@@ -1,0 +1,395 @@
+/**
+ * SAP Business One Service Layer client.
+ *
+ * Features
+ * --------
+ *   - Session management (login → B1SESSION cookie cached in module-scope memory)
+ *   - Auto-refresh on 401 (session expired after 30 min idle) with single in-flight login lock
+ *   - TLS bypass conditionally via SAP_B1_TLS_INSECURE=1 (dev only — never use in prod)
+ *   - Typed helpers: get, post, patch, delete (return typed JSON via generics)
+ *   - OData pagination helper: getAll<T>(path) follows @odata.nextLink until exhausted
+ *   - Per-call timeout (default 30s) with AbortController
+ *
+ * Usage
+ * -----
+ *   import { sap } from "@/lib/sapb1";
+ *   const items = await sap.getAll<{ ItemCode: string }>(
+ *     "/Items?$select=ItemCode,ItemName&$top=500"
+ *   );
+ */
+
+import https from "node:https";
+import { URL } from "node:url";
+
+export type SapEnv = "prod" | "test";
+
+// ── Config par environnement (lue au chargement) ──────────────
+// L'env « test » retombe sur les valeurs prod pour base/user/pass si ses
+// variables dédiées ne sont pas définies — seul SAP_B1_COMPANY_DB_TEST est
+// strictement requis pour activer la bascule.
+const CFG: Record<SapEnv, { base: string; company: string; user: string; pass: string }> = {
+  prod: {
+    base: process.env.SAP_B1_BASE_URL ?? "",
+    company: process.env.SAP_B1_COMPANY_DB ?? "",
+    user: process.env.SAP_B1_USERNAME ?? "",
+    pass: process.env.SAP_B1_PASSWORD ?? "",
+  },
+  test: {
+    base: process.env.SAP_B1_BASE_URL_TEST ?? process.env.SAP_B1_BASE_URL ?? "",
+    company: process.env.SAP_B1_COMPANY_DB_TEST ?? "",
+    user: process.env.SAP_B1_USERNAME_TEST ?? process.env.SAP_B1_USERNAME ?? "",
+    pass: process.env.SAP_B1_PASSWORD_TEST ?? process.env.SAP_B1_PASSWORD ?? "",
+  },
+};
+const INSECURE = process.env.SAP_B1_TLS_INSECURE === "1";
+
+// Environnement SAP actif (prod par défaut). Persisté en base (AppSetting.sap_env)
+// et rechargé à chaque login → cohérent entre instances et redémarrages.
+let activeEnv: SapEnv = "prod";
+const cfg = () => CFG[activeEnv];
+
+if (!CFG.prod.base || !CFG.prod.company || !CFG.prod.user || !CFG.prod.pass) {
+  // eslint-disable-next-line no-console
+  console.warn("[sapb1] Missing prod env vars — SAP client will fail at first call");
+}
+
+/** Recharge l'environnement actif depuis la base (silencieux si indispo). */
+async function loadEnvFromDb(): Promise<void> {
+  try {
+    // Import dynamique : évite de coupler le client SAP à Prisma au chargement
+    // du module (sinon les tests vitest, qui ne résolvent pas l'alias @/, cassent).
+    const { prisma } = await import("@/lib/prisma");
+    const rows = await prisma.$queryRaw<{ value: string }[]>`
+      SELECT "value" FROM "AppSetting" WHERE "key" = 'sap_env' LIMIT 1;`;
+    const v = rows[0]?.value;
+    if (v === "test" || v === "prod") activeEnv = v;
+  } catch { /* table absente / DB indispo → garder le défaut */ }
+  envLoaded = true;
+}
+
+// HTTPS agent — keepalive for connection reuse, optional TLS bypass for self-signed
+const agent = new https.Agent({
+  rejectUnauthorized: !INSECURE,
+  keepAlive: true,
+  timeout: 90_000,
+});
+
+// ── Session state (une session par environnement) ─────────────
+// Permet des lectures PROD et des écritures TEST en parallèle (split) sans se
+// marcher dessus : chaque société a son propre cookie de session.
+const sessions: Record<SapEnv, string | null> = { prod: null, test: null };
+const loginInflight: Record<SapEnv, Promise<void> | null> = { prod: null, test: null };
+let envLoaded = false;
+
+interface SapRequestOptions {
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  body?: unknown;
+  headers?: Record<string, string>;
+  timeoutMs?: number;
+  /** Skip auto re-login on 401 — avoids infinite recursion in login() itself */
+  noRetry?: boolean;
+  /** Force un environnement SAP pour CET appel (sinon = environnement actif).
+   *  Les lectures de référence (stock, prix, miroir) passent "prod". */
+  env?: SapEnv;
+}
+
+interface RawResponse<T> {
+  status: number;
+  headers: Record<string, string | string[] | undefined>;
+  body: T;
+}
+
+/** Raw HTTPS request. Returns parsed JSON if Content-Type is JSON, else raw string in body. */
+function rawRequest<T = unknown>(env: SapEnv, path: string, opts: SapRequestOptions = {}): Promise<RawResponse<T>> {
+  const { method = "GET", body, headers = {}, timeoutMs = 90_000 } = opts;
+  const base = CFG[env].base;
+  const baseWithSlash = base.endsWith("/") ? base : base + "/";
+  const target = new URL(path.replace(/^\//, ""), baseWithSlash);
+
+  return new Promise((resolve, reject) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`SAP request timeout after ${timeoutMs}ms: ${path}`));
+    }, timeoutMs);
+
+    const req = https.request(
+      {
+        hostname: target.hostname,
+        port: target.port || 443,
+        path: target.pathname + target.search,
+        method,
+        agent,
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...(sessions[env] ? { Cookie: sessions[env] as string } : {}),
+          ...headers,
+        },
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => {
+          clearTimeout(timer);
+          let parsed: unknown = data;
+          if (res.headers["content-type"]?.includes("application/json") && data) {
+            try { parsed = JSON.parse(data); } catch { /* keep string */ }
+          }
+          resolve({ status: res.statusCode ?? 0, headers: res.headers, body: parsed as T });
+        });
+      },
+    );
+    req.on("error", (e) => { clearTimeout(timer); reject(e); });
+    if (body !== undefined && body !== null) {
+      req.write(typeof body === "string" ? body : JSON.stringify(body));
+    }
+    req.end();
+  });
+}
+
+/** Login + cache cookie pour l'environnement donné. Coalesce les appels concurrents. */
+async function login(env: SapEnv): Promise<void> {
+  if (loginInflight[env]) return loginInflight[env] as Promise<void>;
+  loginInflight[env] = (async () => {
+    const res = await rawRequest<{
+      SessionId?: string;
+      SessionTimeout?: number;
+      Version?: string;
+      error?: { code: number; message: { value: string } };
+    }>(env, "Login", {
+      method: "POST",
+      body: { CompanyDB: CFG[env].company, UserName: CFG[env].user, Password: CFG[env].pass },
+      noRetry: true,
+    });
+    if (res.status !== 200) {
+      const msg = res.body?.error?.message?.value ?? `HTTP ${res.status}`;
+      sessions[env] = null;
+      throw new Error(`SAP login failed (${env}): ${msg}`);
+    }
+    const set = res.headers["set-cookie"];
+    sessions[env] = Array.isArray(set)
+      ? set.map((c) => c.split(";")[0]).join("; ")
+      : "";
+  })();
+  try {
+    await loginInflight[env];
+  } finally {
+    loginInflight[env] = null;
+  }
+}
+
+/** Logout (best-effort) de l'environnement actif. */
+export async function logout(): Promise<void> {
+  const env = activeEnv;
+  if (!sessions[env]) return;
+  try { await rawRequest(env, "Logout", { method: "POST", noRetry: true }); } catch { /* ignore */ }
+  sessions[env] = null;
+}
+
+/** Core authenticated call with auto re-login on 401. env = opts.env ?? actif. */
+async function call<T>(path: string, opts: SapRequestOptions = {}): Promise<T> {
+  let env = opts.env;
+  if (!env) {
+    // Charge l'environnement persisté une fois (le toggle met à jour en mémoire ensuite).
+    if (!envLoaded) await loadEnvFromDb();
+    env = activeEnv;
+  }
+  if (!sessions[env] && !opts.noRetry) await login(env);
+  let res = await rawRequest<T>(env, path, opts);
+
+  // 401 → session expirée → re-login + retry une fois
+  if (res.status === 401 && !opts.noRetry) {
+    sessions[env] = null;
+    await login(env);
+    res = await rawRequest<T>(env, path, opts);
+  }
+
+  if (res.status >= 400) {
+    const errBody = res.body as { error?: { message?: { value?: string } } } | string;
+    const message = typeof errBody === "object" && errBody?.error?.message?.value
+      ? errBody.error.message.value
+      : typeof errBody === "string" ? errBody.slice(0, 300) : `HTTP ${res.status}`;
+    throw new Error(`SAP ${opts.method ?? "GET"} ${path} → ${res.status}: ${message}`);
+  }
+  return res.body;
+}
+
+// ── Public API ────────────────────────────────────────────────
+export const sap = {
+  /** Trigger explicit login (rarely needed — happens automatically on first call). */
+  login,
+  logout,
+
+  /** Returns true if currently has a cached session cookie (env actif). */
+  isAuthenticated: () => sessions[activeEnv] !== null,
+
+  /** Environnement SAP actif + société cible + test configuré ou non. */
+  getEnvironment(): { env: SapEnv; company: string; prodCompany: string; testCompany: string; testConfigured: boolean } {
+    return {
+      env: activeEnv,
+      company: cfg().company,
+      prodCompany: CFG.prod.company,
+      testCompany: CFG.test.company,
+      testConfigured: CFG.test.company !== "",
+    };
+  },
+
+  /**
+   * Bascule l'environnement SAP en mémoire et invalide la session (force un
+   * re-login sur la nouvelle société au prochain appel). La persistance en base
+   * est gérée par l'endpoint /api/sap/environment.
+   */
+  setEnvironment(env: SapEnv): void {
+    if (env === "test" && CFG.test.company === "") {
+      throw new Error("Environnement TEST non configuré (SAP_B1_COMPANY_DB_TEST manquant).");
+    }
+    activeEnv = env;
+    envLoaded = true;
+    // Pas besoin d'invalider les sessions : chaque env garde la sienne.
+  },
+
+  /** GET <path>. Path is relative to BASE (e.g. "/Items?$top=10" or "Items?$top=10"). */
+  get<T = unknown>(path: string, opts: Omit<SapRequestOptions, "method" | "body"> = {}): Promise<T> {
+    return call<T>(path, { ...opts, method: "GET" });
+  },
+
+  /** POST with JSON body. */
+  post<T = unknown>(path: string, body: unknown, opts: Omit<SapRequestOptions, "method" | "body"> = {}): Promise<T> {
+    return call<T>(path, { ...opts, method: "POST", body });
+  },
+
+  /** PATCH (typically returns 204). */
+  patch<T = unknown>(path: string, body: unknown, opts: Omit<SapRequestOptions, "method" | "body"> = {}): Promise<T> {
+    return call<T>(path, { ...opts, method: "PATCH", body });
+  },
+
+  delete<T = unknown>(path: string, opts: Omit<SapRequestOptions, "method"> = {}): Promise<T> {
+    return call<T>(path, { ...opts, method: "DELETE" });
+  },
+
+  /**
+   * Fast pagination — fetches the total count, then fires all pages in PARALLEL.
+   * ~3-5x faster than sequential pagination for collections of ~1000s items.
+   *
+   * Requires an entity that supports the /$count endpoint (Items, BusinessPartners…).
+   * Returns all values flattened.
+   */
+  async getAllParallel<T = unknown>(
+    basePath: string,
+    countPath: string,
+    opts: { pageSize?: number; maxPages?: number; env?: SapEnv } = {},
+  ): Promise<T[]> {
+    const { pageSize = 500, maxPages = 50, env } = opts;
+    const totalStr = await call<string | number>(countPath, { env });
+    const total = typeof totalStr === "number" ? totalStr : parseInt(String(totalStr));
+    if (!total || total === 0) return [];
+    const pageCount = Math.min(Math.ceil(total / pageSize), maxPages);
+    const pages = await Promise.all(
+      Array.from({ length: pageCount }, (_, i) => {
+        const skip = i * pageSize;
+        const sep = basePath.includes("?") ? "&" : "?";
+        const url = `${basePath}${sep}$top=${pageSize}&$skip=${skip}`;
+        return call<{ value: T[] }>(url, {
+          headers: { Prefer: `odata.maxpagesize=${pageSize}` },
+          env,
+        });
+      }),
+    );
+    return pages.flatMap((p) => p.value ?? []);
+  },
+
+  /**
+   * OData pagination helper (sequential). Use when count isn't known or for small datasets.
+   *  - @odata.nextLink (newer Service Layer versions) — preferred
+   *  - $skip/$top manual pagination (fallback when nextLink absent)
+   *
+   * Override pageSize via Prefer header (max 500 in standard SAP B1).
+   */
+  async getAll<T = unknown>(path: string, opts: { pageSize?: number; maxPages?: number; env?: SapEnv } = {}): Promise<T[]> {
+    const { pageSize = 500, maxPages = 50, env } = opts;
+    const all: T[] = [];
+    let nextUrl: string | null = path;
+    let page = 0;
+
+    while (nextUrl !== null && page < maxPages) {
+      const currentPath: string = nextUrl;
+      const res: { value: T[]; "@odata.nextLink"?: string } =
+        await call<{ value: T[]; "@odata.nextLink"?: string }>(currentPath, {
+          headers: { Prefer: `odata.maxpagesize=${pageSize}` },
+          env,
+        });
+      const batch = res.value ?? [];
+      all.push(...batch);
+
+      // Strategy 1: follow nextLink if present
+      if (res["@odata.nextLink"]) {
+        nextUrl = res["@odata.nextLink"];
+      } else if (batch.length === pageSize) {
+        // Strategy 2: manual $skip pagination if full page returned (likely more)
+        const skipParam = `$skip=${all.length}`;
+        nextUrl = path.includes("?") ? `${path}&${skipParam}` : `${path}?${skipParam}`;
+      } else {
+        nextUrl = null;
+      }
+      page++;
+    }
+    return all;
+  },
+
+  /** Cookie de session de l'environnement actif (debug). */
+  getCookieHeader: () => sessions[activeEnv],
+};
+
+// ── Types: common SAP B1 entities ─────────────────────────────
+export interface SapItem {
+  ItemCode: string;
+  ItemName: string;
+  ItemsGroupCode?: number;
+  // Units
+  SalesUnit?: string;                  // ex. "pie"
+  SalesPackagingUnit?: string;         // ex. "CAT I"
+  SalesQtyPerPackUnit?: number;        // ex. 12
+  SalesUnitWeight?: number;            // poids d'1 unité en kg (ex. 0.125)
+  InventoryUOM?: string;               // ex. "pie"
+  PurchaseUnit?: string;
+  ManageBatchNumbers?: "tYES" | "tNO";
+  QuantityOnStock?: number;
+  Valid?: "tYES" | "tNO";
+  Frozen?: "tYES" | "tNO";
+  ItemWarehouseInfoCollection?: SapItemWarehouse[];
+  // Custom Gervifrais fields
+  U_Pays?: string;
+  U_GER_Marque?: string;
+  U_GER_Det_Condt?: string;
+  U_GER_UVC?: string;
+  U_GER_NB_BARQ_COLIS?: number;
+}
+
+export interface SapItemWarehouse {
+  WarehouseCode: string;
+  InStock?: number;
+  Committed?: number;
+  Ordered?: number;
+}
+
+export interface SapItemGroup {
+  Number: number;
+  GroupName: string;
+}
+
+export interface SapBatchDetail {
+  ItemCode: string;
+  ItemDescription?: string;
+  Batch: string;
+  Status?: string;
+  AdmissionDate?: string;
+  ManufacturingDate?: string;
+  ExpirationDate?: string;
+  SystemNumber?: number;
+  DocEntry?: number;
+  BatchAttribute1?: string;
+  BatchAttribute2?: string;
+  Details?: string;
+}

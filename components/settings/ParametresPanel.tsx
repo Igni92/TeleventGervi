@@ -1,0 +1,286 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useReducedMotion } from "framer-motion";
+import {
+  Moon, Sun, Palette, LayoutList, Sparkles, BadgePercent, Check, Wand2,
+} from "lucide-react";
+import { SurfaceCard } from "@/components/ui/surface-card";
+import { useTheme } from "@/components/ThemeProvider";
+import { cn } from "@/lib/utils";
+import {
+  SETTING_KEYS, readSetting, writeSetting, onSettingChange,
+} from "@/components/settings/app-settings";
+
+/**
+ * Panneau « Paramètres » — CONSOLIDE les réglages d'affichage jusqu'ici dispersés
+ * (thème, colorimétrie, densité, animations, bandeau promo) sur une page dédiée.
+ *
+ * Persistance : 100 % via le mécanisme localStorage existant —
+ *   - thème clair/sombre  → ThemeProvider (clé `tv-theme`)
+ *   - colorimétrie        → `televent-theme` + attribut data-theme (logique
+ *                           reprise de ColorimetrieSwitcher)
+ *   - densité / animations / promos → writeSetting (SETTING_KEYS)
+ * Tous les consommateurs (Console Écran 2, PromoBanner, AmbientBackground)
+ * réagissent à chaud via onSettingChange / l'attribut data-theme.
+ */
+
+/* ── Brique réutilisable : groupe de boutons segmentés (DA PilotageScreen2) ── */
+
+interface SegOption<T extends string> {
+  id: T;
+  label: string;
+  hint?: string;
+  swatch?: string;
+  icon?: React.ReactNode;
+}
+
+function SegmentToggle<T extends string>({
+  value, onChange, options, ariaLabel,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: SegOption<T>[];
+  ariaLabel: string;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={ariaLabel}
+      className="inline-flex items-center gap-0.5 bg-secondary/60 p-0.5 rounded-lg flex-wrap"
+    >
+      {options.map((o) => {
+        const active = value === o.id;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(o.id)}
+            title={o.hint}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-3 h-8 text-[12.5px] font-semibold tracking-tight rounded-md transition-colors",
+              active
+                ? "bg-card text-foreground shadow-sm ring-1 ring-inset ring-border"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {o.swatch && (
+              <span
+                className="h-3 w-3 rounded-full ring-1 ring-black/10 dark:ring-white/15 shrink-0"
+                style={{ background: o.swatch }}
+              />
+            )}
+            {o.icon}
+            {o.label}
+            {active && <Check className="h-3 w-3 ml-0.5 text-brand-500" />}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Ligne « libellé + description + contrôle » dans une carte de réglage. */
+function SettingRow({
+  title, desc, children,
+}: {
+  title: string;
+  desc?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+      <div className="min-w-0">
+        <p className="text-[13.5px] font-semibold text-foreground">{title}</p>
+        {desc && <p className="text-[12px] text-muted-foreground mt-0.5 max-w-md">{desc}</p>}
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  );
+}
+
+/* ── Constantes (alignées sur les composants d'origine) ─────────────────── */
+
+const COLORIMETRIE: SegOption<"or" | "agrume" | "fraise">[] = [
+  { id: "or",     label: "Or",     hint: "Classique",        swatch: "#facc15" },
+  { id: "agrume", label: "Agrume", hint: "Peps · conseillé", swatch: "#f97316" },
+  { id: "fraise", label: "Fraise", hint: "Peps max",         swatch: "#f43f5e" },
+];
+
+const DENSITES: SegOption<"compact" | "normal" | "aere">[] = [
+  { id: "compact", label: "Compact", hint: "Plus de lignes visibles" },
+  { id: "normal",  label: "Normal",  hint: "Équilibré (défaut)" },
+  { id: "aere",    label: "Aéré",    hint: "Plus d'espace, lecture confort" },
+];
+
+const ANIMATIONS: SegOption<"auto" | "on" | "off">[] = [
+  { id: "auto", label: "Auto", hint: "Suit le réglage système (accessibilité)" },
+  { id: "on",   label: "Activées", hint: "Toujours animer" },
+  { id: "off",  label: "Désactivées", hint: "Fond et transitions figés" },
+];
+
+const ONOFF: SegOption<"on" | "off">[] = [
+  { id: "on",  label: "Activé" },
+  { id: "off", label: "Désactivé" },
+];
+
+type ColorId = (typeof COLORIMETRIE)[number]["id"];
+
+/** Applique la colorimétrie (même logique que ColorimetrieSwitcher). */
+function applyColorimetrie(id: ColorId) {
+  try { localStorage.setItem(SETTING_KEYS.colorimetrie, id); } catch { /* ignore */ }
+  if (id === "or") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", id);
+}
+
+export function ParametresPanel() {
+  const { theme, toggleTheme } = useTheme();
+  const systemReduce = useReducedMotion();
+
+  const [colorimetrie, setColorimetrie] = useState<ColorId>("or");
+  const [densite, setDensite] = useState<"compact" | "normal" | "aere">("normal");
+  const [animations, setAnimations] = useState<"auto" | "on" | "off">("auto");
+  const [promoAnim, setPromoAnim] = useState<"on" | "off">("on");
+  const [promoNotifs, setPromoNotifs] = useState<"on" | "off">("on");
+
+  // Hydratation depuis le stockage local + abonnement aux changements (autres
+  // onglets / autres widgets qui écriraient les mêmes clés).
+  useEffect(() => {
+    const fromAttr = document.documentElement.getAttribute("data-theme");
+    const savedColor = (fromAttr || readSetting(SETTING_KEYS.colorimetrie, "or")) as ColorId;
+    setColorimetrie(COLORIMETRIE.some((c) => c.id === savedColor) ? savedColor : "or");
+
+    const d = readSetting(SETTING_KEYS.ecran2Density, "normal");
+    setDensite((["compact", "normal", "aere"].includes(d) ? d : "normal") as typeof densite);
+
+    const a = readSetting(SETTING_KEYS.animations, "auto");
+    setAnimations((["auto", "on", "off"].includes(a) ? a : "auto") as typeof animations);
+
+    setPromoAnim(readSetting(SETTING_KEYS.promoBannerAnim, "on") === "off" ? "off" : "on");
+    setPromoNotifs(readSetting(SETTING_KEYS.promoNotifs, "on") === "off" ? "off" : "on");
+
+    return onSettingChange((key, value) => {
+      if (key === SETTING_KEYS.colorimetrie && value) setColorimetrie(value as ColorId);
+      if (key === SETTING_KEYS.ecran2Density && value) setDensite(value as typeof densite);
+      if (key === SETTING_KEYS.animations && value) setAnimations(value as typeof animations);
+      if (key === SETTING_KEYS.promoBannerAnim) setPromoAnim(value === "off" ? "off" : "on");
+      if (key === SETTING_KEYS.promoNotifs) setPromoNotifs(value === "off" ? "off" : "on");
+    });
+  }, []);
+
+  const onColorimetrie = (id: ColorId) => {
+    setColorimetrie(id);
+    applyColorimetrie(id);
+    // Notifie l'onglet courant (le storage natif couvre les autres onglets).
+    writeSetting(SETTING_KEYS.colorimetrie, id);
+  };
+
+  const effectiveAnim =
+    animations === "off" ? "Figées"
+    : animations === "on" ? "Animées"
+    : systemReduce ? "Réduites (système)" : "Animées (système)";
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      {/* 1 ── Thème clair / sombre ─────────────────────────────────── */}
+      <SurfaceCard accent="brand" title="Thème" icon={<Moon className="h-3.5 w-3.5" />}>
+        <SettingRow
+          title="Apparence"
+          desc="Mode sombre (anthracite + accent) recommandé pour l'usage deux écrans en télévente."
+        >
+          <SegmentToggle
+            ariaLabel="Thème clair ou sombre"
+            value={theme}
+            onChange={(v) => { if (v !== theme) toggleTheme(); }}
+            options={[
+              { id: "light", label: "Clair", icon: <Sun className="h-3.5 w-3.5" /> },
+              { id: "dark",  label: "Sombre", icon: <Moon className="h-3.5 w-3.5" /> },
+            ]}
+          />
+        </SettingRow>
+      </SurfaceCard>
+
+      {/* 2 ── Colorimétrie ─────────────────────────────────────────── */}
+      <SurfaceCard accent="amber" title="Colorimétrie" icon={<Palette className="h-3.5 w-3.5" />}>
+        <SettingRow
+          title="Accent de l'application"
+          desc="Change la couleur d'accent (boutons, liens, surbrillances). Le fond anthracite et les couleurs d'alerte ne bougent pas."
+        >
+          <SegmentToggle
+            ariaLabel="Colorimétrie de l'application"
+            value={colorimetrie}
+            onChange={onColorimetrie}
+            options={COLORIMETRIE}
+          />
+        </SettingRow>
+      </SurfaceCard>
+
+      {/* 3 ── Densité ──────────────────────────────────────────────── */}
+      <SurfaceCard accent="sky" title="Densité" icon={<LayoutList className="h-3.5 w-3.5" />}>
+        <SettingRow
+          title="Densité des listes"
+          desc="Compacité de la liste stock de la Console (Écran 2). Compact = plus d'articles à l'écran, Aéré = lecture plus confortable."
+        >
+          <SegmentToggle
+            ariaLabel="Densité d'affichage"
+            value={densite}
+            onChange={(v) => { setDensite(v); writeSetting(SETTING_KEYS.ecran2Density, v); }}
+            options={DENSITES}
+          />
+        </SettingRow>
+      </SurfaceCard>
+
+      {/* 4 ── Animations ───────────────────────────────────────────── */}
+      <SurfaceCard accent="violet" title="Animations" icon={<Wand2 className="h-3.5 w-3.5" />}>
+        <SettingRow
+          title="Animations d'ambiance"
+          desc={`Fond animé (aurora, anneaux radar) et transitions. « Auto » respecte le réglage d'accessibilité du système — actuellement : ${effectiveAnim}.`}
+        >
+          <SegmentToggle
+            ariaLabel="Niveau d'animation"
+            value={animations}
+            onChange={(v) => { setAnimations(v); writeSetting(SETTING_KEYS.animations, v); }}
+            options={ANIMATIONS}
+          />
+        </SettingRow>
+      </SurfaceCard>
+
+      {/* 5 ── Bandeau promo ────────────────────────────────────────── */}
+      <SurfaceCard accent="rose" title="Bandeau promotions" icon={<BadgePercent className="h-3.5 w-3.5" />}>
+        <div className="space-y-4">
+          <SettingRow
+            title="Rotation automatique"
+            desc="Fait défiler les promotions du bandeau toutes les ~6 s. Désactivé : navigation manuelle uniquement (le bandeau reste visible)."
+          >
+            <SegmentToggle
+              ariaLabel="Animation du bandeau promotions"
+              value={promoAnim}
+              onChange={(v) => { setPromoAnim(v); writeSetting(SETTING_KEYS.promoBannerAnim, v); }}
+              options={ONOFF}
+            />
+          </SettingRow>
+          <div className="h-px bg-border/60" />
+          <SettingRow
+            title="Modale « Nouvelles promotions »"
+            desc="Affiche au démarrage les promotions lancées depuis ta dernière visite. Désactivé : aucune fenêtre, le bandeau reste actif."
+          >
+            <SegmentToggle
+              ariaLabel="Notifications des nouvelles promotions"
+              value={promoNotifs}
+              onChange={(v) => { setPromoNotifs(v); writeSetting(SETTING_KEYS.promoNotifs, v); }}
+              options={ONOFF}
+            />
+          </SettingRow>
+        </div>
+      </SurfaceCard>
+
+      <p className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground/80 pt-1">
+        <Sparkles className="h-3.5 w-3.5 shrink-0" />
+        Ces réglages sont propres à ce poste (navigateur) et s'appliquent immédiatement,
+        sur tous les onglets ouverts.
+      </p>
+    </div>
+  );
+}

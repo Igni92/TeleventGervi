@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Fiche technique Orderlion – SAP B1 Gervifrais</title>
+<style>
+  @page { size: A4; margin: 14mm 15mm; }
+  html { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #0f172a; font-size: 10pt; line-height: 1.4; }
+  body { margin: 0; }
+  h1 { font-size: 18pt; color: #0f172a; margin: 0 0 4pt; letter-spacing: -0.01em; }
+  h2 { font-size: 12pt; color: #1e3a8a; margin: 12pt 0 3pt; border-bottom: 1px solid #cbd5e1; padding-bottom: 2pt; page-break-after: avoid; }
+  h3 { font-size: 10.5pt; color: #1e3a8a; margin: 8pt 0 2pt; page-break-after: avoid; }
+  p { margin: 3pt 0; }
+  .lead { color: #475569; font-size: 9.5pt; margin-bottom: 6pt; }
+  .note { color: #475569; font-size: 9pt; font-style: italic; margin: 2pt 0 6pt; }
+  .warn { background: #fef3c7; border-left: 3pt solid #d97706; padding: 4pt 8pt; margin: 4pt 0 8pt; font-size: 9pt; }
+  .lang { color: #6b7280; font-size: 8pt; font-style: italic; margin: 4pt 0 2pt; }
+  table { width: 100%; border-collapse: collapse; margin: 3pt 0 8pt; font-size: 9pt; page-break-inside: auto; }
+  th { background: #1e3a8a; color: white; text-align: left; padding: 4pt 6pt; font-weight: 600; }
+  td { border: 0.5pt solid #cbd5e1; padding: 3pt 6pt; vertical-align: top; }
+  tr { page-break-inside: avoid; }
+  tr:nth-child(even) td { background: #f8fafc; }
+  code { font-family: "Consolas", "Courier New", monospace; font-size: 8.8pt; background: #f1f5f9; padding: 0 3pt; border-radius: 2pt; }
+  pre { font-family: "Consolas", "Courier New", monospace; font-size: 8.3pt; line-height: 1.4; background: #f1f5f9; border: 0.5pt solid #cbd5e1; border-radius: 3pt; padding: 6pt 9pt; white-space: pre-wrap; word-wrap: break-word; margin: 0 0 8pt; page-break-inside: avoid; }
+  ul { margin: 3pt 0; padding-left: 16pt; }
+  li { margin: 2pt 0; }
+  .section { page-break-inside: auto; }
+  .keep { page-break-inside: avoid; }
+  .com { color: #64748b; }
+  .kw  { color: #1e3a8a; font-weight: 600; }
+  .str { color: #166534; }
+  .num { color: #9a3412; }
+  .meta { display: inline-block; background: #1e3a8a; color: white; font-size: 7.5pt; padding: 1pt 5pt; border-radius: 3pt; margin-right: 3pt; vertical-align: 1pt; }
+  .mail { border: 0.5pt solid #cbd5e1; border-radius: 4pt; padding: 12pt 14pt; margin: 0 0 14pt; background: #fafafa; page-break-inside: avoid; }
+  .mail .head { font-size: 9pt; color: #475569; border-bottom: 0.5pt solid #cbd5e1; padding-bottom: 6pt; margin-bottom: 8pt; }
+  .mail .head .row { margin: 1pt 0; }
+  .mail .head .lbl { display: inline-block; width: 50pt; color: #94a3b8; }
+  .mail .body { font-size: 10pt; line-height: 1.5; }
+  .mail .body p { margin: 0 0 6pt; }
+  .mail .sig { margin-top: 10pt; color: #475569; }
+</style>
+</head>
+<body>
+
+<div class="mail">
+  <div class="head">
+    <div class="row"><span class="lbl">De :</span> [Ton prénom NOM] &lt;[ton.email]&gt;</div>
+    <div class="row"><span class="lbl">À :</span> [Prénom NOM responsable] &lt;[email]&gt;</div>
+    <div class="row"><span class="lbl">Objet :</span> Intégration Orderlion ↔ SAP B1 Gervifrais — fiche technique complète</div>
+  </div>
+  <div class="body">
+    <p>Bonjour [Prénom],</p>
+
+    <p>Suite à nos échanges sur les valeurs manquantes côté Orderlion pour la création des BL dans SAP B1, vous trouverez ci-joint la fiche technique complète de l'appel à <code>POST /Orders</code> tel qu'attendu par la base Gervifrais.</p>
+
+    <p>Le document détaille, champ par champ, la source exacte de chaque donnée — table SAP, requête OData, traitement éventuel — pour que votre équipe puisse implémenter sans devoir deviner. Trois points méritent votre attention particulière :</p>
+
+    <ul>
+      <li><b>Règle du numéro de lot</b> (<code>U_NoLot</code>) : obligatoire et calculée à partir des bons de réception SAP. Sans elle, le BL est rejeté côté contrôle Gervifrais.</li>
+      <li><b>Split par entrepôt</b> : un même article livré depuis deux entrepôts différents doit générer deux lignes distinctes — même <code>ItemCode</code>, lots différents.</li>
+      <li><b>Frais para-fiscaux (INTERFEL + DDG)</b> : calculés par ligne, avec une étape de réconciliation post-création quand le prix est laissé au tarif SAP.</li>
+    </ul>
+
+    <p>Les identifiants ci-dessous concernent la <b>base de test</b> (<code>GERVIFRAIS_TEST</code>) — la base de production sera transmise séparément une fois l'intégration validée. Le mot de passe SAP est volontairement omis du document : je vous le communique par canal sécurisé.</p>
+
+    <p>Je reste disponible pour clarifier n'importe quel point ou organiser un échange technique avec votre équipe d'intégration. Idéalement, je suggère un premier appel test sur la base <code>GERVIFRAIS_TEST</code> avant de passer en prod.</p>
+
+    <div class="sig">
+      Bien cordialement,<br>
+      [Ton prénom NOM]<br>
+      [Téléphone] · [email]
+    </div>
+  </div>
+</div>
+
+<h1>Fiche technique — Création BL SAP B1 pour Orderlion</h1>
+<p class="lead">Cible : <b>SAP Business One — Service Layer v1</b> chez Gervifrais. Chaque bloc de code indique son langage en italique au-dessus. Toutes les sources de données sont détaillées au §3.</p>
+
+<div class="warn">
+<b>Environnements :</b> les identifiants ci-dessous sont ceux de la base de <b>TEST</b>. La base de production sera fournie séparément par Gervifrais — seuls <code>SAP_B1_BASE_URL</code> et <code>SAP_B1_COMPANY_DB</code> changent, le reste de la mécanique est identique.
+</div>
+
+<!-- 1 -->
+<div class="section">
+<h2>1. Endpoint &amp; authentification</h2>
+<p>Service Layer SAP B1 en HTTPS sur port dédié. Login → cookie <code>B1SESSION</code> (TTL 30 min idle), à renvoyer dans l'en-tête <code>Cookie</code> de chaque appel suivant. TLS auto-signé côté SAP : Orderlion doit accepter le certificat (ou désactiver la vérif TLS sur cette base de test uniquement).</p>
+
+<table>
+  <thead><tr><th style="width:35%">Variable</th><th style="width:35%">Valeur TEST</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>SAP_B1_BASE_URL</code></td><td><code>https://185.57.12.2:40021/b1s/v1</code></td><td>Racine Service Layer (HTTPS, port 40021 sur cette instance)</td></tr>
+    <tr><td><code>SAP_B1_COMPANY_DB</code></td><td><code>GERVIFRAIS_TEST</code></td><td>Nom de la base SAP (multi-tenant)</td></tr>
+    <tr><td><code>SAP_B1_USERNAME</code></td><td><code>GERJMG</code></td><td>Utilisateur SAP dédié à l'interface</td></tr>
+    <tr><td><code>SAP_B1_PASSWORD</code></td><td><i>fourni hors-ligne</i></td><td>À transmettre via canal sécurisé</td></tr>
+    <tr><td><code>SAP_B1_TLS_INSECURE</code></td><td><code>1</code></td><td>Cert auto-signé sur la base TEST → accepter</td></tr>
+  </tbody>
+</table>
+
+<p class="lang">Langage : HTTP — requêtes</p>
+<pre><span class="com"># 1) Login (renvoie un cookie B1SESSION valable 30 min)</span>
+<span class="kw">POST</span>  https://185.57.12.2:40021/b1s/v1/Login
+
+<span class="com"># 2) Création de la commande (cookie B1SESSION dans l'en-tête Cookie)</span>
+<span class="kw">POST</span>  https://185.57.12.2:40021/b1s/v1/Orders</pre>
+
+<p class="lang">Langage : JSON — corps du POST /Login</p>
+<pre>{
+  <span class="str">"CompanyDB"</span>: <span class="str">"GERVIFRAIS_TEST"</span>,
+  <span class="str">"UserName"</span>:  <span class="str">"GERJMG"</span>,
+  <span class="str">"Password"</span>:  <span class="str">"&lt;fourni hors-ligne&gt;"</span>
+}</pre>
+</div>
+
+<!-- 2 -->
+<div class="section">
+<h2>2. Codes fixes Gervifrais</h2>
+<p class="note">Conventions internes — à coder en dur côté Orderlion, elles ne changent pas entre TEST et PROD.</p>
+
+<table>
+  <thead><tr><th style="width:32%">Entrepôt (<code>WarehouseCode</code>)</th><th style="width:25%">Libellé (<code>U_NomMag</code>)</th><th>Usage métier</th></tr></thead>
+  <tbody>
+    <tr><td><code>000</code></td><td>A/C - A/D</td><td>Réception — à consommer / à dispatcher</td></tr>
+    <tr><td><code>01</code></td><td>Stock</td><td>Stock physique principal</td></tr>
+    <tr><td><code>R1</code></td><td>J+1</td><td>Livraison demain</td></tr>
+  </tbody>
+</table>
+
+<table>
+  <thead><tr><th style="width:30%">Frais para-fiscal</th><th style="width:13%">GroupCode</th><th style="width:15%">ExpenseCode</th><th>Calcul du <code>LineTotal</code></th></tr></thead>
+  <tbody>
+    <tr><td>INTERFEL (slot TPF2)</td><td><code>1</code></td><td><code>2</code></td><td><code>LineTotal_SAP × 0,21 %</code></td></tr>
+    <tr><td>Droit De Garde (slot TPF3)</td><td><code>2</code></td><td><code>3</code></td><td><code>nb_colis × 0,02 €</code></td></tr>
+  </tbody>
+</table>
+
+<p class="note">Avec <code>nb_colis = Quantity / SalesQtyPerPackUnit</code> (= <code>Quantity</code> si l'article n'a pas d'emballage défini, c-à-d <code>SalesQtyPerPackUnit ≤ 1</code>). Les taux <code>0,21</code> et <code>0,02</code> sont les valeurs par défaut — la vraie source est <code>AdditionalExpenses.U_Taux</code> (cf. §3).</p>
+
+<p>Lot de fallback ultime si aucun PDN trouvé : <code>EM0000</code> (variable d'env <code>GERVIFRAIS_LOT_DEFAUT</code>).</p>
+</div>
+
+<!-- 3 -->
+<div class="section">
+<h2>3. D'où vient chaque champ — map exhaustive</h2>
+<p>Pour chaque champ du payload <code>POST /Orders</code>, voici la source précise : appel OData, table, champ exact.</p>
+
+<h3>3.1. Champs doc-level</h3>
+<table>
+  <thead><tr><th style="width:22%">Champ payload</th><th style="width:35%">Source</th><th>Comment l'obtenir</th></tr></thead>
+  <tbody>
+    <tr><td><code>CardCode</code></td>
+        <td>Orderlion (input) → SAP <code>BusinessPartners.CardCode</code></td>
+        <td>Code client SAP fourni par Orderlion. À pré-valider via <code>GET BusinessPartners('XXX')?$select=CardCode,Frozen,Valid,CreditLimit,CurrentAccountBalance</code>. Refuser si <code>Frozen='tYES'</code> ou <code>Valid='tNO'</code>.</td></tr>
+    <tr><td><code>DocDate</code></td>
+        <td>Calculé localement</td>
+        <td>Date du jour <code>YYYY-MM-DD</code>.</td></tr>
+    <tr><td><code>DocDueDate</code></td>
+        <td>Orderlion (input)</td>
+        <td>Date de livraison demandée par le client, <code>YYYY-MM-DD</code>.</td></tr>
+    <tr><td><code>TaxDate</code></td>
+        <td>Calculé localement</td>
+        <td>= <code>DocDate</code>.</td></tr>
+    <tr><td><code>NumAtCard</code></td>
+        <td>Orderlion (input)</td>
+        <td>Référence Orderlion (n° commande client) — visible sur le BL imprimé.</td></tr>
+    <tr><td><code>Comments</code></td>
+        <td>Orderlion / fixe</td>
+        <td>Texte libre. Convention : <code>"Via Orderlion — &lt;nom&gt;"</code>.</td></tr>
+    <tr><td><code>DocumentLines[]</code></td>
+        <td>Voir §3.2</td>
+        <td>Une ligne par couple <code>(ItemCode, WarehouseCode)</code>.</td></tr>
+  </tbody>
+</table>
+
+<h3>3.2. Champs ligne (DocumentLines)</h3>
+<table>
+  <thead><tr><th style="width:22%">Champ ligne</th><th style="width:35%">Source SAP</th><th>Comment l'obtenir</th></tr></thead>
+  <tbody>
+    <tr><td><code>ItemCode</code></td>
+        <td>Orderlion (input) → SAP <code>Items.ItemCode</code></td>
+        <td>Pré-valider via <code>GET Items('XXX')?$select=ItemCode</code>. Évite l'erreur SAP cryptique <code>-2028</code>.</td></tr>
+    <tr><td><code>Quantity</code></td>
+        <td>Orderlion (input)</td>
+        <td>En <b>unité de stock SAP</b> (champ <code>InventoryUOM</code> de l'item, généralement <code>pie</code>). Si Orderlion travaille en colis, convertir : <code>qte_pie = qte_colis × SalesQtyPerPackUnit</code>.</td></tr>
+    <tr><td><code>WarehouseCode</code></td>
+        <td>Orderlion (input) + check stock</td>
+        <td>Un de <code>000</code>, <code>01</code>, <code>R1</code>. Vérifier la dispo via <code>GET Items('XXX')?$select=ItemWarehouseInfoCollection</code> → champ <code>InStock - Committed</code> par entrepôt.</td></tr>
+    <tr><td><code>UnitPrice</code> <i>(et/ou <code>Price</code>)</i></td>
+        <td>Orderlion (input)</td>
+        <td>Prix HT par unité de stock SAP. Si omis, SAP applique son tarif client et il faut réconcilier les TPF au §7.</td></tr>
+    <tr><td><code>U_NomMag</code></td>
+        <td>Calculé localement</td>
+        <td>Libellé humain de <code>WarehouseCode</code>, cf. table §2 : <code>{000: "A/C - A/D", 01: "Stock", R1: "J+1"}</code>.</td></tr>
+    <tr><td><code>U_NoLot</code></td>
+        <td>SAP <code>PurchaseDeliveryNotes</code></td>
+        <td>Cf. §4. <code>"EM" + DocNum</code> du dernier PDN contenant l'article dans cet entrepôt. <b>Champ obligatoire</b> côté Gervifrais.</td></tr>
+    <tr><td><code>U_GER_Pays</code></td>
+        <td>SAP <code>Items.U_Pays</code></td>
+        <td><code>GET Items('XXX')?$select=U_Pays</code>. À pré-charger / cacher.</td></tr>
+    <tr><td><code>U_GER_Marque</code></td>
+        <td>SAP <code>Items.U_GER_Marque</code></td>
+        <td><code>GET Items('XXX')?$select=U_GER_Marque</code>.</td></tr>
+    <tr><td><code>U_GER_Condi</code></td>
+        <td>SAP <code>Items.U_GER_Det_Condt</code></td>
+        <td><b>⚠ Renommage</b> : champ <code>U_GER_Det_Condt</code> côté Items, à poser comme <code>U_GER_Condi</code> sur la ligne de la commande. Ex. <code>"12x125g"</code>.</td></tr>
+    <tr><td><code>DocumentLineAdditionalExpenses[]</code></td>
+        <td>Calculé + SAP <code>AdditionalExpenses</code></td>
+        <td>Voir §3.3.</td></tr>
+  </tbody>
+</table>
+
+<h3>3.3. Frais para-fiscaux (TPF par ligne)</h3>
+<table>
+  <thead><tr><th style="width:22%">Sous-champ</th><th style="width:35%">Source</th><th>Comment l'obtenir</th></tr></thead>
+  <tbody>
+    <tr><td><code>GroupCode</code></td>
+        <td>Fixe (cf. §2)</td>
+        <td><code>1</code> pour INTERFEL, <code>2</code> pour DDG.</td></tr>
+    <tr><td><code>ExpenseCode</code></td>
+        <td>SAP <code>AdditionalExpenses.ExpensCode</code></td>
+        <td><b>⚠ Typo SAP</b> : le master expose <code>ExpensCode</code> (sans 'e' entre s et C). À la ligne le champ est <code>ExpenseCode</code> (avec). Valeurs Gervifrais : <code>2</code>=INTERFEL, <code>3</code>=DDG. Lecture : <code>GET AdditionalExpenses?$top=50</code>.</td></tr>
+    <tr><td><code>LineTotal</code> (INTERFEL)</td>
+        <td>Calculé : <code>HT × taux</code></td>
+        <td>Taux dans <code>AdditionalExpenses(ExpensCode=2).U_Taux</code> — valeur courante <code>0,21</code> (= 0,21 %). Formule : <code>round(LineTotal_SAP × 0.0021, 2)</code>. Le <code>LineTotal_SAP</code> n'est connu qu'<i>après</i> création → réconciliation au §7.</td></tr>
+    <tr><td><code>LineTotal</code> (DDG)</td>
+        <td>Calculé : <code>nb_colis × taux</code></td>
+        <td>Taux dans <code>AdditionalExpenses(ExpensCode=3).U_Taux</code> — valeur courante <code>0,02</code> €. Formule : <code>round((Quantity / SalesQtyPerPackUnit) × 0.02, 2)</code>. <code>SalesQtyPerPackUnit</code> vient de <code>GET Items('XXX')?$select=SalesQtyPerPackUnit</code>.</td></tr>
+  </tbody>
+</table>
+
+<h3>3.4. Données à pré-charger / cacher</h3>
+<table>
+  <thead><tr><th style="width:30%">Donnée</th><th style="width:40%">Appel SAP</th><th>TTL conseillé</th></tr></thead>
+  <tbody>
+    <tr><td>Master <code>AdditionalExpenses</code> (taux TPF)</td>
+        <td><code>GET AdditionalExpenses?$top=50</code></td>
+        <td>10 min</td></tr>
+    <tr><td>Index des derniers PDN par <code>(ItemCode, WarehouseCode)</code></td>
+        <td><code>GET PurchaseDeliveryNotes?$top=50&amp;$skip=N&amp;$orderby=DocNum desc&amp;$select=DocNum,DocumentLines</code> (scan 500 docs)</td>
+        <td>10 min</td></tr>
+    <tr><td>Méta-article (<code>U_Pays</code>, <code>U_GER_Marque</code>, <code>U_GER_Det_Condt</code>, <code>SalesQtyPerPackUnit</code>, <code>SalesUnitWeight</code>, <code>InventoryUOM</code>)</td>
+        <td><code>GET Items?$filter=Valid eq 'tYES' and Frozen eq 'tNO'&amp;$select=…</code> (paginé, ~1300 articles)</td>
+        <td>1 h ou sync 1×/jour</td></tr>
+    <tr><td>État stock par entrepôt (<code>ItemWarehouseInfoCollection</code>)</td>
+        <td><code>GET Items('XXX')?$select=ItemWarehouseInfoCollection</code> (par item, à la volée)</td>
+        <td>30 s (sync delta)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- 4 -->
+<div class="section">
+<h2>4. Règle <code>U_NoLot</code> (numéro de lot)</h2>
+<p><b>Obligatoire</b> — un BL sans <code>U_NoLot</code> conforme passe côté SAP mais est rejeté au contrôle Gervifrais. Règle confirmée par probe sur des BL réels.</p>
+
+<p class="lang">Langage : Pseudo-code — règle métier</p>
+<pre><span class="kw">U_NoLot</span> = <span class="str">"EM"</span> + DocNum du DERNIER PurchaseDeliveryNote
+          contenant l'ItemCode DANS le WarehouseCode de la ligne
+
+<span class="com"># Cascade de fallback si rien trouvé :</span>
+<span class="com">#   1. (ItemCode + WarehouseCode)  → cas nominal</span>
+<span class="com">#   2. (ItemCode, dernière réception toutes confondues)</span>
+<span class="com">#   3. "EM0000" (constante GERVIFRAIS_LOT_DEFAUT)</span>
+
+<span class="com"># Exemples observés sur la base TEST :</span>
+<span class="com">#   FE1SL reçu en 000 via PDN n°22739  →  U_NoLot = "EM22739"</span>
+<span class="com">#   FE1SL reçu en 01  via PDN n°22755  →  U_NoLot = "EM22755"</span></pre>
+
+<p><b>Conséquence métier :</b> un même <code>ItemCode</code> livré depuis 2 entrepôts différents = 2 lots différents = <b>2 lignes distinctes</b> dans <code>DocumentLines</code>. Le split se fait dans l'input Orderlion, pas dans le builder de payload.</p>
+</div>
+
+<!-- 5 -->
+<div class="section">
+<h2>5. Payload complet de <code>POST /Orders</code></h2>
+<p class="note">Exemple : client <code>APLAI</code>, 30 pièces de <code>FE1SL</code> réparties entre 2 entrepôts (20 en <code>01</code>, 10 en <code>000</code>) → 2 lignes.</p>
+
+<p class="lang">Langage : JSON — corps du POST /Orders</p>
+<pre>{
+  <span class="str">"CardCode"</span>:   <span class="str">"APLAI"</span>,
+  <span class="str">"DocDate"</span>:    <span class="str">"2026-06-03"</span>,
+  <span class="str">"DocDueDate"</span>: <span class="str">"2026-06-04"</span>,
+  <span class="str">"TaxDate"</span>:    <span class="str">"2026-06-03"</span>,
+  <span class="str">"NumAtCard"</span>:  <span class="str">"ORD-12345"</span>,
+  <span class="str">"Comments"</span>:   <span class="str">"Via Orderlion"</span>,
+
+  <span class="str">"DocumentLines"</span>: [
+    {
+      <span class="com">// ── Ligne 1 : 20 pie depuis le stock physique (01) ───────</span>
+      <span class="str">"ItemCode"</span>:      <span class="str">"FE1SL"</span>,
+      <span class="str">"Quantity"</span>:      <span class="num">20</span>,
+      <span class="str">"WarehouseCode"</span>: <span class="str">"01"</span>,
+      <span class="str">"U_NomMag"</span>:      <span class="str">"Stock"</span>,
+      <span class="str">"U_NoLot"</span>:       <span class="str">"EM22755"</span>,      <span class="com">// dernier PDN de FE1SL en 01</span>
+      <span class="str">"U_GER_Pays"</span>:    <span class="str">"FRANCE"</span>,       <span class="com">// = Items.U_Pays</span>
+      <span class="str">"U_GER_Marque"</span>:  <span class="str">"GERVI"</span>,        <span class="com">// = Items.U_GER_Marque</span>
+      <span class="str">"U_GER_Condi"</span>:   <span class="str">"12x125g"</span>,      <span class="com">// = Items.U_GER_Det_Condt</span>
+
+      <span class="str">"DocumentLineAdditionalExpenses"</span>: [
+        { <span class="str">"GroupCode"</span>: <span class="num">1</span>, <span class="str">"ExpenseCode"</span>: <span class="num">2</span>, <span class="str">"LineTotal"</span>: <span class="num">8.40</span> },  <span class="com">// INTERFEL</span>
+        { <span class="str">"GroupCode"</span>: <span class="num">2</span>, <span class="str">"ExpenseCode"</span>: <span class="num">3</span>, <span class="str">"LineTotal"</span>: <span class="num">0.80</span> }   <span class="com">// DDG</span>
+      ]
+    },
+    {
+      <span class="com">// ── Ligne 2 : 10 pie depuis A/C-A/D (000) ────────────────</span>
+      <span class="str">"ItemCode"</span>:      <span class="str">"FE1SL"</span>,
+      <span class="str">"Quantity"</span>:      <span class="num">10</span>,
+      <span class="str">"WarehouseCode"</span>: <span class="str">"000"</span>,
+      <span class="str">"U_NomMag"</span>:      <span class="str">"A/C - A/D"</span>,
+      <span class="str">"U_NoLot"</span>:       <span class="str">"EM22739"</span>,      <span class="com">// dernier PDN de FE1SL en 000</span>
+      <span class="str">"U_GER_Pays"</span>:    <span class="str">"FRANCE"</span>,
+      <span class="str">"U_GER_Marque"</span>:  <span class="str">"GERVI"</span>,
+      <span class="str">"U_GER_Condi"</span>:   <span class="str">"12x125g"</span>,
+
+      <span class="str">"DocumentLineAdditionalExpenses"</span>: [
+        { <span class="str">"GroupCode"</span>: <span class="num">1</span>, <span class="str">"ExpenseCode"</span>: <span class="num">2</span>, <span class="str">"LineTotal"</span>: <span class="num">4.20</span> },
+        { <span class="str">"GroupCode"</span>: <span class="num">2</span>, <span class="str">"ExpenseCode"</span>: <span class="num">3</span>, <span class="str">"LineTotal"</span>: <span class="num">0.20</span> }
+      ]
+    }
+  ]
+}</pre>
+
+<p><b>Réponse SAP utile :</b> <code>DocEntry</code> (id technique), <code>DocNum</code> (n° de doc visible), <code>DocTotal</code> (TTC), <code>VatSum</code> (TVA), <code>DocumentLines[].LineTotal</code> (HT calculé par SAP, utile pour la réconciliation §7).</p>
+</div>
+
+<!-- 6 -->
+<div class="section">
+<h2>6. Code minimal — split par lot</h2>
+<p>Le split (un même article sur 2 entrepôts → 2 lignes) est <b>dans l'input Orderlion</b>. Le builder ne fait que mapper chaque ligne d'input vers une ligne SAP enrichie.</p>
+
+<p class="lang">Langage : TypeScript — pré-calcul du lot (cache 10 min)</p>
+<pre><span class="com">// Construit deux index à partir des 500 dernières réceptions :</span>
+<span class="com">//   byItemWhs : "ItemCode|Warehouse" → dernier DocNum vu (cas nominal)</span>
+<span class="com">//   byItem    : "ItemCode"           → dernier DocNum vu (fallback)</span>
+<span class="kw">async function</span> buildLotMaps() {
+  <span class="kw">const</span> byItemWhs = <span class="kw">new</span> Map&lt;string, number&gt;();
+  <span class="kw">const</span> byItem    = <span class="kw">new</span> Map&lt;string, number&gt;();
+
+  <span class="kw">for</span> (<span class="kw">let</span> skip = <span class="num">0</span>; skip &lt; <span class="num">500</span>; skip += <span class="num">50</span>) {
+    <span class="kw">const</span> r = <span class="kw">await</span> sapGet(
+      <span class="str">"PurchaseDeliveryNotes"</span>
+      + <span class="str">"?$top=50&amp;$skip="</span> + skip
+      + <span class="str">"&amp;$orderby=DocNum desc"</span>
+      + <span class="str">"&amp;$select=DocNum,DocumentLines"</span>
+    );
+    <span class="kw">if</span> (!r.value?.length) <span class="kw">break</span>;
+
+    <span class="kw">for</span> (<span class="kw">const</span> doc <span class="kw">of</span> r.value) {
+      <span class="kw">for</span> (<span class="kw">const</span> line <span class="kw">of</span> doc.DocumentLines ?? []) {
+        <span class="kw">if</span> (!line.ItemCode) <span class="kw">continue</span>;
+
+        <span class="com">// On garde le DocNum max par sécurité (au cas où l'ordre flotte)</span>
+        <span class="kw">const</span> prevItem = byItem.get(line.ItemCode) ?? <span class="num">0</span>;
+        <span class="kw">if</span> (doc.DocNum &gt; prevItem) byItem.set(line.ItemCode, doc.DocNum);
+
+        <span class="kw">if</span> (line.WarehouseCode) {
+          <span class="kw">const</span> key  = line.ItemCode + <span class="str">"|"</span> + line.WarehouseCode;
+          <span class="kw">const</span> prev = byItemWhs.get(key) ?? <span class="num">0</span>;
+          <span class="kw">if</span> (doc.DocNum &gt; prev) byItemWhs.set(key, doc.DocNum);
+        }
+      }
+    }
+  }
+  <span class="kw">return</span> { byItemWhs, byItem };
+}</pre>
+
+<p class="lang">Langage : TypeScript — résolution du lot pour une ligne donnée</p>
+<pre><span class="com">// Cascade : (item+entrepôt) → (item seul) → fallback constant.</span>
+<span class="kw">function</span> resolveLot(
+  maps: { byItemWhs: Map&lt;string, number&gt;; byItem: Map&lt;string, number&gt; },
+  itemCode: string,
+  warehouseCode: string,
+): string {
+  <span class="com">// 1. Cas nominal : réception vue pour cet item dans cet entrepôt</span>
+  <span class="kw">const</span> exact = maps.byItemWhs.get(itemCode + <span class="str">"|"</span> + warehouseCode);
+  <span class="kw">if</span> (exact) <span class="kw">return</span> <span class="str">"EM"</span> + exact;
+
+  <span class="com">// 2. Fallback : item vu ailleurs → dernière réception toutes confondues</span>
+  <span class="kw">const</span> any = maps.byItem.get(itemCode);
+  <span class="kw">if</span> (any) <span class="kw">return</span> <span class="str">"EM"</span> + any;
+
+  <span class="com">// 3. Fallback ultime (cf. GERVIFRAIS_LOT_DEFAUT)</span>
+  <span class="kw">return</span> <span class="str">"EM0000"</span>;
+}</pre>
+
+<p class="lang">Langage : TypeScript — construction du payload final (avec split)</p>
+<pre><span class="com">// Libellés humains des entrepôts (cf. §2)</span>
+<span class="kw">const</span> WHS_NAMES = {
+  <span class="str">"000"</span>: <span class="str">"A/C - A/D"</span>,
+  <span class="str">"01"</span>:  <span class="str">"Stock"</span>,
+  <span class="str">"R1"</span>:  <span class="str">"J+1"</span>,
+} <span class="kw">as const</span>;
+
+<span class="com">// Une ligne d'input Orderlion = un couple (article, entrepôt)</span>
+<span class="kw">type</span> CartLine = {
+  itemCode:      string;
+  quantity:      number;                  <span class="com">// en unité de stock SAP (pie)</span>
+  warehouseCode: <span class="str">"000"</span> | <span class="str">"01"</span> | <span class="str">"R1"</span>;
+};
+
+<span class="kw">async function</span> buildOrderPayload(
+  cart:     CartLine[],
+  cardCode: string,                       <span class="com">// code client SAP (BusinessPartners.CardCode)</span>
+  dueDate:  string,                       <span class="com">// "YYYY-MM-DD"</span>
+  ref:      string,                       <span class="com">// référence Orderlion → NumAtCard</span>
+) {
+  <span class="kw">const</span> lotMaps = <span class="kw">await</span> buildLotMaps();
+
+  <span class="com">// Cache local des méta-articles : U_Pays, U_GER_Marque, U_GER_Det_Condt,</span>
+  <span class="com">// SalesQtyPerPackUnit. Lecture batch via Items?$filter=...</span>
+  <span class="kw">const</span> items = <span class="kw">await</span> loadItemMeta(cart.map(l =&gt; l.itemCode));
+
+  <span class="kw">const</span> documentLines = cart.map((l) =&gt; {
+    <span class="kw">const</span> meta = items.get(l.itemCode);
+    <span class="kw">return</span> {
+      ItemCode:      l.itemCode,
+      Quantity:      l.quantity,
+      WarehouseCode: l.warehouseCode,
+      U_NomMag:      WHS_NAMES[l.warehouseCode],
+      U_NoLot:       resolveLot(lotMaps, l.itemCode, l.warehouseCode),
+      <span class="com">// Renommage Items → ligne : U_GER_Det_Condt devient U_GER_Condi</span>
+      ...(meta?.U_Pays          &amp;&amp; { U_GER_Pays:   meta.U_Pays }),
+      ...(meta?.U_GER_Marque    &amp;&amp; { U_GER_Marque: meta.U_GER_Marque }),
+      ...(meta?.U_GER_Det_Condt &amp;&amp; { U_GER_Condi:  meta.U_GER_Det_Condt }),
+      <span class="com">// TPF : voir §7 pour le calcul et la réconciliation post-création</span>
+    };
+  });
+
+  <span class="kw">const</span> today = <span class="kw">new</span> Date().toISOString().slice(<span class="num">0</span>, <span class="num">10</span>);
+  <span class="kw">return</span> {
+    CardCode:   cardCode,
+    DocDate:    today,
+    DocDueDate: dueDate,
+    TaxDate:    today,
+    NumAtCard:  ref,
+    Comments:   <span class="str">"Via Orderlion"</span>,
+    DocumentLines: documentLines,        <span class="com">// N lignes, une par (item, entrepôt)</span>
+  };
+}</pre>
+</div>
+
+<!-- 7 -->
+<div class="section">
+<h2>7. Réconciliation TPF après création</h2>
+<p>Si le prix est laissé au tarif SAP, le HT (<code>LineTotal</code>) n'est connu qu'<i>après</i> la création de la commande. Il faut donc <b>relire</b> la commande puis <b>PATCH</b>er les TPF par ligne avec les vraies valeurs. Sans ça, INTERFEL est à 0 ou faux.</p>
+
+<p class="lang">Langage : HTTP — séquence des appels</p>
+<pre><span class="com"># 1) Relire la commande qu'on vient de créer</span>
+<span class="kw">GET</span>    /Orders({DocEntry})
+
+<span class="com"># 2) PATCH ciblé des DocumentLineAdditionalExpenses par ligne</span>
+<span class="kw">PATCH</span>  /Orders({DocEntry})</pre>
+
+<p class="lang">Langage : TypeScript — recalcul et PATCH</p>
+<pre><span class="com">// Taux lus depuis AdditionalExpenses (mis en cache 10 min)</span>
+<span class="com">//   AdditionalExpenses(ExpensCode=2).U_Taux  →  INTERFEL</span>
+<span class="com">//   AdditionalExpenses(ExpensCode=3).U_Taux  →  DDG</span>
+<span class="kw">const</span> ITFEL_RATE = <span class="num">0.0021</span>;   <span class="com">// 0,21 % du LineTotal SAP</span>
+<span class="kw">const</span> DDG_RATE   = <span class="num">0.02</span>;     <span class="com">// 0,02 € par colis</span>
+
+<span class="kw">async function</span> reconcileTpf(docEntry: number) {
+  <span class="com">// 1. Relire : SAP a calculé le vrai LineTotal de chaque ligne</span>
+  <span class="kw">const</span> order = <span class="kw">await</span> sapGet(<span class="str">"Orders("</span> + docEntry + <span class="str">")"</span>);
+
+  <span class="kw">const</span> patchLines = [];
+  <span class="kw">for</span> (<span class="kw">const</span> line <span class="kw">of</span> order.DocumentLines) {
+    <span class="kw">const</span> meta    = <span class="kw">await</span> getItemMeta(line.ItemCode);
+    <span class="kw">const</span> packDiv = meta?.SalesQtyPerPackUnit &gt; <span class="num">1</span>
+                      ? meta.SalesQtyPerPackUnit
+                      : <span class="num">1</span>;
+    <span class="kw">const</span> nbColis = (line.Quantity ?? <span class="num">0</span>) / packDiv;
+
+    <span class="com">// Valeurs correctes attendues</span>
+    <span class="kw">const</span> itfel = round2((line.LineTotal ?? <span class="num">0</span>) * ITFEL_RATE);
+    <span class="kw">const</span> ddg   = round2(nbColis * DDG_RATE);
+
+    <span class="com">// Valeurs actuellement posées sur la ligne</span>
+    <span class="kw">const</span> exps    = line.DocumentLineAdditionalExpenses ?? [];
+    <span class="kw">const</span> curItfel = exps.find(e =&gt; e.ExpenseCode === <span class="num">2</span>)?.LineTotal ?? <span class="num">0</span>;
+    <span class="kw">const</span> curDdg   = exps.find(e =&gt; e.ExpenseCode === <span class="num">3</span>)?.LineTotal ?? <span class="num">0</span>;
+
+    <span class="com">// Si écart &gt; 1 centime → PATCH cette ligne</span>
+    <span class="kw">if</span> (Math.abs(itfel - curItfel) &gt; <span class="num">0.005</span>
+        || Math.abs(ddg - curDdg) &gt; <span class="num">0.005</span>) {
+      <span class="kw">const</span> merged = [];
+      <span class="kw">if</span> (itfel &gt; <span class="num">0</span>) merged.push(
+        { GroupCode: <span class="num">1</span>, ExpenseCode: <span class="num">2</span>, LineTotal: itfel });
+      <span class="kw">if</span> (ddg &gt; <span class="num">0</span>) merged.push(
+        { GroupCode: <span class="num">2</span>, ExpenseCode: <span class="num">3</span>, LineTotal: ddg });
+      patchLines.push({
+        LineNum: line.LineNum,
+        DocumentLineAdditionalExpenses: merged,
+      });
+    }
+  }
+
+  <span class="kw">if</span> (patchLines.length &gt; <span class="num">0</span>) {
+    <span class="kw">await</span> sapPatch(<span class="str">"Orders("</span> + docEntry + <span class="str">")"</span>,
+                   { DocumentLines: patchLines });
+  }
+}
+
+<span class="kw">const</span> round2 = (n: number) =&gt; Math.round(n * <span class="num">100</span>) / <span class="num">100</span>;</pre>
+</div>
+
+<!-- 8 -->
+<div class="section">
+<h2>8. Pièges connus</h2>
+<ul>
+  <li><b>Typo SAP <code>ExpensCode</code> vs <code>ExpenseCode</code> :</b> le master <code>AdditionalExpenses</code> expose <code>ExpensCode</code> (sans 'e'), alors qu'à la ligne le champ est <code>ExpenseCode</code> (avec). Les deux orthographes sont nécessaires.</li>
+  <li><b>Renommage <code>U_GER_Det_Condt</code> → <code>U_GER_Condi</code> :</b> le champ master article et le champ ligne n'ont pas le même nom. À mapper explicitement.</li>
+  <li><b><code>U_NoLot</code> manquant ou <code>"EM0000"</code> :</b> passe côté SAP mais sera bloqué au contrôle Gervifrais. Logger un warning quand le fallback est utilisé.</li>
+  <li><b>Session SAP :</b> idle &gt; 30 min → <code>401 Unauthorized</code>. Prévoir re-login automatique avec un verrou pour éviter les logins parallèles concurrents (sinon n logins simultanés = saturation).</li>
+  <li><b>TLS auto-signé (base TEST) :</b> certif non chaîné. Côté Orderlion : accepter le cert (pinning) ou désactiver la vérif TLS sur cette base uniquement.</li>
+  <li><b><code>WarehouseCode</code> hors {<code>000</code>, <code>01</code>, <code>R1</code>} :</b> SAP l'accepte mais l'article sort du flux télévente standard. Refuser en validation Orderlion.</li>
+  <li><b>Pré-validation conseillée avant POST :</b> <code>GET Items('XXX')</code> pour chaque <code>ItemCode</code> unique + <code>GET BusinessPartners('YYY')</code>. Évite l'erreur SAP <code>-2028</code> (article inexistant) et permet un message d'erreur clair côté Orderlion.</li>
+  <li><b>Quantités :</b> SAP attend la quantité en unité d'inventaire (<code>InventoryUOM</code>, généralement <code>pie</code>). Si Orderlion travaille en colis, convertir avant POST.</li>
+</ul>
+</div>
+
+</body>
+</html>

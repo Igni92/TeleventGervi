@@ -1,0 +1,210 @@
+/**
+ * Fonctions PURES de calcul Gervifrais (testables, sans I/O).
+ * Centralise la logique financière critique : découpe entrepôts, TPF, prix conseillé.
+ * Couvert par lib/gervifrais-calc.test.ts.
+ */
+
+// ── Découpe multi-entrepôt ────────────────────────────────────
+export const WAREHOUSE_FILL_ORDER = ["000", "01", "R1"];
+
+export function totalAvailable(availByWarehouse: Record<string, number>): number {
+  return WAREHOUSE_FILL_ORDER.reduce((s, w) => s + Math.max(0, availByWarehouse[w] ?? 0), 0);
+}
+
+/** Répartit une quantité sur les entrepôts par ordre de puisage (000→01→R1).
+ *  Surplus (sur-vente) ajouté au 1er entrepôt dispo (ou 000). */
+export function splitByWarehouse(
+  qty: number,
+  availByWarehouse: Record<string, number>,
+  fillOrder: string[] = WAREHOUSE_FILL_ORDER,
+): { warehouse: string; qty: number }[] {
+  let remaining = qty;
+  const chunks: { warehouse: string; qty: number }[] = [];
+  for (const w of fillOrder) {
+    if (remaining <= 0.0001) break;
+    const avail = Math.max(0, availByWarehouse[w] ?? 0);
+    if (avail <= 0) continue;
+    const take = Math.min(avail, remaining);
+    chunks.push({ warehouse: w, qty: Math.round(take * 1000) / 1000 });
+    remaining -= take;
+  }
+  if (remaining > 0.0001) {
+    const w = fillOrder.find((x) => (availByWarehouse[x] ?? 0) > 0) ?? fillOrder[0];
+    const existing = chunks.find((c) => c.warehouse === w);
+    if (existing) existing.qty = Math.round((existing.qty + remaining) * 1000) / 1000;
+    else chunks.push({ warehouse: w, qty: Math.round(remaining * 1000) / 1000 });
+  }
+  return chunks;
+}
+
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
+// ── Taxes para-fiscales (TPF) ─────────────────────────────────
+/** TPF2 INTERFEL = LineHT × taux% (taux par défaut 0,21). */
+export function computeItfel(lineHT: number, tauxPct = 0.21): number {
+  if (lineHT <= 0) return 0;
+  return r2(lineHT * (tauxPct / 100));
+}
+/** TPF3 DROIT DE GARDE = nb_colis × taux €/colis (défaut 0,02). */
+export function computeDdg(nbColis: number, tauxParColis = 0.02): number {
+  if (nbColis <= 0) return 0;
+  return r2(nbColis * tauxParColis);
+}
+
+// ── Prix conseillé ────────────────────────────────────────────
+export const COEF_DEFAUT = 1.5;
+
+export type PriceCategory =
+  | "Fraises" | "Fruits_Rges" | "Legumes" | "Fruits_Prep"
+  | "Divers_Fruits" | "Fruits_Secs" | "Autres";
+
+export function categoryFromGroupName(name?: string | null): PriceCategory | null {
+  if (!name) return null;
+  const n = name.toLowerCase();
+  if (/fraise/.test(n)) return "Fraises";
+  if (/fruits?\s*rouges?|framboise|myrtille|m[uû]re|groseille|cassis/.test(n)) return "Fruits_Rges";
+  if (/l[ée]gume/.test(n)) return "Legumes";
+  if (/pr[ée]par/.test(n)) return "Fruits_Prep";
+  if (/secs?|amande|datte|noix|noisette|pruneau/.test(n)) return "Fruits_Secs";
+  if (/agrume|exotiqu|banane|ananas|mangue|kiwi|raisin|pomme|poire|p[êe]che|prune|cerise|figue|melon|brugnon|nectarine/.test(n)) return "Divers_Fruits";
+  return null;
+}
+
+export interface GroupCoefs {
+  base: Partial<Record<PriceCategory, number>>;
+  fraiseBands?: { b0_3?: number; b3_5?: number; b5_8?: number; b8_999?: number };
+}
+
+export function fraiseBandCoef(bands: GroupCoefs["fraiseBands"], achat: number): number | undefined {
+  if (!bands) return undefined;
+  if (achat < 3) return bands.b0_3 || undefined;
+  if (achat < 5) return bands.b3_5 || undefined;
+  if (achat < 8) return bands.b5_8 || undefined;
+  return bands.b8_999 || undefined;
+}
+
+/** Coefficient applicable (spécifique groupe×catégorie, paliers fraises, sinon défaut 1,5). */
+export function resolveCoef(category: PriceCategory | null, coefs: GroupCoefs, achat: number): { coef: number; isDefault: boolean } {
+  let coef: number | undefined;
+  if (category === "Fraises") coef = fraiseBandCoef(coefs.fraiseBands, achat) ?? coefs.base.Fraises;
+  else if (category) coef = coefs.base[category];
+  if (coef == null || coef === 0) return { coef: COEF_DEFAUT, isDefault: true };
+  return { coef, isDefault: false };
+}
+
+export function computeSuggestedPrice(achat: number, coef: number): number {
+  return r2(achat * coef);
+}
+
+// ── Numéro de lot (U_NoLot) ───────────────────────────────────
+/**
+ * Sentinel de vente à découvert : un BL créé sans lot résolvable porte ce code.
+ * /api/sap/goods-receipts le réécrit en EM<DocNum> à la prochaine entrée
+ * marchandise. Défini ICI (lib pure, testable) et ré-exporté par lib/lotResolver
+ * pour les consommateurs existants. ⚠️ Libellé ASCII court (PATCH SAP U_NoLot).
+ */
+export const LOT_PENDING = "EM_PENDING";
+
+export type LotChoice = {
+  lot: string;                                       // JAMAIS vide — EM<DocNum> ou EM_PENDING
+  reason: "fifo" | "decouvert" | "aucun-pdn" | "env-defaut";
+};
+
+/**
+ * Décision systématique du lot d'une ligne de commande (bug BL 24011560 : une
+ * ligne ne doit JAMAIS partir sans U_NoLot).
+ *   • lot FIFO résolu + stock (local OU SAP) → on pose le lot.
+ *   • lot résolu mais aucun stock nulle part → vente à découvert → EM_PENDING.
+ *   • aucun lot résolvable (article hors fenêtre de scan PDN, kit fabriqué…)
+ *     → EM_PENDING (réécrit à la prochaine EM), sauf si un défaut env est fourni.
+ * `sapOnHand` (Items.QuantityOnStock) sert de filet quand le miroir local est
+ * obsolète (cas réel : fraises réceptionnées le matin, polling stock en retard).
+ */
+export function chooseLot(opts: {
+  resolvedLot: string | null;       // EM<DocNum> du lotResolver, null si introuvable
+  localAvailable: number;           // stock dispo agrégé du miroir local (peut être faux)
+  sapOnHand?: number | null;        // SAP Items.QuantityOnStock (vérité SAP si dispo)
+  envDefault?: string | null;       // GERVIFRAIS_LOT_DEFAUT (opt-in, sinon ignoré)
+}): LotChoice {
+  const hasStock = opts.localAvailable > 0 || (opts.sapOnHand ?? 0) > 0;
+  if (opts.resolvedLot && hasStock) return { lot: opts.resolvedLot, reason: "fifo" };
+  if (!opts.resolvedLot && hasStock) {
+    const envDef = (opts.envDefault ?? "").trim();
+    if (envDef) return { lot: envDef, reason: "env-defaut" };
+    return { lot: LOT_PENDING, reason: "aucun-pdn" };
+  }
+  return { lot: LOT_PENDING, reason: "decouvert" };
+}
+
+// ── Unité d'affichage / vente ─────────────────────────────────
+/**
+ * Détermine comment afficher/saisir un produit.
+ *
+ * RÉGIME HISTORIQUE (salesItemsPerUnit absent/null — strictement inchangé) :
+ *   • Vente au kg → AU KILO (packDivisor 1, unité "kg")
+ *   • Tout le reste → AU COLIS (packDivisor = SalPackUn, unité "colis")
+ *
+ * NOUVEAU RÉGIME (salesItemsPerUnit fourni — Product.salesItemsPerUnit peuplé
+ * au sync ; relevé SAP réel via scripts/diag-condi.mjs) :
+ *   unités de base / colis = NumInSale (SalesItemsPerUnit) × SalPackUn (SalesQtyPerPackUnit)
+ *   • Fraise FB4KA3 : SalesUnit "KG", NumInSale 1, SalPackUn 4, poids 1 kg/unité,
+ *     condi "8x500g" → colis de 4 kg : on AFFICHE/prix au kilo, on VEND au colis
+ *     (packDivisor 4 → quantité SAP = colis × 4, en KG — vérifié sur BL réels :
+ *     Quantity=28 KG / PackageQuantity=7).
+ *   • FRAMB12PD : "pie" ×12 × 0,125 kg → colis de 1,5 kg, prix /pie (inchangé).
+ *   `colisWeightKg` (poids d'un colis) n'est exposé QUE dans ce régime — pour
+ *   l'affichage « colis de 4 kg » — afin de ne pas altérer les objets historiques.
+ *
+ * Le prix reste TOUJOURS à l'unité de base SAP (priceUnit : kg/pie), envoyé tel
+ * quel à SAP. La quantité SAP = qté_colis × packDivisor (unités de base).
+ */
+export function unitInfo(
+  salesUnit?: string | null,
+  salesQtyPerPackUnit?: number | null,
+  salesItemsPerUnit?: number | null,
+  salesUnitWeight?: number | null,
+): {
+  packDivisor: number; displayUnit: string; priceUnit: string; isKg: boolean;
+  colisWeightKg?: number | null;
+} {
+  const unit = (salesUnit || "").trim();
+  const isKg = /kg|kilo/i.test(unit);
+
+  // ── Régime historique : comportement strictement identique (NULL-SAFE) ──
+  if (salesItemsPerUnit == null) {
+    if (isKg) return { packDivisor: 1, displayUnit: "kg", priceUnit: "kg", isKg: true };
+    const div = salesQtyPerPackUnit && salesQtyPerPackUnit > 1 ? salesQtyPerPackUnit : 1;
+    return { packDivisor: div, displayUnit: div > 1 ? "colis" : (unit || "u."), priceUnit: unit || "pie", isKg: false };
+  }
+
+  // ── Nouveau régime : NumInSale × SalPackUn = unités de base par colis ──
+  const numInSale = salesItemsPerUnit > 0 ? salesItemsPerUnit : 1;
+  const salPackUn = salesQtyPerPackUnit && salesQtyPerPackUnit > 0 ? salesQtyPerPackUnit : 1;
+  const perColis = numInSale * salPackUn;
+  // Poids d'un colis : unités de base × poids/unité. Pour un article vendu au KG,
+  // le poids d'une unité de base est 1 kg par définition (relevé SAP : UnitWgt=1).
+  const unitWeight = salesUnitWeight && salesUnitWeight > 0 ? salesUnitWeight : (isKg ? 1 : null);
+  const colisWeightKg = unitWeight != null ? Math.round(perColis * unitWeight * 1000) / 1000 : null;
+
+  if (isKg) {
+    // Vendu au poids : affichage/prix au kilo, vente par colis de N kg.
+    if (perColis > 1) {
+      return { packDivisor: perColis, displayUnit: "colis", priceUnit: "kg", isKg: true, colisWeightKg };
+    }
+    return { packDivisor: 1, displayUnit: "kg", priceUnit: "kg", isKg: true, colisWeightKg };
+  }
+  return {
+    packDivisor: perColis,
+    displayUnit: perColis > 1 ? "colis" : (unit || "u."),
+    priceUnit: unit || "pie",
+    isKg: false,
+    colisWeightKg,
+  };
+}
+
+// ── Stock perso commercial ────────────────────────────────────
+/** Stock attribué à un commercial = stock dispo × (pct/100), arrondi 1 décimale. */
+export function personalStock(available: number, sharePct: number): number {
+  const a = Math.max(0, available) * (Math.max(0, sharePct) / 100);
+  return Math.floor(a * 10) / 10;
+}

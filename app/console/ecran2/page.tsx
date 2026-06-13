@@ -1,0 +1,378 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  MonitorSmartphone, Loader2, Phone, AlertTriangle, Clock,
+  TrendingUp, TrendingDown, Minus, ShoppingCart, User, Users, Mail,
+  ExternalLink, Calendar, ArrowLeft,
+} from "lucide-react";
+import { Ecran2Order } from "@/components/console/Ecran2Order";
+import { rememberConsoleScreen } from "@/components/console/ConsoleScreenGate";
+import {
+  subscribeActiveClient, readActiveClient, requestActiveClient,
+  type ActiveClientState, type ActiveClientInfo,
+} from "@/lib/consoleSync";
+
+/**
+ * Écran 2 (fenêtre détachée) — optimisé **marge + relation client + incident**.
+ * Synchronisé à l'écran 1. Le constructeur de commande prend toute la
+ * largeur ; le bandeau client regroupe au-dessus toutes les infos
+ * contextuelles utiles pour vendre / fidéliser / gérer un incident.
+ */
+export default function Ecran2Page() {
+  const [state, setState] = useState<ActiveClientState | null>(null);
+  const [ready, setReady] = useState(false);
+
+  // C3 — mémorise « dernier écran Console = Écran 2 » : le lien Console de la
+  // sidebar ramènera ici (cf. ConsoleScreenGate sur /console).
+  useEffect(() => { rememberConsoleScreen("ecran2"); }, []);
+
+  useEffect(() => {
+    setState(readActiveClient());
+    const unsub = subscribeActiveClient((s) => setState(s));
+    requestActiveClient();
+    setReady(true);
+    return unsub;
+  }, []);
+
+  const clientId = state?.clientId ?? null;
+  const clientName = state?.clientName ?? null;
+  const sharePct = state?.stockSharePct ?? 100;
+  const info = state?.client ?? null;
+
+  return (
+    <div className="h-full flex flex-col gap-3 animate-fade-up min-h-0">
+      <ClientBanner clientId={clientId} clientName={clientName} info={info} />
+
+      {/* Constructeur de commande — prend tout l'espace restant */}
+      <div className="flex-1 min-h-0">
+        {!ready ? (
+          <p className="text-[13px] text-muted-foreground inline-flex items-center gap-2 p-4">
+            <Loader2 className="h-4 w-4 animate-spin" /> Connexion…
+          </p>
+        ) : clientId && clientName ? (
+          <Ecran2Order key={clientId} clientId={clientId} clientName={clientName} stockSharePct={sharePct} />
+        ) : (
+          <div className="h-full flex items-center justify-center panel">
+            <p className="text-[13px] text-muted-foreground text-center max-w-xs">
+              Sélectionne un client sur l&apos;écran 1 — son stock et la saisie de commande apparaîtront ici.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Notes legacy — fallback regex pour clients pas encore migrés
+   vers les champs structurés Client.email / Client.sapGroupName.
+───────────────────────────────────────────────────────────── */
+
+function extractGroupeLegacy(notes: string | null): string | null {
+  if (!notes) return null;
+  const m = notes.match(/^\s*(?:Niveau|Groupe|Cat[ée]gorie)\s*[:\-]\s*(.+?)\s*$/im);
+  if (m) return m[1].trim();
+  return null;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Bandeau client riche — toutes les infos contextuelles pour
+   conduire l'entretien (téléphones, groupe, interlocuteurs,
+   habitudes, incidents) + accès rapide au compte.
+───────────────────────────────────────────────────────────── */
+
+const JOURS_FR = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"] as const;
+
+/** C3 — Retour volontaire à l'Écran 1 dans CETTE fenêtre : on réécrit la
+ *  mémoire d'écran AVANT de naviguer, sinon le Gate de /console nous
+ *  renverrait immédiatement ici. */
+function Ecran1Link() {
+  const router = useRouter();
+  return (
+    <button
+      type="button"
+      onClick={() => { rememberConsoleScreen("ecran1"); router.push("/console"); }}
+      title="Revenir à l'Écran 1 (file d'appel) dans cette fenêtre"
+      className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-muted-foreground hover:text-brand-600 dark:hover:text-brand-400 hover:underline shrink-0"
+    >
+      <ArrowLeft className="h-3 w-3" /> Écran 1
+    </button>
+  );
+}
+
+function ClientBanner({
+  clientId, clientName, info,
+}: { clientId: string | null; clientName: string | null; info: ActiveClientInfo | null }) {
+  if (!clientName) {
+    return (
+      <header className="shrink-0 panel px-4 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="kicker mb-0.5 inline-flex items-center gap-1.5">
+            <MonitorSmartphone className="h-3 w-3" /> Écran 2 · synchronisé
+          </p>
+          <Ecran1Link />
+        </div>
+        <h1 className="text-[19px] font-semibold tracking-tight text-muted-foreground">
+          En attente d&apos;un client…
+        </h1>
+      </header>
+    );
+  }
+
+  const tels = info ? [
+    { label: "Standard", value: info.tel1 },
+    { label: "Direct 1", value: info.tel2 },
+    { label: "Direct 2", value: info.tel3 },
+  ].filter((t): t is { label: string; value: string } => !!t.value) : [];
+
+  const groupe = info?.sapGroupName ?? extractGroupeLegacy(info?.notes ?? null);
+
+  const incidents = info?.openIncidents ?? 0;
+  const lastDays = info?.lastOrderDays;
+  const lastLabel = lastDays === 0 ? "Aujourd'hui"
+                  : lastDays === 1 ? "Hier"
+                  : lastDays != null ? `il y a ${lastDays} j`
+                  : null;
+
+  const TrendIcon = info?.trend30 === "rising"  ? TrendingUp
+                  : info?.trend30 === "falling" ? TrendingDown
+                  :                                Minus;
+  const trendColor = info?.trend30 === "rising"  ? "text-emerald-600 dark:text-emerald-400"
+                   : info?.trend30 === "falling" ? "text-rose-500 dark:text-rose-400"
+                   :                                "text-muted-foreground";
+
+  return (
+    <header className="shrink-0 panel divide-y divide-border">
+      {/* ── Ligne 1 — Identité + groupe + téléphones + accès compte ── */}
+      <div className="px-4 py-3 flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="kicker mb-1 inline-flex items-center gap-3">
+            <span className="inline-flex items-center gap-1.5">
+              <MonitorSmartphone className="h-3 w-3" /> Écran 2 · synchronisé
+            </span>
+            <Ecran1Link />
+          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-[22px] font-semibold tracking-tight text-foreground leading-tight truncate">
+              {clientName}
+            </h1>
+            {info?.type && (
+              <span className={`text-[10px] font-bold tracking-[0.14em] uppercase px-2 py-0.5 rounded ${
+                info.type === "EXPORT" ? "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" :
+                info.type === "GMS"    ? "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" :
+                                         "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
+              }`}>
+                {info.type}
+              </span>
+            )}
+            {incidents > 0 && (
+              <span
+                className="inline-flex items-center gap-1 text-[10.5px] font-semibold px-2 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
+                title={`${incidents} incident(s) BL ouvert(s)`}
+              >
+                <AlertTriangle className="h-3 w-3" /> {incidents} incident{incidents > 1 ? "s" : ""}
+              </span>
+            )}
+            {clientId && (
+              <Link
+                href={`/clients/${clientId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Ouvrir la fiche client complète (nouvel onglet)"
+                className="ml-1 inline-flex items-center gap-1 text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:underline"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Ouvrir le compte
+              </Link>
+            )}
+          </div>
+          {/* Ligne meta : code + commercial + groupe client (extrait des notes) */}
+          <div className="flex items-center gap-3 mt-1.5 text-[11.5px] text-muted-foreground flex-wrap">
+            {info?.code && <span className="font-mono text-foreground/70">{info.code}</span>}
+            {info?.commercial && (
+              <span className="inline-flex items-center gap-1">
+                <User className="h-3 w-3" /> {info.commercial}
+              </span>
+            )}
+            {groupe && (
+              <span className="inline-flex items-center gap-1">
+                <span className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground/70">
+                  Groupe
+                </span>
+                <span className="text-foreground/85 font-medium">{groupe}</span>
+              </span>
+            )}
+            {info?.email && (
+              <a
+                href={`mailto:${info.email}`}
+                className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-400 hover:underline truncate max-w-[220px]"
+                title={info.email}
+              >
+                <Mail className="h-3 w-3" /> {info.email}
+              </a>
+            )}
+          </div>
+        </div>
+
+        {/* Téléphones — colonne droite, alignés (label fixe 60px, n° tnum) */}
+        {tels.length > 0 && (
+          <div className="shrink-0 flex flex-col gap-0.5">
+            {tels.map((t, i) => (
+              <a
+                key={t.label}
+                href={`tel:${t.value}`}
+                className={`group inline-flex items-center justify-end gap-2 px-2.5 py-1 rounded-md transition-colors ${
+                  i === 0
+                    ? "bg-primary/15 hover:bg-primary/25 text-foreground"
+                    : "hover:bg-secondary/40 text-foreground/80"
+                }`}
+              >
+                <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground w-[60px] text-right shrink-0">
+                  {t.label}
+                </span>
+                <Phone className={`h-3 w-3 shrink-0 ${i === 0 ? "text-primary" : "text-muted-foreground/70"}`} />
+                <span className="font-mono tnum text-[13px] font-semibold tracking-tight">{t.value}</span>
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Ligne 2 — Habitudes en chips (sans jours d'appel) ── */}
+      {(lastLabel || info?.medianHour != null || info?.bestDayOfWeek != null || info?.trend30) && (
+        <div className="px-4 py-2 flex items-center gap-2 flex-wrap text-[11px]">
+          {info?.medianHour != null && (
+            <Chip icon={Clock} label="Créneau">
+              <span className="font-semibold tnum">{info.medianHour}h</span>
+            </Chip>
+          )}
+          {info?.bestDayOfWeek != null && (
+            <Chip icon={Calendar} label="Meilleur jour">
+              <span className="font-semibold">{JOURS_FR[info.bestDayOfWeek]}</span>
+            </Chip>
+          )}
+          {lastLabel && (
+            <Chip icon={ShoppingCart} label="Dernière cde">
+              <span className="font-semibold">{lastLabel}</span>
+              {info?.ordersCount != null && info.ordersCount > 0 && (
+                <span className="text-muted-foreground"> · {info.ordersCount} cde{info.ordersCount > 1 ? "s" : ""}</span>
+              )}
+            </Chip>
+          )}
+          {info?.trend30 && (
+            <Chip icon={TrendIcon} label="Tendance 30j">
+              <span className={`font-semibold ${trendColor}`}>
+                {info.trend30 === "rising" ? "En hausse" : info.trend30 === "falling" ? "En baisse" : "Stable"}
+              </span>
+            </Chip>
+          )}
+        </div>
+      )}
+
+      {/* ── Ligne 3 — Interlocuteurs (fetch direct, clé = clientId) ── */}
+      {clientId && <InterlocuteursStrip clientId={clientId} />}
+    </header>
+  );
+}
+
+/* Chip uniforme — icône + label uppercase + valeur. Hauteur fixe pour alignement. */
+function Chip({
+  icon: Icon, label, children,
+}: { icon: React.ElementType; label: string; children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 h-6 px-2 rounded-md border border-border bg-card">
+      <Icon className="h-3 w-3 text-muted-foreground/70 shrink-0" />
+      <span className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
+        {label}
+      </span>
+      <span className="text-[11.5px] text-foreground/90">{children}</span>
+    </span>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Interlocuteurs — strip horizontal compact (lecture seule).
+   Édition complète sur la fiche compte (/clients/[id]).
+───────────────────────────────────────────────────────────── */
+
+interface Contact {
+  id: string;
+  name: string;
+  role: string | null;
+  phone: string | null;
+  email: string | null;
+}
+
+function InterlocuteursStrip({ clientId }: { clientId: string }) {
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setContacts([]);
+    fetch(`/api/clients/${clientId}/contacts`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j: { contacts?: Contact[] }) => { if (!cancelled) setContacts(j.contacts ?? []); })
+      .catch(() => { if (!cancelled) setContacts([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [clientId]);
+
+  if (loading) {
+    return (
+      <div className="px-4 py-2 inline-flex items-center gap-2 text-[11px] text-muted-foreground">
+        <Users className="h-3 w-3" /> <Loader2 className="h-3 w-3 animate-spin" /> Interlocuteurs…
+      </div>
+    );
+  }
+
+  if (contacts.length === 0) {
+    return (
+      <div className="px-4 py-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+        <Users className="h-3 w-3" />
+        <span className="text-[10px] uppercase tracking-[0.12em] font-semibold">Interlocuteurs</span>
+        <span className="italic text-muted-foreground/60">aucun enregistré.</span>
+        <Link href={`/clients/${clientId}`} target="_blank" rel="noopener noreferrer"
+          className="ml-auto text-[10.5px] text-brand-600 dark:text-brand-400 hover:underline inline-flex items-center gap-1">
+          + Ajouter sur la fiche
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-4 py-2 space-y-1">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] font-semibold text-foreground/80">
+        <Users className="h-3 w-3 text-muted-foreground" />
+        Interlocuteurs <span className="text-muted-foreground/60 font-normal">({contacts.length})</span>
+      </div>
+      <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-0.5">
+        {contacts.map((c, i) => (
+          <li key={c.id} className="flex items-baseline gap-1.5 text-[11.5px] min-w-0">
+            <span className="h-4 w-4 shrink-0 rounded-full bg-brand-500/10 text-brand-600 dark:text-brand-400 text-[9px] font-bold inline-flex items-center justify-center self-center">
+              {i + 1}
+            </span>
+            <span className="font-medium text-foreground truncate">{c.name}</span>
+            {c.role && (
+              <span className="text-[10px] text-muted-foreground/80 truncate shrink-0">· {c.role}</span>
+            )}
+            {c.phone && (
+              <a href={`tel:${c.phone}`} className="inline-flex items-center gap-1 font-mono tnum text-foreground/80 hover:text-brand-600 ml-auto shrink-0 text-[10.5px]">
+                <Phone className="h-2.5 w-2.5" /> {c.phone}
+              </a>
+            )}
+            {c.email && !c.phone && (
+              <a href={`mailto:${c.email}`} className="inline-flex items-center gap-1 text-foreground/70 hover:text-brand-600 ml-auto shrink-0 text-[10.5px] truncate">
+                <Mail className="h-2.5 w-2.5" /> {c.email}
+              </a>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

@@ -1,0 +1,40 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+
+/**
+ * GET  /api/clients/[id]/contacts   → liste des interlocuteurs
+ * POST /api/clients/[id]/contacts   → ajoute un interlocuteur
+ *   body: { name, role?, phone?, email?, note? }
+ */
+export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  const contacts = await prisma.contact.findMany({
+    where: { clientId: params.id },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+  });
+  return NextResponse.json({ contacts });
+}
+
+export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  let body: { name?: string; role?: string; phone?: string; email?: string; note?: string };
+  try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
+  if (!body.name?.trim()) return NextResponse.json({ error: "Nom requis" }, { status: 400 });
+
+  const count = await prisma.contact.count({ where: { clientId: params.id } });
+  const contact = await prisma.contact.create({
+    data: {
+      clientId: params.id,
+      name: body.name.trim(),
+      role: body.role?.trim() || null,
+      phone: body.phone?.trim() || null,
+      email: body.email?.trim() || null,
+      note: body.note?.trim() || null,
+      position: count,
+    },
+  });
+  return NextResponse.json({ ok: true, contact }, { status: 201 });
+}

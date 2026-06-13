@@ -1,0 +1,511 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════════════════
+   LIGHT MODE — Design tokens
+═══════════════════════════════════════════════════════════ */
+@layer base {
+  :root {
+    --background:        220 20% 97%;
+    --foreground:        222 47% 7%;
+    --card:              0 0% 100%;
+    --card-foreground:   222 47% 7%;
+    --popover:           0 0% 100%;
+    --popover-foreground:222 47% 7%;
+    --primary:           42 95% 44%;          /* or profond — lisible sur blanc */
+    --primary-foreground: 45 70% 99%;
+    --secondary:         220 14% 96%;
+    --secondary-foreground: 222 47% 7%;
+    --muted:             220 14% 96%;
+    --muted-foreground:  220 9% 46%;
+    --accent:            220 14% 96%;
+    --accent-foreground: 222 47% 7%;
+    --destructive:       0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border:            220 13% 90%;
+    --input:             220 13% 90%;
+    --ring:              42 95% 44%;
+    --radius:            0.9rem;
+
+    /* ── Échelle BRAND par défaut = OR / JAUNE (triplets HSL, pour <alpha-value>) ──
+       Surchargée par [data-theme="agrume"|"fraise"] plus bas pour changer la
+       colorimétrie à chaud. */
+    --brand-50:  55 92% 95%;
+    --brand-100: 53 97% 88%;
+    --brand-200: 54 97% 77%;
+    --brand-300: 48 96% 64%;
+    --brand-400: 45 96% 53%;
+    --brand-500: 45 96% 42%;
+    --brand-600: 44 96% 33%;
+    --brand-700: 44 86% 26%;
+    --brand-800: 44 78% 21%;
+    --brand-900: 44 72% 14%;
+    --brand-950: 43 70% 8%;
+
+    /* Shadows */
+    --shadow-card:
+      0 0 0 1px rgba(0,0,0,0.04),
+      0 1px 3px rgba(0,0,0,0.04),
+      0 2px 8px rgba(0,0,0,0.04);
+    --shadow-card-hover:
+      0 0 0 1px rgba(0,0,0,0.06),
+      0 4px 12px rgba(0,0,0,0.07),
+      0 8px 24px rgba(0,0,0,0.06);
+    --shadow-nav:
+      0 1px 0 rgba(255,255,255,0.05),
+      0 4px 24px rgba(0,0,0,0.22);
+    --shadow-modal:
+      0 0 0 1px rgba(0,0,0,0.08),
+      0 8px 40px rgba(0,0,0,0.14),
+      0 20px 60px rgba(0,0,0,0.1);
+  }
+
+/* ═══════════════════════════════════════════════════════════
+   DARK MODE — Premium night palette
+═══════════════════════════════════════════════════════════ */
+  .dark {
+    /* Charcoal anthracite (légère pointe de bleu) + jaune vif — style "Controllino" */
+    --background:        222 18% 8%;            /* ~#11141a charcoal */
+    --foreground:        210 22% 95%;           /* blanc froid */
+    --card:              220 15% 11%;           /* ~#181c23 cartes */
+    --card-foreground:   210 22% 95%;
+    --popover:           220 15% 13%;
+    --popover-foreground:210 22% 95%;
+    --primary:           47 97% 55%;            /* JAUNE VIF */
+    --primary-foreground:222 45% 9%;            /* texte sombre sur le jaune */
+    --secondary:         220 12% 16%;           /* ~#232730 */
+    --secondary-foreground: 210 22% 95%;
+    --muted:             220 12% 16%;
+    --muted-foreground:  217 11% 62%;
+    --accent:            220 12% 16%;
+    --accent-foreground: 210 22% 95%;
+    --destructive:       0 72% 56%;
+    --destructive-foreground: 0 0% 100%;
+    --border:            220 11% 19%;           /* ~#2b303a */
+    --input:             220 11% 19%;
+    --ring:              47 97% 55%;
+
+    --shadow-card:
+      0 0 0 1px rgba(255,255,255,0.05),
+      0 1px 3px rgba(0,0,0,0.3),
+      0 2px 8px rgba(0,0,0,0.2);
+    --shadow-card-hover:
+      0 0 0 1px rgba(255,255,255,0.07),
+      0 4px 16px rgba(0,0,0,0.35),
+      0 8px 32px rgba(0,0,0,0.25);
+    --shadow-nav:
+      0 1px 0 rgba(255,255,255,0.04),
+      0 4px 24px rgba(0,0,0,0.5);
+    --shadow-modal:
+      0 0 0 1px rgba(255,255,255,0.06),
+      0 8px 40px rgba(0,0,0,0.5),
+      0 24px 64px rgba(0,0,0,0.4);
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     COLORIMÉTRIES alternatives — basculées via [data-theme] sur <html>.
+     On ne change QUE l'accent (échelle brand + primary/ring) ; le fond
+     anthracite et les couleurs sémantiques (error/warning/success) restent.
+     Placé après .dark pour gagner en ordre de cascade (même spécificité).
+  ═══════════════════════════════════════════════════════════ */
+
+  /* AGRUME — orange vif, énergique et appétissant (recommandé council) */
+  [data-theme="agrume"] {
+    --brand-50:  34 100% 96%;
+    --brand-100: 34 100% 92%;
+    --brand-200: 32 98% 83%;
+    --brand-300: 31 97% 72%;
+    --brand-400: 27 96% 61%;
+    --brand-500: 25 95% 53%;
+    --brand-600: 21 90% 48%;
+    --brand-700: 17 88% 40%;
+    --brand-800: 15 79% 34%;
+    --brand-900: 15 75% 28%;
+    --brand-950: 13 81% 15%;
+    --primary:            25 95% 53%;
+    --primary-foreground: 222 45% 9%;   /* texte sombre sur l'orange vif (AA) */
+    --ring:               25 95% 53%;
+  }
+
+  /* FRAISE / FRAMBOISE — rose-rouge vif, peps maximal, lié au produit phare */
+  [data-theme="fraise"] {
+    --brand-50:  356 100% 97%;
+    --brand-100: 356 100% 95%;
+    --brand-200: 353 96% 90%;
+    --brand-300: 353 96% 82%;
+    --brand-400: 351 95% 71%;
+    --brand-500: 350 89% 60%;
+    --brand-600: 347 77% 50%;
+    --brand-700: 345 83% 41%;
+    --brand-800: 343 80% 35%;
+    --brand-900: 342 75% 30%;
+    --brand-950: 343 88% 16%;
+    --primary:            350 89% 60%;
+    --primary-foreground: 222 45% 9%;   /* texte sombre sur le rose vif (council) */
+    --ring:               350 89% 60%;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   BASE STYLES
+═══════════════════════════════════════════════════════════ */
+@layer base {
+  *,*::before,*::after { @apply border-border; box-sizing: border-box; }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-size: 14px;
+    line-height: 1.6;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Subtle film-grain overlay (editorial premium feel) ── */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.022;
+    mix-blend-mode: overlay;
+    background-image:
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+  .dark body::before { opacity: 0.045; }
+
+  /* Sélection alignée sur l'identité jaune/or (plus d'indigo) */
+  ::selection {
+    background-color: rgba(212,160,4,0.24);
+  }
+  .dark ::selection {
+    background-color: rgba(250,204,21,0.26);
+  }
+
+  /* ── Ultra-thin scrollbar ─────────────────────────── */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: #d1d5db;
+    border-radius: 99px;
+  }
+  .dark ::-webkit-scrollbar-thumb { background: #374151; }
+  ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+  * { scrollbar-width: thin; scrollbar-color: #d1d5db transparent; }
+  .dark * { scrollbar-color: #374151 transparent; }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DESIGN SYSTEM — Utility classes
+═══════════════════════════════════════════════════════════ */
+@layer utilities {
+
+  /* ── Shadows via CSS vars (auto dark/light) ───────── */
+  .shadow-card       { box-shadow: var(--shadow-card); }
+  .shadow-card-hover { box-shadow: var(--shadow-card-hover); }
+  .shadow-nav        { box-shadow: var(--shadow-nav); }
+  .shadow-modal      { box-shadow: var(--shadow-modal); }
+
+  /* ── Surface card — auto dark mode ───────────────── */
+  .surface {
+    background-color: hsl(var(--card));
+    border-radius: 1rem;
+    border: 1px solid hsl(var(--border));
+    box-shadow: var(--shadow-card);
+  }
+
+  /* ── Glass effect ─────────────────────────────────── */
+  .glass {
+    background: rgba(255,255,255,0.03);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+  .dark .glass {
+    background: rgba(0,0,0,0.3);
+  }
+
+  /* ── Gradient text — signature or/jaune (remplace l'ancien indigo) ── */
+  .text-gradient-brand {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, #facc15 0%, #a87d03 100%);
+  }
+  .dark .text-gradient-brand {
+    background-image: linear-gradient(135deg, #fde047 0%, #facc15 100%);
+  }
+
+  /* ── Shimmer skeleton ─────────────────────────────── */
+  .skeleton {
+    @apply rounded-lg overflow-hidden;
+    background: linear-gradient(90deg,
+      hsl(var(--muted)) 0%,
+      hsl(var(--border)) 50%,
+      hsl(var(--muted)) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+
+  /* ── Stagger delays ───────────────────────────────── */
+  .delay-75  { animation-delay: 75ms; }
+  .delay-100 { animation-delay: 100ms; }
+  .delay-150 { animation-delay: 150ms; }
+  .delay-200 { animation-delay: 200ms; }
+  .delay-300 { animation-delay: 300ms; }
+  .delay-400 { animation-delay: 400ms; }
+  .delay-500 { animation-delay: 500ms; }
+
+  /* ── Divider ──────────────────────────────────────── */
+  .divider { @apply h-px bg-border w-full; }
+
+  /* ── Table dark mode helpers ──────────────────────── */
+  .dark .table-row-hover:hover {
+    background-color: rgba(255,255,255,0.025);
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     EDITORIAL — display typography & decoratives
+     used to break out of the "AI dashboard template" look
+  ═══════════════════════════════════════════════════════════ */
+
+  /* Display = Inter with tight tracking for big metrics/headlines.
+     Same family as body — readability first. Premium feel comes from spacing. */
+  .font-display {
+    font-family: var(--font-inter), Inter, system-ui, sans-serif;
+    font-feature-settings: "ss01", "cv11", "calt", "kern", "tnum";
+    letter-spacing: -0.035em;
+    line-height: 0.95;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Eyebrow / kicker label */
+  .kicker {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+  }
+
+  /* Hairline rule — 1px dotted-then-solid feel */
+  .hairline {
+    height: 1px;
+    background: linear-gradient(to right,
+      hsl(var(--border)) 0%,
+      hsl(var(--border)) 60%,
+      transparent 100%);
+  }
+
+  /* Tabular numerics opt-in (already on body, but explicit on data cells) */
+  .tnum { font-variant-numeric: tabular-nums; }
+
+  /* Soft-glow accent dot (used in stat lists) */
+  .dot-accent {
+    box-shadow: 0 0 0 3px hsl(var(--background)),
+                0 0 12px currentColor;
+  }
+
+  /* Asymmetric bento panel — subtle inner glow */
+  .panel {
+    background-color: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: 1.25rem;
+    position: relative;
+    isolation: isolate;
+  }
+  .panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      135deg,
+      rgba(255,255,255,0.04) 0%,
+      transparent 45%
+    );
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    pointer-events: none;
+    z-index: -1;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   KEYFRAMES
+═══════════════════════════════════════════════════════════ */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes slide-right {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to   { background-position:  200% 0; }
+}
+@keyframes dot-pulse {
+  0%,100% { opacity:1; transform:scale(1); }
+  50%     { opacity:.5; transform:scale(.85); }
+}
+@keyframes spin-slow {
+  to { transform: rotate(360deg); }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   AMBIANCE DE FOND — "salle de signal"
+   Aurora teintée par l'accent (suit la colorimétrie via --brand-*),
+   grille technique masquée, anneaux radar. Discret derrière les
+   données (cartes opaques) ; visible dans les marges/gouttières.
+═══════════════════════════════════════════════════════════ */
+/* Deux couches d'aurora qui errent à des rythmes différents = mouvement
+   organique (et non un glissement linéaire). */
+.ambient-aurora,
+.ambient-aurora-2 {
+  position: absolute;
+  inset: -30%;
+  will-change: transform;
+  filter: blur(40px) saturate(125%);
+}
+.ambient-aurora {
+  background:
+    radial-gradient(28% 32% at 16% 14%, hsl(var(--brand-500) / 0.24), transparent 68%),
+    radial-gradient(32% 36% at 90% 90%, hsl(var(--brand-400) / 0.20), transparent 70%);
+  animation: ambient-drift-a 17s ease-in-out infinite alternate;
+}
+.ambient-aurora-2 {
+  background:
+    radial-gradient(26% 30% at 84% 8%,  hsl(212 90% 58% / 0.16), transparent 70%),
+    radial-gradient(30% 34% at 8% 90%,  hsl(268 78% 62% / 0.15), transparent 72%),
+    radial-gradient(22% 26% at 58% 50%, hsl(var(--brand-400) / 0.10), transparent 68%);
+  filter: blur(52px) saturate(120%);
+  animation: ambient-drift-b 23s ease-in-out infinite alternate;
+}
+.dark .ambient-aurora {
+  background:
+    radial-gradient(34% 38% at 16% 14%, hsl(var(--brand-500) / 0.28), transparent 70%),
+    radial-gradient(40% 44% at 90% 90%, hsl(var(--brand-400) / 0.22), transparent 72%);
+}
+.dark .ambient-aurora-2 {
+  background:
+    radial-gradient(30% 34% at 84% 8%,  hsl(212 90% 58% / 0.15), transparent 72%),
+    radial-gradient(34% 40% at 8% 90%,  hsl(268 78% 62% / 0.14), transparent 74%),
+    radial-gradient(26% 30% at 58% 50%, hsl(var(--brand-400) / 0.10), transparent 70%);
+}
+.ambient-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(hsl(var(--foreground) / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--foreground) / 0.045) 1px, transparent 1px);
+  background-size: 56px 56px;
+  -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 38%, #000 0%, transparent 82%);
+          mask-image: radial-gradient(ellipse 75% 65% at 50% 38%, #000 0%, transparent 82%);
+}
+.ambient-rings { color: hsl(var(--brand-400)); transform-origin: center; }
+/* Balayage radar très lent (organique, clin d'œil au métier "signal") */
+.ambient-rings-spin   { animation: ambient-spin 60s linear infinite; }
+.ambient-rings-spin-r { animation: ambient-spin 85s linear infinite reverse; }
+
+/* Errances organiques : amplitude nettement visible, easings doux, rotation. */
+@keyframes ambient-drift-a {
+  0%   { transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
+  30%  { transform: translate3d(-7%, -5%, 0) scale(1.1)  rotate(-2.4deg); }
+  60%  { transform: translate3d(5%, 4%, 0)   scale(1.06) rotate(1.8deg); }
+  100% { transform: translate3d(-3%, -8%, 0) scale(1.16) rotate(-3deg); }
+}
+@keyframes ambient-drift-b {
+  0%   { transform: translate3d(0, 0, 0) scale(1.05) rotate(0deg); }
+  40%  { transform: translate3d(8%, 5%, 0)   scale(1.2)  rotate(3deg); }
+  70%  { transform: translate3d(-5%, 7%, 0)  scale(1.1)  rotate(-1.8deg); }
+  100% { transform: translate3d(6%, -4%, 0)  scale(1.18) rotate(2.4deg); }
+}
+@keyframes ambient-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient-aurora, .ambient-aurora-2,
+  .ambient-rings-spin, .ambient-rings-spin-r { animation: none; }
+}
+
+/* Réglage televente:animations (page /parametres), posé sur <html> par
+   AmbientMotionGate. "off" coupe le fond d'ambiance ; "on" (data-anim=force)
+   le rallume même si le système demande prefers-reduced-motion. */
+html[data-reduce-anim="1"] .ambient-aurora,
+html[data-reduce-anim="1"] .ambient-aurora-2,
+html[data-reduce-anim="1"] .ambient-rings-spin,
+html[data-reduce-anim="1"] .ambient-rings-spin-r { animation: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-anim="force"] .ambient-aurora { animation: ambient-drift-a 17s ease-in-out infinite alternate; }
+  html[data-anim="force"] .ambient-aurora-2 { animation: ambient-drift-b 23s ease-in-out infinite alternate; }
+  html[data-anim="force"] .ambient-rings-spin { animation: ambient-spin 60s linear infinite; }
+  html[data-anim="force"] .ambient-rings-spin-r { animation: ambient-spin 85s linear infinite reverse; }
+}
+
+/* Console-specific — soft swap between active clients */
+@keyframes client-swap {
+  from { opacity: 0; transform: translateY(6px); filter: blur(4px); }
+  to   { opacity: 1; transform: translateY(0);   filter: blur(0); }
+}
+.animate-client-swap { animation: client-swap 0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Success burst — subtle scale+fade for action confirmations */
+@keyframes success-burst {
+  0%   { transform: scale(0.92); opacity: 0; }
+  60%  { transform: scale(1.04); opacity: 1; }
+  100% { transform: scale(1);    opacity: 1; }
+}
+.animate-success-burst { animation: success-burst 0.4s cubic-bezier(0.22, 1.4, 0.4, 1) both; }
+
+/* Soft pulse for the live indicator on the logo */
+@keyframes soft-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(0.92); }
+}
+.animate-soft-pulse { animation: soft-pulse 2.4s ease-in-out infinite; }
+
+/* ═══════════════════════════════════════════════════════════
+   COMPONENT OVERRIDES
+═══════════════════════════════════════════════════════════ */
+/* Sonner toast — premium */
+[data-sonner-toast] {
+  font-size: 13.5px !important;
+  border-radius: 12px !important;
+}
+.dark [data-sonner-toast] {
+  background: #1a1d27 !important;
+  border-color: rgba(255,255,255,0.08) !important;
+  color: #f1f5f9 !important;
+}
+
+/* Radix Select — dark */
+.dark [data-radix-select-viewport] {
+  background: hsl(var(--popover));
+  border-color: hsl(var(--border));
+}
+
+/* ── Input focus ring — brand color ───────────────── */
+input:focus-visible,
+textarea:focus-visible,
+[data-state="open"] {
+  outline: none;
+}

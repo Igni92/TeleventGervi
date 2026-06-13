@@ -1,0 +1,48 @@
+# Dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# Testing
+/coverage
+
+# Next.js
+/.next/
+/out/
+
+# Production
+/build
+
+# Misc
+.DS_Store
+*.pem
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local env files
+.env*.local
+.env
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Prisma
+prisma/migrations/dev.db
+prisma/dev.db
+
+# Exports de données SAP — volumineux (>100 Mo, rejetés par GitHub) ET sensibles
+# (factures/paiements clients). On ne versionne PAS la donnée, seulement le code.
+*.zip
+/sap_scrape/
+backfill-2024.log
+
+# Tooling local
+.claude/settings.local.json

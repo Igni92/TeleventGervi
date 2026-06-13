@@ -1,0 +1,826 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id            String     @id @default(cuid())
+  name          String?
+  email         String?    @unique
+  emailVerified DateTime?
+  image         String?
+  // % du stock total attribué à ce commercial (aide à la répartition). Défaut 100.
+  stockSharePct Float?     @default(100)
+  accounts      Account[]
+  sessions      Session[]
+  presences     Presence[]
+}
+
+// Présence quotidienne d'un commercial — pilote la distribution des clients.
+// Absent → ses clients sont signalés "à couvrir" pour les présents.
+model Presence {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime // début du jour (00:00)
+  present   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([date])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Client {
+  id              String               @id @default(cuid())
+  code            String               @unique
+  nom             String
+  type            String? // EXPORT | GMS | CHR (optionnel)
+  commercial      String? // Nom du commercial en charge
+  tel1            String?
+  tel2            String?
+  tel3            String?
+  // Email principal — **déprécié** (B7) : l'email vit maintenant sur Contact
+  // (une fiche par interlocuteur). Conservé pour compat (script de migration
+  // legacy a migré ici depuis les notes ; le retrait définitif du champ
+  // attend une migration de données vers Contact.email + cleanup des lectures).
+  email           String?
+  // Email de la comptabilité (onglet Compta de la fiche client). Distinct de
+  // l'email commercial — sert aux factures/relances, pas à la télévente.
+  emailCompta     String?
+  // Email du quai/réception marchandise — pour confirmations de livraison et
+  // litiges réception. Souvent distinct de la compta (ex. "reception.X@…").
+  emailReception  String?
+  // Adresse de facturation (onglet Compta) — libre, multi-ligne accepté.
+  // Distincte de l'adresse de livraison (côté SAP/ClientDeliveryMode).
+  adresseFacturation String?
+  // Cache local du BusinessPartner.GroupCode SAP (lecture seule côté app).
+  // Pilote le coefficient de prix conseillé (cf. lib/gerviPricing.ts) —
+  // modification réservée à SAP B1 pour éviter de casser la marge.
+  sapGroupCode    Int?
+  sapGroupName    String? // libellé résolu, idem cache
+  // Note libre — résiduel après split email/groupe/historique. Pour le bruit
+  // (anecdotes, contexte non catégorisable).
+  notes           String?
+  joursAppel      String?
+  // Activation TeleVente : un client n'apparaît dans la liste d'un commercial
+  // que s'il est activé. Auto-activé à l'import SAP si U_Actif='O' ; sinon
+  // activation manuelle (et tout nouveau client arrive inactif).
+  activeTelevente Boolean              @default(false)
+  // VENDEUR (≠ commercial assigné) : celui qui réalise concrètement les ventes,
+  // déduit du dernier BL/commande SAP. Non commissionné — sert au routage du
+  // travail. Réassignable à la main. Le `commercial` (account manager) reste la
+  // source du futur calcul de commission.
+  vendeur         String?
+  rappels         Rappel[]
+  appels          AppelLog[]
+  tempAssignments TempAssignment[]
+  deliveryModes   ClientDeliveryMode[]
+  contacts        Contact[]
+  incidents       Incident[]
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+}
+
+// Incident rattaché à un BL (commande SAP) d'un client.
+// type = libellé réutilisable (TypeOption kind=incident).
+model Incident {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  docEntry  Int? // SAP Order DocEntry du BL concerné
+  docNum    Int? // n° de BL (affichage)
+  type      String? // libellé incident (TypeOption kind=incident)
+  note      String?
+  createdBy String?
+  resolved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([clientId])
+  @@index([docEntry])
+}
+
+// Incident de RÉCEPTION marchandise (côté fournisseur — ≠ Incident client).
+// Rattaché à un bon de réception SAP (PurchaseDeliveryNote) créé via /entrees.
+// ⚠️ Table créée par SQL direct + accès raw SQL dans l'API (même pattern que
+//    activeTelevente : prisma generate bloqué EPERM quand le dev server tourne).
+model ReceptionIncident {
+  id        String   @id @default(cuid())
+  docEntry  Int? // SAP PurchaseDeliveryNote DocEntry
+  docNum    Int? // n° du BR (affichage)
+  lot       String? // lot EM<DocNum> concerné
+  cardCode  String? // fournisseur SAP
+  cardName  String?
+  itemCode  String? // article concerné (optionnel)
+  type      String? // Qualité / Manquant / Casse / Température / Prix / Autre
+  note      String?
+  createdBy String?
+  resolved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([docEntry])
+  @@index([resolved])
+}
+
+// Interlocuteurs d'un client (plusieurs par client : chef pâtissier, apprenti…).
+model Contact {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name      String
+  role      String? // type/poste (libellé issu de TypeOption kind=contact)
+  phone     String?
+  email     String?
+  note      String?
+  position  Int      @default(0) // ordre d'affichage (contact 1, 2, 3…)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+}
+
+// Liste de libellés réutilisables et incrémentale (types de contact, types d'incident…).
+// kind = "contact" | "incident". Créer/réutiliser/supprimer un libellé.
+model TypeOption {
+  id        String   @id @default(cuid())
+  kind      String // "contact" | "incident"
+  label     String
+  createdAt DateTime @default(now())
+
+  @@unique([kind, label])
+  @@index([kind])
+}
+
+// Transporteur (C11). Deux familles distinctes sur la même UI :
+//   - "cardcode" : change le CardCode SAP utilisé sur le BL (legacy
+//      SCACHAP/Direct → modèle existant ClientDeliveryMode reste autoritaire).
+//   - "field"    : MÊME CardCode mais on positionne un champ transport SAP
+//      sur le BL (ex. Rungis enlèvement, Antoine livreur…).
+//
+// ⚠️ Le NOM exact du champ SAP qui porte le transporteur reste à confirmer
+//    avec l'utilisateur (`TransportationCode` ? un `U_GER_*` ?). Le modèle
+//    stocke `sapField` + `sapValue` pour rester agnostique le temps de
+//    l'enquête côté SAP B1. La route `/api/sap/orders` ne consomme PAS
+//    encore ce champ — branchement final attend la confirmation.
+model Carrier {
+  id        String   @id @default(cuid())
+  name      String   @unique // "Rungis enlèvement", "Antoine", "SCACHAP", "Direct"…
+  // Famille du mapping SAP :
+  //   - "cardcode" → utiliser ClientDeliveryMode (transporteur = CardCode)
+  //   - "field"    → SET un champ SAP sur le BL (sapField + sapValue)
+  kind      String   // "cardcode" | "field"
+  // Pour kind="field" : nom du champ SAP côté Service Layer (ex. "TransportationCode")
+  sapField  String?
+  // Valeur à pousser dans ce champ (ex. "1" pour Rungis enlèvement)
+  sapValue  String?
+  active    Boolean  @default(true)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active])
+}
+
+// Modes de livraison disponibles pour un client.
+// Permet de gérer plusieurs codes SAP pour un même client TeleVent
+// (ex: LPOI livré direct OU via SCACHAP qui utilise le code "LPOI." côté SAP).
+model ClientDeliveryMode {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name        String // ex: "Direct", "SCACHAP", "Drive"
+  sapCardCode String // Code utilisé pour CardCode dans le BL SAP
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([clientId])
+}
+
+// Couverture temporaire : un utilisateur prend en charge un client d'un autre commercial
+// pour la journée (ex. : commercial absent). Reset chaque jour — la cible "date" est
+// le début du jour à 00:00 UTC, et unique par (client, date).
+model TempAssignment {
+  id             String   @id @default(cuid())
+  clientId       String
+  client         Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  userId         String // ID NextAuth de l'utilisateur qui prend en charge
+  fromCommercial String? // Nom du commercial d'origine (snapshot au moment du claim)
+  date           DateTime // Début du jour (00:00) auquel la couverture s'applique
+  createdAt      DateTime @default(now())
+
+  @@unique([clientId, date])
+  @@index([userId, date])
+}
+
+// ════════════════════════════════════════════════════════════════
+//   SAP B1 — Cache local des produits et stocks
+// ════════════════════════════════════════════════════════════════
+
+// Produits synchronisés depuis SAP B1 (table /Items).
+// Toutes les unités/groupes/quantités globales en cache pour éviter de hammer SAP.
+model Product {
+  id                  String         @id @default(cuid())
+  itemCode            String         @unique // SAP ItemCode (ex. "MVM12L")
+  itemName            String // SAP ItemName
+  itemGroup           Int? // SAP ItemsGroupCode
+  groupName           String? // Nom du groupe résolu
+  salesUnit           String? // ex. "pie" (pièce) — unité de vente unitaire
+  salesPackagingUnit  String? // ex. "CAT I" — emballage de vente (barquette, etc.)
+  salesQtyPerPackUnit Float? // ex. 12 — pièces par emballage (SalPackUn)
+  salesItemsPerUnit   Float? // SAP Items.SalesItemsPerUnit (NumInSale) — unités par unité de vente (ex. fraise 4×1kg)
+  salesUnitWeight     Float? // poids 1 pie en kg (ex. 0.125)
+  inventoryUnit       String? // unité gérée en stock (ex. "pie" ou "Colis")
+  purchaseUnit        String? // unité d'achat
+  // === Champs custom Gervifrais (U_* dans SAP) — copiés sur chaque ligne d'order ===
+  uPays               String? // SAP Items.U_Pays  → ligne.U_GER_Pays
+  uMarque             String? // SAP Items.U_GER_Marque
+  uCondi              String? // SAP Items.U_GER_Det_Condt (ex. "12x125g")
+  uUvc                String? // SAP Items.U_GER_UVC (ex. "125g")
+  uNbBarqColis        Float? // SAP Items.U_GER_NB_BARQ_COLIS
+  manageBatch         Boolean        @default(false) // tYES/tNO de SAP
+  isPackaging         Boolean        @default(false) // True si groupe 100-130/114
+  // === Kit / Fabrication (DECO = mélange de fruits) ===
+  // Si true → ce produit est fabriqué à partir d'autres (cf. ProductBom).
+  // L'assemblage local appelle InventoryGenEntries (+parent) + InventoryGenExits
+  // (-composants) côté SAP. Marge calculée sur Σ(qtyPerParent × purchasePrice
+  // du composant). Voir [[kit-deco-fabrication]] memory.
+  isKit               Boolean        @default(false)
+  totalStock          Float          @default(0) // SAP QuantityOnStock (somme tous entrepôts)
+  syncedAt            DateTime       @default(now())
+  stocks              ProductStock[]
+  batches             ProductBatch[]
+  bomAsParent         ProductBom[]   @relation("BomParent")
+  bomAsComponent      ProductBom[]   @relation("BomComponent")
+  recipe              ProductionRecipe? @relation("RecipeParent")
+
+  @@index([itemGroup])
+  @@index([totalStock])
+  @@index([isPackaging])
+  @@index([isKit])
+}
+
+// Nomenclature : recette d'un produit composite (= kit DECO).
+// Ex : 1 DECO → 6 GROSEILLE + 5 MURE + 5 MYRTILLE (en unité d'inventaire pie).
+// qtyPerParent est exprimé dans l'unité de stock du composant (pie, kg, …).
+model ProductBom {
+  id                String   @id @default(cuid())
+  parentItemCode    String // ex. "DECO12"
+  parent            Product  @relation("BomParent", fields: [parentItemCode], references: [itemCode], onDelete: Cascade)
+  componentItemCode String // ex. "GROSEILLE125"
+  component         Product  @relation("BomComponent", fields: [componentItemCode], references: [itemCode], onDelete: Cascade)
+  qtyPerParent      Float // pie de composant par pie de parent
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([parentItemCode, componentItemCode])
+  @@index([parentItemCode])
+  @@index([componentItemCode])
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ORDRE DE PRODUCTION — recette d'un produit fabriqué (remplace le BoM
+// historique pour /fabrication). Tout est exprimé EN COLIS (la pièce ne
+// sert qu'au calcul de marge interne, jamais affichée).
+//
+// Particularités :
+//   • Composant = FAMILLE (ex. "groseille"), pas un code article précis.
+//     À la production, on résout la famille vers le(s) lot(s) réellement
+//     en stock, consommés en FIFO (plus vieux lot d'abord).
+//   • Lignes de coût (main d'œuvre, emballage, carton…) saisies sur la
+//     recette, PAR COLIS de produit fini — elles ne partent PAS dans
+//     l'ordre SAP, elles servent uniquement au calcul de marge.
+// ═══════════════════════════════════════════════════════════════════
+model ProductionRecipe {
+  id             String                      @id @default(cuid())
+  parentItemCode String                      @unique // produit fini fabriqué
+  parent         Product                     @relation("RecipeParent", fields: [parentItemCode], references: [itemCode], onDelete: Cascade)
+  // Ratio colis : nb de colis parent produits par « tour » de recette
+  // (2 DECO16 = 1 colis myrtille + 1 colis groseille + 2 colis mûre → parentQty=2).
+  parentQty      Float                       @default(1)
+  components     ProductionRecipeComponent[]
+  costs          ProductionRecipeCost[]
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+}
+
+// Une ligne de composant de la recette = une famille + une quantité (colis
+// de la famille par colis de parent fabriqué).
+model ProductionRecipeComponent {
+  id          String           @id @default(cuid())
+  recipeId    String
+  recipe      ProductionRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  familyKey   String // ex. "groseille" (cf. lib/familles.familyOf)
+  familyLabel String // ex. "Groseille"
+  qtyColis    Float // colis de cette famille par colis de parent
+  position    Int              @default(0)
+
+  @@unique([recipeId, familyKey])
+  @@index([recipeId])
+}
+
+// Une ligne de coût (marge uniquement, jamais poussée dans SAP), par colis
+// de produit fini.
+model ProductionRecipeCost {
+  id           String           @id @default(cuid())
+  recipeId     String
+  recipe       ProductionRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  label        String // ex. "Main d'œuvre", "Emballage", "Carton"
+  costPerColis Float // € par colis de produit fini
+  position     Int              @default(0)
+
+  @@index([recipeId])
+}
+
+// ── Run de fabrication — traçabilité des lots affectés à chaque OP ──
+// Tables créées en raw SQL (scripts/ddl-fabrication-v2.mjs) — accès $queryRaw
+// tant que le client Prisma n'est pas régénéré. Le run est enregistré AVANT
+// l'appel SAP (status pending), puis complété des DocEntry (done | error).
+model FabricationRun {
+  id             String   @id @default(cuid())
+  opCode         String? // code OP posé en U_NoLot sur l'entrée parent
+  parentItemCode String
+  parentItemName String?
+  parentColis    Float
+  warehouseCode  String   @default("01")
+  recipeSnapshot Json // recette figée au moment du run
+  totalCost      Float?
+  parentValue    Float?
+  status         String   @default("pending") // pending | done | error
+  error          String?
+  sapExitEntry   Int? // DocEntry InventoryGenExits
+  sapExitDocNum  Int?
+  sapEntryEntry  Int? // DocEntry InventoryGenEntries
+  sapEntryDocNum Int?
+  createdAt      DateTime @default(now())
+  createdBy      String?
+
+  lines FabricationRunLine[]
+
+  @@index([createdAt])
+}
+
+model FabricationRunLine {
+  id            String         @id @default(cuid())
+  runId         String
+  run           FabricationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  family        String // clé familyOf (ex. "groseille")
+  familyLabel   String?
+  itemCode      String // article concret choisi au run (ex. GRO12B)
+  itemName      String?
+  batchNumber   String // "EM<DocNum>" ou "EM_PENDING"
+  colisQty      Float
+  pieceQty      Float          @default(0)
+  purchasePrice Float? // € par COLIS (marge)
+  warehouseCode String?
+
+  @@index([runId])
+  @@index([batchNumber])
+}
+
+// Réglages applicatifs clé/valeur (singleton par clé). Sert notamment à
+// l'environnement SAP actif (prod/test) — basculable à chaud via un bouton,
+// persisté ici pour rester cohérent entre instances/redémarrages.
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// Stock par entrepôt. On ne synchronise que les entrepôts utiles pour Gervifrais :
+// 000 (A/C et A/D), 01 (Stock physique), R1 (J+1 = livraison demain).
+model ProductStock {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse String // Code entrepôt : "000" | "01" | "R1"
+  inStock   Float    @default(0) // SAP InStock
+  committed Float    @default(0) // SAP Committed (réservé)
+  ordered   Float    @default(0) // SAP Ordered (en commande fournisseur)
+  available Float    @default(0) // calc : inStock - committed
+  syncedAt  DateTime @default(now())
+
+  @@unique([productId, warehouse])
+  @@index([warehouse])
+}
+
+// Lots de produits (batches) synchronisés depuis SAP B1 BatchNumberDetails.
+// 1 ligne par lot. Prix d'achat enrichi via PurchaseDeliveryNotes quand dispo.
+model ProductBatch {
+  id              String    @id @default(cuid())
+  productId       String
+  product         Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batchNumber     String // ex. "EM14878"
+  sapSystemNumber Int? // SystemNumber côté SAP — référence unique
+  sapDocEntry     Int? // DocEntry source (goods receipt)
+  warehouseCode   String? // entrepôt où se trouve le lot
+  quantity        Float     @default(0) // qté restante du lot
+  status          String? // bdsStatus_Released | _Locked | ...
+  admissionDate   DateTime? // date d'entrée en système
+  manufactureDate DateTime? // date de fabrication
+  expirationDate  DateTime? // DLC
+  // Prix d'achat : enrichi via PurchaseDeliveryNotes lookup (peut être null)
+  purchasePrice   Float?
+  currency        String? // ex. "EUR"
+  supplierName    String? // nom fournisseur (du GR)
+  sourceDocNum    String? // n° BR pour traçabilité
+  syncedAt        DateTime  @default(now())
+
+  @@unique([productId, batchNumber, warehouseCode])
+  @@index([productId])
+  @@index([expirationDate])
+}
+
+// Historique des synchronisations (SAP → DB) — pour visibilité + diagnostic.
+model SyncLog {
+  id           String    @id @default(cuid())
+  source       String // "sap" | "orderlion" | "csv"
+  type         String // "products" | "customers" | "orders"
+  status       String // "running" | "success" | "error"
+  startedAt    DateTime  @default(now())
+  finishedAt   DateTime?
+  itemsTotal   Int       @default(0) // nb d'items lus côté SAP
+  itemsSynced  Int       @default(0) // nb d'upserts réussis
+  itemsSkipped Int       @default(0) // nb filtrés (emballages, etc.)
+  errors       String? // JSON {message, sample[]}
+  durationMs   Int?
+  triggeredBy  String? // userId qui a lancé le sync
+
+  @@index([source, type, startedAt])
+}
+
+// Curseur singleton pour la sync delta SAP → ProductStock (mise à jour quasi temps réel).
+// Une seule ligne (id=1). On stocke les derniers DocEntry vus côté SAP pour Orders et
+// PurchaseDeliveryNotes, plus un lastTickAt qui sert de throttle serveur (évite que
+// plusieurs consoles tapent SAP en même temps).
+model StockSyncCursor {
+  id                Int      @id @default(1)
+  lastOrderDocEntry Int      @default(0)
+  lastPdnDocEntry   Int      @default(0)
+  lastTickAt        DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model Rappel {
+  id         String   @id @default(cuid())
+  clientId   String
+  client     Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  dateRappel DateTime
+  note       String?
+  msEventId  String?
+  statut     String   @default("PLANIFIE") // PLANIFIE | FAIT | ANNULE
+  createdAt  DateTime @default(now())
+}
+
+// Historique des appels téléphoniques
+model AppelLog {
+  id           String    @id @default(cuid())
+  clientId     String
+  client       Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  type         String // COMMANDE | DEMAIN
+  note         String?
+  heureAppel   DateTime  @default(now())
+  // Pré-commande : date de livraison/traitement programmée.
+  // Quand renseigné, le client est "snoozé" — il n'apparaît plus dans la queue
+  // tant que cette date n'est pas dépassée (pas besoin de le rappeler avant).
+  scheduledFor DateTime?
+  createdAt    DateTime  @default(now())
+}
+
+// ════════════════════════════════════════════════════════════════
+//   SAP B1 — Mirror local pour Dashboard puzzle (Phase 2)
+//   Objectif : pré-agrégat local pour CA / marge / tops sans hammer SAP.
+//   Source SAP : /Invoices, /Orders, /PurchaseDeliveryNotes, /BusinessPartners.
+//   Stratégie : backfill 1 an + cron incrémental UpdateDate gt cursor.
+// ════════════════════════════════════════════════════════════════
+
+// BusinessPartner SAP — clients (C) et fournisseurs (V).
+model SapBusinessPartner {
+  cardCode   String    @id // SAP CardCode
+  cardName   String
+  cardType   String // "C" (customer) | "V" (vendor)
+  groupCode  Int?
+  groupName  String?
+  slpName    String? // commercial SAP (résolu via SalesPersonCode)
+  email      String?
+  phone      String?
+  active     Boolean   @default(true)
+  updateDate DateTime? // SAP UpdateDate (ISO)
+  syncedAt   DateTime  @default(now())
+
+  invoices SapInvoice[]
+  orders   SapOrder[]
+  pdns     SapPurchaseDeliveryNote[]
+  creditNotes SapCreditNote[]
+  purchaseReturns SapPurchaseReturn[]
+
+  @@index([cardType])
+  @@index([slpName])
+  @@index([updateDate])
+}
+
+// Facture client (vente confirmée — source CA dans le dashboard).
+model SapInvoice {
+  docEntry    Int       @id // SAP DocEntry
+  docNum      Int?
+  docDate     DateTime // SAP DocDate (jour de facturation)
+  cardCode    String
+  cardName    String? // snapshot (utile si BP supprimé)
+  slpName     String? // commercial snapshot
+  docTotal    Float     @default(0) // total HT (DocTotal - VatSum)
+  vatSum      Float     @default(0)
+  grossProfit Float? // marge SAP B1 (calculée à partir des LineCost)
+  cancelled   Boolean   @default(false)
+  updateDate  DateTime?
+  syncedAt    DateTime  @default(now())
+
+  bp    SapBusinessPartner @relation(fields: [cardCode], references: [cardCode], onDelete: Cascade)
+  lines SapInvoiceLine[]
+
+  @@index([docDate])
+  @@index([cardCode])
+  @@index([slpName])
+  @@index([updateDate])
+}
+
+model SapInvoiceLine {
+  id              Int     @id @default(autoincrement())
+  docEntry        Int
+  lineNum         Int
+  // Nullable : lignes de prestation/location/charges/refacturation n'ont pas
+  // d'Item SAP. itemDescription porte alors le libellé (ex: "Prestation",
+  // "Location local"). On garde la ligne pour cohérence DocTotal vs Σ(lines).
+  itemCode        String?
+  itemDescription String?
+  quantity        Float   @default(0)
+  lineTotal       Float   @default(0) // total HT ligne
+  lineCost        Float? // prix de revient SAP (unitaire)
+  grossProfit     Float? // marge SAP ligne
+  warehouseCode   String?
+  // Flag pour distinguer une ligne "vraie vente produit" d'une ligne de
+  // refacturation (service/location/déchet). Permet de filtrer les rapports
+  // marge sur le pur négoce. true = ligne sans itemCode (= pas un produit SAP).
+  isService       Boolean @default(false)
+
+  invoice SapInvoice @relation(fields: [docEntry], references: [docEntry], onDelete: Cascade)
+
+  @@unique([docEntry, lineNum])
+  @@index([itemCode])
+  @@index([isService])
+}
+
+// Commande client (Orders) — vue commerciale (pas encore facturé).
+model SapOrder {
+  docEntry    Int       @id
+  docNum      Int?
+  docDate     DateTime
+  cardCode    String
+  cardName    String?
+  slpName     String?
+  docTotal    Float     @default(0)
+  vatSum      Float     @default(0)
+  grossProfit Float?
+  cancelled   Boolean   @default(false)
+  updateDate  DateTime?
+  syncedAt    DateTime  @default(now())
+
+  bp    SapBusinessPartner @relation(fields: [cardCode], references: [cardCode], onDelete: Cascade)
+  lines SapOrderLine[]
+
+  @@index([docDate])
+  @@index([cardCode])
+  @@index([slpName])
+  @@index([updateDate])
+}
+
+model SapOrderLine {
+  id              Int     @id @default(autoincrement())
+  docEntry        Int
+  lineNum         Int
+  itemCode        String? // nullable — lignes de service (cf. SapInvoiceLine)
+  itemDescription String?
+  quantity        Float   @default(0)
+  lineTotal       Float   @default(0)
+  lineCost        Float?
+  grossProfit     Float?
+  warehouseCode   String?
+  isService       Boolean @default(false)
+
+  order SapOrder @relation(fields: [docEntry], references: [docEntry], onDelete: Cascade)
+
+  @@unique([docEntry, lineNum])
+  @@index([itemCode])
+  @@index([isService])
+}
+
+// Bon de livraison fournisseur — alimente Top fournisseurs (valeur entrées).
+model SapPurchaseDeliveryNote {
+  docEntry   Int       @id
+  docNum     Int?
+  docDate    DateTime
+  cardCode   String // CardCode fournisseur
+  cardName   String?
+  docTotal   Float     @default(0)
+  cancelled  Boolean   @default(false)
+  updateDate DateTime?
+  syncedAt   DateTime  @default(now())
+
+  bp    SapBusinessPartner @relation(fields: [cardCode], references: [cardCode], onDelete: Cascade)
+  lines SapPdnLine[]
+
+  @@index([docDate])
+  @@index([cardCode])
+  @@index([updateDate])
+}
+
+model SapPdnLine {
+  id              Int     @id @default(autoincrement())
+  docEntry        Int
+  lineNum         Int
+  itemCode        String? // nullable pour cohérence avec les autres lignes
+  itemDescription String?
+  quantity        Float   @default(0)
+  lineTotal       Float   @default(0)
+  warehouseCode   String?
+  isService       Boolean @default(false)
+
+  pdn SapPurchaseDeliveryNote @relation(fields: [docEntry], references: [docEntry], onDelete: Cascade)
+
+  @@unique([docEntry, lineNum])
+  @@index([itemCode])
+  @@index([isService])
+}
+
+// Avoir client (CreditNote SAP) — annulation/correction d'une Invoice.
+// docTotal stocké en POSITIF (= montant de l'avoir). Pour calculer le
+// CA NET, l'agrégateur fait : Σ SapInvoice.docTotal − Σ SapCreditNote.docTotal.
+model SapCreditNote {
+  docEntry    Int       @id
+  docNum      Int?
+  docDate     DateTime
+  cardCode    String
+  cardName    String?
+  slpName     String?
+  docTotal    Float     @default(0) // total HT de l'avoir (positif)
+  vatSum      Float     @default(0)
+  grossProfit Float? // perte de marge associée (positif aussi)
+  // DocEntry de l'Invoice source si traçable (SAP BaseEntry sur la 1ère ligne).
+  // Permet d'imputer l'avoir à la facture d'origine côté analytique.
+  baseInvoiceEntry Int?
+  cancelled   Boolean   @default(false)
+  updateDate  DateTime?
+  syncedAt    DateTime  @default(now())
+
+  bp    SapBusinessPartner @relation(fields: [cardCode], references: [cardCode], onDelete: Cascade)
+  lines SapCreditNoteLine[]
+
+  @@index([docDate])
+  @@index([cardCode])
+  @@index([slpName])
+  @@index([updateDate])
+}
+
+model SapCreditNoteLine {
+  id              Int     @id @default(autoincrement())
+  docEntry        Int
+  lineNum         Int
+  itemCode        String?
+  itemDescription String?
+  quantity        Float   @default(0)
+  lineTotal       Float   @default(0) // positif = montant retiré du CA
+  lineCost        Float?
+  grossProfit     Float?
+  warehouseCode   String?
+  isService       Boolean @default(false)
+
+  creditNote SapCreditNote @relation(fields: [docEntry], references: [docEntry], onDelete: Cascade)
+
+  @@unique([docEntry, lineNum])
+  @@index([itemCode])
+}
+
+// Retour fournisseur (PurchaseReturn SAP) — annulation/retour d'une PDN.
+// docTotal stocké en POSITIF. Achats NET = Σ PDN − Σ Returns.
+model SapPurchaseReturn {
+  docEntry   Int       @id
+  docNum     Int?
+  docDate    DateTime
+  cardCode   String
+  cardName   String?
+  docTotal   Float     @default(0)
+  basePdnEntry Int? // DocEntry du PDN source si traçable
+  cancelled  Boolean   @default(false)
+  updateDate DateTime?
+  syncedAt   DateTime  @default(now())
+
+  bp    SapBusinessPartner @relation(fields: [cardCode], references: [cardCode], onDelete: Cascade)
+  lines SapPurchaseReturnLine[]
+
+  @@index([docDate])
+  @@index([cardCode])
+  @@index([updateDate])
+}
+
+model SapPurchaseReturnLine {
+  id              Int     @id @default(autoincrement())
+  docEntry        Int
+  lineNum         Int
+  itemCode        String?
+  itemDescription String?
+  quantity        Float   @default(0)
+  lineTotal       Float   @default(0) // positif = montant rendu au fournisseur
+  warehouseCode   String?
+  isService       Boolean @default(false)
+
+  purchaseReturn SapPurchaseReturn @relation(fields: [docEntry], references: [docEntry], onDelete: Cascade)
+
+  @@unique([docEntry, lineNum])
+  @@index([itemCode])
+}
+
+// Curseur singleton pour la sync incrémentale du mirror SAP.
+// On stocke un UpdateDate ISO par entité — chaque pull "UpdateDate gt cursor".
+// id=1, pattern identique à StockSyncCursor.
+model SapMirrorCursor {
+  id                Int       @id @default(1)
+  lastInvoiceUpdate DateTime? // SAP UpdateDate max vu sur Invoices
+  lastOrderUpdate   DateTime?
+  lastPdnUpdate     DateTime?
+  lastBpUpdate      DateTime?
+  lastCreditNoteUpdate     DateTime?
+  lastPurchaseReturnUpdate DateTime?
+  lastTickAt        DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+// ── Favoris articles par utilisateur (Console 2 — accès rapide) ──
+// Accès en raw SQL tant que le client Prisma n'est pas régénéré (EPERM dev).
+model FavoriteItem {
+  id        String   @id @default(cuid())
+  userId    String // session.user.id (un set de favoris par commercial)
+  itemCode  String // SAP ItemCode
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, itemCode])
+  @@index([userId])
+}
+
+// ── Promotions saisies dans l'app (Console 2 + notation sur le BL) ──
+// kind: 'PERCENT' (value=10 → -10%) | 'X_PLUS_Y' (buyQty=5, freeQty=1 → 5+1).
+// Appliquées à la saisie (DiscountPercent SAP par ligne) + mention Comments.
+model Promo {
+  id        String    @id @default(cuid())
+  itemCode  String // SAP ItemCode
+  kind      String // 'PERCENT' | 'X_PLUS_Y'
+  value     Float? // % de remise (PERCENT)
+  buyQty    Float? // X achetés (X_PLUS_Y)
+  freeQty   Float? // Y offerts (X_PLUS_Y)
+  label     String? // libellé libre affiché sur le BL
+  startsAt  DateTime?
+  endsAt    DateTime?
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([itemCode])
+  @@index([active])
+}
