@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getAccessScope, pilotageSlpFilter, scopePayload } from "@/lib/permissions";
+import { getAccessScope, resolvePilotageView, scopePayload } from "@/lib/permissions";
 import {
   aggregateKpi, periodBounds, previousYearBounds,
   caLast12Months, caLast12MonthsPrevYear,
@@ -18,11 +18,12 @@ export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  // Droits : un non-admin ne voit QUE ses propres chiffres (filtre slpName).
-  const scope = await getAccessScope(session);
-  const slp = pilotageSlpFilter(scope);
-
+  // Droits : un non-admin ne voit QUE ses propres chiffres ; un admin peut
+  // imiter un commercial via ?as=MM (« voir comme »).
   const url = new URL(req.url);
+  const scope = await getAccessScope(session);
+  const { slp } = resolvePilotageView(scope, url.searchParams.get("as"));
+
   const g = (url.searchParams.get("g") ?? "week") as Granularity;
   if (!["day", "week", "month", "year"].includes(g)) {
     return NextResponse.json({ error: "Granularité invalide" }, { status: 400 });

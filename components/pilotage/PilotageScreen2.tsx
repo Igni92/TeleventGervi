@@ -47,10 +47,10 @@ function topFmt(m: Metric): ((v: number) => string) | undefined {
  *   ├ Top clients année (4×3) │ Top fournisseurs (4×3) │ Top SLP ─┤
  *   └──────────────────────────────────────────────────────────────┘
  */
-export function PilotageScreen2() {
+export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = {}) {
   const [segment, setSegment] = useState<Segment>("ALL");
-  const { data } = useAnnualData(segment);
-  const { data: weekly } = useWeeklyData(segment);
+  const { data } = useAnnualData(segment, viewAs);
+  const { data: weekly } = useWeeklyData(segment, viewAs);
   const [mode, setMode] = useState<Metric>("ca");
   const [view, setView] = useState<Screen2View>("matrix");
   const [drill, setDrill] = useState<{ year: number; month: number } | null>(null);
@@ -202,6 +202,7 @@ export function PilotageScreen2() {
           month={drill.month}
           mode={mode === "marginPct" ? "ca" : mode}
           segment={segment}
+          viewAs={viewAs}
           onClose={() => setDrill(null)}
         />
       )}
@@ -703,18 +704,18 @@ interface MonthDrillPayload {
 }
 
 function MonthDrilldownDrawer({
-  year, month, mode, segment, onClose,
-}: { year: number; month: number; mode: "ca" | "weight"; segment: Segment; onClose: () => void }) {
+  year, month, mode, segment, viewAs = null, onClose,
+}: { year: number; month: number; mode: "ca" | "weight"; segment: Segment; viewAs?: string | null; onClose: () => void }) {
   const [data, setData] = useState<MonthDrillPayload | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/pilotage/annual/month?year=${year}&month=${month}&segment=${segment}`, { cache: "no-store" })
+    fetch(`/api/pilotage/annual/month?year=${year}&month=${month}&segment=${segment}${viewAs ? `&as=${encodeURIComponent(viewAs)}` : ""}`, { cache: "no-store" })
       .then((r) => r.ok ? r.json() : null)
       .then((j) => setData(j))
       .finally(() => setLoading(false));
-  }, [year, month, segment]);
+  }, [year, month, segment, viewAs]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };

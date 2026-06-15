@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getAccessScope, pilotageSlpFilter } from "@/lib/permissions";
+import { getAccessScope, resolvePilotageView } from "@/lib/permissions";
 import { weeklyOrderSeries } from "@/lib/pilotage";
 import { isoWeek } from "@/lib/iso-week";
 
@@ -11,13 +11,13 @@ import { isoWeek } from "@/lib/iso-week";
  * (1er janvier) à aujourd'hui. Alimente les courbes/sparklines de l'Écran 1
  * commercial (≠ /api/pilotage/weekly qui est le CA facturé comptable).
  */
-export async function GET() {
+export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  // Droits : série volume BL scopée au slpName du non-admin.
+  // Droits : série volume BL scopée au slpName (non-admin ou « voir comme »).
   const scope = await getAccessScope(session);
-  const slp = pilotageSlpFilter(scope);
+  const { slp } = resolvePilotageView(scope, new URL(req.url).searchParams.get("as"));
 
   const now = new Date();
   const from = new Date(now.getFullYear() - 1, 0, 1);

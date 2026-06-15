@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, TrendingUp, FileText, ArrowLeft } from "lucide-react";
+import { ChevronLeft, ChevronRight, TrendingUp, FileText, ArrowLeft, Eye, X } from "lucide-react";
 import { PilotageScreen1 } from "./PilotageScreen1";
 import { PilotageScreen2 } from "./PilotageScreen2";
 
@@ -28,7 +28,7 @@ const SLIDES = [
  * dual-écran physique — le `sisterHref` interne du Header continue de
  * l'ouvrir dans un nouvel onglet).
  */
-export function PilotageSlider() {
+export function PilotageSlider({ viewAs = null }: { viewAs?: string | null } = {}) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [slide, setSlide] = useState<SlideIndex>(0);
 
@@ -94,12 +94,28 @@ export function PilotageSlider() {
         style={{ scrollbarWidth: "none" }}
       >
         <section className="w-screen h-screen shrink-0 snap-start" aria-label="Cockpit commercial — BL">
-          <PilotageScreen1 />
+          <PilotageScreen1 viewAs={viewAs} />
         </section>
         <section className="w-screen h-screen shrink-0 snap-start" aria-label="Rapport annuel — comptable">
-          <PilotageScreen2 />
+          <PilotageScreen2 viewAs={viewAs} />
         </section>
       </div>
+
+      {/* Bannière « voir comme » — aperçu admin du cockpit d'un commercial. */}
+      {viewAs && (
+        <div className="absolute top-2.5 left-1/2 -translate-x-1/2 z-40 inline-flex items-center gap-2 h-8 pl-3 pr-1.5 rounded-full bg-violet-600/95 backdrop-blur-md shadow-modal text-[11.5px] font-semibold text-white">
+          <Eye className="h-3.5 w-3.5" />
+          Vue de&nbsp;<span className="font-bold">{viewAs}</span>&nbsp;· lecture seule
+          <Link
+            href="/dashboard"
+            aria-label="Revenir à ma vue"
+            title="Revenir à ma vue"
+            className="ml-1 inline-flex items-center gap-1 h-6 px-2 rounded-full bg-white/15 hover:bg-white/25 transition-colors"
+          >
+            <X className="h-3 w-3" /> Quitter
+          </Link>
+        </div>
+      )}
 
       {/* Chevron gauche — caché sur slide 0 */}
       {slide === 1 && (

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getAccessScope, pilotageSlpFilter } from "@/lib/permissions";
+import { getAccessScope, resolvePilotageView } from "@/lib/permissions";
 import { monthDrilldown } from "@/lib/pilotage";
 import { groupCodesForSegment, parseSegment } from "@/lib/segments";
 
@@ -14,11 +14,11 @@ export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  // Droits : drilldown mensuel scopé au slpName du non-admin.
-  const scope = await getAccessScope(session);
-  const slp = pilotageSlpFilter(scope);
-
+  // Droits : drilldown mensuel scopé au slpName (non-admin ou « voir comme »).
   const url = new URL(req.url);
+  const scope = await getAccessScope(session);
+  const { slp } = resolvePilotageView(scope, url.searchParams.get("as"));
+
   const year = Number.parseInt(url.searchParams.get("year") ?? "");
   const month = Number.parseInt(url.searchParams.get("month") ?? "");
   if (!Number.isFinite(year) || !Number.isFinite(month) || month < 0 || month > 11) {

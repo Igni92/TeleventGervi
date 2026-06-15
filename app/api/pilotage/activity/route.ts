@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getAccessScope, pilotageSlpFilter, scopePayload } from "@/lib/permissions";
+import { getAccessScope, resolvePilotageView, scopePayload } from "@/lib/permissions";
 import {
   aggregateActivity, periodBounds, previousYearBounds,
   topClientsOrder, topSalespersonsOrder, orderWeightMaps,
@@ -26,12 +26,12 @@ export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  // Droits : non-admin scopé sur son slpName ; le classement des commerciaux
-  // (vue transverse) reste réservé aux admins.
-  const scope = await getAccessScope(session);
-  const slp = pilotageSlpFilter(scope);
-
+  // Droits : non-admin (ou admin en « voir comme ») scopé sur le slpName ; le
+  // classement des commerciaux (vue transverse) reste réservé à l'admin global.
   const url = new URL(req.url);
+  const scope = await getAccessScope(session);
+  const { slp, showTransverse } = resolvePilotageView(scope, url.searchParams.get("as"));
+
   const g = (url.searchParams.get("g") ?? "week") as Granularity;
   if (!["day", "week", "month"].includes(g)) {
     return NextResponse.json({ error: "Granularité invalide pour Activité (day|week|month)" }, { status: 400 });
@@ -46,7 +46,7 @@ export async function GET(req: Request) {
     crmActivity(curr.start, curr.end, slp),
     crmActivity(prev.start, prev.end, slp),
     topClientsOrder(curr.start, curr.end, 6, slp),
-    scope.all ? topSalespersonsOrder(curr.start, curr.end, 6) : Promise.resolve([]),
+    showTransverse ? topSalespersonsOrder(curr.start, curr.end, 6) : Promise.resolve([]),
     orderWeightMaps(curr.start, curr.end, slp),
   ]);
 

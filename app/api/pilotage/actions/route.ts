@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getAccessScope, pilotageSlpFilter } from "@/lib/permissions";
+import { getAccessScope, resolvePilotageView } from "@/lib/permissions";
 import { clientsToRelance } from "@/lib/pilotage";
 
 /**
@@ -12,13 +12,13 @@ import { clientsToRelance } from "@/lib/pilotage";
  *
  * Pas de granularité : la relance est toujours sur fenêtre 30j (cf. arbitrage council).
  */
-export async function GET() {
+export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  // Droits : « à relancer » scopé aux clients du non-admin.
+  // Droits : « à relancer » scopé aux clients du commercial (ou « voir comme »).
   const scope = await getAccessScope(session);
-  const slp = pilotageSlpFilter(scope);
+  const { slp } = resolvePilotageView(scope, new URL(req.url).searchParams.get("as"));
 
   const toRelance = await clientsToRelance(5, slp);
   return NextResponse.json({ toRelance });

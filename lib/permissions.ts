@@ -96,6 +96,27 @@ export function pilotageSlpFilter(scope: AccessScope): string | null {
 }
 
 /**
+ * Résout la vue pilotage d'une requête, impersonation « voir comme » comprise.
+ *   - admin + ?as=MM  → aperçu filtré sur MM (lecture seule), vues transverses
+ *                       MASQUÉES (l'admin voit ce que MM verrait).
+ *   - admin seul      → vision globale, vues transverses visibles.
+ *   - commercial      → son propre slpName (le ?as= est IGNORÉ — anti-contournement).
+ *   - non mappé       → sentinel impossible → résultats à zéro.
+ */
+export function resolvePilotageView(scope: AccessScope, asParam: string | null): {
+  slp: string | null;
+  viewingAs: string | null;
+  showTransverse: boolean;
+} {
+  const impersonate = scope.all && asParam?.trim() ? asParam.trim() : null;
+  return {
+    slp: impersonate ?? pilotageSlpFilter(scope),
+    viewingAs: impersonate,
+    showTransverse: scope.all && !impersonate,
+  };
+}
+
+/**
  * Vérifie qu'un client (par `id`) est dans le périmètre d'accès :
  *   - admin                       → toujours `true`
  *   - commercial mappé            → `true` si Client.commercial = slpName OU

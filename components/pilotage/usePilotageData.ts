@@ -53,18 +53,23 @@ export interface ActivityPayload {
   salespersons: { slpName: string; volume: number; weightKg: number; orders: number; activeClients: number }[];
 }
 
-export function useActivityData(g: Granularity) {
+/** Suffixe « voir comme » (impersonation admin) à ajouter aux requêtes pilotage. */
+function asSuffix(as?: string | null): string {
+  return as ? `&as=${encodeURIComponent(as)}` : "";
+}
+
+export function useActivityData(g: Granularity, as?: string | null) {
   const [data, setData] = useState<ActivityPayload | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     setErr(null);
-    fetch(`/api/pilotage/activity?g=${g}`, { cache: "no-store" })
+    fetch(`/api/pilotage/activity?g=${g}${asSuffix(as)}`, { cache: "no-store" })
       .then((r) => r.ok ? r.json() : r.json().then((j) => Promise.reject(j.error ?? r.statusText)))
       .then((j: ActivityPayload) => { if (!cancelled) setData(j); })
       .catch((e) => { if (!cancelled) setErr(String(e)); });
     return () => { cancelled = true; };
-  }, [g]);
+  }, [g, as]);
   return { data, err };
 }
 
@@ -87,16 +92,16 @@ export interface AnnualPayload {
   salespersons: { slpName: string; ca: number; margin: number; activeClients: number; invoices: number; weightKg: number }[];
 }
 
-export function useAnnualData(segment: Segment = "ALL") {
+export function useAnnualData(segment: Segment = "ALL", as?: string | null) {
   const [data, setData] = useState<AnnualPayload | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/pilotage/annual?segment=${segment}`, { cache: "no-store" })
+    fetch(`/api/pilotage/annual?segment=${segment}${asSuffix(as)}`, { cache: "no-store" })
       .then((r) => r.ok ? r.json() : null)
       .then((j: AnnualPayload | null) => { if (!cancelled && j) setData(j); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [segment]);
+  }, [segment, as]);
   return { data };
 }
 
@@ -111,16 +116,16 @@ export interface ActivityWeeklyPayload {
   weeks: { isoYear: number; week: number; volume: number; weightKg: number }[];
 }
 
-export function useActivityWeekly() {
+export function useActivityWeekly(as?: string | null) {
   const [data, setData] = useState<ActivityWeeklyPayload | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/pilotage/activity/weekly`, { cache: "no-store" })
+    fetch(`/api/pilotage/activity/weekly${as ? `?as=${encodeURIComponent(as)}` : ""}`, { cache: "no-store" })
       .then((r) => r.ok ? r.json() : null)
       .then((j: ActivityWeeklyPayload | null) => { if (!cancelled && j) setData(j); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, []);
+  }, [as]);
   return { data };
 }
 
@@ -136,16 +141,16 @@ export interface WeeklyPayload {
   weeks: { isoYear: number; week: number; ca: number; margin: number }[];
 }
 
-export function useWeeklyData(segment: Segment = "ALL") {
+export function useWeeklyData(segment: Segment = "ALL", as?: string | null) {
   const [data, setData] = useState<WeeklyPayload | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/pilotage/weekly?segment=${segment}`, { cache: "no-store" })
+    fetch(`/api/pilotage/weekly?segment=${segment}${asSuffix(as)}`, { cache: "no-store" })
       .then((r) => r.ok ? r.json() : null)
       .then((j: WeeklyPayload | null) => { if (!cancelled && j) setData(j); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [segment]);
+  }, [segment, as]);
   return { data };
 }
 
@@ -160,16 +165,16 @@ export interface ActionsPayload {
   }[];
 }
 
-export function useActionsData() {
+export function useActionsData(as?: string | null) {
   const [data, setData] = useState<ActionsPayload | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/pilotage/actions`, { cache: "no-store" })
+    fetch(`/api/pilotage/actions${as ? `?as=${encodeURIComponent(as)}` : ""}`, { cache: "no-store" })
       .then((r) => r.ok ? r.json() : null)
       .then((j: ActionsPayload | null) => { if (!cancelled && j) setData(j); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, []);
+  }, [as]);
   return { data };
 }
 

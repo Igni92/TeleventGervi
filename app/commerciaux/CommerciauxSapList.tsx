@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Loader2, ShieldAlert, Users, ArrowRight } from "lucide-react";
+import { Loader2, ShieldAlert, Users, ArrowRight, Eye } from "lucide-react";
 import { Sparkline } from "@/components/charts/Sparkline";
 
 /**
@@ -31,12 +31,14 @@ export function CommerciauxSapList() {
   const [data, setData] = useState<CommercialSap[] | null>(null);
   const [restricted, setRestricted] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     fetch("/api/commerciaux/sap", { cache: "no-store" })
       .then((r) => r.json())
       .then((j) => {
         if (j.restricted && j.message) setRestricted(j.message);
+        setIsAdmin(!!j.scope?.all);
         setData(j.commerciaux ?? []);
       })
       .catch(() => setError(true));
@@ -75,10 +77,19 @@ export function CommerciauxSapList() {
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {data.map((c) => (
+        <div key={c.slpName} className="relative">
+        {isAdmin && (
+          <Link
+            href={`/dashboard?as=${encodeURIComponent(c.slpName)}`}
+            title={`Voir le cockpit comme ${c.slpName}`}
+            className="absolute bottom-3 right-3 z-10 inline-flex items-center gap-1 h-6 px-2 rounded-md text-[10.5px] font-semibold bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-900/50 transition-colors focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none"
+          >
+            <Eye className="h-3 w-3" /> Voir comme
+          </Link>
+        )}
         <Link
-          key={c.slpName}
           href={`/commerciaux/${encodeURIComponent(c.slpName)}`}
-          className="group relative bg-card border border-border border-l-4 border-l-brand-500 rounded-xl p-4 hover:bg-secondary/30 transition-colors"
+          className="group relative block bg-card border border-border border-l-4 border-l-brand-500 rounded-xl p-4 hover:bg-secondary/30 transition-colors"
         >
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
@@ -119,6 +130,7 @@ export function CommerciauxSapList() {
             <p className="text-[9.5px] text-muted-foreground mt-0.5">CA facturé · 12 dernières semaines</p>
           </div>
         </Link>
+        </div>
       ))}
     </div>
   );

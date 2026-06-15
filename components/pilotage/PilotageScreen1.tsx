@@ -95,7 +95,7 @@ function formatWeight(kg: number): string {
  *   ├ Top clients mixte BL × Appels CRM (6×2)│ Top commerciaux ┤
  *   └────────────────────────────────────────┴─────────────────┘
  */
-export function PilotageScreen1() {
+export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = {}) {
   const ALLOWED: Granularity[] = ["day", "week", "month"];
   const [g, setG] = useSharedGranularity("week", "leader");
   // Si l'écran 2 broadcast "year", on force "month" côté écran 1.
@@ -106,8 +106,8 @@ export function PilotageScreen1() {
   const pick: WeekPick = (w) => (isWeight ? w.weightKg : w.volume);
   const fmtVal = (n: number) => (isWeight ? formatWeight(n) : formatEuro(n, true));
 
-  const { data } = useActivityData(safeG);
-  const { data: weekly } = useActivityWeekly();
+  const { data } = useActivityData(safeG, viewAs);
+  const { data: weekly } = useActivityWeekly(viewAs);
   const spark = useMemo(() => buildSpark(weekly, pick), [weekly, isWeight]); // eslint-disable-line react-hooks/exhaustive-deps
   const trend = useMemo(() => buildTrend(weekly, pick), [weekly, isWeight]); // eslint-disable-line react-hooks/exhaustive-deps
   const periodLabel = granularityLabel(safeG);

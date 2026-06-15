@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getAccessScope, pilotageSlpFilter, scopePayload } from "@/lib/permissions";
+import { getAccessScope, resolvePilotageView, scopePayload } from "@/lib/permissions";
 import {
   annualMatrix,
   topClients, topSuppliers, topSalespersons,
@@ -35,13 +35,12 @@ export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  // Droits : matrice + top clients scopés au slpName du non-admin ; top
-  // fournisseurs et top commerciaux (vues transverses) réservés aux admins.
-  const scope = await getAccessScope(session);
-  const slp = pilotageSlpFilter(scope);
-  const admin = scope.all;
-
+  // Droits : matrice + top clients scopés au slpName (non-admin ou « voir comme ») ;
+  // top fournisseurs et top commerciaux (transverses) réservés à l'admin global.
   const url = new URL(req.url);
+  const scope = await getAccessScope(session);
+  const { slp, showTransverse: admin } = resolvePilotageView(scope, url.searchParams.get("as"));
+
   const yearsBack = Number.parseInt(url.searchParams.get("years") ?? "2", 10);
   const years = Number.isFinite(yearsBack) ? yearsBack : 2;
   const segment = parseSegment(url.searchParams.get("segment"));

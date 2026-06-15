@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getAccessScope, pilotageSlpFilter, scopePayload } from "@/lib/permissions";
+import { getAccessScope, resolvePilotageView, scopePayload } from "@/lib/permissions";
 import {
   periodBounds, previousYearBounds,
   topClients, topSuppliers, topSalespersons,
@@ -21,12 +21,12 @@ export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  // Droits : top clients scopé sur le slpName du non-admin ; top fournisseurs
-  // (achats) et top commerciaux (vues transverses) réservés aux admins.
-  const scope = await getAccessScope(session);
-  const slp = pilotageSlpFilter(scope);
-
+  // Droits : top clients scopé sur le slpName (non-admin ou admin « voir comme ») ;
+  // top fournisseurs (achats) et top commerciaux (transverses) réservés à l'admin global.
   const url = new URL(req.url);
+  const scope = await getAccessScope(session);
+  const { slp, showTransverse } = resolvePilotageView(scope, url.searchParams.get("as"));
+
   const g = (url.searchParams.get("g") ?? "week") as Granularity;
   if (!["day", "week", "month", "year"].includes(g)) {
     return NextResponse.json({ error: "Granularité invalide" }, { status: 400 });
@@ -37,10 +37,10 @@ export async function GET(req: Request) {
 
   const [clients, suppliers, salespersons, clientsPrev, salespersonsPrev] = await Promise.all([
     topClients(curr.start, curr.end, 8, null, slp),
-    scope.all ? topSuppliers(curr.start, curr.end, 6) : Promise.resolve([]),
-    scope.all ? topSalespersons(curr.start, curr.end, 8) : Promise.resolve([]),
+    showTransverse ? topSuppliers(curr.start, curr.end, 6) : Promise.resolve([]),
+    showTransverse ? topSalespersons(curr.start, curr.end, 8) : Promise.resolve([]),
     topClients(prev.start, prev.end, 50, null, slp),   // élargi pour matcher delta
-    scope.all ? topSalespersons(prev.start, prev.end, 50) : Promise.resolve([]),
+    showTransverse ? topSalespersons(prev.start, prev.end, 50) : Promise.resolve([]),
   ]);
 
   const prevClientCa = new Map(clientsPrev.map((c) => [c.cardCode, c.ca]));

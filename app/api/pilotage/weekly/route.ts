@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getAccessScope, pilotageSlpFilter } from "@/lib/permissions";
+import { getAccessScope, resolvePilotageView } from "@/lib/permissions";
 import { weeklyInvoiceSeries } from "@/lib/pilotage";
 import { isoWeek } from "@/lib/iso-week";
 import { groupCodesForSegment, parseSegment } from "@/lib/segments";
@@ -21,11 +21,12 @@ export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  // Droits : série CA/marge scopée au slpName du non-admin (clé cache incluse).
+  // Droits : série CA/marge scopée au slpName (non-admin ou « voir comme »).
+  const url = new URL(req.url);
   const scope = await getAccessScope(session);
-  const slp = pilotageSlpFilter(scope);
+  const { slp } = resolvePilotageView(scope, url.searchParams.get("as"));
 
-  const segment = parseSegment(new URL(req.url).searchParams.get("segment"));
+  const segment = parseSegment(url.searchParams.get("segment"));
 
   const payload = await cached(`pilotage:weekly:${slp ?? "ALL"}:${segment}`, 120_000, async () => {
     const now = new Date();
