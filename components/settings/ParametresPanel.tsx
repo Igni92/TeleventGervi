@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { useReducedMotion } from "framer-motion";
 import {
-  Moon, Sun, Palette, LayoutList, Sparkles, BadgePercent, Check, Wand2,
+  Moon, Sun, Palette, LayoutList, Sparkles, BadgePercent, Check, Wand2, Database,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
+import { ClientImportButton } from "@/components/clients/ClientImportButton";
 import { useTheme } from "@/components/ThemeProvider";
 import { cn } from "@/lib/utils";
 import {
@@ -135,7 +136,7 @@ function applyColorimetrie(id: ColorId) {
   else document.documentElement.setAttribute("data-theme", id);
 }
 
-export function ParametresPanel() {
+export function ParametresPanel({ admin = false }: { admin?: boolean }) {
   const { theme, toggleTheme } = useTheme();
   const systemReduce = useReducedMotion();
 
@@ -276,10 +277,27 @@ export function ParametresPanel() {
         </div>
       </SurfaceCard>
 
+      {/* 6 ── Données / SAP (admin) — import des clients (alimente aussi la carte géo) ── */}
+      {admin && (
+        <SurfaceCard accent="sky" title="Données · SAP" icon={<Database className="h-3.5 w-3.5" />}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+            <div className="min-w-0">
+              <p className="text-[13.5px] font-semibold text-foreground">Import des clients SAP</p>
+              <p className="text-[12px] text-muted-foreground mt-0.5 max-w-md">
+                Synchronise la base clients depuis SAP — y compris la localisation
+                (ville / code postal / pays) qui alimente la carte « Où je livre le plus ».
+                « Actualiser » n&apos;efface rien ; « Réimport complet » repart de zéro.
+              </p>
+            </div>
+            <div className="shrink-0"><ClientImportButton /></div>
+          </div>
+        </SurfaceCard>
+      )}
+
       <p className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground/80 pt-1">
         <Sparkles className="h-3.5 w-3.5 shrink-0" />
-        Ces réglages sont propres à ce poste (navigateur) et s&apos;appliquent immédiatement,
-        sur tous les onglets ouverts.
+        Ces réglages d&apos;affichage sont propres à ce poste (navigateur) et s&apos;appliquent
+        immédiatement, sur tous les onglets ouverts.
       </p>
     </div>
   );
