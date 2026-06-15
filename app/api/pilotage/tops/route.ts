@@ -7,6 +7,7 @@ import {
   crmCallsByCardCode,
   type Granularity,
 } from "@/lib/pilotage";
+import { cached } from "@/lib/ttlCache";
 
 /**
  * GET /api/pilotage/tops?g=day|week|month|year
@@ -32,34 +33,39 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Granularité invalide" }, { status: 400 });
   }
 
-  const curr = periodBounds(g);
-  const prev = previousYearBounds(curr, g);
+  // Agrégats lourds (5 tops + CRM) cachés 120 s par périmètre+granularité+vue
+  // transverse — même pattern que weekly/annual ; scope (par user) hors cache.
+  const data = await cached(`pilotage:tops:${slp ?? "ALL"}:${g}:${showTransverse ? 1 : 0}`, 120_000, async () => {
+    const curr = periodBounds(g);
+    const prev = previousYearBounds(curr, g);
 
-  const [clients, suppliers, salespersons, clientsPrev, salespersonsPrev] = await Promise.all([
-    topClients(curr.start, curr.end, 8, null, slp),
-    showTransverse ? topSuppliers(curr.start, curr.end, 6) : Promise.resolve([]),
-    showTransverse ? topSalespersons(curr.start, curr.end, 8) : Promise.resolve([]),
-    topClients(prev.start, prev.end, 50, null, slp),   // élargi pour matcher delta
-    showTransverse ? topSalespersons(prev.start, prev.end, 50) : Promise.resolve([]),
-  ]);
+    const [clients, suppliers, salespersons, clientsPrev, salespersonsPrev] = await Promise.all([
+      topClients(curr.start, curr.end, 8, null, slp),
+      showTransverse ? topSuppliers(curr.start, curr.end, 6) : Promise.resolve([]),
+      showTransverse ? topSalespersons(curr.start, curr.end, 8) : Promise.resolve([]),
+      topClients(prev.start, prev.end, 50, null, slp),   // élargi pour matcher delta
+      showTransverse ? topSalespersons(prev.start, prev.end, 50) : Promise.resolve([]),
+    ]);
 
-  const prevClientCa = new Map(clientsPrev.map((c) => [c.cardCode, c.ca]));
-  const prevSlpCa = new Map(salespersonsPrev.map((s) => [s.slpName, s.ca]));
+    const prevClientCa = new Map(clientsPrev.map((c) => [c.cardCode, c.ca]));
+    const prevSlpCa = new Map(salespersonsPrev.map((s) => [s.slpName, s.ca]));
 
-  // Enrichit chaque top client avec son # appels CRM sur la même fenêtre
-  // (jointure clientsCode = SAP cardCode = Client.code TeleVent).
-  const crmCalls = await crmCallsByCardCode(clients.map((c) => c.cardCode), curr.start, curr.end);
+    // Enrichit chaque top client avec son # appels CRM sur la même fenêtre
+    // (jointure clientsCode = SAP cardCode = Client.code TeleVent).
+    const crmCalls = await crmCallsByCardCode(clients.map((c) => c.cardCode), curr.start, curr.end);
 
-  return NextResponse.json({
-    granularity: g,
-    period: { start: curr.start, end: curr.end },
-    clients: clients.map((c) => ({
-      ...c,
-      caPrev: prevClientCa.get(c.cardCode) ?? 0,
-      crmCalls: crmCalls.get(c.cardCode) ?? 0,
-    })),
-    suppliers,
-    salespersons: salespersons.map((s) => ({ ...s, caPrev: prevSlpCa.get(s.slpName) ?? 0 })),
-    scope: scopePayload(scope),
+    return {
+      granularity: g,
+      period: { start: curr.start, end: curr.end },
+      clients: clients.map((c) => ({
+        ...c,
+        caPrev: prevClientCa.get(c.cardCode) ?? 0,
+        crmCalls: crmCalls.get(c.cardCode) ?? 0,
+      })),
+      suppliers,
+      salespersons: salespersons.map((s) => ({ ...s, caPrev: prevSlpCa.get(s.slpName) ?? 0 })),
+    };
   });
+
+  return NextResponse.json({ ...data, scope: scopePayload(scope) });
 }

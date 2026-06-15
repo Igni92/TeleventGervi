@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getAccessScope, resolvePilotageView } from "@/lib/permissions";
 import { clientsToRelance } from "@/lib/pilotage";
+import { cached } from "@/lib/ttlCache";
 
 /**
  * GET /api/pilotage/actions
@@ -20,6 +21,6 @@ export async function GET(req: Request) {
   const scope = await getAccessScope(session);
   const { slp } = resolvePilotageView(scope, new URL(req.url).searchParams.get("as"));
 
-  const toRelance = await clientsToRelance(5, slp);
+  const toRelance = await cached(`pilotage:actions:${slp ?? "ALL"}`, 120_000, () => clientsToRelance(5, slp));
   return NextResponse.json({ toRelance });
 }
