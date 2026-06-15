@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Loader2, ShieldAlert, Users, ArrowRight, Eye } from "lucide-react";
+import { toast } from "sonner";
+import { Loader2, ShieldAlert, Users, ArrowRight, Eye, Target } from "lucide-react";
 import { Sparkline } from "@/components/charts/Sparkline";
 
 /**
@@ -19,6 +20,10 @@ interface CommercialSap {
   caBlYtd: number;
   nbCommandesYtd: number;
   volumeKgYtd: number;
+  /** CA net YTD du portefeuille (clients affectés) — base du % d'objectif. */
+  caPortefeuilleYtd: number;
+  /** Objectif CA annuel (0 = non défini). */
+  objectifCa: number;
   spark: number[];
 }
 
@@ -43,6 +48,9 @@ export function CommerciauxSapList() {
       })
       .catch(() => setError(true));
   }, []);
+
+  const updateObjectif = (slp: string, obj: number) =>
+    setData((cur) => (cur ? cur.map((c) => (c.slpName === slp ? { ...c, objectifCa: obj } : c)) : cur));
 
   if (error) {
     return (
@@ -130,8 +138,81 @@ export function CommerciauxSapList() {
             <p className="text-[9.5px] text-muted-foreground mt-0.5">CA facturé · 12 dernières semaines</p>
           </div>
         </Link>
+        <ObjectifCell c={c} isAdmin={isAdmin} onSaved={updateObjectif} />
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Objectif CA du commercial : barre de progression (réalisé portefeuille /
+ * objectif) + % atteint. Admin : édition inline de l'objectif annuel.
+ * Hors du <Link> de la carte (évite un input imbriqué dans une ancre).
+ */
+function ObjectifCell({
+  c, isAdmin, onSaved,
+}: {
+  c: CommercialSap;
+  isAdmin: boolean;
+  onSaved: (slp: string, obj: number) => void;
+}) {
+  const [val, setVal] = useState(c.objectifCa);
+  const [saving, setSaving] = useState(false);
+  const pct = c.objectifCa > 0 ? Math.round((c.caPortefeuilleYtd / c.objectifCa) * 100) : null;
+  const barW = pct === null ? 0 : Math.max(0, Math.min(100, pct));
+  const tone = pct === null ? "" : pct >= 100 ? "bg-emerald-500" : pct >= 60 ? "bg-brand-500" : "bg-amber-500";
+
+  async function save(n: number) {
+    const obj = Math.max(0, Math.round(n) || 0);
+    if (obj === c.objectifCa) return;
+    setVal(obj); setSaving(true);
+    try {
+      const r = await fetch("/api/commerciaux/objectif", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slpName: c.slpName, objectifCa: obj }),
+      });
+      if (!r.ok) throw new Error();
+      onSaved(c.slpName, obj);
+      toast.success(`Objectif ${c.slpName} : ${fmtEur(obj)}`);
+    } catch { setVal(c.objectifCa); toast.error("Erreur enregistrement objectif"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="mt-1.5 px-1">
+      <div className="flex items-center justify-between text-[10px]">
+        <span className="inline-flex items-center gap-1 uppercase tracking-[0.1em] font-semibold text-muted-foreground">
+          <Target className="h-3 w-3" /> Objectif
+        </span>
+        {pct !== null ? (
+          <span className={`tnum font-bold ${pct >= 100 ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>
+            {pct}% · {fmtEur(c.caPortefeuilleYtd)} / {fmtEur(c.objectifCa)}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">non défini</span>
+        )}
+      </div>
+      {pct !== null && (
+        <div className="mt-1 h-1.5 rounded-full bg-secondary/70 overflow-hidden">
+          <div className={`h-full rounded-full ${tone}`} style={{ width: `${barW}%` }} />
+        </div>
+      )}
+      {isAdmin && (
+        <label className="mt-1.5 flex items-center gap-1 text-[10.5px] text-muted-foreground">
+          <span>Objectif annuel €</span>
+          <input
+            type="number" min={0} step={1000}
+            value={val}
+            onChange={(e) => setVal(parseFloat(e.target.value) || 0)}
+            onBlur={(e) => save(parseFloat(e.target.value) || 0)}
+            disabled={saving}
+            className="w-24 h-6 px-1.5 rounded-md bg-secondary/60 text-right tnum text-foreground focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none disabled:opacity-60"
+          />
+          {saving && <Loader2 className="h-3 w-3 animate-spin" />}
+        </label>
+      )}
     </div>
   );
 }

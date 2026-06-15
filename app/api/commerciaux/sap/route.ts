@@ -39,7 +39,7 @@ export async function GET() {
   const slpCond = (col: Prisma.Sql) =>
     !scope.all && scope.slpName ? Prisma.sql`AND ${col} = ${scope.slpName}` : Prisma.empty;
 
-  const [active, caInv, caCn, caBl, kgBl, sparkRows] = await Promise.all([
+  const [active, caInv, caCn, caBl, kgBl, sparkRows, caPortInv, caPortCn] = await Promise.all([
     // Commerciaux actifs 12 mois (Orders ∪ Invoices) + nb clients + dernier doc.
     prisma.$queryRaw<{ slp: string; clients: number; last: Date }[]>(Prisma.sql`
       SELECT s.slp, COUNT(DISTINCT s.card)::int AS clients, MAX(s.d) AS last
@@ -92,7 +92,35 @@ export async function GET() {
       WHERE "cancelled" = false AND "docDate" >= ${sparkStart}
         AND "slpName" IS NOT NULL AND "slpName" <> '' ${slpCond(Prisma.sql`"slpName"`)}
       GROUP BY 1, 2, 3`),
+    // CA facturé YTD sur le PORTEFEUILLE (clients affectés : Client.commercial),
+    // base du calcul d'objectif (≠ caNetYtd qui est par slpName de facture SAP).
+    prisma.$queryRaw<{ slp: string; ca: number }[]>(Prisma.sql`
+      SELECT c."commercial" AS slp, COALESCE(SUM(i."docTotal"), 0)::float AS ca
+      FROM "SapInvoice" i
+      JOIN "Client" c ON c."code" = i."cardCode"
+      WHERE i."cancelled" = false AND i."docDate" >= ${ytdStart}
+        AND c."commercial" IS NOT NULL AND c."commercial" <> '' ${slpCond(Prisma.sql`c."commercial"`)}
+      GROUP BY 1`),
+    // Avoirs YTD du portefeuille (à soustraire).
+    prisma.$queryRaw<{ slp: string; ca: number }[]>(Prisma.sql`
+      SELECT c."commercial" AS slp, COALESCE(SUM(i."docTotal"), 0)::float AS ca
+      FROM "SapCreditNote" i
+      JOIN "Client" c ON c."code" = i."cardCode"
+      WHERE i."cancelled" = false AND i."docDate" >= ${ytdStart}
+        AND c."commercial" IS NOT NULL AND c."commercial" <> '' ${slpCond(Prisma.sql`c."commercial"`)}
+      GROUP BY 1`),
   ]);
+
+  // Objectifs CA (table optionnelle — repli silencieux si DDL non lancée).
+  const objMap = new Map<string, number>();
+  try {
+    const objRows = await prisma.$queryRaw<{ slp: string; obj: number }[]>(Prisma.sql`
+      SELECT "slpName" AS slp, "objectifCa"::float AS obj FROM "CommercialObjectif"
+      WHERE 1 = 1 ${slpCond(Prisma.sql`"slpName"`)}`);
+    for (const r of objRows) objMap.set(r.slp, Number(r.obj));
+  } catch { /* table CommercialObjectif pas encore créée */ }
+  const portInvMap = new Map(caPortInv.map((r) => [r.slp, Number(r.ca)]));
+  const portCnMap = new Map(caPortCn.map((r) => [r.slp, Number(r.ca)]));
 
   const caInvMap = new Map(caInv.map((r) => [r.slp, r]));
   const caCnMap = new Map(caCn.map((r) => [r.slp, Number(r.ca)]));
@@ -132,6 +160,9 @@ export async function GET() {
         caBlYtd: Number(bl?.ca ?? 0),
         nbCommandesYtd: Number(bl?.n ?? 0),
         volumeKgYtd: kgMap.get(a.slp) ?? 0,
+        // Objectif : CA cible annuel + réalisé sur le portefeuille (clients affectés).
+        caPortefeuilleYtd: (portInvMap.get(a.slp) ?? 0) - (portCnMap.get(a.slp) ?? 0),
+        objectifCa: objMap.get(a.slp) ?? 0,
         spark: weekKeys.map((k) => weeks?.get(k) ?? 0),
       };
     })

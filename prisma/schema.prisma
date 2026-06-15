@@ -73,6 +73,16 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
+// Objectif commercial — CA cible ANNUEL par commercial (trigramme = slpName).
+// Le réalisé est mesuré sur le PORTEFEUILLE (clients affectés : Client.commercial
+// = slpName), pas sur le slpName des factures SAP — cf. /api/commerciaux/sap.
+// Accédé en raw SQL (cf. scripts/ddl-commercial-objectif.mjs).
+model CommercialObjectif {
+  slpName   String   @id
+  objectifCa Float   @default(0)
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
 model Client {
   id              String               @id @default(cuid())
   code            String               @unique
