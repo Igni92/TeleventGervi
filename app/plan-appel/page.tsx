@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/permissions";
 import { PlanAppel } from "@/components/plan-appel/PlanAppel";
 import { ResyncButton } from "@/components/admin/ResyncButton";
+import { PromoBanner } from "@/components/promos/PromoBanner";
 
 export const metadata = { title: "Plan d'appel" };
 export const dynamic = "force-dynamic";
@@ -30,6 +31,8 @@ export default async function PlanAppelPage() {
         </div>
         {admin && <ResyncButton />}
       </header>
+      {/* Promos en cours, là où le vendeur prépare ses appels (s'auto-masque si aucune). */}
+      <PromoBanner context="commande" />
       <PlanAppel />
     </div>
   );
