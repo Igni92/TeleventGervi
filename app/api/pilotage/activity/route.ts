@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope, pilotageSlpFilter, scopePayload } from "@/lib/permissions";
 import {
   aggregateActivity, periodBounds, previousYearBounds,
   topClientsOrder, topSalespersonsOrder, orderWeightMaps,
@@ -25,6 +26,11 @@ export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
+  // Droits : non-admin scopé sur son slpName ; le classement des commerciaux
+  // (vue transverse) reste réservé aux admins.
+  const scope = await getAccessScope(session);
+  const slp = pilotageSlpFilter(scope);
+
   const url = new URL(req.url);
   const g = (url.searchParams.get("g") ?? "week") as Granularity;
   if (!["day", "week", "month"].includes(g)) {
@@ -35,13 +41,13 @@ export async function GET(req: Request) {
   const prev = previousYearBounds(curr, g);
 
   const [currAct, prevAct, currCrm, prevCrm, tcs, sps, weightMaps] = await Promise.all([
-    aggregateActivity(curr.start, curr.end),
-    aggregateActivity(prev.start, prev.end),
-    crmActivity(curr.start, curr.end),
-    crmActivity(prev.start, prev.end),
-    topClientsOrder(curr.start, curr.end, 6),
-    topSalespersonsOrder(curr.start, curr.end, 6),
-    orderWeightMaps(curr.start, curr.end),
+    aggregateActivity(curr.start, curr.end, slp),
+    aggregateActivity(prev.start, prev.end, slp),
+    crmActivity(curr.start, curr.end, slp),
+    crmActivity(prev.start, prev.end, slp),
+    topClientsOrder(curr.start, curr.end, 6, slp),
+    scope.all ? topSalespersonsOrder(curr.start, curr.end, 6) : Promise.resolve([]),
+    orderWeightMaps(curr.start, curr.end, slp),
   ]);
 
   // Enrichit top clients avec # appels CRM + poids BL (kg) sur la même fenêtre
@@ -63,5 +69,6 @@ export async function GET(req: Request) {
     crmPrev: prevCrm,
     clients,
     salespersons,
+    scope: scopePayload(scope),
   });
 }

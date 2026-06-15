@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
 /** PATCH / DELETE pour une delivery mode spécifique. */
@@ -10,6 +11,8 @@ export async function PATCH(
 ) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await clientInScope(await getAccessScope(session), params.id)))
+    return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
 
   const body = await req.json();
   const updates: string[] = [];
@@ -43,6 +46,8 @@ export async function DELETE(
 ) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await clientInScope(await getAccessScope(session), params.id)))
+    return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
 
   await prisma.$executeRawUnsafe(
     `DELETE FROM "ClientDeliveryMode" WHERE id = $1 AND "clientId" = $2`,

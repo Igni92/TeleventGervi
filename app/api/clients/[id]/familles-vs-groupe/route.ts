@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
+import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { FAMILY_CTE_SQL } from "@/lib/familles";
 
@@ -45,6 +46,8 @@ function median(xs: number[]): number {
 export async function GET(_: Request, { params }: { params: { id: string } }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await clientInScope(await getAccessScope(session), params.id)))
+    return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
 
   const client = await prisma.client.findUnique({
     where: { id: params.id },

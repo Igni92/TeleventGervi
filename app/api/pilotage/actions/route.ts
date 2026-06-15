@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope, pilotageSlpFilter } from "@/lib/permissions";
 import { clientsToRelance } from "@/lib/pilotage";
 
 /**
@@ -15,6 +16,10 @@ export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  const toRelance = await clientsToRelance(5);
+  // Droits : « à relancer » scopé aux clients du non-admin.
+  const scope = await getAccessScope(session);
+  const slp = pilotageSlpFilter(scope);
+
+  const toRelance = await clientsToRelance(5, slp);
   return NextResponse.json({ toRelance });
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope, clientInScope, clientIdsInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -20,6 +21,12 @@ export async function GET(req: NextRequest) {
   if (clientId) where.clientId = clientId;
   if (docEntry) where.docEntry = parseInt(docEntry);
   if (!clientId && !docEntry) return NextResponse.json({ incidents: [] });
+  // Droits : un non-admin ne voit que les incidents de SES clients.
+  const ids = await clientIdsInScope(await getAccessScope(session));
+  if (ids) {
+    if (clientId && !ids.includes(clientId)) return NextResponse.json({ incidents: [] });
+    if (!clientId) where.clientId = { in: ids };
+  }
   const incidents = await prisma.incident.findMany({ where, orderBy: { createdAt: "desc" } });
   return NextResponse.json({ incidents });
 }
@@ -30,6 +37,8 @@ export async function POST(req: NextRequest) {
   let body: { clientId?: string; docEntry?: number; docNum?: number; type?: string; note?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
   if (!body.clientId) return NextResponse.json({ error: "clientId requis" }, { status: 400 });
+  if (!(await clientInScope(await getAccessScope(session), body.clientId)))
+    return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
   const incident = await prisma.incident.create({
     data: {
       clientId: body.clientId,
@@ -49,6 +58,10 @@ export async function PATCH(req: NextRequest) {
   let body: { id?: string; resolved?: boolean; type?: string; note?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
   if (!body.id) return NextResponse.json({ error: "id requis" }, { status: 400 });
+  const target = await prisma.incident.findUnique({ where: { id: body.id }, select: { clientId: true } });
+  if (!target) return NextResponse.json({ error: "Incident introuvable" }, { status: 404 });
+  if (!(await clientInScope(await getAccessScope(session), target.clientId)))
+    return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
   const data: Record<string, unknown> = {};
   if (typeof body.resolved === "boolean") data.resolved = body.resolved;
   if (body.type !== undefined) data.type = body.type?.trim() || null;
@@ -62,6 +75,9 @@ export async function DELETE(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id requis" }, { status: 400 });
+  const target = await prisma.incident.findUnique({ where: { id }, select: { clientId: true } });
+  if (target && !(await clientInScope(await getAccessScope(session), target.clientId)))
+    return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
   await prisma.incident.delete({ where: { id } }).catch(() => {});
   return NextResponse.json({ ok: true });
 }

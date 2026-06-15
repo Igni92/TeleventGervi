@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { clientSchema } from "@/lib/validations";
 import { sap } from "@/lib/sapb1";
@@ -7,6 +8,8 @@ import { sap } from "@/lib/sapb1";
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await clientInScope(await getAccessScope(session), params.id)))
+    return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
 
   try {
     const client = await prisma.client.findUnique({
@@ -27,6 +30,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await clientInScope(await getAccessScope(session), params.id)))
+    return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
 
   try {
     const body = await req.json();
@@ -83,6 +88,8 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await clientInScope(await getAccessScope(session), params.id)))
+    return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
 
   try {
     const existing = await prisma.client.findUnique({ where: { id: params.id } });

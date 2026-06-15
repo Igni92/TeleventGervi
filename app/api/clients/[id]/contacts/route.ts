@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -10,6 +11,8 @@ import { prisma } from "@/lib/prisma";
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await clientInScope(await getAccessScope(session), params.id)))
+    return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
   const contacts = await prisma.contact.findMany({
     where: { clientId: params.id },
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
@@ -20,6 +23,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await clientInScope(await getAccessScope(session), params.id)))
+    return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
   let body: { name?: string; role?: string; phone?: string; email?: string; note?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
   if (!body.name?.trim()) return NextResponse.json({ error: "Nom requis" }, { status: 400 });

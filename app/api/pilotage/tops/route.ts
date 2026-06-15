@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope, pilotageSlpFilter, scopePayload } from "@/lib/permissions";
 import {
   periodBounds, previousYearBounds,
   topClients, topSuppliers, topSalespersons,
@@ -20,6 +21,11 @@ export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
+  // Droits : top clients scopé sur le slpName du non-admin ; top fournisseurs
+  // (achats) et top commerciaux (vues transverses) réservés aux admins.
+  const scope = await getAccessScope(session);
+  const slp = pilotageSlpFilter(scope);
+
   const url = new URL(req.url);
   const g = (url.searchParams.get("g") ?? "week") as Granularity;
   if (!["day", "week", "month", "year"].includes(g)) {
@@ -30,11 +36,11 @@ export async function GET(req: Request) {
   const prev = previousYearBounds(curr, g);
 
   const [clients, suppliers, salespersons, clientsPrev, salespersonsPrev] = await Promise.all([
-    topClients(curr.start, curr.end, 8),
-    topSuppliers(curr.start, curr.end, 6),
-    topSalespersons(curr.start, curr.end, 8),
-    topClients(prev.start, prev.end, 50),         // élargi pour matcher delta
-    topSalespersons(prev.start, prev.end, 50),
+    topClients(curr.start, curr.end, 8, null, slp),
+    scope.all ? topSuppliers(curr.start, curr.end, 6) : Promise.resolve([]),
+    scope.all ? topSalespersons(curr.start, curr.end, 8) : Promise.resolve([]),
+    topClients(prev.start, prev.end, 50, null, slp),   // élargi pour matcher delta
+    scope.all ? topSalespersons(prev.start, prev.end, 50) : Promise.resolve([]),
   ]);
 
   const prevClientCa = new Map(clientsPrev.map((c) => [c.cardCode, c.ca]));
@@ -54,5 +60,6 @@ export async function GET(req: Request) {
     })),
     suppliers,
     salespersons: salespersons.map((s) => ({ ...s, caPrev: prevSlpCa.get(s.slpName) ?? 0 })),
+    scope: scopePayload(scope),
   });
 }

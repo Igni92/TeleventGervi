@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
+import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -35,6 +36,8 @@ async function readCompta(clientId: string): Promise<ComptaRow | null> {
 export async function GET(_: Request, { params }: { params: { id: string } }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await clientInScope(await getAccessScope(session), params.id)))
+    return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
 
   const row = await readCompta(params.id);
   if (!row) return NextResponse.json({ error: "Client introuvable" }, { status: 404 });
@@ -51,6 +54,8 @@ const PatchSchema = z.object({
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await clientInScope(await getAccessScope(session), params.id)))
+    return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
 
   const body = await req.json().catch(() => null);
   const parsed = PatchSchema.safeParse(body);

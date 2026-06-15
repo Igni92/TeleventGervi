@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 
@@ -57,6 +58,23 @@ export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
+  // Droits : un non-admin ne voit que les encours de SES clients (commercial OU
+  // vendeur = son slpName). `allowed = null` → admin (aucun filtre) ; non mappé
+  // → ensemble vide → encours à zéro (jamais la vue globale).
+  const scope = await getAccessScope(session);
+  let allowed: Set<string> | null = null;
+  if (!scope.all) {
+    if (scope.slpName) {
+      const rows = await prisma.$queryRawUnsafe<{ code: string }[]>(
+        `SELECT "code" FROM "Client" WHERE "commercial" = $1 OR "vendeur" = $1`,
+        scope.slpName,
+      );
+      allowed = new Set(rows.map((r) => r.code));
+    } else {
+      allowed = new Set();
+    }
+  }
+
   let invs: OpenInvoice[];
   try {
     invs = await sap.getAll<OpenInvoice>(
@@ -75,6 +93,7 @@ export async function GET() {
   let tot3045 = 0, tot4590 = 0, tot90 = 0;
 
   for (const inv of invs) {
+    if (allowed && !allowed.has(inv.CardCode)) continue; // hors périmètre commercial
     const bal = (inv.DocTotal ?? 0) - (inv.PaidToDate ?? 0);
     if (bal <= 0.01) continue; // soldée (arrondi)
     const due = inv.DocDueDate ? new Date(inv.DocDueDate).getTime() : null;

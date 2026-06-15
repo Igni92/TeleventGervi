@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope, clientInScope, clientIdsInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { rappelSchema } from "@/lib/validations";
 import { createCalendarEvent, deleteCalendarEvent } from "@/lib/graph";
@@ -14,7 +15,14 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const clientId = searchParams.get("clientId");
 
-    const where = clientId ? { clientId } : {};
+    // Droits : un non-admin ne voit que les rappels de SES clients.
+    const ids = await clientIdsInScope(await getAccessScope(session));
+    const where: { clientId?: string | { in: string[] } } = {};
+    if (clientId) where.clientId = clientId;
+    if (ids) {
+      if (clientId) { if (!ids.includes(clientId)) return NextResponse.json([]); }
+      else where.clientId = { in: ids };
+    }
 
     const rappels = await prisma.rappel.findMany({
       where,
@@ -38,6 +46,9 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const data = rappelSchema.parse(body);
+
+    if (!(await clientInScope(await getAccessScope(session), data.clientId)))
+      return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
 
     // Fetch client info for event creation
     const client = await prisma.client.findUnique({
@@ -113,6 +124,8 @@ export async function PATCH(req: NextRequest) {
     if (!existing) {
       return NextResponse.json({ error: "Rappel introuvable" }, { status: 404 });
     }
+    if (!(await clientInScope(await getAccessScope(session), existing.clientId)))
+      return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
 
     // Delete Microsoft Calendar event if cancelling and event exists
     if (statut === "ANNULE" && existing.msEventId && session.accessToken) {

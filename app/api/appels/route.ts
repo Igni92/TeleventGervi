@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope, clientInScope, clientIdsInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { appelLogSchema } from "@/lib/validations";
 
@@ -10,7 +11,15 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const clientId = searchParams.get("clientId");
-    const where = clientId ? { clientId } : {};
+
+    // Droits : un non-admin ne voit que les appels de SES clients.
+    const ids = await clientIdsInScope(await getAccessScope(session));
+    const where: { clientId?: string | { in: string[] } } = {};
+    if (clientId) where.clientId = clientId;
+    if (ids) {
+      if (clientId) { if (!ids.includes(clientId)) return NextResponse.json([]); }
+      else where.clientId = { in: ids };
+    }
 
     const appels = await prisma.appelLog.findMany({
       where,
@@ -33,6 +42,9 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const data = appelLogSchema.parse(body);
+
+    if (!(await clientInScope(await getAccessScope(session), data.clientId)))
+      return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
 
     const client = await prisma.client.findUnique({ where: { id: data.clientId } });
     if (!client) return NextResponse.json({ error: "Client introuvable" }, { status: 404 });

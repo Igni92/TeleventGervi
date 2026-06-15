@@ -48,6 +48,30 @@ function segmentWhere(groupCodes?: number[] | null): { bp: { groupCode: { in: nu
 }
 
 /* ─────────────────────────────────────────────────────────────────
+   Scoping commercial (droits) — restreint un agrégat aux documents d'un
+   seul `slpName`. `null`/`undefined` = AUCUN filtre = vision globale (admin) :
+   le comportement historique est strictement préservé pour les admins.
+   `alias` = alias SQL de la table document (ex. "i" pour SapInvoice).
+   ───────────────────────────────────────────────────────────────── */
+function slpSql(alias: string, slpName?: string | null): Prisma.Sql {
+  if (!slpName) return Prisma.empty;
+  return Prisma.sql`AND ${Prisma.raw(`${alias}."slpName"`)} = ${slpName}`;
+}
+
+/** Variante Prisma (requêtes typées) du filtre commercial. */
+function slpWhere(slpName?: string | null): { slpName: string } | Record<string, never> {
+  return slpName ? { slpName } : {};
+}
+
+/** Filtre commercial via la relation client (CRM : AppelLog/Client). Le
+ *  rattachement typé disponible est `Client.commercial` (account manager) ;
+ *  `vendeur` n'est pas dans le client Prisma typé → sous-scope sûr (jamais une
+ *  fuite). null/undefined = pas de filtre (admin). */
+function clientOwnerWhere(slpName?: string | null): { commercial: string } | Record<string, never> {
+  return slpName ? { commercial: slpName } : {};
+}
+
+/* ─────────────────────────────────────────────────────────────────
    KPI agrégats — CA HT, marge, # invoices, # clients distincts, panier moyen.
    ───────────────────────────────────────────────────────────────── */
 export interface KpiBucket {
@@ -84,20 +108,21 @@ export interface KpiBucket {
  * Les CreditNotes sont stockées avec `docTotal` positif (= montant de l'avoir),
  * donc on les soustrait. Idem la marge "rendue" au client sur l'avoir.
  */
-export async function aggregateKpi(start: Date, end: Date): Promise<KpiBucket> {
+export async function aggregateKpi(start: Date, end: Date, slpName?: string | null): Promise<KpiBucket> {
+  const slp = slpWhere(slpName);
   const [invAgg, cnAgg, distinct, invProductLines, cnProductLines, invMargin, cnMargin] = await Promise.all([
     prisma.sapInvoice.aggregate({
-      where: { docDate: { gte: start, lt: end }, cancelled: false },
+      where: { docDate: { gte: start, lt: end }, cancelled: false, ...slp },
       _sum: { docTotal: true },
       _count: { docEntry: true },
     }),
     prisma.sapCreditNote.aggregate({
-      where: { docDate: { gte: start, lt: end }, cancelled: false },
+      where: { docDate: { gte: start, lt: end }, cancelled: false, ...slp },
       _sum: { docTotal: true },
       _count: { docEntry: true },
     }),
     prisma.sapInvoice.findMany({
-      where: { docDate: { gte: start, lt: end }, cancelled: false },
+      where: { docDate: { gte: start, lt: end }, cancelled: false, ...slp },
       select: { cardCode: true },
       distinct: ["cardCode"],
     }),
@@ -105,7 +130,7 @@ export async function aggregateKpi(start: Date, end: Date): Promise<KpiBucket> {
     prisma.sapInvoiceLine.aggregate({
       where: {
         isService: false,
-        invoice: { docDate: { gte: start, lt: end }, cancelled: false },
+        invoice: { docDate: { gte: start, lt: end }, cancelled: false, ...slp },
       },
       _sum: { lineTotal: true },
     }),
@@ -114,13 +139,13 @@ export async function aggregateKpi(start: Date, end: Date): Promise<KpiBucket> {
     prisma.sapCreditNoteLine.aggregate({
       where: {
         isService: false,
-        creditNote: { docDate: { gte: start, lt: end }, cancelled: false },
+        creditNote: { docDate: { gte: start, lt: end }, cancelled: false, ...slp },
       },
       _sum: { lineTotal: true },
     }),
     // Marge RÉELLE (coût EM) — factures et avoirs clients (lib/cogs).
-    realMarginAgg(prisma, "invoice", start, end),
-    realMarginAgg(prisma, "creditNote", start, end),
+    realMarginAgg(prisma, "invoice", start, end, slpSql("i", slpName)),
+    realMarginAgg(prisma, "creditNote", start, end, slpSql("i", slpName)),
   ]);
   const caGross = invAgg._sum.docTotal ?? 0;
   const creditNotes = cnAgg._sum.docTotal ?? 0;
@@ -152,14 +177,15 @@ export async function aggregateKpi(start: Date, end: Date): Promise<KpiBucket> {
    ───────────────────────────────────────────────────────────────── */
 /** Renvoie CA NET (Invoices − Avoirs) par mois sur 12 mois glissants.
  *  Perf : 2 GROUP BY (année, mois) — pas 12 × 2 agrégats. */
-export async function caLast12Months(ref = new Date()): Promise<number[]> {
+export async function caLast12Months(ref = new Date(), slpName?: string | null): Promise<number[]> {
   const start = new Date(ref.getFullYear(), ref.getMonth() - 11, 1);
   const end = new Date(ref.getFullYear(), ref.getMonth() + 1, 1);
+  const slp = slpName ? Prisma.sql`AND "slpName" = ${slpName}` : Prisma.empty;
   const q = (table: string) => prisma.$queryRaw<{ y: number; m: number; v: number }[]>(Prisma.sql`
     SELECT EXTRACT(YEAR FROM "docDate")::int AS y, EXTRACT(MONTH FROM "docDate")::int AS m,
            COALESCE(SUM("docTotal"), 0)::float AS v
     FROM ${Prisma.raw(`"${table}"`)}
-    WHERE "cancelled" = false AND "docDate" >= ${start} AND "docDate" < ${end}
+    WHERE "cancelled" = false AND "docDate" >= ${start} AND "docDate" < ${end} ${slp}
     GROUP BY 1, 2`);
   const [inv, cn] = await Promise.all([q("SapInvoice"), q("SapCreditNote")]);
 
@@ -174,10 +200,10 @@ export async function caLast12Months(ref = new Date()): Promise<number[]> {
 }
 
 /** Idem mais shifté de 1 an en arrière — pour le comparatif barres YoY. */
-export function caLast12MonthsPrevYear(ref = new Date()): Promise<number[]> {
+export function caLast12MonthsPrevYear(ref = new Date(), slpName?: string | null): Promise<number[]> {
   const shifted = new Date(ref);
   shifted.setFullYear(shifted.getFullYear() - 1);
-  return caLast12Months(shifted);
+  return caLast12Months(shifted, slpName);
 }
 
 /* ─────────────────────────────────────────────────────────────────
@@ -219,6 +245,7 @@ async function realMarginByKey(
   start: Date,
   end: Date,
   groupCodes?: number[] | null,
+  slpName?: string | null,
 ): Promise<Map<string, number>> {
   if (keys.length === 0) return new Map();
   const col = Prisma.raw(`i."${keyCol}"`);
@@ -227,7 +254,7 @@ async function realMarginByKey(
       SELECT ${col} AS k, COALESCE(SUM(${COGS_MARGIN}), 0)::float AS m
       FROM ${cogsFromSql(kind)}
       WHERE i."cancelled" = false AND i."docDate" >= ${start} AND i."docDate" < ${end}
-        AND ${col} IN (${Prisma.join(keys)}) ${segmentSql("i", groupCodes)}
+        AND ${col} IN (${Prisma.join(keys)}) ${segmentSql("i", groupCodes)} ${slpSql("i", slpName)}
       GROUP BY 1`);
   const [inv, cn] = await Promise.all([q("invoice"), q("creditNote")]);
   const m = new Map<string, number>();
@@ -236,10 +263,10 @@ async function realMarginByKey(
   return m;
 }
 
-export async function topClients(start: Date, end: Date, limit = 10, groupCodes?: number[] | null): Promise<TopClient[]> {
+export async function topClients(start: Date, end: Date, limit = 10, groupCodes?: number[] | null, slpName?: string | null): Promise<TopClient[]> {
   const grouped = await prisma.sapInvoice.groupBy({
     by: ["cardCode"],
-    where: { docDate: { gte: start, lt: end }, cancelled: false, ...segmentWhere(groupCodes) },
+    where: { docDate: { gte: start, lt: end }, cancelled: false, ...segmentWhere(groupCodes), ...slpWhere(slpName) },
     _sum: { docTotal: true },
     _count: { docEntry: true },
     orderBy: { _sum: { docTotal: "desc" } },
@@ -252,7 +279,7 @@ export async function topClients(start: Date, end: Date, limit = 10, groupCodes?
       select: { cardCode: true, cardName: true },
     }),
     // Marge réelle (coût EM) restreinte aux clients du top — pas le gp SAP.
-    realMarginByKey("cardCode", codes, start, end, groupCodes),
+    realMarginByKey("cardCode", codes, start, end, groupCodes, slpName),
   ]);
   const nameMap = new Map(names.map((n) => [n.cardCode, n.cardName]));
 
@@ -343,17 +370,18 @@ export interface ActivityBucket {
   avgBasket: number;
 }
 
-export async function aggregateActivity(start: Date, end: Date): Promise<ActivityBucket> {
+export async function aggregateActivity(start: Date, end: Date, slpName?: string | null): Promise<ActivityBucket> {
   // 2 requêtes SQL agrégées (en-têtes + lignes) — on ne rapatrie plus les
   // milliers de lignes en JS : SUM/COUNT côté Postgres. Le coût vient du
   // LATERAL EM (lib/cogs), alias i = SapOrder, l = SapOrderLine.
+  const slpHdr = slpName ? Prisma.sql`AND "slpName" = ${slpName}` : Prisma.empty;
   const [[hdr], [ln]] = await Promise.all([
     prisma.$queryRaw<{ volume: number; orders: number; clients: number }[]>(Prisma.sql`
       SELECT COALESCE(SUM("docTotal"), 0)::float AS volume,
              COUNT(*)::int AS orders,
              COUNT(DISTINCT "cardCode")::int AS clients
       FROM "SapOrder"
-      WHERE "cancelled" = false AND "docDate" >= ${start} AND "docDate" < ${end}`),
+      WHERE "cancelled" = false AND "docDate" >= ${start} AND "docDate" < ${end} ${slpHdr}`),
     prisma.$queryRaw<{ n: number; with_cost: number; margin: number; weight: number }[]>(Prisma.sql`
       SELECT ${COGS_PRODUCT_LINES}::int AS n,
              ${COGS_COSTED_LINES}::int AS with_cost,
@@ -361,7 +389,7 @@ export async function aggregateActivity(start: Date, end: Date): Promise<Activit
              COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS weight
       FROM ${cogsFromSql("order")}
       LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
-      WHERE i."cancelled" = false AND i."docDate" >= ${start} AND i."docDate" < ${end}`),
+      WHERE i."cancelled" = false AND i."docDate" >= ${start} AND i."docDate" < ${end} ${slpSql("i", slpName)}`),
   ]);
 
   const volume = Number(hdr?.volume ?? 0);
@@ -388,10 +416,10 @@ export interface TopClientOrder {
   orders: number;
 }
 
-export async function topClientsOrder(start: Date, end: Date, limit = 10): Promise<TopClientOrder[]> {
+export async function topClientsOrder(start: Date, end: Date, limit = 10, slpName?: string | null): Promise<TopClientOrder[]> {
   const grouped = await prisma.sapOrder.groupBy({
     by: ["cardCode"],
-    where: { docDate: { gte: start, lt: end }, cancelled: false },
+    where: { docDate: { gte: start, lt: end }, cancelled: false, ...slpWhere(slpName) },
     _sum: { docTotal: true },
     _count: { docEntry: true },
     orderBy: { _sum: { docTotal: "desc" } },
@@ -473,19 +501,21 @@ export interface YearMonthlyData {
  * La marge n'est plus le grossProfit SAP mais le coût EM réel (lib/cogs),
  * agrégée à la ligne et regroupée par mois en deux requêtes dédiées.
  */
-export async function annualMatrix(yearsBack = 2, groupCodes?: number[] | null): Promise<YearMonthlyData[]> {
+export async function annualMatrix(yearsBack = 2, groupCodes?: number[] | null, slpName?: string | null): Promise<YearMonthlyData[]> {
   const currentYear = new Date().getFullYear();
   const firstYear = currentYear - yearsBack;
   const start = new Date(firstYear, 0, 1);
   const end = new Date(currentYear + 1, 0, 1);
   const seg = segmentSql("i", groupCodes);
+  const slp = slpSql("i", slpName);
 
   // Chaque requête renvoie (année, mois 1..12, a). CA et marge sont agrégés
   // séparément : la marge réelle se calcule à la ligne (LATERAL EM) tandis que
   // le CA reste en en-tête — les joindre dupliquerait docTotal par ligne.
   type Row1 = { y: number; m: number; a: number };
   const ym = Prisma.sql`EXTRACT(YEAR FROM i."docDate")::int AS y, EXTRACT(MONTH FROM i."docDate")::int AS m`;
-  const range = Prisma.sql`i."docDate" >= ${start} AND i."docDate" < ${end}`;
+  // Le filtre commercial est replié dans `range` → appliqué aux 8 agrégats.
+  const range = Prisma.sql`i."docDate" >= ${start} AND i."docDate" < ${end}${slp}`;
 
   const [invCa, cnCa, invMargin, cnMargin, invWeight, cnWeight, invProduct, cnProduct] = await Promise.all([
     // CA HT (Invoices) / à déduire (Avoirs) — agrégat en-tête
@@ -603,9 +633,10 @@ export interface WeeklyBucket {
  * de semaines `keys`. Les semaines sans activité ne sont pas renvoyées (la UI
  * comble les trous à 0 via le numéro de semaine).
  */
-export async function weeklyInvoiceSeries(from: Date, to: Date, groupCodes?: number[] | null): Promise<WeeklyBucket[]> {
+export async function weeklyInvoiceSeries(from: Date, to: Date, groupCodes?: number[] | null, slpName?: string | null): Promise<WeeklyBucket[]> {
   const seg = segmentSql("i", groupCodes);
-  const range = Prisma.sql`i."docDate" >= ${from} AND i."docDate" < ${to}`;
+  // Filtre commercial replié dans `range` → appliqué aux CTE CA et marge.
+  const range = Prisma.sql`i."docDate" >= ${from} AND i."docDate" < ${to}${slpSql("i", slpName)}`;
   const isoWeekCols = Prisma.sql`EXTRACT(ISOYEAR FROM i."docDate")::int AS iso_year,
              EXTRACT(WEEK    FROM i."docDate")::int AS week`;
   // CA en en-tête (docTotal) — table SapInvoice / SapCreditNote.
@@ -663,7 +694,8 @@ export interface WeeklyVolumeBucket {
   weightKg: number; // Volume kg (Σ quantity × salesUnitWeight)
 }
 
-export async function weeklyOrderSeries(from: Date, to: Date): Promise<WeeklyVolumeBucket[]> {
+export async function weeklyOrderSeries(from: Date, to: Date, slpName?: string | null): Promise<WeeklyVolumeBucket[]> {
+  const slpHdr = slpName ? Prisma.sql`AND "slpName" = ${slpName}` : Prisma.empty;
   const rows = await prisma.$queryRaw<
     { iso_year: number; week: number; volume: number; weight: number }[]
   >(Prisma.sql`
@@ -672,7 +704,7 @@ export async function weeklyOrderSeries(from: Date, to: Date): Promise<WeeklyVol
              EXTRACT(WEEK    FROM "docDate")::int AS week,
              SUM("docTotal") AS volume
       FROM "SapOrder"
-      WHERE "cancelled" = false AND "docDate" >= ${from} AND "docDate" < ${to}
+      WHERE "cancelled" = false AND "docDate" >= ${from} AND "docDate" < ${to} ${slpHdr}
       GROUP BY 1, 2
     ),
     wt AS (
@@ -682,7 +714,7 @@ export async function weeklyOrderSeries(from: Date, to: Date): Promise<WeeklyVol
       FROM "SapOrderLine" l
       JOIN "SapOrder"   o ON o."docEntry" = l."docEntry"
       LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
-      WHERE o."cancelled" = false AND o."docDate" >= ${from} AND o."docDate" < ${to}
+      WHERE o."cancelled" = false AND o."docDate" >= ${from} AND o."docDate" < ${to} ${slpSql("o", slpName)}
       GROUP BY 1, 2
     )
     SELECT COALESCE(vol.iso_year, wt.iso_year) AS iso_year,
@@ -706,13 +738,14 @@ export async function weeklyOrderSeries(from: Date, to: Date): Promise<WeeklyVol
 export async function orderWeightMaps(
   start: Date,
   end: Date,
+  slpName?: string | null,
 ): Promise<{ byCard: Map<string, number>; bySlp: Map<string, number> }> {
   // 2 GROUP BY SQL au lieu de rapatrier toutes les lignes de la période en JS.
   const weightSelect = Prisma.sql`COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS w
     FROM "SapOrderLine" l
     JOIN "SapOrder" o ON o."docEntry" = l."docEntry"
     LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
-    WHERE o."cancelled" = false AND o."docDate" >= ${start} AND o."docDate" < ${end}`;
+    WHERE o."cancelled" = false AND o."docDate" >= ${start} AND o."docDate" < ${end} ${slpSql("o", slpName)}`;
   const [cardRows, slpRows] = await Promise.all([
     prisma.$queryRaw<{ k: string; w: number }[]>(Prisma.sql`
       SELECT o."cardCode" AS k, ${weightSelect}
@@ -734,7 +767,7 @@ export async function orderWeightMaps(
    ───────────────────────────────────────────────────────────────── */
 
 /** Poids facturé par client (Invoices × Product.salesUnitWeight) sur la fenêtre. */
-export async function invoiceWeightByCard(start: Date, end: Date, cardCodes: string[]): Promise<Map<string, number>> {
+export async function invoiceWeightByCard(start: Date, end: Date, cardCodes: string[], slpName?: string | null): Promise<Map<string, number>> {
   if (cardCodes.length === 0) return new Map();
   const rows = await prisma.$queryRaw<{ k: string; w: number }[]>(Prisma.sql`
     SELECT i."cardCode" AS k, COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS w
@@ -742,7 +775,7 @@ export async function invoiceWeightByCard(start: Date, end: Date, cardCodes: str
     JOIN "SapInvoice" i ON i."docEntry" = l."docEntry"
     LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
     WHERE i."cancelled" = false AND i."docDate" >= ${start} AND i."docDate" < ${end}
-      AND i."cardCode" IN (${Prisma.join(cardCodes)})
+      AND i."cardCode" IN (${Prisma.join(cardCodes)}) ${slpSql("i", slpName)}
     GROUP BY 1`);
   return new Map(rows.map((r) => [r.k, Number(r.w)]));
 }
@@ -795,26 +828,27 @@ export interface MonthDrilldown {
   daily: { day: number; ca: number; weightKg: number }[];   // jours 1..31 (filtré)
 }
 
-export async function monthDrilldown(year: number, month: number, groupCodes?: number[] | null): Promise<MonthDrilldown> {
+export async function monthDrilldown(year: number, month: number, groupCodes?: number[] | null, slpName?: string | null): Promise<MonthDrilldown> {
   const start = new Date(year, month, 1);
   const end = new Date(year, month + 1, 1);
   const seg = segmentWhere(groupCodes);
-  const segRaw = segmentSql("i", groupCodes);
+  const slpW = slpWhere(slpName);
+  const segRaw = Prisma.sql`${segmentSql("i", groupCodes)} ${slpSql("i", slpName)}`;
 
   const [hdr, invMargin, invoices, lines, products] = await Promise.all([
     prisma.sapInvoice.aggregate({
-      where: { docDate: { gte: start, lt: end }, cancelled: false, ...seg },
+      where: { docDate: { gte: start, lt: end }, cancelled: false, ...seg, ...slpW },
       _sum: { docTotal: true },
       _count: { docEntry: true },
     }),
     // Marge RÉELLE du mois (coût EM, lib/cogs) — plus jamais le grossProfit SAP.
     realMarginAgg(prisma, "invoice", start, end, segRaw),
     prisma.sapInvoice.findMany({
-      where: { docDate: { gte: start, lt: end }, cancelled: false, ...seg },
+      where: { docDate: { gte: start, lt: end }, cancelled: false, ...seg, ...slpW },
       select: { docEntry: true, cardCode: true, cardName: true, docDate: true, docTotal: true },
     }),
     prisma.sapInvoiceLine.findMany({
-      where: { invoice: { docDate: { gte: start, lt: end }, cancelled: false, ...seg } },
+      where: { invoice: { docDate: { gte: start, lt: end }, cancelled: false, ...seg, ...slpW } },
       select: { docEntry: true, itemCode: true, itemDescription: true, quantity: true, lineTotal: true },
     }),
     prisma.product.findMany({ select: { itemCode: true, itemName: true, groupName: true, salesUnitWeight: true } }),
@@ -907,9 +941,9 @@ export interface CrmBucket {
   clientsTouches: number;    // # clients distincts
 }
 
-export async function crmActivity(start: Date, end: Date): Promise<CrmBucket> {
+export async function crmActivity(start: Date, end: Date, slpName?: string | null): Promise<CrmBucket> {
   const rows = await prisma.appelLog.findMany({
-    where: { heureAppel: { gte: start, lt: end } },
+    where: { heureAppel: { gte: start, lt: end }, ...(slpName ? { client: clientOwnerWhere(slpName) } : {}) },
     select: { clientId: true, type: true },
   });
   const appels = rows.length;
@@ -962,11 +996,11 @@ export interface ToRelance {
   lastInvoiceDays: number | null;
 }
 
-export async function clientsToRelance(limit = 5): Promise<ToRelance[]> {
+export async function clientsToRelance(limit = 5, slpName?: string | null): Promise<ToRelance[]> {
   const last30 = new Date(); last30.setDate(last30.getDate() - 30);
-  // Clients planifiés
+  // Clients planifiés (scopés au commercial pour un non-admin).
   const planifies = await prisma.client.findMany({
-    where: { joursAppel: { not: null } },
+    where: { joursAppel: { not: null }, ...clientOwnerWhere(slpName) },
     select: { id: true, code: true, nom: true, commercial: true },
   });
   if (planifies.length === 0) return [];

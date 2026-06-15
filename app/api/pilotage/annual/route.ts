@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope, pilotageSlpFilter, scopePayload } from "@/lib/permissions";
 import {
   annualMatrix,
   topClients, topSuppliers, topSalespersons,
@@ -34,12 +35,20 @@ export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
+  // Droits : matrice + top clients scopés au slpName du non-admin ; top
+  // fournisseurs et top commerciaux (vues transverses) réservés aux admins.
+  const scope = await getAccessScope(session);
+  const slp = pilotageSlpFilter(scope);
+  const admin = scope.all;
+
   const url = new URL(req.url);
   const yearsBack = Number.parseInt(url.searchParams.get("years") ?? "2", 10);
   const years = Number.isFinite(yearsBack) ? yearsBack : 2;
   const segment = parseSegment(url.searchParams.get("segment"));
 
-  const cacheKey = `pilotage:annual:${segment}:${years}`;
+  // ⚠️ La clé de cache DOIT inclure le périmètre (slp) — sinon le rapport
+  // scopé d'un commercial serait resservi à un autre / à un admin.
+  const cacheKey = `pilotage:annual:${slp ?? "ALL"}:${segment}:${years}`;
   // ?refresh=1 → purge la clé avant lecture = recalcul garanti.
   if (url.searchParams.get("refresh") === "1") invalidate(cacheKey);
 
@@ -50,14 +59,14 @@ export async function GET(req: Request) {
     const yearEnd = new Date(now.getFullYear() + 1, 0, 1);
 
     const [matrix, clients, suppliers, salespersons] = await Promise.all([
-      annualMatrix(years, groupCodes),
-      topClients(yearStart, yearEnd, 8, groupCodes),
-      topSuppliers(yearStart, yearEnd, 6),
-      topSalespersons(yearStart, yearEnd, 6, groupCodes),
+      annualMatrix(years, groupCodes, slp),
+      topClients(yearStart, yearEnd, 8, groupCodes, slp),
+      admin ? topSuppliers(yearStart, yearEnd, 6) : Promise.resolve([]),
+      admin ? topSalespersons(yearStart, yearEnd, 6, groupCodes) : Promise.resolve([]),
     ]);
 
     const [weightByClient, weightByVendor, weightBySlp] = await Promise.all([
-      invoiceWeightByCard(yearStart, yearEnd, clients.map((c) => c.cardCode)),
+      invoiceWeightByCard(yearStart, yearEnd, clients.map((c) => c.cardCode), slp),
       pdnWeightByCard(yearStart, yearEnd, suppliers.map((s) => s.cardCode)),
       invoiceWeightBySlp(yearStart, yearEnd, salespersons.map((s) => s.slpName), groupCodes),
     ]);
@@ -68,6 +77,7 @@ export async function GET(req: Request) {
       clients: clients.map((c) => ({ ...c, weightKg: weightByClient.get(c.cardCode) ?? 0 })),
       suppliers: suppliers.map((s) => ({ ...s, weightKg: weightByVendor.get(s.cardCode) ?? 0 })),
       salespersons: salespersons.map((s) => ({ ...s, weightKg: weightBySlp.get(s.slpName) ?? 0 })),
+      scope: scopePayload(scope),
     };
   });
 

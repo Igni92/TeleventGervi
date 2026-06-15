@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope, pilotageSlpFilter } from "@/lib/permissions";
 import { weeklyInvoiceSeries } from "@/lib/pilotage";
 import { isoWeek } from "@/lib/iso-week";
 import { groupCodesForSegment, parseSegment } from "@/lib/segments";
@@ -20,14 +21,18 @@ export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
+  // Droits : série CA/marge scopée au slpName du non-admin (clé cache incluse).
+  const scope = await getAccessScope(session);
+  const slp = pilotageSlpFilter(scope);
+
   const segment = parseSegment(new URL(req.url).searchParams.get("segment"));
 
-  const payload = await cached(`pilotage:weekly:${segment}`, 120_000, async () => {
+  const payload = await cached(`pilotage:weekly:${slp ?? "ALL"}:${segment}`, 120_000, async () => {
     const now = new Date();
     const from = new Date(now.getFullYear() - 1, 0, 1); // 1er janv N-1
     const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1); // inclut aujourd'hui
 
-    const weeks = await weeklyInvoiceSeries(from, to, groupCodesForSegment(segment));
+    const weeks = await weeklyInvoiceSeries(from, to, groupCodesForSegment(segment), slp);
     const cur = isoWeek(now);
 
     return {
