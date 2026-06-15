@@ -29,6 +29,13 @@ import { sap } from "@/lib/sapb1";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
+interface SapBPAddress {
+  AddressName?: string | null;
+  AddressType?: string | null; // "bo_ShipTo" (livraison) | "bo_BillTo" (facturation)
+  City?: string | null;
+  ZipCode?: string | null;
+  Country?: string | null;
+}
 interface SapBP {
   CardCode: string;
   CardName: string;
@@ -37,16 +44,45 @@ interface SapBP {
   Phone1?: string;
   Frozen?: "tYES" | "tNO";
   U_Actif?: string | null;
-  // Localisation (adresse par défaut du BusinessPartner) — pour la carte géo.
+  // Localisation — pour la carte géo. On géolocalise sur l'adresse de LIVRAISON
+  // (ship-to dans BPAddresses), pas la facturation. Les champs de tête
+  // (City/ZipCode/Country = adresse par défaut/facturation) servent de repli.
   City?: string | null;
   ZipCode?: string | null;
   Country?: string | null;
+  ShipToDefault?: string | null; // AddressName de l'adresse de livraison par défaut
+  BPAddresses?: SapBPAddress[];
 }
 interface SalesPerson { SalesEmployeeCode: number; SalesEmployeeName: string }
 // ⚠️ BusinessPartnerGroups (groupes CLIENTS) = Code/Name (≠ ItemGroups = Number/GroupName).
 interface SapGroup { Code: number; Name: string }
 
 const isActif = (v: unknown) => String(v ?? "").trim().toUpperCase() === "O";
+
+const pickStr = (v?: string | null) => (v && v.trim() ? v.trim() : null);
+
+/**
+ * Adresse de LIVRAISON (ship-to) du client, pour la géolocalisation de la carte.
+ * Priorité : ship-to par défaut (ShipToDefault) → 1ʳᵉ ship-to → 1ʳᵉ bill-to →
+ * champs de tête du BP (repli). On ne géolocalise JAMAIS sur la facturation si
+ * une adresse de livraison existe (demande métier).
+ */
+function deliveryAddress(bp: SapBP): { city: string | null; zip: string | null; country: string | null; usedShipTo: boolean } {
+  const addrs = bp.BPAddresses ?? [];
+  const shipTos = addrs.filter((a) => a.AddressType === "bo_ShipTo");
+  const chosen =
+    (bp.ShipToDefault ? shipTos.find((a) => a.AddressName === bp.ShipToDefault) : undefined)
+    ?? shipTos[0]
+    ?? addrs.find((a) => a.AddressType === "bo_BillTo")
+    ?? addrs[0]
+    ?? null;
+  return {
+    city: pickStr(chosen?.City) ?? pickStr(bp.City),
+    zip: pickStr(chosen?.ZipCode) ?? pickStr(bp.ZipCode),
+    country: pickStr(chosen?.Country) ?? pickStr(bp.Country),
+    usedShipTo: shipTos.length > 0,
+  };
+}
 
 /** Type client dérivé du nom de groupe SAP. GMS pour tous les groupes « GMS … ». */
 function clientTypeFromGroup(groupName: string | null): string | null {
@@ -72,11 +108,18 @@ export async function POST(req: NextRequest) {
     const groups = await sap.getAll<SapGroup>("BusinessPartnerGroups?$select=Code,Name", { env: "prod" });
     groupName = new Map(groups.map((g) => [g.Code, g.Name]));
 
-    bps = await sap.getAll<SapBP>(
-      "BusinessPartners?$select=CardCode,CardName,GroupCode,SalesPersonCode,Phone1,U_Actif,Frozen,City,ZipCode,Country"
-      + "&$filter=CardType eq 'cCustomer' and Frozen eq 'tNO'",
-      { pageSize: 500, maxPages: 100, env: "prod" },
-    );
+    const baseSel = "CardCode,CardName,GroupCode,SalesPersonCode,Phone1,U_Actif,Frozen,City,ZipCode,Country";
+    const filter = "&$filter=CardType eq 'cCustomer' and Frozen eq 'tNO'";
+    const opts = { pageSize: 500, maxPages: 100, env: "prod" as const };
+    try {
+      // Idéal : on rapatrie aussi les adresses (BPAddresses) pour géolocaliser
+      // sur l'adresse de LIVRAISON (ship-to).
+      bps = await sap.getAll<SapBP>(`BusinessPartners?$select=${baseSel},ShipToDefault,BPAddresses${filter}`, opts);
+    } catch {
+      // Certaines versions de Service Layer refusent une collection dans $select
+      // → repli sur l'adresse de tête (facturation) pour ne pas casser l'import.
+      bps = await sap.getAll<SapBP>(`BusinessPartners?$select=${baseSel}${filter}`, opts);
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ ok: false, error: `Lecture SAP échouée : ${msg}` }, { status: 502 });
@@ -95,6 +138,7 @@ export async function POST(req: NextRequest) {
 
   let activated = 0;
   let gmsCount = 0;
+  let shipToCount = 0;
   const CHUNK = 50;
   for (let i = 0; i < bps.length; i += CHUNK) {
     const slice = bps.slice(i, i + CHUNK);
@@ -109,9 +153,9 @@ export async function POST(req: NextRequest) {
       // règle métier). Réassignation manuelle préservée via le COALESCE plus bas.
       // Vendeur : GMS + actif → MM (1ʳᵉ passe).
       const vendeur = (type === "GMS" && active) ? "MM" : null;
-      const city = bp.City?.trim() || null;
-      const zip = bp.ZipCode?.trim() || null;
-      const country = bp.Country?.trim() || null;
+      // Géoloc carte = adresse de LIVRAISON (ship-to), repli facturation/tête.
+      const { city, zip, country, usedShipTo } = deliveryAddress(bp);
+      if (usedShipTo) shipToCount++;
       return prisma.$executeRaw`
         INSERT INTO "Client" ("id","code","nom","type","commercial","vendeur","tel1","joursAppel","sapGroupCode","sapGroupName","city","zipCode","country","activeTelevente","createdAt","updatedAt")
         VALUES (gen_random_uuid()::text, ${bp.CardCode}, ${bp.CardName || bp.CardCode}, ${type}, 'JMG', ${vendeur}, ${bp.Phone1 ?? null}, '1,2,3,4,5,6', ${grpCode}, ${grpName}, ${city}, ${zip}, ${country}, ${active}, NOW(), NOW())
@@ -143,5 +187,6 @@ export async function POST(req: NextRequest) {
     activated,
     manual: bps.length - activated,
     gms: gmsCount,
+    shipTo: shipToCount, // clients géolocalisés sur leur adresse de livraison
   });
 }

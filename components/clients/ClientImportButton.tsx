@@ -48,7 +48,8 @@ export function ClientImportButton() {
       if (!r.ok || !j.ok) { toast.error(j.error || "Échec de l'import"); return; }
       toast.success(
         `${j.pulled} clients ${clear ? "importés" : "synchronisés"} (${j.company}) · ` +
-        `${j.activated} actifs · ${j.manual} à activer · ${j.gms} en GMS`,
+        `${j.activated} actifs · ${j.gms} en GMS` +
+        (typeof j.shipTo === "number" ? ` · ${j.shipTo} géoloc. livraison` : ""),
         { duration: 10000 },
       );
       router.refresh();
