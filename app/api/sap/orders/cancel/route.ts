@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { sap } from "@/lib/sapb1";
+import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
 
 /**
  * POST /api/sap/orders/cancel
@@ -23,6 +24,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // Anti-IDOR : vérifier l'appartenance du client AVANT d'annuler.
+    const owner = await sap.get<{ CardCode: string }>(`Orders(${body.docEntry})?$select=CardCode`);
+    if (!(await cardCodeInScope(await getAccessScope(session), owner.CardCode)))
+      return NextResponse.json({ error: "Commande hors de votre périmètre" }, { status: 403 });
     await sap.post(`Orders(${body.docEntry})/Cancel`, undefined);
     console.log(`[Order] Annulée — DocEntry ${body.docEntry} (DB ${process.env.SAP_B1_COMPANY_DB})`);
     return NextResponse.json({ ok: true, docEntry: body.docEntry, cancelled: true });

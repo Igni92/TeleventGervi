@@ -10,6 +10,7 @@ import {
   pullPurchaseReturns,
   syncClientGroupsFromMirror,
 } from "@/lib/sapMirror";
+import { requireAdmin } from "@/lib/permissions";
 
 /**
  * POST /api/sap/sync/backfill?from=YYYY-MM-DD
@@ -31,6 +32,9 @@ import {
 export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  // Reconstruction globale du miroir SAP → réservé aux admins.
+  if (!(await requireAdmin(session)))
+    return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
 
   const url = new URL(req.url);
   const fromParam = url.searchParams.get("from");

@@ -10,6 +10,7 @@ import {
   pullPurchaseReturns,
   syncClientGroupsFromMirror,
 } from "@/lib/sapMirror";
+import { requireAdmin } from "@/lib/permissions";
 
 /**
  * POST /api/sap/sync/mirror
@@ -18,14 +19,29 @@ import {
  * `UpdateDate > cursor`. Pensé pour être appelé par un cron toutes les N min
  * (ex. 5 min) ou par /loop côté Claude Code.
  *
+ * Accès : admin (session) OU secret de cron (`CRON_SECRET`, via en-tête
+ * `Authorization: Bearer …` ou `x-cron-secret`). Empêche un commercial de
+ * déclencher des pulls SAP globaux tout en laissant le job planifié opérer.
+ *
  * Throttle serveur 60 s pour empêcher les concurrences agressives.
  */
 
 const THROTTLE_MS = 60_000;
 
-export async function POST() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+export async function POST(req: Request) {
+  const cronSecret = process.env.CRON_SECRET;
+  const provided =
+    req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ??
+    req.headers.get("x-cron-secret") ??
+    undefined;
+  const isCron = Boolean(cronSecret) && provided === cronSecret;
+
+  if (!isCron) {
+    const session = await auth();
+    if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+    if (!(await requireAdmin(session)))
+      return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+  }
 
   const cursor = await prisma.sapMirrorCursor.upsert({
     where: { id: 1 },

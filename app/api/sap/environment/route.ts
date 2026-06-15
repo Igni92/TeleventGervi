@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
+import { requireAdmin } from "@/lib/permissions";
 
 /**
  * Environnement SAP actif (prod ↔ test) — basculable à chaud.
@@ -24,6 +25,9 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  // Bascule prod↔test = impacte TOUTES les écritures SAP → réservé aux admins.
+  if (!(await requireAdmin(session)))
+    return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
 
   const body = await req.json().catch(() => null);
   const env = body?.env;

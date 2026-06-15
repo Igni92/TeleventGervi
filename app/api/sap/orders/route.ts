@@ -7,6 +7,7 @@ import { getLotMaps, resolveLotDetailed, LOT_PENDING } from "@/lib/lotResolver";
 import { chooseLot } from "@/lib/gervifrais-calc";
 import { getDefaultCarrier } from "@/lib/clientCarriers";
 import { colisInfo } from "@/lib/colis";
+import { getAccessScope, clientInScope } from "@/lib/permissions";
 
 /**
  * Cache module-level du référentiel AdditionalExpenses SAP.
@@ -114,6 +115,9 @@ export async function POST(req: NextRequest) {
     select: { id: true, code: true, nom: true },
   });
   if (!client) return NextResponse.json({ error: "Client introuvable" }, { status: 404 });
+  // Anti-IDOR : un commercial ne crée de commande que pour SES clients.
+  if (!(await clientInScope(await getAccessScope(session), body.clientId)))
+    return NextResponse.json({ error: "Client hors de votre périmètre" }, { status: 403 });
 
   // Get cardCode from deliveryMode (or default mode, or client.code as fallback)
   let cardCode = client.code;

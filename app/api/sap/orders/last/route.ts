@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { unitInfo } from "@/lib/gervifrais-calc";
+import { getAccessScope, clientInScope } from "@/lib/permissions";
 
 /**
  * GET /api/sap/orders/last?clientId=xxx
@@ -15,6 +16,9 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   const clientId = new URL(req.url).searchParams.get("clientId");
   if (!clientId) return NextResponse.json({ error: "clientId requis" }, { status: 400 });
+  // Anti-IDOR : la dernière commande n'est lisible que pour SES clients.
+  if (!(await clientInScope(await getAccessScope(session), clientId)))
+    return NextResponse.json({ error: "Client hors de votre périmètre" }, { status: 403 });
 
   // CardCodes du client
   const client = await prisma.client.findUnique({ where: { id: clientId }, select: { code: true } });

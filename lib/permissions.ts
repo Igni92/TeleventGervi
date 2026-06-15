@@ -154,6 +154,33 @@ export async function clientIdsInScope(scope: AccessScope): Promise<string[] | n
   return rows.map((r) => r.id);
 }
 
+/**
+ * Vérifie qu'un `cardCode` SAP est dans le périmètre d'accès :
+ *   - admin                     → toujours `true`
+ *   - commercial mappé          → `true` si un Client du périmètre
+ *     (Client.commercial = slpName OU Client.vendeur = slpName) porte ce
+ *     `code` OU possède un `ClientDeliveryMode.sapCardCode` égal au cardCode.
+ *   - non mappé / inconnu       → `false`
+ *
+ * Pendant des routes SAP par `docEntry` (factures/commandes) : on résout le
+ * `CardCode` du document puis on vérifie l'appartenance — empêche l'IDOR par
+ * énumération de DocEntry (lecture/annulation de documents d'un autre client).
+ */
+export async function cardCodeInScope(scope: AccessScope, cardCode: string): Promise<boolean> {
+  if (scope.all) return true;
+  if (!scope.slpName || !cardCode) return false;
+  const rows = await prisma.$queryRawUnsafe<{ n: number }[]>(
+    `SELECT 1 AS n FROM "Client" c
+     LEFT JOIN "ClientDeliveryMode" dm ON dm."clientId" = c."id"
+     WHERE ("commercial" = $1 OR "vendeur" = $1)
+       AND (c."code" = $2 OR dm."sapCardCode" = $2)
+     LIMIT 1`,
+    scope.slpName,
+    cardCode,
+  );
+  return rows.length > 0;
+}
+
 /** Forme sérialisable du scope pour les réponses API (consommée par l'UI). */
 export function scopePayload(scope: AccessScope) {
   return scope.all

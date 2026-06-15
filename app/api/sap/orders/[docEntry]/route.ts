@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { sap } from "@/lib/sapb1";
+import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
 
 /**
  * GET   /api/sap/orders/[docEntry]   → détail d'une commande (lignes) pour affichage/édition
@@ -23,6 +24,9 @@ export async function GET(_req: NextRequest, { params }: { params: { docEntry: s
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   try {
     const o = await sap.get<Order>(`Orders(${params.docEntry})`);
+    // Anti-IDOR : seul le périmètre propriétaire du client peut lire la commande.
+    if (!(await cardCodeInScope(await getAccessScope(session), o.CardCode)))
+      return NextResponse.json({ error: "Commande hors de votre périmètre" }, { status: 403 });
     return NextResponse.json({
       docEntry: o.DocEntry, docNum: o.DocNum, status: o.DocumentStatus,
       editable: o.DocumentStatus === "bost_Open",
@@ -58,6 +62,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { docEntry: 
   if (body.comments !== undefined) patch.Comments = body.comments;
 
   try {
+    // Anti-IDOR : vérifier l'appartenance AVANT de modifier la commande.
+    const owner = await sap.get<Order>(`Orders(${params.docEntry})`);
+    if (!(await cardCodeInScope(await getAccessScope(session), owner.CardCode)))
+      return NextResponse.json({ error: "Commande hors de votre périmètre" }, { status: 403 });
     await sap.patch(`Orders(${params.docEntry})`, patch);
     const o = await sap.get<Order>(`Orders(${params.docEntry})`);
     return NextResponse.json({ ok: true, total: o.DocTotal ?? 0, totalHT: (o.DocTotal ?? 0) - (o.VatSum ?? 0) });
