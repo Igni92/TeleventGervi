@@ -17,23 +17,18 @@
 
 ---
 
-## A. Cohérence des chiffres (financier — VALIDER la définition voulue)
-> Changent des montants/classements que le patron voit. À trancher puis coder
-> AVEC un test `lib/pilotage.test.ts` + validation sur données réelles.
+## A. Cohérence des chiffres (financier)
 
-1. **Top clients en CA brut** — `lib/pilotage.ts:289` · Majeur · quick win.
-   `ca = _sum.docTotal` (factures, **avoirs non déduits**) alors que `margin`
-   utilise déjà `realMarginByKey` (net) et le KPI à côté est en CA net. Répliquer
-   le pattern de `topSuppliers` (PDN − retours) : grouper `SapCreditNote` par
-   `cardCode`, netter, **re-classer** sur le net, `take(limit)`.
-2. **Base de la marge % incohérente écran 1 vs écran 2** — `lib/pilotage.ts:366,373`
-   (aggregateActivity) vs `:111` (aggregateKpi) · Majeur · quick win.
-   Écran 1 : `marginPct = margin / volume` avec `volume = DocTotal` (services
-   inclus) ; Écran 2 : divise par `caProductNet` (base produit). Ajouter une base
-   « CA produit net » à `ActivityBucket` et diviser la marge par celle-ci.
-3. **Panier moyen biaisé par les avoirs** — `lib/pilotage.ts:171` · Mineur.
-   Numérateur net (− avoirs), dénominateur = nb factures seules. Documenter ou
-   diviser le CA **brut** par le nb de factures.
+1. ✅ **FAIT (A1)** — **Top clients en CA NET.** `topClients` nette désormais les
+   avoirs (`SapCreditNote`) avant classement (cœur pur `lib/pilotage-rank.ts`,
+   testé). Définition retenue : NET (cohérent avec la règle métier centrale).
+2. ✅ **FAIT (A2)** — **Base de la marge % Écran 1 = CA produit.** `aggregateActivity`
+   divise la marge par `SUM(lineTotal) FILTER (itemCode NOT NULL)` (services
+   exclus), comme `aggregateKpi` → les deux écrans concordent.
+3. **Panier moyen biaisé par les avoirs** — `lib/pilotage.ts` (aggregateKpi
+   `avgBasket = ca / invoicesCount`) · Mineur · RESTE. Numérateur net (− avoirs),
+   dénominateur = nb factures seules. Documenter ou diviser le CA **brut** par le
+   nb de factures (décision : quelle définition du « panier moyen » ?).
 
 ## B. Périmètre & modèle de données (ARCHI — décision structurante)
 4. **Deux définitions de périmètre incompatibles** — `lib/permissions.ts:131`
@@ -88,9 +83,8 @@
     reste logistique, ou y mettre l'encours/limite réels).
 
 ## E. Performance (chantiers)
-18. **N+1 `topSalespersonsOrder`** — `lib/pilotage.ts:~458` · Majeur · quick win.
-    Boucle `findMany(distinct cardCode)` par commercial → un seul
-    `COUNT(DISTINCT cardCode)` groupé par `slpName` (raw SQL). À tester.
+18. ✅ **FAIT (E18)** — **N+1 `topSalespersonsOrder` supprimé** : une seule requête
+    groupée `COUNT(DISTINCT cardCode) … GROUP BY slpName` (résultat identique).
 19. **N+1 transporteurs** — `lib/clientCarriers.ts:227,252` (`ensureCarrier` en
     boucle) · Majeur · chantier. Batch `findMany({sapValue:{in:codes}})` +
     `createMany` ; remplacer `findFirst+create` par `upsert`.
@@ -103,9 +97,9 @@
 22. **Next.js vulnérable** — `next@14.2.18` · **Bloquant** · chantier. GHSA-f82v-jwr5-mffw
     « Authorization Bypass in Next.js Middleware » (l'authZ des pages repose sur
     `middleware.ts`). Monter à une version corrigée (breaking, à planifier/tester).
-23. **`npm ci` cassé** — `package-lock.json` désynchronisé de `package.json` ·
-    Majeur · quick win. Régénérer le lockfile (review du diff) pour rétablir les
-    installs reproductibles en CI/déploiement.
+23. ~~`npm ci` cassé~~ — **requalifié non-actionnable** : vérifié, `npm install`
+    ne modifie PAS `package-lock.json` (lockfile en sync). L'échec de `npm ci`
+    observé était environnemental (npm/registry), pas une dérive du lockfile.
 24. **RGPD — traçabilité** — aucun journal d'accès/modif des PII (contacts, compta,
     appels) · Majeur · chantier (art. 30/32). Table d'audit.
 25. **RGPD — rétention** — aucune politique ni purge (`AppelLog`, `Contact`,
