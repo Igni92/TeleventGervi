@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { isAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
 function todayStart() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
@@ -36,6 +37,8 @@ export async function GET() {
 export async function PATCH(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  // Gestion d'équipe (présence + % stock de N'IMPORTE quel commercial) → admins uniquement.
+  if (!isAdmin(session)) return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
 
   let body: { userId?: string; present?: boolean; stockSharePct?: number };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }

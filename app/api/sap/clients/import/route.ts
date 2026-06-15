@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { isAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 
@@ -54,6 +55,8 @@ function clientTypeFromGroup(groupName: string | null): string | null {
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  // Import global (peut VIDER la table Client en CASCADE) → admins uniquement.
+  if (!isAdmin(session)) return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
 
   const body = await req.json().catch(() => ({}));
   const clear = body?.clear === true;

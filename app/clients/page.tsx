@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { isAdmin } from "@/lib/permissions";
 import { ClientTable } from "@/components/ClientTable";
 import { ClientImportButton } from "@/components/clients/ClientImportButton";
 
@@ -8,6 +9,8 @@ export const metadata = { title: "Clients" };
 export default async function ClientsPage() {
   const session = await auth();
   if (!session) redirect("/login");
+  // Import SAP global (peut vider la base Client) = action admin (cf. garde serveur).
+  const admin = isAdmin(session);
 
   return (
     <div className="space-y-6 animate-fade-up">
@@ -21,7 +24,7 @@ export default async function ClientsPage() {
             Gérez votre base, vos contacts et les plans d&apos;appel.
           </p>
         </div>
-        <ClientImportButton />
+        {admin && <ClientImportButton />}
       </header>
       <ClientTable />
     </div>

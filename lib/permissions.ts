@@ -25,6 +25,17 @@ export const ADMIN_EMAILS = [
   "m.mandine@gervifrais.com",
 ] as const;
 
+/**
+ * True si la session correspond à un email admin (accès global). Synchrone : les
+ * admins sont déterminés par email seul (aucun accès DB) — à utiliser pour
+ * verrouiller les routes/actions réservées aux administrateurs (imports, resync,
+ * (ré)assignation de portefeuille, gestion d'équipe…).
+ */
+export function isAdmin(session: Session | null): boolean {
+  const email = session?.user?.email?.trim().toLowerCase() ?? null;
+  return !!email && ADMIN_EMAILS.some((a) => a.toLowerCase() === email);
+}
+
 /** Message UI standard pour un compte non relié à un commercial. */
 export const UNMAPPED_MESSAGE =
   "Compte non relié à un commercial — contactez l'administrateur.";

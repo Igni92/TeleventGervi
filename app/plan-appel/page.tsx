@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { isAdmin } from "@/lib/permissions";
 import { PlanAppel } from "@/components/plan-appel/PlanAppel";
 import { ResyncButton } from "@/components/admin/ResyncButton";
 
@@ -9,6 +10,9 @@ export const dynamic = "force-dynamic";
 export default async function PlanAppelPage() {
   const session = await auth();
   if (!session) redirect("/login");
+  // Resync (purge + reconstruction du miroir PROD) = action admin : bouton masqué
+  // aux non-admins, qui recevraient sinon un 403 (cf. garde serveur full-reset).
+  const admin = isAdmin(session);
 
   return (
     <div className="space-y-6 animate-fade-up">
@@ -24,7 +28,7 @@ export default async function PlanAppelPage() {
             et les jours d&apos;appel.
           </p>
         </div>
-        <ResyncButton />
+        {admin && <ResyncButton />}
       </header>
       <PlanAppel />
     </div>
