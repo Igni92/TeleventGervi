@@ -95,11 +95,13 @@ export async function POST(req: NextRequest) {
       const grpName = grpCode != null ? groupName.get(grpCode) ?? null : null;
       const type = clientTypeFromGroup(grpName);
       if (type === "GMS") gmsCount++;
-      // Commercial = null par défaut (affecté à la main). Vendeur : GMS + actif → MM (1ʳᵉ passe).
+      // Commercial = JMG par défaut (un client sans commercial revient à JMG —
+      // règle métier). Réassignation manuelle préservée via le COALESCE plus bas.
+      // Vendeur : GMS + actif → MM (1ʳᵉ passe).
       const vendeur = (type === "GMS" && active) ? "MM" : null;
       return prisma.$executeRaw`
         INSERT INTO "Client" ("id","code","nom","type","commercial","vendeur","tel1","joursAppel","sapGroupCode","sapGroupName","activeTelevente","createdAt","updatedAt")
-        VALUES (gen_random_uuid()::text, ${bp.CardCode}, ${bp.CardName || bp.CardCode}, ${type}, NULL, ${vendeur}, ${bp.Phone1 ?? null}, '1,2,3,4,5,6', ${grpCode}, ${grpName}, ${active}, NOW(), NOW())
+        VALUES (gen_random_uuid()::text, ${bp.CardCode}, ${bp.CardName || bp.CardCode}, ${type}, 'JMG', ${vendeur}, ${bp.Phone1 ?? null}, '1,2,3,4,5,6', ${grpCode}, ${grpName}, ${active}, NOW(), NOW())
         ON CONFLICT ("code") DO UPDATE SET
           "nom" = EXCLUDED."nom",
           "type" = EXCLUDED."type",

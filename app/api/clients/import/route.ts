@@ -53,8 +53,9 @@ export async function POST(req: NextRequest) {
           updated++;
         } else {
           await prisma.client.create({
-            // Par défaut : Lun→Sam (1,2,3,4,5,6), pas le dimanche
-            data: { code, joursAppel: "1,2,3,4,5,6", ...data },
+            // Par défaut : commercial JMG (client sans commercial → JMG),
+            // Lun→Sam (1,2,3,4,5,6), pas le dimanche.
+            data: { code, commercial: "JMG", joursAppel: "1,2,3,4,5,6", ...data },
           });
           created++;
         }
