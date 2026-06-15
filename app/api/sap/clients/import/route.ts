@@ -37,6 +37,10 @@ interface SapBP {
   Phone1?: string;
   Frozen?: "tYES" | "tNO";
   U_Actif?: string | null;
+  // Localisation (adresse par défaut du BusinessPartner) — pour la carte géo.
+  City?: string | null;
+  ZipCode?: string | null;
+  Country?: string | null;
 }
 interface SalesPerson { SalesEmployeeCode: number; SalesEmployeeName: string }
 // ⚠️ BusinessPartnerGroups (groupes CLIENTS) = Code/Name (≠ ItemGroups = Number/GroupName).
@@ -69,7 +73,7 @@ export async function POST(req: NextRequest) {
     groupName = new Map(groups.map((g) => [g.Code, g.Name]));
 
     bps = await sap.getAll<SapBP>(
-      "BusinessPartners?$select=CardCode,CardName,GroupCode,SalesPersonCode,Phone1,U_Actif,Frozen"
+      "BusinessPartners?$select=CardCode,CardName,GroupCode,SalesPersonCode,Phone1,U_Actif,Frozen,City,ZipCode,Country"
       + "&$filter=CardType eq 'cCustomer' and Frozen eq 'tNO'",
       { pageSize: 500, maxPages: 100, env: "prod" },
     );
@@ -77,6 +81,12 @@ export async function POST(req: NextRequest) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ ok: false, error: `Lecture SAP échouée : ${msg}` }, { status: 502 });
   }
+
+  // Colonnes géo (cf. scripts/ddl-client-geo.mjs) — créées ici de façon
+  // défensive pour que l'INSERT enrichi ne casse pas si le DDL n'a pas tourné.
+  await prisma.$executeRawUnsafe(`ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "city" TEXT;`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "zipCode" TEXT;`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "country" TEXT;`);
 
   if (clear) {
     // CASCADE → vide aussi appels, rappels, contacts, modes de livraison, incidents.
@@ -99,9 +109,12 @@ export async function POST(req: NextRequest) {
       // règle métier). Réassignation manuelle préservée via le COALESCE plus bas.
       // Vendeur : GMS + actif → MM (1ʳᵉ passe).
       const vendeur = (type === "GMS" && active) ? "MM" : null;
+      const city = bp.City?.trim() || null;
+      const zip = bp.ZipCode?.trim() || null;
+      const country = bp.Country?.trim() || null;
       return prisma.$executeRaw`
-        INSERT INTO "Client" ("id","code","nom","type","commercial","vendeur","tel1","joursAppel","sapGroupCode","sapGroupName","activeTelevente","createdAt","updatedAt")
-        VALUES (gen_random_uuid()::text, ${bp.CardCode}, ${bp.CardName || bp.CardCode}, ${type}, 'JMG', ${vendeur}, ${bp.Phone1 ?? null}, '1,2,3,4,5,6', ${grpCode}, ${grpName}, ${active}, NOW(), NOW())
+        INSERT INTO "Client" ("id","code","nom","type","commercial","vendeur","tel1","joursAppel","sapGroupCode","sapGroupName","city","zipCode","country","activeTelevente","createdAt","updatedAt")
+        VALUES (gen_random_uuid()::text, ${bp.CardCode}, ${bp.CardName || bp.CardCode}, ${type}, 'JMG', ${vendeur}, ${bp.Phone1 ?? null}, '1,2,3,4,5,6', ${grpCode}, ${grpName}, ${city}, ${zip}, ${country}, ${active}, NOW(), NOW())
         ON CONFLICT ("code") DO UPDATE SET
           "nom" = EXCLUDED."nom",
           "type" = EXCLUDED."type",
@@ -112,6 +125,10 @@ export async function POST(req: NextRequest) {
           "tel1" = EXCLUDED."tel1",
           "sapGroupCode" = EXCLUDED."sapGroupCode",
           "sapGroupName" = EXCLUDED."sapGroupName",
+          -- localisation SAP : on rafraîchit, en conservant l'ancienne valeur si SAP renvoie vide
+          "city" = COALESCE(EXCLUDED."city", "Client"."city"),
+          "zipCode" = COALESCE(EXCLUDED."zipCode", "Client"."zipCode"),
+          "country" = COALESCE(EXCLUDED."country", "Client"."country"),
           "activeTelevente" = "Client"."activeTelevente" OR EXCLUDED."activeTelevente",
           "updatedAt" = NOW();
       `;

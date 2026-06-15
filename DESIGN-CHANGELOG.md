@@ -214,3 +214,25 @@ Vérif : **tsc 0 erreur · 35/35 tests**. (CSS/JS → HMR, F5 si besoin.)
 - Skeletons de chargement (vs `—`).
 - Propager les primitives aux pages **clients / products / entrées / fabrication**.
 - Itérations council suivantes jusqu'à convergence (max 5).
+
+---
+
+## 🗺️ Carte « Où je livre le plus » — Écran 3 du dashboard (NOUVEAU)
+
+3ᵉ écran du slider `/dashboard` (à côté de Commercial · BL et Comptable · Annuel),
+pour visualiser **où l'on livre le plus**, à partir de l'adresse SAP des clients.
+
+| Élément | Détail |
+|---------|--------|
+| `FranceChoropleth` (NOUVEAU) | Choroplèthe des départements métropolitains + Corse — remplissage par intensité de la métrique (rampe brand, cohérente avec la Heatmap). Tooltip CA/marge/volume/BL/clients. Fond statique `public/geo/fr-departements.json`. |
+| `WorldBubbleMap` (NOUVEAU) | Carte monde à **bulles** (export + DOM : Guadeloupe, Réunion, Maldives…). Le fond monde est décoratif ; la donnée est portée par les bulles placées au centroïde de chaque pays/DOM → même les micro-États apparaissent. |
+| `Donut` (réutilisé) | Camembert de **répartition EXPORT / GMS / CHR** selon la métrique active. |
+| Top zones + Totaux | `BarList` des zones les plus livrées + panneau totaux (CA, marge, volume, BL, clients) avec part **non localisée** (adresse SAP manquante). |
+
+- **Métrique commune** sélectionnable : CA facturé · Marge € · Volume (kg/t) · Nb de BL.
+- **Périmètre** : segments **EXPORT + GMS + CHR** uniquement, regroupés (cf. `lib/segments`).
+- **Source** : `/api/pilotage/geo` → `lib/pilotageGeo` (facturé 12 mois glissants, marge réelle coût EM `lib/cogs`, scope commercial + « voir comme » comme le reste du pilotage).
+- **Localisation** : `Client.city/zipCode/country` (cache adresse SAP, alimenté par l'import clients) → département FR déduit du code postal (`lib/geo/zip`), pays pour l'export (`lib/geo/countries`). DDL : `scripts/ddl-client-geo.mjs`. Fonds de carte régénérables via `scripts/prepare-geo-assets.mjs`.
+- Cartes via **visx** (`@visx/geo` — Mercator/NaturalEarth), responsive, reduced-motion respecté.
+
+> ⚠️ Pré-requis données : lancer `node scripts/ddl-client-geo.mjs` puis **relancer l'import clients SAP** une fois pour peupler ville/CP/pays.

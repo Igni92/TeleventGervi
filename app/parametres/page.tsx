@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { requireAdmin } from "@/lib/permissions";
 import { ParametresPanel } from "@/components/settings/ParametresPanel";
 
 export const metadata = { title: "Paramètres" };
@@ -8,6 +9,8 @@ export const dynamic = "force-dynamic";
 export default async function ParametresPage() {
   const session = await auth();
   if (!session) redirect("/login");
+  // L'import clients SAP (action sensible) n'apparaît dans Paramètres que pour un admin.
+  const admin = await requireAdmin(session);
 
   return (
     <div className="space-y-6 animate-fade-up">
@@ -22,7 +25,7 @@ export default async function ParametresPage() {
           reste mémorisé sur ce poste.
         </p>
       </header>
-      <ParametresPanel />
+      <ParametresPanel admin={admin} />
     </div>
   );
 }

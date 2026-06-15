@@ -217,7 +217,7 @@ async function buildFromTrcl(rows: TrclRow[]): Promise<ClientCarriersResult | nu
   if (byCode.size === 0) return null; // client absent de l'UDT → fallback
 
   // Ligne principale en tête (défaut), puis ordre des lignes de l'UDT.
-  const entries = [...byCode.entries()].sort((a, b) =>
+  const entries = Array.from(byCode.entries()).sort((a, b) =>
     Number(b[1].isDefault) - Number(a[1].isDefault) || a[1].order - b[1].order,
   );
   // Si aucune ligne U_TrspDef='O', la 1ʳᵉ/unique ligne fait office de défaut.
