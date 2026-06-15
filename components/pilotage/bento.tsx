@@ -13,7 +13,8 @@
  * `grid-template-rows: repeat(8, 1fr)` sur un viewport `h-screen overflow-hidden`.
  */
 
-import { ReactNode } from "react";
+import { ReactNode, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { Delta } from "@/components/ui/delta";
 import { Sparkline as VisxSparkline } from "@/components/charts/Sparkline";
@@ -45,7 +46,7 @@ export function Tile({
   colSpan?: number;
   rowSpan?: number;
   title?: string;
-  accent?: "brand" | "emerald" | "rose" | "violet" | "amber";
+  accent?: "brand" | "emerald" | "rose" | "violet" | "amber" | "sky";
   className?: string;
 }) {
   const accentBorder =
@@ -53,6 +54,7 @@ export function Tile({
     accent === "rose"    ? "border-l-rose-500" :
     accent === "violet"  ? "border-l-violet-500" :
     accent === "amber"   ? "border-l-amber-500" :
+    accent === "sky"     ? "border-l-sky-500" :
     accent === "brand"   ? "border-l-brand-500" : "";
   return (
     <section
@@ -69,6 +71,25 @@ export function Tile({
       )}
       <div className="flex-1 min-h-0">{children}</div>
     </section>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   RefreshButton — actualise les données de l'écran (busting du cache
+   serveur via refresh=1). Présent dans l'en-tête de chaque écran stats.
+   ───────────────────────────────────────────────────────────────── */
+export function RefreshButton({ onClick, title = "Actualiser les données" }: { onClick: () => void; title?: string }) {
+  const [spin, setSpin] = useState(false);
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={() => { setSpin(true); onClick(); window.setTimeout(() => setSpin(false), 900); }}
+      className="inline-flex items-center justify-center h-7 w-7 rounded-md bg-secondary/60 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+    >
+      <RefreshCw className={`h-3.5 w-3.5 ${spin ? "animate-spin" : ""}`} />
+    </button>
   );
 }
 

@@ -457,7 +457,7 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
                   type="button"
                   onClick={() => setMode("groups")}
                   className={`px-2 py-1 rounded inline-flex items-center gap-1 transition-colors ${
-                    mode === "groups" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                    mode === "groups" ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
                   <LayoutGrid className="h-3 w-3" /> Groupes
@@ -466,7 +466,7 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
                   type="button"
                   onClick={() => setMode("search")}
                   className={`px-2 py-1 rounded inline-flex items-center gap-1 transition-colors ${
-                    mode === "search" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                    mode === "search" ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
                   <Search className="h-3 w-3" /> Recherche

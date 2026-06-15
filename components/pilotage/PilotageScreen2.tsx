@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUp, ArrowDown, Minus, X } from "lucide-react";
 import {
-  Tile, TopList, formatEuro,
+  Tile, TopList, RefreshButton, formatEuro,
 } from "./bento";
 import {
   useAnnualData, useWeeklyData, type WeeklyPayload,
@@ -49,8 +49,9 @@ function topFmt(m: Metric): ((v: number) => string) | undefined {
  */
 export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = {}) {
   const [segment, setSegment] = useState<Segment>("ALL");
-  const { data } = useAnnualData(segment, viewAs);
-  const { data: weekly } = useWeeklyData(segment, viewAs);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const { data } = useAnnualData(segment, viewAs, refreshNonce);
+  const { data: weekly } = useWeeklyData(segment, viewAs, refreshNonce);
   const [mode, setMode] = useState<Metric>("ca");
   const [view, setView] = useState<Screen2View>("matrix");
   const [drill, setDrill] = useState<{ year: number; month: number } | null>(null);
@@ -104,6 +105,7 @@ export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = 
         onView={setView}
         segment={segment}
         onSegment={setSegment}
+        onRefresh={() => setRefreshNonce((n) => n + 1)}
       />
 
       {view === "matrix" && (
@@ -847,7 +849,7 @@ function MonthDrilldownDrawer({
    À la place : toggle mode CA HT / Poids.
    ───────────────────────────────────────────────────────────────── */
 function Header({
-  screen, period, mode, onMode, showModeToggle, view, onView, segment, onSegment,
+  screen, period, mode, onMode, showModeToggle, view, onView, segment, onSegment, onRefresh,
 }: {
   screen: string;
   period: string;
@@ -858,6 +860,7 @@ function Header({
   onView: (v: Screen2View) => void;
   segment: Segment;
   onSegment: (s: Segment) => void;
+  onRefresh: () => void;
 }) {
   const [now, setNow] = useState<string>("");
   useEffect(() => {
@@ -882,6 +885,7 @@ function Header({
         <span className="text-[11px] text-muted-foreground tnum">{now}</span>
         <SegmentToggle value={segment} onChange={onSegment} />
         {showModeToggle && <ModeToggle value={mode} onChange={onMode} />}
+        <RefreshButton onClick={onRefresh} />
       </div>
     </header>
   );
@@ -902,7 +906,7 @@ function ViewSwitch({ value, onChange }: { value: Screen2View; onChange: (v: Scr
           onClick={() => onChange(t.id)}
           aria-pressed={value === t.id}
           className={`px-2.5 h-7 text-[11.5px] font-semibold tracking-tight rounded transition-colors ${
-            value === t.id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+            value === t.id ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
           }`}
         >
           {t.label}
@@ -923,7 +927,7 @@ function SegmentToggle({ value, onChange }: { value: Segment; onChange: (s: Segm
           onClick={() => onChange(s.id)}
           aria-pressed={value === s.id}
           className={`px-2.5 h-7 text-[11.5px] font-semibold tracking-tight rounded transition-colors ${
-            value === s.id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+            value === s.id ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
           }`}
         >
           {s.label}
@@ -948,7 +952,7 @@ function ModeToggle({ value, onChange }: { value: Metric; onChange: (m: Metric) 
           onClick={() => onChange(o.id)}
           aria-pressed={value === o.id}
           className={`px-2.5 h-7 text-[11.5px] font-semibold tracking-tight rounded transition-colors ${
-            value === o.id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+            value === o.id ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
           }`}
         >
           {o.label}

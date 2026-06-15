@@ -59,18 +59,24 @@ function asSuffix(as?: string | null): string {
   return as ? `&as=${encodeURIComponent(as)}` : "";
 }
 
-export function useActivityData(g: Granularity, as?: string | null) {
+/** Ajoute `refresh=1` quand l'utilisateur a cliqué « Actualiser » (nonce > 0) —
+ *  force le recalcul côté serveur (busting du cache hebdo/mémoire). */
+function withRefresh(url: string, nonce: number): string {
+  return nonce > 0 ? url + (url.includes("?") ? "&" : "?") + "refresh=1" : url;
+}
+
+export function useActivityData(g: Granularity, as?: string | null, nonce = 0) {
   const [data, setData] = useState<ActivityPayload | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     setErr(null);
-    fetch(`/api/pilotage/activity?g=${g}${asSuffix(as)}`, { cache: "no-store" })
+    fetch(withRefresh(`/api/pilotage/activity?g=${g}${asSuffix(as)}`, nonce), { cache: "no-store" })
       .then((r) => r.ok ? r.json() : r.json().then((j) => Promise.reject(j.error ?? r.statusText)))
       .then((j: ActivityPayload) => { if (!cancelled) setData(j); })
       .catch((e) => { if (!cancelled) setErr(String(e)); });
     return () => { cancelled = true; };
-  }, [g, as]);
+  }, [g, as, nonce]);
   return { data, err };
 }
 
@@ -93,16 +99,16 @@ export interface AnnualPayload {
   salespersons: { slpName: string; ca: number; margin: number; activeClients: number; invoices: number; weightKg: number }[];
 }
 
-export function useAnnualData(segment: Segment = "ALL", as?: string | null) {
+export function useAnnualData(segment: Segment = "ALL", as?: string | null, nonce = 0) {
   const [data, setData] = useState<AnnualPayload | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/pilotage/annual?segment=${segment}${asSuffix(as)}`, { cache: "no-store" })
+    fetch(withRefresh(`/api/pilotage/annual?segment=${segment}${asSuffix(as)}`, nonce), { cache: "no-store" })
       .then((r) => r.ok ? r.json() : null)
       .then((j: AnnualPayload | null) => { if (!cancelled && j) setData(j); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [segment, as]);
+  }, [segment, as, nonce]);
   return { data };
 }
 
@@ -117,16 +123,16 @@ export interface ActivityWeeklyPayload {
   weeks: { isoYear: number; week: number; volume: number; weightKg: number }[];
 }
 
-export function useActivityWeekly(as?: string | null) {
+export function useActivityWeekly(as?: string | null, nonce = 0) {
   const [data, setData] = useState<ActivityWeeklyPayload | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/pilotage/activity/weekly${as ? `?as=${encodeURIComponent(as)}` : ""}`, { cache: "no-store" })
+    fetch(withRefresh(`/api/pilotage/activity/weekly${as ? `?as=${encodeURIComponent(as)}` : ""}`, nonce), { cache: "no-store" })
       .then((r) => r.ok ? r.json() : null)
       .then((j: ActivityWeeklyPayload | null) => { if (!cancelled && j) setData(j); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [as]);
+  }, [as, nonce]);
   return { data };
 }
 
@@ -142,16 +148,16 @@ export interface WeeklyPayload {
   weeks: { isoYear: number; week: number; ca: number; margin: number }[];
 }
 
-export function useWeeklyData(segment: Segment = "ALL", as?: string | null) {
+export function useWeeklyData(segment: Segment = "ALL", as?: string | null, nonce = 0) {
   const [data, setData] = useState<WeeklyPayload | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/pilotage/weekly?segment=${segment}${asSuffix(as)}`, { cache: "no-store" })
+    fetch(withRefresh(`/api/pilotage/weekly?segment=${segment}${asSuffix(as)}`, nonce), { cache: "no-store" })
       .then((r) => r.ok ? r.json() : null)
       .then((j: WeeklyPayload | null) => { if (!cancelled && j) setData(j); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [segment, as]);
+  }, [segment, as, nonce]);
   return { data };
 }
 
@@ -187,18 +193,18 @@ export interface GeoPayloadClient extends GeoPayload {
   period: { start: string; end: string };
 }
 
-export function useGeoData(as?: string | null) {
+export function useGeoData(as?: string | null, nonce = 0) {
   const [data, setData] = useState<GeoPayloadClient | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     setErr(null);
-    fetch(`/api/pilotage/geo${as ? `?as=${encodeURIComponent(as)}` : ""}`, { cache: "no-store" })
+    fetch(withRefresh(`/api/pilotage/geo${as ? `?as=${encodeURIComponent(as)}` : ""}`, nonce), { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : r.json().then((j) => Promise.reject(j.error ?? r.statusText))))
       .then((j: GeoPayloadClient) => { if (!cancelled) setData(j); })
       .catch((e) => { if (!cancelled) setErr(String(e)); });
     return () => { cancelled = true; };
-  }, [as]);
+  }, [as, nonce]);
   return { data, err };
 }
 
