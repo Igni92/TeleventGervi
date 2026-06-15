@@ -376,7 +376,7 @@ export interface ActivityBucket {
   volume: number;         // Σ DocTotal HT des Orders non annulés (= CA HT BL)
   weightKg: number;       // Σ quantity × salesUnitWeight par ligne (= Volume kg)
   margin: number;         // Σ (lineTotal − quantity × coût_EM) par ligne (lib/cogs)
-  marginPct: number;      // margin / volume × 100 (0 si volume nul)
+  marginPct: number;      // margin / CA produit (lignes itemCode, services exclus) — comme aggregateKpi
   marginCoverage: number; // % des lignes produit dont le coût EM est résolu (qualité données)
   ordersCount: number;
   activeClients: number;
@@ -395,11 +395,12 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
              COUNT(DISTINCT "cardCode")::int AS clients
       FROM "SapOrder"
       WHERE "cancelled" = false AND "docDate" >= ${start} AND "docDate" < ${end} ${slpHdr}`),
-    prisma.$queryRaw<{ n: number; with_cost: number; margin: number; weight: number }[]>(Prisma.sql`
+    prisma.$queryRaw<{ n: number; with_cost: number; margin: number; weight: number; product_revenue: number }[]>(Prisma.sql`
       SELECT ${COGS_PRODUCT_LINES}::int AS n,
              ${COGS_COSTED_LINES}::int AS with_cost,
              COALESCE(SUM(${COGS_MARGIN}), 0)::float AS margin,
-             COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS weight
+             COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS weight,
+             COALESCE(SUM(l."lineTotal") FILTER (WHERE l."itemCode" IS NOT NULL), 0)::float AS product_revenue
       FROM ${cogsFromSql("order")}
       LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
       WHERE i."cancelled" = false AND i."docDate" >= ${start} AND i."docDate" < ${end} ${slpSql("i", slpName)}`),
@@ -409,12 +410,16 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
   const ordersCount = Number(hdr?.orders ?? 0);
   const margin = Number(ln?.margin ?? 0);
   const linesCount = Number(ln?.n ?? 0);
+  // Base marge % = CA PRODUIT (lignes avec itemCode, services exclus) — même
+  // convention qu'aggregateKpi (Écran 2). Diviser par le volume total (docTotal,
+  // services/transport inclus) sous-évaluait la marge % et divergeait de l'Écran 2.
+  const productRevenue = Number(ln?.product_revenue ?? 0);
 
   return {
     volume,
     weightKg: Number(ln?.weight ?? 0),
     margin,
-    marginPct: volume > 0 ? (margin / volume) * 100 : 0,
+    marginPct: productRevenue > 0 ? (margin / productRevenue) * 100 : 0,
     marginCoverage: linesCount > 0 ? (Number(ln?.with_cost ?? 0) / linesCount) * 100 : 0,
     ordersCount,
     activeClients: Number(hdr?.clients ?? 0),
