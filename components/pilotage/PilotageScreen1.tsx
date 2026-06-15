@@ -164,7 +164,7 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
             {data && data.curr.marginCoverage < 95 && (
               <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 inline-flex items-center gap-1">
                 <AlertCircle className="h-3 w-3 shrink-0" />
-                {formatPct(data.curr.marginCoverage)} des lignes ont un coût SAP
+                {formatPct(data.curr.marginCoverage)} des lignes ont un coût d&apos;entrée connu
               </p>
             )}
           </div>

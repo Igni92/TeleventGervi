@@ -154,7 +154,7 @@ export function FicheCommercial({ slp }: { slp: string }) {
           <div className={`grid gap-3 lg:grid-cols-2 transition-opacity ${loading ? "opacity-60" : ""}`}>
             <SurfaceCard accent="brand" title="État commercial — BL (commandes SAP)" icon={<Truck className="h-3.5 w-3.5" />}>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-4">
-                <Kpi label="Volume HT" value={fmtEur(c.ht)} prev={{ curr: c.ht, prev: c.prev.ht }} sub={periodHint} />
+                <Kpi label="CA HT BL" value={fmtEur(c.ht)} prev={{ curr: c.ht, prev: c.prev.ht }} sub={periodHint} />
                 <Kpi label="Volume kg" value={fmtKg(c.kg)} prev={{ curr: c.kg, prev: c.prev.kg }} />
                 <Kpi label="Commandes" value={fmtInt(c.nb)} prev={{ curr: c.nb, prev: c.prev.nb }} />
                 <Kpi label="Clients actifs" value={fmtInt(c.clients)} prev={{ curr: c.clients, prev: c.prev.clients }} />
@@ -177,7 +177,7 @@ export function FicheCommercial({ slp }: { slp: string }) {
           </div>
 
           {/* Évolution hebdo N vs N-1 */}
-          <SurfaceCard accent="violet" title="Évolution hebdo — volume HT BL, N vs N-1 (semaines ISO)" icon={<TrendingUp className="h-3.5 w-3.5" />}>
+          <SurfaceCard accent="violet" title="Évolution hebdo — CA HT BL, N vs N-1 (semaines ISO)" icon={<TrendingUp className="h-3.5 w-3.5" />}>
             <TrendArea
               data={data.weekly}
               tone="violet"
@@ -185,7 +185,7 @@ export function FicheCommercial({ slp }: { slp: string }) {
               format={(v) => fmtEur(v)}
               currentLabel="N"
               compareLabel="N-1 (même semaine)"
-              aria-label={`Volume HT hebdomadaire de ${slp} sur 12 semaines, comparé à N-1`}
+              aria-label={`CA HT BL hebdomadaire de ${slp} sur 12 semaines, comparé à N-1`}
             />
           </SurfaceCard>
 
