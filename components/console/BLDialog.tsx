@@ -311,7 +311,6 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
   };
 
   // Traite la réponse finale (toast riche + fermeture).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const finalizeOrder = async (res: Response, json: any) => {
       if (!res.ok) {
         toast.error(json?.blocked ? `🚫 Client bloqué` : `❌ Échec création Commande`, {

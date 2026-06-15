@@ -278,7 +278,7 @@ export function ParametresPanel() {
 
       <p className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground/80 pt-1">
         <Sparkles className="h-3.5 w-3.5 shrink-0" />
-        Ces réglages sont propres à ce poste (navigateur) et s'appliquent immédiatement,
+        Ces réglages sont propres à ce poste (navigateur) et s&apos;appliquent immédiatement,
         sur tous les onglets ouverts.
       </p>
     </div>

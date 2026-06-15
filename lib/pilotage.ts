@@ -23,10 +23,6 @@ import {
 
 export type { Granularity } from "@/lib/pilotage-time";
 export { periodBounds, previousYearBounds } from "@/lib/pilotage-time";
-import type { Granularity } from "@/lib/pilotage-time";
-// `Granularity` est typé ici comme une union string ; tsc le sait via re-export.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-type _G = Granularity;
 
 /* ─────────────────────────────────────────────────────────────────
    Filtre segment — restreint un agrégat aux clients dont le groupe SAP

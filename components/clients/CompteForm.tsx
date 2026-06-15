@@ -135,7 +135,7 @@ export function CompteForm({ clientId }: { clientId: string }) {
           className="font-sans"
         />
         <p className="text-[11px] text-muted-foreground">
-          Texte libre — distinct de l'adresse de livraison (gérée côté SAP via les modes de livraison).
+          Texte libre — distinct de l&apos;adresse de livraison (gérée côté SAP via les modes de livraison).
         </p>
       </div>
 
