@@ -472,22 +472,25 @@ export async function topSalespersonsOrder(start: Date, end: Date, limit = 10): 
     orderBy: { _sum: { docTotal: "desc" } },
     take: limit,
   });
-  const out: TopSalespersonOrder[] = [];
-  for (const g of grouped) {
-    if (!g.slpName) continue;
-    const distinct = await prisma.sapOrder.findMany({
-      where: { docDate: { gte: start, lt: end }, cancelled: false, slpName: g.slpName },
-      select: { cardCode: true },
-      distinct: ["cardCode"],
-    });
-    out.push({
+  const slps = grouped.map((g) => g.slpName).filter((s): s is string => !!s);
+  if (slps.length === 0) return [];
+  // Clients actifs distincts par commercial en UNE requête groupée (au lieu
+  // d'un findMany distinct par commercial — N+1). Résultat identique.
+  const distinctRows = await prisma.$queryRaw<{ slpName: string; clients: number }[]>(Prisma.sql`
+    SELECT "slpName", COUNT(DISTINCT "cardCode")::int AS clients
+    FROM "SapOrder"
+    WHERE "cancelled" = false AND "docDate" >= ${start} AND "docDate" < ${end}
+      AND "slpName" IN (${Prisma.join(slps)})
+    GROUP BY "slpName"`);
+  const clientsBySlp = new Map(distinctRows.map((r) => [r.slpName, Number(r.clients)]));
+  return grouped
+    .filter((g): g is typeof g & { slpName: string } => !!g.slpName)
+    .map((g) => ({
       slpName: g.slpName,
       volume: g._sum.docTotal ?? 0,
       orders: g._count.docEntry,
-      activeClients: distinct.length,
-    });
-  }
-  return out;
+      activeClients: clientsBySlp.get(g.slpName) ?? 0,
+    }));
 }
 
 /* ═════════════════════════════════════════════════════════════════
