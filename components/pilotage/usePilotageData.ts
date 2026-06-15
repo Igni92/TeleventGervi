@@ -6,6 +6,7 @@ import {
 } from "@/lib/pilotageSync";
 import type { Granularity } from "@/lib/pilotage";
 import type { Segment } from "@/lib/segments";
+import type { GeoPayload } from "@/lib/pilotageGeo";
 import { isoWeek } from "@/lib/iso-week";
 
 /* ─────────────────────────────────────────────────────────────────
@@ -176,6 +177,29 @@ export function useActionsData(as?: string | null) {
     return () => { cancelled = true; };
   }, [as]);
   return { data };
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Écran 3 — Carte géographique (distribution du facturé, 12 mois glissants).
+   ───────────────────────────────────────────────────────────────── */
+
+export interface GeoPayloadClient extends GeoPayload {
+  period: { start: string; end: string };
+}
+
+export function useGeoData(as?: string | null) {
+  const [data, setData] = useState<GeoPayloadClient | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setErr(null);
+    fetch(`/api/pilotage/geo${as ? `?as=${encodeURIComponent(as)}` : ""}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : r.json().then((j) => Promise.reject(j.error ?? r.statusText))))
+      .then((j: GeoPayloadClient) => { if (!cancelled) setData(j); })
+      .catch((e) => { if (!cancelled) setErr(String(e)); });
+    return () => { cancelled = true; };
+  }, [as]);
+  return { data, err };
 }
 
 /* ─────────────────────────────────────────────────────────────────

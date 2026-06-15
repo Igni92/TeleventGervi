@@ -2,15 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, TrendingUp, FileText, ArrowLeft, Eye, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, TrendingUp, FileText, Map as MapIcon, ArrowLeft, Eye, X } from "lucide-react";
 import { PilotageScreen1 } from "./PilotageScreen1";
 import { PilotageScreen2 } from "./PilotageScreen2";
+import { PilotageScreen3 } from "./PilotageScreen3";
 
-type SlideIndex = 0 | 1;
+type SlideIndex = 0 | 1 | 2;
+const LAST_SLIDE: SlideIndex = 2;
 
 const SLIDES = [
   { key: "commercial", label: "Commercial · BL",       icon: TrendingUp },
   { key: "comptable",  label: "Comptable · Annuel",    icon: FileText },
+  { key: "carte",      label: "Carte · Géo",           icon: MapIcon },
 ] as const;
 
 /**
@@ -49,7 +52,7 @@ export function PilotageSlider({ viewAs = null }: { viewAs?: string | null } = {
       if (timeoutId) window.clearTimeout(timeoutId);
       timeoutId = window.setTimeout(() => {
         const i = Math.round(el.scrollLeft / el.clientWidth);
-        setSlide(i === 1 ? 1 : 0);
+        setSlide(Math.max(0, Math.min(LAST_SLIDE, i)) as SlideIndex);
       }, 80);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
@@ -66,12 +69,12 @@ export function PilotageSlider({ viewAs = null }: { viewAs?: string | null } = {
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) {
         return;
       }
-      if (e.key === "ArrowRight") { e.preventDefault(); goTo(1); }
-      else if (e.key === "ArrowLeft") { e.preventDefault(); goTo(0); }
+      if (e.key === "ArrowRight") { e.preventDefault(); goTo(Math.min(LAST_SLIDE, slide + 1) as SlideIndex); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); goTo(Math.max(0, slide - 1) as SlideIndex); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [goTo]);
+  }, [goTo, slide]);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden">
@@ -99,6 +102,9 @@ export function PilotageSlider({ viewAs = null }: { viewAs?: string | null } = {
         <section className="w-screen h-screen shrink-0 snap-start" aria-label="Rapport annuel — comptable">
           <PilotageScreen2 viewAs={viewAs} />
         </section>
+        <section className="w-screen h-screen shrink-0 snap-start" aria-label="Carte — distribution géographique">
+          <PilotageScreen3 viewAs={viewAs} />
+        </section>
       </div>
 
       {/* Bannière « voir comme » — aperçu admin du cockpit d'un commercial. */}
@@ -117,26 +123,26 @@ export function PilotageSlider({ viewAs = null }: { viewAs?: string | null } = {
         </div>
       )}
 
-      {/* Chevron gauche — caché sur slide 0 */}
-      {slide === 1 && (
+      {/* Chevron gauche — caché sur la 1ʳᵉ slide */}
+      {slide > 0 && (
         <button
           type="button"
-          onClick={() => goTo(0)}
-          aria-label="Cockpit commercial"
-          title="← Commercial (BL)"
+          onClick={() => goTo(Math.max(0, slide - 1) as SlideIndex)}
+          aria-label="Écran précédent"
+          title="← Écran précédent"
           className="absolute left-3 top-1/2 -translate-y-1/2 z-30 h-10 w-10 rounded-full bg-background/85 backdrop-blur-md border border-border shadow-modal flex items-center justify-center text-foreground/80 hover:text-foreground hover:bg-background transition-colors"
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
       )}
 
-      {/* Chevron droit — caché sur slide 1 */}
-      {slide === 0 && (
+      {/* Chevron droit — caché sur la dernière slide */}
+      {slide < LAST_SLIDE && (
         <button
           type="button"
-          onClick={() => goTo(1)}
-          aria-label="Rapport annuel comptable"
-          title="Comptable (Annuel) →"
+          onClick={() => goTo(Math.min(LAST_SLIDE, slide + 1) as SlideIndex)}
+          aria-label="Écran suivant"
+          title="Écran suivant →"
           className="absolute right-3 top-1/2 -translate-y-1/2 z-30 h-10 w-10 rounded-full bg-background/85 backdrop-blur-md border border-border shadow-modal flex items-center justify-center text-foreground/80 hover:text-foreground hover:bg-background transition-colors"
         >
           <ChevronRight className="h-5 w-5" />

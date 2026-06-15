@@ -106,6 +106,15 @@ model Client {
   // Adresse de facturation (onglet Compta) — libre, multi-ligne accepté.
   // Distincte de l'adresse de livraison (côté SAP/ClientDeliveryMode).
   adresseFacturation String?
+  // Localisation structurée (cache de l'adresse SAP BusinessPartner :
+  // City / ZipCode / Country) — alimentée par /api/sap/clients/import. Sert à
+  // la carte « Où je livre le plus » (Écran 3 du dashboard) : département FR
+  // déduit du code postal, pays pour l'export. Colonnes créées en raw SQL
+  // (cf. scripts/ddl-client-geo.mjs) — accès $queryRaw tant que le client
+  // Prisma n'est pas régénéré (même convention que activeTelevente).
+  city               String?
+  zipCode            String?
+  country            String?
   // Cache local du BusinessPartner.GroupCode SAP (lecture seule côté app).
   // Pilote le coefficient de prix conseillé (cf. lib/gerviPricing.ts) —
   // modification réservée à SAP B1 pour éviter de casser la marge.
