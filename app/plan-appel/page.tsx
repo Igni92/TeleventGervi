@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { isAdmin } from "@/lib/permissions";
+import { requireAdmin } from "@/lib/permissions";
 import { PlanAppel } from "@/components/plan-appel/PlanAppel";
 import { ResyncButton } from "@/components/admin/ResyncButton";
 
@@ -12,7 +12,7 @@ export default async function PlanAppelPage() {
   if (!session) redirect("/login");
   // Resync (purge + reconstruction du miroir PROD) = action admin : bouton masqué
   // aux non-admins, qui recevraient sinon un 403 (cf. garde serveur full-reset).
-  const admin = isAdmin(session);
+  const admin = await requireAdmin(session);
 
   return (
     <div className="space-y-6 animate-fade-up">

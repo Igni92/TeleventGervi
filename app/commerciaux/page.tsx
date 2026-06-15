@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getAccessScope } from "@/lib/permissions";
+import { getAccessScope, ADMIN_EMAILS } from "@/lib/permissions";
 import { CommercialCard } from "@/components/commerciaux/CommercialCard";
 import { CommerciauxSapList } from "./CommerciauxSapList";
 
@@ -24,6 +24,17 @@ export default async function CommerciauxPage() {
       select: { id: true, name: true, email: true, stockSharePct: true },
       orderBy: { name: "asc" },
     });
+    // Rôle admin (colonne hors client typé tant que generate n'est pas relancé →
+    // lecture raw, repli silencieux si la colonne n'existe pas encore).
+    const adminByUser = new Map<string, boolean>();
+    try {
+      const rows = await prisma.$queryRawUnsafe<{ id: string; isAdmin: boolean }[]>(
+        `SELECT "id", "isAdmin" FROM "User"`,
+      );
+      for (const r of rows) adminByUser.set(r.id, r.isAdmin);
+    } catch { /* colonne isAdmin pas encore créée (DDL non lancée) → tous false */ }
+    const bootstrapAdmins = new Set(ADMIN_EMAILS.map((e) => e.toLowerCase()));
+
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     const presences = await prisma.presence.findMany({ where: { date: todayStart } });
     const presMap = new Map(presences.map((p) => [p.userId, p.present]));
@@ -75,6 +86,8 @@ export default async function CommerciauxPage() {
                 isMe={user.id === session.user?.id}
                 present={presMap.get(user.id) ?? true}
                 stockSharePct={user.stockSharePct ?? 100}
+                isBootstrapAdmin={!!user.email && bootstrapAdmins.has(user.email.toLowerCase())}
+                isAdmin={(!!user.email && bootstrapAdmins.has(user.email.toLowerCase())) || (adminByUser.get(user.id) ?? false)}
               />
             );
           })}

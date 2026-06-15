@@ -4,7 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import {
   ChevronDown, Mail, ArrowRight, Loader2, Users,
-  Building2, Globe, Store, Check, X, Percent,
+  Building2, Globe, Store, Check, X, Percent, Shield, ShieldCheck,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -26,13 +26,28 @@ interface Props {
   isMe?: boolean;
   present?: boolean;
   stockSharePct?: number;
+  /** Rôle admin (accès global) — promu en base. */
+  isAdmin?: boolean;
+  /** Admin « bootstrap » (codé en dur, lib/permissions.ts) → non rétrogradable ici. */
+  isBootstrapAdmin?: boolean;
 }
 
-export function CommercialCard({ userId, name, email, counts, isMe, present = true, stockSharePct = 100 }: Props) {
+export function CommercialCard({ userId, name, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false }: Props) {
   const [claiming, setClaiming] = useState<string | null>(null);
   const [isPresent, setIsPresent] = useState(present);
   const [share, setShare] = useState(stockSharePct);
   const [savingPresence, setSavingPresence] = useState(false);
+  const [admin, setAdmin] = useState(isAdmin);
+  const [savingAdmin, setSavingAdmin] = useState(false);
+
+  async function toggleAdmin() {
+    if (isBootstrapAdmin) return; // admin système : non modifiable depuis l'UI
+    const next = !admin;
+    setAdmin(next); setSavingAdmin(true);
+    try { await patch({ isAdmin: next }); toast.success(next ? `${name} est désormais admin` : `${name} repassé en commercial`); }
+    catch { setAdmin(!next); toast.error("Erreur changement de rôle"); }
+    finally { setSavingAdmin(false); }
+  }
 
   async function patch(payload: Record<string, unknown>) {
     const res = await fetch("/api/commerciaux", {
@@ -141,6 +156,31 @@ export function CommercialCard({ userId, name, email, counts, isMe, present = tr
               />
               <span>stock</span>
             </label>
+
+            {/* Rôle admin — toggle (badge figé pour un admin système) */}
+            {isBootstrapAdmin ? (
+              <span
+                className="inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300"
+                title="Admin système (défini dans le code) — non modifiable ici"
+              >
+                <ShieldCheck className="h-3 w-3" /> Admin système
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={toggleAdmin}
+                disabled={savingAdmin}
+                title={admin ? "Rétrograder en commercial" : "Promouvoir administrateur"}
+                className={`inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none ${
+                  admin
+                    ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300"
+                    : "bg-secondary/60 text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {savingAdmin ? <Loader2 className="h-3 w-3 animate-spin" /> : admin ? <ShieldCheck className="h-3 w-3" /> : <Shield className="h-3 w-3" />}
+                {admin ? "Admin" : "Commercial"}
+              </button>
+            )}
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { isAdmin } from "@/lib/permissions";
+import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -16,7 +16,7 @@ export async function POST() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   // Réécrit le vendeur de TOUS les clients (mutation de masse) → admins uniquement.
-  if (!isAdmin(session)) return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+  if (!(await requireAdmin(session))) return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
 
   const updated = await prisma.$executeRaw`
     UPDATE "Client" AS c

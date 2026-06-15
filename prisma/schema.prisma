@@ -41,6 +41,10 @@ model User {
   image         String?
   // % du stock total attribué à ce commercial (aide à la répartition). Défaut 100.
   stockSharePct Float?     @default(100)
+  // Rôle admin (accès global) gérable depuis l'UI Équipe. Les emails de
+  // lib/permissions.ts (ADMIN_EMAILS) restent admins « bootstrap » indélogeables ;
+  // ce flag permet d'en ajouter d'autres sans redéploiement.
+  isAdmin       Boolean    @default(false)
   accounts      Account[]
   sessions      Session[]
   presences     Presence[]

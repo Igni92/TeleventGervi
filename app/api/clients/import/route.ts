@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { isAdmin } from "@/lib/permissions";
+import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
 interface ImportRow {
@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   // Import/upsert de clients en masse → admins uniquement.
-  if (!isAdmin(session)) return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+  if (!(await requireAdmin(session))) return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
 
   try {
     const body = await req.json();

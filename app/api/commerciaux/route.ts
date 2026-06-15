@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { isAdmin } from "@/lib/permissions";
+import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
 function todayStart() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
@@ -38,9 +38,9 @@ export async function PATCH(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   // Gestion d'équipe (présence + % stock de N'IMPORTE quel commercial) → admins uniquement.
-  if (!isAdmin(session)) return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+  if (!(await requireAdmin(session))) return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
 
-  let body: { userId?: string; present?: boolean; stockSharePct?: number };
+  let body: { userId?: string; present?: boolean; stockSharePct?: number; isAdmin?: boolean };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
   if (!body.userId) return NextResponse.json({ error: "userId requis" }, { status: 400 });
 
@@ -57,6 +57,11 @@ export async function PATCH(req: NextRequest) {
   if (typeof body.stockSharePct === "number") {
     const pct = Math.max(0, Math.min(100, body.stockSharePct));
     await prisma.user.update({ where: { id: body.userId }, data: { stockSharePct: pct } });
+  }
+  // Rôle admin (promotion / rétrogradation). Raw SQL : colonne hors client Prisma
+  // typé tant que generate n'est pas relancé (cf. scripts/ddl-user-isadmin.mjs).
+  if (typeof body.isAdmin === "boolean") {
+    await prisma.$executeRawUnsafe(`UPDATE "User" SET "isAdmin" = $1 WHERE "id" = $2`, body.isAdmin, body.userId);
   }
 
   return NextResponse.json({ ok: true });

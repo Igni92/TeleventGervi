@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
-import { isAdmin } from "@/lib/permissions";
+import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   // (Ré)assignation de portefeuille (vendeur/commercial/activation) → admins uniquement.
-  if (!isAdmin(session)) return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+  if (!(await requireAdmin(session))) return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
 
   const body = await req.json().catch(() => ({}));
   const sets: Prisma.Sql[] = [];

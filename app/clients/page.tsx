@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { isAdmin } from "@/lib/permissions";
+import { requireAdmin } from "@/lib/permissions";
 import { ClientTable } from "@/components/ClientTable";
 import { ClientImportButton } from "@/components/clients/ClientImportButton";
 
@@ -10,7 +10,7 @@ export default async function ClientsPage() {
   const session = await auth();
   if (!session) redirect("/login");
   // Import SAP global (peut vider la base Client) = action admin (cf. garde serveur).
-  const admin = isAdmin(session);
+  const admin = await requireAdmin(session);
 
   return (
     <div className="space-y-6 animate-fade-up">
