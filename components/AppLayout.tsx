@@ -1,4 +1,5 @@
 import { Sidebar } from "@/components/Sidebar";
+import { PromoRibbon } from "@/components/promos/PromoRibbon";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -16,6 +17,8 @@ export function AppLayout({ children }: AppLayoutProps) {
       <main className="flex-1 min-w-0 max-w-[1440px] mx-auto px-6 sm:px-10 lg:px-14 py-8 lg:py-10">
         {children}
       </main>
+      {/* Ruban promos « en biais » — coin haut-droit, global (null si aucune promo). */}
+      <PromoRibbon />
     </div>
   );
 }

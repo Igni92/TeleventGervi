@@ -6,6 +6,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Loader2, RefreshCw, Euro, AlertTriangle, Clock, Flame, Search, ExternalLink, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { ClientLink } from "@/components/ClientLink";
 
 interface InvoiceLine {
   docEntry: number;
@@ -130,7 +131,12 @@ export function Encours() {
               ) : rows.map((c) => (
                 <tr key={c.cardCode} className="hover:bg-secondary/30 transition-colors cursor-pointer" onClick={() => setDrill(c)}>
                   <td className="px-3 py-2">
-                    <div className="font-semibold text-foreground hover:text-brand-600">{c.cardName}</div>
+                    {/* Accès fiche client (stopPropagation → n'ouvre pas la modale de la ligne) */}
+                    <ClientLink
+                      code={c.cardCode}
+                      name={c.cardName}
+                      className="font-semibold text-foreground text-left hover:underline decoration-brand-500/60 underline-offset-2 cursor-pointer"
+                    />
                     <div className="text-[10.5px] font-mono text-muted-foreground">{c.cardCode}</div>
                   </td>
                   <td className="px-3 py-2 text-right font-bold tnum text-foreground">{eur(c.encours)}</td>

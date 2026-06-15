@@ -42,7 +42,7 @@ prisma/dev.db
 # (factures/paiements clients). On ne versionne PAS la donnée, seulement le code.
 *.zip
 /sap_scrape/
-backfill-2024.log
+backfill*.log
 
 # Tooling local
 .claude/settings.local.json

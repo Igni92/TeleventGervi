@@ -54,8 +54,18 @@ export function PilotageScreen2() {
   const [mode, setMode] = useState<Metric>("ca");
   const [view, setView] = useState<Screen2View>("matrix");
   const [drill, setDrill] = useState<{ year: number; month: number } | null>(null);
-  // Comparatif N-1 sur la courbe d'évolution mensuelle — cochable par l'utilisateur.
+  // Comparatif N-1 sur la courbe d'évolution mensuelle — cochable + mémorisé.
   const [compareN1, setCompareN1] = useState(true);
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem("televente:pilotageCompareN1");
+      if (v != null) setCompareN1(v !== "off");
+    } catch { /* localStorage indispo */ }
+  }, []);
+  const setCompare = (v: boolean) => {
+    setCompareN1(v);
+    try { localStorage.setItem("televente:pilotageCompareN1", v ? "on" : "off"); } catch { /* noop */ }
+  };
   const monthlyTrend = useMemo(() => buildMonthlyTrend(data?.matrix ?? [], mode, compareN1), [data, mode, compareN1]);
 
   // Tops RE-triés selon la métrique active (CA / Poids / Marge %) — pas l'ordre API.
@@ -116,7 +126,7 @@ export function PilotageScreen2() {
               <div className="shrink-0 flex justify-end pb-1">
                 <CompareToggle
                   checked={compareN1}
-                  onChange={setCompareN1}
+                  onChange={setCompare}
                   prevYear={(data?.currentYear ?? new Date().getFullYear()) - 1}
                 />
               </div>

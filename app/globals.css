@@ -509,3 +509,16 @@ textarea:focus-visible,
 [data-state="open"] {
   outline: none;
 }
+
+/* ── Ticker promos (crawl façon BFM) ──────────────────
+   La piste contient 2 copies de la séquence ; -50 % = exactement une copie
+   → boucle sans couture. Gelée si l'utilisateur coupe les animations
+   (réglage global televente:animations → html[data-reduce-anim]). */
+@keyframes promo-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+html[data-reduce-anim="1"] .promo-marquee-track {
+  animation: none !important;
+  transform: none !important;
+}

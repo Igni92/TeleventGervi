@@ -106,6 +106,27 @@ async function logout() {
   cookies = "";
 }
 
+/** GET avec retry sur erreurs réseau transitoires. L'ECONNRESET est fréquent
+ *  sur les longues paginations SAP depuis certains réseaux (connexion coupée en
+ *  cours de lecture) → on rejoue la MÊME page (5 essais, backoff), re-login si
+ *  401, plutôt que d'abandonner tout le backfill. */
+async function getPage(url, pageSize, tries = 5) {
+  let lastErr;
+  for (let t = 0; t < tries; t++) {
+    try {
+      let r = await req("GET", url, { prefer: `odata.maxpagesize=${pageSize}` });
+      if (r.status === 401) { await login(); r = await req("GET", url, { prefer: `odata.maxpagesize=${pageSize}` }); }
+      return r;
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e?.code || e?.message || e);
+      if (!/ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|socket hang up|EAI_AGAIN/i.test(msg)) throw e;
+      await new Promise((res) => setTimeout(res, 700 * (t + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 /** Paginate /BusinessPartners-style endpoints with $top + $skip. */
 async function getAll(path, pageSize = 200, maxPages = 200) {
   const all = [];
@@ -113,7 +134,7 @@ async function getAll(path, pageSize = 200, maxPages = 200) {
   for (let i = 0; i < maxPages; i++) {
     const sep = path.includes("?") ? "&" : "?";
     const url = `${path}${sep}$top=${pageSize}&$skip=${skip}`;
-    const r = await req("GET", url, { prefer: `odata.maxpagesize=${pageSize}` });
+    const r = await getPage(url, pageSize);
     if (r.status >= 400) {
       const msg = r.body?.error?.message?.value ?? JSON.stringify(r.body).slice(0, 300);
       throw new Error(`GET ${url} → ${r.status}: ${msg}`);
