@@ -1,5 +1,36 @@
 import { describe, it, expect } from "vitest";
 import { periodBounds, previousYearBounds } from "./pilotage-time";
+import { rankByNet } from "./pilotage-rank";
+
+describe("rankByNet — Top clients en CA NET (avoirs déduits)", () => {
+  const gross = [
+    { key: "A", gross: 1000, count: 10 },
+    { key: "B", gross: 800, count: 8 },
+    { key: "C", gross: 600, count: 6 },
+  ];
+
+  it("déduit les avoirs du brut par clé", () => {
+    const r = rankByNet(gross, new Map([["A", 300]]), 10);
+    expect(r.find((x) => x.key === "A")!.net).toBe(700);
+    expect(r.find((x) => x.key === "B")!.net).toBe(800); // aucun avoir
+  });
+
+  it("re-classe sur le NET : un gros brut très avoirisé recule", () => {
+    // A (1000 brut) avec 500 d'avoirs → 500 net, passe DERRIÈRE B (800) et C (600).
+    const r = rankByNet(gross, new Map([["A", 500]]), 10);
+    expect(r.map((x) => x.key)).toEqual(["B", "C", "A"]);
+  });
+
+  it("respecte la limite après classement net", () => {
+    const r = rankByNet(gross, new Map([["A", 500]]), 2);
+    expect(r.map((x) => x.key)).toEqual(["B", "C"]);
+  });
+
+  it("clé sans avoir → net = brut ; conserve le count", () => {
+    const r = rankByNet([{ key: "X", gross: 42, count: 3 }], new Map(), 10);
+    expect(r[0]).toEqual({ key: "X", net: 42, count: 3 });
+  });
+});
 
 describe("periodBounds", () => {
   it("day = jour entier 00:00 → 24:00", () => {

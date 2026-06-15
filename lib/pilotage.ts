@@ -16,6 +16,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { familyOf } from "@/lib/familles";
+import { rankByNet } from "@/lib/pilotage-rank";
 import {
   COGS_MARGIN, COGS_PRODUCT_LINES, COGS_COSTED_LINES,
   cogsFromSql, realMarginAgg,
@@ -237,8 +238,49 @@ export interface TopClient {
   invoices: number;
 }
 
-/** Marge RÉELLE (coût EM) par clé (cardCode ou slpName), Invoices − Avoirs,
- *  restreinte aux clés du top (≤ qq dizaines) — 2 GROUP BY SQL ciblés. */
+export async function topClients(start: Date, end: Date, limit = 10, groupCodes?: number[] | null, slpName?: string | null): Promise<TopClient[]> {
+  // CA NET par client = Σ Invoices.docTotal − Σ CreditNotes.docTotal (mêmes
+  // filtres), cohérent avec le KPI principal et la marge (déjà nette via
+  // realMarginByKey). On nette avant le classement.
+  const [invGrouped, cnGrouped] = await Promise.all([
+    prisma.sapInvoice.groupBy({
+      by: ["cardCode"],
+      where: { docDate: { gte: start, lt: end }, cancelled: false, ...segmentWhere(groupCodes), ...slpWhere(slpName) },
+      _sum: { docTotal: true },
+      _count: { docEntry: true },
+    }),
+    prisma.sapCreditNote.groupBy({
+      by: ["cardCode"],
+      where: { docDate: { gte: start, lt: end }, cancelled: false, ...segmentWhere(groupCodes), ...slpWhere(slpName) },
+      _sum: { docTotal: true },
+    }),
+  ]);
+  const cnByCard = new Map(cnGrouped.map((g) => [g.cardCode, g._sum.docTotal ?? 0]));
+  const ranked = rankByNet(
+    invGrouped.map((g) => ({ key: g.cardCode, gross: g._sum.docTotal ?? 0, count: g._count.docEntry })),
+    cnByCard,
+    limit,
+  );
+
+  const codes = ranked.map((g) => g.key);
+  const [names, margins] = await Promise.all([
+    prisma.sapBusinessPartner.findMany({
+      where: { cardCode: { in: codes } },
+      select: { cardCode: true, cardName: true },
+    }),
+    // Marge réelle (coût EM) restreinte aux clients du top — pas le gp SAP.
+    realMarginByKey("cardCode", codes, start, end, groupCodes, slpName),
+  ]);
+  const nameMap = new Map(names.map((n) => [n.cardCode, n.cardName]));
+
+  return ranked.map((g) => ({
+    cardCode: g.key,
+    cardName: nameMap.get(g.key) ?? null,
+    ca: g.net,
+    margin: margins.get(g.key) ?? 0,
+    invoices: g.count,
+  }));
+}
 async function realMarginByKey(
   keyCol: "cardCode" | "slpName",
   keys: string[],
@@ -261,35 +303,6 @@ async function realMarginByKey(
   for (const r of inv) m.set(r.k, Number(r.m));
   for (const r of cn) m.set(r.k, (m.get(r.k) ?? 0) - Number(r.m));
   return m;
-}
-
-export async function topClients(start: Date, end: Date, limit = 10, groupCodes?: number[] | null, slpName?: string | null): Promise<TopClient[]> {
-  const grouped = await prisma.sapInvoice.groupBy({
-    by: ["cardCode"],
-    where: { docDate: { gte: start, lt: end }, cancelled: false, ...segmentWhere(groupCodes), ...slpWhere(slpName) },
-    _sum: { docTotal: true },
-    _count: { docEntry: true },
-    orderBy: { _sum: { docTotal: "desc" } },
-    take: limit,
-  });
-  const codes = grouped.map((g) => g.cardCode);
-  const [names, margins] = await Promise.all([
-    prisma.sapBusinessPartner.findMany({
-      where: { cardCode: { in: codes } },
-      select: { cardCode: true, cardName: true },
-    }),
-    // Marge réelle (coût EM) restreinte aux clients du top — pas le gp SAP.
-    realMarginByKey("cardCode", codes, start, end, groupCodes, slpName),
-  ]);
-  const nameMap = new Map(names.map((n) => [n.cardCode, n.cardName]));
-
-  return grouped.map((g) => ({
-    cardCode: g.cardCode,
-    cardName: nameMap.get(g.cardCode) ?? null,
-    ca: g._sum.docTotal ?? 0,
-    margin: margins.get(g.cardCode) ?? 0,
-    invoices: g._count.docEntry,
-  }));
 }
 
 export interface TopSupplier {
