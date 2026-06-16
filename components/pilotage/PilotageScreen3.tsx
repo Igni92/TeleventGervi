@@ -98,7 +98,7 @@ export function PilotageScreen3({ viewAs = null }: { viewAs?: string | null } = 
           style={{ gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gridTemplateRows: "repeat(6, minmax(0, 1fr))" }}
         >
           <Tile colSpan={5} rowSpan={4} title={`France · ${geoMetricLabel(metric)} · clic = détail`} accent="brand">
-            <GeoMapGL view="france" zones={data?.zones ?? []} metric={metric} onZoneClick={openByCode} />
+            <GeoMapGL view="france" zones={data?.zones ?? []} clients={data?.clients ?? []} metric={metric} onZoneClick={openByCode} />
           </Tile>
 
           <Tile colSpan={7} rowSpan={4} title={`Outre-mer & Export · ${geoMetricLabel(metric)}`} accent="violet">
