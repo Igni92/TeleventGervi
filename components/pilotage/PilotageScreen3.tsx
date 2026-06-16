@@ -7,6 +7,7 @@ import { FranceChoropleth } from "@/components/charts/FranceChoropleth";
 import { WorldBubbleMap } from "@/components/charts/WorldBubbleMap";
 import { BarList } from "@/components/charts/BarList";
 import { Donut } from "@/components/charts/Donut";
+import { GeoDrilldown, type DrillDescriptor } from "@/components/charts/GeoDrilldown";
 import {
   type GeoMetric, GEO_METRICS, geoMetricLabel, geoValue, formatGeoValue, formatWeight,
   IDF_CODES, groupParisZones,
@@ -27,22 +28,42 @@ export function PilotageScreen3({ viewAs = null }: { viewAs?: string | null } = 
   const [refreshNonce, setRefreshNonce] = useState(0);
   const { data, err } = useGeoData(viewAs, refreshNonce);
   const [metric, setMetric] = useState<GeoMetric>("ca");
+  const [drill, setDrill] = useState<DrillDescriptor | null>(null);
 
-  const topZones = useMemo(() => {
-    if (!data) return [];
-    // Vue nationale : la région parisienne est regroupée en « Île-de-France ».
-    return groupParisZones(data.zones)
+  // Vue nationale : la région parisienne est regroupée en « Île-de-France ».
+  const groupedZones = useMemo(() => (data ? groupParisZones(data.zones) : []), [data]);
+
+  const topZones = useMemo(
+    () => groupedZones
       .map((z) => ({ z, v: geoValue(z, metric) }))
       .filter((x) => x.v > 0)
       .sort((a, b) => b.v - a.v)
       .slice(0, 8)
       .map(({ z, v }) => ({
+        id: z.id,
         label: z.name,
         value: v,
         hint: `${formatNum(z.docs)} BL · ${formatNum(z.clients)} cl.`,
         color: "#facc15",
-      }));
-  }, [data, metric]);
+      })),
+    [groupedZones, metric],
+  );
+
+  // Ouvre le drill-down depuis un clic carte (code département ou "IDF").
+  const openByCode = (code: string) => {
+    if (!data) return;
+    if (code === "IDF") { setDrill({ kind: "idf", code: "IDF", name: "Île-de-France" }); return; }
+    const z = data.zones.find((x) => x.kind === "fr-dept" && x.code === code);
+    setDrill({ kind: "dept", code, name: z?.name ?? `Dép. ${code}` });
+  };
+  // Ouvre le drill-down depuis un clic sur une ligne du Top zones (zone id).
+  const openById = (id: string) => {
+    const z = groupedZones.find((x) => x.id === id);
+    if (!z) return;
+    if (z.code === "IDF") setDrill({ kind: "idf", code: "IDF", name: z.name });
+    else if (z.kind === "fr-dept") setDrill({ kind: "dept", code: z.code, name: z.name });
+    else setDrill({ kind: "country", code: z.code, name: z.name });
+  };
 
   const donutData = useMemo(() => {
     if (!data) return [];
@@ -70,12 +91,12 @@ export function PilotageScreen3({ viewAs = null }: { viewAs?: string | null } = 
           className="flex-1 grid gap-2 min-h-0"
           style={{ gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gridTemplateRows: "repeat(6, minmax(0, 1fr))" }}
         >
-          <Tile colSpan={4} rowSpan={4} title={`France · ${geoMetricLabel(metric)}`} accent="brand">
-            <FranceChoropleth zones={data?.zones ?? []} metric={metric} groupParis />
+          <Tile colSpan={4} rowSpan={4} title={`France · ${geoMetricLabel(metric)} · clic = détail`} accent="brand">
+            <FranceChoropleth zones={data?.zones ?? []} metric={metric} groupParis onZoneClick={openByCode} />
           </Tile>
 
           <Tile colSpan={3} rowSpan={4} title={`Île-de-France · ${geoMetricLabel(metric)}`} accent="sky">
-            <FranceChoropleth zones={data?.zones ?? []} metric={metric} onlyCodes={IDF_CODES} />
+            <FranceChoropleth zones={data?.zones ?? []} metric={metric} onlyCodes={IDF_CODES} onZoneClick={openByCode} />
           </Tile>
 
           <Tile colSpan={5} rowSpan={4} title={`Outre-mer & Export · ${geoMetricLabel(metric)}`} accent="violet">
@@ -99,14 +120,23 @@ export function PilotageScreen3({ viewAs = null }: { viewAs?: string | null } = 
             </div>
           </Tile>
 
-          <Tile colSpan={5} rowSpan={2} title={`Top zones · ${geoMetricLabel(metric)}`} accent="amber">
-            <BarList items={topZones} max={8} format={(v) => formatGeoValue(metric, v)} className="space-y-0.5" />
+          <Tile colSpan={5} rowSpan={2} title={`Top zones · ${geoMetricLabel(metric)} · clic = détail`} accent="amber">
+            <BarList items={topZones} max={8} format={(v) => formatGeoValue(metric, v)} className="space-y-0.5" onSelect={openById} />
           </Tile>
 
           <Tile colSpan={4} rowSpan={2} title="Total livré · 12 mois">
             <TotalsPanel data={data} />
           </Tile>
         </main>
+      )}
+
+      {drill && data && (
+        <GeoDrilldown
+          descriptor={drill}
+          clients={data.clients}
+          metric={metric}
+          onClose={() => setDrill(null)}
+        />
       )}
     </div>
   );

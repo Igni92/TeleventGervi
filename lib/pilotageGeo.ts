@@ -54,12 +54,29 @@ export interface GeoSegmentTotal {
   clients: number;
 }
 
+/** Client individuel localisé — pour le drill-down d'une zone (bulles). */
+export interface GeoClient {
+  cardCode: string;
+  name: string;
+  zoneId: string | null;          // "fr-75" | "c-MV" | null (non localisé)
+  kind: "fr-dept" | "country" | null;
+  code: string | null;            // "75" | "MV" | null
+  zip: string | null;
+  city: string | null;
+  ca: number;
+  margin: number;
+  weightKg: number;
+  docs: number;
+}
+
 export interface GeoPayload {
   zones: GeoZone[];
   segments: GeoSegmentTotal[];
   totals: { ca: number; margin: number; weightKg: number; docs: number; clients: number };
   /** Clients livrés mais non localisables (CP/pays absent ou inconnu). */
   unlocated: { ca: number; margin: number; weightKg: number; docs: number; clients: number };
+  /** Clients individuels (pour le drill-down d'une zone en bulles). */
+  clients: GeoClient[];
 }
 
 type Accum = { ca: number; margin: number; weightKg: number; docs: number; clients: number };
@@ -71,7 +88,7 @@ const zero = (): Accum => ({ ca: 0, margin: 0, weightKg: 0, docs: 0, clients: 0 
  */
 export async function geoAggregate(start: Date, end: Date, slpName?: string | null): Promise<GeoPayload> {
   if (GEO_GROUP_CODES.length === 0) {
-    return { zones: [], segments: [], totals: zero(), unlocated: zero() };
+    return { zones: [], segments: [], totals: zero(), unlocated: zero(), clients: [] };
   }
   const slp = slpName ? Prisma.sql`AND i."slpName" = ${slpName}` : Prisma.empty;
   const inCodes = Prisma.sql`c."sapGroupCode" IN (${Prisma.join(GEO_GROUP_CODES)})`;
@@ -79,17 +96,17 @@ export async function geoAggregate(start: Date, end: Date, slpName?: string | nu
 
   // En-tête : CA + nb BL par client (avec son adresse + groupe SAP).
   const headerRows = await prisma.$queryRaw<{
-    card: string; zip: string | null; country: string | null;
+    card: string; nom: string | null; zip: string | null; city: string | null; country: string | null;
     gcode: number | null; gname: string | null; docs: number; ca: number;
   }[]>(Prisma.sql`
-    SELECT c."code" AS card, c."zipCode" AS zip, c."country" AS country,
+    SELECT c."code" AS card, c."nom" AS nom, c."zipCode" AS zip, c."city" AS city, c."country" AS country,
            c."sapGroupCode" AS gcode, c."sapGroupName" AS gname,
            COUNT(i."docEntry")::int AS docs,
            COALESCE(SUM(i."docTotal"), 0)::float AS ca
     FROM "SapInvoice" i
     JOIN "Client" c ON c."code" = i."cardCode"
     WHERE ${range} AND ${inCodes} ${slp}
-    GROUP BY c."code", c."zipCode", c."country", c."sapGroupCode", c."sapGroupName"`);
+    GROUP BY c."code", c."nom", c."zipCode", c."city", c."country", c."sapGroupCode", c."sapGroupName"`);
 
   // Marge réelle (coût EM) par client — agrégat ligne (lib/cogs).
   const marginRows = await prisma.$queryRaw<{ card: string; m: number }[]>(Prisma.sql`
@@ -117,6 +134,7 @@ export async function geoAggregate(start: Date, end: Date, slpName?: string | nu
   const segs = new Map<ClientSegment, Accum>();
   const totals = zero();
   const unlocated = zero();
+  const clients: GeoClient[] = [];
 
   const bumpSeg = (s: ClientSegment, ca: number, m: number, w: number, docs: number) => {
     const acc = segs.get(s) ?? zero();
@@ -153,6 +171,12 @@ export async function geoAggregate(start: Date, end: Date, slpName?: string | nu
       if (c) zone = { id: `c-${c.iso2}`, kind: "country", code: c.iso2, name: c.nameFr, lat: c.lat, lng: c.lng };
     }
 
+    clients.push({
+      cardCode: r.card, name: r.nom ?? r.card,
+      zoneId: zone?.id ?? null, kind: zone?.kind ?? null, code: zone?.code ?? null,
+      zip: r.zip, city: r.city, ca, margin, weightKg, docs,
+    });
+
     if (!zone) {
       unlocated.ca += ca; unlocated.margin += margin; unlocated.weightKg += weightKg;
       unlocated.docs += docs; unlocated.clients += 1;
@@ -169,5 +193,6 @@ export async function geoAggregate(start: Date, end: Date, slpName?: string | nu
     segments: GEO_SEGMENTS.map((s) => ({ segment: s, ...(segs.get(s) ?? zero()) })),
     totals,
     unlocated,
+    clients: clients.sort((a, b) => b.ca - a.ca),
   };
 }

@@ -11,6 +11,8 @@ export interface BarItem {
   hint?: string;
   /** couleur custom, sinon palette catégorielle */
   color?: string;
+  /** identifiant optionnel — passé à onSelect au clic */
+  id?: string;
 }
 
 interface BarListProps {
@@ -19,6 +21,8 @@ interface BarListProps {
   /** nombre max d'items affichés */
   max?: number;
   className?: string;
+  /** rend chaque ligne cliquable (drill-down) — reçoit item.id (ou le label). */
+  onSelect?: (id: string) => void;
 }
 
 /**
@@ -34,6 +38,7 @@ export function BarList({
   format = (v) => new Intl.NumberFormat("fr-FR").format(Math.round(v)),
   max = 6,
   className,
+  onSelect,
 }: BarListProps) {
   const reduce = useReducedMotion();
   const rows = items.slice(0, max);
@@ -52,8 +57,16 @@ export function BarList({
       {rows.map((r, i) => {
         const pct = Math.max(2, (r.value / peak) * 100);
         const color = r.color ?? CATEGORICAL[i % CATEGORICAL.length];
+        const clickable = !!onSelect;
         return (
-          <li key={r.label} className="group relative py-1">
+          <li
+            key={r.label}
+            className={`group relative py-1 ${clickable ? "cursor-pointer rounded-md -mx-1 px-1 hover:bg-secondary/50 transition-colors" : ""}`}
+            onClick={clickable ? () => onSelect!(r.id ?? r.label) : undefined}
+            role={clickable ? "button" : undefined}
+            tabIndex={clickable ? 0 : undefined}
+            onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect!(r.id ?? r.label); } } : undefined}
+          >
             <div className="flex items-baseline justify-between gap-3 mb-1">
               <span className="text-[12px] font-medium text-foreground truncate flex items-center gap-1.5 min-w-0">
                 <span className="h-2 w-2 rounded-[3px] shrink-0" style={{ background: color }} />
