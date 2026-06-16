@@ -4,7 +4,7 @@ import { getAccessScope, resolvePilotageView } from "@/lib/permissions";
 import { weeklyInvoiceSeries } from "@/lib/pilotage";
 import { isoWeek } from "@/lib/iso-week";
 import { groupCodesForSegment, parseSegment } from "@/lib/segments";
-import { cached } from "@/lib/ttlCache";
+import { cached, invalidate } from "@/lib/ttlCache";
 
 /**
  * GET /api/pilotage/weekly
@@ -28,7 +28,10 @@ export async function GET(req: Request) {
 
   const segment = parseSegment(url.searchParams.get("segment"));
 
-  const payload = await cached(`pilotage:weekly:${slp ?? "ALL"}:${segment}`, 120_000, async () => {
+  const cacheKey = `pilotage:weekly:${slp ?? "ALL"}:${segment}`;
+  if (url.searchParams.get("refresh") === "1") invalidate(cacheKey);
+
+  const payload = await cached(cacheKey, 120_000, async () => {
     const now = new Date();
     const from = new Date(now.getFullYear() - 1, 0, 1); // 1er janv N-1
     const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1); // inclut aujourd'hui

@@ -63,7 +63,7 @@ function SegmentToggle<T extends string>({
             className={cn(
               "inline-flex items-center gap-1.5 px-3 h-8 text-[12.5px] font-semibold tracking-tight rounded-md transition-colors",
               active
-                ? "bg-card text-foreground shadow-sm ring-1 ring-inset ring-border"
+                ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >

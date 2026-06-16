@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Tile, formatEuro, formatNum } from "./bento";
+import { Tile, RefreshButton, formatEuro, formatNum } from "./bento";
 import { useGeoData } from "./usePilotageData";
 import { FranceChoropleth } from "@/components/charts/FranceChoropleth";
 import { WorldBubbleMap } from "@/components/charts/WorldBubbleMap";
@@ -9,6 +9,7 @@ import { BarList } from "@/components/charts/BarList";
 import { Donut } from "@/components/charts/Donut";
 import {
   type GeoMetric, GEO_METRICS, geoMetricLabel, geoValue, formatGeoValue, formatWeight,
+  IDF_CODES, groupParisZones,
 } from "@/components/charts/geoShared";
 
 const SEGMENT_COLORS: Record<string, string> = { GMS: "#38bdf8", CHR: "#10b981", EXPORT: "#a78bfa" };
@@ -23,12 +24,14 @@ const SEGMENT_LABELS: Record<string, string> = { GMS: "GMS", CHR: "CHR", EXPORT:
  * Métrique commune sélectionnable : CA / Marge / Volume / Nb de BL.
  */
 export function PilotageScreen3({ viewAs = null }: { viewAs?: string | null } = {}) {
-  const { data, err } = useGeoData(viewAs);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const { data, err } = useGeoData(viewAs, refreshNonce);
   const [metric, setMetric] = useState<GeoMetric>("ca");
 
   const topZones = useMemo(() => {
     if (!data) return [];
-    return [...data.zones]
+    // Vue nationale : la région parisienne est regroupée en « Île-de-France ».
+    return groupParisZones(data.zones)
       .map((z) => ({ z, v: geoValue(z, metric) }))
       .filter((x) => x.v > 0)
       .sort((a, b) => b.v - a.v)
@@ -54,7 +57,7 @@ export function PilotageScreen3({ viewAs = null }: { viewAs?: string | null } = 
 
   return (
     <div className="h-screen w-screen flex flex-col p-3 gap-3 overflow-hidden">
-      <Header period={periodLabel} metric={metric} onMetric={setMetric} />
+      <Header period={periodLabel} metric={metric} onMetric={setMetric} onRefresh={() => setRefreshNonce((n) => n + 1)} />
 
       {err && (
         <div className="flex-1 grid place-items-center text-[13px] text-rose-400">
@@ -67,11 +70,15 @@ export function PilotageScreen3({ viewAs = null }: { viewAs?: string | null } = 
           className="flex-1 grid gap-2 min-h-0"
           style={{ gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gridTemplateRows: "repeat(6, minmax(0, 1fr))" }}
         >
-          <Tile colSpan={5} rowSpan={4} title={`France métropolitaine · ${geoMetricLabel(metric)}`} accent="brand">
-            <FranceChoropleth zones={data?.zones ?? []} metric={metric} />
+          <Tile colSpan={4} rowSpan={4} title={`France · ${geoMetricLabel(metric)}`} accent="brand">
+            <FranceChoropleth zones={data?.zones ?? []} metric={metric} groupParis />
           </Tile>
 
-          <Tile colSpan={7} rowSpan={4} title={`Outre-mer & Export · ${geoMetricLabel(metric)}`} accent="violet">
+          <Tile colSpan={3} rowSpan={4} title={`Île-de-France · ${geoMetricLabel(metric)}`} accent="sky">
+            <FranceChoropleth zones={data?.zones ?? []} metric={metric} onlyCodes={IDF_CODES} />
+          </Tile>
+
+          <Tile colSpan={5} rowSpan={4} title={`Outre-mer & Export · ${geoMetricLabel(metric)}`} accent="violet">
             <WorldBubbleMap zones={data?.zones ?? []} metric={metric} />
           </Tile>
 
@@ -146,8 +153,8 @@ function TotalsPanel({ data }: { data: ReturnType<typeof useGeoData>["data"] }) 
    Header — titre + sélecteur de métrique (CA / Marge / Volume / BL).
    ───────────────────────────────────────────────────────────────── */
 function Header({
-  period, metric, onMetric,
-}: { period: string; metric: GeoMetric; onMetric: (m: GeoMetric) => void }) {
+  period, metric, onMetric, onRefresh,
+}: { period: string; metric: GeoMetric; onMetric: (m: GeoMetric) => void; onRefresh: () => void }) {
   const [now, setNow] = useState("");
   useEffect(() => {
     const tick = () => setNow(new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }));
@@ -166,6 +173,7 @@ function Header({
       <div className="flex items-center gap-3">
         <span className="text-[11px] text-muted-foreground tnum">{now}</span>
         <MetricToggle value={metric} onChange={onMetric} />
+        <RefreshButton onClick={onRefresh} title="Actualiser la géoloc et les données" />
       </div>
     </header>
   );
@@ -181,7 +189,7 @@ function MetricToggle({ value, onChange }: { value: GeoMetric; onChange: (m: Geo
           onClick={() => onChange(m.id)}
           aria-pressed={value === m.id}
           className={`px-2.5 h-7 text-[11.5px] font-semibold tracking-tight rounded transition-colors ${
-            value === m.id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+            value === m.id ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
           }`}
         >
           {m.short}

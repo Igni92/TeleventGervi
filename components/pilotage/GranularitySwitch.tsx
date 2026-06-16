@@ -38,7 +38,7 @@ export function GranularitySwitch({
             }}
             className={`px-2.5 h-7 text-[11.5px] font-semibold tracking-tight rounded transition-colors ${
               active
-                ? "bg-card text-foreground shadow-sm"
+                ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >

@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { AlertCircle } from "lucide-react";
 import {
-  Tile, BigKpi, MiniKpi, TopList, MixedTopList,
+  Tile, BigKpi, MiniKpi, TopList, MixedTopList, RefreshButton,
   formatEuro, formatNum, formatPct,
 } from "./bento";
 import { GranularitySwitch } from "./GranularitySwitch";
@@ -106,8 +106,9 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
   const pick: WeekPick = (w) => (isWeight ? w.weightKg : w.volume);
   const fmtVal = (n: number) => (isWeight ? formatWeight(n) : formatEuro(n, true));
 
-  const { data } = useActivityData(safeG, viewAs);
-  const { data: weekly } = useActivityWeekly(viewAs);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const { data } = useActivityData(safeG, viewAs, refreshNonce);
+  const { data: weekly } = useActivityWeekly(viewAs, refreshNonce);
   const spark = useMemo(() => buildSpark(weekly, pick), [weekly, isWeight]); // eslint-disable-line react-hooks/exhaustive-deps
   const trend = useMemo(() => buildTrend(weekly, pick), [weekly, isWeight]); // eslint-disable-line react-hooks/exhaustive-deps
   const periodLabel = granularityLabel(safeG);
@@ -129,6 +130,7 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
         allowed={ALLOWED}
         metric={metric}
         onMetric={setMetric}
+        onRefresh={() => setRefreshNonce((n) => n + 1)}
       />
 
       <main
@@ -266,7 +268,7 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
    Header — kicker + période + switch granularité (restreint) + lien sister.
    ───────────────────────────────────────────────────────────────── */
 function Header({
-  screen, period, g, onG, allowed, metric, onMetric,
+  screen, period, g, onG, allowed, metric, onMetric, onRefresh,
 }: {
   screen: string;
   period: string;
@@ -275,6 +277,7 @@ function Header({
   allowed: Granularity[];
   metric: "ca" | "weight";
   onMetric: (m: "ca" | "weight") => void;
+  onRefresh: () => void;
 }) {
   const [now, setNow] = useState<string>("");
   useEffect(() => {
@@ -298,6 +301,7 @@ function Header({
         <MetricToggle value={metric} onChange={onMetric} />
         <span className="text-[11px] text-muted-foreground tnum">{now}</span>
         <GranularitySwitch value={g} onChange={onG} allowed={allowed} />
+        <RefreshButton onClick={onRefresh} />
       </div>
     </header>
   );
@@ -312,7 +316,7 @@ function MetricToggle({ value, onChange }: { value: "ca" | "weight"; onChange: (
         onClick={() => onChange("ca")}
         aria-pressed={value === "ca"}
         className={`px-2.5 h-7 text-[11.5px] font-semibold tracking-tight rounded transition-colors ${
-          value === "ca" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          value === "ca" ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
         }`}
       >
         CA HT
@@ -322,7 +326,7 @@ function MetricToggle({ value, onChange }: { value: "ca" | "weight"; onChange: (
         onClick={() => onChange("weight")}
         aria-pressed={value === "weight"}
         className={`px-2.5 h-7 text-[11.5px] font-semibold tracking-tight rounded transition-colors ${
-          value === "weight" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          value === "weight" ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
         }`}
       >
         Volume

@@ -25,6 +25,34 @@ export function geoValue(z: Pick<GeoZone, GeoMetric>, m: GeoMetric): number {
   return z[m] ?? 0;
 }
 
+/* ─────────────────────────────────────────────────────────────────
+   Île-de-France — les 8 départements franciliens. Sur la carte nationale
+   ils sont minuscules et illisibles → on les REGROUPE en une zone unique
+   « Île-de-France », et on détaille la région sur une carte zoomée dédiée.
+   ───────────────────────────────────────────────────────────────── */
+export const IDF_CODES = ["75", "77", "78", "91", "92", "93", "94", "95"];
+const IDF_SET = new Set(IDF_CODES);
+export const isIDF = (code: string) => IDF_SET.has(code);
+
+/** Fusionne les 8 départements franciliens en une zone « Île-de-France ».
+ *  Utilisé pour la liste Top zones (vue nationale regroupée). */
+export function groupParisZones(zones: GeoZone[]): GeoZone[] {
+  const idf = zones.filter((z) => z.kind === "fr-dept" && isIDF(z.code));
+  if (idf.length === 0) return zones;
+  const sum = (k: GeoMetric) => idf.reduce((s, z) => s + (z[k] ?? 0), 0);
+  const merged: GeoZone = {
+    id: "fr-IDF", kind: "fr-dept", code: "IDF", name: "Île-de-France", lat: null, lng: null,
+    ca: sum("ca"), margin: sum("margin"), weightKg: sum("weightKg"), docs: sum("docs"),
+    clients: idf.reduce((s, z) => s + z.clients, 0),
+  };
+  return [...zones.filter((z) => !(z.kind === "fr-dept" && isIDF(z.code))), merged];
+}
+
+/** Agrégat « Île-de-France » seul (ou null si aucune donnée IDF). */
+export function parisAggregate(zones: GeoZone[]): GeoZone | null {
+  return groupParisZones(zones).find((z) => z.code === "IDF") ?? null;
+}
+
 export function formatWeight(kg: number): string {
   if (Math.abs(kg) >= 1000) return `${(kg / 1000).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} t`;
   return `${Math.round(kg).toLocaleString("fr-FR")} kg`;
