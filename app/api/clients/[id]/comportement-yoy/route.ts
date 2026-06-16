@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { cardCodesOf } from "@/lib/clientCardCodes";
 
 /**
  * GET /api/clients/[id]/comportement-yoy
@@ -68,9 +69,7 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
   });
   if (!client) return NextResponse.json({ error: "Client introuvable" }, { status: 404 });
 
-  const cardCodes = Array.from(
-    new Set<string>([client.code, ...client.deliveryModes.map((m) => m.sapCardCode).filter(Boolean)]),
-  );
+  const cardCodes = cardCodesOf(client);
 
   const now = new Date();
   const yearN = now.getUTCFullYear();

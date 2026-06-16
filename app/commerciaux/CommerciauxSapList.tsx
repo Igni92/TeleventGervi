@@ -116,9 +116,14 @@ export function CommerciauxSapList() {
 
           <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2">
             <div>
-              <p className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">CA net YTD</p>
+              <p className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">CA porté · YTD</p>
               <p className="text-[17px] font-bold tnum text-foreground leading-tight">{fmtEur(c.caNetYtd)}</p>
-              <p className="text-[10px] text-muted-foreground tnum">{c.nbFacturesYtd} factures</p>
+              <p className="text-[10px] text-muted-foreground tnum">{c.nbFacturesYtd} factures · porté (slpName)</p>
+              {Math.abs(c.caNetYtd - c.caPortefeuilleYtd) / Math.max(c.caNetYtd, 1) > 0.01 && (
+                <p className="text-[10px] text-amber-600 dark:text-amber-400 tnum mt-0.5" title="CA des clients affectés au commercial (Client.commercial), base de l'objectif — distinct du CA porté (slpName des factures).">
+                  Portefeuille : {fmtEur(c.caPortefeuilleYtd)}
+                </p>
+              )}
             </div>
             <div>
               <p className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">Volume BL YTD</p>
@@ -183,8 +188,8 @@ function ObjectifCell({
   return (
     <div className="mt-1.5 px-1">
       <div className="flex items-center justify-between text-[10px]">
-        <span className="inline-flex items-center gap-1 uppercase tracking-[0.1em] font-semibold text-muted-foreground">
-          <Target className="h-3 w-3" /> Objectif
+        <span className="inline-flex items-center gap-1 uppercase tracking-[0.1em] font-semibold text-muted-foreground" title="Réalisé mesuré sur le PORTEFEUILLE (clients affectés), pas sur le CA porté (slpName des factures).">
+          <Target className="h-3 w-3" /> Objectif · portefeuille
         </span>
         {pct !== null ? (
           <span className={`tnum font-bold ${pct >= 100 ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>

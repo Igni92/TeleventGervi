@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getAccessScope } from "@/lib/permissions";
+import { cardCodesOf } from "@/lib/clientCardCodes";
 
 /**
  * GET /api/sap/clients/[id]/recurring
@@ -59,9 +60,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     }
   }
 
-  const cardCodes = Array.from(
-    new Set<string>([client.code, ...client.deliveryModes.map((m) => m.sapCardCode).filter(Boolean)]),
-  );
+  const cardCodes = cardCodesOf(client);
   if (cardCodes.length === 0) {
     return NextResponse.json({ ok: true, items: [] });
   }
