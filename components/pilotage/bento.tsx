@@ -13,7 +13,7 @@
  * `grid-template-rows: repeat(8, 1fr)` sur un viewport `h-screen overflow-hidden`.
  */
 
-import { ReactNode, useState } from "react";
+import { ReactNode, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { Delta } from "@/components/ui/delta";
@@ -56,20 +56,36 @@ export function Tile({
     accent === "amber"   ? "border-l-amber-500" :
     accent === "sky"     ? "border-l-sky-500" :
     accent === "brand"   ? "border-l-brand-500" : "";
+  const ref = useRef<HTMLElement>(null);
+  // Spotlight premium : un halo brand suit le curseur (CSS vars, sans re-render).
+  const onMove = (e: React.MouseEvent<HTMLElement>) => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    el.style.setProperty("--mx", `${e.clientX - r.left}px`);
+    el.style.setProperty("--my", `${e.clientY - r.top}px`);
+  };
   return (
     <section
-      className={`bg-card border border-border rounded-xl overflow-hidden flex flex-col p-4 ${accent ? `border-l-4 ${accentBorder}` : ""} ${className}`}
+      ref={ref}
+      onMouseMove={onMove}
+      className={`group relative bg-card border border-border rounded-xl overflow-hidden flex flex-col p-4 ${accent ? `border-l-4 ${accentBorder}` : ""} ${className}`}
       style={{
         gridColumn: `span ${colSpan} / span ${colSpan}`,
         gridRow: `span ${rowSpan} / span ${rowSpan}`,
       }}
     >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+        style={{ background: "radial-gradient(200px circle at var(--mx, 50%) var(--my, 0%), rgba(250,204,21,0.07), transparent 60%)" }}
+      />
       {title && (
-        <h3 className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2 shrink-0">
+        <h3 className="relative text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2 shrink-0">
           {title}
         </h3>
       )}
-      <div className="flex-1 min-h-0">{children}</div>
+      <div className="relative flex-1 min-h-0">{children}</div>
     </section>
   );
 }
