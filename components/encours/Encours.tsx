@@ -6,6 +6,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Loader2, RefreshCw, Euro, AlertTriangle, Clock, Flame, Search, ExternalLink, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ClientLink } from "@/components/ClientLink";
 
 interface InvoiceLine {
@@ -125,7 +126,21 @@ export function Encours() {
             </thead>
             <tbody className="divide-y divide-border/50">
               {loading ? (
-                <tr><td colSpan={8} className="h-32 text-center"><Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></td></tr>
+                <>
+                  <tr className="sr-only"><td colSpan={8} role="status">Chargement des encours…</td></tr>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <tr key={i} aria-hidden>
+                      <td className="px-3 py-2">
+                        <Skeleton className="h-3.5 w-40" />
+                        <Skeleton className="h-2.5 w-20 mt-1" />
+                      </td>
+                      {Array.from({ length: 6 }).map((__, j) => (
+                        <td key={j} className="px-3 py-2"><div className="flex justify-end"><Skeleton className="h-3.5 w-14" /></div></td>
+                      ))}
+                      <td className="w-8" />
+                    </tr>
+                  ))}
+                </>
               ) : rows.length === 0 ? (
                 <tr><td colSpan={8} className="h-32 text-center text-muted-foreground">Aucun encours 🎉</td></tr>
               ) : rows.map((c) => (
