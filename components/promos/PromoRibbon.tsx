@@ -64,6 +64,7 @@ export function PromoRibbon() {
   const count = promos?.length ?? 0;
   const animOn = animPref && !reduce;
   if (!promos || count === 0) return null;
+  const hasNew = promos.some((p) => p.isNew);
 
   // Remplissage pour une bande assez large même avec peu de promos, puis
   // duplication → boucle sans couture (translateX 0 → -50 %).
@@ -73,6 +74,21 @@ export function PromoRibbon() {
   const items = animOn ? [...seq, ...seq] : seq;
 
   return (
+    <>
+    {/* Mobile : pastille compacte — le ruban en biais est illisible en petit
+        écran, mais le vendeur garde un accès promo persistant sur toutes les
+        pages (bas-droite, libre : le Toaster est en haut-droite). */}
+    <Link
+      href="/promos"
+      aria-label={`${count} promotion${count > 1 ? "s" : ""} en cours`}
+      className="md:hidden fixed bottom-4 right-4 z-40 inline-flex items-center gap-1.5 rounded-full bg-rose-500 text-white shadow-lg shadow-rose-900/30 ring-1 ring-rose-300/40 pl-2.5 pr-3 h-9 text-[12.5px] font-semibold print:hidden active:scale-95 transition-transform focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+    >
+      <Gift className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <span className="tnum">{count}</span>&nbsp;promo{count > 1 ? "s" : ""}
+      {hasNew && <span aria-hidden className="ml-0.5 h-2 w-2 rounded-full bg-amber-300 ring-1 ring-rose-600" />}
+    </Link>
+
+    {/* Desktop : ruban d'angle « en biais » */}
     <div
       role="region"
       aria-label="Promotions en cours"
@@ -123,5 +139,6 @@ export function PromoRibbon() {
         </div>
       </div>
     </div>
+    </>
   );
 }

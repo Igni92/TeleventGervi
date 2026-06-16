@@ -255,3 +255,19 @@ Lot « sûr » post-audit sur `components/ClientTable.tsx` (je code, QA visuelle
 - **a11y motion** : `.skeleton` désormais **figé en `prefers-reduced-motion`** (fond muté statique, plus de balayage) — gap corrigé dans `globals.css`.
 
 Vérif : **tsc 0 erreur · lint clean · 105/105 tests · `next build` OK (65/65 pages)**.
+
+---
+
+---
+
+## 🔎 Suite d'audit — D11 (dédup promos) · D12 (ruban mobile) · C9 (couverture poids)
+
+| # | Constat | Correctif |
+|---|---------|-----------|
+| **D11** | `/accueil` fetchait `/api/promos?active=1` **et** `/api/notifications` **3× chacun** (PromoBanner + PromosAccueil + PromoRibbon) ; `/console/ecran2` les doublait. | **NOUVEAU `lib/sharedFetch.ts`** : `sharedFetchJson()` coalesce les requêtes concurrentes par URL + cache TTL court ; `useJson` et les 3 composants promo passent par lui → **2 requêtes au lieu de 6**. Marquer « vu » invalide le cache → badge « Nouveau » cohérent partout. |
+| **D12** | `PromoRibbon` est `hidden md:block` → **aucune présence promo en mobile** (le ruban en biais est illisible en petit écran). | **Pastille compacte mobile** (`md:hidden`, bas-droite, libre car Toaster en haut-droite) : « 🎁 N promos », pastille « nouveau », tap → `/promos`. Même composant, **0 fetch en plus**. |
+| **C9** | « Volume BL (kg) » fait `Σ qty × COALESCE(salesUnitWeight, 0)` : les lignes sans poids comptent **0 kg mais comptent au CA** → kg **sous-estimé silencieusement**. | **`weightCoverage`** ajouté côté serveur (mirroir exact de `marginCoverage`) ; **caveat ambre** sous le héros kg quand < 95 % : « Poids connu sur X % des lignes — volume kg sous-estimé ». |
+
+Vérif : **tsc 0 erreur · lint clean · 105/105 tests · `next build` OK (65/65 pages)**.
+
+> 🧪 À QA visuel : (D11) onglet Réseau sur `/accueil` = 2 appels promos/notifs ; (D12) réduire en mobile → pastille promo en bas-droite ; (C9) cockpit `/dashboard` écran 1 en vue **kg** → caveat ambre si des articles n'ont pas de `SalesUnitWeight`.

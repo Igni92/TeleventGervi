@@ -361,6 +361,7 @@ export interface ActivityBucket {
   margin: number;         // Σ (lineTotal − quantity × coût_EM) par ligne (lib/cogs)
   marginPct: number;      // margin / volume × 100 (0 si volume nul)
   marginCoverage: number; // % des lignes produit dont le coût EM est résolu (qualité données)
+  weightCoverage: number; // % des lignes produit dont le poids kg (SalesUnitWeight) est connu
   ordersCount: number;
   activeClients: number;
   avgBasket: number;
@@ -378,11 +379,12 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
              COUNT(DISTINCT "cardCode")::int AS clients
       FROM "SapOrder"
       WHERE "cancelled" = false AND "docDate" >= ${start} AND "docDate" < ${end} ${slpHdr}`),
-    prisma.$queryRaw<{ n: number; with_cost: number; margin: number; weight: number }[]>(Prisma.sql`
+    prisma.$queryRaw<{ n: number; with_cost: number; margin: number; weight: number; weighted_lines: number }[]>(Prisma.sql`
       SELECT ${COGS_PRODUCT_LINES}::int AS n,
              ${COGS_COSTED_LINES}::int AS with_cost,
              COALESCE(SUM(${COGS_MARGIN}), 0)::float AS margin,
-             COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS weight
+             COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS weight,
+             COUNT(*) FILTER (WHERE l."itemCode" IS NOT NULL AND COALESCE(p."salesUnitWeight", 0) > 0)::int AS weighted_lines
       FROM ${cogsFromSql("order")}
       LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
       WHERE i."cancelled" = false AND i."docDate" >= ${start} AND i."docDate" < ${end} ${slpSql("i", slpName)}`),
@@ -399,6 +401,7 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
     margin,
     marginPct: volume > 0 ? (margin / volume) * 100 : 0,
     marginCoverage: linesCount > 0 ? (Number(ln?.with_cost ?? 0) / linesCount) * 100 : 0,
+    weightCoverage: linesCount > 0 ? (Number(ln?.weighted_lines ?? 0) / linesCount) * 100 : 0,
     ordersCount,
     activeClients: Number(hdr?.clients ?? 0),
     avgBasket: ordersCount > 0 ? volume / ordersCount : 0,

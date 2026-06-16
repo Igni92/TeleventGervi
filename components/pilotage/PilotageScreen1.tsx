@@ -139,16 +139,24 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
       >
         {/* Volume BL héros (8×3) */}
         <Tile colSpan={8} rowSpan={3} accent="brand">
-          <BigKpi
-            label={isWeight ? "Activité commerciale · volume BL (kg)" : "Activité commerciale · CA HT BL"}
-            value={data ? fmtVal(heroCurr) : "—"}
-            curr={heroCurr}
-            prev={heroPrev}
-            hint={hint}
-            spark={spark.length > 1 ? spark : undefined}
-            format={data ? fmtVal : undefined}
-            animateOnMount
-          />
+          <div className="h-full flex flex-col">
+            <BigKpi
+              label={isWeight ? "Activité commerciale · volume BL (kg)" : "Activité commerciale · CA HT BL"}
+              value={data ? fmtVal(heroCurr) : "—"}
+              curr={heroCurr}
+              prev={heroPrev}
+              hint={hint}
+              spark={spark.length > 1 ? spark : undefined}
+              format={data ? fmtVal : undefined}
+              animateOnMount
+            />
+            {data && isWeight && data.curr.weightCoverage < 95 && (
+              <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 inline-flex items-center gap-1">
+                <AlertCircle className="h-3 w-3 shrink-0" />
+                Poids connu sur {formatPct(data.curr.weightCoverage)} des lignes — volume kg sous-estimé
+              </p>
+            )}
+          </div>
         </Tile>
 
         {/* Marge € (4×3) avec indicateur qualité couverture */}

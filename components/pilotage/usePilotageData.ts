@@ -41,11 +41,11 @@ export interface ActivityPayload {
   period: { start: string; end: string };
   previous: { start: string; end: string };
   curr: {
-    volume: number; weightKg: number; margin: number; marginPct: number; marginCoverage: number;
+    volume: number; weightKg: number; margin: number; marginPct: number; marginCoverage: number; weightCoverage: number;
     ordersCount: number; activeClients: number; avgBasket: number;
   };
   prev: {
-    volume: number; weightKg: number; margin: number; marginPct: number; marginCoverage: number;
+    volume: number; weightKg: number; margin: number; marginPct: number; marginCoverage: number; weightCoverage: number;
     ordersCount: number; activeClients: number; avgBasket: number;
   };
   crm: { appels: number; cdesCrm: number; tauxConv: number; clientsTouches: number };
