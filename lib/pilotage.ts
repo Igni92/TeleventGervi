@@ -16,6 +16,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { familyOf } from "@/lib/familles";
+import { grossMarginPct } from "@/lib/margin";
 import {
   COGS_MARGIN, COGS_PRODUCT_LINES, COGS_COSTED_LINES,
   cogsFromSql, realMarginAgg,
@@ -156,8 +157,9 @@ export async function aggregateKpi(start: Date, end: Date, slpName?: string | nu
     creditNotes,
     caProductNet,
     margin,
-    // Marge % sur la base CA produit (exclu services) — pas sur le CA total.
-    marginPct: caProductNet > 0 ? (margin / caProductNet) * 100 : 0,
+    // Marge BRUTE % sur la base CA produit NET (hors services) — base unique
+    // partagée par tous les écrans (lib/margin), jamais sur le CA total.
+    marginPct: grossMarginPct(margin, caProductNet),
     marginCoverage: invMargin.productLines > 0
       ? (invMargin.costedLines / invMargin.productLines) * 100
       : 0,
@@ -229,12 +231,15 @@ export interface TopClient {
   cardCode: string;
   cardName: string | null;
   ca: number;
+  /** CA produit NET (hors services) — base de la marge BRUTE % (≠ ca total). */
+  caProductNet: number;
   margin: number;
   invoices: number;
 }
 
-/** Marge RÉELLE (coût EM) par clé (cardCode ou slpName), Invoices − Avoirs,
- *  restreinte aux clés du top (≤ qq dizaines) — 2 GROUP BY SQL ciblés. */
+/** Marge brute (coût EM) + CA produit NET par clé (cardCode ou slpName),
+ *  Invoices − Avoirs, restreints aux clés du top (≤ qq dizaines) — 2 GROUP BY
+ *  SQL ciblés. La marge % se calcule ensuite via grossMarginPct(margin, cpn). */
 async function realMarginByKey(
   keyCol: "cardCode" | "slpName",
   keys: string[],
@@ -242,20 +247,24 @@ async function realMarginByKey(
   end: Date,
   groupCodes?: number[] | null,
   slpName?: string | null,
-): Promise<Map<string, number>> {
+): Promise<Map<string, { margin: number; caProductNet: number }>> {
   if (keys.length === 0) return new Map();
   const col = Prisma.raw(`i."${keyCol}"`);
   const q = (kind: "invoice" | "creditNote") =>
-    prisma.$queryRaw<{ k: string; m: number }[]>(Prisma.sql`
-      SELECT ${col} AS k, COALESCE(SUM(${COGS_MARGIN}), 0)::float AS m
+    prisma.$queryRaw<{ k: string; m: number; cpn: number }[]>(Prisma.sql`
+      SELECT ${col} AS k, COALESCE(SUM(${COGS_MARGIN}), 0)::float AS m,
+             COALESCE(SUM(l."lineTotal") FILTER (WHERE l."isService" = false), 0)::float AS cpn
       FROM ${cogsFromSql(kind)}
       WHERE i."cancelled" = false AND i."docDate" >= ${start} AND i."docDate" < ${end}
         AND ${col} IN (${Prisma.join(keys)}) ${segmentSql("i", groupCodes)} ${slpSql("i", slpName)}
       GROUP BY 1`);
   const [inv, cn] = await Promise.all([q("invoice"), q("creditNote")]);
-  const m = new Map<string, number>();
-  for (const r of inv) m.set(r.k, Number(r.m));
-  for (const r of cn) m.set(r.k, (m.get(r.k) ?? 0) - Number(r.m));
+  const m = new Map<string, { margin: number; caProductNet: number }>();
+  for (const r of inv) m.set(r.k, { margin: Number(r.m), caProductNet: Number(r.cpn) });
+  for (const r of cn) {
+    const cur = m.get(r.k) ?? { margin: 0, caProductNet: 0 };
+    m.set(r.k, { margin: cur.margin - Number(r.m), caProductNet: cur.caProductNet - Number(r.cpn) });
+  }
   return m;
 }
 
@@ -279,13 +288,17 @@ export async function topClients(start: Date, end: Date, limit = 10, groupCodes?
   ]);
   const nameMap = new Map(names.map((n) => [n.cardCode, n.cardName]));
 
-  return grouped.map((g) => ({
-    cardCode: g.cardCode,
-    cardName: nameMap.get(g.cardCode) ?? null,
-    ca: g._sum.docTotal ?? 0,
-    margin: margins.get(g.cardCode) ?? 0,
-    invoices: g._count.docEntry,
-  }));
+  return grouped.map((g) => {
+    const md = margins.get(g.cardCode);
+    return {
+      cardCode: g.cardCode,
+      cardName: nameMap.get(g.cardCode) ?? null,
+      ca: g._sum.docTotal ?? 0,
+      caProductNet: md?.caProductNet ?? 0,
+      margin: md?.margin ?? 0,
+      invoices: g._count.docEntry,
+    };
+  });
 }
 
 export interface TopSupplier {
@@ -341,6 +354,8 @@ export async function topSuppliers(start: Date, end: Date, limit = 10): Promise<
 export interface TopSalesperson {
   slpName: string;
   ca: number;
+  /** CA produit NET (hors services) — base de la marge BRUTE % (≠ ca total). */
+  caProductNet: number;
   margin: number;
   activeClients: number;
   invoices: number;
@@ -357,9 +372,10 @@ export interface TopSalesperson {
 
 export interface ActivityBucket {
   volume: number;         // Σ DocTotal HT des Orders non annulés (= CA HT BL)
+  caProductNet: number;   // Σ lineTotal des lignes produit (isService=false) — base marge %
   weightKg: number;       // Σ quantity × salesUnitWeight par ligne (= Volume kg)
   margin: number;         // Σ (lineTotal − quantity × coût_EM) par ligne (lib/cogs)
-  marginPct: number;      // margin / volume × 100 (0 si volume nul)
+  marginPct: number;      // marge BRUTE / CA produit NET × 100 (base unique lib/margin)
   marginCoverage: number; // % des lignes produit dont le coût EM est résolu (qualité données)
   ordersCount: number;
   activeClients: number;
@@ -378,11 +394,12 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
              COUNT(DISTINCT "cardCode")::int AS clients
       FROM "SapOrder"
       WHERE "cancelled" = false AND "docDate" >= ${start} AND "docDate" < ${end} ${slpHdr}`),
-    prisma.$queryRaw<{ n: number; with_cost: number; margin: number; weight: number }[]>(Prisma.sql`
+    prisma.$queryRaw<{ n: number; with_cost: number; margin: number; weight: number; ca_product: number }[]>(Prisma.sql`
       SELECT ${COGS_PRODUCT_LINES}::int AS n,
              ${COGS_COSTED_LINES}::int AS with_cost,
              COALESCE(SUM(${COGS_MARGIN}), 0)::float AS margin,
-             COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS weight
+             COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS weight,
+             COALESCE(SUM(l."lineTotal") FILTER (WHERE l."isService" = false), 0)::float AS ca_product
       FROM ${cogsFromSql("order")}
       LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
       WHERE i."cancelled" = false AND i."docDate" >= ${start} AND i."docDate" < ${end} ${slpSql("i", slpName)}`),
@@ -392,12 +409,16 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
   const ordersCount = Number(hdr?.orders ?? 0);
   const margin = Number(ln?.margin ?? 0);
   const linesCount = Number(ln?.n ?? 0);
+  const caProductNet = Number(ln?.ca_product ?? 0);
 
   return {
     volume,
+    caProductNet,
     weightKg: Number(ln?.weight ?? 0),
     margin,
-    marginPct: volume > 0 ? (margin / volume) * 100 : 0,
+    // Marge BRUTE % sur le CA produit NET (hors services), pas sur le volume BL
+    // total — alignée sur l'écran 2 / la matrice annuelle (base unique lib/margin).
+    marginPct: grossMarginPct(margin, caProductNet),
     marginCoverage: linesCount > 0 ? (Number(ln?.with_cost ?? 0) / linesCount) * 100 : 0,
     ordersCount,
     activeClients: Number(hdr?.clients ?? 0),
@@ -1070,10 +1091,12 @@ export async function topSalespersons(start: Date, end: Date, limit = 10, groupC
       select: { cardCode: true },
       distinct: ["cardCode"],
     });
+    const md = margins.get(g.slpName);
     withActive.push({
       slpName: g.slpName,
       ca: g._sum.docTotal ?? 0,
-      margin: margins.get(g.slpName) ?? 0,
+      caProductNet: md?.caProductNet ?? 0,
+      margin: md?.margin ?? 0,
       activeClients: distinct.length,
       invoices: g._count.docEntry,
     });

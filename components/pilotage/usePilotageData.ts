@@ -41,11 +41,11 @@ export interface ActivityPayload {
   period: { start: string; end: string };
   previous: { start: string; end: string };
   curr: {
-    volume: number; weightKg: number; margin: number; marginPct: number; marginCoverage: number;
+    volume: number; caProductNet: number; weightKg: number; margin: number; marginPct: number; marginCoverage: number;
     ordersCount: number; activeClients: number; avgBasket: number;
   };
   prev: {
-    volume: number; weightKg: number; margin: number; marginPct: number; marginCoverage: number;
+    volume: number; caProductNet: number; weightKg: number; margin: number; marginPct: number; marginCoverage: number;
     ordersCount: number; activeClients: number; avgBasket: number;
   };
   crm: { appels: number; cdesCrm: number; tauxConv: number; clientsTouches: number };
@@ -94,9 +94,9 @@ export interface AnnualPayload {
     totalWeightKg: number;
     totalCaProductNet: number;
   }[];
-  clients: { cardCode: string; cardName: string | null; ca: number; margin: number; invoices: number; weightKg: number }[];
+  clients: { cardCode: string; cardName: string | null; ca: number; caProductNet: number; margin: number; invoices: number; weightKg: number }[];
   suppliers: { cardCode: string; cardName: string | null; totalIn: number; pdnCount: number; weightKg: number }[];
-  salespersons: { slpName: string; ca: number; margin: number; activeClients: number; invoices: number; weightKg: number }[];
+  salespersons: { slpName: string; ca: number; caProductNet: number; margin: number; activeClients: number; invoices: number; weightKg: number }[];
 }
 
 export function useAnnualData(segment: Segment = "ALL", as?: string | null, nonce = 0) {

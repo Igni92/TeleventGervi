@@ -15,15 +15,15 @@ import {
   isoWeek, isoWeekLabel, isoWeeksInYear, isoWeekKey, COMMERCIAL_EVENTS,
 } from "@/lib/iso-week";
 import { SEGMENTS, type Segment } from "@/lib/segments";
+import { grossMarginPct } from "@/lib/margin";
 
 type Screen2View = "matrix" | "evolution" | "events";
-/** Métrique affichée : CA HT (€), Poids (kg), ou Marge % (margin / CA produit net). */
+/** Métrique affichée : CA HT (€), Poids (kg), ou Marge % (marge brute / CA produit net). */
 type Metric = "ca" | "weight" | "marginPct";
 
-/** Marge % = marge / base (CA produit net), garde-fou base ≤ 0. */
-function marginPctOf(margin: number, base: number): number {
-  return base > 0 ? (margin / base) * 100 : 0;
-}
+/** Marge BRUTE % = marge / CA produit NET — base unique partagée (lib/margin),
+ *  identique écran 1 / écran 2 / matrice / tops. */
+const marginPctOf = grossMarginPct;
 
 function metricLabel(m: Metric): string {
   return m === "ca" ? "CA HT" : m === "weight" ? "Poids" : "Marge %";
@@ -71,8 +71,8 @@ export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = 
 
   // Tops RE-triés selon la métrique active (CA / Poids / Marge %) — pas l'ordre API.
   const sortedClients = useMemo(() => {
-    const v = (c: { ca: number; weightKg: number; margin: number }) =>
-      mode === "ca" ? c.ca : mode === "weight" ? c.weightKg : marginPctOf(c.margin, c.ca);
+    const v = (c: { ca: number; weightKg: number; margin: number; caProductNet: number }) =>
+      mode === "ca" ? c.ca : mode === "weight" ? c.weightKg : marginPctOf(c.margin, c.caProductNet);
     return [...(data?.clients ?? [])].sort((a, b) => v(b) - v(a));
   }, [data, mode]);
   const sortedSuppliers = useMemo(() => {
@@ -80,8 +80,8 @@ export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = 
     return [...(data?.suppliers ?? [])].sort((a, b) => v(b) - v(a));
   }, [data, mode]);
   const sortedSlp = useMemo(() => {
-    const v = (s: { ca: number; weightKg: number; margin: number }) =>
-      mode === "ca" ? s.ca : mode === "weight" ? s.weightKg : marginPctOf(s.margin, s.ca);
+    const v = (s: { ca: number; weightKg: number; margin: number; caProductNet: number }) =>
+      mode === "ca" ? s.ca : mode === "weight" ? s.weightKg : marginPctOf(s.margin, s.caProductNet);
     return [...(data?.salespersons ?? [])].sort((a, b) => v(b) - v(a));
   }, [data, mode]);
 
@@ -157,7 +157,7 @@ export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = 
             <TopList
               items={sortedClients.slice(0, 8).map((c) => ({
                 name: c.cardName ?? c.cardCode,
-                value: mode === "ca" ? c.ca : mode === "weight" ? c.weightKg : marginPctOf(c.margin, c.ca),
+                value: mode === "ca" ? c.ca : mode === "weight" ? c.weightKg : marginPctOf(c.margin, c.caProductNet),
                 sub: mode === "ca" ? `${formatEuro(c.margin, true)} marge · ${c.invoices} fact.`
                   : mode === "weight" ? `${formatEuro(c.ca, true)} CA · ${c.invoices} fact.`
                   : `${formatEuro(c.ca, true)} CA · ${formatEuro(c.margin, true)} marge`,
@@ -184,7 +184,7 @@ export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = 
             <TopList
               items={sortedSlp.slice(0, 6).map((s) => ({
                 name: s.slpName,
-                value: mode === "ca" ? s.ca : mode === "weight" ? s.weightKg : marginPctOf(s.margin, s.ca),
+                value: mode === "ca" ? s.ca : mode === "weight" ? s.weightKg : marginPctOf(s.margin, s.caProductNet),
                 sub: mode === "ca" ? `${s.activeClients} clients · ${formatEuro(s.margin, true)} marge`
                   : mode === "weight" ? `${formatEuro(s.ca, true)} CA · ${s.activeClients} clients`
                   : `${s.activeClients} clients · ${formatEuro(s.ca, true)} CA`,

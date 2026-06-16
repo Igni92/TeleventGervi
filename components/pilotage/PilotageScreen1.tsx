@@ -84,10 +84,12 @@ function formatWeight(kg: number): string {
  * Granularité restreinte = Jour / Semaine / Mois (pas Année — pour l'année,
  * basculer sur Écran 2 = rapport annuel comptable).
  *
- * Marge calculée ligne par ligne :
- *   Σ (lineTotal − quantity × lineCost)  sur SapOrderLine
- * (lineCost = StockPrice SAP B1). La couverture des lignes avec coût est
- * affichée pour transparence sur la qualité des données SAP.
+ * Marge BRUTE calculée ligne par ligne :
+ *   Σ (lineTotal − quantity × coût d'entrée marchandise réel)  sur SapOrderLine
+ * (coût EM réel issu des dernières entrées marchandise — lib/cogs.ts, JAMAIS le
+ * lineCost/grossProfit SAP). Marge % rapportée au CA produit NET (lib/margin).
+ * La couverture des lignes dont le coût EM est connu est affichée pour
+ * transparence sur la qualité des données.
  *
  * Disposition 12×6 :
  *   ┌──────── Volume BL (8×3 héros) ────────┬─ Marge € (4×3) ──┐
@@ -166,7 +168,7 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
             {data && data.curr.marginCoverage < 95 && (
               <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 inline-flex items-center gap-1">
                 <AlertCircle className="h-3 w-3 shrink-0" />
-                {formatPct(data.curr.marginCoverage)} des lignes ont un coût SAP
+                {formatPct(data.curr.marginCoverage)} des lignes ont un coût d’entrée connu
               </p>
             )}
           </div>
