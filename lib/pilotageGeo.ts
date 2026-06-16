@@ -11,8 +11,10 @@
  * EXPORT + GMS + CHR (cf. lib/segments). Tout est regroupé : par zone on cumule
  * CA, marge réelle (coût EM, lib/cogs), volume (kg) et nombre de BL/factures.
  *
- * NB : à la différence du rapport annuel (Écran 2), on ne déduit PAS les avoirs
- *      clients — c'est une vue de DISTRIBUTION du facturé, pas le CA net comptable.
+ * NB : on DÉDUIT les avoirs clients (CreditNotes) par client — une facture
+ *      annulée par un avoir ne doit pas laisser de position fantôme sur la carte
+ *      (ex. cas Égypte). Un client dont le CA net (factures − avoirs) est ≤ 0
+ *      est écarté : il ne correspond à aucune livraison réelle.
  */
 
 import { Prisma } from "@prisma/client";
@@ -127,8 +129,37 @@ export async function geoAggregate(start: Date, end: Date, slpName?: string | nu
     WHERE ${range} AND ${inCodes} ${slp}
     GROUP BY 1`);
 
+  // Avoirs clients (CreditNotes) à DÉDUIRE par client — sinon une facture
+  // annulée par un avoir laisse une position fantôme sur la carte (ex. Égypte).
+  const [cnHeaderRows, cnMarginRows, cnWeightRows] = await Promise.all([
+    prisma.$queryRaw<{ card: string; ca: number }[]>(Prisma.sql`
+      SELECT i."cardCode" AS card, COALESCE(SUM(i."docTotal"), 0)::float AS ca
+      FROM "SapCreditNote" i
+      JOIN "Client" c ON c."code" = i."cardCode"
+      WHERE ${range} AND ${inCodes} ${slp}
+      GROUP BY 1`),
+    prisma.$queryRaw<{ card: string; m: number }[]>(Prisma.sql`
+      SELECT i."cardCode" AS card, COALESCE(SUM(${COGS_MARGIN}), 0)::float AS m
+      FROM ${cogsFromSql("creditNote")}
+      JOIN "Client" c ON c."code" = i."cardCode"
+      WHERE ${range} AND ${inCodes} ${slp}
+      GROUP BY 1`),
+    prisma.$queryRaw<{ card: string; w: number }[]>(Prisma.sql`
+      SELECT i."cardCode" AS card,
+             COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS w
+      FROM "SapCreditNoteLine" l
+      JOIN "SapCreditNote" i ON i."docEntry" = l."docEntry"
+      JOIN "Client" c ON c."code" = i."cardCode"
+      LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
+      WHERE ${range} AND ${inCodes} ${slp}
+      GROUP BY 1`),
+  ]);
+
   const marginByCard = new Map(marginRows.map((r) => [r.card, Number(r.m)]));
   const weightByCard = new Map(weightRows.map((r) => [r.card, Number(r.w)]));
+  const cnCaByCard = new Map(cnHeaderRows.map((r) => [r.card, Number(r.ca)]));
+  const cnMarginByCard = new Map(cnMarginRows.map((r) => [r.card, Number(r.m)]));
+  const cnWeightByCard = new Map(cnWeightRows.map((r) => [r.card, Number(r.w)]));
 
   const zones = new Map<string, GeoZone>();
   const segs = new Map<ClientSegment, Accum>();
@@ -145,10 +176,14 @@ export async function geoAggregate(start: Date, end: Date, slpName?: string | nu
   for (const r of headerRows) {
     const seg = segmentOfGroup(r.gname, r.gcode);
     if (!seg || !GEO_SEGMENTS.includes(seg)) continue; // hors périmètre
-    const ca = Number(r.ca);
-    const margin = marginByCard.get(r.card) ?? 0;
-    const weightKg = weightByCard.get(r.card) ?? 0;
+    // Net des avoirs : CA / marge / poids facturés − avoirés sur la période.
+    const ca = Number(r.ca) - (cnCaByCard.get(r.card) ?? 0);
+    const margin = (marginByCard.get(r.card) ?? 0) - (cnMarginByCard.get(r.card) ?? 0);
+    const weightKg = (weightByCard.get(r.card) ?? 0) - (cnWeightByCard.get(r.card) ?? 0);
     const docs = Number(r.docs);
+    // CA net ≤ 0 = facture entièrement annulée par un avoir → pas une livraison
+    // réelle, on écarte la position (évite les fantômes type Égypte).
+    if (ca <= 0) continue;
 
     totals.ca += ca; totals.margin += margin; totals.weightKg += weightKg;
     totals.docs += docs; totals.clients += 1;
