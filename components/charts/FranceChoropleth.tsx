@@ -5,7 +5,7 @@ import { ParentSize } from "@visx/responsive";
 import { Mercator } from "@visx/geo";
 import type { GeoZone } from "@/lib/pilotageGeo";
 import {
-  type GeoMetric, geoValue, brandHeat, ZoneTooltipCard, loadGeo, type GeoFeature,
+  type GeoMetric, type MapPoint, geoValue, brandHeat, ZoneTooltipCard, loadGeo, type GeoFeature,
   isIDF, parisAggregate,
 } from "./geoShared";
 
@@ -25,12 +25,16 @@ type MercatorFit = NonNullable<ComponentProps<typeof Mercator>["fitSize"]>;
  * Les DOM ne sont pas ici (rendus en bulles sur la carte Outre-mer & Export).
  */
 export function FranceChoropleth({
-  zones, metric, onlyCodes, groupParis = false,
+  zones, metric, onlyCodes, groupParis = false, points, onZoneClick,
 }: {
   zones: GeoZone[];
   metric: GeoMetric;
   onlyCodes?: string[];
   groupParis?: boolean;
+  /** Bulles clients à superposer (drill-down d'un département). */
+  points?: MapPoint[];
+  /** Clic sur un département (code, ou "IDF" si la région est regroupée). */
+  onZoneClick?: (code: string) => void;
 }) {
   const [features, setFeatures] = useState<GeoFeature[] | null>(null);
   useEffect(() => {
@@ -70,6 +74,8 @@ export function FranceChoropleth({
     return max;
   }, [shown, byCode, idfZone, groupParis, metric]);
 
+  const pointMax = useMemo(() => (points ?? []).reduce((m, p) => Math.max(m, p.value), 0), [points]);
+
   const [hover, setHover] = useState<{ zone: GeoZone; x: number; y: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -96,6 +102,7 @@ export function FranceChoropleth({
                       const z = zoneFor(code);
                       const v = z ? geoValue(z, metric) : 0;
                       const t = maxValue > 0 ? v / maxValue : 0;
+                      const clickable = !!onZoneClick && !!z;
                       return (
                         <path
                           key={`dep-${i}`}
@@ -103,14 +110,33 @@ export function FranceChoropleth({
                           fill={z && v > 0 ? brandHeat(t) : "rgba(148,163,184,0.07)"}
                           stroke="rgba(148,163,184,0.35)"
                           strokeWidth={0.4}
-                          style={{ cursor: z ? "pointer" : "default", transition: "fill 120ms" }}
+                          style={{ cursor: clickable ? "pointer" : "default", transition: "fill 120ms" }}
                           onMouseMove={(e) => {
                             if (!z) return;
                             const r = wrapRef.current?.getBoundingClientRect();
                             setHover({ zone: z, x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) });
                           }}
                           onMouseLeave={() => setHover(null)}
+                          onClick={clickable ? () => onZoneClick!(groupParis && isIDF(code) ? "IDF" : code) : undefined}
                         />
+                      );
+                    })}
+                    {points?.map((p) => {
+                      const xy = mercator.projection([p.lng, p.lat]);
+                      if (!xy) return null;
+                      const r = pointMax > 0 ? 3 + Math.sqrt(p.value / pointMax) * 15 : 4;
+                      return (
+                        <circle
+                          key={p.id}
+                          cx={xy[0]}
+                          cy={xy[1]}
+                          r={r}
+                          fill="rgba(56,189,248,0.55)"
+                          stroke="#38bdf8"
+                          strokeWidth={1}
+                        >
+                          <title>{p.label}{p.sub ? ` — ${p.sub}` : ""}</title>
+                        </circle>
                       );
                     })}
                   </g>
@@ -123,7 +149,7 @@ export function FranceChoropleth({
 
       {hover && (
         <div
-          className="absolute z-20"
+          className="absolute z-20 pointer-events-none"
           style={{
             left: Math.min(hover.x + 12, (wrapRef.current?.clientWidth ?? 0) - 170),
             top: Math.max(hover.y - 10, 4),

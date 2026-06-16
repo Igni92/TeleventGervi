@@ -115,3 +115,20 @@ export function loadGeo(url: string): Promise<{ features: GeoFeature[] }> {
   }
   return p;
 }
+
+/** Référentiel codes postaux FR → [lng, lat] (centroïde). Chargé une fois. */
+let cpPromise: Promise<Record<string, [number, number]>> | null = null;
+export function loadCp(): Promise<Record<string, [number, number]>> {
+  if (!cpPromise) cpPromise = fetch("/geo/cp-fr.json").then((r) => r.json());
+  return cpPromise;
+}
+
+/** Point placé sur une carte (bulle client) — coordonnées + valeur métrique. */
+export interface MapPoint {
+  id: string;
+  lng: number;
+  lat: number;
+  value: number;
+  label: string;
+  sub?: string;
+}

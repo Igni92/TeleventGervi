@@ -28,6 +28,8 @@ fs.mkdirSync(OUT, { recursive: true });
 const SRC = {
   fr: "https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/departements-version-simplifiee.geojson",
   world: "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson",
+  // Base officielle des codes postaux (La Poste hexasmal) — code_postal → lat/long.
+  cp: "https://www.data.gouv.fr/fr/datasets/r/dbe8a621-a9c4-4bc3-9cae-be1699c5ff25",
 };
 
 /** Arrondit récursivement tous les nombres d'un tableau de coordonnées. */
@@ -63,6 +65,34 @@ async function main() {
   }));
   fs.writeFileSync(path.join(OUT, "world.json"), JSON.stringify(world));
   console.log(`✅ world.json — ${world.features.length} pays, ${(fs.statSync(path.join(OUT, "world.json")).size / 1024).toFixed(0)} KB`);
+
+  // ── Codes postaux → coordonnées (centroïde moyen par CP) ──
+  // Sert à placer chaque client en BULLE sur la carte zoomée d'un département.
+  const res = await fetch(SRC.cp);
+  if (!res.ok) throw new Error(`HTTP ${res.status} on ${SRC.cp}`);
+  const csv = await res.text();
+  const lines = csv.split(/\r?\n/);
+  const header = lines[0].split(",");
+  const iZip = header.indexOf("code_postal");
+  const iLat = header.indexOf("latitude");
+  const iLng = header.indexOf("longitude");
+  const acc = new Map(); // cp → { lat, lng, n }
+  for (let i = 1; i < lines.length; i++) {
+    const c = lines[i].split(",");
+    const zip = c[iZip]?.trim();
+    const lat = Number.parseFloat(c[iLat]);
+    const lng = Number.parseFloat(c[iLng]);
+    if (!zip || zip.length !== 5 || !Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const a = acc.get(zip) ?? { lat: 0, lng: 0, n: 0 };
+    a.lat += lat; a.lng += lng; a.n += 1;
+    acc.set(zip, a);
+  }
+  const cp = {};
+  for (const [zip, a] of acc) {
+    cp[zip] = [Math.round((a.lng / a.n) * 1e4) / 1e4, Math.round((a.lat / a.n) * 1e4) / 1e4];
+  }
+  fs.writeFileSync(path.join(OUT, "cp-fr.json"), JSON.stringify(cp));
+  console.log(`✅ cp-fr.json — ${Object.keys(cp).length} codes postaux, ${(fs.statSync(path.join(OUT, "cp-fr.json")).size / 1024).toFixed(0)} KB`);
 }
 
 main().catch((e) => { console.error("❌", e.message); process.exitCode = 1; });

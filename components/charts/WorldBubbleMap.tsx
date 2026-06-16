@@ -96,7 +96,7 @@ export function WorldBubbleMap({ zones, metric }: { zones: GeoZone[]; metric: Ge
 
       {hover && (
         <div
-          className="absolute z-20"
+          className="absolute z-20 pointer-events-none"
           style={{
             left: Math.min(hover.x + 12, (wrapRef.current?.clientWidth ?? 0) - 170),
             top: Math.max(hover.y - 10, 4),
