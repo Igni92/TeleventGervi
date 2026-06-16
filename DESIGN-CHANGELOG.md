@@ -271,3 +271,29 @@ Vérif : **tsc 0 erreur · lint clean · 105/105 tests · `next build` OK (65/65
 Vérif : **tsc 0 erreur · lint clean · 105/105 tests · `next build` OK (65/65 pages)**.
 
 > 🧪 À QA visuel : (D11) onglet Réseau sur `/accueil` = 2 appels promos/notifs ; (D12) réduire en mobile → pastille promo en bas-droite ; (C9) cockpit `/dashboard` écran 1 en vue **kg** → caveat ambre si des articles n'ont pas de `SalesUnitWeight`.
+
+---
+
+---
+
+## 🔎 Suite d'audit — lot 3 (orchestré par sous-agents) : A3 · RGPD · C6 · C7 · C8 + plan B4/B5
+
+Lots restants enchaînés via sous-agents en worktrees isolés, **rapatriés et revus un par un**.
+⚠️ Une branche d'agent a été **rejetée** (régression de scoping `slpName` + revert de C9) et
+A3 ré-implémenté à la main ; une autre était basée sur une base périmée → seul son **vrai
+changeset** (10 fichiers) a été extrait. La revue avant merge a évité 2 régressions sérieuses.
+
+| # | Lot | Contenu |
+|---|-----|---------|
+| **A3** | Panier moyen — définition **NET / NET** | Le panier comptable (`KpiBucket.avgBasket`) = CA NET / nb factures (avoirs nettés au numérateur, dénominateur = factures émises) ; le panier BL (`ActivityBucket`) = volume BL / nb BL, brut/brut, déjà cohérent. Clarifié en commentaires, **aucune logique changée** (scoping `slpName` + C9 préservés). |
+| **F24-F27** | Programme **RGPD** | `docs/rgpd-conformite.md` (registre, base légale, rétention, sous-traitants UE, procédures) + `GET /api/rgpd/export` (droit d'accès, **admin seul**, lecture seule, SQL paramétré). Pas d'endpoint destructeur (effacement = TODO anonymisation). |
+| **C6** | Encours / **limite de crédit** | Champs SAP `CreditLimit`/`CurrentAccountBalance`/`Frozen` mirrorés (`SapBusinessPartner` + `lib/sapMirror.ts`) ; encart fiche client (barre d'utilisation, badge gelé/dépassement), masqué si donnée absente. Endpoint scopé `slpName`. **Migration NON appliquée** (DDL idempotent à exécuter). |
+| **C7** | **Produits récurrents** par client | Top articles les plus commandés (fréquence + volume kg réel), **multi-cardCode** (principal + `ClientDeliveryMode`). Endpoint scopé `slpName`. |
+| **C8** | `managedUnitOf` — **retiré** | Code mort (zéro consommateur) supprimé de `lib/cogs.ts`. |
+| **B4 / B5** | **Plan** (chantiers structurants) | `docs/chantiers-b4-b5.md` : unification slpName↔portefeuille (B4) et schéma multi-CardCode (B5), avec premier pas sûr et réversible pour chacun. **Pas exécutés** (validation requise). |
+
+Vérif : **tsc 0 erreur · lint clean · 420/420 tests · `next build` OK (65/65 pages + 2 routes API)**.
+
+> ⚙️ Pré-requis C6 : exécuter `node scripts/ddl-bp-credit.mjs --apply` (ou le SQL
+> `prisma/migrations/manual/20260616_sap_bp_credit.sql`) **puis relancer une synchro BP**
+> pour peupler limite/encours. Tant que non fait, l'encart crédit reste masqué (dégradation propre).
