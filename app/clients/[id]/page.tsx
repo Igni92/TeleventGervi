@@ -6,10 +6,12 @@ import { DeliveryModesEditor } from "@/components/clients/DeliveryModesEditor";
 import { ContactsEditor } from "@/components/clients/ContactsEditor";
 import { FamillesVsGroupe } from "@/components/clients/FamillesVsGroupe";
 import { ComportementYoY } from "@/components/clients/ComportementYoY";
+import { ProduitsRecurrents } from "@/components/clients/ProduitsRecurrents";
+import { EncoursCreditCard } from "@/components/clients/EncoursCreditCard";
 import { CompteForm } from "@/components/clients/CompteForm";
 import { ClientTabs } from "@/components/clients/ClientTabs";
 import { SurfaceCard } from "@/components/ui/surface-card";
-import { ArrowLeft, Calendar, Sprout, TrendingUp, Receipt } from "lucide-react";
+import { ArrowLeft, Calendar, Sprout, TrendingUp, Receipt, Repeat } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -83,12 +85,24 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
         <ContactsEditor clientId={client.id} />
       </div>
 
+      {/* C6 — Encours / limite de crédit (n'apparaît que si la donnée SAP existe). */}
+      <EncoursCreditCard clientId={client.id} />
+
       <SurfaceCard
         accent="brand"
         title="Comportement N vs N-1 (YTD)"
         icon={<TrendingUp className="h-3.5 w-3.5" />}
       >
         <ComportementYoY clientId={client.id} />
+      </SurfaceCard>
+
+      {/* C7 — Top des produits que ce client commande le plus souvent. */}
+      <SurfaceCard
+        accent="violet"
+        title="Produits récurrents"
+        icon={<Repeat className="h-3.5 w-3.5" />}
+      >
+        <ProduitsRecurrents clientId={client.id} />
       </SurfaceCard>
 
       <SurfaceCard

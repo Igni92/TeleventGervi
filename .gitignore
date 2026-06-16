@@ -46,3 +46,6 @@ backfill*.log
 
 # Tooling local
 .claude/settings.local.json
+
+# Worktrees temporaires des sous-agents Claude
+.claude/worktrees/

@@ -566,6 +566,15 @@ model SapBusinessPartner {
   email      String?
   phone      String?
   active     Boolean   @default(true)
+  // Encours / risque crédit — miroir des champs SAP BusinessPartners.
+  //   creditLimit           = CreditLimit (plafond autorisé, 0/NULL = pas de limite)
+  //   currentAccountBalance = CurrentAccountBalance (solde du compte client,
+  //                           positif = dû par le client)
+  //   frozen                = Frozen ('tYES'/'tNO') → compte bloqué en SAP
+  // Cache lecture seule côté app (modif réservée à SAP B1).
+  creditLimit           Float?
+  currentAccountBalance Float?
+  frozen                Boolean   @default(false)
   updateDate DateTime? // SAP UpdateDate (ISO)
   syncedAt   DateTime  @default(now())
 
