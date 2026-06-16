@@ -30,7 +30,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  if (!(await clientInScope(await getAccessScope(session), params.id)))
+  const scope = await getAccessScope(session);
+  if (!(await clientInScope(scope, params.id)))
     return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
 
   try {
@@ -50,20 +51,28 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const nextEmail = data.email?.trim().toLowerCase() || null;
     const emailChanged = nextEmail !== existing.email;
 
+    const updateData: Record<string, unknown> = {
+      code: data.code,
+      nom: data.nom,
+      type: data.type || null,
+      tel1: data.tel1 || null,
+      tel2: data.tel2 || null,
+      tel3: data.tel3 || null,
+      email: nextEmail,
+      notes: data.notes || null,
+      joursAppel: data.joursAppel?.length ? data.joursAppel.join(",") : null,
+    };
+    // Sécurité : un non-admin ne peut pas se (ré)attribuer un client → on ignore
+    // les champs d'affectation `commercial`/`vendeur` du payload. Admin inchangé.
+    // (`vendeur` n'est pas dans le schéma validé ni dans le data d'update → déjà
+    //  ignoré de fait ; on garde `commercial` admin-only.)
+    if (scope.all) {
+      updateData.commercial = data.commercial || null;
+    }
+
     const client = await prisma.client.update({
       where: { id: params.id },
-      data: {
-        code: data.code,
-        nom: data.nom,
-        type: data.type || null,
-        commercial: data.commercial || null,
-        tel1: data.tel1 || null,
-        tel2: data.tel2 || null,
-        tel3: data.tel3 || null,
-        email: nextEmail,
-        notes: data.notes || null,
-        joursAppel: data.joursAppel?.length ? data.joursAppel.join(",") : null,
-      },
+      data: updateData,
     });
 
     // Bidir SAP : push l'email sur le BusinessPartner si modifié. Best-effort —

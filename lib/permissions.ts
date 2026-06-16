@@ -165,6 +165,25 @@ export async function clientInScope(scope: AccessScope, clientId: string): Promi
   return rows.length > 0;
 }
 
+/** True si le client rattaché à un CardCode SAP est dans le périmètre.
+ *  Admin → true. Sinon match Client.code = cardCode OU un ClientDeliveryMode
+ *  pointant ce cardCode, ET (commercial = slpName OU vendeur = slpName).
+ *  Empêche l'IDOR sur les routes SAP indexées par cardCode/docEntry. */
+export async function cardCodeInScope(scope: AccessScope, cardCode: string | null | undefined): Promise<boolean> {
+  if (scope.all) return true;
+  if (!scope.slpName || !cardCode) return false;
+  const rows = await prisma.$queryRawUnsafe<{ n: number }[]>(
+    `SELECT 1 AS n FROM "Client" c
+     WHERE (c."commercial" = $2 OR c."vendeur" = $2)
+       AND (c."code" = $1 OR EXISTS (
+         SELECT 1 FROM "ClientDeliveryMode" dm
+         WHERE dm."clientId" = c."id" AND dm."sapCardCode" = $1))
+     LIMIT 1`,
+    cardCode, scope.slpName,
+  );
+  return rows.length > 0;
+}
+
 /**
  * Liste des `id` de clients du périmètre (Client.commercial OU Client.vendeur =
  * slpName) — pour restreindre les LISTES CRM (appels/rappels/incidents) d'un

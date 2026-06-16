@@ -33,8 +33,9 @@ export async function PATCH(
   if (updates.length === 0) return NextResponse.json({ ok: true });
   updates.push(`"updatedAt" = NOW()`);
   values.push(params.modeId);
+  values.push(params.id);
   await prisma.$executeRawUnsafe(
-    `UPDATE "ClientDeliveryMode" SET ${updates.join(", ")} WHERE id = $${i}`,
+    `UPDATE "ClientDeliveryMode" SET ${updates.join(", ")} WHERE id = $${i} AND "clientId" = $${i + 1}`,
     ...values,
   );
   return NextResponse.json({ ok: true });

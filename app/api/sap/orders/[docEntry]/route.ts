@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
+import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 
 /**
@@ -21,6 +23,11 @@ type Order = {
 export async function GET(_req: NextRequest, { params }: { params: { docEntry: string } }) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  const ord = await prisma.sapOrder.findUnique({ where: { docEntry: Number(params.docEntry) }, select: { cardCode: true } });
+  const scope = await getAccessScope(session);
+  if (!(await cardCodeInScope(scope, ord?.cardCode))) {
+    return NextResponse.json({ error: "Commande hors de votre périmètre" }, { status: 403 });
+  }
   try {
     const o = await sap.get<Order>(`Orders(${params.docEntry})`);
     return NextResponse.json({
@@ -42,6 +49,11 @@ export async function GET(_req: NextRequest, { params }: { params: { docEntry: s
 export async function PATCH(req: NextRequest, { params }: { params: { docEntry: string } }) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  const ord = await prisma.sapOrder.findUnique({ where: { docEntry: Number(params.docEntry) }, select: { cardCode: true } });
+  const scope = await getAccessScope(session);
+  if (!(await cardCodeInScope(scope, ord?.cardCode))) {
+    return NextResponse.json({ error: "Commande hors de votre périmètre" }, { status: 403 });
+  }
   let body: { lines?: { lineNum: number; quantity?: number; price?: number }[]; numAtCard?: string; comments?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 

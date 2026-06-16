@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
+import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 
 /**
@@ -20,6 +22,12 @@ export async function POST(req: NextRequest) {
 
   if (!body.docEntry || typeof body.docEntry !== "number") {
     return NextResponse.json({ error: "docEntry requis" }, { status: 400 });
+  }
+
+  const ord = await prisma.sapOrder.findUnique({ where: { docEntry: body.docEntry }, select: { cardCode: true } });
+  const scope = await getAccessScope(session);
+  if (!(await cardCodeInScope(scope, ord?.cardCode))) {
+    return NextResponse.json({ error: "Commande hors de votre périmètre" }, { status: 403 });
   }
 
   try {
