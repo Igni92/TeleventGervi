@@ -70,6 +70,19 @@ export async function GET() {
         scope.slpName,
       );
       allowed = new Set(rows.map((r) => r.code));
+      // B5 — inclure les comptes SAP secondaires (modes de livraison) des clients
+      // du commercial : sinon l'encours porté par ces comptes lui est invisible.
+      try {
+        const sec = await prisma.$queryRawUnsafe<{ code: string }[]>(
+          `SELECT DISTINCT dm."sapCardCode" AS code
+             FROM "ClientDeliveryMode" dm
+             JOIN "Client" c ON c."id" = dm."clientId"
+            WHERE (c."commercial" = $1 OR c."vendeur" = $1)
+              AND dm."sapCardCode" IS NOT NULL AND dm."sapCardCode" <> ''`,
+          scope.slpName,
+        );
+        for (const r of sec) allowed.add(r.code);
+      } catch { /* ClientDeliveryMode optionnel */ }
     } else {
       allowed = new Set();
     }

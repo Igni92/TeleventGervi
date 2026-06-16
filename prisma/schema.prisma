@@ -137,6 +137,7 @@ model Client {
   appels          AppelLog[]
   tempAssignments TempAssignment[]
   deliveryModes   ClientDeliveryMode[]
+  cardCodes       ClientCardCode[]
   contacts        Contact[]
   incidents       Incident[]
   createdAt       DateTime             @default(now())
@@ -254,6 +255,26 @@ model ClientDeliveryMode {
   isDefault   Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@index([clientId])
+}
+
+// Multi-CardCode (audit B5) — store CANONIQUE des comptes SAP d'un client
+// logique : code principal (Client.code) + comptes secondaires (livraison
+// directe vs plateforme, ex. LPOI / LPOI. via SCACHAP). Remplace à terme la
+// dérivation via ClientDeliveryMode. `cardCode @unique` : un compte SAP = un
+// seul client logique (empêche le double comptage). Alimenté par
+// scripts/ddl-client-cardcodes.mjs (backfill non destructif depuis Client.code
+// + ClientDeliveryMode.sapCardCode). Accès via lib/clientCardCodes.ts, avec
+// repli sur les modes de livraison tant que la table n'est pas peuplée.
+model ClientCardCode {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  cardCode  String   @unique
+  isPrimary Boolean  @default(false)
+  source    String? // "principal" | "deliveryMode" | "manuel"
+  createdAt DateTime @default(now())
 
   @@index([clientId])
 }
