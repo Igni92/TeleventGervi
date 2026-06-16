@@ -92,6 +92,13 @@ export interface KpiBucket {
   invoicesCount: number;
   creditNotesCount: number;
   activeClients: number;
+  /**
+   * Panier NET moyen = CA NET / nb de factures émises (audit A3 — convention
+   * NET / NET). Le numérateur `ca` nette déjà les avoirs (factures − avoirs) ;
+   * le dénominateur reste le nombre de factures émises (un avoir corrige une
+   * facture, il ne constitue pas un panier vendu supplémentaire). Numérateur et
+   * dénominateur portent ainsi sur le même périmètre de documents de vente.
+   */
   avgBasket: number;
 }
 
@@ -164,6 +171,7 @@ export async function aggregateKpi(start: Date, end: Date, slpName?: string | nu
     invoicesCount,
     creditNotesCount: cnAgg._count.docEntry,
     activeClients: distinct.length,
+    // Panier NET moyen (audit A3) : CA NET / nb factures — cf. doc du champ.
     avgBasket: invoicesCount > 0 ? ca / invoicesCount : 0,
   };
 }
@@ -364,6 +372,12 @@ export interface ActivityBucket {
   weightCoverage: number; // % des lignes produit dont le poids kg (SalesUnitWeight) est connu
   ordersCount: number;
   activeClients: number;
+  /**
+   * Panier moyen BL = volume BL / nb BL — déjà cohérent (audit A3) : brut au
+   * numérateur (`volume` = Σ docTotal Orders, pas d'avoirs côté BL) ET brut au
+   * dénominateur (`ordersCount` = nb BL). À ne pas confondre avec le panier NET
+   * comptable (`KpiBucket.avgBasket`), qui nette les avoirs côté factures.
+   */
   avgBasket: number;
 }
 
@@ -404,6 +418,7 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
     weightCoverage: linesCount > 0 ? (Number(ln?.weighted_lines ?? 0) / linesCount) * 100 : 0,
     ordersCount,
     activeClients: Number(hdr?.clients ?? 0),
+    // Panier moyen BL (audit A3) : volume BL / nb BL — brut/brut, cf. doc du champ.
     avgBasket: ordersCount > 0 ? volume / ordersCount : 0,
   };
 }
