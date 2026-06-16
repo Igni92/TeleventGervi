@@ -1,5 +1,6 @@
 import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
+import { initialsFromEmail } from "@/lib/salespeople";
 
 /**
  * Gestion des droits — « par défaut, un commercial ne voit que ses propres
@@ -73,6 +74,31 @@ export async function getAccessScope(session: Session | null): Promise<AccessSco
       return { all: false, slpName: null, email };
     }
   }
+}
+
+/**
+ * Trigramme SAP (slpName) du commercial CONNECTÉ — **indépendant du flag admin**.
+ *
+ * `getAccessScope` court-circuite les admins (`{ all: true }`) sans résoudre leur
+ * slpName : pour les écrans transverses (dashboard, pilotage) un admin n'est pas
+ * filtré. Mais la **console d'appel** est un poste de travail PERSONNEL — même un
+ * admin n'y voit que SES clients (vendeur = son trigramme). On résout donc le
+ * trigramme depuis l'email : mapping `UserCommercial` d'abord, repli sur la liste
+ * statique `SALESPEOPLE`. `null` = email inconnu/non mappé (→ console vide).
+ */
+export async function getOwnSlpName(session: Session | null): Promise<string | null> {
+  const email = session?.user?.email?.trim().toLowerCase() ?? null;
+  if (!email) return null;
+  try {
+    const rows = await prisma.$queryRawUnsafe<{ slpName: string }[]>(
+      `SELECT "slpName" FROM "UserCommercial" WHERE LOWER("email") = $1 LIMIT 1`,
+      email,
+    );
+    if (rows[0]?.slpName) return rows[0].slpName;
+  } catch {
+    /* table UserCommercial absente → repli sur la liste statique */
+  }
+  return initialsFromEmail(email);
 }
 
 /** True si la session a l'accès global (admin bootstrap OU promu en base).
