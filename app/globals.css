@@ -524,6 +524,10 @@ html[data-reduce-anim="1"] .promo-marquee-track {
 }
 
 /* ── MapLibre GL — thème sombre (carte « Où je livre le plus ») ──────── */
+/* Le popup suit le curseur (tooltip de survol) : il NE doit jamais capter le
+   clic, sinon cliquer sur un département atterrit sur la bulle au lieu du
+   canvas → drill impossible (surtout en 2D, pitch 0). */
+.geo-popup { pointer-events: none; }
 .geo-popup .maplibregl-popup-content {
   background: hsl(var(--popover));
   color: hsl(var(--foreground));
