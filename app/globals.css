@@ -444,6 +444,8 @@
 @media (prefers-reduced-motion: reduce) {
   .ambient-aurora, .ambient-aurora-2,
   .ambient-rings-spin, .ambient-rings-spin-r { animation: none; }
+  /* Squelettes : pas de balayage, fond muté statique. */
+  .skeleton { animation: none; background: hsl(var(--muted)); }
 }
 
 /* Réglage televente:animations (page /parametres), posé sur <html> par

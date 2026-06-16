@@ -52,6 +52,7 @@ import {
 import { ReminderModal } from "@/components/ReminderModal";
 import { ImportModal } from "@/components/ImportModal";
 import { AnimatedNumber } from "@/components/ui/animated-number";
+import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelative } from "@/lib/utils";
 import { SALESPEOPLE } from "@/lib/salespeople";
 
@@ -113,7 +114,7 @@ function JoursBadges({ joursAppel }: { joursAppel?: string | null }) {
             className={`inline-flex items-center justify-center h-[18px] w-[20px] text-[10px] font-semibold rounded tnum tracking-tight ${
               on
                 ? "bg-brand-600 text-white"
-                : "bg-secondary text-muted-foreground/40"
+                : "bg-secondary text-muted-foreground/70"
             }`}
             title={["Dim","Lun","Mar","Mer","Jeu","Ven","Sam"][d]}
           >
@@ -322,9 +323,9 @@ export function ClientTable() {
       </div>
 
       {/* Toolbar */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         {/* Search */}
-        <div className="relative flex-1 max-w-sm">
+        <div className="relative w-full lg:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Rechercher par code, nom, commercial..."
@@ -334,62 +335,68 @@ export function ClientTable() {
           />
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Type filter */}
-          <Select value={typeFilter} onValueChange={setTypeFilter}>
-            <SelectTrigger className="w-[130px]">
-              <SelectValue placeholder="Type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">Tous les types</SelectItem>
-              <SelectItem value="EXPORT">EXPORT</SelectItem>
-              <SelectItem value="GMS">GMS</SelectItem>
-              <SelectItem value="CHR">CHR</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+          {/* Filtres — pleine largeur empilés en mobile, fixes en desktop */}
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+            {/* Type filter */}
+            <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <SelectTrigger className="w-full sm:w-[130px]">
+                <SelectValue placeholder="Type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">Tous les types</SelectItem>
+                <SelectItem value="EXPORT">EXPORT</SelectItem>
+                <SelectItem value="GMS">GMS</SelectItem>
+                <SelectItem value="CHR">CHR</SelectItem>
+              </SelectContent>
+            </Select>
 
-          {/* Commercial filter (commercial assigné) */}
-          <Select value={commercialFilter} onValueChange={setCommercialFilter}>
-            <SelectTrigger className="w-[150px]">
-              <SelectValue placeholder="Commercial" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">Tous commerciaux</SelectItem>
-              {SALESPEOPLE.map((s) => (
-                <SelectItem key={s.initials} value={s.initials}>{s.initials}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            {/* Commercial filter (commercial assigné) */}
+            <Select value={commercialFilter} onValueChange={setCommercialFilter}>
+              <SelectTrigger className="w-full sm:w-[150px]">
+                <SelectValue placeholder="Commercial" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">Tous commerciaux</SelectItem>
+                {SALESPEOPLE.map((s) => (
+                  <SelectItem key={s.initials} value={s.initials}>{s.initials}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-          {/* Activation filter */}
-          <Select value={activeFilter} onValueChange={setActiveFilter}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue placeholder="Activation" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">Tous (actif/inactif)</SelectItem>
-              <SelectItem value="actifs">Actifs</SelectItem>
-              <SelectItem value="inactifs">À activer</SelectItem>
-            </SelectContent>
-          </Select>
+            {/* Activation filter (pleine largeur sur sa ligne en mobile) */}
+            <Select value={activeFilter} onValueChange={setActiveFilter}>
+              <SelectTrigger className="col-span-2 w-full sm:col-span-1 sm:w-[140px]">
+                <SelectValue placeholder="Activation" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">Tous (actif/inactif)</SelectItem>
+                <SelectItem value="actifs">Actifs</SelectItem>
+                <SelectItem value="inactifs">À activer</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-          {/* Déduire les vendeurs depuis le dernier BL SAP */}
-          <Button variant="outline" size="sm" onClick={syncVendeurs} disabled={syncingVendeurs} className="gap-1">
-            {syncingVendeurs ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-            Déduire vendeurs
-          </Button>
+          {/* Actions */}
+          <div className="flex gap-2 flex-wrap">
+            {/* Déduire les vendeurs depuis le dernier BL SAP */}
+            <Button variant="outline" size="sm" onClick={syncVendeurs} disabled={syncingVendeurs} className="flex-1 sm:flex-none gap-1">
+              {syncingVendeurs ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+              Déduire vendeurs
+            </Button>
 
-          {/* Import CSV */}
-          <ImportModal onImported={fetchClients} />
+            {/* Import CSV */}
+            <ImportModal onImported={fetchClients} />
 
-          {/* New client */}
-          <Button
-            onClick={() => router.push("/clients/new")}
-            className="gap-1"
-          >
-            <Plus className="h-4 w-4" />
-            Nouveau client
-          </Button>
+            {/* New client */}
+            <Button
+              onClick={() => router.push("/clients/new")}
+              className="flex-1 sm:flex-none gap-1"
+            >
+              <Plus className="h-4 w-4" />
+              Nouveau client
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -441,18 +448,23 @@ export function ClientTable() {
               {!isAujourdhui && (
                 <SortableHead label="Jours d'appel" skey="joursAppel"  sortKey={sortKey} sortDir={sortDir} onClick={toggleSort} />
               )}
-              <TableHead className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider px-4 py-3 text-right">
+              <TableHead className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-4 py-3 text-right">
                 Actions
               </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow>
-                <TableCell colSpan={isAujourdhui ? 9 : 10} className="h-32 text-center">
-                  <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
-                </TableCell>
-              </TableRow>
+              <>
+                <TableRow className="sr-only">
+                  <TableCell colSpan={isAujourdhui ? 9 : 10} role="status">
+                    Chargement des clients…
+                  </TableCell>
+                </TableRow>
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <ClientRowSkeleton key={i} withJours={!isAujourdhui} />
+                ))}
+              </>
             ) : !sortedClients.length ? (
               <TableRow>
                 <TableCell
@@ -510,7 +522,7 @@ export function ClientTable() {
                   <TableCell className="px-4 py-3 font-mono text-[12px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
                     {client.tel1 || <span className="text-slate-300 dark:text-slate-600">—</span>}
                   </TableCell>
-                  <TableCell className="px-4 py-3 font-mono text-[12px] text-slate-400 dark:text-slate-500 whitespace-nowrap">
+                  <TableCell className="px-4 py-3 font-mono text-[12px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
                     {client.tel2 || <span className="text-slate-300 dark:text-slate-600">—</span>}
                   </TableCell>
                   <TableCell className="px-4 py-3 whitespace-nowrap">
@@ -572,6 +584,28 @@ export function ClientTable() {
         </div>
       )}
     </div>
+  );
+}
+
+/* ── Ligne squelette (état de chargement) ───────────────── */
+function ClientRowSkeleton({ withJours }: { withJours: boolean }) {
+  return (
+    <TableRow aria-hidden className="border-b border-slate-100/80 dark:border-slate-700/40">
+      <TableCell className="w-9 px-3 py-3"><Skeleton className="h-4 w-4 rounded" /></TableCell>
+      <TableCell className="px-4 py-3"><Skeleton className="h-3.5 w-14" /></TableCell>
+      <TableCell className="px-4 py-3"><Skeleton className="h-3.5 w-40" /></TableCell>
+      <TableCell className="px-4 py-3"><Skeleton className="h-5 w-14 rounded-full" /></TableCell>
+      <TableCell className="px-4 py-3"><Skeleton className="h-3.5 w-10" /></TableCell>
+      <TableCell className="px-4 py-3"><Skeleton className="h-3.5 w-24" /></TableCell>
+      <TableCell className="px-4 py-3"><Skeleton className="h-3.5 w-24" /></TableCell>
+      <TableCell className="px-4 py-3"><Skeleton className="h-3.5 w-16" /></TableCell>
+      {withJours && (
+        <TableCell className="px-4 py-3"><Skeleton className="h-[18px] w-[150px] rounded" /></TableCell>
+      )}
+      <TableCell className="px-4 py-3">
+        <div className="flex justify-end"><Skeleton className="h-8 w-8 rounded-md" /></div>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -810,7 +844,7 @@ function SortableHead({
         className={`group inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider transition-colors ${
           active
             ? "text-foreground"
-            : "text-slate-400 dark:text-slate-500 hover:text-foreground"
+            : "text-slate-500 dark:text-slate-400 hover:text-foreground"
         }`}
       >
         {label}

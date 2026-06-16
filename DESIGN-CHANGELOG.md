@@ -236,3 +236,22 @@ pour visualiser **où l'on livre le plus**, à partir de l'adresse SAP des clien
 - Cartes via **visx** (`@visx/geo` — Mercator/NaturalEarth), responsive, reduced-motion respecté.
 
 > ⚠️ Pré-requis données : lancer `node scripts/ddl-client-geo.mjs` puis **relancer l'import clients SAP** une fois pour peupler ville/CP/pays.
+
+---
+
+---
+
+## 🔎 Suite d'audit — quick wins UI (D14 · D15 · D16)
+
+Lot « sûr » post-audit sur `components/ClientTable.tsx` (je code, QA visuelle requise).
+
+| # | Constat | Correctif |
+|---|---------|-----------|
+| **D14** | Contraste sous AA : tél « Direct 1 » et en-têtes de colonnes en `text-slate-400` (~3:1), jours d'appel inactifs en `/40` quasi illisibles. | Tél « Direct 1 » et en-têtes (table + `SortableHead`) montés en `slate-500/slate-400` (≥ 4.5:1) ; jours inactifs `text-muted-foreground/70`. Tirets « — » (placeholders vides) laissés volontairement discrets. |
+| **D15** | Barre d'outils passe en ligne dès `sm` (640px) : recherche + 3 selects largeur fixe + 3 boutons → tassés ; selects non adaptatifs en mobile. | Bascule en ligne repoussée à `lg` ; filtres en **grille 2 colonnes pleine largeur** en mobile (Activation sur sa propre ligne), largeurs fixes en `sm+` ; boutons d'action `flex-1` en mobile. |
+| **D16** | Chargement de la table = simple spinner centré. | **Lignes squelette** (`ClientRowSkeleton`) calquées sur les colonnes + statut `sr-only` « Chargement des clients… ». |
+
+- **NOUVEAU `components/ui/skeleton.tsx`** — primitive canonique `Skeleton` (réutilise la classe shimmer `.skeleton` de `globals.css`).
+- **a11y motion** : `.skeleton` désormais **figé en `prefers-reduced-motion`** (fond muté statique, plus de balayage) — gap corrigé dans `globals.css`.
+
+Vérif : **tsc 0 erreur · lint clean · 105/105 tests · `next build` OK (65/65 pages)**.
