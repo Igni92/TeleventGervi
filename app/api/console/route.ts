@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { computeInsights } from "@/lib/insights";
+import { getAccessScope, getOwnSlpName } from "@/lib/permissions";
 
 /**
  * GET /api/console
@@ -31,6 +33,34 @@ export async function GET() {
     : [];
   const claimedMap = new Map(myClaims.map((c) => [c.clientId, c.fromCommercial]));
 
+  // ── Périmètre de la console (poste de travail PERSONNEL) ──
+  // On n'affiche QUE les clients dont le VENDEUR (= celui qui réalise les ventes)
+  // est le trigramme du commercial connecté. On NE filtre PAS sur `commercial`
+  // (account manager) : un client géré par un collègue mais vendu par moi DOIT
+  // apparaître, et un client dont je suis l'account manager mais que je ne vends
+  // pas NE doit PAS encombrer ma file.
+  //   - non-admin mappé      → son slpName
+  //   - non-admin non mappé  → console vide (cohérent avec le reste de l'app)
+  //   - admin                → son propre trigramme (résolu via email) ; si on ne
+  //                            peut pas le résoudre → repli sur la vue globale
+  //                            (aucune régression pour un admin hors mapping).
+  // + clients récupérés aujourd'hui (TempAssignment) pour conserver la
+  //   couverture ponctuelle d'un collègue absent.
+  // `vendeur` est hors client Prisma typé → pré-filtre raw SQL → liste d'ids.
+  const scope = await getAccessScope(session);
+  const mySlp = scope.all ? await getOwnSlpName(session) : scope.slpName;
+  let scopeIdList: string[] | null = null; // null = aucun filtre (vue globale)
+  if (!(scope.all && !mySlp)) {
+    const rows = mySlp
+      ? await prisma.$queryRaw<{ id: string }[]>(
+          Prisma.sql`SELECT "id" FROM "Client" WHERE "vendeur" = ${mySlp}`,
+        )
+      : [];
+    const scopeIds = new Set<string>(rows.map((r) => r.id));
+    for (const c of myClaims) scopeIds.add(c.clientId);
+    scopeIdList = Array.from(scopeIds);
+  }
+
   // ── Présence du jour → distribution des clients ──
   // Un commercial absent : ses clients sont signalés "à couvrir" pour les présents.
   const usersForPresence = await prisma.user.findMany({
@@ -57,6 +87,7 @@ export async function GET() {
   // can compute behavioral insights without an extra round-trip.
   const last180 = new Date(now); last180.setDate(now.getDate() - 180);
   const clients = await prisma.client.findMany({
+    where: scopeIdList ? { id: { in: scopeIdList } } : undefined,
     select: {
       id: true, code: true, nom: true, type: true,
       commercial: true, tel1: true, tel2: true, tel3: true,
@@ -81,7 +112,11 @@ export async function GET() {
   // Business rule: COMMANDE always overrides DEMAIN on the same day.
   // We still keep both entries in DB for audit, but stats count each client once.
   const todayLogs = await prisma.appelLog.findMany({
-    where: { heureAppel: { gte: todayStart, lt: todayEnd } },
+    where: {
+      heureAppel: { gte: todayStart, lt: todayEnd },
+      // Stats cohérentes avec la file scopée : on ne compte que MES clients.
+      ...(scopeIdList ? { clientId: { in: scopeIdList } } : {}),
+    },
     select: { id: true, clientId: true, type: true, heureAppel: true },
     orderBy: { heureAppel: "desc" },
   });

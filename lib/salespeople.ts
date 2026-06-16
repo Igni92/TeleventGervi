@@ -26,11 +26,19 @@ export const SALESPEOPLE: Salesperson[] = [
 
 const BY_INITIALS = new Map(SALESPEOPLE.map((s) => [s.initials.toUpperCase(), s]));
 const BY_CODE = new Map(SALESPEOPLE.map((s) => [s.code, s]));
+const BY_EMAIL = new Map(SALESPEOPLE.map((s) => [s.email.toLowerCase(), s]));
 
 /** Email du compte depuis le trigramme SAP (MM/JMG/AG). */
 export function emailFromInitials(initials: string | null | undefined): string | null {
   if (!initials) return null;
   return BY_INITIALS.get(initials.trim().toUpperCase())?.email ?? null;
+}
+
+/** Trigramme SAP (MM/JMG/AG) depuis l'email du compte — repli statique quand
+ *  le mapping UserCommercial n'a pas (encore) la ligne. */
+export function initialsFromEmail(email: string | null | undefined): string | null {
+  if (!email) return null;
+  return BY_EMAIL.get(email.trim().toLowerCase())?.initials ?? null;
 }
 
 /** Email du compte depuis le SalesEmployeeCode SAP. */
