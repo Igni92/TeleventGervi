@@ -86,7 +86,7 @@ const JOURS_FR: Record<number, string> = { 0:"Dim",1:"Lun",2:"Mar",3:"Mer",4:"Je
 /* ─────────────────────────────────────────────────────────────
    Main component — single-page daily workspace
 ───────────────────────────────────────────────────────────── */
-type SortMode = "name" | "hour" | "commercial" | "type" | "lastOrder";
+type SortMode = "name" | "hour" | "type" | "lastOrder";
 
 export function CallConsole() {
   const [data, setData] = useState<ConsoleData | null>(null);
@@ -94,7 +94,6 @@ export function CallConsole() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortMode>("hour");
-  const [commercialFilter, setCommercialFilter] = useState<string>("ALL");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [rappelOpen, setRappelOpen] = useState(false);
   const [blOpen, setBlOpen] = useState(false);
@@ -166,48 +165,26 @@ export function CallConsole() {
     setNotesDraft(active?.notes ?? "");
   }, [active?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Unique commercials present in today's queue ─────────── */
-  const queueCommercials = useMemo(() => {
-    if (!data) return [];
-    const set = new Set<string>();
-    for (const c of data.queue) if (c.commercial) set.add(c.commercial);
-    return Array.from(set).sort();
-  }, [data]);
-
-  /* ── Filtered + sorted queue ─────────────────────────────── */
+  /* ── Filtered + sorted queue (console PERSONNELLE : on ne voit que SES
+        clients à la vente — aucun filtre d'équipe / par commercial) ──────── */
   const filteredQueue = useMemo(() => {
     if (!data) return [];
     let q = [...data.queue];
 
-    // 1. Commercial filter (plan d'appel — pick up other commercials' clients)
-    if (commercialFilter !== "ALL") {
-      if (commercialFilter === "NONE") {
-        q = q.filter((c) => !c.commercial);
-      } else if (commercialFilter === "CLAIMED") {
-        // Show only clients I've claimed today from other commercials
-        q = q.filter((c) => !!c.claimedFrom);
-      } else {
-        q = q.filter((c) => c.commercial === commercialFilter);
-      }
-    }
-
-    // 2. Search
+    // Recherche (nom / code)
     if (search.trim()) {
       const term = search.trim().toLowerCase();
       q = q.filter((c) =>
         c.nom.toLowerCase().includes(term) ||
-        c.code.toLowerCase().includes(term) ||
-        (c.commercial || "").toLowerCase().includes(term),
+        c.code.toLowerCase().includes(term),
       );
     }
 
-    // 3. Sort
+    // Tri
     q.sort((a, b) => {
       switch (sortBy) {
         case "name":
           return a.nom.localeCompare(b.nom, "fr");
-        case "commercial":
-          return (a.commercial || "zzz").localeCompare(b.commercial || "zzz", "fr");
         case "type":
           return (a.type || "zzz").localeCompare(b.type || "zzz");
         case "lastOrder": {
@@ -226,7 +203,7 @@ export function CallConsole() {
     });
 
     return q;
-  }, [data, search, commercialFilter, sortBy]);
+  }, [data, search, sortBy]);
 
   /* ── Auto-advance to next client in queue ────────────────── */
   const advance = useCallback(() => {
@@ -457,50 +434,27 @@ export function CallConsole() {
               </kbd>
             </div>
 
-            {/* Sort + Commercial filter (plan d'appel) */}
-            <div className="grid grid-cols-2 gap-1.5">
-              <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortMode)}>
-                <SelectTrigger className="h-8 text-[11.5px]">
-                  <span className="inline-flex items-center gap-1.5 truncate">
-                    <ArrowUpDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-                    <SelectValue placeholder="Tri" />
-                  </span>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="hour">Heure optimale</SelectItem>
-                  <SelectItem value="name">Nom (A–Z)</SelectItem>
-                  <SelectItem value="commercial">Commercial</SelectItem>
-                  <SelectItem value="type">Type</SelectItem>
-                  <SelectItem value="lastOrder">Dernière commande</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Select value={commercialFilter} onValueChange={setCommercialFilter}>
-                <SelectTrigger className="h-8 text-[11.5px]">
-                  <span className="inline-flex items-center gap-1.5 truncate">
-                    <User className="h-3 w-3 shrink-0 text-muted-foreground" />
-                    <SelectValue placeholder="Commercial" />
-                  </span>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">Toute l&apos;équipe</SelectItem>
-                  <SelectItem value="CLAIMED">Mes récupérations</SelectItem>
-                  {queueCommercials.map((c) => (
-                    <SelectItem key={c} value={c}>{c}</SelectItem>
-                  ))}
-                  <SelectItem value="NONE">Sans commercial</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Tri — console personnelle : aucun filtre d'équipe / par commercial */}
+            <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortMode)}>
+              <SelectTrigger className="h-8 text-[11.5px]">
+                <span className="inline-flex items-center gap-1.5 truncate">
+                  <ArrowUpDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <SelectValue placeholder="Tri" />
+                </span>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="hour">Heure optimale</SelectItem>
+                <SelectItem value="name">Nom (A–Z)</SelectItem>
+                <SelectItem value="type">Type</SelectItem>
+                <SelectItem value="lastOrder">Dernière commande</SelectItem>
+              </SelectContent>
+            </Select>
 
             {/* Queue header */}
             <div className="flex items-center justify-between mt-1 px-1">
               <span className="kicker">À appeler</span>
               <span className="text-[11px] tnum text-muted-foreground">
                 {filteredQueue.length}
-                {commercialFilter !== "ALL" && data && (
-                  <span className="text-muted-foreground/60"> / {data.queue.length}</span>
-                )}
               </span>
             </div>
           </div>

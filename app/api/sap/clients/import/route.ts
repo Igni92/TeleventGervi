@@ -92,6 +92,94 @@ function clientTypeFromGroup(groupName: string | null): string | null {
   return null;
 }
 
+/** Vrai si le CardCode est une variante « transporteur » (suffixe « . ») :
+ *  même client, autre mode de livraison (ex. LPOI. = SCACHAP de LPOI). */
+const isDotVariant = (code: string) => code.trim().endsWith(".");
+
+/** Upsert d'un BP SAP dans la table Client (insert idempotent, préserve les
+ *  affectations manuelles commercial/vendeur/jours). Renvoie de quoi alimenter
+ *  les compteurs de la réponse. */
+async function upsertClientBp(
+  bp: SapBP,
+  groupName: Map<number, string>,
+): Promise<{ active: boolean; gms: boolean; shipTo: boolean }> {
+  const active = isActif(bp.U_Actif);
+  const grpCode = bp.GroupCode ?? null;
+  const grpName = grpCode != null ? groupName.get(grpCode) ?? null : null;
+  const type = clientTypeFromGroup(grpName);
+  // Vendeur : GMS + actif → MM (1ʳᵉ passe). Commercial = JMG par défaut.
+  const vendeur = type === "GMS" && active ? "MM" : null;
+  // Géoloc carte = adresse de LIVRAISON (ship-to), repli facturation/tête.
+  const { city, zip, country, usedShipTo } = deliveryAddress(bp);
+  await prisma.$executeRaw`
+    INSERT INTO "Client" ("id","code","nom","type","commercial","vendeur","tel1","joursAppel","sapGroupCode","sapGroupName","city","zipCode","country","activeTelevente","createdAt","updatedAt")
+    VALUES (gen_random_uuid()::text, ${bp.CardCode}, ${bp.CardName || bp.CardCode}, ${type}, 'JMG', ${vendeur}, ${bp.Phone1 ?? null}, '1,2,3,4,5,6', ${grpCode}, ${grpName}, ${city}, ${zip}, ${country}, ${active}, NOW(), NOW())
+    ON CONFLICT ("code") DO UPDATE SET
+      "nom" = EXCLUDED."nom",
+      "type" = EXCLUDED."type",
+      -- préserve les assignations manuelles (commercial / vendeur / jours) au ré-import
+      "commercial" = COALESCE("Client"."commercial", EXCLUDED."commercial"),
+      "vendeur" = COALESCE("Client"."vendeur", EXCLUDED."vendeur"),
+      "joursAppel" = COALESCE("Client"."joursAppel", EXCLUDED."joursAppel"),
+      "tel1" = EXCLUDED."tel1",
+      "sapGroupCode" = EXCLUDED."sapGroupCode",
+      "sapGroupName" = EXCLUDED."sapGroupName",
+      -- localisation SAP : on rafraîchit, en conservant l'ancienne valeur si SAP renvoie vide
+      "city" = COALESCE(EXCLUDED."city", "Client"."city"),
+      "zipCode" = COALESCE(EXCLUDED."zipCode", "Client"."zipCode"),
+      "country" = COALESCE(EXCLUDED."country", "Client"."country"),
+      "activeTelevente" = "Client"."activeTelevente" OR EXCLUDED."activeTelevente",
+      "updatedAt" = NOW();
+  `;
+  return { active, gms: type === "GMS", shipTo: usedShipTo };
+}
+
+/**
+ * Replie un BP « code. » (variante transporteur SAP) en MODE DE LIVRAISON du
+ * client parent (« code »), au lieu d'en faire un client séparé en double.
+ *   - crée le mode « Direct » (CardCode = code parent) + « SCACHAP » (CardCode
+ *     = code point) sur le parent — idempotent ;
+ *   - fusionne un éventuel client point déjà importé : son historique CRM
+ *     (appels, rappels, incidents, contacts) est rapatrié sur le parent, puis
+ *     la fiche en double est supprimée.
+ * Renvoie "orphan" si aucun parent n'existe (l'appelant importe alors le BP
+ * comme client normal, pour ne rien perdre).
+ */
+async function foldDotVariant(dotCode: string, altName = "SCACHAP"): Promise<"folded" | "orphan"> {
+  const parentCode = dotCode.replace(/\.+$/, "");
+  if (!parentCode || parentCode === dotCode) return "orphan";
+  const parent = await prisma.client.findUnique({ where: { code: parentCode }, select: { id: true } });
+  if (!parent) return "orphan";
+
+  // Mode « Direct » — défaut seulement si le client n'a encore AUCUN mode (on ne
+  // force pas un défaut déjà choisi à la main).
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO "ClientDeliveryMode" ("id","clientId","name","sapCardCode","isDefault","createdAt","updatedAt")
+     SELECT gen_random_uuid()::text, $1, 'Direct', $2,
+            NOT EXISTS (SELECT 1 FROM "ClientDeliveryMode" WHERE "clientId" = $1),
+            NOW(), NOW()
+     WHERE NOT EXISTS (SELECT 1 FROM "ClientDeliveryMode" WHERE "clientId" = $1 AND "sapCardCode" = $2)`,
+    parent.id, parentCode,
+  );
+  // Mode alternatif (SCACHAP) = le CardCode point.
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO "ClientDeliveryMode" ("id","clientId","name","sapCardCode","isDefault","createdAt","updatedAt")
+     SELECT gen_random_uuid()::text, $1, $2, $3, false, NOW(), NOW()
+     WHERE NOT EXISTS (SELECT 1 FROM "ClientDeliveryMode" WHERE "clientId" = $1 AND "sapCardCode" = $3)`,
+    parent.id, altName, dotCode,
+  );
+  // Fusionne un client point déjà présent (doublon) → parent, puis supprime.
+  const dot = await prisma.client.findUnique({ where: { code: dotCode }, select: { id: true } });
+  if (dot && dot.id !== parent.id) {
+    for (const table of ["AppelLog", "Rappel", "Incident", "Contact"]) {
+      await prisma.$executeRawUnsafe(`UPDATE "${table}" SET "clientId" = $1 WHERE "clientId" = $2`, parent.id, dot.id);
+    }
+    // TempAssignment (éphémère, unique (clientId,date)) → supprimé par cascade.
+    await prisma.client.delete({ where: { id: dot.id } });
+  }
+  return "folded";
+}
+
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
@@ -136,57 +224,51 @@ export async function POST(req: NextRequest) {
     await prisma.$executeRawUnsafe(`TRUNCATE TABLE "Client" RESTART IDENTITY CASCADE;`);
   }
 
+  // Sépare les variantes « transporteur » (code finissant par « . ») des clients
+  // normaux : une variante n'est PAS un client séparé, c'est un MODE DE LIVRAISON
+  // du parent (cf. foldDotVariant) — ex. LPOI (Direct) / LPOI. (SCACHAP).
+  const mainBps = bps.filter((bp) => !isDotVariant(bp.CardCode));
+  const dotBps = bps.filter((bp) => isDotVariant(bp.CardCode));
+
   let activated = 0;
   let gmsCount = 0;
   let shipToCount = 0;
+  const bump = (r: { active: boolean; gms: boolean; shipTo: boolean }) => {
+    if (r.active) activated++;
+    if (r.gms) gmsCount++;
+    if (r.shipTo) shipToCount++;
+  };
+
   const CHUNK = 50;
-  for (let i = 0; i < bps.length; i += CHUNK) {
-    const slice = bps.slice(i, i + CHUNK);
-    await Promise.all(slice.map((bp) => {
-      const active = isActif(bp.U_Actif);
-      if (active) activated++;
-      const grpCode = bp.GroupCode ?? null;
-      const grpName = grpCode != null ? groupName.get(grpCode) ?? null : null;
-      const type = clientTypeFromGroup(grpName);
-      if (type === "GMS") gmsCount++;
-      // Commercial = JMG par défaut (un client sans commercial revient à JMG —
-      // règle métier). Réassignation manuelle préservée via le COALESCE plus bas.
-      // Vendeur : GMS + actif → MM (1ʳᵉ passe).
-      const vendeur = (type === "GMS" && active) ? "MM" : null;
-      // Géoloc carte = adresse de LIVRAISON (ship-to), repli facturation/tête.
-      const { city, zip, country, usedShipTo } = deliveryAddress(bp);
-      if (usedShipTo) shipToCount++;
-      return prisma.$executeRaw`
-        INSERT INTO "Client" ("id","code","nom","type","commercial","vendeur","tel1","joursAppel","sapGroupCode","sapGroupName","city","zipCode","country","activeTelevente","createdAt","updatedAt")
-        VALUES (gen_random_uuid()::text, ${bp.CardCode}, ${bp.CardName || bp.CardCode}, ${type}, 'JMG', ${vendeur}, ${bp.Phone1 ?? null}, '1,2,3,4,5,6', ${grpCode}, ${grpName}, ${city}, ${zip}, ${country}, ${active}, NOW(), NOW())
-        ON CONFLICT ("code") DO UPDATE SET
-          "nom" = EXCLUDED."nom",
-          "type" = EXCLUDED."type",
-          -- préserve les assignations manuelles (commercial / vendeur / jours) au ré-import
-          "commercial" = COALESCE("Client"."commercial", EXCLUDED."commercial"),
-          "vendeur" = COALESCE("Client"."vendeur", EXCLUDED."vendeur"),
-          "joursAppel" = COALESCE("Client"."joursAppel", EXCLUDED."joursAppel"),
-          "tel1" = EXCLUDED."tel1",
-          "sapGroupCode" = EXCLUDED."sapGroupCode",
-          "sapGroupName" = EXCLUDED."sapGroupName",
-          -- localisation SAP : on rafraîchit, en conservant l'ancienne valeur si SAP renvoie vide
-          "city" = COALESCE(EXCLUDED."city", "Client"."city"),
-          "zipCode" = COALESCE(EXCLUDED."zipCode", "Client"."zipCode"),
-          "country" = COALESCE(EXCLUDED."country", "Client"."country"),
-          "activeTelevente" = "Client"."activeTelevente" OR EXCLUDED."activeTelevente",
-          "updatedAt" = NOW();
-      `;
-    }));
+  for (let i = 0; i < mainBps.length; i += CHUNK) {
+    const slice = mainBps.slice(i, i + CHUNK);
+    const res = await Promise.all(slice.map((bp) => upsertClientBp(bp, groupName)));
+    res.forEach(bump);
   }
 
+  // Replie les variantes « code. » en modes de livraison du parent. Un orphelin
+  // (parent absent) est importé comme client normal pour ne rien perdre.
+  let foldedModes = 0;
+  let orphanDots = 0;
+  for (const bp of dotBps) {
+    const r = await foldDotVariant(bp.CardCode);
+    if (r === "folded") { foldedModes++; continue; }
+    orphanDots++;
+    bump(await upsertClientBp(bp, groupName));
+  }
+
+  const importedClients = mainBps.length + orphanDots;
   return NextResponse.json({
     ok: true,
     cleared: clear,
     company: sap.getEnvironment().prodCompany, // import lu sur la base réelle
     pulled: bps.length,
+    clientsImported: importedClients,
     activated,
-    manual: bps.length - activated,
+    manual: importedClients - activated,
     gms: gmsCount,
     shipTo: shipToCount, // clients géolocalisés sur leur adresse de livraison
+    foldedDeliveryModes: foldedModes, // variantes « code. » repliées en modes Direct/SCACHAP
+    orphanDotClients: orphanDots, // variantes « code. » sans parent → importées telles quelles
   });
 }
