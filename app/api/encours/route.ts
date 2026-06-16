@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getAccessScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { cardCodeToClientMap } from "@/lib/clientCardCodes";
 import { sap } from "@/lib/sapb1";
 
 /**
@@ -100,6 +101,10 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: `Lecture SAP échouée : ${msg}` }, { status: 502 });
   }
 
+  // B5 — regroupe les CardCodes secondaires (modes de livraison) sous le client
+  // logique : « LPOI » et « LPOI. » consolidés en une seule ligne d'encours.
+  const clientMap = await cardCodeToClientMap();
+
   const now = Date.now();
   const byClient = new Map<string, ClientEncours>();
   let totalEncours = 0;
@@ -114,8 +119,11 @@ export async function GET() {
     const late = overdueDays > GRACE_DAYS; // en retard seulement passé 30 j
     totalEncours += bal;
 
-    const e = byClient.get(inv.CardCode) ?? {
-      cardCode: inv.CardCode, cardName: inv.CardName ?? inv.CardCode, clientId: null,
+    // Clé = client logique (code principal) si connu, sinon le CardCode brut.
+    const ref = clientMap.get(inv.CardCode);
+    const key = ref?.primaryCode ?? inv.CardCode;
+    const e = byClient.get(key) ?? {
+      cardCode: key, cardName: ref?.nom ?? inv.CardName ?? inv.CardCode, clientId: ref?.clientId ?? null,
       encours: 0, countOpen: 0, b3045: 0, b4590: 0, b90: 0,
       countLate: 0, maxOverdueDays: 0, invoices: [] as InvoiceLine[],
     };
@@ -136,7 +144,7 @@ export async function GET() {
       balance: Math.round(bal * 100) / 100,
       overdueDays,
     });
-    byClient.set(inv.CardCode, e);
+    byClient.set(key, e);
   }
 
   const aggregated = Array.from(byClient.values()).sort((a, b) => b.encours - a.encours);
@@ -163,7 +171,7 @@ export async function GET() {
     clients: aggregated.map((c) => ({
       cardCode: c.cardCode,
       cardName: c.cardName,
-      clientId: idByCode.get(c.cardCode) ?? null,
+      clientId: c.clientId ?? idByCode.get(c.cardCode) ?? null,
       // Précision complète (cents) : le total client doit réconcilier avec la
       // somme des soldes du détail (modale). L'affichage compacte si besoin.
       encours: Math.round(c.encours * 100) / 100,

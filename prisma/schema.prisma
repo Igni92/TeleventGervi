@@ -877,3 +877,17 @@ model Promo {
   @@index([itemCode])
   @@index([active])
 }
+
+// Référentiel des commerciaux SAP (audit B4) — persiste les SalesPersons
+// (SalesEmployeeCode ↔ SalesEmployeeName/trigramme). Alimenté par le miroir
+// (lib/sapMirror.ts → pullBusinessPartners), seedé par
+// scripts/ddl-salesperson.mjs depuis les commerciaux connus (lib/salespeople.ts).
+// Remplace à terme le hardcode lib/salespeople.ts (qui reste le repli/bootstrap).
+// `email` = compte applicatif (mapping conservé, cf. UserCommercial).
+model SalesPerson {
+  slpName  String   @id // SAP SalesEmployeeName (trigramme : MM, JMG, AG…)
+  code     Int?     @unique // SAP SalesEmployeeCode
+  email    String?
+  active   Boolean  @default(true)
+  syncedAt DateTime @default(now()) @updatedAt
+}

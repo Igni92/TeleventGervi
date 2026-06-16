@@ -277,6 +277,27 @@ export async function pullBusinessPartners(opts: {
   );
   const slpNameByCode = new Map(slps.map((s) => [s.SalesEmployeeCode, s.SalesEmployeeName]));
 
+  // Référentiel SalesPerson (audit B4) — persiste les commerciaux SAP. GARDÉ :
+  // un échec (table absente avant migration, etc.) ne doit PAS casser la synchro BP.
+  try {
+    const sp = slps.filter((s) => s.SalesEmployeeName);
+    if (sp.length > 0) {
+      const params: unknown[] = [];
+      let p = 1;
+      const tuples = sp.map((s) => {
+        params.push(s.SalesEmployeeName, s.SalesEmployeeCode);
+        return `($${p++},$${p++},true,NOW())`;
+      });
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "SalesPerson" ("slpName","code","active","syncedAt") VALUES ${tuples.join(",")}
+         ON CONFLICT ("slpName") DO UPDATE SET "code"=EXCLUDED."code","active"=true,"syncedAt"=NOW()`,
+        ...params,
+      );
+    }
+  } catch (e) {
+    console.warn("[sapMirror] référentiel SalesPerson ignoré :", e instanceof Error ? e.message : e);
+  }
+
   let path =
     "BusinessPartners?$select=CardCode,CardName,CardType,GroupCode,SalesPersonCode,EmailAddress,Phone1,Valid"
     + ",CreditLimit,CurrentAccountBalance,Frozen,UpdateDate"

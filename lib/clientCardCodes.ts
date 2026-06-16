@@ -51,3 +51,45 @@ export async function cardCodesForClient(clientId: string): Promise<string[]> {
   });
   return client ? cardCodesOf(client) : [];
 }
+
+export interface ClientRef {
+  clientId: string;
+  /** Code principal du client logique (clé de regroupement). */
+  primaryCode: string;
+  nom: string;
+}
+
+/**
+ * Mappe CHAQUE CardCode SAP (principal + secondaires) → son client logique.
+ * Sert à regrouper les agrégats par cardCode sous le client (audit B5 — ex.
+ * encours : « LPOI » et « LPOI. » consolidés). Source canonique `ClientCardCode`
+ * si peuplée, sinon dérivation via Client.code + modes de livraison.
+ */
+export async function cardCodeToClientMap(): Promise<Map<string, ClientRef>> {
+  const map = new Map<string, ClientRef>();
+  // 1) Store canonique.
+  try {
+    const rows = await prisma.$queryRaw<{ cardCode: string; clientId: string; primaryCode: string; nom: string }[]>(
+      Prisma.sql`SELECT cc."cardCode", cc."clientId", c."code" AS "primaryCode", c."nom"
+                 FROM "ClientCardCode" cc JOIN "Client" c ON c."id" = cc."clientId"`,
+    );
+    if (rows.length > 0) {
+      for (const r of rows) map.set(r.cardCode, { clientId: r.clientId, primaryCode: r.primaryCode, nom: r.nom });
+      return map;
+    }
+  } catch {
+    // Table absente → dérivation ci-dessous.
+  }
+  // 2) Dérivation : Client.code (principal) + ClientDeliveryMode.sapCardCode.
+  const clients = await prisma.client.findMany({
+    select: { id: true, code: true, nom: true, deliveryModes: { select: { sapCardCode: true } } },
+  });
+  for (const c of clients) {
+    const ref: ClientRef = { clientId: c.id, primaryCode: c.code, nom: c.nom };
+    map.set(c.code, ref);
+    for (const m of c.deliveryModes) {
+      if (m.sapCardCode && !map.has(m.sapCardCode)) map.set(m.sapCardCode, ref);
+    }
+  }
+  return map;
+}
