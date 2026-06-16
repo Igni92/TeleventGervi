@@ -1,6 +1,8 @@
 import { auth } from "@/lib/auth";
+import { getAccessScope } from "@/lib/permissions";
 import { redirect, notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { RgpdExportButton } from "@/components/clients/RgpdExportButton";
 import { ClientForm } from "@/components/ClientForm";
 import { DeliveryModesEditor } from "@/components/clients/DeliveryModesEditor";
 import { ContactsEditor } from "@/components/clients/ContactsEditor";
@@ -43,6 +45,7 @@ const statutLabel: Record<string, string> = {
 export default async function ClientDetailPage({ params }: { params: { id: string } }) {
   const session = await auth();
   if (!session) redirect("/login");
+  const isAdmin = (await getAccessScope(session)).all;
 
   const client = await prisma.client.findUnique({
     where: { id: params.id },
@@ -116,6 +119,13 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
       <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-6">
         <DeliveryModesEditor clientId={client.id} clientCode={client.code} />
       </div>
+
+      {/* RGPD — export des données personnelles (droit d'accès), admin uniquement. */}
+      {isAdmin && (
+        <div className="flex justify-end">
+          <RgpdExportButton clientId={client.id} clientCode={client.code} />
+        </div>
+      )}
 
       {client.rappels.length > 0 && (
         <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-6">

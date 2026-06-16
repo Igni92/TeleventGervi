@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { cardCodesForClient } from "@/lib/clientCardCodes";
 import { sap } from "@/lib/sapb1";
 
 /**
@@ -25,17 +26,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   const clientId = params.id;
   if (!clientId) return NextResponse.json({ error: "clientId requis" }, { status: 400 });
 
-  // Tous les CardCodes du client (principal + modes de livraison)
-  const client = await prisma.client.findUnique({ where: { id: clientId }, select: { code: true } });
-  const cardCodes: string[] = [];
-  if (client?.code) cardCodes.push(client.code);
-  try {
-    const modes = await prisma.$queryRawUnsafe<{ sapCardCode: string }[]>(
-      `SELECT DISTINCT "sapCardCode" FROM "ClientDeliveryMode" WHERE "clientId" = $1`, clientId,
-    );
-    for (const m of modes) if (m.sapCardCode && !cardCodes.includes(m.sapCardCode)) cardCodes.push(m.sapCardCode);
-  } catch { /* table optionnelle */ }
-
+  // Tous les CardCodes du client (principal + modes de livraison) — source unique.
+  const cardCodes = await cardCodesForClient(clientId);
   if (cardCodes.length === 0) {
     return NextResponse.json({ lastOrderDate: null, topProducts: [] });
   }
