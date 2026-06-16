@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { BadgePercent, Check, ExternalLink, Gift, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { invalidateSharedFetch } from "@/lib/sharedFetch";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
@@ -72,6 +73,7 @@ export function PromoNotifications({
           }),
         ),
       );
+      invalidateSharedFetch("/api/notifications");
       onSeen(ids);
       close(true);
     } finally {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { sharedFetchJson } from "@/lib/sharedFetch";
 
 export type FetchState = "loading" | "ok" | "error";
 
@@ -21,11 +22,11 @@ export function useJson<T>(url: string, intervalMs?: number): { data: T | null; 
   useEffect(() => {
     let cancelled = false;
 
-    const load = async () => {
+    // Cache partagé : montages concurrents du même URL = une seule requête.
+    // Les rafraîchissements d'intervalle forcent un refetch (cadence préservée).
+    const load = async (force: boolean) => {
       try {
-        const r = await fetch(url, { cache: "no-store" });
-        if (!r.ok) throw new Error(String(r.status));
-        const j = (await r.json()) as T;
+        const j = await sharedFetchJson<T>(url, intervalMs ?? 30_000, force);
         if (cancelled) return;
         hasData.current = true;
         setData(j);
@@ -36,9 +37,9 @@ export function useJson<T>(url: string, intervalMs?: number): { data: T | null; 
       }
     };
 
-    load();
+    load(false);
     if (intervalMs && intervalMs > 0) {
-      const t = setInterval(load, intervalMs);
+      const t = setInterval(() => load(true), intervalMs);
       return () => { cancelled = true; clearInterval(t); };
     }
     return () => { cancelled = true; };

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useReducedMotion } from "framer-motion";
 import { Gift } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { sharedFetchJson, invalidateSharedFetch } from "@/lib/sharedFetch";
 import { SETTING_KEYS, onSettingChange, readSetting } from "@/components/settings/app-settings";
 import { ActivePromo, promoChip, promoTitre } from "@/components/promos/promo-utils";
 
@@ -40,12 +41,10 @@ export function PromoRibbon() {
     let alive = true;
     (async () => {
       try {
-        const [pRes, nRes] = await Promise.all([
-          fetch("/api/promos?active=1", { cache: "no-store" }),
-          fetch("/api/notifications", { cache: "no-store" }),
+        const [pJson, nJson] = await Promise.all([
+          sharedFetchJson<{ promos?: ActivePromo[] }>("/api/promos?active=1", 60_000).catch(() => ({}) as { promos?: ActivePromo[] }),
+          sharedFetchJson<{ notifications?: { promoId?: string; isNew?: boolean }[] }>("/api/notifications", 60_000).catch(() => ({}) as { notifications?: { promoId?: string; isNew?: boolean }[] }),
         ]);
-        const pJson = await pRes.json().catch(() => ({}));
-        const nJson = await nRes.json().catch(() => ({}));
         const newIds = new Set(
           ((nJson?.notifications ?? []) as { promoId?: string; isNew?: boolean }[])
             .filter((n) => n.isNew && typeof n.promoId === "string")
@@ -102,7 +101,9 @@ export function PromoRibbon() {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ promoId: p.id }),
-                }).catch(() => { /* best-effort */ });
+                })
+                  .then(() => invalidateSharedFetch("/api/notifications"))
+                  .catch(() => { /* best-effort */ });
               }}
               className="group inline-flex items-center gap-1.5 shrink-0 px-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-white/70 rounded"
             >

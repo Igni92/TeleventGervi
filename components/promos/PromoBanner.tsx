@@ -7,6 +7,7 @@ import {
   BadgePercent, CalendarRange, ChevronLeft, ChevronRight, Gift, Tag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { sharedFetchJson, invalidateSharedFetch } from "@/lib/sharedFetch";
 import { SETTING_KEYS, onSettingChange, readSetting } from "@/components/settings/app-settings";
 import { PromoNotifications } from "@/components/promos/PromoNotifications";
 import {
@@ -65,12 +66,10 @@ export function PromoBanner({
     let alive = true;
     (async () => {
       try {
-        const [pRes, nRes] = await Promise.all([
-          fetch("/api/promos?active=1", { cache: "no-store" }),
-          fetch("/api/notifications", { cache: "no-store" }),
+        const [pJson, nJson] = await Promise.all([
+          sharedFetchJson<{ promos?: ActivePromo[] }>("/api/promos?active=1", 60_000).catch(() => ({}) as { promos?: ActivePromo[] }),
+          sharedFetchJson<{ notifications?: { promoId?: string; isNew?: boolean }[] }>("/api/notifications", 60_000).catch(() => ({}) as { notifications?: { promoId?: string; isNew?: boolean }[] }),
         ]);
-        const pJson = await pRes.json().catch(() => ({}));
-        const nJson = await nRes.json().catch(() => ({}));
         const newIds = new Set(
           ((nJson?.notifications ?? []) as { promoId?: string; isNew?: boolean }[])
             .filter((n) => n.isNew && typeof n.promoId === "string")
@@ -121,7 +120,9 @@ export function PromoBanner({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ promoId: p.id }),
-    }).catch(() => { /* best-effort */ });
+    })
+      .then(() => invalidateSharedFetch("/api/notifications"))
+      .catch(() => { /* best-effort */ });
   }, [clearNew]);
 
   if (!promos || count === 0) return null;

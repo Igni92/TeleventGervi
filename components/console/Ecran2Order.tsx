@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
+import { sharedFetchJson } from "@/lib/sharedFetch";
 import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -278,7 +279,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
 
   // ── C2 — Promos actives (Dialog récap + remise auto au panier) ──
   useEffect(() => {
-    fetch(`/api/promos?active=1`).then((r) => r.json())
+    sharedFetchJson<{ promos?: Promo[] }>("/api/promos?active=1", 60_000)
       .then((d) => {
         const list = (d?.promos ?? []) as Promo[];
         setPromoList(list);
