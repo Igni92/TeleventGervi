@@ -7,6 +7,7 @@ import { useGeoData } from "./usePilotageData";
 import { BarList } from "@/components/charts/BarList";
 import { Donut } from "@/components/charts/Donut";
 import { GeoDrilldown, type DrillDescriptor } from "@/components/charts/GeoDrilldown";
+import { AnimatedNumber } from "@/components/ui/animated-number";
 import {
   type GeoMetric, GEO_METRICS, geoMetricLabel, geoValue, formatGeoValue, formatWeight,
   groupParisZones,
@@ -151,13 +152,14 @@ function TotalsPanel({ data }: { data: ReturnType<typeof useGeoData>["data"] }) 
     return <div className="h-full grid place-items-center text-[12px] text-muted-foreground">Chargement…</div>;
   }
   const t = data.totals;
-  const stats: { label: string; value: string }[] = [
-    { label: "CA facturé", value: formatEuro(t.ca, true) },
-    { label: "Marge", value: formatEuro(t.margin, true) },
-    { label: "Volume", value: formatWeight(t.weightKg) },
-    { label: "BL", value: formatNum(t.docs) },
-    { label: "Clients", value: formatNum(t.clients) },
-    { label: "Zones", value: formatNum(data.zones.length) },
+  const eur = (n: number) => formatEuro(n, true);
+  const stats: { label: string; value: number; format: (n: number) => string }[] = [
+    { label: "CA facturé", value: t.ca, format: eur },
+    { label: "Marge", value: t.margin, format: eur },
+    { label: "Volume", value: t.weightKg, format: formatWeight },
+    { label: "BL", value: t.docs, format: formatNum },
+    { label: "Clients", value: t.clients, format: formatNum },
+    { label: "Zones", value: data.zones.length, format: formatNum },
   ];
   const unlocatedPct = t.ca > 0 ? (data.unlocated.ca / t.ca) * 100 : 0;
   return (
@@ -166,7 +168,9 @@ function TotalsPanel({ data }: { data: ReturnType<typeof useGeoData>["data"] }) 
         {stats.map((s) => (
           <div key={s.label} className="rounded-lg bg-secondary/40 px-2.5 py-2">
             <p className="text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground">{s.label}</p>
-            <p className="text-[15px] font-semibold text-foreground tnum leading-tight mt-0.5">{s.value}</p>
+            <p className="text-[15px] font-semibold text-foreground tnum leading-tight mt-0.5">
+              <AnimatedNumber value={s.value} format={s.format} animateOnMount />
+            </p>
           </div>
         ))}
       </div>
