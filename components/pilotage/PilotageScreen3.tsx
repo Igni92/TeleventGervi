@@ -10,7 +10,7 @@ import { Donut } from "@/components/charts/Donut";
 import { GeoDrilldown, type DrillDescriptor } from "@/components/charts/GeoDrilldown";
 import {
   type GeoMetric, GEO_METRICS, geoMetricLabel, geoValue, formatGeoValue, formatWeight,
-  IDF_CODES, groupParisZones,
+  groupParisZones,
 } from "@/components/charts/geoShared";
 
 const SEGMENT_COLORS: Record<string, string> = { GMS: "#38bdf8", CHR: "#10b981", EXPORT: "#a78bfa" };
@@ -91,15 +91,11 @@ export function PilotageScreen3({ viewAs = null }: { viewAs?: string | null } = 
           className="flex-1 grid gap-2 min-h-0"
           style={{ gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gridTemplateRows: "repeat(6, minmax(0, 1fr))" }}
         >
-          <Tile colSpan={4} rowSpan={4} title={`France · ${geoMetricLabel(metric)} · clic = détail`} accent="brand">
+          <Tile colSpan={5} rowSpan={4} title={`France · ${geoMetricLabel(metric)} · clic = détail`} accent="brand">
             <FranceChoropleth zones={data?.zones ?? []} metric={metric} groupParis onZoneClick={openByCode} />
           </Tile>
 
-          <Tile colSpan={3} rowSpan={4} title={`Île-de-France · ${geoMetricLabel(metric)}`} accent="sky">
-            <FranceChoropleth zones={data?.zones ?? []} metric={metric} onlyCodes={IDF_CODES} onZoneClick={openByCode} />
-          </Tile>
-
-          <Tile colSpan={5} rowSpan={4} title={`Outre-mer & Export · ${geoMetricLabel(metric)}`} accent="violet">
+          <Tile colSpan={7} rowSpan={4} title={`Outre-mer & Export · ${geoMetricLabel(metric)}`} accent="violet">
             <WorldBubbleMap zones={data?.zones ?? []} metric={metric} />
           </Tile>
 

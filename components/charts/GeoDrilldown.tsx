@@ -59,7 +59,9 @@ export function GeoDrilldown({
     const out: MapPoint[] = [];
     for (const c of zoneClients) {
       const v = geoValue(c, metric);
-      const xy = c.zip ? cp[c.zip] : undefined;
+      // Les CP SAP peuvent contenir une espace (« 77 700 ») → on normalise en 5 chiffres.
+      const zipKey = (c.zip ?? "").replace(/\D/g, "").slice(0, 5);
+      const xy = zipKey ? cp[zipKey] : undefined;
       if (!xy || v <= 0) continue;
       out.push({
         id: c.cardCode,
