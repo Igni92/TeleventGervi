@@ -218,8 +218,13 @@ export function GeoMapGL({
 
         {view === "france" && franceFc && (
           <Source id="fr" type="geojson" data={franceFc as unknown as GeoJSON.FeatureCollection}>
-            {mode === "3d" ? (
+            {/* Blocs SÉPARÉS + key distincte : MapLibre ne peut pas changer le
+                TYPE d'une couche (extrusion↔fill). Sans ça, React réutilise
+                l'instance et la couche reste extrusion (clic KO, couleurs en
+                Densité). La key forcée garantit remove+add propre. */}
+            {mode === "3d" && (
               <Layer
+                key="fr-ext"
                 id="fr-ext"
                 type="fill-extrusion"
                 paint={{
@@ -229,8 +234,10 @@ export function GeoMapGL({
                   "fill-extrusion-opacity": 0.92,
                 }}
               />
-            ) : (
+            )}
+            {mode !== "3d" && (
               <Layer
+                key={`fr-fill-${mode}`}
                 id="fr-fill"
                 type="fill"
                 paint={
