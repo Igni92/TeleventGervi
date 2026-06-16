@@ -158,11 +158,19 @@ export function GeoMapGL({
 
   const worldFc = useMemo(() => (world ? { type: "FeatureCollection" as const, features: world } : null), [world]);
 
-  const franceLayer = view === "france" ? (mode === "3d" ? "fr-ext" : "fr-fill") : null;
-  const interactiveLayerIds = view === "france" ? (franceLayer ? [franceLayer] : []) : ["world-bubbles"];
+  // ⚠️ react-map-gl v8 (entrée /maplibre) n'alimente PAS `e.features` et ignore
+  // `interactiveLayerIds` : on interroge la carte nous-mêmes via le ref
+  // (queryRenderedFeatures au point écran). Sinon : aucun survol/clic détecté.
+  const featAt = (e: MapLayerMouseEvent) => {
+    const map = mapRef.current;
+    if (!map) return undefined;
+    const layerId = view === "france" ? (mode === "3d" ? "fr-ext" : "fr-fill") : "world-bubbles";
+    if (!map.getLayer(layerId)) return undefined;
+    return map.queryRenderedFeatures(e.point, { layers: [layerId] })?.[0];
+  };
 
   const onMove = (e: MapLayerMouseEvent) => {
-    const f = e.features?.[0];
+    const f = featAt(e);
     if (!f) { setHover(null); setCursor("grab"); return; }
     const p = f.properties as Record<string, unknown>;
     setCursor(view === "france" ? (Number(p.hasData) ? "pointer" : "grab") : "pointer");
@@ -178,10 +186,11 @@ export function GeoMapGL({
   const onLeave = () => { setHover(null); setCursor("grab"); };
   const onClick = (e: MapLayerMouseEvent) => {
     if (view !== "france" || !onZoneClick) return;
-    const f = e.features?.[0];
+    const f = featAt(e);
     if (f && Number((f.properties as Record<string, unknown>).hasData)) {
       // Vol fluide vers la zone puis ouverture du détail.
-      mapRef.current?.easeTo({ center: [e.lngLat.lng, e.lngLat.lat], zoom: Math.min((mapRef.current.getZoom() ?? 4.4) + 1.3, 7), duration: 550 });
+      const map = mapRef.current;
+      map?.easeTo({ center: [e.lngLat.lng, e.lngLat.lat], zoom: Math.min((map.getZoom() ?? 4.4) + 1.3, 7), duration: 550 });
       onZoneClick(String((f.properties as Record<string, unknown>).code));
     }
   };
@@ -196,7 +205,6 @@ export function GeoMapGL({
         ref={mapRef}
         initialViewState={initialViewState}
         mapStyle={MAP_STYLE as never}
-        interactiveLayerIds={interactiveLayerIds}
         onMouseMove={onMove}
         onMouseLeave={onLeave}
         onClick={onClick}
