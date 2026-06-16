@@ -522,3 +522,22 @@ html[data-reduce-anim="1"] .promo-marquee-track {
   animation: none !important;
   transform: none !important;
 }
+
+/* ── MapLibre GL — thème sombre (carte « Où je livre le plus ») ──────── */
+.geo-popup .maplibregl-popup-content {
+  background: hsl(var(--popover));
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.6rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  padding: 8px 10px;
+}
+.geo-popup .maplibregl-popup-tip { display: none; }
+.maplibregl-ctrl-group {
+  background: hsl(var(--popover));
+  border: 1px solid hsl(var(--border)) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.maplibregl-ctrl-group button + button { border-top: 1px solid hsl(var(--border)); }
+.maplibregl-ctrl-group button .maplibregl-ctrl-icon { filter: invert(0.75); }
+.maplibregl-canvas:focus { outline: none; }

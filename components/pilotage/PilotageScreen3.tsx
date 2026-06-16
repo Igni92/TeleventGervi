@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { Tile, RefreshButton, formatEuro, formatNum } from "./bento";
 import { useGeoData } from "./usePilotageData";
-import { FranceChoropleth } from "@/components/charts/FranceChoropleth";
-import { WorldBubbleMap } from "@/components/charts/WorldBubbleMap";
 import { BarList } from "@/components/charts/BarList";
 import { Donut } from "@/components/charts/Donut";
 import { GeoDrilldown, type DrillDescriptor } from "@/components/charts/GeoDrilldown";
@@ -12,6 +11,12 @@ import {
   type GeoMetric, GEO_METRICS, geoMetricLabel, geoValue, formatGeoValue, formatWeight,
   groupParisZones,
 } from "@/components/charts/geoShared";
+
+// Carte MapLibre (WebGL) — client uniquement, chargée à la volée.
+const GeoMapGL = dynamic(() => import("@/components/charts/GeoMapGL").then((m) => m.GeoMapGL), {
+  ssr: false,
+  loading: () => <div className="h-full w-full grid place-items-center text-[12px] text-muted-foreground">Chargement de la carte…</div>,
+});
 
 const SEGMENT_COLORS: Record<string, string> = { GMS: "#38bdf8", CHR: "#10b981", EXPORT: "#a78bfa" };
 const SEGMENT_LABELS: Record<string, string> = { GMS: "GMS", CHR: "CHR", EXPORT: "Export" };
@@ -92,11 +97,11 @@ export function PilotageScreen3({ viewAs = null }: { viewAs?: string | null } = 
           style={{ gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gridTemplateRows: "repeat(6, minmax(0, 1fr))" }}
         >
           <Tile colSpan={5} rowSpan={4} title={`France · ${geoMetricLabel(metric)} · clic = détail`} accent="brand">
-            <FranceChoropleth zones={data?.zones ?? []} metric={metric} groupParis onZoneClick={openByCode} />
+            <GeoMapGL view="france" zones={data?.zones ?? []} metric={metric} onZoneClick={openByCode} />
           </Tile>
 
           <Tile colSpan={7} rowSpan={4} title={`Outre-mer & Export · ${geoMetricLabel(metric)}`} accent="violet">
-            <WorldBubbleMap zones={data?.zones ?? []} metric={metric} />
+            <GeoMapGL view="world" zones={data?.zones ?? []} metric={metric} />
           </Tile>
 
           <Tile colSpan={3} rowSpan={2} title="Répartition EXPORT / GMS / CHR" accent="emerald">
