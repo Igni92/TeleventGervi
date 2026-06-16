@@ -29,7 +29,7 @@ const MAP_STYLE = {
 };
 
 type HoverInfo = { lng: number; lat: number; zone: Partial<GeoZone> & { name?: string } };
-type FranceMode = "3d" | "heat";
+type FranceMode = "2d" | "3d" | "heat";
 
 /**
  * Carte vectorielle interactive (MapLibre GL).
@@ -222,7 +222,7 @@ export function GeoMapGL({
                 }}
               />
             ) : (
-              <Layer id="fr-fill" type="fill" paint={{ "fill-color": ["get", "fillColor"], "fill-opacity": 0.55 }} />
+              <Layer id="fr-fill" type="fill" paint={{ "fill-color": ["get", "fillColor"], "fill-opacity": mode === "heat" ? 0.42 : 0.82 }} />
             )}
             <Layer id="fr-line" type="line" paint={{ "line-color": "rgba(148,163,184,0.30)", "line-width": 0.5 }} />
           </Source>
@@ -292,17 +292,18 @@ export function GeoMapGL({
       {/* Bascule 3D / Densité (France) */}
       {view === "france" && (
         <div className="absolute top-2 left-2 z-10 inline-flex items-center gap-0.5 bg-popover/90 backdrop-blur-md border border-border p-0.5 rounded-md shadow-modal">
-          {(["3d", "heat"] as FranceMode[]).map((m) => (
+          {(["2d", "3d", "heat"] as FranceMode[]).map((m) => (
             <button
               key={m}
               type="button"
               onClick={() => setMode(m)}
               aria-pressed={mode === m}
+              title={m === "2d" ? "Vue à plat (clic facile)" : m === "3d" ? "Relief 3D" : "Heatmap densité clients"}
               className={`px-2 h-6 text-[10.5px] font-semibold tracking-tight rounded transition-colors ${
                 mode === m ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {m === "3d" ? "3D" : "Densité"}
+              {m === "2d" ? "2D" : m === "3d" ? "3D" : "Densité"}
             </button>
           ))}
         </div>
