@@ -222,7 +222,17 @@ export function GeoMapGL({
                 }}
               />
             ) : (
-              <Layer id="fr-fill" type="fill" paint={{ "fill-color": ["get", "fillColor"], "fill-opacity": mode === "heat" ? 0.42 : 0.82 }} />
+              <Layer
+                id="fr-fill"
+                type="fill"
+                paint={
+                  mode === "heat"
+                    // Densité : pas de choroplèthe — fond neutre uniforme, seule
+                    // la heatmap porte l'information (+ contours via fr-line).
+                    ? { "fill-color": "rgba(148,163,184,0.06)", "fill-opacity": 1 }
+                    : { "fill-color": ["get", "fillColor"], "fill-opacity": 0.82 }
+                }
+              />
             )}
             <Layer id="fr-line" type="line" paint={{ "line-color": "rgba(148,163,184,0.30)", "line-width": 0.5 }} />
           </Source>
