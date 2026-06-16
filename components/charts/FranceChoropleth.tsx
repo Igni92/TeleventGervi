@@ -43,6 +43,16 @@ export function FranceChoropleth({
     return () => { on = false; };
   }, []);
 
+  // Polygone Île-de-France d'un seul tenant (vue nationale) — Paris intégré,
+  // sans délimitations départementales internes.
+  const [idfFeature, setIdfFeature] = useState<GeoFeature | null>(null);
+  useEffect(() => {
+    if (!groupParis) return;
+    let on = true;
+    loadGeo("/geo/idf-region.json").then((g) => { if (on) setIdfFeature(g.features[0] ?? null); });
+    return () => { on = false; };
+  }, [groupParis]);
+
   const byCode = useMemo(() => {
     const m = new Map<string, GeoZone>();
     for (const z of zones) if (z.kind === "fr-dept") m.set(z.code, z);
@@ -52,27 +62,29 @@ export function FranceChoropleth({
   // Agrégat Île-de-France (pour le regroupement de la vue nationale).
   const idfZone = useMemo(() => (groupParis ? parisAggregate(zones) : null), [zones, groupParis]);
 
-  // Départements effectivement dessinés (filtre du zoom).
-  const shown = useMemo(
-    () => (features ? (onlyCodes ? features.filter((f) => onlyCodes.includes(f.properties.code)) : features) : []),
-    [features, onlyCodes],
-  );
+  // Départements dessinés. En vue nationale, on retire les 8 départements
+  // franciliens et on ajoute le polygone IDF d'un seul tenant (code "IDF").
+  const shown = useMemo(() => {
+    if (!features) return [];
+    if (onlyCodes) return features.filter((f) => onlyCodes.includes(f.properties.code));
+    if (groupParis && idfFeature) {
+      return [...features.filter((f) => !isIDF(f.properties.code)), idfFeature];
+    }
+    return features;
+  }, [features, onlyCodes, groupParis, idfFeature]);
 
-  // Zone associée à un code département — regroupe l'IDF en vue nationale.
+  // Zone associée à un code — "IDF" = agrégat régional, sinon le département.
   const zoneFor = (code: string): GeoZone | undefined =>
-    (groupParis && isIDF(code) ? idfZone ?? undefined : byCode.get(code));
+    (code === "IDF" ? idfZone ?? undefined : byCode.get(code));
 
   const maxValue = useMemo(() => {
     let max = 0;
     for (const f of shown) {
-      const code = f.properties.code;
-      if (groupParis && isIDF(code)) continue; // compté via idfZone
-      const z = byCode.get(code);
+      const z = f.properties.code === "IDF" ? idfZone : byCode.get(f.properties.code);
       if (z) max = Math.max(max, geoValue(z, metric));
     }
-    if (idfZone) max = Math.max(max, geoValue(idfZone, metric));
     return max;
-  }, [shown, byCode, idfZone, groupParis, metric]);
+  }, [shown, byCode, idfZone, metric]);
 
   const pointMax = useMemo(() => (points ?? []).reduce((m, p) => Math.max(m, p.value), 0), [points]);
 
@@ -117,7 +129,7 @@ export function FranceChoropleth({
                             setHover({ zone: z, x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) });
                           }}
                           onMouseLeave={() => setHover(null)}
-                          onClick={clickable ? () => onZoneClick!(groupParis && isIDF(code) ? "IDF" : code) : undefined}
+                          onClick={clickable ? () => onZoneClick!(code) : undefined}
                         />
                       );
                     })}

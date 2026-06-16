@@ -30,6 +30,8 @@ const SRC = {
   world: "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson",
   // Base officielle des codes postaux (La Poste hexasmal) — code_postal → lat/long.
   cp: "https://www.data.gouv.fr/fr/datasets/r/dbe8a621-a9c4-4bc3-9cae-be1699c5ff25",
+  // Régions (pour le polygone Île-de-France d'un seul tenant, Paris intégré).
+  regions: "https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/regions-version-simplifiee.geojson",
 };
 
 /** Arrondit récursivement tous les nombres d'un tableau de coordonnées. */
@@ -65,6 +67,23 @@ async function main() {
   }));
   fs.writeFileSync(path.join(OUT, "world.json"), JSON.stringify(world));
   console.log(`✅ world.json — ${world.features.length} pays, ${(fs.statSync(path.join(OUT, "world.json")).size / 1024).toFixed(0)} KB`);
+
+  // ── Île-de-France d'un seul tenant (région code 11) ──
+  // Affichée sur la carte nationale SANS les délimitations départementales,
+  // Paris (75) intégré dans la région.
+  const regions = await fetchJson(SRC.regions);
+  const idf = regions.features.find((f) => f.properties.code === "11" || /Île-de-France/i.test(f.properties.nom || ""));
+  if (!idf) throw new Error("Région Île-de-France introuvable dans le GeoJSON régions");
+  const idfFc = {
+    type: "FeatureCollection",
+    features: [{
+      type: "Feature",
+      properties: { code: "IDF", nom: "Île-de-France" },
+      geometry: { ...idf.geometry, coordinates: roundCoords(idf.geometry.coordinates) },
+    }],
+  };
+  fs.writeFileSync(path.join(OUT, "idf-region.json"), JSON.stringify(idfFc));
+  console.log(`✅ idf-region.json — ${(fs.statSync(path.join(OUT, "idf-region.json")).size / 1024).toFixed(0)} KB`);
 
   // ── Codes postaux → coordonnées (centroïde moyen par CP) ──
   // Sert à placer chaque client en BULLE sur la carte zoomée d'un département.
