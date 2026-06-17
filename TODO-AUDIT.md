@@ -44,15 +44,21 @@
 - [x] 🟡 **`/api/clients/resolve`** : normalisation casse (MAJUSCULES).
 - [x] 🟠 **Périmètre CRM pilotage** (décision métier validée) : aligné sur **commercial OU vendeur** — KPI CRM non-admin via `clientIdsForOwner` (union raw SQL, vendeur inclus) ; admin = vision globale inchangée.
 
+### Lot 8 — UI/UX & migration Next 16
+- [x] 🟠 **Événements** : système pur `lib/events` (fenêtre ±1 semaine, passage d'année, testé), bannière `EventsBanner` en haut à gauche **en remplacement du ruban promos** (doublon). Bandeau promo principal conservé.
+- [x] 🟠 **Moins d'onglets** : accueil épuré (grille « Modules » retirée = doublon de la nav) ; sidebar 2 niveaux (cœur *Télévente* + *Stock & stats* visibles, groupe **Gestion repliable**) ; code mort supprimé (`Navbar`, `PromoRibbon`, `ModuleGrid`).
+- [x] 🟠 **Mapping commerciaux** : `UserCommercial` = AG/JMG/MM uniquement (CM & autres absents — vérifié en base). « Televent first » : stats par commercial reportées.
+- [x] 🟠 **Migration Next 14.2.35 → Next 16.2.9 / React 19.2.7** : `next build` vert (51 pages), `tsc` 0, `eslint` (flat config) 0, `vitest` 121 verts (projet). APIs request async (params/searchParams), `middleware.ts → proxy.ts`, overrides @visx React 19, next-auth beta.31 compatible.
+  - ⚠️ **À valider en runtime réel** (non testable ici sans DB/SSO) : flux OAuth Microsoft + `proxy.ts` (redirections login) ; rendu graphes `@visx` / carte `maplibre` sous React 19.
+
 ---
 
 ## 🟠 RESTE — nécessite TA décision ou des DONNÉES (hors code pur)
 
 - [ ] 🟠 🛠️ **Données métier** (côté SAP/process, pas du code) :
-  - 285/339 clients **sans `vendeur`** → file console vide hors MM (filtre vendeur strict, confirmé). Compléter le champ.
-  - **Mapping ≠ SAP** : `CM` (~80 % du CA) sans compte, `AG` sans activité. Réconcilier `UserCommercial` ↔ slpName réels.
+  - ✅ **Mapping** réconcilié : `UserCommercial` = AG/JMG/MM seulement (CM & autres retirés). Reste : **compléter `vendeur`** sur les fiches clients (sinon file console vide hors MM) — donnée SAP/process.
   - 280/339 sans `type` ; 5,1 % CA produit sans `lineCost` ; 19 produits sans poids ; `ProductBatch` vide (DLC/FIFO).
-- [ ] ℹ️ Migration **Next 15/16** (advisories résiduelles fixées en majeure) — chantier à planifier.
+- [x] ✅ Migration **Next 16 / React 19** faite (cf. Lot 8) — reste à valider en runtime (auth/SSO Microsoft, rendu visx).
 - [ ] 🟡 🛠️ **RGPD** : durée de conservation `AppelLog`, journalisation accès PII, registre sous-traitants (Supabase UE, Microsoft, SAP), base légale + droit d'accès/effacement.
 
 ---
@@ -69,6 +75,6 @@
 
 ## 🏆 Synthèse
 
-Le **backlog code clairement actionnable et sûr est traité** (lots 1→7 : sécurité, marges, perf, imports, fuseau, sync stock, jeton Graph, UX console, cleanup pilotage). `tsc` 0 · `lint` 0 · `vitest` 220 verts.
+Le **backlog code actionnable et sûr est traité** (lots 1→8 : sécurité, marges, perf, imports, fuseau, sync stock, jeton Graph, UX console/accueil/sidebar, événements, **migration Next 16 / React 19**). Sur la branche : `next build` vert · `tsc` 0 · `eslint` 0 · `vitest` 121 verts (périmètre projet).
 
-Ce qui reste demande **soit ta décision** (périmètre CRM pilotage), **soit des données/process** (vendeur, mapping CM/AG, types, poids, lots), **soit un chantier planifié** (Next 16, RGPD). Je n'y touche pas à l'aveugle pour ne pas dégrader.
+Ce qui reste demande **des données/process** (compléter `vendeur` sur les clients ; `type`/poids/lots), une **validation runtime** de la migration (auth SSO Microsoft, rendu visx sous React 19), ou un **chantier planifié** (RGPD). Je n'y touche pas à l'aveugle pour ne pas dégrader.
