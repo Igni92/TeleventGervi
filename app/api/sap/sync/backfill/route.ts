@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import {
   pullBusinessPartners,
@@ -31,6 +32,9 @@ import {
 export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await requireAdmin(session))) {
+    return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+  }
 
   const url = new URL(req.url);
   const fromParam = url.searchParams.get("from");

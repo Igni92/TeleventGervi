@@ -41,11 +41,11 @@ export interface ActivityPayload {
   period: { start: string; end: string };
   previous: { start: string; end: string };
   curr: {
-    volume: number; weightKg: number; margin: number; marginPct: number; marginCoverage: number;
+    volume: number; caProductNet: number; weightKg: number; margin: number; marginPct: number; marginCoverage: number;
     ordersCount: number; activeClients: number; avgBasket: number;
   };
   prev: {
-    volume: number; weightKg: number; margin: number; marginPct: number; marginCoverage: number;
+    volume: number; caProductNet: number; weightKg: number; margin: number; marginPct: number; marginCoverage: number;
     ordersCount: number; activeClients: number; avgBasket: number;
   };
   crm: { appels: number; cdesCrm: number; tauxConv: number; clientsTouches: number };
@@ -94,22 +94,24 @@ export interface AnnualPayload {
     totalWeightKg: number;
     totalCaProductNet: number;
   }[];
-  clients: { cardCode: string; cardName: string | null; ca: number; margin: number; invoices: number; weightKg: number }[];
+  clients: { cardCode: string; cardName: string | null; ca: number; caProductNet: number; margin: number; invoices: number; weightKg: number }[];
   suppliers: { cardCode: string; cardName: string | null; totalIn: number; pdnCount: number; weightKg: number }[];
-  salespersons: { slpName: string; ca: number; margin: number; activeClients: number; invoices: number; weightKg: number }[];
+  salespersons: { slpName: string; ca: number; caProductNet: number; margin: number; activeClients: number; invoices: number; weightKg: number }[];
 }
 
 export function useAnnualData(segment: Segment = "ALL", as?: string | null, nonce = 0) {
   const [data, setData] = useState<AnnualPayload | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
+    setErr(null);
     fetch(withRefresh(`/api/pilotage/annual?segment=${segment}${asSuffix(as)}`, nonce), { cache: "no-store" })
-      .then((r) => r.ok ? r.json() : null)
-      .then((j: AnnualPayload | null) => { if (!cancelled && j) setData(j); })
-      .catch(() => {});
+      .then((r) => r.ok ? r.json() : r.json().then((j) => Promise.reject(j.error ?? r.statusText)))
+      .then((j: AnnualPayload) => { if (!cancelled) setData(j); })
+      .catch((e) => { if (!cancelled) setErr(String(e)); });
     return () => { cancelled = true; };
   }, [segment, as, nonce]);
-  return { data };
+  return { data, err };
 }
 
 /* ─────────────────────────────────────────────────────────────────
@@ -150,15 +152,17 @@ export interface WeeklyPayload {
 
 export function useWeeklyData(segment: Segment = "ALL", as?: string | null, nonce = 0) {
   const [data, setData] = useState<WeeklyPayload | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
+    setErr(null);
     fetch(withRefresh(`/api/pilotage/weekly?segment=${segment}${asSuffix(as)}`, nonce), { cache: "no-store" })
-      .then((r) => r.ok ? r.json() : null)
-      .then((j: WeeklyPayload | null) => { if (!cancelled && j) setData(j); })
-      .catch(() => {});
+      .then((r) => r.ok ? r.json() : r.json().then((j) => Promise.reject(j.error ?? r.statusText)))
+      .then((j: WeeklyPayload) => { if (!cancelled) setData(j); })
+      .catch((e) => { if (!cancelled) setErr(String(e)); });
     return () => { cancelled = true; };
   }, [segment, as, nonce]);
-  return { data };
+  return { data, err };
 }
 
 /* ─────────────────────────────────────────────────────────────────

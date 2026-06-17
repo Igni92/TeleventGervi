@@ -14,7 +14,9 @@ export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  const code = req.nextUrl.searchParams.get("code")?.trim();
+  // L'import stocke les codes en MAJUSCULES → on normalise pour ne pas rater la
+  // résolution sur un CardCode saisi en minuscules/casse mixte.
+  const code = req.nextUrl.searchParams.get("code")?.trim().toUpperCase();
   if (!code) return NextResponse.json({ id: null });
 
   const client = await prisma.client.findUnique({

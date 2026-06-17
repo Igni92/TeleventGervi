@@ -49,7 +49,6 @@ let activeEnv: SapEnv = "prod";
 const cfg = () => CFG[activeEnv];
 
 if (!CFG.prod.base || !CFG.prod.company || !CFG.prod.user || !CFG.prod.pass) {
-  // eslint-disable-next-line no-console
   console.warn("[sapb1] Missing prod env vars — SAP client will fail at first call");
 }
 
@@ -188,6 +187,28 @@ export async function logout(): Promise<void> {
   sessions[env] = null;
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Codes d'erreur réseau transitoires Node — un retry peut réussir. */
+const TRANSIENT_NET_CODES = new Set(["ECONNRESET", "ETIMEDOUT", "EPIPE", "ECONNREFUSED", "EAI_AGAIN"]);
+
+/** Vrai si l'erreur réseau (rejet de rawRequest) est transitoire et mérite un retry. */
+function isTransientNetworkError(e: unknown): boolean {
+  if (!e || typeof e !== "object") return false;
+  const code = (e as { code?: string }).code;
+  if (code && TRANSIENT_NET_CODES.has(code)) return true;
+  const msg = (e as { message?: string }).message ?? "";
+  return /socket hang up|ECONNRESET|ETIMEDOUT|EPIPE|timeout/i.test(msg);
+}
+
+/** Vrai pour une réponse HTTP transitoire (passerelle indisponible) → retry. */
+function isTransientStatus(status: number): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
+
+// Backoff : 3 tentatives au total (delays appliqués avant retry 2 et 3).
+const RETRY_DELAYS_MS = [500, 1000, 2000];
+
 /** Core authenticated call with auto re-login on 401. env = opts.env ?? actif. */
 async function call<T>(path: string, opts: SapRequestOptions = {}): Promise<T> {
   let env = opts.env;
@@ -197,9 +218,34 @@ async function call<T>(path: string, opts: SapRequestOptions = {}): Promise<T> {
     env = activeEnv;
   }
   if (!sessions[env] && !opts.noRetry) await login(env);
-  let res = await rawRequest<T>(env, path, opts);
 
-  // 401 → session expirée → re-login + retry une fois
+  // Retry réseau avec backoff sur erreurs TRANSITOIRES uniquement (un ECONNRESET
+  // en milieu de pagination ne doit pas faire échouer tout un backfill).
+  // Les 4xx métier (sauf 401, géré ci-dessous) NE sont PAS retentées.
+  let res: RawResponse<T> | undefined;
+  let lastNetError: unknown;
+  const maxAttempts = opts.noRetry ? 1 : RETRY_DELAYS_MS.length + 1;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt - 1]);
+    try {
+      res = await rawRequest<T>(env, path, opts);
+    } catch (e) {
+      // Erreur réseau (rejet de la promesse) : retry si transitoire, sinon propage.
+      lastNetError = e;
+      if (!opts.noRetry && isTransientNetworkError(e) && attempt < maxAttempts - 1) continue;
+      throw e;
+    }
+    // 5xx passerelle transitoire → retry (sauf noRetry / dernière tentative).
+    if (!opts.noRetry && isTransientStatus(res.status) && attempt < maxAttempts - 1) {
+      lastNetError = undefined;
+      continue;
+    }
+    break;
+  }
+  // res est défini si on sort sans throw ; garde-fou défensif.
+  if (!res) throw (lastNetError instanceof Error ? lastNetError : new Error("SAP request failed (no response)"));
+
+  // 401 → session expirée → re-login + retry une fois (logique inchangée).
   if (res.status === 401 && !opts.noRetry) {
     sessions[env] = null;
     await login(env);

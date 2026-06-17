@@ -15,15 +15,15 @@ import {
   isoWeek, isoWeekLabel, isoWeeksInYear, isoWeekKey, COMMERCIAL_EVENTS,
 } from "@/lib/iso-week";
 import { SEGMENTS, type Segment } from "@/lib/segments";
+import { grossMarginPct } from "@/lib/margin";
 
 type Screen2View = "matrix" | "evolution" | "events";
-/** Métrique affichée : CA HT (€), Poids (kg), ou Marge % (margin / CA produit net). */
+/** Métrique affichée : CA HT (€), Poids (kg), ou Marge % (marge brute / CA produit net). */
 type Metric = "ca" | "weight" | "marginPct";
 
-/** Marge % = marge / base (CA produit net), garde-fou base ≤ 0. */
-function marginPctOf(margin: number, base: number): number {
-  return base > 0 ? (margin / base) * 100 : 0;
-}
+/** Marge BRUTE % = marge / CA produit NET — base unique partagée (lib/margin),
+ *  identique écran 1 / écran 2 / matrice / tops. */
+const marginPctOf = grossMarginPct;
 
 function metricLabel(m: Metric): string {
   return m === "ca" ? "CA HT" : m === "weight" ? "Poids" : "Marge %";
@@ -50,8 +50,11 @@ function topFmt(m: Metric): ((v: number) => string) | undefined {
 export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = {}) {
   const [segment, setSegment] = useState<Segment>("ALL");
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const { data } = useAnnualData(segment, viewAs, refreshNonce);
+  const { data, err } = useAnnualData(segment, viewAs, refreshNonce);
   const { data: weekly } = useWeeklyData(segment, viewAs, refreshNonce);
+  // 1er chargement annuel : ni data ni erreur encore → on évite d'afficher
+  // « Aucune donnée / backfill » (faux négatif tant que le fetch n'a pas répondu).
+  const annualLoading = data === null && err === null;
   const [mode, setMode] = useState<Metric>("ca");
   const [view, setView] = useState<Screen2View>("matrix");
   const [drill, setDrill] = useState<{ year: number; month: number } | null>(null);
@@ -71,8 +74,8 @@ export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = 
 
   // Tops RE-triés selon la métrique active (CA / Poids / Marge %) — pas l'ordre API.
   const sortedClients = useMemo(() => {
-    const v = (c: { ca: number; weightKg: number; margin: number }) =>
-      mode === "ca" ? c.ca : mode === "weight" ? c.weightKg : marginPctOf(c.margin, c.ca);
+    const v = (c: { ca: number; weightKg: number; margin: number; caProductNet: number }) =>
+      mode === "ca" ? c.ca : mode === "weight" ? c.weightKg : marginPctOf(c.margin, c.caProductNet);
     return [...(data?.clients ?? [])].sort((a, b) => v(b) - v(a));
   }, [data, mode]);
   const sortedSuppliers = useMemo(() => {
@@ -80,8 +83,8 @@ export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = 
     return [...(data?.suppliers ?? [])].sort((a, b) => v(b) - v(a));
   }, [data, mode]);
   const sortedSlp = useMemo(() => {
-    const v = (s: { ca: number; weightKg: number; margin: number }) =>
-      mode === "ca" ? s.ca : mode === "weight" ? s.weightKg : marginPctOf(s.margin, s.ca);
+    const v = (s: { ca: number; weightKg: number; margin: number; caProductNet: number }) =>
+      mode === "ca" ? s.ca : mode === "weight" ? s.weightKg : marginPctOf(s.margin, s.caProductNet);
     return [...(data?.salespersons ?? [])].sort((a, b) => v(b) - v(a));
   }, [data, mode]);
 
@@ -108,7 +111,28 @@ export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = 
         onRefresh={() => setRefreshNonce((n) => n + 1)}
       />
 
-      {view === "matrix" && (
+      {view === "matrix" && err && (
+        <div className="flex-1 grid place-items-center">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <p className="text-[13px] text-rose-400">Erreur de chargement : {err}</p>
+            <button
+              type="button"
+              onClick={() => setRefreshNonce((n) => n + 1)}
+              className="px-3 h-8 text-[12px] font-semibold tracking-tight rounded-md bg-secondary/60 text-foreground hover:bg-secondary transition-colors"
+            >
+              Réessayer
+            </button>
+          </div>
+        </div>
+      )}
+
+      {view === "matrix" && !err && annualLoading && (
+        <div className="flex-1 grid place-items-center text-[13px] text-muted-foreground">
+          Chargement du rapport annuel…
+        </div>
+      )}
+
+      {view === "matrix" && !err && !annualLoading && (
         <main
           className="flex-1 grid gap-2 min-h-0"
           style={{ gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gridTemplateRows: "repeat(6, minmax(0, 1fr))" }}
@@ -157,7 +181,7 @@ export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = 
             <TopList
               items={sortedClients.slice(0, 8).map((c) => ({
                 name: c.cardName ?? c.cardCode,
-                value: mode === "ca" ? c.ca : mode === "weight" ? c.weightKg : marginPctOf(c.margin, c.ca),
+                value: mode === "ca" ? c.ca : mode === "weight" ? c.weightKg : marginPctOf(c.margin, c.caProductNet),
                 sub: mode === "ca" ? `${formatEuro(c.margin, true)} marge · ${c.invoices} fact.`
                   : mode === "weight" ? `${formatEuro(c.ca, true)} CA · ${c.invoices} fact.`
                   : `${formatEuro(c.ca, true)} CA · ${formatEuro(c.margin, true)} marge`,
@@ -184,7 +208,7 @@ export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = 
             <TopList
               items={sortedSlp.slice(0, 6).map((s) => ({
                 name: s.slpName,
-                value: mode === "ca" ? s.ca : mode === "weight" ? s.weightKg : marginPctOf(s.margin, s.ca),
+                value: mode === "ca" ? s.ca : mode === "weight" ? s.weightKg : marginPctOf(s.margin, s.caProductNet),
                 sub: mode === "ca" ? `${s.activeClients} clients · ${formatEuro(s.margin, true)} marge`
                   : mode === "weight" ? `${formatEuro(s.ca, true)} CA · ${s.activeClients} clients`
                   : `${s.activeClients} clients · ${formatEuro(s.ca, true)} CA`,

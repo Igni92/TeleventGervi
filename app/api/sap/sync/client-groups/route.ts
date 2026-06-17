@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/permissions";
 import { syncClientGroupsFromMirror } from "@/lib/sapMirror";
 
 /**
@@ -18,6 +19,9 @@ import { syncClientGroupsFromMirror } from "@/lib/sapMirror";
 export async function POST() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await requireAdmin(session))) {
+    return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+  }
 
   try {
     const r = await syncClientGroupsFromMirror();

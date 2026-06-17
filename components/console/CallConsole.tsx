@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import {
@@ -18,6 +19,7 @@ import {
 } from "@/lib/useConsoleShortcuts";
 import { HabitudesBanner } from "@/components/console/HabitudesBanner";
 import { broadcastActiveClient } from "@/lib/consoleSync";
+import { loadCallNote, saveCallNote, clearCallNote } from "@/lib/callNoteStorage";
 import { MonitorSmartphone } from "lucide-react";
 import { BLDialog } from "@/components/console/BLDialog";
 import { SapOrderHistory } from "@/components/console/SapOrderHistory";
@@ -69,7 +71,7 @@ interface Client {
   insights?: ClientInsights;
   /** null = not claimed; string = original commercial name (I covered this client today) */
   claimedFrom?: string | null;
-  /** true = commercial propriétaire absent aujourd'hui → à couvrir */
+  /** true = client REPRIS aujourd'hui dont le commercial d'origine est absent → vraie couverture */
   ownerAbsent?: boolean;
   /** nb d'incidents ouverts (BL) — affiché dans la file */
   openIncidents?: number;
@@ -243,7 +245,9 @@ export function CallConsole() {
           ? `✅ ${dateLabel ? `Pré-commande ${dateLabel}` : "Commande"} — ${active.nom}`
           : `📅 À demain — ${active.nom}`,
       );
-      setCallNote(""); // reset comment for next call
+      // Action journalisée → la note rapide n'a plus lieu d'être conservée.
+      clearCallNote(active.id);
+      setCallNote("");
       advance();
       fetchData();
     } catch {
@@ -253,8 +257,19 @@ export function CallConsole() {
     }
   }, [active, callNote, advance, fetchData]);
 
-  // Reset draft comment when active client changes
-  useEffect(() => { setCallNote(""); }, [activeId]);
+  // Restaure la note rapide persistée (localStorage) quand le client actif
+  // change — survit ainsi à un refresh de page. Écrite par client via
+  // setCallNotePersisted ci-dessous, et effacée lors d'une action journalisée.
+  useEffect(() => {
+    setCallNote(loadCallNote(activeId));
+  }, [activeId]);
+
+  // Setter "persistant" : met à jour le state ET sauvegarde la note pour le
+  // client actif (clé `tv-callnote-<id>`). Passé à l'ActionPanel.
+  const setCallNotePersisted = useCallback((v: string) => {
+    setCallNote(v);
+    saveCallNote(activeId, v);
+  }, [activeId]);
 
   /* ── Save notes inline ───────────────────────────────────── */
   const saveNotes = useCallback(async () => {
@@ -404,6 +419,7 @@ export function CallConsole() {
               <> · <span className="font-semibold">{data.presence.toCover} client{data.presence.toCover > 1 ? "s" : ""} à couvrir</span> dans ta file</>
             )}
           </p>
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- navigation full-reload volontaire (comportement preexistant inchange) */}
           <a href="/commerciaux" className="ml-auto text-[11.5px] font-medium text-orange-800 dark:text-orange-300 hover:underline shrink-0">
             Gérer les présences →
           </a>
@@ -552,7 +568,7 @@ export function CallConsole() {
             onSkip={advance}
             actionLoading={actionLoading}
             callNote={callNote}
-            setCallNote={setCallNote}
+            setCallNote={setCallNotePersisted}
             keymap={keymap}
           />
         </aside>
@@ -588,7 +604,13 @@ export function CallConsole() {
           clientId={active.id}
           clientName={active.nom}
           stockSharePct={data?.me?.stockSharePct ?? 100}
-          onCreated={() => { fetchData(); advance(); }}
+          onCreated={() => {
+            // BL = commande journalisée → on purge la note rapide du client.
+            clearCallNote(active.id);
+            setCallNote("");
+            fetchData();
+            advance();
+          }}
         />
       )}
     </div>
@@ -696,9 +718,10 @@ function Stat({
  * en haut de la file (déjà filtré) — y mettre le nom dans chaque ligne =
  * doublon visuel qui rallonge la file pour rien.
  */
-function QueueRow({
-  client, active, done, onClick,
-}: { client: Client; active: boolean; done?: boolean; onClick: () => void }) {
+const QueueRow = React.forwardRef<
+  HTMLLIElement,
+  { client: Client; active: boolean; done?: boolean; onClick: () => void }
+>(function QueueRow({ client, active, done, onClick }, ref) {
   const reduce = useReducedMotion();
   const window = client.insights ? hourWindowLabel(client.insights) : null;
   // Direct line first if available, fallback to standard
@@ -706,6 +729,7 @@ function QueueRow({
   const isDirect = !!client.tel2;
   return (
     <motion.li
+      ref={ref}
       layout={!reduce}
       variants={reduce ? { hidden: { opacity: 0 }, show: { opacity: 1 } } : staggerItem}
       exit={{ opacity: 0, x: reduce ? 0 : -8, transition: { duration: DUR.exit, ease: EASE.in } }}
@@ -733,22 +757,25 @@ function QueueRow({
           }`}>
             {client.nom}
           </p>
-          {client.claimedFrom && (
+          {/* « à couvrir » = reprise effective d'un collègue absent (ownerAbsent
+              implique claimedFrom). Prioritaire sur le badge "récup." pour ne pas
+              doubler l'info. Sinon, pour une reprise sans absence avérée, on
+              garde le badge "récup.". */}
+          {client.ownerAbsent ? (
+            <span
+              className="text-[9px] font-semibold uppercase tracking-wider px-1 py-px rounded bg-orange-100 text-orange-700 dark:bg-orange-950/60 dark:text-orange-300 shrink-0"
+              title={`${client.claimedFrom} est absent — client repris à couvrir`}
+            >
+              à couvrir
+            </span>
+          ) : client.claimedFrom ? (
             <span
               className="text-[9px] font-semibold uppercase tracking-wider px-1 py-px rounded bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 shrink-0"
               title={`Récupéré de ${client.claimedFrom}`}
             >
               récup.
             </span>
-          )}
-          {client.ownerAbsent && !client.claimedFrom && (
-            <span
-              className="text-[9px] font-semibold uppercase tracking-wider px-1 py-px rounded bg-orange-100 text-orange-700 dark:bg-orange-950/60 dark:text-orange-300 shrink-0"
-              title={`${client.commercial} est absent — client à couvrir`}
-            >
-              à couvrir
-            </span>
-          )}
+          ) : null}
           {!!client.openIncidents && client.openIncidents > 0 && (
             <span
               className="inline-flex items-center gap-0.5 text-[9px] font-semibold px-1 py-px rounded bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 shrink-0"
@@ -811,7 +838,8 @@ function QueueRow({
       </button>
     </motion.li>
   );
-}
+});
+QueueRow.displayName = "QueueRow";
 
 function EmptyActive() {
   return (

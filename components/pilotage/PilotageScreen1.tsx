@@ -84,10 +84,12 @@ function formatWeight(kg: number): string {
  * Granularité restreinte = Jour / Semaine / Mois (pas Année — pour l'année,
  * basculer sur Écran 2 = rapport annuel comptable).
  *
- * Marge calculée ligne par ligne :
- *   Σ (lineTotal − quantity × lineCost)  sur SapOrderLine
- * (lineCost = StockPrice SAP B1). La couverture des lignes avec coût est
- * affichée pour transparence sur la qualité des données SAP.
+ * Marge BRUTE calculée ligne par ligne :
+ *   Σ (lineTotal − quantity × coût d'entrée marchandise réel)  sur SapOrderLine
+ * (coût EM réel issu des dernières entrées marchandise — lib/cogs.ts, JAMAIS le
+ * lineCost/grossProfit SAP). Marge % rapportée au CA produit NET (lib/margin).
+ * La couverture des lignes dont le coût EM est connu est affichée pour
+ * transparence sur la qualité des données.
  *
  * Disposition 12×6 :
  *   ┌──────── Volume BL (8×3 héros) ────────┬─ Marge € (4×3) ──┐
@@ -107,8 +109,13 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
   const fmtVal = (n: number) => (isWeight ? formatWeight(n) : formatEuro(n, true));
 
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const { data } = useActivityData(safeG, viewAs, refreshNonce);
+  const { data, err } = useActivityData(safeG, viewAs, refreshNonce);
   const { data: weekly } = useActivityWeekly(viewAs, refreshNonce);
+  // 1er chargement : data pas encore arrivée et pas d'erreur → on montre un état
+  // de chargement léger plutôt que des « — » qui ressemblent à des zéros.
+  const loading = data === null && err === null;
+  const phBig = loading ? "Chargement…" : "—"; // placeholder gros chiffres
+  const phMini = loading ? "…" : "—";           // placeholder mini-KPI (compact)
   const spark = useMemo(() => buildSpark(weekly, pick), [weekly, isWeight]); // eslint-disable-line react-hooks/exhaustive-deps
   const trend = useMemo(() => buildTrend(weekly, pick), [weekly, isWeight]); // eslint-disable-line react-hooks/exhaustive-deps
   const periodLabel = granularityLabel(safeG);
@@ -133,6 +140,22 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
         onRefresh={() => setRefreshNonce((n) => n + 1)}
       />
 
+      {err && (
+        <div className="flex-1 grid place-items-center">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <p className="text-[13px] text-rose-400">Erreur de chargement : {err}</p>
+            <button
+              type="button"
+              onClick={() => setRefreshNonce((n) => n + 1)}
+              className="px-3 h-8 text-[12px] font-semibold tracking-tight rounded-md bg-secondary/60 text-foreground hover:bg-secondary transition-colors"
+            >
+              Réessayer
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!err && (
       <main
         className="flex-1 grid gap-2 min-h-0"
         style={{ gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gridTemplateRows: "repeat(6, minmax(0, 1fr))" }}
@@ -141,7 +164,7 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
         <Tile colSpan={8} rowSpan={3} accent="brand">
           <BigKpi
             label={isWeight ? "Activité commerciale · volume BL (kg)" : "Activité commerciale · CA HT BL"}
-            value={data ? fmtVal(heroCurr) : "—"}
+            value={data ? fmtVal(heroCurr) : phBig}
             curr={heroCurr}
             prev={heroPrev}
             hint={hint}
@@ -156,7 +179,7 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
           <div className="h-full flex flex-col">
             <BigKpi
               label="Marge BL (calculée ligne par ligne)"
-              value={data ? formatEuro(data.curr.margin, true) : "—"}
+              value={data ? formatEuro(data.curr.margin, true) : phBig}
               curr={data?.curr.margin ?? 0}
               prev={data?.prev.margin ?? 0}
               hint={data ? `${formatPct(data.curr.marginPct)} de marge` : undefined}
@@ -166,7 +189,7 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
             {data && data.curr.marginCoverage < 95 && (
               <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 inline-flex items-center gap-1">
                 <AlertCircle className="h-3 w-3 shrink-0" />
-                {formatPct(data.curr.marginCoverage)} des lignes ont un coût SAP
+                {formatPct(data.curr.marginCoverage)} des lignes ont un coût d’entrée connu
               </p>
             )}
           </div>
@@ -176,7 +199,7 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
         <Tile colSpan={3} rowSpan={1}>
           <MiniKpi
             label="Cdes BL"
-            value={data ? formatNum(data.curr.ordersCount) : "—"}
+            value={data ? formatNum(data.curr.ordersCount) : phMini}
             curr={data?.curr.ordersCount ?? 0}
             prev={data?.prev.ordersCount ?? 0}
             format={data ? formatNum : undefined}
@@ -186,7 +209,7 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
         <Tile colSpan={3} rowSpan={1}>
           <MiniKpi
             label="Appels CRM"
-            value={data ? formatNum(data.crm.appels) : "—"}
+            value={data ? formatNum(data.crm.appels) : phMini}
             curr={data?.crm.appels ?? 0}
             prev={data?.crmPrev.appels ?? 0}
             format={data ? formatNum : undefined}
@@ -196,7 +219,7 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
         <Tile colSpan={3} rowSpan={1}>
           <MiniKpi
             label="Taux conversion CRM"
-            value={data ? formatPct(data.crm.tauxConv) : "—"}
+            value={data ? formatPct(data.crm.tauxConv) : phMini}
             curr={data?.crm.tauxConv ?? 0}
             prev={data?.crmPrev.tauxConv ?? 0}
             format={data ? formatPct : undefined}
@@ -206,7 +229,7 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
         <Tile colSpan={3} rowSpan={1}>
           <MiniKpi
             label={isWeight ? "Panier moyen BL (kg)" : "Panier moyen BL"}
-            value={data ? (isWeight ? formatWeight(basketCurr) : formatEuro(basketCurr)) : "—"}
+            value={data ? (isWeight ? formatWeight(basketCurr) : formatEuro(basketCurr)) : phMini}
             curr={basketCurr}
             prev={basketPrev}
             format={data ? (isWeight ? formatWeight : (n) => formatEuro(n)) : undefined}
@@ -260,6 +283,7 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
           )}
         </Tile>
       </main>
+      )}
     </div>
   );
 }

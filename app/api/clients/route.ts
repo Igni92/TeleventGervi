@@ -3,7 +3,8 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { clientSchema, clientQuerySchema } from "@/lib/validations";
-import { getAccessScope, scopePayload, UNMAPPED_MESSAGE } from "@/lib/permissions";
+import { getAccessScope, getOwnSlpName, scopePayload, UNMAPPED_MESSAGE } from "@/lib/permissions";
+import { parisStartOfDay, parisEndOfDay, parisDayOfWeek } from "@/lib/paris-time";
 
 /** Enrichit une liste de clients avec activeTelevente + vendeur (raw SQL :
  *  ces champs ne sont pas dans le client Prisma typé tant que generate est bloqué). */
@@ -86,11 +87,10 @@ export async function GET(req: NextRequest) {
     // Onglet "Aujourd'hui" : filtrer les clients dont joursAppel inclut le jour courant
     // et qui n'ont pas encore eu d'appel aujourd'hui
     if (query.aujourdhui) {
-      const todayDay = new Date().getDay(); // 0=Dim, 1=Lun...6=Sam
-      const startOfDay = new Date();
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date();
-      endOfDay.setHours(23, 59, 59, 999);
+      // Jour ouvré en heure de Paris (cohérent avec /api/console).
+      const todayDay = parisDayOfWeek(); // 0=Dim, 1=Lun...6=Sam
+      const startOfDay = parisStartOfDay();
+      const endOfDay = parisEndOfDay(); // borne haute EXCLUSIVE (début du jour suivant)
 
       // Récupérer tous les clients qui ont joursAppel renseigné
       // Le filtrage par jour se fait côté JS (données stockées en string CSV)
@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
             _count: { select: { rappels: true, appels: true } },
             appels: {
               where: {
-                heureAppel: { gte: startOfDay, lte: endOfDay },
+                heureAppel: { gte: startOfDay, lt: endOfDay },
               },
               orderBy: { heureAppel: "desc" },
               take: 1,
@@ -220,6 +220,16 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const data = clientSchema.parse(body);
 
+    // Anti-IDOR : un non-admin ne peut créer un client QUE sous son propre
+    // trigramme (interdit de s'attribuer le client d'un autre commercial).
+    // Admin : le `commercial` du body est respecté tel quel.
+    const scope = await getAccessScope(session);
+    let commercial = data.commercial || null;
+    if (!scope.all) {
+      const own = await getOwnSlpName(session);
+      commercial = own || commercial;
+    }
+
     const existing = await prisma.client.findUnique({ where: { code: data.code } });
     if (existing) {
       return NextResponse.json({ error: "Un client avec ce code existe déjà" }, { status: 409 });
@@ -230,7 +240,7 @@ export async function POST(req: NextRequest) {
         code: data.code,
         nom: data.nom,
         type: data.type || null,
-        commercial: data.commercial || null,
+        commercial,
         tel1: data.tel1 || null,
         tel2: data.tel2 || null,
         tel3: data.tel3 || null,

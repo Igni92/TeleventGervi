@@ -46,3 +46,4 @@ backfill*.log
 
 # Tooling local
 .claude/settings.local.json
+.claude/worktrees/

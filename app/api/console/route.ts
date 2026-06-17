@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { computeInsights } from "@/lib/insights";
 import { getAccessScope, getOwnSlpName } from "@/lib/permissions";
+import { parisStartOfDay, parisEndOfDay, parisDayOfWeek } from "@/lib/paris-time";
 
 /**
  * GET /api/console
@@ -19,10 +20,12 @@ export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  // Jour ouvré en heure de PARIS (le serveur tourne en UTC) — sinon la file et
+  // les stats du jour basculent à 02h heure française (cf. lib/paris-time).
   const now = new Date();
-  const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
-  const todayEnd = new Date(todayStart); todayEnd.setDate(todayEnd.getDate() + 1);
-  const todayDay = now.getDay(); // 0..6
+  const todayStart = parisStartOfDay(now);
+  const todayEnd = parisEndOfDay(now);
+  const todayDay = parisDayOfWeek(now); // 0=dim..6=sam, en heure de Paris
 
   // Today's temp assignments for me (clients I've claimed from other commercials)
   const myClaims = session.user.id
@@ -163,8 +166,14 @@ export async function GET() {
       insights,
       // null = not claimed; string = name of the commercial I claimed this from
       claimedFrom,
-      // true = le commercial propriétaire est absent aujourd'hui → à couvrir
-      ownerAbsent: !!(c.commercial && absentNames.has(c.commercial)),
+      // « à couvrir » = VRAIE couverture d'un collègue absent.
+      // La file est scopée par VENDEUR (mon trigramme), pas par l'account
+      // manager `commercial`. Le simple fait que l'account manager d'un de mes
+      // clients habituels soit absent n'est donc PAS une couverture et ne doit
+      // pas afficher ce badge. On ne le déclenche que pour un client REPRIS
+      // aujourd'hui (TempAssignment → claimedFrom) dont le commercial d'origine
+      // est effectivement absent ce jour.
+      ownerAbsent: !!(claimedFrom && absentNames.has(claimedFrom)),
       openIncidents: openIncByClient.get(c.id) ?? 0,
     } as Enriched & { claimedFrom: string | null; ownerAbsent: boolean; openIncidents: number };
 
@@ -184,6 +193,8 @@ export async function GET() {
   });
   const calledToday = outcomeByClient.size; // distinct clients touched today
 
+  // Nombre de clients « à couvrir » dans ma file = reprises effectives d'un
+  // collègue absent (cf. ownerAbsent ci-dessus, qui implique claimedFrom).
   const toCover = queue.filter((c) => (c as { ownerAbsent?: boolean }).ownerAbsent).length;
 
   return NextResponse.json({

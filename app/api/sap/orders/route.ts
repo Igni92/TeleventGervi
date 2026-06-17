@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { decrementLocalStock } from "@/lib/stockSync";
@@ -106,6 +107,11 @@ export async function POST(req: NextRequest) {
     if (!l.itemCode || !l.quantity || l.quantity <= 0) {
       return NextResponse.json({ error: `Ligne invalide : ${JSON.stringify(l)}` }, { status: 400 });
     }
+  }
+
+  const scope = await getAccessScope(session);
+  if (!(await clientInScope(scope, body.clientId))) {
+    return NextResponse.json({ error: "Client hors de votre périmètre" }, { status: 403 });
   }
 
   // ── 1. Resolve client + delivery mode → CardCode SAP ──

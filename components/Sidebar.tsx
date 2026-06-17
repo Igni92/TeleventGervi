@@ -6,7 +6,7 @@ import { useSession, signOut } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  LogOut, ChevronsLeft, ChevronsRight, LayoutDashboard, Users, Briefcase,
+  LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, Package, PackagePlus, Factory, ClipboardList, Receipt, AlertTriangle,
   Home, Settings,
 } from "lucide-react";
@@ -54,7 +54,7 @@ interface NavItem {
   badge?: "receptionIncidents" | "notifications";
 }
 
-const GROUPS: { label: string | null; items: NavItem[] }[] = [
+const GROUPS: { label: string | null; items: NavItem[]; collapsible?: boolean }[] = [
   {
     // Accueil — hors groupe, toujours en tête (label null = pas d'en-tête)
     label: null,
@@ -63,7 +63,8 @@ const GROUPS: { label: string | null; items: NavItem[] }[] = [
     ],
   },
   {
-    label: "Opérations",
+    // Cœur télévente — le quotidien, toujours visible (televent first).
+    label: "Télévente",
     items: [
       { href: "/console", label: "Console", icon: Radio },
       { href: "/plan-appel", label: "Plan d'appel", icon: ClipboardList },
@@ -71,17 +72,21 @@ const GROUPS: { label: string | null; items: NavItem[] }[] = [
     ],
   },
   {
-    label: "Logistique",
+    // Suivi quotidien — stock dispo + pilotage en un coup d'œil.
+    label: "Stock & stats",
     items: [
       { href: "/products", label: "Stock", icon: Package },
-      { href: "/entrees", label: "Entrées", icon: PackagePlus, badge: "receptionIncidents" },
-      { href: "/fabrication", label: "Fabrication", icon: Factory },
+      { href: "/dashboard", label: "Stats", icon: LayoutDashboard },
     ],
   },
   {
-    label: "Pilotage",
+    // Gestion — pages moins quotidiennes, repliées par défaut (1 clic pour
+    // déplier). Rien n'est masqué : le groupe s'ouvre seul si on est dessus.
+    label: "Gestion",
+    collapsible: true,
     items: [
-      { href: "/dashboard", label: "Stats", icon: LayoutDashboard },
+      { href: "/entrees", label: "Entrées", icon: PackagePlus, badge: "receptionIncidents" },
+      { href: "/fabrication", label: "Fabrication", icon: Factory },
       { href: "/encours", label: "Encours", icon: Receipt },
       { href: "/commerciaux", label: "Commerciaux", icon: Briefcase },
     ],
@@ -149,6 +154,22 @@ export function Sidebar() {
   const badges = useBadges();
   // Voile de navigation : label de la page en cours d'ouverture (null = caché).
   const [pending, setPending] = useState<string | null>(null);
+  // Groupe « Gestion » repliable (pages moins quotidiennes) — état persistant.
+  const [gestionOpen, setGestionOpen] = useState(false);
+  useEffect(() => {
+    try { setGestionOpen(localStorage.getItem("televent-sidebar-gestion") === "open"); } catch { /* ignore */ }
+  }, []);
+  const toggleGestion = () =>
+    setGestionOpen((o) => {
+      try { localStorage.setItem("televent-sidebar-gestion", o ? "closed" : "open"); } catch { /* ignore */ }
+      return !o;
+    });
+
+  /** Item actif (même logique qu'avant : exact, accueil≡/, sinon préfixe sauf /dashboard). */
+  const isActive = (href: string) =>
+    pathname === href ||
+    (href === "/accueil" && pathname === "/") ||
+    (href !== "/dashboard" && pathname.startsWith(href));
 
   // Persistance du mode rail (lu après hydratation pour éviter un mismatch SSR).
   useEffect(() => {
@@ -227,22 +248,34 @@ export function Sidebar() {
 
       {/* ── Navigation groupée ─────────────────────────── */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden px-3 pb-2 pt-1 space-y-4">
-        {GROUPS.map((group) => (
+        {GROUPS.map((group) => {
+          const collapsible = !!group.collapsible && !rail;
+          const hasActive = group.items.some((it) => isActive(it.href));
+          // Replié par défaut ; s'ouvre seul si la page active est dedans.
+          const open = !collapsible || gestionOpen || hasActive;
+          return (
           <div key={group.label ?? "accueil"}>
             {group.label !== null && (rail ? (
               <div className="mx-2 mb-2 h-px bg-white/[0.07]" />
+            ) : collapsible ? (
+              <button
+                type="button"
+                onClick={toggleGestion}
+                aria-expanded={open}
+                className="w-full px-2 mb-1.5 flex items-center justify-between text-[9.5px] uppercase tracking-[0.18em] font-bold text-white/30 hover:text-white/55 transition-colors"
+              >
+                <span className="whitespace-nowrap">{group.label}</span>
+                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${open ? "" : "-rotate-90"}`} />
+              </button>
             ) : (
               <p className="px-2 mb-1.5 text-[9.5px] uppercase tracking-[0.18em] font-bold text-white/30 whitespace-nowrap">
                 {group.label}
               </p>
             ))}
+            {open && (
             <ul className="space-y-0.5">
               {group.items.map(({ href, label, icon: Icon, badge }) => {
-                const active =
-                  pathname === href ||
-                  // « / » redirige vers l'accueil → l'item Accueil reste allumé
-                  (href === "/accueil" && pathname === "/") ||
-                  (href !== "/dashboard" && pathname.startsWith(href));
+                const active = isActive(href);
                 const badgeCount = badge ? badges[badge] ?? 0 : 0;
                 return (
                   <li key={href} className="relative group/item">
@@ -314,8 +347,10 @@ export function Sidebar() {
                 );
               })}
             </ul>
+            )}
           </div>
-        ))}
+          );
+        })}
       </nav>
 
       {/* ── Footer système ─────────────────────────────── */}

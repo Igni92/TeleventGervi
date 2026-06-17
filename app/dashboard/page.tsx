@@ -15,11 +15,12 @@ export const dynamic = "force-dynamic";
  * dots indicateurs. `/dashboard/ecran2` reste accessible comme page autonome pour
  * le mode dual-écran physique.
  */
-export default async function DashboardPage({
-  searchParams,
-}: {
-  searchParams: { as?: string };
-}) {
+export default async function DashboardPage(
+  props: {
+    searchParams: Promise<{ as?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const session = await auth();
   if (!session) redirect("/login");
   // « Voir comme » : seul un admin peut imiter un commercial (?as=MM). Pour un

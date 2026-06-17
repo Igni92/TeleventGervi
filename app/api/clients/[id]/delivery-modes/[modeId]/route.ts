@@ -7,8 +7,9 @@ import { prisma } from "@/lib/prisma";
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string; modeId: string } },
+  props: { params: Promise<{ id: string; modeId: string }> }
 ) {
+  const params = await props.params;
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   if (!(await clientInScope(await getAccessScope(session), params.id)))
@@ -33,8 +34,9 @@ export async function PATCH(
   if (updates.length === 0) return NextResponse.json({ ok: true });
   updates.push(`"updatedAt" = NOW()`);
   values.push(params.modeId);
+  values.push(params.id);
   await prisma.$executeRawUnsafe(
-    `UPDATE "ClientDeliveryMode" SET ${updates.join(", ")} WHERE id = $${i}`,
+    `UPDATE "ClientDeliveryMode" SET ${updates.join(", ")} WHERE id = $${i} AND "clientId" = $${i + 1}`,
     ...values,
   );
   return NextResponse.json({ ok: true });
@@ -42,8 +44,9 @@ export async function PATCH(
 
 export async function DELETE(
   _req: NextRequest,
-  { params }: { params: { id: string; modeId: string } },
+  props: { params: Promise<{ id: string; modeId: string }> }
 ) {
+  const params = await props.params;
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   if (!(await clientInScope(await getAccessScope(session), params.id)))

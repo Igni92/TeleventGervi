@@ -39,7 +39,7 @@ export function InfoTip({
   const [open, setOpen] = React.useState(false);
   const [pos, setPos] = React.useState<{ x: number; y: number } | null>(null);
   const ref = React.useRef<HTMLSpanElement>(null);
-  const timer = React.useRef<NodeJS.Timeout>();
+  const timer = React.useRef<NodeJS.Timeout | undefined>(undefined);
 
   const computePos = React.useCallback(() => {
     const el = ref.current;

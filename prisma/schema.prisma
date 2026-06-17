@@ -255,6 +255,9 @@ model ClientDeliveryMode {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // Un même CardCode SAP ne doit exister qu'UNE fois par client (idempotence des
+  // imports / foldDotVariant — sinon modes de livraison en double).
+  @@unique([clientId, sapCardCode])
   @@index([clientId])
 }
 

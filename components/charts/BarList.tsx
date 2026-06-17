@@ -42,7 +42,10 @@ export function BarList({
 }: BarListProps) {
   const reduce = useReducedMotion();
   const rows = items.slice(0, max);
-  const peak = Math.max(1, ...rows.map((r) => r.value));
+  // Échelle des barres = plus forte valeur ABSOLUE (une marge en perte a une
+  // ampleur, même négative). La largeur reste positive (géométrie) ; la valeur
+  // réelle signée est affichée par `format`, signalée en alerte si < 0.
+  const peak = Math.max(1, ...rows.map((r) => Math.abs(r.value)));
 
   if (rows.length === 0) {
     return (
@@ -55,7 +58,8 @@ export function BarList({
   return (
     <ul className={className}>
       {rows.map((r, i) => {
-        const pct = Math.max(2, (r.value / peak) * 100);
+        const pct = Math.max(2, (Math.abs(r.value) / peak) * 100);
+        const loss = r.value < 0;
         const color = r.color ?? CATEGORICAL[i % CATEGORICAL.length];
         const clickable = !!onSelect;
         return (
@@ -73,7 +77,10 @@ export function BarList({
                 <span className="truncate">{r.label}</span>
                 {r.hint && <span className="text-[10.5px] text-muted-foreground shrink-0">· {r.hint}</span>}
               </span>
-              <span className="text-[12px] font-semibold tnum text-foreground shrink-0">{format(r.value)}</span>
+              <span
+                className={`text-[12px] font-semibold tnum shrink-0 ${loss ? "text-rose-400" : "text-foreground"}`}
+                title={loss ? "Perte (valeur négative)" : undefined}
+              >{format(r.value)}</span>
             </div>
             <div className="h-1.5 w-full rounded-full bg-secondary/60 overflow-hidden">
               {/* width (pas scaleX) pour ne pas déformer le rayon des extrémités */}

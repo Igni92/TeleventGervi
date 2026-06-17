@@ -6,10 +6,8 @@ import { prisma } from "@/lib/prisma";
  * GET /api/products/[id]/batches
  * Returns all batches (lots) for a given product, sorted by admission date desc.
  */
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 

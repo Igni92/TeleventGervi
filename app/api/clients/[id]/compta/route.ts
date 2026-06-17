@@ -33,7 +33,8 @@ async function readCompta(clientId: string): Promise<ComptaRow | null> {
   return rows[0] ?? null;
 }
 
-export async function GET(_: Request, { params }: { params: { id: string } }) {
+export async function GET(_: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   if (!(await clientInScope(await getAccessScope(session), params.id)))
@@ -51,7 +52,8 @@ const PatchSchema = z.object({
   adresseFacturation: z.string().trim().max(2000, "Trop long").nullable().optional(),
 });
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   if (!(await clientInScope(await getAccessScope(session), params.id)))

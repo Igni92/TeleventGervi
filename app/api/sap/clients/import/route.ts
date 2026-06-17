@@ -158,14 +158,16 @@ async function foldDotVariant(dotCode: string, altName = "SCACHAP"): Promise<"fo
      SELECT gen_random_uuid()::text, $1, 'Direct', $2,
             NOT EXISTS (SELECT 1 FROM "ClientDeliveryMode" WHERE "clientId" = $1),
             NOW(), NOW()
-     WHERE NOT EXISTS (SELECT 1 FROM "ClientDeliveryMode" WHERE "clientId" = $1 AND "sapCardCode" = $2)`,
+     WHERE NOT EXISTS (SELECT 1 FROM "ClientDeliveryMode" WHERE "clientId" = $1 AND "sapCardCode" = $2)
+     ON CONFLICT ("clientId","sapCardCode") DO NOTHING`,
     parent.id, parentCode,
   );
   // Mode alternatif (SCACHAP) = le CardCode point.
   await prisma.$executeRawUnsafe(
     `INSERT INTO "ClientDeliveryMode" ("id","clientId","name","sapCardCode","isDefault","createdAt","updatedAt")
      SELECT gen_random_uuid()::text, $1, $2, $3, false, NOW(), NOW()
-     WHERE NOT EXISTS (SELECT 1 FROM "ClientDeliveryMode" WHERE "clientId" = $1 AND "sapCardCode" = $3)`,
+     WHERE NOT EXISTS (SELECT 1 FROM "ClientDeliveryMode" WHERE "clientId" = $1 AND "sapCardCode" = $3)
+     ON CONFLICT ("clientId","sapCardCode") DO NOTHING`,
     parent.id, altName, dotCode,
   );
   // Fusionne un client point déjà présent (doublon) → parent, puis supprime.

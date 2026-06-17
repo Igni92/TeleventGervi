@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
@@ -34,31 +35,58 @@ export async function POST() {
   }
 
   // Singleton cursor (id=1) — créé à la 1ère exécution
-  const cursor = await prisma.stockSyncCursor.upsert({
-    where: { id: 1 },
-    update: {},
-    create: { id: 1 },
-  });
+  await prisma.stockSyncCursor.upsert({ where: { id: 1 }, update: {}, create: { id: 1 } });
 
-  if (Date.now() - cursor.lastTickAt.getTime() < THROTTLE_MS) {
+  // Claim ATOMIQUE du tick : l'UPDATE conditionnel ne touche la ligne que si
+  // lastTickAt est assez vieux → un seul process franchit la fenêtre de throttle.
+  // Évite que plusieurs consoles déclenchent des pulls SAP concurrents (la
+  // version précédente lisait puis comparait → course possible).
+  const claimed = await prisma.$queryRaw<
+    { lastOrderDocEntry: number; lastPdnDocEntry: number }[]
+  >(Prisma.sql`
+    UPDATE "StockSyncCursor"
+       SET "lastTickAt" = now()
+     WHERE id = 1 AND "lastTickAt" < now() - make_interval(secs => ${THROTTLE_MS / 1000})
+    RETURNING "lastOrderDocEntry", "lastPdnDocEntry"`);
+
+  if (claimed.length === 0) {
+    const c = await prisma.stockSyncCursor.findUnique({ where: { id: 1 } });
     return NextResponse.json({
       ok: true,
       throttled: true,
-      lastTickAt: cursor.lastTickAt,
-      cursor: {
-        lastOrderDocEntry: cursor.lastOrderDocEntry,
-        lastPdnDocEntry: cursor.lastPdnDocEntry,
-      },
+      lastTickAt: c?.lastTickAt,
+      cursor: { lastOrderDocEntry: c?.lastOrderDocEntry, lastPdnDocEntry: c?.lastPdnDocEntry },
     });
   }
+  const cursor = {
+    lastOrderDocEntry: claimed[0].lastOrderDocEntry,
+    lastPdnDocEntry: claimed[0].lastPdnDocEntry,
+  };
 
   try {
+    // ── Auto-rattrapage du curseur ──────────────────────────────────────────
+    // Le curseur peut être TRÈS en retard (ex. seedé à 500 alors que SAP est à
+    // 129 000). Crawler l'historique ancien (DocEntry asc, plafonné) ne
+    // rattraperait jamais le présent → le stock récent ne se rafraîchit pas.
+    // On lit le DocEntry courant le plus haut côté SAP et on ne traite QUE la
+    // fenêtre récente : `from = max(curseur, maxActuel − LOOKBACK)`. Le stock de
+    // base vient du sync produits ; le delta ne sert qu'à suivre les
+    // changements récents. `refreshItemStocks` repull le stock LIVE de l'article.
+    const LOOKBACK = 500;
+    const latest = (coll: string) =>
+      sap.getAll<Doc>(`${coll}?$orderby=DocEntry desc&$select=DocEntry`, { pageSize: 1, maxPages: 1 });
+    const [latestOrders, latestPdns] = await Promise.all([latest("Orders"), latest("PurchaseDeliveryNotes")]);
+    const maxOrderNow = latestOrders[0]?.DocEntry ?? cursor.lastOrderDocEntry;
+    const maxPdnNow = latestPdns[0]?.DocEntry ?? cursor.lastPdnDocEntry;
+    const fromOrder = Math.max(cursor.lastOrderDocEntry, maxOrderNow - LOOKBACK);
+    const fromPdn = Math.max(cursor.lastPdnDocEntry, maxPdnNow - LOOKBACK);
+
     const orderPath =
-      `Orders?$filter=DocEntry gt ${cursor.lastOrderDocEntry}`
+      `Orders?$filter=DocEntry gt ${fromOrder}`
       + `&$orderby=DocEntry asc`
       + `&$select=DocEntry,DocumentLines`;   // DocumentLines en $select, PAS d'$expand (ce SL ne le supporte pas)
     const pdnPath =
-      `PurchaseDeliveryNotes?$filter=DocEntry gt ${cursor.lastPdnDocEntry}`
+      `PurchaseDeliveryNotes?$filter=DocEntry gt ${fromPdn}`
       + `&$orderby=DocEntry asc`
       + `&$select=DocEntry,DocumentLines`;   // DocumentLines en $select, PAS d'$expand (ce SL ne le supporte pas)
 
@@ -77,12 +105,17 @@ export async function POST() {
 
     const refreshed = await refreshItemStocks(Array.from(touched));
 
-    const maxOrder = orders.length > 0
-      ? Math.max(cursor.lastOrderDocEntry, ...orders.map((d) => d.DocEntry))
-      : cursor.lastOrderDocEntry;
-    const maxPdn = pdns.length > 0
-      ? Math.max(cursor.lastPdnDocEntry, ...pdns.map((d) => d.DocEntry))
-      : cursor.lastPdnDocEntry;
+    // On avance le curseur au plus haut DocEntry réellement atteint : la borne
+    // `from` (rattrapage) si la fenêtre était vide, sinon le max des docs vus.
+    // Plafonné par maxXxxNow pour ne pas dépasser ce qui existe côté SAP.
+    const maxOrder = Math.min(
+      maxOrderNow,
+      orders.length > 0 ? Math.max(fromOrder, ...orders.map((d) => d.DocEntry)) : fromOrder,
+    );
+    const maxPdn = Math.min(
+      maxPdnNow,
+      pdns.length > 0 ? Math.max(fromPdn, ...pdns.map((d) => d.DocEntry)) : fromPdn,
+    );
 
     await prisma.stockSyncCursor.update({
       where: { id: 1 },
