@@ -58,6 +58,10 @@ interface SapBP {
   EmailAddress?: string;
   Phone1?: string;
   Valid?: "tYES" | "tNO";
+  // Risque crédit : plafond, solde courant, gel du compte.
+  CreditLimit?: number;
+  CurrentAccountBalance?: number;
+  Frozen?: "tYES" | "tNO";
   UpdateDate?: string;
 }
 
@@ -253,7 +257,9 @@ function dedupeByDocEntry<T extends { DocEntry: number }>(docs: T[]): T[] {
 
 const BP_COLS = [
   "cardCode", "cardName", "cardType", "groupCode", "groupName",
-  "slpName", "email", "phone", "active", "updateDate",
+  "slpName", "email", "phone", "active",
+  "creditLimit", "currentAccountBalance", "frozen",
+  "updateDate",
 ] as const;
 
 export async function pullBusinessPartners(opts: {
@@ -272,7 +278,7 @@ export async function pullBusinessPartners(opts: {
   const slpNameByCode = new Map(slps.map((s) => [s.SalesEmployeeCode, s.SalesEmployeeName]));
 
   let path =
-    "BusinessPartners?$select=CardCode,CardName,CardType,GroupCode,SalesPersonCode,EmailAddress,Phone1,Valid,UpdateDate"
+    "BusinessPartners?$select=CardCode,CardName,CardType,GroupCode,SalesPersonCode,EmailAddress,Phone1,Valid,CreditLimit,CurrentAccountBalance,Frozen,UpdateDate"
     + "&$filter=(CardType eq 'cCustomer' or CardType eq 'cSupplier')";
   if (opts.updatedSince) {
     // `ge` et pas `gt` : UpdateDate tronqué au jour (cf. commentaire pullSalesDocs).
@@ -309,6 +315,9 @@ export async function pullBusinessPartners(opts: {
         bp.EmailAddress ?? null,
         bp.Phone1 ?? null,
         bp.Valid !== "tNO",
+        bp.CreditLimit ?? null,
+        bp.CurrentAccountBalance ?? null,
+        bp.Frozen === "tYES",
         bp.UpdateDate ? new Date(bp.UpdateDate) : null,
       ];
       values.push(`(${row.map(() => `$${p++}`).join(",")},NOW())`);

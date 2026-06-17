@@ -7,6 +7,9 @@ import { ContactsEditor } from "@/components/clients/ContactsEditor";
 import { FamillesVsGroupe } from "@/components/clients/FamillesVsGroupe";
 import { ComportementYoY } from "@/components/clients/ComportementYoY";
 import { CompteForm } from "@/components/clients/CompteForm";
+import { ProduitsRecurrents } from "@/components/clients/ProduitsRecurrents";
+import { EncoursCreditCard } from "@/components/clients/EncoursCreditCard";
+import { RgpdExportButton } from "@/components/clients/RgpdExportButton";
 import { ClientTabs } from "@/components/clients/ClientTabs";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { ArrowLeft, Calendar, Sprout, TrendingUp, Receipt } from "lucide-react";
@@ -15,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { formatDate } from "@/lib/utils";
+import { requireAdmin } from "@/lib/permissions";
 
 export async function generateMetadata(props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -43,6 +47,7 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
   const params = await props.params;
   const session = await auth();
   if (!session) redirect("/login");
+  const admin = await requireAdmin(session);
 
   const client = await prisma.client.findUnique({
     where: { id: params.id },
@@ -101,6 +106,8 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
         <FamillesVsGroupe clientId={client.id} />
       </SurfaceCard>
 
+      <ProduitsRecurrents clientId={client.id} />
+
       <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-6">
         <DeliveryModesEditor clientId={client.id} clientCode={client.code} />
       </div>
@@ -146,6 +153,8 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
 
   const comptaPane = (
     <div className="space-y-6">
+      <EncoursCreditCard clientId={client.id} />
+
       <SurfaceCard
         accent="amber"
         title="Comptabilité"
@@ -158,13 +167,14 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
 
   return (
     <div className="space-y-6 max-w-3xl">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between gap-3">
         <Button variant="ghost" size="sm" asChild className="gap-1 text-slate-500 dark:text-slate-400">
           <Link href="/clients">
             <ArrowLeft className="h-4 w-4" />
             Retour aux clients
           </Link>
         </Button>
+        {admin && <RgpdExportButton clientId={client.id} />}
       </div>
 
       <div>
