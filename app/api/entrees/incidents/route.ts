@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await auth();
-  if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   let body: {
     docEntry?: number; docNum?: number; lot?: string; cardCode?: string;
     cardName?: string; itemCode?: string; type?: string; note?: string;

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -51,6 +52,9 @@ export async function PATCH(
 ) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await requireAdmin(session))) {
+    return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+  }
 
   // 404 si la promo n'existe pas — on lit aussi l'existant pour valider l'état résultant.
   const existingRows = await prisma.$queryRawUnsafe<PromoRow[]>(
@@ -208,6 +212,9 @@ export async function DELETE(
 ) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await requireAdmin(session))) {
+    return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+  }
 
   const deleted = await prisma.$executeRawUnsafe(
     `DELETE FROM "Promo" WHERE "id" = $1;`,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import {
   getRecipe, getFamilyItems, resolveLotsForItems, lastSalePricePie, packRatio, LOT_PENDING,
@@ -26,6 +27,9 @@ const WHITELIST_WHS = new Set(["000", "01", "R1"]);
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+
+  // Coûts d'achat (€/colis composant) et lignes de coût recette → admins seuls.
+  const admin = (await getAccessScope(session)).all;
 
   const { searchParams } = new URL(req.url);
   const parent = searchParams.get("parent")?.trim();
@@ -86,7 +90,7 @@ export async function GET(req: NextRequest) {
         lot: {
           batchNumber,
           pending: batchNumber === LOT_PENDING,
-          priceColis,                       // €/colis (estimation marge, même à découvert)
+          priceColis: admin ? priceColis : undefined, // €/colis coût — admins seuls
           source: lot?.source ?? null,
           supplierName: lot?.supplierName ?? null,
         },
@@ -109,7 +113,7 @@ export async function GET(req: NextRequest) {
       unite: parentUnite,                  // unité de gestion réelle (kg/colis/barquette)
       lastSalePriceColis: parentSaleColis, // €/colis — null si jamais vendu
     },
-    recipe: { parentQty: recipe.parentQty, costs: recipe.costs },
+    recipe: { parentQty: recipe.parentQty, costs: admin ? recipe.costs : [] },
     warehouse,
     families,
   });

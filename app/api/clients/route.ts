@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { clientSchema, clientQuerySchema } from "@/lib/validations";
-import { getAccessScope, scopePayload, UNMAPPED_MESSAGE } from "@/lib/permissions";
+import { getAccessScope, getOwnSlpName, scopePayload, UNMAPPED_MESSAGE } from "@/lib/permissions";
 
 /** Enrichit une liste de clients avec activeTelevente + vendeur (raw SQL :
  *  ces champs ne sont pas dans le client Prisma typé tant que generate est bloqué). */
@@ -220,6 +220,16 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const data = clientSchema.parse(body);
 
+    // Anti-IDOR : un non-admin ne peut créer un client QUE sous son propre
+    // trigramme (interdit de s'attribuer le client d'un autre commercial).
+    // Admin : le `commercial` du body est respecté tel quel.
+    const scope = await getAccessScope(session);
+    let commercial = data.commercial || null;
+    if (!scope.all) {
+      const own = await getOwnSlpName(session);
+      commercial = own || commercial;
+    }
+
     const existing = await prisma.client.findUnique({ where: { code: data.code } });
     if (existing) {
       return NextResponse.json({ error: "Un client avec ce code existe déjà" }, { status: 409 });
@@ -230,7 +240,7 @@ export async function POST(req: NextRequest) {
         code: data.code,
         nom: data.nom,
         type: data.type || null,
-        commercial: data.commercial || null,
+        commercial,
         tel1: data.tel1 || null,
         tel2: data.tel2 || null,
         tel3: data.tel3 || null,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { uniteGestion } from "@/lib/fabrication-optim";
 
@@ -17,6 +18,9 @@ import { uniteGestion } from "@/lib/fabrication-optim";
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+
+  // Coût total / valeur parent / prix d'achat ligne → admins seuls.
+  const admin = (await getAccessScope(session)).all;
 
   const { searchParams } = new URL(req.url);
   const last = Math.min(50, Math.max(1, parseInt(searchParams.get("last") || "12")));
@@ -91,8 +95,8 @@ export async function GET(req: NextRequest) {
       ...r,
       parentColis: Number(r.parentColis),
       parentUniteColis: uniteColisOf(r.parentItemCode),
-      totalCost: r.totalCost != null ? Number(r.totalCost) : null,
-      parentValue: r.parentValue != null ? Number(r.parentValue) : null,
+      totalCost: admin ? (r.totalCost != null ? Number(r.totalCost) : null) : undefined,
+      parentValue: admin ? (r.parentValue != null ? Number(r.parentValue) : null) : undefined,
       lines: (byRun.get(r.id) ?? []).map((l) => ({
         family: l.family,
         familyLabel: l.familyLabel,
@@ -101,7 +105,7 @@ export async function GET(req: NextRequest) {
         batchNumber: l.batchNumber,
         colisQty: Number(l.colisQty),
         uniteColis: uniteColisOf(l.itemCode),
-        purchasePrice: l.purchasePrice != null ? Number(l.purchasePrice) : null,
+        purchasePrice: admin ? (l.purchasePrice != null ? Number(l.purchasePrice) : null) : undefined,
       })),
     })),
   });

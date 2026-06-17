@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { auth } from "@/lib/auth";
+import { getAccessScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { incrementLocalStock, decrementLocalStock } from "@/lib/stockSync";
@@ -46,14 +47,22 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
+  // Coûts/marges réservés aux admins : un commercial fabrique sans voir le coût.
+  const admin = (await getAccessScope(session)).all;
+
   let body: Record<string, unknown>;
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
   if (Array.isArray(body.picks)) {
-    return assemblyV2(body as unknown as V2Body, session);
+    return assemblyV2(body as unknown as V2Body, session, admin);
   }
-  return assemblyLegacy(body as unknown as LegacyBody, session);
+  return assemblyLegacy(body as unknown as LegacyBody, session, admin);
+}
+
+/** Champs de coût/marge — `undefined` pour un non-admin (retirés du JSON). */
+function costField<T>(admin: boolean, v: T): T | undefined {
+  return admin ? v : undefined;
 }
 
 /** Compteur atomique de code d'ordre de production (OP00001, OP00002, …). */
@@ -80,7 +89,7 @@ interface V2Body {
   picks: { familyKey: string; itemCode: string }[];
 }
 
-async function assemblyV2(body: V2Body, session: Session) {
+async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
   // ── Validation de surface ──
   const parentCode = body.parentItemCode?.trim();
   if (!parentCode) return NextResponse.json({ error: "parentItemCode requis" }, { status: 400 });
@@ -373,11 +382,13 @@ async function assemblyV2(body: V2Body, session: Session) {
     lines: runLines.map((l) => ({
       family: l.familyLabel, itemCode: l.itemCode, itemName: l.itemName,
       batchNumber: l.batchNumber, pending: l.pending,
-      colisQty: l.colisQty, priceColis: l.priceColis, lineCost: l.lineCost,
+      colisQty: l.colisQty,
+      priceColis: costField(admin, l.priceColis),
+      lineCost: costField(admin, l.lineCost),
     })),
-    totalCost,
-    parentValue,
-    margin: parentValue != null ? Math.round((parentValue - totalCost) * 100) / 100 : null,
+    totalCost: costField(admin, totalCost),
+    parentValue: costField(admin, parentValue),
+    margin: costField(admin, parentValue != null ? Math.round((parentValue - totalCost) * 100) / 100 : null),
     sapExitDocNum: exitDoc.DocNum,
     sapEntryDocNum: entryDoc.DocNum,
     warehouse,
@@ -394,7 +405,7 @@ interface LegacyBody {
   warehouseCode: string;
 }
 
-async function assemblyLegacy(body: LegacyBody, session: Session) {
+async function assemblyLegacy(body: LegacyBody, session: Session, admin: boolean) {
   if (!body.parentItemCode?.trim()) {
     return NextResponse.json({ error: "parentItemCode requis" }, { status: 400 });
   }
@@ -510,9 +521,10 @@ async function assemblyLegacy(body: LegacyBody, session: Session) {
     parent: { itemCode: parentCode, itemName: parent.itemName, packageQuantity: body.packageQuantity, pieceQuantity: parentPieceQty },
     components: resolvedComponents.map((c) => ({
       itemCode: c.componentItemCode, itemName: c.itemName, qty: c.qty,
-      purchasePrice: c.purchasePrice, lineCost: Math.round(c.lineCost * 100) / 100,
+      purchasePrice: costField(admin, c.purchasePrice),
+      lineCost: costField(admin, Math.round(c.lineCost * 100) / 100),
     })),
-    totalCost: Math.round(totalCost * 100) / 100,
+    totalCost: costField(admin, Math.round(totalCost * 100) / 100),
     sapExitDocNum: exitDoc.DocNum,
     sapEntryDocNum: entryDoc.DocNum,
     warehouse,

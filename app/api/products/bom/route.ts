@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { getAccessScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -27,6 +28,9 @@ interface BomRow {
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+
+  // Prix d'achat / coût ligne des composants → admins seuls.
+  const admin = (await getAccessScope(session)).all;
 
   const { searchParams } = new URL(req.url);
   const list = searchParams.get("list") === "true";
@@ -71,9 +75,9 @@ export async function GET(req: NextRequest) {
       itemName: c.itemName,
       salesUnit: c.salesUnit,
       qtyPerParent: c.qtyPerParent,
-      purchasePrice: c.purchasePrice,
+      purchasePrice: admin ? c.purchasePrice : undefined,
       // Coût ligne = qtyPerParent × purchasePrice (€/pie composant)
-      lineCost: (c.purchasePrice ?? 0) * c.qtyPerParent,
+      lineCost: admin ? (c.purchasePrice ?? 0) * c.qtyPerParent : undefined,
     })),
   });
 }
