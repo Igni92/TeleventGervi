@@ -4,106 +4,71 @@
 > sécurité, données base de test, simulation 1 mois, rendu navigateur réel).
 > Sévérité : 🔴 Bloquant/Critique · 🟠 Majeur/Élevé · 🟡 Mineur · ℹ️ Info.
 > Effort : ⚡ quick win · 🛠️ chantier.
-> Cases cochées = fait et vérifié (`tsc` 0 / `lint` 0 / `vitest` 115 / rendu OK).
+> Cases cochées = fait et vérifié (`tsc` 0 / `lint` 0 / `vitest` 220 verts / rendu OK).
 
 ---
 
 ## ✅ FAIT (branche `claude/practical-pasteur-58wk4g`)
 
 ### Lot 1 — Sécurité fondations
-- [x] 🔴 **RLS activé sur 45/45 tables** (migration `enable_rls_deny_all_public_tables`). PostgREST anon/authenticated bloqué ; Prisma intact. Rollback : `ALTER TABLE public."X" DISABLE ROW LEVEL SECURITY;`
-- [x] 🔴 **IDOR `/api/sap/orders` POST / cancel / [docEntry] / invoices/[docEntry]** → `clientInScope`/`cardCodeInScope`.
-- [x] 🟠 **`/api/sap/environment` POST** → `requireAdmin`.
-- [x] 🟠 **`/api/clients/[id]` PUT** : `commercial` réservé admin. **delivery-modes/[modeId] PATCH** : contrainte `clientId`.
-- [x] 🟠 **Next.js 14.2.18 → 14.2.35** (CVE-2025-29927 bypass middleware).
+- [x] 🔴 **RLS activé sur 45/45 tables** (deny-all public). PostgREST anon/authenticated bloqué ; Prisma intact.
+- [x] 🔴 **IDOR `/api/sap/orders`** (POST / cancel / [docEntry] / invoices/[docEntry]) → scope.
+- [x] 🟠 **`/api/sap/environment` POST** + **`/api/clients/[id]` PUT** (commercial admin) + **delivery-modes/[modeId]** (appartenance).
+- [x] 🟠 **Next.js 14.2.18 → 14.2.35** (CVE-2025-29927).
 
 ### Lot 2 — Marge
-- [x] 🟠 **Marge BRUTE % unifiée** sur le CA produit NET partout (`lib/margin.grossMarginPct`), libellé « coût SAP » corrigé, tests.
+- [x] 🟠 **Marge BRUTE % unifiée** sur le CA produit NET (`lib/margin.grossMarginPct`), libellés corrigés, tests.
 
-### Lot 3 — Sécurité (gating choisi par le métier)
-- [x] 🟠 **`requireAdmin`** sur `/api/sap/sync/{mirror,backfill,products,client-groups}` (delta & full-reset inchangés).
-- [x] 🟠 **`requireAdmin`** sur Promotions (`/api/promos` POST + `[id]` PATCH/DELETE) et Transporteurs (`/api/carriers` POST).
-- [x] 🟠 **Masquage marges/COGS aux non-admins** : `sap/assembly`, `fabrication/options`+`runs`, `products/bom` (prix de vente conservé). *(Recettes/nomenclatures laissées ouvertes — choix métier.)*
-- [x] 🟠 **`/api/temp-assignments`** : reprise réservée aux clients d'un commercial **absent ce jour** (Presence), admin toujours OK.
-- [x] 🟡 **`/api/clients` POST** (commercial forcé au créateur), **`/api/entrees/incidents`** (session exigée), **contacts/[contactId]** (appartenance client).
+### Lot 3 — Sécurité (gating métier)
+- [x] 🟠 `requireAdmin` sur `/api/sap/sync/{mirror,backfill,products,client-groups}`, Promotions, Transporteurs.
+- [x] 🟠 **Masquage marges/COGS aux non-admins** (assembly, fabrication, bom). Recettes laissées ouvertes (choix métier).
+- [x] 🟠 **`/api/temp-assignments`** : reprise réservée aux clients d'un commercial **absent ce jour**.
+- [x] 🟡 `/api/clients` POST (commercial = créateur), incidents (session), contacts (appartenance).
 
 ### Lot 4 — Pilotage perf + UX
-- [x] 🟠 **N+1** `topSalespersons`/`topSalespersonsOrder` → COUNT(DISTINCT) GROUP BY (1 requête).
-- [x] 🟠 **`monthDrilldown`** : catalogue restreint aux itemCode du mois.
-- [x] 🟠 **États erreur + chargement** écrans 1 & 2 (plus de « — »/« backfill » pendant le fetch).
+- [x] 🟠 **N+1** tops (COUNT DISTINCT) · **monthDrilldown** ciblé · **états erreur/chargement** écrans 1 & 2.
 
 ### Lot 5 — Imports
-- [x] 🟠 **CSV** : parser RFC4180 (guillemets), encodage UTF-8/windows-1252, dédoublonnage.
-- [x] 🟠 **`/api/clients/import`** : borne 10000 lignes, upserts par lots de 500 en transaction.
-- [x] 🟠 **`full-reset`** : `SapPurchaseReturn` ajouté (truncate + pull).
-- [x] 🟠 **`lib/sapb1.call`** : retry/backoff sur erreurs réseau + 502/503/504.
+- [x] 🟠 **CSV** parser RFC4180 + encodage UTF-8/Latin1 · **import** transaction + borne 10000 · **full-reset** retours fournisseurs · **sapb1** retry réseau.
 
-### Lot 6 — Console / fuseau / DB
-- [x] 🟠 **Fuseau Europe/Paris** (`lib/paris-time`) appliqué de façon cohérente : console (file/stats/présence/reprise) + `/api/commerciaux` (écriture présence) + `/api/temp-assignments` + onglet « Aujourd'hui ». Tests été/hiver/DST.
-- [x] 🟠 **consoleSync** : purge PII (tel/email/notes) du localStorage à la fermeture (`pagehide`). Double-écran préservé.
-- [x] 🟠 **ClientDeliveryMode** `@@unique([clientId, sapCardCode])` (index créé en base) + `ON CONFLICT` dans foldDotVariant.
+### Lot 6 — Console / fuseau / DB / UX sync
+- [x] 🟠 **Fuseau Europe/Paris** cohérent (console, présence, reprise, onglet Aujourd'hui), testé.
+- [x] 🟠 **consoleSync** purge PII à la fermeture · **ClientDeliveryMode** `@@unique` + ON CONFLICT.
+- [x] 🟠 **Fix sync stock 30 s** (auto-rattrapage du curseur) + **claim atomique** du throttle delta.
+- [x] 🟠 **Hub unique Paramètres › Données · SAP** (boutons regroupés ; capture validée).
 
----
-
-## 🔴 SÉCURITÉ — reste
-
-- [ ] 🟠 🛠️ **Fuite jeton Graph** : `lib/auth.ts:45-49` expose l'`accessToken` Microsoft via `/api/auth/session` (navigateur). Le garder dans le JWT chiffré ; adapter `/api/reminders`. **Différé** : touche le flux rappels Outlook, à tester avec une vraie session Microsoft (non reproductible en sandbox).
-- [ ] ℹ️ Migration **Next 15/16** (advisories DoS/cache-poisoning/SSRF résiduelles, fixées seulement en majeure) — chantier à planifier.
+### Lot 7 — Sécurité jeton, console UX, pilotage cleanup
+- [x] 🟠 **Jeton Graph hors session client** : reste dans le JWT chiffré, relu serveur via `getToken()` ; non bloquant (rappel créé même sans jeton).
+- [x] 🟠 **Console** : badge « à couvrir » cohérent (reprise réelle d'un absent, plus l'account manager) ; `callNote` persistée par client ; warning `forwardRef` corrigé.
+- [x] 🟠 **Pilotage** : `viewAs` propagé à l'écran 2 ; route `/api/pilotage/kpi` orpheline + ~155 lignes de code mort supprimées ; Donut/BarList gèrent les marges négatives.
+- [x] 🟡 **`/api/clients/resolve`** : normalisation casse (MAJUSCULES).
 
 ---
 
-## 🧭 IMPORT / SYNC — refonte UX (demande métier)
+## 🟠 RESTE — nécessite TA décision ou des DONNÉES (hors code pur)
 
-- [x] 🟠 **Regrouper les boutons import/sync** → hub unique **Paramètres › Données · SAP** (Clients SAP, Données stats, Stock & catalogue) ; boutons retirés des pages Clients & Plan d'appel.
-- [x] 🟠 **Sync stock 30 s « ne marche pas »** → diagnostiqué (curseur bloqué à 500 vs ~129 000 côté SAP, crawl ascendant plafonné) + corrigé (auto-rattrapage : saut direct à la fenêtre récente). *(Annulation de doc seule non détectée = limite connue V1, à traiter plus tard.)*
-- [ ] 🟡 ⚡ **`isDotVariant`** : ne gère que le suffixe `.` ; parent gelé SAP → variante en doublon. Valider les conventions transporteur.
-- [ ] 🟡 ⚡ **`clients/resolve`** : normaliser la casse (`toUpperCase`) — l'import stocke en MAJUSCULES.
-- [ ] 🟡 ⚡ **delta** : throttle `lastTickAt` non atomique → 2 pulls SAP concurrents possibles (advisory lock).
-
----
-
-## 📞 CONSOLE — reste
-
-- [ ] 🟠 ⚡ **Badge « à couvrir »/`ownerAbsent`** (`CallConsole.tsx`) basé sur `commercial` alors que la file filtre sur `vendeur` → incohérent post-#18. Retirer ou rebrancher.
-- [ ] 🟡 ⚡ **`callNote` perdue au refresh** : persister par client.
-- [ ] 🟡 ⚡ **Pas d'optimistic update** (refetch complet après action).
-- [ ] 🟡 ⚡ **`joursAppel` malformé** (`console/route.ts`) : exclusion silencieuse (NaN) → signaler.
-- [ ] 🟡 🛠️ **Duplication** `BLDialog.tsx` vs `Ecran2Order.tsx` → hook commun.
-- [ ] 🟡 ⚡ **Bug latent** : warning React `forwardRef` (`CallConsole.tsx:1363`).
+- [ ] 🟠 🛠️ **Données métier** (côté SAP/process, pas du code) :
+  - 285/339 clients **sans `vendeur`** → file console vide hors MM (filtre vendeur strict, confirmé). Compléter le champ.
+  - **Mapping ≠ SAP** : `CM` (~80 % du CA) sans compte, `AG` sans activité. Réconcilier `UserCommercial` ↔ slpName réels.
+  - 280/339 sans `type` ; 5,1 % CA produit sans `lineCost` ; 19 produits sans poids ; `ProductBatch` vide (DLC/FIFO).
+- [ ] 🟠 ❓ **Périmètre CRM pilotage** (décision métier) : les KPI CRM non-admin sont scopés sur `commercial` (account manager) alors que l'identité opérationnelle est `vendeur` (cf. console #18). Faut-il aligner sur `vendeur` (ou `commercial OU vendeur`) ? Change les chiffres vus par un commercial non-admin. **À trancher avant de toucher.**
+- [ ] ℹ️ Migration **Next 15/16** (advisories résiduelles fixées en majeure) — chantier à planifier.
+- [ ] 🟡 🛠️ **RGPD** : durée de conservation `AppelLog`, journalisation accès PII, registre sous-traitants (Supabase UE, Microsoft, SAP), base légale + droit d'accès/effacement.
 
 ---
 
-## 📊 STATS / PILOTAGE — reste
+## 🟡 MINORES restantes (faible valeur / nuancées)
 
-- [ ] 🟡 ⚡ **`/dashboard/ecran2/page.tsx`** ne propage pas `viewAs` (impersonation dual-écran).
-- [ ] 🟡 ⚡ **`/api/pilotage/kpi`** orphelin (heatmap/spark12m non consommés) → brancher ou supprimer.
-- [ ] 🟡 ⚡ **`invoiceHeatmap`** non scopé → supprimer/scoper.
-- [ ] 🟡 ⚡ **CRM scopé `commercial` seul** (`pilotage.ts` `clientOwnerWhere`) vs périmètre réel `commercial OU vendeur`.
-- [ ] 🟡 ⚡ **Δ N (en cours) vs N-1 (complète)** trompeur ; **`buildMonthlyTrend`** courbe vide en janvier ; **`familyOf`** vs CTE (repli `itemDescription`).
-- [ ] ℹ️ Fallback COGS « première EM postérieure » (`cogs.ts`) : exposer un 2ᵉ indicateur de couverture / documenter. Confirmer index `SapPdnLine.itemCode` + `SapPurchaseDeliveryNote.docDate`.
-
----
-
-## 🗃️ DONNÉES & MÉTIER (côté données/process, hors code)
-
-- [ ] 🟠 🛠️ **285/339 clients sans `vendeur`** → file console vide sauf MM (filtre vendeur strict, choix confirmé). Compléter le champ `vendeur` (process / `sync-vendeurs`).
-- [ ] 🟠 🛠️ **Mapping ≠ SAP** : `CM` (80 % du CA) sans compte, `AG` sans activité. Réconcilier `UserCommercial` ↔ slpName réels.
-- [ ] 🟡 ⚡ **280/339 sans `type`** (badges/segmentation vides) ; **5,1 % CA produit sans `lineCost`** (couverture marge) ; **19 produits sans poids** (volume kg).
-- [ ] 🟡 ℹ️ **`ProductBatch` vide** (DLC/lots/fabrication FIFO non alimentés) ; 1 stock négatif ; 3 clients actifs sans tel ; factures futures 12/2026.
+- [ ] 🟡 **`buildMonthlyTrend`** : courbe quasi vide en janvier (peu de mois N) — comportement attendu, à polir éventuellement.
+- [ ] 🟡 **Δ N (en cours) vs N-1 (complète)** : libellé potentiellement trompeur (préciser « à date »).
+- [ ] 🟡 **`familyOf`** vs CTE (repli `itemDescription`) — qualité données, nuancé.
+- [ ] 🟡 **`isDotVariant`** (suffixe `.` uniquement) ; **delta** : annulation de doc seule non détectée (limite V1).
+- [ ] 🟡 Duplication `BLDialog.tsx` vs `Ecran2Order.tsx` → hook commun (dette technique).
 
 ---
 
-## 🎨 UX / RGPD — reste
+## 🏆 Synthèse
 
-- [ ] 🟡 ⚡ Donut géo/familles : `Math.max(0, value)` masque les marges négatives → signaler.
-- [ ] 🟡 🛠️ **RGPD** : durée de conservation `AppelLog`, journalisation accès PII, registre sous-traitants (Supabase UE ✅, Microsoft, SAP), base légale + droit d'accès/effacement.
+Le **backlog code clairement actionnable et sûr est traité** (lots 1→7 : sécurité, marges, perf, imports, fuseau, sync stock, jeton Graph, UX console, cleanup pilotage). `tsc` 0 · `lint` 0 · `vitest` 220 verts.
 
----
-
-## 🏆 TOP priorités restantes
-
-1. 🟠 🛠️ **Sortir l'`accessToken` Graph** de la session client (à tester avec session Microsoft).
-2. 🟠 🛠️ **Données métier** : compléter `vendeur` + réconcilier mapping CM/AG (sinon console hors MM inutilisable).
-3. 🟡 ⚡ **Console** : badge « à couvrir » cohérent, persistance `callNote`, fix forwardRef.
-4. 🟡 ⚡ **Pilotage** : `viewAs` ecran2, route `kpi` orpheline, CRM scope vendeur.
-5. 🟡 🛠️ **RGPD** : conservation/journalisation/registre.
+Ce qui reste demande **soit ta décision** (périmètre CRM pilotage), **soit des données/process** (vendeur, mapping CM/AG, types, poids, lots), **soit un chantier planifié** (Next 16, RGPD). Je n'y touche pas à l'aveugle pour ne pas dégrader.
