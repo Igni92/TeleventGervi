@@ -54,8 +54,8 @@
 
 ## 🧭 IMPORT / SYNC — refonte UX (demande métier)
 
-- [ ] 🟠 🛠️ **Regrouper les boutons import/sync** dans UN seul panneau admin (Paramètres › Données · SAP) : import clients, resync stats (rare), etc. — « le moins de boutons possible ».
-- [ ] 🟠 🛠️ **Sync stock 30 s « ne marche pas »** : auditer `StockPanel`/`/api/sap/sync/delta` (polling toutes les 30 s) — diagnostiquer pourquoi le stock ne se rafraîchit pas, et soit fiabiliser, soit passer en rafraîchissement à la demande. (Annulation de doc non détectée = limite connue V1.)
+- [x] 🟠 **Regrouper les boutons import/sync** → hub unique **Paramètres › Données · SAP** (Clients SAP, Données stats, Stock & catalogue) ; boutons retirés des pages Clients & Plan d'appel.
+- [x] 🟠 **Sync stock 30 s « ne marche pas »** → diagnostiqué (curseur bloqué à 500 vs ~129 000 côté SAP, crawl ascendant plafonné) + corrigé (auto-rattrapage : saut direct à la fenêtre récente). *(Annulation de doc seule non détectée = limite connue V1, à traiter plus tard.)*
 - [ ] 🟡 ⚡ **`isDotVariant`** : ne gère que le suffixe `.` ; parent gelé SAP → variante en doublon. Valider les conventions transporteur.
 - [ ] 🟡 ⚡ **`clients/resolve`** : normaliser la casse (`toUpperCase`) — l'import stocke en MAJUSCULES.
 - [ ] 🟡 ⚡ **delta** : throttle `lastTickAt` non atomique → 2 pulls SAP concurrents possibles (advisory lock).
@@ -102,9 +102,8 @@
 
 ## 🏆 TOP priorités restantes
 
-1. 🟠 🛠️ **Refonte panneau Données/Sync** (regrouper boutons) + diagnostic sync stock 30 s.
-2. 🟠 🛠️ **Sortir l'`accessToken` Graph** de la session client (à tester avec session Microsoft).
-3. 🟠 🛠️ **Données métier** : compléter `vendeur` + réconcilier mapping CM/AG (sinon console hors MM inutilisable).
-4. 🟡 ⚡ **Console** : badge « à couvrir » cohérent, persistance `callNote`, fix forwardRef.
-5. 🟡 ⚡ **Pilotage** : `viewAs` ecran2, route `kpi` orpheline, CRM scope vendeur.
-6. 🟡 🛠️ **RGPD** : conservation/journalisation/registre.
+1. 🟠 🛠️ **Sortir l'`accessToken` Graph** de la session client (à tester avec session Microsoft).
+2. 🟠 🛠️ **Données métier** : compléter `vendeur` + réconcilier mapping CM/AG (sinon console hors MM inutilisable).
+3. 🟡 ⚡ **Console** : badge « à couvrir » cohérent, persistance `callNote`, fix forwardRef.
+4. 🟡 ⚡ **Pilotage** : `viewAs` ecran2, route `kpi` orpheline, CRM scope vendeur.
+5. 🟡 🛠️ **RGPD** : conservation/journalisation/registre.
