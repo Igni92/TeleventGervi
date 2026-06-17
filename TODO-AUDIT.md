@@ -42,6 +42,7 @@
 - [x] 🟠 **Console** : badge « à couvrir » cohérent (reprise réelle d'un absent, plus l'account manager) ; `callNote` persistée par client ; warning `forwardRef` corrigé.
 - [x] 🟠 **Pilotage** : `viewAs` propagé à l'écran 2 ; route `/api/pilotage/kpi` orpheline + ~155 lignes de code mort supprimées ; Donut/BarList gèrent les marges négatives.
 - [x] 🟡 **`/api/clients/resolve`** : normalisation casse (MAJUSCULES).
+- [x] 🟠 **Périmètre CRM pilotage** (décision métier validée) : aligné sur **commercial OU vendeur** — KPI CRM non-admin via `clientIdsForOwner` (union raw SQL, vendeur inclus) ; admin = vision globale inchangée.
 
 ---
 
@@ -51,7 +52,6 @@
   - 285/339 clients **sans `vendeur`** → file console vide hors MM (filtre vendeur strict, confirmé). Compléter le champ.
   - **Mapping ≠ SAP** : `CM` (~80 % du CA) sans compte, `AG` sans activité. Réconcilier `UserCommercial` ↔ slpName réels.
   - 280/339 sans `type` ; 5,1 % CA produit sans `lineCost` ; 19 produits sans poids ; `ProductBatch` vide (DLC/FIFO).
-- [ ] 🟠 ❓ **Périmètre CRM pilotage** (décision métier) : les KPI CRM non-admin sont scopés sur `commercial` (account manager) alors que l'identité opérationnelle est `vendeur` (cf. console #18). Faut-il aligner sur `vendeur` (ou `commercial OU vendeur`) ? Change les chiffres vus par un commercial non-admin. **À trancher avant de toucher.**
 - [ ] ℹ️ Migration **Next 15/16** (advisories résiduelles fixées en majeure) — chantier à planifier.
 - [ ] 🟡 🛠️ **RGPD** : durée de conservation `AppelLog`, journalisation accès PII, registre sous-traitants (Supabase UE, Microsoft, SAP), base légale + droit d'accès/effacement.
 
