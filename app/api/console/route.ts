@@ -166,8 +166,14 @@ export async function GET() {
       insights,
       // null = not claimed; string = name of the commercial I claimed this from
       claimedFrom,
-      // true = le commercial propriétaire est absent aujourd'hui → à couvrir
-      ownerAbsent: !!(c.commercial && absentNames.has(c.commercial)),
+      // « à couvrir » = VRAIE couverture d'un collègue absent.
+      // La file est scopée par VENDEUR (mon trigramme), pas par l'account
+      // manager `commercial`. Le simple fait que l'account manager d'un de mes
+      // clients habituels soit absent n'est donc PAS une couverture et ne doit
+      // pas afficher ce badge. On ne le déclenche que pour un client REPRIS
+      // aujourd'hui (TempAssignment → claimedFrom) dont le commercial d'origine
+      // est effectivement absent ce jour.
+      ownerAbsent: !!(claimedFrom && absentNames.has(claimedFrom)),
       openIncidents: openIncByClient.get(c.id) ?? 0,
     } as Enriched & { claimedFrom: string | null; ownerAbsent: boolean; openIncidents: number };
 
@@ -187,6 +193,8 @@ export async function GET() {
   });
   const calledToday = outcomeByClient.size; // distinct clients touched today
 
+  // Nombre de clients « à couvrir » dans ma file = reprises effectives d'un
+  // collègue absent (cf. ownerAbsent ci-dessus, qui implique claimedFrom).
   const toCover = queue.filter((c) => (c as { ownerAbsent?: boolean }).ownerAbsent).length;
 
   return NextResponse.json({
