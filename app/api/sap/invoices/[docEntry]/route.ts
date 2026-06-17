@@ -8,7 +8,8 @@ import { sap } from "@/lib/sapb1";
 type Line = { ItemCode: string; ItemDescription?: string; Quantity: number; Price?: number; LineTotal?: number; MeasureUnit?: string; WarehouseCode?: string };
 type Invoice = { DocEntry: number; DocNum: number; DocDate: string; DocTotal?: number; VatSum?: number; DocumentStatus?: string; DocumentLines: Line[] };
 
-export async function GET(_req: NextRequest, { params }: { params: { docEntry: string } }) {
+export async function GET(_req: NextRequest, props: { params: Promise<{ docEntry: string }> }) {
+  const params = await props.params;
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   const inv = await prisma.sapInvoice.findUnique({ where: { docEntry: Number(params.docEntry) }, select: { cardCode: true } });

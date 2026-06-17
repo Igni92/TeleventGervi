@@ -98,7 +98,8 @@ async function invoiceKpis(slp: string, from: Date, to: Date) {
   };
 }
 
-export async function GET(req: NextRequest, { params }: { params: { slp: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ slp: string }> }) {
+  const params = await props.params;
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 

@@ -49,7 +49,6 @@ let activeEnv: SapEnv = "prod";
 const cfg = () => CFG[activeEnv];
 
 if (!CFG.prod.base || !CFG.prod.company || !CFG.prod.user || !CFG.prod.pass) {
-  // eslint-disable-next-line no-console
   console.warn("[sapb1] Missing prod env vars — SAP client will fail at first call");
 }
 

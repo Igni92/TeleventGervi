@@ -20,7 +20,8 @@ type Order = {
   DocumentStatus?: string; NumAtCard?: string; Comments?: string; DocumentLines: Line[];
 };
 
-export async function GET(_req: NextRequest, { params }: { params: { docEntry: string } }) {
+export async function GET(_req: NextRequest, props: { params: Promise<{ docEntry: string }> }) {
+  const params = await props.params;
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   const ord = await prisma.sapOrder.findUnique({ where: { docEntry: Number(params.docEntry) }, select: { cardCode: true } });
@@ -46,7 +47,8 @@ export async function GET(_req: NextRequest, { params }: { params: { docEntry: s
   }
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { docEntry: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ docEntry: string }> }) {
+  const params = await props.params;
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   const ord = await prisma.sapOrder.findUnique({ where: { docEntry: Number(params.docEntry) }, select: { cardCode: true } });

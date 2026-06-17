@@ -419,6 +419,7 @@ export function CallConsole() {
               <> · <span className="font-semibold">{data.presence.toCover} client{data.presence.toCover > 1 ? "s" : ""} à couvrir</span> dans ta file</>
             )}
           </p>
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- navigation full-reload volontaire (comportement preexistant inchange) */}
           <a href="/commerciaux" className="ml-auto text-[11.5px] font-medium text-orange-800 dark:text-orange-300 hover:underline shrink-0">
             Gérer les présences →
           </a>

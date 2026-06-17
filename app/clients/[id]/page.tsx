@@ -16,7 +16,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { formatDate } from "@/lib/utils";
 
-export async function generateMetadata({ params }: { params: { id: string } }) {
+export async function generateMetadata(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const client = await prisma.client.findUnique({
     where: { id: params.id },
     select: { nom: true },
@@ -38,7 +39,8 @@ const statutLabel: Record<string, string> = {
   ANNULE: "Annulé",
 };
 
-export default async function ClientDetailPage({ params }: { params: { id: string } }) {
+export default async function ClientDetailPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await auth();
   if (!session) redirect("/login");
 

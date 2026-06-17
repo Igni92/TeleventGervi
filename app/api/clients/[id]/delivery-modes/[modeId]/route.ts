@@ -7,8 +7,9 @@ import { prisma } from "@/lib/prisma";
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string; modeId: string } },
+  props: { params: Promise<{ id: string; modeId: string }> }
 ) {
+  const params = await props.params;
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   if (!(await clientInScope(await getAccessScope(session), params.id)))
@@ -43,8 +44,9 @@ export async function PATCH(
 
 export async function DELETE(
   _req: NextRequest,
-  { params }: { params: { id: string; modeId: string } },
+  props: { params: Promise<{ id: string; modeId: string }> }
 ) {
+  const params = await props.params;
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   if (!(await clientInScope(await getAccessScope(session), params.id)))

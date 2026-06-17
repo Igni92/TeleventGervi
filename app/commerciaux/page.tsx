@@ -108,6 +108,7 @@ export default async function CommerciauxPage() {
                 Ces clients n&apos;apparaissent dans la liste d&apos;aucun commercial.
               </p>
             </div>
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- navigation full-reload volontaire (comportement preexistant inchange) */}
             <a
               href="/clients?commercial=none"
               className="text-[12px] font-medium text-amber-800 dark:text-amber-300 hover:underline"

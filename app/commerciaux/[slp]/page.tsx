@@ -12,7 +12,8 @@ export const dynamic = "force-dynamic";
  * Droits : un non-admin ne peut voir QUE sa propre fiche (redirect sinon) ;
  * compte non mappé → message explicite. Les admins voient tout.
  */
-export default async function FicheCommercialPage({ params }: { params: { slp: string } }) {
+export default async function FicheCommercialPage(props: { params: Promise<{ slp: string }> }) {
+  const params = await props.params;
   const session = await auth();
   if (!session) redirect("/login");
 

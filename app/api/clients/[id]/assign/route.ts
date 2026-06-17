@@ -14,7 +14,8 @@ import { prisma } from "@/lib/prisma";
  */
 const clean = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   // (Ré)assignation de portefeuille (vendeur/commercial/activation) → admins uniquement.

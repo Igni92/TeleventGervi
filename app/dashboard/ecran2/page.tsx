@@ -13,11 +13,12 @@ export const dynamic = "force-dynamic";
  * "À relancer" (clients planifiés sans facture SAP 30j, cliquable), clients actifs.
  * Granularité suit l'écran 1 (role=follower).
  */
-export default async function DashboardEcran2Page({
-  searchParams,
-}: {
-  searchParams: { as?: string };
-}) {
+export default async function DashboardEcran2Page(
+  props: {
+    searchParams: Promise<{ as?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const session = await auth();
   if (!session) redirect("/login");
   // « Voir comme » : seul un admin peut imiter un commercial (?as=MM). Pour un
