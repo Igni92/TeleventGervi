@@ -44,9 +44,28 @@ export interface ActiveClientState {
 const CHANNEL = "televent-console";
 const STORAGE_KEY = "tv-console-active";
 
+/** Supprime le miroir local du client actif (contient des PII : tel, email,
+ *  notes). À appeler quand la console se ferme pour ne RIEN laisser en clair
+ *  sur un poste partagé. */
+export function clearActiveClient() {
+  if (typeof window === "undefined") return;
+  try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+}
+
+// Purge automatique à la fermeture de l'onglet/fenêtre (poste partagé) : le
+// miroir localStorage ne doit pas survivre à la session de travail. `pagehide`
+// couvre fermeture + navigation + bfcache (plus fiable que beforeunload).
+let unloadHooked = false;
+function hookUnloadPurge() {
+  if (unloadHooked || typeof window === "undefined") return;
+  unloadHooked = true;
+  window.addEventListener("pagehide", clearActiveClient);
+}
+
 /** Diffuse l'état du client actif (écran 1) + persiste pour l'init de l'écran 2. */
 export function broadcastActiveClient(state: Omit<ActiveClientState, "at">) {
   if (typeof window === "undefined") return;
+  hookUnloadPurge();
   const payload: ActiveClientState = { ...state, at: Date.now() };
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch { /* ignore */ }
   try {
