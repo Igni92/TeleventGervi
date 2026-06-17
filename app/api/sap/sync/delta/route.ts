@@ -53,12 +53,29 @@ export async function POST() {
   }
 
   try {
+    // ── Auto-rattrapage du curseur ──────────────────────────────────────────
+    // Le curseur peut être TRÈS en retard (ex. seedé à 500 alors que SAP est à
+    // 129 000). Crawler l'historique ancien (DocEntry asc, plafonné) ne
+    // rattraperait jamais le présent → le stock récent ne se rafraîchit pas.
+    // On lit le DocEntry courant le plus haut côté SAP et on ne traite QUE la
+    // fenêtre récente : `from = max(curseur, maxActuel − LOOKBACK)`. Le stock de
+    // base vient du sync produits ; le delta ne sert qu'à suivre les
+    // changements récents. `refreshItemStocks` repull le stock LIVE de l'article.
+    const LOOKBACK = 500;
+    const latest = (coll: string) =>
+      sap.getAll<Doc>(`${coll}?$orderby=DocEntry desc&$select=DocEntry`, { pageSize: 1, maxPages: 1 });
+    const [latestOrders, latestPdns] = await Promise.all([latest("Orders"), latest("PurchaseDeliveryNotes")]);
+    const maxOrderNow = latestOrders[0]?.DocEntry ?? cursor.lastOrderDocEntry;
+    const maxPdnNow = latestPdns[0]?.DocEntry ?? cursor.lastPdnDocEntry;
+    const fromOrder = Math.max(cursor.lastOrderDocEntry, maxOrderNow - LOOKBACK);
+    const fromPdn = Math.max(cursor.lastPdnDocEntry, maxPdnNow - LOOKBACK);
+
     const orderPath =
-      `Orders?$filter=DocEntry gt ${cursor.lastOrderDocEntry}`
+      `Orders?$filter=DocEntry gt ${fromOrder}`
       + `&$orderby=DocEntry asc`
       + `&$select=DocEntry,DocumentLines`;   // DocumentLines en $select, PAS d'$expand (ce SL ne le supporte pas)
     const pdnPath =
-      `PurchaseDeliveryNotes?$filter=DocEntry gt ${cursor.lastPdnDocEntry}`
+      `PurchaseDeliveryNotes?$filter=DocEntry gt ${fromPdn}`
       + `&$orderby=DocEntry asc`
       + `&$select=DocEntry,DocumentLines`;   // DocumentLines en $select, PAS d'$expand (ce SL ne le supporte pas)
 
@@ -77,12 +94,17 @@ export async function POST() {
 
     const refreshed = await refreshItemStocks(Array.from(touched));
 
-    const maxOrder = orders.length > 0
-      ? Math.max(cursor.lastOrderDocEntry, ...orders.map((d) => d.DocEntry))
-      : cursor.lastOrderDocEntry;
-    const maxPdn = pdns.length > 0
-      ? Math.max(cursor.lastPdnDocEntry, ...pdns.map((d) => d.DocEntry))
-      : cursor.lastPdnDocEntry;
+    // On avance le curseur au plus haut DocEntry réellement atteint : la borne
+    // `from` (rattrapage) si la fenêtre était vide, sinon le max des docs vus.
+    // Plafonné par maxXxxNow pour ne pas dépasser ce qui existe côté SAP.
+    const maxOrder = Math.min(
+      maxOrderNow,
+      orders.length > 0 ? Math.max(fromOrder, ...orders.map((d) => d.DocEntry)) : fromOrder,
+    );
+    const maxPdn = Math.min(
+      maxPdnNow,
+      pdns.length > 0 ? Math.max(fromPdn, ...pdns.map((d) => d.DocEntry)) : fromPdn,
+    );
 
     await prisma.stockSyncCursor.update({
       where: { id: 1 },
