@@ -50,8 +50,11 @@ function topFmt(m: Metric): ((v: number) => string) | undefined {
 export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = {}) {
   const [segment, setSegment] = useState<Segment>("ALL");
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const { data } = useAnnualData(segment, viewAs, refreshNonce);
+  const { data, err } = useAnnualData(segment, viewAs, refreshNonce);
   const { data: weekly } = useWeeklyData(segment, viewAs, refreshNonce);
+  // 1er chargement annuel : ni data ni erreur encore → on évite d'afficher
+  // « Aucune donnée / backfill » (faux négatif tant que le fetch n'a pas répondu).
+  const annualLoading = data === null && err === null;
   const [mode, setMode] = useState<Metric>("ca");
   const [view, setView] = useState<Screen2View>("matrix");
   const [drill, setDrill] = useState<{ year: number; month: number } | null>(null);
@@ -108,7 +111,28 @@ export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = 
         onRefresh={() => setRefreshNonce((n) => n + 1)}
       />
 
-      {view === "matrix" && (
+      {view === "matrix" && err && (
+        <div className="flex-1 grid place-items-center">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <p className="text-[13px] text-rose-400">Erreur de chargement : {err}</p>
+            <button
+              type="button"
+              onClick={() => setRefreshNonce((n) => n + 1)}
+              className="px-3 h-8 text-[12px] font-semibold tracking-tight rounded-md bg-secondary/60 text-foreground hover:bg-secondary transition-colors"
+            >
+              Réessayer
+            </button>
+          </div>
+        </div>
+      )}
+
+      {view === "matrix" && !err && annualLoading && (
+        <div className="flex-1 grid place-items-center text-[13px] text-muted-foreground">
+          Chargement du rapport annuel…
+        </div>
+      )}
+
+      {view === "matrix" && !err && !annualLoading && (
         <main
           className="flex-1 grid gap-2 min-h-0"
           style={{ gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gridTemplateRows: "repeat(6, minmax(0, 1fr))" }}

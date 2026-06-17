@@ -471,19 +471,29 @@ export async function topSalespersonsOrder(start: Date, end: Date, limit = 10): 
     orderBy: { _sum: { docTotal: "desc" } },
     take: limit,
   });
+  const slpNames = grouped.flatMap((g) => (g.slpName ? [g.slpName] : []));
+
+  // # clients actifs distincts par commercial — UNE requête (était N+1 :
+  // un findMany distinct par commercial). COUNT(DISTINCT cardCode) GROUP BY slpName
+  // sur les mêmes filtres (range + cancelled), restreint au top N.
+  const active = slpNames.length > 0
+    ? await prisma.$queryRaw<{ k: string; n: number }[]>(Prisma.sql`
+        SELECT o."slpName" AS k, COUNT(DISTINCT o."cardCode")::int AS n
+        FROM "SapOrder" o
+        WHERE o."cancelled" = false AND o."docDate" >= ${start} AND o."docDate" < ${end}
+          AND o."slpName" IN (${Prisma.join(slpNames)})
+        GROUP BY 1`)
+    : [];
+  const activeMap = new Map(active.map((r) => [r.k, Number(r.n)]));
+
   const out: TopSalespersonOrder[] = [];
   for (const g of grouped) {
     if (!g.slpName) continue;
-    const distinct = await prisma.sapOrder.findMany({
-      where: { docDate: { gte: start, lt: end }, cancelled: false, slpName: g.slpName },
-      select: { cardCode: true },
-      distinct: ["cardCode"],
-    });
     out.push({
       slpName: g.slpName,
       volume: g._sum.docTotal ?? 0,
       orders: g._count.docEntry,
-      activeClients: distinct.length,
+      activeClients: activeMap.get(g.slpName) ?? 0,
     });
   }
   return out;
@@ -852,7 +862,7 @@ export async function monthDrilldown(year: number, month: number, groupCodes?: n
   const slpW = slpWhere(slpName);
   const segRaw = Prisma.sql`${segmentSql("i", groupCodes)} ${slpSql("i", slpName)}`;
 
-  const [hdr, invMargin, invoices, lines, products] = await Promise.all([
+  const [hdr, invMargin, invoices, lines] = await Promise.all([
     prisma.sapInvoice.aggregate({
       where: { docDate: { gte: start, lt: end }, cancelled: false, ...seg, ...slpW },
       _sum: { docTotal: true },
@@ -868,8 +878,20 @@ export async function monthDrilldown(year: number, month: number, groupCodes?: n
       where: { invoice: { docDate: { gte: start, lt: end }, cancelled: false, ...seg, ...slpW } },
       select: { docEntry: true, itemCode: true, itemDescription: true, quantity: true, lineTotal: true },
     }),
-    prisma.product.findMany({ select: { itemCode: true, itemName: true, groupName: true, salesUnitWeight: true } }),
   ]);
+
+  // Catalogue restreint aux itemCode réellement présents dans les lignes du mois
+  // (était un findMany sans where = ~tout le catalogue). Les maps weight/name/group
+  // ne couvrent que les items utilisés — suffisant pour ce mois.
+  const usedItemCodes = Array.from(
+    new Set(lines.map((l) => l.itemCode).filter((c): c is string => c != null)),
+  );
+  const products = usedItemCodes.length > 0
+    ? await prisma.product.findMany({
+        where: { itemCode: { in: usedItemCodes } },
+        select: { itemCode: true, itemName: true, groupName: true, salesUnitWeight: true },
+      })
+    : [];
 
   const weightByItem = new Map(products.map((p) => [p.itemCode, p.salesUnitWeight ?? 0]));
   const nameByItem = new Map(products.map((p) => [p.itemCode, p.itemName]));
@@ -1075,29 +1097,34 @@ export async function topSalespersons(start: Date, end: Date, limit = 10, groupC
     take: limit,
   });
 
-  // Marge réelle (coût EM) restreinte aux commerciaux du top — pas le gp SAP.
-  const margins = await realMarginByKey(
-    "slpName",
-    grouped.flatMap((g) => (g.slpName ? [g.slpName] : [])),
-    start, end, groupCodes,
-  );
+  const slpNames = grouped.flatMap((g) => (g.slpName ? [g.slpName] : []));
 
-  // # clients actifs distincts par commercial — boucle sur les top N seulement.
+  // Marge réelle (coût EM) restreinte aux commerciaux du top — pas le gp SAP.
+  const margins = await realMarginByKey("slpName", slpNames, start, end, groupCodes);
+
+  // # clients actifs distincts par commercial — UNE seule requête (était N+1 :
+  // un findMany distinct par commercial). COUNT(DISTINCT cardCode) GROUP BY slpName
+  // sur les mêmes filtres (range + cancelled + segment), restreint au top N.
+  const active = slpNames.length > 0
+    ? await prisma.$queryRaw<{ k: string; n: number }[]>(Prisma.sql`
+        SELECT i."slpName" AS k, COUNT(DISTINCT i."cardCode")::int AS n
+        FROM "SapInvoice" i
+        WHERE i."cancelled" = false AND i."docDate" >= ${start} AND i."docDate" < ${end}
+          AND i."slpName" IN (${Prisma.join(slpNames)}) ${segmentSql("i", groupCodes)}
+        GROUP BY 1`)
+    : [];
+  const activeMap = new Map(active.map((r) => [r.k, Number(r.n)]));
+
   const withActive: TopSalesperson[] = [];
   for (const g of grouped) {
     if (!g.slpName) continue;
-    const distinct = await prisma.sapInvoice.findMany({
-      where: { docDate: { gte: start, lt: end }, cancelled: false, slpName: g.slpName, ...seg },
-      select: { cardCode: true },
-      distinct: ["cardCode"],
-    });
     const md = margins.get(g.slpName);
     withActive.push({
       slpName: g.slpName,
       ca: g._sum.docTotal ?? 0,
       caProductNet: md?.caProductNet ?? 0,
       margin: md?.margin ?? 0,
-      activeClients: distinct.length,
+      activeClients: activeMap.get(g.slpName) ?? 0,
       invoices: g._count.docEntry,
     });
   }
