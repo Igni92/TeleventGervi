@@ -7,6 +7,8 @@ import {
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { ClientImportButton } from "@/components/clients/ClientImportButton";
+import { ResyncButton } from "@/components/admin/ResyncButton";
+import { ProductsSyncButton } from "@/components/admin/ProductsSyncButton";
 import { useTheme } from "@/components/ThemeProvider";
 import { cn } from "@/lib/utils";
 import {
@@ -277,19 +279,49 @@ export function ParametresPanel({ admin = false }: { admin?: boolean }) {
         </div>
       </SurfaceCard>
 
-      {/* 6 ── Données / SAP (admin) — import des clients (alimente aussi la carte géo) ── */}
+      {/* 6 ── Données · SAP (admin) — HUB unique de synchronisation ──
+            Regroupe ici TOUTES les actions données (avant dispersées sur les
+            pages Clients / Plan d'appel) : clients, miroir stats, produits/stock.
+            Réservé aux administrateurs ; à lancer ponctuellement. */}
       {admin && (
         <SurfaceCard accent="sky" title="Données · SAP" icon={<Database className="h-3.5 w-3.5" />}>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-            <div className="min-w-0">
-              <p className="text-[13.5px] font-semibold text-foreground">Import des clients SAP</p>
-              <p className="text-[12px] text-muted-foreground mt-0.5 max-w-md">
-                Synchronise la base clients depuis SAP — y compris la localisation
-                (ville / code postal / pays) qui alimente la carte « Où je livre le plus ».
-                « Actualiser » n&apos;efface rien ; « Réimport complet » repart de zéro.
-              </p>
+          <p className="text-[12px] text-muted-foreground -mt-1 mb-1 max-w-xl">
+            Centre de synchronisation (administrateurs). Lectures épinglées sur la base réelle —
+            à lancer ponctuellement, pas en continu.
+          </p>
+          <div className="flex flex-col divide-y divide-border/50">
+            <div className="flex flex-col gap-2 py-3 first:pt-1 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+              <div className="min-w-0">
+                <p className="text-[13.5px] font-semibold text-foreground">Clients SAP</p>
+                <p className="text-[12px] text-muted-foreground mt-0.5 max-w-md">
+                  Base clients + localisation (ville / CP / pays, pour la carte). « Actualiser »
+                  n&apos;efface rien ; « Réimport complet » repart de zéro.
+                </p>
+              </div>
+              <div className="shrink-0"><ClientImportButton /></div>
             </div>
-            <div className="shrink-0"><ClientImportButton /></div>
+
+            <div className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+              <div className="min-w-0">
+                <p className="text-[13.5px] font-semibold text-foreground">Données stats (miroir comptable)</p>
+                <p className="text-[12px] text-muted-foreground mt-0.5 max-w-md">
+                  Factures, avoirs, commandes et fournisseurs — alimente le pilotage et les marges.
+                  Reconstruction complète : à relancer de temps en temps.
+                </p>
+              </div>
+              <div className="shrink-0"><ResyncButton /></div>
+            </div>
+
+            <div className="flex flex-col gap-2 py-3 last:pb-1 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+              <div className="min-w-0">
+                <p className="text-[13.5px] font-semibold text-foreground">Stock &amp; catalogue produits</p>
+                <p className="text-[12px] text-muted-foreground mt-0.5 max-w-md">
+                  Quantités et infos articles depuis SAP. Le stock « live » de la console se
+                  rafraîchit déjà tout seul ; ceci resynchronise le catalogue complet.
+                </p>
+              </div>
+              <div className="shrink-0"><ProductsSyncButton /></div>
+            </div>
           </div>
         </SurfaceCard>
       )}
