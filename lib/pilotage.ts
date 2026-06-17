@@ -60,12 +60,18 @@ function slpWhere(slpName?: string | null): { slpName: string } | Record<string,
   return slpName ? { slpName } : {};
 }
 
-/** Filtre commercial via la relation client (CRM : AppelLog/Client). Le
- *  rattachement typé disponible est `Client.commercial` (account manager) ;
- *  `vendeur` n'est pas dans le client Prisma typé → sous-scope sûr (jamais une
- *  fuite). null/undefined = pas de filtre (admin). */
-function clientOwnerWhere(slpName?: string | null): { commercial: string } | Record<string, never> {
-  return slpName ? { commercial: slpName } : {};
+/** Périmètre CRM d'un commercial : IDs des clients qu'il suit par `commercial`
+ *  (account manager) OU `vendeur` (réalité terrain — cf. console #18, décision
+ *  métier « commercial OU vendeur »). `vendeur` n'étant pas dans le client
+ *  Prisma typé, on résout les IDs en raw SQL puis on filtre par `clientId IN`.
+ *  null/undefined = AUCUN filtre (admin, vision globale — comportement
+ *  historique strictement préservé). */
+async function clientIdsForOwner(slpName?: string | null): Promise<string[] | null> {
+  if (!slpName) return null;
+  const rows = await prisma.$queryRaw<{ id: string }[]>(
+    Prisma.sql`SELECT "id" FROM "Client" WHERE "commercial" = ${slpName} OR "vendeur" = ${slpName}`,
+  );
+  return rows.map((r) => r.id);
 }
 
 /* ─────────────────────────────────────────────────────────────────
@@ -826,8 +832,9 @@ export interface CrmBucket {
 }
 
 export async function crmActivity(start: Date, end: Date, slpName?: string | null): Promise<CrmBucket> {
+  const ids = await clientIdsForOwner(slpName);
   const rows = await prisma.appelLog.findMany({
-    where: { heureAppel: { gte: start, lt: end }, ...(slpName ? { client: clientOwnerWhere(slpName) } : {}) },
+    where: { heureAppel: { gte: start, lt: end }, ...(ids ? { clientId: { in: ids } } : {}) },
     select: { clientId: true, type: true },
   });
   const appels = rows.length;
@@ -882,9 +889,10 @@ export interface ToRelance {
 
 export async function clientsToRelance(limit = 5, slpName?: string | null): Promise<ToRelance[]> {
   const last30 = new Date(); last30.setDate(last30.getDate() - 30);
-  // Clients planifiés (scopés au commercial pour un non-admin).
+  // Clients planifiés (scopés commercial OU vendeur pour un non-admin).
+  const ids = await clientIdsForOwner(slpName);
   const planifies = await prisma.client.findMany({
-    where: { joursAppel: { not: null }, ...clientOwnerWhere(slpName) },
+    where: { joursAppel: { not: null }, ...(ids ? { id: { in: ids } } : {}) },
     select: { id: true, code: true, nom: true, commercial: true },
   });
   if (planifies.length === 0) return [];
