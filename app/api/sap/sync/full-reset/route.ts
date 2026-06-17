@@ -7,6 +7,7 @@ import {
   pullInvoices,
   pullOrders,
   pullPdns,
+  pullPurchaseReturns,
   pullCreditNotes,
   syncClientGroupsFromMirror,
 } from "@/lib/sapMirror";
@@ -44,15 +45,20 @@ export async function POST(req: Request) {
   }
 
   try {
-    // 1) Purge du miroir docs (CASCADE → lignes). Ne touche PAS Client/Product.
+    // 1) Purge du miroir docs (CASCADE → lignes, dont SapPurchaseReturnLine via
+    //    SapPurchaseReturn). Ne touche PAS Client/Product.
+    //    NB : SapPurchaseReturn (retours/avoirs fournisseurs) est inclus, sans
+    //    quoi les Achats NET (= Σ PDN − Σ retours) restent périmés après reset.
+    //    ⚠️ Le truncate précède le pull : si un pull échoue ensuite, le miroir
+    //    peut rester partiel — relancer le full-reset pour le reconstruire.
     await prisma.$executeRawUnsafe(
-      `TRUNCATE TABLE "SapBusinessPartner", "SapInvoice", "SapOrder", "SapCreditNote", "SapPurchaseDeliveryNote" RESTART IDENTITY CASCADE;`,
+      `TRUNCATE TABLE "SapBusinessPartner", "SapInvoice", "SapOrder", "SapCreditNote", "SapPurchaseDeliveryNote", "SapPurchaseReturn" RESTART IDENTITY CASCADE;`,
     );
     // Reset des watermarks incrémentaux (best-effort).
     try {
       await prisma.sapMirrorCursor.update({
         where: { id: 1 },
-        data: { lastBpUpdate: null, lastInvoiceUpdate: null, lastOrderUpdate: null, lastPdnUpdate: null, lastCreditNoteUpdate: null },
+        data: { lastBpUpdate: null, lastInvoiceUpdate: null, lastOrderUpdate: null, lastPdnUpdate: null, lastCreditNoteUpdate: null, lastPurchaseReturnUpdate: null },
       });
     } catch { /* curseur absent → ignoré */ }
 
@@ -61,11 +67,12 @@ export async function POST(req: Request) {
     const groups = await syncClientGroupsFromMirror();
 
     // 3) Docs en parallèle (endpoints SAP indépendants).
-    const [inv, cn, ord, pdn] = await Promise.all([
+    const [inv, cn, ord, pdn, pret] = await Promise.all([
       pullInvoices({ from }),
       pullCreditNotes({ from }),
       pullOrders({ from }),
       pullPdns({ from }),
+      pullPurchaseReturns({ from }),
     ]);
 
     return NextResponse.json({
@@ -78,6 +85,7 @@ export async function POST(req: Request) {
       creditNotes: cn.pulled,
       orders: ord.pulled,
       pdns: pdn.pulled,
+      purchaseReturns: pret.pulled,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

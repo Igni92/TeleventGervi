@@ -31,35 +31,161 @@ interface ImportModalProps {
   onImported?: () => void;
 }
 
-function parseCSV(text: string): ParsedRow[] {
-  const lines = text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
+interface ParseOutcome {
+  rows: ParsedRow[];
+  duplicates: number; // nombre de lignes fusionnées (même code)
+}
 
-  if (lines.length === 0) return [];
+/**
+ * Décode un fichier CSV en texte.
+ * - Gère le BOM UTF-8.
+ * - Décode en UTF-8 d'abord ; si le caractère de remplacement `�` (U+FFFD)
+ *   apparaît (typique d'un export Excel FR en Latin1/Windows-1252),
+ *   redécode l'intégralité en windows-1252.
+ */
+function decodeCsv(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  // BOM UTF-8 (EF BB BF) → on laisse TextDecoder le gérer en mode non-fatal,
+  // mais on le retire explicitement après décodage par sécurité.
+  const utf8 = new TextDecoder("utf-8").decode(bytes);
+  let text = utf8;
+  if (utf8.includes("�")) {
+    try {
+      text = new TextDecoder("windows-1252").decode(bytes);
+    } catch {
+      // Environnement sans support windows-1252 → on garde l'UTF-8.
+      text = utf8;
+    }
+  }
+  // Retrait du BOM résiduel s'il subsiste.
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
 
-  // Détecter si la première ligne est un en-tête
-  const firstLine = lines[0].toLowerCase();
+/**
+ * Parser CSV correct (RFC 4180) :
+ *   - champs entre guillemets `"..."` : le séparateur à l'intérieur est ignoré ;
+ *   - guillemets échappés `""` → `"` ;
+ *   - retours chariot `\r` (CRLF/CR/LF) gérés, y compris dans un champ quoté.
+ * Le séparateur est détecté UNE SEULE FOIS sur la 1re ligne (compte , vs ;).
+ */
+function parseCsvRecords(text: string, sep: string): string[][] {
+  const records: string[][] = [];
+  let field = "";
+  let record: string[] = [];
+  let inQuotes = false;
+  let i = 0;
+  const n = text.length;
+
+  const pushField = () => {
+    record.push(field);
+    field = "";
+  };
+  const pushRecord = () => {
+    pushField();
+    records.push(record);
+    record = [];
+  };
+
+  while (i < n) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"'; // guillemet échappé
+          i += 2;
+          continue;
+        }
+        inQuotes = false;
+        i++;
+        continue;
+      }
+      field += ch;
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+      i++;
+      continue;
+    }
+    if (ch === sep) {
+      pushField();
+      i++;
+      continue;
+    }
+    if (ch === "\r") {
+      // \r seul ou \r\n → fin de ligne
+      pushRecord();
+      i += text[i + 1] === "\n" ? 2 : 1;
+      continue;
+    }
+    if (ch === "\n") {
+      pushRecord();
+      i++;
+      continue;
+    }
+    field += ch;
+    i++;
+  }
+  // Dernier champ/enregistrement si le fichier ne finit pas par un saut de ligne.
+  if (field.length > 0 || record.length > 0) pushRecord();
+  return records;
+}
+
+/** Détecte le séparateur (`,` ou `;`) sur la 1re ligne brute, hors guillemets. */
+function detectSeparator(text: string): string {
+  const firstLineEnd = text.search(/[\r\n]/);
+  const firstLine = firstLineEnd === -1 ? text : text.slice(0, firstLineEnd);
+  let comma = 0;
+  let semi = 0;
+  let inQuotes = false;
+  for (let i = 0; i < firstLine.length; i++) {
+    const ch = firstLine[i];
+    if (ch === '"') inQuotes = !inQuotes;
+    else if (!inQuotes && ch === ",") comma++;
+    else if (!inQuotes && ch === ";") semi++;
+  }
+  return semi > comma ? ";" : ",";
+}
+
+function parseCSV(text: string): ParseOutcome {
+  if (!text.trim()) return { rows: [], duplicates: 0 };
+
+  const sep = detectSeparator(text);
+  const records = parseCsvRecords(text, sep)
+    .map((cols) => cols.map((c) => c.trim()))
+    // Ignore les lignes entièrement vides.
+    .filter((cols) => cols.some((c) => c.length > 0));
+
+  if (records.length === 0) return { rows: [], duplicates: 0 };
+
+  // Détection d'en-tête sur la 1re ligne parsée.
+  const firstJoined = records[0].join(" ").toLowerCase();
   const hasHeader =
-    firstLine.includes("code") || firstLine.includes("nom") || firstLine.includes("tel");
+    firstJoined.includes("code") ||
+    firstJoined.includes("nom") ||
+    firstJoined.includes("tel");
 
-  const dataLines = hasHeader ? lines.slice(1) : lines;
+  const dataRecords = hasHeader ? records.slice(1) : records;
 
-  return dataLines
-    .map((line) => {
-      // Gère les virgules et les points-virgules comme séparateur
-      const sep = line.includes(";") ? ";" : ",";
-      const cols = line.split(sep).map((c) => c.trim().replace(/^"|"$/g, ""));
-      return {
-        code: cols[0] || "",
-        nom: cols[1] || "",
-        tel1: cols[2] || "",
-        tel2: cols[3] || "",
-        tel3: cols[4] || "",
-      };
-    })
-    .filter((r) => r.code);
+  // Dédoublonnage par code (dernier gagne) tout en conservant l'ordre d'apparition.
+  const byCode = new Map<string, ParsedRow>();
+  let duplicates = 0;
+  for (const cols of dataRecords) {
+    const code = (cols[0] || "").trim();
+    if (!code) continue;
+    const key = code.toUpperCase();
+    if (byCode.has(key)) duplicates++;
+    byCode.set(key, {
+      code,
+      nom: cols[1] || "",
+      tel1: cols[2] || "",
+      tel2: cols[3] || "",
+      tel3: cols[4] || "",
+    });
+  }
+
+  return { rows: Array.from(byCode.values()), duplicates };
 }
 
 export function ImportModal({ onImported }: ImportModalProps) {
@@ -72,12 +198,25 @@ export function ImportModal({ onImported }: ImportModalProps) {
   const handleFile = (file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const text = e.target?.result as string;
-      const parsed = parseCSV(text);
+      const buffer = e.target?.result;
+      if (!(buffer instanceof ArrayBuffer)) {
+        toast.error("Lecture du fichier impossible");
+        return;
+      }
+      const text = decodeCsv(buffer);
+      const { rows: parsed, duplicates } = parseCSV(text);
       setRows(parsed);
       setResult(null);
+      if (parsed.length === 0) {
+        toast.error("Aucune ligne valide détectée dans le fichier");
+      } else if (duplicates > 0) {
+        toast.warning(
+          `${duplicates} doublon${duplicates > 1 ? "s" : ""} de code fusionné${duplicates > 1 ? "s" : ""} (dernière occurrence conservée)`,
+        );
+      }
     };
-    reader.readAsText(file, "utf-8");
+    reader.onerror = () => toast.error("Erreur de lecture du fichier");
+    reader.readAsArrayBuffer(file);
   };
 
   const handleDrop = (e: React.DragEvent) => {
