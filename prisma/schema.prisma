@@ -569,6 +569,11 @@ model SapBusinessPartner {
   email      String?
   phone      String?
   active     Boolean   @default(true)
+  // Encours / risque crédit — miroir des champs SAP BusinessPartners (lecture
+  // seule côté app, peuplés par lib/sapMirror ; modification réservée à SAP B1).
+  creditLimit           Float?
+  currentAccountBalance Float?
+  frozen                Boolean   @default(false)
   updateDate DateTime? // SAP UpdateDate (ISO)
   syncedAt   DateTime  @default(now())
 
