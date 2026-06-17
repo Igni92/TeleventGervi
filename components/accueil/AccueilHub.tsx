@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { PromoBanner } from "@/components/promos/PromoBanner";
 import { KpiStrip } from "./KpiStrip";
-import { ModuleGrid } from "./ModuleGrid";
 import { DernieresCommandes } from "./DernieresCommandes";
 import { AlertesEncours } from "./AlertesEncours";
 import { PromosAccueil } from "./PromosAccueil";
@@ -85,9 +84,10 @@ export function AccueilHub() {
       <KpiStrip />
 
       {/* ── Bento principal ────────────────────────────────── */}
+      {/* La grille « Modules » a été retirée (doublon de la navigation laté-
+          rale) : l'accueil se concentre sur l'activité du jour. */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         <div className="lg:col-span-7 space-y-4 min-w-0">
-          <ModuleGrid />
           <DernieresCommandes />
         </div>
         <div className="lg:col-span-5 space-y-4 min-w-0">
