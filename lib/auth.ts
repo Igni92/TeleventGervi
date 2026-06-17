@@ -35,17 +35,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return true;
     },
     async jwt({ token, account }) {
+      // Le jeton Microsoft (Graph) reste UNIQUEMENT dans le JWT chiffré (cookie
+      // httpOnly), jamais recopié dans la session renvoyée au navigateur via
+      // /api/auth/session. Les routes serveur le relisent via getToken()
+      // (cf. app/api/reminders/route.ts) — pas de fuite côté client.
       if (account) {
         token.accessToken = account.access_token;
         token.refreshToken = account.refresh_token;
         token.expiresAt = account.expires_at;
       }
       return token;
-    },
-    async session({ session, token }) {
-      (session as { accessToken?: string } & typeof session).accessToken =
-        token.accessToken as string | undefined;
-      return session;
     },
   },
   pages: {
@@ -54,9 +53,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
 });
 
-// Extend next-auth Session type
-declare module "next-auth" {
-  interface Session {
+// Le jeton d'accès Graph vit dans le JWT (server-only), PAS dans la Session
+// exposée au client. Typage du JWT pour getToken()/le callback jwt.
+declare module "next-auth/jwt" {
+  interface JWT {
     accessToken?: string;
+    refreshToken?: string;
+    expiresAt?: number;
   }
 }

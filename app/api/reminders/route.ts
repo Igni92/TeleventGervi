@@ -1,9 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getToken } from "next-auth/jwt";
 import { auth } from "@/lib/auth";
 import { getAccessScope, clientInScope, clientIdsInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { rappelSchema } from "@/lib/validations";
 import { createCalendarEvent, deleteCalendarEvent } from "@/lib/graph";
+
+/**
+ * Jeton Microsoft Graph de l'utilisateur, lu depuis le JWT CHIFFRÉ (cookie
+ * httpOnly) — jamais exposé au navigateur (cf. lib/auth.ts). Non bloquant : si
+ * absent/illisible, on n'écrit pas l'événement calendrier mais le rappel est
+ * tout de même créé en base.
+ */
+async function graphToken(req: NextRequest): Promise<string | undefined> {
+  try {
+    const t = await getToken({
+      req,
+      secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+      secureCookie: process.env.NODE_ENV === "production",
+    });
+    return (t?.accessToken as string | undefined) ?? undefined;
+  } catch (e) {
+    console.error("[reminders] lecture du jeton Graph échouée (non bloquant):", e);
+    return undefined;
+  }
+}
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -64,10 +85,11 @@ export async function POST(req: NextRequest) {
     let msEventId: string | null = null;
 
     // Try to create Microsoft Calendar event if we have an access token
-    if (session.accessToken) {
+    const accessToken = await graphToken(req);
+    if (accessToken) {
       try {
         const event = await createCalendarEvent(
-          session.accessToken,
+          accessToken,
           client,
           dateRappel,
           data.note
@@ -128,9 +150,10 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
 
     // Delete Microsoft Calendar event if cancelling and event exists
-    if (statut === "ANNULE" && existing.msEventId && session.accessToken) {
+    const accessToken = statut === "ANNULE" && existing.msEventId ? await graphToken(req) : undefined;
+    if (statut === "ANNULE" && existing.msEventId && accessToken) {
       try {
-        await deleteCalendarEvent(session.accessToken, existing.msEventId);
+        await deleteCalendarEvent(accessToken, existing.msEventId);
       } catch (graphError) {
         console.error("Graph API delete error (non-blocking):", graphError);
       }
