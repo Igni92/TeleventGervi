@@ -63,7 +63,7 @@ const GROUPS: { label: string | null; items: NavItem[] }[] = [
     ],
   },
   {
-    label: "Opérations",
+    label: "Télévente",
     items: [
       { href: "/console", label: "Console", icon: Radio },
       { href: "/plan-appel", label: "Plan d'appel", icon: ClipboardList },
