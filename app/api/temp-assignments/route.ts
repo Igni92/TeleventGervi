@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getAccessScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { parisStartOfDay } from "@/lib/paris-time";
 
 /**
  * Temporary daily assignments — pick up another commercial's clients for the day.
@@ -14,10 +15,10 @@ import { prisma } from "@/lib/prisma";
  * original commercial assignment naturally takes over again.
  */
 
+// Début du jour en heure de Paris (cohérent avec /api/console & /api/commerciaux
+// qui lisent/écrivent Presence & TempAssignment sur la même borne).
 function dayStart(d = new Date()): Date {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
+  return parisStartOfDay(d);
 }
 
 /**

@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { parisStartOfDay } from "@/lib/paris-time";
 
-function todayStart() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
+// Début du jour en heure de Paris — cohérent avec /api/console et
+// /api/temp-assignments (qui lisent/écrivent ces Presence sur la même borne).
+function todayStart() { return parisStartOfDay(); }
 
 /**
  * GET /api/commerciaux

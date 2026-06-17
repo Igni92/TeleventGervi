@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { computeInsights } from "@/lib/insights";
 import { getAccessScope, getOwnSlpName } from "@/lib/permissions";
+import { parisStartOfDay, parisEndOfDay, parisDayOfWeek } from "@/lib/paris-time";
 
 /**
  * GET /api/console
@@ -19,10 +20,12 @@ export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  // Jour ouvré en heure de PARIS (le serveur tourne en UTC) — sinon la file et
+  // les stats du jour basculent à 02h heure française (cf. lib/paris-time).
   const now = new Date();
-  const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
-  const todayEnd = new Date(todayStart); todayEnd.setDate(todayEnd.getDate() + 1);
-  const todayDay = now.getDay(); // 0..6
+  const todayStart = parisStartOfDay(now);
+  const todayEnd = parisEndOfDay(now);
+  const todayDay = parisDayOfWeek(now); // 0=dim..6=sam, en heure de Paris
 
   // Today's temp assignments for me (clients I've claimed from other commercials)
   const myClaims = session.user.id
