@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
@@ -34,23 +35,33 @@ export async function POST() {
   }
 
   // Singleton cursor (id=1) — créé à la 1ère exécution
-  const cursor = await prisma.stockSyncCursor.upsert({
-    where: { id: 1 },
-    update: {},
-    create: { id: 1 },
-  });
+  await prisma.stockSyncCursor.upsert({ where: { id: 1 }, update: {}, create: { id: 1 } });
 
-  if (Date.now() - cursor.lastTickAt.getTime() < THROTTLE_MS) {
+  // Claim ATOMIQUE du tick : l'UPDATE conditionnel ne touche la ligne que si
+  // lastTickAt est assez vieux → un seul process franchit la fenêtre de throttle.
+  // Évite que plusieurs consoles déclenchent des pulls SAP concurrents (la
+  // version précédente lisait puis comparait → course possible).
+  const claimed = await prisma.$queryRaw<
+    { lastOrderDocEntry: number; lastPdnDocEntry: number }[]
+  >(Prisma.sql`
+    UPDATE "StockSyncCursor"
+       SET "lastTickAt" = now()
+     WHERE id = 1 AND "lastTickAt" < now() - make_interval(secs => ${THROTTLE_MS / 1000})
+    RETURNING "lastOrderDocEntry", "lastPdnDocEntry"`);
+
+  if (claimed.length === 0) {
+    const c = await prisma.stockSyncCursor.findUnique({ where: { id: 1 } });
     return NextResponse.json({
       ok: true,
       throttled: true,
-      lastTickAt: cursor.lastTickAt,
-      cursor: {
-        lastOrderDocEntry: cursor.lastOrderDocEntry,
-        lastPdnDocEntry: cursor.lastPdnDocEntry,
-      },
+      lastTickAt: c?.lastTickAt,
+      cursor: { lastOrderDocEntry: c?.lastOrderDocEntry, lastPdnDocEntry: c?.lastPdnDocEntry },
     });
   }
+  const cursor = {
+    lastOrderDocEntry: claimed[0].lastOrderDocEntry,
+    lastPdnDocEntry: claimed[0].lastPdnDocEntry,
+  };
 
   try {
     // ── Auto-rattrapage du curseur ──────────────────────────────────────────
