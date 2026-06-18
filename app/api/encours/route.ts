@@ -3,18 +3,21 @@ import { auth } from "@/lib/auth";
 import { getAccessScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
+import { netEncours } from "@/lib/encours-net";
 
 /**
- * GET /api/encours — état des encours clients (factures dues).
+ * GET /api/encours — état des encours clients (factures dues), AU NET.
  *
  * Lit en direct les factures **ouvertes** SAP (DocumentStatus=bost_Open, non
- * annulées) sur la **base réelle (PROD)**. Solde dû = DocTotal − PaidToDate.
+ * annulées) sur la **base réelle (PROD)**. Solde facture = DocTotal − PaidToDate.
+ *
+ * ⚠️ Le dû affiché est le **NET** : on soustrait l'encaissé non encore affecté
+ * (= solde compte tiers SAP `CurrentAccountBalance`, lu en direct = SOLDE du
+ * grand livre), alloué aux tranches d'ancienneté les plus anciennes d'abord
+ * (cf. lib/encours-net). On ne compte donc jamais du déjà payé.
  *
  * ⚠️ Conditions de paiement = 30 jours → une facture n'est « en retard » que
- * **passé 30 jours** au-delà de l'échéance. Paliers comptés : >30j / >45j / >90j.
- *
- * Agrège par client (+ id local pour lien fiche). Base d'un futur système de
- * relance automatique selon le retard.
+ * **passé 30 jours** au-delà de l'échéance. Paliers : >30j / >45j / >90j.
  */
 export const dynamic = "force-dynamic";
 
@@ -30,26 +33,31 @@ interface OpenInvoice {
   DocTotal?: number;
   PaidToDate?: number;
 }
+interface BpBalance {
+  CardCode: string;
+  CurrentAccountBalance?: number;
+}
 
 interface InvoiceLine {
   docEntry: number;
   docNum: number | null;
   docDate: string | null;
   dueDate: string | null;
-  balance: number;     // solde dû
+  balance: number;     // solde dû (brut, par facture)
   overdueDays: number; // jours au-delà de l'échéance (0 si à jour)
 }
 interface ClientEncours {
   cardCode: string;
   cardName: string;
   clientId: string | null;
-  encours: number;
-  countOpen: number;  // nb factures avec solde dû
-  // Paliers de retard EXCLUSIFS (une facture ne compte que dans une tranche).
-  b3045: number;      // 30 < retard ≤ 45 j
-  b4590: number;      // 45 < retard ≤ 90 j
-  b90: number;        // retard > 90 j
-  countLate: number;  // nb factures en retard (> 30 j)
+  encours: number;     // NET (encaissé déduit)
+  encaisse: number;    // encaissé non affecté déduit du brut
+  countOpen: number;   // nb factures avec solde dû
+  // Paliers de retard EXCLUSIFS, NETS (une facture ne compte que dans une tranche).
+  b3045: number;       // 30 < retard ≤ 45 j
+  b4590: number;       // 45 < retard ≤ 90 j
+  b90: number;         // retard > 90 j
+  countLate: number;   // nb factures en retard (> 30 j) — info (sur les factures)
   maxOverdueDays: number;
   invoices: InvoiceLine[];
 }
@@ -76,21 +84,36 @@ export async function GET() {
   }
 
   let invs: OpenInvoice[];
+  let bps: BpBalance[];
   try {
-    invs = await sap.getAll<OpenInvoice>(
-      "Invoices?$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,PaidToDate"
-      + "&$filter=DocumentStatus eq 'bost_Open' and Cancelled eq 'tNO'",
-      { pageSize: 200, maxPages: 200, env: "prod" },
-    );
+    [invs, bps] = await Promise.all([
+      sap.getAll<OpenInvoice>(
+        "Invoices?$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,PaidToDate"
+        + "&$filter=DocumentStatus eq 'bost_Open' and Cancelled eq 'tNO'",
+        { pageSize: 200, maxPages: 200, env: "prod" },
+      ),
+      // Solde NET par client (encaissé déduit). Best-effort : si KO, on garde le
+      // brut (pas de blocage de la page).
+      sap.getAll<BpBalance>(
+        "BusinessPartners?$select=CardCode,CurrentAccountBalance&$filter=CardType eq 'cCustomer'",
+        { pageSize: 500, maxPages: 100, env: "prod" },
+      ).catch((e) => {
+        console.error("[encours] lecture des soldes compte échouée (repli brut):", e);
+        return [] as BpBalance[];
+      }),
+    ]);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ ok: false, error: `Lecture SAP échouée : ${msg}` }, { status: 502 });
   }
 
+  const cabByCode = new Map<string, number>();
+  for (const b of bps) {
+    if (typeof b.CurrentAccountBalance === "number") cabByCode.set(b.CardCode, b.CurrentAccountBalance);
+  }
+
   const now = Date.now();
   const byClient = new Map<string, ClientEncours>();
-  let totalEncours = 0;
-  let tot3045 = 0, tot4590 = 0, tot90 = 0;
 
   for (const inv of invs) {
     if (allowed && !allowed.has(inv.CardCode)) continue; // hors périmètre commercial
@@ -99,19 +122,18 @@ export async function GET() {
     const due = inv.DocDueDate ? new Date(inv.DocDueDate).getTime() : null;
     const overdueDays = due ? Math.max(0, Math.floor((now - due) / 86_400_000)) : 0;
     const late = overdueDays > GRACE_DAYS; // en retard seulement passé 30 j
-    totalEncours += bal;
 
     const e = byClient.get(inv.CardCode) ?? {
       cardCode: inv.CardCode, cardName: inv.CardName ?? inv.CardCode, clientId: null,
-      encours: 0, countOpen: 0, b3045: 0, b4590: 0, b90: 0,
+      encours: 0, encaisse: 0, countOpen: 0, b3045: 0, b4590: 0, b90: 0,
       countLate: 0, maxOverdueDays: 0, invoices: [] as InvoiceLine[],
     };
-    e.encours += bal;
+    e.encours += bal; // brut pour l'instant — mis au net après la boucle
     e.countOpen++;
     // Tranches EXCLUSIVES : la facture ne tombe que dans une seule.
-    if (overdueDays > 90) { tot90 += bal; e.b90 += bal; }
-    else if (overdueDays > 45) { tot4590 += bal; e.b4590 += bal; }
-    else if (overdueDays > 30) { tot3045 += bal; e.b3045 += bal; }
+    if (overdueDays > 90) e.b90 += bal;
+    else if (overdueDays > 45) e.b4590 += bal;
+    else if (overdueDays > 30) e.b3045 += bal;
     if (late) { e.countLate++; e.maxOverdueDays = Math.max(e.maxOverdueDays, overdueDays); }
     e.invoices.push({
       docEntry: inv.DocEntry,
@@ -126,7 +148,27 @@ export async function GET() {
     byClient.set(inv.CardCode, e);
   }
 
-  const aggregated = Array.from(byClient.values()).sort((a, b) => b.encours - a.encours);
+  // Mise au NET : on soustrait l'encaissé non affecté (solde compte tiers).
+  for (const e of byClient.values()) {
+    const cab = cabByCode.has(e.cardCode) ? cabByCode.get(e.cardCode)! : null;
+    const n = netEncours({ openTotal: e.encours, b3045: e.b3045, b4590: e.b4590, b90: e.b90, currentAccountBalance: cab });
+    e.encours = n.net;
+    e.encaisse = n.encaisse;
+    e.b3045 = n.b3045;
+    e.b4590 = n.b4590;
+    e.b90 = n.b90;
+  }
+
+  // On ne liste que les clients dont le NET reste dû (le déjà-payé sort de la liste).
+  const aggregated = Array.from(byClient.values())
+    .filter((c) => c.encours > 0.01)
+    .sort((a, b) => b.encours - a.encours);
+
+  // Totaux au net.
+  const totalEncours = aggregated.reduce((s, c) => s + c.encours, 0);
+  const tot3045 = aggregated.reduce((s, c) => s + c.b3045, 0);
+  const tot4590 = aggregated.reduce((s, c) => s + c.b4590, 0);
+  const tot90 = aggregated.reduce((s, c) => s + c.b90, 0);
 
   // Lien fiche : id local par code (quand le client existe en base).
   const codes = aggregated.map((c) => c.cardCode);
@@ -151,9 +193,9 @@ export async function GET() {
       cardCode: c.cardCode,
       cardName: c.cardName,
       clientId: idByCode.get(c.cardCode) ?? null,
-      // Précision complète (cents) : le total client doit réconcilier avec la
-      // somme des soldes du détail (modale). L'affichage compacte si besoin.
+      // Précision complète (cents). Encours = NET (encaissé déduit).
       encours: Math.round(c.encours * 100) / 100,
+      encaisse: Math.round(c.encaisse * 100) / 100,
       countOpen: c.countOpen,
       b3045: Math.round(c.b3045 * 100) / 100,
       b4590: Math.round(c.b4590 * 100) / 100,
