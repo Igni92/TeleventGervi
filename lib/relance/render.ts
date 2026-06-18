@@ -6,7 +6,7 @@
  * (multi-factures) est rendu spécifiquement : tableau HTML pour l'email, liste
  * à puces pour la version texte.
  *
- * Sortie : { subject, html, text } prête pour Microsoft Graph (sendMail, HTML).
+ * Sortie : { subject, html, text } prête pour Graph (sendMailAsShared, HTML).
  */
 import type { RelanceCode } from "./levels";
 import { type RelanceContext, invoiceRows } from "./fields";

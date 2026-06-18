@@ -18,7 +18,7 @@ import {
 } from "./fields";
 import { getLevel, type RelanceCode } from "./levels";
 import { renderRelance, type RenderedRelance } from "./render";
-import { resolveRecipient, type ResolvedRecipient } from "./delivery";
+import { resolveRecipient, fromAddress, type ResolvedRecipient } from "./delivery";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -46,6 +46,8 @@ export interface RelancePackage {
   clientEmailCompta: string | null;
   level: RelanceCode;
   channel: string;
+  /** Boîte expéditrice (boîte partagée — identité applicative). */
+  from: string;
   recipient: ResolvedRecipient;
   context: RelanceContext;
   rendered: RenderedRelance;
@@ -159,6 +161,7 @@ export async function buildRelancePackage(
     clientEmailCompta,
     level,
     channel: lvl.canal,
+    from: fromAddress(),
     recipient,
     context,
     rendered,

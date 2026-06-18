@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
 import { auth } from "@/lib/auth";
 import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { isRelanceCode } from "@/lib/relance/levels";
 import { buildRelancePackage, RelanceInputError } from "@/lib/relance/server";
-import { sendMail } from "@/lib/graph";
+import { sendMailAsShared } from "@/lib/graph";
 
 /**
- * POST /api/relance/send — envoie le courrier de relance via Microsoft Graph
- * (au nom de l'opérateur connecté) et JOURNALISE l'envoi (RelanceLog, §6).
+ * POST /api/relance/send — envoie le courrier de relance DEPUIS la boîte
+ * partagée (compta@…) via l'identité applicative Graph, et JOURNALISE l'envoi
+ * (RelanceLog, §6).
+ *
+ * L'opérateur connecté n'a besoin d'AUCUNE permission Graph perso : l'envoi
+ * utilise la permission d'APPLICATION Mail.Send (client credentials). La session
+ * ne sert qu'à l'autorisation (périmètre commercial).
  *
  * En mode test (défaut), le destinataire est redirigé vers la boîte de test
  * (cf. lib/relance/delivery) — aucun email n'atteint les vrais débiteurs.
@@ -17,21 +21,6 @@ import { sendMail } from "@/lib/graph";
  * Body : { cardCode: string, level: "R0".."R5" }
  */
 export const dynamic = "force-dynamic";
-
-/** Jeton Graph lu depuis le JWT chiffré (httpOnly) — cf. /api/reminders. */
-async function graphToken(req: NextRequest): Promise<string | undefined> {
-  try {
-    const t = await getToken({
-      req,
-      secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
-      secureCookie: process.env.NODE_ENV === "production",
-    });
-    return (t?.accessToken as string | undefined) ?? undefined;
-  } catch (e) {
-    console.error("[relance/send] lecture du jeton Graph échouée:", e);
-    return undefined;
-  }
-}
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -73,21 +62,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
   }
 
-  const token = await graphToken(req);
-  if (!token) {
-    return NextResponse.json(
-      { ok: false, error: "Jeton Microsoft indisponible — reconnectez-vous pour autoriser l'envoi d'emails (scope Mail.Send)." },
-      { status: 401 },
-    );
-  }
-
   const docEntries = pkg.context.invoices.map((i) => i.docEntry);
   const docNums = pkg.context.invoices.map((i) => (i.docNum ?? i.docEntry)).join(", ");
   const { totals } = pkg.context;
   const sentBy = session.user.email ?? null;
 
   try {
-    await sendMail(token, {
+    await sendMailAsShared(pkg.from, {
       to: pkg.recipient.to,
       subject: pkg.rendered.subject,
       html: pkg.rendered.html,
@@ -106,7 +87,7 @@ export async function POST(req: NextRequest) {
         status: "ECHEC", error: msg.slice(0, 500), sentBy,
       },
     }).catch((logErr) => console.error("[relance/send] journalisation ECHEC impossible:", logErr));
-    return NextResponse.json({ ok: false, error: `Envoi Graph échoué : ${msg}` }, { status: 502 });
+    return NextResponse.json({ ok: false, error: `Envoi depuis ${pkg.from} échoué : ${msg}` }, { status: 502 });
   }
 
   const log = await prisma.relanceLog.create({
@@ -121,5 +102,5 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  return NextResponse.json({ ok: true, logId: log.id, recipient: pkg.recipient, level });
+  return NextResponse.json({ ok: true, logId: log.id, from: pkg.from, recipient: pkg.recipient, level });
 }

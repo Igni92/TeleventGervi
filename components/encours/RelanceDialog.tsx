@@ -22,6 +22,7 @@ interface PreviewData {
   subject: string;
   html: string;
   channel: string;
+  from: string;
   recommande: boolean;
   recipient: PreviewRecipient;
   clientEmailCompta: string | null;
@@ -179,7 +180,7 @@ export function RelanceDialog({
               <div className="flex items-start gap-2 rounded-lg border border-amber-400/60 bg-amber-50 dark:bg-amber-950/25 px-3 py-2">
                 <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
                 <p className="text-[12px] text-amber-800 dark:text-amber-200">
-                  <b>Mode test</b> — l&apos;email partira vers <b className="font-mono">{preview.recipient.to}</b>
+                  <b>Mode test</b> — depuis <b className="font-mono">{preview.from}</b>, l&apos;email partira vers <b className="font-mono">{preview.recipient.to}</b>
                   {preview.recipient.intendedTo
                     ? <> et non vers le client (<span className="font-mono">{preview.recipient.intendedTo}</span>).</>
                     : <> (aucun email compta connu pour ce client).</>}
@@ -189,7 +190,7 @@ export function RelanceDialog({
               <div className="flex items-start gap-2 rounded-lg border border-emerald-400/60 bg-emerald-50 dark:bg-emerald-950/25 px-3 py-2">
                 <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
                 <p className="text-[12px] text-emerald-800 dark:text-emerald-200">
-                  <b>Envoi réel</b> — destinataire <b className="font-mono">{preview.recipient.to}</b>.
+                  <b>Envoi réel</b> — depuis <b className="font-mono">{preview.from}</b> vers <b className="font-mono">{preview.recipient.to}</b>.
                 </p>
               </div>
             )
@@ -253,7 +254,7 @@ export function RelanceDialog({
         {/* Pied : envoi */}
         <footer className="shrink-0 flex items-center justify-between gap-3 px-5 py-3 border-t border-border">
           <p className="text-[11px] text-muted-foreground max-w-md">
-            L&apos;email part au nom de votre compte Microsoft. {meta.canal.includes("LRAR") && <b className="text-amber-600 dark:text-amber-400">Niveau LRAR : l&apos;email de test ne remplace pas le recommandé postal. </b>}
+            L&apos;email part depuis la boîte partagée{preview?.from ? <> <b className="font-mono">{preview.from}</b></> : ""}. {meta.canal.includes("LRAR") && <b className="text-amber-600 dark:text-amber-400">Niveau LRAR : l&apos;email de test ne remplace pas le recommandé postal. </b>}
             Chaque envoi est journalisé (piste d&apos;audit).
           </p>
           <button

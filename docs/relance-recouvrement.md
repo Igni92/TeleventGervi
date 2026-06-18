@@ -22,7 +22,7 @@ dans la note technique **NT-2026-RC-01**. Objectif : industrialiser les relances
 | `lib/relance/render.ts` | Modèles R0→R5 (texte de la note) + moteur de rendu (HTML/texte). |
 | `lib/relance/delivery.ts` | Acheminement : mode **test** (redirection) vs **live**. |
 | `lib/relance/server.ts` | Assemblage serveur : lit les factures SAP ouvertes, rend le courrier. |
-| `lib/graph.ts` → `sendMail` | Envoi via Microsoft Graph (`/me/sendMail`). |
+| `lib/graph.ts` → `sendMailAsShared` | Envoi via Graph depuis la boîte partagée (`/users/{from}/sendMail`, identité applicative). |
 | `app/api/relance/preview` | Aperçu (sans envoi). |
 | `app/api/relance/send` | Envoi + journalisation (`RelanceLog`). |
 | `app/api/relance/log` | Historique d'un client. |
@@ -94,12 +94,30 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value", "updatedAt" = now(
 - **Anti-doublon** : un envoi identique (même client + niveau) émis il y a moins
   de 2 minutes est refusé (409) ; l'UI verrouille aussi le bouton après envoi.
 
-### Prérequis Microsoft Graph
+### Expéditeur : boîte partagée via identité applicative
 
-L'envoi utilise `/me/sendMail` → scope **`Mail.Send`** (ajouté dans
-`lib/auth.ts`). **Comme le scope a été ajouté après coup, les comptes déjà
-connectés doivent se reconnecter une fois** pour consentir le nouveau scope
-(sinon l'API renvoie 401 « reconnectez-vous »).
+Les relances partent de la **boîte partagée** `RELANCE_FROM_ADDRESS` (défaut
+`compta@gervifrais.com`), envoyées par l'**identité applicative** (client
+credentials : `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `AZURE_TENANT_ID`) via
+`POST /users/{from}/sendMail`. L'opérateur n'a besoin d'aucune permission Graph
+personnelle ; la session ne sert qu'à l'autorisation (périmètre commercial). Cela
+couvre aussi la future automatisation (cron, sans utilisateur connecté).
+
+**Prérequis Azure / Exchange (admin, une fois) :**
+1. Azure AD → App registration → **API permissions** → Microsoft Graph →
+   **Application permissions** → **`Mail.Send`** → **Grant admin consent**.
+2. (Fortement recommandé) **ApplicationAccessPolicy** Exchange Online restreignant
+   l'app à la seule boîte `compta@gervifrais.com` — sinon la permission permet
+   d'envoyer depuis n'importe quelle boîte du tenant :
+   ```powershell
+   New-ApplicationAccessPolicy -AppId <AZURE_CLIENT_ID> `
+     -PolicyScopeGroupId compta@gervifrais.com -AccessRight RestrictAccess `
+     -Description "TeleVent — relances depuis compta@ uniquement"
+   ```
+3. `AZURE_CLIENT_SECRET` valide dans l'environnement de l'app.
+
+Erreurs explicites côté API : `401/invalid_client` = secret/app KO ; `403` =
+permission `Mail.Send` non accordée ou boîte hors ApplicationAccessPolicy.
 
 ## Journalisation (§6)
 

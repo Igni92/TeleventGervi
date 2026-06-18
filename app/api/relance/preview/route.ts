@@ -37,6 +37,7 @@ export async function POST(req: NextRequest) {
       cardName: pkg.cardName,
       level: pkg.level,
       channel: pkg.channel,
+      from: pkg.from,
       subject: pkg.rendered.subject,
       html: pkg.rendered.html,
       text: pkg.rendered.text,
