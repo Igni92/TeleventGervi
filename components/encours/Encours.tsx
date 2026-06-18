@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Loader2, RefreshCw, Euro, AlertTriangle, Clock, Flame, Search, ExternalLink, X } from "lucide-react";
+import { Loader2, RefreshCw, Euro, AlertTriangle, Clock, Flame, Search, ExternalLink, X, Send } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ClientLink } from "@/components/ClientLink";
+import { RelanceDialog } from "@/components/encours/RelanceDialog";
 
 interface InvoiceLine {
   docEntry: number;
@@ -49,6 +50,7 @@ export function Encours() {
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [search, setSearch] = useState("");
   const [drill, setDrill] = useState<ClientEncours | null>(null);
+  const [relance, setRelance] = useState<ClientEncours | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -160,13 +162,30 @@ export function Encours() {
         </p>
       )}
 
-      {drill && <InvoicesModal client={drill} onClose={() => setDrill(null)} />}
+      {drill && (
+        <InvoicesModal
+          client={drill}
+          onClose={() => setDrill(null)}
+          onRelance={(c) => { setDrill(null); setRelance(c); }}
+        />
+      )}
+      {relance && (
+        <RelanceDialog
+          cardCode={relance.cardCode}
+          cardName={relance.cardName}
+          // Vrai retard max (jours/échéance, NON borné par la grâce de 30 j de
+          // l'encours) → suggestion de niveau R0→R5 correcte dès J+8.
+          maxOverdueDays={relance.invoices.reduce((m, i) => Math.max(m, i.overdueDays), 0)}
+          onClose={() => setRelance(null)}
+          onSent={load}
+        />
+      )}
     </div>
   );
 }
 
 /* ── Détail des factures d'un client ─────────────────────── */
-function InvoicesModal({ client, onClose }: { client: ClientEncours; onClose: () => void }) {
+function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; onClose: () => void; onRelance: (c: ClientEncours) => void }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", h);
@@ -189,6 +208,13 @@ function InvoicesModal({ client, onClose }: { client: ClientEncours; onClose: ()
             </p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => onRelance(client)}
+              className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md bg-brand-600 text-white text-[12px] font-semibold hover:bg-brand-700"
+            >
+              <Send className="h-3.5 w-3.5" /> Relancer
+            </button>
             {client.clientId && (
               <Link href={`/clients/${client.clientId}`} className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md border border-border text-[12px] font-medium text-muted-foreground hover:text-foreground">
                 <ExternalLink className="h-3.5 w-3.5" /> Fiche

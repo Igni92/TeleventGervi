@@ -855,3 +855,40 @@ model Promo {
   @@index([itemCode])
   @@index([active])
 }
+
+// ── Relance / recouvrement des encours — NT-2026-RC-01 (§6 « Journalisation ») ──
+// Piste d'audit : UNE ligne par courrier de relance émis (R0→R5). Horodatée,
+// rattachée au tiers, avec le niveau, le canal, le destinataire et le décompte
+// (principal / pénalités / IFR / total). Constitue la preuve des diligences en
+// cas de contentieux. Table créée par migration additive
+// (prisma/migrations/manual/20260618_relance_log.sql, appliquée via Supabase MCP).
+model RelanceLog {
+  id               String   @id @default(cuid())
+  cardCode         String // tiers SAP relancé
+  clientId         String? // fiche locale (lien) si rattachée
+  level            String // R0 | R1 | R2 | R3 | R4 | R5
+  channel          String // Email | Email + appel | LRAR…
+  subject          String
+  // Destinataire RÉELLEMENT utilisé pour l'envoi (en mode test = boîte de test).
+  recipient        String
+  // Destinataire « réel » qui aurait été visé hors test (email compta du client).
+  intendedTo       String?
+  // true = envoi redirigé vers la boîte de test (mode de validation).
+  testMode         Boolean  @default(true)
+  docEntries       Int[] // factures incluses (SAP DocEntry)
+  docNums          String? // n° de factures (affichage), séparés par des virgules
+  montantPrincipal Float    @default(0)
+  montantPenalites Float    @default(0)
+  montantIfr       Float    @default(0)
+  montantTotal     Float    @default(0)
+  status           String   @default("ENVOYE") // ENVOYE | ECHEC
+  error            String? // message si ECHEC
+  msMessageId      String? // identifiant Microsoft Graph (si disponible)
+  sentBy           String? // email de l'opérateur
+  sentAt           DateTime @default(now())
+
+  @@index([cardCode])
+  @@index([clientId])
+  @@index([level])
+  @@index([sentAt])
+}

@@ -15,7 +15,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // La restriction est faite dans le callback signIn ci-dessous
       authorization: {
         params: {
-          scope: "openid profile email offline_access Calendars.ReadWrite User.Read",
+          // Mail.Send : envoi des relances de recouvrement via Graph (/me/sendMail).
+          // Ajout postérieur au déploiement → les comptes déjà connectés doivent
+          // se reconnecter une fois pour consentir le nouveau scope.
+          scope: "openid profile email offline_access Calendars.ReadWrite Mail.Send User.Read",
           // Forcer le tenant spécifique au niveau de la requête d'autorisation
           tenant: process.env.AZURE_TENANT_ID,
         },

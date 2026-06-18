@@ -18,7 +18,8 @@ export default async function EncoursPage() {
         </h1>
         <p className="text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
           Factures dues (non soldées) par client, avec le montant <b>en retard</b> et
-          l&apos;ancienneté. Base d&apos;un futur système de <b>relance automatique</b>.
+          l&apos;ancienneté. Ouvrez un client puis <b>Relancer</b> pour générer et envoyer
+          un courrier de relance (R0→R5, modèles NT-2026-RC-01).
         </p>
       </header>
       <Encours />

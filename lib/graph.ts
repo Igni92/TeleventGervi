@@ -1,5 +1,10 @@
 /**
- * Microsoft Graph API client utilities for calendar event management.
+ * Microsoft Graph API client utilities — calendrier (rappels) et envoi d'emails
+ * (relances de recouvrement, NT-2026-RC-01).
+ *
+ * ⚠️ L'envoi d'email (sendMail) requiert le scope OAuth `Mail.Send` (cf.
+ * lib/auth.ts). Si le scope a été ajouté APRÈS la dernière connexion, l'opérateur
+ * doit se reconnecter (re-consentement) pour que le jeton Graph le porte.
  */
 
 interface ClientInfo {
@@ -104,6 +109,56 @@ export async function deleteCalendarEvent(
     const error = await response.json().catch(() => ({}));
     throw new Error(
       `Graph API error: ${response.status} - ${JSON.stringify(error)}`
+    );
+  }
+}
+
+interface SendMailInput {
+  to: string | string[];
+  subject: string;
+  /** Corps HTML du message. */
+  html: string;
+  cc?: string[];
+  /** Adresse de réponse (ex. boîte compta) — facultatif. */
+  replyTo?: string;
+  /** Conserver une copie dans « Éléments envoyés » (défaut : true). */
+  saveToSentItems?: boolean;
+}
+
+/**
+ * Envoie un email au nom de l'utilisateur connecté (POST /me/sendMail).
+ * Requiert le scope `Mail.Send`. Lève une erreur explicite en cas d'échec Graph
+ * (403 = scope manquant / consentement requis ; 401 = jeton expiré).
+ */
+export async function sendMail(accessToken: string, input: SendMailInput): Promise<void> {
+  const addresses = Array.isArray(input.to) ? input.to : [input.to];
+  const toRecipients = addresses.map((address) => ({ emailAddress: { address } }));
+
+  const message: Record<string, unknown> = {
+    subject: input.subject,
+    body: { contentType: "HTML", content: input.html },
+    toRecipients,
+  };
+  if (input.cc?.length) {
+    message.ccRecipients = input.cc.map((address) => ({ emailAddress: { address } }));
+  }
+  if (input.replyTo) {
+    message.replyTo = [{ emailAddress: { address: input.replyTo } }];
+  }
+
+  const response = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ message, saveToSentItems: input.saveToSentItems ?? true }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(
+      `Graph sendMail error: ${response.status} - ${JSON.stringify(error)}`
     );
   }
 }
