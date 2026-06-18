@@ -157,3 +157,40 @@ diligences en cas de contentieux.
 - **Tableau de bord** : balance âgée / DSO / top débiteurs (la balance âgée
   30-45 / 45-90 / +90 j existe déjà sur `/encours`).
 - **Paramétrage UI** : écran de réglage des clés `relance_*` (aujourd'hui en base).
+
+## Archivage & récupération des PDF de factures (décidé — à implémenter)
+
+Objectif : joindre aux relances le **PDF original** de la facture (généré par
+coresuite), sans le régénérer.
+
+**Contexte technique (constaté) :**
+- coresuite envoie les factures en **SMTP via OVH** (`ssl0.ovh.net:465`, compte
+  `jm.gunslay@gervifrais.com`).
+- `gervifrais.com` : **MX → Microsoft 365** (Exchange Online) ; SPF autorise OVH
+  + M365. ⇒ Les boîtes sont sur M365, mais l'envoi coresuite passant par OVH,
+  **aucune copie n'arrive dans les « Éléments envoyés » M365** → Graph ne les voit
+  pas. Il faut donc une copie déposée dans M365 (Drive ou boîte).
+- L'app dispose déjà de l'**identité applicative Graph** (Mail.Send pour compta@).
+
+**Solution retenue — Option 1 (SharePoint), demandée à l'intégrateur (EDOS) :**
+- Dépôt **dès génération du PDF** (envoyé au client **ou non**) dans une
+  **bibliothèque SharePoint partagée** :
+  `/Factures/{CodeClient}/{CodeClient} - F {NumFacture} du {JOUR JJ.MM.AA}.pdf`
+  (CodeClient = CardCode SAP ; n° de facture dans le nom → matching).
+- Repli possible : **Option 2** = BCC vers `factures-archive@gervifrais.com`
+  (récup via `Mail.Read`).
+
+**À faire côté TeleVent (une fois l'archive en place) :**
+1. Récupération du PDF par `DocEntry/DocNum` via Graph (lecture
+   `/Factures/{CardCode}/…`), branchée sur `lib/relance/invoicePdf.ts`, puis
+   attachement au mail de relance (`sendMailAsShared`, déjà prêt).
+2. **Purge au paiement** : job planifié quotidien qui **supprime** le PDF dès que
+   la facture n'est plus ouverte côté SAP (soldée / `bost_Close`) — pour borner le
+   stockage. Suppression uniquement si SAP confirme le paiement ; journalisée.
+   Rétention après paiement : **0 par défaut** (réglable si litige/relance tardive).
+
+**Permission Graph requise :** `Sites.Selected` en **lecture ET écriture** sur le
+seul site de la bibliothèque Factures (lire pour attacher, supprimer pour purger).
+Repli Option 2 : `Mail.Read` (boîte d'archive).
+
+**En attente de l'intégrateur :** URL du site SharePoint + nom de la bibliothèque.
