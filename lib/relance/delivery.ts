@@ -12,8 +12,15 @@
 
 export const DEFAULT_TEST_RECIPIENT = "wahofef603@aratrin.com";
 
+/** Boîte EXPÉDITRICE des relances (boîte partagée) — identité applicative. */
+export const DEFAULT_FROM_ADDRESS = "compta@gervifrais.com";
+
 export function testRecipient(): string {
   return process.env.RELANCE_TEST_RECIPIENT?.trim() || DEFAULT_TEST_RECIPIENT;
+}
+
+export function fromAddress(): string {
+  return process.env.RELANCE_FROM_ADDRESS?.trim() || DEFAULT_FROM_ADDRESS;
 }
 
 export function isLive(): boolean {
