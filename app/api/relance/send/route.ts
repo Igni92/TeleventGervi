@@ -1,0 +1,108 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getToken } from "next-auth/jwt";
+import { auth } from "@/lib/auth";
+import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
+import { prisma } from "@/lib/prisma";
+import { isRelanceCode } from "@/lib/relance/levels";
+import { buildRelancePackage } from "@/lib/relance/server";
+import { sendMail } from "@/lib/graph";
+
+/**
+ * POST /api/relance/send — envoie le courrier de relance via Microsoft Graph
+ * (au nom de l'opérateur connecté) et JOURNALISE l'envoi (RelanceLog, §6).
+ *
+ * En mode test (défaut), le destinataire est redirigé vers la boîte de test
+ * (cf. lib/relance/delivery) — aucun email n'atteint les vrais débiteurs.
+ *
+ * Body : { cardCode: string, level: "R0".."R5" }
+ */
+export const dynamic = "force-dynamic";
+
+/** Jeton Graph lu depuis le JWT chiffré (httpOnly) — cf. /api/reminders. */
+async function graphToken(req: NextRequest): Promise<string | undefined> {
+  try {
+    const t = await getToken({
+      req,
+      secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+      secureCookie: process.env.NODE_ENV === "production",
+    });
+    return (t?.accessToken as string | undefined) ?? undefined;
+  } catch (e) {
+    console.error("[relance/send] lecture du jeton Graph échouée:", e);
+    return undefined;
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+
+  const body = await req.json().catch(() => ({}));
+  const cardCode = typeof body.cardCode === "string" ? body.cardCode.trim() : "";
+  const level = body.level;
+  if (!cardCode || !isRelanceCode(level)) {
+    return NextResponse.json({ error: "cardCode et level (R0–R5) requis." }, { status: 400 });
+  }
+
+  const scope = await getAccessScope(session);
+  if (!(await cardCodeInScope(scope, cardCode))) {
+    return NextResponse.json({ error: "Client hors de votre périmètre." }, { status: 403 });
+  }
+
+  let pkg;
+  try {
+    pkg = await buildRelancePackage(cardCode, level);
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
+  }
+
+  const token = await graphToken(req);
+  if (!token) {
+    return NextResponse.json(
+      { ok: false, error: "Jeton Microsoft indisponible — reconnectez-vous pour autoriser l'envoi d'emails (scope Mail.Send)." },
+      { status: 401 },
+    );
+  }
+
+  const docEntries = pkg.context.invoices.map((i) => i.docEntry);
+  const docNums = pkg.context.invoices.map((i) => (i.docNum ?? i.docEntry)).join(", ");
+  const { totals } = pkg.context;
+  const sentBy = session.user.email ?? null;
+
+  try {
+    await sendMail(token, {
+      to: pkg.recipient.to,
+      subject: pkg.rendered.subject,
+      html: pkg.rendered.html,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // Journalise l'échec (piste d'audit) puis renvoie l'erreur.
+    await prisma.relanceLog.create({
+      data: {
+        cardCode, clientId: pkg.clientId, level, channel: pkg.channel,
+        subject: pkg.rendered.subject, recipient: pkg.recipient.to,
+        intendedTo: pkg.recipient.intendedTo, testMode: pkg.recipient.testMode,
+        docEntries, docNums,
+        montantPrincipal: totals.principal, montantPenalites: totals.penalites,
+        montantIfr: totals.ifr, montantTotal: totals.total,
+        status: "ECHEC", error: msg.slice(0, 500), sentBy,
+      },
+    }).catch((logErr) => console.error("[relance/send] journalisation ECHEC impossible:", logErr));
+    return NextResponse.json({ ok: false, error: `Envoi Graph échoué : ${msg}` }, { status: 502 });
+  }
+
+  const log = await prisma.relanceLog.create({
+    data: {
+      cardCode, clientId: pkg.clientId, level, channel: pkg.channel,
+      subject: pkg.rendered.subject, recipient: pkg.recipient.to,
+      intendedTo: pkg.recipient.intendedTo, testMode: pkg.recipient.testMode,
+      docEntries, docNums,
+      montantPrincipal: totals.principal, montantPenalites: totals.penalites,
+      montantIfr: totals.ifr, montantTotal: totals.total,
+      status: "ENVOYE", sentBy,
+    },
+  });
+
+  return NextResponse.json({ ok: true, logId: log.id, recipient: pkg.recipient, level });
+}
