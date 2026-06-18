@@ -173,7 +173,9 @@ export function Encours() {
         <RelanceDialog
           cardCode={relance.cardCode}
           cardName={relance.cardName}
-          maxOverdueDays={relance.maxOverdueDays}
+          // Vrai retard max (jours/échéance, NON borné par la grâce de 30 j de
+          // l'encours) → suggestion de niveau R0→R5 correcte dès J+8.
+          maxOverdueDays={relance.invoices.reduce((m, i) => Math.max(m, i.overdueDays), 0)}
           onClose={() => setRelance(null)}
           onSent={load}
         />

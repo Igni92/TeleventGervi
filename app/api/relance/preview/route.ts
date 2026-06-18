@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
 import { isRelanceCode } from "@/lib/relance/levels";
-import { buildRelancePackage } from "@/lib/relance/server";
+import { buildRelancePackage, RelanceInputError } from "@/lib/relance/server";
 
 /**
  * POST /api/relance/preview — aperçu d'un courrier de relance (objet + corps
@@ -54,7 +54,10 @@ export async function POST(req: NextRequest) {
       })),
     });
   } catch (e) {
+    if (e instanceof RelanceInputError) {
+      return NextResponse.json({ ok: false, error: e.message }, { status: 400 });
+    }
     const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ ok: false, error: msg }, { status: 502 });
+    return NextResponse.json({ ok: false, error: `Lecture SAP échouée : ${msg}` }, { status: 502 });
   }
 }

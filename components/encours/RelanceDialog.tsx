@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { Loader2, X, Send, Mail, AlertTriangle, ShieldCheck, History } from "lucide-react";
@@ -58,12 +58,16 @@ export function RelanceDialog({
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sentLevel, setSentLevel] = useState<RelanceCode | null>(null);
   const [logs, setLogs] = useState<RelanceLogRow[]>([]);
+  // Anti-course : on ignore la réponse d'un aperçu si un autre a été demandé depuis.
+  const reqRef = useRef(0);
 
   const meta = useMemo(() => RELANCE_LEVELS.find((l) => l.code === level)!, [level]);
   const suggested = useMemo(() => suggestLevel(maxOverdueDays), [maxOverdueDays]);
 
   const loadPreview = useCallback(async () => {
+    const myReq = ++reqRef.current;
     setLoading(true);
     setPreview(null);
     try {
@@ -73,12 +77,13 @@ export function RelanceDialog({
         body: JSON.stringify({ cardCode, level }),
       });
       const j = await r.json();
+      if (myReq !== reqRef.current) return; // réponse obsolète (niveau changé entre-temps)
       if (!r.ok || !j.ok) { toast.error(j.error || "Aperçu impossible"); return; }
       setPreview(j);
     } catch (e) {
-      toast.error((e as Error).message);
+      if (myReq === reqRef.current) toast.error((e as Error).message);
     } finally {
-      setLoading(false);
+      if (myReq === reqRef.current) setLoading(false);
     }
   }, [cardCode, level]);
 
@@ -109,6 +114,7 @@ export function RelanceDialog({
       });
       const j = await r.json();
       if (!r.ok || !j.ok) { toast.error(j.error || "Envoi impossible"); return; }
+      setSentLevel(level); // verrouille le bouton pour ce niveau (anti-doublon UI)
       toast.success(
         j.recipient?.testMode
           ? `Relance ${level} envoyée (test) → ${j.recipient.to}`
@@ -253,11 +259,11 @@ export function RelanceDialog({
           <button
             type="button"
             onClick={send}
-            disabled={sending || loading || !preview}
+            disabled={sending || loading || !preview || sentLevel === level}
             className="inline-flex items-center gap-2 h-9 px-4 rounded-md bg-brand-600 text-white text-[13px] font-semibold hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
           >
             {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            {preview?.recipient.testMode ? "Envoyer (test)" : "Envoyer"}
+            {sentLevel === level ? "Envoyé ✓" : preview?.recipient.testMode ? "Envoyer (test)" : "Envoyer"}
           </button>
         </footer>
       </div>

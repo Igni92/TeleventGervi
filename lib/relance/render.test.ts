@@ -58,6 +58,18 @@ describe("renderRelance — modèles R0→R5 (NT-2026-RC-01 §5)", () => {
     expect(renderRelance("R5", ctx).text).toContain("30/05/2026");
   });
 
+  it("R5 sans date de mise en demeure → clause neutre (jamais « du — »)", () => {
+    const ctxNoDate = buildRelanceContext({
+      client: { cardCode: "C1", raisonSociale: "SARL LES DÉLICES", civilite: "Monsieur" },
+      invoices,
+      params: DEFAULT_RELANCE_PARAMS,
+    });
+    const out = renderRelance("R5", ctxNoDate);
+    expect(out.text).toContain("étant restées sans effet");
+    expect(out.text).not.toContain("du —");
+    expect(out.text).not.toMatch(/\{\{/);
+  });
+
   it("expose un modèle pour chacun des 6 niveaux", () => {
     expect(Object.keys(TEMPLATES).sort()).toEqual(["R0", "R1", "R2", "R3", "R4", "R5"]);
   });

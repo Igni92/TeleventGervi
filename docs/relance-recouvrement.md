@@ -87,8 +87,12 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value", "updatedAt" = now(
   `RELANCE_TEST_RECIPIENT` (défaut `wahofef603@aratrin.com`), quel que soit
   l'email du client. La modale affiche un bandeau « Mode test » et le log
   enregistre `testMode = true` + le destinataire réel visé (`intendedTo`).
-- Pour l'**envoi réel** : `RELANCE_LIVE=1` (l'email part vers
-  `Client.emailCompta`, repli `Client.email`).
+- Pour l'**envoi réel** : `RELANCE_LIVE=1`. L'email part **uniquement** vers
+  `Client.emailCompta` (email de la comptabilité). Si ce champ est vide, l'envoi
+  est **redirigé vers la boîte de test** (fail-safe) plutôt que vers un contact
+  non-compta — on n'adresse jamais une mise en demeure à une adresse générale.
+- **Anti-doublon** : un envoi identique (même client + niveau) émis il y a moins
+  de 2 minutes est refusé (409) ; l'UI verrouille aussi le bouton après envoi.
 
 ### Prérequis Microsoft Graph
 

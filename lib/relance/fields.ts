@@ -147,6 +147,11 @@ export function buildRelanceContext(args: {
     IndemniteForfaitaire: formatEUR(ifr),
     TotalDu: formatEUR(total),
     DateMiseEnDemeure: formatDateFR(dateMiseEnDemeure ?? null),
+    // Clause d'ouverture R5 : évite « mise en demeure du — » si aucune R4 n'est
+    // datée (R4 = LRAR souvent envoyée hors outil → date non connue ici).
+    RappelMiseEnDemeure: dateMiseEnDemeure
+      ? `Notre mise en demeure du ${formatDateFR(dateMiseEnDemeure)} étant demeurée sans effet,`
+      : "Nos relances et notre mise en demeure étant restées sans effet,",
     DelaiReponse: params.delaiReponse,
     Signataire: params.signataire,
     FonctionSignataire: params.fonctionSignataire,

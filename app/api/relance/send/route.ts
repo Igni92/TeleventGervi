@@ -4,7 +4,7 @@ import { auth } from "@/lib/auth";
 import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { isRelanceCode } from "@/lib/relance/levels";
-import { buildRelancePackage } from "@/lib/relance/server";
+import { buildRelancePackage, RelanceInputError } from "@/lib/relance/server";
 import { sendMail } from "@/lib/graph";
 
 /**
@@ -49,10 +49,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Client hors de votre périmètre." }, { status: 403 });
   }
 
+  // Anti-doublon : refuse un envoi identique (même client + niveau) émis il y a
+  // moins de 2 minutes — couvre les double-clics / double-submit qui
+  // contourneraient le verrou de l'UI. Au-delà, un renvoi volontaire reste permis.
+  const recentDup = await prisma.relanceLog.findFirst({
+    where: { cardCode, level, status: "ENVOYE", sentAt: { gte: new Date(Date.now() - 120_000) } },
+    select: { id: true },
+  });
+  if (recentDup) {
+    return NextResponse.json(
+      { ok: false, error: "Relance identique déjà envoyée il y a moins de 2 minutes (anti-doublon)." },
+      { status: 409 },
+    );
+  }
+
   let pkg;
   try {
     pkg = await buildRelancePackage(cardCode, level);
   } catch (e) {
+    if (e instanceof RelanceInputError) {
+      return NextResponse.json({ ok: false, error: e.message }, { status: 400 });
+    }
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
   }
 

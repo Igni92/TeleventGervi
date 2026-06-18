@@ -118,7 +118,7 @@ Dans cette attente, je vous prie d'agréer, {{Civilite}}, l'expression de mes sa
     recommande: true,
     body: `{{Civilite}},
 
-Notre mise en demeure du {{DateMiseEnDemeure}} étant demeurée sans effet, votre compte présente à ce jour un solde exigible de {{TotalDu}}, détaillé comme suit :
+{{RappelMiseEnDemeure}} votre compte présente à ce jour un solde exigible de {{TotalDu}}, détaillé comme suit :
 
 ${TABLE_TOKEN}
 

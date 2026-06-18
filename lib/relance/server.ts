@@ -3,8 +3,9 @@
  *
  * Lit les factures **ouvertes** en direct SAP (base réelle, comme /api/encours),
  * rattache la fiche locale (email compta, contact, adresse), construit le
- * contexte de fusion et rend le courrier. Partagé par l'aperçu et l'envoi pour
- * garantir qu'on envoie EXACTEMENT ce qui a été prévisualisé.
+ * contexte de fusion et rend le courrier. Aperçu et envoi appellent la MÊME
+ * fonction avec les mêmes entrées (cardCode, niveau) : les montants reflètent
+ * l'état SAP au moment de l'appel (l'envoi relit donc les valeurs à jour).
  */
 import { sap } from "@/lib/sapb1";
 import { prisma } from "@/lib/prisma";
@@ -20,6 +21,12 @@ import { renderRelance, type RenderedRelance } from "./render";
 import { resolveRecipient, type ResolvedRecipient } from "./delivery";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Erreur d'ENTRÉE (cardCode invalide, aucune facture…) — distincte d'une panne
+ * SAP. Les routes la mappent en 400/404 (et non 502).
+ */
+export class RelanceInputError extends Error {}
 
 interface OpenInvoice {
   DocEntry: number;
@@ -47,7 +54,7 @@ export interface RelancePackage {
 /** CardCode SAP « sûr » pour interpolation OData (alphanumérique + . _ -). */
 function assertSafeCardCode(cardCode: string): void {
   if (!/^[\w.\-]+$/.test(cardCode)) {
-    throw new Error("CardCode invalide.");
+    throw new RelanceInputError("CardCode invalide.");
   }
 }
 
@@ -98,7 +105,7 @@ export async function buildRelancePackage(
     });
   }
   if (all.length === 0) {
-    throw new Error("Aucune facture ouverte à relancer pour ce client.");
+    throw new RelanceInputError("Aucune facture ouverte à relancer pour ce client.");
   }
 
   // 2) Sélection des factures : mono-facture pour R0/R1, toutes pour R2+.
@@ -138,7 +145,11 @@ export async function buildRelancePackage(
   });
 
   const rendered = renderRelance(level, context);
-  const clientEmailCompta = client?.emailCompta?.trim() || client?.email?.trim() || null;
+  // Relances = email de la COMPTABILITÉ uniquement (cf. Client.emailCompta). On
+  // ne retombe PAS sur l'email général/commercial : en mode live, mieux vaut
+  // rediriger vers la boîte de test (resolveRecipient) que d'adresser une mise en
+  // demeure à un contact non-compta.
+  const clientEmailCompta = client?.emailCompta?.trim() || null;
   const recipient = resolveRecipient(clientEmailCompta);
 
   return {
