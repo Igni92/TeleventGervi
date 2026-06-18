@@ -113,8 +113,10 @@ export async function buildRelancePackage(
   // 2) Sélection des factures : mono-facture pour R0/R1, toutes pour R2+.
   const included = lvl.multiInvoice ? all : [mostOverdue(all)];
 
-  // 3) Fiche locale (email compta, contact, adresse) + date de mise en demeure (R5).
-  const [client, params, lastR4] = await Promise.all([
+  // 3) Fiche locale (email compta, contact, adresse) + date de mise en demeure (R5)
+  //    + solde NET du compte tiers (pour soustraire l'encaissé sur les relances
+  //    multi-factures = relances « compte »).
+  const [client, params, lastR4, bp] = await Promise.all([
     prisma.client.findUnique({
       where: { code: cardCode },
       select: {
@@ -132,7 +134,20 @@ export async function buildRelancePackage(
       orderBy: { sentAt: "desc" },
       select: { sentAt: true },
     }),
+    // Solde compte (SAP CurrentAccountBalance) = net de tous les encaissements/
+    // avoirs (= SOLDE du grand livre). Live, donc indépendant de la resync miroir.
+    lvl.multiInvoice
+      ? sap
+          .get<{ CurrentAccountBalance?: number }>(
+            `BusinessPartners('${cardCode}')?$select=CurrentAccountBalance`,
+            { env: "prod" },
+          )
+          .catch(() => null)
+      : Promise.resolve(null),
   ]);
+
+  const currentAccountBalance =
+    lvl.multiInvoice && bp && typeof bp.CurrentAccountBalance === "number" ? bp.CurrentAccountBalance : null;
 
   const context = buildRelanceContext({
     client: {
@@ -144,6 +159,7 @@ export async function buildRelancePackage(
     invoices: included,
     params,
     dateMiseEnDemeure: lastR4?.sentAt ?? null,
+    currentAccountBalance,
   });
 
   const rendered = renderRelance(level, context);

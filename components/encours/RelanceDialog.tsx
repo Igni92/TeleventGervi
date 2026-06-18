@@ -13,6 +13,8 @@ interface PreviewRecipient {
 }
 interface PreviewTotals {
   nbFactures: number;
+  openTotal: number;
+  encaissementsNonAffectes: number;
   principal: number;
   penalites: number;
   ifr: number;
@@ -218,11 +220,18 @@ export function RelanceDialog({
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[12px]">
-                <Stat label={`Principal (${preview.totals.nbFactures} fact.)`} value={eur(preview.totals.principal)} />
+                <Stat label={`Principal net (${preview.totals.nbFactures} fact.)`} value={eur(preview.totals.principal)} />
                 <Stat label="Pénalités" value={eur(preview.totals.penalites)} hint={preview.totals.penalites === 0 ? "taux CGV non paramétré" : undefined} />
                 <Stat label="Indemnité forfait." value={eur(preview.totals.ifr)} />
                 <Stat label="Total dû" value={eur(preview.totals.total)} strong />
               </div>
+              {preview.totals.encaissementsNonAffectes > 0 && (
+                <p className="text-[11.5px] text-muted-foreground">
+                  Factures échues <b className="text-foreground">{eur(preview.totals.openTotal)}</b> − encaissements/avoirs reçus non affectés{" "}
+                  <b className="text-emerald-600 dark:text-emerald-400">−{eur(preview.totals.encaissementsNonAffectes)}</b> = principal net{" "}
+                  <b className="text-foreground">{eur(preview.totals.principal)}</b> (solde compte tiers).
+                </p>
+              )}
             </>
           ) : (
             <div className="h-48 flex items-center justify-center text-[13px] text-muted-foreground">Aucun aperçu.</div>

@@ -117,6 +117,46 @@ describe("buildRelanceContext", () => {
     expect(ctx.fields.NumFacture).toBe("77");
   });
 
+  it("soustrait les encaissements non affectés : net = solde compte tiers (grand livre)", () => {
+    // Cas FANTASY : factures 170 413,91 − encaissé 85 425,48 = SOLDE 84 988,43.
+    const ctx = buildRelanceContext({
+      client: { cardCode: "FANTASY", raisonSociale: "FANTASY PVT." },
+      invoices: [
+        inv({ docEntry: 1, balance: 100000, overdueDays: 40 }),
+        inv({ docEntry: 2, balance: 70413.91, overdueDays: 30 }),
+      ],
+      params: DEFAULT_RELANCE_PARAMS,
+      currentAccountBalance: 84988.43,
+    });
+    expect(ctx.totals.openTotal).toBeCloseTo(170413.91, 2);
+    expect(ctx.totals.principal).toBeCloseTo(84988.43, 2); // net
+    expect(ctx.totals.encaissementsNonAffectes).toBeCloseTo(85425.48, 2);
+    expect(ctx.totals.total).toBeCloseTo(84988.43 + 80, 2); // net + 0 pénalités + 40×2
+    expect(ctx.fields.MontantRestantDu).toBe("84 988,43 €");
+  });
+
+  it("sans solde compte (mono-facture) : principal = solde facture, aucune déduction", () => {
+    const ctx = buildRelanceContext({
+      client: { cardCode: "C1", raisonSociale: "X" },
+      invoices: [inv({ balance: 4820, overdueDays: 23 })],
+      params: DEFAULT_RELANCE_PARAMS,
+    });
+    expect(ctx.totals.encaissementsNonAffectes).toBe(0);
+    expect(ctx.totals.principal).toBe(4820);
+    expect(ctx.fields.LigneDeduction).toBe("");
+  });
+
+  it("solde compte ≥ total factures → pas de déduction (principal = total)", () => {
+    const ctx = buildRelanceContext({
+      client: { cardCode: "C1", raisonSociale: "X" },
+      invoices: [inv({ balance: 1000, overdueDays: 30 })],
+      params: DEFAULT_RELANCE_PARAMS,
+      currentAccountBalance: 5000, // autres débits hors factures → on ne réclame que les factures
+    });
+    expect(ctx.totals.principal).toBe(1000);
+    expect(ctx.totals.encaissementsNonAffectes).toBe(0);
+  });
+
   it("lève si aucune facture", () => {
     expect(() =>
       buildRelanceContext({ client: { cardCode: "C1", raisonSociale: "X" }, invoices: [], params: DEFAULT_RELANCE_PARAMS }),
