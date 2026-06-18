@@ -21,7 +21,8 @@ interface ClientEncours {
   cardCode: string;
   cardName: string;
   clientId: string | null;
-  encours: number;
+  encours: number;   // NET (encaissé déduit)
+  encaisse: number;  // encaissé non affecté déduit du brut
   countOpen: number;
   b3045: number; // 30-45 j
   b4590: number; // 45-90 j
@@ -203,8 +204,9 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
           <div className="min-w-0">
             <h2 className="text-[18px] font-semibold tracking-tight text-foreground truncate">{client.cardName}</h2>
             <p className="text-[12px] text-muted-foreground">
-              <span className="font-mono">{client.cardCode}</span> · encours <b className="text-foreground">{eurExact(client.encours)}</b>
+              <span className="font-mono">{client.cardCode}</span> · encours net <b className="text-foreground">{eurExact(client.encours)}</b>
               {" · "}{client.countOpen} facture(s){client.countLate > 0 && <> · <span className="text-rose-600 dark:text-rose-400 font-semibold">{client.countLate} en retard</span></>}
+              {client.encaisse > 0 && <> · <span className="text-emerald-600 dark:text-emerald-400">encaissé déduit {eurExact(client.encaisse)}</span></>}
             </p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -232,6 +234,11 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
         </div>
 
         <div className="flex-1 overflow-auto">
+          {client.encaisse > 0 && (
+            <p className="px-4 py-2 text-[11.5px] text-muted-foreground border-b border-border bg-secondary/20">
+              Soldes par facture <b>bruts</b> ci-dessous — l&apos;encours affiché est <b>net</b> des encaissements non affectés ({eurExact(client.encaisse)}).
+            </p>
+          )}
           <table className="w-full text-[12.5px]">
             <thead className="sticky top-0 bg-card text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
               <tr>

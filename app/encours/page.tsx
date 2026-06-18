@@ -17,9 +17,9 @@ export default async function EncoursPage() {
           État des encours
         </h1>
         <p className="text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
-          Factures dues (non soldées) par client, avec le montant <b>en retard</b> et
-          l&apos;ancienneté. Ouvrez un client puis <b>Relancer</b> pour générer et envoyer
-          un courrier de relance (R0→R5, modèles NT-2026-RC-01).
+          Dû <b>net</b> par client (factures ouvertes <b>moins l&apos;encaissé non affecté</b> —
+          solde du compte tiers). Ouvrez un client puis <b>Relancer</b> pour générer et
+          envoyer un courrier de relance (R0→R5, modèles NT-2026-RC-01).
         </p>
       </header>
       <Encours />
