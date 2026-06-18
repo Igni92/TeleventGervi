@@ -121,6 +121,12 @@ interface SendMailInput {
   replyTo?: string;
   /** Conserver une copie dans « Éléments envoyés » (défaut : true). */
   saveToSentItems?: boolean;
+  /**
+   * Pièces jointes inline (base64). Convient aux PDF de facture (petits) :
+   * Graph limite l'envoi inline à ~3 Mo par fichier / <4 Mo par requête ;
+   * au-delà il faudrait une upload session (non gérée ici).
+   */
+  attachments?: { name: string; base64: string; contentType?: string }[];
 }
 
 // ── Jeton applicatif Graph (client credentials) ───────────────────────────
@@ -174,6 +180,14 @@ function buildMessage(input: SendMailInput): Record<string, unknown> {
   };
   if (input.cc?.length) message.ccRecipients = input.cc.map((address) => ({ emailAddress: { address } }));
   if (input.replyTo) message.replyTo = [{ emailAddress: { address: input.replyTo } }];
+  if (input.attachments?.length) {
+    message.attachments = input.attachments.map((a) => ({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      name: a.name,
+      contentType: a.contentType ?? "application/pdf",
+      contentBytes: a.base64,
+    }));
+  }
   return message;
 }
 

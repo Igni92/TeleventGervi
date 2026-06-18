@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
 import { isRelanceCode } from "@/lib/relance/levels";
 import { buildRelancePackage, RelanceInputError } from "@/lib/relance/server";
+import { invoicePdfEnabled } from "@/lib/relance/invoicePdf";
 
 /**
  * POST /api/relance/preview — aperçu d'un courrier de relance (objet + corps
@@ -38,6 +39,7 @@ export async function POST(req: NextRequest) {
       level: pkg.level,
       channel: pkg.channel,
       from: pkg.from,
+      attachInvoices: invoicePdfEnabled(),
       subject: pkg.rendered.subject,
       html: pkg.rendered.html,
       text: pkg.rendered.text,

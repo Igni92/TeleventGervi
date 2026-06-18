@@ -119,6 +119,17 @@ couvre aussi la future automatisation (cron, sans utilisateur connecté).
 Erreurs explicites côté API : `401/invalid_client` = secret/app KO ; `403` =
 permission `Mail.Send` non accordée ou boîte hors ApplicationAccessPolicy.
 
+### Pièces jointes : PDF des factures (Crystal)
+
+À l'envoi, TeleVent peut joindre le **PDF Crystal** de chaque facture concernée.
+Le Service Layer SAP ne rendant pas les layouts Crystal, le PDF est obtenu via un
+**service externe** (`RELANCE_INVOICE_PDF_URL`, par `DocEntry`) — voir
+`docs/crystal-pdf-service/`. Tant que cette URL n'est pas configurée, **aucune
+pièce jointe** n'est ajoutée (comportement par défaut). Si le service est
+configuré mais échoue, l'envoi est **bloqué** (on ne prétend pas « facture
+jointe » sans la pièce). Plomberie : `lib/relance/invoicePdf.ts` +
+`sendMailAsShared` (Graph, base64).
+
 ## Journalisation (§6)
 
 Chaque envoi crée une ligne `RelanceLog` (horodatage, tiers, niveau, canal,
