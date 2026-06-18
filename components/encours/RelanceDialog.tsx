@@ -23,6 +23,7 @@ interface PreviewData {
   html: string;
   channel: string;
   from: string;
+  attachInvoices: boolean;
   recommande: boolean;
   recipient: PreviewRecipient;
   clientEmailCompta: string | null;
@@ -254,7 +255,9 @@ export function RelanceDialog({
         {/* Pied : envoi */}
         <footer className="shrink-0 flex items-center justify-between gap-3 px-5 py-3 border-t border-border">
           <p className="text-[11px] text-muted-foreground max-w-md">
-            L&apos;email part depuis la boîte partagée{preview?.from ? <> <b className="font-mono">{preview.from}</b></> : ""}. {meta.canal.includes("LRAR") && <b className="text-amber-600 dark:text-amber-400">Niveau LRAR : l&apos;email de test ne remplace pas le recommandé postal. </b>}
+            L&apos;email part depuis la boîte partagée{preview?.from ? <> <b className="font-mono">{preview.from}</b></> : ""}.{" "}
+            {preview?.attachInvoices && <>Les PDF des factures sont joints. </>}
+            {meta.canal.includes("LRAR") && <b className="text-amber-600 dark:text-amber-400">Niveau LRAR : l&apos;email de test ne remplace pas le recommandé postal. </b>}
             Chaque envoi est journalisé (piste d&apos;audit).
           </p>
           <button

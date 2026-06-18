@@ -4,6 +4,7 @@ import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { isRelanceCode } from "@/lib/relance/levels";
 import { buildRelancePackage, RelanceInputError } from "@/lib/relance/server";
+import { invoicePdfEnabled, fetchInvoicePdf, type InvoicePdf } from "@/lib/relance/invoicePdf";
 import { sendMailAsShared } from "@/lib/graph";
 
 /**
@@ -67,11 +68,29 @@ export async function POST(req: NextRequest) {
   const { totals } = pkg.context;
   const sentBy = session.user.email ?? null;
 
+  // Pièces jointes : PDF des factures (si un service de rendu est configuré).
+  // En cas d'échec on N'ENVOIE PAS (une relance « facture jointe » sans la pièce
+  // serait trompeuse) — l'opérateur réessaie ou désactive le service.
+  let attachments: InvoicePdf[] | undefined;
+  if (invoicePdfEnabled()) {
+    try {
+      attachments = (
+        await Promise.all(pkg.context.invoices.map((i) => fetchInvoicePdf(i.docEntry, i.docNum)))
+      ).filter((a): a is InvoicePdf => a !== null);
+    } catch (e) {
+      return NextResponse.json(
+        { ok: false, error: e instanceof Error ? e.message : String(e) },
+        { status: 502 },
+      );
+    }
+  }
+
   try {
     await sendMailAsShared(pkg.from, {
       to: pkg.recipient.to,
       subject: pkg.rendered.subject,
       html: pkg.rendered.html,
+      attachments,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
