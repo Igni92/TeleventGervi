@@ -74,7 +74,9 @@ ${TABLE_TOKEN}
 
 À ce jour, votre compte présente le solde débiteur suivant :
 
-Principal : {{MontantRestantDu}}
+{{LigneTotalFactures}}
+{{LigneDeduction}}
+Principal restant dû : {{MontantRestantDu}}
 Pénalités de retard ({{TauxPenalites}}) : {{MontantPenalites}}
 Indemnité forfaitaire de recouvrement : {{IndemniteForfaitaire}}
 Total dû : {{TotalDu}}
@@ -97,7 +99,9 @@ Nos relances étant restées sans effet, nous vous mettons en demeure, par la pr
 
 ${TABLE_TOKEN}
 
-Principal : {{MontantRestantDu}}
+{{LigneTotalFactures}}
+{{LigneDeduction}}
+Principal restant dû : {{MontantRestantDu}}
 Pénalités de retard ({{TauxPenalites}}) : {{MontantPenalites}}
 Indemnité forfaitaire de recouvrement : {{IndemniteForfaitaire}}
 Total dû : {{TotalDu}}
@@ -214,10 +218,12 @@ export function renderRelance(level: RelanceCode, ctx: RelanceContext): Rendered
       textParts.push(tableText(ctx));
       continue;
     }
-    const fused = fuse(block, ctx.fields);
-    const lines = fused.split("\n");
+    // Fusion + suppression des lignes vides : les lignes optionnelles (ex. la
+    // déduction des encaissements) disparaissent proprement quand le champ est vide.
+    const lines = fuse(block, ctx.fields).split("\n").filter((l) => l.trim() !== "");
+    if (lines.length === 0) continue;
     htmlParts.push(`<p style="margin:0 0 12px;line-height:1.5;">${lines.map(escapeHtml).join("<br>")}</p>`);
-    textParts.push(fused);
+    textParts.push(lines.join("\n"));
   }
 
   const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1a1f29;max-width:640px;">

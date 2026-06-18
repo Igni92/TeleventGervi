@@ -49,9 +49,25 @@ describe("renderRelance — modèles R0→R5 (NT-2026-RC-01 §5)", () => {
 
   it("R3 affiche le décompte (principal / pénalités / IFR / total)", () => {
     const out = renderRelance("R3", ctx);
-    expect(out.text).toContain("Principal : 6 020,00 €"); // 4820 + 1200
+    expect(out.text).toContain("Principal restant dû : 6 020,00 €"); // 4820 + 1200
     expect(out.text).toContain("Indemnité forfaitaire de recouvrement : 80,00 €"); // 40 × 2
     expect(out.text).toContain("Total dû : 6 100,00 €"); // 6020 + 0 + 80
+    // Sans encaissement à déduire, pas de ligne de déduction.
+    expect(out.text).not.toContain("Règlements et avoirs");
+  });
+
+  it("R3 affiche la déduction des encaissements quand le solde compte est inférieur", () => {
+    const ctxDed = buildRelanceContext({
+      client: { cardCode: "C1", raisonSociale: "FANTASY", civilite: "Monsieur" },
+      invoices, // total 6 020,00 €
+      params: DEFAULT_RELANCE_PARAMS,
+      currentAccountBalance: 3000, // 3 020 encaissés non affectés
+    });
+    const out = renderRelance("R3", ctxDed);
+    expect(out.text).toContain("Total des factures échues : 6 020,00 €");
+    expect(out.text).toContain("Règlements et avoirs reçus non affectés : -3 020,00 €");
+    expect(out.text).toContain("Principal restant dû : 3 000,00 €");
+    expect(out.text).not.toMatch(/\{\{/);
   });
 
   it("R5 reprend la date de mise en demeure", () => {

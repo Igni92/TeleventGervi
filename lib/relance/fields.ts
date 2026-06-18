@@ -38,6 +38,11 @@ export interface RelanceClientInfo {
 
 export interface RelanceTotals {
   nbFactures: number;
+  /** Somme des soldes des factures ouvertes (avant déduction des encaissements). */
+  openTotal: number;
+  /** Encaissements / avoirs reçus mais non encore affectés (à déduire). */
+  encaissementsNonAffectes: number;
+  /** Principal NET restant dû (= openTotal − encaissements, ou solde compte tiers). */
   principal: number;
   penalites: number;
   ifr: number;
@@ -118,18 +123,34 @@ export function buildRelanceContext(args: {
   invoices: RelanceInvoice[];
   params: RelanceParams;
   dateMiseEnDemeure?: Date | null;
+  /**
+   * Solde net du compte tiers (SAP CurrentAccountBalance) — net de TOUS les
+   * encaissements/avoirs, rapprochés ou non (= SOLDE du grand livre). Fourni pour
+   * les relances multi-factures (compte) afin de soustraire l'encaissé non
+   * affecté. Absent (mono-facture R0/R1) → on s'en tient au solde de la facture.
+   */
+  currentAccountBalance?: number | null;
 }): RelanceContext {
   const { client, invoices, params, dateMiseEnDemeure } = args;
   if (invoices.length === 0) throw new Error("Aucune facture à relancer.");
 
   const primary = pickPrimary(invoices);
   const nbFactures = invoices.length;
-  const principal = round2(invoices.reduce((s, i) => s + i.balance, 0));
+
+  // Total des factures ouvertes, puis NET du compte : on soustrait les
+  // encaissements/avoirs non encore affectés (ne jamais relancer du déjà payé).
+  const openTotal = round2(invoices.reduce((s, i) => s + i.balance, 0));
+  const cab = args.currentAccountBalance;
+  const principal = cab == null ? openTotal : round2(Math.max(0, Math.min(openTotal, cab)));
+  const encaissementsNonAffectes = round2(openTotal - principal);
+
   const penalites = round2(
     invoices.reduce((s, i) => s + computePenalty(i.balance, i.overdueDays, params.penaliteTauxAnnuel), 0),
   );
   const ifr = round2(params.ifrParFacture * nbFactures);
   const total = round2(principal + penalites + ifr);
+
+  const hasDeduction = encaissementsNonAffectes > 0.005;
 
   const fields: Record<string, string> = {
     Civilite: client.civilite?.trim() || "Madame, Monsieur",
@@ -141,6 +162,11 @@ export function buildRelanceContext(args: {
     DateEcheance: formatDateFR(primary.dueDate),
     MontantTTC: formatEUR(primary.docTotal),
     MontantRestantDu: formatEUR(principal),
+    TotalFactures: formatEUR(openTotal),
+    EncaissementsNonAffectes: formatEUR(encaissementsNonAffectes),
+    // Lignes optionnelles (vides si rien à déduire → masquées au rendu).
+    LigneTotalFactures: hasDeduction ? `Total des factures échues : ${formatEUR(openTotal)}` : "",
+    LigneDeduction: hasDeduction ? `Règlements et avoirs reçus non affectés : -${formatEUR(encaissementsNonAffectes)}` : "",
     JoursRetard: String(Math.max(0, primary.overdueDays)),
     TauxPenalites: params.tauxPenalitesLabel,
     MontantPenalites: formatEUR(penalites),
@@ -158,7 +184,12 @@ export function buildRelanceContext(args: {
     Societe: params.societe,
   };
 
-  return { fields, invoices, primary, totals: { nbFactures, principal, penalites, ifr, total } };
+  return {
+    fields,
+    invoices,
+    primary,
+    totals: { nbFactures, openTotal, encaissementsNonAffectes, principal, penalites, ifr, total },
+  };
 }
 
 /** Lignes du tableau multi-factures (pour le rendu HTML / texte). */

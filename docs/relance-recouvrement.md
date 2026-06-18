@@ -54,6 +54,14 @@ Les seuils (jours / échéance) sont des **valeurs par défaut** centralisées d
   fragiliserait la relance. Le **libellé** affiché (`{{TauxPenalites}}`) reste
   descriptif (« 3 × le taux d'intérêt légal »).
 - **Total dû** = principal + pénalités + IFR.
+- **Net du compte (encaissé déduit)** : sur les relances **multi-factures** (R2+),
+  le principal n'est pas la simple somme des factures ouvertes mais le **solde net
+  du compte tiers** (SAP `CurrentAccountBalance`, lu en direct) = factures −
+  **tous les encaissements/avoirs reçus, rapprochés ou non** (= le SOLDE du grand
+  livre « non rapprochées »). On ne relance donc jamais du déjà payé. Le courrier
+  affiche, le cas échéant : `Total des factures échues` − `Règlements/avoirs reçus
+  non affectés` = `Principal restant dû`. Les R0/R1 (mono-facture) restent sur le
+  solde de la facture.
 - Solde = `DocTotal − PaidToDate` (TTC), facture soldée (lettrée) ⇒ exclue
   (escalade suspendue, §6). Fuseau **Europe/Paris** pour les jours de retard.
 
