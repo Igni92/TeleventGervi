@@ -22,20 +22,23 @@ interface ClientEncours {
   cardName: string;
   clientId: string | null;
   encours: number;   // NET (encaissé déduit)
-  encaisse: number;  // encaissé non affecté déduit du brut
+  brut: number;      // somme des factures (avant déduction)
+  encaisse: number;  // encaissé/avoirs non affectés (déduit en ligne)
   countOpen: number;
-  b3045: number; // 30-45 j
-  b4590: number; // 45-90 j
-  b90: number;   // > 90 j
+  b3045: number; // 30-45 j (brut)
+  b4590: number; // 45-90 j (brut)
+  b90: number;   // > 90 j (brut)
   countLate: number;
   maxOverdueDays: number;
   invoices: InvoiceLine[];
 }
 interface EncoursData {
   company: string;
-  totals: { encours: number; overdueTotal: number; b3045: number; b4590: number; b90: number; invoices: number; clients: number };
+  totals: { encours: number; encaisse: number; overdueTotal: number; b3045: number; b4590: number; b90: number; invoices: number; clients: number };
   clients: ClientEncours[];
 }
+
+type SortKey = "cardName" | "encours" | "countOpen" | "b3045" | "b4590" | "b90" | "countLate";
 
 const eur = (n: number) =>
   Math.abs(n) >= 1000 ? `${(n / 1000).toFixed(1)} k€` : `${Math.round(n)} €`;
@@ -52,6 +55,10 @@ export function Encours() {
   const [search, setSearch] = useState("");
   const [drill, setDrill] = useState<ClientEncours | null>(null);
   const [relance, setRelance] = useState<ClientEncours | null>(null);
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "encours", dir: "desc" });
+  const onSort = useCallback((key: SortKey) => {
+    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "cardName" ? "asc" : "desc" }));
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,10 +75,16 @@ export function Encours() {
   const rows = useMemo(() => {
     if (!data) return [];
     const q = search.trim().toLowerCase();
-    return data.clients
+    const filtered = data.clients
       .filter((c) => (!overdueOnly || c.countLate > 0))
       .filter((c) => !q || c.cardName.toLowerCase().includes(q) || c.cardCode.toLowerCase().includes(q));
-  }, [data, overdueOnly, search]);
+    const dir = sort.dir === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) =>
+      sort.key === "cardName"
+        ? dir * a.cardName.localeCompare(b.cardName, "fr")
+        : dir * ((a[sort.key] as number) - (b[sort.key] as number)),
+    );
+  }, [data, overdueOnly, search, sort]);
 
   return (
     <div className="space-y-4">
@@ -116,13 +129,13 @@ export function Encours() {
           <table className="w-full text-[13px]">
             <thead className="bg-secondary/40 text-[10.5px] uppercase tracking-wider text-muted-foreground">
               <tr>
-                <th className="text-left px-3 py-2.5 font-semibold">Client</th>
-                <th className="text-right px-3 py-2.5 font-semibold">Encours</th>
-                <th className="text-right px-3 py-2.5 font-semibold">Nb fact.</th>
-                <th className="text-right px-3 py-2.5 font-semibold">Retard 30-45 j</th>
-                <th className="text-right px-3 py-2.5 font-semibold">45-90 j</th>
-                <th className="text-right px-3 py-2.5 font-semibold">&gt; 90 j</th>
-                <th className="text-right px-3 py-2.5 font-semibold">Fact. retard</th>
+                <SortTh label="Client" k="cardName" sort={sort} onSort={onSort} align="left" />
+                <SortTh label="Encours net" k="encours" sort={sort} onSort={onSort} align="right" />
+                <SortTh label="Nb fact." k="countOpen" sort={sort} onSort={onSort} align="right" />
+                <SortTh label="Retard 30-45 j" k="b3045" sort={sort} onSort={onSort} align="right" />
+                <SortTh label="45-90 j" k="b4590" sort={sort} onSort={onSort} align="right" />
+                <SortTh label="> 90 j" k="b90" sort={sort} onSort={onSort} align="right" />
+                <SortTh label="Fact. retard" k="countLate" sort={sort} onSort={onSort} align="right" />
                 <th className="w-8" />
               </tr>
             </thead>
@@ -159,7 +172,7 @@ export function Encours() {
       </div>
       {!loading && data && (
         <p className="text-[12px] text-muted-foreground">
-          {rows.length} client(s) · {data.totals.clients} débiteurs · {data.totals.invoices} factures ouvertes · <b className="text-rose-600 dark:text-rose-400">{eur(data.totals.overdueTotal)} en retard</b> · triés par encours. Clic = détail des factures.
+          {rows.length} client(s) · {data.totals.clients} débiteurs · {data.totals.invoices} factures · <b className="text-rose-600 dark:text-rose-400">{eur(data.totals.overdueTotal)} en retard (brut)</b>{data.totals.encaisse > 0 && <> · <span className="text-emerald-600 dark:text-emerald-400">{eur(data.totals.encaisse)} encaissé/avoirs déduits</span></>} · clic = détail des factures.
         </p>
       )}
 
@@ -206,7 +219,6 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
             <p className="text-[12px] text-muted-foreground">
               <span className="font-mono">{client.cardCode}</span> · encours net <b className="text-foreground">{eurExact(client.encours)}</b>
               {" · "}{client.countOpen} facture(s){client.countLate > 0 && <> · <span className="text-rose-600 dark:text-rose-400 font-semibold">{client.countLate} en retard</span></>}
-              {client.encaisse > 0 && <> · <span className="text-emerald-600 dark:text-emerald-400">encaissé déduit {eurExact(client.encaisse)}</span></>}
             </p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -226,7 +238,15 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
           </div>
         </header>
 
-        {/* Résumé paliers */}
+        {/* Ligne globale de déduction (encaissé/avoirs non répartis par facture) */}
+        {client.encaisse > 0 && (
+          <div className="shrink-0 px-5 py-2 text-[12px] border-b border-border bg-emerald-50/40 dark:bg-emerald-950/15 text-foreground">
+            Factures (brut) <b>{eurExact(client.brut)}</b> − encaissements/avoirs non affectés{" "}
+            <b className="text-emerald-600 dark:text-emerald-400">{eurExact(client.encaisse)}</b> = net dû <b>{eurExact(client.encours)}</b>
+          </div>
+        )}
+
+        {/* Résumé paliers (au brut) */}
         <div className="shrink-0 grid grid-cols-3 gap-2 px-5 py-3 border-b border-border">
           <MiniStat label="Retard 30-45 j" value={eurOrDash(client.b3045)} tone="amber" />
           <MiniStat label="Retard 45-90 j" value={eurOrDash(client.b4590)} tone="rose" />
@@ -272,6 +292,33 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
       </div>
     </div>,
     document.body,
+  );
+}
+
+function SortTh({
+  label, k, sort, onSort, align,
+}: {
+  label: string;
+  k: SortKey;
+  sort: { key: SortKey; dir: "asc" | "desc" };
+  onSort: (k: SortKey) => void;
+  align: "left" | "right";
+}) {
+  const active = sort.key === k;
+  return (
+    <th
+      className={`px-3 py-2.5 font-semibold ${align === "right" ? "text-right" : "text-left"}`}
+      aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(k)}
+        className={`inline-flex items-center gap-0.5 uppercase tracking-wider hover:text-foreground transition-colors ${align === "right" ? "flex-row-reverse" : ""} ${active ? "text-foreground" : ""}`}
+      >
+        {label}
+        <span className="text-[8px] w-2">{active ? (sort.dir === "asc" ? "▲" : "▼") : ""}</span>
+      </button>
+    </th>
   );
 }
 

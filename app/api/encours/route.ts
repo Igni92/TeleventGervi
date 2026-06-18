@@ -50,14 +50,16 @@ interface ClientEncours {
   cardCode: string;
   cardName: string;
   clientId: string | null;
-  encours: number;     // NET (encaissé déduit)
-  encaisse: number;    // encaissé non affecté déduit du brut
+  encours: number;     // NET dû (= brut − encaissé)
+  brut: number;        // somme des factures ouvertes (avant déduction)
+  encaisse: number;    // encaissé/avoirs non affectés (déduit EN LIGNE, pas par facture)
   countOpen: number;   // nb factures avec solde dû
-  // Paliers de retard EXCLUSIFS, NETS (une facture ne compte que dans une tranche).
+  // Paliers de retard EXCLUSIFS, au BRUT (on ne répartit pas les avoirs par
+  // facture : un avoir peut viser une autre facture → déduction globale en ligne).
   b3045: number;       // 30 < retard ≤ 45 j
   b4590: number;       // 45 < retard ≤ 90 j
   b90: number;         // retard > 90 j
-  countLate: number;   // nb factures en retard (> 30 j) — info (sur les factures)
+  countLate: number;   // nb factures en retard (> 30 j)
   maxOverdueDays: number;
   invoices: InvoiceLine[];
 }
@@ -125,7 +127,7 @@ export async function GET() {
 
     const e = byClient.get(inv.CardCode) ?? {
       cardCode: inv.CardCode, cardName: inv.CardName ?? inv.CardCode, clientId: null,
-      encours: 0, encaisse: 0, countOpen: 0, b3045: 0, b4590: 0, b90: 0,
+      encours: 0, brut: 0, encaisse: 0, countOpen: 0, b3045: 0, b4590: 0, b90: 0,
       countLate: 0, maxOverdueDays: 0, invoices: [] as InvoiceLine[],
     };
     e.encours += bal; // brut pour l'instant — mis au net après la boucle
@@ -148,15 +150,15 @@ export async function GET() {
     byClient.set(inv.CardCode, e);
   }
 
-  // Mise au NET : on soustrait l'encaissé non affecté (solde compte tiers).
+  // Mise au NET : net = brut − encaissé/avoirs (solde compte tiers). On NE répartit
+  // PAS l'encaissé sur les factures/tranches (un avoir peut viser une autre
+  // facture) → factures et tranches restent au BRUT, déduction présentée en ligne.
   for (const e of byClient.values()) {
     const cab = cabByCode.has(e.cardCode) ? cabByCode.get(e.cardCode)! : null;
-    const n = netEncours({ openTotal: e.encours, b3045: e.b3045, b4590: e.b4590, b90: e.b90, currentAccountBalance: cab });
-    e.encours = n.net;
-    e.encaisse = n.encaisse;
-    e.b3045 = n.b3045;
-    e.b4590 = n.b4590;
-    e.b90 = n.b90;
+    const { net, encaisse } = netEncours(e.encours, cab);
+    e.brut = e.encours;
+    e.encours = net;
+    e.encaisse = encaisse;
   }
 
   // On ne liste que les clients dont le NET reste dû (le déjà-payé sort de la liste).
@@ -164,8 +166,9 @@ export async function GET() {
     .filter((c) => c.encours > 0.01)
     .sort((a, b) => b.encours - a.encours);
 
-  // Totaux au net.
+  // Totaux : encours au NET ; tranches d'ancienneté au BRUT ; encaissé total.
   const totalEncours = aggregated.reduce((s, c) => s + c.encours, 0);
+  const totalEncaisse = aggregated.reduce((s, c) => s + c.encaisse, 0);
   const tot3045 = aggregated.reduce((s, c) => s + c.b3045, 0);
   const tot4590 = aggregated.reduce((s, c) => s + c.b4590, 0);
   const tot90 = aggregated.reduce((s, c) => s + c.b90, 0);
@@ -182,6 +185,7 @@ export async function GET() {
     company: sap.getEnvironment().prodCompany,
     totals: {
       encours: Math.round(totalEncours),
+      encaisse: Math.round(totalEncaisse),
       overdueTotal: Math.round(tot3045 + tot4590 + tot90),
       b3045: Math.round(tot3045),
       b4590: Math.round(tot4590),
@@ -193,8 +197,9 @@ export async function GET() {
       cardCode: c.cardCode,
       cardName: c.cardName,
       clientId: idByCode.get(c.cardCode) ?? null,
-      // Précision complète (cents). Encours = NET (encaissé déduit).
+      // Précision complète (cents). Encours = NET ; brut et encaissé en plus.
       encours: Math.round(c.encours * 100) / 100,
+      brut: Math.round(c.brut * 100) / 100,
       encaisse: Math.round(c.encaisse * 100) / 100,
       countOpen: c.countOpen,
       b3045: Math.round(c.b3045 * 100) / 100,
