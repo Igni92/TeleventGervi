@@ -23,11 +23,12 @@ import {
  * Élimine les données périmées/aberrantes (ex. factures test datées dans le futur).
  * Le stock/catalogue est rafraîchi à part via /api/sap/sync/products.
  *
- * ⚠️ Long (peut dépasser 1-2 min sur ~1 an) — lancer en local / hors prod serverless.
+ * ⚠️ Long (peut dépasser 1-2 min sur ~1 an) — à lancer plutôt en local. Sur
+ * Vercel, le plan Hobby plafonne maxDuration à 300 s (au-delà → échec de build).
  * Les lectures sont épinglées PROD (cf. split sapb1), quel que soit le badge.
  */
 export const dynamic = "force-dynamic";
-export const maxDuration = 600;
+export const maxDuration = 300; // max plan Hobby (Pro : jusqu'à 800)
 
 export async function POST(req: Request) {
   const session = await auth();
