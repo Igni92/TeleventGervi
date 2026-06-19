@@ -8,6 +8,10 @@ import {
   type Granularity,
 } from "@/lib/pilotage";
 
+// Évite le timeout serverless sur les agrégations (cold start Vercel).
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 /**
  * GET /api/pilotage/tops?g=day|week|month|year
  *

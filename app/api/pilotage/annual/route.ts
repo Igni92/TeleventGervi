@@ -9,6 +9,10 @@ import {
 import { groupCodesForSegment, parseSegment } from "@/lib/segments";
 import { cached, invalidate } from "@/lib/ttlCache";
 
+// Évite le timeout serverless sur les agrégations (cold start Vercel).
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 /**
  * GET /api/pilotage/annual?years=2&segment=ALL|GMS|CHR|EXPORT|RUNGIS[&refresh=1]
  *

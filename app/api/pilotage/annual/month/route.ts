@@ -4,6 +4,10 @@ import { getAccessScope, resolvePilotageView } from "@/lib/permissions";
 import { monthDrilldown } from "@/lib/pilotage";
 import { groupCodesForSegment, parseSegment } from "@/lib/segments";
 
+// Évite le timeout serverless sur les agrégations (cold start Vercel).
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 /**
  * GET /api/pilotage/annual/month?year=YYYY&month=0..11
  *
