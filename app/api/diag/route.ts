@@ -7,6 +7,9 @@ import { sap } from "@/lib/sapb1";
  * Permet de vérifier (sans login) la présence des variables d'env et la
  * connectivité SAP/DB sur le déploiement. Protégée par une clé en query.
  * N'expose JAMAIS les valeurs secrètes — seulement présent/absent + tests.
+ *
+ * NB : le dossier ne doit PAS être préfixé par "_" (dossier privé Next.js =
+ * exclu du routage → 404). D'où le chemin /api/diag (et non /api/_diag).
  */
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -22,6 +25,7 @@ export async function GET(req: NextRequest) {
     DATABASE_URL: !!process.env.DATABASE_URL,
     AUTH_SECRET: !!(process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET),
     NEXTAUTH_URL: process.env.NEXTAUTH_URL ?? "(unset)",
+    AUTH_URL: process.env.AUTH_URL ?? "(unset)",
     AZURE_CLIENT_ID: !!process.env.AZURE_CLIENT_ID,
     AZURE_CLIENT_SECRET: !!process.env.AZURE_CLIENT_SECRET,
     AZURE_TENANT_ID: !!process.env.AZURE_TENANT_ID,
@@ -30,10 +34,12 @@ export async function GET(req: NextRequest) {
       try { return new URL(process.env.SAP_B1_BASE_URL ?? "").host; } catch { return "(invalid/unset)"; }
     })(),
     SAP_B1_COMPANY_DB: process.env.SAP_B1_COMPANY_DB ?? "(unset)",
-    SAP_B1_USERNAME_set: !!process.env.SAP_B1_USERNAME,
+    SAP_B1_USERNAME: process.env.SAP_B1_USERNAME ?? "(unset)",
     SAP_B1_PASSWORD_set: !!process.env.SAP_B1_PASSWORD,
     SAP_B1_TLS_INSECURE: process.env.SAP_B1_TLS_INSECURE ?? "(unset)",
     RELANCE_FROM_ADDRESS: process.env.RELANCE_FROM_ADDRESS ?? "(unset)",
+    RELANCE_TEST_RECIPIENT: process.env.RELANCE_TEST_RECIPIENT ?? "(unset)",
+    RELANCE_LIVE: process.env.RELANCE_LIVE ?? "(unset)",
   };
 
   let db: string;
