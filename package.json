@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
-    "prod": "next build && next start",
+    "prod": "prisma generate && next build && next start",
+    "postinstall": "prisma generate",
     "lint": "eslint .",
     "format": "prettier --write .",
     "db:push": "prisma db push",
