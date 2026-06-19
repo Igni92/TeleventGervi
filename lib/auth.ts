@@ -11,6 +11,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     MicrosoftEntraID({
       clientId: process.env.AZURE_CLIENT_ID!,
       clientSecret: process.env.AZURE_CLIENT_SECRET!,
+      // Lie automatiquement la connexion Microsoft à un User EXISTANT de même
+      // email (évite OAuthAccountNotLinked sur les comptes pré-existants). Sûr
+      // ici : fournisseur unique de confiance (Entra, emails vérifiés) + login
+      // restreint au domaine @gervifrais.com (callback signIn ci-dessous).
+      allowDangerousEmailAccountLinking: true,
       // Pas d'issuer ici — on utilise l'endpoint "common" (tous comptes Microsoft)
       // La restriction est faite dans le callback signIn ci-dessous
       authorization: {
