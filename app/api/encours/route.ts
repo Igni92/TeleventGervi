@@ -20,6 +20,9 @@ import { netEncours } from "@/lib/encours-net";
  * **passé 30 jours** au-delà de l'échéance. Paliers : >30j / >45j / >90j.
  */
 export const dynamic = "force-dynamic";
+// Agrégation SAP lourde (toutes les factures ouvertes + soldes clients, paginés).
+// Évite un timeout au seuil court par défaut des fonctions serverless.
+export const maxDuration = 60;
 
 const GRACE_DAYS = 30; // tolérance avant de considérer "en retard"
 
