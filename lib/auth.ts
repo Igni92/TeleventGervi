@@ -7,6 +7,12 @@ const ALLOWED_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || "gervifrais.com";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
+  // Derrière le proxy Vercel : on fait confiance à l'en-tête Host transmis
+  // (x-forwarded-host) pour construire les URL (callback OAuth, redirections)
+  // plutôt qu'une variable NEXTAUTH_URL qui peut rester sur http://localhost:3000
+  // si le .env local a été collé tel quel dans Vercel. Évite les redirections
+  // vers localhost en production.
+  trustHost: true,
   providers: [
     MicrosoftEntraID({
       clientId: process.env.AZURE_CLIENT_ID!,
