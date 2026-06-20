@@ -1,16 +1,18 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
   Search, RefreshCw, Loader2, Package, ChevronLeft, ChevronRight,
-  AlertTriangle, Check, ChevronDown,
+  AlertTriangle, Check, ChevronDown, Scale, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InfoTip } from "@/components/ui/info-tip";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { formatRelative } from "@/lib/utils";
+import { convertStockDisplay, type StockDisplayUnit } from "@/lib/gervifrais-calc";
 
 interface StockEntry { inStock: number; committed: number; ordered: number; available: number; }
 interface Product {
@@ -77,6 +79,10 @@ export function ProductsTable() {
   const [page, setPage] = useState(1);
   const [inStockOnly, setInStockOnly] = useState(true);
   const [selectedGroups, setSelectedGroups] = useState<Set<number>>(new Set());
+  // Unité d'affichage du stock par groupe (kg/colis/pièce) — surcharge le mode auto.
+  const [groupUnits, setGroupUnits] = useState<Record<string, StockDisplayUnit>>({});
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [unitModalOpen, setUnitModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   // Rows expanded to show batches
@@ -136,6 +142,17 @@ export function ProductsTable() {
     } catch { /* silent */ }
   }, []);
 
+  const fetchGroupUnits = useCallback(async () => {
+    try {
+      const res = await fetch("/api/products/group-units");
+      if (res.ok) {
+        const j = await res.json();
+        setGroupUnits(j.units ?? {});
+        setIsAdmin(!!j.isAdmin);
+      }
+    } catch { /* silent */ }
+  }, []);
+
   const sync = useCallback(async () => {
     setSyncing(true);
     try {
@@ -156,6 +173,7 @@ export function ProductsTable() {
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
   useEffect(() => { fetchLastSync(); }, [fetchLastSync]);
   useEffect(() => { fetchGroups(); }, [fetchGroups]);
+  useEffect(() => { fetchGroupUnits(); }, [fetchGroupUnits]);
 
   // Reset page when filter changes
   useEffect(() => { setPage(1); }, [search, inStockOnly, selectedGroups]);
@@ -259,8 +277,19 @@ export function ProductsTable() {
           <span className="text-foreground/80">Disponible uniquement</span>
         </label>
 
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setUnitModalOpen(true)}
+            className="ml-auto inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-medium bg-card border border-border text-foreground/80 hover:border-brand-500/50 hover:text-foreground transition-colors focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none"
+            title="Choisir l'unité d'affichage du stock par groupe article"
+          >
+            <Scale className="h-3.5 w-3.5" /> Unité d&apos;affichage
+          </button>
+        )}
+
         {data && (
-          <span className="ml-auto text-[12px] text-muted-foreground tnum">
+          <span className={`text-[12px] text-muted-foreground tnum ${isAdmin ? "" : "ml-auto"}`}>
             {data.total} produit{data.total > 1 ? "s" : ""}
           </span>
         )}
@@ -369,6 +398,8 @@ export function ProductsTable() {
             ) : (
               data.products.flatMap((p) => {
                 const isExpanded = expandedId === p.id;
+                // Surcharge d'unité d'affichage choisie pour le groupe (sinon auto).
+                const unit = (p.itemGroup != null ? groupUnits[String(p.itemGroup)] : undefined) ?? null;
                 const rows = [
                   <tr
                     key={p.id}
@@ -392,30 +423,26 @@ export function ProductsTable() {
                     <td className="px-4 py-2.5 font-mono text-[11.5px] font-semibold text-foreground">{p.itemCode}</td>
                     <td className="px-4 py-2.5 text-foreground/90">{p.itemName}</td>
                     <td className="px-4 py-2.5 text-[11.5px] text-muted-foreground">{p.groupName || "—"}</td>
-                    <td className="px-2 py-2.5"><UnitsBadge product={p} /></td>
-                    <StockCell entry={p.stockByWarehouse["000"]} product={p} />
-                    <StockCell entry={p.stockByWarehouse["01"]} product={p} />
-                    <StockCell entry={p.stockByWarehouse["R1"]} product={p} highlight />
+                    <td className="px-2 py-2.5"><UnitsBadge product={p} unit={unit} /></td>
+                    <StockCell entry={p.stockByWarehouse["000"]} product={p} unit={unit} />
+                    <StockCell entry={p.stockByWarehouse["01"]} product={p} unit={unit} />
+                    <StockCell entry={p.stockByWarehouse["R1"]} product={p} unit={unit} highlight />
                     <td className="px-4 py-2.5 text-right font-semibold tnum text-foreground">
                       {(() => {
-                        const div = getPackDivisor(p);
                         // Total = somme des DISPO sur les 3 entrepôts synchronisés
                         // (et non plus le totalStock SAP global qui inclut le committed)
                         const totalAvailable = ["000", "01", "R1"].reduce(
                           (s, w) => s + (p.stockByWarehouse[w]?.available ?? 0),
                           0,
                         );
-                        const total = totalAvailable / div;
-                        if (total <= 0) return <span className="text-muted-foreground/50">0</span>;
-                        // Règle : pas de demi-colis affiché → floor en Colis.
-                        const formatted = div > 1
-                          ? Math.floor(total).toString()
-                          : total.toFixed(0);
+                        const { qty, label, whole } = stockDisplay(p, totalAvailable, unit);
+                        if (qty <= 0) return <span className="text-muted-foreground/50">0</span>;
+                        const formatted = whole ? Math.floor(qty).toString() : qty.toFixed(0);
                         return (
                           <>
                             {formatted}
                             <span className="ml-1 text-[10px] text-muted-foreground/70 font-normal">
-                              {getDisplayUnit(p)}
+                              {label}
                             </span>
                           </>
                         );
@@ -453,6 +480,22 @@ export function ProductsTable() {
           </div>
         </div>
       )}
+
+      {unitModalOpen && (
+        <StockUnitModal
+          groups={groups}
+          units={groupUnits}
+          onClose={() => setUnitModalOpen(false)}
+          onChange={(groupId, value) =>
+            setGroupUnits((cur) => {
+              const next = { ...cur };
+              if (value === null) delete next[String(groupId)];
+              else next[String(groupId)] = value;
+              return next;
+            })
+          }
+        />
+      )}
     </div>
   );
 }
@@ -478,13 +521,49 @@ function getDisplayUnit(p: Product): string {
   return p.salesUnit || p.inventoryUnit || "";
 }
 
+/**
+ * Quantité à afficher pour un stock `available` (unités de base SAP).
+ *   - override (kg/colis/pièce choisi pour le groupe) → conversion dédiée ;
+ *   - sinon mode auto historique : colis si pack, sinon unité de vente.
+ * `whole` = true ⇒ on tronque (jamais de demi-colis / demi-pièce).
+ */
+function stockDisplay(
+  p: Product, available: number, override: StockDisplayUnit | null,
+): { qty: number; label: string; whole: boolean } {
+  if (override) return convertStockDisplay(available, override, p);
+  const div = getPackDivisor(p);
+  return { qty: available / div, label: getDisplayUnit(p), whole: div > 1 };
+}
+
 /** "Colis (12 × 125g)" — explicit format requested by the user. */
-function UnitsBadge({ product }: { product: Product }) {
+function UnitsBadge({ product, unit }: { product: Product; unit: StockDisplayUnit | null }) {
   const sale = product.salesUnit;
   const inv = product.inventoryUnit;
   const qty = product.salesQtyPerPackUnit;
   const weightLabel = formatWeight(product.salesUnitWeight);
   const divisor = getPackDivisor(product);
+
+  // Override de groupe : badge explicite signalant l'unité d'affichage forcée.
+  if (unit) {
+    const label = unit === "kg" ? "kg" : unit === "piece" ? "pièce" : "Colis";
+    return (
+      <InfoTip
+        label="Unité d'affichage"
+        content={<>
+          Affichage forcé en <b>{label}</b> pour ce groupe article.
+          {weightLabel && <> · 1 unité ≈ {weightLabel}</>}
+          {divisor > 1 && <> · 1 colis = {qty} unités</>}
+        </>}
+        side="top"
+      >
+        <span className="inline-flex items-center gap-1 text-[11px]">
+          <span className="px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 font-semibold">
+            {label}
+          </span>
+        </span>
+      </InfoTip>
+    );
+  }
 
   if (divisor > 1) {
     // Pack mode — "Colis (12 × 125g)" or "Colis (12 × pie)" if no weight
@@ -650,32 +729,151 @@ function BatchStatus({ status }: { status: string | null }) {
 }
 
 function StockCell({
-  entry, product, highlight,
+  entry, product, unit, highlight,
 }: {
   entry?: StockEntry;
   product: Product;
+  unit: StockDisplayUnit | null;
   highlight?: boolean;
 }) {
-  const divisor = getPackDivisor(product);
   if (!entry || entry.available <= 0) {
     return <td className="px-3 py-2.5 text-right text-muted-foreground/40 tnum">—</td>;
   }
-  // Divide by pack qty so we display in Colis (not pieces)
-  const available = entry.available / divisor;
-  const isLow = available < (divisor > 1 ? 1 : 10);
+  const { qty, whole } = stockDisplay(product, entry.available, unit);
+  const isLow = qty < (whole ? 1 : 10);
   const color = isLow
     ? "text-amber-600 dark:text-amber-400"
     : highlight
     ? "text-brand-600 dark:text-brand-400 font-semibold"
     : "text-foreground";
-  // Règle métier : on n'affiche jamais un demi-colis (76.8 → 76).
-  // Pour les unités unitaires (kg/pièce), on garde 0 décimale (round).
-  const fmt = (n: number) => divisor > 1
-    ? Math.floor(n).toString()
-    : n.toFixed(0);
+  // Règle métier : on n'affiche jamais un demi-colis / demi-pièce (76.8 → 76).
+  // Pour le kilo, on garde 0 décimale (round).
+  const fmt = (n: number) => (whole ? Math.floor(n).toString() : n.toFixed(0));
   return (
     <td className="px-3 py-2.5 text-right tnum">
-      <span className={`${color} font-semibold`}>{fmt(available)}</span>
+      <span className={`${color} font-semibold`}>{fmt(qty)}</span>
     </td>
   );
+}
+
+/* ── Popup « Unité d'affichage du stock » par groupe article ──── */
+const UNIT_OPTIONS: { value: StockDisplayUnit | null; label: string }[] = [
+  { value: null, label: "Auto" },
+  { value: "kg", label: "kg" },
+  { value: "colis", label: "Colis" },
+  { value: "piece", label: "Pièce" },
+];
+
+function StockUnitModal({
+  groups, units, onClose, onChange,
+}: {
+  groups: ProductGroup[];
+  units: Record<string, StockDisplayUnit>;
+  onClose: () => void;
+  onChange: (groupId: number, value: StockDisplayUnit | null) => void;
+}) {
+  const [savingId, setSavingId] = useState<number | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  async function setUnit(groupId: number, value: StockDisplayUnit | null) {
+    const previous = units[String(groupId)] ?? null;
+    setSavingId(groupId);
+    onChange(groupId, value); // optimiste
+    try {
+      const r = await fetch("/api/products/group-units", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groupId, unit: value }),
+      });
+      if (!r.ok) throw new Error();
+    } catch {
+      onChange(groupId, previous); // rollback
+      toast.error("Échec de l'enregistrement de l'unité");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  const modal = (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="w-full max-w-lg rounded-2xl border border-border bg-card shadow-2xl flex flex-col max-h-[85vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-border px-5 py-3.5 shrink-0">
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1">
+              <Scale className="h-3 w-3" /> Unité d&apos;affichage du stock
+            </p>
+            <p className="text-[12px] text-muted-foreground">
+              Par groupe article — le calcul de conversion est appliqué partout.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Fermer" className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="px-5 py-3 overflow-y-auto">
+          {groups.length === 0 ? (
+            <p className="text-[12.5px] text-muted-foreground py-6 text-center">Aucun groupe article.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {groups.map((g) => {
+                const cur = units[String(g.id)] ?? null;
+                return (
+                  <div key={g.id} className="flex items-center justify-between gap-3 py-1.5">
+                    <div className="min-w-0">
+                      <p className="text-[12.5px] font-medium text-foreground truncate">{g.name}</p>
+                      <p className="text-[10px] text-muted-foreground tnum">{g.count} article{g.count > 1 ? "s" : ""}</p>
+                    </div>
+                    <div className="inline-flex items-center rounded-lg bg-secondary/60 p-0.5 shrink-0">
+                      {UNIT_OPTIONS.map((opt) => {
+                        const active = cur === opt.value;
+                        return (
+                          <button
+                            key={opt.label}
+                            type="button"
+                            disabled={savingId === g.id}
+                            onClick={() => setUnit(g.id, opt.value)}
+                            className={`h-7 px-2.5 rounded-md text-[11.5px] font-semibold transition-colors disabled:opacity-50 ${
+                              active
+                                ? "bg-brand-600 text-white shadow-[0_1px_2px_rgba(79,70,229,0.3)]"
+                                : "text-foreground/70 hover:text-foreground"
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-border px-5 py-3 shrink-0">
+          <p className="text-[10.5px] text-muted-foreground leading-relaxed">
+            <b>Auto</b> : colis si l&apos;article a un conditionnement, sinon son unité de vente.
+            {" "}<b>kg</b> : poids réel. <b>Colis</b> : nombre de colis. <b>Pièce</b> : ÷ poids unitaire (salesUnitWeight).
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (typeof document === "undefined") return null;
+  return createPortal(modal, document.body);
 }

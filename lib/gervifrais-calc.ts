@@ -208,3 +208,66 @@ export function personalStock(available: number, sharePct: number): number {
   const a = Math.max(0, available) * (Math.max(0, sharePct) / 100);
   return Math.floor(a * 10) / 10;
 }
+
+// ── Unité d'affichage du STOCK par groupe article ─────────────
+/** Unité d'affichage choisie pour un groupe : kilo, colis ou pièce. */
+export type StockDisplayUnit = "kg" | "colis" | "piece";
+
+/** Forme minimale d'un produit pour le calcul d'affichage stock. */
+export interface StockUnitProduct {
+  salesUnit?: string | null;
+  inventoryUnit?: string | null;
+  salesPackagingUnit?: string | null;
+  salesQtyPerPackUnit?: number | null;
+  salesUnitWeight?: number | null;
+}
+
+/**
+ * Diviseur unités de base → colis. Cohérent avec ProductsTable.getPackDivisor :
+ * un colis n'existe que si l'article porte une unité de conditionnement
+ * (SalesPackagingUnit) ET un nombre d'unités > 1 (SalesQtyPerPackUnit).
+ */
+export function stockPackDivisor(p: StockUnitProduct): number {
+  if (p.salesPackagingUnit && p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) {
+    return p.salesQtyPerPackUnit;
+  }
+  return 1;
+}
+
+/**
+ * Convertit un stock DISPONIBLE (exprimé en unités de base SAP = inventoryUnit)
+ * vers l'unité d'affichage choisie pour le groupe article.
+ *
+ *   • kg    : article au poids → tel quel (le stock EST déjà en kg) ; article à
+ *             la pièce → × salesUnitWeight (kg par pièce). C'est le cas qui règle
+ *             l'incohérence FB4LA3 (affiché en colis) vs FB4CA3B (affiché en kg) :
+ *             forcer « kg » sur le groupe ramène les deux au kilo.
+ *   • colis : unités de base ÷ (unités par colis). Pas de demi-colis (floor amont).
+ *   • pièce : article au poids → ÷ salesUnitWeight (nb de pièces) ; article déjà à
+ *             la pièce → tel quel. (Choix utilisateur : « pièce = salesUnitWeight ».)
+ *
+ * `whole` = true ⇒ l'appelant tronque (jamais de fraction de colis/pièce).
+ */
+export function convertStockDisplay(
+  available: number,
+  target: StockDisplayUnit,
+  p: StockUnitProduct,
+): { qty: number; label: string; whole: boolean } {
+  const unit = (p.salesUnit || p.inventoryUnit || "").trim();
+  const isKg = /kg|kilo/i.test(unit);
+  const weight = p.salesUnitWeight && p.salesUnitWeight > 0 ? p.salesUnitWeight : null;
+
+  switch (target) {
+    case "colis":
+      return { qty: available / stockPackDivisor(p), label: "Colis", whole: true };
+    case "piece": {
+      const pieces = isKg && weight ? available / weight : available;
+      return { qty: pieces, label: "pièce", whole: true };
+    }
+    case "kg":
+    default: {
+      const kg = isKg ? available : weight ? available * weight : available;
+      return { qty: kg, label: "kg", whole: false };
+    }
+  }
+}
