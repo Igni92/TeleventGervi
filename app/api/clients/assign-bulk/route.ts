@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { normalizeSlp } from "@/lib/salespeople";
 
 /**
  * POST /api/clients/assign-bulk
@@ -11,7 +12,8 @@ import { prisma } from "@/lib/prisma";
  * Assignation en série : applique vendeur / commercial / activation à tous les
  * clients cochés en un seul UPDATE. Raw SQL (champs hors client Prisma typé).
  */
-const clean = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+// Normalise vers le trigramme canonique (MM/JMG/AG) avant stockage.
+const clean = (v: unknown) => (typeof v === "string" ? normalizeSlp(v) : null);
 
 export async function POST(req: NextRequest) {
   const session = await auth();

@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { normalizeSlp } from "@/lib/salespeople";
 
 /**
  * POST /api/clients/[id]/assign
@@ -12,7 +13,9 @@ import { prisma } from "@/lib/prisma";
  * et/ou son commercial (account manager). Raw SQL : vendeur/activeTelevente ne
  * sont pas dans le client Prisma typé (generate bloqué).
  */
-const clean = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+// Normalise un commercial/vendeur vers son trigramme canonique (MM/JMG/AG) avant
+// stockage — évite que « Jean-Michel GUNSLAY - Gervifrais » et « JMG » coexistent.
+const clean = (v: unknown) => (typeof v === "string" ? normalizeSlp(v) : null);
 
 export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;

@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { SALESPEOPLE } from "@/lib/salespeople";
+import { SALESPEOPLE, nameFromInitials, normalizeSlp } from "@/lib/salespeople";
 import { ClientLink } from "@/components/ClientLink";
 
 interface PlanClient {
@@ -91,19 +91,23 @@ function LastOrder({ days }: { days: number | null }) {
 function AssignSelect({ value, options, placeholder, onChange }: {
   value: string | null; options: readonly string[]; placeholder: string; onChange: (v: string | null) => void;
 }) {
+  // Valeur canonique (trigramme) quel que soit le format stocké (« JMG »,
+  // « jm.gunslay », « Jean-Michel GUNSLAY - Gervifrais » → tous = JMG).
+  const norm = value ? normalizeSlp(value) : null;
   const opts = useMemo(() => {
     const set = new Set(options);
-    if (value) set.add(value);
+    if (norm) set.add(norm);
     return Array.from(set);
-  }, [options, value]);
+  }, [options, norm]);
   return (
     <select
-      value={value ?? ""}
+      value={norm ?? ""}
       onChange={(e) => onChange(e.target.value || null)}
-      className="h-7 w-full max-w-[110px] rounded-md border border-border bg-background text-[11.5px] px-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
+      className="h-7 w-full max-w-[130px] rounded-md border border-border bg-background text-[11.5px] px-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
     >
       <option value="">{placeholder}</option>
-      {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+      {/* On stocke le trigramme (valeur), on affiche le nom TeleVent (label). */}
+      {opts.map((o) => <option key={o} value={o}>{nameFromInitials(o) ?? o}</option>)}
     </select>
   );
 }
@@ -264,9 +268,9 @@ export function PlanAppel() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher (code, nom)…" className="pl-9" />
         </div>
-        <FilterSelect value={vendeur} onChange={setVendeur} placeholder="Vendeur" options={[["", "Tous vendeurs"], ...VENDEURS.map((v) => [v, v] as [string, string])]} />
+        <FilterSelect value={vendeur} onChange={setVendeur} placeholder="Vendeur" options={[["", "Tous vendeurs"], ...VENDEURS.map((v) => [v, nameFromInitials(v) ?? v] as [string, string])]} />
         <FilterSelect value={commercial} onChange={setCommercial} placeholder="Commercial"
-          options={[["", "Tous commerciaux"], ["__none__", "Non assigné"], ...VENDEURS.map((v) => [v, v] as [string, string])]} />
+          options={[["", "Tous commerciaux"], ["__none__", "Non assigné"], ...VENDEURS.map((v) => [v, nameFromInitials(v) ?? v] as [string, string])]} />
         <FilterSelect value={type} onChange={setType} placeholder="Type" options={[["", "Tous types"], ["GMS", "GMS"], ["EXPORT", "EXPORT"], ["CHR", "CHR"]]} />
         <FilterSelect value={active} onChange={setActive} placeholder="Activation" options={[["", "Actif + inactif"], ["actifs", "Actifs"], ["inactifs", "À activer"]]} />
         <FilterSelect value={stale} onChange={setStale} placeholder="Retard cde" options={[["", "Toute ancienneté"], ["14", "≥ 14 j"], ["30", "≥ 30 j"], ["60", "≥ 60 j"]]} />
@@ -375,7 +379,7 @@ function BulkActionSelect({ label, options, onPick }: { label: string; options: 
       className="h-8 rounded-md border border-brand-400/50 bg-card text-[12px] px-2 font-medium focus:outline-none focus:ring-1 focus:ring-brand-500"
     >
       <option value="">{label}…</option>
-      {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      {options.map((o) => <option key={o} value={o}>{nameFromInitials(o) ?? o}</option>)}
       <option value="__none__">— retirer —</option>
     </select>
   );
