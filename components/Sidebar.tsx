@@ -424,7 +424,7 @@ export function Sidebar() {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18, ease: "easeOut" }}
-          className="fixed inset-0 z-[70] bg-[#0b1018]/45 backdrop-blur-[2px] flex items-center justify-center cursor-progress"
+          className="fixed inset-0 z-[70] bg-[#0b1018]/55 flex items-center justify-center cursor-progress"
           aria-live="polite"
           aria-label={`Ouverture de ${pending}`}
         >
@@ -433,7 +433,7 @@ export function Sidebar() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.97 }}
             transition={SPRING.snappy}
-            className="flex items-center gap-4 rounded-2xl border border-white/[0.1] bg-[#11161f]/95 backdrop-blur-md px-6 py-4 shadow-[0_20px_60px_rgba(0,0,0,0.5),0_0_30px_rgba(99,102,241,0.12)]"
+            className="flex items-center gap-4 rounded-2xl border border-white/[0.1] bg-[#11161f] px-6 py-4 shadow-[0_20px_60px_rgba(0,0,0,0.5),0_0_30px_rgba(99,102,241,0.12)]"
           >
             <SignalLoader />
             <div>

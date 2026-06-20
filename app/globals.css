@@ -175,8 +175,9 @@
     inset: 0;
     pointer-events: none;
     z-index: 9999;
-    opacity: 0.022;
-    mix-blend-mode: overlay;
+    /* Pas de mix-blend-mode : il forçait une recomposition plein écran à chaque
+       frame de scroll (jank universel). Grain en simple overlay très léger. */
+    opacity: 0.03;
     background-image:
       url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
   }
@@ -441,6 +442,14 @@
   100% { transform: translate3d(6%, -4%, 0)  scale(1.18) rotate(2.4deg); }
 }
 @keyframes ambient-spin { to { transform: rotate(360deg); } }
+
+/* Loader « signal » — animé en CSS PUR (transform/opacity = thread compositeur)
+   pour rester fluide même quand le thread principal rend la page. */
+@keyframes signal-bar {
+  0%, 100% { transform: scaleY(0.35); opacity: 0.45; }
+  50%      { transform: scaleY(1);    opacity: 1; }
+}
+.signal-bar { transform-origin: bottom; animation: signal-bar 0.9s ease-in-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
   .ambient-aurora, .ambient-aurora-2,

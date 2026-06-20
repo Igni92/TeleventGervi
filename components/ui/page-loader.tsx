@@ -1,18 +1,14 @@
-"use client";
-
-import { motion } from "framer-motion";
-
 /**
- * Chargements « salle de signal » :
+ * Chargements « salle de signal ».
  *
- * - `SignalLoader`   : égaliseur 5 barres animées (écho du logo waveform).
- * - `PageLoader`     : état de chargement d'une page (utilisé par les
- *                      `loading.tsx` de chaque section — la sidebar reste
- *                      visible, le contenu affiche ce loader).
- * - `FullscreenLoader` : variante plein écran pour le cockpit /dashboard.
+ * - `SignalLoader`   : égaliseur 5 barres — animé en CSS PUR (transform/opacity
+ *                      = thread compositeur) pour rester FLUIDE même quand le
+ *                      thread principal est occupé à rendre la page. (Avant :
+ *                      framer-motion → saccadait pendant les gros rendus.)
+ * - `PageLoader`     : état de chargement d'une section (sidebar visible).
+ * - `FullscreenLoader` : variante plein écran (cockpit /dashboard).
  *
- * Le voile grisé de NAVIGATION (clic sidebar → page suivante) vit dans
- * components/Sidebar.tsx (overlay fixed + ce SignalLoader).
+ * Le voile de NAVIGATION (clic sidebar) vit dans components/Sidebar.tsx.
  */
 
 const BAR_HEIGHTS = [10, 17, 24, 17, 10];
@@ -25,27 +21,22 @@ export function SignalLoader({ className = "" }: { className?: string }) {
       aria-label="Chargement en cours"
     >
       {BAR_HEIGHTS.map((h, i) => (
-        <motion.span
+        <span
           key={i}
-          className="w-[3.5px] rounded-full bg-brand-500"
-          style={{ height: h, transformOrigin: "bottom" }}
-          animate={{ scaleY: [0.35, 1, 0.35], opacity: [0.45, 1, 0.45] }}
-          transition={{ repeat: Infinity, duration: 0.9, delay: i * 0.1, ease: "easeInOut" }}
+          className="signal-bar w-[3.5px] rounded-full bg-brand-500"
+          style={{ height: h, animationDelay: `${i * 0.1}s` }}
         />
       ))}
     </div>
   );
 }
 
-/** Carte de chargement centrée — cœur commun des deux variantes. */
+/** Carte de chargement centrée — cœur commun des deux variantes.
+ *  Fond OPAQUE (pas de backdrop-filter) : moins cher à peindre pendant le
+ *  chargement, et pas d'animation d'entrée JS. */
 function LoaderChip({ label, hint }: { label?: string; hint?: string }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8, scale: 0.97 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.25, ease: "easeOut" }}
-      className="flex items-center gap-4 rounded-2xl border border-border bg-card/85 backdrop-blur-md px-6 py-4 shadow-2xl"
-    >
+    <div className="flex items-center gap-4 rounded-2xl border border-border bg-card px-6 py-4 shadow-2xl">
       <SignalLoader />
       <div className="min-w-0">
         <p className="text-[13px] font-semibold text-foreground leading-tight">
@@ -53,7 +44,7 @@ function LoaderChip({ label, hint }: { label?: string; hint?: string }) {
         </p>
         <p className="text-[11px] text-muted-foreground mt-0.5">{hint ?? "Récupération des données…"}</p>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
