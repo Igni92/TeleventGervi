@@ -7,7 +7,7 @@
 export interface ActivePromo {
   id: string;
   itemCode: string;
-  kind: "PERCENT" | "X_PLUS_Y" | string;
+  kind: "PERCENT" | "X_PLUS_Y" | "FREE" | string;
   value: number | null;
   buyQty: number | null;
   freeQty: number | null;
@@ -20,9 +20,13 @@ export interface ActivePromo {
   isNew?: boolean;
 }
 
-/** Chip type courte : « −10 % » ou « 5+1 ». */
+/** Chip type courte : « −10 % », « 5+1 » ou « +1 offert ». */
 export function promoChip(p: Pick<ActivePromo, "kind" | "value" | "buyQty" | "freeQty">): string {
   if (p.kind === "PERCENT") return `−${String(Math.round((p.value ?? 0) * 100) / 100)} %`;
+  if (p.kind === "FREE") {
+    const n = p.freeQty ?? 1;
+    return `+${n} offert${n > 1 ? "s" : ""}`;
+  }
   return `${p.buyQty ?? "?"}+${p.freeQty ?? "?"}`;
 }
 

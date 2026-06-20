@@ -841,10 +841,10 @@ model FavoriteItem {
 model Promo {
   id        String    @id @default(cuid())
   itemCode  String // SAP ItemCode
-  kind      String // 'PERCENT' | 'X_PLUS_Y'
+  kind      String // 'PERCENT' | 'X_PLUS_Y' | 'FREE' (N colis offerts, sans seuil)
   value     Float? // % de remise (PERCENT)
   buyQty    Float? // X achetés (X_PLUS_Y)
-  freeQty   Float? // Y offerts (X_PLUS_Y)
+  freeQty   Float? // colis offerts (X_PLUS_Y et FREE)
   label     String? // libellé libre affiché sur le BL
   startsAt  DateTime?
   endsAt    DateTime?

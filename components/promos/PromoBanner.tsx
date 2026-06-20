@@ -152,7 +152,7 @@ export function PromoBanner({
         "inline-flex justify-center items-center px-2 rounded-[5px] font-bold shrink-0 bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-400/70 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/60",
         compact ? "h-[22px] min-w-[56px] text-[12px]" : "h-[26px] min-w-[66px] text-[13.5px]",
       )}>
-        {current.kind === "X_PLUS_Y" && <Gift className="h-3 w-3 mr-1" />}
+        {(current.kind === "X_PLUS_Y" || current.kind === "FREE") && <Gift className="h-3 w-3 mr-1" />}
         {promoChip(current)}
       </span>
 
@@ -313,7 +313,7 @@ function PromoTickerItem({
         "inline-flex justify-center items-center px-1.5 rounded-[5px] font-bold shrink-0 bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-400/70 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/60",
         compact ? "h-[20px] min-w-[52px] text-[11.5px]" : "h-[22px] min-w-[58px] text-[12.5px]",
       )}>
-        {p.kind === "X_PLUS_Y" && <Gift className="h-3 w-3 mr-1" />}
+        {(p.kind === "X_PLUS_Y" || p.kind === "FREE") && <Gift className="h-3 w-3 mr-1" />}
         {promoChip(p)}
       </span>
       {p.isNew && (

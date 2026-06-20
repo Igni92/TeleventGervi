@@ -13,8 +13,9 @@ import { prisma } from "@/lib/prisma";
  * POST { itemCode, kind, value?, buyQty?, freeQty?, label?, pitch?, startsAt?, endsAt? }
  *      → { ok: true, promo } (ligne créée, RETURNING *).
  *
- * kind : 'PERCENT' (remise en %, 1 ≤ value ≤ 90)
- *        ou 'X_PLUS_Y' (buyQty achetés → freeQty offerts, chacun ≥ 1).
+ * kind : 'PERCENT'  (remise en %, 1 ≤ value ≤ 90)
+ *        'X_PLUS_Y' (buyQty achetés → freeQty offerts, chacun ≥ 1)
+ *        'FREE'     (freeQty colis offerts, sans seuil d'achat — « 1 colis offert »).
  *
  * ⚠️ Table Promo absente du client Prisma généré (régénération impossible —
  * EPERM dev server) → accès exclusivement en raw SQL paramétré ($1, $2…).
@@ -98,11 +99,11 @@ export async function POST(req: NextRequest) {
   if (!itemCode) return bad("itemCode requis");
 
   const kind = body.kind;
-  if (kind !== "PERCENT" && kind !== "X_PLUS_Y") {
-    return bad("kind invalide (PERCENT ou X_PLUS_Y attendu)");
+  if (kind !== "PERCENT" && kind !== "X_PLUS_Y" && kind !== "FREE") {
+    return bad("kind invalide (PERCENT, X_PLUS_Y ou FREE attendu)");
   }
 
-  // Champs spécifiques au type — les champs de l'autre type sont mis à NULL.
+  // Champs spécifiques au type — les champs des autres types sont mis à NULL.
   let value: number | null = null;
   let buyQty: number | null = null;
   let freeQty: number | null = null;
@@ -111,11 +112,15 @@ export async function POST(req: NextRequest) {
     value = toNum(body.value);
     if (value === null) return bad("value requise pour une promo PERCENT");
     if (value < 1 || value > 90) return bad("value doit être comprise entre 1 et 90");
-  } else {
+  } else if (kind === "X_PLUS_Y") {
     buyQty = toNum(body.buyQty);
     freeQty = toNum(body.freeQty);
     if (buyQty === null || buyQty < 1) return bad("buyQty doit être ≥ 1 pour une promo X_PLUS_Y");
     if (freeQty === null || freeQty < 1) return bad("freeQty doit être ≥ 1 pour une promo X_PLUS_Y");
+  } else {
+    // FREE — « N colis offerts », sans seuil d'achat (buyQty/value restent NULL).
+    freeQty = toNum(body.freeQty);
+    if (freeQty === null || freeQty < 1) return bad("freeQty doit être ≥ 1 pour une promo FREE");
   }
 
   const label =

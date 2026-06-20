@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
-  BadgePercent, Gift, Loader2, Plus, Power, RefreshCw, Search, Trash2,
+  BadgePercent, Gift, Loader2, PackagePlus, Plus, Power, RefreshCw, Search, Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
@@ -25,7 +25,7 @@ import {
 interface Promo {
   id: string;
   itemCode: string;
-  kind: "PERCENT" | "X_PLUS_Y";
+  kind: "PERCENT" | "X_PLUS_Y" | "FREE";
   value: number | null;
   buyQty: number | null;
   freeQty: number | null;
@@ -41,9 +41,10 @@ interface Promo {
 
 interface ProductHit { itemCode: string; itemName: string; groupName: string | null }
 
-/** Libellé court du type : « −10 % » ou « 5+1 ». */
+/** Libellé court du type : « −10 % », « 5+1 » ou « +1 offert ». */
 function promoBadge(p: Promo): string {
   if (p.kind === "PERCENT") return `−${String(Math.round((p.value ?? 0) * 100) / 100)} %`;
+  if (p.kind === "FREE") { const n = p.freeQty ?? 1; return `+${n} offert${n > 1 ? "s" : ""}`; }
   return `${p.buyQty ?? "?"}+${p.freeQty ?? "?"}`;
 }
 
@@ -140,7 +141,7 @@ export function PromosManager() {
               <li key={p.id} className={`flex items-center gap-3 py-2.5 ${active ? "" : "opacity-55"}`}>
                 {/* Type — chip vif assorti au badge de l'Écran 2 */}
                 <span className="inline-flex h-[24px] min-w-[64px] justify-center items-center px-2 rounded-[5px] text-[13px] font-bold shrink-0 bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-400/70 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/60">
-                  {p.kind === "X_PLUS_Y" && <Gift className="h-3 w-3 mr-1" />}
+                  {(p.kind === "X_PLUS_Y" || p.kind === "FREE") && <Gift className="h-3 w-3 mr-1" />}
                   {promoBadge(p)}
                 </span>
                 <div className="min-w-0 flex-1">
@@ -149,9 +150,13 @@ export function PromosManager() {
                   </p>
                   <p className="text-[11px] font-mono text-muted-foreground/70 truncate mt-0.5">
                     {p.itemCode}
-                    {(debut || fin) && (
+                    {(debut || fin) ? (
                       <span className="font-sans text-muted-foreground/80">
                         {" "}· {debut ?? "…"} → {fin ?? "…"}
+                      </span>
+                    ) : (
+                      <span className="font-sans text-emerald-600/80 dark:text-emerald-400/80">
+                        {" "}· permanente
                       </span>
                     )}
                   </p>
@@ -202,11 +207,13 @@ export function PromosManager() {
 function CreatePromoDialog({
   open, onOpenChange, onCreated,
 }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: () => void }) {
-  const [kind, setKind] = useState<"PERCENT" | "X_PLUS_Y">("PERCENT");
+  const [kind, setKind] = useState<"PERCENT" | "X_PLUS_Y" | "FREE">("PERCENT");
   const [value, setValue] = useState<number | null>(10);
   const [buyQty, setBuyQty] = useState<number | null>(5);
   const [freeQty, setFreeQty] = useState<number | null>(1);
   const [label, setLabel] = useState("");
+  // Promo permanente (sans dates) par défaut — décocher pour fixer une période.
+  const [permanent, setPermanent] = useState(true);
   const [startsAt, setStartsAt] = useState("");
   const [endsAt, setEndsAt] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -221,7 +228,7 @@ function CreatePromoDialog({
   useEffect(() => {
     if (!open) return;
     setKind("PERCENT"); setValue(10); setBuyQty(5); setFreeQty(1);
-    setLabel(""); setStartsAt(""); setEndsAt("");
+    setLabel(""); setPermanent(true); setStartsAt(""); setEndsAt("");
     setQuery(""); setHits([]); setPicked(null);
   }, [open]);
 
@@ -254,7 +261,9 @@ function CreatePromoDialog({
   const valid = picked != null && (
     kind === "PERCENT"
       ? value != null && value > 0 && value < 100
-      : buyQty != null && buyQty >= 1 && freeQty != null && freeQty >= 1
+      : kind === "X_PLUS_Y"
+        ? buyQty != null && buyQty >= 1 && freeQty != null && freeQty >= 1
+        : /* FREE */ freeQty != null && freeQty >= 1
   );
 
   const submit = async () => {
@@ -268,11 +277,11 @@ function CreatePromoDialog({
           kind,
           value: kind === "PERCENT" ? value : 0,
           buyQty: kind === "X_PLUS_Y" ? buyQty : 0,
-          freeQty: kind === "X_PLUS_Y" ? freeQty : 0,
+          freeQty: (kind === "X_PLUS_Y" || kind === "FREE") ? freeQty : 0,
           label: label.trim() || null,
-          // Dates optionnelles — ignorées sans dommage si le serveur ne les gère pas
-          ...(startsAt ? { startsAt: new Date(startsAt).toISOString() } : {}),
-          ...(endsAt ? { endsAt: new Date(endsAt).toISOString() } : {}),
+          // Promo permanente → aucune date envoyée (sinon période fixée).
+          ...(!permanent && startsAt ? { startsAt: new Date(startsAt).toISOString() } : {}),
+          ...(!permanent && endsAt ? { endsAt: new Date(endsAt).toISOString() } : {}),
         }),
       });
       if (!res.ok) {
@@ -336,18 +345,24 @@ function CreatePromoDialog({
             <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
               Type de promo
             </label>
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
               <button type="button" aria-pressed={kind === "PERCENT"} onClick={() => setKind("PERCENT")}
-                className={`h-10 rounded-md border text-[13px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
+                className={`h-10 rounded-md border text-[12.5px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
                   kind === "PERCENT" ? "border-rose-400/70 bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" : "border-border text-muted-foreground hover:text-foreground"
                 }`}>
                 <BadgePercent className="h-4 w-4" /> Remise %
               </button>
               <button type="button" aria-pressed={kind === "X_PLUS_Y"} onClick={() => setKind("X_PLUS_Y")}
-                className={`h-10 rounded-md border text-[13px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
+                className={`h-10 rounded-md border text-[12.5px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
                   kind === "X_PLUS_Y" ? "border-rose-400/70 bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" : "border-border text-muted-foreground hover:text-foreground"
                 }`}>
-                <Gift className="h-4 w-4" /> X achetés + Y offerts
+                <Gift className="h-4 w-4" /> X + Y
+              </button>
+              <button type="button" aria-pressed={kind === "FREE"} onClick={() => setKind("FREE")}
+                className={`h-10 rounded-md border text-[12.5px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
+                  kind === "FREE" ? "border-rose-400/70 bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" : "border-border text-muted-foreground hover:text-foreground"
+                }`}>
+                <PackagePlus className="h-4 w-4" /> Colis offert
               </button>
             </div>
           </div>
@@ -363,6 +378,18 @@ function CreatePromoDialog({
                   aria-label="Remise en pourcentage"
                   className="h-10 w-24 text-right text-[15px] tnum rounded-md border border-border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
                 <span className="text-[14px] text-muted-foreground">% sur le prix conseillé</span>
+              </div>
+            </div>
+          ) : kind === "FREE" ? (
+            <div>
+              <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+                Colis offerts
+              </label>
+              <div className="flex items-center gap-2">
+                <NumberInput value={freeQty} onValueChange={setFreeQty} min={1} step={1}
+                  aria-label="Colis offerts"
+                  className="h-10 w-20 text-right text-[15px] tnum rounded-md border border-border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                <span className="text-[13.5px] text-muted-foreground">colis offert(s) — sans condition d&apos;achat, ligne à 0 € sur le bon</span>
               </div>
             </div>
           ) : (
@@ -400,22 +427,34 @@ function CreatePromoDialog({
               className="w-full h-10 rounded-md border border-border bg-background text-[14px] px-2.5 focus:outline-none focus:ring-1 focus:ring-brand-500" />
           </div>
 
-          {/* Dates optionnelles */}
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
-                Début (optionnel)
-              </label>
-              <input type="date" value={startsAt} onChange={(e) => setStartsAt(e.target.value)}
-                className="w-full h-10 rounded-md border border-border bg-background text-[13px] px-2" />
-            </div>
-            <div>
-              <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
-                Fin (optionnel)
-              </label>
-              <input type="date" value={endsAt} onChange={(e) => setEndsAt(e.target.value)}
-                className="w-full h-10 rounded-md border border-border bg-background text-[13px] px-2" />
-            </div>
+          {/* Durée : permanente (sans dates) ou période fixée */}
+          <div>
+            <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+              Durée
+            </label>
+            <label className="inline-flex items-center gap-2 text-[13.5px] text-foreground cursor-pointer select-none">
+              <input type="checkbox" checked={permanent} onChange={(e) => setPermanent(e.target.checked)}
+                className="h-4 w-4 accent-rose-500" />
+              Promo permanente <span className="text-muted-foreground">(sans date de fin)</span>
+            </label>
+            {!permanent && (
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <div>
+                  <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+                    Début (optionnel)
+                  </label>
+                  <input type="date" value={startsAt} onChange={(e) => setStartsAt(e.target.value)}
+                    className="w-full h-10 rounded-md border border-border bg-background text-[13px] px-2" />
+                </div>
+                <div>
+                  <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+                    Fin (optionnel)
+                  </label>
+                  <input type="date" value={endsAt} onChange={(e) => setEndsAt(e.target.value)}
+                    className="w-full h-10 rounded-md border border-border bg-background text-[13px] px-2" />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

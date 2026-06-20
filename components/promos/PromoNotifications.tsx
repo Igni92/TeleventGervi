@@ -101,7 +101,7 @@ export function PromoNotifications({
           {promos.map((p) => (
             <li key={p.id} className="py-3 flex items-start gap-3">
               <span className="inline-flex h-[24px] min-w-[64px] justify-center items-center px-2 rounded-[5px] text-[13px] font-bold shrink-0 mt-0.5 bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-400/70 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/60">
-                {p.kind === "X_PLUS_Y" ? <Gift className="h-3 w-3 mr-1" /> : <BadgePercent className="h-3 w-3 mr-1" />}
+                {(p.kind === "X_PLUS_Y" || p.kind === "FREE") ? <Gift className="h-3 w-3 mr-1" /> : <BadgePercent className="h-3 w-3 mr-1" />}
                 {promoChip(p)}
               </span>
               <div className="min-w-0 flex-1">

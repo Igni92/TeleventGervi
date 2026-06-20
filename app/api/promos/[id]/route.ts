@@ -82,8 +82,8 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
   // kind — restreint à l'énumération.
   let kind = existing.kind;
   if (body.kind !== undefined) {
-    if (body.kind !== "PERCENT" && body.kind !== "X_PLUS_Y") {
-      return bad("kind invalide (PERCENT ou X_PLUS_Y attendu)");
+    if (body.kind !== "PERCENT" && body.kind !== "X_PLUS_Y" && body.kind !== "FREE") {
+      return bad("kind invalide (PERCENT, X_PLUS_Y ou FREE attendu)");
     }
     kind = body.kind;
     sets.push(`"kind" = $${i++}`);
@@ -136,9 +136,12 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
   if (kindFieldsTouched) {
     if (kind === "PERCENT") {
       if (value === null) return bad("value requise pour une promo PERCENT");
-    } else {
+    } else if (kind === "X_PLUS_Y") {
       if (buyQty === null || buyQty < 1) return bad("buyQty doit être ≥ 1 pour une promo X_PLUS_Y");
       if (freeQty === null || freeQty < 1) return bad("freeQty doit être ≥ 1 pour une promo X_PLUS_Y");
+    } else {
+      // FREE — seul freeQty compte (sans seuil d'achat).
+      if (freeQty === null || freeQty < 1) return bad("freeQty doit être ≥ 1 pour une promo FREE");
     }
   }
 

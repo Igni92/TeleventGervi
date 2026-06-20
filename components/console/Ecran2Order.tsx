@@ -29,7 +29,7 @@ interface Hint {
 }
 /** C2 — Promo active sur un article (cf. /api/promos?active=1). */
 interface Promo {
-  id: string; itemCode: string; kind: "PERCENT" | "X_PLUS_Y";
+  id: string; itemCode: string; kind: "PERCENT" | "X_PLUS_Y" | "FREE";
   value: number; buyQty: number; freeQty: number; label: string | null;
   startsAt?: string | null; endsAt?: string | null;
 }
@@ -46,22 +46,32 @@ interface Carrier { id: string; name: string; count?: number }
 
 /* ── C2 — Helpers promo (purs) ─────────────────────────────── */
 
-/** Recalcule remise/colis offerts d'une ligne X_PLUS_Y (« 5 achetés + 1 offert »).
- *  freeUnits = freeQty × floor(qty / (buyQty + freeQty)) ;
- *  discountPercent = freeUnits / qty × 100 (la remise SAP « offre » les unités gratuites).
- *  No-op pour les autres lignes — appelé systématiquement à chaque changement de quantité. */
-function applyXPlusY(line: CartLine): CartLine {
+/** Recalcule les COLIS OFFERTS d'une ligne promo (X_PLUS_Y ou FREE).
+ *  X_PLUS_Y (« 5 achetés + 1 offert ») : le(s) offert(s) sont DANS la quantité
+ *    saisie → freeUnits = freeQty × floor(qty / (buyQty + freeQty)). discountPercent
+ *    sert UNIQUEMENT à l'affichage panier (le bon SAP, lui, fait une ligne à 0).
+ *  FREE (« 1 colis offert ») : freeQty colis offerts EN PLUS de la quantité saisie,
+ *    sans seuil d'achat → freeUnits = freeQty (dès qu'on commande l'article).
+ *  No-op pour les autres lignes — appelé à chaque changement de quantité. */
+function applyPromoFree(line: CartLine): CartLine {
   const pr = line.promo;
-  if (!pr || pr.kind !== "X_PLUS_Y" || !(pr.buyQty > 0) || !(pr.freeQty > 0)) return line;
   const qty = line.quantity;
-  const freeUnits = qty > 0 ? pr.freeQty * Math.floor(qty / (pr.buyQty + pr.freeQty)) : 0;
-  const discountPercent = freeUnits > 0 ? Math.round((freeUnits / qty) * 100 * 100) / 100 : 0;
-  return { ...line, freeUnits, discountPercent };
+  if (pr?.kind === "X_PLUS_Y" && pr.buyQty > 0 && pr.freeQty > 0) {
+    const freeUnits = qty > 0 ? pr.freeQty * Math.floor(qty / (pr.buyQty + pr.freeQty)) : 0;
+    const discountPercent = freeUnits > 0 ? Math.round((freeUnits / qty) * 100 * 100) / 100 : 0;
+    return { ...line, freeUnits, discountPercent };
+  }
+  if (pr?.kind === "FREE" && pr.freeQty > 0) {
+    return { ...line, freeUnits: qty > 0 ? pr.freeQty : 0, discountPercent: 0 };
+  }
+  return line;
 }
 
-/** Libellé court du badge promo : « −10 % » ou « 5+1 ». */
+/** Libellé court du badge promo : « −10 % », « 5+1 » ou « +1 offert ». */
 function promoBadge(pr: Promo): string {
-  return pr.kind === "PERCENT" ? `−${String(Math.round(pr.value * 100) / 100)} %` : `${pr.buyQty}+${pr.freeQty}`;
+  if (pr.kind === "PERCENT") return `−${String(Math.round(pr.value * 100) / 100)} %`;
+  if (pr.kind === "FREE") return `+${pr.freeQty} offert${pr.freeQty > 1 ? "s" : ""}`;
+  return `${pr.buyQty}+${pr.freeQty}`;
 }
 
 /** Période lisible d'une promo : « 02/06 → 15/06 », « jusqu'au 15/06 », « permanente ». */
@@ -377,16 +387,16 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
         discountPercent = promo.value;
         if (price != null) price = Math.round(price * (1 - promo.value / 100) * 100) / 100;
       }
-      return [...cur, applyXPlusY({
+      return [...cur, applyPromoFree({
         itemCode: p.itemCode, itemName: p.itemName, unit: displayUnit, priceUnit, packDivisor,
         availByWarehouse: avail, quantity: 1, price,
         promo, discountPercent, freeUnits: 0,
       })];
     });
   };
-  // applyXPlusY est no-op hors promo X_PLUS_Y → recalcul sûr à chaque changement de quantité.
+  // applyPromoFree est no-op hors promo X_PLUS_Y/FREE → recalcul sûr à chaque changement de quantité.
   const updateLine = (i: number, patch: Partial<CartLine>) =>
-    setCart((c) => c.map((l, k) => k === i ? applyXPlusY({ ...l, ...patch }) : l));
+    setCart((c) => c.map((l, k) => k === i ? applyPromoFree({ ...l, ...patch }) : l));
   const removeLine = (i: number) => setCart((c) => c.filter((_, k) => k !== i));
   /** Retire un item du panier par son itemCode (utilisé par le toggle Add/Done). */
   const removeFromCartByCode = (itemCode: string) =>
@@ -441,6 +451,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
         parts.push(`−${String(Math.round(l.discountPercent * 100) / 100)}% ${name}`);
       } else if (l.promo.kind === "X_PLUS_Y" && l.freeUnits > 0) {
         parts.push(`${l.promo.buyQty}+${l.promo.freeQty} ${name} (${l.freeUnits} colis offert${l.freeUnits > 1 ? "s" : ""})`);
+      } else if (l.promo.kind === "FREE" && l.freeUnits > 0) {
+        parts.push(`${name} (${l.freeUnits} colis offert${l.freeUnits > 1 ? "s" : ""})`);
       }
     }
     return parts.length > 0 ? `PROMO : ${parts.join(" · ")}` : undefined;
@@ -472,24 +484,57 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
 
   const buildApiLines = (): ApiLine[] =>
     cart.flatMap((l) => {
-      const d = l.discountPercent > 0 && l.discountPercent < 100
+      const kind = l.promo?.kind;
+      const freeUnits = (kind === "X_PLUS_Y" || kind === "FREE") ? Math.max(0, Math.floor(l.freeUnits)) : 0;
+      // Quantité TOTALE expédiée (colis) :
+      //   X_PLUS_Y → les offerts sont DANS la qté saisie (le 6ᵉ d'un 5+1) ;
+      //   FREE     → les offerts s'AJOUTENT par-dessus la qté saisie ;
+      //   autres   → qté saisie.
+      const paidQty = kind === "FREE" ? l.quantity : Math.max(0, l.quantity - freeUnits);
+      const totalQty = paidQty + freeUnits;
+
+      // C2 — PERCENT : le prix panier est NET (déjà remisé) → on renvoie le BRUT
+      //   pour que le net SAP retombe sur le prix affiché. Sinon prix plein.
+      const dPercent = kind === "PERCENT" && l.discountPercent > 0 && l.discountPercent < 100
         ? Math.round(l.discountPercent * 100) / 100 : undefined;
-      // C2 — SAP applique DiscountPercent sur UnitPrice (net = prix × (1 − %)).
-      //   PERCENT  : le prix panier est NET (déjà remisé) → on renvoie le prix BRUT
-      //              pour que le net SAP retombe exactement sur le prix affiché.
-      //   X_PLUS_Y : le prix panier est PLEIN → envoyé tel quel, la remise = colis offerts.
       let price = l.price != null && l.price > 0 ? l.price : undefined;
-      if (price != null && d != null && l.promo?.kind === "PERCENT") {
-        price = Math.round((price / (1 - d / 100)) * 10000) / 10000;
+      if (price != null && dPercent != null) {
+        price = Math.round((price / (1 - dPercent / 100)) * 10000) / 10000;
       }
-      return splitByWarehouse(l.quantity, l.availByWarehouse).map((c) => ({
-        itemCode: l.itemCode,
-        quantity: c.qty * l.packDivisor,        // colis → pièces pour SAP
-        displayQuantity: c.qty, displayUnit: l.unit,
-        warehouseCode: c.warehouse,
-        price,
-        ...(d != null ? { discountPercent: d } : {}),
-      }));
+
+      // Découpe multi-entrepôt sur la qté TOTALE, puis on carve les colis offerts
+      // en tête (mêmes entrepôts) → ligne(s) « offert » à 100 % de remise = 0 €.
+      // Résultat X_PLUS_Y / FREE : 2 lignes (payante + offerte à 0), comme demandé.
+      const chunks = splitByWarehouse(totalQty, l.availByWarehouse);
+      let remainingFree = freeUnits;
+      const out: ApiLine[] = [];
+      for (const c of chunks) {
+        const freeHere = Math.min(remainingFree, c.qty);
+        const paidHere = c.qty - freeHere;
+        remainingFree -= freeHere;
+        if (paidHere > 0) {
+          out.push({
+            itemCode: l.itemCode,
+            quantity: paidHere * l.packDivisor,   // colis → pièces pour SAP
+            displayQuantity: paidHere, displayUnit: l.unit,
+            warehouseCode: c.warehouse,
+            ...(price != null ? { price } : {}),
+            ...(dPercent != null ? { discountPercent: dPercent } : {}),
+          });
+        }
+        if (freeHere > 0) {
+          out.push({
+            itemCode: l.itemCode,
+            quantity: freeHere * l.packDivisor,
+            displayQuantity: freeHere, displayUnit: l.unit,
+            warehouseCode: c.warehouse,
+            // Colis offert : on garde le prix de référence + 100 % de remise → 0 €.
+            ...(price != null ? { price } : {}),
+            discountPercent: 100,
+          });
+        }
+      }
+      return out;
     });
 
   const submit = async () => {
@@ -529,12 +574,15 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
   const ui = DENSITY_UI[density];
 
   // C1 — tête de liste : « ⭐ Favoris » (articles), puis les GROUPES favoris
-  // épinglés, puis toutes les familles à leur place alphabétique normale.
-  // Tout est dédupliqué par copie : les articles favoris restent AUSSI dans
-  // leur famille d'origine, et un groupe épinglé reste AUSSI à sa place.
+  // épinglés en tête, puis les autres familles à leur place alphabétique.
+  // Un groupe épinglé n'apparaît QU'UNE fois (en tête) — il est retiré de sa
+  // place normale. Les articles favoris, eux, restent AUSSI dans leur famille.
   const groupEntries = useMemo<GroupEntry[]>(() => {
     const base = Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b));
-    const normal: GroupEntry[] = base.map(([g, prods]) => ({ key: g, name: g, prods }));
+    // Les familles épinglées sortent de la liste normale (sinon doublon).
+    const normal: GroupEntry[] = base
+      .filter(([g]) => !favGroups.has(g))
+      .map(([g, prods]) => ({ key: g, name: g, prods }));
     const head: GroupEntry[] = [];
 
     // 1. Articles favoris → pseudo-groupe « ⭐ Favoris »
@@ -873,11 +921,11 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
                 {l.packDivisor > 1 && l.price != null && (
                   <p className="text-[11px] text-muted-foreground mt-0.5">{l.quantity} colis × {l.packDivisor} {l.priceUnit} × {l.price}€</p>
                 )}
-                {/* C2 — X_PLUS_Y : colis offerts atteints (recalculé à chaque changement de qté) */}
-                {l.promo?.kind === "X_PLUS_Y" && l.freeUnits > 0 && (
+                {/* C2 — colis offerts (X_PLUS_Y / FREE) : ligne séparée à 0 € sur le bon */}
+                {(l.promo?.kind === "X_PLUS_Y" || l.promo?.kind === "FREE") && l.freeUnits > 0 && (
                   <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400 mt-1 inline-flex items-center gap-1">
                     <Gift className="h-3 w-3" />
-                    {l.freeUnits} colis offert{l.freeUnits > 1 ? "s" : ""} — remise {l.discountPercent} % sur la ligne
+                    {l.freeUnits} colis offert{l.freeUnits > 1 ? "s" : ""} — ligne à 0 € sur le bon
                   </p>
                 )}
                 {sellShort ? (
