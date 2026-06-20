@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { animate, useReducedMotion } from "framer-motion";
-import { DUR, EASE } from "@/lib/motion";
+import { DUR } from "@/lib/motion";
 
 interface AnimatedNumberProps {
   value: number;
@@ -27,13 +26,13 @@ interface AnimatedNumberProps {
 }
 
 /**
- * Compteur animé (count-up) — Framer Motion.
+ * Compteur animé (count-up) — requestAnimationFrame natif (PAS framer-motion :
+ * ce composant est monté en masse sur les dashboards, on évite N instances
+ * framer au montage).
  *
  * - Anime de l'ancienne valeur vers la nouvelle (utile quand la granularité change).
  * - Locale-aware (fr-FR) + tabular-nums pour éviter le layout shift.
  * - Respecte prefers-reduced-motion : affiche directement la valeur finale.
- *
- * (cf. ui-ux-pro-max : motion-meaning + number-tabular + reduced-motion)
  */
 export function AnimatedNumber({
   value,
@@ -47,9 +46,7 @@ export function AnimatedNumber({
   className,
 }: AnimatedNumberProps) {
   const ref = useRef<HTMLSpanElement>(null);
-  const reduce = useReducedMotion();
-  // null = pas encore monté → on affiche la vraie valeur sans balayer depuis 0
-  // (évite l'effet "0 qui grimpe" qui ressemble à un chargement / une fausse mesure).
+  // null = pas encore monté → on affiche la vraie valeur sans balayer depuis 0.
   const prev = useRef<number | null>(null);
 
   const format = (n: number) => {
@@ -68,26 +65,36 @@ export function AnimatedNumber({
     if (!node) return;
 
     const firstMount = prev.current === null;
+    const reduce =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
     // Reduced-motion → valeur finale immédiate.
-    // Premier rendu : honnête par défaut, SAUF animateOnMount (effet vitrine) sur une valeur > 0.
+    // Premier rendu : honnête par défaut, SAUF animateOnMount (vitrine) sur une valeur > 0.
     if (reduce || (firstMount && !(animateOnMount && value !== 0))) {
       node.textContent = format(value);
       prev.current = value;
       return;
     }
-    // Count-up : depuis 0 au montage (vitrine) ou depuis l'ancienne valeur (changement réel).
+
+    // Count-up rAF : depuis 0 au montage (vitrine) ou depuis l'ancienne valeur.
     const from = firstMount ? 0 : prev.current!;
-    const controls = animate(from, value, {
-      duration,
-      ease: EASE.out,
-      onUpdate(v) {
-        node.textContent = format(v);
-      },
-    });
+    const to = value;
+    const ms = Math.max(1, duration * 1000);
+    const start = performance.now();
+    let raf = 0;
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / ms);
+      const eased = 1 - Math.pow(1 - t, 3); // easeOut cubique
+      node.textContent = format(from + (to - from) * eased);
+      if (t < 1) raf = requestAnimationFrame(step);
+      else node.textContent = format(to);
+    };
+    raf = requestAnimationFrame(step);
     prev.current = value;
-    return () => controls.stop();
+    return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, decimals, prefix, suffix, compact, duration, reduce]);
+  }, [value, decimals, prefix, suffix, compact, duration]);
 
   return (
     <span ref={ref} className={className} style={{ fontVariantNumeric: "tabular-nums" }}>

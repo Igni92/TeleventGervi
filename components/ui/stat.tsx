@@ -1,11 +1,9 @@
 "use client";
 
-import { motion, useReducedMotion } from "framer-motion";
 import { AnimatedNumber } from "./animated-number";
 import { Delta } from "./delta";
 import { Sparkline } from "@/components/charts/Sparkline";
 import type { ChartTone } from "@/components/charts/theme";
-import { fadeUp, reducedFade } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 interface StatProps {
@@ -39,14 +37,12 @@ export function Stat({
   label, value, decimals = 0, prefix = "", suffix = "", compact = false,
   prev, spark, tone = "brand", hint, icon, className, size = "lg",
 }: StatProps) {
-  const reduce = useReducedMotion();
   const valueCls =
     size === "xl" ? "text-[34px]" : size === "lg" ? "text-[26px]" : "text-[19px]";
 
   return (
-    <motion.div
-      variants={reduce ? reducedFade : fadeUp}
-      className={cn("flex flex-col justify-between h-full min-w-0", className)}
+    <div
+      className={cn("flex flex-col justify-between h-full min-w-0 animate-fade-up motion-reduce:animate-none", className)}
     >
       <div className="flex items-center justify-between gap-2">
         <span className="kicker truncate">{label}</span>
@@ -73,6 +69,6 @@ export function Stat({
           <Sparkline data={spark} tone={tone} width={76} height={32} aria-label={`Tendance ${label}`} />
         )}
       </div>
-    </motion.div>
+    </div>
   );
 }

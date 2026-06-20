@@ -1,7 +1,5 @@
 "use client";
 
-import { motion, useReducedMotion } from "framer-motion";
-import { DUR, EASE } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 /**
@@ -11,10 +9,9 @@ import { cn } from "@/lib/utils";
  *   - fond `bg-card`, bord `border-border`, coins `rounded-xl`
  *   - bordure d'accent GAUCHE colorée (border-l-4) optionnelle
  *   - titre en « kicker » (uppercase, tracking large, muted)
- *   - entrée fade-up douce (respecte reduced-motion)
- *
- * À utiliser à la place de l'ancien shadcn `Card` (rounded-lg + shadow) pour
- * unifier le look entre Console / Stats / Clients / Stock / Entrées / Fabrication.
+ *   - entrée fade-up douce en CSS (compositeur, respecte reduced-motion via
+ *     `motion-reduce:animate-none`) — plus de framer-motion : ces cartes sont
+ *     montées en masse sur les dashboards, l'entrée JS faisait un pic au montage.
  */
 
 export type Accent = "brand" | "emerald" | "rose" | "violet" | "amber" | "sky";
@@ -48,10 +45,10 @@ interface SurfaceCardProps {
 export function SurfaceCard({
   children, accent, title, action, icon, animate = true, delay = 0, className,
 }: SurfaceCardProps) {
-  const reduce = useReducedMotion();
   const base = cn(
     "bg-card border border-border rounded-xl p-4",
     accent && `border-l-4 ${ACCENT_BORDER[accent]}`,
+    animate && "animate-fade-up motion-reduce:animate-none",
     className,
   );
 
@@ -67,18 +64,10 @@ export function SurfaceCard({
     </div>
   );
 
-  if (!animate || reduce) {
-    return <section className={base}>{header}{children}</section>;
-  }
   return (
-    <motion.section
-      className={base}
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: DUR.base, ease: EASE.out, delay: delay / 1000 }}
-    >
+    <section className={base} style={animate && delay ? { animationDelay: `${delay}ms` } : undefined}>
       {header}
       {children}
-    </motion.section>
+    </section>
   );
 }
