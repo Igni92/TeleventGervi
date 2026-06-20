@@ -1809,7 +1809,7 @@ function ActionPanel({
       </div>
 
       {/* ── Verdict — barre fixe en bas, TOUJOURS visible (loi de Fitts) ── */}
-      <div className="shrink-0 border-t border-border bg-card/95 backdrop-blur-sm p-4 space-y-2">
+      <div className="shrink-0 border-t border-border bg-card p-4 space-y-2">
         <div className="flex items-center gap-1.5 mb-1">
           <p className="kicker">Résultat de l&apos;appel</p>
           <InfoTip
