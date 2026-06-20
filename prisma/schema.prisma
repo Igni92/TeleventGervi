@@ -856,6 +856,19 @@ model Promo {
   @@index([active])
 }
 
+// Paramétrage de la PRIME commerciale (par trigramme). Taux + date de début
+// propres à chaque commercial. La prime = rate × marge brute du portefeuille
+// (factures nettes d'avoirs des clients dont il est le commercial) depuis `since`.
+// Table créée par migration additive (Supabase MCP : commercial_prime) →
+// accédée en raw SQL (hors client Prisma typé).
+model CommercialPrime {
+  slpName   String   @id // trigramme SAP (MM/JMG/AG)
+  rate      Float    @default(0.05) // taux de prime (0.05 = 5 %)
+  since     DateTime @default(now()) // début de la période de prime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 // ── Relance / recouvrement des encours — NT-2026-RC-01 (§6 « Journalisation ») ──
 // Piste d'audit : UNE ligne par courrier de relance émis (R0→R5). Horodatée,
 // rattachée au tiers, avec le niveau, le canal, le destinataire et le décompte

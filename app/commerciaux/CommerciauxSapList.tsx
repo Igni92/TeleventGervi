@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -30,17 +30,19 @@ interface CommercialSap {
   nbCommandesYtd: number;
   volumeKgYtd: number;
   caPortefeuilleYtd: number;
-  /** Prime = primeMargeBrute × taux (5 %). */
+  /** Prime = primeMargeBrute × primeRate. */
   prime: number;
-  /** Marge brute du portefeuille (commandes depuis le début de période prime). */
+  /** Marge brute facturée (nette d'avoirs) du portefeuille depuis primeSince. */
   primeMargeBrute: number;
+  /** Taux de prime du commercial (fraction, 0.05 = 5 %). */
+  primeRate: number;
+  /** Date de début de la période de prime (ISO). */
+  primeSince: string;
   objectifCa: number;
   objectifMarge: number;
   objectifVolume: number;
   spark: number[];
 }
-
-interface PrimeMeta { rate: number; since: string }
 
 const fmtEur = (v: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v);
@@ -64,19 +66,19 @@ export function CommerciauxSapList() {
   const [error, setError] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [objOpen, setObjOpen] = useState<CommercialSap | null>(null);
-  const [primeMeta, setPrimeMeta] = useState<PrimeMeta>({ rate: 0.05, since: "2025-11-01T00:00:00.000Z" });
 
-  useEffect(() => {
-    fetch("/api/commerciaux/sap", { cache: "no-store" })
+  const load = useCallback(() => {
+    return fetch("/api/commerciaux/sap", { cache: "no-store" })
       .then((r) => r.json())
       .then((j) => {
         if (j.restricted && j.message) setRestricted(j.message);
-        if (j.primeMeta) setPrimeMeta(j.primeMeta);
         setIsAdmin(!!j.scope?.all);
         setData(j.commerciaux ?? []);
       })
       .catch(() => setError(true));
   }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   const patchObjectifs = (slp: string, patch: Partial<CommercialSap>) =>
     setData((cur) => (cur ? cur.map((c) => (c.slpName === slp ? { ...c, ...patch } : c)) : cur));
@@ -115,7 +117,7 @@ export function CommerciauxSapList() {
     <>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {data.map((c) => (
-          <CommercialCard key={c.slpName} c={c} isAdmin={isAdmin} primeMeta={primeMeta} onObjectifs={() => setObjOpen(c)} />
+          <CommercialCard key={c.slpName} c={c} isAdmin={isAdmin} onObjectifs={() => setObjOpen(c)} />
         ))}
       </div>
       {objOpen && (
@@ -124,6 +126,7 @@ export function CommerciauxSapList() {
           isAdmin={isAdmin}
           onClose={() => setObjOpen(null)}
           onSaved={patchObjectifs}
+          onReload={load}
         />
       )}
     </>
@@ -131,10 +134,10 @@ export function CommerciauxSapList() {
 }
 
 /* ── Carte commercial ──────────────────────────────────────── */
-function CommercialCard({ c, isAdmin, primeMeta, onObjectifs }: { c: CommercialSap; isAdmin: boolean; primeMeta: PrimeMeta; onObjectifs: () => void }) {
+function CommercialCard({ c, isAdmin, onObjectifs }: { c: CommercialSap; isAdmin: boolean; onObjectifs: () => void }) {
   const pctCa = c.objectifCa > 0 ? Math.round((c.caNetYtd / c.objectifCa) * 100) : null;
-  const primePct = Math.round(primeMeta.rate * 1000) / 10; // 0.05 → 5
-  const primeSince = fmtDateShort(primeMeta.since);
+  const primePct = Math.round(c.primeRate * 1000) / 10; // 0.05 → 5
+  const primeSince = fmtDateShort(c.primeSince);
   return (
     <div className="relative bg-card border border-border border-l-4 border-l-brand-500 rounded-xl p-4">
       <Link
@@ -238,16 +241,20 @@ function CommercialCard({ c, isAdmin, primeMeta, onObjectifs }: { c: CommercialS
 
 /* ── Popup objectifs (CA / marge / volume) ─────────────────── */
 function ObjectifModal({
-  c, isAdmin, onClose, onSaved,
+  c, isAdmin, onClose, onSaved, onReload,
 }: {
   c: CommercialSap;
   isAdmin: boolean;
   onClose: () => void;
   onSaved: (slp: string, patch: Partial<CommercialSap>) => void;
+  onReload: () => void;
 }) {
   const [ca, setCa] = useState(c.objectifCa);
   const [marge, setMarge] = useState(c.objectifMarge);
   const [volume, setVolume] = useState(c.objectifVolume);
+  // Prime : taux saisi en % (5 = 5 %) + date de début (yyyy-mm-dd).
+  const [primeRatePct, setPrimeRatePct] = useState(Math.round(c.primeRate * 1000) / 10);
+  const [primeSince, setPrimeSince] = useState(c.primeSince.slice(0, 10));
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -271,14 +278,27 @@ function ObjectifModal({
         body: JSON.stringify(payload),
       });
       if (!r.ok) throw new Error();
+      // Prime : taux (fraction) + date de début. La marge/prime sont recalculées
+      // côté serveur (dépend des factures) → on recharge la liste après coup.
+      const rp = await fetch("/api/commerciaux/prime", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slpName: c.slpName,
+          rate: Math.max(0, Math.min(1, primeRatePct / 100)),
+          since: new Date(`${primeSince}T00:00:00Z`).toISOString(),
+        }),
+      });
+      if (!rp.ok) throw new Error();
       onSaved(c.slpName, {
         objectifCa: payload.objectifCa,
         objectifMarge: payload.objectifMarge,
         objectifVolume: payload.objectifVolume,
       });
-      toast.success(`Objectifs de ${localPart(c.email)} enregistrés`);
+      onReload(); // marge brute + prime recalculées (nouvelle date/taux)
+      toast.success(`Objectifs & prime de ${localPart(c.email)} enregistrés`);
       onClose();
-    } catch { toast.error("Erreur enregistrement des objectifs"); }
+    } catch { toast.error("Erreur enregistrement"); }
     finally { setSaving(false); }
   }
 
@@ -312,6 +332,43 @@ function ObjectifModal({
           <p className="text-[10.5px] text-muted-foreground">
             Réalisé = ventes <b>saisies</b> par le commercial, depuis le 1ᵉʳ janvier.
           </p>
+
+          {/* ── Prime ────────────────────────────────────────── */}
+          <div className="border-t border-border/60 pt-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1">
+                <BadgeEuro className="h-3 w-3" /> Prime
+              </p>
+              <span className="text-[14px] font-bold tnum text-emerald-700 dark:text-emerald-300">{fmtEur2(c.prime)}</span>
+            </div>
+            <p className="text-[10.5px] text-muted-foreground mt-1">
+              {primeRatePct}% × marge brute {fmtEur(c.primeMargeBrute)} — factures du portefeuille
+              (nettes d&apos;avoirs) depuis le {fmtDateShort(c.primeSince)}.
+              <br />La marge « nette transport » n&apos;est pas encore déduite.
+            </p>
+            {isAdmin && (
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Taux (%)</span>
+                  <input
+                    type="number" min={0} max={100} step={0.5}
+                    value={primeRatePct}
+                    onChange={(e) => setPrimeRatePct(parseFloat(e.target.value) || 0)}
+                    className="mt-1 w-full h-8 px-2 rounded-md bg-secondary/60 text-right tnum text-foreground focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Depuis le</span>
+                  <input
+                    type="date"
+                    value={primeSince}
+                    onChange={(e) => setPrimeSince(e.target.value)}
+                    className="mt-1 w-full h-8 px-2 rounded-md bg-secondary/60 text-foreground focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none"
+                  />
+                </label>
+              </div>
+            )}
+          </div>
         </div>
 
         {isAdmin && (
