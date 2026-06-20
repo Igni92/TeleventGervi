@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
@@ -108,6 +108,56 @@ function AssignSelect({ value, options, placeholder, onChange }: {
   );
 }
 
+type AssignPatch = Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTelevente">>;
+
+/** Ligne mémoïsée : cocher une case / changer un select ne re-rend QUE la ligne
+ *  concernée (avant : toute la liste re-rendait à chaque interaction). */
+const PlanRow = memo(function PlanRow({
+  c, sel, showTel, showJours, showLastOrder, showIncidents, showVendeur, showCommercial, onToggle, onAssign,
+}: {
+  c: PlanClient; sel: boolean;
+  showTel: boolean; showJours: boolean; showLastOrder: boolean;
+  showIncidents: boolean; showVendeur: boolean; showCommercial: boolean;
+  onToggle: (id: string) => void;
+  onAssign: (id: string, patch: AssignPatch) => void;
+}) {
+  return (
+    <tr className={`transition-colors ${sel ? "bg-brand-50/60 dark:bg-brand-950/30" : "hover:bg-secondary/30"} ${!c.activeTelevente ? "opacity-60" : ""}`}>
+      <td className="w-9 px-3 py-2"><Checkbox checked={sel} onChange={() => onToggle(c.id)} /></td>
+      <td className="px-3 py-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="font-semibold text-foreground">{c.nom}</span>
+          {c.type && <Badge variant={c.type === "GMS" ? "gms" : c.type === "EXPORT" ? "export" : "outline"} className="text-[9.5px]">{c.type}</Badge>}
+          {!c.activeTelevente && <span className="text-[9px] font-bold uppercase text-amber-600 dark:text-amber-400">inactif</span>}
+        </div>
+        <span className="text-[10.5px] font-mono text-muted-foreground">{c.code}</span>
+      </td>
+      {showTel && (
+        <td className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground whitespace-nowrap">
+          {c.tel1 ? <a href={`tel:${c.tel1}`} className="inline-flex items-center gap-1 hover:text-brand-600"><Phone className="h-3 w-3" />{c.tel1}</a> : "—"}
+        </td>
+      )}
+      {showJours && <td className="px-3 py-2"><JoursBadges joursAppel={c.joursAppel} /></td>}
+      {showLastOrder && <td className="px-3 py-2 text-right whitespace-nowrap"><LastOrder days={c.lastOrderDays} /></td>}
+      {showIncidents && (
+        <td className="px-3 py-2 text-center">
+          {c.openIncidents > 0
+            ? <span className="inline-flex items-center gap-1 h-5 px-1.5 rounded-md bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300 text-[11px] font-bold"><AlertTriangle className="h-3 w-3" />{c.openIncidents}</span>
+            : <span className="text-muted-foreground/40">—</span>}
+        </td>
+      )}
+      {showVendeur && <td className="px-3 py-2"><AssignSelect value={c.vendeur} options={VENDEURS} placeholder="" onChange={(v) => onAssign(c.id, { vendeur: v })} /></td>}
+      {showCommercial && <td className="px-3 py-2"><AssignSelect value={c.commercial} options={VENDEURS} placeholder="" onChange={(v) => onAssign(c.id, { commercial: v })} /></td>}
+      <td className="px-2 py-2 text-right">
+        <Link href={`/clients/${c.id}`} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60" title="Ouvrir la fiche">
+          <ExternalLink className="h-3.5 w-3.5" />
+        </Link>
+      </td>
+    </tr>
+  );
+});
+PlanRow.displayName = "PlanRow";
+
 export function PlanAppel() {
   const [search, setSearch] = useState("");
   const debSearch = useDebounced(search, 250);
@@ -145,7 +195,7 @@ export function PlanAppel() {
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => { setSelected(new Set()); }, [debSearch, vendeur, commercial, type, active, incidents, stale]);
 
-  const assign = async (id: string, patch: Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTelevente">>) => {
+  const assign = useCallback(async (id: string, patch: Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTelevente">>) => {
     setData((cur) => cur.map((c) => c.id === id ? { ...c, ...patch } : c));
     try {
       const r = await fetch(`/api/clients/${id}/assign`, {
@@ -153,7 +203,7 @@ export function PlanAppel() {
       });
       if (!r.ok) throw new Error();
     } catch { toast.error("Échec de l'assignation"); fetchData(); }
-  };
+  }, [fetchData]);
 
   // Assignation / activation EN SÉRIE des clients cochés
   const bulkAssign = async (patch: { vendeur?: string | null; commercial?: string | null; activeTelevente?: boolean }) => {
@@ -174,9 +224,9 @@ export function PlanAppel() {
     } catch { toast.error("Échec de l'action en série"); fetchData(); }
   };
 
-  const toggleOne = (id: string) => setSelected((cur) => {
+  const toggleOne = useCallback((id: string) => setSelected((cur) => {
     const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n;
-  });
+  }), []);
   const allVisibleSelected = data.length > 0 && data.every((c) => selected.has(c.id));
   const someSelected = !allVisibleSelected && data.some((c) => selected.has(c.id));
   const toggleAll = () => setSelected((cur) => {
@@ -290,43 +340,21 @@ export function PlanAppel() {
                 <tr><td colSpan={colCount} className="h-32 text-center"><Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></td></tr>
               ) : data.length === 0 ? (
                 <tr><td colSpan={colCount} className="h-32 text-center text-muted-foreground">Aucun client pour ces filtres.</td></tr>
-              ) : data.map((c) => {
-                const sel = selected.has(c.id);
-                return (
-                  <tr key={c.id} className={`transition-colors ${sel ? "bg-brand-50/60 dark:bg-brand-950/30" : "hover:bg-secondary/30"} ${!c.activeTelevente ? "opacity-60" : ""}`}>
-                    <td className="w-9 px-3 py-2"><Checkbox checked={sel} onChange={() => toggleOne(c.id)} /></td>
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-semibold text-foreground">{c.nom}</span>
-                        {c.type && <Badge variant={c.type === "GMS" ? "gms" : c.type === "EXPORT" ? "export" : "outline"} className="text-[9.5px]">{c.type}</Badge>}
-                        {!c.activeTelevente && <span className="text-[9px] font-bold uppercase text-amber-600 dark:text-amber-400">inactif</span>}
-                      </div>
-                      <span className="text-[10.5px] font-mono text-muted-foreground">{c.code}</span>
-                    </td>
-                    {show("tel") && (
-                      <td className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground whitespace-nowrap">
-                        {c.tel1 ? <a href={`tel:${c.tel1}`} className="inline-flex items-center gap-1 hover:text-brand-600"><Phone className="h-3 w-3" />{c.tel1}</a> : "—"}
-                      </td>
-                    )}
-                    {show("jours") && <td className="px-3 py-2"><JoursBadges joursAppel={c.joursAppel} /></td>}
-                    {show("lastOrder") && <td className="px-3 py-2 text-right whitespace-nowrap"><LastOrder days={c.lastOrderDays} /></td>}
-                    {show("incidents") && (
-                      <td className="px-3 py-2 text-center">
-                        {c.openIncidents > 0
-                          ? <span className="inline-flex items-center gap-1 h-5 px-1.5 rounded-md bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300 text-[11px] font-bold"><AlertTriangle className="h-3 w-3" />{c.openIncidents}</span>
-                          : <span className="text-muted-foreground/40">—</span>}
-                      </td>
-                    )}
-                    {show("vendeur") && <td className="px-3 py-2"><AssignSelect value={c.vendeur} options={VENDEURS} placeholder="" onChange={(v) => assign(c.id, { vendeur: v })} /></td>}
-                    {show("commercial") && <td className="px-3 py-2"><AssignSelect value={c.commercial} options={VENDEURS} placeholder="" onChange={(v) => assign(c.id, { commercial: v })} /></td>}
-                    <td className="px-2 py-2 text-right">
-                      <Link href={`/clients/${c.id}`} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60" title="Ouvrir la fiche">
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </Link>
-                    </td>
-                  </tr>
-                );
-              })}
+              ) : data.map((c) => (
+                <PlanRow
+                  key={c.id}
+                  c={c}
+                  sel={selected.has(c.id)}
+                  showTel={show("tel")}
+                  showJours={show("jours")}
+                  showLastOrder={show("lastOrder")}
+                  showIncidents={show("incidents")}
+                  showVendeur={show("vendeur")}
+                  showCommercial={show("commercial")}
+                  onToggle={toggleOne}
+                  onAssign={assign}
+                />
+              ))}
             </tbody>
           </table>
         </div>

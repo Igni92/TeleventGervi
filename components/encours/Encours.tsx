@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -48,6 +48,40 @@ const eurExact = (n: number) =>
   n.toLocaleString("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const frDate = (s: string | null) => (s ? new Date(s).toLocaleDateString("fr-FR") : "—");
 
+function useDebounced<T>(v: T, ms: number): T {
+  const [d, setD] = useState(v);
+  useEffect(() => { const t = setTimeout(() => setD(v), ms); return () => clearTimeout(t); }, [v, ms]);
+  return d;
+}
+
+/** Ligne mémoïsée : la recherche/tri ne re-rend QUE les lignes dont les props
+ *  changent (avant : toute la liste re-rendait à chaque frappe). */
+const EncoursRow = memo(function EncoursRow({ c, onSelect }: { c: ClientEncours; onSelect: (c: ClientEncours) => void }) {
+  return (
+    <tr className="hover:bg-secondary/30 transition-colors cursor-pointer" onClick={() => onSelect(c)}>
+      <td className="px-3 py-2">
+        {/* Accès fiche client (ClientLink stoppe la propagation → n'ouvre pas la modale) */}
+        <ClientLink
+          code={c.cardCode}
+          name={c.cardName}
+          className="font-semibold text-foreground text-left hover:underline decoration-brand-500/60 underline-offset-2 cursor-pointer"
+        />
+        <div className="text-[10.5px] font-mono text-muted-foreground">{c.cardCode}</div>
+      </td>
+      <td className="px-3 py-2 text-right font-bold tnum text-foreground">{eur(c.encours)}</td>
+      <td className="px-3 py-2 text-right tnum text-muted-foreground">{c.countOpen}</td>
+      <td className="px-3 py-2 text-right tnum">{c.b3045 > 0 ? <span className="font-semibold text-amber-600 dark:text-amber-400">{eur(c.b3045)}</span> : <span className="text-muted-foreground/40">—</span>}</td>
+      <td className="px-3 py-2 text-right tnum">{c.b4590 > 0 ? <span className="font-semibold text-rose-500 dark:text-rose-400">{eur(c.b4590)}</span> : <span className="text-muted-foreground/40">—</span>}</td>
+      <td className="px-3 py-2 text-right tnum">{c.b90 > 0 ? <span className="font-bold text-rose-600 dark:text-rose-400">{eur(c.b90)}</span> : <span className="text-muted-foreground/40">—</span>}</td>
+      <td className="px-3 py-2 text-right tnum">{c.countLate > 0 ? <span className="font-semibold text-rose-600 dark:text-rose-400">{c.countLate}</span> : <span className="text-muted-foreground/40">—</span>}</td>
+      <td className="px-2 py-2 text-right">
+        <span className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground"><ExternalLink className="h-3.5 w-3.5" /></span>
+      </td>
+    </tr>
+  );
+});
+EncoursRow.displayName = "EncoursRow";
+
 export function Encours() {
   const [data, setData] = useState<EncoursData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -72,9 +106,10 @@ export function Encours() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  const debSearch = useDebounced(search, 250);
   const rows = useMemo(() => {
     if (!data) return [];
-    const q = search.trim().toLowerCase();
+    const q = debSearch.trim().toLowerCase();
     const filtered = data.clients
       .filter((c) => (!overdueOnly || c.countLate > 0))
       .filter((c) => !q || c.cardName.toLowerCase().includes(q) || c.cardCode.toLowerCase().includes(q));
@@ -84,7 +119,7 @@ export function Encours() {
         ? dir * a.cardName.localeCompare(b.cardName, "fr")
         : dir * ((a[sort.key] as number) - (b[sort.key] as number)),
     );
-  }, [data, overdueOnly, search, sort]);
+  }, [data, overdueOnly, debSearch, sort]);
 
   return (
     <div className="space-y-4">
@@ -145,26 +180,7 @@ export function Encours() {
               ) : rows.length === 0 ? (
                 <tr><td colSpan={8} className="h-32 text-center text-muted-foreground">Aucun encours 🎉</td></tr>
               ) : rows.map((c) => (
-                <tr key={c.cardCode} className="hover:bg-secondary/30 transition-colors cursor-pointer" onClick={() => setDrill(c)}>
-                  <td className="px-3 py-2">
-                    {/* Accès fiche client (stopPropagation → n'ouvre pas la modale de la ligne) */}
-                    <ClientLink
-                      code={c.cardCode}
-                      name={c.cardName}
-                      className="font-semibold text-foreground text-left hover:underline decoration-brand-500/60 underline-offset-2 cursor-pointer"
-                    />
-                    <div className="text-[10.5px] font-mono text-muted-foreground">{c.cardCode}</div>
-                  </td>
-                  <td className="px-3 py-2 text-right font-bold tnum text-foreground">{eur(c.encours)}</td>
-                  <td className="px-3 py-2 text-right tnum text-muted-foreground">{c.countOpen}</td>
-                  <td className="px-3 py-2 text-right tnum">{c.b3045 > 0 ? <span className="font-semibold text-amber-600 dark:text-amber-400">{eur(c.b3045)}</span> : <span className="text-muted-foreground/40">—</span>}</td>
-                  <td className="px-3 py-2 text-right tnum">{c.b4590 > 0 ? <span className="font-semibold text-rose-500 dark:text-rose-400">{eur(c.b4590)}</span> : <span className="text-muted-foreground/40">—</span>}</td>
-                  <td className="px-3 py-2 text-right tnum">{c.b90 > 0 ? <span className="font-bold text-rose-600 dark:text-rose-400">{eur(c.b90)}</span> : <span className="text-muted-foreground/40">—</span>}</td>
-                  <td className="px-3 py-2 text-right tnum">{c.countLate > 0 ? <span className="font-semibold text-rose-600 dark:text-rose-400">{c.countLate}</span> : <span className="text-muted-foreground/40">—</span>}</td>
-                  <td className="px-2 py-2 text-right">
-                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground"><ExternalLink className="h-3.5 w-3.5" /></span>
-                  </td>
-                </tr>
+                <EncoursRow key={c.cardCode} c={c} onSelect={setDrill} />
               ))}
             </tbody>
           </table>

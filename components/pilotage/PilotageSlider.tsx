@@ -6,6 +6,15 @@ import { ChevronLeft, ChevronRight, TrendingUp, FileText, Map as MapIcon, ArrowL
 import { PilotageScreen1 } from "./PilotageScreen1";
 import { PilotageScreen2 } from "./PilotageScreen2";
 import { PilotageScreen3 } from "./PilotageScreen3";
+import { SignalLoader } from "@/components/ui/page-loader";
+
+function SlidePlaceholder() {
+  return (
+    <div className="h-full w-full flex items-center justify-center">
+      <SignalLoader />
+    </div>
+  );
+}
 
 type SlideIndex = 0 | 1 | 2;
 const LAST_SLIDE: SlideIndex = 2;
@@ -34,6 +43,15 @@ const SLIDES = [
 export function PilotageSlider({ viewAs = null }: { viewAs?: string | null } = {}) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [slide, setSlide] = useState<SlideIndex>(0);
+
+  // On ne monte un écran (Screen2 = annuel, Screen3 = 2 cartes WebGL) qu'à sa
+  // PREMIÈRE visite — puis on le garde monté (pas de re-fetch ni de re-création
+  // du contexte WebGL au retour). Évite de charger 2 cartes MapLibre + 3 fetchs
+  // dès l'ouverture du dashboard.
+  const [mounted, setMounted] = useState<Set<number>>(() => new Set([0]));
+  useEffect(() => {
+    setMounted((m) => (m.has(slide) ? m : new Set(m).add(slide)));
+  }, [slide]);
 
   const goTo = useCallback((i: SlideIndex) => {
     const el = scrollRef.current;
@@ -97,13 +115,13 @@ export function PilotageSlider({ viewAs = null }: { viewAs?: string | null } = {
         style={{ scrollbarWidth: "none" }}
       >
         <section className="w-screen h-screen shrink-0 snap-start" aria-label="Cockpit commercial — BL">
-          <PilotageScreen1 viewAs={viewAs} />
+          {mounted.has(0) ? <PilotageScreen1 viewAs={viewAs} /> : <SlidePlaceholder />}
         </section>
         <section className="w-screen h-screen shrink-0 snap-start" aria-label="Rapport annuel — comptable">
-          <PilotageScreen2 viewAs={viewAs} />
+          {mounted.has(1) ? <PilotageScreen2 viewAs={viewAs} /> : <SlidePlaceholder />}
         </section>
         <section className="w-screen h-screen shrink-0 snap-start" aria-label="Carte — distribution géographique">
-          <PilotageScreen3 viewAs={viewAs} />
+          {mounted.has(2) ? <PilotageScreen3 viewAs={viewAs} /> : <SlidePlaceholder />}
         </section>
       </div>
 

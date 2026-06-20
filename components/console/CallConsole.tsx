@@ -44,9 +44,9 @@ import {
 } from "@/components/ui/dialog";
 import { InfoTip } from "@/components/ui/info-tip";
 import { formatDate, formatDateInput, formatRelative } from "@/lib/utils";
-import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
+import { motion } from "framer-motion";
 import { AnimatedNumber } from "@/components/ui/animated-number";
-import { staggerContainer, staggerItem, DUR, EASE } from "@/lib/motion";
+import { DUR, EASE } from "@/lib/motion";
 
 /* ─────────────────────────────────────────────────────────────
    Types (mirror /api/console response)
@@ -486,18 +486,16 @@ export function CallConsole() {
                 </p>
               </div>
             ) : (
-              <motion.ol variants={staggerContainer()} initial="hidden" animate="show">
-                <AnimatePresence initial={false} mode="popLayout">
-                  {filteredQueue.map((c) => (
-                    <QueueRow
-                      key={c.id}
-                      client={c}
-                      active={c.id === activeId}
-                      onClick={() => setActiveId(c.id)}
-                    />
-                  ))}
-                </AnimatePresence>
-              </motion.ol>
+              <ol>
+                {filteredQueue.map((c) => (
+                  <QueueRow
+                    key={c.id}
+                    client={c}
+                    active={c.id === activeId}
+                    onSelect={setActiveId}
+                  />
+                ))}
+              </ol>
             )}
 
             {/* Done section */}
@@ -509,19 +507,17 @@ export function CallConsole() {
                     {data?.done.length}
                   </span>
                 </div>
-                <motion.ol variants={staggerContainer()} initial="hidden" animate="show">
-                  <AnimatePresence initial={false} mode="popLayout">
-                    {data!.done.map((c) => (
-                      <QueueRow
-                        key={c.id}
-                        client={c}
-                        active={c.id === activeId}
-                        done
-                        onClick={() => setActiveId(c.id)}
-                      />
-                    ))}
-                  </AnimatePresence>
-                </motion.ol>
+                <ol>
+                  {data!.done.map((c) => (
+                    <QueueRow
+                      key={c.id}
+                      client={c}
+                      active={c.id === activeId}
+                      done
+                      onSelect={setActiveId}
+                    />
+                  ))}
+                </ol>
               </div>
             )}
           </div>
@@ -718,24 +714,20 @@ function Stat({
  * en haut de la file (déjà filtré) — y mettre le nom dans chaque ligne =
  * doublon visuel qui rallonge la file pour rien.
  */
-const QueueRow = React.forwardRef<
-  HTMLLIElement,
-  { client: Client; active: boolean; done?: boolean; onClick: () => void }
->(function QueueRow({ client, active, done, onClick }, ref) {
-  const reduce = useReducedMotion();
+const QueueRow = React.memo(function QueueRow({
+  client,
+  active,
+  done,
+  onSelect,
+}: { client: Client; active: boolean; done?: boolean; onSelect: (id: string) => void }) {
   const window = client.insights ? hourWindowLabel(client.insights) : null;
   // Direct line first if available, fallback to standard
   const phone = client.tel2 || client.tel1;
   const isDirect = !!client.tel2;
   return (
-    <motion.li
-      ref={ref}
-      layout={!reduce}
-      variants={reduce ? { hidden: { opacity: 0 }, show: { opacity: 1 } } : staggerItem}
-      exit={{ opacity: 0, x: reduce ? 0 : -8, transition: { duration: DUR.exit, ease: EASE.in } }}
-    >
+    <li>
       <button
-        onClick={onClick}
+        onClick={() => onSelect(client.id)}
         className={`w-full text-left px-3 py-1.5 border-l-2 transition-colors duration-150 group
           ${active
             ? "bg-brand-50/60 dark:bg-brand-950/30 border-l-brand-500"
@@ -836,7 +828,7 @@ const QueueRow = React.forwardRef<
           )}
         </div>
       </button>
-    </motion.li>
+    </li>
   );
 });
 QueueRow.displayName = "QueueRow";
