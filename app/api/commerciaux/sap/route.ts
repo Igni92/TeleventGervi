@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getAccessScope, scopePayload, UNMAPPED_MESSAGE } from "@/lib/permissions";
+import { emailFromInitials } from "@/lib/salespeople";
 
 /**
  * GET /api/commerciaux/sap — liste des commerciaux SAP (slpName) actifs sur
@@ -52,16 +53,18 @@ export async function GET() {
         FROM "SapInvoice" WHERE "cancelled" = false AND "docDate" >= ${activeStart}
           AND "slpName" IS NOT NULL AND "slpName" <> '' ${slpCond(Prisma.sql`"slpName"`)}
       ) s GROUP BY 1`),
-    // CA facturé YTD.
-    prisma.$queryRaw<{ slp: string; ca: number; n: number }[]>(Prisma.sql`
-      SELECT "slpName" AS slp, COALESCE(SUM("docTotal"), 0)::float AS ca, COUNT(*)::int AS n
+    // CA + MARGE BRUTE facturés YTD (par vendeur = slpName).
+    prisma.$queryRaw<{ slp: string; ca: number; marge: number; n: number }[]>(Prisma.sql`
+      SELECT "slpName" AS slp, COALESCE(SUM("docTotal"), 0)::float AS ca,
+             COALESCE(SUM("grossProfit"), 0)::float AS marge, COUNT(*)::int AS n
       FROM "SapInvoice"
       WHERE "cancelled" = false AND "docDate" >= ${ytdStart}
         AND "slpName" IS NOT NULL AND "slpName" <> '' ${slpCond(Prisma.sql`"slpName"`)}
       GROUP BY 1`),
-    // Avoirs YTD (à soustraire).
-    prisma.$queryRaw<{ slp: string; ca: number }[]>(Prisma.sql`
-      SELECT "slpName" AS slp, COALESCE(SUM("docTotal"), 0)::float AS ca
+    // Avoirs YTD (CA + marge à soustraire).
+    prisma.$queryRaw<{ slp: string; ca: number; marge: number }[]>(Prisma.sql`
+      SELECT "slpName" AS slp, COALESCE(SUM("docTotal"), 0)::float AS ca,
+             COALESCE(SUM("grossProfit"), 0)::float AS marge
       FROM "SapCreditNote"
       WHERE "cancelled" = false AND "docDate" >= ${ytdStart}
         AND "slpName" IS NOT NULL AND "slpName" <> '' ${slpCond(Prisma.sql`"slpName"`)}
@@ -112,18 +115,19 @@ export async function GET() {
   ]);
 
   // Objectifs CA (table optionnelle — repli silencieux si DDL non lancée).
-  const objMap = new Map<string, number>();
+  const objMap = new Map<string, { ca: number; marge: number; volume: number }>();
   try {
-    const objRows = await prisma.$queryRaw<{ slp: string; obj: number }[]>(Prisma.sql`
-      SELECT "slpName" AS slp, "objectifCa"::float AS obj FROM "CommercialObjectif"
-      WHERE 1 = 1 ${slpCond(Prisma.sql`"slpName"`)}`);
-    for (const r of objRows) objMap.set(r.slp, Number(r.obj));
+    const objRows = await prisma.$queryRaw<{ slp: string; ca: number | null; marge: number | null; volume: number | null }[]>(Prisma.sql`
+      SELECT "slpName" AS slp, "objectifCa"::float AS ca, "objectifMarge"::float AS marge, "objectifVolume"::float AS volume
+      FROM "CommercialObjectif" WHERE 1 = 1 ${slpCond(Prisma.sql`"slpName"`)}`);
+    for (const r of objRows) objMap.set(r.slp, { ca: Number(r.ca ?? 0), marge: Number(r.marge ?? 0), volume: Number(r.volume ?? 0) });
   } catch { /* table CommercialObjectif pas encore créée */ }
   const portInvMap = new Map(caPortInv.map((r) => [r.slp, Number(r.ca)]));
   const portCnMap = new Map(caPortCn.map((r) => [r.slp, Number(r.ca)]));
 
   const caInvMap = new Map(caInv.map((r) => [r.slp, r]));
   const caCnMap = new Map(caCn.map((r) => [r.slp, Number(r.ca)]));
+  const margeCnMap = new Map(caCn.map((r) => [r.slp, Number(r.marge)]));
   const caBlMap = new Map(caBl.map((r) => [r.slp, r]));
   const kgMap = new Map(kgBl.map((r) => [r.slp, Number(r.kg)]));
   const sparkMap = new Map<string, Map<string, number>>();
@@ -151,21 +155,34 @@ export async function GET() {
       const inv = caInvMap.get(a.slp);
       const bl = caBlMap.get(a.slp);
       const weeks = sparkMap.get(a.slp);
+      const obj = objMap.get(a.slp);
       return {
         slpName: a.slp,
+        // Nom TeleVent (email) ; null si le trigramme n'est pas rattaché à un
+        // compte (CM, ".", "ADM"…) → filtré ci-dessous.
+        email: emailFromInitials(a.slp),
         clientsActifs: Number(a.clients),
         lastDocDate: a.last,
+        // Ventes SAISIES par le commercial (vendeur = slpName sur le doc).
         caNetYtd: Number(inv?.ca ?? 0) - (caCnMap.get(a.slp) ?? 0),
+        margeBruteYtd: Number(inv?.marge ?? 0) - (margeCnMap.get(a.slp) ?? 0),
         nbFacturesYtd: Number(inv?.n ?? 0),
         caBlYtd: Number(bl?.ca ?? 0),
         nbCommandesYtd: Number(bl?.n ?? 0),
         volumeKgYtd: kgMap.get(a.slp) ?? 0,
-        // Objectif : CA cible annuel + réalisé sur le portefeuille (clients affectés).
+        // Ventes de SES CLIENTS (portefeuille : Client.commercial = lui, quel que
+        // soit le vendeur qui a saisi le doc). Net d'avoirs.
         caPortefeuilleYtd: (portInvMap.get(a.slp) ?? 0) - (portCnMap.get(a.slp) ?? 0),
-        objectifCa: objMap.get(a.slp) ?? 0,
+        // Objectifs annuels (0 = non défini) — CA / marge brute / volume kg.
+        objectifCa: obj?.ca ?? 0,
+        objectifMarge: obj?.marge ?? 0,
+        objectifVolume: obj?.volume ?? 0,
         spark: weekKeys.map((k) => weeks?.get(k) ?? 0),
       };
     })
+    // On ne garde que les commerciaux rattachés à un compte TeleVent (email) :
+    // masque les codes SAP non nominatifs (CM, ".", "ADM").
+    .filter((c) => !!c.email)
     .sort((x, y) => y.caNetYtd - x.caNetYtd);
 
   return NextResponse.json({ ok: true, commerciaux, scope: scopePayload(scope) });
