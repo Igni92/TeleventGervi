@@ -12,8 +12,14 @@ import {
   syncClientGroupsFromMirror,
 } from "@/lib/sapMirror";
 
+// Backfill historique long (plusieurs années × 5 entités, pagination SAP) →
+// autoriser la durée max du plan (Vercel Hobby = 300s). Pour de très gros
+// historiques, découper en tranches via le couple from/to (anti-timeout).
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
+
 /**
- * POST /api/sap/sync/backfill?from=YYYY-MM-DD
+ * POST /api/sap/sync/backfill?from=YYYY-MM-DD[&to=YYYY-MM-DD]
  *
  * One-shot rétrospectif : ramène ~1 an de SAP B1 dans les tables miroir locales
  * (SapBusinessPartner, SapInvoice, SapOrder, SapPurchaseDeliveryNote, avoirs
@@ -38,12 +44,17 @@ export async function POST(req: Request) {
 
   const url = new URL(req.url);
   const fromParam = url.searchParams.get("from");
+  const toParam = url.searchParams.get("to");
   const from = fromParam
     ? new Date(fromParam)
     : (() => { const d = new Date(); d.setFullYear(d.getFullYear() - 1); return d; })();
+  const to = toParam ? new Date(toParam) : undefined;
 
   if (Number.isNaN(from.getTime())) {
     return NextResponse.json({ error: "Paramètre `from` invalide (attendu YYYY-MM-DD)" }, { status: 400 });
+  }
+  if (to && Number.isNaN(to.getTime())) {
+    return NextResponse.json({ error: "Paramètre `to` invalide (attendu YYYY-MM-DD)" }, { status: 400 });
   }
 
   const startedAt = new Date();
@@ -66,11 +77,11 @@ export async function POST(req: Request) {
     // 2) Invoices + Orders + PDN + avoirs (clients & fournisseurs) en parallèle
     //    — 5 endpoints SAP indépendants.
     const [inv, ord, pdn, cn, pret] = await Promise.all([
-      pullInvoices({ from }),
-      pullOrders({ from }),
-      pullPdns({ from }),
-      pullCreditNotes({ from }),
-      pullPurchaseReturns({ from }),
+      pullInvoices({ from, to }),
+      pullOrders({ from, to }),
+      pullPdns({ from, to }),
+      pullCreditNotes({ from, to }),
+      pullPurchaseReturns({ from, to }),
     ]);
 
     // 3) Update cursor (max UpdateDate vu sur tout le backfill).
@@ -112,6 +123,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       from: from.toISOString().slice(0, 10),
+      to: to ? to.toISOString().slice(0, 10) : null,
       bps,
       clientGroups: groups,
       invoices: inv,

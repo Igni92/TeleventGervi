@@ -365,6 +365,11 @@ export async function syncClientGroupsFromMirror(): Promise<{ updated: number }>
 // Retourne le nombre de docs traités + le max UpdateDate vu.
 // ─────────────────────────────────────────────────────────────────
 
+/** Options de pull : borne basse `from` et/ou haute `to` (DocDate), ou
+ *  `updatedSince` (incrémental). `to` permet de découper un gros backfill
+ *  historique en tranches (anti-timeout). */
+type MirrorPullOpts = { from?: Date; to?: Date; updatedSince?: Date };
+
 type Endpoint = "Invoices" | "Orders" | "CreditNotes";
 
 const SALES_TABLES: Record<Endpoint, { header: string; line: string }> = {
@@ -375,10 +380,11 @@ const SALES_TABLES: Record<Endpoint, { header: string; line: string }> = {
 
 async function pullSalesDocs(
   endpoint: Endpoint,
-  opts: { from?: Date; updatedSince?: Date },
+  opts: MirrorPullOpts,
 ): Promise<{ pulled: number; maxUpdate: Date | null }> {
   const filters: string[] = [];
   if (opts.from) filters.push(`DocDate ge ${odataDate(opts.from)}`);
+  if (opts.to) filters.push(`DocDate le ${odataDate(opts.to)}`);
   // ⚠️ `ge` (≥) et pas `gt` : SAP UpdateDate est tronqué au JOUR (pas d'heure).
   // Avec `gt`, dès que le curseur atteint aujourd'hui, tous les docs du jour
   // même sont exclus (UpdateDate gt 2026-06-11 = faux pour un doc du 2026-06-11)
@@ -455,14 +461,14 @@ async function pullSalesDocs(
   return { pulled: docs.length, maxUpdate };
 }
 
-export const pullInvoices = (opts: { from?: Date; updatedSince?: Date }) =>
+export const pullInvoices = (opts: MirrorPullOpts) =>
   pullSalesDocs("Invoices", opts);
 
-export const pullOrders = (opts: { from?: Date; updatedSince?: Date }) =>
+export const pullOrders = (opts: MirrorPullOpts) =>
   pullSalesDocs("Orders", opts);
 
 /** Avoirs clients (CreditNotes) → SapCreditNote. Nécessaire au CA NET (factures − avoirs). */
-export const pullCreditNotes = (opts: { from?: Date; updatedSince?: Date }) =>
+export const pullCreditNotes = (opts: MirrorPullOpts) =>
   pullSalesDocs("CreditNotes", opts);
 
 // ─────────────────────────────────────────────────────────────────
@@ -486,10 +492,11 @@ interface SapPdnDoc {
 async function pullPurchaseDocs(
   endpoint: "PurchaseDeliveryNotes" | "PurchaseReturns",
   tables: { header: string; line: string },
-  opts: { from?: Date; updatedSince?: Date },
+  opts: MirrorPullOpts,
 ): Promise<{ pulled: number; maxUpdate: Date | null }> {
   const filters: string[] = [];
   if (opts.from) filters.push(`DocDate ge ${odataDate(opts.from)}`);
+  if (opts.to) filters.push(`DocDate le ${odataDate(opts.to)}`);
   // ⚠️ `ge` (≥) et pas `gt` : SAP UpdateDate est tronqué au JOUR (pas d'heure).
   // Avec `gt`, dès que le curseur atteint aujourd'hui, tous les docs du jour
   // même sont exclus (UpdateDate gt 2026-06-11 = faux pour un doc du 2026-06-11)
@@ -538,10 +545,10 @@ async function pullPurchaseDocs(
   return { pulled: docs.length, maxUpdate };
 }
 
-export const pullPdns = (opts: { from?: Date; updatedSince?: Date }) =>
+export const pullPdns = (opts: MirrorPullOpts) =>
   pullPurchaseDocs("PurchaseDeliveryNotes", { header: "SapPurchaseDeliveryNote", line: "SapPdnLine" }, opts);
 
 /** Avoirs fournisseurs (PurchaseReturns) → SapPurchaseReturn.
  *  Nécessaire aux Achats NET (= Σ PDN − Σ retours) — curseur : lastPurchaseReturnUpdate. */
-export const pullPurchaseReturns = (opts: { from?: Date; updatedSince?: Date }) =>
+export const pullPurchaseReturns = (opts: MirrorPullOpts) =>
   pullPurchaseDocs("PurchaseReturns", { header: "SapPurchaseReturn", line: "SapPurchaseReturnLine" }, opts);
