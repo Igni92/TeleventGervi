@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Loader2, ShieldAlert, Users, ArrowRight, Eye, Target, X } from "lucide-react";
+import { Loader2, ShieldAlert, Users, ArrowRight, Eye, Target, X, BadgeEuro } from "lucide-react";
 import { Sparkline } from "@/components/charts/Sparkline";
 
 /**
@@ -30,14 +30,27 @@ interface CommercialSap {
   nbCommandesYtd: number;
   volumeKgYtd: number;
   caPortefeuilleYtd: number;
+  /** Prime = primeMargeBrute × taux (5 %). */
+  prime: number;
+  /** Marge brute du portefeuille (commandes depuis le début de période prime). */
+  primeMargeBrute: number;
   objectifCa: number;
   objectifMarge: number;
   objectifVolume: number;
   spark: number[];
 }
 
+interface PrimeMeta { rate: number; since: string }
+
 const fmtEur = (v: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v);
+// Prime : montant fin (cents significatifs) → 2 décimales.
+const fmtEur2 = (v: number) =>
+  new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+const fmtDateShort = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("fr-FR");
+};
 const fmtKg = (v: number) => `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(v)} kg`;
 const localPart = (email: string) => email.split("@")[0] || email;
 const avatarOf = (email: string) => {
@@ -51,12 +64,14 @@ export function CommerciauxSapList() {
   const [error, setError] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [objOpen, setObjOpen] = useState<CommercialSap | null>(null);
+  const [primeMeta, setPrimeMeta] = useState<PrimeMeta>({ rate: 0.05, since: "2025-11-01T00:00:00.000Z" });
 
   useEffect(() => {
     fetch("/api/commerciaux/sap", { cache: "no-store" })
       .then((r) => r.json())
       .then((j) => {
         if (j.restricted && j.message) setRestricted(j.message);
+        if (j.primeMeta) setPrimeMeta(j.primeMeta);
         setIsAdmin(!!j.scope?.all);
         setData(j.commerciaux ?? []);
       })
@@ -100,7 +115,7 @@ export function CommerciauxSapList() {
     <>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {data.map((c) => (
-          <CommercialCard key={c.slpName} c={c} isAdmin={isAdmin} onObjectifs={() => setObjOpen(c)} />
+          <CommercialCard key={c.slpName} c={c} isAdmin={isAdmin} primeMeta={primeMeta} onObjectifs={() => setObjOpen(c)} />
         ))}
       </div>
       {objOpen && (
@@ -116,8 +131,10 @@ export function CommerciauxSapList() {
 }
 
 /* ── Carte commercial ──────────────────────────────────────── */
-function CommercialCard({ c, isAdmin, onObjectifs }: { c: CommercialSap; isAdmin: boolean; onObjectifs: () => void }) {
+function CommercialCard({ c, isAdmin, primeMeta, onObjectifs }: { c: CommercialSap; isAdmin: boolean; primeMeta: PrimeMeta; onObjectifs: () => void }) {
   const pctCa = c.objectifCa > 0 ? Math.round((c.caNetYtd / c.objectifCa) * 100) : null;
+  const primePct = Math.round(primeMeta.rate * 1000) / 10; // 0.05 → 5
+  const primeSince = fmtDateShort(primeMeta.since);
   return (
     <div className="relative bg-card border border-border border-l-4 border-l-brand-500 rounded-xl p-4">
       <Link
@@ -167,6 +184,18 @@ function CommercialCard({ c, isAdmin, onObjectifs }: { c: CommercialSap; isAdmin
             <span className="text-muted-foreground/60">· {c.clientsActifs} actifs</span>
           </span>
           <span className="text-[13px] font-bold tnum text-foreground">{fmtEur(c.caPortefeuilleYtd)}</span>
+        </div>
+
+        {/* PRIME : taux × marge brute du portefeuille (commandes depuis primeSince) */}
+        <div
+          className="mt-2 flex items-center justify-between rounded-lg bg-emerald-50 dark:bg-emerald-950/30 ring-1 ring-inset ring-emerald-300/50 dark:ring-emerald-500/30 px-2.5 py-1.5"
+          title={`${primePct} % de la marge brute du portefeuille · commandes depuis le ${primeSince} (marge nette transport à venir)`}
+        >
+          <span className="text-[10px] text-emerald-700 dark:text-emerald-300 inline-flex items-center gap-1 min-w-0">
+            <BadgeEuro className="h-3 w-3 shrink-0" /> Prime ({primePct} %)
+            <span className="text-emerald-600/70 dark:text-emerald-400/70 truncate">· marge {fmtEur(c.primeMargeBrute)}</span>
+          </span>
+          <span className="text-[14px] font-bold tnum text-emerald-700 dark:text-emerald-300 shrink-0">{fmtEur2(c.prime)}</span>
         </div>
 
         <div className="mt-2.5">

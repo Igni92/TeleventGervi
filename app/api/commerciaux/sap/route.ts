@@ -36,11 +36,19 @@ export async function GET() {
   const activeStart = new Date(now.getTime() - 365 * 86_400_000);
   const sparkStart = new Date(now.getTime() - 12 * 7 * 86_400_000);
 
+  // ── PRIME commerciale ──────────────────────────────────────
+  // 5 % de la marge (JMG/AG/MM). Pour l'instant marge BRUTE (la marge « nette
+  // transport » n'est pas encore calculée → transport non déduit). Base = les
+  // COMMANDES (SapOrder) des clients du PORTEFEUILLE (Client.commercial), depuis
+  // le 01.11.2025 (début de la période de prime).
+  const PRIME_RATE = 0.05;
+  const primeStart = new Date(Date.UTC(2025, 10, 1)); // 1ᵉʳ novembre 2025
+
   // Filtre slp non-admin injecté dans chaque agrégat.
   const slpCond = (col: Prisma.Sql) =>
     !scope.all && scope.slpName ? Prisma.sql`AND ${col} = ${scope.slpName}` : Prisma.empty;
 
-  const [active, caInv, caCn, caBl, kgBl, sparkRows, caPortInv, caPortCn] = await Promise.all([
+  const [active, caInv, caCn, caBl, kgBl, sparkRows, caPortInv, caPortCn, primeOrders] = await Promise.all([
     // Commerciaux actifs 12 mois (Orders ∪ Invoices) + nb clients + dernier doc.
     prisma.$queryRaw<{ slp: string; clients: number; last: Date }[]>(Prisma.sql`
       SELECT s.slp, COUNT(DISTINCT s.card)::int AS clients, MAX(s.d) AS last
@@ -112,7 +120,17 @@ export async function GET() {
       WHERE i."cancelled" = false AND i."docDate" >= ${ytdStart}
         AND c."commercial" IS NOT NULL AND c."commercial" <> '' ${slpCond(Prisma.sql`c."commercial"`)}
       GROUP BY 1`),
+    // PRIME — marge BRUTE du portefeuille sur les COMMANDES depuis le 01.11.2025
+    // (Client.commercial = lui). prime = PRIME_RATE × cette marge.
+    prisma.$queryRaw<{ slp: string; marge: number }[]>(Prisma.sql`
+      SELECT c."commercial" AS slp, COALESCE(SUM(o."grossProfit"), 0)::float AS marge
+      FROM "SapOrder" o
+      JOIN "Client" c ON c."code" = o."cardCode"
+      WHERE o."cancelled" = false AND o."docDate" >= ${primeStart}
+        AND c."commercial" IS NOT NULL AND c."commercial" <> '' ${slpCond(Prisma.sql`c."commercial"`)}
+      GROUP BY 1`),
   ]);
+  const primeMargeMap = new Map(primeOrders.map((r) => [r.slp, Number(r.marge)]));
 
   // Objectifs CA (table optionnelle — repli silencieux si DDL non lancée).
   const objMap = new Map<string, { ca: number; marge: number; volume: number }>();
@@ -173,6 +191,10 @@ export async function GET() {
         // Ventes de SES CLIENTS (portefeuille : Client.commercial = lui, quel que
         // soit le vendeur qui a saisi le doc). Net d'avoirs.
         caPortefeuilleYtd: (portInvMap.get(a.slp) ?? 0) - (portCnMap.get(a.slp) ?? 0),
+        // PRIME : 5 % de la marge brute du portefeuille sur les COMMANDES depuis
+        // le 01.11.2025 (marge nette transport à venir).
+        primeMargeBrute: primeMargeMap.get(a.slp) ?? 0,
+        prime: Math.round((primeMargeMap.get(a.slp) ?? 0) * PRIME_RATE * 100) / 100,
         // Objectifs annuels (0 = non défini) — CA / marge brute / volume kg.
         objectifCa: obj?.ca ?? 0,
         objectifMarge: obj?.marge ?? 0,
@@ -185,5 +207,10 @@ export async function GET() {
     .filter((c) => !!c.email)
     .sort((x, y) => y.caNetYtd - x.caNetYtd);
 
-  return NextResponse.json({ ok: true, commerciaux, scope: scopePayload(scope) });
+  return NextResponse.json({
+    ok: true,
+    commerciaux,
+    primeMeta: { rate: PRIME_RATE, since: primeStart.toISOString() },
+    scope: scopePayload(scope),
+  });
 }
