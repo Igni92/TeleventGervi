@@ -108,10 +108,6 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
 
       <ProduitsRecurrents clientId={client.id} />
 
-      <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-6">
-        <DeliveryModesEditor clientId={client.id} clientCode={client.code} />
-      </div>
-
       {client.rappels.length > 0 && (
         <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-6">
           <div className="flex items-center gap-2 mb-4">
@@ -165,6 +161,14 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
     </div>
   );
 
+  const logistiquePane = (
+    <div className="space-y-6">
+      <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-6">
+        <DeliveryModesEditor clientId={client.id} clientCode={client.code} />
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-6 max-w-3xl">
       <div className="flex items-center justify-between gap-3">
@@ -193,7 +197,7 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
         </p>
       </div>
 
-      <ClientTabs commercial={commercialPane} compta={comptaPane} />
+      <ClientTabs commercial={commercialPane} compta={comptaPane} logistique={logistiquePane} />
     </div>
   );
 }
