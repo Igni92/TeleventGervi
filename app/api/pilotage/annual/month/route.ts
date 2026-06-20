@@ -3,10 +3,13 @@ import { auth } from "@/lib/auth";
 import { getAccessScope, resolvePilotageView } from "@/lib/permissions";
 import { monthDrilldown } from "@/lib/pilotage";
 import { groupCodesForSegment, parseSegment } from "@/lib/segments";
+import { cached, invalidate } from "@/lib/ttlCache";
 
 // Évite le timeout serverless sur les agrégations (cold start Vercel).
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+const PILOTAGE_TTL_MS = 5 * 60_000; // filet de sécurité (le tick mirror purge "pilotage:")
 
 /**
  * GET /api/pilotage/annual/month?year=YYYY&month=0..11
@@ -31,6 +34,10 @@ export async function GET(req: Request) {
 
   const segment = parseSegment(url.searchParams.get("segment"));
 
-  const data = await monthDrilldown(year, month, groupCodesForSegment(segment), slp);
+  const cacheKey = `pilotage:annual-month:${slp ?? "ALL"}:${year}:${month}:${segment}`;
+  if (url.searchParams.get("refresh") === "1") invalidate(cacheKey);
+  const data = await cached(cacheKey, PILOTAGE_TTL_MS, () =>
+    monthDrilldown(year, month, groupCodesForSegment(segment), slp),
+  );
   return NextResponse.json(data);
 }

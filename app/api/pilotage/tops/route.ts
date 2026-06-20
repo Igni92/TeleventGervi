@@ -7,10 +7,15 @@ import {
   crmCallsByCardCode,
   type Granularity,
 } from "@/lib/pilotage";
+import { cached, invalidate } from "@/lib/ttlCache";
 
 // Évite le timeout serverless sur les agrégations (cold start Vercel).
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+// Cache court par périmètre+granularité ; le tick mirror purge "pilotage:" dès
+// que de nouveaux docs arrivent, ce TTL n'est qu'un filet de sécurité.
+const PILOTAGE_TTL_MS = 5 * 60_000;
 
 /**
  * GET /api/pilotage/tops?g=day|week|month|year
@@ -36,34 +41,42 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Granularité invalide" }, { status: 400 });
   }
 
-  const curr = periodBounds(g);
-  const prev = previousYearBounds(curr, g);
+  const cacheKey = `pilotage:tops:${slp ?? "ALL"}:${g}`;
+  if (url.searchParams.get("refresh") === "1") invalidate(cacheKey);
 
-  const [clients, suppliers, salespersons, clientsPrev, salespersonsPrev] = await Promise.all([
-    topClients(curr.start, curr.end, 8, null, slp),
-    showTransverse ? topSuppliers(curr.start, curr.end, 6) : Promise.resolve([]),
-    showTransverse ? topSalespersons(curr.start, curr.end, 8) : Promise.resolve([]),
-    topClients(prev.start, prev.end, 50, null, slp),   // élargi pour matcher delta
-    showTransverse ? topSalespersons(prev.start, prev.end, 50) : Promise.resolve([]),
-  ]);
+  const data = await cached(cacheKey, PILOTAGE_TTL_MS, async () => {
+    const curr = periodBounds(g);
+    const prev = previousYearBounds(curr, g);
 
-  const prevClientCa = new Map(clientsPrev.map((c) => [c.cardCode, c.ca]));
-  const prevSlpCa = new Map(salespersonsPrev.map((s) => [s.slpName, s.ca]));
+    const [clients, suppliers, salespersons, clientsPrev, salespersonsPrev] = await Promise.all([
+      topClients(curr.start, curr.end, 8, null, slp),
+      showTransverse ? topSuppliers(curr.start, curr.end, 6) : Promise.resolve([]),
+      showTransverse ? topSalespersons(curr.start, curr.end, 8) : Promise.resolve([]),
+      topClients(prev.start, prev.end, 50, null, slp),   // élargi pour matcher delta
+      showTransverse ? topSalespersons(prev.start, prev.end, 50) : Promise.resolve([]),
+    ]);
 
-  // Enrichit chaque top client avec son # appels CRM sur la même fenêtre
-  // (jointure clientsCode = SAP cardCode = Client.code TeleVent).
-  const crmCalls = await crmCallsByCardCode(clients.map((c) => c.cardCode), curr.start, curr.end);
+    const prevClientCa = new Map(clientsPrev.map((c) => [c.cardCode, c.ca]));
+    const prevSlpCa = new Map(salespersonsPrev.map((s) => [s.slpName, s.ca]));
 
-  return NextResponse.json({
-    granularity: g,
-    period: { start: curr.start, end: curr.end },
-    clients: clients.map((c) => ({
-      ...c,
-      caPrev: prevClientCa.get(c.cardCode) ?? 0,
-      crmCalls: crmCalls.get(c.cardCode) ?? 0,
-    })),
-    suppliers,
-    salespersons: salespersons.map((s) => ({ ...s, caPrev: prevSlpCa.get(s.slpName) ?? 0 })),
-    scope: scopePayload(scope),
+    // Enrichit chaque top client avec son # appels CRM sur la même fenêtre
+    // (jointure clientsCode = SAP cardCode = Client.code TeleVent).
+    const crmCalls = await crmCallsByCardCode(clients.map((c) => c.cardCode), curr.start, curr.end);
+
+    return {
+      granularity: g,
+      period: { start: curr.start, end: curr.end },
+      clients: clients.map((c) => ({
+        ...c,
+        caPrev: prevClientCa.get(c.cardCode) ?? 0,
+        crmCalls: crmCalls.get(c.cardCode) ?? 0,
+      })),
+      suppliers,
+      salespersons: salespersons.map((s) => ({ ...s, caPrev: prevSlpCa.get(s.slpName) ?? 0 })),
+    };
   });
+
+  // `scope` recalculé HORS cache (admin vs commercial même slp → même data,
+  // mais flag admin différent) pour ne pas servir le mauvais périmètre.
+  return NextResponse.json({ ...data, scope: scopePayload(scope) });
 }

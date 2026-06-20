@@ -165,18 +165,31 @@ export async function POST(req: NextRequest) {
   // Empêche aussi le -2028 cryptique de SAP en retournant un message clair.
   const sapStockByItem = new Map<string, number>();
   try {
-    const missing: string[] = [];
     const uniqueCodes = Array.from(new Set(body.lines.map((l) => l.itemCode)));
-    for (const code of uniqueCodes) {
-      try {
-        const it = await sap.get<{ ItemCode: string; QuantityOnStock?: number }>(
-          `Items('${encodeURIComponent(code)}')?$select=ItemCode,QuantityOnStock`,
+    // Validation existence + VRAI stock SAP en 1 requête (paquets de 40,
+    // parallèles) au lieu d'un appel par article (N+1) → saisie de commande
+    // bien plus rapide. Un article absent du résultat = inexistant dans SAP.
+    const VALIDATE_CHUNK = 40;
+    const chunks: string[][] = [];
+    for (let i = 0; i < uniqueCodes.length; i += VALIDATE_CHUNK) {
+      chunks.push(uniqueCodes.slice(i, i + VALIDATE_CHUNK));
+    }
+    const found = new Set<string>();
+    const results = await Promise.all(
+      chunks.map((chunk) => {
+        const filter = chunk.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
+        return sap.get<{ value: { ItemCode: string; QuantityOnStock?: number }[] }>(
+          `Items?$select=ItemCode,QuantityOnStock&$filter=${filter}`,
         );
-        if (typeof it.QuantityOnStock === "number") sapStockByItem.set(code, it.QuantityOnStock);
-      } catch {
-        missing.push(code);
+      }),
+    );
+    for (const res of results) {
+      for (const it of res.value ?? []) {
+        found.add(it.ItemCode);
+        if (typeof it.QuantityOnStock === "number") sapStockByItem.set(it.ItemCode, it.QuantityOnStock);
       }
     }
+    const missing = uniqueCodes.filter((c) => !found.has(c));
     if (missing.length > 0) {
       const dbName = process.env.SAP_B1_COMPANY_DB;
       return NextResponse.json({

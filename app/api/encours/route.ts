@@ -4,6 +4,7 @@ import { getAccessScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { netEncours } from "@/lib/encours-net";
+import { cached, invalidate } from "@/lib/ttlCache";
 
 /**
  * GET /api/encours — état des encours clients (factures dues), AU NET.
@@ -25,6 +26,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const GRACE_DAYS = 30; // tolérance avant de considérer "en retard"
+const ENCOURS_TTL_MS = 60_000; // cache court par périmètre (reloads quasi instantanés ; ?refresh=1 force)
 
 interface OpenInvoice {
   DocEntry: number;
@@ -119,7 +121,7 @@ async function fetchBalances(cardCodes: string[]): Promise<Map<string, number>> 
   return map;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
@@ -140,13 +142,20 @@ export async function GET() {
     }
   }
 
-  let invs: OpenInvoice[];
+  // Cache court PAR PÉRIMÈTRE (l'agrégation SAP est lourde) ; ?refresh=1 force.
+  const cacheKey = `encours:${scope.all ? "ALL" : (scope.slpName ?? "none")}`;
+  if (new URL(req.url).searchParams.get("refresh") === "1") invalidate(cacheKey);
   try {
-    invs = await fetchOpenInvoices();
+    const payload = await cached(cacheKey, ENCOURS_TTL_MS, () => computeEncours(allowed));
+    return NextResponse.json(payload);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ ok: false, error: `Lecture SAP échouée : ${msg}` }, { status: 502 });
   }
+}
+
+async function computeEncours(allowed: Set<string> | null) {
+  const invs = await fetchOpenInvoices();
 
   // Soldes compte : on ne lit QUE les clients ayant une facture ouverte due (et
   // dans le périmètre commercial) — au lieu de TOUS les tiers SAP. Best-effort :
@@ -224,7 +233,7 @@ export async function GET() {
     : [];
   const idByCode = new Map(locals.map((l) => [l.code, l.id]));
 
-  return NextResponse.json({
+  return {
     ok: true,
     company: sap.getEnvironment().prodCompany,
     totals: {
@@ -253,5 +262,5 @@ export async function GET() {
       maxOverdueDays: c.maxOverdueDays,
       invoices: [...c.invoices].sort((a, b) => b.overdueDays - a.overdueDays),
     })),
-  });
+  };
 }

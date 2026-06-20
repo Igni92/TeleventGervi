@@ -118,15 +118,23 @@ export async function POST(req: NextRequest) {
 
   // ── Pré-validation : tous les items existent ──
   try {
-    const missing: string[] = [];
     const uniqueCodes = Array.from(new Set(body.lines.map((l) => l.itemCode)));
-    for (const code of uniqueCodes) {
-      try {
-        await sap.get<{ ItemCode: string }>(`Items('${encodeURIComponent(code)}')?$select=ItemCode`);
-      } catch {
-        missing.push(code);
-      }
+    // Existence des articles en 1 requête (paquets de 40, parallèles) au lieu
+    // d'un appel par article (N+1). Un article absent du résultat = inexistant.
+    const VALIDATE_CHUNK = 40;
+    const chunks: string[][] = [];
+    for (let i = 0; i < uniqueCodes.length; i += VALIDATE_CHUNK) {
+      chunks.push(uniqueCodes.slice(i, i + VALIDATE_CHUNK));
     }
+    const found = new Set<string>();
+    const results = await Promise.all(
+      chunks.map((chunk) => {
+        const filter = chunk.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
+        return sap.get<{ value: { ItemCode: string }[] }>(`Items?$select=ItemCode&$filter=${filter}`);
+      }),
+    );
+    for (const res of results) for (const it of res.value ?? []) found.add(it.ItemCode);
+    const missing = uniqueCodes.filter((c) => !found.has(c));
     if (missing.length > 0) {
       return NextResponse.json({
         ok: false,
