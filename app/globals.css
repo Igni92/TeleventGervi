@@ -383,14 +383,14 @@
 .ambient-aurora-2 {
   position: absolute;
   inset: -30%;
-  will-change: transform;
   filter: blur(40px) saturate(125%);
 }
 .ambient-aurora {
   background:
     radial-gradient(28% 32% at 16% 14%, hsl(var(--brand-500) / 0.24), transparent 68%),
     radial-gradient(32% 36% at 90% 90%, hsl(var(--brand-400) / 0.20), transparent 70%);
-  animation: ambient-drift-a 17s ease-in-out infinite alternate;
+  /* Animation = opt-in (réglage /parametres « animations: on ») — statique par
+     défaut pour un scroll fluide. Voir html[data-anim="force"] plus bas. */
 }
 .ambient-aurora-2 {
   background:
@@ -398,7 +398,6 @@
     radial-gradient(30% 34% at 8% 90%,  hsl(268 78% 62% / 0.15), transparent 72%),
     radial-gradient(22% 26% at 58% 50%, hsl(var(--brand-400) / 0.10), transparent 68%);
   filter: blur(52px) saturate(120%);
-  animation: ambient-drift-b 23s ease-in-out infinite alternate;
 }
 .dark .ambient-aurora {
   background:
@@ -423,8 +422,10 @@
 }
 .ambient-rings { color: hsl(var(--brand-400)); transform-origin: center; }
 /* Balayage radar très lent (organique, clin d'œil au métier "signal") */
-.ambient-rings-spin   { animation: ambient-spin 60s linear infinite; }
-.ambient-rings-spin-r { animation: ambient-spin 85s linear infinite reverse; }
+/* Rotation des anneaux = opt-in : statique par défaut (sinon le compositeur
+   tourne en continu → scroll qui rame). Rallumée sous html[data-anim="force"]. */
+.ambient-rings-spin,
+.ambient-rings-spin-r { animation: none; }
 
 /* Errances organiques : amplitude nettement visible, easings doux, rotation. */
 @keyframes ambient-drift-a {
@@ -456,12 +457,12 @@ html[data-reduce-anim="1"] .ambient-aurora-2,
 html[data-reduce-anim="1"] .ambient-rings-spin,
 html[data-reduce-anim="1"] .ambient-rings-spin-r { animation: none !important; }
 
-@media (prefers-reduced-motion: reduce) {
-  html[data-anim="force"] .ambient-aurora { animation: ambient-drift-a 17s ease-in-out infinite alternate; }
-  html[data-anim="force"] .ambient-aurora-2 { animation: ambient-drift-b 23s ease-in-out infinite alternate; }
-  html[data-anim="force"] .ambient-rings-spin { animation: ambient-spin 60s linear infinite; }
-  html[data-anim="force"] .ambient-rings-spin-r { animation: ambient-spin 85s linear infinite reverse; }
-}
+/* "on" (data-anim=force) → rallume le fond animé pour qui le souhaite,
+   y compris si le système demande prefers-reduced-motion. */
+html[data-anim="force"] .ambient-aurora { animation: ambient-drift-a 17s ease-in-out infinite alternate; will-change: transform; }
+html[data-anim="force"] .ambient-aurora-2 { animation: ambient-drift-b 23s ease-in-out infinite alternate; will-change: transform; }
+html[data-anim="force"] .ambient-rings-spin { animation: ambient-spin 60s linear infinite; }
+html[data-anim="force"] .ambient-rings-spin-r { animation: ambient-spin 85s linear infinite reverse; }
 
 /* Console-specific — soft swap between active clients */
 @keyframes client-swap {
