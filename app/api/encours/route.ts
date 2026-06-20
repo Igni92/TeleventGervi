@@ -67,6 +67,58 @@ interface ClientEncours {
   invoices: InvoiceLine[];
 }
 
+const OPEN_FILTER = "DocumentStatus eq 'bost_Open' and Cancelled eq 'tNO'";
+const INV_SELECT = "DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,PaidToDate";
+
+/** Factures ouvertes (live SAP) — pagination PARALLÈLE (getAllParallel),
+ *  repli séquentiel si l'endpoint /$count est indisponible. */
+async function fetchOpenInvoices(): Promise<OpenInvoice[]> {
+  const path = `Invoices?$select=${INV_SELECT}&$filter=${OPEN_FILTER}`;
+  try {
+    return await sap.getAllParallel<OpenInvoice>(path, `Invoices/$count?$filter=${OPEN_FILTER}`, {
+      pageSize: 500,
+      maxPages: 100,
+      env: "prod",
+    });
+  } catch (e) {
+    console.error("[encours] pagination parallèle KO → repli séquentiel:", e);
+    return sap.getAll<OpenInvoice>(path, { pageSize: 500, maxPages: 100, env: "prod" });
+  }
+}
+
+/**
+ * Soldes compte tiers (CurrentAccountBalance) UNIQUEMENT pour les cardCodes
+ * utiles (clients ayant une facture due, dans le périmètre) — au lieu de lire
+ * TOUS les tiers SAP. Paquets parallèles ; best-effort (un paquet KO n'empêche
+ * pas les autres → ces clients retombent simplement sur le brut).
+ */
+async function fetchBalances(cardCodes: string[]): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  const CHUNK = 40;
+  const chunks: string[][] = [];
+  for (let i = 0; i < cardCodes.length; i += CHUNK) chunks.push(cardCodes.slice(i, i + CHUNK));
+  const results = await Promise.all(
+    chunks.map((chunk) => {
+      const filter = chunk.map((c) => `CardCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
+      return sap
+        .getAll<BpBalance>(
+          `BusinessPartners?$select=CardCode,CurrentAccountBalance&$filter=${filter}`,
+          { pageSize: 100, maxPages: 2, env: "prod" },
+        )
+        .catch((e) => {
+          console.error("[encours] lecture d'un paquet de soldes échouée (repli brut partiel):", e);
+          return [] as BpBalance[];
+        });
+    }),
+  );
+  for (const arr of results) {
+    for (const b of arr) {
+      if (typeof b.CurrentAccountBalance === "number") map.set(b.CardCode, b.CurrentAccountBalance);
+    }
+  }
+  return map;
+}
+
 export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
@@ -89,33 +141,22 @@ export async function GET() {
   }
 
   let invs: OpenInvoice[];
-  let bps: BpBalance[];
   try {
-    [invs, bps] = await Promise.all([
-      sap.getAll<OpenInvoice>(
-        "Invoices?$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,PaidToDate"
-        + "&$filter=DocumentStatus eq 'bost_Open' and Cancelled eq 'tNO'",
-        { pageSize: 200, maxPages: 200, env: "prod" },
-      ),
-      // Solde NET par client (encaissé déduit). Best-effort : si KO, on garde le
-      // brut (pas de blocage de la page).
-      sap.getAll<BpBalance>(
-        "BusinessPartners?$select=CardCode,CurrentAccountBalance&$filter=CardType eq 'cCustomer'",
-        { pageSize: 500, maxPages: 100, env: "prod" },
-      ).catch((e) => {
-        console.error("[encours] lecture des soldes compte échouée (repli brut):", e);
-        return [] as BpBalance[];
-      }),
-    ]);
+    invs = await fetchOpenInvoices();
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ ok: false, error: `Lecture SAP échouée : ${msg}` }, { status: 502 });
   }
 
-  const cabByCode = new Map<string, number>();
-  for (const b of bps) {
-    if (typeof b.CurrentAccountBalance === "number") cabByCode.set(b.CardCode, b.CurrentAccountBalance);
+  // Soldes compte : on ne lit QUE les clients ayant une facture ouverte due (et
+  // dans le périmètre commercial) — au lieu de TOUS les tiers SAP. Best-effort :
+  // si une lecture échoue, ces clients retombent sur le brut.
+  const neededCodes = new Set<string>();
+  for (const inv of invs) {
+    if (allowed && !allowed.has(inv.CardCode)) continue;
+    if ((inv.DocTotal ?? 0) - (inv.PaidToDate ?? 0) > 0.01) neededCodes.add(inv.CardCode);
   }
+  const cabByCode = await fetchBalances([...neededCodes]);
 
   const now = Date.now();
   const byClient = new Map<string, ClientEncours>();
