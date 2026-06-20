@@ -50,16 +50,27 @@ export async function GET() {
   // + clients récupérés aujourd'hui (TempAssignment) pour conserver la
   //   couverture ponctuelle d'un collègue absent.
   // `vendeur` est hors client Prisma typé → pré-filtre raw SQL → liste d'ids.
+  // La console est une FILE D'APPEL : elle ne montre QUE des clients ACTIFS en
+  // télévente. Un client inactif — même s'il a un vendeur — ne doit jamais y
+  // apparaître (il reste pilotable depuis le Plan d'appel pour réactivation).
   const scope = await getAccessScope(session);
   const mySlp = scope.all ? await getOwnSlpName(session) : scope.slpName;
-  let scopeIdList: string[] | null = null; // null = aucun filtre (vue globale)
-  if (!(scope.all && !mySlp)) {
+  let scopeIdList: string[];
+  if (scope.all && !mySlp) {
+    // Admin dont on ne résout pas le trigramme → vue globale, bornée aux actifs.
+    const rows = await prisma.$queryRaw<{ id: string }[]>(
+      Prisma.sql`SELECT "id" FROM "Client" WHERE "activeTelevente" = true`,
+    );
+    scopeIdList = rows.map((r) => r.id);
+  } else {
     const rows = mySlp
       ? await prisma.$queryRaw<{ id: string }[]>(
-          Prisma.sql`SELECT "id" FROM "Client" WHERE "vendeur" = ${mySlp}`,
+          Prisma.sql`SELECT "id" FROM "Client" WHERE "vendeur" = ${mySlp} AND "activeTelevente" = true`,
         )
       : [];
     const scopeIds = new Set<string>(rows.map((r) => r.id));
+    // Reprises explicites du jour (couverture d'un collègue absent) : conservées
+    // telles quelles — c'est une action volontaire, pas la file automatique.
     for (const c of myClaims) scopeIds.add(c.clientId);
     scopeIdList = Array.from(scopeIds);
   }
@@ -90,7 +101,7 @@ export async function GET() {
   // can compute behavioral insights without an extra round-trip.
   const last180 = new Date(now); last180.setDate(now.getDate() - 180);
   const clients = await prisma.client.findMany({
-    where: scopeIdList ? { id: { in: scopeIdList } } : undefined,
+    where: { id: { in: scopeIdList } },
     select: {
       id: true, code: true, nom: true, type: true,
       commercial: true, tel1: true, tel2: true, tel3: true,
@@ -117,8 +128,8 @@ export async function GET() {
   const todayLogs = await prisma.appelLog.findMany({
     where: {
       heureAppel: { gte: todayStart, lt: todayEnd },
-      // Stats cohérentes avec la file scopée : on ne compte que MES clients.
-      ...(scopeIdList ? { clientId: { in: scopeIdList } } : {}),
+      // Stats cohérentes avec la file scopée : on ne compte que MES clients actifs.
+      clientId: { in: scopeIdList },
     },
     select: { id: true, clientId: true, type: true, heureAppel: true },
     orderBy: { heureAppel: "desc" },
