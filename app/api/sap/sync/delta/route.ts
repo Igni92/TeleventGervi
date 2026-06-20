@@ -5,6 +5,10 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { refreshItemStocks } from "@/lib/stockSync";
 
+// Pull incrémental SAP (commandes/BL récents) + refresh stocks → borne la durée.
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 /**
  * POST /api/sap/sync/delta
  *

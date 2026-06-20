@@ -4,6 +4,10 @@ import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap, type SapItem, type SapItemGroup, type SapBatchDetail } from "@/lib/sapb1";
 
+// ~1300 items paginés depuis SAP → peut dépasser le défaut serverless.
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
+
 /**
  * POST /api/sap/sync/products
  *

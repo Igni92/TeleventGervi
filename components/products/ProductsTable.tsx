@@ -67,7 +67,7 @@ interface LastSyncInfo {
 
 interface ProductGroup { id: number; name: string; count: number }
 
-const REFRESH_INTERVAL = 30 * 1000; // 30 s — sync delta SAP + refetch DB locale
+const REFRESH_INTERVAL = 90 * 1000; // 90 s — sync delta SAP + refetch DB locale (serveur throttle déjà à 20 s)
 
 export function ProductsTable() {
   const [data, setData] = useState<Response | null>(null);

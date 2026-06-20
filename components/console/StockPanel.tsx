@@ -48,7 +48,7 @@ export function StockPanel({ sharePct = 100 }: { sharePct?: number }) {
       try { await fetch("/api/sap/sync/delta", { method: "POST" }); } catch { /* silent */ }
       load();
     };
-    const t = setInterval(tick, 30 * 1000);
+    const t = setInterval(tick, 90 * 1000);
     return () => clearInterval(t);
   }, [load]);
 

@@ -11,6 +11,11 @@ import {
   pullPurchaseReturns,
   syncClientGroupsFromMirror,
 } from "@/lib/sapMirror";
+import { invalidate } from "@/lib/ttlCache";
+
+// Pull de 5 entités + BP (pagination SAP) → peut dépasser le défaut serverless.
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 /**
  * POST /api/sap/sync/mirror
@@ -68,6 +73,14 @@ export async function POST() {
         lastTickAt: new Date(),
       },
     });
+
+    // Si de NOUVEAUX documents sont entrés, purge les caches d'agrégats pilotage
+    // (annual/geo/weekly/tops…) pour que les dashboards reflètent ce tick sans
+    // attendre l'expiration du TTL (jusqu'à 7 j pour l'annuel). Si rien de neuf,
+    // on garde le cache (la plupart des ticks ne ramènent aucun doc).
+    if (inv.pulled || ord.pulled || pdn.pulled || cn.pulled || pret.pulled) {
+      invalidate("pilotage:");
+    }
 
     return NextResponse.json({
       ok: true,
