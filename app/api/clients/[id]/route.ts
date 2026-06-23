@@ -4,6 +4,7 @@ import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { clientSchema } from "@/lib/validations";
 import { sap } from "@/lib/sapb1";
+import { standardizePhone } from "@/lib/phone";
 
 export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -38,6 +39,11 @@ export async function PUT(req: NextRequest, props: { params: Promise<{ id: strin
 
   try {
     const body = await req.json();
+    // Standardisation des téléphones AVANT validation (la saisie est souvent
+    // sale : points, espaces, surplus « / 65 »…). On nettoie → 10 chiffres.
+    for (const k of ["tel1", "tel2", "tel3"] as const) {
+      if (typeof body?.[k] === "string" && body[k].trim()) body[k] = standardizePhone(body[k]);
+    }
     const data = clientSchema.parse(body);
 
     const existing = await prisma.client.findUnique({ where: { id: params.id } });
@@ -52,6 +58,7 @@ export async function PUT(req: NextRequest, props: { params: Promise<{ id: strin
 
     const nextEmail = data.email?.trim().toLowerCase() || null;
     const emailChanged = nextEmail !== existing.email;
+    const nameChanged = data.nom.trim() !== (existing.nom ?? "").trim();
 
     const updateData: Record<string, unknown> = {
       code: data.code,
@@ -77,15 +84,16 @@ export async function PUT(req: NextRequest, props: { params: Promise<{ id: strin
       data: updateData,
     });
 
-    // Bidir SAP : push l'email sur le BusinessPartner si modifié. Best-effort —
-    // si SAP est down, le cache DB reste correct, on log juste l'erreur.
-    if (emailChanged) {
+    // Bidir SAP : push email + nom (CardName) sur le BusinessPartner si modifiés.
+    // Best-effort — si SAP est down, le cache DB reste correct, on log juste.
+    const sapPatch: Record<string, unknown> = {};
+    if (emailChanged) sapPatch.EmailAddress = nextEmail ?? "";
+    if (nameChanged) sapPatch.CardName = data.nom.trim();
+    if (Object.keys(sapPatch).length > 0) {
       try {
-        await sap.patch(`BusinessPartners('${data.code.replace(/'/g, "''")}')`, {
-          EmailAddress: nextEmail ?? "",
-        });
+        await sap.patch(`BusinessPartners('${data.code.replace(/'/g, "''")}')`, sapPatch);
       } catch (e) {
-        console.warn(`[PUT /api/clients/${params.id}] PATCH SAP email failed:`, e);
+        console.warn(`[PUT /api/clients/${params.id}] PATCH SAP (email/nom) failed:`, e);
       }
     }
 

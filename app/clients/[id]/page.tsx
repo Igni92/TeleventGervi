@@ -7,13 +7,14 @@ import { ContactsEditor } from "@/components/clients/ContactsEditor";
 import { FamillesVsGroupe } from "@/components/clients/FamillesVsGroupe";
 import { ComportementYoY } from "@/components/clients/ComportementYoY";
 import { CompteForm } from "@/components/clients/CompteForm";
+import { ReceptionEmailForm } from "@/components/clients/ReceptionEmailForm";
 import { ProduitsRecurrents } from "@/components/clients/ProduitsRecurrents";
 import { EncoursCreditCard } from "@/components/clients/EncoursCreditCard";
 import { RgpdExportButton } from "@/components/clients/RgpdExportButton";
 import { ClientTabs } from "@/components/clients/ClientTabs";
 import { FicheActions } from "@/components/clients/FicheActions";
 import { SurfaceCard } from "@/components/ui/surface-card";
-import { ArrowLeft, Calendar, Sprout, TrendingUp, Receipt } from "lucide-react";
+import { ArrowLeft, Calendar, Sprout, TrendingUp, Receipt, Truck } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -167,6 +168,9 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
 
   const logistiquePane = (
     <div className="space-y-6">
+      <SurfaceCard accent="sky" title="Réception marchandise" icon={<Truck className="h-3.5 w-3.5" />}>
+        <ReceptionEmailForm clientId={client.id} />
+      </SurfaceCard>
       <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-6">
         <DeliveryModesEditor clientId={client.id} clientCode={client.code} />
       </div>

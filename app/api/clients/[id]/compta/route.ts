@@ -65,21 +65,23 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
     return NextResponse.json({ error: "Données invalides", details: parsed.error.flatten() }, { status: 400 });
   }
 
-  const emailCompta = parsed.data.emailCompta === "" ? null : parsed.data.emailCompta ?? null;
-  const emailReception = parsed.data.emailReception === "" ? null : parsed.data.emailReception ?? null;
-  const adresseFacturation =
-    parsed.data.adresseFacturation === "" ? null : parsed.data.adresseFacturation ?? null;
+  // Mise à jour PARTIELLE : on ne touche QUE les champs présents dans le body.
+  // (La fiche édite désormais l'email réception dans la section Logistique, séparément
+  //  de l'email compta / l'adresse de facturation — il ne faut pas s'écraser mutuellement.)
+  const norm = (v: string | null | undefined) => (v === "" ? null : v ?? null);
+  const sets: Prisma.Sql[] = [];
+  if (parsed.data.emailCompta !== undefined) sets.push(Prisma.sql`"emailCompta" = ${norm(parsed.data.emailCompta)}`);
+  if (parsed.data.emailReception !== undefined) sets.push(Prisma.sql`"emailReception" = ${norm(parsed.data.emailReception)}`);
+  if (parsed.data.adresseFacturation !== undefined) sets.push(Prisma.sql`"adresseFacturation" = ${norm(parsed.data.adresseFacturation)}`);
 
-  const result = await prisma.$executeRaw`
-    UPDATE "Client"
-    SET "emailCompta"        = ${emailCompta},
-        "emailReception"     = ${emailReception},
-        "adresseFacturation" = ${adresseFacturation},
-        "updatedAt"          = NOW()
-    WHERE "id" = ${params.id};
-  `;
-  if (result === 0) {
-    return NextResponse.json({ error: "Client introuvable" }, { status: 404 });
+  if (sets.length > 0) {
+    const result = await prisma.$executeRaw(Prisma.sql`
+      UPDATE "Client" SET ${Prisma.join(sets, ", ")}, "updatedAt" = NOW()
+      WHERE "id" = ${params.id};
+    `);
+    if (result === 0) {
+      return NextResponse.json({ error: "Client introuvable" }, { status: 404 });
+    }
   }
 
   const row = await readCompta(params.id);
