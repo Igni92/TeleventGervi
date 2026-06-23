@@ -97,6 +97,8 @@ export function ProductsTable() {
   // Rows expanded to show batches
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [batches, setBatches] = useState<Record<string, Batch[] | "loading">>({});
+  // Groupes repliés sur la liste mobile (style Écran 2 — sections par famille).
+  const [closedGroups, setClosedGroups] = useState<Set<string>>(new Set());
 
   const toggleExpand = useCallback(async (productId: string) => {
     if (expandedId === productId) { setExpandedId(null); return; }
@@ -410,8 +412,9 @@ export function ProductsTable() {
         </div>
       )}
 
-      {/* ── Mobile : liste de cartes (code + qté en gros, lots au tap) ── */}
-      <div className="md:hidden space-y-2.5">
+      {/* ── Mobile : stock en SECTIONS par famille (style Écran 2) — dispo à
+            gauche, désignation + chips colorés (marque/condt/origine) à droite. ── */}
+      <div className="md:hidden space-y-3">
         {loading && !data?.products.length ? (
           <div className="h-32 flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
         ) : !data?.products.length ? (
@@ -419,54 +422,104 @@ export function ProductsTable() {
             {last?.totalProducts === 0 ? "Aucun produit — lance un premier sync sur ordinateur." : "Aucun produit ne correspond aux filtres."}
           </p>
         ) : (
-          data.products.map((p) => {
-            const unit = (p.itemGroup != null ? groupUnits[String(p.itemGroup)] : undefined) ?? null;
-            const dz = designationProduit({ itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque, uCondi: p.uCondi });
-            const totalAvailable = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.available ?? 0), 0);
-            const totalOrdered = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.ordered ?? 0), 0);
-            const stockD = stockDisplay(p, totalAvailable, unit);
-            const orderD = stockDisplay(p, totalOrdered, unit);
-            const fmtQty = (n: number, whole: boolean) => (whole ? Math.floor(n).toString() : n.toFixed(0));
-            const isExpanded = expandedId === p.id;
-            // Désignation distinctive (condt · pays · marque) — sinon deux
-            // « Fraise 8×500g » de codes différents sont indiscernables.
-            const detail = [dz.condt, dz.pays, dz.marque].filter((x) => x && x !== "—").join(" · ");
-            const attendu = orderD.qty > 0 ? `+${fmtQty(orderD.qty, orderD.whole)} ${orderD.label} en achat` : "";
-            return (
-              <div key={p.id} className="rounded-2xl border border-border bg-card overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => { if (p.manageBatch) toggleExpand(p.id); }}
-                  className={`w-full flex items-center gap-3 p-3.5 text-left ${p.manageBatch ? "active:bg-secondary/40" : "cursor-default"}`}
-                >
-                  {/* Quantité à GAUCHE (stock + unité) */}
-                  <div className="shrink-0 w-[68px] text-center">
-                    <div className={`text-[26px] font-bold tnum leading-none ${stockD.qty > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>
-                      {stockD.qty > 0 ? fmtQty(stockD.qty, stockD.whole) : "0"}
-                    </div>
-                    <div className="text-[11px] text-muted-foreground mt-1">{stockD.label}</div>
+          (() => {
+            // Regroupe la page courante par famille (groupName), ordre alpha.
+            const byGroup = new Map<string, Product[]>();
+            for (const p of data.products) {
+              const g = p.groupName?.trim() || "Autres";
+              const arr = byGroup.get(g);
+              if (arr) arr.push(p); else byGroup.set(g, [p]);
+            }
+            const chip = "inline-flex items-center px-2 py-0.5 rounded-[5px] text-[11px] font-semibold";
+            return Array.from(byGroup.entries())
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([groupName, prods]) => {
+                const isClosed = closedGroups.has(groupName);
+                return (
+                  <div key={groupName} className="rounded-2xl border border-border bg-card overflow-hidden">
+                    {/* En-tête de famille (repliable) */}
+                    <button
+                      type="button"
+                      onClick={() => setClosedGroups((cur) => {
+                        const next = new Set(cur);
+                        if (next.has(groupName)) next.delete(groupName); else next.add(groupName);
+                        return next;
+                      })}
+                      className="w-full flex items-center gap-2 px-3.5 py-2.5 bg-secondary/40 border-b border-border text-left active:bg-secondary/60"
+                    >
+                      <ChevronDown className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform ${isClosed ? "-rotate-90" : ""}`} />
+                      <span className="text-[13.5px] font-semibold text-foreground">{groupName}</span>
+                      <span className="text-[11px] tnum text-muted-foreground">({prods.length})</span>
+                    </button>
+
+                    {!isClosed && (
+                      <div className="divide-y divide-border/60">
+                        {prods.map((p) => {
+                          const unit = (p.itemGroup != null ? groupUnits[String(p.itemGroup)] : undefined) ?? null;
+                          const dz = designationProduit({ itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque, uCondi: p.uCondi });
+                          const totalAvailable = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.available ?? 0), 0);
+                          const totalOrdered = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.ordered ?? 0), 0);
+                          const stockD = stockDisplay(p, totalAvailable, unit);
+                          const orderD = stockDisplay(p, totalOrdered, unit);
+                          const fmtQty = (n: number, whole: boolean) => (whole ? Math.floor(n).toString() : n.toFixed(0));
+                          const isExpanded = expandedId === p.id;
+                          const noStock = stockD.qty <= 0;
+                          const attendu = orderD.qty > 0 ? `+${fmtQty(orderD.qty, orderD.whole)} ${orderD.label} en achat` : "";
+                          return (
+                            <div key={p.id}>
+                              <button
+                                type="button"
+                                onClick={() => { if (p.manageBatch) toggleExpand(p.id); }}
+                                className={`w-full grid items-center gap-3 px-3 py-2.5 text-left ${p.manageBatch ? "active:bg-secondary/30" : "cursor-default"} ${noStock ? "bg-rose-50/40 dark:bg-rose-950/15" : ""}`}
+                                style={{ gridTemplateColumns: "60px minmax(0,1fr) auto" }}
+                              >
+                                {/* Dispo à GAUCHE */}
+                                <span className="flex flex-col items-center text-center leading-none">
+                                  {noStock ? (
+                                    <>
+                                      <span className="text-[15px] font-bold text-rose-600 dark:text-rose-400">À déc.</span>
+                                      <span className="text-[9px] font-medium uppercase tracking-wide text-rose-500/80 mt-1">à récept.</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="text-[23px] font-bold tnum tracking-tight text-foreground">{fmtQty(stockD.qty, stockD.whole)}</span>
+                                      <span className="text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground/70 mt-1">{stockD.label}</span>
+                                    </>
+                                  )}
+                                </span>
+                                {/* Désignation + chips colorés à DROITE */}
+                                <span className="min-w-0 border-l border-border/60 pl-3">
+                                  <span className="block text-[15px] font-semibold text-foreground truncate leading-tight">{dz.fruit}</span>
+                                  {(dz.marque !== "—" || dz.condt !== "—" || dz.pays !== "—") && (
+                                    <span className="mt-1.5 flex items-center gap-1 flex-wrap">
+                                      {dz.marque !== "—" && <span className={`${chip} bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100 dark:ring-1 dark:ring-inset dark:ring-violet-400/50`}>{dz.marque}</span>}
+                                      {dz.condt !== "—" && <span className={`${chip} bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100 dark:ring-1 dark:ring-inset dark:ring-sky-400/50`}>{dz.condt}</span>}
+                                      {dz.pays !== "—" && <span className={`${chip} bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100 dark:ring-1 dark:ring-inset dark:ring-amber-400/50`}>{dz.pays}</span>}
+                                    </span>
+                                  )}
+                                  <span className="flex items-baseline gap-2 text-[11px] mt-1 min-w-0">
+                                    <span className="font-mono text-muted-foreground/60 truncate">{p.itemCode}</span>
+                                    {attendu && <span className="text-sky-600 dark:text-sky-400 shrink-0 font-medium">{attendu}</span>}
+                                  </span>
+                                </span>
+                                {p.manageBatch && (
+                                  <ChevronDown className={`h-5 w-5 text-muted-foreground/50 shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                                )}
+                              </button>
+                              {isExpanded && (
+                                <div className="px-4 pb-4 pt-3 bg-secondary/20">
+                                  <BatchList batches={batches[p.id]} product={p} />
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                  {/* Désignation à DROITE */}
-                  <div className="min-w-0 flex-1 border-l border-border/60 pl-3">
-                    <div className="flex items-baseline gap-2">
-                      <span className="font-mono font-bold text-[14px] text-foreground shrink-0">{p.itemCode}</span>
-                      <span className="text-[15px] font-medium text-foreground/90 truncate">{dz.fruit}</span>
-                    </div>
-                    {detail && <div className="text-[12.5px] text-muted-foreground mt-0.5 truncate">{detail}</div>}
-                    {attendu && <div className="text-[12px] text-sky-600 dark:text-sky-400 mt-0.5">{attendu}</div>}
-                  </div>
-                  {p.manageBatch && (
-                    <ChevronDown className={`h-5 w-5 text-muted-foreground/50 shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
-                  )}
-                </button>
-                {isExpanded && (
-                  <div className="px-4 pb-4 border-t border-border/60 pt-3">
-                    <BatchList batches={batches[p.id]} product={p} />
-                  </div>
-                )}
-              </div>
-            );
-          })
+                );
+              });
+          })()
         )}
       </div>
 
