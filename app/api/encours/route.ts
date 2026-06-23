@@ -254,7 +254,13 @@ async function computeEncours(allowed: Set<string> | null) {
   // en parallèle.
   const [cabByCode, creditNotesByCode] = await Promise.all([
     fetchBalances([...neededCodes]),
-    fetchCreditNotes([...neededCodes]),
+    // ⚠️ PERF : la lecture EN MASSE des avoirs (CreditNotes + DocumentLines pour
+    // tous les clients) faisait dépasser le timeout Vercel (504 → écran vide).
+    // Désactivée par défaut. À réactiver via un calcul PAR CLIENT à l'ouverture
+    // du détail (chantier « avoirs lazy »). Opt-in explicite par flag d'env.
+    process.env.ENCOURS_AVOIRS_BULK === "1"
+      ? fetchCreditNotes([...neededCodes])
+      : Promise.resolve(new Map<string, CreditNoteRef[]>()),
   ]);
 
   const now = Date.now();
