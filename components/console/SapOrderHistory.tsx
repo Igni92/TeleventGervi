@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, PackageCheck, PackageOpen, Ban, FileText,
-  ChevronDown, ChevronRight, AlertTriangle, Plus, Check, Trash2,
+  ChevronDown, ChevronRight, AlertTriangle, Plus, Check, Trash2, Maximize2,
 } from "lucide-react";
 import { TypeCombobox } from "@/components/TypeCombobox";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,8 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
   // ajout incident
   const [incType, setIncType] = useState("");
   const [incNote, setIncNote] = useState("");
+  // affichage en grand (plein cadre) d'un BL
+  const [largeEntry, setLargeEntry] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -59,18 +61,27 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
   const fmtDate = (d: string) => new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" });
   const incCount = (de: number) => incidents.filter((i) => i.docEntry === de && !i.resolved).length;
 
+  const fetchLines = useCallback(async (docEntry: number) => {
+    try {
+      const d = await fetch(`/api/sap/orders/${docEntry}`).then((r) => r.json());
+      setLines((cur) => ({ ...cur, [docEntry]: d.lines ?? [] }));
+      const dr: Record<string, { quantity: number; price: number }> = {};
+      for (const l of (d.lines ?? [])) dr[`${docEntry}:${l.lineNum}`] = { quantity: l.quantity, price: l.price };
+      setLineDraft((cur) => ({ ...cur, ...dr }));
+    } catch { toast.error("Erreur chargement lignes"); }
+  }, []);
+
   const toggle = async (o: SapOrder) => {
     if (expanded === o.docEntry) { setExpanded(null); return; }
     setExpanded(o.docEntry);
-    if (!lines[o.docEntry]) {
-      try {
-        const d = await fetch(`/api/sap/orders/${o.docEntry}`).then((r) => r.json());
-        setLines((cur) => ({ ...cur, [o.docEntry]: d.lines ?? [] }));
-        const dr: Record<string, { quantity: number; price: number }> = {};
-        for (const l of (d.lines ?? [])) dr[`${o.docEntry}:${l.lineNum}`] = { quantity: l.quantity, price: l.price };
-        setLineDraft((cur) => ({ ...cur, ...dr }));
-      } catch { toast.error("Erreur chargement lignes"); }
-    }
+    if (!lines[o.docEntry]) await fetchLines(o.docEntry);
+  };
+
+  // Ouvre le BL en grand (charge les lignes si besoin).
+  const largeOrder = largeEntry != null ? orders.find((o) => o.docEntry === largeEntry) ?? null : null;
+  const openLarge = async (o: SapOrder) => {
+    setLargeEntry(o.docEntry);
+    if (!lines[o.docEntry]) await fetchLines(o.docEntry);
   };
 
   const saveLines = async (o: SapOrder) => {
@@ -187,6 +198,9 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
                     </button>
                   )}
                   <span className="ml-auto font-bold tnum text-foreground shrink-0">{fmt(o.total)} €</span>
+                  <button type="button" onClick={() => openLarge(o)} title="Afficher en grand" className="shrink-0 h-5 w-5 inline-flex items-center justify-center rounded text-muted-foreground/50 hover:text-foreground">
+                    <Maximize2 className="h-3 w-3" />
+                  </button>
                   {!closed && (
                     <button type="button" onClick={() => setCancelTarget(o)} disabled={busy === o.docEntry} title="Annuler" className="shrink-0 h-5 w-5 inline-flex items-center justify-center rounded text-muted-foreground/40 hover:text-rose-500">
                       {busy === o.docEntry ? <Loader2 className="h-3 w-3 animate-spin" /> : <Ban className="h-3 w-3" />}
@@ -319,6 +333,79 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── Affichage en grand (plein cadre) d'un bon de livraison ── */}
+      <Dialog open={!!largeOrder} onOpenChange={(o) => { if (!o) setLargeEntry(null); }}>
+        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-brand-600 dark:text-brand-400" />
+              Bon de livraison N° {largeOrder?.docNum}
+              {largeOrder?.status === "bost_Close" && <span className="text-[13px] font-normal text-muted-foreground">· clôturé</span>}
+            </DialogTitle>
+          </DialogHeader>
+          {largeOrder && <BLLarge order={largeOrder} lines={lines[largeOrder.docEntry]} />}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+/* ── Affichage agrandi d'un BL — lecture, gros caractères ──────────── */
+function BLLarge({ order, lines }: { order: SapOrder; lines?: OrderLine[] }) {
+  const fmt = (n: number) => n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = (d: string) => new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap gap-x-6 gap-y-1.5 text-[14px]">
+        <span className="text-muted-foreground">Date <span className="text-foreground font-medium tnum">{fmtDate(order.docDate)}</span></span>
+        {order.numAtCard && <span className="text-muted-foreground">Réf. <span className="text-foreground font-medium">{order.numAtCard}</span></span>}
+        {order.colis != null && order.colis > 0 && <span className="text-muted-foreground tnum">{order.colis} colis</span>}
+        {order.weightKg != null && order.weightKg > 0 && <span className="text-muted-foreground tnum">{order.weightKg} kg</span>}
+        {order.invoiceNum && <span className="text-muted-foreground">Facture <span className="text-foreground font-medium tnum">{order.invoiceNum}</span></span>}
+      </div>
+
+      {!lines ? (
+        <p className="text-muted-foreground inline-flex items-center gap-2 text-[14px]"><Loader2 className="h-4 w-4 animate-spin" /> Chargement…</p>
+      ) : (
+        <div className="rounded-lg border border-border overflow-x-auto">
+          <table className="w-full text-[15px]">
+            <thead className="bg-secondary/40 text-[11.5px] uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="text-left px-3 py-2.5 font-semibold">Désignation</th>
+                <th className="text-left px-3 py-2.5 font-semibold w-36">Entrepôt / Lot</th>
+                <th className="text-right px-3 py-2.5 font-semibold w-24">Qté</th>
+                <th className="text-right px-3 py-2.5 font-semibold w-28">PU HT</th>
+                <th className="text-right px-3 py-2.5 font-semibold w-28">Total HT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((l, k) => (
+                <tr key={k} className="border-t border-border/50">
+                  <td className="px-3 py-2.5">
+                    <span className="text-foreground">{l.itemName || l.itemCode}</span>
+                    <span className="ml-2 text-[12px] font-mono text-muted-foreground">{l.itemCode}</span>
+                  </td>
+                  <td className="px-3 py-2.5 text-muted-foreground text-[13px]">{l.warehouse}{l.lot ? ` · ${l.lot}` : ""}</td>
+                  <td className="px-3 py-2.5 text-right tnum">{l.quantity}{l.unit ? ` ${l.unit}` : ""}</td>
+                  <td className="px-3 py-2.5 text-right tnum">{fmt(l.price)} €</td>
+                  <td className="px-3 py-2.5 text-right tnum font-medium">{fmt(l.lineTotal)} €</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-border bg-secondary/30">
+                <td colSpan={4} className="px-3 py-2.5 text-right text-[12px] uppercase tracking-wide font-semibold text-muted-foreground">Total HT</td>
+                <td className="px-3 py-2.5 text-right tnum font-semibold text-[16px] text-foreground">{fmt(order.totalHT)} €</td>
+              </tr>
+              <tr className="bg-secondary/30 border-t border-border">
+                <td colSpan={4} className="px-3 py-2.5 text-right text-[12px] uppercase tracking-wide font-semibold text-muted-foreground">Total TTC</td>
+                <td className="px-3 py-2.5 text-right tnum font-bold text-[16px] text-foreground">{fmt(order.total)} €</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

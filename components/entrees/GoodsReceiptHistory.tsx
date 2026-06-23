@@ -4,11 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ClipboardList, Search, ChevronRight, ChevronDown,
-  AlertTriangle, Truck, X,
+  AlertTriangle, Truck, X, Maximize2,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
 import {
@@ -53,6 +54,7 @@ export function GoodsReceiptHistory() {
   const [query, setQuery] = useState("");
   const [dateFilter, setDateFilter] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [largeEntry, setLargeEntry] = useState<number | null>(null);
   const { incidents, loading: incLoading, reload: reloadIncidents, openCountByDoc, byDoc } = useReceptionIncidents();
 
   const load = useCallback(async () => {
@@ -89,6 +91,8 @@ export function GoodsReceiptHistory() {
   const updateNumAtCard = (docEntry: number, numAtCard: string) =>
     setDocs((cur) => cur.map((d) => (d.docEntry === docEntry ? { ...d, numAtCard } : d)));
   const hasFilters = query.trim() !== "" || dateFilter !== "";
+  // Entrée affichée en grand (dérivée de docs → reflète les éditions).
+  const largeDoc = largeEntry != null ? docs.find((d) => d.docEntry === largeEntry) ?? null : null;
 
   return (
     <div className="space-y-6">
@@ -218,6 +222,7 @@ export function GoodsReceiptHistory() {
                             incidents={byDoc.get(d.docEntry) ?? []}
                             onIncidentChanged={reloadIncidents}
                             onNumAtCardChange={updateNumAtCard}
+                            onEnlarge={() => setLargeEntry(d.docEntry)}
                           />
                         </td>
                       </tr>,
@@ -232,6 +237,28 @@ export function GoodsReceiptHistory() {
       </SurfaceCard>
 
       <OpenReceptionIncidents incidents={incidents} loading={incLoading} onChanged={reloadIncidents} />
+
+      {/* ── Affichage agrandi (plein cadre) d'une entrée marchandise ── */}
+      <Dialog open={!!largeDoc} onOpenChange={(o) => { if (!o) setLargeEntry(null); }}>
+        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ClipboardList className="h-5 w-5 text-sky-600 dark:text-sky-400" />
+              Entrée marchandise N° {largeDoc?.docNum}
+              {largeDoc?.lot && <span className="text-[13px] font-normal font-mono text-muted-foreground">· {largeDoc.lot}</span>}
+            </DialogTitle>
+          </DialogHeader>
+          {largeDoc && (
+            <ReceiptDetail
+              large
+              receipt={largeDoc}
+              incidents={byDoc.get(largeDoc.docEntry) ?? []}
+              onIncidentChanged={reloadIncidents}
+              onNumAtCardChange={updateNumAtCard}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -253,15 +280,27 @@ function Stat({ label, value, tone }: { label: string; value: React.ReactNode; t
    directement depuis cette consultation.
    ───────────────────────────────────────────────────────────────── */
 function ReceiptDetail({
-  receipt, incidents, onIncidentChanged, onNumAtCardChange,
+  receipt, incidents, onIncidentChanged, onNumAtCardChange, large, onEnlarge,
 }: {
   receipt: Receipt;
   incidents: { id: string; type: string | null; note: string | null; resolved: boolean; createdAt: string; createdBy: string | null }[];
   onIncidentChanged: () => void;
   onNumAtCardChange: (docEntry: number, numAtCard: string) => void;
+  /** Affichage agrandi (modale plein cadre) — textes et espacements plus grands. */
+  large?: boolean;
+  /** Ouvre l'affichage agrandi (visible seulement en mode normal). */
+  onEnlarge?: () => void;
 }) {
   const [declareOpen, setDeclareOpen] = useState(false);
   const [savingBl, setSavingBl] = useState(false);
+
+  // Jeu de tailles : compact (inline) vs agrandi (modale).
+  const big = !!large;
+  const tbl = big ? "text-[15px]" : "text-[12px]";
+  const th = big ? "px-3 py-2.5 text-[11.5px]" : "px-2 py-1.5 text-[10px]";
+  const td = big ? "px-3 py-2.5" : "px-2 py-1.5";
+  const totLbl = big ? "text-[12px]" : "text-[10px]";
+  const totVal = big ? "text-[17px]" : "";
 
   async function saveNumAtCard(v: string) {
     const next = v.trim();
@@ -294,15 +333,15 @@ function ReceiptDetail({
   }
 
   return (
-    <div className="space-y-3">
-      {/* En-tête : fournisseur + référence + commentaire */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
-        <span className="inline-flex items-center gap-1.5 text-foreground">
-          <Truck className="h-3.5 w-3.5 text-muted-foreground" />
+    <div className={big ? "space-y-5" : "space-y-3"}>
+      {/* En-tête : fournisseur + référence + commentaire (+ bouton Agrandir) */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        <span className={`inline-flex items-center gap-1.5 text-foreground ${big ? "text-[15px]" : "text-[12px]"}`}>
+          <Truck className={big ? "h-4 w-4 text-muted-foreground" : "h-3.5 w-3.5 text-muted-foreground"} />
           <span className="font-mono font-semibold">{receipt.cardCode}</span>
           {receipt.cardName && <span className="text-muted-foreground">· {receipt.cardName}</span>}
         </span>
-        <span className="text-muted-foreground tnum">Entrée le {fmtDate(receipt.docDate)}</span>
+        <span className={`text-muted-foreground tnum ${big ? "text-[14px]" : "text-[12px]"}`}>Entrée le {fmtDate(receipt.docDate)}</span>
         {/* Référence fournisseur — éditable, valeur libre (BL, Cde, F…), aucun préfixe imposé */}
         <span className="inline-flex items-center gap-1.5">
           <input
@@ -311,27 +350,33 @@ function ReceiptDetail({
             disabled={savingBl}
             onBlur={(e) => saveNumAtCard(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-            className="h-7 w-48 rounded-md border border-border bg-background px-2 text-[12px] tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
+            className={`rounded-md border border-border bg-background px-2 tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60 ${big ? "h-9 w-56 text-[14px]" : "h-7 w-48 text-[12px]"}`}
           />
           {savingBl && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
         </span>
+        {onEnlarge && (
+          <Button variant="outline" size="sm" className="ml-auto" onClick={onEnlarge}>
+            <Maximize2 className="h-3.5 w-3.5" />
+            Agrandir
+          </Button>
+        )}
       </div>
-      {receipt.comments && <p className="text-[11.5px] italic text-muted-foreground">« {receipt.comments} »</p>}
+      {receipt.comments && <p className={`italic text-muted-foreground ${big ? "text-[13px]" : "text-[11.5px]"}`}>« {receipt.comments} »</p>}
 
       {/* Lignes — désignation décomposée + HT par ligne */}
-      <div className="rounded-lg border border-border overflow-hidden bg-card/40">
-        <table className="w-full text-[12px]">
-          <thead className="bg-secondary/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+      <div className="rounded-lg border border-border overflow-x-auto bg-card/40">
+        <table className={`w-full ${tbl}`}>
+          <thead className="bg-secondary/40 uppercase tracking-wide text-muted-foreground">
             <tr>
-              <th className="text-left px-2 py-1.5 font-semibold w-24">Qté</th>
-              <th className="text-left px-2 py-1.5 font-semibold w-28">Code Article</th>
-              <th className="text-left px-2 py-1.5 font-semibold">Fruit</th>
-              <th className="text-left px-2 py-1.5 font-semibold">Pays</th>
-              <th className="text-left px-2 py-1.5 font-semibold">Marque</th>
-              <th className="text-left px-2 py-1.5 font-semibold">Variété</th>
-              <th className="text-left px-2 py-1.5 font-semibold">Condt</th>
-              <th className="text-right px-2 py-1.5 font-semibold w-24">PU HT</th>
-              <th className="text-right px-2 py-1.5 font-semibold w-24">Total HT</th>
+              <th className={`text-left font-semibold w-24 ${th}`}>Qté</th>
+              <th className={`text-left font-semibold w-28 ${th}`}>Code Article</th>
+              <th className={`text-left font-semibold ${th}`}>Fruit</th>
+              <th className={`text-left font-semibold ${th}`}>Pays</th>
+              <th className={`text-left font-semibold ${th}`}>Marque</th>
+              <th className={`text-left font-semibold ${th}`}>Variété</th>
+              <th className={`text-left font-semibold ${th}`}>Condt</th>
+              <th className={`text-right font-semibold w-24 ${th}`}>PU HT</th>
+              <th className={`text-right font-semibold w-24 ${th}`}>Total HT</th>
             </tr>
           </thead>
           <tbody>
@@ -340,31 +385,31 @@ function ReceiptDetail({
               const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
               return (
                 <tr key={`${l.itemCode}-${i}`} className="border-t border-border/50">
-                  <td className="px-2 py-1.5 tnum whitespace-nowrap">{fmtColis(l.packageQuantity)} <span className="text-muted-foreground">colis</span></td>
-                  <td className="px-2 py-1.5 font-mono">{l.itemCode}</td>
-                  <td className="px-2 py-1.5 text-foreground">{dz.fruit}</td>
-                  <td className="px-2 py-1.5 text-muted-foreground">{dz.pays}</td>
-                  <td className="px-2 py-1.5 text-muted-foreground">{dz.marque}</td>
-                  <td className="px-2 py-1.5 text-muted-foreground">{dz.variete}</td>
-                  <td className="px-2 py-1.5 text-muted-foreground">{dz.condt}</td>
-                  <td className="px-2 py-1.5 text-right tnum">{l.price != null ? eur(l.price) : "—"}</td>
-                  <td className="px-2 py-1.5 text-right tnum font-medium">{lineHT != null ? eur(lineHT) : "—"}</td>
+                  <td className={`tnum whitespace-nowrap ${td}`}>{fmtColis(l.packageQuantity)} <span className="text-muted-foreground">colis</span></td>
+                  <td className={`font-mono ${td}`}>{l.itemCode}</td>
+                  <td className={`text-foreground ${td}`}>{dz.fruit}</td>
+                  <td className={`text-muted-foreground ${td}`}>{dz.pays}</td>
+                  <td className={`text-muted-foreground ${td}`}>{dz.marque}</td>
+                  <td className={`text-muted-foreground ${td}`}>{dz.variete}</td>
+                  <td className={`text-muted-foreground ${td}`}>{dz.condt}</td>
+                  <td className={`text-right tnum ${td}`}>{l.price != null ? eur(l.price) : "—"}</td>
+                  <td className={`text-right tnum font-medium ${td}`}>{lineHT != null ? eur(lineHT) : "—"}</td>
                 </tr>
               );
             })}
           </tbody>
           <tfoot>
             <tr className="border-t border-border bg-secondary/30">
-              <td colSpan={7} className="px-2 py-1.5 text-right text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Total HT</td>
-              <td colSpan={2} className="px-2 py-1.5 text-right tnum font-semibold text-foreground">{eur(receipt.totalHT ?? 0)}</td>
+              <td colSpan={7} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total HT</td>
+              <td colSpan={2} className={`text-right tnum font-semibold text-foreground ${td} ${totVal}`}>{eur(receipt.totalHT ?? 0)}</td>
             </tr>
             <tr className="bg-secondary/20">
-              <td colSpan={7} className="px-2 py-1 text-right text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">TVA</td>
-              <td colSpan={2} className="px-2 py-1 text-right tnum text-muted-foreground">{eur(receipt.totalTVA ?? 0)}</td>
+              <td colSpan={7} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>TVA</td>
+              <td colSpan={2} className={`text-right tnum text-muted-foreground ${td}`}>{eur(receipt.totalTVA ?? 0)}</td>
             </tr>
             <tr className="bg-secondary/30 border-t border-border">
-              <td colSpan={7} className="px-2 py-1.5 text-right text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Total TTC</td>
-              <td colSpan={2} className="px-2 py-1.5 text-right tnum font-bold text-foreground">{eur(receipt.totalTTC ?? receipt.total ?? 0)}</td>
+              <td colSpan={7} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total TTC</td>
+              <td colSpan={2} className={`text-right tnum font-bold text-foreground ${td} ${totVal}`}>{eur(receipt.totalTTC ?? receipt.total ?? 0)}</td>
             </tr>
           </tfoot>
         </table>
@@ -374,7 +419,7 @@ function ReceiptDetail({
       {incidents.length > 0 && (
         <ul className="space-y-1">
           {incidents.map((i) => (
-            <li key={i.id} className="flex items-center gap-2 text-[12px]">
+            <li key={i.id} className={`flex items-center gap-2 ${big ? "text-[14px]" : "text-[12px]"}`}>
               <button
                 type="button"
                 onClick={() => toggleResolved(i.id, i.resolved)}
