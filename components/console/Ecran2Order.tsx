@@ -37,6 +37,11 @@ interface CartLine {
   itemCode: string; itemName: string; unit: string; priceUnit: string; packDivisor: number;
   availByWarehouse: Record<string, number>;
   quantity: number; price: number | null;
+  // Tags produit (affichés sur la ligne panier) — capturés à l'ajout.
+  marque: string | null; condi: string | null; pays: string | null;
+  // Incrément « un colis » dans l'unité d'affichage : kg/colis (ex. 4 pour un
+  // colis de 4 kg vendu au kg ; 1 pour un article déjà compté en colis).
+  stepColis: number;
   // C2 — promo appliquée à la ligne (remise SAP envoyée à la création du bon)
   promo: Promo | null; discountPercent: number; freeUnits: number;
 }
@@ -378,6 +383,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
       const { packDivisor, displayUnit, priceUnit } = unitInfo(p.salesUnit, p.salesQtyPerPackUnit);
       const avail: Record<string, number> = {};
       for (const w of ["000", "01", "R1"]) avail[w] = Math.max(0, Math.floor(((p.stockByWarehouse[w]?.available ?? 0) / packDivisor) * 10) / 10);
+      // Incrément « un colis » : si l'article est vendu au kg, on avance du poids
+      // d'un colis (ex. 4 kg) ; sinon d'un colis entier (1).
+      const colisW = unitInfo(p.salesUnit, p.salesQtyPerPackUnit, null, p.salesUnitWeight).colisWeightKg ?? null;
+      const stepColis = displayUnit === "kg" ? (colisW && colisW > 0 ? Math.round(colisW * 100) / 100 : 1) : 1;
       // C2 — promo PERCENT : prix prérempli déjà remisé (prix conseillé × (1 − %)),
       // la remise est mémorisée pour être poussée sur la ligne SAP du bon.
       const promo = promos[p.itemCode] ?? null;
@@ -389,7 +398,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
       }
       return [...cur, applyPromoFree({
         itemCode: p.itemCode, itemName: p.itemName, unit: displayUnit, priceUnit, packDivisor,
-        availByWarehouse: avail, quantity: 1, price,
+        availByWarehouse: avail, quantity: stepColis, price,
+        marque: p.uMarque ?? null, condi: p.uCondi ?? p.uUvc ?? null, pays: p.uPays ?? null,
+        stepColis,
         promo, discountPercent, freeUnits: 0,
       })];
     });
@@ -414,6 +425,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
       setCart(json.lines.map((l: { itemCode: string; itemName: string; displayUnit: string; priceUnit: string; packDivisor: number; availByWarehouse: Record<string, number>; quantity: number; price: number | null }) => ({
         itemCode: l.itemCode, itemName: l.itemName, unit: l.displayUnit, priceUnit: l.priceUnit,
         packDivisor: l.packDivisor, availByWarehouse: l.availByWarehouse, quantity: l.quantity, price: l.price,
+        marque: null, condi: null, pays: null, stepColis: 1,
         promo: null, discountPercent: 0, freeUnits: 0,
       })));
       toast.success(`Dernière commande #${json.docNum} rejouée`);
@@ -899,24 +911,57 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
                       )}
                     </div>
                     <p className="text-[11px] font-mono text-muted-foreground/70">{l.itemCode}</p>
+                    {/* Tags produit (mêmes couleurs que la liste stock) */}
+                    {(() => {
+                      const calibre = hints[l.itemCode]?.calibre ? `cal. ${hints[l.itemCode]!.calibre}` : null;
+                      const chips = [
+                        l.marque && ["bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100", l.marque],
+                        l.condi && ["bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100", l.condi],
+                        calibre && ["bg-teal-100 text-teal-800 dark:bg-teal-500/30 dark:text-teal-100", calibre],
+                        l.pays && ["bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100", l.pays],
+                      ].filter(Boolean) as [string, string][];
+                      if (chips.length === 0) return null;
+                      return (
+                        <span className="mt-1 flex items-center gap-1 flex-wrap">
+                          {chips.map(([cls, txt], ci) => (
+                            <span key={ci} className={`inline-flex items-center px-1.5 py-px rounded-[5px] text-[10.5px] font-semibold ${cls}`}>{txt}</span>
+                          ))}
+                        </span>
+                      );
+                    })()}
                   </div>
                   <button type="button" onClick={() => removeLine(i)} className="text-muted-foreground/50 hover:text-rose-500 shrink-0">
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
-                <div className="flex items-center gap-1.5 mt-1.5">
-                  <NumberInput value={l.quantity} onValueChange={(n) => updateLine(i, { quantity: n ?? 0 })}
-                    min={0} step={0.1}
-                    aria-label={`Quantité ${l.itemName}`}
-                    className={`h-10 w-16 text-right text-[15px] tnum rounded-md border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500 ${over ? "border-amber-500" : "border-border"}`} />
+                <div className="flex items-center gap-1.5 mt-2">
+                  {/* Stepper « un colis » : −/+ avancent du poids/nombre d'un colis */}
+                  <div className="inline-flex items-center rounded-lg border border-border overflow-hidden shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => updateLine(i, { quantity: Math.max(0, Math.round((l.quantity - l.stepColis) * 100) / 100) })}
+                      aria-label="Retirer un colis"
+                      className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-muted-foreground hover:bg-secondary/60 active:scale-95"
+                    >−</button>
+                    <NumberInput value={l.quantity} onValueChange={(n) => updateLine(i, { quantity: n ?? 0 })}
+                      min={0} step={l.stepColis}
+                      aria-label={`Quantité ${l.itemName}`}
+                      className={`h-11 w-16 text-center text-[17px] font-semibold tnum border-x border-border bg-background px-1 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 ${over ? "text-amber-600 dark:text-amber-400" : ""}`} />
+                    <button
+                      type="button"
+                      onClick={() => updateLine(i, { quantity: Math.round((l.quantity + l.stepColis) * 100) / 100 })}
+                      aria-label="Ajouter un colis"
+                      className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-brand-600 dark:text-brand-400 hover:bg-secondary/60 active:scale-95"
+                    >+</button>
+                  </div>
                   <span className="text-[12px] text-muted-foreground w-9">{l.unit}</span>
                   <span className="text-muted-foreground">×</span>
                   <NumberInput value={l.price} onValueChange={(n) => updateLine(i, { price: n })}
                     min={0} step={0.1} allowEmpty placeholder="prix"
                     aria-label={`Prix ${l.itemName}`}
-                    className="h-10 w-[72px] text-right text-[15px] tnum rounded-md border border-border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                    className="h-11 w-[84px] text-right text-[17px] font-semibold tnum rounded-lg border border-border bg-background px-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500" />
                   <span className="text-[12px] text-muted-foreground">€/{l.priceUnit}</span>
-                  <span className="ml-auto text-[14px] font-semibold tnum">{l.price ? lineHT(l).toFixed(2) : "—"}</span>
+                  <span className="ml-auto text-[15px] font-bold tnum">{l.price ? lineHT(l).toFixed(2) : "—"}</span>
                 </div>
                 {l.packDivisor > 1 && l.price != null && (
                   <p className="text-[11px] text-muted-foreground mt-0.5">{l.quantity} colis × {l.packDivisor} {l.priceUnit} × {l.price}€</p>
