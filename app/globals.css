@@ -163,9 +163,13 @@
 
   body {
     @apply bg-background text-foreground;
-    font-size: 14px;
+    /* Mobile-first : plancher lisible 15px ; on densifie à 14px sur ≥ md (desktop). */
+    font-size: 15px;
     line-height: 1.6;
     font-variant-numeric: tabular-nums;
+  }
+  @media (min-width: 768px) {
+    body { font-size: 14px; }
   }
 
   /* ── Subtle film-grain overlay (editorial premium feel) ── */
@@ -287,11 +291,14 @@
 
   /* Eyebrow / kicker label */
   .kicker {
-    font-size: 10.5px;
+    font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.18em;
     text-transform: uppercase;
     color: hsl(var(--muted-foreground));
+  }
+  @media (min-width: 768px) {
+    .kicker { font-size: 10.5px; }
   }
 
   /* Hairline rule — 1px dotted-then-solid feel */

@@ -159,8 +159,47 @@ export function Encours() {
         {data && <span className="text-[11.5px] text-muted-foreground ml-auto">Base {data.company}</span>}
       </div>
 
-      {/* Table */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
+      {/* Mobile : liste de cartes (client + encours en gros, détail au tap) */}
+      <div className="md:hidden space-y-2.5">
+        {loading ? (
+          <div className="h-32 flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        ) : rows.length === 0 ? (
+          <p className="text-center text-muted-foreground py-10 text-[15px]">Aucun encours 🎉</p>
+        ) : rows.map((c) => (
+          <button
+            key={c.cardCode}
+            type="button"
+            onClick={() => setDrill(c)}
+            className="w-full rounded-2xl border border-border bg-card p-4 text-left active:bg-secondary/40"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-mono font-semibold text-[16px] text-foreground leading-tight">{c.cardCode}</div>
+                <div className="text-[13px] text-muted-foreground truncate">{c.cardName}</div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-[20px] font-bold tnum leading-none text-foreground">{eur(c.encours)}</div>
+                <div className="text-[12px] text-muted-foreground mt-1">{c.countOpen} fact.</div>
+              </div>
+            </div>
+            {c.countLate > 0 && (
+              <div className="flex items-center gap-2 mt-2.5">
+                {c.b90 > 0 && (
+                  <span className="inline-flex items-center rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 px-2.5 h-6 text-[12px] font-bold tnum">
+                    +90 j · {eur(c.b90)}
+                  </span>
+                )}
+                <span className="inline-flex items-center rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 px-2.5 h-6 text-[12px] font-semibold tnum">
+                  {c.maxOverdueDays} j de retard
+                </span>
+              </div>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Table (desktop) */}
+      <div className="hidden md:block bg-card border border-border rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead className="bg-secondary/40 text-[10.5px] uppercase tracking-wider text-muted-foreground">
@@ -188,7 +227,7 @@ export function Encours() {
         </div>
       </div>
       {!loading && data && (
-        <p className="text-[12px] text-muted-foreground">
+        <p className="hidden md:block text-[12px] text-muted-foreground">
           {rows.length} client(s) · {data.totals.clients} débiteurs · {data.totals.invoices} factures · <b className="text-rose-600 dark:text-rose-400">{eur(data.totals.overdueTotal)} en retard (brut)</b>{data.totals.encaisse > 0 && <> · <span className="text-emerald-600 dark:text-emerald-400">{eur(data.totals.encaisse)} encaissé/avoirs déduits</span></>} · clic = détail des factures.
         </p>
       )}

@@ -6,7 +6,7 @@ import {
   Radio, ClipboardList, Users, Briefcase,
   PackagePlus, Package, Factory,
   Receipt, LayoutDashboard,
-  Settings, Tag, ChevronRight,
+  Settings, Tag,
   type LucideIcon,
 } from "lucide-react";
 
@@ -117,11 +117,8 @@ export function MobileTiles({ className }: { className?: string }) {
         return (
           <section key={axis.key}>
             <div className="flex items-center gap-2.5 mb-2.5 px-0.5">
-              <span className={`h-5 w-1 rounded-full ${accent.bar}`} aria-hidden />
-              <div className="min-w-0">
-                <h2 className="text-[15px] font-semibold text-foreground leading-none">{axis.label}</h2>
-                <p className="text-[11px] text-muted-foreground mt-0.5">{axis.desc}</p>
-              </div>
+              <span className={`h-6 w-1.5 rounded-full ${accent.bar}`} aria-hidden />
+              <h2 className="text-[17px] font-semibold text-foreground leading-none">{axis.label}</h2>
             </div>
             <div className="grid grid-cols-2 gap-2.5">
               {axis.tiles.map((t) => {
@@ -131,24 +128,19 @@ export function MobileTiles({ className }: { className?: string }) {
                   <Link
                     key={t.href + t.label}
                     href={t.href}
-                    className="group relative flex flex-col justify-between h-[88px] rounded-2xl border border-border bg-card p-3 active:scale-[0.97] transition-transform overflow-hidden"
+                    className="group relative flex flex-col justify-between h-[104px] rounded-2xl border border-border bg-card p-3.5 active:scale-[0.97] transition-transform overflow-hidden"
                   >
                     <div className="flex items-start justify-between">
-                      <span className={`inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br ${accent.icon}`}>
-                        <Icon className="h-[18px] w-[18px]" strokeWidth={1.9} />
+                      <span className={`inline-flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${accent.icon}`}>
+                        <Icon className="h-6 w-6" strokeWidth={1.9} />
                       </span>
-                      {count > 0 ? (
-                        <span className="inline-flex min-w-[18px] h-[18px] px-1 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-[#0b1018]">
+                      {count > 0 && (
+                        <span className="inline-flex min-w-[22px] h-[22px] px-1.5 items-center justify-center rounded-full bg-amber-500 text-[12px] font-bold text-[#0b1018]">
                           {count > 9 ? "9+" : count}
                         </span>
-                      ) : (
-                        <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-active:text-foreground" />
                       )}
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-[13px] font-semibold text-foreground leading-tight truncate">{t.label}</p>
-                      {t.sub && <p className="text-[10.5px] text-muted-foreground truncate">{t.sub}</p>}
-                    </div>
+                    <p className="text-[16px] font-semibold text-foreground leading-tight">{t.label}</p>
                   </Link>
                 );
               })}

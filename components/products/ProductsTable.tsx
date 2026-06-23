@@ -203,8 +203,8 @@ export function ProductsTable() {
 
   return (
     <div className="space-y-4">
-      {/* ── Sync status bar ── */}
-      <div className="bg-card border border-border border-l-4 border-l-brand-500 rounded-xl p-4 flex flex-wrap items-center gap-4">
+      {/* ── Sync status bar (masquée sur mobile : bruit technique) ── */}
+      <div className="hidden md:flex bg-card border border-border border-l-4 border-l-brand-500 rounded-xl p-4 flex-wrap items-center gap-4">
         <div className="flex items-center gap-2 text-[12px]">
           <Package className="h-3.5 w-3.5 text-muted-foreground" />
           <span className="text-foreground/80">
@@ -345,8 +345,67 @@ export function ProductsTable() {
         </div>
       )}
 
-      {/* ── Table ── */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
+      {/* ── Mobile : liste de cartes (code + qté en gros, lots au tap) ── */}
+      <div className="md:hidden space-y-2.5">
+        {loading && !data?.products.length ? (
+          <div className="h-32 flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        ) : !data?.products.length ? (
+          <p className="text-center text-muted-foreground py-10 text-[15px]">
+            {last?.totalProducts === 0 ? "Aucun produit — lance un premier sync sur ordinateur." : "Aucun produit ne correspond aux filtres."}
+          </p>
+        ) : (
+          data.products.map((p) => {
+            const unit = (p.itemGroup != null ? groupUnits[String(p.itemGroup)] : undefined) ?? null;
+            const dz = designationProduit({ itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque, uCondi: p.uCondi });
+            const totalAvailable = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.available ?? 0), 0);
+            const totalOrdered = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.ordered ?? 0), 0);
+            const stockD = stockDisplay(p, totalAvailable, unit);
+            const orderD = stockDisplay(p, totalOrdered, unit);
+            const fmtQty = (n: number, whole: boolean) => (whole ? Math.floor(n).toString() : n.toFixed(0));
+            const isExpanded = expandedId === p.id;
+            const condt = dz.condt !== "—" ? dz.condt : "";
+            const attendu = orderD.qty > 0 ? `+${fmtQty(orderD.qty, orderD.whole)} ${orderD.label} attendu` : "";
+            return (
+              <div key={p.id} className="rounded-2xl border border-border bg-card overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => { if (p.manageBatch) toggleExpand(p.id); }}
+                  className={`w-full flex items-center gap-3 p-4 text-left ${p.manageBatch ? "active:bg-secondary/40" : "cursor-default"}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="font-mono font-semibold text-[16px] text-foreground leading-tight">{p.itemCode}</div>
+                    <div className="text-[15px] text-foreground/90 leading-snug mt-0.5">{dz.fruit}</div>
+                    {(condt || attendu) && (
+                      <div className="text-[13px] text-muted-foreground mt-1">
+                        {condt}
+                        {condt && attendu ? " · " : ""}
+                        {attendu && <span className="text-sky-600 dark:text-sky-400">{attendu}</span>}
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-[26px] font-bold tnum leading-none text-foreground">
+                      {stockD.qty > 0 ? fmtQty(stockD.qty, stockD.whole) : <span className="text-muted-foreground/40">0</span>}
+                    </div>
+                    <div className="text-[12px] text-muted-foreground mt-1">{stockD.label}</div>
+                  </div>
+                  {p.manageBatch && (
+                    <ChevronDown className={`h-5 w-5 text-muted-foreground/50 shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                  )}
+                </button>
+                {isExpanded && (
+                  <div className="px-4 pb-4 border-t border-border/60 pt-3">
+                    <BatchList batches={batches[p.id]} product={p} />
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* ── Table (desktop) ── */}
+      <div className="hidden md:block bg-card border border-border rounded-xl overflow-hidden">
         <table className="w-full text-[12.5px]">
           <thead>
             <tr className="bg-slate-50/80 dark:bg-slate-800/50 border-b border-border">

@@ -47,21 +47,18 @@ export function MobileTopBar({ className }: { className?: string }) {
     .split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 
   return (
-    <div className={`sticky top-0 z-40 -mx-6 sm:-mx-10 mb-4 flex items-center gap-2 border-b border-border bg-background/85 px-4 sm:px-6 py-2.5 backdrop-blur ${className ?? ""}`}>
+    <div className={`sticky top-0 z-40 -mx-4 sm:-mx-10 mb-4 flex items-center gap-2.5 border-b border-border bg-background/85 px-4 sm:px-6 py-2 backdrop-blur ${className ?? ""}`}>
       <Link
         href="/accueil"
         aria-label="Accueil"
-        className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border ${isHome ? "bg-brand-500/10 text-brand-600 dark:text-brand-400" : "text-foreground/70"}`}
+        className={`inline-flex h-11 w-11 items-center justify-center rounded-xl border border-border shrink-0 ${isHome ? "bg-brand-500/10 text-brand-600 dark:text-brand-400" : "text-foreground/70"}`}
       >
-        <Home className="h-[18px] w-[18px]" />
+        <Home className="h-5 w-5" />
       </Link>
 
-      <div className="min-w-0 flex-1">
-        <span className="block text-[10px] uppercase tracking-[0.16em] text-muted-foreground leading-none">TeleVent</span>
-        <span className="block text-[14px] font-semibold text-foreground truncate leading-tight">
-          {section ?? "TeleVent"}
-        </span>
-      </div>
+      <span className="min-w-0 flex-1 block text-[17px] font-semibold text-foreground truncate leading-tight">
+        {section ?? "TeleVent"}
+      </span>
 
       <ThemeToggle />
 
@@ -70,7 +67,7 @@ export function MobileTopBar({ className }: { className?: string }) {
           <DropdownMenuTrigger asChild>
             <button
               aria-label="Compte"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-purple-600 text-[11px] font-bold text-white"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-purple-600 text-[13px] font-bold text-white shrink-0"
             >
               {initials}
             </button>
