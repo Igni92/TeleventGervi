@@ -31,12 +31,19 @@ export interface InventorySession {
   reviewedBy: string | null;
 }
 
-/** Liste blanche des emails préparateurs (env, séparés par des virgules). */
+/** Préparateurs « bootstrap » (codés en dur) + liste env PREPARATEUR_EMAILS. */
+const DEFAULT_PREPARATEURS = ["h.vachey@gervifrais.com"];
+
+export function preparateurEmails(): string[] {
+  const env = (process.env.PREPARATEUR_EMAILS || "")
+    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  return Array.from(new Set([...DEFAULT_PREPARATEURS.map((e) => e.toLowerCase()), ...env]));
+}
+
+/** Liste blanche des emails préparateurs (défaut + env). */
 export function isPreparateurEmail(email: string | null | undefined): boolean {
   if (!email) return false;
-  const list = (process.env.PREPARATEUR_EMAILS || "")
-    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
-  return list.includes(email.trim().toLowerCase());
+  return preparateurEmails().includes(email.trim().toLowerCase());
 }
 
 export async function listSessions(): Promise<InventorySession[]> {

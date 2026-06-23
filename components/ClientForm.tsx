@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ClientGroupEditor } from "@/components/clients/ClientGroupEditor";
 import {
   Select,
   SelectContent,
@@ -264,27 +265,21 @@ export function ClientForm({ initialData, mode }: ClientFormProps) {
             POST/PATCH (legacy) mais n'est plus éditable ici. */}
         <input type="hidden" {...register("email")} />
 
-        {/* Groupe SAP — lecture seule (pilote les coefs prix, édition réservée à SAP B1) */}
-        <div className="space-y-2">
-          <Label>Groupe SAP</Label>
-          <div className="h-9 px-3 inline-flex items-center gap-2 rounded-md border border-dashed border-border bg-secondary/40 text-[13px]">
-            {initialData?.sapGroupName || initialData?.sapGroupCode != null ? (
-              <>
-                <span className="font-medium">
-                  {initialData?.sapGroupName ?? `Groupe #${initialData?.sapGroupCode}`}
-                </span>
-                {initialData?.sapGroupName && initialData?.sapGroupCode != null && (
-                  <span className="font-mono text-[11px] text-muted-foreground">#{initialData.sapGroupCode}</span>
-                )}
-              </>
-            ) : (
-              <span className="italic text-muted-foreground">— non synchronisé —</span>
-            )}
+        {/* Groupe SAP — éditable (écrit le GroupCode dans SAP, pilote les coefs prix) */}
+        {mode === "edit" && initialData?.id ? (
+          <ClientGroupEditor
+            clientId={initialData.id}
+            initialCode={initialData.sapGroupCode ?? null}
+            initialName={initialData.sapGroupName ?? null}
+          />
+        ) : (
+          <div className="space-y-2">
+            <Label>Groupe SAP</Label>
+            <div className="h-9 px-3 inline-flex items-center gap-2 rounded-md border border-dashed border-border bg-secondary/40 text-[13px]">
+              <span className="italic text-muted-foreground">disponible après création</span>
+            </div>
           </div>
-          <p className="text-[11px] text-muted-foreground">
-            Édition réservée à SAP B1 (pilote les coefs de prix conseillé).
-          </p>
-        </div>
+        )}
       </div>
 
       {/* Jours d'appel */}

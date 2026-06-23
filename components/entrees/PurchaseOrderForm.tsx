@@ -168,6 +168,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
                 <th className="text-left px-2 py-2 font-semibold">Fruit</th>
                 <th className="text-left px-2 py-2 font-semibold">Pays</th>
                 <th className="text-left px-2 py-2 font-semibold">Marque</th>
+                <th className="text-left px-2 py-2 font-semibold">Variété</th>
                 <th className="text-left px-2 py-2 font-semibold">Condt</th>
                 <th className="text-left px-2 py-2 font-semibold w-36">Entrepôt</th>
                 <th className="text-right px-2 py-2 font-semibold w-24">Prix /pie HT</th>
@@ -188,6 +189,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
                     <td className="px-2 py-2 text-foreground">{dz.fruit}</td>
                     <td className="px-2 py-2 text-muted-foreground">{dz.pays}</td>
                     <td className="px-2 py-2 text-muted-foreground">{dz.marque}</td>
+                    <td className="px-2 py-2 text-muted-foreground">{dz.variete}</td>
                     <td className="px-2 py-2 text-muted-foreground">{dz.condt}</td>
                     <td className="px-2 py-2">
                       <select value={l.warehouseCode} onChange={(e) => updateLine(i, { warehouseCode: e.target.value as Line["warehouseCode"] })} className="h-9 w-full rounded-md border border-input bg-background px-2 text-[12.5px]">
@@ -203,7 +205,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
             </tbody>
             <tfoot>
               <tr className="border-t border-border bg-secondary/30">
-                <td colSpan={8} className="px-2 py-2 text-right text-[10.5px] uppercase tracking-wide font-semibold text-muted-foreground">Total HT</td>
+                <td colSpan={9} className="px-2 py-2 text-right text-[10.5px] uppercase tracking-wide font-semibold text-muted-foreground">Total HT</td>
                 <td className="px-2 py-2 text-right tnum font-bold text-foreground whitespace-nowrap">{fmtEur(totalHT)}</td>
                 <td />
               </tr>
