@@ -4,6 +4,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { sap } from "@/lib/sapb1";
 
 /**
  * GET / PATCH /api/clients/[id]/compta
@@ -81,6 +82,21 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
     `);
     if (result === 0) {
       return NextResponse.json({ error: "Client introuvable" }, { status: 404 });
+    }
+  }
+
+  // Bidir SAP : l'email compta est poussé sur le champ utilisateur U_ComptaE du
+  // BusinessPartner. Best-effort — si SAP échoue, le cache DB reste correct.
+  if (parsed.data.emailCompta !== undefined) {
+    const c = await prisma.client.findUnique({ where: { id: params.id }, select: { code: true } });
+    if (c?.code) {
+      try {
+        await sap.patch(`BusinessPartners('${c.code.replace(/'/g, "''")}')`, {
+          U_ComptaE: norm(parsed.data.emailCompta) ?? "",
+        });
+      } catch (e) {
+        console.warn(`[PATCH compta ${params.id}] SAP U_ComptaE failed:`, e);
+      }
     }
   }
 
