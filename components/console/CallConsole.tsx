@@ -401,7 +401,7 @@ export function CallConsole() {
           type="button"
           onClick={() => window.open("/console/ecran2", "televent-ecran2", "width=720,height=900")}
           title="Ouvre une 2e fenêtre (stock perso + saisie BL) synchronisée — à glisser sur ton 2e écran"
-          className="shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-[12px] font-medium text-foreground/80 hover:text-foreground hover:border-brand-400 transition-colors"
+          className="shrink-0 hidden md:inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-[12px] font-medium text-foreground/80 hover:text-foreground hover:border-brand-400 transition-colors"
         >
           <MonitorSmartphone className="h-3.5 w-3.5" />
           2ᵉ écran
@@ -629,7 +629,8 @@ function ConsoleHeader({ stats }: { stats: ConsoleData["stats"] }) {
           {date.charAt(0).toUpperCase() + date.slice(1)}
         </h1>
       </div>
-      <div className="flex items-stretch gap-2.5 flex-wrap">
+      {/* Strip de stats — masqué sur mobile (on veut la file d'appel, pas le score) */}
+      <div className="hidden md:flex items-stretch gap-2.5 flex-wrap">
         <Stat
           label="Restants" value={stats.remaining} tone="brand" icon={Phone} delay={0}
           info={{ label: "Restants à appeler",

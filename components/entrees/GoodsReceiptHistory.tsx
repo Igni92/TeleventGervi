@@ -160,8 +160,58 @@ export function GoodsReceiptHistory() {
           </div>
         )}
 
+        {/* Mobile : liste de cartes (N° EM + fournisseur + total, détail au tap) */}
         {filtered.length > 0 && (
-          <div className="rounded-lg border border-border overflow-hidden">
+          <div className="md:hidden space-y-2.5">
+            {filtered.map((d) => {
+              const isOpen = expanded === d.docEntry;
+              const openInc = openCountByDoc.get(d.docEntry) ?? 0;
+              return (
+                <div key={d.docEntry} className="rounded-2xl border border-border bg-card overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => toggle(d.docEntry)}
+                    className="w-full flex items-center gap-3 p-4 text-left active:bg-secondary/40"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-semibold text-[16px] text-foreground">#{d.docNum}</span>
+                        {openInc > 0 && (
+                          <span className="inline-flex items-center gap-1 px-2 h-6 rounded-md text-[12px] font-semibold bg-amber-500/15 border border-amber-500/60 text-amber-600 dark:text-amber-400">
+                            <AlertTriangle className="h-3 w-3" />{openInc}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[14px] text-foreground/90 mt-0.5 truncate" title={d.cardName}>
+                        {d.cardName || d.cardCode}
+                      </div>
+                      <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
+                        {fmtDate(d.docDate)} · {d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-[17px] font-bold tnum text-foreground leading-none">{eur(d.totalTTC ?? d.total ?? 0)}</div>
+                      <ChevronDown className={`h-5 w-5 text-muted-foreground/50 inline-block mt-2 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div className="px-4 pb-4 border-t border-border/60 pt-3">
+                      <ReceiptDetail
+                        receipt={d}
+                        incidents={byDoc.get(d.docEntry) ?? []}
+                        onIncidentChanged={reloadIncidents}
+                        onNumAtCardChange={updateNumAtCard}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {filtered.length > 0 && (
+          <div className="hidden md:block rounded-lg border border-border overflow-hidden">
             <table className="w-full text-[13px]">
               <thead className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
                 <tr>

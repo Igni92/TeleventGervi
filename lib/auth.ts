@@ -81,8 +81,10 @@ export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
  */
 const TEST_NO_AUTH = process.env.VERCEL_ENV === "preview";
 
+// Email admin (cf. ADMIN_EMAILS) → la préversion voit les données réelles
+// (sinon périmètre vide = 0 client / 0 encours). Préversion uniquement.
 const FAKE_SESSION = {
-  user: { name: "Test (préversion)", email: `test@${ALLOWED_DOMAIN}` },
+  user: { name: "Test (préversion)", email: "m.mandine@gervifrais.com" },
   expires: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
 };
 
