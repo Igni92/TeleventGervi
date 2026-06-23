@@ -56,7 +56,7 @@ export function GoodsReceiptHistory() {
   const [dateFilter, setDateFilter] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
   const [largeEntry, setLargeEntry] = useState<number | null>(null);
-  const { incidents, loading: incLoading, reload: reloadIncidents, openCountByDoc, byDoc } = useReceptionIncidents();
+  const { incidents, loading: incLoading, reload: reloadIncidents, byDoc } = useReceptionIncidents();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -166,7 +166,7 @@ export function GoodsReceiptHistory() {
         {filtered.length > 0 && (
           <div className="md:hidden space-y-2.5">
             {filtered.map((d) => {
-              const openInc = openCountByDoc.get(d.docEntry) ?? 0;
+              const openIncidents = (byDoc.get(d.docEntry) ?? []).filter((i) => !i.resolved);
               return (
                 <button
                   key={d.docEntry}
@@ -175,14 +175,7 @@ export function GoodsReceiptHistory() {
                   className="w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-semibold text-[16px] text-foreground">#{d.docNum}</span>
-                      {openInc > 0 && (
-                        <span className="inline-flex items-center gap-1 px-2 h-6 rounded-md text-[12px] font-semibold bg-amber-500/15 border border-amber-500/60 text-amber-600 dark:text-amber-400">
-                          <AlertTriangle className="h-3 w-3" />{openInc}
-                        </span>
-                      )}
-                    </div>
+                    <span className="font-mono font-semibold text-[16px] text-foreground">#{d.docNum}</span>
                     <div className="text-[14px] text-foreground/90 mt-0.5 truncate" title={d.cardName}>
                       {d.cardName || d.cardCode}
                     </div>
@@ -195,6 +188,12 @@ export function GoodsReceiptHistory() {
                       <span className="text-[17px] font-bold tnum text-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
                       <span className="ml-1 text-[11px] text-muted-foreground">HT</span>
                     </div>
+                    {/* Logo(s) du type d'incident à droite (pas de compteur) */}
+                    {openIncidents.length > 0 && (
+                      <span className="inline-flex items-center gap-1">
+                        {openIncidents.map((i) => <IncidentTypeIcon key={i.id} type={i.type} className="h-[18px] w-[18px]" />)}
+                      </span>
+                    )}
                     <ChevronRight className="h-5 w-5 text-muted-foreground/50" />
                   </div>
                 </button>
@@ -221,7 +220,6 @@ export function GoodsReceiptHistory() {
               <tbody>
                 {filtered.flatMap((d) => {
                   const isOpen = expanded === d.docEntry;
-                  const openInc = openCountByDoc.get(d.docEntry) ?? 0;
                   const rows = [
                     <tr
                       key={d.docEntry}
@@ -241,18 +239,16 @@ export function GoodsReceiptHistory() {
                       <td className="px-3 py-2 text-right tnum">{d.lineCount}</td>
                       <td className="px-3 py-2 text-right tnum font-semibold">{eur(d.totalHT ?? 0)}</td>
                       <td className="px-3 py-2 text-center">
-                        {/* Icône incident visible UNIQUEMENT s'il y a un incident ouvert */}
-                        {openInc > 0 ? (
-                          <span
-                            className="inline-flex items-center gap-1 px-2 h-6 rounded-md text-[11px] font-semibold bg-amber-500/15 border border-amber-500/60 text-amber-600 dark:text-amber-400"
-                            title={`${openInc} incident(s) ouvert(s)`}
-                          >
-                            <AlertTriangle className="h-3 w-3" />
-                            {openInc}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground/30 text-[11px]">—</span>
-                        )}
+                        {/* Logo(s) du TYPE d'incident ouvert (thermomètre pour le froid…) — pas de compteur */}
+                        {(() => {
+                          const open = (byDoc.get(d.docEntry) ?? []).filter((i) => !i.resolved);
+                          if (open.length === 0) return <span className="text-muted-foreground/30 text-[11px]">—</span>;
+                          return (
+                            <span className="inline-flex items-center justify-center gap-1.5">
+                              {open.map((i) => <IncidentTypeIcon key={i.id} type={i.type} className="h-[18px] w-[18px]" />)}
+                            </span>
+                          );
+                        })()}
                       </td>
                     </tr>,
                   ];
