@@ -5,8 +5,12 @@ import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
   Search, RefreshCw, Loader2, Package, ChevronLeft, ChevronRight,
-  AlertTriangle, Check, ChevronDown, Scale, X,
+  AlertTriangle, Check, ChevronDown, Scale, X, LayoutGrid,
 } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InfoTip } from "@/components/ui/info-tip";
@@ -300,9 +304,70 @@ export function ProductsTable() {
         )}
       </div>
 
-      {/* Horizontal group pills — only groups with at least 1 product in stock */}
+      {/* ── MOBILE : groupes en menu déroulant (les puces horizontales débordaient
+            et étaient coupées hors-écran). Multi-sélection conservée. ── */}
+      {groups.length > 0 && (() => {
+        const allCount = groups.reduce((s, g) => s + g.count, 0);
+        const groupLabel =
+          selectedGroups.size === 0 ? "Tous les groupes"
+          : selectedGroups.size === 1 ? (groups.find((g) => selectedGroups.has(g.id))?.name ?? "1 groupe")
+          : `${selectedGroups.size} groupes`;
+        return (
+          <div className="md:hidden">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="w-full inline-flex items-center justify-between gap-2 h-10 px-3.5 rounded-xl border border-border bg-card text-[13.5px] font-medium text-foreground active:bg-secondary/40 transition-colors">
+                  <span className="inline-flex items-center gap-2 min-w-0">
+                    <LayoutGrid className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="truncate">{groupLabel}</span>
+                  </span>
+                  <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto">
+                <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground">
+                  Filtrer par groupe
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={(e) => { e.preventDefault(); setSelectedGroups(new Set()); }}
+                  className="cursor-pointer flex items-center gap-2 text-[13.5px]"
+                >
+                  <span className="flex-1">Tous les groupes</span>
+                  <span className="tnum text-muted-foreground text-[12px]">{allCount}</span>
+                  {selectedGroups.size === 0 && <Check className="h-4 w-4 text-brand-500" />}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {groups.map((g) => {
+                  const checked = selectedGroups.has(g.id);
+                  return (
+                    <DropdownMenuItem
+                      key={g.id}
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        setSelectedGroups((cur) => {
+                          const next = new Set(cur);
+                          if (next.has(g.id)) next.delete(g.id); else next.add(g.id);
+                          return next;
+                        });
+                      }}
+                      className="cursor-pointer flex items-center gap-2 text-[13.5px]"
+                    >
+                      <span className="flex-1 truncate">{g.name}</span>
+                      <span className="tnum text-muted-foreground text-[12px]">{g.count}</span>
+                      {checked && <Check className="h-4 w-4 text-brand-500" />}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        );
+      })()}
+
+      {/* ── DESKTOP : puces horizontales — groupes avec ≥ 1 produit en stock ── */}
       {groups.length > 0 && (
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 -mb-1 scrollbar-thin">
+        <div className="hidden md:flex items-center gap-2 overflow-x-auto pb-1 -mb-1 scrollbar-thin">
           <span className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground shrink-0 mr-1">
             Groupes
           </span>
@@ -374,19 +439,21 @@ export function ProductsTable() {
                   onClick={() => { if (p.manageBatch) toggleExpand(p.id); }}
                   className={`w-full flex items-center gap-3 p-3.5 text-left ${p.manageBatch ? "active:bg-secondary/40" : "cursor-default"}`}
                 >
-                  <div className="min-w-0 flex-1">
+                  {/* Quantité à GAUCHE (stock + unité) */}
+                  <div className="shrink-0 w-[68px] text-center">
+                    <div className={`text-[26px] font-bold tnum leading-none ${stockD.qty > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>
+                      {stockD.qty > 0 ? fmtQty(stockD.qty, stockD.whole) : "0"}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground mt-1">{stockD.label}</div>
+                  </div>
+                  {/* Désignation à DROITE */}
+                  <div className="min-w-0 flex-1 border-l border-border/60 pl-3">
                     <div className="flex items-baseline gap-2">
                       <span className="font-mono font-bold text-[14px] text-foreground shrink-0">{p.itemCode}</span>
                       <span className="text-[15px] font-medium text-foreground/90 truncate">{dz.fruit}</span>
                     </div>
                     {detail && <div className="text-[12.5px] text-muted-foreground mt-0.5 truncate">{detail}</div>}
                     {attendu && <div className="text-[12px] text-sky-600 dark:text-sky-400 mt-0.5">{attendu}</div>}
-                  </div>
-                  <div className="shrink-0 flex items-baseline gap-1">
-                    <span className={`text-[24px] font-bold tnum leading-none ${stockD.qty > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>
-                      {stockD.qty > 0 ? fmtQty(stockD.qty, stockD.whole) : "0"}
-                    </span>
-                    <span className="text-[12px] text-muted-foreground">{stockD.label}</span>
                   </div>
                   {p.manageBatch && (
                     <ChevronDown className={`h-5 w-5 text-muted-foreground/50 shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`} />

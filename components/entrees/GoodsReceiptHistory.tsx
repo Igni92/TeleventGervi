@@ -283,11 +283,12 @@ export function GoodsReceiptHistory() {
       {/* ── Affichage agrandi (plein cadre) d'une entrée marchandise ── */}
       <Dialog open={!!largeDoc} onOpenChange={(o) => { if (!o) setLargeEntry(null); }}>
         <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ClipboardList className="h-5 w-5 text-sky-600 dark:text-sky-400" />
-              Entrée marchandise N° {largeDoc?.docNum}
-              {largeDoc?.lot && <span className="text-[13px] font-normal font-mono text-muted-foreground">· {largeDoc.lot}</span>}
+          <DialogHeader className="text-left">
+            <DialogTitle className="flex items-center gap-2 justify-start pr-8 text-[16px] sm:text-[18px] whitespace-nowrap">
+              <ClipboardList className="h-5 w-5 shrink-0 text-sky-600 dark:text-sky-400" />
+              <span className="truncate min-w-0">Entrée marchandise N° {largeDoc?.docNum}</span>
+              {/* Lot = « EM{docNum} » → redondant avec le N° ci-dessus : masqué sur mobile pour tenir sur UNE ligne. */}
+              {largeDoc?.lot && <span className="hidden sm:inline text-[13px] font-normal font-mono text-muted-foreground shrink-0">· {largeDoc.lot}</span>}
             </DialogTitle>
           </DialogHeader>
           {largeDoc && (
