@@ -379,16 +379,18 @@ export function ClientTable() {
             </Select>
           </div>
 
-          {/* Actions */}
+          {/* Actions — outils d'admin masqués sur mobile (déduction vendeurs, import CSV) */}
           <div className="flex gap-2 flex-wrap">
             {/* Déduire les vendeurs depuis le dernier BL SAP */}
-            <Button variant="outline" size="sm" onClick={syncVendeurs} disabled={syncingVendeurs} className="flex-1 sm:flex-none gap-1">
+            <Button variant="outline" size="sm" onClick={syncVendeurs} disabled={syncingVendeurs} className="hidden sm:inline-flex flex-none gap-1">
               {syncingVendeurs ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
               Déduire vendeurs
             </Button>
 
             {/* Import CSV */}
-            <ImportModal onImported={fetchClients} />
+            <span className="hidden sm:block">
+              <ImportModal onImported={fetchClients} />
+            </span>
 
             {/* New client */}
             <Button
@@ -428,8 +430,68 @@ export function ClientTable() {
         </div>
       )}
 
-      {/* Table */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
+      {/* Mobile : liste de cartes (nom + appel direct, actions au kebab) */}
+      <div className="md:hidden space-y-2.5">
+        {loading ? (
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-24 rounded-2xl bg-secondary/40 animate-pulse" />
+          ))
+        ) : !sortedClients.length ? (
+          <p className="text-center text-muted-foreground py-10 text-[15px]">
+            {isAujourdhui ? "Aucun client à appeler aujourd'hui 🎉" : "Aucun client trouvé"}
+          </p>
+        ) : (
+          sortedClients.map((client) => {
+            const tel = client.tel2 || client.tel1 || client.tel3 || null;
+            const telHref = tel ? tel.replace(/[^\d+]/g, "") : null;
+            return (
+              <div key={client.id} className="rounded-2xl border border-border bg-card p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <Link href={`/clients/${client.id}`} className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[16px] font-semibold text-foreground leading-tight">{client.nom}</span>
+                      {client.type && (
+                        <Badge variant={typeBadgeVariant[client.type] || "outline"}>{client.type}</Badge>
+                      )}
+                      {client.activeTelevente === false && (
+                        <span className="inline-flex h-[18px] items-center px-1.5 rounded text-[11px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                          à activer
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[12px] font-mono text-muted-foreground mt-1">
+                      {client.code}{client.commercial ? ` · ${client.commercial}` : ""}
+                    </div>
+                  </Link>
+                  <ClientRowMenu client={client} onReminderCreated={fetchClients} />
+                </div>
+                <div className="flex items-center justify-between gap-2 mt-3">
+                  {telHref ? (
+                    <a
+                      href={`tel:${telHref}`}
+                      className="inline-flex items-center gap-2 h-10 px-3 rounded-xl bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[15px] font-semibold tnum active:scale-[0.97]"
+                    >
+                      <Phone className="h-4 w-4" /> {tel}
+                    </a>
+                  ) : (
+                    <span className="text-[13px] text-muted-foreground">Pas de téléphone</span>
+                  )}
+                  {client.derniereCommande ? (
+                    <span className="text-[13px] font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
+                      {formatRelative(client.derniereCommande)}
+                    </span>
+                  ) : (
+                    <span className="text-[13px] text-muted-foreground shrink-0">jamais</span>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Table (desktop) */}
+      <div className="hidden md:block bg-card border border-border rounded-xl overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow className="bg-slate-50/80 dark:bg-slate-800/50 hover:bg-slate-50/80 dark:hover:bg-slate-800/50 border-b border-slate-100 dark:border-slate-700/50">
