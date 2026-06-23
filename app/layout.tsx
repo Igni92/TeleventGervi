@@ -30,10 +30,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="fr" className={inter.variable}>
       <head>
-        {/* Anti-FOUC : applique la colorimétrie choisie avant le 1er paint */}
+        {/* Anti-FOUC : applique colorimétrie + densité choisies avant le 1er paint */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('televent-theme');if(t&&t!=='or'){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();`,
+            __html: `(function(){try{var r=document.documentElement;var t=localStorage.getItem('televent-theme');if(t&&t!=='or'){r.setAttribute('data-theme',t);}var d=localStorage.getItem('televente:ecran2Density');if(d==='compact'||d==='aere'){r.setAttribute('data-density',d);}}catch(e){}})();`,
           }}
         />
       </head>

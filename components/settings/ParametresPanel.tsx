@@ -131,6 +131,8 @@ const ONOFF: SegOption<"on" | "off">[] = [
 
 type ColorId = (typeof COLORIMETRIE)[number]["id"];
 
+type DensityId = (typeof DENSITES)[number]["id"];
+
 /** Applique la colorimétrie (même logique que ColorimetrieSwitcher). */
 function applyColorimetrie(id: ColorId) {
   try { localStorage.setItem(SETTING_KEYS.colorimetrie, id); } catch { /* ignore */ }
@@ -138,12 +140,18 @@ function applyColorimetrie(id: ColorId) {
   else document.documentElement.setAttribute("data-theme", id);
 }
 
+/** Applique la densité GLOBALE → attribut data-density sur <html> (cf. globals.css). */
+function applyDensity(id: DensityId) {
+  if (id === "normal") document.documentElement.removeAttribute("data-density");
+  else document.documentElement.setAttribute("data-density", id);
+}
+
 export function ParametresPanel({ admin = false }: { admin?: boolean }) {
   const { theme, toggleTheme } = useTheme();
   const systemReduce = useReducedMotion();
 
   const [colorimetrie, setColorimetrie] = useState<ColorId>("or");
-  const [densite, setDensite] = useState<"compact" | "normal" | "aere">("normal");
+  const [densite, setDensite] = useState<DensityId>("normal");
   const [animations, setAnimations] = useState<"auto" | "on" | "off">("auto");
   const [promoAnim, setPromoAnim] = useState<"on" | "off">("on");
   const [promoNotifs, setPromoNotifs] = useState<"on" | "off">("on");
@@ -155,8 +163,10 @@ export function ParametresPanel({ admin = false }: { admin?: boolean }) {
     const savedColor = (fromAttr || readSetting(SETTING_KEYS.colorimetrie, "or")) as ColorId;
     setColorimetrie(COLORIMETRIE.some((c) => c.id === savedColor) ? savedColor : "or");
 
-    const d = readSetting(SETTING_KEYS.ecran2Density, "normal");
-    setDensite((["compact", "normal", "aere"].includes(d) ? d : "normal") as typeof densite);
+    const d = readSetting(SETTING_KEYS.density, "normal");
+    const dv = (["compact", "normal", "aere"].includes(d) ? d : "normal") as DensityId;
+    setDensite(dv);
+    applyDensity(dv); // resynchronise l'attribut au cas où (idempotent)
 
     const a = readSetting(SETTING_KEYS.animations, "auto");
     setAnimations((["auto", "on", "off"].includes(a) ? a : "auto") as typeof animations);
@@ -166,7 +176,7 @@ export function ParametresPanel({ admin = false }: { admin?: boolean }) {
 
     return onSettingChange((key, value) => {
       if (key === SETTING_KEYS.colorimetrie && value) setColorimetrie(value as ColorId);
-      if (key === SETTING_KEYS.ecran2Density && value) setDensite(value as typeof densite);
+      if (key === SETTING_KEYS.density && value) { setDensite(value as DensityId); applyDensity(value as DensityId); }
       if (key === SETTING_KEYS.animations && value) setAnimations(value as typeof animations);
       if (key === SETTING_KEYS.promoBannerAnim) setPromoAnim(value === "off" ? "off" : "on");
       if (key === SETTING_KEYS.promoNotifs) setPromoNotifs(value === "off" ? "off" : "on");
@@ -223,13 +233,13 @@ export function ParametresPanel({ admin = false }: { admin?: boolean }) {
       {/* 3 ── Densité ──────────────────────────────────────────────── */}
       <SurfaceCard accent="sky" title="Densité" icon={<LayoutList className="h-3.5 w-3.5" />}>
         <SettingRow
-          title="Densité des listes"
-          desc="Compacité de la liste stock de la Console (Écran 2). Compact = plus d'articles à l'écran, Aéré = lecture plus confortable."
+          title="Densité de l'affichage"
+          desc="Compacité générale de toute l'application (espacements des listes, cartes, tableaux). Compact = plus d'informations à l'écran, Aéré = lecture plus confortable."
         >
           <SegmentToggle
-            ariaLabel="Densité d'affichage"
+            ariaLabel="Densité d'affichage de l'application"
             value={densite}
-            onChange={(v) => { setDensite(v); writeSetting(SETTING_KEYS.ecran2Density, v); }}
+            onChange={(v) => { setDensite(v); applyDensity(v); writeSetting(SETTING_KEYS.density, v); }}
             options={DENSITES}
           />
         </SettingRow>

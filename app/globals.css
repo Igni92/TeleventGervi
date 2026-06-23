@@ -187,6 +187,17 @@
   /* Touche en mode CLAIR aussi (fond légèrement teinté) */
   :root[data-theme="agrume"]:not(.dark) { --background: 36 60% 97%; --secondary: 34 50% 94%; --muted: 34 50% 94%; --accent: 34 50% 94%; }
   :root[data-theme="fraise"]:not(.dark) { --background: 350 60% 98%; --secondary: 350 50% 95%; --muted: 350 50% 95%; --accent: 350 50% 95%; }
+
+  /* ═══════════════════════════════════════════════════════════
+     DENSITÉ GLOBALE — Compact / Normal / Aéré (réglée sur /parametres).
+     Pilote la taille rem RACINE : toutes les gouttières/espacements Tailwind
+     (p-, gap-, space-, m-, h-/w- en rem) de TOUTE l'app se resserrent ou
+     s'aèrent d'un coup. « normal » = défaut navigateur (16px) → AUCUN
+     changement pour l'existant. Le texte (tailles en px) reste lisible ;
+     on ne joue que sur l'air autour des éléments.
+  ═══════════════════════════════════════════════════════════ */
+  html[data-density="compact"] { font-size: 14px; }
+  html[data-density="aere"]    { font-size: 18px; }
 }
 
 /* ═══════════════════════════════════════════════════════════
