@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   Users, Briefcase,
-  PackagePlus, PackageCheck, Package, Factory,
+  PackagePlus, PackageCheck, Package, Factory, ClipboardCheck,
   Receipt, LayoutDashboard,
   Settings, Tag,
   type LucideIcon,
@@ -23,7 +23,7 @@ import {
  * pas un contrôle d'accès — tout reste accessible à tous.)
  */
 
-type BadgeKey = "receptionIncidents" | "commandesDue";
+type BadgeKey = "receptionIncidents" | "commandesDue" | "inventairePending";
 
 interface Tile {
   href: string;
@@ -58,6 +58,7 @@ const AXES: Axis[] = [
     tiles: [
       { href: "/entrees", label: "Entrées march.", icon: PackagePlus, badge: "receptionIncidents" },
       { href: "/commandes-fournisseurs", label: "Cmd. fourn.", icon: PackageCheck, badge: "commandesDue" },
+      { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },
       { href: "/products", label: "Stock", icon: Package },
       { href: "/fabrication", label: "Fabrication", icon: Factory },
     ],
@@ -121,10 +122,25 @@ function useCommandesDueBadge(): number {
   return n;
 }
 
+/** Inventaires soumis non revus — pastille tuile inventaire (admins). */
+function useInventaireBadge(): number {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/inventaire", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!cancelled && typeof j?.pendingReview === "number") setN(j.pendingReview); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  return n;
+}
+
 export function MobileTiles({ className }: { className?: string }) {
   const badges: Record<BadgeKey, number> = {
     receptionIncidents: useReceptionBadge(),
     commandesDue: useCommandesDueBadge(),
+    inventairePending: useInventaireBadge(),
   };
 
   return (

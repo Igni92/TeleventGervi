@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, Package, PackagePlus, Factory, ClipboardList, Receipt, AlertTriangle,
-  Home, Settings, PackageCheck,
+  Home, Settings, PackageCheck, ClipboardCheck,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ColorimetrieSwitcher } from "@/components/ColorimetrieSwitcher";
@@ -51,7 +51,7 @@ interface NavItem {
   label: string;
   icon: typeof Radio;
   /** clé de badge dynamique (cf. useBadges) */
-  badge?: "receptionIncidents" | "notifications" | "commandesDue";
+  badge?: "receptionIncidents" | "notifications" | "commandesDue" | "inventairePending";
 }
 
 const GROUPS: { label: string | null; items: NavItem[]; collapsible?: boolean }[] = [
@@ -87,6 +87,7 @@ const GROUPS: { label: string | null; items: NavItem[]; collapsible?: boolean }[
     items: [
       { href: "/entrees", label: "Entrées", icon: PackagePlus, badge: "receptionIncidents" },
       { href: "/commandes-fournisseurs", label: "Cmd. fourn.", icon: PackageCheck, badge: "commandesDue" },
+      { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },
       { href: "/fabrication", label: "Fabrication", icon: Factory },
       { href: "/encours", label: "Encours", icon: Receipt },
       { href: "/commerciaux", label: "Commerciaux", icon: Briefcase },
@@ -105,6 +106,7 @@ const BADGE_STYLE: Record<NonNullable<NavItem["badge"]>, string> = {
   receptionIncidents: "bg-amber-500 text-[#0b1018]",
   notifications: "bg-brand-500 text-white",
   commandesDue: "bg-amber-500 text-[#0b1018]",
+  inventairePending: "bg-amber-500 text-[#0b1018]",
 };
 
 /**
@@ -153,6 +155,20 @@ function useBadges(): Record<string, number> {
       fetch("/api/sap/purchase-orders/due-count", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => { if (!cancelled && typeof j?.count === "number") setBadges((b) => ({ ...b, commandesDue: j.count })); })
+        .catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 120_000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+
+  // Inventaires soumis non revus (admin) — refresh ~2 min.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetch("/api/inventaire", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => { if (!cancelled && typeof j?.pendingReview === "number") setBadges((b) => ({ ...b, inventairePending: j.pendingReview })); })
         .catch(() => {});
     };
     load();
