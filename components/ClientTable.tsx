@@ -481,7 +481,9 @@ export function ClientTable() {
                       {formatRelative(client.derniereCommande)}
                     </span>
                   ) : (
-                    <span className="text-[13px] text-muted-foreground shrink-0">jamais</span>
+                    <span className="inline-flex items-center shrink-0 px-2 h-6 rounded-md text-[11px] font-bold uppercase tracking-wide bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/40">
+                      New
+                    </span>
                   )}
                 </div>
               </div>

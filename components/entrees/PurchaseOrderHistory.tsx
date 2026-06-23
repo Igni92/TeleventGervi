@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
-  Loader2, RefreshCw, PackageCheck, Search, ChevronRight, X, Truck,
+  Loader2, RefreshCw, PackageCheck, Search, ChevronRight, X, Truck, AlertTriangle,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
@@ -54,6 +55,23 @@ function StatusBadge({ open, large }: { open: boolean; large?: boolean }) {
   );
 }
 
+/** Commande ouverte dont la livraison prévue est atteinte (≤ aujourd'hui). */
+function isDue(d: { open: boolean; dueDate: string | null }): boolean {
+  if (!d.open || !d.dueDate) return false;
+  const due = new Date(d.dueDate);
+  if (Number.isNaN(due.getTime())) return false;
+  const today = new Date(); today.setHours(23, 59, 59, 999);
+  return due.getTime() <= today.getTime();
+}
+
+function DueBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md px-2 h-6 text-[11px] font-semibold bg-amber-500/15 border border-amber-500/60 text-amber-600 dark:text-amber-400">
+      <AlertTriangle className="h-3 w-3" /> À réceptionner
+    </span>
+  );
+}
+
 function Stat({ label, value, tone }: { label: string; value: React.ReactNode; tone?: "emerald" }) {
   return (
     <div>
@@ -72,6 +90,7 @@ export function PurchaseOrderHistory() {
   const [query, setQuery] = useState("");
   const [dateFilter, setDateFilter] = useState("");
   const [largeEntry, setLargeEntry] = useState<number | null>(null);
+  const [receiving, setReceiving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -103,6 +122,28 @@ export function PurchaseOrderHistory() {
 
   const hasFilters = query.trim() !== "" || dateFilter !== "";
   const largeDoc = largeEntry != null ? docs.find((d) => d.docEntry === largeEntry) ?? null : null;
+  const dueCount = useMemo(() => docs.filter(isDue).length, [docs]);
+
+  // Valide la réception d'une commande → crée l'entrée marchandise (PDN) côté SAP.
+  const receive = useCallback(async (docEntry: number) => {
+    setReceiving(true);
+    try {
+      const res = await fetch("/api/sap/purchase-orders/receive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry }),
+      });
+      const j = await res.json();
+      if (!res.ok || j.ok === false) throw new Error(j.error || "Échec");
+      toast.success(`Réception validée — entrée marchandise #${j.docNum} créée (lot ${j.lot})`, { duration: 9000 });
+      setLargeEntry(null);
+      await load();
+    } catch (e) {
+      toast.error(`Échec de la réception : ${e instanceof Error ? e.message : ""}`, { duration: 10000 });
+    } finally {
+      setReceiving(false);
+    }
+  }, [load]);
 
   return (
     <div className="space-y-6">
@@ -166,6 +207,7 @@ export function PurchaseOrderHistory() {
               }
             />
             <Stat label="Ouvertes" value={<AnimatedNumber value={filtered.filter((d) => d.open).length} />} />
+            {dueCount > 0 && <Stat label="À réceptionner" value={<span className="text-amber-600 dark:text-amber-400">{dueCount}</span>} />}
           </div>
         )}
 
@@ -180,9 +222,9 @@ export function PurchaseOrderHistory() {
                 className="w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-mono font-semibold text-[16px] text-foreground">#{d.docNum}</span>
-                    <StatusBadge open={d.open} />
+                    {isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} />}
                   </div>
                   <div className="text-[14px] text-foreground/90 mt-0.5 truncate" title={d.cardName}>
                     {d.cardName || d.cardCode}
@@ -232,7 +274,7 @@ export function PurchaseOrderHistory() {
                     </td>
                     <td className="px-3 py-2 tnum text-muted-foreground">{fmtDate(d.docDate)}</td>
                     <td className="px-3 py-2 tnum text-muted-foreground">{fmtDate(d.dueDate)}</td>
-                    <td className="px-3 py-2"><StatusBadge open={d.open} /></td>
+                    <td className="px-3 py-2">{isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} />}</td>
                     <td className="px-3 py-2 text-right tnum font-semibold">{eur(d.totalHT ?? 0)}</td>
                     <td className="px-2 py-2 text-right"><ChevronRight className="h-4 w-4 text-muted-foreground/50 inline" /></td>
                   </tr>
@@ -252,16 +294,57 @@ export function PurchaseOrderHistory() {
               <span className="truncate min-w-0">Commande fournisseur N° {largeDoc?.docNum}</span>
             </DialogTitle>
           </DialogHeader>
-          {largeDoc && <PoDetail po={largeDoc} />}
+          {largeDoc && <PoDetail po={largeDoc} onReceive={receive} receiving={receiving} />}
         </DialogContent>
       </Dialog>
     </div>
   );
 }
 
-function PoDetail({ po }: { po: PurchaseOrder }) {
+function PoDetail({ po, onReceive, receiving }: { po: PurchaseOrder; onReceive: (docEntry: number) => void; receiving: boolean }) {
+  const [confirm, setConfirm] = useState(false);
   return (
     <div className="space-y-5">
+      {/* Action : valider la réception → crée l'entrée marchandise */}
+      {po.open && (
+        <div className="rounded-xl border border-amber-400/50 bg-amber-50/60 dark:bg-amber-950/20 p-3">
+          {!confirm ? (
+            <button
+              type="button"
+              onClick={() => setConfirm(true)}
+              className="w-full inline-flex items-center justify-center gap-2 h-11 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-[14px] font-semibold transition-colors"
+            >
+              <PackageCheck className="h-4 w-4" /> Réceptionner → entrée marchandise
+            </button>
+          ) : (
+            <div className="space-y-2.5">
+              <p className="text-[13px] text-foreground">
+                Créer l&apos;entrée marchandise pour cette commande&nbsp;? La commande sera clôturée
+                et le stock incrémenté.
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onReceive(po.docEntry)}
+                  disabled={receiving}
+                  className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-semibold disabled:opacity-60"
+                >
+                  {receiving ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageCheck className="h-4 w-4" />}
+                  Confirmer la réception
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirm(false)}
+                  disabled={receiving}
+                  className="inline-flex items-center h-10 px-4 rounded-lg border border-border text-[13px] font-medium text-muted-foreground hover:text-foreground"
+                >
+                  Annuler
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       {/* En-tête : fournisseur + dates + statut + réf */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
         <span className="inline-flex items-center gap-1.5 text-[15px] text-foreground">

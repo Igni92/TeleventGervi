@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { GoodsReceiptForm } from "@/components/entrees/GoodsReceiptForm";
-import { EntreesHistoryTabs } from "@/components/entrees/EntreesHistoryTabs";
+import { GoodsReceiptHistory } from "@/components/entrees/GoodsReceiptHistory";
 
 export const metadata = { title: "Entrée marchandise" };
 export const dynamic = "force-dynamic";
@@ -24,7 +24,7 @@ export default async function EntreesPage() {
         </p>
       </div>
       <GoodsReceiptForm />
-      <EntreesHistoryTabs />
+      <GoodsReceiptHistory />
     </div>
   );
 }
