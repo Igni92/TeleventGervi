@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import { SurfaceCard } from "@/components/ui/surface-card";
+import { DateStepper, todayISO } from "@/components/ui/date-stepper";
 import { designationProduit } from "@/lib/produit-designation";
 import { DesignationChips } from "./DesignationChips";
 import { SupplierPicker, ProductPicker, type Supplier, type ProductHit } from "./GoodsReceiptForm";
@@ -24,15 +25,9 @@ const WAREHOUSES: { code: "000" | "01" | "R1"; label: string }[] = [
   { code: "R1", label: "R1 · J+1" },
 ];
 
-/** Demain (par défaut) au format yyyy-mm-dd pour <input type=date>. */
-function tomorrow(): string {
-  const d = new Date(); d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
-}
-
 export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
   const [supplier, setSupplier] = useState<Supplier | null>(null);
-  const [dueDate, setDueDate] = useState(tomorrow());
+  const [dueDate, setDueDate] = useState(todayISO());
   const [numAtCard, setNumAtCard] = useState("");
   const [comment, setComment] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
@@ -47,7 +42,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
   const updateLine = (i: number, patch: Partial<Line>) => setLines((c) => c.map((l, k) => k === i ? { ...l, ...patch } : l));
   const removeLine = (i: number) => setLines((c) => c.filter((_, k) => k !== i));
   const totalHT = lines.reduce((s, l) => { const p = l.price === "" ? null : parseFloat(l.price); return s + (p != null ? p * l.packageQuantity * l.ratio : 0); }, 0);
-  const reset = () => { setSupplier(null); setNumAtCard(""); setComment(""); setLines([]); setDueDate(tomorrow()); };
+  const reset = () => { setSupplier(null); setNumAtCard(""); setComment(""); setLines([]); setDueDate(todayISO()); };
 
   const submit = async () => {
     if (!supplier) { toast.error("Sélectionne un fournisseur"); return; }
@@ -93,7 +88,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
         </div>
         <div className="space-y-1.5">
           <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Livraison prévue</label>
-          <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+          <DateStepper value={dueDate} onChange={setDueDate} />
         </div>
       </div>
 
