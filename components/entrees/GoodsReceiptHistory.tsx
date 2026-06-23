@@ -147,11 +147,11 @@ export function GoodsReceiptHistory() {
           <div className="flex flex-wrap gap-6 pb-1">
             <Stat label="Entrées" value={<AnimatedNumber value={filtered.length} />} />
             <Stat
-              label="Valeur cumulée (TTC)"
+              label="Valeur cumulée (HT)"
               tone="emerald"
               value={
                 <AnimatedNumber
-                  value={filtered.reduce((s, d) => s + (d.totalTTC ?? d.total ?? 0), 0)}
+                  value={filtered.reduce((s, d) => s + (d.totalHT ?? 0), 0)}
                   format={(n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n)}
                 />
               }
@@ -190,7 +190,10 @@ export function GoodsReceiptHistory() {
                     </div>
                   </div>
                   <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
-                    <div className="text-[17px] font-bold tnum text-foreground leading-none">{eur(d.totalTTC ?? d.total ?? 0)}</div>
+                    <div>
+                      <span className="text-[17px] font-bold tnum text-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
+                      <span className="ml-1 text-[11px] text-muted-foreground">HT</span>
+                    </div>
                     <ChevronRight className="h-5 w-5 text-muted-foreground/50" />
                   </div>
                 </button>
@@ -210,7 +213,7 @@ export function GoodsReceiptHistory() {
                   <th className="text-left px-3 py-2 font-semibold">Fournisseur</th>
                   <th className="text-left px-3 py-2 font-semibold w-28">Date</th>
                   <th className="text-right px-3 py-2 font-semibold w-16">Lignes</th>
-                  <th className="text-right px-3 py-2 font-semibold w-28">Total TTC</th>
+                  <th className="text-right px-3 py-2 font-semibold w-28">Total HT</th>
                   <th className="text-center px-3 py-2 font-semibold w-20">Incident</th>
                 </tr>
               </thead>
@@ -235,7 +238,7 @@ export function GoodsReceiptHistory() {
                       </td>
                       <td className="px-3 py-2 text-muted-foreground tnum">{fmtDate(d.docDate)}</td>
                       <td className="px-3 py-2 text-right tnum">{d.lineCount}</td>
-                      <td className="px-3 py-2 text-right tnum font-semibold">{eur(d.totalTTC ?? d.total ?? 0)}</td>
+                      <td className="px-3 py-2 text-right tnum font-semibold">{eur(d.totalHT ?? 0)}</td>
                       <td className="px-3 py-2 text-center">
                         {/* Icône incident visible UNIQUEMENT s'il y a un incident ouvert */}
                         {openInc > 0 ? (
