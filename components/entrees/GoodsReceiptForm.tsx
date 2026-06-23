@@ -8,13 +8,14 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { designationProduit } from "@/lib/produit-designation";
+import { DesignationChips } from "./DesignationChips";
 
 /** Montant € à 2 décimales (séparateur FR). */
 const fmtEur = (n: number): string =>
   n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 
-type Supplier = { cardCode: string; cardName: string };
-type ProductHit = {
+export type Supplier = { cardCode: string; cardName: string };
+export type ProductHit = {
   id: string; itemCode: string; itemName: string;
   salesUnit: string | null;                    // ex. "pie" — unité de stock
   salesPackagingUnit: string | null;           // ex. "CAT I" — libellé du colis
@@ -70,7 +71,7 @@ function useClickOutside<T extends HTMLElement>(onOutside: () => void) {
 }
 
 /** Combobox supplier (autocomplete BusinessPartners cSupplier). */
-function SupplierPicker({ value, onChange }: {
+export function SupplierPicker({ value, onChange }: {
   value: Supplier | null; onChange: (s: Supplier | null) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -141,7 +142,7 @@ function SupplierPicker({ value, onChange }: {
 }
 
 /** Combobox produit (search /api/products). */
-function ProductPicker({ onPick }: { onPick: (p: ProductHit) => void }) {
+export function ProductPicker({ onPick }: { onPick: (p: ProductHit) => void }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ProductHit[]>([]);
   const [open, setOpen] = useState(false);
@@ -327,14 +328,13 @@ export function GoodsReceiptForm() {
             const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt });
             const priceNum = l.price === "" ? null : parseFloat(l.price);
             const lineHT = priceNum != null ? priceNum * pieceQty : null;
-            const desc = [dz.pays, dz.marque, dz.variete, dz.condt].filter((x) => x && x !== "—").join(" · ");
             return (
               <div key={l.itemCode} className="rounded-xl border border-border bg-card/40 p-3 space-y-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
                     <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-                    {desc && <div className="text-[13px] text-muted-foreground mt-0.5">{desc}</div>}
+                    <DesignationChips marque={dz.marque} condt={dz.condt} pays={dz.pays} className="mt-1.5" />
                   </div>
                   <Button variant="ghost" size="icon-sm" onClick={() => removeLine(i)} aria-label="Supprimer">
                     <Trash2 className="h-4 w-4" />

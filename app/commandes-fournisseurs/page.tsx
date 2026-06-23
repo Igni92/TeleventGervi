@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { PurchaseOrderHistory } from "@/components/entrees/PurchaseOrderHistory";
+import { PurchaseOrderForm } from "@/components/entrees/PurchaseOrderForm";
 
 export const metadata = { title: "Commandes fournisseurs" };
 export const dynamic = "force-dynamic";
@@ -21,6 +22,7 @@ export default async function CommandesFournisseursPage() {
           l&apos;entrée marchandise correspondante et clôture la commande.
         </p>
       </div>
+      <PurchaseOrderForm />
       <PurchaseOrderHistory />
     </div>
   );

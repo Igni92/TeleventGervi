@@ -5,7 +5,6 @@ import { Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 
 /**
  * Onglet Comptabilité de la fiche client (B6).
@@ -16,13 +15,11 @@ import { Textarea } from "@/components/ui/textarea";
 
 type Compta = {
   emailCompta: string | null;
-  adresseFacturation: string | null;
 };
 
 export function CompteForm({ clientId }: { clientId: string }) {
   const [data, setData] = useState<Compta | null>(null);
   const [emailCompta, setEmailCompta] = useState("");
-  const [adresse, setAdresse] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, startSave] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -36,12 +33,8 @@ export function CompteForm({ clientId }: { clientId: string }) {
       .then((d) => {
         if (cancelled) return;
         if (d.ok) {
-          setData({
-            emailCompta: d.emailCompta ?? null,
-            adresseFacturation: d.adresseFacturation ?? null,
-          });
+          setData({ emailCompta: d.emailCompta ?? null });
           setEmailCompta(d.emailCompta ?? "");
-          setAdresse(d.adresseFacturation ?? "");
         } else {
           setError(d.error ?? "Erreur");
         }
@@ -51,10 +44,7 @@ export function CompteForm({ clientId }: { clientId: string }) {
     return () => { cancelled = true; };
   }, [clientId]);
 
-  const dirty =
-    data != null &&
-    ((emailCompta || null) !== data.emailCompta
-      || (adresse || null) !== data.adresseFacturation);
+  const dirty = data != null && (emailCompta || null) !== data.emailCompta;
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
@@ -64,20 +54,14 @@ export function CompteForm({ clientId }: { clientId: string }) {
       const res = await fetch(`/api/clients/${clientId}/compta`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          emailCompta: emailCompta || null,
-          adresseFacturation: adresse || null,
-        }),
+        body: JSON.stringify({ emailCompta: emailCompta || null }),
       });
       const d = await res.json().catch(() => null);
       if (!res.ok || !d?.ok) {
         setError(d?.error ?? `Erreur ${res.status}`);
         return;
       }
-      setData({
-        emailCompta: d.emailCompta ?? null,
-        adresseFacturation: d.adresseFacturation ?? null,
-      });
+      setData({ emailCompta: d.emailCompta ?? null });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     });
@@ -99,21 +83,6 @@ export function CompteForm({ clientId }: { clientId: string }) {
         />
         <p className="text-[11px] text-muted-foreground">
           Pour les factures et relances — distinct des emails des interlocuteurs (onglet Commercial).
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="adresseFacturation">Adresse de facturation</Label>
-        <Textarea
-          id="adresseFacturation"
-          placeholder={"Raison sociale\nN° et rue\nCode postal Ville\nPays"}
-          rows={5}
-          value={adresse}
-          onChange={(e) => setAdresse(e.target.value)}
-          className="font-sans"
-        />
-        <p className="text-[11px] text-muted-foreground">
-          Texte libre — distinct de l&apos;adresse de livraison (gérée côté SAP via les modes de livraison).
         </p>
       </div>
 
