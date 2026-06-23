@@ -145,6 +145,48 @@
     --primary-foreground: 222 45% 9%;   /* texte sombre sur le rose vif (council) */
     --ring:               350 89% 60%;
   }
+
+  /* ── SURFACES teintées par thème (dark) — pour que chaque colorimétrie soit
+        une VRAIE patte graphique différente, pas seulement un accent. On scope
+        en .dark[data-theme=…] pour ne pas casser le mode clair. ────────────── */
+
+  /* AGRUME — anthracite CHAUD (ambre / brun) */
+  .dark[data-theme="agrume"] {
+    --background:        28 26% 7%;     /* charcoal chaud */
+    --foreground:        38 30% 95%;
+    --card:              26 22% 10%;
+    --card-foreground:   38 30% 95%;
+    --popover:           26 22% 12%;
+    --secondary:         26 18% 15%;
+    --secondary-foreground: 38 25% 95%;
+    --muted:             26 18% 15%;
+    --muted-foreground:  30 14% 64%;
+    --accent:            26 18% 15%;
+    --accent-foreground: 38 25% 95%;
+    --border:            26 18% 19%;
+    --input:             26 18% 19%;
+  }
+
+  /* FRAISE — anthracite ROSÉ / bordeaux profond */
+  .dark[data-theme="fraise"] {
+    --background:        344 28% 7%;    /* charcoal bordeaux */
+    --foreground:        350 25% 96%;
+    --card:              344 22% 10%;
+    --card-foreground:   350 25% 96%;
+    --popover:           344 22% 12%;
+    --secondary:         344 18% 15%;
+    --secondary-foreground: 350 22% 96%;
+    --muted:             344 18% 15%;
+    --muted-foreground:  344 12% 66%;
+    --accent:            344 18% 15%;
+    --accent-foreground: 350 22% 96%;
+    --border:            344 20% 20%;
+    --input:             344 20% 20%;
+  }
+
+  /* Touche en mode CLAIR aussi (fond légèrement teinté) */
+  :root[data-theme="agrume"]:not(.dark) { --background: 36 60% 97%; --secondary: 34 50% 94%; --muted: 34 50% 94%; --accent: 34 50% 94%; }
+  :root[data-theme="fraise"]:not(.dark) { --background: 350 60% 98%; --secondary: 350 50% 95%; --muted: 350 50% 95%; --accent: 350 50% 95%; }
 }
 
 /* ═══════════════════════════════════════════════════════════
