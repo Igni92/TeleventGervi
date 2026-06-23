@@ -485,3 +485,34 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
 }
+
+/**
+ * PATCH /api/sap/goods-receipts
+ *
+ * Met à jour le N° BL fournisseur (NumAtCard) d'une entrée marchandise existante
+ * (PurchaseDeliveryNote). Permet de renseigner / corriger le n° de BL après coup,
+ * depuis la consultation du détail.
+ *
+ * Body : { docEntry: number, numAtCard: string }
+ */
+export async function PATCH(req: NextRequest) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+
+  let body: { docEntry?: number; numAtCard?: string };
+  try { body = await req.json(); }
+  catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
+
+  const docEntry = Number(body.docEntry);
+  if (!docEntry || Number.isNaN(docEntry)) {
+    return NextResponse.json({ error: "docEntry requis" }, { status: 400 });
+  }
+  const numAtCard = (body.numAtCard ?? "").trim();
+
+  try {
+    await sap.patch(`PurchaseDeliveryNotes(${docEntry})`, { NumAtCard: numAtCard });
+    return NextResponse.json({ ok: true, numAtCard });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+  }
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ClipboardList, Search, ChevronRight, ChevronDown,
   AlertTriangle, Truck, X,
@@ -85,6 +86,8 @@ export function GoodsReceiptHistory() {
   }, [docs, query, dateFilter]);
 
   const toggle = (docEntry: number) => setExpanded((cur) => (cur === docEntry ? null : docEntry));
+  const updateNumAtCard = (docEntry: number, numAtCard: string) =>
+    setDocs((cur) => cur.map((d) => (d.docEntry === docEntry ? { ...d, numAtCard } : d)));
   const hasFilters = query.trim() !== "" || dateFilter !== "";
 
   return (
@@ -214,6 +217,7 @@ export function GoodsReceiptHistory() {
                             receipt={d}
                             incidents={byDoc.get(d.docEntry) ?? []}
                             onIncidentChanged={reloadIncidents}
+                            onNumAtCardChange={updateNumAtCard}
                           />
                         </td>
                       </tr>,
@@ -249,13 +253,36 @@ function Stat({ label, value, tone }: { label: string; value: React.ReactNode; t
    directement depuis cette consultation.
    ───────────────────────────────────────────────────────────────── */
 function ReceiptDetail({
-  receipt, incidents, onIncidentChanged,
+  receipt, incidents, onIncidentChanged, onNumAtCardChange,
 }: {
   receipt: Receipt;
   incidents: { id: string; type: string | null; note: string | null; resolved: boolean; createdAt: string; createdBy: string | null }[];
   onIncidentChanged: () => void;
+  onNumAtCardChange: (docEntry: number, numAtCard: string) => void;
 }) {
   const [declareOpen, setDeclareOpen] = useState(false);
+  const [savingBl, setSavingBl] = useState(false);
+
+  async function saveNumAtCard(v: string) {
+    const next = v.trim();
+    if (next === (receipt.numAtCard ?? "")) return;
+    setSavingBl(true);
+    try {
+      const res = await fetch("/api/sap/goods-receipts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: receipt.docEntry, numAtCard: next }),
+      });
+      const j = await res.json();
+      if (!res.ok || j.ok === false) throw new Error(j.error || "Échec");
+      onNumAtCardChange(receipt.docEntry, next);
+      toast.success(`N° BL enregistré sur l'entrée #${receipt.docNum}`);
+    } catch (e) {
+      toast.error(`Échec de l'enregistrement du N° BL : ${e instanceof Error ? e.message : ""}`);
+    } finally {
+      setSavingBl(false);
+    }
+  }
 
   async function toggleResolved(id: string, resolved: boolean) {
     await fetch("/api/entrees/incidents", {
@@ -276,7 +303,19 @@ function ReceiptDetail({
           {receipt.cardName && <span className="text-muted-foreground">· {receipt.cardName}</span>}
         </span>
         <span className="text-muted-foreground tnum">Entrée le {fmtDate(receipt.docDate)}</span>
-        {receipt.numAtCard && <span className="text-muted-foreground">BL fournisseur {receipt.numAtCard}</span>}
+        {/* N° BL fournisseur — éditable (renseigner / corriger après création) */}
+        <span className="inline-flex items-center gap-1.5">
+          <span className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">N° BL</span>
+          <input
+            defaultValue={receipt.numAtCard ?? ""}
+            placeholder="à renseigner…"
+            disabled={savingBl}
+            onBlur={(e) => saveNumAtCard(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+            className="h-7 w-44 rounded-md border border-border bg-background px-2 text-[12px] tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
+          />
+          {savingBl && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+        </span>
       </div>
       {receipt.comments && <p className="text-[11.5px] italic text-muted-foreground">« {receipt.comments} »</p>}
 
