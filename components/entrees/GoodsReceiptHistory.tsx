@@ -160,51 +160,40 @@ export function GoodsReceiptHistory() {
           </div>
         )}
 
-        {/* Mobile : liste de cartes (N° EM + fournisseur + total, détail au tap) */}
+        {/* Mobile : liste de cartes — le tap OUVRE le détail en plein écran
+            (pas d'accordéon : le détail ne tient pas en ligne sur téléphone). */}
         {filtered.length > 0 && (
           <div className="md:hidden space-y-2.5">
             {filtered.map((d) => {
-              const isOpen = expanded === d.docEntry;
               const openInc = openCountByDoc.get(d.docEntry) ?? 0;
               return (
-                <div key={d.docEntry} className="rounded-2xl border border-border bg-card overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => toggle(d.docEntry)}
-                    className="w-full flex items-center gap-3 p-4 text-left active:bg-secondary/40"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-semibold text-[16px] text-foreground">#{d.docNum}</span>
-                        {openInc > 0 && (
-                          <span className="inline-flex items-center gap-1 px-2 h-6 rounded-md text-[12px] font-semibold bg-amber-500/15 border border-amber-500/60 text-amber-600 dark:text-amber-400">
-                            <AlertTriangle className="h-3 w-3" />{openInc}
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[14px] text-foreground/90 mt-0.5 truncate" title={d.cardName}>
-                        {d.cardName || d.cardCode}
-                      </div>
-                      <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
-                        {fmtDate(d.docDate)} · {d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}
-                      </div>
+                <button
+                  key={d.docEntry}
+                  type="button"
+                  onClick={() => setLargeEntry(d.docEntry)}
+                  className="w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-semibold text-[16px] text-foreground">#{d.docNum}</span>
+                      {openInc > 0 && (
+                        <span className="inline-flex items-center gap-1 px-2 h-6 rounded-md text-[12px] font-semibold bg-amber-500/15 border border-amber-500/60 text-amber-600 dark:text-amber-400">
+                          <AlertTriangle className="h-3 w-3" />{openInc}
+                        </span>
+                      )}
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-[17px] font-bold tnum text-foreground leading-none">{eur(d.totalTTC ?? d.total ?? 0)}</div>
-                      <ChevronDown className={`h-5 w-5 text-muted-foreground/50 inline-block mt-2 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                    <div className="text-[14px] text-foreground/90 mt-0.5 truncate" title={d.cardName}>
+                      {d.cardName || d.cardCode}
                     </div>
-                  </button>
-                  {isOpen && (
-                    <div className="px-4 pb-4 border-t border-border/60 pt-3">
-                      <ReceiptDetail
-                        receipt={d}
-                        incidents={byDoc.get(d.docEntry) ?? []}
-                        onIncidentChanged={reloadIncidents}
-                        onNumAtCardChange={updateNumAtCard}
-                      />
+                    <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
+                      {fmtDate(d.docDate)} · {d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}
                     </div>
-                  )}
-                </div>
+                  </div>
+                  <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
+                    <div className="text-[17px] font-bold tnum text-foreground leading-none">{eur(d.totalTTC ?? d.total ?? 0)}</div>
+                    <ChevronRight className="h-5 w-5 text-muted-foreground/50" />
+                  </div>
+                </button>
               );
             })}
           </div>
@@ -413,8 +402,42 @@ function ReceiptDetail({
       </div>
       {receipt.comments && <p className={`italic text-muted-foreground ${big ? "text-[13px]" : "text-[11.5px]"}`}>« {receipt.comments} »</p>}
 
-      {/* Lignes — désignation décomposée + HT par ligne */}
-      <div className="rounded-lg border border-border overflow-x-auto bg-card/40">
+      {/* Mobile : lignes empilées (le tableau large déborde) + totaux */}
+      <div className="md:hidden space-y-2">
+        {receipt.lines.map((l, i) => {
+          const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi });
+          const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
+          const desc = [dz.pays, dz.marque, dz.variete, dz.condt].filter((x) => x && x !== "—").join(" · ");
+          return (
+            <div key={`m-${l.itemCode}-${i}`} className="rounded-lg border border-border bg-card/40 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
+                  <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
+                  {desc && <div className="text-[13px] text-muted-foreground mt-0.5">{desc}</div>}
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-[15px] font-bold tnum text-foreground">{lineHT != null ? eur(lineHT) : "—"}</div>
+                  <div className="text-[11px] text-muted-foreground">HT</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 mt-2 text-[13px] text-muted-foreground tnum">
+                <span className="text-foreground font-medium">{fmtColis(l.packageQuantity)} colis</span>
+                <span>·</span>
+                <span>PU {l.price != null ? eur(l.price) : "—"}</span>
+              </div>
+            </div>
+          );
+        })}
+        <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1.5">
+          <div className="flex justify-between text-[14px]"><span className="text-muted-foreground">Total HT</span><span className="font-semibold tnum">{eur(receipt.totalHT ?? 0)}</span></div>
+          <div className="flex justify-between text-[14px]"><span className="text-muted-foreground">TVA</span><span className="tnum text-muted-foreground">{eur(receipt.totalTVA ?? 0)}</span></div>
+          <div className="flex justify-between text-[16px] border-t border-border pt-1.5"><span className="font-semibold text-foreground">Total TTC</span><span className="font-bold tnum text-foreground">{eur(receipt.totalTTC ?? receipt.total ?? 0)}</span></div>
+        </div>
+      </div>
+
+      {/* Desktop : tableau large — désignation décomposée + HT par ligne */}
+      <div className="hidden md:block rounded-lg border border-border overflow-x-auto bg-card/40">
         <table className={`w-full ${tbl}`}>
           <thead className="bg-secondary/40 uppercase tracking-wide text-muted-foreground">
             <tr>

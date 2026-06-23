@@ -11,6 +11,7 @@ import { ProduitsRecurrents } from "@/components/clients/ProduitsRecurrents";
 import { EncoursCreditCard } from "@/components/clients/EncoursCreditCard";
 import { RgpdExportButton } from "@/components/clients/RgpdExportButton";
 import { ClientTabs } from "@/components/clients/ClientTabs";
+import { FicheActions } from "@/components/clients/FicheActions";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { ArrowLeft, Calendar, Sprout, TrendingUp, Receipt } from "lucide-react";
 import Link from "next/link";
@@ -80,8 +81,11 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
   };
 
   const commercialPane = (
-    <div className="space-y-6">
-      <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-6">
+    <div className="space-y-5 sm:space-y-6">
+      {/* Actions commerciales — commander / notifier un appel (cœur du mobile) */}
+      <FicheActions clientId={client.id} clientName={client.nom} />
+
+      <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-4 sm:p-6">
         <h2 className="text-base font-semibold mb-5 text-slate-800 dark:text-foreground">Informations client</h2>
         <ClientForm initialData={formData} mode="edit" />
       </div>
@@ -170,7 +174,7 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
   );
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-5 sm:space-y-6 max-w-3xl overflow-x-hidden">
       <div className="flex items-center justify-between gap-3">
         <Button variant="ghost" size="sm" asChild className="gap-1 text-slate-500 dark:text-slate-400">
           <Link href="/clients">
@@ -183,7 +187,7 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
 
       <div>
         <p className="kicker mb-2">Fiche client · {client.type || "—"}</p>
-        <h1 className="font-display text-[42px] font-light text-foreground leading-[0.95] tracking-tight">
+        <h1 className="font-display text-[30px] sm:text-[42px] font-light text-foreground leading-[1.02] sm:leading-[0.95] tracking-tight break-words">
           {client.nom}
         </h1>
         <p className="text-[12px] text-muted-foreground mt-3 font-mono">

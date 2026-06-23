@@ -50,6 +50,25 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
+/** Ferme un panneau (liste déroulante) quand on clique/tape en dehors. */
+function useClickOutside<T extends HTMLElement>(onOutside: () => void) {
+  const ref = useRef<T>(null);
+  const cb = useRef(onOutside);
+  cb.current = onOutside;
+  useEffect(() => {
+    const handler = (e: Event) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) cb.current();
+    };
+    document.addEventListener("mousedown", handler);
+    document.addEventListener("touchstart", handler);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("touchstart", handler);
+    };
+  }, []);
+  return ref;
+}
+
 /** Combobox supplier (autocomplete BusinessPartners cSupplier). */
 function SupplierPicker({ value, onChange }: {
   value: Supplier | null; onChange: (s: Supplier | null) => void;
@@ -59,6 +78,7 @@ function SupplierPicker({ value, onChange }: {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const debounced = useDebounced(query, 220);
+  const boxRef = useClickOutside<HTMLDivElement>(() => setOpen(false));
 
   useEffect(() => {
     let cancel = false;
@@ -90,7 +110,7 @@ function SupplierPicker({ value, onChange }: {
   }
 
   return (
-    <div className="relative">
+    <div className="relative" ref={boxRef}>
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
       <Input
         value={query}
@@ -128,6 +148,7 @@ function ProductPicker({ onPick }: { onPick: (p: ProductHit) => void }) {
   const [loading, setLoading] = useState(false);
   const debounced = useDebounced(query, 220);
   const inputRef = useRef<HTMLInputElement>(null);
+  const boxRef = useClickOutside<HTMLDivElement>(() => setOpen(false));
 
   useEffect(() => {
     let cancel = false;
@@ -149,7 +170,7 @@ function ProductPicker({ onPick }: { onPick: (p: ProductHit) => void }) {
   }, [debounced]);
 
   return (
-    <div className="relative">
+    <div className="relative" ref={boxRef}>
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
       <Input
         ref={inputRef}
@@ -298,8 +319,76 @@ export function GoodsReceiptForm() {
         <ProductPicker onPick={addLine} />
       </div>
 
+      {/* Mobile : lignes empilées (le tableau large déborde sur téléphone) */}
       {lines.length > 0 && (
-        <div className="rounded-lg border border-border overflow-x-auto">
+        <div className="md:hidden space-y-2.5">
+          {lines.map((l, i) => {
+            const pieceQty = l.packageQuantity * l.ratio;
+            const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt });
+            const priceNum = l.price === "" ? null : parseFloat(l.price);
+            const lineHT = priceNum != null ? priceNum * pieceQty : null;
+            const desc = [dz.pays, dz.marque, dz.variete, dz.condt].filter((x) => x && x !== "—").join(" · ");
+            return (
+              <div key={l.itemCode} className="rounded-xl border border-border bg-card/40 p-3 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
+                    <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
+                    {desc && <div className="text-[13px] text-muted-foreground mt-0.5">{desc}</div>}
+                  </div>
+                  <Button variant="ghost" size="icon-sm" onClick={() => removeLine(i)} aria-label="Supprimer">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">Qté (colis)</label>
+                    <NumberInput
+                      value={l.packageQuantity}
+                      onValueChange={(n) => updateLine(i, { packageQuantity: n ?? 0 })}
+                      min={0} step={1}
+                      className="h-11 w-full text-right text-[15px]"
+                    />
+                    <div className="text-[11px] text-muted-foreground mt-0.5 text-right">{l.ratio > 1 ? `= ${pieceQty} pie` : "à la pièce"}</div>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">Prix /pie HT</label>
+                    <NumberInput
+                      value={priceNum}
+                      onValueChange={(n) => updateLine(i, { price: n == null ? "" : String(n) })}
+                      min={0} step={0.01} allowEmpty placeholder="—"
+                      className="h-11 w-full text-right text-[15px]"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-end justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">Entrepôt</label>
+                    <select
+                      value={l.warehouseCode}
+                      onChange={(e) => updateLine(i, { warehouseCode: e.target.value as Line["warehouseCode"] })}
+                      className="h-11 w-full rounded-md border border-input bg-background px-2 text-[14px]"
+                    >
+                      {WAREHOUSES.map((w) => <option key={w.code} value={w.code}>{w.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="block text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Total HT</span>
+                    <span className="text-[18px] font-bold tnum text-foreground">{lineHT != null ? fmtEur(lineHT) : "—"}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          <div className="flex items-center justify-between px-1 pt-1 border-t border-border">
+            <span className="text-[12px] uppercase tracking-wide font-semibold text-muted-foreground">Total HT</span>
+            <span className="text-[20px] font-bold tnum text-foreground">{fmtEur(totalHT)}</span>
+          </div>
+        </div>
+      )}
+
+      {lines.length > 0 && (
+        <div className="hidden md:block rounded-lg border border-border overflow-x-auto">
           <table className="w-full text-[12.5px]">
             <thead className="bg-secondary/40 text-[10.5px] uppercase tracking-wide text-muted-foreground">
               <tr>
