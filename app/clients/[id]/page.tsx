@@ -8,6 +8,7 @@ import { FamillesVsGroupe } from "@/components/clients/FamillesVsGroupe";
 import { ComportementYoY } from "@/components/clients/ComportementYoY";
 import { CompteForm } from "@/components/clients/CompteForm";
 import { ReceptionEmailForm } from "@/components/clients/ReceptionEmailForm";
+import { ClientGroupEditor } from "@/components/clients/ClientGroupEditor";
 import { ProduitsRecurrents } from "@/components/clients/ProduitsRecurrents";
 import { EncoursCreditCard } from "@/components/clients/EncoursCreditCard";
 import { RgpdExportButton } from "@/components/clients/RgpdExportButton";
@@ -162,6 +163,14 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
         icon={<Receipt className="h-3.5 w-3.5" />}
       >
         <CompteForm clientId={client.id} />
+      </SurfaceCard>
+
+      <SurfaceCard accent="violet" title="Groupe SAP" icon={<Receipt className="h-3.5 w-3.5" />}>
+        <ClientGroupEditor
+          clientId={client.id}
+          initialCode={client.sapGroupCode ?? null}
+          initialName={client.sapGroupName ?? null}
+        />
       </SurfaceCard>
     </div>
   );
