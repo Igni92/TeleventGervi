@@ -39,8 +39,8 @@ export default auth((req) => {
   // chemin applicatif est renvoyé vers /inventaire (les routes /api et les
   // assets restent accessibles pour que la page fonctionne).
   const email = (req.auth?.user?.email ?? "").trim().toLowerCase();
-  const preparateurs = (process.env.PREPARATEUR_EMAILS || "")
-    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const preparateurs = ["h.vachey@gervifrais.com", ...(process.env.PREPARATEUR_EMAILS || "").split(",")]
+    .map((e) => e.trim().toLowerCase()).filter(Boolean);
   if (email && preparateurs.includes(email)) {
     const allowed = pathname.startsWith("/inventaire")
       || pathname.startsWith("/api")

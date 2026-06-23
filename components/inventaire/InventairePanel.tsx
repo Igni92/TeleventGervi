@@ -122,29 +122,31 @@ export function InventairePanel({ isAdmin }: { isAdmin: boolean }) {
               const real = counts[p.itemCode];
               const ecart = real != null && Number.isFinite(real) ? Math.round((real - s.qty) * 10) / 10 : null;
               return (
-                <div key={p.id} className="flex items-center gap-3 px-3 py-2.5">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[14px] font-semibold text-foreground truncate">{dz.fruit}</div>
-                    <div className="text-[11px] font-mono text-muted-foreground">{p.itemCode}</div>
+                <div key={p.id} className="px-3 py-2.5">
+                  {/* Nom sur toute la largeur (plus de troncature « F… ») */}
+                  <div className="flex items-baseline gap-2 min-w-0">
+                    <span className="text-[14px] font-semibold text-foreground truncate">{dz.fruit}</span>
+                    <span className="text-[11px] font-mono text-muted-foreground shrink-0">{p.itemCode}</span>
                   </div>
-                  <div className="text-right shrink-0 w-20">
-                    <div className="text-[15px] font-bold tnum text-foreground">{fmt(s.qty)}</div>
-                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground">SAP {s.unit}</div>
-                  </div>
-                  <div className="shrink-0 w-24">
-                    <NumberInput
-                      value={real ?? null}
-                      onValueChange={(n) => setCounts((c) => ({ ...c, [p.itemCode]: n }))}
-                      min={0} step={1} allowEmpty placeholder="réel"
-                      className="h-11 w-full text-center text-[16px] font-semibold"
-                    />
-                  </div>
-                  <div className="shrink-0 w-14 text-right">
-                    {ecart != null && (
-                      <span className={`text-[13px] font-bold tnum ${ecart === 0 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
-                        {ecart > 0 ? `+${fmt(ecart)}` : fmt(ecart)}
-                      </span>
-                    )}
+                  <div className="flex items-center gap-3 mt-1.5">
+                    <div className="text-[12px] text-muted-foreground shrink-0">
+                      SAP <b className="text-foreground tnum text-[15px]">{fmt(s.qty)}</b> {s.unit}
+                    </div>
+                    <div className="ml-auto shrink-0 w-24">
+                      <NumberInput
+                        value={real ?? null}
+                        onValueChange={(n) => setCounts((c) => ({ ...c, [p.itemCode]: n }))}
+                        min={0} step={1} allowEmpty placeholder="réel"
+                        className="h-11 w-full text-center text-[16px] font-semibold"
+                      />
+                    </div>
+                    <div className="shrink-0 w-14 text-right">
+                      {ecart != null && (
+                        <span className={`text-[13px] font-bold tnum ${ecart === 0 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
+                          {ecart > 0 ? `+${fmt(ecart)}` : fmt(ecart)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
