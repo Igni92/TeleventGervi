@@ -56,7 +56,7 @@ export default function Ecran2Page() {
           <Ecran2Order key={clientId} clientId={clientId} clientName={clientName} stockSharePct={sharePct} />
         ) : (
           <div className="h-full flex items-center justify-center panel">
-            <p className="text-[13px] text-muted-foreground text-center max-w-xs">
+            <p className="hidden md:block text-[13px] text-muted-foreground text-center max-w-xs">
               Sélectionne un client sur l&apos;écran 1 — son stock et la saisie de commande apparaîtront ici.
             </p>
           </div>

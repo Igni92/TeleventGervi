@@ -39,6 +39,8 @@ export function CommercialCard({ userId, name, email, counts, isMe, present = tr
   const [savingPresence, setSavingPresence] = useState(false);
   const [admin, setAdmin] = useState(isAdmin);
   const [savingAdmin, setSavingAdmin] = useState(false);
+  // Nom affiché sans le suffixe société (« … - Gervifrais ») qui tronque sur mobile.
+  const displayName = name.split(/\s+[-–]\s+/)[0].trim() || name;
 
   async function toggleAdmin() {
     if (isBootstrapAdmin) return; // admin système : non modifiable depuis l'UI
@@ -106,7 +108,7 @@ export function CommercialCard({ userId, name, email, counts, isMe, present = tr
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="font-semibold text-foreground truncate text-[14px]">{name}</p>
+            <p className="font-semibold text-foreground truncate text-[14px]">{displayName}</p>
             {isMe && (
               <span className="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-brand-600 text-white">
                 vous
@@ -130,8 +132,8 @@ export function CommercialCard({ userId, name, email, counts, isMe, present = tr
             {counts.EXPORT > 0 && <span><span className="font-medium text-foreground/80 tnum">{counts.EXPORT}</span> EXPORT</span>}
           </div>
 
-          {/* Présence + % stock attribué */}
-          <div className="flex items-center gap-2 mt-3 flex-wrap">
+          {/* Présence + % stock attribué — outils d'admin, masqués sur mobile */}
+          <div className="hidden md:flex items-center gap-2 mt-3 flex-wrap">
             <button
               type="button"
               onClick={togglePresence}
@@ -196,6 +198,7 @@ export function CommercialCard({ userId, name, email, counts, isMe, present = tr
         </Link>
 
         {!isMe && counts.ALL > 0 && (
+          <div className="hidden md:block">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -262,6 +265,7 @@ export function CommercialCard({ userId, name, email, counts, isMe, present = tr
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
+          </div>
         )}
       </div>
     </div>

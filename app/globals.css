@@ -291,14 +291,16 @@
 
   /* Eyebrow / kicker label */
   .kicker {
-    font-size: 12px;
+    font-size: 10.5px;
     font-weight: 600;
     letter-spacing: 0.18em;
     text-transform: uppercase;
     color: hsl(var(--muted-foreground));
+    /* Sur mobile : on retire les libellés gris « eyebrow » (demande client). */
+    display: none;
   }
   @media (min-width: 768px) {
-    .kicker { font-size: 10.5px; }
+    .kicker { display: block; }
   }
 
   /* Hairline rule — 1px dotted-then-solid feel */

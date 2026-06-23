@@ -256,7 +256,7 @@ export function ProductsTable() {
 
       {/* ── Toolbar ── */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 max-w-md">
+        <div className="relative w-full sm:flex-1 sm:max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Rechercher code ou nom produit…"
@@ -363,31 +363,30 @@ export function ProductsTable() {
             const orderD = stockDisplay(p, totalOrdered, unit);
             const fmtQty = (n: number, whole: boolean) => (whole ? Math.floor(n).toString() : n.toFixed(0));
             const isExpanded = expandedId === p.id;
-            const condt = dz.condt !== "—" ? dz.condt : "";
-            const attendu = orderD.qty > 0 ? `+${fmtQty(orderD.qty, orderD.whole)} ${orderD.label} attendu` : "";
+            // Désignation distinctive (condt · pays · marque) — sinon deux
+            // « Fraise 8×500g » de codes différents sont indiscernables.
+            const detail = [dz.condt, dz.pays, dz.marque].filter((x) => x && x !== "—").join(" · ");
+            const attendu = orderD.qty > 0 ? `+${fmtQty(orderD.qty, orderD.whole)} ${orderD.label} en achat` : "";
             return (
               <div key={p.id} className="rounded-2xl border border-border bg-card overflow-hidden">
                 <button
                   type="button"
                   onClick={() => { if (p.manageBatch) toggleExpand(p.id); }}
-                  className={`w-full flex items-center gap-3 p-4 text-left ${p.manageBatch ? "active:bg-secondary/40" : "cursor-default"}`}
+                  className={`w-full flex items-center gap-3 p-3.5 text-left ${p.manageBatch ? "active:bg-secondary/40" : "cursor-default"}`}
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="font-mono font-semibold text-[16px] text-foreground leading-tight">{p.itemCode}</div>
-                    <div className="text-[15px] text-foreground/90 leading-snug mt-0.5">{dz.fruit}</div>
-                    {(condt || attendu) && (
-                      <div className="text-[13px] text-muted-foreground mt-1">
-                        {condt}
-                        {condt && attendu ? " · " : ""}
-                        {attendu && <span className="text-sky-600 dark:text-sky-400">{attendu}</span>}
-                      </div>
-                    )}
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-[26px] font-bold tnum leading-none text-foreground">
-                      {stockD.qty > 0 ? fmtQty(stockD.qty, stockD.whole) : <span className="text-muted-foreground/40">0</span>}
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-mono font-bold text-[14px] text-foreground shrink-0">{p.itemCode}</span>
+                      <span className="text-[15px] font-medium text-foreground/90 truncate">{dz.fruit}</span>
                     </div>
-                    <div className="text-[12px] text-muted-foreground mt-1">{stockD.label}</div>
+                    {detail && <div className="text-[12.5px] text-muted-foreground mt-0.5 truncate">{detail}</div>}
+                    {attendu && <div className="text-[12px] text-sky-600 dark:text-sky-400 mt-0.5">{attendu}</div>}
+                  </div>
+                  <div className="shrink-0 flex items-baseline gap-1">
+                    <span className={`text-[24px] font-bold tnum leading-none ${stockD.qty > 0 ? "text-foreground" : "text-muted-foreground/40"}`}>
+                      {stockD.qty > 0 ? fmtQty(stockD.qty, stockD.whole) : "0"}
+                    </span>
+                    <span className="text-[12px] text-muted-foreground">{stockD.label}</span>
                   </div>
                   {p.manageBatch && (
                     <ChevronDown className={`h-5 w-5 text-muted-foreground/50 shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`} />

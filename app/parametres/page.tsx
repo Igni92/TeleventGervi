@@ -19,7 +19,7 @@ export default async function ParametresPage() {
         <h1 className="font-display text-[34px] font-semibold text-foreground tracking-tight leading-none">
           Paramètres
         </h1>
-        <p className="text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
+        <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
           Réglages d&apos;affichage de l&apos;application — thème, colorimétrie, densité,
           animations et bandeau promotions. Chaque choix s&apos;applique <b>immédiatement</b> et
           reste mémorisé sur ce poste.
