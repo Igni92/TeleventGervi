@@ -35,6 +35,21 @@ export default auth((req) => {
     return NextResponse.redirect(new URL("/clients", origin));
   }
 
+  // RÔLE PRÉPARATEUR : accès restreint au SEUL onglet inventaire. Tout autre
+  // chemin applicatif est renvoyé vers /inventaire (les routes /api et les
+  // assets restent accessibles pour que la page fonctionne).
+  const email = (req.auth?.user?.email ?? "").trim().toLowerCase();
+  const preparateurs = (process.env.PREPARATEUR_EMAILS || "")
+    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  if (email && preparateurs.includes(email)) {
+    const allowed = pathname.startsWith("/inventaire")
+      || pathname.startsWith("/api")
+      || pathname.startsWith("/login");
+    if (!allowed) {
+      return NextResponse.redirect(new URL("/inventaire", origin));
+    }
+  }
+
   return NextResponse.next();
 });
 
