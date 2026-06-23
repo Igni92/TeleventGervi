@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   Users, Briefcase,
-  PackagePlus, Package, Factory,
+  PackagePlus, PackageCheck, Package, Factory,
   Receipt, LayoutDashboard,
   Settings, Tag,
   type LucideIcon,
@@ -23,7 +23,7 @@ import {
  * pas un contrôle d'accès — tout reste accessible à tous.)
  */
 
-type BadgeKey = "receptionIncidents";
+type BadgeKey = "receptionIncidents" | "commandesDue";
 
 interface Tile {
   href: string;
@@ -57,6 +57,7 @@ const AXES: Axis[] = [
     desc: "Approvisionnement & stock",
     tiles: [
       { href: "/entrees", label: "Entrées march.", icon: PackagePlus, badge: "receptionIncidents" },
+      { href: "/commandes-fournisseurs", label: "Cmd. fourn.", icon: PackageCheck, badge: "commandesDue" },
       { href: "/products", label: "Stock", icon: Package },
       { href: "/fabrication", label: "Fabrication", icon: Factory },
     ],
@@ -106,8 +107,25 @@ function useReceptionBadge(): number {
   return n;
 }
 
+/** Commandes fournisseurs à réceptionner (échéance atteinte) — pastille tuile. */
+function useCommandesDueBadge(): number {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/sap/purchase-orders/due-count", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!cancelled && typeof j?.count === "number") setN(j.count); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  return n;
+}
+
 export function MobileTiles({ className }: { className?: string }) {
-  const badges: Record<BadgeKey, number> = { receptionIncidents: useReceptionBadge() };
+  const badges: Record<BadgeKey, number> = {
+    receptionIncidents: useReceptionBadge(),
+    commandesDue: useCommandesDueBadge(),
+  };
 
   return (
     <div className={`space-y-6 ${className ?? ""}`}>

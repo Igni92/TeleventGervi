@@ -55,6 +55,7 @@ import { AnimatedNumber } from "@/components/ui/animated-number";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelative } from "@/lib/utils";
 import { SALESPEOPLE } from "@/lib/salespeople";
+import { standardizePhone, formatPhoneDisplay } from "@/lib/phone";
 
 interface Client {
   id: string;
@@ -442,8 +443,9 @@ export function ClientTable() {
           </p>
         ) : (
           sortedClients.map((client) => {
-            const tel = client.tel2 || client.tel1 || client.tel3 || null;
-            const telHref = tel ? tel.replace(/[^\d+]/g, "") : null;
+            const telRaw = client.tel2 || client.tel1 || client.tel3 || null;
+            const telHref = telRaw ? standardizePhone(telRaw) || null : null;
+            const tel = telRaw ? formatPhoneDisplay(telRaw) : null;
             return (
               <div key={client.id} className="rounded-2xl border border-border bg-card p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -481,7 +483,9 @@ export function ClientTable() {
                       {formatRelative(client.derniereCommande)}
                     </span>
                   ) : (
-                    <span className="text-[13px] text-muted-foreground shrink-0">jamais</span>
+                    <span className="inline-flex items-center shrink-0 px-2 h-6 rounded-md text-[11px] font-bold uppercase tracking-wide bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/40">
+                      New
+                    </span>
                   )}
                 </div>
               </div>

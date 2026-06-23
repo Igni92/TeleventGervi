@@ -16,14 +16,12 @@ import { Textarea } from "@/components/ui/textarea";
 
 type Compta = {
   emailCompta: string | null;
-  emailReception: string | null;
   adresseFacturation: string | null;
 };
 
 export function CompteForm({ clientId }: { clientId: string }) {
   const [data, setData] = useState<Compta | null>(null);
   const [emailCompta, setEmailCompta] = useState("");
-  const [emailReception, setEmailReception] = useState("");
   const [adresse, setAdresse] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, startSave] = useTransition();
@@ -40,11 +38,9 @@ export function CompteForm({ clientId }: { clientId: string }) {
         if (d.ok) {
           setData({
             emailCompta: d.emailCompta ?? null,
-            emailReception: d.emailReception ?? null,
             adresseFacturation: d.adresseFacturation ?? null,
           });
           setEmailCompta(d.emailCompta ?? "");
-          setEmailReception(d.emailReception ?? "");
           setAdresse(d.adresseFacturation ?? "");
         } else {
           setError(d.error ?? "Erreur");
@@ -58,7 +54,6 @@ export function CompteForm({ clientId }: { clientId: string }) {
   const dirty =
     data != null &&
     ((emailCompta || null) !== data.emailCompta
-      || (emailReception || null) !== data.emailReception
       || (adresse || null) !== data.adresseFacturation);
 
   async function onSave(e: React.FormEvent) {
@@ -71,7 +66,6 @@ export function CompteForm({ clientId }: { clientId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           emailCompta: emailCompta || null,
-          emailReception: emailReception || null,
           adresseFacturation: adresse || null,
         }),
       });
@@ -82,7 +76,6 @@ export function CompteForm({ clientId }: { clientId: string }) {
       }
       setData({
         emailCompta: d.emailCompta ?? null,
-        emailReception: d.emailReception ?? null,
         adresseFacturation: d.adresseFacturation ?? null,
       });
       setSaved(true);
@@ -106,21 +99,6 @@ export function CompteForm({ clientId }: { clientId: string }) {
         />
         <p className="text-[11px] text-muted-foreground">
           Pour les factures et relances — distinct des emails des interlocuteurs (onglet Commercial).
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="emailReception">Email réception</Label>
-        <Input
-          id="emailReception"
-          type="email"
-          placeholder="reception@exemple.fr"
-          value={emailReception}
-          onChange={(e) => setEmailReception(e.target.value)}
-          autoComplete="off"
-        />
-        <p className="text-[11px] text-muted-foreground">
-          Pour les confirmations de livraison et litiges réception.
         </p>
       </div>
 

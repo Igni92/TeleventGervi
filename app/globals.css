@@ -247,6 +247,14 @@
   .dark ::selection {
     background-color: rgba(250,204,21,0.26);
   }
+  /* Dans les CHAMPS de saisie : surlignage BLEU (clic = sélection-remplacement,
+     repère visuel net pour la saisie rapide de commande). */
+  input::selection, textarea::selection {
+    background-color: rgba(37,99,235,0.40);
+  }
+  .dark input::selection, .dark textarea::selection {
+    background-color: rgba(59,130,246,0.50);
+  }
 
   /* ── Ultra-thin scrollbar ─────────────────────────── */
   ::-webkit-scrollbar { width: 5px; height: 5px; }
