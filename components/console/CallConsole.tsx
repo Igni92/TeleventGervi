@@ -1930,7 +1930,7 @@ function KeyboardHints({
     [displayKey(keymap.skip), "Passer"],
   ];
   return (
-    <footer className="flex items-center justify-end gap-4 flex-wrap text-[11px] text-muted-foreground">
+    <footer className="hidden md:flex items-center justify-end gap-4 flex-wrap text-[11px] text-muted-foreground">
       {hints.map(([k, l]) => (
         <span key={l} className="flex items-center gap-1.5">
           <kbd className="font-mono bg-secondary/60 border border-border px-1.5 py-0.5 rounded text-[10px] text-foreground/70">
