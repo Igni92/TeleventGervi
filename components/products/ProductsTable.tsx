@@ -13,6 +13,7 @@ import { InfoTip } from "@/components/ui/info-tip";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { formatRelative } from "@/lib/utils";
 import { convertStockDisplay, type StockDisplayUnit } from "@/lib/gervifrais-calc";
+import { designationProduit } from "@/lib/produit-designation";
 
 interface StockEntry { inStock: number; committed: number; ordered: number; available: number; }
 interface Product {
@@ -31,6 +32,10 @@ interface Product {
   isPackaging: boolean;
   totalStock: number;
   syncedAt: string;
+  // Désignation décomposée (champs custom Gervifrais)
+  uPays: string | null;
+  uMarque: string | null;
+  uCondi: string | null;
   stockByWarehouse: Record<string, StockEntry>;
 }
 
@@ -346,38 +351,23 @@ export function ProductsTable() {
           <thead>
             <tr className="bg-slate-50/80 dark:bg-slate-800/50 border-b border-border">
               <th className="w-8 px-2 py-3"></th>
-              <th className="text-left px-4 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Code</th>
-              <th className="text-left px-4 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Nom</th>
-              <th className="text-left px-4 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Groupe</th>
-              <th className="text-left px-2 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <div className="inline-flex items-center gap-1">Unités
-                  <InfoTip label="Unités" content={<>Vente · Stock · Achat. Cliquable si différentes (ex. vente en barquette, stock en pièce).</>} side="bottom" iconSize={10} />
+              {/* Quantités à GAUCHE : stock dispo + en achat (EM) */}
+              <th className="text-right px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <div className="inline-flex items-center gap-1 justify-end">Qté stock
+                  <InfoTip label="Quantité en stock" content="Somme des dispos sur 000 + 01 + R1 (dispo = stock − réservé)." side="bottom" iconSize={10} />
                 </div>
               </th>
               <th className="text-right px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <div className="inline-flex items-center gap-1">Dispo 000
-                  <InfoTip label="Disponible — entrepôt 000" content="A/C et A/D · réception / dispatch initial." side="bottom" iconSize={10} />
+                <div className="inline-flex items-center gap-1 justify-end">Qté achat (EM)
+                  <InfoTip label="Quantité en achat" content="Quantité en commande fournisseur (entrées marchandises attendues)." side="bottom" iconSize={10} />
                 </div>
               </th>
-              <th className="text-right px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <div className="inline-flex items-center gap-1">Dispo 01
-                  <InfoTip label="Disponible — entrepôt 01" content="Stock physique principal." side="bottom" iconSize={10} />
-                </div>
-              </th>
-              <th className="text-right px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <div className="inline-flex items-center gap-1">Dispo R1
-                  <InfoTip label="Disponible — entrepôt R1" content="J+1 · pour livraison demain." side="bottom" iconSize={10} />
-                </div>
-              </th>
-              <th className="text-right px-4 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <div className="inline-flex items-center gap-1 justify-end">Total dispo
-                  <InfoTip
-                    label="Total disponible"
-                    content="Somme des dispos sur 000 + 01 + R1."
-                    side="bottom" iconSize={10}
-                  />
-                </div>
-              </th>
+              <th className="text-left px-4 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Code Article</th>
+              <th className="text-left px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Fruit</th>
+              <th className="text-left px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Pays</th>
+              <th className="text-left px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Marque</th>
+              <th className="text-left px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Variété</th>
+              <th className="text-left px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Condt</th>
             </tr>
           </thead>
           <tbody>
@@ -400,6 +390,13 @@ export function ProductsTable() {
                 const isExpanded = expandedId === p.id;
                 // Surcharge d'unité d'affichage choisie pour le groupe (sinon auto).
                 const unit = (p.itemGroup != null ? groupUnits[String(p.itemGroup)] : undefined) ?? null;
+                const dz = designationProduit({ itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque, uCondi: p.uCondi });
+                // Quantités cumulées sur les 3 entrepôts synchronisés.
+                const totalAvailable = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.available ?? 0), 0);
+                const totalOrdered = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.ordered ?? 0), 0);
+                const stockD = stockDisplay(p, totalAvailable, unit);
+                const orderD = stockDisplay(p, totalOrdered, unit);
+                const fmtQty = (n: number, whole: boolean) => (whole ? Math.floor(n).toString() : n.toFixed(0));
                 const rows = [
                   <tr
                     key={p.id}
@@ -420,34 +417,34 @@ export function ProductsTable() {
                         <span className="text-muted-foreground/30 text-[10px]">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-[11.5px] font-semibold text-foreground">{p.itemCode}</td>
-                    <td className="px-4 py-2.5 text-foreground/90">{p.itemName}</td>
-                    <td className="px-4 py-2.5 text-[11.5px] text-muted-foreground">{p.groupName || "—"}</td>
-                    <td className="px-2 py-2.5"><UnitsBadge product={p} unit={unit} /></td>
-                    <StockCell entry={p.stockByWarehouse["000"]} product={p} unit={unit} />
-                    <StockCell entry={p.stockByWarehouse["01"]} product={p} unit={unit} />
-                    <StockCell entry={p.stockByWarehouse["R1"]} product={p} unit={unit} highlight />
-                    <td className="px-4 py-2.5 text-right font-semibold tnum text-foreground">
-                      {(() => {
-                        // Total = somme des DISPO sur les 3 entrepôts synchronisés
-                        // (et non plus le totalStock SAP global qui inclut le committed)
-                        const totalAvailable = ["000", "01", "R1"].reduce(
-                          (s, w) => s + (p.stockByWarehouse[w]?.available ?? 0),
-                          0,
-                        );
-                        const { qty, label, whole } = stockDisplay(p, totalAvailable, unit);
-                        if (qty <= 0) return <span className="text-muted-foreground/50">0</span>;
-                        const formatted = whole ? Math.floor(qty).toString() : qty.toFixed(0);
-                        return (
-                          <>
-                            {formatted}
-                            <span className="ml-1 text-[10px] text-muted-foreground/70 font-normal">
-                              {label}
-                            </span>
-                          </>
-                        );
-                      })()}
+                    {/* Qté stock (dispo) — à gauche */}
+                    <td className="px-3 py-2.5 text-right tnum font-semibold text-foreground">
+                      {stockD.qty > 0 ? (
+                        <>
+                          {fmtQty(stockD.qty, stockD.whole)}
+                          <span className="ml-1 text-[10px] text-muted-foreground/70 font-normal">{stockD.label}</span>
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground/40">0</span>
+                      )}
                     </td>
+                    {/* Qté en achat (EM) — commande fournisseur attendue */}
+                    <td className="px-3 py-2.5 text-right tnum text-sky-600 dark:text-sky-400">
+                      {orderD.qty > 0 ? (
+                        <>
+                          {fmtQty(orderD.qty, orderD.whole)}
+                          <span className="ml-1 text-[10px] text-muted-foreground/70 font-normal">{orderD.label}</span>
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground/30">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 font-mono text-[11.5px] font-semibold text-foreground">{p.itemCode}</td>
+                    <td className="px-3 py-2.5 text-foreground/90">{dz.fruit}</td>
+                    <td className="px-3 py-2.5 text-[12px] text-muted-foreground">{dz.pays}</td>
+                    <td className="px-3 py-2.5 text-[12px] text-muted-foreground">{dz.marque}</td>
+                    <td className="px-3 py-2.5 text-[12px] text-muted-foreground">{dz.variete}</td>
+                    <td className="px-3 py-2.5 text-[12px] text-muted-foreground">{dz.condt}</td>
                   </tr>,
                 ];
                 if (isExpanded) {
@@ -500,13 +497,6 @@ export function ProductsTable() {
   );
 }
 
-/** Format weight in kg → "125g" if < 1kg, else "1,25 kg". */
-function formatWeight(kg: number | null | undefined): string | null {
-  if (kg == null || kg <= 0) return null;
-  if (kg < 1) return `${Math.round(kg * 1000)}g`;
-  return `${kg.toFixed(2).replace(".", ",")} kg`;
-}
-
 /** Returns the pack divisor (qty per pack) if this product is sold per pack. */
 function getPackDivisor(p: Product): number {
   if (p.salesPackagingUnit && p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) {
@@ -533,75 +523,6 @@ function stockDisplay(
   if (override) return convertStockDisplay(available, override, p);
   const div = getPackDivisor(p);
   return { qty: available / div, label: getDisplayUnit(p), whole: div > 1 };
-}
-
-/** "Colis (12 × 125g)" — explicit format requested by the user. */
-function UnitsBadge({ product, unit }: { product: Product; unit: StockDisplayUnit | null }) {
-  const sale = product.salesUnit;
-  const inv = product.inventoryUnit;
-  const qty = product.salesQtyPerPackUnit;
-  const weightLabel = formatWeight(product.salesUnitWeight);
-  const divisor = getPackDivisor(product);
-
-  // Override de groupe : badge explicite signalant l'unité d'affichage forcée.
-  if (unit) {
-    const label = unit === "kg" ? "kg" : unit === "piece" ? "pièce" : "Colis";
-    return (
-      <InfoTip
-        label="Unité d'affichage"
-        content={<>
-          Affichage forcé en <b>{label}</b> pour ce groupe article.
-          {weightLabel && <> · 1 unité ≈ {weightLabel}</>}
-          {divisor > 1 && <> · 1 colis = {qty} unités</>}
-        </>}
-        side="top"
-      >
-        <span className="inline-flex items-center gap-1 text-[11px]">
-          <span className="px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 font-semibold">
-            {label}
-          </span>
-        </span>
-      </InfoTip>
-    );
-  }
-
-  if (divisor > 1) {
-    // Pack mode — "Colis (12 × 125g)" or "Colis (12 × pie)" if no weight
-    const composition = weightLabel ?? sale ?? "pie";
-    return (
-      <InfoTip
-        label="Unités"
-        content={<>
-          Géré en <b>Colis</b> · 1 colis = {qty} × {weightLabel ?? sale ?? "pie"}<br/>
-          Étiquette SAP : {product.salesPackagingUnit ?? "—"}
-        </>}
-        side="top"
-      >
-        <span className="inline-flex items-center gap-1 text-[11px]">
-          <span className="px-1.5 py-0.5 rounded bg-brand-100 dark:bg-brand-950/50 text-brand-700 dark:text-brand-300 font-semibold">
-            Colis
-          </span>
-          <span className="text-muted-foreground tnum">
-            ({qty} × {composition})
-          </span>
-        </span>
-      </InfoTip>
-    );
-  }
-
-  // Sales unit different from inventory unit (no pack)
-  if (sale && inv && sale !== inv) {
-    return (
-      <span className="text-[11px] inline-flex items-center gap-1">
-        <span className="text-foreground/80">{sale}</span>
-        <span className="text-muted-foreground/50">/</span>
-        <span className="text-muted-foreground italic">stock {inv}</span>
-      </span>
-    );
-  }
-
-  // Same unit everywhere
-  return <span className="text-[11px] text-muted-foreground">{sale || inv || "—"}</span>;
 }
 
 /** Renders the list of batches under an expanded product row. */
@@ -726,34 +647,6 @@ function BatchStatus({ status }: { status: string | null }) {
   };
   const v = map[status] ?? { label: status.replace(/^bdsStatus_/, ""), cls: "bg-secondary text-muted-foreground" };
   return <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider ${v.cls}`}>{v.label}</span>;
-}
-
-function StockCell({
-  entry, product, unit, highlight,
-}: {
-  entry?: StockEntry;
-  product: Product;
-  unit: StockDisplayUnit | null;
-  highlight?: boolean;
-}) {
-  if (!entry || entry.available <= 0) {
-    return <td className="px-3 py-2.5 text-right text-muted-foreground/40 tnum">—</td>;
-  }
-  const { qty, whole } = stockDisplay(product, entry.available, unit);
-  const isLow = qty < (whole ? 1 : 10);
-  const color = isLow
-    ? "text-amber-600 dark:text-amber-400"
-    : highlight
-    ? "text-brand-600 dark:text-brand-400 font-semibold"
-    : "text-foreground";
-  // Règle métier : on n'affiche jamais un demi-colis / demi-pièce (76.8 → 76).
-  // Pour le kilo, on garde 0 décimale (round).
-  const fmt = (n: number) => (whole ? Math.floor(n).toString() : n.toFixed(0));
-  return (
-    <td className="px-3 py-2.5 text-right tnum">
-      <span className={`${color} font-semibold`}>{fmt(qty)}</span>
-    </td>
-  );
 }
 
 /* ── Popup « Unité d'affichage du stock » par groupe article ──── */

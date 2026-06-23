@@ -92,7 +92,7 @@ export function AlertesEncours() {
             {late.map((c) => (
               <li key={c.cardCode ?? c.cardName} className="flex items-center gap-3 py-1.5">
                 <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-foreground">
-                  {c.cardCode ? <ClientLink code={c.cardCode} name={c.cardName} /> : c.cardName ?? "—"}
+                  {c.cardCode ? <ClientLink code={c.cardCode} name={c.cardName} preferCode /> : c.cardName ?? "—"}
                 </span>
                 <span className="shrink-0 text-[12px] font-semibold text-rose-600 dark:text-rose-400 tnum">
                   {eur(lateOf(c))}

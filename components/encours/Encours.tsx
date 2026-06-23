@@ -64,9 +64,10 @@ const EncoursRow = memo(function EncoursRow({ c, onSelect }: { c: ClientEncours;
         <ClientLink
           code={c.cardCode}
           name={c.cardName}
-          className="font-semibold text-foreground text-left hover:underline decoration-brand-500/60 underline-offset-2 cursor-pointer"
+          preferCode
+          className="font-mono font-semibold text-foreground text-left hover:underline decoration-brand-500/60 underline-offset-2 cursor-pointer"
         />
-        <div className="text-[10.5px] font-mono text-muted-foreground">{c.cardCode}</div>
+        <div className="text-[10.5px] text-muted-foreground truncate max-w-[220px]">{c.cardName}</div>
       </td>
       <td className="px-3 py-2 text-right font-bold tnum text-foreground">{eur(c.encours)}</td>
       <td className="px-3 py-2 text-right tnum text-muted-foreground">{c.countOpen}</td>

@@ -13,14 +13,16 @@ import { useRouter } from "next/navigation";
  *
  *   <ClientLink code="APLAI" name="A PLAISIR" />
  */
-export function ClientLink({ code, name, className }: {
+export function ClientLink({ code, name, className, preferCode }: {
   code: string;
   name?: string | null;
   className?: string;
+  /** Affiche le CODE client comme libellé principal (le nom passe en infobulle). */
+  preferCode?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const label = name?.trim() || code;
+  const label = preferCode ? code : (name?.trim() || code);
 
   const open = async (e: React.MouseEvent) => {
     // Ne pas déclencher les onClick parents (lignes cliquables, cartes…)
@@ -41,7 +43,7 @@ export function ClientLink({ code, name, className }: {
     <button
       type="button"
       onClick={open}
-      title={`Ouvrir la fiche ${label}`}
+      title={`Ouvrir la fiche ${name?.trim() ? `${name.trim()} (${code})` : code}`}
       className={className ?? "text-left hover:underline decoration-brand-500/60 underline-offset-2 cursor-pointer disabled:opacity-60"}
       disabled={busy}
     >

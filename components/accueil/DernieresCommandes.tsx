@@ -90,7 +90,7 @@ export function DernieresCommandes() {
                 </span>
                 <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-foreground">
                   {d.cardCode ? (
-                    <ClientLink code={d.cardCode} name={d.cardName} />
+                    <ClientLink code={d.cardCode} name={d.cardName} preferCode />
                   ) : (
                     d.cardName ?? "—"
                   )}

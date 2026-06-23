@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { PromoBanner } from "@/components/promos/PromoBanner";
+import { MobileTiles } from "@/components/mobile/MobileTiles";
 import { KpiStrip } from "./KpiStrip";
 import { DernieresCommandes } from "./DernieresCommandes";
 import { AlertesEncours } from "./AlertesEncours";
@@ -76,17 +77,20 @@ export function AccueilHub() {
       {/* ── Bandeau promotions ── */}
       <PromoBanner context="accueil" />
 
-      {/* ── KPI du jour ── */}
-      <KpiStrip />
+      {/* ── MOBILE : lanceur en tuiles (4 axes) — écran volontairement différent du bureau ── */}
+      <MobileTiles className="md:hidden" />
 
-      {/* ── Bento principal ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-        <div className="lg:col-span-7 space-y-4 min-w-0">
-          <DernieresCommandes />
-        </div>
-        <div className="lg:col-span-5 space-y-4 min-w-0">
-          <AlertesEncours />
-          <PromosAccueil />
+      {/* ── BUREAU : KPI + bento ── */}
+      <div className="hidden md:block space-y-4">
+        <KpiStrip />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+          <div className="lg:col-span-7 space-y-4 min-w-0">
+            <DernieresCommandes />
+          </div>
+          <div className="lg:col-span-5 space-y-4 min-w-0">
+            <AlertesEncours />
+            <PromosAccueil />
+          </div>
         </div>
       </div>
     </div>

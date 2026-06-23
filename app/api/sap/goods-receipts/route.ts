@@ -408,38 +408,78 @@ export async function GET(req: NextRequest) {
       ItemCode: string; ItemDescription?: string;
       Quantity: number; PackageQuantity?: number;
       WarehouseCode?: string;
+      Price?: number;                 // prix unitaire HT (unité de stock)
+      LineTotal?: number;             // total ligne HT
+      TaxPercentagePerRow?: number;   // taux TVA de la ligne
     };
     type SapPdnListed = {
       DocEntry: number; DocNum: number; DocDate: string; CardCode: string; CardName?: string;
-      NumAtCard?: string; DocTotal?: number; Comments?: string; DocumentLines?: ListedLine[];
+      NumAtCard?: string; DocTotal?: number; VatSum?: number; Comments?: string; DocumentLines?: ListedLine[];
     };
     const docs = await sap.get<{ value: SapPdnListed[] }>(
       `PurchaseDeliveryNotes?$top=${last}&$orderby=DocEntry desc`
-      + `&$select=DocEntry,DocNum,DocDate,CardCode,CardName,NumAtCard,DocTotal,Comments,DocumentLines`,
+      + `&$select=DocEntry,DocNum,DocDate,CardCode,CardName,NumAtCard,DocTotal,VatSum,Comments,DocumentLines`,
     );
+
+    // Enrichissement local : désignation complète (Fruit/Pays/Marque/Condt) +
+    // ratio colis pour reconstituer la quantité « type condt » dans le détail.
+    const itemCodes = Array.from(
+      new Set((docs.value || []).flatMap((d) => (d.DocumentLines || []).map((l) => l.ItemCode))),
+    );
+    const products = itemCodes.length
+      ? await prisma.product.findMany({
+          where: { itemCode: { in: itemCodes } },
+          select: {
+            itemCode: true, itemName: true, salesQtyPerPackUnit: true, salesPackagingUnit: true,
+            uPays: true, uMarque: true, uCondi: true,
+          },
+        })
+      : [];
+    const pMap = new Map(products.map((p) => [p.itemCode, p]));
 
     return NextResponse.json({
       db: process.env.SAP_B1_COMPANY_DB,
       count: docs.value?.length || 0,
-      docs: (docs.value || []).map((d) => ({
-        docEntry: d.DocEntry,
-        docNum: d.DocNum,
-        lot: `EM${d.DocNum}`,
-        docDate: d.DocDate,
-        cardCode: d.CardCode,
-        cardName: d.CardName,
-        numAtCard: d.NumAtCard ?? "",
-        total: d.DocTotal ?? 0,
-        comments: d.Comments ?? "",
-        lineCount: (d.DocumentLines || []).length,
-        lines: (d.DocumentLines || []).map((l) => ({
-          itemCode: l.ItemCode,
-          itemName: l.ItemDescription,
-          pieceQuantity: l.Quantity,
-          packageQuantity: l.PackageQuantity ?? null,
-          warehouse: l.WarehouseCode,
-        })),
-      })),
+      docs: (docs.value || []).map((d) => {
+        const lines = d.DocumentLines || [];
+        const totalTTC = d.DocTotal ?? 0;
+        const totalTVA = d.VatSum ?? 0;
+        const sumLines = lines.reduce((s, l) => s + (l.LineTotal ?? 0), 0);
+        const totalHT = sumLines > 0 ? sumLines : Math.max(0, totalTTC - totalTVA);
+        return {
+          docEntry: d.DocEntry,
+          docNum: d.DocNum,
+          lot: `EM${d.DocNum}`,
+          docDate: d.DocDate,
+          cardCode: d.CardCode,
+          cardName: d.CardName,
+          numAtCard: d.NumAtCard ?? "",
+          total: totalTTC,        // rétro-compat : « total » = TTC
+          totalTTC,
+          totalHT,
+          totalTVA,
+          comments: d.Comments ?? "",
+          lineCount: lines.length,
+          lines: lines.map((l) => {
+            const p = pMap.get(l.ItemCode);
+            const ratio = (p?.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) ? p.salesQtyPerPackUnit : 1;
+            return {
+              itemCode: l.ItemCode,
+              itemName: l.ItemDescription || p?.itemName || l.ItemCode,
+              pieceQuantity: l.Quantity,
+              packageQuantity: l.PackageQuantity ?? (ratio > 1 ? l.Quantity / ratio : l.Quantity),
+              warehouse: l.WarehouseCode,
+              price: l.Price ?? null,
+              lineTotal: l.LineTotal ?? null,
+              taxPercent: l.TaxPercentagePerRow ?? null,
+              // Désignation décomposée (catalogue local)
+              uPays: p?.uPays ?? null,
+              uMarque: p?.uMarque ?? null,
+              uCondi: p?.uCondi ?? null,
+            };
+          }),
+        };
+      }),
     });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });

@@ -204,7 +204,7 @@ export function Sidebar() {
     <motion.aside
       animate={{ width: rail ? W_RAIL : W_FULL }}
       transition={SPRING.soft}
-      className="sticky top-0 h-screen shrink-0 z-50 flex flex-col bg-[#0b1018] border-r border-white/[0.07] overflow-hidden"
+      className="sticky top-0 h-screen shrink-0 z-50 hidden md:flex flex-col bg-[#0b1018] border-r border-white/[0.07] overflow-hidden"
     >
       {/* Liseré signal — fine colonne dégradée côté contenu */}
       <span aria-hidden className="absolute inset-y-0 right-0 w-px bg-gradient-to-b from-transparent via-brand-500/40 to-transparent" />

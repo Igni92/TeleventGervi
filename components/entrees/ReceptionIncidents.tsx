@@ -1,17 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Check, Loader2, X } from "lucide-react";
+import {
+  AlertTriangle, Check, Loader2,
+  SearchCheck, PackageMinus, PackageX, Thermometer, Euro, CircleHelp,
+  type LucideIcon,
+} from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
 /**
- * Incidents de réception marchandise (litige fournisseur sur un BR).
+ * Incidents de réception marchandise (litige fournisseur sur une entrée).
  *
- * - `ReceptionIncidentButton` : bouton par ligne de l'historique BR → dialog
- *   de déclaration (type + note). Affiche le nombre d'incidents ouverts du BR.
+ * - `InlineIncidentDeclare` : bloc de déclaration intégré au DÉTAIL d'une entrée
+ *   (type par logo + note). Plus de bouton « + » isolé dans la liste : la
+ *   déclaration se fait depuis la consultation du détail.
  * - `OpenReceptionIncidents` : panneau des incidents ouverts (résolution 1 clic).
+ * - `useReceptionIncidents` : hook de chargement + comptage par entrée.
  */
 
 export interface ReceptionIncident {
@@ -29,27 +35,72 @@ export interface ReceptionIncident {
   createdAt: string;
 }
 
-export const INCIDENT_TYPES = ["Qualité", "Manquant", "Casse", "Température", "Prix", "Autre"] as const;
+/* ─────────────────────────────────────────────────────────────────
+   Types d'incident — chacun son LOGO (cf. maquette) et sa couleur.
+   Qualité · Manquant · Casse · Température · Prix (+ Autre, repli).
+   ───────────────────────────────────────────────────────────────── */
+export interface IncidentMeta {
+  icon: LucideIcon;
+  /** Couleur du logo (texte). */
+  color: string;
+  /** Classes du chip quand le type est sélectionné. */
+  active: string;
+}
+
+export const INCIDENT_META: Record<string, IncidentMeta> = {
+  "Qualité": {
+    icon: SearchCheck,
+    color: "text-amber-500",
+    active: "bg-amber-500/15 border-amber-500/60 text-amber-600 dark:text-amber-400",
+  },
+  "Manquant": {
+    icon: PackageMinus,
+    color: "text-blue-500",
+    active: "bg-blue-500/15 border-blue-500/60 text-blue-600 dark:text-blue-400",
+  },
+  "Casse": {
+    icon: PackageX,
+    color: "text-rose-500",
+    active: "bg-rose-500/15 border-rose-500/60 text-rose-600 dark:text-rose-400",
+  },
+  "Température": {
+    icon: Thermometer,
+    color: "text-cyan-500",
+    active: "bg-cyan-500/15 border-cyan-500/60 text-cyan-600 dark:text-cyan-400",
+  },
+  "Prix": {
+    icon: Euro,
+    color: "text-emerald-500",
+    active: "bg-emerald-500/15 border-emerald-500/60 text-emerald-600 dark:text-emerald-400",
+  },
+  "Autre": {
+    icon: CircleHelp,
+    color: "text-muted-foreground",
+    active: "bg-secondary border-border text-foreground",
+  },
+};
+
+export const INCIDENT_TYPES = Object.keys(INCIDENT_META) as (keyof typeof INCIDENT_META)[];
+
+/** Petit logo coloré d'un type d'incident (repli sur « Autre » si inconnu). */
+export function IncidentTypeIcon({ type, className }: { type: string | null; className?: string }) {
+  const meta = INCIDENT_META[type ?? ""] ?? INCIDENT_META["Autre"];
+  const Icon = meta.icon;
+  return <Icon className={className ?? `h-3.5 w-3.5 ${meta.color}`} />;
+}
 
 /* ─────────────────────────────────────────────────────────────────
-   Dialog de déclaration — type (chips) + note libre.
+   Déclaration intégrée au détail d'une entrée — logos + note libre.
    ───────────────────────────────────────────────────────────────── */
-function DeclareDialog({
-  receipt, onClose, onCreated,
+export function InlineIncidentDeclare({
+  receipt, onCreated,
 }: {
   receipt: { docEntry: number; docNum: number; lot?: string; cardCode?: string; cardName?: string };
-  onClose: () => void;
   onCreated: () => void;
 }) {
   const [type, setType] = useState<string>("Qualité");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [onClose]);
 
   async function submit() {
     setSaving(true);
@@ -68,9 +119,9 @@ function DeclareDialog({
         }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? res.statusText);
-      toast.success(`Incident « ${type} » déclaré sur le BR #${receipt.docNum}`);
+      toast.success(`Incident « ${type} » déclaré sur l'entrée #${receipt.docNum}`);
+      setNote("");
       onCreated();
-      onClose();
     } catch (e) {
       toast.error(`Échec de la déclaration : ${e instanceof Error ? e.message : e}`);
     } finally {
@@ -79,109 +130,50 @@ function DeclareDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6" onClick={onClose}>
-      <div
-        className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="flex items-center justify-between px-5 py-3 border-b border-border">
-          <div className="flex items-baseline gap-2">
-            <AlertTriangle className="h-4 w-4 text-amber-500 self-center" />
-            <h2 className="text-[15px] font-semibold text-foreground">Incident réception</h2>
-            <span className="text-[12px] text-muted-foreground">
-              BR #{receipt.docNum}{receipt.cardName ? ` · ${receipt.cardName}` : ""}
-            </span>
-          </div>
-          <button onClick={onClose} className="p-1.5 hover:bg-secondary rounded-md text-muted-foreground">
-            <X className="h-4 w-4" />
-          </button>
-        </header>
-
-        <div className="p-5 space-y-4">
-          <div>
-            <p className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">
-              Type d&apos;incident
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {INCIDENT_TYPES.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setType(t)}
-                  aria-pressed={type === t}
-                  className={`px-2.5 h-7 text-[12px] font-medium rounded-md border transition-colors ${
-                    type === t
-                      ? "bg-amber-500/15 border-amber-500/60 text-amber-600 dark:text-amber-400"
-                      : "border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <p className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">
-              Détail
-            </p>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={3}
-              placeholder="Ex. : 3 colis de fraises écrasés, photo envoyée au fournisseur…"
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-[13px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-amber-500/40 resize-none"
-            />
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={onClose}>Annuler</Button>
-            <Button size="sm" onClick={submit} disabled={saving}>
-              {saving && <Loader2 className="animate-spin" />}
-              Déclarer l&apos;incident
-            </Button>
-          </div>
-        </div>
+    <div className="rounded-lg border border-amber-500/30 bg-amber-500/[0.04] p-3 space-y-2.5">
+      <p className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1.5">
+        <AlertTriangle className="h-3 w-3 text-amber-500" />
+        Déclarer un incident
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {INCIDENT_TYPES.map((t) => {
+          const meta = INCIDENT_META[t];
+          const Icon = meta.icon;
+          const on = type === t;
+          return (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setType(t)}
+              aria-pressed={on}
+              className={`inline-flex items-center gap-1.5 px-2.5 h-8 text-[12px] font-medium rounded-md border transition-colors ${
+                on ? meta.active : "border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+              }`}
+            >
+              <Icon className={`h-3.5 w-3.5 ${on ? "" : meta.color}`} />
+              {t}
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Détail (ex. 3 colis écrasés, photo envoyée au fournisseur)…"
+          className="flex-1 h-8 rounded-md border border-border bg-background px-2.5 text-[12.5px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+        />
+        <Button size="sm" onClick={submit} disabled={saving}>
+          {saving && <Loader2 className="animate-spin" />}
+          Déclarer
+        </Button>
       </div>
     </div>
   );
 }
 
 /* ─────────────────────────────────────────────────────────────────
-   Bouton par ligne — ouvre le dialog ; badge = nb d'incidents ouverts.
-   ───────────────────────────────────────────────────────────────── */
-export function ReceptionIncidentButton({
-  receipt, openCount, onChanged,
-}: {
-  receipt: { docEntry: number; docNum: number; lot?: string; cardCode?: string; cardName?: string };
-  openCount: number;
-  onChanged: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        title="Déclarer un incident de réception"
-        className={`inline-flex items-center gap-1 px-2 h-6 rounded-md text-[11px] font-semibold border transition-colors ${
-          openCount > 0
-            ? "bg-amber-500/15 border-amber-500/60 text-amber-600 dark:text-amber-400"
-            : "border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-        }`}
-      >
-        <AlertTriangle className="h-3 w-3" />
-        {openCount > 0 ? openCount : "Incident"}
-      </button>
-      {open && (
-        <DeclareDialog receipt={receipt} onClose={() => setOpen(false)} onCreated={onChanged} />
-      )}
-    </>
-  );
-}
-
-/* ─────────────────────────────────────────────────────────────────
-   Panneau incidents ouverts — sous l'historique BR sur /entrees.
+   Panneau incidents ouverts — sous la liste des entrées sur /entrees.
    ───────────────────────────────────────────────────────────────── */
 export function OpenReceptionIncidents({
   incidents, loading, onChanged,
@@ -216,10 +208,13 @@ export function OpenReceptionIncidents({
           <li key={i.id} className="py-2 flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-baseline gap-2 text-[13px]">
-                <span className="font-semibold text-amber-600 dark:text-amber-400">{i.type ?? "Incident"}</span>
-                {i.docNum != null && <span className="font-mono text-muted-foreground">BR #{i.docNum}</span>}
+                <span className="inline-flex items-center gap-1 font-semibold text-foreground">
+                  <IncidentTypeIcon type={i.type} className="h-3.5 w-3.5 self-center" />
+                  {i.type ?? "Incident"}
+                </span>
+                {i.docNum != null && <span className="font-mono text-muted-foreground">EM #{i.docNum}</span>}
                 {i.lot && <span className="font-mono text-muted-foreground">{i.lot}</span>}
-                {i.cardName && <span className="text-foreground/80 truncate">{i.cardName}</span>}
+                {i.cardCode && <span className="font-mono text-foreground/80 truncate">{i.cardCode}</span>}
               </div>
               {i.note && <p className="text-[12px] text-muted-foreground mt-0.5">{i.note}</p>}
               <p className="text-[10.5px] text-muted-foreground/70 mt-0.5">
@@ -265,5 +260,14 @@ export function useReceptionIncidents() {
     openCountByDoc.set(i.docEntry, (openCountByDoc.get(i.docEntry) ?? 0) + 1);
   }
 
-  return { incidents, loading, reload, openCountByDoc };
+  /** Incidents (ouverts + résolus) regroupés par entrée. */
+  const byDoc = new Map<number, ReceptionIncident[]>();
+  for (const i of incidents) {
+    if (i.docEntry == null) continue;
+    const arr = byDoc.get(i.docEntry) ?? [];
+    arr.push(i);
+    byDoc.set(i.docEntry, arr);
+  }
+
+  return { incidents, loading, reload, openCountByDoc, byDoc };
 }
