@@ -356,7 +356,7 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-[18px] font-semibold tracking-tight">
             <FileText className="h-5 w-5 text-brand-600 dark:text-brand-400" />
@@ -371,8 +371,9 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
         </DialogHeader>
 
         <div className="space-y-4 mt-2">
-          {/* Mode + Date côte à côte */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Mode + Date — empilés sur mobile (le champ datetime-local natif a une
+              largeur minimale incompressible qui faisait déborder la modale). */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground inline-flex items-center gap-1.5">
                 <Truck className="h-3 w-3" />Mode de livraison
@@ -607,7 +608,163 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
 
           {/* Lines */}
           {lines.length > 0 && (
-            <div className="border border-border rounded-lg overflow-hidden">
+            <div className="space-y-3">
+              {/* ── MOBILE : éditeur de lignes en CARTES (le tableau large était
+                    coupé hors-écran → qté/prix inaccessibles). Mêmes contrôles
+                    que sur PC : qté, prix, conseillé, répartition entrepôts,
+                    total HT par ligne, suppression. ── */}
+              <div className="md:hidden space-y-2.5">
+                {lines.map((l, i) => {
+                  const max = totalAvailable(l.availByWarehouse);
+                  const perso = personalStock(max, stockSharePct);
+                  const overPerso = stockSharePct < 100 && l.quantity > perso && l.quantity <= max;
+                  const over = l.quantity > max;
+                  const noStock = max <= 0;
+                  const chunks = splitByWarehouse(l.quantity, l.availByWarehouse);
+                  const h = hints[l.itemCode];
+                  const lineHT = l.price != null && l.price > 0 ? l.quantity * l.packDivisor * l.price : null;
+                  return (
+                    <div
+                      key={`m-${i}`}
+                      className={`rounded-xl border p-3 ${over || noStock ? "border-rose-300 dark:border-rose-800 bg-rose-50/40 dark:bg-rose-950/15" : "border-border bg-card/40"}`}
+                    >
+                      {/* Nom + suppression */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-foreground text-[14px] leading-tight">{l.itemName}</p>
+                          <p className="text-[11px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeLine(i)}
+                          aria-label="Retirer la ligne"
+                          className="h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-lg text-muted-foreground/60 hover:text-rose-500 hover:bg-secondary/60 transition-colors"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+
+                      {/* Attributs marque / calibre / pays */}
+                      {h && (h.marque || h.calibre || h.pays) && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {h.marque && <span className="text-[10px] px-1.5 py-px rounded bg-secondary text-muted-foreground">{h.marque}</span>}
+                          {h.calibre && <span className="text-[10px] px-1.5 py-px rounded bg-secondary text-muted-foreground">cal. {h.calibre}</span>}
+                          {h.pays && <span className="text-[10px] px-1.5 py-px rounded bg-secondary text-muted-foreground">{h.pays}</span>}
+                        </div>
+                      )}
+
+                      {/* Quantité + Prix */}
+                      <div className="grid grid-cols-2 gap-2.5 mt-2.5">
+                        <div className="space-y-1 min-w-0">
+                          <span className="block text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Quantité</span>
+                          <div className="flex items-center gap-1.5">
+                            <NumberInput
+                              min={0}
+                              max={max > 0 ? max : undefined}
+                              step={l.packDivisor > 1 ? 1 : 0.1}
+                              value={l.quantity}
+                              onValueChange={(n) => updateLine(i, { quantity: n ?? 0 })}
+                              className={`h-9 w-full text-right text-[14px] tnum ${over ? "border-rose-500 focus-visible:ring-rose-500" : ""}`}
+                            />
+                            <span className="text-[12px] text-muted-foreground shrink-0 w-9">{l.displayUnit}</span>
+                          </div>
+                          <span className={`block text-[10.5px] tnum ${
+                            noStock ? "text-rose-500 font-medium" :
+                            over ? "text-amber-600 dark:text-amber-400 font-semibold" :
+                            overPerso ? "text-orange-600 dark:text-orange-400 font-medium" :
+                            "text-muted-foreground/70"
+                          }`}>
+                            {noStock ? "❌ Rupture"
+                              : over ? `⚠️ sur-vente (dispo ${max})`
+                              : overPerso ? `⚠️ > perso (${perso})`
+                              : stockSharePct < 100 ? `perso ${perso} · max ${max}`
+                              : `max ${max}`}
+                          </span>
+                        </div>
+                        <div className="space-y-1 min-w-0">
+                          <span className="block text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Prix unitaire HT</span>
+                          <div className="flex items-center gap-1.5">
+                            <NumberInput
+                              min={0}
+                              step={0.1}
+                              allowEmpty
+                              placeholder="auto"
+                              value={l.price}
+                              onValueChange={(n) => updateLine(i, { price: n })}
+                              className="h-9 w-full text-right text-[14px] tnum"
+                            />
+                            <span className="text-[12px] text-muted-foreground shrink-0 w-9">€/{l.priceUnit}</span>
+                          </div>
+                          {h && h.prixConseille != null && (() => {
+                            const applied = l.price != null && Math.abs(l.price - h.prixConseille) < 0.001;
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => updateLine(i, { price: h.prixConseille })}
+                                className={`block text-[10.5px] tnum transition-colors ${
+                                  applied ? "text-emerald-600 dark:text-emerald-400" : "text-brand-600 dark:text-brand-400 hover:underline"
+                                }`}
+                              >
+                                {applied ? "✓ conseillé appliqué" : `conseillé ${h.prixConseille.toFixed(2)} €${h.isDefault ? " (×1,5)" : ""}`}
+                              </button>
+                            );
+                          })()}
+                        </div>
+                      </div>
+
+                      {/* Répartition entrepôts + total HT ligne */}
+                      <div className="flex items-end justify-between gap-2 mt-2.5 pt-2.5 border-t border-border/50">
+                        <div className="flex flex-wrap gap-1 min-w-0">
+                          {chunks.length === 0 ? (
+                            <span className="text-[10.5px] italic text-muted-foreground/70">—</span>
+                          ) : chunks.map((c, ci) => {
+                            const avail = Math.max(0, l.availByWarehouse[c.warehouse] ?? 0);
+                            const spill = c.qty > avail;
+                            return (
+                              <span
+                                key={ci}
+                                title={`${WAREHOUSE_LABELS[c.warehouse] ?? c.warehouse} — ${avail} dispo`}
+                                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] tnum font-medium ${
+                                  spill ? "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400" : "bg-secondary text-foreground/80"
+                                }`}
+                              >
+                                <span className="font-mono">{c.warehouse}</span>
+                                <span className="font-semibold">{c.qty}</span>
+                                <span className="text-muted-foreground">{l.displayUnit}</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="block text-[9.5px] uppercase tracking-wider text-muted-foreground">Total HT</span>
+                          <span className="text-[15px] font-bold tnum text-foreground">{lineHT != null ? `${lineHT.toFixed(2)} €` : "—"}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* Total HT estimé (mobile) */}
+                {(() => {
+                  const totalHT = lines.reduce((s, l) => s + (l.price != null && l.price > 0 ? l.quantity * l.packDivisor * l.price : 0), 0);
+                  const pricedCount = lines.filter((l) => l.price != null && l.price > 0).length;
+                  return (
+                    <div className="rounded-xl border border-border bg-secondary/30 p-3 flex items-center justify-between gap-3">
+                      <span className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">
+                        Total HT estimé
+                        {pricedCount < lines.length && (
+                          <span className="ml-1.5 italic normal-case font-normal text-[10px] text-amber-600 dark:text-amber-400">
+                            ({lines.length - pricedCount} en tarif SAP)
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-[16px] font-bold tnum text-foreground">{totalHT.toFixed(2)} €</span>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* ── DESKTOP : tableau complet ── */}
+              <div className="hidden md:block border border-border rounded-lg overflow-hidden">
               <table className="w-full text-[12.5px]">
                 <thead>
                   <tr className="bg-secondary/50 border-b border-border">
@@ -785,6 +942,7 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
                   })()}
                 </tfoot>
               </table>
+              </div>
             </div>
           )}
 

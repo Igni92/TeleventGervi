@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, TrendingUp, FileText, Map as MapIcon, ArrowLeft, Eye, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, TrendingUp, FileText, Map as MapIcon, ArrowLeft, Eye, X, Home } from "lucide-react";
 import { PilotageScreen1 } from "./PilotageScreen1";
 import { PilotageScreen2 } from "./PilotageScreen2";
 import { PilotageScreen3 } from "./PilotageScreen3";
 import { SignalLoader } from "@/components/ui/page-loader";
+import { KpiStrip } from "@/components/accueil/KpiStrip";
 
 function SlidePlaceholder() {
   return (
@@ -102,16 +103,36 @@ export function PilotageSlider({ viewAs = null }: { viewAs?: string | null } = {
         href="/console"
         aria-label="Retour au site"
         title="Retour au site"
-        className="absolute left-3 top-2.5 z-40 inline-flex items-center gap-1.5 h-8 pl-2 pr-3 rounded-full bg-background/85 backdrop-blur-md border border-border shadow-modal text-[11px] font-semibold text-foreground/80 hover:text-foreground hover:bg-background transition-colors"
+        className="absolute left-3 top-2.5 z-40 hidden md:inline-flex items-center gap-1.5 h-8 pl-2 pr-3 rounded-full bg-background/85 backdrop-blur-md border border-border shadow-modal text-[11px] font-semibold text-foreground/80 hover:text-foreground hover:bg-background transition-colors"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
         Retour au site
       </Link>
 
+      {/* ── MOBILE : « chiffres clés du jour » — le bento desktop (grille 12×6 +
+           cartes WebGL) est illisible sur téléphone, on sert une vue allégée. ── */}
+      <div className="md:hidden h-full overflow-y-auto px-4 py-4 space-y-4">
+        <div className="flex items-center gap-2.5">
+          <Link href="/accueil" aria-label="Accueil" className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-border text-foreground/70 shrink-0">
+            <Home className="h-5 w-5" />
+          </Link>
+          <div className="min-w-0">
+            <p className="kicker">Pilotage</p>
+            <h1 className="text-[20px] font-semibold leading-none text-foreground">Chiffres clés du jour</h1>
+          </div>
+        </div>
+        <KpiStrip />
+        <div className="rounded-2xl border border-border bg-card p-4 text-[14px] leading-relaxed text-muted-foreground">
+          📊 La vue complète — cockpit commercial, rapport annuel et carte géographique —
+          est optimisée pour <b className="text-foreground">grand écran</b>. Ouvrez le tableau de bord
+          sur ordinateur pour les graphes et la carte.
+        </div>
+      </div>
+
       {/* Conteneur scrollable horizontal — snap-mandatory pour caler net sur une slide */}
       <div
         ref={scrollRef}
-        className="h-full w-full overflow-x-auto overflow-y-hidden flex snap-x snap-mandatory scroll-smooth [&::-webkit-scrollbar]:hidden"
+        className="hidden md:flex h-full w-full overflow-x-auto overflow-y-hidden snap-x snap-mandatory scroll-smooth [&::-webkit-scrollbar]:hidden"
         style={{ scrollbarWidth: "none" }}
       >
         <section className="w-screen h-screen shrink-0 snap-start" aria-label="Cockpit commercial — BL">
@@ -148,7 +169,7 @@ export function PilotageSlider({ viewAs = null }: { viewAs?: string | null } = {
           onClick={() => goTo(Math.max(0, slide - 1) as SlideIndex)}
           aria-label="Écran précédent"
           title="← Écran précédent"
-          className="absolute left-3 top-1/2 -translate-y-1/2 z-30 h-10 w-10 rounded-full bg-background/85 backdrop-blur-md border border-border shadow-modal flex items-center justify-center text-foreground/80 hover:text-foreground hover:bg-background transition-colors"
+          className="absolute left-3 top-1/2 -translate-y-1/2 z-30 h-10 w-10 rounded-full bg-background/85 backdrop-blur-md border border-border shadow-modal hidden md:flex items-center justify-center text-foreground/80 hover:text-foreground hover:bg-background transition-colors"
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
@@ -161,7 +182,7 @@ export function PilotageSlider({ viewAs = null }: { viewAs?: string | null } = {
           onClick={() => goTo(Math.min(LAST_SLIDE, slide + 1) as SlideIndex)}
           aria-label="Écran suivant"
           title="Écran suivant →"
-          className="absolute right-3 top-1/2 -translate-y-1/2 z-30 h-10 w-10 rounded-full bg-background/85 backdrop-blur-md border border-border shadow-modal flex items-center justify-center text-foreground/80 hover:text-foreground hover:bg-background transition-colors"
+          className="absolute right-3 top-1/2 -translate-y-1/2 z-30 h-10 w-10 rounded-full bg-background/85 backdrop-blur-md border border-border shadow-modal hidden md:flex items-center justify-center text-foreground/80 hover:text-foreground hover:bg-background transition-colors"
         >
           <ChevronRight className="h-5 w-5" />
         </button>
@@ -170,7 +191,7 @@ export function PilotageSlider({ viewAs = null }: { viewAs?: string | null } = {
       {/* Dots indicateurs en bas — pill allongée pour le courant, dot court pour l'autre */}
       <nav
         aria-label="Navigation entre les écrans"
-        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-1.5 rounded-full bg-background/80 backdrop-blur-md border border-border shadow-modal"
+        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-background/80 backdrop-blur-md border border-border shadow-modal"
       >
         {SLIDES.map((s, i) => {
           const Icon = s.icon;

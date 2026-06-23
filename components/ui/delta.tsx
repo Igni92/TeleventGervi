@@ -42,7 +42,7 @@ export function Delta({ curr, prev, className, size = "md" }: DeltaProps) {
 
   return (
     <span
-      className={cn("inline-flex items-center rounded-full font-semibold tnum", sz, tone, className)}
+      className={cn("inline-flex items-center whitespace-nowrap rounded-full font-semibold tnum", sz, tone, className)}
       title={hasBase ? `N-1 : ${new Intl.NumberFormat("fr-FR").format(Math.round(prev))}` : "Pas de donnée N-1"}
     >
       {!flat || hasBase ? <Icon className={iconSz} aria-hidden /> : null}

@@ -36,7 +36,7 @@ interface TileDef {
 
 const TILES: TileDef[] = [
   {
-    label: "CA du jour (HT)",
+    label: "CA du jour",
     icon: <Euro className="h-3.5 w-3.5" />,
     accent: "brand",
     suffix: " €",
@@ -44,7 +44,7 @@ const TILES: TileDef[] = [
     pick: (b) => b.volume ?? 0,
   },
   {
-    label: "Volume du jour",
+    label: "Volume",
     icon: <Package className="h-3.5 w-3.5" />,
     accent: "sky",
     suffix: " kg",
@@ -59,7 +59,7 @@ const TILES: TileDef[] = [
     pick: (b) => b.ordersCount ?? 0,
   },
   {
-    label: "Clients servis",
+    label: "Clients",
     icon: <Users className="h-3.5 w-3.5" />,
     accent: "violet",
     suffix: "",
@@ -79,15 +79,15 @@ export function KpiStrip() {
         const prevValue = prev ? t.pick(prev) : null;
         return (
           <SurfaceCard key={t.label} accent={t.accent} delay={i * 50} className="py-3.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="kicker truncate">{t.label}</span>
-              <span className="text-muted-foreground/60 shrink-0">{t.icon}</span>
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <span className="shrink-0 text-muted-foreground/70">{t.icon}</span>
+              <span className="text-[11.5px] font-semibold uppercase tracking-[0.08em] leading-none">{t.label}</span>
             </div>
 
             {state === "loading" ? (
-              <div className="mt-2.5 h-[30px] w-24 rounded-md bg-secondary/70 animate-pulse" />
+              <div className="mt-3 h-[28px] w-24 rounded-md bg-secondary/70 animate-pulse" />
             ) : (
-              <div className="mt-1.5 font-display text-[28px] font-bold text-foreground leading-none">
+              <div className="mt-2.5 font-display text-[26px] sm:text-[28px] font-bold text-foreground leading-none tnum">
                 {state === "error" ? (
                   <span className="text-muted-foreground">—</span>
                 ) : (
@@ -96,15 +96,15 @@ export function KpiStrip() {
               </div>
             )}
 
-            <div className="mt-1.5 flex items-center gap-2 min-h-[16px]">
+            <div className="mt-2 flex items-center gap-1.5 min-h-[18px] whitespace-nowrap">
               {state === "ok" && prevValue != null && (
                 <>
                   <Delta curr={value} prev={prevValue} size="sm" />
-                  <span className="text-[10px] text-muted-foreground">vs même jour N-1</span>
+                  <span className="text-[10.5px] text-muted-foreground">vs N-1</span>
                 </>
               )}
               {state === "error" && (
-                <span className="text-[10px] text-muted-foreground">Donnée indisponible</span>
+                <span className="text-[10.5px] text-muted-foreground">Indisponible</span>
               )}
             </div>
           </SurfaceCard>

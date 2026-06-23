@@ -9,21 +9,31 @@ import { Input } from "@/components/ui/input";
 import { ClientLink } from "@/components/ClientLink";
 import { RelanceDialog } from "@/components/encours/RelanceDialog";
 
+interface AttributedAvoir {
+  docEntry: number;
+  docNum: number | null;
+  docDate: string | null;
+  amount: number;    // montant de l'avoir imputé à cette facture (positif)
+}
 interface InvoiceLine {
   docEntry: number;
   docNum: number | null;
   docDate: string | null;
   dueDate: string | null;
-  balance: number;
+  balance: number;        // solde brut de la facture
   overdueDays: number;
+  avoirs: AttributedAvoir[]; // avoirs rattachés à cette facture
+  avoirsTotal: number;       // somme des avoirs attribués
+  net: number;               // net facture = balance − avoirsTotal (≥ 0)
 }
 interface ClientEncours {
   cardCode: string;
   cardName: string;
   clientId: string | null;
-  encours: number;   // NET (encaissé déduit)
-  brut: number;      // somme des factures (avant déduction)
-  encaisse: number;  // encaissé/avoirs non affectés (déduit en ligne)
+  encours: number;          // NET (paiements + avoirs déduits)
+  brut: number;             // somme des factures (avant déduction)
+  encaisse: number;         // paiements + avoirs NON affectés (déduit en ligne)
+  avoirsAttribues: number;  // avoirs rattachés à une facture (déduit par facture)
   countOpen: number;
   b3045: number; // 30-45 j (brut)
   b4590: number; // 45-90 j (brut)
@@ -34,7 +44,7 @@ interface ClientEncours {
 }
 interface EncoursData {
   company: string;
-  totals: { encours: number; encaisse: number; overdueTotal: number; b3045: number; b4590: number; b90: number; invoices: number; clients: number };
+  totals: { encours: number; encaisse: number; avoirsAttribues: number; overdueTotal: number; b3045: number; b4590: number; b90: number; invoices: number; clients: number };
   clients: ClientEncours[];
 }
 
@@ -228,7 +238,7 @@ export function Encours() {
       </div>
       {!loading && data && (
         <p className="hidden md:block text-[12px] text-muted-foreground">
-          {rows.length} client(s) · {data.totals.clients} débiteurs · {data.totals.invoices} factures · <b className="text-rose-600 dark:text-rose-400">{eur(data.totals.overdueTotal)} en retard (brut)</b>{data.totals.encaisse > 0 && <> · <span className="text-emerald-600 dark:text-emerald-400">{eur(data.totals.encaisse)} encaissé/avoirs déduits</span></>} · clic = détail des factures.
+          {rows.length} client(s) · {data.totals.clients} débiteurs · {data.totals.invoices} factures · <b className="text-rose-600 dark:text-rose-400">{eur(data.totals.overdueTotal)} en retard (brut)</b>{data.totals.encaisse > 0 && <> · <span className="text-emerald-600 dark:text-emerald-400">{eur(data.totals.encaisse)} encaissé</span></>}{data.totals.avoirsAttribues > 0 && <> · <span className="text-violet-600 dark:text-violet-400">{eur(data.totals.avoirsAttribues)} avoirs</span></>} · clic = détail des factures.
         </p>
       )}
 
@@ -267,8 +277,8 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
   // Portal vers <body> : sinon un ancêtre transformé (animate-fade-up) "capture"
   // le position:fixed et la modale s'affiche tout en bas au lieu d'être centrée.
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6" onClick={onClose}>
-      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-6" onClick={onClose}>
+      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-3xl max-h-[92vh] sm:max-h-[88vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
         <header className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-border">
           <div className="min-w-0">
             <h2 className="text-[18px] font-semibold tracking-tight text-foreground truncate">{client.cardName}</h2>
@@ -294,11 +304,20 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
           </div>
         </header>
 
-        {/* Ligne globale de déduction (encaissé/avoirs non répartis par facture) */}
-        {client.encaisse > 0 && (
+        {/* Ligne globale de déduction : encaissements (payés) ET avoirs attribués
+            sont maintenant DISTINGUÉS. Les avoirs rattachés à une facture sont
+            affichés sous leur facture (case dédiée) ; ce qui reste en global =
+            paiements + avoirs non affectés à une facture précise. */}
+        {(client.encaisse > 0 || client.avoirsAttribues > 0) && (
           <div className="shrink-0 px-5 py-2 text-[12px] border-b border-border bg-emerald-50/40 dark:bg-emerald-950/15 text-foreground">
-            Factures (brut) <b>{eurExact(client.brut)}</b> − encaissements/avoirs non affectés{" "}
-            <b className="text-emerald-600 dark:text-emerald-400">{eurExact(client.encaisse)}</b> = net dû <b>{eurExact(client.encours)}</b>
+            Factures (brut) <b>{eurExact(client.brut)}</b>
+            {client.encaisse > 0 && (
+              <> − encaissements <b className="text-emerald-600 dark:text-emerald-400">{eurExact(client.encaisse)}</b></>
+            )}
+            {client.avoirsAttribues > 0 && (
+              <> − avoirs <b className="text-violet-600 dark:text-violet-400">{eurExact(client.avoirsAttribues)}</b></>
+            )}
+            {" = net dû "}<b>{eurExact(client.encours)}</b>
           </div>
         )}
 
@@ -310,39 +329,105 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
         </div>
 
         <div className="flex-1 overflow-auto">
-          {client.encaisse > 0 && (
+          {(client.encaisse > 0 || client.avoirsAttribues > 0) && (
             <p className="px-4 py-2 text-[11.5px] text-muted-foreground border-b border-border bg-secondary/20">
-              Soldes par facture <b>bruts</b> ci-dessous — l&apos;encours affiché est <b>net</b> des encaissements non affectés ({eurExact(client.encaisse)}).
+              Chaque facture montre son <b>solde brut</b>, ses <b>avoirs rattachés</b> (en retrait) puis son <b>total net</b>.
+              {client.encaisse > 0 && <> Les encaissements non affectés ({eurExact(client.encaisse)}) restent déduits globalement.</>}
             </p>
           )}
-          <table className="w-full text-[12.5px]">
-            <thead className="sticky top-0 bg-card text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
+          {/* ── MOBILE : cartes par facture (le tableau 5 colonnes débordait) ── */}
+          <div className="md:hidden p-3 space-y-2.5">
+            {client.invoices.map((inv) => {
+              const late = inv.overdueDays > 30;
+              const hasAvoirs = inv.avoirs.length > 0;
+              return (
+                <div key={inv.docEntry} className={`rounded-xl border p-3 ${late ? "border-rose-300 dark:border-rose-800 bg-rose-50/40 dark:bg-rose-950/15" : "border-border bg-card"}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="font-mono font-bold text-[15px] text-foreground">{inv.docNum ?? inv.docEntry}</span>
+                      <div className="text-[12px] text-muted-foreground mt-0.5 tnum">
+                        {frDate(inv.docDate)} · éch. {frDate(inv.dueDate)}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="font-bold tnum text-[16px] text-foreground">{eurExact(inv.balance)}</div>
+                      {inv.overdueDays > 30
+                        ? <div className={`text-[12px] font-semibold ${inv.overdueDays >= 90 ? "text-rose-600 dark:text-rose-400" : inv.overdueDays >= 45 ? "text-rose-500 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"}`}>{inv.overdueDays} j de retard</div>
+                        : <div className="text-[12px] text-muted-foreground/60">à jour</div>}
+                    </div>
+                  </div>
+                  {hasAvoirs && (
+                    <div className="mt-2 pt-2 border-t border-border/60 space-y-1">
+                      {inv.avoirs.map((av) => (
+                        <div key={av.docEntry} className="flex items-center justify-between gap-2 text-[12.5px] text-violet-600 dark:text-violet-400">
+                          <span>↳ AV {av.docNum ?? av.docEntry}{av.docDate && <span className="text-muted-foreground"> · {frDate(av.docDate)}</span>}</span>
+                          <span className="tnum font-medium">−{eurExact(av.amount)}</span>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between gap-2 pt-1 text-[13px]">
+                        <span className="uppercase tracking-wide text-[10.5px] font-semibold text-muted-foreground">Total net</span>
+                        <span className="font-bold tnum text-foreground">{eurExact(inv.net)}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── DESKTOP : tableau détaillé ── */}
+          <table className="hidden md:table w-full text-[12.5px]">
+            <thead className="sticky top-0 z-10 bg-card text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
               <tr>
                 <th className="text-left px-4 py-2 font-semibold">N° facture</th>
                 <th className="text-left px-4 py-2 font-semibold">Date</th>
                 <th className="text-left px-4 py-2 font-semibold">Échéance</th>
-                <th className="text-right px-4 py-2 font-semibold">Solde dû</th>
+                <th className="text-right px-4 py-2 font-semibold">Montant</th>
                 <th className="text-right px-4 py-2 font-semibold">Retard</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border/50">
-              {client.invoices.map((inv) => {
-                const late = inv.overdueDays > 30;
-                return (
-                  <tr key={inv.docEntry} className={late ? "bg-rose-50/40 dark:bg-rose-950/15" : ""}>
-                    <td className="px-4 py-2 font-mono text-foreground">{inv.docNum ?? inv.docEntry}</td>
-                    <td className="px-4 py-2 text-muted-foreground">{frDate(inv.docDate)}</td>
-                    <td className="px-4 py-2 text-muted-foreground">{frDate(inv.dueDate)}</td>
-                    <td className="px-4 py-2 text-right font-semibold tnum text-foreground">{eurExact(inv.balance)}</td>
-                    <td className="px-4 py-2 text-right tnum">
+            {/* Une « case » par facture (tbody) : facture + avoirs en retrait + TOTAL. */}
+            {client.invoices.map((inv) => {
+              const late = inv.overdueDays > 30;
+              const hasAvoirs = inv.avoirs.length > 0;
+              return (
+                <tbody key={inv.docEntry} className="border-b-2 border-border/70">
+                  {/* Ligne facture (solde brut) */}
+                  <tr className={late ? "bg-rose-50/40 dark:bg-rose-950/15" : ""}>
+                    <td className="px-4 pt-2 pb-1 font-mono font-semibold text-foreground">{inv.docNum ?? inv.docEntry}</td>
+                    <td className="px-4 pt-2 pb-1 text-muted-foreground">{frDate(inv.docDate)}</td>
+                    <td className="px-4 pt-2 pb-1 text-muted-foreground">{frDate(inv.dueDate)}</td>
+                    <td className="px-4 pt-2 pb-1 text-right font-semibold tnum text-foreground">{eurExact(inv.balance)}</td>
+                    <td className="px-4 pt-2 pb-1 text-right tnum">
                       {inv.overdueDays > 30
                         ? <span className={`font-semibold ${inv.overdueDays >= 90 ? "text-rose-600 dark:text-rose-400" : inv.overdueDays >= 45 ? "text-rose-500 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"}`}>{inv.overdueDays} j</span>
                         : <span className="text-muted-foreground/50">à jour</span>}
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
+                  {/* Avoirs rattachés — imbriqués SOUS la facture, en retrait */}
+                  {inv.avoirs.map((av) => (
+                    <tr key={av.docEntry} className={late ? "bg-rose-50/40 dark:bg-rose-950/15" : ""}>
+                      <td className="px-4 py-0.5 text-violet-600 dark:text-violet-400" colSpan={3}>
+                        <span className="pl-4">↳ AV {av.docNum ?? av.docEntry}</span>
+                        {av.docDate && <span className="text-muted-foreground"> · {frDate(av.docDate)}</span>}
+                      </td>
+                      <td className="px-4 py-0.5 text-right tnum font-medium text-violet-600 dark:text-violet-400">−{eurExact(av.amount)}</td>
+                      <td className="px-4 py-0.5" />
+                    </tr>
+                  ))}
+                  {/* TOTAL facture (net = solde − avoirs) — seulement s'il y a des avoirs */}
+                  {hasAvoirs && (
+                    <tr className={late ? "bg-rose-50/40 dark:bg-rose-950/15" : ""}>
+                      <td className="px-4 pt-1 pb-2 text-[10.5px] uppercase tracking-wide font-semibold text-muted-foreground" colSpan={3}>
+                        <span className="pl-4">Total facture</span>
+                      </td>
+                      <td className="px-4 pt-1 pb-2 text-right font-bold tnum text-foreground border-t border-border/60">{eurExact(inv.net)}</td>
+                      <td className="px-4 pt-1 pb-2 border-t border-border/60" />
+                    </tr>
+                  )}
+                </tbody>
+              );
+            })}
           </table>
         </div>
       </div>

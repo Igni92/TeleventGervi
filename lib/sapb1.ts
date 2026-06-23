@@ -43,9 +43,14 @@ const CFG: Record<SapEnv, { base: string; company: string; user: string; pass: s
 };
 const INSECURE = process.env.SAP_B1_TLS_INSECURE === "1";
 
+// ⚠️ MODE TEST (préversion uniquement) : on force la société SAP TEST sur les
+// déploiements de préversion, SANS toucher au réglage partagé (AppSetting), pour
+// ne jamais impacter la prod. JAMAIS forcé en production. À retirer après tests.
+const FORCE_TEST_ENV = process.env.VERCEL_ENV === "preview";
+
 // Environnement SAP actif (prod par défaut). Persisté en base (AppSetting.sap_env)
 // et rechargé à chaque login → cohérent entre instances et redémarrages.
-let activeEnv: SapEnv = "prod";
+let activeEnv: SapEnv = FORCE_TEST_ENV ? "test" : "prod";
 const cfg = () => CFG[activeEnv];
 
 if (!CFG.prod.base || !CFG.prod.company || !CFG.prod.user || !CFG.prod.pass) {
@@ -54,6 +59,8 @@ if (!CFG.prod.base || !CFG.prod.company || !CFG.prod.user || !CFG.prod.pass) {
 
 /** Recharge l'environnement actif depuis la base (silencieux si indispo). */
 async function loadEnvFromDb(): Promise<void> {
+  // Préversion : on reste verrouillé sur TEST, on ignore le réglage partagé.
+  if (FORCE_TEST_ENV) { activeEnv = "test"; envLoaded = true; return; }
   try {
     // Import dynamique : évite de coupler le client SAP à Prisma au chargement
     // du module (sinon les tests vitest, qui ne résolvent pas l'alias @/, cassent).

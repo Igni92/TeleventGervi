@@ -66,7 +66,7 @@ export default async function CommerciauxPage() {
       <section className="space-y-4">
         <div>
           <p className="kicker mb-1">Équipe TeleVent</p>
-          <p className="text-[12.5px] text-muted-foreground max-w-2xl">
+          <p className="hidden md:block text-[12.5px] text-muted-foreground max-w-2xl">
             Comptes connectés : présence du jour, % de stock attribué et menu{" "}
             <span className="font-medium text-foreground">Récupérer ▾</span> pour reprendre
             temporairement les clients d&apos;un collègue absent.
@@ -128,7 +128,7 @@ export default async function CommerciauxPage() {
         <h1 className="font-display text-[34px] font-semibold text-foreground tracking-tight leading-none">
           Commerciaux
         </h1>
-        <p className="text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
+        <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
           Commerciaux SAP avec activité sur 12 mois : CA net facturé, volume BL (kg),
           clients actifs et tendance hebdo. Clic sur une carte → fiche détaillée
           (états commercial et comptable).

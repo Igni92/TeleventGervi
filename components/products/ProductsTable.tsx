@@ -5,8 +5,12 @@ import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
   Search, RefreshCw, Loader2, Package, ChevronLeft, ChevronRight,
-  AlertTriangle, Check, ChevronDown, Scale, X,
+  AlertTriangle, Check, ChevronDown, Scale, X, LayoutGrid,
 } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InfoTip } from "@/components/ui/info-tip";
@@ -93,6 +97,8 @@ export function ProductsTable() {
   // Rows expanded to show batches
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [batches, setBatches] = useState<Record<string, Batch[] | "loading">>({});
+  // Groupes repliés sur la liste mobile (style Écran 2 — sections par famille).
+  const [closedGroups, setClosedGroups] = useState<Set<string>>(new Set());
 
   const toggleExpand = useCallback(async (productId: string) => {
     if (expandedId === productId) { setExpandedId(null); return; }
@@ -256,7 +262,7 @@ export function ProductsTable() {
 
       {/* ── Toolbar ── */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 max-w-md">
+        <div className="relative w-full sm:flex-1 sm:max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Rechercher code ou nom produit…"
@@ -300,9 +306,70 @@ export function ProductsTable() {
         )}
       </div>
 
-      {/* Horizontal group pills — only groups with at least 1 product in stock */}
+      {/* ── MOBILE : groupes en menu déroulant (les puces horizontales débordaient
+            et étaient coupées hors-écran). Multi-sélection conservée. ── */}
+      {groups.length > 0 && (() => {
+        const allCount = groups.reduce((s, g) => s + g.count, 0);
+        const groupLabel =
+          selectedGroups.size === 0 ? "Tous les groupes"
+          : selectedGroups.size === 1 ? (groups.find((g) => selectedGroups.has(g.id))?.name ?? "1 groupe")
+          : `${selectedGroups.size} groupes`;
+        return (
+          <div className="md:hidden">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="w-full inline-flex items-center justify-between gap-2 h-10 px-3.5 rounded-xl border border-border bg-card text-[13.5px] font-medium text-foreground active:bg-secondary/40 transition-colors">
+                  <span className="inline-flex items-center gap-2 min-w-0">
+                    <LayoutGrid className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="truncate">{groupLabel}</span>
+                  </span>
+                  <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] max-w-sm max-h-[60vh] overflow-y-auto">
+                <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground">
+                  Filtrer par groupe
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={(e) => { e.preventDefault(); setSelectedGroups(new Set()); }}
+                  className="cursor-pointer flex items-center gap-2 text-[13.5px]"
+                >
+                  <span className="flex-1">Tous les groupes</span>
+                  <span className="tnum text-muted-foreground text-[12px]">{allCount}</span>
+                  {selectedGroups.size === 0 && <Check className="h-4 w-4 text-brand-500" />}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {groups.map((g) => {
+                  const checked = selectedGroups.has(g.id);
+                  return (
+                    <DropdownMenuItem
+                      key={g.id}
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        setSelectedGroups((cur) => {
+                          const next = new Set(cur);
+                          if (next.has(g.id)) next.delete(g.id); else next.add(g.id);
+                          return next;
+                        });
+                      }}
+                      className="cursor-pointer flex items-center gap-2 text-[13.5px]"
+                    >
+                      <span className="flex-1 truncate">{g.name}</span>
+                      <span className="tnum text-muted-foreground text-[12px]">{g.count}</span>
+                      {checked && <Check className="h-4 w-4 text-brand-500" />}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        );
+      })()}
+
+      {/* ── DESKTOP : puces horizontales — groupes avec ≥ 1 produit en stock ── */}
       {groups.length > 0 && (
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 -mb-1 scrollbar-thin">
+        <div className="hidden md:flex items-center gap-2 overflow-x-auto pb-1 -mb-1 scrollbar-thin">
           <span className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground shrink-0 mr-1">
             Groupes
           </span>
@@ -345,8 +412,9 @@ export function ProductsTable() {
         </div>
       )}
 
-      {/* ── Mobile : liste de cartes (code + qté en gros, lots au tap) ── */}
-      <div className="md:hidden space-y-2.5">
+      {/* ── Mobile : stock en SECTIONS par famille (style Écran 2) — dispo à
+            gauche, désignation + chips colorés (marque/condt/origine) à droite. ── */}
+      <div className="md:hidden space-y-3">
         {loading && !data?.products.length ? (
           <div className="h-32 flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
         ) : !data?.products.length ? (
@@ -354,53 +422,104 @@ export function ProductsTable() {
             {last?.totalProducts === 0 ? "Aucun produit — lance un premier sync sur ordinateur." : "Aucun produit ne correspond aux filtres."}
           </p>
         ) : (
-          data.products.map((p) => {
-            const unit = (p.itemGroup != null ? groupUnits[String(p.itemGroup)] : undefined) ?? null;
-            const dz = designationProduit({ itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque, uCondi: p.uCondi });
-            const totalAvailable = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.available ?? 0), 0);
-            const totalOrdered = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.ordered ?? 0), 0);
-            const stockD = stockDisplay(p, totalAvailable, unit);
-            const orderD = stockDisplay(p, totalOrdered, unit);
-            const fmtQty = (n: number, whole: boolean) => (whole ? Math.floor(n).toString() : n.toFixed(0));
-            const isExpanded = expandedId === p.id;
-            const condt = dz.condt !== "—" ? dz.condt : "";
-            const attendu = orderD.qty > 0 ? `+${fmtQty(orderD.qty, orderD.whole)} ${orderD.label} attendu` : "";
-            return (
-              <div key={p.id} className="rounded-2xl border border-border bg-card overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => { if (p.manageBatch) toggleExpand(p.id); }}
-                  className={`w-full flex items-center gap-3 p-4 text-left ${p.manageBatch ? "active:bg-secondary/40" : "cursor-default"}`}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="font-mono font-semibold text-[16px] text-foreground leading-tight">{p.itemCode}</div>
-                    <div className="text-[15px] text-foreground/90 leading-snug mt-0.5">{dz.fruit}</div>
-                    {(condt || attendu) && (
-                      <div className="text-[13px] text-muted-foreground mt-1">
-                        {condt}
-                        {condt && attendu ? " · " : ""}
-                        {attendu && <span className="text-sky-600 dark:text-sky-400">{attendu}</span>}
+          (() => {
+            // Regroupe la page courante par famille (groupName), ordre alpha.
+            const byGroup = new Map<string, Product[]>();
+            for (const p of data.products) {
+              const g = p.groupName?.trim() || "Autres";
+              const arr = byGroup.get(g);
+              if (arr) arr.push(p); else byGroup.set(g, [p]);
+            }
+            const chip = "inline-flex items-center px-2 py-0.5 rounded-[5px] text-[11px] font-semibold";
+            return Array.from(byGroup.entries())
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([groupName, prods]) => {
+                const isClosed = closedGroups.has(groupName);
+                return (
+                  <div key={groupName} className="rounded-2xl border border-border bg-card overflow-hidden">
+                    {/* En-tête de famille (repliable) */}
+                    <button
+                      type="button"
+                      onClick={() => setClosedGroups((cur) => {
+                        const next = new Set(cur);
+                        if (next.has(groupName)) next.delete(groupName); else next.add(groupName);
+                        return next;
+                      })}
+                      className="w-full flex items-center gap-2 px-3.5 py-2.5 bg-secondary/40 border-b border-border text-left active:bg-secondary/60"
+                    >
+                      <ChevronDown className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform ${isClosed ? "-rotate-90" : ""}`} />
+                      <span className="text-[13.5px] font-semibold text-foreground">{groupName}</span>
+                      <span className="text-[11px] tnum text-muted-foreground">({prods.length})</span>
+                    </button>
+
+                    {!isClosed && (
+                      <div className="divide-y divide-border/60">
+                        {prods.map((p) => {
+                          const unit = (p.itemGroup != null ? groupUnits[String(p.itemGroup)] : undefined) ?? null;
+                          const dz = designationProduit({ itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque, uCondi: p.uCondi });
+                          const totalAvailable = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.available ?? 0), 0);
+                          const totalOrdered = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.ordered ?? 0), 0);
+                          const stockD = stockDisplay(p, totalAvailable, unit);
+                          const orderD = stockDisplay(p, totalOrdered, unit);
+                          const fmtQty = (n: number, whole: boolean) => (whole ? Math.floor(n).toString() : n.toFixed(0));
+                          const isExpanded = expandedId === p.id;
+                          const noStock = stockD.qty <= 0;
+                          const attendu = orderD.qty > 0 ? `+${fmtQty(orderD.qty, orderD.whole)} ${orderD.label} en achat` : "";
+                          return (
+                            <div key={p.id}>
+                              <button
+                                type="button"
+                                onClick={() => { if (p.manageBatch) toggleExpand(p.id); }}
+                                className={`w-full grid items-center gap-3 px-3 py-2.5 text-left ${p.manageBatch ? "active:bg-secondary/30" : "cursor-default"} ${noStock ? "bg-rose-50/40 dark:bg-rose-950/15" : ""}`}
+                                style={{ gridTemplateColumns: "60px minmax(0,1fr) auto" }}
+                              >
+                                {/* Dispo à GAUCHE */}
+                                <span className="flex flex-col items-center text-center leading-none">
+                                  {noStock ? (
+                                    <>
+                                      <span className="text-[15px] font-bold text-rose-600 dark:text-rose-400">À déc.</span>
+                                      <span className="text-[9px] font-medium uppercase tracking-wide text-rose-500/80 mt-1">à récept.</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="text-[23px] font-bold tnum tracking-tight text-foreground">{fmtQty(stockD.qty, stockD.whole)}</span>
+                                      <span className="text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground/70 mt-1">{stockD.label}</span>
+                                    </>
+                                  )}
+                                </span>
+                                {/* Désignation + chips colorés à DROITE */}
+                                <span className="min-w-0 border-l border-border/60 pl-3">
+                                  <span className="block text-[15px] font-semibold text-foreground truncate leading-tight">{dz.fruit}</span>
+                                  {(dz.marque !== "—" || dz.condt !== "—" || dz.pays !== "—") && (
+                                    <span className="mt-1.5 flex items-center gap-1 flex-wrap">
+                                      {dz.marque !== "—" && <span className={`${chip} bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100 dark:ring-1 dark:ring-inset dark:ring-violet-400/50`}>{dz.marque}</span>}
+                                      {dz.condt !== "—" && <span className={`${chip} bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100 dark:ring-1 dark:ring-inset dark:ring-sky-400/50`}>{dz.condt}</span>}
+                                      {dz.pays !== "—" && <span className={`${chip} bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100 dark:ring-1 dark:ring-inset dark:ring-amber-400/50`}>{dz.pays}</span>}
+                                    </span>
+                                  )}
+                                  <span className="flex items-baseline gap-2 text-[11px] mt-1 min-w-0">
+                                    <span className="font-mono text-muted-foreground/60 truncate">{p.itemCode}</span>
+                                    {attendu && <span className="text-sky-600 dark:text-sky-400 shrink-0 font-medium">{attendu}</span>}
+                                  </span>
+                                </span>
+                                {p.manageBatch && (
+                                  <ChevronDown className={`h-5 w-5 text-muted-foreground/50 shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+                                )}
+                              </button>
+                              {isExpanded && (
+                                <div className="px-4 pb-4 pt-3 bg-secondary/20">
+                                  <BatchList batches={batches[p.id]} product={p} />
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-[26px] font-bold tnum leading-none text-foreground">
-                      {stockD.qty > 0 ? fmtQty(stockD.qty, stockD.whole) : <span className="text-muted-foreground/40">0</span>}
-                    </div>
-                    <div className="text-[12px] text-muted-foreground mt-1">{stockD.label}</div>
-                  </div>
-                  {p.manageBatch && (
-                    <ChevronDown className={`h-5 w-5 text-muted-foreground/50 shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
-                  )}
-                </button>
-                {isExpanded && (
-                  <div className="px-4 pb-4 border-t border-border/60 pt-3">
-                    <BatchList batches={batches[p.id]} product={p} />
-                  </div>
-                )}
-              </div>
-            );
-          })
+                );
+              });
+          })()
         )}
       </div>
 

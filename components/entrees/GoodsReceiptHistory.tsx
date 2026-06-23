@@ -147,11 +147,11 @@ export function GoodsReceiptHistory() {
           <div className="flex flex-wrap gap-6 pb-1">
             <Stat label="Entrées" value={<AnimatedNumber value={filtered.length} />} />
             <Stat
-              label="Valeur cumulée (TTC)"
+              label="Valeur cumulée (HT)"
               tone="emerald"
               value={
                 <AnimatedNumber
-                  value={filtered.reduce((s, d) => s + (d.totalTTC ?? d.total ?? 0), 0)}
+                  value={filtered.reduce((s, d) => s + (d.totalHT ?? 0), 0)}
                   format={(n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n)}
                 />
               }
@@ -160,8 +160,50 @@ export function GoodsReceiptHistory() {
           </div>
         )}
 
+        {/* Mobile : liste de cartes — le tap OUVRE le détail en plein écran
+            (pas d'accordéon : le détail ne tient pas en ligne sur téléphone). */}
         {filtered.length > 0 && (
-          <div className="rounded-lg border border-border overflow-hidden">
+          <div className="md:hidden space-y-2.5">
+            {filtered.map((d) => {
+              const openInc = openCountByDoc.get(d.docEntry) ?? 0;
+              return (
+                <button
+                  key={d.docEntry}
+                  type="button"
+                  onClick={() => setLargeEntry(d.docEntry)}
+                  className="w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-semibold text-[16px] text-foreground">#{d.docNum}</span>
+                      {openInc > 0 && (
+                        <span className="inline-flex items-center gap-1 px-2 h-6 rounded-md text-[12px] font-semibold bg-amber-500/15 border border-amber-500/60 text-amber-600 dark:text-amber-400">
+                          <AlertTriangle className="h-3 w-3" />{openInc}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[14px] text-foreground/90 mt-0.5 truncate" title={d.cardName}>
+                      {d.cardName || d.cardCode}
+                    </div>
+                    <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
+                      {fmtDate(d.docDate)} · {d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
+                    <div>
+                      <span className="text-[17px] font-bold tnum text-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
+                      <span className="ml-1 text-[11px] text-muted-foreground">HT</span>
+                    </div>
+                    <ChevronRight className="h-5 w-5 text-muted-foreground/50" />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {filtered.length > 0 && (
+          <div className="hidden md:block rounded-lg border border-border overflow-hidden">
             <table className="w-full text-[13px]">
               <thead className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
                 <tr>
@@ -171,7 +213,7 @@ export function GoodsReceiptHistory() {
                   <th className="text-left px-3 py-2 font-semibold">Fournisseur</th>
                   <th className="text-left px-3 py-2 font-semibold w-28">Date</th>
                   <th className="text-right px-3 py-2 font-semibold w-16">Lignes</th>
-                  <th className="text-right px-3 py-2 font-semibold w-28">Total TTC</th>
+                  <th className="text-right px-3 py-2 font-semibold w-28">Total HT</th>
                   <th className="text-center px-3 py-2 font-semibold w-20">Incident</th>
                 </tr>
               </thead>
@@ -196,7 +238,7 @@ export function GoodsReceiptHistory() {
                       </td>
                       <td className="px-3 py-2 text-muted-foreground tnum">{fmtDate(d.docDate)}</td>
                       <td className="px-3 py-2 text-right tnum">{d.lineCount}</td>
-                      <td className="px-3 py-2 text-right tnum font-semibold">{eur(d.totalTTC ?? d.total ?? 0)}</td>
+                      <td className="px-3 py-2 text-right tnum font-semibold">{eur(d.totalHT ?? 0)}</td>
                       <td className="px-3 py-2 text-center">
                         {/* Icône incident visible UNIQUEMENT s'il y a un incident ouvert */}
                         {openInc > 0 ? (
@@ -241,11 +283,12 @@ export function GoodsReceiptHistory() {
       {/* ── Affichage agrandi (plein cadre) d'une entrée marchandise ── */}
       <Dialog open={!!largeDoc} onOpenChange={(o) => { if (!o) setLargeEntry(null); }}>
         <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ClipboardList className="h-5 w-5 text-sky-600 dark:text-sky-400" />
-              Entrée marchandise N° {largeDoc?.docNum}
-              {largeDoc?.lot && <span className="text-[13px] font-normal font-mono text-muted-foreground">· {largeDoc.lot}</span>}
+          <DialogHeader className="text-left">
+            <DialogTitle className="flex items-center gap-2 justify-start pr-8 text-[16px] sm:text-[18px] whitespace-nowrap">
+              <ClipboardList className="h-5 w-5 shrink-0 text-sky-600 dark:text-sky-400" />
+              <span className="truncate min-w-0">Entrée marchandise N° {largeDoc?.docNum}</span>
+              {/* Lot = « EM{docNum} » → redondant avec le N° ci-dessus : masqué sur mobile pour tenir sur UNE ligne. */}
+              {largeDoc?.lot && <span className="hidden sm:inline text-[13px] font-normal font-mono text-muted-foreground shrink-0">· {largeDoc.lot}</span>}
             </DialogTitle>
           </DialogHeader>
           {largeDoc && (
@@ -363,8 +406,42 @@ function ReceiptDetail({
       </div>
       {receipt.comments && <p className={`italic text-muted-foreground ${big ? "text-[13px]" : "text-[11.5px]"}`}>« {receipt.comments} »</p>}
 
-      {/* Lignes — désignation décomposée + HT par ligne */}
-      <div className="rounded-lg border border-border overflow-x-auto bg-card/40">
+      {/* Mobile : lignes empilées (le tableau large déborde) + totaux */}
+      <div className="md:hidden space-y-2">
+        {receipt.lines.map((l, i) => {
+          const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi });
+          const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
+          const desc = [dz.pays, dz.marque, dz.variete, dz.condt].filter((x) => x && x !== "—").join(" · ");
+          return (
+            <div key={`m-${l.itemCode}-${i}`} className="rounded-lg border border-border bg-card/40 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
+                  <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
+                  {desc && <div className="text-[13px] text-muted-foreground mt-0.5">{desc}</div>}
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-[15px] font-bold tnum text-foreground">{lineHT != null ? eur(lineHT) : "—"}</div>
+                  <div className="text-[11px] text-muted-foreground">HT</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 mt-2 text-[13px] text-muted-foreground tnum">
+                <span className="text-foreground font-medium">{fmtColis(l.packageQuantity)} colis</span>
+                <span>·</span>
+                <span>PU {l.price != null ? eur(l.price) : "—"}</span>
+              </div>
+            </div>
+          );
+        })}
+        <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1.5">
+          <div className="flex justify-between text-[14px]"><span className="text-muted-foreground">Total HT</span><span className="font-semibold tnum">{eur(receipt.totalHT ?? 0)}</span></div>
+          <div className="flex justify-between text-[14px]"><span className="text-muted-foreground">TVA</span><span className="tnum text-muted-foreground">{eur(receipt.totalTVA ?? 0)}</span></div>
+          <div className="flex justify-between text-[16px] border-t border-border pt-1.5"><span className="font-semibold text-foreground">Total TTC</span><span className="font-bold tnum text-foreground">{eur(receipt.totalTTC ?? receipt.total ?? 0)}</span></div>
+        </div>
+      </div>
+
+      {/* Desktop : tableau large — désignation décomposée + HT par ligne */}
+      <div className="hidden md:block rounded-lg border border-border overflow-x-auto bg-card/40">
         <table className={`w-full ${tbl}`}>
           <thead className="bg-secondary/40 uppercase tracking-wide text-muted-foreground">
             <tr>

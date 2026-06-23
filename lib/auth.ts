@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 
 const ALLOWED_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || "gervifrais.com";
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
   // Derrière le proxy Vercel : on fait confiance à l'en-tête Host transmis
   // (x-forwarded-host) pour construire les URL (callback OAuth, redirections)
@@ -66,6 +66,34 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     error: "/login",
   },
 });
+
+/**
+ * ⚠️ MODE TEST (préversion uniquement) — bypass TEMPORAIRE du login Microsoft.
+ *
+ * Activé EXCLUSIVEMENT quand `VERCEL_ENV === "preview"` (déploiements de
+ * préversion = branches). JAMAIS en production (`VERCEL_ENV === "production"`)
+ * ni en local. Permet de tester l'UI (mobile) sans SSO. À RETIRER une fois les
+ * tests terminés.
+ *
+ * En mode test, `auth()` (sans argument, server components/routes) renvoie une
+ * session factice. Les autres signatures (middleware) passent au vrai handler ;
+ * le middleware (proxy.ts) court-circuite la redirection login en préversion.
+ */
+const TEST_NO_AUTH = process.env.VERCEL_ENV === "preview";
+
+// Email admin (cf. ADMIN_EMAILS) → la préversion voit les données réelles
+// (sinon périmètre vide = 0 client / 0 encours). Préversion uniquement.
+const FAKE_SESSION = {
+  user: { name: "Test (préversion)", email: "m.mandine@gervifrais.com" },
+  expires: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+};
+
+export const auth = ((...args: unknown[]) => {
+  if (TEST_NO_AUTH && args.length === 0) {
+    return Promise.resolve(FAKE_SESSION);
+  }
+  return (_auth as (...a: unknown[]) => unknown)(...args);
+}) as unknown as typeof _auth;
 
 // Le jeton d'accès Graph vit dans le JWT (server-only), PAS dans la Session
 // exposée au client. Typage du JWT pour getToken()/le callback jwt.

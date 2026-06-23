@@ -15,7 +15,7 @@ export default async function PromosPage() {
         <h1 className="text-[32px] font-bold text-foreground tracking-tight leading-none">
           Promos
         </h1>
-        <p className="text-[13px] text-muted-foreground mt-3 max-w-2xl">
+        <p className="hidden md:block text-[13px] text-muted-foreground mt-3 max-w-2xl">
           Les promos <b>actives</b> s&apos;affichent en badge sur la liste stock de
           l&apos;Écran 2, préremplissent la remise à l&apos;ajout au panier
           (remise % ou colis offerts) et sont mentionnées en en-tête du bon SAP.

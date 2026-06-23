@@ -322,8 +322,57 @@ export function PlanAppel() {
         </div>
       )}
 
-      {/* Table */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
+      {/* Mobile : cartes (nom + appel direct + dernière cde + incident) ;
+          les contrôles d'assignation (vendeur/commercial) restent sur desktop. */}
+      <div className="md:hidden space-y-2.5">
+        {loading ? (
+          <div className="h-32 flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        ) : data.length === 0 ? (
+          <p className="text-center text-muted-foreground py-10 text-[15px]">Aucun client pour ces filtres.</p>
+        ) : data.map((c) => {
+          const tel = c.tel1 || c.tel2 || null;
+          const telHref = tel ? tel.replace(/[^\d+]/g, "") : null;
+          const tv = c.type === "GMS" ? "gms" : c.type === "EXPORT" ? "export" : c.type === "CHR" ? "chr" : "outline";
+          return (
+            <div key={c.id} className={`rounded-2xl border border-border bg-card p-4 ${!c.activeTelevente ? "opacity-70" : ""}`}>
+              <div className="flex items-start justify-between gap-3">
+                <Link href={`/clients/${c.id}`} className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[16px] font-semibold text-foreground leading-tight">{c.nom}</span>
+                    {c.type && <Badge variant={tv as "gms" | "export" | "chr" | "outline"}>{c.type}</Badge>}
+                    {!c.activeTelevente && (
+                      <span className="inline-flex h-[18px] items-center px-1.5 rounded text-[11px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">à activer</span>
+                    )}
+                    {c.openIncidents > 0 && (
+                      <span className="inline-flex items-center gap-1 h-[18px] px-1.5 rounded text-[11px] font-bold bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300">
+                        <AlertTriangle className="h-3 w-3" />{c.openIncidents}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[12px] font-mono text-muted-foreground mt-1">
+                    {c.code}{c.vendeur ? ` · vend. ${c.vendeur}` : ""}
+                  </div>
+                </Link>
+              </div>
+              <div className="flex items-center justify-between gap-2 mt-3">
+                {telHref ? (
+                  <a href={`tel:${telHref}`} className="inline-flex items-center gap-2 h-10 px-3 rounded-xl bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[15px] font-semibold tnum active:scale-[0.97]">
+                    <Phone className="h-4 w-4" /> {tel}
+                  </a>
+                ) : (
+                  <span className="text-[13px] text-muted-foreground">Pas de téléphone</span>
+                )}
+                <span className="text-[13px] text-muted-foreground shrink-0">
+                  {c.lastOrderDays != null ? `cde il y a ${c.lastOrderDays} j` : "jamais commandé"}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Table (desktop) */}
+      <div className="hidden md:block bg-card border border-border rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead className="bg-secondary/40 text-[10.5px] uppercase tracking-wider text-muted-foreground">

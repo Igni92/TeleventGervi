@@ -4,6 +4,12 @@ import { NextResponse } from "next/server";
 export default auth((req) => {
   const { pathname } = req.nextUrl;
 
+  // ⚠️ MODE TEST (préversion uniquement) : on laisse tout passer, le login
+  // Microsoft est court-circuité. JAMAIS en production. À retirer après tests.
+  if (process.env.VERCEL_ENV === "preview") {
+    return NextResponse.next();
+  }
+
   // Origine RÉELLE de la requête derrière le proxy Vercel. On n'utilise pas
   // req.url (ni NEXTAUTH_URL) qui peut pointer vers http://localhost:3000 si la
   // variable d'env a été écrasée — x-forwarded-host/proto reflètent toujours le

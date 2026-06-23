@@ -50,7 +50,7 @@ function HubHeader({ firstName }: { firstName: string | null }) {
           {salutation}
           {firstName ? ` ${firstName}` : ""}
         </h1>
-        <p className="text-[12.5px] text-muted-foreground mt-2">
+        <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2">
           Voici l&apos;activité du jour en un coup d&apos;œil.
         </p>
       </div>

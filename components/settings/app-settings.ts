@@ -16,8 +16,14 @@
 export const SETTING_KEYS = {
   /** colorimétrie Or/Agrume/Fraise — clé historique de ColorimetrieSwitcher */
   colorimetrie: "televent-theme",
-  /** densité de la liste stock Écran 2 : "compact" | "normal" | "aere" */
-  ecran2Density: "televente:ecran2Density",
+  /**
+   * Densité d'affichage GLOBALE de l'app : "compact" | "normal" | "aere".
+   * Pilote l'attribut `data-density` sur <html> (échelle rem racine, cf.
+   * globals.css). Clé localStorage HISTORIQUE conservée (`…:ecran2Density`)
+   * pour ne pas perdre les valeurs déjà enregistrées : la Console Écran 2 lit
+   * exactement la même clé/valeur, donc rien à migrer.
+   */
+  density: "televente:ecran2Density",
   /** animation/rotation auto du bandeau promos : "on" | "off" (défaut on) */
   promoBannerAnim: "televente:promoBannerAnim",
   /** modale « Nouvelles promotions » à l'ouverture : "on" | "off" (défaut on) */

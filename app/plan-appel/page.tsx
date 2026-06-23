@@ -16,7 +16,7 @@ export default async function PlanAppelPage() {
         <h1 className="font-display text-[34px] font-semibold text-foreground tracking-tight leading-none">
           Plan d&apos;appel
         </h1>
-        <p className="text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
+        <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
           Centralise les appels : affecte chaque client à un <b>vendeur</b> (télévente) et un
           <b> commercial</b>, repère les <b>commandes en retard</b>, les <b>incidents ouverts</b>
           et les jours d&apos;appel. Synchronisation des données dans <b>Paramètres › Données · SAP</b>.

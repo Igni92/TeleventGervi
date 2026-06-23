@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
-  Radio, ClipboardList, Users, Briefcase,
+  Users, Briefcase,
   PackagePlus, Package, Factory,
   Receipt, LayoutDashboard,
   Settings, Tag,
@@ -44,12 +44,11 @@ const AXES: Axis[] = [
   {
     key: "commercial",
     label: "Commercial",
-    desc: "Télévente au quotidien",
+    desc: "Clients & commandes",
+    // Pas d'outils de télévente (console / plan d'appel) sur mobile : tout passe
+    // par la fiche client (commander, noter, notifier un appel).
     tiles: [
-      { href: "/console", label: "Console", sub: "Prise de commande", icon: Radio },
-      { href: "/plan-appel", label: "Plan d'appel", sub: "Clients à appeler", icon: ClipboardList },
-      { href: "/clients", label: "Clients", sub: "Fiches & recherche", icon: Users },
-      { href: "/commerciaux", label: "Commerciaux", sub: "Portefeuilles", icon: Briefcase },
+      { href: "/clients", label: "Clients", icon: Users },
     ],
   },
   {
@@ -57,9 +56,9 @@ const AXES: Axis[] = [
     label: "Acheteur",
     desc: "Approvisionnement & stock",
     tiles: [
-      { href: "/entrees", label: "Entrées march.", sub: "Réceptions & incidents", icon: PackagePlus, badge: "receptionIncidents" },
-      { href: "/products", label: "Stock", sub: "Disponibilités", icon: Package },
-      { href: "/fabrication", label: "Fabrication", sub: "Assemblages", icon: Factory },
+      { href: "/entrees", label: "Entrées march.", icon: PackagePlus, badge: "receptionIncidents" },
+      { href: "/products", label: "Stock", icon: Package },
+      { href: "/fabrication", label: "Fabrication", icon: Factory },
     ],
   },
   {
@@ -67,8 +66,8 @@ const AXES: Axis[] = [
     label: "Comptable",
     desc: "Encours & finances",
     tiles: [
-      { href: "/encours", label: "Encours", sub: "Retards & relances", icon: Receipt },
-      { href: "/dashboard", label: "Statistiques", sub: "Chiffres clés", icon: LayoutDashboard },
+      { href: "/encours", label: "Encours", icon: Receipt },
+      { href: "/dashboard", label: "Statistiques", icon: LayoutDashboard },
     ],
   },
   {
@@ -76,9 +75,9 @@ const AXES: Axis[] = [
     label: "Administrateur",
     desc: "Pilotage & réglages",
     tiles: [
-      { href: "/dashboard", label: "Cockpit", sub: "Vue d'ensemble", icon: LayoutDashboard },
-      { href: "/promos", label: "Promotions", sub: "Offres en cours", icon: Tag },
-      { href: "/parametres", label: "Paramètres", sub: "Configuration", icon: Settings },
+      { href: "/commerciaux", label: "Commerciaux", icon: Briefcase },
+      { href: "/promos", label: "Promotions", icon: Tag },
+      { href: "/parametres", label: "Paramètres", icon: Settings },
     ],
   },
 ];
@@ -121,14 +120,16 @@ export function MobileTiles({ className }: { className?: string }) {
               <h2 className="text-[17px] font-semibold text-foreground leading-none">{axis.label}</h2>
             </div>
             <div className="grid grid-cols-2 gap-2.5">
-              {axis.tiles.map((t) => {
+              {axis.tiles.map((t, idx) => {
                 const Icon = t.icon;
                 const count = t.badge ? badges[t.badge] ?? 0 : 0;
+                // Dernière tuile d'un axe au nombre impair → pleine largeur (pas de trou).
+                const fillRow = idx === axis.tiles.length - 1 && axis.tiles.length % 2 === 1;
                 return (
                   <Link
                     key={t.href + t.label}
                     href={t.href}
-                    className="group relative flex flex-col justify-between h-[104px] rounded-2xl border border-border bg-card p-3.5 active:scale-[0.97] transition-transform overflow-hidden"
+                    className={`group relative flex flex-col justify-between h-[104px] rounded-2xl border border-border bg-card p-3.5 active:scale-[0.97] transition-transform overflow-hidden ${fillRow ? "col-span-2" : ""}`}
                   >
                     <div className="flex items-start justify-between">
                       <span className={`inline-flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${accent.icon}`}>
