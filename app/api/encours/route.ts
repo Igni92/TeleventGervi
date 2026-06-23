@@ -4,7 +4,6 @@ import { getAccessScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { netEncours } from "@/lib/encours-net";
-import { attributeAvoirs, type CreditNoteRef } from "@/lib/encours-avoirs";
 import { cached, invalidate } from "@/lib/ttlCache";
 
 /**
@@ -43,24 +42,7 @@ interface BpBalance {
   CardCode: string;
   CurrentAccountBalance?: number;
 }
-// Avoir client (CreditNote) lu en direct, avec ses lignes : on récupère le lien
-// vers la facture d'origine (BaseType=13 → BaseEntry = DocEntry facture).
-interface CreditNoteDoc {
-  DocEntry: number;
-  DocNum?: number;
-  DocDate?: string;
-  CardCode: string;
-  DocTotal?: number;   // montant TTC de l'avoir (positif)
-  DocumentLines?: { BaseType?: number; BaseEntry?: number }[];
-}
 
-/** Avoir attribué à une facture (n° d'avoir, date, montant imputé). */
-interface AttributedAvoir {
-  docEntry: number;
-  docNum: number | null;
-  docDate: string | null;
-  amount: number;
-}
 interface InvoiceLine {
   docEntry: number;
   docNum: number | null;
@@ -68,27 +50,17 @@ interface InvoiceLine {
   dueDate: string | null;
   balance: number;     // solde dû (brut, par facture)
   overdueDays: number; // jours au-delà de l'échéance (0 si à jour)
-  avoirs: AttributedAvoir[]; // avoirs rattachés à CETTE facture (BaseEntry SAP)
-  avoirsTotal: number;       // somme des avoirs attribués (positif)
-  net: number;               // solde net facture = balance − avoirsTotal (≥ 0)
 }
 interface ClientEncours {
   cardCode: string;
   cardName: string;
   clientId: string | null;
-  encours: number;     // NET dû (= brut − encaissé − avoirs attribués) — INCHANGÉ
+  encours: number;     // NET dû (= brut − encaissé)
   brut: number;        // somme des factures ouvertes (avant déduction)
-  // Déduction globale (brut − net) scindée en DEUX postes distincts :
-  //   - encaisse : PAIEMENTS + avoirs non rattachables (sac global, EN LIGNE) ;
-  //   - avoirsAttribues : avoirs ré-imputés à une facture précise (affichés sous
-  //     la facture). encaisse + avoirsAttribues == ancien « encaissé » global
-  //     → le net total ne change pas.
-  encaisse: number;        // paiements + avoirs NON affectés (déduit en ligne)
-  avoirsAttribues: number; // avoirs rattachés à une facture (déduit par facture)
+  encaisse: number;    // encaissé/avoirs non affectés (déduit EN LIGNE, pas par facture)
   countOpen: number;   // nb factures avec solde dû
-  // Paliers de retard EXCLUSIFS, au BRUT : on garde le solde brut des factures
-  // pour le classement par ancienneté (cohérent avec l'historique). Les avoirs
-  // attribués s'affichent SOUS la facture mais n'altèrent pas les tranches.
+  // Paliers de retard EXCLUSIFS, au BRUT (on ne répartit pas les avoirs par
+  // facture : un avoir peut viser une autre facture → déduction globale en ligne).
   b3045: number;       // 30 < retard ≤ 45 j
   b4590: number;       // 45 < retard ≤ 90 j
   b90: number;         // retard > 90 j
@@ -149,63 +121,6 @@ async function fetchBalances(cardCodes: string[]): Promise<Map<string, number>> 
   return map;
 }
 
-/**
- * Avoirs clients (CreditNotes) NON annulés, UNIQUEMENT pour les cardCodes utiles.
- * On lit les DocumentLines pour récupérer le lien vers la facture d'origine
- * (BaseType=13 = Invoice → BaseEntry = DocEntry de la facture). Best-effort : un
- * paquet KO → ces clients n'auront pas d'avoir attribué (ils retombent sur le
- * comportement actuel = avoir laissé dans le sac « encaissé » global).
- *
- * NB : pas de filtre sur le statut de l'avoir. Un avoir réconcilié a déjà
- * augmenté le PaidToDate de sa facture (le solde brut est donc déjà net de lui),
- * un avoir ouvert a déjà baissé le CurrentAccountBalance : dans les deux cas le
- * garde-fou anti double-comptage de lib/encours-avoirs plafonne l'attribution
- * par l'« encaissé » réel, donc lire tous les avoirs récents est sans risque.
- */
-async function fetchCreditNotes(cardCodes: string[]): Promise<Map<string, CreditNoteRef[]>> {
-  const byClient = new Map<string, CreditNoteRef[]>();
-  if (cardCodes.length === 0) return byClient;
-  const CHUNK = 30; // plus petit : on tire les DocumentLines (payload plus lourd)
-  const chunks: string[][] = [];
-  for (let i = 0; i < cardCodes.length; i += CHUNK) chunks.push(cardCodes.slice(i, i + CHUNK));
-  const results = await Promise.all(
-    chunks.map((chunk) => {
-      const filter =
-        "Cancelled eq 'tNO' and (" +
-        chunk.map((c) => `CardCode eq '${c.replace(/'/g, "''")}'`).join(" or ") +
-        ")";
-      return sap
-        .getAll<CreditNoteDoc>(
-          `CreditNotes?$select=DocEntry,DocNum,DocDate,CardCode,DocTotal,DocumentLines&$filter=${filter}`,
-          { pageSize: 100, maxPages: 5, env: "prod" },
-        )
-        .catch((e) => {
-          console.error("[encours] lecture d'un paquet d'avoirs échouée (avoirs ignorés):", e);
-          return [] as CreditNoteDoc[];
-        });
-    }),
-  );
-  for (const arr of results) {
-    for (const d of arr) {
-      // 1ère ligne pointant une facture (BaseType=13) → facture d'origine.
-      let baseInvoiceEntry: number | null = null;
-      for (const l of d.DocumentLines ?? []) {
-        if (l.BaseType === 13 && l.BaseEntry != null) { baseInvoiceEntry = l.BaseEntry; break; }
-      }
-      const list = byClient.get(d.CardCode) ?? [];
-      list.push({
-        docEntry: d.DocEntry,
-        docNum: d.DocNum ?? null,
-        docDate: d.DocDate ?? null,
-        amount: Math.abs(d.DocTotal ?? 0),
-        baseInvoiceEntry,
-      });
-      byClient.set(d.CardCode, list);
-    }
-  }
-  return byClient;
-}
-
 export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
@@ -250,12 +165,7 @@ async function computeEncours(allowed: Set<string> | null) {
     if (allowed && !allowed.has(inv.CardCode)) continue;
     if ((inv.DocTotal ?? 0) - (inv.PaidToDate ?? 0) > 0.01) neededCodes.add(inv.CardCode);
   }
-  // Soldes compte + avoirs (avec lien facture d'origine) pour les mêmes clients,
-  // en parallèle.
-  const [cabByCode, creditNotesByCode] = await Promise.all([
-    fetchBalances([...neededCodes]),
-    fetchCreditNotes([...neededCodes]),
-  ]);
+  const cabByCode = await fetchBalances([...neededCodes]);
 
   const now = Date.now();
   const byClient = new Map<string, ClientEncours>();
@@ -270,8 +180,7 @@ async function computeEncours(allowed: Set<string> | null) {
 
     const e = byClient.get(inv.CardCode) ?? {
       cardCode: inv.CardCode, cardName: inv.CardName ?? inv.CardCode, clientId: null,
-      encours: 0, brut: 0, encaisse: 0, avoirsAttribues: 0, countOpen: 0,
-      b3045: 0, b4590: 0, b90: 0,
+      encours: 0, brut: 0, encaisse: 0, countOpen: 0, b3045: 0, b4590: 0, b90: 0,
       countLate: 0, maxOverdueDays: 0, invoices: [] as InvoiceLine[],
     };
     e.encours += bal; // brut pour l'instant — mis au net après la boucle
@@ -290,43 +199,19 @@ async function computeEncours(allowed: Set<string> | null) {
       // l'euro (directive métier). L'arrondi 2 déc. évite seulement le bruit float.
       balance: Math.round(bal * 100) / 100,
       overdueDays,
-      avoirs: [],            // rempli après la boucle (attribution des avoirs)
-      avoirsTotal: 0,
-      net: Math.round(bal * 100) / 100,
     });
     byClient.set(inv.CardCode, e);
   }
 
-  // Mise au NET : net = brut − déduction (solde compte tiers). La déduction
-  // (brut − net) regroupe paiements ET avoirs non encore affectés. On NE touche
-  // PAS au net (cf. lib/encours-avoirs : un avoir a déjà impacté soit le solde
-  // brut de sa facture, soit le solde compte). On se contente de SCINDER cette
-  // déduction : la part expliquée par des avoirs rattachables à une facture
-  // ouverte est ré-imputée SOUS la facture ; le reste (paiements + avoirs non
-  // affectés) reste dans le sac global « encaisse ».
+  // Mise au NET : net = brut − encaissé/avoirs (solde compte tiers). On NE répartit
+  // PAS l'encaissé sur les factures/tranches (un avoir peut viser une autre
+  // facture) → factures et tranches restent au BRUT, déduction présentée en ligne.
   for (const e of byClient.values()) {
     const cab = cabByCode.has(e.cardCode) ? cabByCode.get(e.cardCode)! : null;
     const { net, encaisse } = netEncours(e.encours, cab);
     e.brut = e.encours;
     e.encours = net;
-
-    // Attribution des avoirs aux factures (plafonnée par l'encaissé → anti
-    // double-comptage). attributedTotal SORT du sac « encaisse ».
-    const cns = creditNotesByCode.get(e.cardCode) ?? [];
-    const attr = attributeAvoirs(
-      e.invoices.map((i) => ({ docEntry: i.docEntry, balance: i.balance })),
-      cns,
-      encaisse,
-    );
-    e.avoirsAttribues = attr.attributedTotal;
-    e.encaisse = Math.round((encaisse - attr.attributedTotal) * 100) / 100;
-    for (const inv of e.invoices) {
-      const list = attr.byInvoice.get(inv.docEntry);
-      if (!list || list.length === 0) continue;
-      inv.avoirs = list;
-      inv.avoirsTotal = Math.round(list.reduce((s, a) => s + a.amount, 0) * 100) / 100;
-      inv.net = Math.round(Math.max(0, inv.balance - inv.avoirsTotal) * 100) / 100;
-    }
+    e.encaisse = encaisse;
   }
 
   // On ne liste que les clients dont le NET reste dû (le déjà-payé sort de la liste).
@@ -334,10 +219,9 @@ async function computeEncours(allowed: Set<string> | null) {
     .filter((c) => c.encours > 0.01)
     .sort((a, b) => b.encours - a.encours);
 
-  // Totaux : encours au NET ; tranches d'ancienneté au BRUT ; encaissé + avoirs.
+  // Totaux : encours au NET ; tranches d'ancienneté au BRUT ; encaissé total.
   const totalEncours = aggregated.reduce((s, c) => s + c.encours, 0);
   const totalEncaisse = aggregated.reduce((s, c) => s + c.encaisse, 0);
-  const totalAvoirs = aggregated.reduce((s, c) => s + c.avoirsAttribues, 0);
   const tot3045 = aggregated.reduce((s, c) => s + c.b3045, 0);
   const tot4590 = aggregated.reduce((s, c) => s + c.b4590, 0);
   const tot90 = aggregated.reduce((s, c) => s + c.b90, 0);
@@ -355,7 +239,6 @@ async function computeEncours(allowed: Set<string> | null) {
     totals: {
       encours: Math.round(totalEncours),
       encaisse: Math.round(totalEncaisse),
-      avoirsAttribues: Math.round(totalAvoirs),
       overdueTotal: Math.round(tot3045 + tot4590 + tot90),
       b3045: Math.round(tot3045),
       b4590: Math.round(tot4590),
@@ -367,11 +250,10 @@ async function computeEncours(allowed: Set<string> | null) {
       cardCode: c.cardCode,
       cardName: c.cardName,
       clientId: idByCode.get(c.cardCode) ?? null,
-      // Précision complète (cents). Encours = NET ; brut, encaissé et avoirs en plus.
+      // Précision complète (cents). Encours = NET ; brut et encaissé en plus.
       encours: Math.round(c.encours * 100) / 100,
       brut: Math.round(c.brut * 100) / 100,
       encaisse: Math.round(c.encaisse * 100) / 100,
-      avoirsAttribues: Math.round(c.avoirsAttribues * 100) / 100,
       countOpen: c.countOpen,
       b3045: Math.round(c.b3045 * 100) / 100,
       b4590: Math.round(c.b4590 * 100) / 100,
