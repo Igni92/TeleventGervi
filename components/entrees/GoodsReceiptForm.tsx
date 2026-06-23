@@ -288,8 +288,8 @@ export function GoodsReceiptForm() {
           <SupplierPicker value={supplier} onChange={setSupplier} />
         </div>
         <div className="space-y-1.5">
-          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">N° BL fournisseur (optionnel)</label>
-          <Input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="ex. BL-2026-0123" />
+          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Référence (BL, Cde, F… — optionnel)</label>
+          <Input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="ex. BL-2026-0123, F-2026-045…" />
         </div>
       </div>
 

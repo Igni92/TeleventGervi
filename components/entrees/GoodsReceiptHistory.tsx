@@ -188,7 +188,7 @@ export function GoodsReceiptHistory() {
                       <td className="px-3 py-2 font-mono text-muted-foreground">{d.lot}</td>
                       <td className="px-3 py-2">
                         <div className="font-mono font-medium truncate" title={d.cardName}>{d.cardCode}</div>
-                        {d.numAtCard && <div className="text-[11px] text-muted-foreground">BL {d.numAtCard}</div>}
+                        {d.numAtCard && <div className="text-[11px] text-muted-foreground tnum">{d.numAtCard}</div>}
                       </td>
                       <td className="px-3 py-2 text-muted-foreground tnum">{fmtDate(d.docDate)}</td>
                       <td className="px-3 py-2 text-right tnum">{d.lineCount}</td>
@@ -303,16 +303,15 @@ function ReceiptDetail({
           {receipt.cardName && <span className="text-muted-foreground">· {receipt.cardName}</span>}
         </span>
         <span className="text-muted-foreground tnum">Entrée le {fmtDate(receipt.docDate)}</span>
-        {/* N° BL fournisseur — éditable (renseigner / corriger après création) */}
+        {/* Référence fournisseur — éditable, valeur libre (BL, Cde, F…), aucun préfixe imposé */}
         <span className="inline-flex items-center gap-1.5">
-          <span className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">N° BL</span>
           <input
             defaultValue={receipt.numAtCard ?? ""}
-            placeholder="à renseigner…"
+            placeholder="Réf. (BL, Cde, F…)"
             disabled={savingBl}
             onBlur={(e) => saveNumAtCard(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-            className="h-7 w-44 rounded-md border border-border bg-background px-2 text-[12px] tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
+            className="h-7 w-48 rounded-md border border-border bg-background px-2 text-[12px] tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
           />
           {savingBl && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
         </span>
