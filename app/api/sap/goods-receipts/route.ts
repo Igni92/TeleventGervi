@@ -54,6 +54,7 @@ interface InLine {
 }
 interface CreateBody {
   cardCode: string;
+  docDate?: string;       // date de réception (défaut : aujourd'hui)
   numAtCard?: string;
   comment?: string;
   lines: InLine[];
@@ -150,6 +151,9 @@ export async function POST(req: NextRequest) {
   // On envoie PackageQuantity (colis) ET Quantity (pie) — sans le calcul côté
   // serveur, SAP laisse Qty Totale = colis et le stock physique est faux.
   const today = new Date().toISOString().slice(0, 10);
+  // Date du DOCUMENT (réception) : saisie au formulaire ou aujourd'hui. Distincte
+  // de `today` (jour réel) qui sert aux scans de propagation rétro ci-dessous.
+  const docDate = (body.docDate && /^\d{4}-\d{2}-\d{2}$/.test(body.docDate)) ? body.docDate : today;
   const resolvedLines = body.lines.map((l) => {
     const meta = productMap.get(l.itemCode);
     const ratio = (meta?.salesQtyPerPackUnit && meta.salesQtyPerPackUnit > 1) ? meta.salesQtyPerPackUnit : 1;
@@ -171,9 +175,9 @@ export async function POST(req: NextRequest) {
   });
   const payload: Record<string, unknown> = {
     CardCode: cardCode,
-    DocDate: today,
-    DocDueDate: today,
-    TaxDate: today,
+    DocDate: docDate,
+    DocDueDate: docDate,
+    TaxDate: docDate,
     Comments: body.comment?.trim()
       || `Entrée marchandise via TeleVent — ${session.user?.name ?? session.user?.email ?? "?"}`,
     DocumentLines: documentLines,

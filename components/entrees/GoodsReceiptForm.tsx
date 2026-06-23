@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import { SurfaceCard } from "@/components/ui/surface-card";
+import { DateStepper, todayISO } from "@/components/ui/date-stepper";
 import { designationProduit } from "@/lib/produit-designation";
 import { DesignationChips } from "./DesignationChips";
 
@@ -206,6 +207,7 @@ export function ProductPicker({ onPick }: { onPick: (p: ProductHit) => void }) {
 
 export function GoodsReceiptForm() {
   const [supplier, setSupplier] = useState<Supplier | null>(null);
+  const [docDate, setDocDate] = useState(todayISO());
   const [numAtCard, setNumAtCard] = useState("");
   const [comment, setComment] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
@@ -245,7 +247,7 @@ export function GoodsReceiptForm() {
   }, 0);
 
   const reset = () => {
-    setSupplier(null); setNumAtCard(""); setComment(""); setLines([]);
+    setSupplier(null); setDocDate(todayISO()); setNumAtCard(""); setComment(""); setLines([]);
   };
 
   const submit = async () => {
@@ -265,6 +267,7 @@ export function GoodsReceiptForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cardCode: supplier.cardCode,
+          docDate: docDate || undefined,
           numAtCard: numAtCard.trim() || undefined,
           comment: comment.trim() || undefined,
           lines: lines.map((l) => ({
@@ -310,6 +313,10 @@ export function GoodsReceiptForm() {
           <SupplierPicker value={supplier} onChange={setSupplier} />
         </div>
         <div className="space-y-1.5">
+          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Date de réception</label>
+          <DateStepper value={docDate} onChange={setDocDate} />
+        </div>
+        <div className="space-y-1.5 sm:col-span-2">
           <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Référence (BL, Cde, F… — optionnel)</label>
           <Input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="ex. BL-2026-0123, F-2026-045…" />
         </div>
