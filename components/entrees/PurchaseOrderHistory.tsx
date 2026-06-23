@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
+import { DesignationChips } from "./DesignationChips";
 
 type PoLine = {
   itemCode: string; itemName?: string;
@@ -364,14 +365,13 @@ function PoDetail({ po, onReceive, receiving }: { po: PurchaseOrder; onReceive: 
         {po.lines.map((l, i) => {
           const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi });
           const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
-          const desc = [dz.pays, dz.marque, dz.condt].filter((x) => x && x !== "—").join(" · ");
           return (
             <div key={`m-${l.itemCode}-${i}`} className="rounded-lg border border-border bg-card/40 p-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
                   <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-                  {desc && <div className="text-[13px] text-muted-foreground mt-0.5">{desc}</div>}
+                  <DesignationChips marque={dz.marque} condt={dz.condt} pays={dz.pays} className="mt-1.5" />
                 </div>
                 <div className="text-right shrink-0">
                   <div className="text-[15px] font-bold tnum text-foreground">{lineHT != null ? eur(lineHT) : "—"}</div>
@@ -411,14 +411,13 @@ function PoDetail({ po, onReceive, receiving }: { po: PurchaseOrder; onReceive: 
             {po.lines.map((l, i) => {
               const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi });
               const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
-              const desc = [dz.pays, dz.marque, dz.condt].filter((x) => x && x !== "—").join(" · ");
               return (
                 <tr key={`${l.itemCode}-${i}`} className="border-t border-border/60">
                   <td className="px-3 py-2.5">
                     <div className="font-semibold text-foreground">{dz.fruit}</div>
                     <div className="font-mono text-[12px] text-muted-foreground">{l.itemCode}</div>
                   </td>
-                  <td className="px-3 py-2.5 text-muted-foreground">{desc || "—"}</td>
+                  <td className="px-3 py-2.5"><DesignationChips marque={dz.marque} condt={dz.condt} pays={dz.pays} /></td>
                   <td className="px-3 py-2.5 text-right tnum">{fmtColis(l.packageQuantity)}</td>
                   <td className="px-3 py-2.5 text-right tnum">{l.price != null ? eur(l.price) : "—"}</td>
                   <td className="px-3 py-2.5 text-right tnum font-semibold">{lineHT != null ? eur(lineHT) : "—"}</td>

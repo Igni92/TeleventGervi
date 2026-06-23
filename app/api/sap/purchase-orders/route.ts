@@ -3,6 +3,84 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 
+const WHITELIST_WHS = new Set(["000", "01", "R1"]);
+
+/**
+ * POST /api/sap/purchase-orders — crée une COMMANDE FOURNISSEUR (PurchaseOrder).
+ *
+ * Body : { cardCode, dueDate (ISO/yyyy-mm-dd), numAtCard?, comment?,
+ *          lines: [{ itemCode, packageQuantity (colis), warehouseCode, price? }] }
+ *
+ * Comme l'entrée marchandise : la saisie est en COLIS, on envoie Quantity (pie)
+ * ET PackageQuantity (colis). Pas d'effet stock (c'est un engagement d'achat).
+ */
+export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+
+  let body: {
+    cardCode?: string; dueDate?: string; numAtCard?: string; comment?: string;
+    lines?: { itemCode: string; packageQuantity: number; warehouseCode: string; price?: number }[];
+  };
+  try { body = await req.json(); }
+  catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
+
+  if (!body.cardCode?.trim()) return NextResponse.json({ error: "Fournisseur requis" }, { status: 400 });
+  if (!Array.isArray(body.lines) || body.lines.length === 0) {
+    return NextResponse.json({ error: "Au moins 1 ligne requise" }, { status: 400 });
+  }
+  for (const l of body.lines) {
+    if (!l.itemCode || !l.packageQuantity || l.packageQuantity <= 0) {
+      return NextResponse.json({ error: `Ligne invalide : ${JSON.stringify(l)}` }, { status: 400 });
+    }
+    if (!l.warehouseCode || !WHITELIST_WHS.has(l.warehouseCode)) {
+      return NextResponse.json({ error: `Entrepôt invalide : ${l.warehouseCode}` }, { status: 400 });
+    }
+  }
+  const cardCode = body.cardCode.trim();
+  const today = new Date().toISOString().slice(0, 10);
+  const due = body.dueDate ? new Date(body.dueDate).toISOString().slice(0, 10) : today;
+
+  // Ratio colis → pie depuis le catalogue local.
+  const codes = Array.from(new Set(body.lines.map((l) => l.itemCode)));
+  const products = await prisma.product.findMany({
+    where: { itemCode: { in: codes } },
+    select: { itemCode: true, salesQtyPerPackUnit: true },
+  });
+  const ratioOf = new Map(products.map((p) => [p.itemCode, (p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) ? p.salesQtyPerPackUnit : 1]));
+
+  const DocumentLines = body.lines.map((l) => {
+    const ratio = ratioOf.get(l.itemCode) ?? 1;
+    const line: Record<string, unknown> = {
+      ItemCode: l.itemCode,
+      Quantity: l.packageQuantity * ratio,
+      PackageQuantity: l.packageQuantity,
+      WarehouseCode: l.warehouseCode,
+    };
+    if (l.price != null && l.price > 0) { line.UnitPrice = l.price; line.Price = l.price; }
+    return line;
+  });
+
+  const payload: Record<string, unknown> = {
+    CardCode: cardCode,
+    DocDate: today,
+    DocDueDate: due,
+    TaxDate: today,
+    Comments: body.comment?.trim() || `Commande fournisseur via TeleVent — ${session.user?.name ?? session.user?.email ?? "?"}`,
+    DocumentLines,
+  };
+  if (body.numAtCard?.trim()) payload.NumAtCard = body.numAtCard.trim();
+
+  try {
+    const created = await sap.post<{ DocEntry: number; DocNum: number }>("/PurchaseOrders", payload);
+    return NextResponse.json({ ok: true, docNum: created.DocNum, docEntry: created.DocEntry });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[PurchaseOrder] CREATE FAILED:", message);
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  }
+}
+
 /**
  * GET /api/sap/purchase-orders?last=30
  *

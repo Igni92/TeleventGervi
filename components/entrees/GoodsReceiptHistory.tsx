@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
+import { DesignationChips, Chip } from "./DesignationChips";
 import {
   OpenReceptionIncidents, InlineIncidentDeclare, IncidentTypeIcon, useReceptionIncidents,
 } from "./ReceptionIncidents";
@@ -411,14 +412,13 @@ function ReceiptDetail({
         {receipt.lines.map((l, i) => {
           const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi });
           const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
-          const desc = [dz.pays, dz.marque, dz.variete, dz.condt].filter((x) => x && x !== "—").join(" · ");
           return (
             <div key={`m-${l.itemCode}-${i}`} className="rounded-lg border border-border bg-card/40 p-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
                   <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-                  {desc && <div className="text-[13px] text-muted-foreground mt-0.5">{desc}</div>}
+                  <DesignationChips marque={dz.marque} condt={dz.condt} pays={dz.pays} className="mt-1.5" />
                 </div>
                 <div className="text-right shrink-0">
                   <div className="text-[15px] font-bold tnum text-foreground">{lineHT != null ? eur(lineHT) : "—"}</div>
@@ -465,10 +465,10 @@ function ReceiptDetail({
                   <td className={`tnum whitespace-nowrap ${td}`}>{fmtColis(l.packageQuantity)} <span className="text-muted-foreground">colis</span></td>
                   <td className={`font-mono ${td}`}>{l.itemCode}</td>
                   <td className={`text-foreground ${td}`}>{dz.fruit}</td>
-                  <td className={`text-muted-foreground ${td}`}>{dz.pays}</td>
-                  <td className={`text-muted-foreground ${td}`}>{dz.marque}</td>
-                  <td className={`text-muted-foreground ${td}`}>{dz.variete}</td>
-                  <td className={`text-muted-foreground ${td}`}>{dz.condt}</td>
+                  <td className={td}><Chip kind="pays">{dz.pays}</Chip></td>
+                  <td className={td}><Chip kind="marque">{dz.marque}</Chip></td>
+                  <td className={td}><Chip kind="calibre">{dz.variete}</Chip></td>
+                  <td className={td}><Chip kind="condt">{dz.condt}</Chip></td>
                   <td className={`text-right tnum ${td}`}>{l.price != null ? eur(l.price) : "—"}</td>
                   <td className={`text-right tnum font-medium ${td}`}>{lineHT != null ? eur(lineHT) : "—"}</td>
                 </tr>
