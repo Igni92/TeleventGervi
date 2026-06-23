@@ -277,8 +277,8 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
   // Portal vers <body> : sinon un ancêtre transformé (animate-fade-up) "capture"
   // le position:fixed et la modale s'affiche tout en bas au lieu d'être centrée.
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6" onClick={onClose}>
-      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-6" onClick={onClose}>
+      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-3xl max-h-[92vh] sm:max-h-[88vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
         <header className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-border">
           <div className="min-w-0">
             <h2 className="text-[18px] font-semibold tracking-tight text-foreground truncate">{client.cardName}</h2>
@@ -335,7 +335,48 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
               {client.encaisse > 0 && <> Les encaissements non affectés ({eurExact(client.encaisse)}) restent déduits globalement.</>}
             </p>
           )}
-          <table className="w-full text-[12.5px]">
+          {/* ── MOBILE : cartes par facture (le tableau 5 colonnes débordait) ── */}
+          <div className="md:hidden p-3 space-y-2.5">
+            {client.invoices.map((inv) => {
+              const late = inv.overdueDays > 30;
+              const hasAvoirs = inv.avoirs.length > 0;
+              return (
+                <div key={inv.docEntry} className={`rounded-xl border p-3 ${late ? "border-rose-300 dark:border-rose-800 bg-rose-50/40 dark:bg-rose-950/15" : "border-border bg-card"}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="font-mono font-bold text-[15px] text-foreground">{inv.docNum ?? inv.docEntry}</span>
+                      <div className="text-[12px] text-muted-foreground mt-0.5 tnum">
+                        {frDate(inv.docDate)} · éch. {frDate(inv.dueDate)}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="font-bold tnum text-[16px] text-foreground">{eurExact(inv.balance)}</div>
+                      {inv.overdueDays > 30
+                        ? <div className={`text-[12px] font-semibold ${inv.overdueDays >= 90 ? "text-rose-600 dark:text-rose-400" : inv.overdueDays >= 45 ? "text-rose-500 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"}`}>{inv.overdueDays} j de retard</div>
+                        : <div className="text-[12px] text-muted-foreground/60">à jour</div>}
+                    </div>
+                  </div>
+                  {hasAvoirs && (
+                    <div className="mt-2 pt-2 border-t border-border/60 space-y-1">
+                      {inv.avoirs.map((av) => (
+                        <div key={av.docEntry} className="flex items-center justify-between gap-2 text-[12.5px] text-violet-600 dark:text-violet-400">
+                          <span>↳ AV {av.docNum ?? av.docEntry}{av.docDate && <span className="text-muted-foreground"> · {frDate(av.docDate)}</span>}</span>
+                          <span className="tnum font-medium">−{eurExact(av.amount)}</span>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between gap-2 pt-1 text-[13px]">
+                        <span className="uppercase tracking-wide text-[10.5px] font-semibold text-muted-foreground">Total net</span>
+                        <span className="font-bold tnum text-foreground">{eurExact(inv.net)}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── DESKTOP : tableau détaillé ── */}
+          <table className="hidden md:table w-full text-[12.5px]">
             <thead className="sticky top-0 z-10 bg-card text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
               <tr>
                 <th className="text-left px-4 py-2 font-semibold">N° facture</th>
