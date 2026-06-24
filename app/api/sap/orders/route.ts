@@ -7,7 +7,6 @@ import { sap } from "@/lib/sapb1";
 import { decrementLocalStock } from "@/lib/stockSync";
 import { getLotMaps, resolveLotDetailed, LOT_PENDING } from "@/lib/lotResolver";
 import { chooseLot } from "@/lib/gervifrais-calc";
-import { getDefaultCarrier } from "@/lib/clientCarriers";
 import { colisInfo } from "@/lib/colis";
 
 /**
@@ -336,9 +335,9 @@ export async function POST(req: NextRequest) {
   // C11 — Transporteur → ORDR.U_TrspCode.
   // Si carrierId fourni : on résout via la table Carrier (champ U_TrspCode = sapValue).
   // Sinon carrierCode raccourci (déjà la valeur SAP).
-  // B2 — Si AUCUN des deux : transporteur PAR DÉFAUT du client = le plus utilisé
-  // dans son historique SAP 24 mois (lib/clientCarriers, partagée avec
-  // /api/clients/[id]/carriers). Sans historique → on ne pose rien (loggé).
+  // Sinon : on NE POSE RIEN (plus de « transporteur le plus utilisé »). On laisse
+  // le transporteur par défaut de SAP ; il se choisit/ajuste ensuite dans
+  // « Détail livraison » (changement direct par commande).
   let trspCode: string | null = null;
   if (body.carrierId) {
     const rows = await prisma.$queryRawUnsafe<{ sapValue: string | null; active: boolean }[]>(
@@ -348,18 +347,6 @@ export async function POST(req: NextRequest) {
     if (rows[0]?.active && rows[0].sapValue) trspCode = rows[0].sapValue;
   } else if (body.carrierCode?.trim()) {
     trspCode = body.carrierCode.trim();
-  } else {
-    try {
-      const def = await getDefaultCarrier(cardCode);
-      if (def) {
-        trspCode = def.sapValue;
-        console.log(`[Order] Transporteur par défaut ${cardCode} → ${def.sapValue} (${def.count} cdes/24 mois)`);
-      } else {
-        console.log(`[Order] Aucun transporteur dans l'historique SAP de ${cardCode} — U_TrspCode non posé`);
-      }
-    } catch (e) {
-      console.warn(`[Order] Résolution transporteur par défaut échouée (non-bloquant):`, (e as Error).message);
-    }
   }
   if (trspCode) payload.U_TrspCode = trspCode;
   // ⚠️ Plus de DocumentAdditionalExpenses doc-level — TPF2/TPF3 sont désormais
