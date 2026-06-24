@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { docLabel } from "@/lib/docLabel";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest) {
     DocDate: today,
     DocDueDate: due,
     TaxDate: today,
-    Comments: body.comment?.trim() || `Commande fournisseur via TeleVent — ${session.user?.name ?? session.user?.email ?? "?"}`,
+    Comments: body.comment?.trim() || docLabel("CF", session.user?.name, session.user?.email),
     DocumentLines,
   };
   if (body.numAtCard?.trim()) payload.NumAtCard = body.numAtCard.trim();

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { docLabel } from "@/lib/docLabel";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { incrementLocalStock } from "@/lib/stockSync";
@@ -179,7 +180,7 @@ export async function POST(req: NextRequest) {
     DocDueDate: docDate,
     TaxDate: docDate,
     Comments: body.comment?.trim()
-      || `Entrée marchandise via TeleVent — ${session.user?.name ?? session.user?.email ?? "?"}`,
+      || docLabel("EM", session.user?.name, session.user?.email),
     DocumentLines: documentLines,
   };
   if (body.numAtCard?.trim()) payload.NumAtCard = body.numAtCard.trim();

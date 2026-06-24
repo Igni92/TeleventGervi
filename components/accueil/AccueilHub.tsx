@@ -51,7 +51,7 @@ function HubHeader({ firstName }: { firstName: string | null }) {
           {firstName ? ` ${firstName}` : ""}
         </h1>
         <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2">
-          Voici l&apos;activité du jour en un coup d&apos;œil.
+          L&apos;activité du jour !
         </p>
       </div>
       <div className="text-right" aria-live="off">

@@ -938,7 +938,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
                   {/* Stepper « un colis » : −/+ avancent du poids/nombre d'un colis */}
                   <div className="inline-flex items-center rounded-lg border border-border overflow-hidden shrink-0">
                     <button
-                      type="button"
+                      type="button" tabIndex={-1}
                       onClick={() => updateLine(i, { quantity: Math.max(0, Math.round((l.quantity - l.stepColis) * 100) / 100) })}
                       aria-label="Retirer un colis"
                       className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-muted-foreground hover:bg-secondary/60 active:scale-95"
@@ -948,7 +948,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
                       aria-label={`Quantité ${l.itemName}`}
                       className={`h-11 w-16 text-center text-[17px] font-semibold tnum border-x border-border bg-background px-1 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 ${over ? "text-amber-600 dark:text-amber-400" : ""}`} />
                     <button
-                      type="button"
+                      type="button" tabIndex={-1}
                       onClick={() => updateLine(i, { quantity: Math.round((l.quantity + l.stepColis) * 100) / 100 })}
                       aria-label="Ajouter un colis"
                       className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-brand-600 dark:text-brand-400 hover:bg-secondary/60 active:scale-95"
@@ -957,7 +957,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
                   <span className="text-[12px] text-muted-foreground w-9">{l.unit}</span>
                   <span className="text-muted-foreground">×</span>
                   <NumberInput value={l.price} onValueChange={(n) => updateLine(i, { price: n })}
-                    min={0} step={0.1} allowEmpty placeholder="prix"
+                    min={0} step={0.1} decimals={2} allowEmpty placeholder="prix"
                     aria-label={`Prix ${l.itemName}`}
                     className="h-11 w-[84px] text-right text-[17px] font-semibold tnum rounded-lg border border-border bg-background px-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500" />
                   <span className="text-[12px] text-muted-foreground">€/{l.priceUnit}</span>

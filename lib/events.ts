@@ -67,3 +67,11 @@ export function relativeDayLabel(daysFromRef: number): string {
   if (daysFromRef === -1) return "hier";
   return daysFromRef > 0 ? `dans ${daysFromRef} j` : `il y a ${-daysFromRef} j`;
 }
+
+/** Variante longue : « aujourd'hui », « dans 3 jours », « il y a 2 jours ». */
+export function relativeDayLabelLong(daysFromRef: number): string {
+  if (daysFromRef === 0) return "aujourd'hui";
+  if (daysFromRef === 1) return "demain";
+  if (daysFromRef === -1) return "hier";
+  return daysFromRef > 0 ? `dans ${daysFromRef} jours` : `il y a ${-daysFromRef} jours`;
+}

@@ -56,13 +56,15 @@ function StatusBadge({ open, large }: { open: boolean; large?: boolean }) {
   );
 }
 
-/** Commande ouverte dont la livraison prévue est atteinte (≤ aujourd'hui). */
+/** Commande ouverte dont la livraison prévue est atteinte (≤ aujourd'hui).
+ *  Comparaison sur la DATE CALENDAIRE (yyyy-mm-dd) pour éviter tout décalage de
+ *  fuseau : une livraison datée de demain ne doit jamais s'afficher « à réceptionner ». */
 function isDue(d: { open: boolean; dueDate: string | null }): boolean {
   if (!d.open || !d.dueDate) return false;
-  const due = new Date(d.dueDate);
-  if (Number.isNaN(due.getTime())) return false;
-  const today = new Date(); today.setHours(23, 59, 59, 999);
-  return due.getTime() <= today.getTime();
+  const dueStr = d.dueDate.slice(0, 10);                 // yyyy-mm-dd (date SAP)
+  const n = new Date();
+  const todayStr = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+  return dueStr <= todayStr;
 }
 
 function DueBadge() {
