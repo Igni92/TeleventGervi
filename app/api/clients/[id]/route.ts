@@ -70,6 +70,7 @@ export async function PUT(req: NextRequest, props: { params: Promise<{ id: strin
       email: nextEmail,
       notes: data.notes || null,
       joursAppel: data.joursAppel?.length ? data.joursAppel.join(",") : null,
+      joursLivraison: data.joursLivraison?.length ? data.joursLivraison.join(",") : null,
     };
     // Sécurité : un non-admin ne peut pas se (ré)attribuer un client → on ignore
     // les champs d'affectation `commercial`/`vendeur` du payload. Admin inchangé.

@@ -75,12 +75,14 @@ export function ClientForm({ initialData, mode }: ClientFormProps) {
       email: initialData?.email || "",
       notes: initialData?.notes || "",
       joursAppel: initialData?.joursAppel || [],
+      joursLivraison: initialData?.joursLivraison ?? [1, 2, 3, 4, 5, 6],
     },
   });
 
   const typeValue = watch("type");
   const commercialValue = watch("commercial");
   const joursAppelValue = watch("joursAppel") || [];
+  const joursLivraisonValue = watch("joursLivraison") || [];
 
   const toggleJour = (val: number) => {
     const current = joursAppelValue;
@@ -88,6 +90,15 @@ export function ClientForm({ initialData, mode }: ClientFormProps) {
       setValue("joursAppel", current.filter((j) => j !== val));
     } else {
       setValue("joursAppel", [...current, val]);
+    }
+  };
+
+  const toggleJourLivraison = (val: number) => {
+    const current = joursLivraisonValue;
+    if (current.includes(val)) {
+      setValue("joursLivraison", current.filter((j) => j !== val));
+    } else {
+      setValue("joursLivraison", [...current, val]);
     }
   };
 
@@ -306,6 +317,33 @@ export function ClientForm({ initialData, mode }: ClientFormProps) {
         </div>
         <p className="text-xs text-slate-400 dark:text-slate-500">
           Sélectionnez les jours auxquels ce client doit être appelé.
+        </p>
+      </div>
+
+      {/* Jours de livraison — défaut lundi → samedi */}
+      <div className="space-y-3">
+        <Label>Jours de livraison</Label>
+        <div className="flex gap-2 flex-wrap">
+          {JOURS.map(({ label, value }) => {
+            const active = joursLivraisonValue.includes(value);
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => toggleJourLivraison(value)}
+                className={`h-9 w-12 rounded-md border text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 dark:focus:ring-offset-slate-900 ${
+                  active
+                    ? "bg-emerald-600 text-white border-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.35)]"
+                    : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:border-emerald-400 hover:text-emerald-600 dark:hover:border-emerald-500 dark:hover:text-emerald-400"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-xs text-slate-400 dark:text-slate-500">
+          Jours où ce client peut être livré (par défaut du lundi au samedi).
         </p>
       </div>
 

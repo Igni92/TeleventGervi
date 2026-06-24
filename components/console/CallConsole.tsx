@@ -215,6 +215,23 @@ export function CallConsole() {
     setActiveId(next?.id ?? null);
   }, [data, activeId]);
 
+  /* ── Retrait OPTIMISTE de la file « À appeler » ──────────────
+     Une action journalisée (BL, commande, demain, rappel) doit faire
+     disparaître le client de la file IMMÉDIATEMENT au clic, sans attendre le
+     re-fetch serveur. On le bascule côté « Fait » et fetchData() réconcilie. */
+  const markHandled = useCallback((id: string | null | undefined) => {
+    if (!id) return;
+    setData((cur) => {
+      if (!cur) return cur;
+      const c = cur.queue.find((x) => x.id === id);
+      return {
+        ...cur,
+        queue: cur.queue.filter((x) => x.id !== id),
+        done: c && !cur.done.some((x) => x.id === id) ? [c, ...cur.done] : cur.done,
+      };
+    });
+  }, []);
+
   /* ── Log appel (COMMANDE / DEMAIN) ──────────────────────────
      scheduledFor (optional): for pre-commandes — client is snoozed
      until that date, no callback needed before it.
@@ -249,13 +266,14 @@ export function CallConsole() {
       clearCallNote(active.id);
       setCallNote("");
       advance();
+      markHandled(active.id);   // disparaît de « À appeler » au clic
       fetchData();
     } catch {
       toast.error("Erreur d'enregistrement");
     } finally {
       setActionLoading(null);
     }
-  }, [active, callNote, advance, fetchData]);
+  }, [active, callNote, advance, markHandled, fetchData]);
 
   // Restaure la note rapide persistée (localStorage) quand le client actif
   // change — survit ainsi à un refresh de page. Écrite par client via
@@ -478,12 +496,13 @@ export function CallConsole() {
           {/* Queue list */}
           <div className="flex-1 overflow-y-auto">
             {filteredQueue.length === 0 ? (
-              <div className="p-6 text-center">
-                <CheckCircle2 className="h-7 w-7 mx-auto text-emerald-500 mb-2" />
-                <p className="text-[13px] font-medium text-foreground">Tout est fait 🎉</p>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  Aucun client à appeler maintenant.
+              <div className="px-4 py-10 text-center animate-fade-up">
+                <CheckCircle2 className="h-20 w-20 mx-auto text-emerald-500 mb-4 drop-shadow-[0_0_18px_rgba(16,185,129,0.45)]" />
+                <p className="text-[30px] leading-none font-extrabold tracking-tight text-foreground">Tout est fait <span aria-hidden>🎉</span></p>
+                <p className="text-[15px] font-medium text-emerald-600 dark:text-emerald-400 mt-3">
+                  Journée d&apos;appels bouclée — bravo !
                 </p>
+                <p className="text-[12px] text-muted-foreground mt-1">Aucun client à appeler maintenant.</p>
               </div>
             ) : (
               <ol>
@@ -580,7 +599,7 @@ export function CallConsole() {
         open={rappelOpen}
         onOpenChange={setRappelOpen}
         client={active}
-        onCreated={() => { fetchData(); advance(); }}
+        onCreated={() => { advance(); markHandled(active?.id); fetchData(); }}
       />
 
       {/* ── Keyboard shortcuts customization dialog ──────── */}
@@ -604,8 +623,9 @@ export function CallConsole() {
             // BL = commande journalisée → on purge la note rapide du client.
             clearCallNote(active.id);
             setCallNote("");
-            fetchData();
             advance();
+            markHandled(active.id);   // le client quitte « À appeler » dès le clic
+            fetchData();
           }}
         />
       )}

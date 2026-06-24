@@ -247,6 +247,7 @@ export async function POST(req: NextRequest) {
         email: data.email?.trim().toLowerCase() || null,
         notes: data.notes || null,
         joursAppel: data.joursAppel?.length ? data.joursAppel.join(",") : null,
+        joursLivraison: data.joursLivraison?.length ? data.joursLivraison.join(",") : null,
       },
     });
 
