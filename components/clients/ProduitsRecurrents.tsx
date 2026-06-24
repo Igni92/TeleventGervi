@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Repeat } from "lucide-react";
-import { SectionCard } from "@/components/clients/SectionCard";
+import { SurfaceCard } from "@/components/ui/surface-card";
 import { formatKg } from "@/components/clients/FamillesVsGroupe";
 
 /**
@@ -56,7 +56,7 @@ export function ProduitsRecurrents({ clientId }: { clientId: string }) {
   }, [clientId]);
 
   return (
-    <SectionCard accent="sky" title="Produits récurrents" subtitle="Réassort · historique facturé" icon={<Repeat />}>
+    <SurfaceCard accent="sky" title="Produits récurrents" icon={<Repeat className="h-3.5 w-3.5" />}>
       {loading ? (
         <p className="text-sm text-muted-foreground py-2">Chargement…</p>
       ) : error ? (
@@ -99,6 +99,6 @@ export function ProduitsRecurrents({ clientId }: { clientId: string }) {
           </table>
         </>
       )}
-    </SectionCard>
+    </SurfaceCard>
   );
 }

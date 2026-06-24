@@ -62,17 +62,10 @@ export function ContactsEditor({ clientId }: { clientId: string }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-500/12 text-violet-600 ring-1 ring-violet-500/20 dark:text-violet-400">
-          <Users className="h-[17px] w-[17px]" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <h3 className="text-[14.5px] font-semibold leading-tight tracking-[-0.01em] text-foreground">Interlocuteurs</h3>
-            <InfoTip label="Interlocuteurs" content={<>Plusieurs contacts par client (chef pâtissier, apprenti…).<br/>Le <b>type</b> se choisit dans une liste réutilisable que tu peux enrichir.</>} side="right" iconSize={11} />
-          </div>
-          <p className="text-[12px] leading-snug text-muted-foreground">Contacts rattachés au compte</p>
-        </div>
+      <div className="flex items-center gap-2">
+        <Users className="h-4 w-4 text-muted-foreground" />
+        <h3 className="text-[13px] font-semibold text-foreground">Interlocuteurs</h3>
+        <InfoTip label="Interlocuteurs" content={<>Plusieurs contacts par client (chef pâtissier, apprenti…).<br/>Le <b>type</b> se choisit dans une liste réutilisable que tu peux enrichir.</>} side="right" iconSize={11} />
       </div>
 
       {loading ? (

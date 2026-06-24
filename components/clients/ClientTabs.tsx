@@ -31,18 +31,14 @@ export function ClientTabs({ commercial, compta, logistique, defaultTab = "comme
 
   return (
     <div>
-      <div
-        role="tablist"
-        aria-label="Sections fiche client"
-        className="mb-5 inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-xl border border-border bg-secondary/40 p-1"
-      >
-        <TabButton active={tab === "commercial"} reduce={!!reduce} onClick={() => setTab("commercial")} icon={<Briefcase className="h-3.5 w-3.5" />}>
+      <div role="tablist" aria-label="Sections fiche client" className="mb-5 inline-flex rounded-md border border-border bg-card/60 p-0.5">
+        <TabButton active={tab === "commercial"} onClick={() => setTab("commercial")} icon={<Briefcase className="h-3.5 w-3.5" />}>
           Commercial
         </TabButton>
-        <TabButton active={tab === "compta"} reduce={!!reduce} onClick={() => setTab("compta")} icon={<Receipt className="h-3.5 w-3.5" />}>
+        <TabButton active={tab === "compta"} onClick={() => setTab("compta")} icon={<Receipt className="h-3.5 w-3.5" />}>
           Comptabilité
         </TabButton>
-        <TabButton active={tab === "logistique"} reduce={!!reduce} onClick={() => setTab("logistique")} icon={<Truck className="h-3.5 w-3.5" />}>
+        <TabButton active={tab === "logistique"} onClick={() => setTab("logistique")} icon={<Truck className="h-3.5 w-3.5" />}>
           Logistique
         </TabButton>
       </div>
@@ -60,8 +56,8 @@ export function ClientTabs({ commercial, compta, logistique, defaultTab = "comme
 }
 
 function TabButton({
-  active, onClick, icon, children, reduce,
-}: { active: boolean; onClick: () => void; icon?: React.ReactNode; children: React.ReactNode; reduce: boolean }) {
+  active, onClick, icon, children,
+}: { active: boolean; onClick: () => void; icon?: React.ReactNode; children: React.ReactNode }) {
   return (
     <button
       type="button"
@@ -69,21 +65,14 @@ function TabButton({
       aria-selected={active}
       onClick={onClick}
       className={cn(
-        "relative inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3.5 text-[12.5px] font-medium transition-colors",
-        active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+        "h-8 px-3.5 text-[12.5px] font-medium rounded-[5px] transition-colors inline-flex items-center gap-1.5",
+        active
+          ? "bg-primary text-primary-foreground"
+          : "text-muted-foreground hover:text-foreground",
       )}
     >
-      {active && (
-        <motion.span
-          layoutId="ficheTabPill"
-          className="absolute inset-0 rounded-lg border border-border bg-card shadow-sm"
-          transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 420, damping: 34, mass: 0.8 }}
-        />
-      )}
-      <span className="relative z-10 inline-flex items-center gap-1.5">
-        {icon}
-        {children}
-      </span>
+      {icon}
+      {children}
     </button>
   );
 }

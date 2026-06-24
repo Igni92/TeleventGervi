@@ -127,25 +127,25 @@ export function ReorderableSections({ storageKey, sections }: { storageKey: stri
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between gap-2">
-        <p className="hidden text-[12px] text-muted-foreground sm:block">
+      <div className="flex items-center justify-between gap-2 mb-4">
+        <p className="text-[12px] text-muted-foreground">
           {editing ? "Glissez les blocs pour réordonner · renommez · masquez (œil) · pleine largeur (⤢)" : ""}
         </p>
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           {editing && (
             <button
               type="button" onClick={reset}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
+              className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
             >
               <RotateCcw className="h-3.5 w-3.5" /> Réinitialiser
             </button>
           )}
           <button
             type="button" onClick={() => setEditing((e) => !e)}
-            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] font-semibold transition-colors ${
+            className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[12px] font-semibold transition-colors ${
               editing
-                ? "bg-brand-600 text-white shadow-[0_2px_10px_-2px_hsl(var(--brand-600))] hover:bg-brand-700"
-                : "border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                ? "bg-brand-600 text-white hover:bg-brand-700"
+                : "border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60"
             }`}
           >
             {editing ? <><Check className="h-3.5 w-3.5" /> Terminer</> : <><SlidersHorizontal className="h-3.5 w-3.5" /> Personnaliser</>}
@@ -153,11 +153,9 @@ export function ReorderableSections({ storageKey, sections }: { storageKey: stri
         </div>
       </div>
 
-      {/* Grille : 1 colonne (mobile) → 2 (lg) → 3 (2xl). Ordre de lecture
-          gauche→droite (prévisible). Les blocs « pleine largeur » s'étendent
-          sur toutes les colonnes via col-span-full. `items-start` = chaque
-          carte garde sa hauteur naturelle (alignement net, pas d'étirement). */}
-      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2 2xl:grid-cols-3">
+      {/* Mosaïque : 1 colonne (mobile) → 2 (lg) → 3 (2xl). Les blocs « pleine
+          largeur » s'étendent sur toutes les colonnes via column-span. */}
+      <div className="gap-5 columns-1 lg:columns-2 2xl:columns-3">
         {effectiveOrder.map((id) => {
           const section = byId.get(id);
           if (!section) return null;
@@ -166,11 +164,11 @@ export function ReorderableSections({ storageKey, sections }: { storageKey: stri
 
           const isWide = wide.has(id);
           const renamed = labels[id] != null && labels[id] !== section.label;
-          const spanClass = isWide ? "col-span-full" : "";
+          const spanClass = isWide ? "[column-span:all]" : "";
 
           if (!editing) {
             return (
-              <div key={id} className={spanClass}>
+              <div key={id} className={`mb-5 break-inside-avoid ${spanClass}`}>
                 {renamed && <p className="kicker mb-2 text-brand-600 dark:text-brand-400">{labelOf(id)}</p>}
                 {section.node}
               </div>
@@ -181,7 +179,7 @@ export function ReorderableSections({ storageKey, sections }: { storageKey: stri
           return (
             <div
               key={id}
-              className={spanClass}
+              className={`mb-5 break-inside-avoid ${spanClass}`}
             >
               <div
                 draggable

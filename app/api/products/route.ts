@@ -13,6 +13,24 @@ import { prisma } from "@/lib/prisma";
  *   page          : default 1
  *   limit         : default 50, max 200
  */
+/** Tri serveur (clic sur en-tête de colonne côté Stock). Les colonnes de
+ *  quantités agrégées (dispo / commande fournisseur) ne sont pas des colonnes
+ *  SQL → on retombe sur `totalStock` (proxy raisonnable). Tri par défaut
+ *  inchangé : plus gros stock d'abord. */
+type OrderBy = Record<string, "asc" | "desc">;
+function buildOrderBy(sort: string | null, dir: string | null): OrderBy[] {
+  const d: "asc" | "desc" = dir === "asc" ? "asc" : "desc";
+  const map: Record<string, string> = {
+    qty: "totalStock", stock: "totalStock", ordered: "totalStock",
+    code: "itemCode", fruit: "itemName", pays: "uPays",
+    marque: "uMarque", variete: "frgnName", condt: "uCondi",
+  };
+  const col = sort ? map[sort] : null;
+  if (!col) return [{ totalStock: "desc" }, { itemName: "asc" }];
+  // Tie-breaker stable par nom pour les colonnes texte/quantité.
+  return col === "itemName" ? [{ itemName: d }] : [{ [col]: d }, { itemName: "asc" }];
+}
+
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
@@ -53,7 +71,7 @@ export async function GET(req: NextRequest) {
     prisma.product.findMany({
       where,
       include: { stocks: true },
-      orderBy: [{ totalStock: "desc" }, { itemName: "asc" }],
+      orderBy: buildOrderBy(searchParams.get("sort"), searchParams.get("dir")),
       skip: (page - 1) * limit,
       take: limit,
     }),

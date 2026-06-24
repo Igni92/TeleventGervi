@@ -12,12 +12,15 @@ import { BillingAddressForm } from "@/components/clients/BillingAddressForm";
 import { ReorderableSections } from "@/components/clients/ReorderableSections";
 import { ProduitsRecurrents } from "@/components/clients/ProduitsRecurrents";
 import { EncoursCreditCard } from "@/components/clients/EncoursCreditCard";
+import { RgpdExportButton } from "@/components/clients/RgpdExportButton";
 import { ClientTabs } from "@/components/clients/ClientTabs";
 import { FicheActions } from "@/components/clients/FicheActions";
-import { FicheHeader } from "@/components/clients/FicheHeader";
-import { SectionCard } from "@/components/clients/SectionCard";
-import { Calendar, CalendarClock, Sprout, TrendingUp, Receipt, Truck, UserRound, MapPin } from "lucide-react";
+import { SurfaceCard } from "@/components/ui/surface-card";
+import { ArrowLeft, Calendar, Sprout, TrendingUp, Receipt, Truck } from "lucide-react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import { formatDate } from "@/lib/utils";
 import { requireAdmin } from "@/lib/permissions";
 
@@ -42,12 +45,6 @@ const statutLabel: Record<string, string> = {
   PLANIFIE: "Planifié",
   FAIT: "Fait",
   ANNULE: "Annulé",
-};
-
-const statutDot: Record<string, string> = {
-  PLANIFIE: "bg-amber-500",
-  FAIT: "bg-emerald-500",
-  ANNULE: "bg-slate-400",
 };
 
 export default async function ClientDetailPage(props: { params: Promise<{ id: string }> }) {
@@ -98,63 +95,53 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
           <FicheActions clientId={client.id} clientName={client.nom} />
         ) },
         { id: "infos", label: "Informations client", wide: true, node: (
-          <SectionCard
-            accent="brand"
-            title="Informations client"
-            subtitle="Coordonnées · rattachement · préférences d'appel"
-            icon={<UserRound />}
-          >
+          <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-4 sm:p-6">
+            <h2 className="text-base font-semibold mb-5 text-slate-800 dark:text-foreground">Informations client</h2>
             <ClientForm initialData={formData} mode="edit" />
-          </SectionCard>
+          </div>
         ) },
         { id: "contacts", label: "Interlocuteurs", node: (
-          <SectionCard bare>
+          <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-6">
             <ContactsEditor clientId={client.id} />
-          </SectionCard>
+          </div>
         ) },
         { id: "comportement", label: "Comportement N vs N-1 (YTD)", node: (
-          <SectionCard accent="brand" title="Comportement N vs N-1" subtitle="Année en cours vs même période N-1 (YTD)" icon={<TrendingUp />}>
+          <SurfaceCard accent="brand" title="Comportement N vs N-1 (YTD)" icon={<TrendingUp className="h-3.5 w-3.5" />}>
             <ComportementYoY clientId={client.id} />
-          </SectionCard>
+          </SurfaceCard>
         ) },
         { id: "familles", label: "Familles régulières", node: (
-          <SectionCard accent="emerald" title="Familles régulières" subtitle="Volume vs médiane de son groupe SAP" icon={<Sprout />}>
+          <SurfaceCard accent="emerald" title="Familles régulières · vs son groupe" icon={<Sprout className="h-3.5 w-3.5" />}>
             <FamillesVsGroupe clientId={client.id} />
-          </SectionCard>
+          </SurfaceCard>
         ) },
         { id: "produits", label: "Produits récurrents", wide: true, node: (
           <ProduitsRecurrents clientId={client.id} />
         ) },
         ...(client.rappels.length > 0 ? [{ id: "rappels", label: `Rappels (${client.rappels.length})`, node: (
-          <SectionCard
-            accent="violet"
-            title="Rappels"
-            subtitle={`${client.rappels.length} enregistré${client.rappels.length > 1 ? "s" : ""}`}
-            icon={<Calendar />}
-          >
-            <ul className="space-y-2">
-              {client.rappels.map((rappel) => (
-                <li
-                  key={rappel.id}
-                  className="flex items-start gap-3 rounded-xl border border-border bg-secondary/30 px-3 py-2.5"
-                >
-                  <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${statutDot[rappel.statut] || "bg-slate-400"}`} aria-hidden />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={statutVariant[rappel.statut] || "outline"}>{statutLabel[rappel.statut] || rappel.statut}</Badge>
-                      <span className="text-[12px] text-muted-foreground tabular-nums">{formatDate(rappel.dateRappel)}</span>
-                      {rappel.msEventId && (
-                        <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-400">
-                          <CalendarClock className="h-3 w-3" /> Agenda
-                        </span>
-                      )}
+          <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Calendar className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+              <h2 className="text-base font-semibold text-slate-800 dark:text-foreground">Rappels ({client.rappels.length})</h2>
+            </div>
+            <div className="space-y-2">
+              {client.rappels.map((rappel, i) => (
+                <div key={rappel.id}>
+                  {i > 0 && <Separator className="my-2" />}
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Badge variant={statutVariant[rappel.statut] || "outline"}>{statutLabel[rappel.statut] || rappel.statut}</Badge>
+                        <span className="text-sm text-muted-foreground">{formatDate(rappel.dateRappel)}</span>
+                      </div>
+                      {rappel.note && <p className="text-sm text-slate-700 dark:text-slate-300">{rappel.note}</p>}
                     </div>
-                    {rappel.note && <p className="mt-1 text-[13px] leading-snug text-foreground/80">{rappel.note}</p>}
+                    {rappel.msEventId && <span className="text-xs text-brand-500 dark:text-brand-400 shrink-0">📅 Calendrier</span>}
                   </div>
-                </li>
+                </div>
               ))}
-            </ul>
-          </SectionCard>
+            </div>
+          </div>
         ) }] : []),
       ]}
     />
@@ -166,14 +153,14 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
       sections={[
         { id: "encours", label: "Encours / crédit", wide: true, node: <EncoursCreditCard clientId={client.id} /> },
         { id: "compta", label: "Comptabilité", node: (
-          <SectionCard accent="amber" title="Comptabilité" subtitle="Email de facturation & relances" icon={<Receipt />}>
+          <SurfaceCard accent="amber" title="Comptabilité" icon={<Receipt className="h-3.5 w-3.5" />}>
             <CompteForm clientId={client.id} />
-          </SectionCard>
+          </SurfaceCard>
         ) },
         { id: "adresse", label: "Adresse de facturation", node: (
-          <SectionCard accent="sky" title="Adresse de facturation" subtitle="Synchronisée avec SAP (« Facturer à »)" icon={<MapPin />}>
+          <SurfaceCard accent="sky" title="Adresse de facturation" icon={<Receipt className="h-3.5 w-3.5" />}>
             <BillingAddressForm clientId={client.id} />
-          </SectionCard>
+          </SurfaceCard>
         ) },
       ]}
     />
@@ -184,29 +171,46 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
       storageKey="fiche:logistique"
       sections={[
         { id: "reception", label: "Réception marchandise", node: (
-          <SectionCard accent="sky" title="Réception marchandise" subtitle="Email quai & litiges réception" icon={<Truck />}>
+          <SurfaceCard accent="sky" title="Réception marchandise" icon={<Truck className="h-3.5 w-3.5" />}>
             <ReceptionEmailForm clientId={client.id} />
-          </SectionCard>
+          </SurfaceCard>
         ) },
         { id: "modes", label: "Modes de livraison", wide: true, node: (
-          <SectionCard bare>
+          <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-6">
             <DeliveryModesEditor clientId={client.id} clientCode={client.code} />
-          </SectionCard>
+          </div>
         ) },
       ]}
     />
   );
 
   return (
-    <div className="max-w-[1600px] space-y-6 overflow-x-hidden">
-      <FicheHeader
-        clientId={client.id}
-        name={client.nom}
-        code={client.code}
-        type={client.type}
-        commercial={client.commercial}
-        admin={admin}
-      />
+    <div className="space-y-5 sm:space-y-6 max-w-[1600px] overflow-x-hidden">
+      <div className="flex items-center justify-between gap-3">
+        <Button variant="ghost" size="sm" asChild className="gap-1 text-slate-500 dark:text-slate-400">
+          <Link href="/clients">
+            <ArrowLeft className="h-4 w-4" />
+            Retour aux clients
+          </Link>
+        </Button>
+        {admin && <RgpdExportButton clientId={client.id} />}
+      </div>
+
+      <div>
+        <p className="kicker mb-2">Fiche client · {client.type || "—"}</p>
+        <h1 className="font-display text-[30px] sm:text-[42px] font-light text-foreground leading-[1.02] sm:leading-[0.95] tracking-tight break-words">
+          {client.nom}
+        </h1>
+        <p className="text-[12px] text-muted-foreground mt-3 font-mono">
+          {client.code}
+          {client.commercial && (
+            <>
+              <span className="opacity-40 mx-2">·</span>
+              <span className="italic font-sans">suivi par {client.commercial}</span>
+            </>
+          )}
+        </p>
+      </div>
 
       <ClientTabs commercial={commercialPane} compta={comptaPane} logistique={logistiquePane} />
     </div>

@@ -8,9 +8,8 @@ import {
   ChevronRight,
   Loader2, Calendar, Sparkles, ArrowUpDown,
   StickyNote, History, User, TrendingUp, TrendingDown, Minus,
-  MessageSquare, AlertTriangle, Settings, Mail, Tag, ArrowUpRight,
+  MessageSquare, AlertTriangle, Settings, Mail, Tag,
 } from "lucide-react";
-import Link from "next/link";
 import type { ClientInsights } from "@/lib/insights";
 import { dayOfWeekLabel, summaryRecommendation, hourWindowLabel } from "@/lib/insights";
 import { useConsolePrefs, SECTION_LABELS, type SectionId } from "@/lib/useConsolePrefs";
@@ -728,30 +727,10 @@ function Stat({
 }
 
 /**
- * Heure de prise de commande d'un client « fait » aujourd'hui.
- * Prend l'appel COMMANDE le plus récent (sinon le dernier appel logué),
- * et renvoie l'heure « HH:mm ». null si aucun appel exploitable.
- */
-function handledTimeLabel(client: Client): string | null {
-  const appels = client.appels ?? [];
-  if (appels.length === 0) return null;
-  const commandes = appels.filter((a) => a.type === "COMMANDE");
-  const pool = commandes.length > 0 ? commandes : appels;
-  const latest = pool.reduce((a, b) =>
-    new Date(b.heureAppel).getTime() > new Date(a.heureAppel).getTime() ? b : a,
-  );
-  const d = new Date(latest.heureAppel);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-}
-
-/**
  * QueueRow — version compacte 2 lignes.
  *  L1 : ● Nom + badges          tél (tnum, droite)
- *  L2 : créneau (à appeler) OU heure de prise de commande (fait)   TYPE
+ *  L2 : code · créneau                        TYPE
  *
- * Le code client n'est plus affiché dans la file (demande métier) : seul le
- * nom porte l'identité ; les « faits » montrent l'heure de prise de commande.
  * Commercial volontairement retiré : info portée par le filtre commercial
  * en haut de la file (déjà filtré) — y mettre le nom dans chaque ligne =
  * doublon visuel qui rallonge la file pour rien.
@@ -766,8 +745,6 @@ const QueueRow = React.memo(function QueueRow({
   // Direct line first if available, fallback to standard
   const phone = client.tel2 || client.tel1;
   const isDirect = !!client.tel2;
-  // « Fait » → heure de prise de commande (remplace le code dans la file).
-  const handledTime = done ? handledTimeLabel(client) : null;
   return (
     <li>
       <button
@@ -851,21 +828,16 @@ const QueueRow = React.memo(function QueueRow({
           )}
         </div>
 
-        {/* ── L2 — heure de prise de commande (fait) OU créneau (à appeler) à
-               gauche, TYPE à droite. Le code client n'est plus affiché. ── */}
+        {/* ── L2 — code (+ créneau) à gauche, TYPE à droite ── */}
         <div className="flex items-center gap-2 mt-0.5 pl-4 min-w-0">
-          {handledTime ? (
-            <span
-              className="inline-flex items-center gap-1 text-[10px] font-mono tnum text-emerald-600 dark:text-emerald-400 shrink-0"
-              title="Heure de prise de commande"
-            >
-              <Clock className="h-2.5 w-2.5" /> {handledTime}
-            </span>
-          ) : !done && window && window !== "—" ? (
+          <span className="text-[10px] font-mono text-muted-foreground/70 truncate min-w-0">
+            {client.code}
+          </span>
+          {window && window !== "—" && (
             <span className="text-[9.5px] font-mono tnum text-muted-foreground shrink-0">
-              {window}
+              · {window}
             </span>
-          ) : null}
+          )}
           {client.type && (
             <span className={`ml-auto shrink-0 text-[9px] font-bold tracking-wider px-1.5 py-px rounded leading-tight ${
               client.type === "EXPORT" ? "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" :
@@ -1095,16 +1067,9 @@ function ActiveClient({
            Les méta (dernière cde, nb cdes, etc.) sont remontées sur l'Écran 2. */}
       <div className="pr-10 border-b border-border pb-3">
         <div className="flex items-baseline gap-2 flex-wrap">
-          <Link
-            href={`/clients/${client.id}`}
-            title={`Ouvrir la fiche de ${client.nom}`}
-            className="group/name inline-flex items-baseline gap-1.5 rounded-md text-[26px] font-bold leading-tight tracking-tight text-foreground transition-colors hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:hover:text-brand-400"
-          >
-            <span className="underline decoration-transparent decoration-2 underline-offset-4 transition-colors group-hover/name:decoration-brand-500/50">
-              {client.nom}
-            </span>
-            <ArrowUpRight className="h-4 w-4 shrink-0 self-center opacity-0 transition-opacity group-hover/name:opacity-70" aria-hidden />
-          </Link>
+          <h2 className="text-[26px] font-bold text-foreground tracking-tight leading-tight">
+            {client.nom}
+          </h2>
           {client.type && (
             <span className={`text-[10px] font-bold tracking-[0.14em] uppercase px-1.5 py-0.5 rounded ${
               client.type === "EXPORT" ? "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" :
