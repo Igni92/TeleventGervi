@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SALESPEOPLE, nameFromInitials, normalizeSlp } from "@/lib/salespeople";
 import { ClientLink } from "@/components/ClientLink";
+import { SortArrow, nextSort, type SortDir } from "@/components/ui/sort";
 
 interface PlanClient {
   id: string;
@@ -177,6 +178,9 @@ export function PlanAppel() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const show = (id: string) => !hidden.has(id);
+  // Tri par colonne (client : la liste est chargée en entier).
+  const [sort, setSort] = useState<{ key: string | null; dir: SortDir }>({ key: null, dir: "asc" });
+  const toggleSort = (key: string) => setSort((cur) => nextSort(cur, key));
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -247,6 +251,29 @@ export function PlanAppel() {
     withIncidents: data.filter((c) => c.openIncidents > 0).length,
     noVendeur: data.filter((c) => !c.vendeur).length,
   }), [data]);
+
+  // Données triées (tri client). Sans tri actif → ordre serveur (cde la plus ancienne).
+  const sortedData = useMemo(() => {
+    if (!sort.key) return data;
+    const dir = sort.dir === "asc" ? 1 : -1;
+    const val = (c: PlanClient): string | number => {
+      switch (sort.key) {
+        case "nom": return c.nom?.toLowerCase() ?? "";
+        case "tel": return c.tel1 || c.tel2 || "";
+        // null (jamais commandé) = le plus en retard → +Infini.
+        case "lastOrder": return c.lastOrderDays == null ? Number.POSITIVE_INFINITY : c.lastOrderDays;
+        case "incidents": return c.openIncidents ?? 0;
+        case "vendeur": return (c.vendeur ? normalizeSlp(c.vendeur) : "") ?? "";
+        case "commercial": return (c.commercial ? normalizeSlp(c.commercial) : "") ?? "";
+        default: return "";
+      }
+    };
+    return [...data].sort((a, b) => {
+      const va = val(a), vb = val(b);
+      if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
+      return String(va).localeCompare(String(vb), "fr") * dir;
+    });
+  }, [data, sort]);
 
   const colCount = 3 + COLS.filter((c) => show(c.id)).length;
 
@@ -327,9 +354,9 @@ export function PlanAppel() {
       <div className="md:hidden space-y-2.5">
         {loading ? (
           <div className="h-32 flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-        ) : data.length === 0 ? (
+        ) : sortedData.length === 0 ? (
           <p className="text-center text-muted-foreground py-10 text-[15px]">Aucun client pour ces filtres.</p>
-        ) : data.map((c) => {
+        ) : sortedData.map((c) => {
           const tel = c.tel1 || c.tel2 || null;
           const telHref = tel ? tel.replace(/[^\d+]/g, "") : null;
           const tv = c.type === "GMS" ? "gms" : c.type === "EXPORT" ? "export" : c.type === "CHR" ? "chr" : "outline";
@@ -371,29 +398,29 @@ export function PlanAppel() {
         })}
       </div>
 
-      {/* Table (desktop) */}
+      {/* Table (desktop) — défile dans le tableau (en-tête figé) */}
       <div className="hidden md:block bg-card border border-border rounded-xl overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[68vh]">
           <table className="w-full text-[13px]">
-            <thead className="bg-secondary/40 text-[10.5px] uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <th className="w-9 px-3 py-2.5"><Checkbox checked={allVisibleSelected} indeterminate={someSelected} onChange={toggleAll} /></th>
-                <th className="text-left px-3 py-2.5 font-semibold">Client</th>
-                {show("tel") && <th className="text-left px-3 py-2.5 font-semibold">Tél</th>}
-                {show("jours") && <th className="text-left px-3 py-2.5 font-semibold">Jours d&apos;appel</th>}
-                {show("lastOrder") && <th className="text-right px-3 py-2.5 font-semibold">Dernière cde</th>}
-                {show("incidents") && <th className="text-center px-3 py-2.5 font-semibold">Incidents</th>}
-                {show("vendeur") && <th className="text-left px-3 py-2.5 font-semibold">Vendeur</th>}
-                {show("commercial") && <th className="text-left px-3 py-2.5 font-semibold">Commercial</th>}
-                <th className="w-8" />
+            <thead className="sticky top-0 z-10 bg-card text-[10.5px] uppercase tracking-wider text-muted-foreground">
+              <tr className="border-b border-border">
+                <th className="w-9 px-3 py-2.5 bg-card"><Checkbox checked={allVisibleSelected} indeterminate={someSelected} onChange={toggleAll} /></th>
+                <PlanTh sortKey="nom" sort={sort} onSort={toggleSort}>Client</PlanTh>
+                {show("tel") && <PlanTh sortKey="tel" sort={sort} onSort={toggleSort}>Tél</PlanTh>}
+                {show("jours") && <th className="text-left px-3 py-2.5 font-semibold bg-card">Jours d&apos;appel</th>}
+                {show("lastOrder") && <PlanTh sortKey="lastOrder" sort={sort} onSort={toggleSort} align="right">Dernière cde</PlanTh>}
+                {show("incidents") && <PlanTh sortKey="incidents" sort={sort} onSort={toggleSort} align="center">Incidents</PlanTh>}
+                {show("vendeur") && <PlanTh sortKey="vendeur" sort={sort} onSort={toggleSort}>Vendeur</PlanTh>}
+                {show("commercial") && <PlanTh sortKey="commercial" sort={sort} onSort={toggleSort}>Commercial</PlanTh>}
+                <th className="w-8 bg-card" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
               {loading ? (
                 <tr><td colSpan={colCount} className="h-32 text-center"><Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></td></tr>
-              ) : data.length === 0 ? (
+              ) : sortedData.length === 0 ? (
                 <tr><td colSpan={colCount} className="h-32 text-center text-muted-foreground">Aucun client pour ces filtres.</td></tr>
-              ) : data.map((c) => (
+              ) : sortedData.map((c) => (
                 <PlanRow
                   key={c.id}
                   c={c}
@@ -412,7 +439,11 @@ export function PlanAppel() {
           </table>
         </div>
       </div>
-      {!loading && <p className="text-[12px] text-muted-foreground">{data.length} client(s) · triés par commande la plus ancienne.</p>}
+      {!loading && (
+        <p className="text-[12px] text-muted-foreground">
+          {data.length} client(s){sort.key ? " · tri personnalisé (clic sur les colonnes)" : " · triés par commande la plus ancienne"}.
+        </p>
+      )}
     </div>
   );
 }
@@ -461,6 +492,34 @@ function StatCard({
       </div>
       <div className="text-[24px] font-bold tnum text-foreground mt-0.5">{value}</div>
     </button>
+  );
+}
+
+/** En-tête de colonne TRIABLE (plan d'appel). Fond opaque (bg-card) pour rester
+ *  lisible quand l'en-tête est figé (sticky) au défilement. */
+function PlanTh({
+  sortKey, sort, onSort, align = "left", children,
+}: {
+  sortKey: string;
+  sort: { key: string | null; dir: SortDir };
+  onSort: (key: string) => void;
+  align?: "left" | "right" | "center";
+  children: React.ReactNode;
+}) {
+  const active = sort.key === sortKey;
+  const just = align === "right" ? "justify-end" : align === "center" ? "justify-center" : "";
+  const txt = align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
+  return (
+    <th className={`${txt} px-3 py-2.5 font-semibold bg-card`}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-1 hover:text-foreground transition-colors ${just} ${active ? "text-foreground" : ""}`}
+      >
+        {children}
+        <SortArrow active={active} dir={sort.dir} />
+      </button>
+    </th>
   );
 }
 

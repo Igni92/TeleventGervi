@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InfoTip } from "@/components/ui/info-tip";
+import { SortArrow, nextSort, type SortDir } from "@/components/ui/sort";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { formatRelative } from "@/lib/utils";
 import { convertStockDisplay, type StockDisplayUnit } from "@/lib/gervifrais-calc";
@@ -86,6 +87,7 @@ export function ProductsTable() {
   const [groups, setGroups] = useState<ProductGroup[]>([]);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<{ key: string | null; dir: SortDir }>({ key: null, dir: "asc" });
   const [inStockOnly, setInStockOnly] = useState(true);
   const [selectedGroups, setSelectedGroups] = useState<Set<number>>(new Set());
   // Unité d'affichage du stock par groupe (kg/colis/pièce) — surcharge le mode auto.
@@ -132,6 +134,8 @@ export function ProductsTable() {
       if (selectedGroups.size > 0) {
         params.set("groups", Array.from(selectedGroups).join(","));
       }
+      // Tri serveur (clic sur en-tête) — sinon tri par défaut (plus gros stock).
+      if (sort.key) { params.set("sort", sort.key); params.set("dir", sort.dir); }
       const res = await fetch(`/api/products?${params}`);
       if (!res.ok) throw new Error();
       setData(await res.json());
@@ -140,7 +144,7 @@ export function ProductsTable() {
     } finally {
       setLoading(false);
     }
-  }, [search, page, inStockOnly, selectedGroups]);
+  }, [search, page, inStockOnly, selectedGroups, sort]);
 
   const fetchGroups = useCallback(async () => {
     try {
@@ -226,7 +230,10 @@ export function ProductsTable() {
   useEffect(() => { fetchGroupUnits(); }, [fetchGroupUnits]);
 
   // Reset page when filter changes
-  useEffect(() => { setPage(1); }, [search, inStockOnly, selectedGroups]);
+  useEffect(() => { setPage(1); }, [search, inStockOnly, selectedGroups, sort]);
+
+  // Clic sur un en-tête → bascule asc/desc/défaut (et revient page 1 via l'effet ci-dessus).
+  const toggleSort = (key: string) => setSort((cur) => nextSort(cur, key));
 
   // Debounced search
   useEffect(() => {
@@ -562,29 +569,29 @@ export function ProductsTable() {
         )}
       </div>
 
-      {/* ── Table (desktop) ── */}
+      {/* ── Table (desktop) — défile dans le tableau (en-tête figé) ── */}
       <div className="hidden md:block bg-card border border-border rounded-xl overflow-hidden">
+        <div className="max-h-[68vh] overflow-y-auto">
         <table className="w-full text-[12.5px]">
-          <thead>
-            <tr className="bg-slate-50/80 dark:bg-slate-800/50 border-b border-border">
-              <th className="w-8 px-2 py-3"></th>
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-slate-50 dark:bg-slate-800 border-b border-border">
+              <th className="w-8 px-2 py-3 bg-slate-50 dark:bg-slate-800"></th>
               {/* Quantités à GAUCHE : stock dispo + en achat (EM) */}
-              <th className="text-right px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <div className="inline-flex items-center gap-1 justify-end">Qté stock
-                  <InfoTip label="Quantité en stock" content="Somme des dispos sur 000 + 01 + R1 (dispo = stock − réservé)." side="bottom" iconSize={10} />
-                </div>
-              </th>
-              <th className="text-right px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <SortTh sortKey="qty" sort={sort} onSort={toggleSort} align="right">
+                Qté stock
+                <InfoTip label="Quantité en stock" content="Somme des dispos sur 000 + 01 + R1 (dispo = stock − réservé)." side="bottom" iconSize={10} />
+              </SortTh>
+              <th className="text-right px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground bg-slate-50 dark:bg-slate-800">
                 <div className="inline-flex items-center gap-1 justify-end">Commande fournisseur
                   <InfoTip label="Commande fournisseur" content="Quantité en commande fournisseur (en attente). Dès la réception (entrée marchandise), elle passe en stock." side="bottom" iconSize={10} />
                 </div>
               </th>
-              <th className="text-left px-4 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Code Article</th>
-              <th className="text-left px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Fruit</th>
-              <th className="text-left px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Pays</th>
-              <th className="text-left px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Marque</th>
-              <th className="text-left px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Variété</th>
-              <th className="text-left px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Condt</th>
+              <SortTh sortKey="code" sort={sort} onSort={toggleSort}>Code Article</SortTh>
+              <SortTh sortKey="fruit" sort={sort} onSort={toggleSort}>Fruit</SortTh>
+              <SortTh sortKey="pays" sort={sort} onSort={toggleSort}>Pays</SortTh>
+              <SortTh sortKey="marque" sort={sort} onSort={toggleSort}>Marque</SortTh>
+              <SortTh sortKey="variete" sort={sort} onSort={toggleSort}>Variété</SortTh>
+              <SortTh sortKey="condt" sort={sort} onSort={toggleSort}>Condt</SortTh>
             </tr>
           </thead>
           <tbody>
@@ -681,6 +688,7 @@ export function ProductsTable() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* ── Pagination ── */}
@@ -989,4 +997,30 @@ function StockUnitModal({
 
   if (typeof document === "undefined") return null;
   return createPortal(modal, document.body);
+}
+
+/** En-tête de colonne TRIABLE (Stock). Clic → asc / desc / défaut. En-tête figé
+ *  (sticky) : on répète le fond pour qu'il masque les lignes au défilement. */
+function SortTh({
+  sortKey, sort, onSort, align = "left", children,
+}: {
+  sortKey: string;
+  sort: { key: string | null; dir: SortDir };
+  onSort: (key: string) => void;
+  align?: "left" | "right";
+  children: React.ReactNode;
+}) {
+  const active = sort.key === sortKey;
+  return (
+    <th className={`px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground bg-slate-50 dark:bg-slate-800 ${align === "right" ? "text-right" : "text-left"}`}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-1 hover:text-foreground transition-colors ${align === "right" ? "justify-end" : ""} ${active ? "text-foreground" : ""}`}
+      >
+        {children}
+        <SortArrow active={active} dir={sort.dir} />
+      </button>
+    </th>
+  );
 }
