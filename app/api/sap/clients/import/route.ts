@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
+import { formatPhoneDisplay } from "@/lib/phone";
 
 /**
  * POST /api/sap/clients/import   body { clear?: boolean }
@@ -111,9 +112,11 @@ async function upsertClientBp(
   const vendeur = type === "GMS" && active ? "MM" : null;
   // Géoloc carte = adresse de LIVRAISON (ship-to), repli facturation/tête.
   const { city, zip, country, usedShipTo } = deliveryAddress(bp);
+  // Téléphone normalisé à l'import au format « xx xx xx xx xx ».
+  const tel1 = formatPhoneDisplay(bp.Phone1) || null;
   await prisma.$executeRaw`
     INSERT INTO "Client" ("id","code","nom","type","commercial","vendeur","tel1","joursAppel","sapGroupCode","sapGroupName","city","zipCode","country","activeTelevente","createdAt","updatedAt")
-    VALUES (gen_random_uuid()::text, ${bp.CardCode}, ${bp.CardName || bp.CardCode}, ${type}, 'JMG', ${vendeur}, ${bp.Phone1 ?? null}, '1,2,3,4,5,6', ${grpCode}, ${grpName}, ${city}, ${zip}, ${country}, ${active}, NOW(), NOW())
+    VALUES (gen_random_uuid()::text, ${bp.CardCode}, ${bp.CardName || bp.CardCode}, ${type}, 'JMG', ${vendeur}, ${tel1}, '1,2,3,4,5,6', ${grpCode}, ${grpName}, ${city}, ${zip}, ${country}, ${active}, NOW(), NOW())
     ON CONFLICT ("code") DO UPDATE SET
       "nom" = EXCLUDED."nom",
       "type" = EXCLUDED."type",

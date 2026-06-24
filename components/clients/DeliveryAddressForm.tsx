@@ -7,15 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 /**
- * Adresse de FACTURATION structurée — bidirectionnelle avec SAP (adresse
- * « Facturer à » / BPAddresses bo_BillTo). Lue depuis SAP, écrite dans SAP.
+ * Adresse de LIVRAISON structurée — bidirectionnelle avec SAP (adresse
+ * « Expédier à » / BPAddresses bo_ShipTo, livraison par défaut). Lue depuis
+ * SAP, écrite dans SAP. Calquée sur BillingAddressForm.
  */
 type Addr = {
   street: string; block: string; city: string; zipCode: string; county: string; country: string;
 };
 const EMPTY: Addr = { street: "", block: "", city: "", zipCode: "", county: "", country: "" };
 
-export function BillingAddressForm({ clientId }: { clientId: string }) {
+export function DeliveryAddressForm({ clientId }: { clientId: string }) {
   const [initial, setInitial] = useState<Addr | null>(null);
   const [a, setA] = useState<Addr>(EMPTY);
   const [loading, setLoading] = useState(true);
@@ -25,7 +26,7 @@ export function BillingAddressForm({ clientId }: { clientId: string }) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetch(`/api/clients/${clientId}/billing-address`)
+    fetch(`/api/clients/${clientId}/delivery-address`)
       .then((r) => r.json())
       .then((d) => {
         if (cancelled) return;
@@ -49,7 +50,7 @@ export function BillingAddressForm({ clientId }: { clientId: string }) {
     e.preventDefault();
     setError(null);
     startSave(async () => {
-      const res = await fetch(`/api/clients/${clientId}/billing-address`, {
+      const res = await fetch(`/api/clients/${clientId}/delivery-address`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(a),
@@ -57,7 +58,7 @@ export function BillingAddressForm({ clientId }: { clientId: string }) {
       const d = await res.json().catch(() => null);
       if (!res.ok || !d?.ok) { setError(d?.error ?? `Erreur ${res.status}`); toast.error("Échec écriture SAP"); return; }
       setInitial({ ...a });
-      toast.success("Adresse de facturation mise à jour (SAP)");
+      toast.success("Adresse de livraison mise à jour (SAP)");
     });
   }
 
@@ -67,7 +68,7 @@ export function BillingAddressForm({ clientId }: { clientId: string }) {
     <form onSubmit={onSave} className="space-y-3">
       <div className="space-y-2">
         <Input placeholder="N° et rue" value={a.street} onChange={set("street")} aria-label="Rue" />
-        <Input placeholder="Complément (bâtiment, BP…)" value={a.block} onChange={set("block")} aria-label="Complément" />
+        <Input placeholder="Complément (bâtiment, quai, BP…)" value={a.block} onChange={set("block")} aria-label="Complément" />
         <div className="grid grid-cols-3 gap-2">
           <Input placeholder="Code postal" value={a.zipCode} onChange={set("zipCode")} aria-label="Code postal" />
           <Input placeholder="Ville" value={a.city} onChange={set("city")} className="col-span-2" aria-label="Ville" />

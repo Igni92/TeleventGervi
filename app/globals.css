@@ -526,6 +526,8 @@
   .ambient-rings-spin, .ambient-rings-spin-r { animation: none; }
   /* Squelettes : pas de balayage, fond muté statique. */
   .skeleton { animation: none; background: hsl(var(--muted)); }
+  /* Boucles décoratives de la fiche (status-light, barres signal) : figées. */
+  .signal-bar, .animate-soft-pulse { animation: none !important; }
 }
 
 /* Réglage televente:animations (page /parametres), posé sur <html> par
@@ -534,7 +536,9 @@
 html[data-reduce-anim="1"] .ambient-aurora,
 html[data-reduce-anim="1"] .ambient-aurora-2,
 html[data-reduce-anim="1"] .ambient-rings-spin,
-html[data-reduce-anim="1"] .ambient-rings-spin-r { animation: none !important; }
+html[data-reduce-anim="1"] .ambient-rings-spin-r,
+html[data-reduce-anim="1"] .signal-bar,
+html[data-reduce-anim="1"] .animate-soft-pulse { animation: none !important; }
 
 /* "on" (data-anim=force) → rallume le fond animé pour qui le souhaite,
    y compris si le système demande prefers-reduced-motion. */

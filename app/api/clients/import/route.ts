@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { formatPhoneDisplay } from "@/lib/phone";
 
 interface ImportRow {
   code: string;
@@ -51,9 +52,10 @@ export async function POST(req: NextRequest) {
       const code = row.code.trim().toUpperCase();
       byCode.set(code, {
         nom: row.nom?.trim() || code,
-        tel1: row.tel1?.trim() || null,
-        tel2: row.tel2?.trim() || null,
-        tel3: row.tel3?.trim() || null,
+        // Téléphones normalisés à l'import au format « xx xx xx xx xx ».
+        tel1: formatPhoneDisplay(row.tel1) || null,
+        tel2: formatPhoneDisplay(row.tel2) || null,
+        tel3: formatPhoneDisplay(row.tel3) || null,
       });
     }
 
