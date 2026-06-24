@@ -536,8 +536,8 @@ export function ProductsTable() {
                 </div>
               </th>
               <th className="text-right px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <div className="inline-flex items-center gap-1 justify-end">Qté achat (EM)
-                  <InfoTip label="Quantité en achat" content="Quantité en commande fournisseur (entrées marchandises attendues)." side="bottom" iconSize={10} />
+                <div className="inline-flex items-center gap-1 justify-end">Commande fournisseur
+                  <InfoTip label="Commande fournisseur" content="Quantité en commande fournisseur (en attente). Dès la réception (entrée marchandise), elle passe en stock." side="bottom" iconSize={10} />
                 </div>
               </th>
               <th className="text-left px-4 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Code Article</th>
