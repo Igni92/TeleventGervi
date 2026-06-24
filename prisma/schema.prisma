@@ -124,6 +124,7 @@ model Client {
   // (anecdotes, contexte non catégorisable).
   notes           String?
   joursAppel      String?
+  joursLivraison  String? // jours de livraison (CSV 0..6) — défaut lun→sam à l'affichage
   // Activation TeleVente : un client n'apparaît dans la liste d'un commercial
   // que s'il est activé. Auto-activé à l'import SAP si U_Actif='O' ; sinon
   // activation manuelle (et tout nouveau client arrive inactif).

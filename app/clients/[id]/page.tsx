@@ -80,6 +80,10 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
     joursAppel: client.joursAppel
       ? client.joursAppel.split(",").map(Number).filter((n: number) => !isNaN(n))
       : [],
+    // Défaut lundi→samedi quand non renseigné (demande métier).
+    joursLivraison: client.joursLivraison
+      ? client.joursLivraison.split(",").map(Number).filter((n: number) => !isNaN(n))
+      : [1, 2, 3, 4, 5, 6],
   };
 
   const commercialPane = (

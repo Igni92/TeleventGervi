@@ -50,6 +50,8 @@ export const clientSchema = z.object({
     .or(z.literal("")),
   // Jours d'appel : tableau de numbers 0-6 (0=Dim, 1=Lun...6=Sam)
   joursAppel: z.array(z.number().min(0).max(6)).optional(),
+  // Jours de livraison : même encodage (défaut lun→sam côté UI)
+  joursLivraison: z.array(z.number().min(0).max(6)).optional(),
 });
 
 export type ClientFormValues = z.infer<typeof clientSchema>;

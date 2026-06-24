@@ -496,12 +496,13 @@ export function CallConsole() {
           {/* Queue list */}
           <div className="flex-1 overflow-y-auto">
             {filteredQueue.length === 0 ? (
-              <div className="p-6 text-center">
-                <CheckCircle2 className="h-7 w-7 mx-auto text-emerald-500 mb-2" />
-                <p className="text-[13px] font-medium text-foreground">Tout est fait 🎉</p>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  Aucun client à appeler maintenant.
+              <div className="px-4 py-10 text-center animate-fade-up">
+                <CheckCircle2 className="h-20 w-20 mx-auto text-emerald-500 mb-4 drop-shadow-[0_0_18px_rgba(16,185,129,0.45)]" />
+                <p className="text-[30px] leading-none font-extrabold tracking-tight text-foreground">Tout est fait <span aria-hidden>🎉</span></p>
+                <p className="text-[15px] font-medium text-emerald-600 dark:text-emerald-400 mt-3">
+                  Journée d&apos;appels bouclée — bravo !
                 </p>
+                <p className="text-[12px] text-muted-foreground mt-1">Aucun client à appeler maintenant.</p>
               </div>
             ) : (
               <ol>
