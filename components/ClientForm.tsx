@@ -304,9 +304,9 @@ export function ClientForm({ initialData, mode }: ClientFormProps) {
                 key={value}
                 type="button"
                 onClick={() => toggleJour(value)}
-                className={`h-9 w-12 rounded-md border text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-1 dark:focus:ring-offset-slate-900 ${
+                className={`h-9 w-12 rounded-lg border text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-1 dark:focus:ring-offset-slate-900 ${
                   active
-                    ? "bg-brand-600 text-white border-brand-600 shadow-[0_0_10px_rgba(99,102,241,0.35)]"
+                    ? "border-brand-500 bg-brand-500 text-white shadow-[0_2px_10px_-2px_hsl(var(--brand-500))]"
                     : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:border-brand-400 hover:text-brand-600 dark:hover:border-brand-500 dark:hover:text-brand-400"
                 }`}
               >
@@ -331,9 +331,9 @@ export function ClientForm({ initialData, mode }: ClientFormProps) {
                 key={value}
                 type="button"
                 onClick={() => toggleJourLivraison(value)}
-                className={`h-9 w-12 rounded-md border text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 dark:focus:ring-offset-slate-900 ${
+                className={`h-9 w-12 rounded-lg border text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 dark:focus:ring-offset-slate-900 ${
                   active
-                    ? "bg-emerald-600 text-white border-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.35)]"
+                    ? "border-emerald-600 bg-emerald-600 text-white shadow-[0_2px_10px_-2px_rgba(16,185,129,0.5)]"
                     : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:border-emerald-400 hover:text-emerald-600 dark:hover:border-emerald-500 dark:hover:text-emerald-400"
                 }`}
               >

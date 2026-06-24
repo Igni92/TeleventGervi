@@ -1,7 +1,7 @@
 "use client";
 
 import { CreditCard } from "lucide-react";
-import { SurfaceCard } from "@/components/ui/surface-card";
+import { SectionCard } from "@/components/clients/SectionCard";
 import { EncoursCredit, useCredit } from "@/components/clients/EncoursCredit";
 
 /**
@@ -18,12 +18,13 @@ export function EncoursCreditCard({ clientId }: { clientId: string }) {
   if (!data || !("available" in data) || !data.available) return null;
 
   return (
-    <SurfaceCard
+    <SectionCard
       accent="rose"
       title="Encours / limite de crédit"
-      icon={<CreditCard className="h-3.5 w-3.5" />}
+      subtitle="Miroir SAP · lecture seule"
+      icon={<CreditCard />}
     >
       <EncoursCredit data={data} />
-    </SurfaceCard>
+    </SectionCard>
   );
 }

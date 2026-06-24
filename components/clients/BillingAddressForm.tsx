@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { Save, MapPin } from "lucide-react";
+import { Save } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 
 /**
  * Adresse de FACTURATION structurée — bidirectionnelle avec SAP (adresse
@@ -66,9 +65,6 @@ export function BillingAddressForm({ clientId }: { clientId: string }) {
 
   return (
     <form onSubmit={onSave} className="space-y-3">
-      <Label className="inline-flex items-center gap-1.5">
-        <MapPin className="h-3.5 w-3.5 text-muted-foreground" /> Adresse de facturation (SAP « Facturer à »)
-      </Label>
       <div className="space-y-2">
         <Input placeholder="N° et rue" value={a.street} onChange={set("street")} aria-label="Rue" />
         <Input placeholder="Complément (bâtiment, BP…)" value={a.block} onChange={set("block")} aria-label="Complément" />

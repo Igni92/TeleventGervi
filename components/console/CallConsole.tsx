@@ -8,8 +8,9 @@ import {
   ChevronRight,
   Loader2, Calendar, Sparkles, ArrowUpDown,
   StickyNote, History, User, TrendingUp, TrendingDown, Minus,
-  MessageSquare, AlertTriangle, Settings, Mail, Tag,
+  MessageSquare, AlertTriangle, Settings, Mail, Tag, ArrowUpRight,
 } from "lucide-react";
+import Link from "next/link";
 import type { ClientInsights } from "@/lib/insights";
 import { dayOfWeekLabel, summaryRecommendation, hourWindowLabel } from "@/lib/insights";
 import { useConsolePrefs, SECTION_LABELS, type SectionId } from "@/lib/useConsolePrefs";
@@ -1067,9 +1068,16 @@ function ActiveClient({
            Les méta (dernière cde, nb cdes, etc.) sont remontées sur l'Écran 2. */}
       <div className="pr-10 border-b border-border pb-3">
         <div className="flex items-baseline gap-2 flex-wrap">
-          <h2 className="text-[26px] font-bold text-foreground tracking-tight leading-tight">
-            {client.nom}
-          </h2>
+          <Link
+            href={`/clients/${client.id}`}
+            title={`Ouvrir la fiche de ${client.nom}`}
+            className="group/name inline-flex items-baseline gap-1.5 rounded-md text-[26px] font-bold leading-tight tracking-tight text-foreground transition-colors hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 dark:hover:text-brand-400"
+          >
+            <span className="underline decoration-transparent decoration-2 underline-offset-4 transition-colors group-hover/name:decoration-brand-500/50">
+              {client.nom}
+            </span>
+            <ArrowUpRight className="h-4 w-4 shrink-0 self-center opacity-0 transition-opacity group-hover/name:opacity-70" aria-hidden />
+          </Link>
           {client.type && (
             <span className={`text-[10px] font-bold tracking-[0.14em] uppercase px-1.5 py-0.5 rounded ${
               client.type === "EXPORT" ? "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" :

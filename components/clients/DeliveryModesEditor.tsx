@@ -88,14 +88,21 @@ export function DeliveryModesEditor({ clientId, clientCode }: Props) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <Truck className="h-4 w-4 text-muted-foreground" />
-        <h3 className="text-[13px] font-semibold text-foreground">Modes de livraison</h3>
-        <InfoTip
-          label="Modes de livraison"
-          content={<>Chaque mode pointe vers un <b>CardCode SAP</b> différent.<br/>Ex : <b>Direct</b> utilise LPOI · <b>SCACHAP</b> utilise LPOI.<br/>Le mode <b>défaut</b> est sélectionné automatiquement lors de la création d&apos;un BL.</>}
-          side="right" iconSize={11}
-        />
+      <div className="flex items-center gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/12 text-sky-600 ring-1 ring-sky-500/20 dark:text-sky-400">
+          <Truck className="h-[17px] w-[17px]" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <h3 className="text-[14.5px] font-semibold leading-tight tracking-[-0.01em] text-foreground">Modes de livraison</h3>
+            <InfoTip
+              label="Modes de livraison"
+              content={<>Chaque mode pointe vers un <b>CardCode SAP</b> différent.<br/>Ex : <b>Direct</b> utilise LPOI · <b>SCACHAP</b> utilise LPOI.<br/>Le mode <b>défaut</b> est sélectionné automatiquement lors de la création d&apos;un BL.</>}
+              side="right" iconSize={11}
+            />
+          </div>
+          <p className="text-[12px] leading-snug text-muted-foreground">Chaque mode cible un CardCode SAP</p>
+        </div>
       </div>
 
       {loading ? (
