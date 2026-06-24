@@ -62,14 +62,16 @@ export async function POST() {
     // Base SÛRE (champs historiques connus pour fonctionner sur ce SAP).
     const ITEMS_SELECT_BASE =
       "ItemCode,ItemName,ItemsGroupCode,SalesUnit,SalesPackagingUnit,SalesQtyPerPackUnit,SalesItemsPerUnit,SalesUnitWeight,InventoryUOM,PurchaseUnit,ManageBatchNumbers,QuantityOnStock,ItemWarehouseInfoCollection,Valid,Frozen,U_Pays,U_GER_Marque,U_GER_Det_Condt,U_GER_UVC,U_GER_NB_BARQ_COLIS";
-    // + FrgnName (variété). Si ce champ n'est pas sélectionnable sur ce SAP, la
-    // requête échoue : on RETOMBE alors sur la base SÛRE pour ne JAMAIS casser la
-    // synchro stock (la variété restera simplement vide).
-    const ITEMS_SELECT_FULL = `ItemCode,ItemName,FrgnName,${ITEMS_SELECT_BASE.slice("ItemCode,ItemName,".length)}`;
+    // + variété. Sur la Service Layer SAP B1, la colonne DB « FrgnName » est
+    // exposée sous le nom de propriété OData « ForeignName » (FrgnName renvoie
+    // 400 « Property invalid »). On sélectionne donc ForeignName. Si ce champ
+    // n'est pas sélectionnable sur ce SAP, la requête échoue : on RETOMBE sur la
+    // base SÛRE pour ne JAMAIS casser la synchro stock (variété simplement vide).
+    const ITEMS_SELECT_FULL = `ItemCode,ItemName,ForeignName,${ITEMS_SELECT_BASE.slice("ItemCode,ItemName,".length)}`;
     // ⚠️ SalesItemsPerUnit (NumInSale) absent du type partagé SapItem ET du
     // client Prisma généré (colonne Product."salesItemsPerUnit" existe en base
     // mais pas dans le client) → extension de type locale + écriture raw SQL.
-    type SapItemEx = SapItem & { SalesItemsPerUnit?: number; FrgnName?: string };
+    type SapItemEx = SapItem & { SalesItemsPerUnit?: number; ForeignName?: string; FrgnName?: string };
     let items: SapItemEx[];
     try {
       items = await sap.getAllParallel<SapItemEx>(
@@ -78,7 +80,7 @@ export async function POST() {
         { pageSize: 500, env: "prod" },
       );
     } catch (e) {
-      console.warn("[sync products] $select avec FrgnName échoué — fallback sans variété:", (e as Error).message);
+      console.warn("[sync products] $select avec ForeignName échoué — fallback sans variété:", (e as Error).message);
       items = await sap.getAllParallel<SapItemEx>(
         `Items?$filter=${ITEMS_FILTER}&$select=${ITEMS_SELECT_BASE}`,
         `Items/$count?$filter=${ITEMS_FILTER}`,
@@ -121,7 +123,7 @@ export async function POST() {
         uMarque: it.U_GER_Marque ?? null,
         uCondi: it.U_GER_Det_Condt ?? null,
         uUvc: it.U_GER_UVC ?? null,
-        frgnName: it.FrgnName ?? null,                 // = variété
+        frgnName: it.ForeignName ?? it.FrgnName ?? null,   // = variété (SL: ForeignName)
         uNbBarqColis: it.U_GER_NB_BARQ_COLIS ?? null,
         stocks: (it.ItemWarehouseInfoCollection ?? []).filter((w) =>
           WAREHOUSES_TO_SYNC.has(w.WarehouseCode),

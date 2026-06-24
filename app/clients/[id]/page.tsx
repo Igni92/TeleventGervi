@@ -91,10 +91,10 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
     <ReorderableSections
       storageKey="fiche:commercial"
       sections={[
-        { id: "actions", label: "Actions commerciales", node: (
+        { id: "actions", label: "Actions commerciales", wide: true, node: (
           <FicheActions clientId={client.id} clientName={client.nom} />
         ) },
-        { id: "infos", label: "Informations client", node: (
+        { id: "infos", label: "Informations client", wide: true, node: (
           <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-4 sm:p-6">
             <h2 className="text-base font-semibold mb-5 text-slate-800 dark:text-foreground">Informations client</h2>
             <ClientForm initialData={formData} mode="edit" />
@@ -115,7 +115,7 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
             <FamillesVsGroupe clientId={client.id} />
           </SurfaceCard>
         ) },
-        { id: "produits", label: "Produits récurrents", node: (
+        { id: "produits", label: "Produits récurrents", wide: true, node: (
           <ProduitsRecurrents clientId={client.id} />
         ) },
         ...(client.rappels.length > 0 ? [{ id: "rappels", label: `Rappels (${client.rappels.length})`, node: (
@@ -151,7 +151,7 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
     <ReorderableSections
       storageKey="fiche:compta"
       sections={[
-        { id: "encours", label: "Encours / crédit", node: <EncoursCreditCard clientId={client.id} /> },
+        { id: "encours", label: "Encours / crédit", wide: true, node: <EncoursCreditCard clientId={client.id} /> },
         { id: "compta", label: "Comptabilité", node: (
           <SurfaceCard accent="amber" title="Comptabilité" icon={<Receipt className="h-3.5 w-3.5" />}>
             <CompteForm clientId={client.id} />
@@ -175,7 +175,7 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
             <ReceptionEmailForm clientId={client.id} />
           </SurfaceCard>
         ) },
-        { id: "modes", label: "Modes de livraison", node: (
+        { id: "modes", label: "Modes de livraison", wide: true, node: (
           <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-6">
             <DeliveryModesEditor clientId={client.id} clientCode={client.code} />
           </div>
@@ -185,7 +185,7 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
   );
 
   return (
-    <div className="space-y-5 sm:space-y-6 max-w-3xl overflow-x-hidden">
+    <div className="space-y-5 sm:space-y-6 max-w-[1600px] overflow-x-hidden">
       <div className="flex items-center justify-between gap-3">
         <Button variant="ghost" size="sm" asChild className="gap-1 text-slate-500 dark:text-slate-400">
           <Link href="/clients">
