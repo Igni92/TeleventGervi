@@ -42,7 +42,10 @@ export async function GET(req: NextRequest) {
   const inStockOnly = searchParams.get("inStock") === "true";
   const includePackaging = searchParams.get("includePack") === "true";
   const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
-  const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") || "50")));
+  // Plafond élevé : la prise de commande « à découvert » charge tout le catalogue
+  // (articles à 0 inclus) en un appel. À 200, les articles 0-stock (ex. survendus)
+  // étaient tronqués → invisibles en vente à découvert.
+  const limit = Math.min(3000, Math.max(1, parseInt(searchParams.get("limit") || "50")));
 
   const where: Record<string, unknown> = {};
   if (!includePackaging) where.isPackaging = false;
