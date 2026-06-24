@@ -346,7 +346,7 @@ export function GoodsReceiptForm() {
                     <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
                     <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
                   </div>
-                  <Button variant="ghost" size="icon-sm" onClick={() => removeLine(i)} aria-label="Supprimer">
+                  <Button variant="ghost" size="icon-sm" tabIndex={-1} onClick={() => removeLine(i)} aria-label="Supprimer">
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
@@ -366,7 +366,7 @@ export function GoodsReceiptForm() {
                     <NumberInput
                       value={priceNum}
                       onValueChange={(n) => updateLine(i, { price: n == null ? "" : String(n) })}
-                      min={0} step={0.01} allowEmpty placeholder="—"
+                      min={0} step={0.01} decimals={2} allowEmpty placeholder="—"
                       className="h-11 w-full text-right text-[15px]"
                     />
                   </div>
@@ -377,6 +377,7 @@ export function GoodsReceiptForm() {
                     <select
                       value={l.warehouseCode}
                       onChange={(e) => updateLine(i, { warehouseCode: e.target.value as Line["warehouseCode"] })}
+                      tabIndex={-1}
                       className="h-11 w-full rounded-md border border-input bg-background px-2 text-[14px]"
                     >
                       {WAREHOUSES.map((w) => <option key={w.code} value={w.code}>{w.label}</option>)}
@@ -444,6 +445,7 @@ export function GoodsReceiptForm() {
                       <select
                         value={l.warehouseCode}
                         onChange={(e) => updateLine(i, { warehouseCode: e.target.value as Line["warehouseCode"] })}
+                        tabIndex={-1}
                         className="h-9 w-full rounded-md border border-input bg-background px-2 text-[12.5px]"
                       >
                         {WAREHOUSES.map((w) => <option key={w.code} value={w.code}>{w.label}</option>)}
@@ -453,7 +455,7 @@ export function GoodsReceiptForm() {
                       <NumberInput
                         value={priceNum}
                         onValueChange={(n) => updateLine(i, { price: n == null ? "" : String(n) })}
-                        min={0} step={0.01} allowEmpty placeholder="—"
+                        min={0} step={0.01} decimals={2} allowEmpty placeholder="—"
                         className="text-right h-9 w-24"
                       />
                     </td>
@@ -461,7 +463,7 @@ export function GoodsReceiptForm() {
                       {lineHT != null ? fmtEur(lineHT) : <span className="text-muted-foreground/60">—</span>}
                     </td>
                     <td className="px-2 py-2 text-right">
-                      <Button variant="ghost" size="icon-sm" onClick={() => removeLine(i)} aria-label="Supprimer">
+                      <Button variant="ghost" size="icon-sm" tabIndex={-1} onClick={() => removeLine(i)} aria-label="Supprimer">
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </td>
