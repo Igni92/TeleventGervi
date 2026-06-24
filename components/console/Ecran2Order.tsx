@@ -383,9 +383,17 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
       const { packDivisor, displayUnit, priceUnit } = unitInfo(p.salesUnit, p.salesQtyPerPackUnit);
       const avail: Record<string, number> = {};
       for (const w of ["000", "01", "R1"]) avail[w] = Math.max(0, Math.floor(((p.stockByWarehouse[w]?.available ?? 0) / packDivisor) * 10) / 10);
-      // Incrément « un colis » : si l'article est vendu au kg, on avance du poids
-      // d'un colis (ex. 4 kg) ; sinon d'un colis entier (1).
-      const colisW = unitInfo(p.salesUnit, p.salesQtyPerPackUnit, null, p.salesUnitWeight).colisWeightKg ?? null;
+      // Incrément « un colis » : si l'article est vendu au kg, on avance du POIDS
+      // d'un colis (ex. 4 kg → 4, 8, 12…) ; sinon d'un colis entier (1).
+      // colisWeightKg n'est calculé par unitInfo qu'avec salesItemsPerUnit ; à
+      // défaut (absent du /api/products) on le reconstruit : qty/colis × poids unité
+      // (ex. FB4CA3B = 4 × 1 = 4 kg).
+      let colisW = unitInfo(p.salesUnit, p.salesQtyPerPackUnit, p.salesItemsPerUnit ?? null, p.salesUnitWeight).colisWeightKg ?? null;
+      if ((colisW == null || colisW <= 0) && displayUnit === "kg") {
+        const q = p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1 ? p.salesQtyPerPackUnit : 1;
+        const w = p.salesUnitWeight && p.salesUnitWeight > 0 ? p.salesUnitWeight : 1;
+        colisW = Math.round(q * w * 1000) / 1000;
+      }
       const stepColis = displayUnit === "kg" ? (colisW && colisW > 0 ? Math.round(colisW * 100) / 100 : 1) : 1;
       // C2 — promo PERCENT : prix prérempli déjà remisé (prix conseillé × (1 − %)),
       // la remise est mémorisée pour être poussée sur la ligne SAP du bon.
@@ -938,7 +946,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
                   {/* Stepper « un colis » : −/+ avancent du poids/nombre d'un colis */}
                   <div className="inline-flex items-center rounded-lg border border-border overflow-hidden shrink-0">
                     <button
-                      type="button"
+                      type="button" tabIndex={-1}
                       onClick={() => updateLine(i, { quantity: Math.max(0, Math.round((l.quantity - l.stepColis) * 100) / 100) })}
                       aria-label="Retirer un colis"
                       className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-muted-foreground hover:bg-secondary/60 active:scale-95"
@@ -948,7 +956,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
                       aria-label={`Quantité ${l.itemName}`}
                       className={`h-11 w-16 text-center text-[17px] font-semibold tnum border-x border-border bg-background px-1 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 ${over ? "text-amber-600 dark:text-amber-400" : ""}`} />
                     <button
-                      type="button"
+                      type="button" tabIndex={-1}
                       onClick={() => updateLine(i, { quantity: Math.round((l.quantity + l.stepColis) * 100) / 100 })}
                       aria-label="Ajouter un colis"
                       className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-brand-600 dark:text-brand-400 hover:bg-secondary/60 active:scale-95"
@@ -957,7 +965,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
                   <span className="text-[12px] text-muted-foreground w-9">{l.unit}</span>
                   <span className="text-muted-foreground">×</span>
                   <NumberInput value={l.price} onValueChange={(n) => updateLine(i, { price: n })}
-                    min={0} step={0.1} allowEmpty placeholder="prix"
+                    min={0} step={0.1} decimals={2} allowEmpty placeholder="prix"
                     aria-label={`Prix ${l.itemName}`}
                     className="h-11 w-[84px] text-right text-[17px] font-semibold tnum rounded-lg border border-border bg-background px-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500" />
                   <span className="text-[12px] text-muted-foreground">€/{l.priceUnit}</span>

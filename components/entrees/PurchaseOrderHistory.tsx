@@ -19,7 +19,7 @@ type PoLine = {
   warehouse?: string;
   price: number | null; lineTotal: number | null; taxPercent: number | null;
   open: boolean;
-  uPays: string | null; uMarque: string | null; uCondi: string | null;
+  uPays: string | null; uMarque: string | null; uCondi: string | null; frgnName?: string | null;
 };
 type PurchaseOrder = {
   docEntry: number; docNum: number; docDate: string; dueDate: string | null;
@@ -56,13 +56,15 @@ function StatusBadge({ open, large }: { open: boolean; large?: boolean }) {
   );
 }
 
-/** Commande ouverte dont la livraison prévue est atteinte (≤ aujourd'hui). */
+/** Commande ouverte dont la livraison prévue est atteinte (≤ aujourd'hui).
+ *  Comparaison sur la DATE CALENDAIRE (yyyy-mm-dd) pour éviter tout décalage de
+ *  fuseau : une livraison datée de demain ne doit jamais s'afficher « à réceptionner ». */
 function isDue(d: { open: boolean; dueDate: string | null }): boolean {
   if (!d.open || !d.dueDate) return false;
-  const due = new Date(d.dueDate);
-  if (Number.isNaN(due.getTime())) return false;
-  const today = new Date(); today.setHours(23, 59, 59, 999);
-  return due.getTime() <= today.getTime();
+  const dueStr = d.dueDate.slice(0, 10);                 // yyyy-mm-dd (date SAP)
+  const n = new Date();
+  const todayStr = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+  return dueStr <= todayStr;
 }
 
 function DueBadge() {
@@ -363,7 +365,7 @@ function PoDetail({ po, onReceive, receiving }: { po: PurchaseOrder; onReceive: 
       {/* Mobile : lignes empilées */}
       <div className="md:hidden space-y-2">
         {po.lines.map((l, i) => {
-          const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi });
+          const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi, frgnName: l.frgnName });
           const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
           return (
             <div key={`m-${l.itemCode}-${i}`} className="rounded-lg border border-border bg-card/40 p-3">
@@ -371,7 +373,7 @@ function PoDetail({ po, onReceive, receiving }: { po: PurchaseOrder; onReceive: 
                 <div className="min-w-0">
                   <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
                   <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-                  <DesignationChips marque={dz.marque} condt={dz.condt} pays={dz.pays} className="mt-1.5" />
+                  <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
                 </div>
                 <div className="text-right shrink-0">
                   <div className="text-[15px] font-bold tnum text-foreground">{lineHT != null ? eur(lineHT) : "—"}</div>
@@ -409,7 +411,7 @@ function PoDetail({ po, onReceive, receiving }: { po: PurchaseOrder; onReceive: 
           </thead>
           <tbody>
             {po.lines.map((l, i) => {
-              const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi });
+              const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi, frgnName: l.frgnName });
               const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
               return (
                 <tr key={`${l.itemCode}-${i}`} className="border-t border-border/60">
@@ -417,7 +419,7 @@ function PoDetail({ po, onReceive, receiving }: { po: PurchaseOrder; onReceive: 
                     <div className="font-semibold text-foreground">{dz.fruit}</div>
                     <div className="font-mono text-[12px] text-muted-foreground">{l.itemCode}</div>
                   </td>
-                  <td className="px-3 py-2.5"><DesignationChips marque={dz.marque} condt={dz.condt} pays={dz.pays} /></td>
+                  <td className="px-3 py-2.5"><DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} /></td>
                   <td className="px-3 py-2.5 text-right tnum">{fmtColis(l.packageQuantity)}</td>
                   <td className="px-3 py-2.5 text-right tnum">{l.price != null ? eur(l.price) : "—"}</td>
                   <td className="px-3 py-2.5 text-right tnum font-semibold">{lineHT != null ? eur(lineHT) : "—"}</td>

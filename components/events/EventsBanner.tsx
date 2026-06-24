@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CalendarDays } from "lucide-react";
-import { eventsInWindow, relativeDayLabel, type UpcomingEvent } from "@/lib/events";
+import { eventsInWindow, relativeDayLabelLong, type UpcomingEvent } from "@/lib/events";
 
 /**
  * Bannière ÉVÉNEMENTS — remplace l'ancien ruban promos (coin). Affiche en haut
@@ -28,10 +28,13 @@ export function EventsBanner() {
       {events.map((ev) => {
         const today = ev.daysFromRef === 0;
         const past = ev.daysFromRef < 0;
+        // « Dimanche 22.06.26 » (jour + date), comme demandé.
+        const raw = ev.date.toLocaleDateString("fr-FR", { weekday: "long", day: "2-digit", month: "2-digit", year: "2-digit" });
+        const jourDate = (raw.charAt(0).toUpperCase() + raw.slice(1)).replace(/\//g, ".");
         return (
           <span
             key={`${ev.key}-${ev.date.getFullYear()}`}
-            title={`${ev.label} — ${relativeDayLabel(ev.daysFromRef)}`}
+            title={`${ev.label} — ${jourDate} — ${relativeDayLabelLong(ev.daysFromRef)}`}
             className={[
               "inline-flex items-center gap-1.5 rounded-full border px-2.5 h-7 text-[12px] transition-colors",
               today
@@ -42,8 +45,8 @@ export function EventsBanner() {
             ].join(" ")}
           >
             <span aria-hidden>{ev.emoji}</span>
-            <span className="font-medium">{ev.label}</span>
-            <span className={today ? "" : "text-muted-foreground"}>· {relativeDayLabel(ev.daysFromRef)}</span>
+            <span className="font-medium">{ev.label} — {jourDate}</span>
+            <span className={today ? "" : "text-muted-foreground"}>· {relativeDayLabelLong(ev.daysFromRef)}</span>
           </span>
         );
       })}

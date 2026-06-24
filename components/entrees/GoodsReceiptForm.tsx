@@ -24,6 +24,7 @@ export type ProductHit = {
   uPays: string | null;                        // pays d'origine
   uMarque: string | null;                      // marque
   uCondi: string | null;                       // conditionnement (ex. "12x125g")
+  frgnName: string | null;                     // variété (SAP FrgnName)
 };
 type Line = {
   itemCode: string; itemName: string;
@@ -35,6 +36,7 @@ type Line = {
   pays: string | null;                         // désignation : pays
   marque: string | null;                       // désignation : marque
   condt: string | null;                        // désignation : conditionnement
+  variete: string | null;                      // désignation : variété (FrgnName)
 };
 
 const WAREHOUSES: { code: "000" | "01" | "R1"; label: string }[] = [
@@ -232,6 +234,7 @@ export function GoodsReceiptForm() {
         pays: p.uPays,
         marque: p.uMarque,
         condt: p.uCondi,
+        variete: p.frgnName,
       }];
     });
   }, []);
@@ -332,7 +335,7 @@ export function GoodsReceiptForm() {
         <div className="md:hidden space-y-2.5">
           {lines.map((l, i) => {
             const pieceQty = l.packageQuantity * l.ratio;
-            const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt });
+            const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, frgnName: l.variete });
             const priceNum = l.price === "" ? null : parseFloat(l.price);
             const lineHT = priceNum != null ? priceNum * pieceQty : null;
             return (
@@ -341,7 +344,7 @@ export function GoodsReceiptForm() {
                   <div className="min-w-0">
                     <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
                     <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-                    <DesignationChips marque={dz.marque} condt={dz.condt} pays={dz.pays} className="mt-1.5" />
+                    <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
                   </div>
                   <Button variant="ghost" size="icon-sm" onClick={() => removeLine(i)} aria-label="Supprimer">
                     <Trash2 className="h-4 w-4" />
@@ -415,7 +418,7 @@ export function GoodsReceiptForm() {
             <tbody>
               {lines.map((l, i) => {
                 const pieceQty = l.packageQuantity * l.ratio;
-                const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt });
+                const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, frgnName: l.variete });
                 const priceNum = l.price === "" ? null : parseFloat(l.price);
                 const lineHT = priceNum != null ? priceNum * pieceQty : null;
                 return (

@@ -22,7 +22,7 @@ type ReceiptLine = {
   pieceQuantity: number; packageQuantity: number | null;
   warehouse?: string;
   price: number | null; lineTotal: number | null; taxPercent: number | null;
-  uPays: string | null; uMarque: string | null; uCondi: string | null;
+  uPays: string | null; uMarque: string | null; uCondi: string | null; frgnName?: string | null;
 };
 type Receipt = {
   docEntry: number; docNum: number; lot: string; docDate: string;
@@ -406,7 +406,7 @@ function ReceiptDetail({
       {/* Mobile : lignes empilées (le tableau large déborde) + totaux */}
       <div className="md:hidden space-y-2">
         {receipt.lines.map((l, i) => {
-          const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi });
+          const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi, frgnName: l.frgnName });
           const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
           return (
             <div key={`m-${l.itemCode}-${i}`} className="rounded-lg border border-border bg-card/40 p-3">
@@ -414,7 +414,7 @@ function ReceiptDetail({
                 <div className="min-w-0">
                   <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
                   <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-                  <DesignationChips marque={dz.marque} condt={dz.condt} pays={dz.pays} className="mt-1.5" />
+                  <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
                 </div>
                 <div className="text-right shrink-0">
                   <div className="text-[15px] font-bold tnum text-foreground">{lineHT != null ? eur(lineHT) : "—"}</div>
@@ -454,7 +454,7 @@ function ReceiptDetail({
           </thead>
           <tbody>
             {receipt.lines.map((l, i) => {
-              const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi });
+              const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi, frgnName: l.frgnName });
               const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
               return (
                 <tr key={`${l.itemCode}-${i}`} className="border-t border-border/50">

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { docLabel } from "@/lib/docLabel";
 import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
@@ -326,7 +327,7 @@ export async function POST(req: NextRequest) {
     // `comments` (contrat front — mention des promos sur le bon) prioritaire sur
     // l'historique `comment`, sinon signature TeleVent par défaut.
     Comments: body.comments?.trim() || body.comment?.trim()
-      || `Commande téléphone via TeleVent — ${session.user?.name ?? session.user?.email ?? "?"}`,
+      || docLabel("BL", session.user?.name, session.user?.email),
     DocumentLines: documentLines,
   };
   // N° de commande client → champ SAP NumAtCard (réf. visible sur le BL)

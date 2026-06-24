@@ -26,8 +26,10 @@ export interface ProduitAttributs {
   uPays?: string | null;
   uMarque?: string | null;
   uCondi?: string | null;
-  /** Réservé : si un champ « variété » est ajouté côté SAP un jour. */
+  /** Réservé : si un champ « variété » dédié est ajouté côté SAP un jour. */
   uVariete?: string | null;
+  /** Variété — portée par SAP Items.FrgnName (nom étranger). */
+  frgnName?: string | null;
 }
 
 /** Marqueur d'« absence de valeur » homogène dans toute l'UI. */
@@ -51,7 +53,7 @@ export function designationProduit(p: ProduitAttributs): ProduitDesignation {
     fruit: clean(p.itemName) || VIDE,
     pays: clean(p.uPays) || VIDE,
     marque: clean(p.uMarque) || VIDE,
-    variete: clean(p.uVariete) || VIDE,
+    variete: clean(p.uVariete) || clean(p.frgnName) || VIDE,
     condt: clean(p.uCondi) || VIDE,
   };
 }
