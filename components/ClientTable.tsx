@@ -494,11 +494,11 @@ export function ClientTable() {
         )}
       </div>
 
-      {/* Table (desktop) */}
+      {/* Table (desktop) — défile dans le tableau (en-tête figé) */}
       <div className="hidden md:block bg-card border border-border rounded-xl overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-slate-50/80 dark:bg-slate-800/50 hover:bg-slate-50/80 dark:hover:bg-slate-800/50 border-b border-slate-100 dark:border-slate-700/50">
+        <Table containerClassName="max-h-[68vh]">
+          <TableHeader className="sticky top-0 z-10">
+            <TableRow className="bg-slate-50 dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 border-b border-slate-100 dark:border-slate-700/50 [&>th]:bg-slate-50 dark:[&>th]:bg-slate-800">
               <TableHead scope="col" className="w-9 px-3 py-3">
                 <SelectAllCheckbox
                   visibleIds={(data?.clients ?? []).map((c) => c.id)}
