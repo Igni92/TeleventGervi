@@ -19,16 +19,84 @@ export interface InventoryLine {
   unit: string;          // unité affichée (colis / kg…)
   ecart: number;         // realQty − sapQty
 }
+
+/**
+ * Photo de l'entrepôt jointe à la fin du comptage. Stockée en data-URL JPEG
+ * compressée CÔTÉ CLIENT (canvas, ~1280px, qualité ~0.7) — aucune infra de
+ * stockage objet n'étant câblée, on reste cohérent avec le choix « tout en
+ * JSON dans AppSetting ». Plafonnée en nombre et en taille (cf. sanitizePhotos).
+ */
+export interface InventoryPhoto {
+  id: string;
+  dataUrl: string;       // data:image/jpeg;base64,…
+  bytes: number;         // poids décodé estimé
+  w: number;
+  h: number;
+  caption?: string;      // libellé court optionnel (« Zone froide », « Quai 3 »)
+  addedAt: string;
+}
+
 export interface InventorySession {
   id: string;
   status: "submitted" | "reviewed";
   createdBy: string;     // email du préparateur
   note: string;
   lines: InventoryLine[];
+  photos: InventoryPhoto[];
   nbEcarts: number;
   createdAt: string;
   reviewedAt: string | null;
   reviewedBy: string | null;
+  /** Présent uniquement dans les réponses de LISTE (photos retirées du payload). */
+  nbPhotos?: number;
+}
+
+/** Plafonds photos (UI + revalidation serveur). */
+export const MAX_PHOTOS = 6;
+const MAX_PHOTO_BYTES = 240 * 1024;       // ~240 Ko décodés / photo
+const MAX_PHOTOS_TOTAL_BYTES = 1.6 * 1024 * 1024; // ~1.6 Mo cumulés
+
+/** Estime le poids décodé (octets) d'une data-URL base64. */
+function dataUrlBytes(dataUrl: string): number {
+  const i = dataUrl.indexOf(",");
+  const b64 = i >= 0 ? dataUrl.slice(i + 1) : "";
+  const pad = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((b64.length * 3) / 4) - pad);
+}
+
+/**
+ * Garde serveur : ne conserve que des data-URL image valides (jpeg/webp/png),
+ * plafonne le nombre et la taille (par photo et cumulée), et (re)calcule les
+ * métadonnées. Toute entrée malformée est silencieusement écartée.
+ */
+export function sanitizePhotos(
+  raw: unknown,
+  newId: () => string,
+  now: () => string,
+): InventoryPhoto[] {
+  if (!Array.isArray(raw)) return [];
+  const out: InventoryPhoto[] = [];
+  let total = 0;
+  for (const item of raw) {
+    if (out.length >= MAX_PHOTOS) break;
+    const p = item as Partial<InventoryPhoto> | null;
+    const dataUrl = typeof p?.dataUrl === "string" ? p.dataUrl : "";
+    if (!/^data:image\/(jpeg|webp|png);base64,/.test(dataUrl)) continue;
+    const bytes = dataUrlBytes(dataUrl);
+    if (bytes <= 0 || bytes > MAX_PHOTO_BYTES) continue;
+    if (total + bytes > MAX_PHOTOS_TOTAL_BYTES) break;
+    total += bytes;
+    out.push({
+      id: typeof p?.id === "string" && p.id ? p.id : newId(),
+      dataUrl,
+      bytes,
+      w: Number.isFinite(p?.w) ? Math.round(p!.w as number) : 0,
+      h: Number.isFinite(p?.h) ? Math.round(p!.h as number) : 0,
+      caption: typeof p?.caption === "string" ? p.caption.trim().slice(0, 80) : undefined,
+      addedAt: now(),
+    });
+  }
+  return out;
 }
 
 /** Préparateurs « bootstrap » (codés en dur) + liste env PREPARATEUR_EMAILS. */
