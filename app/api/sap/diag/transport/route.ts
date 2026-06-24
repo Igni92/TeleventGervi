@@ -6,7 +6,7 @@ import { sap } from "@/lib/sapb1";
 /**
  * DIAGNOSTIC (admin, LECTURE SEULE) — modèle transporteur / tournée / BL.
  *
- *   GET /api/sap/_diag/transport?docNum=24011722,24011726  (ou ?card=APLAI)
+ *   GET /api/sap/diag/transport?docNum=24011722,24011726  (ou ?card=APLAI)
  *
  * Tourne LÀ où SAP est joignable (prod Vercel). Révèle, sans rien écrire :
  *   - tous les champs U_* de BL réels (valeurs réelles de U_TrspCode /
