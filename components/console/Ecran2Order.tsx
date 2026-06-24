@@ -383,9 +383,17 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
       const { packDivisor, displayUnit, priceUnit } = unitInfo(p.salesUnit, p.salesQtyPerPackUnit);
       const avail: Record<string, number> = {};
       for (const w of ["000", "01", "R1"]) avail[w] = Math.max(0, Math.floor(((p.stockByWarehouse[w]?.available ?? 0) / packDivisor) * 10) / 10);
-      // Incrément « un colis » : si l'article est vendu au kg, on avance du poids
-      // d'un colis (ex. 4 kg) ; sinon d'un colis entier (1).
-      const colisW = unitInfo(p.salesUnit, p.salesQtyPerPackUnit, null, p.salesUnitWeight).colisWeightKg ?? null;
+      // Incrément « un colis » : si l'article est vendu au kg, on avance du POIDS
+      // d'un colis (ex. 4 kg → 4, 8, 12…) ; sinon d'un colis entier (1).
+      // colisWeightKg n'est calculé par unitInfo qu'avec salesItemsPerUnit ; à
+      // défaut (absent du /api/products) on le reconstruit : qty/colis × poids unité
+      // (ex. FB4CA3B = 4 × 1 = 4 kg).
+      let colisW = unitInfo(p.salesUnit, p.salesQtyPerPackUnit, p.salesItemsPerUnit ?? null, p.salesUnitWeight).colisWeightKg ?? null;
+      if ((colisW == null || colisW <= 0) && displayUnit === "kg") {
+        const q = p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1 ? p.salesQtyPerPackUnit : 1;
+        const w = p.salesUnitWeight && p.salesUnitWeight > 0 ? p.salesUnitWeight : 1;
+        colisW = Math.round(q * w * 1000) / 1000;
+      }
       const stepColis = displayUnit === "kg" ? (colisW && colisW > 0 ? Math.round(colisW * 100) / 100 : 1) : 1;
       // C2 — promo PERCENT : prix prérempli déjà remisé (prix conseillé × (1 − %)),
       // la remise est mémorisée pour être poussée sur la ligne SAP du bon.

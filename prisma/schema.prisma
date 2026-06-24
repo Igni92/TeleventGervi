@@ -301,6 +301,7 @@ model Product {
   uMarque             String? // SAP Items.U_GER_Marque
   uCondi              String? // SAP Items.U_GER_Det_Condt (ex. "12x125g")
   uUvc                String? // SAP Items.U_GER_UVC (ex. "125g")
+  frgnName            String? // SAP Items.FrgnName (nom étranger) = VARIÉTÉ
   uNbBarqColis        Float? // SAP Items.U_GER_NB_BARQ_COLIS
   manageBatch         Boolean        @default(false) // tYES/tNO de SAP
   isPackaging         Boolean        @default(false) // True si groupe 100-130/114

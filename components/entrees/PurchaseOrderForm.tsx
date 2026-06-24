@@ -17,7 +17,7 @@ const fmtEur = (n: number) => n.toLocaleString("fr-FR", { minimumFractionDigits:
 type Line = {
   itemCode: string; itemName: string; ratio: number;
   packageQuantity: number; warehouseCode: "000" | "01" | "R1"; price: string;
-  pays: string | null; marque: string | null; condt: string | null;
+  pays: string | null; marque: string | null; condt: string | null; variete: string | null;
 };
 const WAREHOUSES: { code: "000" | "01" | "R1"; label: string }[] = [
   { code: "000", label: "000 · A/C-A/D" },
@@ -37,7 +37,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
   const addLine = (p: ProductHit) => setLines((cur) => {
     if (cur.some((l) => l.itemCode === p.itemCode)) { toast.info(`${p.itemCode} déjà dans la liste`); return cur; }
     const ratio = (p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) ? p.salesQtyPerPackUnit : 1;
-    return [...cur, { itemCode: p.itemCode, itemName: p.itemName, ratio, packageQuantity: 1, warehouseCode: "01", price: "", pays: p.uPays, marque: p.uMarque, condt: p.uCondi }];
+    return [...cur, { itemCode: p.itemCode, itemName: p.itemName, ratio, packageQuantity: 1, warehouseCode: "01", price: "", pays: p.uPays, marque: p.uMarque, condt: p.uCondi, variete: p.frgnName }];
   });
   const updateLine = (i: number, patch: Partial<Line>) => setLines((c) => c.map((l, k) => k === i ? { ...l, ...patch } : l));
   const removeLine = (i: number) => setLines((c) => c.filter((_, k) => k !== i));
@@ -107,7 +107,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
         <div className="md:hidden space-y-2.5">
           {lines.map((l, i) => {
             const pieceQty = l.packageQuantity * l.ratio;
-            const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt });
+            const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, frgnName: l.variete });
             const priceNum = l.price === "" ? null : parseFloat(l.price);
             const lineHT = priceNum != null ? priceNum * pieceQty : null;
             return (
@@ -116,7 +116,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
                   <div className="min-w-0">
                     <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
                     <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-                    <DesignationChips marque={dz.marque} condt={dz.condt} pays={dz.pays} className="mt-1.5" />
+                    <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
                   </div>
                   <Button variant="ghost" size="icon-sm" onClick={() => removeLine(i)} aria-label="Supprimer"><Trash2 className="h-4 w-4" /></Button>
                 </div>
@@ -174,7 +174,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
             <tbody>
               {lines.map((l, i) => {
                 const pieceQty = l.packageQuantity * l.ratio;
-                const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt });
+                const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, frgnName: l.variete });
                 const priceNum = l.price === "" ? null : parseFloat(l.price);
                 const lineHT = priceNum != null ? priceNum * pieceQty : null;
                 return (

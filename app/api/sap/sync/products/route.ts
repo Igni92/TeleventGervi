@@ -60,11 +60,11 @@ export async function POST() {
     // les pages. Inclut les champs unités étendus + SalesItemsPerUnit.
     const ITEMS_FILTER = "Valid eq 'tYES' and Frozen eq 'tNO'";
     const ITEMS_SELECT =
-      "ItemCode,ItemName,ItemsGroupCode,SalesUnit,SalesPackagingUnit,SalesQtyPerPackUnit,SalesItemsPerUnit,SalesUnitWeight,InventoryUOM,PurchaseUnit,ManageBatchNumbers,QuantityOnStock,ItemWarehouseInfoCollection,Valid,Frozen,U_Pays,U_GER_Marque,U_GER_Det_Condt,U_GER_UVC,U_GER_NB_BARQ_COLIS";
+      "ItemCode,ItemName,FrgnName,ItemsGroupCode,SalesUnit,SalesPackagingUnit,SalesQtyPerPackUnit,SalesItemsPerUnit,SalesUnitWeight,InventoryUOM,PurchaseUnit,ManageBatchNumbers,QuantityOnStock,ItemWarehouseInfoCollection,Valid,Frozen,U_Pays,U_GER_Marque,U_GER_Det_Condt,U_GER_UVC,U_GER_NB_BARQ_COLIS";
     // ⚠️ SalesItemsPerUnit (NumInSale) absent du type partagé SapItem ET du
     // client Prisma généré (colonne Product."salesItemsPerUnit" existe en base
     // mais pas dans le client) → extension de type locale + écriture raw SQL.
-    type SapItemEx = SapItem & { SalesItemsPerUnit?: number };
+    type SapItemEx = SapItem & { SalesItemsPerUnit?: number; FrgnName?: string };
     const items = await sap.getAllParallel<SapItemEx>(
       `Items?$filter=${ITEMS_FILTER}&$select=${ITEMS_SELECT}`,
       `Items/$count?$filter=${ITEMS_FILTER}`,
@@ -106,6 +106,7 @@ export async function POST() {
         uMarque: it.U_GER_Marque ?? null,
         uCondi: it.U_GER_Det_Condt ?? null,
         uUvc: it.U_GER_UVC ?? null,
+        frgnName: it.FrgnName ?? null,                 // = variété
         uNbBarqColis: it.U_GER_NB_BARQ_COLIS ?? null,
         stocks: (it.ItemWarehouseInfoCollection ?? []).filter((w) =>
           WAREHOUSES_TO_SYNC.has(w.WarehouseCode),
@@ -134,11 +135,11 @@ export async function POST() {
       const P_COLS =
         `"itemCode","itemName","itemGroup","groupName","salesUnit","salesPackagingUnit",` +
         `"salesQtyPerPackUnit","salesItemsPerUnit","salesUnitWeight","inventoryUnit","purchaseUnit",` +
-        `"manageBatch","isPackaging","totalStock","uPays","uMarque","uCondi","uUvc","uNbBarqColis"`;
+        `"manageBatch","isPackaging","totalStock","uPays","uMarque","uCondi","uUvc","frgnName","uNbBarqColis"`;
       const P_CASTS = [
         "text", "text", "int", "text", "text", "text",
         "float8", "float8", "float8", "text", "text",
-        "boolean", "boolean", "float8", "text", "text", "text", "text", "float8",
+        "boolean", "boolean", "float8", "text", "text", "text", "text", "text", "float8",
       ];
       for (let i = 0; i < productRows.length; i += SQL_BATCH) {
         const slice = productRows.slice(i, i + SQL_BATCH);
@@ -149,7 +150,7 @@ export async function POST() {
           const row = [
             r.itemCode, r.itemName, r.itemGroup, r.groupName, r.salesUnit, r.salesPackagingUnit,
             r.salesQtyPerPackUnit, r.salesItemsPerUnit, r.salesUnitWeight, r.inventoryUnit, r.purchaseUnit,
-            r.manageBatch, r.isPackaging, r.totalStock, r.uPays, r.uMarque, r.uCondi, r.uUvc, r.uNbBarqColis,
+            r.manageBatch, r.isPackaging, r.totalStock, r.uPays, r.uMarque, r.uCondi, r.uUvc, r.frgnName, r.uNbBarqColis,
           ];
           values.push(`(${row.map((_, k) => `$${p++}::${P_CASTS[k]}`).join(",")})`);
           params.push(...row);
@@ -163,7 +164,7 @@ export async function POST() {
              "purchaseUnit"=v."purchaseUnit","manageBatch"=v."manageBatch",
              "isPackaging"=v."isPackaging","totalStock"=v."totalStock",
              "uPays"=v."uPays","uMarque"=v."uMarque","uCondi"=v."uCondi",
-             "uUvc"=v."uUvc","uNbBarqColis"=v."uNbBarqColis","syncedAt"=NOW()
+             "uUvc"=v."uUvc","frgnName"=v."frgnName","uNbBarqColis"=v."uNbBarqColis","syncedAt"=NOW()
            FROM (VALUES ${values.join(",")}) AS v(${P_COLS})
            WHERE pr."itemCode" = v."itemCode"`,
           ...params,

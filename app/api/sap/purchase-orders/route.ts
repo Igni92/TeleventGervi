@@ -131,7 +131,7 @@ export async function GET(req: NextRequest) {
           where: { itemCode: { in: itemCodes } },
           select: {
             itemCode: true, itemName: true, salesQtyPerPackUnit: true, salesPackagingUnit: true,
-            uPays: true, uMarque: true, uCondi: true,
+            uPays: true, uMarque: true, uCondi: true, frgnName: true,
           },
         })
       : [];
@@ -177,6 +177,7 @@ export async function GET(req: NextRequest) {
               uPays: p?.uPays ?? null,
               uMarque: p?.uMarque ?? null,
               uCondi: p?.uCondi ?? null,
+              frgnName: p?.frgnName ?? null,
             };
           }),
         };
