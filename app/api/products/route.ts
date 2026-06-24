@@ -28,9 +28,11 @@ export async function GET(req: NextRequest) {
 
   const where: Record<string, unknown> = {};
   if (!includePackaging) where.isPackaging = false;
-  // "En stock" signifie "dispo > 0" (= inStock - committed), pas juste inStock > 0.
+  // "En stock" = dispo > 0 (inStock − committed) OU en COMMANDE FOURNISSEUR
+  // (ordered > 0) : un article attendu (ex. GOLDEN 50X30PLT sans stock mais
+  // commandé) doit rester visible jusqu'à sa réception.
   if (inStockOnly) {
-    where.stocks = { some: { available: { gt: 0 } } };
+    where.stocks = { some: { OR: [{ available: { gt: 0 } }, { ordered: { gt: 0 } }] } };
   }
   // Single group (legacy) OR multi-group (?groups=1,2,3)
   if (groupsParam) {

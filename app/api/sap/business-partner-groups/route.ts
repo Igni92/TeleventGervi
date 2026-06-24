@@ -14,14 +14,28 @@ export async function GET() {
   if (!session) return NextResponse.json({ groups: [] }, { status: 200 });
 
   try {
-    const res = await sap.get<{ value: { Code: number; Name: string }[] }>(
-      `BusinessPartnerGroups?$select=Code,Name&$filter=${encodeURIComponent("Type eq 'bbpgt_CustomerGroup'")}`,
+    // On récupère TOUS les groupes (sans $filter Type, parfois non sélectionnable
+    // selon le SAP) puis on filtre les groupes CLIENTS côté serveur. Fallback : si
+    // aucun n'est typé client, on renvoie tous les groupes (mieux que rien).
+    const res = await sap.get<{ value: { Code: number; Name: string; Type?: string }[] }>(
+      `BusinessPartnerGroups?$select=Code,Name,Type`,
     );
-    const groups = (res.value ?? [])
+    const all = res.value ?? [];
+    const customers = all.filter((g) => g.Type == null || g.Type === "bbpgt_CustomerGroup");
+    const groups = (customers.length > 0 ? customers : all)
       .map((g) => ({ code: g.Code, name: g.Name }))
       .sort((a, b) => a.name.localeCompare(b.name));
     return NextResponse.json({ groups });
-  } catch (e) {
-    return NextResponse.json({ groups: [], error: e instanceof Error ? e.message : String(e) });
+  } catch {
+    // Dernier recours : sans $select (certains SAP rejettent le champ Type).
+    try {
+      const res2 = await sap.get<{ value: { Code: number; Name: string }[] }>(`BusinessPartnerGroups`);
+      const groups = (res2.value ?? [])
+        .map((g) => ({ code: g.Code, name: g.Name }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return NextResponse.json({ groups });
+    } catch (e2) {
+      return NextResponse.json({ groups: [], error: e2 instanceof Error ? e2.message : String(e2) });
+    }
   }
 }

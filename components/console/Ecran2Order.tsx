@@ -21,6 +21,7 @@ interface Product {
   salesUnitWeight?: number | null; salesItemsPerUnit?: number | null;
   // Détails métier (Gervifrais U_*) — sortis du grisé pour décision rapide en appel
   uMarque: string | null; uPays: string | null; uCondi: string | null; uUvc: string | null;
+  frgnName?: string | null;                 // variété (SAP FrgnName)
   stockByWarehouse: Record<string, StockEntry>;
 }
 interface Hint {
@@ -38,7 +39,7 @@ interface CartLine {
   availByWarehouse: Record<string, number>;
   quantity: number; price: number | null;
   // Tags produit (affichés sur la ligne panier) — capturés à l'ajout.
-  marque: string | null; condi: string | null; pays: string | null;
+  marque: string | null; condi: string | null; pays: string | null; variete: string | null;
   // Incrément « un colis » dans l'unité d'affichage : kg/colis (ex. 4 pour un
   // colis de 4 kg vendu au kg ; 1 pour un article déjà compté en colis).
   stepColis: number;
@@ -408,6 +409,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
         itemCode: p.itemCode, itemName: p.itemName, unit: displayUnit, priceUnit, packDivisor,
         availByWarehouse: avail, quantity: stepColis, price,
         marque: p.uMarque ?? null, condi: p.uCondi ?? p.uUvc ?? null, pays: p.uPays ?? null,
+        variete: p.frgnName ?? null,
         stepColis,
         promo, discountPercent, freeUnits: 0,
       })];
@@ -433,7 +435,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
       setCart(json.lines.map((l: { itemCode: string; itemName: string; displayUnit: string; priceUnit: string; packDivisor: number; availByWarehouse: Record<string, number>; quantity: number; price: number | null }) => ({
         itemCode: l.itemCode, itemName: l.itemName, unit: l.displayUnit, priceUnit: l.priceUnit,
         packDivisor: l.packDivisor, availByWarehouse: l.availByWarehouse, quantity: l.quantity, price: l.price,
-        marque: null, condi: null, pays: null, stepColis: 1,
+        marque: null, condi: null, pays: null, variete: null, stepColis: 1,
         promo: null, discountPercent: 0, freeUnits: 0,
       })));
       toast.success(`Dernière commande #${json.docNum} rejouée`);
@@ -756,6 +758,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
                       const marque  = p.uMarque ?? h?.marque ?? null;
                       const condi   = p.uCondi ?? p.uUvc ?? null;          // ex. 8×500g
                       const calibre = h?.calibre ? `cal. ${h.calibre}` : null;
+                      const variete = (p.frgnName ?? "").trim() || null;     // variété (FrgnName)
                       const pays    = p.uPays ?? h?.pays ?? null;
                       const isFav   = favorites.has(p.itemCode);          // C1
                       // C2 — plus de badge promo sur la liste stock : la remise
@@ -812,11 +815,12 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
                               <span className={`block ${ui.name} font-semibold text-foreground truncate leading-tight`}>
                                 {p.itemName}
                               </span>
-                              {(marque || condi || calibre || pays) && (
+                              {(marque || condi || calibre || variete || pays) && (
                                 <span className="mt-1.5 flex items-center gap-1 flex-wrap">
                                   {marque && <span className={`${chipCls} bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100 dark:ring-1 dark:ring-inset dark:ring-violet-400/50`}>{marque}</span>}
                                   {condi && <span className={`${chipCls} bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100 dark:ring-1 dark:ring-inset dark:ring-sky-400/50`}>{condi}</span>}
                                   {calibre && <span className={`${chipCls} bg-teal-100 text-teal-800 dark:bg-teal-500/30 dark:text-teal-100 dark:ring-1 dark:ring-inset dark:ring-teal-400/50`}>{calibre}</span>}
+                                  {variete && <span className={`${chipCls} bg-rose-100 text-rose-800 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-1 dark:ring-inset dark:ring-rose-400/50`}>{variete}</span>}
                                   {pays && <span className={`${chipCls} bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100 dark:ring-1 dark:ring-inset dark:ring-amber-400/50`}>{pays}</span>}
                                 </span>
                               )}
@@ -926,6 +930,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
                         l.marque && ["bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100", l.marque],
                         l.condi && ["bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100", l.condi],
                         calibre && ["bg-teal-100 text-teal-800 dark:bg-teal-500/30 dark:text-teal-100", calibre],
+                        l.variete && ["bg-rose-100 text-rose-800 dark:bg-rose-500/30 dark:text-rose-100", l.variete],
                         l.pays && ["bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100", l.pays],
                       ].filter(Boolean) as [string, string][];
                       if (chips.length === 0) return null;
