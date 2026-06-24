@@ -55,6 +55,39 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const docNums = (sp.get("docNum") ?? "").split(",").map((s) => s.trim()).filter((s) => /^\d+$/.test(s));
   const card = sp.get("card");
+  const scan = sp.get("scan");
+
+  // Mode SCAN : agrège l'historique récent PAR transporteur (U_TrspCode) →
+  // valeurs U_TrspHeur / U_Timbre observées. Révèle la config par transporteur.
+  if (scan !== null) {
+    try {
+      const top = Math.min(Math.max(parseInt(scan || "300", 10) || 300, 50), 1500);
+      const rows = await sap.getAll<{ U_TrspCode?: string; U_TrspHeur?: string; U_Timbre?: number }>(
+        `Orders?$select=DocEntry,U_TrspCode,U_TrspHeur,U_Timbre&$filter=${encodeURIComponent("Cancelled eq 'tNO'")}&$orderby=DocEntry desc&$top=${top}`,
+        { pageSize: 200, maxPages: Math.ceil(top / 200) },
+      );
+      const byCode: Record<string, { count: number; heures: Record<string, number>; timbres: Record<string, number> }> = {};
+      for (const r of rows) {
+        const code = (r.U_TrspCode ?? "").toString().trim() || "(vide)";
+        const e = (byCode[code] ??= { count: 0, heures: {}, timbres: {} });
+        e.count++;
+        const h = (r.U_TrspHeur ?? "").toString().trim() || "(vide)";
+        e.heures[h] = (e.heures[h] ?? 0) + 1;
+        const t = r.U_Timbre == null ? "(null)" : String(r.U_Timbre);
+        e.timbres[t] = (e.timbres[t] ?? 0) + 1;
+      }
+      const perCarrier = Object.entries(byCode)
+        .sort((a, b) => b[1].count - a[1].count)
+        .map(([code, v]) => ({
+          U_TrspCode: code, commandes: v.count,
+          U_TrspHeur: Object.entries(v.heures).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}×${n}`),
+          U_Timbre: Object.entries(v.timbres).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}×${n}`),
+        }));
+      return NextResponse.json({ ok: true, mode: "scan", scanned: rows.length, perCarrier });
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
+  }
 
   try {
     // 1. BL cibles (par DocNum, sinon 6 récents, éventuellement filtrés client)
