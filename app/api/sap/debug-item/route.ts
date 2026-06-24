@@ -35,6 +35,15 @@ export async function GET(req: Request) {
         .map((w) => ({ wh: w.WarehouseCode, inStock: w.InStock ?? 0, ordered: w.Ordered ?? 0, committed: w.Committed ?? 0 })),
     }));
 
+    // Compteurs catalogue local (pour comprendre la troncature de la liste).
+    const [totalProducts, nonPack, withStock, withCommitted] = await Promise.all([
+      prisma.product.count(),
+      prisma.product.count({ where: { isPackaging: false } }),
+      prisma.product.count({ where: { isPackaging: false, stocks: { some: { available: { gt: 0 } } } } }),
+      prisma.product.count({ where: { isPackaging: false, stocks: { some: { committed: { gt: 0 } } } } }),
+    ]);
+    const counts = { totalProducts, nonPack, withStock, withCommitted };
+
     // 2) Base locale — Product correspondant (importé ou non ?) + stocks.
     const codes = sapItems.map((s) => s.itemCode);
     const dbProducts = await prisma.product.findMany({
@@ -44,7 +53,7 @@ export async function GET(req: Request) {
       take: 40,
     });
 
-    return NextResponse.json({ q, sapCount: sapItems.length, sap: sapItems, dbCount: dbProducts.length, db: dbProducts });
+    return NextResponse.json({ q, sapCount: sapItems.length, sap: sapItems, dbCount: dbProducts.length, db: dbProducts, counts });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
