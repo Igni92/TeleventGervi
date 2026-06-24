@@ -10,6 +10,7 @@ import { CompteForm } from "@/components/clients/CompteForm";
 import { ReceptionEmailForm } from "@/components/clients/ReceptionEmailForm";
 import { BillingAddressForm } from "@/components/clients/BillingAddressForm";
 import { DeliveryAddressForm } from "@/components/clients/DeliveryAddressForm";
+import { DeliveryDaysEditor } from "@/components/clients/DeliveryDaysEditor";
 import { ReorderableSections } from "@/components/clients/ReorderableSections";
 import { ProduitsRecurrents } from "@/components/clients/ProduitsRecurrents";
 import { EncoursCreditCard } from "@/components/clients/EncoursCreditCard";
@@ -17,7 +18,7 @@ import { ClientTabs } from "@/components/clients/ClientTabs";
 import { FicheActions } from "@/components/clients/FicheActions";
 import { FicheHeader } from "@/components/clients/FicheHeader";
 import { SectionCard } from "@/components/clients/SectionCard";
-import { Calendar, CalendarClock, Sprout, TrendingUp, Receipt, Truck, UserRound, MapPin } from "lucide-react";
+import { Calendar, CalendarClock, CalendarDays, Sprout, TrendingUp, Receipt, Truck, UserRound, MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { requireAdmin } from "@/lib/permissions";
@@ -85,10 +86,7 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
     joursAppel: client.joursAppel
       ? client.joursAppel.split(",").map(Number).filter((n: number) => !isNaN(n))
       : [],
-    // Défaut lundi→samedi quand non renseigné (demande métier).
-    joursLivraison: client.joursLivraison
-      ? client.joursLivraison.split(",").map(Number).filter((n: number) => !isNaN(n))
-      : [1, 2, 3, 4, 5, 6],
+    // Les jours de LIVRAISON sont édités dans l'onglet Logistique (DeliveryDaysEditor).
   };
 
   const commercialPane = (
@@ -184,6 +182,11 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
     <ReorderableSections
       storageKey="fiche:logistique"
       sections={[
+        { id: "jours-livraison", label: "Jours de livraison", node: (
+          <SectionCard accent="emerald" title="Jours de livraison" subtitle="Décochez tout si le client n'est pas livré" icon={<CalendarDays />}>
+            <DeliveryDaysEditor clientId={client.id} />
+          </SectionCard>
+        ) },
         { id: "reception", label: "Réception marchandise", node: (
           <SectionCard accent="sky" title="Réception marchandise" subtitle="Email quai & litiges réception" icon={<Truck />}>
             <ReceptionEmailForm clientId={client.id} />
@@ -204,7 +207,7 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
   );
 
   return (
-    <div className="max-w-[1600px] space-y-6 overflow-x-hidden">
+    <div className="max-w-[1600px] space-y-5 overflow-x-clip">
       <FicheHeader
         clientId={client.id}
         name={client.nom}

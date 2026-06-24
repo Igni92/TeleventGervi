@@ -153,11 +153,12 @@ export function ReorderableSections({ storageKey, sections }: { storageKey: stri
         </div>
       </div>
 
-      {/* Grille : 1 colonne (mobile) → 2 (lg) → 3 (2xl). Ordre de lecture
-          gauche→droite (prévisible). Les blocs « pleine largeur » s'étendent
-          sur toutes les colonnes via col-span-full. `items-start` = chaque
-          carte garde sa hauteur naturelle (alignement net, pas d'étirement). */}
-      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2 2xl:grid-cols-3">
+      {/* Grille : 1 colonne (mobile) → 2 (lg) → 3 (xl+). Ordre de lecture
+          gauche→droite (prévisible). Le passage à 3 colonnes dès `xl` (≈1280px)
+          réduit fortement la hauteur (donc le scroll) sur les portables. Les
+          blocs « pleine largeur » s'étendent sur toutes les colonnes via
+          col-span-full. `items-start` = hauteur naturelle (alignement net). */}
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
         {effectiveOrder.map((id) => {
           const section = byId.get(id);
           if (!section) return null;

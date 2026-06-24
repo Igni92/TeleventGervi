@@ -70,8 +70,14 @@ export async function PUT(req: NextRequest, props: { params: Promise<{ id: strin
       email: nextEmail,
       notes: data.notes || null,
       joursAppel: data.joursAppel?.length ? data.joursAppel.join(",") : null,
-      joursLivraison: data.joursLivraison?.length ? data.joursLivraison.join(",") : null,
     };
+    // Les jours de LIVRAISON sont gérés à part (onglet Logistique, route
+    // dédiée /delivery-days). Le formulaire « Informations » ne les envoie plus
+    // → on ne les touche QUE s'ils sont explicitement fournis (sinon préservés).
+    // Tableau vide fourni = "" (client explicitement non livré).
+    if (data.joursLivraison !== undefined) {
+      updateData.joursLivraison = data.joursLivraison.length ? data.joursLivraison.join(",") : "";
+    }
     // Sécurité : un non-admin ne peut pas se (ré)attribuer un client → on ignore
     // les champs d'affectation `commercial`/`vendeur` du payload. Admin inchangé.
     // (`vendeur` n'est pas dans le schéma validé ni dans le data d'update → déjà

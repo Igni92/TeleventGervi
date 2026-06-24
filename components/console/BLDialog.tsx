@@ -18,6 +18,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { formatDateInput } from "@/lib/utils";
+import { parseDeliveryDays, defaultDeliveryDate } from "@/lib/deliveryDays";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 
 interface DeliveryMode { id: string; name: string; sapCardCode: string; isDefault: boolean }
@@ -102,7 +103,9 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
   // ── Init when opened ──────────────────────────────────
   useEffect(() => {
     if (!open) return;
-    // Default tomorrow morning for delivery
+    // Date par défaut PROVISOIRE = demain 9 h (raffinée juste après selon les
+    // jours de livraison du client : prochain jour livré, ou le jour même si le
+    // client ne se fait pas livrer).
     const t = new Date(); t.setDate(t.getDate() + 1); t.setHours(9, 0, 0, 0);
     setDeliveryDate(formatDateInput(t));
     setComment("");
@@ -118,6 +121,10 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
       setModes(ms);
       const def = ms.find((m) => m.isDefault) ?? ms[0];
       if (def) setModeId(def.id);
+    }).catch(() => {});
+    // Date de livraison selon les jours de livraison du client (#logistique).
+    fetch(`/api/clients/${clientId}`).then((r) => r.json()).then((c) => {
+      setDeliveryDate(formatDateInput(defaultDeliveryDate(parseDeliveryDays(c?.joursLivraison))));
     }).catch(() => {});
   }, [open, clientId]);
 

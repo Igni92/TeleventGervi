@@ -83,11 +83,11 @@ export function FicheHeader({ clientId, name, code, type, commercial, admin }: F
         />
         <RadarRings />
 
-        <div className="relative z-10 flex flex-col gap-4 p-5 pl-6 sm:flex-row sm:items-center sm:gap-5 sm:p-6 sm:pl-7">
+        <div className="relative z-10 flex flex-col gap-3.5 p-4 pl-5 sm:flex-row sm:items-center sm:gap-4 sm:p-5 sm:pl-6">
           {/* Monogramme « jeton signal » */}
-          <div className="relative h-14 w-14 shrink-0 sm:h-16 sm:w-16">
+          <div className="relative h-12 w-12 shrink-0 sm:h-14 sm:w-14">
             <div className="flex h-full w-full items-center justify-center rounded-2xl bg-gradient-to-br from-brand-400 to-brand-600 text-primary-foreground shadow-[0_8px_24px_-8px_hsl(var(--brand-600))] ring-1 ring-inset ring-white/15">
-              <span className="font-display text-[22px] font-semibold tracking-tight sm:text-[26px]">
+              <span className="font-display text-[20px] font-semibold tracking-tight sm:text-[23px]">
                 {initials(name)}
               </span>
             </div>
@@ -97,8 +97,8 @@ export function FicheHeader({ clientId, name, code, type, commercial, admin }: F
 
           {/* Identité */}
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <h1 className="min-w-0 break-words font-display text-[26px] font-semibold leading-[1.08] tracking-[-0.02em] text-foreground sm:text-[34px]">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <h1 className="min-w-0 break-words font-display text-[23px] font-semibold leading-[1.08] tracking-[-0.02em] text-foreground sm:text-[29px]">
                 {name}
               </h1>
               {badge && <Badge variant={badge.variant}>{badge.label}</Badge>}
