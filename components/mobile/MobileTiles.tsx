@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
-  Users, Briefcase,
+  Users, Briefcase, Truck,
   PackagePlus, PackageCheck, Package, Factory, ClipboardCheck,
   Receipt, LayoutDashboard,
   Settings, Tag,
@@ -46,9 +46,11 @@ const AXES: Axis[] = [
     label: "Commercial",
     desc: "Clients & commandes",
     // Pas d'outils de télévente (console / plan d'appel) sur mobile : tout passe
-    // par la fiche client (commander, noter, notifier un appel).
+    // par la fiche client (commander, noter, notifier un appel). Le « Détail
+    // livraison » fait exception : utile en mobilité pour préparer la tournée.
     tiles: [
       { href: "/clients", label: "Clients", icon: Users },
+      { href: "/livraisons", label: "Détail livraison", icon: Truck },
     ],
   },
   {

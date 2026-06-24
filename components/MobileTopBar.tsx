@@ -28,6 +28,7 @@ const SECTION_LABEL: Record<string, string> = {
   "/console": "Console",
   "/plan-appel": "Plan d'appel",
   "/clients": "Clients",
+  "/livraisons": "Détail livraison",
   "/commerciaux": "Commerciaux",
   "/entrees": "Entrées marchandises",
   "/products": "Stock",

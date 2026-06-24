@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, Package, PackagePlus, Factory, ClipboardList, Receipt, AlertTriangle,
-  Home, Settings, PackageCheck, ClipboardCheck,
+  Home, Settings, PackageCheck, ClipboardCheck, Truck,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ColorimetrieSwitcher } from "@/components/ColorimetrieSwitcher";
@@ -69,6 +69,7 @@ const GROUPS: { label: string | null; items: NavItem[]; collapsible?: boolean }[
       { href: "/console", label: "Console", icon: Radio },
       { href: "/plan-appel", label: "Plan d'appel", icon: ClipboardList },
       { href: "/clients", label: "Clients", icon: Users },
+      { href: "/livraisons", label: "Détail livraison", icon: Truck },
     ],
   },
   {
