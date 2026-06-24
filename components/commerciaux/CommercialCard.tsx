@@ -21,6 +21,8 @@ interface Counts { ALL: number; CHR: number; GMS: number; EXPORT: number; OTHER:
 interface Props {
   userId: string;
   name: string;
+  /** Clé de rattachement des clients (trigramme, ex. JMG/MM). Défaut : name. */
+  commercialKey?: string;
   email: string | null;
   counts: Counts;
   isMe?: boolean;
@@ -32,7 +34,7 @@ interface Props {
   isBootstrapAdmin?: boolean;
 }
 
-export function CommercialCard({ userId, name, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false }: Props) {
+export function CommercialCard({ userId, name, commercialKey, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false }: Props) {
   const [claiming, setClaiming] = useState<string | null>(null);
   const [isPresent, setIsPresent] = useState(present);
   const [share, setShare] = useState(stockSharePct);
@@ -78,7 +80,7 @@ export function CommercialCard({ userId, name, email, counts, isMe, present = tr
       const res = await fetch("/api/temp-assignments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ commercial: name, type }),
+        body: JSON.stringify({ commercial: commercialKey ?? name, type }),
       });
       if (!res.ok) throw new Error();
       const data = await res.json();

@@ -75,12 +75,18 @@ export default async function CommerciauxPage() {
         <div className="grid gap-3 sm:grid-cols-2">
           {users.map((user) => {
             const name = user.name || user.email || "—";
-            const counts = countMap.get(name) ?? { ALL: 0, CHR: 0, GMS: 0, EXPORT: 0, OTHER: 0 };
+            // Les clients sont rattachés par TRIGRAMME (ex. « Jean-Michel GUNSLAY »
+            // → JMG, « Maxyme MANDINE » → MM), pas par nom complet. On dérive le
+            // trigramme (1re lettre de chaque mot) pour retrouver ses clients.
+            const trig = name.split(/[\s.\-_]+/).filter(Boolean).map((w) => w[0]?.toUpperCase() ?? "").join("");
+            const key = countMap.has(trig) ? trig : (countMap.has(name) ? name : trig);
+            const counts = countMap.get(key) ?? { ALL: 0, CHR: 0, GMS: 0, EXPORT: 0, OTHER: 0 };
             return (
               <CommercialCard
                 key={user.id}
                 userId={user.id}
                 name={name}
+                commercialKey={key}
                 email={user.email}
                 counts={counts}
                 isMe={user.id === session.user?.id}
