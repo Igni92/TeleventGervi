@@ -99,6 +99,9 @@ export function ProductsTable() {
   const [batches, setBatches] = useState<Record<string, Batch[] | "loading">>({});
   // Groupes repliés sur la liste mobile (style Écran 2 — sections par famille).
   const [closedGroups, setClosedGroups] = useState<Set<string>>(new Set());
+  // Jours de livraison des commandes fournisseurs ouvertes, par article (survol
+  // de la colonne « Commande fournisseur »). itemCode → "24.06 (480) · 26.06 (120)".
+  const [poDuesByItem, setPoDuesByItem] = useState<Record<string, string>>({});
 
   const toggleExpand = useCallback(async (productId: string) => {
     if (expandedId === productId) { setExpandedId(null); return; }
@@ -146,6 +149,41 @@ export function ProductsTable() {
     } catch { /* silent */ }
   }, []);
 
+  // Dates de livraison des commandes fournisseurs OUVERTES, regroupées par article
+  // (plusieurs lots/commandes → plusieurs jours). Sert d'infobulle sur la quantité
+  // « Commande fournisseur ».
+  const fetchPoDues = useCallback(async () => {
+    try {
+      const res = await fetch("/api/sap/purchase-orders?last=60", { cache: "no-store" });
+      if (!res.ok) return;
+      const json = await res.json();
+      type PoLine = { itemCode: string; pieceQuantity?: number; packageQuantity?: number | null; open?: boolean };
+      type Po = { dueDate: string | null; open: boolean; lines?: PoLine[] };
+      const byItem: Record<string, { due: string; qty: number }[]> = {};
+      for (const po of (json.docs ?? []) as Po[]) {
+        if (!po.open || !po.dueDate) continue;
+        const d = new Date(po.dueDate);
+        const due = Number.isNaN(d.getTime()) ? "?" : `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`;
+        for (const l of (po.lines ?? [])) {
+          if (l.open === false) continue;
+          const qty = l.packageQuantity ?? l.pieceQuantity ?? 0;
+          (byItem[l.itemCode] ??= []).push({ due, qty });
+        }
+      }
+      const out: Record<string, string> = {};
+      for (const [code, arr] of Object.entries(byItem)) {
+        // 1 ligne par jour de livraison (agrégé), trié par date.
+        const perDay = new Map<string, number>();
+        for (const { due, qty } of arr) perDay.set(due, (perDay.get(due) ?? 0) + qty);
+        out[code] = Array.from(perDay.entries())
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(([due, qty]) => `${due} (${Math.round(qty * 10) / 10})`)
+          .join(" · ");
+      }
+      setPoDuesByItem(out);
+    } catch { /* infobulle optionnelle */ }
+  }, []);
+
   const fetchLastSync = useCallback(async () => {
     try {
       const res = await fetch("/api/sap/sync/products");
@@ -184,6 +222,7 @@ export function ProductsTable() {
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
   useEffect(() => { fetchLastSync(); }, [fetchLastSync]);
   useEffect(() => { fetchGroups(); }, [fetchGroups]);
+  useEffect(() => { fetchPoDues(); }, [fetchPoDues]);
   useEffect(() => { fetchGroupUnits(); }, [fetchGroupUnits]);
 
   // Reset page when filter changes
@@ -606,13 +645,16 @@ export function ProductsTable() {
                         <span className="text-muted-foreground/40">0</span>
                       )}
                     </td>
-                    {/* Qté en achat (EM) — commande fournisseur attendue */}
-                    <td className="px-3 py-2.5 text-right tnum text-sky-600 dark:text-sky-400">
+                    {/* Commande fournisseur attendue — survol = jour(s) de livraison */}
+                    <td
+                      className={`px-3 py-2.5 text-right tnum text-sky-600 dark:text-sky-400 ${poDuesByItem[p.itemCode] ? "cursor-help" : ""}`}
+                      title={poDuesByItem[p.itemCode] ? `Livraison(s) : ${poDuesByItem[p.itemCode]}` : undefined}
+                    >
                       {orderD.qty > 0 ? (
-                        <>
+                        <span className={poDuesByItem[p.itemCode] ? "underline decoration-dotted decoration-sky-400/60 underline-offset-2" : ""}>
                           {fmtQty(orderD.qty, orderD.whole)}
                           <span className="ml-1 text-[10px] text-muted-foreground/70 font-normal">{orderD.label}</span>
-                        </>
+                        </span>
                       ) : (
                         <span className="text-muted-foreground/30">—</span>
                       )}
