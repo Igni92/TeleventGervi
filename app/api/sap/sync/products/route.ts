@@ -59,17 +59,32 @@ export async function POST() {
     // Filtre SAP côté serveur (1367 → ~425 actifs) identique sur le count et
     // les pages. Inclut les champs unités étendus + SalesItemsPerUnit.
     const ITEMS_FILTER = "Valid eq 'tYES' and Frozen eq 'tNO'";
-    const ITEMS_SELECT =
-      "ItemCode,ItemName,FrgnName,ItemsGroupCode,SalesUnit,SalesPackagingUnit,SalesQtyPerPackUnit,SalesItemsPerUnit,SalesUnitWeight,InventoryUOM,PurchaseUnit,ManageBatchNumbers,QuantityOnStock,ItemWarehouseInfoCollection,Valid,Frozen,U_Pays,U_GER_Marque,U_GER_Det_Condt,U_GER_UVC,U_GER_NB_BARQ_COLIS";
+    // Base SÛRE (champs historiques connus pour fonctionner sur ce SAP).
+    const ITEMS_SELECT_BASE =
+      "ItemCode,ItemName,ItemsGroupCode,SalesUnit,SalesPackagingUnit,SalesQtyPerPackUnit,SalesItemsPerUnit,SalesUnitWeight,InventoryUOM,PurchaseUnit,ManageBatchNumbers,QuantityOnStock,ItemWarehouseInfoCollection,Valid,Frozen,U_Pays,U_GER_Marque,U_GER_Det_Condt,U_GER_UVC,U_GER_NB_BARQ_COLIS";
+    // + FrgnName (variété). Si ce champ n'est pas sélectionnable sur ce SAP, la
+    // requête échoue : on RETOMBE alors sur la base SÛRE pour ne JAMAIS casser la
+    // synchro stock (la variété restera simplement vide).
+    const ITEMS_SELECT_FULL = `ItemCode,ItemName,FrgnName,${ITEMS_SELECT_BASE.slice("ItemCode,ItemName,".length)}`;
     // ⚠️ SalesItemsPerUnit (NumInSale) absent du type partagé SapItem ET du
     // client Prisma généré (colonne Product."salesItemsPerUnit" existe en base
     // mais pas dans le client) → extension de type locale + écriture raw SQL.
     type SapItemEx = SapItem & { SalesItemsPerUnit?: number; FrgnName?: string };
-    const items = await sap.getAllParallel<SapItemEx>(
-      `Items?$filter=${ITEMS_FILTER}&$select=${ITEMS_SELECT}`,
-      `Items/$count?$filter=${ITEMS_FILTER}`,
-      { pageSize: 500, env: "prod" },
-    );
+    let items: SapItemEx[];
+    try {
+      items = await sap.getAllParallel<SapItemEx>(
+        `Items?$filter=${ITEMS_FILTER}&$select=${ITEMS_SELECT_FULL}`,
+        `Items/$count?$filter=${ITEMS_FILTER}`,
+        { pageSize: 500, env: "prod" },
+      );
+    } catch (e) {
+      console.warn("[sync products] $select avec FrgnName échoué — fallback sans variété:", (e as Error).message);
+      items = await sap.getAllParallel<SapItemEx>(
+        `Items?$filter=${ITEMS_FILTER}&$select=${ITEMS_SELECT_BASE}`,
+        `Items/$count?$filter=${ITEMS_FILTER}`,
+        { pageSize: 500, env: "prod" },
+      );
+    }
 
     // ── 3. Mapping en mémoire (skip invalid/frozen, ceinture-bretelles) ──
     let synced = 0;
