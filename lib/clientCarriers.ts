@@ -297,6 +297,19 @@ export async function getDefaultCarrier(cardCode: string): Promise<ClientCarrier
   return carriers[0] ?? null;
 }
 
+/**
+ * Transporteur par défaut STRICT = ligne principale SERG_TRCL (U_TrspDef='O').
+ * Contrairement à getDefaultCarrier, ne retombe PAS sur « le plus utilisé » :
+ * si la vérité métier (SERG_TRCL) n'est pas disponible, renvoie null (l'appelant
+ * ne pose alors aucun transporteur → on laisse le défaut SAP, choix dans
+ * « Détail livraison »). Demande métier : ne jamais imposer le plus utilisé.
+ */
+export async function getTrclDefaultCarrier(cardCode: string): Promise<ClientCarrierStat | null> {
+  const res = await getClientCarriers(cardCode);
+  if (res.source !== "trcl") return null;
+  return res.carriers.find((c) => c.id === res.defaultId) ?? res.carriers[0] ?? null;
+}
+
 /** Vide le cache — utile pour les tests / debug. */
 export function _resetClientCarriersCache(): void {
   cache.clear();

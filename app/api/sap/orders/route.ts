@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { docLabel } from "@/lib/docLabel";
 import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { getTrclDefaultCarrier } from "@/lib/clientCarriers";
 import { sap } from "@/lib/sapb1";
 import { decrementLocalStock } from "@/lib/stockSync";
 import { getLotMaps, resolveLotDetailed, LOT_PENDING } from "@/lib/lotResolver";
@@ -335,9 +336,9 @@ export async function POST(req: NextRequest) {
   // C11 — Transporteur → ORDR.U_TrspCode.
   // Si carrierId fourni : on résout via la table Carrier (champ U_TrspCode = sapValue).
   // Sinon carrierCode raccourci (déjà la valeur SAP).
-  // Sinon : on NE POSE RIEN (plus de « transporteur le plus utilisé »). On laisse
-  // le transporteur par défaut de SAP ; il se choisit/ajuste ensuite dans
-  // « Détail livraison » (changement direct par commande).
+  // Sinon : transporteur PAR DÉFAUT du client = ligne principale SERG_TRCL
+  // (U_TrspDef='O'). On NE prend JAMAIS « le plus utilisé » : si SERG_TRCL n'est
+  // pas lisible, on ne pose rien → défaut SAP, ajustable dans « Détail livraison ».
   let trspCode: string | null = null;
   if (body.carrierId) {
     const rows = await prisma.$queryRawUnsafe<{ sapValue: string | null; active: boolean }[]>(
@@ -347,6 +348,18 @@ export async function POST(req: NextRequest) {
     if (rows[0]?.active && rows[0].sapValue) trspCode = rows[0].sapValue;
   } else if (body.carrierCode?.trim()) {
     trspCode = body.carrierCode.trim();
+  } else {
+    try {
+      const def = await getTrclDefaultCarrier(cardCode);
+      if (def) {
+        trspCode = def.sapValue;
+        console.log(`[Order] Transporteur par défaut SERG_TRCL ${cardCode} → ${def.sapValue}${def.tour ? ` (tournée ${def.tour})` : ""}`);
+      } else {
+        console.log(`[Order] Pas de défaut SERG_TRCL pour ${cardCode} — U_TrspCode non posé (défaut SAP / à régler dans Détail livraison)`);
+      }
+    } catch (e) {
+      console.warn(`[Order] Résolution transporteur par défaut (SERG_TRCL) échouée (non-bloquant):`, (e as Error).message);
+    }
   }
   if (trspCode) payload.U_TrspCode = trspCode;
   // ⚠️ Plus de DocumentAdditionalExpenses doc-level — TPF2/TPF3 sont désormais
