@@ -215,6 +215,23 @@ export function CallConsole() {
     setActiveId(next?.id ?? null);
   }, [data, activeId]);
 
+  /* ── Retrait OPTIMISTE de la file « À appeler » ──────────────
+     Une action journalisée (BL, commande, demain, rappel) doit faire
+     disparaître le client de la file IMMÉDIATEMENT au clic, sans attendre le
+     re-fetch serveur. On le bascule côté « Fait » et fetchData() réconcilie. */
+  const markHandled = useCallback((id: string | null | undefined) => {
+    if (!id) return;
+    setData((cur) => {
+      if (!cur) return cur;
+      const c = cur.queue.find((x) => x.id === id);
+      return {
+        ...cur,
+        queue: cur.queue.filter((x) => x.id !== id),
+        done: c && !cur.done.some((x) => x.id === id) ? [c, ...cur.done] : cur.done,
+      };
+    });
+  }, []);
+
   /* ── Log appel (COMMANDE / DEMAIN) ──────────────────────────
      scheduledFor (optional): for pre-commandes — client is snoozed
      until that date, no callback needed before it.
@@ -249,13 +266,14 @@ export function CallConsole() {
       clearCallNote(active.id);
       setCallNote("");
       advance();
+      markHandled(active.id);   // disparaît de « À appeler » au clic
       fetchData();
     } catch {
       toast.error("Erreur d'enregistrement");
     } finally {
       setActionLoading(null);
     }
-  }, [active, callNote, advance, fetchData]);
+  }, [active, callNote, advance, markHandled, fetchData]);
 
   // Restaure la note rapide persistée (localStorage) quand le client actif
   // change — survit ainsi à un refresh de page. Écrite par client via
@@ -580,7 +598,7 @@ export function CallConsole() {
         open={rappelOpen}
         onOpenChange={setRappelOpen}
         client={active}
-        onCreated={() => { fetchData(); advance(); }}
+        onCreated={() => { advance(); markHandled(active?.id); fetchData(); }}
       />
 
       {/* ── Keyboard shortcuts customization dialog ──────── */}
@@ -604,8 +622,9 @@ export function CallConsole() {
             // BL = commande journalisée → on purge la note rapide du client.
             clearCallNote(active.id);
             setCallNote("");
-            fetchData();
             advance();
+            markHandled(active.id);   // le client quitte « À appeler » dès le clic
+            fetchData();
           }}
         />
       )}
