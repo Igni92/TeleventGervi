@@ -10,6 +10,7 @@ import {
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { NumberInput } from "@/components/ui/number-input";
 import { GuidedCounter } from "./GuidedCounter";
 import { PhotoStep } from "./PhotoStep";
 import {
@@ -167,7 +168,13 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
         if (el) rows.push({ itemCode, itemName: el.itemName, sapQty: el.sapQty, real, unit: el.unit, ecart: Math.round((real - el.sapQty) * 10) / 10, emoji: fruitEmoji({ itemName: el.itemName }), orphan: true });
       }
     }
-    return rows.sort((a, b) => Math.abs(b.ecart) - Math.abs(a.ecart) || a.itemName.localeCompare(b.itemName));
+    // En correction : ordre alphabétique STABLE (les lignes ne sautent pas quand
+    // on modifie une quantité). Sinon : écarts les plus forts en tête.
+    return rows.sort((a, b) =>
+      editing
+        ? a.itemName.localeCompare(b.itemName)
+        : Math.abs(b.ecart) - Math.abs(a.ecart) || a.itemName.localeCompare(b.itemName),
+    );
   }, [counts, productByCode, editing]);
   const nbCountedAll = recapRows.length;            // inclut les lignes hors stock (correction)
   const nbEcartsAll = useMemo(() => recapRows.filter((r) => r.ecart !== 0).length, [recapRows]);
@@ -455,17 +462,27 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
           </div>
         )}
 
-        {/* Lignes comptées (produits en stock + lignes hors stock d'une correction) */}
+        {/* Lignes comptées (produits en stock + lignes hors stock d'une correction).
+            En correction : chaque quantité réelle est éditable DIRECTEMENT ici. */}
         <SurfaceCard accent="sky" className="p-4">
-          <h3 className="mb-2 text-[13px] font-semibold text-foreground">Articles comptés</h3>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-[13px] font-semibold text-foreground">
+              Articles comptés {recapRows.length > 0 && <span className="text-muted-foreground tnum font-normal">· {recapRows.length}</span>}
+            </h3>
+            {editing && recapRows.length > 0 && (
+              <span className="text-[11px] text-muted-foreground">Modifie les quantités réelles ci-dessous</span>
+            )}
+          </div>
           {recapRows.length === 0 ? (
             <p className="py-2 text-[12px] italic text-muted-foreground">
-              Rien de compté pour l&apos;instant — tu peux n&apos;envoyer que des photos.
+              {editing
+                ? "Aucune ligne — utilise « Continuer » pour compter des articles."
+                : "Rien de compté pour l'instant — tu peux n'envoyer que des photos."}
             </p>
           ) : (
-            <div className="-mx-1 max-h-[44vh] divide-y divide-border/60 overflow-y-auto">
+            <div className={`-mx-1 divide-y divide-border/60 overflow-y-auto ${editing ? "max-h-[60vh]" : "max-h-[44vh]"}`}>
               {recapRows.map((r) => (
-                <div key={r.itemCode} className="flex items-center gap-3 px-1 py-2">
+                <div key={r.itemCode} className="flex items-center gap-2.5 px-1 py-2">
                   <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-[18px] leading-none">
                     {r.emoji}
                   </div>
@@ -479,13 +496,29 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                       )}
                     </div>
                     <div className="text-[11.5px] text-muted-foreground tnum">
-                      SAP {fmt(r.sapQty)} → réel <b className="text-foreground">{fmt(r.real)}</b> {r.unit}
+                      {editing ? (
+                        <>SAP {fmt(r.sapQty)} {r.unit}</>
+                      ) : (
+                        <>SAP {fmt(r.sapQty)} → réel <b className="text-foreground">{fmt(r.real)}</b> {r.unit}</>
+                      )}
                     </div>
                   </div>
-                  <span className={`shrink-0 text-[13px] font-bold tnum ${r.ecart === 0 ? "text-emerald-600 dark:text-emerald-400" : r.ecart > 0 ? "text-sky-600 dark:text-sky-400" : "text-amber-600 dark:text-amber-400"}`}>
+
+                  {editing && (
+                    <NumberInput
+                      value={(counts[r.itemCode] ?? 0) as number}
+                      onValueChange={(n) => setCount(r.itemCode, n)}
+                      min={0}
+                      step={1}
+                      aria-label={`Quantité réelle — ${r.itemName}`}
+                      className="h-9 w-[68px] shrink-0 rounded-lg border-border bg-background px-1 text-center text-[14px] font-semibold tnum text-foreground"
+                    />
+                  )}
+
+                  <span className={`shrink-0 ${editing ? "w-12 text-right" : ""} text-[13px] font-bold tnum ${r.ecart === 0 ? "text-emerald-600 dark:text-emerald-400" : r.ecart > 0 ? "text-sky-600 dark:text-sky-400" : "text-amber-600 dark:text-amber-400"}`}>
                     {r.ecart === 0 ? "OK" : r.ecart > 0 ? `+${fmt(r.ecart)}` : fmt(r.ecart)}
                   </span>
-                  <button onClick={() => setCount(r.itemCode, null)} className="shrink-0 text-muted-foreground/60 hover:text-rose-500" aria-label="Retirer">
+                  <button onClick={() => setCount(r.itemCode, null)} className="shrink-0 text-muted-foreground/60 hover:text-rose-500" aria-label="Retirer la ligne">
                     <X className="h-4 w-4" />
                   </button>
                 </div>
