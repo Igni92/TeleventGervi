@@ -4,7 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import {
   ChevronDown, Mail, ArrowRight, Loader2, Users,
-  Building2, Globe, Store, Check, X, Percent, Shield, ShieldCheck, Boxes,
+  Building2, Globe, Store, Check, X, Percent, ShieldCheck, Boxes, Briefcase, Truck, Lock,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -36,9 +36,11 @@ interface Props {
   isPreparateur?: boolean;
   /** Préparateur « bootstrap » (lib/inventory : défaut + PREPARATEUR_EMAILS) → figé ici. */
   isBootstrapPreparateur?: boolean;
+  /** Rôle commercial (force de vente) — indépendant des autres rôles. */
+  isCommercial?: boolean;
 }
 
-export function CommercialCard({ userId, name, commercialKey, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false, isPreparateur = false, isBootstrapPreparateur = false }: Props) {
+export function CommercialCard({ userId, name, commercialKey, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false, isPreparateur = false, isBootstrapPreparateur = false, isCommercial = true }: Props) {
   const [claiming, setClaiming] = useState<string | null>(null);
   const [isPresent, setIsPresent] = useState(present);
   const [share, setShare] = useState(stockSharePct);
@@ -47,6 +49,8 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
   const [savingAdmin, setSavingAdmin] = useState(false);
   const [prep, setPrep] = useState(isPreparateur);
   const [savingPrep, setSavingPrep] = useState(false);
+  const [comm, setComm] = useState(isCommercial);
+  const [savingComm, setSavingComm] = useState(false);
   // Nom affiché sans le suffixe société (« … - Gervifrais ») qui tronque sur mobile.
   const displayName = name.split(/\s+[-–]\s+/)[0].trim() || name;
 
@@ -66,6 +70,14 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
     try { await patch({ isPreparateur: next }); toast.success(next ? `${name} est désormais préparateur (stock)` : `${name} n'est plus préparateur`); }
     catch { setPrep(!next); toast.error("Erreur changement de rôle"); }
     finally { setSavingPrep(false); }
+  }
+
+  async function toggleCommercial() {
+    const next = !comm;
+    setComm(next); setSavingComm(true);
+    try { await patch({ isCommercial: next }); toast.success(next ? `${name} est désormais commercial` : `${name} n'est plus commercial`); }
+    catch { setComm(!next); toast.error("Erreur changement de rôle"); }
+    finally { setSavingComm(false); }
   }
 
   async function patch(payload: Record<string, unknown>) {
@@ -149,82 +161,46 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
             {counts.EXPORT > 0 && <span><span className="font-medium text-foreground/80 tnum">{counts.EXPORT}</span> EXPORT</span>}
           </div>
 
-          {/* Présence + % stock attribué — outils d'admin, masqués sur mobile */}
-          <div className="hidden md:flex items-center gap-2 mt-3 flex-wrap">
-            <button
-              type="button"
-              onClick={togglePresence}
-              disabled={savingPresence}
-              className={`inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-60 ${
-                isPresent
-                  ? "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
-                  : "bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300"
-              }`}
-            >
-              {savingPresence ? <Loader2 className="h-3 w-3 animate-spin" /> : isPresent ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
-              {isPresent ? "Présent" : "Absent"}
-            </button>
-            <label className="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-secondary/60 text-[11px] text-muted-foreground" title="% du stock total attribué à ce commercial">
-              <Percent className="h-3 w-3" />
-              <input
-                type="number" min={0} max={100} step={5}
-                value={share}
-                onChange={(e) => setShare(parseFloat(e.target.value) || 0)}
-                onBlur={(e) => saveShare(parseFloat(e.target.value) || 0)}
-                className="w-10 bg-transparent text-right tnum text-foreground focus:outline-none"
-              />
-              <span>stock</span>
-            </label>
-
-            {/* Rôle admin — toggle (badge figé pour un admin système) */}
-            {isBootstrapAdmin ? (
-              <span
-                className="inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300"
-                title="Admin système (défini dans le code) — non modifiable ici"
-              >
-                <ShieldCheck className="h-3 w-3" /> Admin système
-              </span>
-            ) : (
+          {/* Présence + % stock + RÔLES (multi-sélection) — outils admin, masqués sur mobile */}
+          <div className="hidden md:block mt-3 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
-                onClick={toggleAdmin}
-                disabled={savingAdmin}
-                title={admin ? "Rétrograder en commercial" : "Promouvoir administrateur"}
-                className={`inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none ${
-                  admin
-                    ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300"
-                    : "bg-secondary/60 text-muted-foreground hover:text-foreground"
+                onClick={togglePresence}
+                disabled={savingPresence}
+                className={`inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-60 ${
+                  isPresent
+                    ? "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
+                    : "bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300"
                 }`}
               >
-                {savingAdmin ? <Loader2 className="h-3 w-3 animate-spin" /> : admin ? <ShieldCheck className="h-3 w-3" /> : <Shield className="h-3 w-3" />}
-                {admin ? "Admin" : "Commercial"}
+                {savingPresence ? <Loader2 className="h-3 w-3 animate-spin" /> : isPresent ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                {isPresent ? "Présent" : "Absent"}
               </button>
-            )}
+              <label className="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-secondary/60 text-[11px] text-muted-foreground" title="% du stock total attribué à ce commercial">
+                <Percent className="h-3 w-3" />
+                <input
+                  type="number" min={0} max={100} step={5}
+                  value={share}
+                  onChange={(e) => setShare(parseFloat(e.target.value) || 0)}
+                  onBlur={(e) => saveShare(parseFloat(e.target.value) || 0)}
+                  className="w-10 bg-transparent text-right tnum text-foreground focus:outline-none"
+                />
+                <span>stock</span>
+              </label>
+            </div>
 
-            {/* Rôle préparateur (en charge du stock) — peut repasser sur les inventaires */}
-            {isBootstrapPreparateur ? (
-              <span
-                className="inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300"
-                title="Préparateur défini dans la configuration (PREPARATEUR_EMAILS) — non modifiable ici"
-              >
-                <Boxes className="h-3 w-3" /> Préparateur système
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={togglePrep}
-                disabled={savingPrep}
-                title={prep ? "Retirer le rôle préparateur (stock)" : "Désigner préparateur (en charge du stock)"}
-                className={`inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-amber-500 focus:outline-none ${
-                  prep
-                    ? "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300"
-                    : "bg-secondary/60 text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {savingPrep ? <Loader2 className="h-3 w-3 animate-spin" /> : <Boxes className="h-3 w-3" />}
-                {prep ? "Préparateur" : "Préparateur ?"}
-              </button>
-            )}
+            {/* RÔLES — indépendants : un compte peut en cumuler plusieurs */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="mr-0.5 select-none text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Rôles</span>
+              <RoleChip tone="indigo" icon={Briefcase} label="Commercial" active={comm} saving={savingComm} onToggle={toggleCommercial}
+                title={comm ? "Retirer le rôle commercial" : "Désigner commercial (force de vente)"} />
+              <RoleChip tone="amber" icon={Boxes} label="Préparateur" active={prep} locked={isBootstrapPreparateur} saving={savingPrep} onToggle={togglePrep}
+                title={isBootstrapPreparateur ? "Préparateur défini dans la configuration (PREPARATEUR_EMAILS) — non modifiable ici" : prep ? "Retirer le rôle préparateur (stock)" : "Désigner préparateur (en charge du stock)"} />
+              <RoleChip tone="violet" icon={ShieldCheck} label="Admin" active={admin} locked={isBootstrapAdmin} saving={savingAdmin} onToggle={toggleAdmin}
+                title={isBootstrapAdmin ? "Admin système (défini dans le code) — non modifiable ici" : admin ? "Retirer les droits administrateur" : "Promouvoir administrateur"} />
+              <RoleChip tone="slate" icon={Truck} label="Livreur" disabled title="Rôle livreur — bientôt disponible" />
+            </div>
           </div>
         </div>
       </div>
@@ -311,5 +287,65 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
         )}
       </div>
     </div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * Pastille de rôle (multi-sélection). Chaque rôle est INDÉPENDANT : un compte
+ * peut cumuler Commercial + Préparateur + Admin (+ Livreur à venir).
+ *   - actif        → pastille colorée cliquable (toggle)
+ *   - locked       → rôle « système » (bootstrap code/env), figé (cadenas)
+ *   - disabled     → rôle pas encore disponible (Livreur), grisé
+ * ------------------------------------------------------------------------- */
+const ROLE_TONE = {
+  indigo: "bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300",
+  amber: "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
+  violet: "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300",
+  slate: "bg-slate-100 dark:bg-slate-800/40 text-slate-600 dark:text-slate-400",
+} as const;
+
+function RoleChip({
+  icon: Icon, label, tone, active = false, locked = false, disabled = false, saving = false, onToggle, title,
+}: {
+  icon: typeof Briefcase;
+  label: string;
+  tone: keyof typeof ROLE_TONE;
+  active?: boolean;
+  locked?: boolean;
+  disabled?: boolean;
+  saving?: boolean;
+  onToggle?: () => void;
+  title?: string;
+}) {
+  const base = "inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold transition-colors";
+  if (disabled) {
+    return (
+      <span className={`${base} bg-secondary/40 text-muted-foreground/50 cursor-not-allowed`} title={title}>
+        <Icon className="h-3 w-3" /> {label}
+        <span className="ml-0.5 text-[8.5px] uppercase tracking-wide opacity-80">bientôt</span>
+      </span>
+    );
+  }
+  if (locked) {
+    return (
+      <span className={`${base} ${ROLE_TONE[tone]}`} title={title}>
+        <Lock className="h-3 w-3" /> {label}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={saving}
+      title={title}
+      aria-pressed={active}
+      className={`${base} disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none ${
+        active ? ROLE_TONE[tone] : "bg-secondary/60 text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Icon className="h-3 w-3" />}
+      {label}
+    </button>
   );
 }

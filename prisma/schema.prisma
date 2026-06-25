@@ -52,6 +52,11 @@ model User {
   // d'autres sans redéploiement. Accédé en raw SQL (colonne hors client typé tant
   // que generate n'est pas relancé) — cf. scripts/ddl-user-ispreparateur.mjs.
   isPreparateur Boolean    @default(false)
+  // Rôle commercial (force de vente) — INDÉPENDANT des autres rôles (un compte
+  // peut cumuler commercial + préparateur + admin). Défaut true (tout compte est
+  // commercial tant qu'on ne le retire pas depuis Effectifs). Géré en UI, accédé
+  // en raw SQL (cf. scripts/ddl-user-roles.mjs).
+  isCommercial  Boolean    @default(true)
   accounts      Account[]
   sessions      Session[]
   presences     Presence[]

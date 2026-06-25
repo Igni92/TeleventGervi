@@ -43,7 +43,7 @@ export async function PATCH(req: NextRequest) {
   // Gestion d'équipe (présence + % stock de N'IMPORTE quel commercial) → admins uniquement.
   if (!(await requireAdmin(session))) return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
 
-  let body: { userId?: string; present?: boolean; stockSharePct?: number; isAdmin?: boolean; isPreparateur?: boolean };
+  let body: { userId?: string; present?: boolean; stockSharePct?: number; isAdmin?: boolean; isPreparateur?: boolean; isCommercial?: boolean };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
   if (!body.userId) return NextResponse.json({ error: "userId requis" }, { status: 400 });
 
@@ -71,6 +71,11 @@ export async function PATCH(req: NextRequest) {
   // (cf. scripts/ddl-user-ispreparateur.mjs).
   if (typeof body.isPreparateur === "boolean") {
     await prisma.$executeRawUnsafe(`UPDATE "User" SET "isPreparateur" = $1 WHERE "id" = $2`, body.isPreparateur, body.userId);
+  }
+  // Rôle commercial (force de vente) — indépendant des autres rôles. Raw SQL,
+  // même convention (cf. scripts/ddl-user-roles.mjs).
+  if (typeof body.isCommercial === "boolean") {
+    await prisma.$executeRawUnsafe(`UPDATE "User" SET "isCommercial" = $1 WHERE "id" = $2`, body.isCommercial, body.userId);
   }
 
   return NextResponse.json({ ok: true });

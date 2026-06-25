@@ -25,21 +25,22 @@ export default async function CommerciauxPage() {
       select: { id: true, name: true, email: true, stockSharePct: true },
       orderBy: { name: "asc" },
     });
-    // Rôles admin / préparateur (colonnes hors client typé tant que generate n'est
-    // pas relancé → lecture raw, repli silencieux si les colonnes n'existent pas).
+    // Rôles admin / préparateur / commercial (colonnes hors client typé tant que
+    // generate n'est pas relancé → lecture raw, repli silencieux si absentes).
     const adminByUser = new Map<string, boolean>();
     const prepByUser = new Map<string, boolean>();
+    const commByUser = new Map<string, boolean>();
     try {
-      const rows = await prisma.$queryRawUnsafe<{ id: string; isAdmin: boolean; isPreparateur: boolean }[]>(
-        `SELECT "id", "isAdmin", "isPreparateur" FROM "User"`,
+      const rows = await prisma.$queryRawUnsafe<{ id: string; isAdmin: boolean; isPreparateur: boolean; isCommercial: boolean }[]>(
+        `SELECT "id", "isAdmin", "isPreparateur", "isCommercial" FROM "User"`,
       );
-      for (const r of rows) { adminByUser.set(r.id, r.isAdmin); prepByUser.set(r.id, r.isPreparateur); }
+      for (const r of rows) { adminByUser.set(r.id, r.isAdmin); prepByUser.set(r.id, r.isPreparateur); commByUser.set(r.id, r.isCommercial); }
     } catch {
-      // Colonne isPreparateur absente ? Repli sur isAdmin seul (DDL partielle).
+      // Colonnes isPreparateur/isCommercial absentes ? Repli sur isAdmin seul (DDL partielle).
       try {
         const rows = await prisma.$queryRawUnsafe<{ id: string; isAdmin: boolean }[]>(`SELECT "id", "isAdmin" FROM "User"`);
         for (const r of rows) adminByUser.set(r.id, r.isAdmin);
-      } catch { /* aucune colonne de rôle → tout false */ }
+      } catch { /* aucune colonne de rôle → admin/prep false, commercial true par défaut */ }
     }
     const bootstrapAdmins = new Set(ADMIN_EMAILS.map((e) => e.toLowerCase()));
     const bootstrapPreparateurs = new Set(preparateurEmails());
@@ -107,6 +108,7 @@ export default async function CommerciauxPage() {
                 isAdmin={(!!user.email && bootstrapAdmins.has(user.email.toLowerCase())) || (adminByUser.get(user.id) ?? false)}
                 isBootstrapPreparateur={bootstrapPrep}
                 isPreparateur={bootstrapPrep || (prepByUser.get(user.id) ?? false)}
+                isCommercial={commByUser.get(user.id) ?? true}
               />
             );
           })}
