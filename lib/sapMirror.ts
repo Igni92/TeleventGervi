@@ -18,6 +18,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
+import { invalidate } from "@/lib/ttlCache";
 
 // ─────────────────────────────────────────────────────────────────
 // Types SAP B1 (Service Layer) — minimal subset
@@ -470,6 +471,93 @@ export const pullOrders = (opts: MirrorPullOpts) =>
 /** Avoirs clients (CreditNotes) → SapCreditNote. Nécessaire au CA NET (factures − avoirs). */
 export const pullCreditNotes = (opts: MirrorPullOpts) =>
   pullSalesDocs("CreditNotes", opts);
+
+// ─────────────────────────────────────────────────────────────────
+// Insert OPTIMISTE d'une commande tout juste créée via TeleVent.
+//
+// Pendant des agrégats du décrément de stock optimiste (POST /api/sap/orders) :
+// au lieu d'attendre la prochaine synchro pour que la commande remonte dans les
+// KPI du jour (cockpit Écran 1 / accueil), on l'écrit DIRECTEMENT dans le miroir
+// à partir de l'objet déjà ramené par la route — AUCUN appel SAP supplémentaire.
+//
+// Idempotent (même ON CONFLICT que la synchro) : la synchro suivante réécrira
+// proprement la ligne (UpdateDate SAP, marge, annulation éventuelle), car SAP
+// renvoie la commande tant que son UpdateDate ≥ curseur (DocDate du jour).
+//
+// slpName est hérité du client via le miroir BP (TeleVent ne surcharge pas
+// SalesPersonCode) — 0 appel SAP. Si inconnu (BP jamais synchro), reste null :
+// la commande compte en vue globale, scope commercial rattrapé à la synchro.
+// ─────────────────────────────────────────────────────────────────
+
+export interface CreatedOrderForMirror {
+  DocEntry: number;
+  DocNum?: number;
+  DocDate: string;            // ISO (SAP DocDate)
+  CardCode: string;
+  CardName?: string;
+  DocTotal?: number;          // TTC (sera stocké HT = DocTotal − VatSum)
+  VatSum?: number;
+  UpdateDate?: string;
+  DocumentLines?: {
+    LineNum?: number;
+    ItemCode?: string | null;
+    ItemDescription?: string;
+    Quantity?: number;
+    LineTotal?: number;
+    GrossProfit?: number;
+    StockPrice?: number;
+    WarehouseCode?: string;
+  }[];
+}
+
+export async function mirrorCreatedOrder(order: CreatedOrderForMirror): Promise<void> {
+  // FK : crée le BP minimal s'il manque (cardCode + cardName).
+  await ensureBusinessPartners([{ CardCode: order.CardCode, CardName: order.CardName }], "C");
+
+  // Commercial : hérité du client (miroir BP) — pas d'appel SAP SalesPersons.
+  const bp = await prisma.sapBusinessPartner.findUnique({
+    where: { cardCode: order.CardCode },
+    select: { slpName: true },
+  });
+  const slpName = bp?.slpName ?? null;
+
+  const docTotal = order.DocTotal ?? 0;
+  const vatSum = order.VatSum ?? 0;
+  const upd = order.UpdateDate ? new Date(order.UpdateDate) : new Date();
+
+  // Mapping IDENTIQUE à pullSalesDocs (mêmes colonnes, même dérivation lineCost).
+  let docGrossProfit = 0;
+  const lines: unknown[][] = (order.DocumentLines ?? []).map((l) => {
+    const qty = l.Quantity ?? 0;
+    const lineTotal = l.LineTotal ?? 0;
+    const gp = l.GrossProfit ?? null;
+    const lineCost = l.StockPrice ?? (gp != null && qty > 0 ? (lineTotal - gp) / qty : null);
+    docGrossProfit += gp ?? 0;
+    // Ordre = SALES_LINE_COLS. isService : ligne sans ItemCode (prestation/location).
+    return [
+      order.DocEntry, l.LineNum ?? 0, l.ItemCode ?? null, l.ItemDescription ?? null,
+      qty, lineTotal, lineCost, gp, l.WarehouseCode ?? null, l.ItemCode == null,
+    ];
+  });
+
+  // Ordre = SALES_HEADER_COLS. docTotal stocké HT (= DocTotal − VatSum), comme la synchro.
+  const header: unknown[] = [
+    order.DocEntry, order.DocNum ?? null, new Date(order.DocDate), order.CardCode, order.CardName ?? null,
+    slpName, docTotal - vatSum, vatSum, docGrossProfit,
+    false, upd,
+  ];
+
+  await bulkUpsertDocs({
+    headerTable: SALES_TABLES.Orders.header,
+    lineTable: SALES_TABLES.Orders.line,
+    headerCols: SALES_HEADER_COLS,
+    lineCols: SALES_LINE_COLS,
+    docs: [{ docEntry: order.DocEntry, header, lines }],
+  });
+
+  // Rafraîchit les agrégats pilotage (KPI du jour) sans attendre le TTL 5 min.
+  invalidate("pilotage:");
+}
 
 // ─────────────────────────────────────────────────────────────────
 // Documents d'ACHAT — PurchaseDeliveryNotes (entrées fournisseur) et
