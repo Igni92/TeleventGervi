@@ -51,6 +51,24 @@ export function sapInfo(p: Product): { qty: number; unit: string } {
   return { qty: Math.round((avail / unitsPerColis) * 10) / 10, unit: "colis" };
 }
 
+/**
+ * Affichage en UNITÉ DE BASE (kg / barquette) au lieu de « colis » : le
+ * préparateur compte AU COLIS (incrément d'un colis) mais voit la valeur dans
+ * l'unité de base — fraises 4/8/12 kg, framboises 12/24/36 bqe. `perColis` =
+ * unités de base par colis ; une valeur_en_colis × perColis = valeur_de_base.
+ * (Le comptage et la régularisation SAP restent en colis : on ne change QUE
+ * l'affichage.)
+ */
+export function baseInfo(p: Product): { perColis: number; unit: string } {
+  const isKg = /kg|kilo/i.test((p.salesUnit ?? "").trim());
+  const { unitsPerColis } = colisInfo({
+    salesUnit: p.salesUnit,
+    salesQtyPerPackUnit: p.salesQtyPerPackUnit,
+    salesUnitWeight: p.salesUnitWeight,
+  });
+  return { perColis: unitsPerColis, unit: isKg ? "kg" : "bqe" };
+}
+
 /** Écart (réel − SAP), arrondi 0,1. null si non compté. */
 export function ecartOf(real: number | null | undefined, sapQty: number): number | null {
   if (real == null || !Number.isFinite(real)) return null;
