@@ -106,6 +106,30 @@ export async function GET(req: NextRequest) {
       /* table Carrier absente → on affichera le code brut */
     }
 
+    // Type client (GMS / CHR / EXPORT) par CardCode — pour le filtre par segment.
+    // Le CardCode d'un BL peut être le code principal OU un code d'adresse de
+    // livraison (ClientDeliveryMode.sapCardCode) : on couvre les deux.
+    const cardCodes = Array.from(new Set(live.map((o) => o.CardCode).filter(Boolean)));
+    const typeByCardCode = new Map<string, string>();
+    if (cardCodes.length) {
+      try {
+        const clients = await prisma.client.findMany({
+          where: { code: { in: cardCodes } },
+          select: { code: true, type: true },
+        });
+        for (const c of clients) if (c.type) typeByCardCode.set(c.code, c.type);
+        const modes = await prisma.clientDeliveryMode.findMany({
+          where: { sapCardCode: { in: cardCodes } },
+          select: { sapCardCode: true, client: { select: { type: true } } },
+        });
+        for (const m of modes) {
+          if (m.client?.type && !typeByCardCode.has(m.sapCardCode)) typeByCardCode.set(m.sapCardCode, m.client.type);
+        }
+      } catch {
+        /* type optionnel → le filtre rangera ces BL en « Autres » */
+      }
+    }
+
     const weightOfItem = (code: string) => pMap.get(code)?.salesUnitWeight ?? 0;
     const colisDivOf = (code: string) => {
       const p = pMap.get(code);
@@ -145,6 +169,7 @@ export async function GET(req: NextRequest) {
         numAtCard: d.NumAtCard ?? "",
         trspCode,
         carrierName: trspCode ? carrierByCode.get(trspCode) ?? trspCode : null,
+        clientType: typeByCardCode.get(d.CardCode) ?? null,   // GMS | CHR | EXPORT | null
         lineCount: lines.length,
         lines,
       };
