@@ -3,6 +3,7 @@
  * Pur côté logique ; `compressImage` n'utilise les API navigateur qu'à l'appel
  * (jamais à l'import) → importable depuis n'importe quel composant client.
  */
+import { colisInfo } from "@/lib/colis";
 
 export type Product = {
   id: string;
@@ -11,6 +12,7 @@ export type Product = {
   groupName: string | null;
   salesQtyPerPackUnit: number | null;
   salesUnit: string | null;
+  salesUnitWeight: number | null;
   uPays: string | null;
   uMarque: string | null;
   uCondi: string | null;
@@ -33,12 +35,20 @@ export const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1
 export const fmtDate = (s: string) =>
   new Date(s).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
 
-/** SAP en COLIS (available ÷ pièces par colis) — ou kg si l'unité de vente l'est. */
+/**
+ * Stock SAP exprimé EXCLUSIVEMENT en COLIS (demande métier : l'inventaire du
+ * préparateur ne parle qu'en colis, y compris pour les articles au kg — 1 colis
+ * = X kg). Conversion via le diviseur exact `unitsPerColis` (lib/colis, source
+ * unique partagée avec la régularisation SAP).
+ */
 export function sapInfo(p: Product): { qty: number; unit: string } {
   const avail = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.available ?? 0), 0);
-  const isKg = /kg|kilo/i.test(p.salesUnit ?? "");
-  const ratio = p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1 ? p.salesQtyPerPackUnit : 1;
-  return { qty: Math.round((avail / ratio) * 10) / 10, unit: isKg ? "kg" : "colis" };
+  const { unitsPerColis } = colisInfo({
+    salesUnit: p.salesUnit,
+    salesQtyPerPackUnit: p.salesQtyPerPackUnit,
+    salesUnitWeight: p.salesUnitWeight,
+  });
+  return { qty: Math.round((avail / unitsPerColis) * 10) / 10, unit: "colis" };
 }
 
 /** Écart (réel − SAP), arrondi 0,1. null si non compté. */
