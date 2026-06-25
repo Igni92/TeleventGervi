@@ -53,7 +53,7 @@ export default function Ecran2Page() {
             <Loader2 className="h-4 w-4 animate-spin" /> Connexion…
           </p>
         ) : clientId && clientName ? (
-          <Ecran2Order key={clientId} clientId={clientId} clientName={clientName} stockSharePct={sharePct} />
+          <Ecran2Order key={clientId} clientId={clientId} clientName={clientName} stockSharePct={sharePct} rajout={state?.rajout ?? null} />
         ) : (
           <div className="h-full flex items-center justify-center panel">
             <p className="hidden md:block text-[13px] text-muted-foreground text-center max-w-xs">

@@ -19,9 +19,21 @@ export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code")?.trim().toUpperCase();
   if (!code) return NextResponse.json({ id: null });
 
-  const client = await prisma.client.findUnique({
+  let client = await prisma.client.findUnique({
     where: { code },
     select: { id: true },
   });
+  // Fallback : le CardCode peut être celui d'un MODE DE LIVRAISON (ex. "LPOI."
+  // via SCACHAP) et non le code principal du client. On résout alors via
+  // ClientDeliveryMode (accès raw, même convention que le reste de l'app).
+  if (!client) {
+    try {
+      const rows = await prisma.$queryRawUnsafe<{ clientId: string }[]>(
+        `SELECT "clientId" FROM "ClientDeliveryMode" WHERE UPPER("sapCardCode") = $1 LIMIT 1`,
+        code,
+      );
+      if (rows[0]?.clientId) client = { id: rows[0].clientId };
+    } catch { /* table absente → on garde null */ }
+  }
   return NextResponse.json({ id: client?.id ?? null });
 }

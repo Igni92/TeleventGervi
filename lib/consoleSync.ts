@@ -38,6 +38,13 @@ export interface ActiveClientState {
   clientName: string | null;
   stockSharePct: number;
   client?: ActiveClientInfo | null;
+  /**
+   * Cible de RAJOUT : quand l'écran 1 (ex. « Détail livraison ») envoie un
+   * client AVEC une commande existante à compléter, l'écran 2 bascule en mode
+   * rajout — les articles ajoutés s'ajoutent à ce BL au lieu de créer une
+   * nouvelle commande. null/absent = saisie de commande normale.
+   */
+  rajout?: { docEntry: number; docNum: number } | null;
   at: number;
 }
 

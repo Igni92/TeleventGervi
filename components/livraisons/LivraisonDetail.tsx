@@ -4,10 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Truck, Boxes, Scale, Users, FileText, Receipt,
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
-  RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw,
+  RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw, Plus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ClientLink } from "@/components/ClientLink";
+import { broadcastActiveClient } from "@/lib/consoleSync";
 import {
   nextDeliveryDate, frenchHolidayLabel, nextWorkingDeliveryDay,
   formatDeliveryDate, addDaysISO,
@@ -464,6 +465,37 @@ function OrderRow({
     setSavingCarrier(false);
   }
 
+  // Rajout : on résout le client puis on pousse la cible vers l'Écran 2 (console)
+  // via consoleSync. L'Écran 2 bascule en mode rajout sur ce BL.
+  const [rajoutBusy, setRajoutBusy] = useState(false);
+  async function startRajout() {
+    setRajoutBusy(true);
+    try {
+      const r = await fetch(`/api/clients/resolve?code=${encodeURIComponent(doc.cardCode)}`);
+      const j = await r.json().catch(() => null);
+      if (!j?.id) {
+        toast.error("Client introuvable en télévente — rajout impossible depuis ici.");
+        return;
+      }
+      broadcastActiveClient({
+        clientId: j.id,
+        clientName: doc.cardName,
+        stockSharePct: 100,
+        client: null,
+        rajout: { docEntry: doc.docEntry, docNum: doc.docNum },
+      });
+      toast.success(`Rajout chargé sur l'Écran 2 — BL #${doc.docNum}`, {
+        description: "Ajoute les articles depuis l'écran de commande (console).",
+        action: { label: "Ouvrir l'Écran 2", onClick: () => window.open("/console/ecran2", "_blank", "noopener") },
+        duration: 8000,
+      });
+    } catch {
+      toast.error("Échec du chargement du rajout.");
+    } finally {
+      setRajoutBusy(false);
+    }
+  }
+
   return (
     <li>
       <div className="flex items-center gap-3 px-4 sm:px-5 py-3 hover:bg-secondary/25 transition-colors">
@@ -523,6 +555,18 @@ function OrderRow({
             <p className="text-[14px] font-semibold tnum text-foreground/85 leading-none">{fmtNum(doc.weightKg)}</p>
             <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-0.5">kg</p>
           </div>
+          {doc.open && (
+            <button
+              type="button"
+              onClick={startRajout}
+              disabled={rajoutBusy}
+              title={`Ajouter des articles au BL #${doc.docNum} (sur l'Écran 2)`}
+              className="inline-flex items-center gap-1 h-9 px-2.5 rounded-lg border border-amber-300/70 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-900/20 text-[12px] font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/35 active:scale-95 transition-all disabled:opacity-60"
+            >
+              {rajoutBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" strokeWidth={2.4} />}
+              <span className="hidden sm:inline">Rajout</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
