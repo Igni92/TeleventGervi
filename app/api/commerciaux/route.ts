@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { requireAdmin } from "@/lib/permissions";
+import { requireAdmin, requireStrictAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { parisStartOfDay } from "@/lib/paris-time";
 
@@ -40,10 +40,12 @@ export async function GET() {
 export async function PATCH(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  // Gestion d'équipe (présence + % stock de N'IMPORTE quel commercial) → admins uniquement.
-  if (!(await requireAdmin(session))) return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+  // Gestion d'équipe (présence + % stock + rôles) → admins OU direction.
+  if (!(await requireAdmin(session))) return NextResponse.json({ error: "Réservé à l'administration / direction" }, { status: 403 });
+  // Le rôle ADMIN ne peut être modifié QUE par un admin strict (pas la direction).
+  const strictAdmin = await requireStrictAdmin(session);
 
-  let body: { userId?: string; present?: boolean; stockSharePct?: number; isAdmin?: boolean; isPreparateur?: boolean; isCommercial?: boolean };
+  let body: { userId?: string; present?: boolean; stockSharePct?: number; isAdmin?: boolean; isPreparateur?: boolean; isCommercial?: boolean; isDirection?: boolean };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
   if (!body.userId) return NextResponse.json({ error: "userId requis" }, { status: 400 });
 
@@ -61,14 +63,17 @@ export async function PATCH(req: NextRequest) {
     const pct = Math.max(0, Math.min(100, body.stockSharePct));
     await prisma.user.update({ where: { id: body.userId }, data: { stockSharePct: pct } });
   }
-  // Rôle admin (promotion / rétrogradation). Raw SQL : colonne hors client Prisma
-  // typé tant que generate n'est pas relancé (cf. scripts/ddl-user-isadmin.mjs).
+  // Rôle admin (promotion / rétrogradation) — ADMIN STRICT uniquement.
   if (typeof body.isAdmin === "boolean") {
+    if (!strictAdmin) return NextResponse.json({ error: "Seul un administrateur peut modifier le rôle admin" }, { status: 403 });
     await prisma.$executeRawUnsafe(`UPDATE "User" SET "isAdmin" = $1 WHERE "id" = $2`, body.isAdmin, body.userId);
   }
+  // Rôle direction — peut tout gérer SAUF le rôle admin et la base SAP. Raw SQL.
+  if (typeof body.isDirection === "boolean") {
+    await prisma.$executeRawUnsafe(`UPDATE "User" SET "isDirection" = $1 WHERE "id" = $2`, body.isDirection, body.userId);
+  }
   // Rôle préparateur (« personne en charge du stock ») — droit de valider /
-  // rouvrir / corriger les inventaires. Raw SQL, même convention que isAdmin
-  // (cf. scripts/ddl-user-ispreparateur.mjs).
+  // rouvrir / corriger les inventaires. Raw SQL, même convention que isAdmin.
   if (typeof body.isPreparateur === "boolean") {
     await prisma.$executeRawUnsafe(`UPDATE "User" SET "isPreparateur" = $1 WHERE "id" = $2`, body.isPreparateur, body.userId);
   }

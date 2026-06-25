@@ -1,8 +1,7 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getAccessScope, ADMIN_EMAILS } from "@/lib/permissions";
-import { preparateurEmails } from "@/lib/inventory";
+import { getAccessScope, requireStrictAdmin, ADMIN_EMAILS } from "@/lib/permissions";
 import { CommercialCard } from "@/components/commerciaux/CommercialCard";
 import { CommerciauxSapList } from "./CommerciauxSapList";
 
@@ -13,37 +12,39 @@ export default async function CommerciauxPage() {
   const session = await auth();
   if (!session) redirect("/login");
 
-  // Droits : un non-admin ne voit que SA carte SAP (filtrée par l'API) et
-  // pas la section « équipe » (présence / % stock / récupération de clients).
+  // Droits : un non-manager ne voit que SA carte SAP (filtrée par l'API) et pas la
+  // section « équipe ». Admin ET direction y accèdent (scope.all) ; mais seul un
+  // admin strict peut (dé)cocher le rôle Admin (canEditAdmin).
   const scope = await getAccessScope(session);
-  const isAdmin = scope.all;
+  const isManager = scope.all;
+  const strictAdmin = await requireStrictAdmin(session);
 
-  // ── Section équipe (admin) : comptes connectés + présence + répartition ──
+  // ── Section équipe (admin/direction) : comptes connectés + présence + rôles ──
   let teamSection: React.ReactNode = null;
-  if (isAdmin) {
+  if (isManager) {
     const users = await prisma.user.findMany({
       select: { id: true, name: true, email: true, stockSharePct: true },
       orderBy: { name: "asc" },
     });
-    // Rôles admin / préparateur / commercial (colonnes hors client typé tant que
-    // generate n'est pas relancé → lecture raw, repli silencieux si absentes).
+    // Rôles (colonnes hors client typé tant que generate n'est pas relancé →
+    // lecture raw, repli silencieux si absentes).
     const adminByUser = new Map<string, boolean>();
     const prepByUser = new Map<string, boolean>();
     const commByUser = new Map<string, boolean>();
+    const dirByUser = new Map<string, boolean>();
     try {
-      const rows = await prisma.$queryRawUnsafe<{ id: string; isAdmin: boolean; isPreparateur: boolean; isCommercial: boolean }[]>(
-        `SELECT "id", "isAdmin", "isPreparateur", "isCommercial" FROM "User"`,
+      const rows = await prisma.$queryRawUnsafe<{ id: string; isAdmin: boolean; isPreparateur: boolean; isCommercial: boolean; isDirection: boolean }[]>(
+        `SELECT "id", "isAdmin", "isPreparateur", "isCommercial", "isDirection" FROM "User"`,
       );
-      for (const r of rows) { adminByUser.set(r.id, r.isAdmin); prepByUser.set(r.id, r.isPreparateur); commByUser.set(r.id, r.isCommercial); }
+      for (const r of rows) { adminByUser.set(r.id, r.isAdmin); prepByUser.set(r.id, r.isPreparateur); commByUser.set(r.id, r.isCommercial); dirByUser.set(r.id, r.isDirection); }
     } catch {
-      // Colonnes isPreparateur/isCommercial absentes ? Repli sur isAdmin seul (DDL partielle).
+      // Colonnes de rôle partiellement absentes ? Repli sur isAdmin seul.
       try {
         const rows = await prisma.$queryRawUnsafe<{ id: string; isAdmin: boolean }[]>(`SELECT "id", "isAdmin" FROM "User"`);
         for (const r of rows) adminByUser.set(r.id, r.isAdmin);
-      } catch { /* aucune colonne de rôle → admin/prep false, commercial true par défaut */ }
+      } catch { /* aucune colonne → admin/prep/dir false, commercial true par défaut */ }
     }
     const bootstrapAdmins = new Set(ADMIN_EMAILS.map((e) => e.toLowerCase()));
-    const bootstrapPreparateurs = new Set(preparateurEmails());
 
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     const presences = await prisma.presence.findMany({ where: { date: todayStart } });
@@ -91,8 +92,7 @@ export default async function CommerciauxPage() {
             const trig = name.split(/[\s.\-_]+/).filter(Boolean).map((w) => w[0]?.toUpperCase() ?? "").join("");
             const key = countMap.has(trig) ? trig : (countMap.has(name) ? name : trig);
             const counts = countMap.get(key) ?? { ALL: 0, CHR: 0, GMS: 0, EXPORT: 0, OTHER: 0 };
-            const emailLc = user.email?.toLowerCase();
-            const bootstrapPrep = !!emailLc && bootstrapPreparateurs.has(emailLc);
+            const isBootstrapAdmin = !!user.email && bootstrapAdmins.has(user.email.toLowerCase());
             return (
               <CommercialCard
                 key={user.id}
@@ -104,11 +104,12 @@ export default async function CommerciauxPage() {
                 isMe={user.id === session.user?.id}
                 present={presMap.get(user.id) ?? true}
                 stockSharePct={user.stockSharePct ?? 100}
-                isBootstrapAdmin={!!user.email && bootstrapAdmins.has(user.email.toLowerCase())}
-                isAdmin={(!!user.email && bootstrapAdmins.has(user.email.toLowerCase())) || (adminByUser.get(user.id) ?? false)}
-                isBootstrapPreparateur={bootstrapPrep}
-                isPreparateur={bootstrapPrep || (prepByUser.get(user.id) ?? false)}
+                isBootstrapAdmin={isBootstrapAdmin}
+                isAdmin={isBootstrapAdmin || (adminByUser.get(user.id) ?? false)}
+                isPreparateur={prepByUser.get(user.id) ?? false}
                 isCommercial={commByUser.get(user.id) ?? true}
+                isDirection={dirByUser.get(user.id) ?? false}
+                canEditAdmin={strictAdmin}
               />
             );
           })}

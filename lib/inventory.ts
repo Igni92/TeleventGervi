@@ -105,35 +105,17 @@ export function sanitizePhotos(
   return out;
 }
 
-/** Préparateurs « bootstrap » (codés en dur) + liste env PREPARATEUR_EMAILS. */
-const DEFAULT_PREPARATEURS = ["h.vachey@gervifrais.com"];
-
-export function preparateurEmails(): string[] {
-  const env = (process.env.PREPARATEUR_EMAILS || "")
-    .split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
-  return Array.from(new Set([...DEFAULT_PREPARATEURS.map((e) => e.toLowerCase()), ...env]));
-}
-
-/** Liste blanche des emails préparateurs « bootstrap » (défaut + env). */
-export function isPreparateurEmail(email: string | null | undefined): boolean {
-  if (!email) return false;
-  return preparateurEmails().includes(email.trim().toLowerCase());
-}
-
 /**
- * Rôle préparateur (« personne en charge du stock ») effectif d'un email :
- * bootstrap/env (`isPreparateurEmail`) OU flag `User.isPreparateur` posé depuis
- * l'écran Effectifs. Même convention que `requireAdmin`/`User.isAdmin` :
- *   - les emails bootstrap restent préparateurs indélogeables ;
- *   - le flag DB permet d'en désigner d'autres sans redéploiement.
+ * Rôle préparateur (« personne en charge du stock ») — désigné EXCLUSIVEMENT par
+ * les admins / la direction depuis l'écran Effectifs (flag `User.isPreparateur`).
+ * Plus aucun préparateur « système » codé en dur/env (cf. demande métier : seul
+ * l'ADMIN garde un rôle bootstrap).
  *
  * Colonne lue en raw SQL (hors client Prisma typé tant que generate n'est pas
- * relancé) ; repli silencieux sur le bootstrap si la colonne n'existe pas encore
- * (DDL `scripts/ddl-user-ispreparateur.mjs` non exécutée).
+ * relancé) ; repli silencieux (false) si la colonne n'existe pas encore.
  */
 export async function isPreparateur(email: string | null | undefined): Promise<boolean> {
   if (!email) return false;
-  if (isPreparateurEmail(email)) return true;
   try {
     const rows = await prisma.$queryRawUnsafe<{ isPreparateur: boolean | null }[]>(
       `SELECT "isPreparateur" FROM "User" WHERE LOWER("email") = $1 LIMIT 1`,

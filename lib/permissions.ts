@@ -20,9 +20,11 @@ import { initialsFromEmail } from "@/lib/salespeople";
  *   }
  */
 
-/** Emails à accès global (comparaison insensible à la casse). */
+/** Emails à accès global « bootstrap » (admin système indélogeable, insensible à
+ *  la casse). Garde-fou anti-lock-out : ne jamais vider cette liste.
+ *  NB : seul l'ADMIN garde un rôle « système » codé en dur (cf. demande métier) —
+ *  la direction et les préparateurs sont désignés en base depuis l'écran Effectifs. */
 export const ADMIN_EMAILS = [
-  "jm.gunslay@gervifrais.com",
   "m.mandine@gervifrais.com",
 ] as const;
 
@@ -50,16 +52,18 @@ export async function getAccessScope(session: Session | null): Promise<AccessSco
   }
 
   try {
-    // Une requête : flag admin (User.isAdmin) + rattachement commercial (slpName).
-    const rows = await prisma.$queryRawUnsafe<{ isAdmin: boolean | null; slpName: string | null }[]>(
-      `SELECT u."isAdmin" AS "isAdmin", uc."slpName" AS "slpName"
+    // Une requête : flags admin/direction (User) + rattachement commercial (slpName).
+    // Accès global = admin OU direction (la direction voit tout comme un admin ;
+    // seules deux actions lui sont fermées — cf. requireStrictAdmin).
+    const rows = await prisma.$queryRawUnsafe<{ isAdmin: boolean | null; isDirection: boolean | null; slpName: string | null }[]>(
+      `SELECT u."isAdmin" AS "isAdmin", u."isDirection" AS "isDirection", uc."slpName" AS "slpName"
        FROM "User" u
        LEFT JOIN "UserCommercial" uc ON LOWER(uc."email") = LOWER(u."email")
        WHERE LOWER(u."email") = $1 LIMIT 1`,
       email,
     );
     const row = rows[0];
-    if (row?.isAdmin) return { all: true, email };
+    if (row?.isAdmin || row?.isDirection) return { all: true, email };
     return { all: false, slpName: row?.slpName ?? null, email };
   } catch {
     // Colonne User.isAdmin pas encore créée (DDL non exécutée) → repli sur le
@@ -101,12 +105,33 @@ export async function getOwnSlpName(session: Session | null): Promise<string | n
   return initialsFromEmail(email);
 }
 
-/** True si la session a l'accès global (admin bootstrap OU promu en base).
- *  Version asynchrone à utiliser dans les routes/pages pour gater une action
- *  admin — remplace l'ancien `isAdmin` synchrone (qui ne voyait pas les admins
- *  promus en base). */
+/** True si la session a l'accès global (admin bootstrap OU promu en base OU
+ *  DIRECTION). À utiliser pour gater les écrans/actions « management » (vision
+ *  globale, gestion d'équipe, validation d'inventaire…). */
 export async function requireAdmin(session: Session | null): Promise<boolean> {
   return (await getAccessScope(session)).all;
+}
+
+/**
+ * True UNIQUEMENT pour un administrateur (bootstrap ADMIN_EMAILS OU User.isAdmin) —
+ * la DIRECTION en est exclue. Réservé aux deux actions que seul l'admin maîtrise :
+ *   1. basculer la base SAP prod ↔ test (/api/sap/environment) ;
+ *   2. promouvoir / rétrograder le rôle ADMIN d'un compte.
+ * Tout le reste passe par `requireAdmin` (admin OU direction).
+ */
+export async function requireStrictAdmin(session: Session | null): Promise<boolean> {
+  const email = session?.user?.email?.trim().toLowerCase() ?? null;
+  if (!email) return false;
+  if (ADMIN_EMAILS.some((a) => a.toLowerCase() === email)) return true;
+  try {
+    const rows = await prisma.$queryRawUnsafe<{ isAdmin: boolean | null }[]>(
+      `SELECT "isAdmin" FROM "User" WHERE LOWER("email") = $1 LIMIT 1`,
+      email,
+    );
+    return !!rows[0]?.isAdmin;
+  } catch {
+    return false;
+  }
 }
 
 /**
