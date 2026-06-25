@@ -29,7 +29,7 @@ type MoveDTO = {
 };
 type AdjustmentDTO = {
   status: "done" | "error"; at: string; by: string;
-  nbSorties: number; nbEntrees: number; totalValue: number;
+  nbSorties: number; nbEntrees: number; totalValue: number; demarqueValue?: number;
   sapExitDocNum: number | null; sapEntryDocNum: number | null; sapEnv: string; error?: string;
 };
 type AdjustPreview = {
@@ -411,6 +411,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
         {mode === "home" && (
           <motion.div key="home" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="space-y-6">
             {renderHome()}
+            {canManage && renderComparatif()}
             {renderHistory()}
           </motion.div>
         )}
@@ -756,6 +757,88 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
           )}
         </SurfaceCard>
       </div>
+    );
+  }
+
+  /* ----------- Comparatif des 3 derniers inventaires (managers) ----------- */
+  function renderComparatif() {
+    const recent = sessions.slice(0, 3);
+    if (recent.length === 0) return null;
+    const nameByCode = new Map<string, string>();
+    const ecartByCode = new Map<string, (number | null)[]>();
+    recent.forEach((s, col) => {
+      for (const l of s.lines) {
+        if (!nameByCode.has(l.itemCode)) nameByCode.set(l.itemCode, l.itemName);
+        if (Math.abs(l.ecart) <= 0.001) continue;
+        const arr = ecartByCode.get(l.itemCode) ?? [null, null, null];
+        arr[col] = l.ecart;
+        ecartByCode.set(l.itemCode, arr);
+      }
+    });
+    const rows = [...ecartByCode.entries()]
+      .map(([code, ecarts]) => ({ code, name: nameByCode.get(code) ?? code, ecarts }))
+      .sort((a, b) =>
+        Math.max(...b.ecarts.map((e) => Math.abs(e ?? 0))) - Math.max(...a.ecarts.map((e) => Math.abs(e ?? 0))),
+      )
+      .slice(0, 40);
+    const demarque = recent.map((s) => (s.adjustment ? s.adjustment.demarqueValue ?? null : null));
+
+    return (
+      <SurfaceCard accent="sky" className="p-5 space-y-3">
+        <h2 className="flex items-center gap-2 text-[14px] font-semibold text-foreground">
+          <ClipboardList className="h-4 w-4 text-muted-foreground" /> Comparatif des {recent.length} dernier(s) inventaire(s)
+        </h2>
+        {rows.length === 0 ? (
+          <p className="py-2 text-[12px] italic text-muted-foreground">Aucun écart sur les derniers inventaires.</p>
+        ) : (
+          <div className="-mx-1 overflow-x-auto">
+            <table className="w-full min-w-[420px] text-[12px]">
+              <thead>
+                <tr className="text-left text-muted-foreground">
+                  <th className="px-2 py-1.5 font-medium">Article</th>
+                  {recent.map((s) => (
+                    <th key={s.id} className="whitespace-nowrap px-2 py-1.5 text-right font-medium">{fmtDate(s.createdAt)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {rows.map((r) => (
+                  <tr key={r.code}>
+                    <td className="px-2 py-1.5">
+                      <div className="max-w-[180px] truncate font-medium text-foreground">{r.name}</div>
+                      <div className="font-mono text-[10.5px] text-muted-foreground">{r.code}</div>
+                    </td>
+                    {r.ecarts.slice(0, recent.length).map((e, i) => (
+                      <td key={i} className="px-2 py-1.5 text-right tnum">
+                        {e == null ? (
+                          <span className="text-muted-foreground/40">—</span>
+                        ) : (
+                          <span className={`font-semibold ${e < 0 ? "text-amber-600 dark:text-amber-400" : "text-sky-600 dark:text-sky-400"}`}>
+                            {e > 0 ? `+${fmt(e)}` : fmt(e)}
+                          </span>
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-border">
+                  <td className="px-2 py-2 text-[11.5px] font-semibold text-muted-foreground">Démarque inconnue</td>
+                  {demarque.map((d, i) => (
+                    <td key={i} className="px-2 py-2 text-right font-bold tnum text-rose-600 dark:text-rose-400">
+                      {d == null ? <span className="text-muted-foreground/40">—</span> : `${d.toFixed(2)} €`}
+                    </td>
+                  ))}
+                </tr>
+              </tfoot>
+            </table>
+            <p className="mt-2 px-2 text-[10.5px] text-muted-foreground">
+              Écarts en colis (− manque, + excédent). La démarque (€) s&apos;affiche une fois l&apos;inventaire régularisé.
+            </p>
+          </div>
+        )}
+      </SurfaceCard>
     );
   }
 

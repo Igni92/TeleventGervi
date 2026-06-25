@@ -94,6 +94,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Ajoute au moins un comptage ou une photo." }, { status: 400 });
   }
 
+  // UN SEUL inventaire complet par jour (heure de Paris). Un 2ᵉ comptage le même
+  // jour est refusé : on corrige l'inventaire existant (PUT) au lieu d'en créer
+  // un nouveau, sinon les états s'empilent et faussent le suivi des écarts.
+  const parisDay = (iso: string) => new Date(iso).toLocaleDateString("fr-CA", { timeZone: "Europe/Paris" });
+  const today = parisDay(nowIso());
+  const existingToday = (await listSessions()).find((x) => parisDay(x.createdAt) === today);
+  if (existingToday) {
+    return NextResponse.json(
+      { error: "Un inventaire a déjà été créé aujourd'hui. Corrige-le (bouton « Corriger ») au lieu d'en créer un nouveau.", existingId: existingToday.id },
+      { status: 409 },
+    );
+  }
+
   const s: InventorySession = {
     id: newId(),
     status: "submitted",

@@ -63,7 +63,8 @@ export interface InventoryAdjustment {
   moves: InventoryMove[];
   nbSorties: number;
   nbEntrees: number;
-  totalValue: number;            // somme des valeurs (€)
+  totalValue: number;            // somme nette des valeurs (€) : entrées − sorties
+  demarqueValue: number;         // valeur des SORTIES (manques) = démarque inconnue (€)
   sapExitDocNum: number | null;  // InventoryGenExits
   sapExitEntry: number | null;
   sapEntryDocNum: number | null; // InventoryGenEntries
