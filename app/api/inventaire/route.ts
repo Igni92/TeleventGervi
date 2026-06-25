@@ -22,17 +22,17 @@ function actorOf(session: { user?: { email?: string | null; name?: string | null
   return session.user?.email ?? session.user?.name ?? "?";
 }
 
-/** Normalise la trace de pré-étape « commandes non préparées » (best-effort). */
+/** Normalise la trace de pré-étape « commandes préparées » (best-effort). */
 function parsePrep(raw: unknown): InventoryPrep | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
-  const nums = Array.isArray(r.nonPreparedDocNums) ? r.nonPreparedDocNums.map(Number).filter(Number.isFinite) : [];
-  const entries = Array.isArray(r.nonPreparedDocEntries) ? r.nonPreparedDocEntries.map(Number).filter(Number.isFinite) : [];
+  const nums = Array.isArray(r.preparedDocNums) ? r.preparedDocNums.map(Number).filter(Number.isFinite) : [];
+  const entries = Array.isArray(r.preparedDocEntries) ? r.preparedDocEntries.map(Number).filter(Number.isFinite) : [];
   if (nums.length === 0 && entries.length === 0) return null;
   return {
-    nonPreparedDocNums: nums.slice(0, 500),
-    nonPreparedDocEntries: entries.slice(0, 500),
-    addedColis: Math.round((Number(r.addedColis) || 0) * 10) / 10,
+    preparedDocNums: nums.slice(0, 1000),
+    preparedDocEntries: entries.slice(0, 1000),
+    removedColis: Math.round((Number(r.removedColis) || 0) * 10) / 10,
     ordersScanned: Math.max(0, Math.floor(Number(r.ordersScanned) || 0)),
     at: nowIso(),
   };

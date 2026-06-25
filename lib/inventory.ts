@@ -92,18 +92,18 @@ export interface InventorySession {
   updatedBy?: string | null;
   /** Régularisation de stock SAP (posée une seule fois à la validation). */
   adjustment?: InventoryAdjustment | null;
-  /** Pré-étape « commandes IDF non préparées » réintégrées au stock théorique. */
+  /** Pré-étape « commandes préparées » retirées du stock théorique. */
   prep?: InventoryPrep | null;
   /** Présent uniquement dans les réponses de LISTE (photos retirées du payload). */
   nbPhotos?: number;
 }
 
-/** Trace de la pré-étape : commandes IDF marquées « non préparées » et colis réintégrés. */
+/** Trace de la pré-étape : commandes GMS/Export/CHR (J+1…J+4) cochées « préparées ». */
 export interface InventoryPrep {
-  nonPreparedDocNums: number[]; // n° des commandes cochées non préparées
-  nonPreparedDocEntries: number[];
-  addedColis: number;           // total colis réintégrés au stock théorique
-  ordersScanned: number;        // nb de commandes IDF ouvertes proposées
+  preparedDocNums: number[];    // n° des commandes cochées préparées
+  preparedDocEntries: number[]; // DocEntry (acté → non reproposé ensuite)
+  removedColis: number;         // total colis retirés du stock théorique
+  ordersScanned: number;        // nb de commandes proposées (fenêtre J+1…J+4)
   at: string;
 }
 
