@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
 import { GuidedCounter } from "./GuidedCounter";
 import { PhotoStep } from "./PhotoStep";
+import { DesignationChips } from "@/components/entrees/DesignationChips";
+import { designationProduit } from "@/lib/produit-designation";
 import {
   buildFamilies, sapInfo, ecartOf, fmt, fmtDate, fruitEmoji, MAX_PHOTOS,
   type Product, type DraftPhoto,
@@ -254,6 +256,17 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
 
   const { families, ordered } = useMemo(() => buildFamilies(effectiveProducts), [effectiveProducts]);
   const productByCode = useMemo(() => new Map(ordered.map((p) => [p.itemCode, p])), [ordered]);
+
+  /** Tags désignation (marque/condt/calibre/pays) d'un article — mêmes couleurs que les commandes. */
+  const productChips = (itemCode: string, className?: string) => {
+    const p = productByCode.get(itemCode);
+    if (!p) return null;
+    const dz = designationProduit({
+      itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque,
+      uCondi: p.uCondi ?? p.uUvc, frgnName: p.frgnName,
+    });
+    return <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className={className} />;
+  };
   const setCount = useCallback((itemCode: string, n: number | null) => {
     setCounts((c) => ({ ...c, [itemCode]: n }));
   }, []);
@@ -814,6 +827,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                         <>SAP {fmt(r.sapQty)} → réel <b className="text-foreground">{fmt(r.real)}</b> {r.unit}</>
                       )}
                     </div>
+                    {productChips(r.itemCode, "mt-1")}
                   </div>
 
                   {editing && (
@@ -1012,6 +1026,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                     <td className="px-2 py-1.5">
                       <div className="max-w-[180px] truncate font-medium text-foreground">{r.name}</div>
                       <div className="font-mono text-[10.5px] text-muted-foreground">{r.code}</div>
+                      {productChips(r.code, "mt-0.5")}
                     </td>
                     {r.ecarts.slice(0, recent.length).map((e, i) => (
                       <td key={i} className="px-2 py-1.5 text-right tnum">

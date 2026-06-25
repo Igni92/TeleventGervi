@@ -6,15 +6,9 @@ import { ChevronLeft, ChevronRight, Check, Minus, Plus, X, ListChecks, Flag } fr
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
+import { DesignationChips } from "@/components/entrees/DesignationChips";
+import { designationProduit } from "@/lib/produit-designation";
 import { fmt, sapInfo, baseInfo, ecartOf, fruitEmoji, type Product } from "./inv-utils";
-
-function Chip({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-[12px] font-medium text-muted-foreground">
-      {children}
-    </span>
-  );
-}
 
 export function GuidedCounter({
   products,
@@ -107,11 +101,13 @@ export function GuidedCounter({
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-[22px] font-bold leading-tight text-foreground">{p.itemName}</div>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {p.uPays && <Chip>{p.uPays}</Chip>}
-                    {p.uMarque && <Chip>{p.uMarque}</Chip>}
-                    {p.uCondi && <Chip>{p.uCondi}</Chip>}
-                  </div>
+                  {(() => {
+                    const dz = designationProduit({
+                      itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque,
+                      uCondi: p.uCondi ?? p.uUvc, frgnName: p.frgnName,
+                    });
+                    return <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />;
+                  })()}
                   <div className="mt-1.5 font-mono text-[11px] text-muted-foreground">{p.itemCode}</div>
                 </div>
               </div>
