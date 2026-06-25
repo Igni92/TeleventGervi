@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/permissions";
+import { isPreparateur } from "@/lib/inventory";
 import { InventairePanel } from "@/components/inventaire/InventairePanel";
 
 export const metadata = { title: "Inventaire" };
@@ -10,6 +11,7 @@ export default async function InventairePage() {
   const session = await auth();
   if (!session) redirect("/login");
   const admin = await requireAdmin(session);
+  const prep = await isPreparateur(session.user?.email);
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-up">
@@ -24,7 +26,7 @@ export default async function InventairePage() {
           transmis aux administrateurs.
         </p>
       </div>
-      <InventairePanel isAdmin={admin} />
+      <InventairePanel isAdmin={admin} isPreparateur={prep} />
     </div>
   );
 }

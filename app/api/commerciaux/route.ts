@@ -43,7 +43,7 @@ export async function PATCH(req: NextRequest) {
   // Gestion d'équipe (présence + % stock de N'IMPORTE quel commercial) → admins uniquement.
   if (!(await requireAdmin(session))) return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
 
-  let body: { userId?: string; present?: boolean; stockSharePct?: number; isAdmin?: boolean };
+  let body: { userId?: string; present?: boolean; stockSharePct?: number; isAdmin?: boolean; isPreparateur?: boolean };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
   if (!body.userId) return NextResponse.json({ error: "userId requis" }, { status: 400 });
 
@@ -65,6 +65,12 @@ export async function PATCH(req: NextRequest) {
   // typé tant que generate n'est pas relancé (cf. scripts/ddl-user-isadmin.mjs).
   if (typeof body.isAdmin === "boolean") {
     await prisma.$executeRawUnsafe(`UPDATE "User" SET "isAdmin" = $1 WHERE "id" = $2`, body.isAdmin, body.userId);
+  }
+  // Rôle préparateur (« personne en charge du stock ») — droit de valider /
+  // rouvrir / corriger les inventaires. Raw SQL, même convention que isAdmin
+  // (cf. scripts/ddl-user-ispreparateur.mjs).
+  if (typeof body.isPreparateur === "boolean") {
+    await prisma.$executeRawUnsafe(`UPDATE "User" SET "isPreparateur" = $1 WHERE "id" = $2`, body.isPreparateur, body.userId);
   }
 
   return NextResponse.json({ ok: true });

@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Loader2, Send, CheckCircle2, AlertTriangle, ClipboardList, Camera, ChevronRight,
-  ChevronLeft, Pencil, X, ImageIcon, ScanLine, PackageCheck,
+  ChevronLeft, Pencil, X, ImageIcon, ScanLine, PackageCheck, RotateCcw, Save,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,12 +23,24 @@ type PhotoDTO = { id: string; dataUrl: string; w: number; h: number };
 type SessionDTO = {
   id: string; status: "submitted" | "reviewed"; createdBy: string; note: string;
   lines: LineDTO[]; photos: PhotoDTO[]; nbEcarts: number; createdAt: string;
-  reviewedAt: string | null; reviewedBy: string | null; nbPhotos?: number;
+  reviewedAt: string | null; reviewedBy: string | null;
+  reopenedAt?: string | null; reopenedBy?: string | null;
+  updatedAt?: string | null; updatedBy?: string | null; nbPhotos?: number;
 };
+
+/** Estime le poids décodé (octets) d'une data-URL base64 (pour l'affichage en édition). */
+function estimateBytes(dataUrl: string): number {
+  const i = dataUrl.indexOf(",");
+  const b64 = i >= 0 ? dataUrl.slice(i + 1) : "";
+  const pad = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((b64.length * 3) / 4) - pad);
+}
 
 type Counts = Record<string, number | null>;
 type Mode = "home" | "count" | "recap";
 type Scope = { products: Product[]; label: string; startIndex: number };
+/** Ligne du récap (produit en stock OU ligne orpheline d'une correction). */
+type RecapRow = { itemCode: string; itemName: string; sapQty: number; real: number; unit: string; ecart: number; emoji: string; orphan: boolean };
 
 const DRAFT_KEY = "tv-inv-draft-v2";
 const PHOTOS_KEY = "tv-inv-photos-v2";
@@ -39,7 +51,10 @@ const firstUncounted = (list: Product[], counts: Counts) => {
   return i < 0 ? 0 : i;
 };
 
-export function InventairePanel({ isAdmin }: { isAdmin: boolean }) {
+export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: boolean; isPreparateur?: boolean }) {
+  // Admin OU préparateur (« personne en charge du stock ») : peut voir tous les
+  // inventaires et repasser dessus (valider / rouvrir / corriger).
+  const canManage = isAdmin || isPreparateur;
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState<SessionDTO[]>([]);
@@ -50,6 +65,13 @@ export function InventairePanel({ isAdmin }: { isAdmin: boolean }) {
   const [note, setNote] = useState("");
   const [photos, setPhotos] = useState<DraftPhoto[]>([]);
   const hydrated = useRef(false);
+
+  // Correction d'un inventaire existant (« repasser dessus »). Quand non-null,
+  // le brouillon courant est celui de la session éditée : on NE persiste pas en
+  // localStorage (le brouillon « nouveau comptage » reste intact) et l'envoi
+  // fait un PUT (mise à jour en place) plutôt qu'un POST.
+  const [editing, setEditing] = useState<SessionDTO | null>(null);
+  const [loadingEdit, setLoadingEdit] = useState<string | null>(null);
 
   // Navigation
   const [mode, setMode] = useState<Mode>("home");
@@ -81,28 +103,37 @@ export function InventairePanel({ isAdmin }: { isAdmin: boolean }) {
   useEffect(() => { loadProducts(); loadSessions(); }, [loadProducts, loadSessions]);
 
   /* --------------------- Persistance du brouillon ---------------------- */
-  useEffect(() => {
+  // Recharge le brouillon « nouveau comptage » depuis localStorage (sert aussi à
+  // restaurer ce brouillon en quittant une correction).
+  const loadDraftFromStorage = useCallback(() => {
     try {
       const d = localStorage.getItem(DRAFT_KEY);
-      if (d) { const o = JSON.parse(d); setCounts(o.counts ?? {}); setNote(o.note ?? ""); }
+      const o = d ? JSON.parse(d) : null;
+      setCounts(o?.counts ?? {});
+      setNote(o?.note ?? "");
       const ph = localStorage.getItem(PHOTOS_KEY);
-      if (ph) setPhotos(JSON.parse(ph) ?? []);
-    } catch { /* ignore */ }
-    hydrated.current = true;
+      setPhotos(ph ? (JSON.parse(ph) ?? []) : []);
+    } catch { setCounts({}); setNote(""); setPhotos([]); }
   }, []);
 
   useEffect(() => {
-    if (!hydrated.current) return;
-    try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ counts, note })); } catch { /* quota */ }
-  }, [counts, note]);
+    loadDraftFromStorage();
+    hydrated.current = true;
+  }, [loadDraftFromStorage]);
 
   useEffect(() => {
-    if (!hydrated.current) return;
+    if (!hydrated.current || editing) return;   // en correction : ne pas écraser le brouillon « neuf »
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ counts, note })); } catch { /* quota */ }
+  }, [counts, note, editing]);
+
+  useEffect(() => {
+    if (!hydrated.current || editing) return;
     try { localStorage.setItem(PHOTOS_KEY, JSON.stringify(photos)); } catch { /* quota */ }
-  }, [photos]);
+  }, [photos, editing]);
 
   /* ----------------------------- Dérivés ------------------------------- */
   const { families, ordered } = useMemo(() => buildFamilies(products), [products]);
+  const productByCode = useMemo(() => new Map(ordered.map((p) => [p.itemCode, p])), [ordered]);
   const setCount = useCallback((itemCode: string, n: number | null) => {
     setCounts((c) => ({ ...c, [itemCode]: n }));
   }, []);
@@ -117,6 +148,30 @@ export function InventairePanel({ isAdmin }: { isAdmin: boolean }) {
     [countedProducts, counts],
   );
 
+  // Lignes du récapitulatif = UNION des produits en stock comptés ET des lignes
+  // « orphelines » (articles comptés qui ne sont plus dans le stock — possible en
+  // correction d'un vieil inventaire). Source unique pour l'affichage du récap ET
+  // l'envoi, pour que ce qui est montré == ce qui est enregistré.
+  const recapRows = useMemo<RecapRow[]>(() => {
+    const editLineByCode = new Map((editing?.lines ?? []).map((l) => [l.itemCode, l] as const));
+    const rows: RecapRow[] = [];
+    for (const [itemCode, val] of Object.entries(counts)) {
+      if (!isCounted(val)) continue;
+      const real = val as number;
+      const p = productByCode.get(itemCode);
+      if (p) {
+        const s = sapInfo(p);
+        rows.push({ itemCode, itemName: p.itemName, sapQty: s.qty, real, unit: s.unit, ecart: ecartOf(real, s.qty) ?? 0, emoji: fruitEmoji(p), orphan: false });
+      } else {
+        const el = editLineByCode.get(itemCode);
+        if (el) rows.push({ itemCode, itemName: el.itemName, sapQty: el.sapQty, real, unit: el.unit, ecart: Math.round((real - el.sapQty) * 10) / 10, emoji: fruitEmoji({ itemName: el.itemName }), orphan: true });
+      }
+    }
+    return rows.sort((a, b) => Math.abs(b.ecart) - Math.abs(a.ecart) || a.itemName.localeCompare(b.itemName));
+  }, [counts, productByCode, editing]);
+  const nbCountedAll = recapRows.length;            // inclut les lignes hors stock (correction)
+  const nbEcartsAll = useMemo(() => recapRows.filter((r) => r.ecart !== 0).length, [recapRows]);
+
   /* ----------------------------- Actions ------------------------------- */
   const startCount = (list: Product[], label: string) => {
     setScope({ products: list, label, startIndex: firstUncounted(list, counts) });
@@ -124,42 +179,79 @@ export function InventairePanel({ isAdmin }: { isAdmin: boolean }) {
   };
 
   async function submit() {
-    const lines: LineDTO[] = countedProducts.map((p) => {
-      const s = sapInfo(p);
-      const real = counts[p.itemCode] as number;
-      return { itemCode: p.itemCode, itemName: p.itemName, sapQty: s.qty, realQty: real, unit: s.unit, ecart: ecartOf(real, s.qty) ?? 0 };
-    });
+    // Lignes envoyées = exactement celles montrées dans le récap (recapRows),
+    // y compris les lignes orphelines (article compté qui n'est plus en stock) :
+    // ce qui est affiché == ce qui est enregistré.
+    const lines: LineDTO[] = recapRows.map((r) => ({
+      itemCode: r.itemCode, itemName: r.itemName, sapQty: r.sapQty, realQty: r.real, unit: r.unit, ecart: r.ecart,
+    }));
     if (lines.length === 0 && photos.length === 0) {
       toast.error("Ajoute au moins un comptage ou une photo.");
       return;
     }
     setSubmitting(true);
     try {
+      const payload = { note, lines, photos: photos.map((p) => ({ id: p.id, dataUrl: p.dataUrl, w: p.w, h: p.h })) };
       const res = await fetch("/api/inventaire", {
-        method: "POST",
+        method: editing ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note, lines, photos: photos.map((p) => ({ id: p.id, dataUrl: p.dataUrl, w: p.w, h: p.h })) }),
+        body: JSON.stringify(editing ? { id: editing.id, ...payload } : payload),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) { toast.error(json.error ?? "Erreur"); return; }
-      toast.success(
-        `Inventaire envoyé — ${json.session.nbEcarts} écart(s)${photos.length ? ` · ${photos.length} photo(s)` : ""} transmis aux administrateurs.`,
-        { duration: 8000 },
-      );
-      setCounts({}); setNote(""); setPhotos([]);
-      try { localStorage.removeItem(DRAFT_KEY); localStorage.removeItem(PHOTOS_KEY); } catch { /* ignore */ }
+      if (editing) {
+        toast.success(`Inventaire corrigé — ${json.session.nbEcarts} écart(s)${photos.length ? ` · ${photos.length} photo(s)` : ""}.`, { duration: 6000 });
+        setEditing(null);
+        loadDraftFromStorage();   // restaure le brouillon « nouveau comptage »
+      } else {
+        toast.success(
+          `Inventaire envoyé — ${json.session.nbEcarts} écart(s)${photos.length ? ` · ${photos.length} photo(s)` : ""} transmis aux administrateurs.`,
+          { duration: 8000 },
+        );
+        setCounts({}); setNote(""); setPhotos([]);
+        try { localStorage.removeItem(DRAFT_KEY); localStorage.removeItem(PHOTOS_KEY); } catch { /* ignore */ }
+      }
       setMode("home");
       loadSessions();
     } catch (e) { toast.error((e as Error).message); }
     finally { setSubmitting(false); }
   }
 
-  async function review(id: string) {
+  /** Valide (submitted → reviewed) ou rouvre (reviewed → submitted) un inventaire. */
+  async function patchSession(id: string, action: "review" | "reopen") {
     const res = await fetch("/api/inventaire", {
-      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }),
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, action }),
     });
-    if (res.ok) { toast.success("Inventaire marqué comme revu"); loadSessions(); }
-    else toast.error("Erreur");
+    if (res.ok) {
+      toast.success(action === "reopen" ? "Inventaire rouvert (à revoir)" : "Inventaire marqué comme revu");
+      loadSessions();
+    } else toast.error("Erreur");
+  }
+
+  /** Charge un inventaire existant dans l'éditeur pour le corriger / recompter. */
+  async function startEdit(id: string) {
+    setLoadingEdit(id);
+    try {
+      const res = await fetch(`/api/inventaire?id=${encodeURIComponent(id)}`, { cache: "no-store" });
+      const json = await res.json();
+      const s = json.session as SessionDTO | undefined;
+      if (!res.ok || !s) { toast.error(json.error ?? "Erreur"); return; }
+      const nextCounts: Counts = {};
+      for (const l of s.lines) nextCounts[l.itemCode] = l.realQty;
+      setEditing(s);
+      setCounts(nextCounts);
+      setNote(s.note ?? "");
+      setPhotos((s.photos ?? []).map((p) => ({ id: p.id, dataUrl: p.dataUrl, w: p.w, h: p.h, bytes: estimateBytes(p.dataUrl) })));
+      setMode("recap");
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setLoadingEdit(null); }
+  }
+
+  /** Abandonne la correction en cours et restaure le brouillon « nouveau comptage ». */
+  function cancelEdit() {
+    setEditing(null);
+    loadDraftFromStorage();
+    setMode("home");
   }
 
   async function openSessionPhotos(id: string) {
@@ -200,7 +292,7 @@ export function InventairePanel({ isAdmin }: { isAdmin: boolean }) {
               counts={counts}
               setCount={setCount}
               startIndex={scope.startIndex}
-              onExit={() => setMode("home")}
+              onExit={() => setMode(editing ? "recap" : "home")}
               onFinish={() => setMode("recap")}
             />
           </motion.div>
@@ -335,21 +427,20 @@ export function InventairePanel({ isAdmin }: { isAdmin: boolean }) {
 
   /* ----------------------------- Écran RÉCAP ----------------------------- */
   function renderRecap() {
-    const lines = [...countedProducts].sort((a, b) => {
-      const ea = Math.abs(ecartOf(counts[a.itemCode], sapInfo(a).qty) ?? 0);
-      const eb = Math.abs(ecartOf(counts[b.itemCode], sapInfo(b).qty) ?? 0);
-      return eb - ea || a.itemName.localeCompare(b.itemName);
-    });
     return (
       <div className="space-y-5">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => setMode("home")} aria-label="Retour">
+          <Button variant="ghost" size="icon" onClick={() => (editing ? cancelEdit() : setMode("home"))} aria-label="Retour">
             <ChevronLeft />
           </Button>
           <div className="flex-1">
-            <h2 className="text-[18px] font-bold text-foreground">Récapitulatif</h2>
+            <h2 className="text-[18px] font-bold text-foreground">
+              {editing ? "Correction de l'inventaire" : "Récapitulatif"}
+            </h2>
             <p className="text-[12px] text-muted-foreground tnum">
-              {countedCount} article(s) · {nbEcarts} écart(s) · {photos.length} photo(s)
+              {editing
+                ? `${fmtDate(editing.createdAt)} · ${editing.createdBy}`
+                : `${nbCountedAll} article(s) · ${nbEcartsAll} écart(s) · ${photos.length} photo(s)`}
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => startCount(ordered, "Inventaire complet")} className="gap-1.5">
@@ -357,39 +448,48 @@ export function InventairePanel({ isAdmin }: { isAdmin: boolean }) {
           </Button>
         </div>
 
-        {/* Lignes comptées */}
+        {editing && (
+          <div className="rounded-xl border border-sky-200 dark:border-sky-500/30 bg-sky-50 dark:bg-sky-900/15 px-4 py-2.5 text-[12.5px] text-sky-800 dark:text-sky-300">
+            Vous repassez sur cet inventaire. L&apos;enregistrement <b>remplace</b> le comptage existant
+            et le repasse en <b>« à revoir »</b>.
+          </div>
+        )}
+
+        {/* Lignes comptées (produits en stock + lignes hors stock d'une correction) */}
         <SurfaceCard accent="sky" className="p-4">
           <h3 className="mb-2 text-[13px] font-semibold text-foreground">Articles comptés</h3>
-          {lines.length === 0 ? (
+          {recapRows.length === 0 ? (
             <p className="py-2 text-[12px] italic text-muted-foreground">
               Rien de compté pour l&apos;instant — tu peux n&apos;envoyer que des photos.
             </p>
           ) : (
             <div className="-mx-1 max-h-[44vh] divide-y divide-border/60 overflow-y-auto">
-              {lines.map((p) => {
-                const s = sapInfo(p);
-                const real = counts[p.itemCode] as number;
-                const ec = ecartOf(real, s.qty) ?? 0;
-                return (
-                  <div key={p.id} className="flex items-center gap-3 px-1 py-2">
-                    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-[18px] leading-none">
-                      {fruitEmoji(p)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] font-semibold text-foreground">{p.itemName}</div>
-                      <div className="text-[11.5px] text-muted-foreground tnum">
-                        SAP {fmt(s.qty)} → réel <b className="text-foreground">{fmt(real)}</b> {s.unit}
-                      </div>
-                    </div>
-                    <span className={`shrink-0 text-[13px] font-bold tnum ${ec === 0 ? "text-emerald-600 dark:text-emerald-400" : ec > 0 ? "text-sky-600 dark:text-sky-400" : "text-amber-600 dark:text-amber-400"}`}>
-                      {ec === 0 ? "OK" : ec > 0 ? `+${fmt(ec)}` : fmt(ec)}
-                    </span>
-                    <button onClick={() => setCount(p.itemCode, null)} className="shrink-0 text-muted-foreground/60 hover:text-rose-500" aria-label="Retirer">
-                      <X className="h-4 w-4" />
-                    </button>
+              {recapRows.map((r) => (
+                <div key={r.itemCode} className="flex items-center gap-3 px-1 py-2">
+                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-[18px] leading-none">
+                    {r.emoji}
                   </div>
-                );
-              })}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-[13px] font-semibold text-foreground">{r.itemName}</span>
+                      {r.orphan && (
+                        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground" title="Article qui n'est plus listé en stock SAP">
+                          hors stock
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11.5px] text-muted-foreground tnum">
+                      SAP {fmt(r.sapQty)} → réel <b className="text-foreground">{fmt(r.real)}</b> {r.unit}
+                    </div>
+                  </div>
+                  <span className={`shrink-0 text-[13px] font-bold tnum ${r.ecart === 0 ? "text-emerald-600 dark:text-emerald-400" : r.ecart > 0 ? "text-sky-600 dark:text-sky-400" : "text-amber-600 dark:text-amber-400"}`}>
+                    {r.ecart === 0 ? "OK" : r.ecart > 0 ? `+${fmt(r.ecart)}` : fmt(r.ecart)}
+                  </span>
+                  <button onClick={() => setCount(r.itemCode, null)} className="shrink-0 text-muted-foreground/60 hover:text-rose-500" aria-label="Retirer">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </SurfaceCard>
@@ -411,10 +511,15 @@ export function InventairePanel({ isAdmin }: { isAdmin: boolean }) {
             placeholder="Note pour les administrateurs (zone, remarque, anomalie…) — optionnel"
             className="min-h-[64px]"
           />
-          <Button onClick={submit} disabled={submitting || (countedCount === 0 && photos.length === 0)} size="lg" className="h-12 w-full text-[15px]">
-            {submitting ? <Loader2 className="animate-spin" /> : <Send className="!size-5" />}
-            Envoyer l&apos;inventaire
+          <Button onClick={submit} disabled={submitting || (nbCountedAll === 0 && photos.length === 0)} size="lg" className="h-12 w-full text-[15px]">
+            {submitting ? <Loader2 className="animate-spin" /> : editing ? <Save className="!size-5" /> : <Send className="!size-5" />}
+            {editing ? "Enregistrer la correction" : "Envoyer l'inventaire"}
           </Button>
+          {editing && (
+            <Button onClick={cancelEdit} variant="ghost" disabled={submitting} className="w-full text-[13px] text-muted-foreground">
+              Annuler la correction
+            </Button>
+          )}
         </SurfaceCard>
       </div>
     );
@@ -425,7 +530,7 @@ export function InventairePanel({ isAdmin }: { isAdmin: boolean }) {
     return (
       <SurfaceCard accent="amber" className="p-5 space-y-3">
         <h2 className="flex items-center gap-2 text-[14px] font-semibold text-foreground">
-          <AlertTriangle className="h-4 w-4 text-muted-foreground" /> États d&apos;inventaire {isAdmin ? "" : "(les miens)"}
+          <AlertTriangle className="h-4 w-4 text-muted-foreground" /> États d&apos;inventaire {canManage ? "" : "(les miens)"}
         </h2>
         {sessions.length === 0 && <p className="py-2 text-[12px] italic text-muted-foreground">Aucun inventaire pour l&apos;instant.</p>}
         <div className="space-y-2">
@@ -442,15 +547,34 @@ export function InventairePanel({ isAdmin }: { isAdmin: boolean }) {
                       {s.lines.length} article(s) · {s.nbEcarts} écart(s)
                       {nbPhotos > 0 ? ` · ${nbPhotos} photo(s)` : ""}{s.note ? ` · « ${s.note} »` : ""}
                     </div>
+                    {s.status === "reviewed" && s.reviewedBy && (
+                      <div className="text-[11px] text-emerald-600/90 dark:text-emerald-400/90">Revu par {s.reviewedBy}</div>
+                    )}
+                    {s.updatedBy && (
+                      <div className="text-[11px] text-sky-600/90 dark:text-sky-400/90">Dernière correction par {s.updatedBy}</div>
+                    )}
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                     {s.status === "reviewed" ? (
                       <span className="inline-flex items-center gap-1 text-[12px] text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> revu</span>
                     ) : (
                       <span className="text-[12px] font-semibold text-amber-600 dark:text-amber-400">à revoir</span>
                     )}
-                    {isAdmin && s.status === "submitted" && (
-                      <Button size="sm" variant="outline" onClick={() => review(s.id)}>Marquer revu</Button>
+                    {canManage && (
+                      <>
+                        {s.status === "submitted" ? (
+                          <Button size="sm" variant="outline" onClick={() => patchSession(s.id, "review")}>
+                            <CheckCircle2 className="!size-3.5" /> Marquer revu
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="outline" onClick={() => patchSession(s.id, "reopen")}>
+                            <RotateCcw className="!size-3.5" /> Rouvrir
+                          </Button>
+                        )}
+                        <Button size="sm" variant="ghost" disabled={loadingEdit === s.id} onClick={() => startEdit(s.id)}>
+                          {loadingEdit === s.id ? <Loader2 className="!size-3.5 animate-spin" /> : <Pencil className="!size-3.5" />} Corriger
+                        </Button>
+                      </>
                     )}
                   </div>
                 </div>
