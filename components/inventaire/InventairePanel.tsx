@@ -44,14 +44,14 @@ type SessionDTO = {
   reopenedAt?: string | null; reopenedBy?: string | null;
   updatedAt?: string | null; updatedBy?: string | null;
   adjustment?: AdjustmentDTO | null; nbPhotos?: number;
-  prep?: { nonPreparedDocNums: number[]; addedColis: number; ordersScanned: number; at: string } | null;
+  prep?: { preparedDocNums: number[]; removedColis: number; ordersScanned: number; at: string } | null;
 };
 
 /** Commande IDF ouverte proposée à la pré-étape (cf. /api/inventaire/prep-orders). */
 type PrepLineDTO = { itemCode: string; itemName: string; qtyUnits: number; colis: number };
 type PrepOrderDTO = {
   docEntry: number; docNum: number; cardCode: string; cardName: string;
-  zip: string | null; dept: string; transport: string | null; docDueDate: string | null;
+  segment: string; transport: string | null; docDueDate: string | null;
   lines: PrepLineDTO[]; totalColis: number;
 };
 
@@ -71,7 +71,7 @@ type RecapRow = { itemCode: string; itemName: string; sapQty: number; real: numb
 
 const DRAFT_KEY = "tv-inv-draft-v2";
 const PHOTOS_KEY = "tv-inv-photos-v2";
-const PREP_KEY = "tv-inv-nonprep-v1";
+const PREP_KEY = "tv-inv-prepared-v2";
 
 const isCounted = (v: number | null | undefined) => v != null && Number.isFinite(v);
 const firstUncounted = (list: Product[], counts: Counts) => {
@@ -104,14 +104,15 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   // Import du stock SAP avant comptage (clic « Commencer »).
   const [refreshing, setRefreshing] = useState(false);
 
-  // Pré-étape « commandes IDF non préparées » : on coche les commandes dont la
-  // marchandise est ENCORE en stock → leurs colis sont réintégrés au stock
-  // théorique (= stock SAP − commandes préparées).
+  // Pré-étape « commandes préparées » (GMS/Export/CHR, livraison J+1…J+4) : on
+  // coche les commandes DÉJÀ préparées → leurs colis sont RETIRÉS du stock
+  // théorique (= stock physique − commandes préparées). Une commande cochée est
+  // actée et n'est plus reproposée (filtrée côté serveur).
   const [prepOrders, setPrepOrders] = useState<PrepOrderDTO[] | null>(null);
   const [prepLoading, setPrepLoading] = useState(false);
   const [prepError, setPrepError] = useState<string | null>(null);
   const [prepOpen, setPrepOpen] = useState(false);
-  const [nonPrepared, setNonPrepared] = useState<Set<number>>(new Set());
+  const [prepared, setPrepared] = useState<Set<number>>(new Set());
 
   // Régularisation de stock SAP (aperçu + confirmation) — réservée admin/direction.
   const [adjustFor, setAdjustFor] = useState<SessionDTO | null>(null);
@@ -156,15 +157,16 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
       if (!res.ok) { setPrepError(json.error ?? "Erreur SAP"); setPrepOrders(null); return; }
       const orders: PrepOrderDTO[] = json.orders ?? [];
       setPrepOrders(orders);
-      // On purge la sélection des commandes qui ne sont plus ouvertes (déjà parties).
+      // On purge la sélection des commandes qui ne sont plus proposées (parties /
+      // hors fenêtre / déjà actées côté serveur).
       const live = new Set(orders.map((o) => o.docEntry));
-      setNonPrepared((prev) => new Set([...prev].filter((d) => live.has(d))));
+      setPrepared((prev) => new Set([...prev].filter((d) => live.has(d))));
     } catch (e) { setPrepError((e as Error).message); setPrepOrders(null); }
     finally { setPrepLoading(false); }
   }, []);
 
-  const toggleNonPrepared = useCallback((docEntry: number) => {
-    setNonPrepared((prev) => {
+  const togglePrepared = useCallback((docEntry: number) => {
+    setPrepared((prev) => {
       const next = new Set(prev);
       if (next.has(docEntry)) next.delete(docEntry); else next.add(docEntry);
       return next;
@@ -192,15 +194,15 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     try {
       const raw = localStorage.getItem(PREP_KEY);
       const arr = raw ? JSON.parse(raw) : null;
-      if (Array.isArray(arr)) setNonPrepared(new Set(arr.map(Number).filter(Number.isFinite)));
+      if (Array.isArray(arr)) setPrepared(new Set(arr.map(Number).filter(Number.isFinite)));
     } catch { /* ignore */ }
     hydrated.current = true;
   }, [loadDraftFromStorage]);
 
   useEffect(() => {
     if (!hydrated.current) return;
-    try { localStorage.setItem(PREP_KEY, JSON.stringify([...nonPrepared])); } catch { /* quota */ }
-  }, [nonPrepared]);
+    try { localStorage.setItem(PREP_KEY, JSON.stringify([...prepared])); } catch { /* quota */ }
+  }, [prepared]);
 
   useEffect(() => {
     if (!hydrated.current || editing) return;   // en correction : ne pas écraser le brouillon « neuf »
@@ -213,42 +215,42 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   }, [photos, editing]);
 
   /* ----------------------------- Dérivés ------------------------------- */
-  // Unités SAP à RÉINTÉGRER par article = somme des lignes des commandes cochées
-  // « non préparées » (leur marchandise est encore physiquement en stock).
-  const addUnitsByItem = useMemo(() => {
+  // Unités SAP à RETIRER par article = somme des lignes des commandes cochées
+  // « préparées » (leur marchandise quitte le stock).
+  const subUnitsByItem = useMemo(() => {
     const m = new Map<string, number>();
     if (!prepOrders) return m;
     for (const o of prepOrders) {
-      if (!nonPrepared.has(o.docEntry)) continue;
+      if (!prepared.has(o.docEntry)) continue;
       for (const l of o.lines) m.set(l.itemCode, (m.get(l.itemCode) ?? 0) + l.qtyUnits);
     }
     return m;
-  }, [prepOrders, nonPrepared]);
+  }, [prepOrders, prepared]);
 
-  // Total colis réintégrés (pour l'affichage + la trace persistée).
-  const addedColis = useMemo(
+  // Total colis retirés (pour l'affichage + la trace persistée).
+  const removedColis = useMemo(
     () =>
       Math.round(
         (prepOrders ?? [])
-          .filter((o) => nonPrepared.has(o.docEntry))
+          .filter((o) => prepared.has(o.docEntry))
           .reduce((s, o) => s + o.totalColis, 0) * 10,
       ) / 10,
-    [prepOrders, nonPrepared],
+    [prepOrders, prepared],
   );
 
-  // Stock théorique = stock SAP « disponible » + colis non préparés réintégrés.
-  // On gonfle `available` (entrepôt 01) : sapInfo() et tout l'aval reflètent alors
+  // Stock théorique = stock physique (inStock) − colis des commandes préparées.
+  // On diminue `inStock` (entrepôt 01) : sapInfo() et tout l'aval reflètent alors
   // automatiquement le stock théorique. En CORRECTION, on n'ajuste pas (la base a
   // déjà été figée à la création de l'inventaire).
   const effectiveProducts = useMemo(() => {
-    if (editing || addUnitsByItem.size === 0) return products;
+    if (editing || subUnitsByItem.size === 0) return products;
     return products.map((p) => {
-      const add = addUnitsByItem.get(p.itemCode);
-      if (!add) return p;
-      const w = p.stockByWarehouse["01"] ?? { available: 0 };
-      return { ...p, stockByWarehouse: { ...p.stockByWarehouse, "01": { ...w, available: (w.available ?? 0) + add } } };
+      const sub = subUnitsByItem.get(p.itemCode);
+      if (!sub) return p;
+      const w = p.stockByWarehouse["01"] ?? { available: 0, inStock: 0 };
+      return { ...p, stockByWarehouse: { ...p.stockByWarehouse, "01": { ...w, inStock: (w.inStock ?? 0) - sub } } };
     });
-  }, [products, addUnitsByItem, editing]);
+  }, [products, subUnitsByItem, editing]);
 
   const { families, ordered } = useMemo(() => buildFamilies(effectiveProducts), [effectiveProducts]);
   const productByCode = useMemo(() => new Map(ordered.map((p) => [p.itemCode, p])), [ordered]);
@@ -317,11 +319,11 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     try {
       // Trace de la pré-étape (uniquement pour un NOUVEL inventaire).
       const prep =
-        !editing && prepOrders && nonPrepared.size > 0
+        !editing && prepOrders && prepared.size > 0
           ? {
-              nonPreparedDocEntries: [...nonPrepared],
-              nonPreparedDocNums: prepOrders.filter((o) => nonPrepared.has(o.docEntry)).map((o) => o.docNum),
-              addedColis,
+              preparedDocEntries: [...prepared],
+              preparedDocNums: prepOrders.filter((o) => prepared.has(o.docEntry)).map((o) => o.docNum),
+              removedColis,
               ordersScanned: prepOrders.length,
             }
           : undefined;
@@ -347,7 +349,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
           { duration: 8000 },
         );
         setCounts({}); setNote(""); setPhotos([]);
-        setNonPrepared(new Set()); setPrepOrders(null); setPrepOpen(false);
+        setPrepared(new Set()); setPrepOrders(null); setPrepOpen(false);
         try { localStorage.removeItem(DRAFT_KEY); localStorage.removeItem(PHOTOS_KEY); localStorage.removeItem(PREP_KEY); } catch { /* ignore */ }
       }
       setMode("home");
@@ -868,11 +870,11 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     );
   }
 
-  /* ------- Pré-étape : commandes IDF non préparées (avant comptage) ------- */
+  /* --------- Pré-étape : commandes déjà préparées (avant comptage) -------- */
   function renderPrepStep() {
     const shortDue = (s: string | null) =>
-      s ? new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) : "—";
-    const nbChecked = nonPrepared.size;
+      s ? new Date(s).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" }) : "—";
+    const nbChecked = prepared.size;
 
     return (
       <SurfaceCard accent="amber" className="p-5 space-y-3">
@@ -883,11 +885,11 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
         >
           <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-amber-100 text-[13px] font-bold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">1</span>
           <span className="min-w-0 flex-1">
-            <span className="block text-[14px] font-semibold text-foreground">Commandes IDF non préparées</span>
+            <span className="block text-[14px] font-semibold text-foreground">Commandes déjà préparées</span>
             <span className="block text-[11.5px] text-muted-foreground">
               {nbChecked > 0
-                ? `${nbChecked} commande(s) non préparée(s) · +${fmt(addedColis)} colis réintégrés`
-                : "À cocher avant de compter — la marchandise non préparée est encore en stock."}
+                ? `${nbChecked} commande(s) préparée(s) · −${fmt(removedColis)} colis retirés du stock`
+                : "À cocher avant de compter — leur marchandise part (GMS/Export/CHR, livraison J+1 à J+4)."}
             </span>
           </span>
           {prepLoading ? (
@@ -908,30 +910,30 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
 
             {!prepOrders && !prepLoading && !prepError && (
               <Button variant="outline" size="sm" className="h-9" onClick={loadPrepOrders}>
-                <Database className="mr-1.5 h-4 w-4" /> Charger les commandes IDF ouvertes
+                <Database className="mr-1.5 h-4 w-4" /> Charger les commandes à préparer (J+1 → J+4)
               </Button>
             )}
 
             {prepOrders && prepOrders.length === 0 && (
-              <p className="py-1 text-[12px] italic text-muted-foreground">Aucune commande IDF ouverte trouvée.</p>
+              <p className="py-1 text-[12px] italic text-muted-foreground">Aucune commande GMS/Export/CHR à préparer (J+1 → J+4).</p>
             )}
 
             {prepOrders && prepOrders.length > 0 && (
               <>
                 <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                  <span>{prepOrders.length} commande(s) IDF ouverte(s) · clique pour marquer « non préparée »</span>
+                  <span>{prepOrders.length} commande(s) · coche celles qui sont préparées</span>
                   <button type="button" onClick={loadPrepOrders} className="inline-flex items-center gap-1 hover:text-foreground">
                     <RotateCcw className="h-3 w-3" /> Rafraîchir
                   </button>
                 </div>
                 <ul className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border">
                   {prepOrders.map((o) => {
-                    const checked = nonPrepared.has(o.docEntry);
+                    const checked = prepared.has(o.docEntry);
                     return (
                       <li key={o.docEntry}>
                         <button
                           type="button"
-                          onClick={() => toggleNonPrepared(o.docEntry)}
+                          onClick={() => togglePrepared(o.docEntry)}
                           className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${checked ? "bg-amber-50 dark:bg-amber-500/10" : "hover:bg-muted/40"}`}
                         >
                           <span className={`grid h-5 w-5 shrink-0 place-items-center rounded border ${checked ? "border-amber-500 bg-amber-500 text-white" : "border-border"}`}>
@@ -940,7 +942,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-[12.5px] font-medium text-foreground">{o.cardName}</span>
                             <span className="block truncate text-[10.5px] text-muted-foreground">
-                              N°{o.docNum} · {o.dept}{o.zip ? ` (${o.zip})` : ""}{o.transport ? ` · ${o.transport}` : ""} · livr. {shortDue(o.docDueDate)}
+                              N°{o.docNum} · {o.segment}{o.transport ? ` · ${o.transport}` : ""} · livr. {shortDue(o.docDueDate)}
                             </span>
                           </span>
                           <span className={`shrink-0 text-right text-[11px] font-semibold ${checked ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}>
@@ -952,8 +954,8 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                   })}
                 </ul>
                 <p className="px-1 text-[10.5px] text-muted-foreground">
-                  Stock théorique = stock SAP − commandes <b>préparées</b>. Les commandes <b>cochées</b> (non préparées)
-                  restent comptées dans le stock (+{fmt(addedColis)} colis).
+                  Stock théorique = stock physique − commandes <b>préparées</b> (cochées). Une commande cochée est
+                  actée : elle ne sera plus reproposée. −{fmt(removedColis)} colis.
                 </p>
               </>
             )}

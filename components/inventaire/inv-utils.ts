@@ -16,7 +16,7 @@ export type Product = {
   uPays: string | null;
   uMarque: string | null;
   uCondi: string | null;
-  stockByWarehouse: Record<string, { available: number }>;
+  stockByWarehouse: Record<string, { available: number; inStock: number }>;
 };
 
 /** Photo en cours de saisie côté client (avant envoi). Compatible InventoryPhoto. */
@@ -36,19 +36,22 @@ export const fmtDate = (s: string) =>
   new Date(s).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 /**
- * Stock SAP exprimé EXCLUSIVEMENT en COLIS (demande métier : l'inventaire du
- * préparateur ne parle qu'en colis, y compris pour les articles au kg — 1 colis
- * = X kg). Conversion via le diviseur exact `unitsPerColis` (lib/colis, source
- * unique partagée avec la régularisation SAP).
+ * Stock SAP « réel » (PHYSIQUE) exprimé EXCLUSIVEMENT en COLIS. On part du
+ * `inStock` (marchandise physiquement présente) et NON du disponible : les
+ * réservations (committed) ne sortent pas la marchandise tant que le BL n'est pas
+ * posté → Hugo les compte. Le stock théorique se déduit ensuite côté écran en
+ * RETIRANT les commandes déjà PRÉPARÉES (marchandise sur le quai / partie).
+ * Conversion via le diviseur exact `unitsPerColis` (lib/colis, source unique
+ * partagée avec la régularisation SAP).
  */
 export function sapInfo(p: Product): { qty: number; unit: string } {
-  const avail = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.available ?? 0), 0);
+  const inStock = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.inStock ?? 0), 0);
   const { unitsPerColis } = colisInfo({
     salesUnit: p.salesUnit,
     salesQtyPerPackUnit: p.salesQtyPerPackUnit,
     salesUnitWeight: p.salesUnitWeight,
   });
-  return { qty: Math.round((avail / unitsPerColis) * 10) / 10, unit: "colis" };
+  return { qty: Math.round((inStock / unitsPerColis) * 10) / 10, unit: "colis" };
 }
 
 /** Écart (réel − SAP), arrondi 0,1. null si non compté. */
