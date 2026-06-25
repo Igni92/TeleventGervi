@@ -14,6 +14,7 @@ import {
   subscribeActiveClient, readActiveClient, requestActiveClient,
   type ActiveClientState, type ActiveClientInfo,
 } from "@/lib/consoleSync";
+import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
 
 /**
  * Écran 2 (fenêtre détachée) — optimisé **marge + relation client + incident**.
@@ -258,7 +259,7 @@ function ClientBanner({
             {tels.map((t, i) => (
               <a
                 key={t.label}
-                href={`tel:${t.value}`}
+                href={`tel:${standardizePhone(t.value)}`}
                 className={`group inline-flex items-center justify-end gap-2 px-2.5 py-1 rounded-md transition-colors ${
                   i === 0
                     ? "bg-primary/15 hover:bg-primary/25 text-foreground"
@@ -269,7 +270,7 @@ function ClientBanner({
                   {t.label}
                 </span>
                 <Phone className={`h-3 w-3 shrink-0 ${i === 0 ? "text-primary" : "text-muted-foreground/70"}`} />
-                <span className="font-mono tnum text-[13px] font-semibold tracking-tight">{t.value}</span>
+                <span className="font-mono tnum text-[13px] font-semibold tracking-tight">{formatPhoneDisplay(t.value)}</span>
               </a>
             ))}
           </div>

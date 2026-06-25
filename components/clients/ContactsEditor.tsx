@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import { TypeCombobox } from "@/components/TypeCombobox";
+import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
 
 interface Contact {
   id: string; name: string; role: string | null;
@@ -93,7 +94,7 @@ export function ContactsEditor({ clientId }: { clientId: string }) {
               <div className="flex items-center gap-2 pl-7">
                 <span className="relative flex-1">
                   <Phone className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                  <Input defaultValue={c.phone ?? ""} onBlur={(e) => e.target.value !== (c.phone ?? "") && patch(c.id, { phone: e.target.value })}
+                  <Input defaultValue={formatPhoneDisplay(c.phone)} onBlur={(e) => standardizePhone(e.target.value) !== standardizePhone(c.phone) && patch(c.id, { phone: e.target.value })}
                     placeholder="Téléphone" className="h-7 text-[12px] pl-7 font-mono" />
                 </span>
                 <span className="relative flex-1">

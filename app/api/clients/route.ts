@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { clientSchema, clientQuerySchema } from "@/lib/validations";
+import { standardizePhone } from "@/lib/phone";
 import { getAccessScope, getOwnSlpName, scopePayload, UNMAPPED_MESSAGE } from "@/lib/permissions";
 import { parisStartOfDay, parisEndOfDay, parisDayOfWeek } from "@/lib/paris-time";
 
@@ -218,6 +219,12 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
+    // Standardisation des téléphones AVANT validation (saisie souvent sale :
+    // points, espaces, préfixe international, surplus « / 65 »…) — cohérent avec
+    // le PUT d'édition : on stocke 10 chiffres, l'affichage regroupe par 2.
+    for (const k of ["tel1", "tel2", "tel3"] as const) {
+      if (typeof body?.[k] === "string" && body[k].trim()) body[k] = standardizePhone(body[k]);
+    }
     const data = clientSchema.parse(body);
 
     // Anti-IDOR : un non-admin ne peut créer un client QUE sous son propre
