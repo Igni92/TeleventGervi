@@ -16,6 +16,8 @@ export type Product = {
   uPays: string | null;
   uMarque: string | null;
   uCondi: string | null;
+  uUvc?: string | null;
+  frgnName?: string | null;
   stockByWarehouse: Record<string, { available: number; inStock: number }>;
 };
 
