@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import {
   listSessions, getSession, saveSession, isPreparateur, sanitizePhotos,
-  type InventoryLine, type InventorySession,
+  type InventoryLine, type InventorySession, type InventoryPrep,
 } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +20,22 @@ function stripPhotos(s: InventorySession): InventorySession {
 /** Identité de l'opérateur courant (email, repli nom). */
 function actorOf(session: { user?: { email?: string | null; name?: string | null } }): string {
   return session.user?.email ?? session.user?.name ?? "?";
+}
+
+/** Normalise la trace de pré-étape « commandes non préparées » (best-effort). */
+function parsePrep(raw: unknown): InventoryPrep | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const nums = Array.isArray(r.nonPreparedDocNums) ? r.nonPreparedDocNums.map(Number).filter(Number.isFinite) : [];
+  const entries = Array.isArray(r.nonPreparedDocEntries) ? r.nonPreparedDocEntries.map(Number).filter(Number.isFinite) : [];
+  if (nums.length === 0 && entries.length === 0) return null;
+  return {
+    nonPreparedDocNums: nums.slice(0, 500),
+    nonPreparedDocEntries: entries.slice(0, 500),
+    addedColis: Math.round((Number(r.addedColis) || 0) * 10) / 10,
+    ordersScanned: Math.max(0, Math.floor(Number(r.ordersScanned) || 0)),
+    at: nowIso(),
+  };
 }
 
 /** Normalise les lignes reçues : ne garde que celles réellement comptées.
@@ -82,7 +98,7 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  let body: { note?: string; lines?: Omit<InventoryLine, "ecart">[]; photos?: unknown };
+  let body: { note?: string; lines?: Omit<InventoryLine, "ecart">[]; photos?: unknown; prep?: unknown };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -118,6 +134,7 @@ export async function POST(req: NextRequest) {
     createdAt: nowIso(),
     reviewedAt: null,
     reviewedBy: null,
+    prep: parsePrep(body.prep),
   };
   await saveSession(s);
   // Réponse allégée (pas besoin de renvoyer les photos qu'on vient d'uploader).
