@@ -4,13 +4,11 @@ import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import {
   pullBusinessPartners,
-  pullInvoices,
-  pullOrders,
-  pullPdns,
-  pullCreditNotes,
-  pullPurchaseReturns,
+  pullAllSalesSliced,
   syncClientGroupsFromMirror,
 } from "@/lib/sapMirror";
+import { periodBounds } from "@/lib/pilotage-time";
+import { invalidate } from "@/lib/ttlCache";
 
 // Backfill historique long (plusieurs années × 5 entités, pagination SAP) →
 // autoriser la durée max du plan (Vercel Hobby = 300s). Pour de très gros
@@ -74,41 +72,39 @@ export async function POST(req: Request) {
     // 1bis) Propage le groupe SAP vers Client.sapGroup* (idempotent).
     const groups = await syncClientGroupsFromMirror();
 
-    // 2) Invoices + Orders + PDN + avoirs (clients & fournisseurs) en parallèle
-    //    — 5 endpoints SAP indépendants.
-    const [inv, ord, pdn, cn, pret] = await Promise.all([
-      pullInvoices({ from, to }),
-      pullOrders({ from, to }),
-      pullPdns({ from, to }),
-      pullCreditNotes({ from, to }),
-      pullPurchaseReturns({ from, to }),
-    ]);
+    // 2) Docs reconstruits par tranches MENSUELLES (plus récente d'abord) :
+    //    aucune fenêtre ne dépasse le plafond de pagination (10 000 docs/pull),
+    //    donc le récent n'est jamais tronqué (cf. pullAllSalesSliced).
+    const docs = await pullAllSalesSliced(from, to ?? new Date());
 
     // 3) Update cursor (max UpdateDate vu sur tout le backfill).
     await prisma.sapMirrorCursor.upsert({
       where: { id: 1 },
       update: {
-        lastInvoiceUpdate: inv.maxUpdate ?? undefined,
-        lastOrderUpdate: ord.maxUpdate ?? undefined,
-        lastPdnUpdate: pdn.maxUpdate ?? undefined,
-        lastCreditNoteUpdate: cn.maxUpdate ?? undefined,
-        lastPurchaseReturnUpdate: pret.maxUpdate ?? undefined,
+        lastInvoiceUpdate: docs.maxUpdate.invoice ?? undefined,
+        lastOrderUpdate: docs.maxUpdate.order ?? undefined,
+        lastPdnUpdate: docs.maxUpdate.pdn ?? undefined,
+        lastCreditNoteUpdate: docs.maxUpdate.creditNote ?? undefined,
+        lastPurchaseReturnUpdate: docs.maxUpdate.purchaseReturn ?? undefined,
         lastBpUpdate: new Date(),
         lastTickAt: new Date(),
       },
       create: {
         id: 1,
-        lastInvoiceUpdate: inv.maxUpdate,
-        lastOrderUpdate: ord.maxUpdate,
-        lastPdnUpdate: pdn.maxUpdate,
-        lastCreditNoteUpdate: cn.maxUpdate,
-        lastPurchaseReturnUpdate: pret.maxUpdate,
+        lastInvoiceUpdate: docs.maxUpdate.invoice,
+        lastOrderUpdate: docs.maxUpdate.order,
+        lastPdnUpdate: docs.maxUpdate.pdn,
+        lastCreditNoteUpdate: docs.maxUpdate.creditNote,
+        lastPurchaseReturnUpdate: docs.maxUpdate.purchaseReturn,
         lastBpUpdate: new Date(),
       },
     });
 
+    // Purge le cache pilotage pour refléter le backfill immédiatement.
+    invalidate("pilotage:");
+
     const finishedAt = new Date();
-    const total = bps.upserted + inv.pulled + ord.pulled + pdn.pulled + cn.pulled + pret.pulled;
+    const total = bps.upserted + docs.invoices + docs.creditNotes + docs.orders + docs.pdns + docs.purchaseReturns;
     await prisma.syncLog.update({
       where: { id: log.id },
       data: {
@@ -124,13 +120,14 @@ export async function POST(req: Request) {
       ok: true,
       from: from.toISOString().slice(0, 10),
       to: to ? to.toISOString().slice(0, 10) : null,
+      monthsSliced: docs.slices,
       bps,
       clientGroups: groups,
-      invoices: inv,
-      orders: ord,
-      pdns: pdn,
-      creditNotes: cn,
-      purchaseReturns: pret,
+      invoices: docs.invoices,
+      orders: docs.orders,
+      pdns: docs.pdns,
+      creditNotes: docs.creditNotes,
+      purchaseReturns: docs.purchaseReturns,
       durationMs: finishedAt.getTime() - startedAt.getTime(),
     });
   } catch (e) {
@@ -149,18 +146,46 @@ export async function POST(req: Request) {
   }
 }
 
-/** GET → état courant du curseur miroir. */
+/**
+ * GET → diagnostic miroir. État du curseur + volumétrie + **fenêtre du jour** :
+ * permet de vérifier d'un coup d'œil si les commandes d'aujourd'hui sont bien
+ * dans le miroir (KPI du jour). Si `orders.today` = 0 alors que SAP a des
+ * commandes datées d'aujourd'hui, c'est une troncature de pull (fenêtre > 10k)
+ * ou un décalage de fuseau sur `ordersDocDateRange.max`.
+ */
 export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+
+  const { start, end } = periodBounds("day");
   const cursor = await prisma.sapMirrorCursor.findUnique({ where: { id: 1 } });
-  const counts = {
-    bps: await prisma.sapBusinessPartner.count(),
-    invoices: await prisma.sapInvoice.count(),
-    orders: await prisma.sapOrder.count(),
-    pdns: await prisma.sapPurchaseDeliveryNote.count(),
-    creditNotes: await prisma.sapCreditNote.count(),
-    purchaseReturns: await prisma.sapPurchaseReturn.count(),
-  };
-  return NextResponse.json({ cursor, counts });
+  const [
+    bps, invoices, orders, pdns, creditNotes, purchaseReturns,
+    ordersToday, ordersTodayAll, orderAgg,
+  ] = await Promise.all([
+    prisma.sapBusinessPartner.count(),
+    prisma.sapInvoice.count(),
+    prisma.sapOrder.count(),
+    prisma.sapPurchaseDeliveryNote.count(),
+    prisma.sapCreditNote.count(),
+    prisma.sapPurchaseReturn.count(),
+    prisma.sapOrder.count({ where: { docDate: { gte: start, lt: end }, cancelled: false } }),
+    prisma.sapOrder.count({ where: { docDate: { gte: start, lt: end } } }),
+    prisma.sapOrder.aggregate({
+      _min: { docDate: true, docEntry: true },
+      _max: { docDate: true, docEntry: true },
+    }),
+  ]);
+
+  return NextResponse.json({
+    todayWindow: { start, end },
+    counts: { bps, invoices, orders, pdns, creditNotes, purchaseReturns },
+    orders: {
+      today: ordersToday,               // non annulées dans la fenêtre du jour (= base KPI)
+      todayInclCancelled: ordersTodayAll,
+      docDateRange: { min: orderAgg._min.docDate, max: orderAgg._max.docDate },
+      docEntryRange: { min: orderAgg._min.docEntry, max: orderAgg._max.docEntry },
+    },
+    cursor,
+  });
 }

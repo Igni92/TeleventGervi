@@ -19,6 +19,7 @@
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { invalidate } from "@/lib/ttlCache";
+import { monthlySlicesDesc } from "@/lib/sync-slices";
 
 // ─────────────────────────────────────────────────────────────────
 // Types SAP B1 (Service Layer) — minimal subset
@@ -394,12 +395,18 @@ async function pullSalesDocs(
   if (opts.updatedSince) filters.push(`UpdateDate ge ${odataDate(opts.updatedSince)}`);
   const filter = filters.length ? `&$filter=${filters.join(" and ")}` : "";
 
-  const path = `${endpoint}?${SELECT_DOC_LINES}${filter}&$orderby=DocEntry asc`;
+  const path = `${endpoint}?${SELECT_DOC_LINES}${filter}&$orderby=DocEntry desc`;
 
   const docs = dedupeByDocEntry(
     await sap.getAll<SapInvoiceDoc>(path, { pageSize: 100, maxPages: 100, env: "prod" }),
   );
   if (docs.length === 0) return { pulled: 0, maxUpdate: null };
+  if (docs.length >= 10_000) {
+    // `getAll` s'arrête SILENCIEUSEMENT au plafond (100×100). En `DocEntry desc`
+    // on garde les plus RÉCENTS, mais la fenêtre est tronquée : il faut la
+    // découper (resync/backfill passent par pullAllSalesSliced, tranches /mois).
+    console.warn(`[mirror] ${endpoint}: plafond pagination 10000 atteint — fenêtre tronquée, découper en tranches (from/to).`);
+  }
 
   // Ensure BP exists for each cardCode — on insère le minimum si manquant.
   await ensureBusinessPartners(docs, "C");
@@ -608,11 +615,14 @@ async function pullPurchaseDocs(
   if (opts.updatedSince) filters.push(`UpdateDate ge ${odataDate(opts.updatedSince)}`);
   const filter = filters.length ? `&$filter=${filters.join(" and ")}` : "";
 
-  const path = `${endpoint}?${SELECT_PDN_LINES}${filter}&$orderby=DocEntry asc`;
+  const path = `${endpoint}?${SELECT_PDN_LINES}${filter}&$orderby=DocEntry desc`;
   const docs = dedupeByDocEntry(
     await sap.getAll<SapPdnDoc>(path, { pageSize: 100, maxPages: 100, env: "prod" }),
   );
   if (docs.length === 0) return { pulled: 0, maxUpdate: null };
+  if (docs.length >= 10_000) {
+    console.warn(`[mirror] ${endpoint}: plafond pagination 10000 atteint — fenêtre tronquée, découper en tranches (from/to).`);
+  }
 
   // BP fournisseur — créer le minimum si manquant
   await ensureBusinessPartners(docs, "V");
@@ -655,3 +665,51 @@ export const pullPdns = (opts: MirrorPullOpts) =>
  *  Nécessaire aux Achats NET (= Σ PDN − Σ retours) — curseur : lastPurchaseReturnUpdate. */
 export const pullPurchaseReturns = (opts: MirrorPullOpts) =>
   pullPurchaseDocs("PurchaseReturns", { header: "SapPurchaseReturn", line: "SapPurchaseReturnLine" }, opts);
+
+// ─────────────────────────────────────────────────────────────────
+// Reconstruction COMPLÈTE des 5 entités vente/achat, par tranches mensuelles
+// (plus récente d'abord) — anti-troncature ET anti-timeout.
+// ─────────────────────────────────────────────────────────────────
+
+export interface SlicedPullResult {
+  invoices: number; creditNotes: number; orders: number; pdns: number; purchaseReturns: number;
+  slices: number;
+  maxUpdate: {
+    invoice: Date | null; creditNote: Date | null; order: Date | null;
+    pdn: Date | null; purchaseReturn: Date | null;
+  };
+}
+
+/**
+ * Pull des 5 entités sur [from, to] découpé en tranches mensuelles, **la plus
+ * récente d'abord** (cf. monthlySlicesDesc). Garantit que le jour courant n'est
+ * jamais tronqué par le plafond de pagination (10 000 docs/pull) : chaque mois
+ * reste très en-deçà. Idempotent (upsert par DocEntry) → sûr à relancer.
+ *
+ * Utilisé par /sync/full-reset (resync PROD) et /sync/backfill (rétrospectif).
+ */
+export async function pullAllSalesSliced(from: Date, to: Date): Promise<SlicedPullResult> {
+  const slices = monthlySlicesDesc(from, to);
+  const res: SlicedPullResult = {
+    invoices: 0, creditNotes: 0, orders: 0, pdns: 0, purchaseReturns: 0,
+    slices: slices.length,
+    maxUpdate: { invoice: null, creditNote: null, order: null, pdn: null, purchaseReturn: null },
+  };
+  const bump = (cur: Date | null, m: Date | null) => (m && (!cur || m > cur) ? m : cur);
+
+  // Séquentiel entre tranches (récent→ancien), 5 entités en parallèle par
+  // tranche — borne la charge SAP et fait remonter le récent en premier.
+  for (const s of slices) {
+    const [inv, cn, ord, pdn, pret] = await Promise.all([
+      pullInvoices(s), pullCreditNotes(s), pullOrders(s), pullPdns(s), pullPurchaseReturns(s),
+    ]);
+    res.invoices += inv.pulled; res.creditNotes += cn.pulled; res.orders += ord.pulled;
+    res.pdns += pdn.pulled; res.purchaseReturns += pret.pulled;
+    res.maxUpdate.invoice = bump(res.maxUpdate.invoice, inv.maxUpdate);
+    res.maxUpdate.creditNote = bump(res.maxUpdate.creditNote, cn.maxUpdate);
+    res.maxUpdate.order = bump(res.maxUpdate.order, ord.maxUpdate);
+    res.maxUpdate.pdn = bump(res.maxUpdate.pdn, pdn.maxUpdate);
+    res.maxUpdate.purchaseReturn = bump(res.maxUpdate.purchaseReturn, pret.maxUpdate);
+  }
+  return res;
+}
