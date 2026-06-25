@@ -620,6 +620,37 @@ function OrderRow({
   const [open, setOpen] = useState(false);
   const [savingCarrier, setSavingCarrier] = useState(false);
 
+  // N° de commande (réf. client) — éditable directement sur la ligne. Sauvé sur
+  // blur/Entrée (PATCH NumAtCard) seulement si modifié. `savedRef` = dernière
+  // valeur enregistrée (évite de muter la prop `doc` et les ré-enregistrements).
+  const [refDraft, setRefDraft] = useState(doc.numAtCard ?? "");
+  const [savedRef, setSavedRef] = useState(doc.numAtCard ?? "");
+  const [savingRef, setSavingRef] = useState(false);
+  async function saveRef() {
+    const val = refDraft.trim();
+    if (val === savedRef.trim()) return;   // inchangé
+    setSavingRef(true);
+    try {
+      const res = await fetch(`/api/sap/orders/${doc.docEntry}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ numAtCard: val }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || j?.ok === false) {
+        toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement du n° de commande");
+        setRefDraft(savedRef);   // rollback affichage
+        return;
+      }
+      setSavedRef(val);
+      toast.success(val ? `N° de commande enregistré (#${doc.docNum})` : `N° de commande retiré (#${doc.docNum})`);
+    } catch {
+      toast.error("SAP injoignable — n° de commande non enregistré");
+      setRefDraft(savedRef);
+    } finally {
+      setSavingRef(false);
+    }
+  }
+
   // Le transporteur courant doit rester sélectionnable même s'il n'est pas dans
   // la table Carrier (code SAP brut) → on l'injecte en tête si besoin.
   const options: CarrierOption[] = useMemo(() => {
@@ -693,11 +724,10 @@ function OrderRow({
           <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground flex-wrap">
             <span className="font-mono text-foreground/60">{doc.cardCode}</span>
             <span>· BL n°{doc.docNum}</span>
-            {doc.numAtCard && <span className="truncate">· réf. {doc.numAtCard}</span>}
             <span className="hidden sm:inline">· {fmtEur(doc.totalHT)} HT</span>
           </div>
           {/* Changement de transporteur direct */}
-          <div className="mt-1.5 inline-flex items-center gap-1.5">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <Truck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <div className="relative">
               <select
@@ -718,6 +748,22 @@ function OrderRow({
               ) : (
                 <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
               )}
+            </div>
+            {/* N° de commande (réf. client) — éditable directement ici */}
+            <div className="relative inline-flex items-center">
+              <FileText className="pointer-events-none absolute left-2 h-3 w-3 text-muted-foreground" />
+              <input
+                value={refDraft}
+                onChange={(e) => setRefDraft(e.target.value)}
+                onBlur={saveRef}
+                onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                disabled={savingRef}
+                placeholder="N° commande"
+                title="N° de commande (réf. client) — Entrée ou clic ailleurs pour enregistrer"
+                aria-label={`N° de commande de la livraison ${doc.docNum}`}
+                className="h-7 w-[140px] rounded-md border border-border bg-card pl-7 pr-6 text-[11.5px] font-medium text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
+              />
+              {savingRef && <Loader2 className="pointer-events-none absolute right-1.5 h-3 w-3 animate-spin text-muted-foreground" />}
             </div>
           </div>
         </div>
