@@ -4,7 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import {
   ChevronDown, Mail, ArrowRight, Loader2, Users,
-  Building2, Globe, Store, Check, X, Percent, ShieldCheck, Boxes, Briefcase, Truck, Lock,
+  Building2, Globe, Store, Check, X, Percent, Lock,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -177,29 +177,34 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
                 {savingPresence ? <Loader2 className="h-3 w-3 animate-spin" /> : isPresent ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
                 {isPresent ? "Présent" : "Absent"}
               </button>
-              <label className="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-secondary/60 text-[11px] text-muted-foreground" title="% du stock total attribué à ce commercial">
-                <Percent className="h-3 w-3" />
-                <input
-                  type="number" min={0} max={100} step={5}
-                  value={share}
-                  onChange={(e) => setShare(parseFloat(e.target.value) || 0)}
-                  onBlur={(e) => saveShare(parseFloat(e.target.value) || 0)}
-                  className="w-10 bg-transparent text-right tnum text-foreground focus:outline-none"
-                />
-                <span>stock</span>
-              </label>
+              {/* % stock attribué — n'a de sens que pour un commercial (force de vente) */}
+              {comm && (
+                <label className="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-secondary/60 text-[11px] text-muted-foreground" title="% du stock total attribué à ce commercial">
+                  <Percent className="h-3 w-3" />
+                  <input
+                    type="number" min={0} max={100} step={5}
+                    value={share}
+                    onChange={(e) => setShare(parseFloat(e.target.value) || 0)}
+                    onBlur={(e) => saveShare(parseFloat(e.target.value) || 0)}
+                    className="w-10 bg-transparent text-right tnum text-foreground focus:outline-none"
+                  />
+                  <span>stock</span>
+                </label>
+              )}
             </div>
 
-            {/* RÔLES — indépendants : un compte peut en cumuler plusieurs */}
-            <div className="flex items-center gap-1.5 flex-wrap">
+            {/* RÔLES — cases à cocher indépendantes : un compte peut en cumuler plusieurs */}
+            <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
               <span className="mr-0.5 select-none text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Rôles</span>
-              <RoleChip tone="indigo" icon={Briefcase} label="Commercial" active={comm} saving={savingComm} onToggle={toggleCommercial}
+              <RoleCheck label="Commercial" active={comm} saving={savingComm} onToggle={toggleCommercial}
                 title={comm ? "Retirer le rôle commercial" : "Désigner commercial (force de vente)"} />
-              <RoleChip tone="amber" icon={Boxes} label="Préparateur" active={prep} locked={isBootstrapPreparateur} saving={savingPrep} onToggle={togglePrep}
+              <RoleCheck label="Préparateur" active={prep} locked={isBootstrapPreparateur} saving={savingPrep} onToggle={togglePrep}
+                note={isBootstrapPreparateur ? "système" : undefined}
                 title={isBootstrapPreparateur ? "Préparateur défini dans la configuration (PREPARATEUR_EMAILS) — non modifiable ici" : prep ? "Retirer le rôle préparateur (stock)" : "Désigner préparateur (en charge du stock)"} />
-              <RoleChip tone="violet" icon={ShieldCheck} label="Admin" active={admin} locked={isBootstrapAdmin} saving={savingAdmin} onToggle={toggleAdmin}
+              <RoleCheck label="Admin" active={admin} locked={isBootstrapAdmin} saving={savingAdmin} onToggle={toggleAdmin}
+                note={isBootstrapAdmin ? "système" : undefined}
                 title={isBootstrapAdmin ? "Admin système (défini dans le code) — non modifiable ici" : admin ? "Retirer les droits administrateur" : "Promouvoir administrateur"} />
-              <RoleChip tone="slate" icon={Truck} label="Livreur" disabled title="Rôle livreur — bientôt disponible" />
+              <RoleCheck label="Livreur" disabled note="bientôt" title="Rôle livreur — bientôt disponible" />
             </div>
           </div>
         </div>
@@ -291,61 +296,58 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
 }
 
 /* ---------------------------------------------------------------------------
- * Pastille de rôle (multi-sélection). Chaque rôle est INDÉPENDANT : un compte
- * peut cumuler Commercial + Préparateur + Admin (+ Livreur à venir).
- *   - actif        → pastille colorée cliquable (toggle)
- *   - locked       → rôle « système » (bootstrap code/env), figé (cadenas)
- *   - disabled     → rôle pas encore disponible (Livreur), grisé
+ * Case à cocher de rôle (multi-sélection). Chaque rôle est INDÉPENDANT : un
+ * compte peut cumuler Commercial + Préparateur + Admin (+ Livreur à venir).
+ *   - cochée         → rôle actif (clic = décocher)
+ *   - locked         → rôle « système » (bootstrap code/env), coché et figé (cadenas)
+ *   - disabled       → rôle pas encore disponible (Livreur), grisé
+ * Présentation case à cocher (et non pastille colorée) pour la lisibilité.
  * ------------------------------------------------------------------------- */
-const ROLE_TONE = {
-  indigo: "bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300",
-  amber: "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
-  violet: "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300",
-  slate: "bg-slate-100 dark:bg-slate-800/40 text-slate-600 dark:text-slate-400",
-} as const;
-
-function RoleChip({
-  icon: Icon, label, tone, active = false, locked = false, disabled = false, saving = false, onToggle, title,
+function RoleCheck({
+  label, active = false, locked = false, disabled = false, saving = false, onToggle, title, note,
 }: {
-  icon: typeof Briefcase;
   label: string;
-  tone: keyof typeof ROLE_TONE;
   active?: boolean;
   locked?: boolean;
   disabled?: boolean;
   saving?: boolean;
   onToggle?: () => void;
   title?: string;
+  note?: string;
 }) {
-  const base = "inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold transition-colors";
-  if (disabled) {
-    return (
-      <span className={`${base} bg-secondary/40 text-muted-foreground/50 cursor-not-allowed`} title={title}>
-        <Icon className="h-3 w-3" /> {label}
-        <span className="ml-0.5 text-[8.5px] uppercase tracking-wide opacity-80">bientôt</span>
-      </span>
-    );
-  }
-  if (locked) {
-    return (
-      <span className={`${base} ${ROLE_TONE[tone]}`} title={title}>
-        <Lock className="h-3 w-3" /> {label}
-      </span>
-    );
-  }
+  const interactive = !locked && !disabled;
   return (
     <button
       type="button"
-      onClick={onToggle}
-      disabled={saving}
+      role="checkbox"
+      aria-checked={active}
+      aria-disabled={!interactive}
+      onClick={interactive ? onToggle : undefined}
+      disabled={saving || disabled}
       title={title}
-      aria-pressed={active}
-      className={`${base} disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none ${
-        active ? ROLE_TONE[tone] : "bg-secondary/60 text-muted-foreground hover:text-foreground"
+      className={`inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-[12.5px] transition-colors focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none ${
+        disabled ? "cursor-not-allowed" : locked ? "cursor-default" : "hover:bg-secondary/60"
       }`}
     >
-      {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Icon className="h-3 w-3" />}
-      {label}
+      <span
+        className={`grid h-[16px] w-[16px] shrink-0 place-items-center rounded-[4px] border transition-colors ${
+          active
+            ? "border-brand-600 bg-brand-600 text-white"
+            : disabled
+              ? "border-dashed border-border bg-muted"
+              : "border-border bg-background"
+        }`}
+      >
+        {saving ? (
+          <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+        ) : locked ? (
+          <Lock className="h-2.5 w-2.5" />
+        ) : active ? (
+          <Check className="h-3 w-3" strokeWidth={3} />
+        ) : null}
+      </span>
+      <span className={`font-medium ${disabled ? "text-muted-foreground/60" : "text-foreground"}`}>{label}</span>
+      {note && <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{note}</span>}
     </button>
   );
 }
