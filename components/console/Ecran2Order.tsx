@@ -153,8 +153,10 @@ interface GroupEntry { key: string; name: string; prods: Product[]; pinned?: boo
  *   C4 — densité d'affichage Compact / Normal / Aéré : RÉGLÉE sur /parametres
  *        (localStorage televente:ecran2Density), lue ici + listener storage
  */
-export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
+export function Ecran2Order({ clientId, clientName, stockSharePct = 100, rajout: rajoutProp = null }: {
   clientId: string; clientName: string; stockSharePct?: number;
+  /** Cible de rajout (pilotée par l'écran 1) : on ajoute au BL existant. */
+  rajout?: { docEntry: number; docNum: number } | null;
 }) {
   const [grouped, setGrouped] = useState<Record<string, Product[]>>({});
   const [loading, setLoading] = useState(false);
@@ -189,6 +191,14 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
   const [encoursPrompt, setEncoursPrompt] = useState<
     { lines: ApiLine[]; message: string; encours?: { balance: number; creditLimit: number } } | null
   >(null);
+  // Mode RAJOUT (piloté par l'écran 1 « Détail livraison » via consoleSync) :
+  // les articles ajoutés s'ajoutent au BL existant au lieu de créer une commande.
+  // Consommé après succès → retour à la saisie normale pour ce client.
+  const [rajout, setRajout] = useState(rajoutProp);
+  useEffect(() => {
+    setRajout(rajoutProp);
+    if (rajoutProp) setCart([]); // panier neuf à l'entrée en mode rajout
+  }, [rajoutProp]);
 
   // ── Reset quand le client change ──
   useEffect(() => {
@@ -566,6 +576,25 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
     setSubmitting(true);
     try {
       const apiLines = buildApiLines();
+      // ── Mode RAJOUT : ajoute les lignes au BL existant (pas de nouvelle commande) ──
+      if (rajout) {
+        const res = await fetch(`/api/sap/orders/${rajout.docEntry}/rajout`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lines: apiLines }),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.ok) {
+          toast.error("❌ Rajout échoué", { description: json?.error, duration: 10000 });
+          return;
+        }
+        const fmt = (n: number | null | undefined) => n != null ? n.toFixed(2) : "—";
+        toast.success(
+          `✅ ${json.addedLines} ligne(s) ajoutée(s) au BL #${json.docNum} — total ${fmt(json.totalTTC)} € TTC`,
+          { duration: 10000 },
+        );
+        setCart([]); setNumAtCard(""); setRajout(null); // rajout consommé → saisie normale
+        return;
+      }
       const res = await postOrder(apiLines, false);
       const json = await res.json();
       // Garde-fou encours : on ouvre une vraie modale (pas un window.confirm natif).
@@ -889,16 +918,19 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
               <Megaphone className="h-3.5 w-3.5" />
               Promotions{promoList.length > 0 ? ` (${promoList.length})` : ""}
             </button>
-            <button type="button" onClick={replayLast} disabled={replaying}
-              className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-60">
-              {replaying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Rejouer la dernière
-            </button>
+            {!rajout && (
+              <button type="button" onClick={replayLast} disabled={replaying}
+                className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-60">
+                {replaying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Rejouer la dernière
+              </button>
+            )}
           </div>
         </div>
+        {rajout && <RajoutBanner docEntry={rajout.docEntry} docNum={rajout.docNum} />}
         <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
           {cart.length === 0 && (
             <p className="text-[14px] text-muted-foreground italic py-4 text-center">
-              Clique un produit à gauche pour l&apos;ajouter.
+              {rajout ? "Clique un produit à gauche pour l'ajouter au BL." : "Clique un produit à gauche pour l'ajouter."}
             </p>
           )}
           {cart.map((l, i) => {
@@ -1002,39 +1034,46 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
 
         {/* Pied : date, mode, n° cmd, total, créer */}
         <div className="shrink-0 pt-2 mt-2 border-t border-border space-y-2">
-          {modes.length > 0 && (
-            <select value={modeId} onChange={(e) => setModeId(e.target.value)}
-              className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2">
-              {modes.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.sapCardCode})</option>)}
-            </select>
+          {/* En mode rajout, le BL existe déjà : mode/transporteur/date/réf sont figés. */}
+          {!rajout && (
+            <>
+              {modes.length > 0 && (
+                <select value={modeId} onChange={(e) => setModeId(e.target.value)}
+                  className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2">
+                  {modes.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.sapCardCode})</option>)}
+                </select>
+              )}
+              {carriers.length > 0 && (
+                <select value={carrierId} onChange={(e) => setCarrierId(e.target.value)}
+                  aria-label="Transporteur"
+                  className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2">
+                  <option value="">Transporteur — non précisé</option>
+                  {/* B3 — count présent quand la liste est filtrée par client (habitudes) */}
+                  {carriers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      🚚 {c.name}{c.count ? ` · ${c.count} cde${c.count > 1 ? "s" : ""}` : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <div className="flex gap-1.5">
+                <input type="datetime-local" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)}
+                  className="flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2" />
+              </div>
+              <input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="N° de commande (réf. client)"
+                className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2" />
+            </>
           )}
-          {carriers.length > 0 && (
-            <select value={carrierId} onChange={(e) => setCarrierId(e.target.value)}
-              aria-label="Transporteur"
-              className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2">
-              <option value="">Transporteur — non précisé</option>
-              {/* B3 — count présent quand la liste est filtrée par client (habitudes) */}
-              {carriers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  🚚 {c.name}{c.count ? ` · ${c.count} cde${c.count > 1 ? "s" : ""}` : ""}
-                </option>
-              ))}
-            </select>
-          )}
-          <div className="flex gap-1.5">
-            <input type="datetime-local" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)}
-              className="flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2" />
-          </div>
-          <input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="N° de commande (réf. client)"
-            className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2" />
           <div className="flex items-center justify-between text-[14px]">
-            <span className="text-muted-foreground">Total HT estimé</span>
+            <span className="text-muted-foreground">{rajout ? "Total HT rajout" : "Total HT estimé"}</span>
             <span className="font-bold tnum text-foreground">{totalHT.toFixed(2)} €</span>
           </div>
           <button type="button" onClick={submit} disabled={submitting || cart.length === 0}
-            className="w-full h-11 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[15px] font-semibold inline-flex items-center justify-center gap-2">
+            className={`w-full h-11 rounded-xl disabled:opacity-50 text-white text-[15px] font-semibold inline-flex items-center justify-center gap-2 ${
+              rajout ? "bg-amber-600 hover:bg-amber-700" : "bg-emerald-600 hover:bg-emerald-700"
+            }`}>
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShoppingCart className="h-4 w-4" />}
-            Créer la commande ({cart.length})
+            {rajout ? `Ajouter au BL #${rajout.docNum} (${cart.length})` : `Créer la commande (${cart.length})`}
           </button>
         </div>
       </div>
@@ -1126,6 +1165,85 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/* ═════════════════════════════════════════════════════════════
+   Bandeau « Rajout » — rappelle le BL ciblé + lignes déjà dessus
+   (lecture seule). Piloté par l'écran 1 (Détail livraison).
+═════════════════════════════════════════════════════════════ */
+function RajoutBanner({ docEntry, docNum }: { docEntry: number; docNum: number }) {
+  type ExistingLine = { itemCode: string; itemName?: string; quantity: number; unit?: string; lineTotal: number };
+  const [data, setData] = useState<
+    { lines: ExistingLine[]; totalHT: number; dueDate?: string; editable?: boolean } | null
+  >(null);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/sap/orders/${docEntry}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled) setData(j); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [docEntry]);
+
+  const dateLabel = data?.dueDate
+    ? new Date(data.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })
+    : null;
+  const nbLines = data?.lines?.length ?? 0;
+
+  return (
+    <div className="mb-2 shrink-0 rounded-lg border border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15 overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-amber-500 text-white shrink-0">
+          <Plus className="h-3.5 w-3.5" strokeWidth={2.4} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[12.5px] font-semibold text-amber-800 dark:text-amber-200 leading-tight">
+            Rajout sur le BL #{docNum}
+          </p>
+          <p className="text-[10.5px] text-amber-700/80 dark:text-amber-300/80">
+            Les articles ajoutés iront sur cette commande{dateLabel ? ` · livraison ${dateLabel}` : ""}.
+          </p>
+        </div>
+        {nbLines > 0 && (
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-300 hover:underline shrink-0"
+          >
+            {nbLines} ligne{nbLines > 1 ? "s" : ""}
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`} />
+          </button>
+        )}
+      </div>
+      {loading && (
+        <p className="px-3 pb-2 text-[11px] text-amber-700/80 dark:text-amber-300/80 inline-flex items-center gap-1.5">
+          <Loader2 className="h-3 w-3 animate-spin" /> Chargement du BL…
+        </p>
+      )}
+      {data && data.editable === false && (
+        <p className="px-3 pb-2 text-[11px] font-medium text-rose-600 dark:text-rose-400">
+          ⚠️ Commande clôturée — le rajout sera refusé.
+        </p>
+      )}
+      {open && data?.lines && (
+        <ul className="border-t border-amber-300/50 dark:border-amber-500/25 divide-y divide-amber-300/30 dark:divide-amber-500/20 max-h-40 overflow-y-auto">
+          {data.lines.map((l, i) => (
+            <li key={i} className="flex items-center justify-between gap-2 px-3 py-1 text-[11.5px]">
+              <span className="min-w-0 truncate text-amber-900/90 dark:text-amber-100/90">{l.itemName || l.itemCode}</span>
+              <span className="tnum text-amber-700 dark:text-amber-300 shrink-0">
+                {l.quantity}{l.unit ? ` ${l.unit}` : ""} · {(l.lineTotal ?? 0).toFixed(2)} €
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
