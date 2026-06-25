@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ClipboardList, Search, ChevronRight, ChevronDown,
@@ -9,6 +9,7 @@ import {
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
@@ -18,6 +19,7 @@ import {
 } from "./ReceptionIncidents";
 
 type ReceiptLine = {
+  lineNum: number | null;          // identifiant SAP de la ligne (PATCH valorisation)
   itemCode: string; itemName?: string;
   pieceQuantity: number; packageQuantity: number | null;
   warehouse?: string;
@@ -91,6 +93,9 @@ export function GoodsReceiptHistory() {
   const toggle = (docEntry: number) => setExpanded((cur) => (cur === docEntry ? null : docEntry));
   const updateNumAtCard = (docEntry: number, numAtCard: string) =>
     setDocs((cur) => cur.map((d) => (d.docEntry === docEntry ? { ...d, numAtCard } : d)));
+  // Remplace une entrée par sa version rafraîchie (après édition d'une valorisation).
+  const applyReceipt = (updated: Receipt) =>
+    setDocs((cur) => cur.map((d) => (d.docEntry === updated.docEntry ? updated : d)));
   const hasFilters = query.trim() !== "" || dateFilter !== "";
   // Entrée affichée en grand (dérivée de docs → reflète les éditions).
   const largeDoc = largeEntry != null ? docs.find((d) => d.docEntry === largeEntry) ?? null : null;
@@ -261,6 +266,7 @@ export function GoodsReceiptHistory() {
                             incidents={byDoc.get(d.docEntry) ?? []}
                             onIncidentChanged={reloadIncidents}
                             onNumAtCardChange={updateNumAtCard}
+                            onReceiptUpdated={applyReceipt}
                             onEnlarge={() => setLargeEntry(d.docEntry)}
                           />
                         </td>
@@ -295,6 +301,7 @@ export function GoodsReceiptHistory() {
               incidents={byDoc.get(largeDoc.docEntry) ?? []}
               onIncidentChanged={reloadIncidents}
               onNumAtCardChange={updateNumAtCard}
+              onReceiptUpdated={applyReceipt}
             />
           )}
         </DialogContent>
@@ -314,18 +321,55 @@ function Stat({ label, value, tone }: { label: string; value: React.ReactNode; t
   );
 }
 
+/** Éditeur inline du prix unitaire HT (valorisation) d'une ligne d'entrée.
+    Enregistre au blur / Entrée ; revient à la valeur canonique si vidé/inchangé. */
+function PriceEditor({
+  value, onSave, saving, disabled, big,
+}: {
+  value: number | null;
+  onSave: (n: number) => void;
+  saving?: boolean;
+  disabled?: boolean;
+  big?: boolean;
+}) {
+  const [draft, setDraft] = useState<number | null>(value);
+  const draftRef = useRef<number | null>(value);
+  useEffect(() => { setDraft(value); draftRef.current = value; }, [value]);
+  const set = (n: number | null) => { setDraft(n); draftRef.current = n; };
+  return (
+    <span className="inline-flex items-center justify-end gap-1">
+      <NumberInput
+        value={draft}
+        onValueChange={set}
+        onBlur={() => {
+          const n = draftRef.current;
+          if (n != null && (value == null || Math.abs(n - value) > 1e-9)) onSave(n);
+          else set(value);   // vidé / inchangé → revient à la valeur courante
+        }}
+        min={0} step={0.01} decimals={2} allowEmpty placeholder="—"
+        disabled={disabled || saving}
+        title="Prix unitaire HT — modifie la valorisation (écrit dans SAP)"
+        className={`text-right tnum w-20 ${big ? "h-9 text-[14px]" : "h-7 text-[12px]"}`}
+      />
+      {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />}
+    </span>
+  );
+}
+
 /* ─────────────────────────────────────────────────────────────────
    Détail d'une entrée — désignation complète + montants HT/TVA/TTC,
    « idem que sur les bons dans la console ». Déclaration d'incident
    directement depuis cette consultation.
    ───────────────────────────────────────────────────────────────── */
 function ReceiptDetail({
-  receipt, incidents, onIncidentChanged, onNumAtCardChange, large, onEnlarge,
+  receipt, incidents, onIncidentChanged, onNumAtCardChange, onReceiptUpdated, large, onEnlarge,
 }: {
   receipt: Receipt;
   incidents: { id: string; type: string | null; note: string | null; resolved: boolean; createdAt: string; createdBy: string | null }[];
   onIncidentChanged: () => void;
   onNumAtCardChange: (docEntry: number, numAtCard: string) => void;
+  /** Remplace l'entrée par sa version rafraîchie après édition d'une valorisation. */
+  onReceiptUpdated: (receipt: Receipt) => void;
   /** Affichage agrandi (modale plein cadre) — textes et espacements plus grands. */
   large?: boolean;
   /** Ouvre l'affichage agrandi (visible seulement en mode normal). */
@@ -333,6 +377,30 @@ function ReceiptDetail({
 }) {
   const [declareOpen, setDeclareOpen] = useState(false);
   const [savingBl, setSavingBl] = useState(false);
+  // lineNum de la ligne dont la valorisation est en cours d'enregistrement.
+  const [savingLine, setSavingLine] = useState<number | null>(null);
+
+  /** Enregistre le prix unitaire HT (valorisation) d'une ligne dans SAP. */
+  async function savePrice(line: ReceiptLine, price: number) {
+    if (line.lineNum == null) { toast.error("Ligne non identifiable (lineNum manquant)"); return; }
+    if (line.price != null && Math.abs(price - line.price) < 1e-9) return;   // inchangé
+    setSavingLine(line.lineNum);
+    try {
+      const res = await fetch("/api/sap/goods-receipts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: receipt.docEntry, lines: [{ lineNum: line.lineNum, price }] }),
+      });
+      const j = await res.json();
+      if (!res.ok || j.ok === false) throw new Error(j.error || "Échec");
+      if (j.receipt) onReceiptUpdated(j.receipt as Receipt);
+      toast.success(`Valorisation enregistrée sur l'entrée #${receipt.docNum}`);
+    } catch (e) {
+      toast.error(`Échec de l'enregistrement de la valorisation : ${e instanceof Error ? e.message : ""}`);
+    } finally {
+      setSavingLine(null);
+    }
+  }
 
   // Jeu de tailles : compact (inline) vs agrandi (modale).
   const big = !!large;
@@ -424,7 +492,16 @@ function ReceiptDetail({
               <div className="flex items-center gap-2 mt-2 text-[13px] text-muted-foreground tnum">
                 <span className="text-foreground font-medium">{fmtColis(l.packageQuantity)} colis</span>
                 <span>·</span>
-                <span>PU {l.price != null ? eur(l.price) : "—"}</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span>PU HT</span>
+                  <PriceEditor
+                    value={l.price}
+                    saving={savingLine === l.lineNum}
+                    disabled={l.lineNum == null}
+                    onSave={(n) => savePrice(l, n)}
+                    big
+                  />
+                </span>
               </div>
             </div>
           );
@@ -465,7 +542,15 @@ function ReceiptDetail({
                   <td className={td}><Chip kind="marque">{dz.marque}</Chip></td>
                   <td className={td}><Chip kind="calibre">{dz.variete}</Chip></td>
                   <td className={td}><Chip kind="condt">{dz.condt}</Chip></td>
-                  <td className={`text-right tnum ${td}`}>{l.price != null ? eur(l.price) : "—"}</td>
+                  <td className={`text-right ${td}`}>
+                    <PriceEditor
+                      value={l.price}
+                      saving={savingLine === l.lineNum}
+                      disabled={l.lineNum == null}
+                      onSave={(n) => savePrice(l, n)}
+                      big={big}
+                    />
+                  </td>
                   <td className={`text-right tnum font-medium ${td}`}>{lineHT != null ? eur(lineHT) : "—"}</td>
                 </tr>
               );

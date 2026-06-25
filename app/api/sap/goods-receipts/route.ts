@@ -395,6 +395,93 @@ export async function POST(req: NextRequest) {
   });
 }
 
+// ── Helpers partagés liste/détail (GET + PATCH valorisations) ──────────
+type ListedLine = {
+  LineNum?: number;
+  ItemCode: string; ItemDescription?: string;
+  Quantity: number; PackageQuantity?: number;
+  WarehouseCode?: string;
+  Price?: number;                 // prix unitaire HT (unité de stock)
+  LineTotal?: number;             // total ligne HT
+  TaxPercentagePerRow?: number;   // taux TVA de la ligne
+};
+type SapPdnListed = {
+  DocEntry: number; DocNum: number; DocDate: string; CardCode: string; CardName?: string;
+  NumAtCard?: string; DocTotal?: number; VatSum?: number; Comments?: string; DocumentLines?: ListedLine[];
+};
+
+const PDN_SELECT =
+  "DocEntry,DocNum,DocDate,CardCode,CardName,NumAtCard,DocTotal,VatSum,Comments,DocumentLines";
+
+type PdnProduct = {
+  itemCode: string; itemName: string | null; salesQtyPerPackUnit: number | null;
+  salesPackagingUnit: string | null; uPays: string | null; uMarque: string | null;
+  uCondi: string | null; frgnName: string | null;
+};
+
+async function loadPdnProductMap(itemCodes: string[]): Promise<Map<string, PdnProduct>> {
+  if (itemCodes.length === 0) return new Map();
+  const products = await prisma.product.findMany({
+    where: { itemCode: { in: itemCodes } },
+    select: {
+      itemCode: true, itemName: true, salesQtyPerPackUnit: true, salesPackagingUnit: true,
+      uPays: true, uMarque: true, uCondi: true, frgnName: true,
+    },
+  });
+  return new Map(products.map((p) => [p.itemCode, p]));
+}
+
+/** Mappe un PurchaseDeliveryNote SAP → DTO « entrée marchandise » (liste/détail). */
+function mapPdnDoc(d: SapPdnListed, pMap: Map<string, PdnProduct>) {
+  const lines = d.DocumentLines || [];
+  const totalTTC = d.DocTotal ?? 0;
+  const totalTVA = d.VatSum ?? 0;
+  const sumLines = lines.reduce((s, l) => s + (l.LineTotal ?? 0), 0);
+  const totalHT = sumLines > 0 ? sumLines : Math.max(0, totalTTC - totalTVA);
+  return {
+    docEntry: d.DocEntry,
+    docNum: d.DocNum,
+    lot: `EM${d.DocNum}`,
+    docDate: d.DocDate,
+    cardCode: d.CardCode,
+    cardName: d.CardName,
+    numAtCard: d.NumAtCard ?? "",
+    total: totalTTC,        // rétro-compat : « total » = TTC
+    totalTTC,
+    totalHT,
+    totalTVA,
+    comments: d.Comments ?? "",
+    lineCount: lines.length,
+    lines: lines.map((l) => {
+      const p = pMap.get(l.ItemCode);
+      const ratio = (p?.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) ? p.salesQtyPerPackUnit : 1;
+      return {
+        lineNum: l.LineNum ?? null,    // identifiant SAP de la ligne (pour PATCH valorisation)
+        itemCode: l.ItemCode,
+        itemName: l.ItemDescription || p?.itemName || l.ItemCode,
+        pieceQuantity: l.Quantity,
+        packageQuantity: l.PackageQuantity ?? (ratio > 1 ? l.Quantity / ratio : l.Quantity),
+        warehouse: l.WarehouseCode,
+        price: l.Price ?? null,
+        lineTotal: l.LineTotal ?? null,
+        taxPercent: l.TaxPercentagePerRow ?? null,
+        // Désignation décomposée (catalogue local)
+        uPays: p?.uPays ?? null,
+        uMarque: p?.uMarque ?? null,
+        uCondi: p?.uCondi ?? null,
+        frgnName: p?.frgnName ?? null,
+      };
+    }),
+  };
+}
+
+/** Récupère UNE entrée marchandise rafraîchie (mêmes champs que la liste). */
+async function fetchReceiptDto(docEntry: number) {
+  const d = await sap.get<SapPdnListed>(`PurchaseDeliveryNotes(${docEntry})?$select=${PDN_SELECT}`);
+  const pMap = await loadPdnProductMap((d.DocumentLines || []).map((l) => l.ItemCode));
+  return mapPdnDoc(d, pMap);
+}
+
 /**
  * GET /api/sap/goods-receipts?last=20
  *
@@ -409,21 +496,8 @@ export async function GET(req: NextRequest) {
   const last = Math.min(50, parseInt(searchParams.get("last") || "20"));
 
   try {
-    type ListedLine = {
-      ItemCode: string; ItemDescription?: string;
-      Quantity: number; PackageQuantity?: number;
-      WarehouseCode?: string;
-      Price?: number;                 // prix unitaire HT (unité de stock)
-      LineTotal?: number;             // total ligne HT
-      TaxPercentagePerRow?: number;   // taux TVA de la ligne
-    };
-    type SapPdnListed = {
-      DocEntry: number; DocNum: number; DocDate: string; CardCode: string; CardName?: string;
-      NumAtCard?: string; DocTotal?: number; VatSum?: number; Comments?: string; DocumentLines?: ListedLine[];
-    };
     const docs = await sap.get<{ value: SapPdnListed[] }>(
-      `PurchaseDeliveryNotes?$top=${last}&$orderby=DocEntry desc`
-      + `&$select=DocEntry,DocNum,DocDate,CardCode,CardName,NumAtCard,DocTotal,VatSum,Comments,DocumentLines`,
+      `PurchaseDeliveryNotes?$top=${last}&$orderby=DocEntry desc&$select=${PDN_SELECT}`,
     );
 
     // Enrichissement local : désignation complète (Fruit/Pays/Marque/Condt) +
@@ -431,61 +505,12 @@ export async function GET(req: NextRequest) {
     const itemCodes = Array.from(
       new Set((docs.value || []).flatMap((d) => (d.DocumentLines || []).map((l) => l.ItemCode))),
     );
-    const products = itemCodes.length
-      ? await prisma.product.findMany({
-          where: { itemCode: { in: itemCodes } },
-          select: {
-            itemCode: true, itemName: true, salesQtyPerPackUnit: true, salesPackagingUnit: true,
-            uPays: true, uMarque: true, uCondi: true, frgnName: true,
-          },
-        })
-      : [];
-    const pMap = new Map(products.map((p) => [p.itemCode, p]));
+    const pMap = await loadPdnProductMap(itemCodes);
 
     return NextResponse.json({
       db: process.env.SAP_B1_COMPANY_DB,
       count: docs.value?.length || 0,
-      docs: (docs.value || []).map((d) => {
-        const lines = d.DocumentLines || [];
-        const totalTTC = d.DocTotal ?? 0;
-        const totalTVA = d.VatSum ?? 0;
-        const sumLines = lines.reduce((s, l) => s + (l.LineTotal ?? 0), 0);
-        const totalHT = sumLines > 0 ? sumLines : Math.max(0, totalTTC - totalTVA);
-        return {
-          docEntry: d.DocEntry,
-          docNum: d.DocNum,
-          lot: `EM${d.DocNum}`,
-          docDate: d.DocDate,
-          cardCode: d.CardCode,
-          cardName: d.CardName,
-          numAtCard: d.NumAtCard ?? "",
-          total: totalTTC,        // rétro-compat : « total » = TTC
-          totalTTC,
-          totalHT,
-          totalTVA,
-          comments: d.Comments ?? "",
-          lineCount: lines.length,
-          lines: lines.map((l) => {
-            const p = pMap.get(l.ItemCode);
-            const ratio = (p?.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) ? p.salesQtyPerPackUnit : 1;
-            return {
-              itemCode: l.ItemCode,
-              itemName: l.ItemDescription || p?.itemName || l.ItemCode,
-              pieceQuantity: l.Quantity,
-              packageQuantity: l.PackageQuantity ?? (ratio > 1 ? l.Quantity / ratio : l.Quantity),
-              warehouse: l.WarehouseCode,
-              price: l.Price ?? null,
-              lineTotal: l.LineTotal ?? null,
-              taxPercent: l.TaxPercentagePerRow ?? null,
-              // Désignation décomposée (catalogue local)
-              uPays: p?.uPays ?? null,
-              uMarque: p?.uMarque ?? null,
-              uCondi: p?.uCondi ?? null,
-              frgnName: p?.frgnName ?? null,
-            };
-          }),
-        };
-      }),
+      docs: (docs.value || []).map((d) => mapPdnDoc(d, pMap)),
     });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
@@ -495,17 +520,22 @@ export async function GET(req: NextRequest) {
 /**
  * PATCH /api/sap/goods-receipts
  *
- * Met à jour le N° BL fournisseur (NumAtCard) d'une entrée marchandise existante
- * (PurchaseDeliveryNote). Permet de renseigner / corriger le n° de BL après coup,
- * depuis la consultation du détail.
+ * Met à jour une entrée marchandise existante (PurchaseDeliveryNote) :
+ *   - le N° BL fournisseur (NumAtCard) ;
+ *   - et/ou la VALORISATION des lignes (prix unitaire HT par ligne) — corrige
+ *     le coût d'achat après coup depuis la consultation du détail. SAP recalcule
+ *     LineTotal / DocTotal ; on renvoie l'entrée rafraîchie.
  *
- * Body : { docEntry: number, numAtCard: string }
+ * Body :
+ *   { docEntry: number,
+ *     numAtCard?: string,
+ *     lines?: { lineNum: number, price: number }[] }   // price = prix /unité de stock (HT)
  */
 export async function PATCH(req: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  let body: { docEntry?: number; numAtCard?: string };
+  let body: { docEntry?: number; numAtCard?: string; lines?: { lineNum?: number; price?: number }[] };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -513,12 +543,47 @@ export async function PATCH(req: NextRequest) {
   if (!docEntry || Number.isNaN(docEntry)) {
     return NextResponse.json({ error: "docEntry requis" }, { status: 400 });
   }
-  const numAtCard = (body.numAtCard ?? "").trim();
+
+  // ── Construit le patch SAP : NumAtCard et/ou valorisations de lignes ──
+  const sapPatch: Record<string, unknown> = {};
+  const hasNumAtCard = typeof body.numAtCard === "string";
+  if (hasNumAtCard) sapPatch.NumAtCard = (body.numAtCard ?? "").trim();
+
+  const lineUpdates: { LineNum: number; UnitPrice: number; Price: number }[] = [];
+  if (Array.isArray(body.lines)) {
+    for (const l of body.lines) {
+      const lineNum = Number(l?.lineNum);
+      const price = Number(l?.price);
+      if (!Number.isInteger(lineNum) || lineNum < 0) {
+        return NextResponse.json({ error: `lineNum invalide : ${JSON.stringify(l)}` }, { status: 400 });
+      }
+      if (!Number.isFinite(price) || price < 0) {
+        return NextResponse.json({ error: `Prix (valorisation) invalide sur la ligne ${lineNum}` }, { status: 400 });
+      }
+      // SAP : UnitPrice pilote, Price suit (cohérent avec la création POST).
+      lineUpdates.push({ LineNum: lineNum, UnitPrice: price, Price: price });
+    }
+    if (lineUpdates.length > 0) sapPatch.DocumentLines = lineUpdates;
+  }
+
+  if (!hasNumAtCard && lineUpdates.length === 0) {
+    return NextResponse.json({ error: "Rien à mettre à jour (numAtCard ou lines requis)" }, { status: 400 });
+  }
 
   try {
-    await sap.patch(`PurchaseDeliveryNotes(${docEntry})`, { NumAtCard: numAtCard });
-    return NextResponse.json({ ok: true, numAtCard });
+    await sap.patch(`PurchaseDeliveryNotes(${docEntry})`, sapPatch);
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
+
+  // Valorisations modifiées → on renvoie l'entrée rafraîchie (totaux SAP à jour).
+  // numAtCard seul : réponse légère (compat avec l'appel existant du détail).
+  if (lineUpdates.length > 0) {
+    try {
+      return NextResponse.json({ ok: true, receipt: await fetchReceiptDto(docEntry) });
+    } catch {
+      return NextResponse.json({ ok: true });
+    }
+  }
+  return NextResponse.json({ ok: true, numAtCard: sapPatch.NumAtCard ?? "" });
 }
