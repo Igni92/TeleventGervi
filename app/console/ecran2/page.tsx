@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   MonitorSmartphone, Loader2, Phone, AlertTriangle, Clock,
   TrendingUp, TrendingDown, Minus, ShoppingCart, User, Users, Mail,
@@ -20,8 +20,33 @@ import {
  * Synchronisé à l'écran 1. Le constructeur de commande prend toute la
  * largeur ; le bandeau client regroupe au-dessus toutes les infos
  * contextuelles utiles pour vendre / fidéliser / gérer un incident.
+ *
+ * Mode MODIFICATION (?modifier=docEntry&docNum&client&name) : ouvert depuis
+ * « Détail livraison », l'écran 2 charge un BL existant et pré-remplit le panier
+ * avec ses lignes (éditables). La cible passe par l'URL — et NON par consoleSync
+ * — car la console (écran 1) rediffuse en continu le client actif et écraserait
+ * une cible portée par le broadcast. Ce mode ignore donc les broadcasts.
  */
 export default function Ecran2Page() {
+  return (
+    <Suspense fallback={
+      <p className="text-[13px] text-muted-foreground inline-flex items-center gap-2 p-4">
+        <Loader2 className="h-4 w-4 animate-spin" /> Chargement…
+      </p>
+    }>
+      <Ecran2Content />
+    </Suspense>
+  );
+}
+
+function Ecran2Content() {
+  const searchParams = useSearchParams();
+  const modifierParam = searchParams.get("modifier");
+  const modifierMode = modifierParam != null && Number.isFinite(Number(modifierParam));
+  const urlClientId = searchParams.get("client");
+  const urlClientName = searchParams.get("name");
+  const urlDocNum = searchParams.get("docNum");
+
   const [state, setState] = useState<ActiveClientState | null>(null);
   const [ready, setReady] = useState(false);
 
@@ -30,17 +55,23 @@ export default function Ecran2Page() {
   useEffect(() => { rememberConsoleScreen("ecran2"); }, []);
 
   useEffect(() => {
+    // Mode modification : la cible vient de l'URL, indépendante des broadcasts.
+    if (modifierMode) { setReady(true); return; }
     setState(readActiveClient());
     const unsub = subscribeActiveClient((s) => setState(s));
     requestActiveClient();
     setReady(true);
     return unsub;
-  }, []);
+  }, [modifierMode]);
 
-  const clientId = state?.clientId ?? null;
-  const clientName = state?.clientName ?? null;
+  const modifier = modifierMode
+    ? { docEntry: Number(modifierParam), docNum: Number(urlDocNum) || 0 }
+    : null;
+
+  const clientId = modifierMode ? urlClientId : (state?.clientId ?? null);
+  const clientName = modifierMode ? urlClientName : (state?.clientName ?? null);
   const sharePct = state?.stockSharePct ?? 100;
-  const info = state?.client ?? null;
+  const info = modifierMode ? null : (state?.client ?? null);
 
   return (
     <div className="h-full flex flex-col gap-3 animate-fade-up min-h-0">
@@ -53,7 +84,11 @@ export default function Ecran2Page() {
             <Loader2 className="h-4 w-4 animate-spin" /> Connexion…
           </p>
         ) : clientId && clientName ? (
-          <Ecran2Order key={clientId} clientId={clientId} clientName={clientName} stockSharePct={sharePct} rajout={state?.rajout ?? null} />
+          <Ecran2Order
+            key={modifierMode ? `m${modifier!.docEntry}` : clientId}
+            clientId={clientId} clientName={clientName} stockSharePct={sharePct}
+            modifier={modifier}
+          />
         ) : (
           <div className="h-full flex items-center justify-center panel">
             <p className="hidden md:block text-[13px] text-muted-foreground text-center max-w-xs">
