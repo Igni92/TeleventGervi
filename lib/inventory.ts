@@ -36,9 +36,45 @@ export interface InventoryPhoto {
   addedAt: string;
 }
 
+/**
+ * Mouvement de régularisation posté dans SAP pour une ligne d'écart.
+ * `sens` = "entree" (excédent → InventoryGenEntries) | "sortie" (manque →
+ * InventoryGenExits). `qtyUnits` est en UNITÉS D'INVENTAIRE SAP (pie/kg), valeur
+ * absolue ; `ecartColis` reste l'écart affiché (colis). `value` = qtyUnits ×
+ * prix d'achat unitaire (positif). `lot` = EM<DocNum> affecté.
+ */
+export interface InventoryMove {
+  itemCode: string;
+  itemName: string;
+  sens: "entree" | "sortie";
+  ecartColis: number;
+  unitsPerColis: number;
+  qtyUnits: number;      // |écart| en unités SAP
+  lot: string | null;    // EM<DocNum>
+  unitPrice: number;     // €/unité d'inventaire
+  value: number;         // qtyUnits × unitPrice (≥ 0)
+}
+
+/** Trace de l'ajustement de stock SAP déclenché à la validation d'un inventaire. */
+export interface InventoryAdjustment {
+  status: "done" | "error";
+  at: string;
+  by: string;
+  moves: InventoryMove[];
+  nbSorties: number;
+  nbEntrees: number;
+  totalValue: number;            // somme des valeurs (€)
+  sapExitDocNum: number | null;  // InventoryGenExits
+  sapExitEntry: number | null;
+  sapEntryDocNum: number | null; // InventoryGenEntries
+  sapEntryEntry: number | null;
+  sapEnv: string;                // base SAP au moment de l'écriture ("prod"/"test")
+  error?: string;
+}
+
 export interface InventorySession {
   id: string;
-  status: "submitted" | "reviewed";
+  status: "submitted" | "reviewed" | "adjusted";
   createdBy: string;     // email du préparateur
   note: string;
   lines: InventoryLine[];
@@ -53,6 +89,8 @@ export interface InventorySession {
   /** Dernière correction / recomptage en place (PUT) : qui, quand. */
   updatedAt?: string | null;
   updatedBy?: string | null;
+  /** Régularisation de stock SAP (posée une seule fois à la validation). */
+  adjustment?: InventoryAdjustment | null;
   /** Présent uniquement dans les réponses de LISTE (photos retirées du payload). */
   nbPhotos?: number;
 }

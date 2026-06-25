@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Loader2, Send, CheckCircle2, AlertTriangle, ClipboardList, Camera, ChevronRight,
   ChevronLeft, Pencil, X, ImageIcon, ScanLine, PackageCheck, RotateCcw, Save,
+  PackageMinus, PackagePlus, Database, AlertCircle, Boxes,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,12 +22,28 @@ import {
 /* ---- DTO côté client (on n'importe pas lib/inventory : il tire Prisma) ---- */
 type LineDTO = { itemCode: string; itemName: string; sapQty: number; realQty: number; unit: string; ecart: number };
 type PhotoDTO = { id: string; dataUrl: string; w: number; h: number };
+type MoveDTO = {
+  itemCode: string; itemName: string; sens: "entree" | "sortie";
+  ecartColis: number; unitsPerColis: number; qtyUnits: number;
+  lot: string | null; unitPrice: number; value: number;
+};
+type AdjustmentDTO = {
+  status: "done" | "error"; at: string; by: string;
+  nbSorties: number; nbEntrees: number; totalValue: number;
+  sapExitDocNum: number | null; sapEntryDocNum: number | null; sapEnv: string; error?: string;
+};
+type AdjustPreview = {
+  ok: boolean; sapEnv: string; sapCompany: string; alreadyAdjusted: boolean;
+  adjustment: AdjustmentDTO | null; moves: MoveDTO[];
+  nbSorties: number; nbEntrees: number; totalValue: number;
+};
 type SessionDTO = {
-  id: string; status: "submitted" | "reviewed"; createdBy: string; note: string;
+  id: string; status: "submitted" | "reviewed" | "adjusted"; createdBy: string; note: string;
   lines: LineDTO[]; photos: PhotoDTO[]; nbEcarts: number; createdAt: string;
   reviewedAt: string | null; reviewedBy: string | null;
   reopenedAt?: string | null; reopenedBy?: string | null;
-  updatedAt?: string | null; updatedBy?: string | null; nbPhotos?: number;
+  updatedAt?: string | null; updatedBy?: string | null;
+  adjustment?: AdjustmentDTO | null; nbPhotos?: number;
 };
 
 /** Estime le poids décodé (octets) d'une data-URL base64 (pour l'affichage en édition). */
@@ -73,6 +90,14 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   // fait un PUT (mise à jour en place) plutôt qu'un POST.
   const [editing, setEditing] = useState<SessionDTO | null>(null);
   const [loadingEdit, setLoadingEdit] = useState<string | null>(null);
+
+  // Import du stock SAP avant comptage (clic « Commencer »).
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Régularisation de stock SAP (aperçu + confirmation) — réservée admin/direction.
+  const [adjustFor, setAdjustFor] = useState<SessionDTO | null>(null);
+  const [adjustPlan, setAdjustPlan] = useState<AdjustPreview | "loading" | null>(null);
+  const [adjusting, setAdjusting] = useState(false);
 
   // Navigation
   const [mode, setMode] = useState<Mode>("home");
@@ -261,6 +286,78 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     setMode("home");
   }
 
+  /** Import du stock SAP (avant comptage) — rafraîchit puis recharge les produits. */
+  async function refreshStock(): Promise<void> {
+    setRefreshing(true);
+    try {
+      const res = await fetch("/api/inventaire/refresh-stock", { method: "POST" });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.ok) {
+        await loadProducts();
+        toast.success(`Stock SAP à jour — ${json.refreshed}/${json.total} article(s).`);
+      } else {
+        toast.error(json?.error ?? "Mise à jour du stock SAP impossible — comptage sur le dernier stock connu.");
+      }
+    } catch {
+      toast.error("Mise à jour du stock SAP impossible — comptage sur le dernier stock connu.");
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  /** Démarre l'inventaire complet en important d'abord le stock SAP. */
+  async function startFullCount() {
+    await refreshStock();
+    startCount(ordered, "Inventaire complet");
+  }
+
+  /** Ouvre l'aperçu de régularisation SAP pour une session (admin/direction). */
+  async function openAdjust(s: SessionDTO) {
+    setAdjustFor(s);
+    setAdjustPlan("loading");
+    try {
+      const res = await fetch(`/api/inventaire/adjust?id=${encodeURIComponent(s.id)}`, { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok || !json.ok) { toast.error(json.error ?? "Erreur"); setAdjustFor(null); setAdjustPlan(null); return; }
+      setAdjustPlan(json as AdjustPreview);
+    } catch (e) {
+      toast.error((e as Error).message); setAdjustFor(null); setAdjustPlan(null);
+    }
+  }
+
+  function closeAdjust() { setAdjustFor(null); setAdjustPlan(null); }
+
+  /** Confirme et poste la régularisation dans SAP. */
+  async function confirmAdjust() {
+    if (!adjustFor) return;
+    setAdjusting(true);
+    try {
+      const res = await fetch("/api/inventaire/adjust", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: adjustFor.id }),
+      });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.ok) {
+        const a = json.adjustment as AdjustmentDTO;
+        toast.success(
+          `Stock régularisé — ${a.nbSorties} sortie(s) / ${a.nbEntrees} entrée(s)` +
+          `${a.sapExitDocNum ? ` · sortie #${a.sapExitDocNum}` : ""}${a.sapEntryDocNum ? ` · entrée #${a.sapEntryDocNum}` : ""}.`,
+          { duration: 9000 },
+        );
+        closeAdjust();
+        loadSessions();
+      } else {
+        toast.error(json?.adjustment?.error ?? json?.error ?? "Échec de la régularisation SAP.", { duration: 9000 });
+        // Recharge : la session peut être passée en « erreur » côté serveur.
+        closeAdjust();
+        loadSessions();
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setAdjusting(false);
+    }
+  }
+
   async function openSessionPhotos(id: string) {
     if (sessionPhotos[id] && sessionPhotos[id] !== "loading") return;
     setSessionPhotos((m) => ({ ...m, [id]: "loading" }));
@@ -339,8 +436,107 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Aperçu + confirmation de régularisation SAP */}
+      <AnimatePresence>{adjustFor && renderAdjustModal()}</AnimatePresence>
     </div>
   );
+
+  /* -------------------- Modale : régularisation de stock SAP -------------------- */
+  function renderAdjustModal() {
+    if (!adjustFor) return null;
+    const plan = adjustPlan;
+    const isProd = plan && plan !== "loading" && plan.sapEnv === "prod";
+    return (
+      <motion.div
+        className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={() => !adjusting && closeAdjust()}
+      >
+        <motion.div
+          className="flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl bg-card shadow-xl sm:rounded-2xl"
+          initial={{ y: 24, opacity: 0.6 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 24, opacity: 0 }}
+          transition={{ duration: 0.18 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-3 border-b border-border p-4">
+            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand-500/15 text-brand-600 dark:text-brand-300"><Boxes className="h-5 w-5" /></div>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-[15px] font-bold text-foreground">Régulariser le stock SAP</h3>
+              <p className="text-[11.5px] text-muted-foreground">Inventaire du {fmtDate(adjustFor.createdAt)} · {adjustFor.createdBy}</p>
+            </div>
+            <button onClick={() => !adjusting && closeAdjust()} className="grid h-8 w-8 place-items-center rounded-full text-muted-foreground hover:bg-muted" aria-label="Fermer"><X className="h-4 w-4" /></button>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            {plan === "loading" || plan === null ? (
+              <div className="flex h-40 items-center justify-center text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin" /></div>
+            ) : (
+              <div className="space-y-3">
+                {/* Bandeau base SAP */}
+                <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium ${isProd ? "bg-rose-500/10 text-rose-700 dark:text-rose-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}>
+                  <Database className="h-4 w-4 shrink-0" />
+                  Écriture sur la base SAP <b>{plan.sapEnv.toUpperCase()}</b>{plan.sapCompany ? ` · ${plan.sapCompany}` : ""}{isProd ? " — stock réel" : " — base de test"}.
+                </div>
+
+                {plan.alreadyAdjusted && (
+                  <div className="rounded-lg bg-muted px-3 py-2 text-[12px] text-muted-foreground">
+                    Cet inventaire a déjà été régularisé{plan.adjustment?.status === "error" ? " (en erreur — à reprendre dans SAP)" : ""}.
+                  </div>
+                )}
+
+                {plan.moves.length === 0 ? (
+                  <p className="py-6 text-center text-[13px] text-muted-foreground">Aucun écart à régulariser.</p>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-3 text-[12px] text-muted-foreground">
+                      <span className="inline-flex items-center gap-1"><PackageMinus className="h-3.5 w-3.5 text-amber-600" /> {plan.nbSorties} sortie(s)</span>
+                      <span className="inline-flex items-center gap-1"><PackagePlus className="h-3.5 w-3.5 text-emerald-600" /> {plan.nbEntrees} entrée(s)</span>
+                      <span className="ml-auto font-semibold text-foreground tnum">Impact ≈ {plan.totalValue >= 0 ? "+" : ""}{plan.totalValue.toFixed(2)} €</span>
+                    </div>
+                    <div className="divide-y divide-border/60 rounded-lg border border-border">
+                      {plan.moves.map((m) => (
+                        <div key={m.itemCode} className="flex items-center gap-2.5 p-2.5">
+                          <div className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${m.sens === "sortie" ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"}`}>
+                            {m.sens === "sortie" ? <PackageMinus className="h-4 w-4" /> : <PackagePlus className="h-4 w-4" />}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-[12.5px] font-semibold text-foreground">{m.itemName}</div>
+                            <div className="text-[11px] text-muted-foreground tnum">
+                              {m.sens === "sortie" ? "Sortir" : "Entrer"} {fmt(m.qtyUnits)} u. ({fmt(Math.abs(m.ecartColis))} colis)
+                              {m.lot ? ` · ${m.lot}` : " · lot ?"}
+                            </div>
+                          </div>
+                          <div className="shrink-0 text-right">
+                            <div className={`text-[12px] font-bold tnum ${m.sens === "sortie" ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                              {m.sens === "sortie" ? "−" : "+"}{m.value.toFixed(2)} €
+                            </div>
+                            {m.unitPrice > 0 && <div className="text-[10px] text-muted-foreground tnum">{m.unitPrice.toFixed(2)} €/u</div>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 border-t border-border p-3">
+            <Button variant="ghost" className="flex-1" onClick={closeAdjust} disabled={adjusting}>Annuler</Button>
+            <Button
+              className="flex-1"
+              onClick={confirmAdjust}
+              disabled={adjusting || plan === "loading" || plan === null || plan.moves.length === 0 || plan.alreadyAdjusted}
+            >
+              {adjusting ? <Loader2 className="!size-4 animate-spin" /> : <Boxes className="!size-4" />}
+              Confirmer l&apos;ajustement SAP
+            </Button>
+          </div>
+        </motion.div>
+      </motion.div>
+    );
+  }
 
   /* ----------------------------- Écran ACCUEIL ----------------------------- */
   function renderHome() {
@@ -370,10 +566,10 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
           </div>
 
           <div className="mt-5 flex flex-col gap-2 sm:flex-row">
-            <Button size="lg" className="h-12 flex-1 text-[15px]" onClick={() => startCount(ordered, "Inventaire complet")}>
-              <ScanLine className="!size-5" />
-              {resume ? "Reprendre le comptage" : "Commencer l'inventaire"}
-              <ChevronRight className="!size-5" />
+            <Button size="lg" className="h-12 flex-1 text-[15px]" onClick={startFullCount} disabled={refreshing}>
+              {refreshing ? <Loader2 className="!size-5 animate-spin" /> : <ScanLine className="!size-5" />}
+              {refreshing ? "Mise à jour du stock SAP…" : resume ? "Reprendre le comptage" : "Commencer l'inventaire"}
+              {!refreshing && <ChevronRight className="!size-5" />}
             </Button>
             {(countedCount > 0 || photos.length > 0) && (
               <Button size="lg" variant="success" className="h-12 text-[15px]" onClick={() => setMode("recap")}>
@@ -381,11 +577,16 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
               </Button>
             )}
           </div>
-          {resume && (
-            <button onClick={resetDraft} className="mt-3 text-[12px] text-muted-foreground hover:text-foreground">
-              Réinitialiser le comptage en cours
-            </button>
-          )}
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <p className="text-[11.5px] text-muted-foreground">
+              On compte <b>uniquement en colis</b>. Le stock SAP est rafraîchi au démarrage.
+            </p>
+            {resume && (
+              <button onClick={resetDraft} className="shrink-0 text-[12px] text-muted-foreground hover:text-foreground">
+                Réinitialiser
+              </button>
+            )}
+          </div>
         </SurfaceCard>
 
         {/* Familles — « petit à petit » */}
@@ -586,15 +787,33 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                     {s.updatedBy && (
                       <div className="text-[11px] text-sky-600/90 dark:text-sky-400/90">Dernière correction par {s.updatedBy}</div>
                     )}
+                    {s.status === "adjusted" && s.adjustment && (
+                      <div className={`text-[11px] ${s.adjustment.status === "error" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600/90 dark:text-emerald-400/90"}`}>
+                        {s.adjustment.status === "error" ? "⚠ Régularisation en erreur" : "Stock régularisé"} par {s.adjustment.by}
+                        {s.adjustment.sapExitDocNum ? ` · sortie #${s.adjustment.sapExitDocNum}` : ""}
+                        {s.adjustment.sapEntryDocNum ? ` · entrée #${s.adjustment.sapEntryDocNum}` : ""}
+                        {` · ${s.adjustment.nbSorties}↓/${s.adjustment.nbEntrees}↑`}
+                        {s.adjustment.error ? ` — ${s.adjustment.error}` : ""}
+                      </div>
+                    )}
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                    {s.status === "reviewed" ? (
+                    {s.status === "adjusted" ? (
+                      <span className={`inline-flex items-center gap-1 text-[12px] ${s.adjustment?.status === "error" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                        {s.adjustment?.status === "error" ? <AlertCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />} régularisé
+                      </span>
+                    ) : s.status === "reviewed" ? (
                       <span className="inline-flex items-center gap-1 text-[12px] text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> revu</span>
                     ) : (
                       <span className="text-[12px] font-semibold text-amber-600 dark:text-amber-400">à revoir</span>
                     )}
-                    {canManage && (
+                    {canManage && s.status !== "adjusted" && (
                       <>
+                        {s.nbEcarts > 0 && (
+                          <Button size="sm" onClick={() => openAdjust(s)}>
+                            <Boxes className="!size-3.5" /> Valider &amp; ajuster le stock
+                          </Button>
+                        )}
                         {s.status === "submitted" ? (
                           <Button size="sm" variant="outline" onClick={() => patchSession(s.id, "review")}>
                             <CheckCircle2 className="!size-3.5" /> Marquer revu

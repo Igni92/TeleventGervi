@@ -86,6 +86,46 @@ export async function decrementLocalStock(
 }
 
 /**
+ * Régularisation d'INVENTAIRE dans le miroir local : applique un delta SIGNÉ
+ * (en unités d'inventaire SAP) sur inStock/available/totalStock — delta > 0 pour
+ * un excédent (entrée), delta < 0 pour un manque (sortie). Contrairement à
+ * decrementLocalStock (qui modélise une RÉSERVATION via committed), ici on touche
+ * le stock RÉEL (inStock), car le mouvement SAP correspondant ajoute/retire
+ * vraiment de la marchandise. Clampe à 0 (jamais de stock négatif local). La sync
+ * delta SAP recalera la valeur exacte au tick suivant.
+ */
+export async function applyInventoryDelta(
+  lines: { itemCode: string; deltaUnits: number; warehouseCode?: string }[],
+): Promise<void> {
+  await Promise.all(lines.map(async (l) => {
+    const whs = l.warehouseCode ?? "01";
+    if (!WAREHOUSES.has(whs) || !Number.isFinite(l.deltaUnits) || l.deltaUnits === 0) return;
+    const product = await prisma.product.findUnique({
+      where: { itemCode: l.itemCode },
+      select: { id: true },
+    });
+    if (!product) return;
+    const cur = await prisma.productStock.findUnique({
+      where: { productId_warehouse: { productId: product.id, warehouse: whs } },
+      select: { inStock: true, available: true },
+    });
+    const nextInStock = Math.max(0, (cur?.inStock ?? 0) + l.deltaUnits);
+    const nextAvail = Math.max(0, (cur?.available ?? 0) + l.deltaUnits);
+    await prisma.productStock.upsert({
+      where: { productId_warehouse: { productId: product.id, warehouse: whs } },
+      update: { inStock: nextInStock, available: nextAvail, syncedAt: new Date() },
+      create: { productId: product.id, warehouse: whs, inStock: Math.max(0, l.deltaUnits), available: Math.max(0, l.deltaUnits) },
+    });
+    // totalStock = somme tous entrepôts → on applique le même delta (clampé ≥ 0).
+    const prod = await prisma.product.findUnique({ where: { id: product.id }, select: { totalStock: true } });
+    await prisma.product.update({
+      where: { id: product.id },
+      data: { totalStock: Math.max(0, (prod?.totalStock ?? 0) + l.deltaUnits), syncedAt: new Date() },
+    });
+  }));
+}
+
+/**
  * Incrément local immédiat (inStock +=, available +=) après création d'une entrée
  * marchandise (PurchaseDeliveryNote). Miroir de decrementLocalStock — supprime
  * la fenêtre où la marchandise serait reçue physiquement mais invisible côté UI
