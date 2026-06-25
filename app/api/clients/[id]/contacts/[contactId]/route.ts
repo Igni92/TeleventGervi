@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { standardizePhone } from "@/lib/phone";
 
 /**
  * PATCH  /api/clients/[id]/contacts/[contactId]  → modifie un interlocuteur
@@ -22,7 +23,7 @@ export async function PATCH(
   const data: Record<string, string | null> = {};
   if (body.name !== undefined) data.name = body.name.trim();
   if (body.role !== undefined) data.role = body.role?.trim() || null;
-  if (body.phone !== undefined) data.phone = body.phone?.trim() || null;
+  if (body.phone !== undefined) data.phone = body.phone?.trim() ? standardizePhone(body.phone) : null;
   if (body.email !== undefined) data.email = body.email?.trim() || null;
   if (body.note !== undefined) data.note = body.note?.trim() || null;
 

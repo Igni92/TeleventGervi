@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { standardizePhone } from "@/lib/phone";
 
 /**
  * GET  /api/clients/[id]/contacts   → liste des interlocuteurs
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       clientId: params.id,
       name: body.name.trim(),
       role: body.role?.trim() || null,
-      phone: body.phone?.trim() || null,
+      phone: body.phone?.trim() ? standardizePhone(body.phone) : null,
       email: body.email?.trim() || null,
       note: body.note?.trim() || null,
       position: count,

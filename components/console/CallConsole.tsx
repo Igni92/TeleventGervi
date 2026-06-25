@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/dialog";
 import { InfoTip } from "@/components/ui/info-tip";
 import { formatDate, formatDateInput, formatRelative } from "@/lib/utils";
+import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
 import { motion } from "framer-motion";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { DUR, EASE } from "@/lib/motion";
@@ -846,7 +847,7 @@ const QueueRow = React.memo(function QueueRow({
               }`}
               title={isDirect ? "Ligne directe" : "Standard"}
             >
-              {phone}
+              {formatPhoneDisplay(phone)}
             </span>
           )}
         </div>
@@ -1815,25 +1816,25 @@ function ActionPanel({
             <div className="space-y-2">
               {/* Numéro principal — gros, le plus accessible (loi de Fitts) */}
               <a
-                href={`tel:${tels[0].value}`}
+                href={`tel:${standardizePhone(tels[0].value)}`}
                 className="group flex items-center gap-3 px-4 py-4 rounded-2xl bg-primary text-primary-foreground shadow-[0_2px_14px_rgba(250,204,21,0.3)] hover:brightness-105 hover:shadow-[0_4px_22px_rgba(250,204,21,0.45)] transition-all active:scale-[0.99]"
               >
                 <Phone className="h-6 w-6 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">{tels[0].label}</p>
-                  <p className="text-[22px] font-mono font-bold tnum leading-tight truncate">{tels[0].value}</p>
+                  <p className="text-[22px] font-mono font-bold tnum leading-tight truncate">{formatPhoneDisplay(tels[0].value)}</p>
                 </div>
               </a>
               {/* Numéros secondaires — compacts */}
               {tels.slice(1).map((t) => (
                 <a
                   key={t.label}
-                  href={`tel:${t.value}`}
+                  href={`tel:${standardizePhone(t.value)}`}
                   className="group flex items-center gap-2.5 px-3 py-2 rounded-lg bg-secondary/40 hover:bg-secondary border border-border transition-all"
                 >
                   <Phone className="h-3.5 w-3.5 text-brand-500 dark:text-brand-400 shrink-0" />
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground w-16 shrink-0">{t.label}</span>
-                  <span className="text-[13px] font-mono font-semibold text-foreground tnum truncate">{t.value}</span>
+                  <span className="text-[13px] font-mono font-semibold text-foreground tnum truncate">{formatPhoneDisplay(t.value)}</span>
                 </a>
               ))}
             </div>

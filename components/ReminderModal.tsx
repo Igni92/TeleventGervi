@@ -21,6 +21,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { rappelSchema, type RappelFormValues } from "@/lib/validations";
 import { formatDate, formatDateInput } from "@/lib/utils";
+import { formatPhoneDisplay } from "@/lib/phone";
 
 interface Rappel {
   id: string;
@@ -175,9 +176,9 @@ export function ReminderModal({
           </DialogTitle>
           <DialogDescription>
             Code : <strong>{client.code}</strong>
-            {client.tel1 && <> &bull; {client.tel1}</>}
-            {client.tel2 && ` / ${client.tel2}`}
-            {client.tel3 && ` / ${client.tel3}`}
+            {client.tel1 && <> &bull; {formatPhoneDisplay(client.tel1)}</>}
+            {client.tel2 && ` / ${formatPhoneDisplay(client.tel2)}`}
+            {client.tel3 && ` / ${formatPhoneDisplay(client.tel3)}`}
           </DialogDescription>
         </DialogHeader>
 

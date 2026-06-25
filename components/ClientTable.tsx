@@ -588,10 +588,10 @@ export function ClientTable() {
                     )}
                   </TableCell>
                   <TableCell className="px-4 py-3 font-mono text-[12px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                    {client.tel1 || <span className="text-slate-300 dark:text-slate-600">—</span>}
+                    {client.tel1 ? formatPhoneDisplay(client.tel1) : <span className="text-slate-300 dark:text-slate-600">—</span>}
                   </TableCell>
                   <TableCell className="px-4 py-3 font-mono text-[12px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                    {client.tel2 || <span className="text-slate-300 dark:text-slate-600">—</span>}
+                    {client.tel2 ? formatPhoneDisplay(client.tel2) : <span className="text-slate-300 dark:text-slate-600">—</span>}
                   </TableCell>
                   <TableCell className="px-4 py-3 whitespace-nowrap">
                     {client.derniereCommande ? (
