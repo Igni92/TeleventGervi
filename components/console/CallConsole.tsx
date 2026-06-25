@@ -8,7 +8,7 @@ import {
   ChevronRight,
   Loader2, Calendar, Sparkles, ArrowUpDown,
   StickyNote, History, User, TrendingUp, TrendingDown, Minus,
-  MessageSquare, AlertTriangle, Settings, Mail, Tag, ArrowUpRight,
+  MessageSquare, AlertTriangle, Settings, Mail, ArrowUpRight,
 } from "lucide-react";
 import Link from "next/link";
 import type { ClientInsights } from "@/lib/insights";
@@ -24,6 +24,7 @@ import { loadCallNote, saveCallNote, clearCallNote } from "@/lib/callNoteStorage
 import { MonitorSmartphone } from "lucide-react";
 import { BLDialog } from "@/components/console/BLDialog";
 import { SapOrderHistory } from "@/components/console/SapOrderHistory";
+import { SapGroupBadge } from "@/components/clients/SapGroupBadge";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -1332,25 +1333,12 @@ function NotesCluster({
         )}
       </div>
 
-      {/* ── Groupe SAP (lecture seule) ──────────────────── */}
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
-          <Tag className="h-3 w-3" /> Groupe SAP
-        </div>
-        {client.sapGroupName ? (
-          <span
-            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-border bg-secondary/40 text-[12px]"
-            title="Édition réservée à SAP B1 (pilote les coefs de prix conseillé)"
-          >
-            <span className="font-medium text-foreground">{client.sapGroupName}</span>
-            {client.sapGroupCode != null && (
-              <span className="font-mono text-[10.5px] text-muted-foreground">#{client.sapGroupCode}</span>
-            )}
-          </span>
-        ) : (
-          <span className="text-[11.5px] italic text-muted-foreground">— non synchronisé —</span>
-        )}
-      </div>
+      {/* ── Groupe SAP (badge compact éditable, bidir SAP) ──────────────────── */}
+      <SapGroupBadge
+        clientId={client.id}
+        initialCode={client.sapGroupCode}
+        initialName={client.sapGroupName}
+      />
 
       {/* ── Historique compilé (notes laissées sur les commandes) ── */}
       {commandeNotes.length > 0 && (

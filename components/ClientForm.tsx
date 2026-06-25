@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ClientGroupEditor } from "@/components/clients/ClientGroupEditor";
+import { SapGroupBadge } from "@/components/clients/SapGroupBadge";
 import {
   Select,
   SelectContent,
@@ -265,9 +265,9 @@ export function ClientForm({ initialData, mode }: ClientFormProps) {
             POST/PATCH (legacy) mais n'est plus éditable ici. */}
         <input type="hidden" {...register("email")} />
 
-        {/* Groupe SAP — éditable (écrit le GroupCode dans SAP, pilote les coefs prix) */}
+        {/* Groupe SAP — badge compact éditable (écrit le GroupCode dans SAP, pilote les coefs prix) */}
         {mode === "edit" && initialData?.id ? (
-          <ClientGroupEditor
+          <SapGroupBadge
             clientId={initialData.id}
             initialCode={initialData.sapGroupCode ?? null}
             initialName={initialData.sapGroupName ?? null}
