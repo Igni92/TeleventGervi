@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ChevronDown, ChevronRight, ChevronUp, Search, Plus, Trash2,
-  ShoppingCart, Check, RotateCcw, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock,
+  ShoppingCart, Check, RotateCcw, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock, X,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
@@ -497,6 +497,32 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       [next[i], next[j]] = [next[j], next[i]];
       return next;
     });
+
+  /** C2 — Bascule la promotion d'une ligne (jamais imposée) : applique la promo
+   *  active de l'article si absente, la retire sinon. Marche aussi sur les
+   *  lignes déjà au BL. PERCENT : ajuste le prix net affiché (et le restaure au
+   *  retrait) ; X_PLUS_Y / FREE : (re)calcule les colis offerts via applyPromoFree. */
+  const togglePromo = (i: number) =>
+    setCart((cur) => cur.map((l, k) => {
+      if (k !== i) return l;
+      if (l.promo) {
+        // Retrait : on restaure le prix plein si une remise % avait été appliquée.
+        let price = l.price;
+        if (l.promo.kind === "PERCENT" && l.discountPercent > 0 && l.discountPercent < 100 && price != null) {
+          price = Math.round((price / (1 - l.discountPercent / 100)) * 100) / 100;
+        }
+        return { ...l, promo: null, discountPercent: 0, freeUnits: 0, price };
+      }
+      const pr = promos[l.itemCode];
+      if (!pr) return l;
+      let price = l.price;
+      let discountPercent = 0;
+      if (pr.kind === "PERCENT" && pr.value > 0 && pr.value < 100) {
+        discountPercent = pr.value;
+        if (price != null) price = Math.round(price * (1 - pr.value / 100) * 100) / 100;
+      }
+      return applyPromoFree({ ...l, promo: pr, discountPercent, price });
+    }));
   /** Retire un item du panier par son itemCode (utilisé par le toggle Add/Done). */
   const removeFromCartByCode = (itemCode: string) =>
     setCart((c) => c.filter((l) => l.itemCode !== itemCode));
@@ -654,17 +680,29 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       const lines: FinalLine[] = [];
       for (const l of cart) {
         const o = l.originalLine;
-        if (o) {
+        // Ligne existante SANS promo (ou avec remise % simple) → conservée
+        // verbatim, lot préservé ; la remise % est portée sur la ligne (prix brut + %).
+        if (o && (!l.promo || l.promo.kind === "PERCENT")) {
           const qtyChanged = Math.abs(l.quantity - o.qty) > 1e-6;
           const pieces = qtyChanged ? Math.round(l.quantity * l.packDivisor * 1000) / 1000 : o.pieces;
           if (pieces <= 0) continue;
+          let price = l.price;
+          let discountPercent: number | undefined;
+          if (l.promo?.kind === "PERCENT" && l.discountPercent > 0 && l.discountPercent < 100 && price != null) {
+            discountPercent = Math.round(l.discountPercent * 100) / 100;
+            price = Math.round((price / (1 - l.discountPercent / 100)) * 10000) / 10000; // net → brut
+          }
           lines.push({
             itemCode: l.itemCode, quantity: pieces,
             ...(o.warehouse ? { warehouseCode: o.warehouse } : {}),
-            ...(l.price != null && l.price > 0 ? { price: l.price } : {}),
+            ...(price != null && price > 0 ? { price } : {}),
+            ...(discountPercent != null ? { discountPercent } : {}),
             keep: true, lot: o.lot,
           });
         } else {
+          // Nouvelle ligne, OU ligne existante avec promo « X+Y / offert » (qui ajoute
+          // une ligne offerte à 0 €) → reconstruite via buildApiLines (split entrepôt,
+          // colis offerts, lot/TPF serveur).
           for (const a of buildApiLines([l])) {
             lines.push({
               itemCode: a.itemCode, quantity: a.quantity,
@@ -1067,12 +1105,20 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                           À DÉCOUVERT
                         </span>
                       )}
-                      {/* C2 — rappel promo sur la ligne panier : « −10 % » ou « 5+1 » */}
-                      {l.promo && (
-                        <span className="inline-flex h-5 items-center px-1.5 rounded text-[11px] font-bold bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-400/60 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/50">
-                          {promoBadge(l.promo)}
-                        </span>
-                      )}
+                      {/* C2 — promo PAR LIGNE, jamais imposée : appliquer/retirer en 1 clic
+                          (badge actif = clic pour retirer ; sinon chip discret si une promo
+                          existe pour l'article). Marche aussi sur les lignes déjà au BL. */}
+                      {l.promo ? (
+                        <button type="button" onClick={() => togglePromo(i)} title="Retirer la promotion"
+                          className="inline-flex h-5 items-center gap-1 px-1.5 rounded text-[11px] font-bold bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-400/60 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/50 hover:bg-rose-200 dark:hover:bg-rose-500/40">
+                          {promoBadge(l.promo)} <X className="h-2.5 w-2.5" />
+                        </button>
+                      ) : (promos[l.itemCode] && !locked) ? (
+                        <button type="button" onClick={() => togglePromo(i)} title="Appliquer la promotion"
+                          className="inline-flex h-5 items-center gap-1 px-1.5 rounded text-[11px] font-semibold border border-dashed border-rose-300 text-rose-600 hover:bg-rose-50 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-950/30">
+                          <Megaphone className="h-2.5 w-2.5" /> {promoBadge(promos[l.itemCode])}
+                        </button>
+                      ) : null}
                       {/* Modification : ligne déjà LIVRÉE → verrouillée (ni édition ni retrait) */}
                       {locked && (
                         <span title="Ligne déjà livrée — verrouillée"
