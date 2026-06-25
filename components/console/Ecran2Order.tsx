@@ -45,6 +45,9 @@ interface CartLine {
   stepColis: number;
   // C2 — promo appliquée à la ligne (remise SAP envoyée à la création du bon)
   promo: Promo | null; discountPercent: number; freeUnits: number;
+  // freeUnits saisi À LA MAIN (sélecteur « offert ») → ne pas recalculer depuis la
+  // promo quand la quantité change. true dès que l'utilisateur touche le sélecteur.
+  freeManual?: boolean;
   // Mode MODIFICATION : ligne déjà présente sur le BL. null/absent = nouvelle
   // ligne. Le BL est ré-enregistré en remplacement complet → une ligne retirée
   // du panier est supprimée du BL, l'ordre du panier = l'ordre des lignes.
@@ -70,6 +73,7 @@ interface Carrier { id: string; name: string; count?: number }
  *  FREE (« 1 colis offert ») : freeQty offerts dès qu'on commande l'article (sans seuil).
  *  No-op pour les autres lignes — appelé à chaque changement de quantité. */
 function applyPromoFree(line: CartLine): CartLine {
+  if (line.freeManual) return line;   // « offert » saisi à la main → on n'écrase pas
   const pr = line.promo;
   const qty = line.quantity;
   if (pr?.kind === "X_PLUS_Y" && pr.buyQty > 0 && pr.freeQty > 0) {
@@ -163,11 +167,13 @@ interface GroupEntry { key: string; name: string; prods: Product[]; pinned?: boo
  *   C4 — densité d'affichage Compact / Normal / Aéré : RÉGLÉE sur /parametres
  *        (localStorage televente:ecran2Density), lue ici + listener storage
  */
-export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifier: modifierProp = null }: {
+export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifier: modifierProp = null, onExitModif }: {
   clientId: string; clientName: string; stockSharePct?: number;
-  /** Cible de MODIFICATION (pilotée par « Détail livraison » via l'URL) : on
-   *  pré-remplit le panier avec les lignes du BL et on enregistre sur ce BL. */
+  /** Cible de MODIFICATION (diffusée par « Détail livraison ») : on pré-remplit le
+   *  panier avec les lignes du BL et on enregistre sur ce BL. */
   modifier?: { docEntry: number; docNum: number } | null;
+  /** Quitter la modification → l'écran 2 reprend la synchro normale. */
+  onExitModif?: () => void;
 }) {
   const [grouped, setGrouped] = useState<Record<string, Product[]>>({});
   const [loading, setLoading] = useState(false);
@@ -481,7 +487,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
         marque: p.uMarque ?? null, condi: p.uCondi ?? p.uUvc ?? null, pays: p.uPays ?? null,
         variete: p.frgnName ?? null,
         stepColis,
-        promo, discountPercent, freeUnits: 0,
+        promo, discountPercent, freeUnits: 0, freeManual: false,
         originalLine: null,   // ajoutée via le stock → nouvelle ligne du BL
       })];
     });
@@ -513,7 +519,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
         if (l.promo.kind === "PERCENT" && l.discountPercent > 0 && l.discountPercent < 100 && price != null) {
           price = Math.round((price / (1 - l.discountPercent / 100)) * 100) / 100;
         }
-        return { ...l, promo: null, discountPercent: 0, freeUnits: 0, price };
+        return { ...l, promo: null, discountPercent: 0, freeUnits: 0, freeManual: false, price };
       }
       const pr = promos[l.itemCode];
       if (!pr) return l;
@@ -523,7 +529,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
         discountPercent = pr.value;
         if (price != null) price = Math.round(price * (1 - pr.value / 100) * 100) / 100;
       }
-      return applyPromoFree({ ...l, promo: pr, discountPercent, price });
+      // freeManual:false → la promo (re)calcule les colis offerts (X+Y / offert).
+      return applyPromoFree({ ...l, promo: pr, discountPercent, price, freeManual: false });
     }));
   /** Retire un item du panier par son itemCode (utilisé par le toggle Add/Done). */
   const removeFromCartByCode = (itemCode: string) =>
@@ -611,9 +618,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   const buildApiLines = (lines: CartLine[] = cart): ApiLine[] =>
     lines.flatMap((l) => {
       const kind = l.promo?.kind;
-      const freeUnits = (kind === "X_PLUS_Y" || kind === "FREE") ? Math.max(0, Math.floor(l.freeUnits)) : 0;
-      // Colis offerts (X_PLUS_Y / FREE) : toujours EN PLUS de la qté saisie (ligne
-      // séparée à 0 €). La quantité saisie est donc entièrement payante.
+      // Colis offerts (promo X+Y / offert OU saisis à la main) : EN PLUS de la qté
+      // saisie, en ligne séparée à 0 €. La quantité saisie est entièrement payante.
+      const freeUnits = Math.max(0, Math.floor(l.freeUnits ?? 0));
       const paidQty = l.quantity;
       const totalQty = paidQty + freeUnits;
 
@@ -681,8 +688,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
         const kind = l.promo?.kind;
         if (o) {
           // Ligne existante → CONSERVÉE (lot préservé). La qté saisie est payante ;
-          // les colis offerts (X+Y / offert) partent en ligne SÉPARÉE à 0 €.
-          const freeColis = (kind === "X_PLUS_Y" || kind === "FREE") ? Math.max(0, Math.floor(l.freeUnits)) : 0;
+          // les colis offerts (promo OU saisis à la main) partent en ligne SÉPARÉE à 0 €.
+          const freeColis = Math.max(0, Math.floor(l.freeUnits));
           const qtyChanged = Math.abs(l.quantity - o.qty) > 1e-6;
           const paidPieces = qtyChanged ? Math.round(l.quantity * l.packDivisor * 1000) / 1000 : o.pieces;
           // Remise % (PERCENT) portée sur la ligne : prix brut + DiscountPercent.
@@ -1089,7 +1096,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             )}
           </div>
         </div>
-        {modif && <ModifBanner docNum={modif.docNum} meta={modifMeta} prefilling={prefilling} />}
+        {modif && <ModifBanner docNum={modif.docNum} meta={modifMeta} prefilling={prefilling} onExit={onExitModif} />}
         <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
           {cart.length === 0 && (
             <p className="text-[14px] text-muted-foreground italic py-4 text-center inline-flex items-center justify-center gap-2 w-full">
@@ -1213,15 +1220,28 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                   <span className="text-[12px] text-muted-foreground">€/{l.priceUnit}</span>
                   <span className="ml-auto text-[15px] font-bold tnum">{l.price ? lineHT(l).toFixed(2) : "—"}</span>
                 </div>
+                {/* Colis OFFERTS (à 0 €) — sélecteur indépendant de la qté payée.
+                    Permet « 0 payé + 1 offert » (juste offert) ou « N payés + M offerts ». */}
+                {!locked && (
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <Gift className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+                    <span className="text-[11px] font-medium text-muted-foreground">Offert</span>
+                    <div className="inline-flex items-center rounded-md border border-border overflow-hidden">
+                      <button type="button" tabIndex={-1}
+                        onClick={() => updateLine(i, { freeUnits: Math.max(0, Math.round((l.freeUnits - l.stepColis) * 100) / 100), freeManual: true })}
+                        aria-label="Retirer un colis offert"
+                        className="h-7 w-8 inline-flex items-center justify-center text-[16px] font-bold text-muted-foreground hover:bg-secondary/60 active:scale-95">−</button>
+                      <span className={`w-9 text-center text-[14px] font-semibold tnum border-x border-border ${l.freeUnits > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>{l.freeUnits}</span>
+                      <button type="button" tabIndex={-1}
+                        onClick={() => updateLine(i, { freeUnits: Math.round((l.freeUnits + l.stepColis) * 100) / 100, freeManual: true })}
+                        aria-label="Ajouter un colis offert"
+                        className="h-7 w-8 inline-flex items-center justify-center text-[16px] font-bold text-rose-600 dark:text-rose-400 hover:bg-secondary/60 active:scale-95">+</button>
+                    </div>
+                    <span className="text-[11px] text-muted-foreground">{l.unit} à 0 €</span>
+                  </div>
+                )}
                 {l.packDivisor > 1 && l.price != null && (
                   <p className="text-[11px] text-muted-foreground mt-0.5">{l.quantity} colis × {l.packDivisor} {l.priceUnit} × {l.price}€</p>
-                )}
-                {/* C2 — colis offerts (X_PLUS_Y / FREE) : ligne séparée à 0 € sur le bon */}
-                {(l.promo?.kind === "X_PLUS_Y" || l.promo?.kind === "FREE") && l.freeUnits > 0 && (
-                  <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400 mt-1 inline-flex items-center gap-1">
-                    <Gift className="h-3 w-3" />
-                    {l.freeUnits} colis offert{l.freeUnits > 1 ? "s" : ""} — ligne à 0 € sur le bon
-                  </p>
                 )}
                 {sellShort ? (
                   <p className="text-[11px] text-rose-600 dark:text-rose-400 mt-1">
@@ -1404,11 +1424,12 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
    « Détail livraison » (URL → Écran 2).
 ═════════════════════════════════════════════════════════════ */
 function ModifBanner({
-  docNum, meta, prefilling,
+  docNum, meta, prefilling, onExit,
 }: {
   docNum: number;
   meta: { dueDate?: string; editable?: boolean } | null;
   prefilling: boolean;
+  onExit?: () => void;
 }) {
   const dateLabel = meta?.dueDate
     ? new Date(meta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })
@@ -1431,6 +1452,13 @@ function ModifBanner({
         </div>
         {prefilling && (
           <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600 dark:text-amber-300 shrink-0" />
+        )}
+        {onExit && (
+          <button type="button" onClick={onExit}
+            title="Quitter la modification et revenir à la saisie normale (synchro écran 1)"
+            className="inline-flex items-center gap-1 h-7 px-2 rounded-md border border-amber-300/70 dark:border-amber-500/40 text-[11px] font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/35 shrink-0">
+            <X className="h-3 w-3" /> Quitter
+          </button>
         )}
       </div>
       {closed && (

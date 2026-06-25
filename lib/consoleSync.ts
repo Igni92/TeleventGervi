@@ -38,6 +38,14 @@ export interface ActiveClientState {
   clientName: string | null;
   stockSharePct: number;
   client?: ActiveClientInfo | null;
+  /**
+   * Cible de MODIFICATION d'un BL : envoyée par « Détail livraison ». L'écran 2
+   * bascule en saisie sur ce BL DANS LA MÊME FENÊTRE (pas de nouvel onglet). Le
+   * mode est « collant » côté écran 2 : une fois en modif, il ignore les
+   * rediffusions de client actif de la console tant que l'utilisateur n'a pas
+   * quitté la modification. null/absent = saisie/synchro normale.
+   */
+  modif?: { docEntry: number; docNum: number } | null;
   at: number;
 }
 
@@ -73,6 +81,18 @@ export function broadcastActiveClient(state: Omit<ActiveClientState, "at">) {
     ch.postMessage({ type: "active", payload });
     ch.close();
   } catch { /* BroadcastChannel non supporté → fallback localStorage event */ }
+}
+
+/** Efface la cible de modification du miroir local (appelé quand l'écran 2 quitte
+ *  la modification) — évite de re-basculer en modif au prochain chargement. */
+export function clearModif() {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (s && s.modif) { s.modif = null; localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); }
+  } catch { /* ignore */ }
 }
 
 /** Lit le dernier état connu (pour initialiser l'écran 2 au chargement). */

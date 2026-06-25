@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { ClientLink } from "@/components/ClientLink";
+import { broadcastActiveClient } from "@/lib/consoleSync";
 import {
   nextDeliveryDate, frenchHolidayLabel, nextWorkingDeliveryDay,
   formatDeliveryDate, addDaysISO,
@@ -636,10 +637,9 @@ function OrderRow({
     setSavingCarrier(false);
   }
 
-  // Modification : on résout le client puis on OUVRE l'Écran 2 directement sur ce
-  // BL (cible passée par l'URL, pas par broadcast — la console rediffuse en
-  // continu le client actif et écraserait une cible portée par consoleSync).
-  // L'Écran 2 pré-remplit le panier avec les lignes du BL, éditables.
+  // Modification : on résout le client puis on DIFFUSE la cible à l'Écran 2 (même
+  // fenêtre, aucun nouvel onglet). L'Écran 2 bascule en saisie sur ce BL (mode
+  // collant) et pré-remplit le panier avec ses lignes, éditables.
   const [modifBusy, setModifBusy] = useState(false);
   async function startModif() {
     setModifBusy(true);
@@ -650,16 +650,19 @@ function OrderRow({
         toast.error("Client introuvable en télévente — modification impossible depuis ici.");
         return;
       }
-      const url = `/console/ecran2?modifier=${doc.docEntry}&docNum=${doc.docNum}`
-        + `&client=${encodeURIComponent(j.id)}&name=${encodeURIComponent(doc.cardName)}`;
-      window.open(url, "_blank", "noopener");
-      toast.success(`Modification du BL #${doc.docNum} ouverte sur l'Écran 2`, {
-        description: "Les articles du BL sont pré-remplis — ajuste les quantités ou ajoute des lignes.",
-        action: { label: "Ouvrir l'Écran 2", onClick: () => window.open(url, "_blank", "noopener") },
-        duration: 8000,
+      broadcastActiveClient({
+        clientId: j.id,
+        clientName: doc.cardName,
+        stockSharePct: 100,
+        client: null,
+        modif: { docEntry: doc.docEntry, docNum: doc.docNum },
+      });
+      toast.success(`Modification du BL #${doc.docNum} chargée sur l'Écran 2`, {
+        description: "La saisie s'ouvre sur l'Écran 2 (même fenêtre).",
+        duration: 6000,
       });
     } catch {
-      toast.error("Échec de l'ouverture de la modification.");
+      toast.error("Échec du chargement de la modification.");
     } finally {
       setModifBusy(false);
     }

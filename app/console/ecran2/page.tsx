@@ -1,8 +1,8 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   MonitorSmartphone, Loader2, Phone, AlertTriangle, Clock,
   TrendingUp, TrendingDown, Minus, ShoppingCart, User, Users, Mail,
@@ -11,68 +11,70 @@ import {
 import { Ecran2Order } from "@/components/console/Ecran2Order";
 import { rememberConsoleScreen } from "@/components/console/ConsoleScreenGate";
 import {
-  subscribeActiveClient, readActiveClient, requestActiveClient,
+  subscribeActiveClient, readActiveClient, requestActiveClient, clearModif,
   type ActiveClientState, type ActiveClientInfo,
 } from "@/lib/consoleSync";
 import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
 
+type ModifTarget = { docEntry: number; docNum: number; clientId: string | null; clientName: string | null };
+
 /**
  * Écran 2 (fenêtre détachée) — optimisé **marge + relation client + incident**.
- * Synchronisé à l'écran 1. Le constructeur de commande prend toute la
- * largeur ; le bandeau client regroupe au-dessus toutes les infos
- * contextuelles utiles pour vendre / fidéliser / gérer un incident.
+ * Synchronisé à l'écran 1. Le constructeur de commande prend toute la largeur.
  *
- * Mode MODIFICATION (?modifier=docEntry&docNum&client&name) : ouvert depuis
- * « Détail livraison », l'écran 2 charge un BL existant et pré-remplit le panier
- * avec ses lignes (éditables). La cible passe par l'URL — et NON par consoleSync
- * — car la console (écran 1) rediffuse en continu le client actif et écraserait
- * une cible portée par le broadcast. Ce mode ignore donc les broadcasts.
+ * Mode MODIFICATION : « Détail livraison » diffuse une cible de modif via
+ * consoleSync ; l'écran 2 bascule en saisie sur ce BL **dans la même fenêtre**
+ * (aucun nouvel onglet). Le mode est « collant » : une fois en modif, les
+ * rediffusions de client actif de la console sont ignorées tant que
+ * l'utilisateur n'a pas quitté la modification (bouton « Quitter »).
  */
 export default function Ecran2Page() {
-  return (
-    <Suspense fallback={
-      <p className="text-[13px] text-muted-foreground inline-flex items-center gap-2 p-4">
-        <Loader2 className="h-4 w-4 animate-spin" /> Chargement…
-      </p>
-    }>
-      <Ecran2Content />
-    </Suspense>
-  );
-}
-
-function Ecran2Content() {
-  const searchParams = useSearchParams();
-  const modifierParam = searchParams.get("modifier");
-  const modifierMode = modifierParam != null && Number.isFinite(Number(modifierParam));
-  const urlClientId = searchParams.get("client");
-  const urlClientName = searchParams.get("name");
-  const urlDocNum = searchParams.get("docNum");
-
   const [state, setState] = useState<ActiveClientState | null>(null);
+  const [modif, setModif] = useState<ModifTarget | null>(null);
   const [ready, setReady] = useState(false);
+  // Réf pour lire l'état « en modif ? » dans le callback de souscription (collant).
+  const inModif = useRef(false);
+  inModif.current = modif != null;
 
   // C3 — mémorise « dernier écran Console = Écran 2 » : le lien Console de la
   // sidebar ramènera ici (cf. ConsoleScreenGate sur /console).
   useEffect(() => { rememberConsoleScreen("ecran2"); }, []);
 
   useEffect(() => {
-    // Mode modification : la cible vient de l'URL, indépendante des broadcasts.
-    if (modifierMode) { setReady(true); return; }
-    setState(readActiveClient());
-    const unsub = subscribeActiveClient((s) => setState(s));
+    const initial = readActiveClient();
+    setState(initial);
+    if (initial?.modif) {
+      setModif({ docEntry: initial.modif.docEntry, docNum: initial.modif.docNum, clientId: initial.clientId, clientName: initial.clientName });
+    }
+    const unsub = subscribeActiveClient((s) => {
+      if (s.modif) {
+        // Nouvelle cible de modif → on bascule l'écran (même fenêtre).
+        setModif({ docEntry: s.modif.docEntry, docNum: s.modif.docNum, clientId: s.clientId, clientName: s.clientName });
+        setState(s);
+      } else if (!inModif.current) {
+        // Broadcast normal (client actif). En modif, on l'ignore (collant) pour ne
+        // pas se faire éjecter par la rediffusion continue de la console.
+        setState(s);
+      }
+    });
     requestActiveClient();
     setReady(true);
     return unsub;
-  }, [modifierMode]);
+  }, []);
 
-  const modifier = modifierMode
-    ? { docEntry: Number(modifierParam), docNum: Number(urlDocNum) || 0 }
-    : null;
+  // Quitte la modification → reprend la synchro normale avec le client actif.
+  const exitModif = useCallback(() => {
+    clearModif();
+    setModif(null);
+    const s = readActiveClient();
+    if (s) setState({ ...s, modif: null });
+  }, []);
 
-  const clientId = modifierMode ? urlClientId : (state?.clientId ?? null);
-  const clientName = modifierMode ? urlClientName : (state?.clientName ?? null);
+  const clientId = modif ? modif.clientId : (state?.clientId ?? null);
+  const clientName = modif ? modif.clientName : (state?.clientName ?? null);
   const sharePct = state?.stockSharePct ?? 100;
-  const info = modifierMode ? null : (state?.client ?? null);
+  const info = modif ? null : (state?.client ?? null);
+  const modifier = modif ? { docEntry: modif.docEntry, docNum: modif.docNum } : null;
 
   return (
     <div className="h-full flex flex-col gap-3 animate-fade-up min-h-0">
@@ -86,9 +88,9 @@ function Ecran2Content() {
           </p>
         ) : clientId && clientName ? (
           <Ecran2Order
-            key={modifierMode ? `m${modifier!.docEntry}` : clientId}
+            key={modif ? `m${modif.docEntry}` : clientId}
             clientId={clientId} clientName={clientName} stockSharePct={sharePct}
-            modifier={modifier}
+            modifier={modifier} onExitModif={exitModif}
           />
         ) : (
           <div className="h-full flex items-center justify-center panel">
