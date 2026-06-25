@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { requireAdmin } from "@/lib/permissions";
+import { requireStrictAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 
@@ -19,13 +19,16 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  return NextResponse.json({ ok: true, ...sap.getEnvironment() });
+  // `canSwitch` : seul un ADMIN strict peut basculer la base (pas la direction).
+  const canSwitch = await requireStrictAdmin(session);
+  return NextResponse.json({ ok: true, canSwitch, ...sap.getEnvironment() });
 }
 
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  if (!(await requireAdmin(session))) {
+  // Bascule prod ↔ test : réservée à l'ADMIN strict (la direction en est exclue).
+  if (!(await requireStrictAdmin(session))) {
     return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
   }
 

@@ -10,6 +10,8 @@ interface EnvState {
   testCompany: string;
   prodCompany: string;
   testConfigured: boolean;
+  /** Seul un admin strict peut basculer la base (la direction voit, sans toggle). */
+  canSwitch?: boolean;
 }
 
 /**
@@ -36,6 +38,24 @@ export function SapEnvSwitch() {
   const isTest = state.env === "test";
   const target = isTest ? "prod" : "test";
   const targetCompany = target === "test" ? state.testCompany : state.prodCompany;
+  const canSwitch = state.canSwitch !== false; // défaut permissif si l'API ne renvoie pas le flag
+
+  // Non-admin (ex. direction) : badge LECTURE SEULE — pas de bascule possible.
+  if (!canSwitch) {
+    return (
+      <span
+        title={`Base SAP : ${state.company} (bascule réservée aux administrateurs)`}
+        className={`shrink-0 inline-flex items-center gap-1.5 h-6 px-2.5 rounded-md text-[11px] font-semibold tracking-wide select-none ${
+          isTest
+            ? "bg-amber-500/20 text-amber-300 ring-1 ring-amber-400/40"
+            : "bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/30"
+        }`}
+      >
+        <span className={`h-1.5 w-1.5 rounded-full ${isTest ? "bg-amber-400 animate-soft-pulse" : "bg-emerald-400"}`} />
+        {isTest ? `SAP TEST · ${state.company}` : `SAP PROD · ${state.company}`}
+      </span>
+    );
+  }
 
   const toggle = async () => {
     if (busy) return;

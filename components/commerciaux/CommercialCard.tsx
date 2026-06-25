@@ -34,13 +34,15 @@ interface Props {
   isBootstrapAdmin?: boolean;
   /** Rôle préparateur (« en charge du stock ») — peut repasser sur les inventaires. */
   isPreparateur?: boolean;
-  /** Préparateur « bootstrap » (lib/inventory : défaut + PREPARATEUR_EMAILS) → figé ici. */
-  isBootstrapPreparateur?: boolean;
   /** Rôle commercial (force de vente) — indépendant des autres rôles. */
   isCommercial?: boolean;
+  /** Rôle direction — accès global ; gère tous les rôles SAUF admin. */
+  isDirection?: boolean;
+  /** Le SPECTATEUR est-il admin strict ? Seul lui peut (dé)cocher le rôle Admin. */
+  canEditAdmin?: boolean;
 }
 
-export function CommercialCard({ userId, name, commercialKey, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false, isPreparateur = false, isBootstrapPreparateur = false, isCommercial = true }: Props) {
+export function CommercialCard({ userId, name, commercialKey, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false, isPreparateur = false, isCommercial = true, isDirection = false, canEditAdmin = false }: Props) {
   const [claiming, setClaiming] = useState<string | null>(null);
   const [isPresent, setIsPresent] = useState(present);
   const [share, setShare] = useState(stockSharePct);
@@ -51,6 +53,8 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
   const [savingPrep, setSavingPrep] = useState(false);
   const [comm, setComm] = useState(isCommercial);
   const [savingComm, setSavingComm] = useState(false);
+  const [direction, setDirection] = useState(isDirection);
+  const [savingDir, setSavingDir] = useState(false);
   // Nom affiché sans le suffixe société (« … - Gervifrais ») qui tronque sur mobile.
   const displayName = name.split(/\s+[-–]\s+/)[0].trim() || name;
 
@@ -64,12 +68,19 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
   }
 
   async function togglePrep() {
-    if (isBootstrapPreparateur) return; // préparateur système (env/code) : figé
     const next = !prep;
     setPrep(next); setSavingPrep(true);
     try { await patch({ isPreparateur: next }); toast.success(next ? `${name} est désormais préparateur (stock)` : `${name} n'est plus préparateur`); }
     catch { setPrep(!next); toast.error("Erreur changement de rôle"); }
     finally { setSavingPrep(false); }
+  }
+
+  async function toggleDirection() {
+    const next = !direction;
+    setDirection(next); setSavingDir(true);
+    try { await patch({ isDirection: next }); toast.success(next ? `${name} est désormais direction` : `${name} n'est plus direction`); }
+    catch { setDirection(!next); toast.error("Erreur changement de rôle"); }
+    finally { setSavingDir(false); }
   }
 
   async function toggleCommercial() {
@@ -198,12 +209,21 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
               <span className="mr-0.5 select-none text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Rôles</span>
               <RoleCheck label="Commercial" active={comm} saving={savingComm} onToggle={toggleCommercial}
                 title={comm ? "Retirer le rôle commercial" : "Désigner commercial (force de vente)"} />
-              <RoleCheck label="Préparateur" active={prep} locked={isBootstrapPreparateur} saving={savingPrep} onToggle={togglePrep}
-                note={isBootstrapPreparateur ? "système" : undefined}
-                title={isBootstrapPreparateur ? "Préparateur défini dans la configuration (PREPARATEUR_EMAILS) — non modifiable ici" : prep ? "Retirer le rôle préparateur (stock)" : "Désigner préparateur (en charge du stock)"} />
-              <RoleCheck label="Admin" active={admin} locked={isBootstrapAdmin} saving={savingAdmin} onToggle={toggleAdmin}
+              <RoleCheck label="Préparateur" active={prep} saving={savingPrep} onToggle={togglePrep}
+                title={prep ? "Retirer le rôle préparateur (stock)" : "Désigner préparateur (en charge du stock)"} />
+              <RoleCheck label="Direction" active={direction} saving={savingDir} onToggle={toggleDirection}
+                title={direction ? "Retirer le rôle direction" : "Désigner direction (gère les rôles sauf admin)"} />
+              <RoleCheck label="Admin" active={admin}
+                locked={isBootstrapAdmin}
+                disabled={!isBootstrapAdmin && !canEditAdmin}
+                saving={savingAdmin}
+                onToggle={canEditAdmin ? toggleAdmin : undefined}
                 note={isBootstrapAdmin ? "système" : undefined}
-                title={isBootstrapAdmin ? "Admin système (défini dans le code) — non modifiable ici" : admin ? "Retirer les droits administrateur" : "Promouvoir administrateur"} />
+                title={isBootstrapAdmin
+                  ? "Admin système (défini dans le code) — non modifiable ici"
+                  : canEditAdmin
+                    ? (admin ? "Retirer les droits administrateur" : "Promouvoir administrateur")
+                    : "Rôle admin — réservé aux administrateurs"} />
               <RoleCheck label="Livreur" disabled note="bientôt" title="Rôle livreur — bientôt disponible" />
             </div>
           </div>
