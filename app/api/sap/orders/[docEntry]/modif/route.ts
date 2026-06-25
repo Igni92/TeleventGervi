@@ -38,7 +38,7 @@ type SapLine = {
 };
 type SapOrder = {
   DocEntry: number; DocNum: number; CardCode: string; DocDueDate: string;
-  DocumentStatus?: string; Cancelled?: string; DocumentLines: SapLine[];
+  DocumentStatus?: string; Cancelled?: string; Comments?: string; DocumentLines: SapLine[];
 };
 type SapExpense = { ExpensCode: number; Name: string; U_Taux: number; OutputVATGroup: string };
 
@@ -52,7 +52,7 @@ async function loadOrder(
   let order: SapOrder;
   try {
     order = await sap.get<SapOrder>(
-      `Orders(${docEntry})?$select=DocEntry,DocNum,CardCode,DocDueDate,DocumentStatus,Cancelled,DocumentLines`,
+      `Orders(${docEntry})?$select=DocEntry,DocNum,CardCode,DocDueDate,DocumentStatus,Cancelled,Comments,DocumentLines`,
     );
   } catch {
     return { error: NextResponse.json({ ok: false, error: `Commande ${docEntry} introuvable dans SAP.` }, { status: 404 }) };
@@ -139,6 +139,7 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ docEntry
     docNum: order.DocNum,
     dueDate: order.DocDueDate,
     editable,
+    comments: order.Comments ?? "",
     cartLines,
   });
 }
@@ -167,7 +168,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   if (!Number.isFinite(docEntry)) return NextResponse.json({ error: "docEntry invalide" }, { status: 400 });
 
-  let body: { lines?: FinalLine[] };
+  let body: { lines?: FinalLine[]; comments?: string };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -243,10 +244,15 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
       Quantity: l.quantity,
     };
     if (l.warehouseCode) line.WarehouseCode = l.warehouseCode;
-    if (l.price != null && l.price > 0) { line.UnitPrice = l.price; line.Price = l.price; }
-    if (typeof l.discountPercent === "number" && Number.isFinite(l.discountPercent) && l.discountPercent > 0) {
-      line.DiscountPercent = Math.min(100, Math.max(0, l.discountPercent));
+    const hasDiscount = typeof l.discountPercent === "number" && Number.isFinite(l.discountPercent) && l.discountPercent > 0;
+    if (l.price != null && l.price > 0) {
+      // On fixe TOUJOURS le prix unitaire (brut) saisi. Avec une remise, on NE fixe
+      // PAS `Price` (le net) : sinon Price + UnitPrice + remise se contredisent et
+      // SAP reprend le prix tarif. SAP calcule le net depuis UnitPrice × (1 − remise).
+      line.UnitPrice = l.price;
+      if (!hasDiscount) line.Price = l.price;
     }
+    if (hasDiscount) line.DiscountPercent = Math.min(100, Math.max(0, l.discountPercent!));
     if (meta?.uPays) line.U_GER_Pays = meta.uPays;
     if (meta?.uMarque) line.U_GER_Marque = meta.uMarque;
     if (meta?.uCondi) line.U_GER_Condi = meta.uCondi;
@@ -288,10 +294,15 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
   // DocumentLines par celle envoyée (au lieu de fusionner par LineNum). C'est le
   // SEUL moyen fiable de SUPPRIMER une ligne et de RÉORDONNER dans ce SAP — un
   // PATCH normal conserve les lignes omises. Le numéro de BL (DocNum) est préservé.
+  // Note BL éditable (texte promo/divers) — écrite dans les commentaires du bon
+  // uniquement si fournie (undefined = on n'y touche pas).
+  const patchBody: Record<string, unknown> = { DocumentLines: documentLines };
+  if (typeof body.comments === "string") patchBody.Comments = body.comments.slice(0, 254);
+
   try {
     await sap.patch(
       `Orders(${docEntry})`,
-      { DocumentLines: documentLines },
+      patchBody,
       { headers: { "B1S-ReplaceCollectionsOnPatch": "true" } },
     );
     type Refetched = { DocTotal?: number; VatSum?: number };

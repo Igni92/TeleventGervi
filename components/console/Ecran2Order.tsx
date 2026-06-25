@@ -208,6 +208,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   const [modif, setModif] = useState(modifierProp);
   const [modifMeta, setModifMeta] = useState<{ dueDate?: string; editable?: boolean } | null>(null);
   const [prefilling, setPrefilling] = useState(false);
+  // Note BL éditable (texte promo/divers) → commentaires du bon. Pré-remplie au chargement.
+  const [comments, setComments] = useState("");
 
   /** Charge (ou recharge) le BL ciblé et pré-remplit le panier avec ses lignes.
    *  Rappelé après un enregistrement pour refléter l'état SAP réel — et pour que
@@ -219,6 +221,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       const j = await r.json();
       if (!j?.ok) { toast.error("Chargement du BL impossible", { description: j?.error, duration: 8000 }); return; }
       setModifMeta({ dueDate: j.dueDate, editable: j.editable });
+      setComments(j.comments ?? "");
       type PrefillLine = {
         lineNum: number; warehouse: string | null; lot: string | null; closed: boolean;
         itemCode: string; itemName: string;
@@ -726,7 +729,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       try {
         const res = await fetch(`/api/sap/orders/${modif.docEntry}/modif`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lines }),
+          body: JSON.stringify({ lines, comments: comments.trim() }),
         });
         const json = await res.json();
         if (!res.ok || !json.ok) {
@@ -1263,6 +1266,30 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
               <input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="N° de commande (réf. client)"
                 className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2" />
             </>
+          )}
+          {/* Note BL éditable (texte promo / divers) — enregistrée dans les commentaires du bon */}
+          {modif && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label htmlFor="bl-note" className="text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
+                  Note sur le BL
+                </label>
+                {cart.some((l) => l.promo) && (
+                  <button type="button"
+                    onClick={() => setComments((c) => {
+                      const t = buildPromoComment();
+                      if (!t) return c;
+                      return c.trim() ? `${c.trim()} · ${t}` : t;
+                    })}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline">
+                    <Megaphone className="h-3 w-3" /> Insérer le texte promo
+                  </button>
+                )}
+              </div>
+              <input id="bl-note" value={comments} onChange={(e) => setComments(e.target.value)}
+                maxLength={254} placeholder="Ex. Framboise offerte (promo 5+1)…"
+                className="w-full h-9 rounded-md border border-border bg-background text-[13px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+            </div>
           )}
           <div className="flex items-center justify-between text-[14px]">
             <span className="text-muted-foreground">{modif ? "Total HT du BL" : "Total HT estimé"}</span>
