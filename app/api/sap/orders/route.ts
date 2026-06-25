@@ -3,11 +3,11 @@ import { auth } from "@/lib/auth";
 import { docLabel } from "@/lib/docLabel";
 import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { getTrclDefaultCarrier } from "@/lib/clientCarriers";
 import { sap } from "@/lib/sapb1";
 import { decrementLocalStock } from "@/lib/stockSync";
 import { getLotMaps, resolveLotDetailed, LOT_PENDING } from "@/lib/lotResolver";
 import { chooseLot } from "@/lib/gervifrais-calc";
-import { getDefaultCarrier } from "@/lib/clientCarriers";
 import { colisInfo } from "@/lib/colis";
 
 /**
@@ -336,9 +336,9 @@ export async function POST(req: NextRequest) {
   // C11 — Transporteur → ORDR.U_TrspCode.
   // Si carrierId fourni : on résout via la table Carrier (champ U_TrspCode = sapValue).
   // Sinon carrierCode raccourci (déjà la valeur SAP).
-  // B2 — Si AUCUN des deux : transporteur PAR DÉFAUT du client = le plus utilisé
-  // dans son historique SAP 24 mois (lib/clientCarriers, partagée avec
-  // /api/clients/[id]/carriers). Sans historique → on ne pose rien (loggé).
+  // Sinon : transporteur PAR DÉFAUT du client = ligne principale SERG_TRCL
+  // (U_TrspDef='O'). On NE prend JAMAIS « le plus utilisé » : si SERG_TRCL n'est
+  // pas lisible, on ne pose rien → défaut SAP, ajustable dans « Détail livraison ».
   let trspCode: string | null = null;
   if (body.carrierId) {
     const rows = await prisma.$queryRawUnsafe<{ sapValue: string | null; active: boolean }[]>(
@@ -350,15 +350,15 @@ export async function POST(req: NextRequest) {
     trspCode = body.carrierCode.trim();
   } else {
     try {
-      const def = await getDefaultCarrier(cardCode);
+      const def = await getTrclDefaultCarrier(cardCode);
       if (def) {
         trspCode = def.sapValue;
-        console.log(`[Order] Transporteur par défaut ${cardCode} → ${def.sapValue} (${def.count} cdes/24 mois)`);
+        console.log(`[Order] Transporteur par défaut SERG_TRCL ${cardCode} → ${def.sapValue}${def.tour ? ` (tournée ${def.tour})` : ""}`);
       } else {
-        console.log(`[Order] Aucun transporteur dans l'historique SAP de ${cardCode} — U_TrspCode non posé`);
+        console.log(`[Order] Pas de défaut SERG_TRCL pour ${cardCode} — U_TrspCode non posé (défaut SAP / à régler dans Détail livraison)`);
       }
     } catch (e) {
-      console.warn(`[Order] Résolution transporteur par défaut échouée (non-bloquant):`, (e as Error).message);
+      console.warn(`[Order] Résolution transporteur par défaut (SERG_TRCL) échouée (non-bloquant):`, (e as Error).message);
     }
   }
   if (trspCode) payload.U_TrspCode = trspCode;

@@ -56,7 +56,12 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ docEntr
   if (!(await cardCodeInScope(scope, ord?.cardCode))) {
     return NextResponse.json({ error: "Commande hors de votre périmètre" }, { status: 403 });
   }
-  let body: { lines?: { lineNum: number; quantity?: number; price?: number }[]; numAtCard?: string; comments?: string };
+  let body: {
+    lines?: { lineNum: number; quantity?: number; price?: number }[];
+    numAtCard?: string; comments?: string;
+    /** Transporteur → ORDR.U_TrspCode. "" / null = désaffecter. */
+    trspCode?: string | null;
+  };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
   const patch: Record<string, unknown> = {};
@@ -70,6 +75,8 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ docEntr
   }
   if (body.numAtCard !== undefined) patch.NumAtCard = body.numAtCard.trim();
   if (body.comments !== undefined) patch.Comments = body.comments;
+  // Changement de transporteur depuis « Détail livraison ».
+  if (body.trspCode !== undefined) patch.U_TrspCode = (body.trspCode ?? "").trim();
 
   try {
     await sap.patch(`Orders(${params.docEntry})`, patch);

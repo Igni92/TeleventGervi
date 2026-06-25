@@ -6,11 +6,14 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
   RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw,
 } from "lucide-react";
+import { toast } from "sonner";
 import { ClientLink } from "@/components/ClientLink";
 import {
   nextDeliveryDate, frenchHolidayLabel, nextWorkingDeliveryDay,
   formatDeliveryDate, addDaysISO,
 } from "@/lib/livraison";
+
+interface CarrierOption { name: string; sapValue: string }
 
 /* ─────────────────────────────────────────────────────────────
    Types (miroir de /api/livraisons)
@@ -88,6 +91,23 @@ export function LivraisonDetail() {
   const [data, setData] = useState<ApiResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [carriers, setCarriers] = useState<CarrierOption[]>([]);
+
+  // Liste des transporteurs (pour le changement direct par commande).
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/carriers")
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled || !j?.ok) return;
+        const opts: CarrierOption[] = (j.carriers ?? [])
+          .filter((c: { sapValue?: string | null }) => c.sapValue)
+          .map((c: { name: string; sapValue: string }) => ({ name: c.name, sapValue: c.sapValue }));
+        setCarriers(opts);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const auto = useMemo(() => nextDeliveryDate(), []);
   const holiday = frenchHolidayLabel(date);
@@ -125,6 +145,32 @@ export function LivraisonDetail() {
   }, [load]);
 
   const shift = (days: number) => setDate((d) => addDaysISO(d, days));
+
+  // Changement de transporteur d'une commande (écrit ORDR.U_TrspCode dans SAP),
+  // puis rechargement pour re-grouper. "" = désaffecter.
+  const changeCarrier = useCallback(
+    async (docEntry: number, sapValue: string): Promise<boolean> => {
+      try {
+        const res = await fetch(`/api/sap/orders/${docEntry}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trspCode: sapValue }),
+        });
+        const j = await res.json().catch(() => null);
+        if (!res.ok || !j?.ok) {
+          toast.error(j?.error ? `Échec : ${j.error}` : "Échec du changement de transporteur");
+          return false;
+        }
+        toast.success(sapValue ? "Transporteur mis à jour" : "Transporteur retiré");
+        load();
+        return true;
+      } catch {
+        toast.error("SAP injoignable — transporteur non modifié");
+        return false;
+      }
+    },
+    [load],
+  );
 
   return (
     <div className="space-y-5 animate-fade-up">
@@ -184,7 +230,7 @@ export function LivraisonDetail() {
       ) : data ? (
         <div className={`space-y-4 transition-opacity ${loading ? "opacity-60" : ""}`}>
           {data.carriers.map((c) => (
-            <CarrierGroup key={c.code ?? "__none__"} carrier={c} />
+            <CarrierGroup key={c.code ?? "__none__"} carrier={c} carriers={carriers} onCarrierChange={changeCarrier} />
           ))}
         </div>
       ) : null}
@@ -329,7 +375,13 @@ function SummaryRow({ totals, loading }: { totals: Totals; loading: boolean }) {
 /* ═════════════════════════════════════════════════════════════
    Groupe transporteur — en-tête + cartes clients
 ═════════════════════════════════════════════════════════════ */
-function CarrierGroup({ carrier }: { carrier: Carrier }) {
+function CarrierGroup({
+  carrier, carriers, onCarrierChange,
+}: {
+  carrier: Carrier;
+  carriers: CarrierOption[];
+  onCarrierChange: (docEntry: number, sapValue: string) => Promise<boolean>;
+}) {
   const unassigned = !carrier.code;
   return (
     <section className="rounded-2xl border border-border bg-card overflow-hidden">
@@ -364,7 +416,7 @@ function CarrierGroup({ carrier }: { carrier: Carrier }) {
       {/* Cartes clients */}
       <ul className="divide-y divide-border/60">
         {carrier.docs.map((d) => (
-          <OrderRow key={d.docEntry} doc={d} />
+          <OrderRow key={d.docEntry} doc={d} carriers={carriers} onCarrierChange={onCarrierChange} />
         ))}
       </ul>
     </section>
@@ -385,8 +437,33 @@ function Metric({ label, value, strong, className }: { label: string; value: str
 /* ═════════════════════════════════════════════════════════════
    Ligne commande — repliable vers le détail des lignes
 ═════════════════════════════════════════════════════════════ */
-function OrderRow({ doc }: { doc: Doc }) {
+function OrderRow({
+  doc, carriers, onCarrierChange,
+}: {
+  doc: Doc;
+  carriers: CarrierOption[];
+  onCarrierChange: (docEntry: number, sapValue: string) => Promise<boolean>;
+}) {
   const [open, setOpen] = useState(false);
+  const [savingCarrier, setSavingCarrier] = useState(false);
+
+  // Le transporteur courant doit rester sélectionnable même s'il n'est pas dans
+  // la table Carrier (code SAP brut) → on l'injecte en tête si besoin.
+  const options: CarrierOption[] = useMemo(() => {
+    const base = carriers.slice();
+    if (doc.trspCode && !base.some((c) => c.sapValue === doc.trspCode)) {
+      base.unshift({ name: doc.carrierName ?? doc.trspCode, sapValue: doc.trspCode });
+    }
+    return base;
+  }, [carriers, doc.trspCode, doc.carrierName]);
+
+  async function handleCarrier(value: string) {
+    if (value === (doc.trspCode ?? "")) return;
+    setSavingCarrier(true);
+    await onCarrierChange(doc.docEntry, value);
+    setSavingCarrier(false);
+  }
+
   return (
     <li>
       <div className="flex items-center gap-3 px-4 sm:px-5 py-3 hover:bg-secondary/25 transition-colors">
@@ -409,6 +486,30 @@ function OrderRow({ doc }: { doc: Doc }) {
             <span>· BL n°{doc.docNum}</span>
             {doc.numAtCard && <span className="truncate">· réf. {doc.numAtCard}</span>}
             <span className="hidden sm:inline">· {fmtEur(doc.totalHT)} HT</span>
+          </div>
+          {/* Changement de transporteur direct */}
+          <div className="mt-1.5 inline-flex items-center gap-1.5">
+            <Truck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <div className="relative">
+              <select
+                value={doc.trspCode ?? ""}
+                disabled={savingCarrier || !doc.open}
+                onChange={(e) => handleCarrier(e.target.value)}
+                aria-label={`Transporteur de la commande ${doc.docNum}`}
+                title={doc.open ? "Changer le transporteur" : "Commande livrée — transporteur figé"}
+                className="h-7 max-w-[200px] rounded-md border border-border bg-card pl-2 pr-7 text-[11.5px] font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60 disabled:cursor-not-allowed appearance-none truncate cursor-pointer"
+              >
+                <option value="">Non affecté</option>
+                {options.map((c) => (
+                  <option key={c.sapValue} value={c.sapValue}>{c.name}</option>
+                ))}
+              </select>
+              {savingCarrier ? (
+                <Loader2 className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 animate-spin text-muted-foreground" />
+              ) : (
+                <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+              )}
+            </div>
           </div>
         </div>
 

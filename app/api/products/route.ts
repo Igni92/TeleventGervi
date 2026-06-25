@@ -13,6 +13,24 @@ import { prisma } from "@/lib/prisma";
  *   page          : default 1
  *   limit         : default 50, max 200
  */
+/** Tri serveur (clic sur en-tête de colonne côté Stock). Les colonnes de
+ *  quantités agrégées (dispo / commande fournisseur) ne sont pas des colonnes
+ *  SQL → on retombe sur `totalStock` (proxy raisonnable). Tri par défaut
+ *  inchangé : plus gros stock d'abord. */
+type OrderBy = Record<string, "asc" | "desc">;
+function buildOrderBy(sort: string | null, dir: string | null): OrderBy[] {
+  const d: "asc" | "desc" = dir === "asc" ? "asc" : "desc";
+  const map: Record<string, string> = {
+    qty: "totalStock", stock: "totalStock", ordered: "totalStock",
+    code: "itemCode", fruit: "itemName", pays: "uPays",
+    marque: "uMarque", variete: "frgnName", condt: "uCondi",
+  };
+  const col = sort ? map[sort] : null;
+  if (!col) return [{ totalStock: "desc" }, { itemName: "asc" }];
+  // Tie-breaker stable par nom pour les colonnes texte/quantité.
+  return col === "itemName" ? [{ itemName: d }] : [{ [col]: d }, { itemName: "asc" }];
+}
+
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
@@ -24,7 +42,10 @@ export async function GET(req: NextRequest) {
   const inStockOnly = searchParams.get("inStock") === "true";
   const includePackaging = searchParams.get("includePack") === "true";
   const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
-  const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") || "50")));
+  // Plafond élevé : la prise de commande « à découvert » charge tout le catalogue
+  // (articles à 0 inclus) en un appel. À 200, les articles 0-stock (ex. survendus)
+  // étaient tronqués → invisibles en vente à découvert.
+  const limit = Math.min(3000, Math.max(1, parseInt(searchParams.get("limit") || "50")));
 
   const where: Record<string, unknown> = {};
   if (!includePackaging) where.isPackaging = false;
@@ -53,7 +74,7 @@ export async function GET(req: NextRequest) {
     prisma.product.findMany({
       where,
       include: { stocks: true },
-      orderBy: [{ totalStock: "desc" }, { itemName: "asc" }],
+      orderBy: buildOrderBy(searchParams.get("sort"), searchParams.get("dir")),
       skip: (page - 1) * limit,
       take: limit,
     }),

@@ -19,7 +19,8 @@ export default async function InventairePage() {
           Inventaire
         </h1>
         <p className="hidden md:block text-[13px] text-muted-foreground mt-3 max-w-2xl">
-          Saisis le stock <b>réel</b> en face du stock <b>SAP</b>. À l&apos;envoi, les écarts sont
+          Comptage <b>pas à pas</b> : l&apos;app te propose les produits un par un. Compte le stock
+          <b> réel</b>, ajoute des <b>photos de l&apos;entrepôt</b>, puis envoie — les écarts sont
           transmis aux administrateurs.
         </p>
       </div>

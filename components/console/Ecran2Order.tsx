@@ -329,7 +329,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
   const loadStock = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ limit: "600" });
+      // limit élevé : en « à découvert » on veut TOUT le catalogue (articles à 0
+      // inclus). À 600 plafonné à 200 côté API, les articles 0-stock étaient coupés.
+      const params = new URLSearchParams({ limit: "3000" });
       if (!includeOutOfStock) params.set("inStock", "true");
       const res = await fetch(`/api/products?${params}`);
       const json = await res.json();
