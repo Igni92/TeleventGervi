@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { designationProduit } from "@/lib/produit-designation";
-import { fmt, sapInfo, ecartOf, fruitEmoji, type Product } from "./inv-utils";
+import { fmt, sapInfo, baseInfo, ecartOf, fruitEmoji, type Product } from "./inv-utils";
 
 export function GuidedCounter({
   products,
@@ -40,6 +40,9 @@ export function GuidedCounter({
   if (N === 0) return null;
   const p = products[cursor];
   const sap = sapInfo(p);
+  // Comptage en colis (interne) ; AFFICHAGE en unité de base (× perColis).
+  const base = baseInfo(p);
+  const toBase = (colis: number) => Math.round(colis * base.perColis * 10) / 10;
   const real = counts[p.itemCode] ?? null;
   const ecart = ecartOf(real, sap.qty);
   const isLast = cursor >= N - 1;
@@ -113,32 +116,41 @@ export function GuidedCounter({
               <div className="mt-5 rounded-2xl bg-muted/60 p-4 text-center">
                 <div className="kicker !block">Stock attendu · SAP</div>
                 <div className="mt-1 text-[34px] font-bold leading-none tnum text-foreground">
-                  {fmt(sap.qty)} <span className="text-[16px] font-semibold text-muted-foreground">{sap.unit}</span>
+                  {fmt(toBase(sap.qty))} <span className="text-[16px] font-semibold text-muted-foreground">{base.unit}</span>
                 </div>
+                {base.perColis > 1 && (
+                  <div className="mt-1 text-[12px] text-muted-foreground tnum">≈ {fmt(sap.qty)} colis</div>
+                )}
               </div>
 
               {/* Saisie du réel */}
               <div className="mt-4">
                 <label className="mb-1.5 block text-[12px] font-semibold text-muted-foreground">
-                  Stock compté (réel)
+                  Stock compté (réel) — saisie au colis, affichée en {base.unit}
                 </label>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="icon" className="h-14 w-14 shrink-0" onClick={() => bump(-1)} aria-label="−1">
+                  <Button variant="outline" size="icon" className="h-14 w-14 shrink-0" onClick={() => bump(-1)} aria-label="−1 colis">
                     <Minus className="!size-5" />
                   </Button>
                   <NumberInput
-                    value={real}
-                    onValueChange={(n) => setCount(p.itemCode, n)}
+                    value={real != null ? toBase(real) : null}
+                    onValueChange={(n) => setCount(p.itemCode, n == null ? null : Math.round((n / base.perColis) * 1000) / 1000)}
                     min={0}
-                    step={1}
+                    step={base.perColis}
                     allowEmpty
                     placeholder="—"
+                    aria-label={`Stock compté (en ${base.unit})`}
                     className="h-14 flex-1 text-center text-[28px] font-bold"
                   />
-                  <Button variant="outline" size="icon" className="h-14 w-14 shrink-0" onClick={() => bump(1)} aria-label="+1">
+                  <Button variant="outline" size="icon" className="h-14 w-14 shrink-0" onClick={() => bump(1)} aria-label="+1 colis">
                     <Plus className="!size-5" />
                   </Button>
                 </div>
+
+                {/* Repère colis (la saisie avance d'un colis) */}
+                {real != null && base.perColis > 1 && (
+                  <div className="mt-1.5 text-center text-[12px] text-muted-foreground tnum">= {fmt(real)} colis</div>
+                )}
 
                 {/* Écart en direct */}
                 <div className="mt-2 flex h-6 items-center justify-center">
@@ -149,7 +161,7 @@ export function GuidedCounter({
                       </span>
                     ) : (
                       <span className={`inline-flex items-center gap-1 text-[13px] font-bold tnum ${ecart > 0 ? "text-sky-600 dark:text-sky-400" : "text-amber-600 dark:text-amber-400"}`}>
-                        Écart {ecart > 0 ? `+${fmt(ecart)}` : fmt(ecart)} {sap.unit}
+                        Écart {ecart > 0 ? `+${fmt(toBase(ecart))}` : fmt(toBase(ecart))} {base.unit}
                       </span>
                     )
                   )}
@@ -159,7 +171,7 @@ export function GuidedCounter({
               {/* Actions rapides */}
               <div className="mt-2 grid grid-cols-1 gap-2">
                 <Button variant="success" size="lg" className="h-12 text-[15px]" onClick={conforme}>
-                  <Check className="!size-5" /> Conforme — {fmt(sap.qty)} {sap.unit}
+                  <Check className="!size-5" /> Conforme — {fmt(toBase(sap.qty))} {base.unit}
                 </Button>
                 {real != null && (
                   <button

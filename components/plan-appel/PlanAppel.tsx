@@ -15,6 +15,7 @@ import {
 import { SALESPEOPLE, nameFromInitials, normalizeSlp } from "@/lib/salespeople";
 import { ClientLink } from "@/components/ClientLink";
 import { SortArrow, nextSort, type SortDir } from "@/components/ui/sort";
+import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
 
 interface PlanClient {
   id: string;
@@ -139,7 +140,7 @@ const PlanRow = memo(function PlanRow({
       </td>
       {showTel && (
         <td className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground whitespace-nowrap">
-          {c.tel1 ? <a href={`tel:${c.tel1}`} className="inline-flex items-center gap-1 hover:text-brand-600"><Phone className="h-3 w-3" />{c.tel1}</a> : "—"}
+          {c.tel1 ? <a href={`tel:${standardizePhone(c.tel1)}`} className="inline-flex items-center gap-1 hover:text-brand-600"><Phone className="h-3 w-3" />{formatPhoneDisplay(c.tel1)}</a> : "—"}
         </td>
       )}
       {showJours && <td className="px-3 py-2"><JoursBadges joursAppel={c.joursAppel} /></td>}
@@ -358,7 +359,7 @@ export function PlanAppel() {
           <p className="text-center text-muted-foreground py-10 text-[15px]">Aucun client pour ces filtres.</p>
         ) : sortedData.map((c) => {
           const tel = c.tel1 || c.tel2 || null;
-          const telHref = tel ? tel.replace(/[^\d+]/g, "") : null;
+          const telHref = tel ? standardizePhone(tel) || null : null;
           const tv = c.type === "GMS" ? "gms" : c.type === "EXPORT" ? "export" : c.type === "CHR" ? "chr" : "outline";
           return (
             <div key={c.id} className={`rounded-2xl border border-border bg-card p-4 ${!c.activeTelevente ? "opacity-70" : ""}`}>
@@ -384,7 +385,7 @@ export function PlanAppel() {
               <div className="flex items-center justify-between gap-2 mt-3">
                 {telHref ? (
                   <a href={`tel:${telHref}`} className="inline-flex items-center gap-2 h-10 px-3 rounded-xl bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[15px] font-semibold tnum active:scale-[0.97]">
-                    <Phone className="h-4 w-4" /> {tel}
+                    <Phone className="h-4 w-4" /> {formatPhoneDisplay(tel)}
                   </a>
                 ) : (
                   <span className="text-[13px] text-muted-foreground">Pas de téléphone</span>

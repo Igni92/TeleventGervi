@@ -4,13 +4,10 @@ import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import {
   pullBusinessPartners,
-  pullInvoices,
-  pullOrders,
-  pullPdns,
-  pullPurchaseReturns,
-  pullCreditNotes,
+  pullAllSalesSliced,
   syncClientGroupsFromMirror,
 } from "@/lib/sapMirror";
+import { invalidate } from "@/lib/ttlCache";
 
 /**
  * POST /api/sap/sync/full-reset?from=YYYY-MM-DD
@@ -67,26 +64,31 @@ export async function POST(req: Request) {
     const bps = await pullBusinessPartners({});
     const groups = await syncClientGroupsFromMirror();
 
-    // 3) Docs en parallèle (endpoints SAP indépendants).
-    const [inv, cn, ord, pdn, pret] = await Promise.all([
-      pullInvoices({ from }),
-      pullCreditNotes({ from }),
-      pullOrders({ from }),
-      pullPdns({ from }),
-      pullPurchaseReturns({ from }),
-    ]);
+    // 3) Docs reconstruits par tranches MENSUELLES, plus récente d'abord.
+    //    Indispensable : un `from` d'un an dépasse le plafond de pagination
+    //    (10 000 docs/pull) → un pull global en `DocEntry desc` garderait les
+    //    récents mais perdrait l'historique ; pire, l'ancienne version (asc)
+    //    gardait les 10 000 plus VIEUX et laissait le JOUR COURANT hors miroir
+    //    (cause des KPI du jour à 0). Le découpage mensuel évite toute
+    //    troncature et fait remonter le récent en premier (cf. pullAllSalesSliced).
+    const docs = await pullAllSalesSliced(from, new Date());
+
+    // Purge les agrégats pilotage en cache (TTL 5 min) pour que le cockpit
+    // reflète la resync immédiatement, sans attendre l'expiration.
+    invalidate("pilotage:");
 
     return NextResponse.json({
       ok: true,
       company: "GERVIFRAIS (PROD)",
       from: from.toISOString().slice(0, 10),
+      monthsSliced: docs.slices,
       businessPartners: bps.upserted,
       clientGroups: groups.updated,
-      invoices: inv.pulled,
-      creditNotes: cn.pulled,
-      orders: ord.pulled,
-      pdns: pdn.pulled,
-      purchaseReturns: pret.pulled,
+      invoices: docs.invoices,
+      creditNotes: docs.creditNotes,
+      orders: docs.orders,
+      pdns: docs.pdns,
+      purchaseReturns: docs.purchaseReturns,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

@@ -18,6 +18,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
+import { invalidate } from "@/lib/ttlCache";
+import { monthlySlicesDesc } from "@/lib/sync-slices";
 
 // ─────────────────────────────────────────────────────────────────
 // Types SAP B1 (Service Layer) — minimal subset
@@ -393,12 +395,18 @@ async function pullSalesDocs(
   if (opts.updatedSince) filters.push(`UpdateDate ge ${odataDate(opts.updatedSince)}`);
   const filter = filters.length ? `&$filter=${filters.join(" and ")}` : "";
 
-  const path = `${endpoint}?${SELECT_DOC_LINES}${filter}&$orderby=DocEntry asc`;
+  const path = `${endpoint}?${SELECT_DOC_LINES}${filter}&$orderby=DocEntry desc`;
 
   const docs = dedupeByDocEntry(
     await sap.getAll<SapInvoiceDoc>(path, { pageSize: 100, maxPages: 100, env: "prod" }),
   );
   if (docs.length === 0) return { pulled: 0, maxUpdate: null };
+  if (docs.length >= 10_000) {
+    // `getAll` s'arrête SILENCIEUSEMENT au plafond (100×100). En `DocEntry desc`
+    // on garde les plus RÉCENTS, mais la fenêtre est tronquée : il faut la
+    // découper (resync/backfill passent par pullAllSalesSliced, tranches /mois).
+    console.warn(`[mirror] ${endpoint}: plafond pagination 10000 atteint — fenêtre tronquée, découper en tranches (from/to).`);
+  }
 
   // Ensure BP exists for each cardCode — on insère le minimum si manquant.
   await ensureBusinessPartners(docs, "C");
@@ -472,6 +480,108 @@ export const pullCreditNotes = (opts: MirrorPullOpts) =>
   pullSalesDocs("CreditNotes", opts);
 
 // ─────────────────────────────────────────────────────────────────
+// Insert OPTIMISTE d'une commande tout juste créée via TeleVent.
+//
+// Pendant des agrégats du décrément de stock optimiste (POST /api/sap/orders) :
+// au lieu d'attendre la prochaine synchro pour que la commande remonte dans les
+// KPI du jour (cockpit Écran 1 / accueil), on l'écrit DIRECTEMENT dans le miroir
+// à partir de l'objet déjà ramené par la route — AUCUN appel SAP supplémentaire.
+//
+// Idempotent (même ON CONFLICT que la synchro) : la synchro suivante réécrira
+// proprement la ligne (UpdateDate SAP, marge, annulation éventuelle), car SAP
+// renvoie la commande tant que son UpdateDate ≥ curseur (DocDate du jour).
+//
+// slpName est hérité du client via le miroir BP (TeleVent ne surcharge pas
+// SalesPersonCode) — 0 appel SAP. Si inconnu (BP jamais synchro), reste null :
+// la commande compte en vue globale, scope commercial rattrapé à la synchro.
+// ─────────────────────────────────────────────────────────────────
+
+export interface CreatedOrderForMirror {
+  DocEntry: number;
+  DocNum?: number;
+  DocDate: string;            // ISO (SAP DocDate)
+  CardCode: string;
+  CardName?: string;
+  DocTotal?: number;          // TTC (sera stocké HT = DocTotal − VatSum)
+  VatSum?: number;
+  UpdateDate?: string;
+  DocumentLines?: {
+    LineNum?: number;
+    ItemCode?: string | null;
+    ItemDescription?: string;
+    Quantity?: number;
+    LineTotal?: number;
+    GrossProfit?: number;
+    StockPrice?: number;
+    WarehouseCode?: string;
+  }[];
+}
+
+export async function mirrorCreatedOrder(order: CreatedOrderForMirror): Promise<void> {
+  // FK : crée le BP minimal s'il manque (cardCode + cardName).
+  await ensureBusinessPartners([{ CardCode: order.CardCode, CardName: order.CardName }], "C");
+
+  // Commercial : hérité du client (miroir BP) — pas d'appel SAP SalesPersons.
+  const bp = await prisma.sapBusinessPartner.findUnique({
+    where: { cardCode: order.CardCode },
+    select: { slpName: true },
+  });
+  const slpName = bp?.slpName ?? null;
+
+  const docTotal = order.DocTotal ?? 0;
+  const vatSum = order.VatSum ?? 0;
+  const upd = order.UpdateDate ? new Date(order.UpdateDate) : new Date();
+
+  // Mapping IDENTIQUE à pullSalesDocs (mêmes colonnes, même dérivation lineCost).
+  let docGrossProfit = 0;
+  const lines: unknown[][] = (order.DocumentLines ?? []).map((l) => {
+    const qty = l.Quantity ?? 0;
+    const lineTotal = l.LineTotal ?? 0;
+    const gp = l.GrossProfit ?? null;
+    const lineCost = l.StockPrice ?? (gp != null && qty > 0 ? (lineTotal - gp) / qty : null);
+    docGrossProfit += gp ?? 0;
+    // Ordre = SALES_LINE_COLS. isService : ligne sans ItemCode (prestation/location).
+    return [
+      order.DocEntry, l.LineNum ?? 0, l.ItemCode ?? null, l.ItemDescription ?? null,
+      qty, lineTotal, lineCost, gp, l.WarehouseCode ?? null, l.ItemCode == null,
+    ];
+  });
+
+  // Ordre = SALES_HEADER_COLS. docTotal stocké HT (= DocTotal − VatSum), comme la synchro.
+  const header: unknown[] = [
+    order.DocEntry, order.DocNum ?? null, new Date(order.DocDate), order.CardCode, order.CardName ?? null,
+    slpName, docTotal - vatSum, vatSum, docGrossProfit,
+    false, upd,
+  ];
+
+  await bulkUpsertDocs({
+    headerTable: SALES_TABLES.Orders.header,
+    lineTable: SALES_TABLES.Orders.line,
+    headerCols: SALES_HEADER_COLS,
+    lineCols: SALES_LINE_COLS,
+    docs: [{ docEntry: order.DocEntry, header, lines }],
+  });
+
+  // Rafraîchit les agrégats pilotage (KPI du jour) sans attendre le TTL 5 min.
+  invalidate("pilotage:");
+}
+
+/**
+ * Marque une commande comme ANNULÉE dans le miroir (pendant TeleVent du Cancel
+ * SAP). Comme l'insert optimiste : TeleVent est la source de vérité, on ne
+ * dépend pas d'une resync pour que la commande disparaisse des agrégats du jour
+ * (aggregateActivity filtre `cancelled = false`). `updateMany` = no-op si la
+ * commande n'est pas (encore) dans le miroir.
+ */
+export async function mirrorCancelOrder(docEntry: number): Promise<void> {
+  await prisma.sapOrder.updateMany({
+    where: { docEntry },
+    data: { cancelled: true, syncedAt: new Date() },
+  });
+  invalidate("pilotage:");
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Documents d'ACHAT — PurchaseDeliveryNotes (entrées fournisseur) et
 // PurchaseReturns (avoirs/retours fournisseurs). Mêmes colonnes, même
 // mapping (pas de slpName / vatSum / grossProfit / lineCost).
@@ -505,11 +615,14 @@ async function pullPurchaseDocs(
   if (opts.updatedSince) filters.push(`UpdateDate ge ${odataDate(opts.updatedSince)}`);
   const filter = filters.length ? `&$filter=${filters.join(" and ")}` : "";
 
-  const path = `${endpoint}?${SELECT_PDN_LINES}${filter}&$orderby=DocEntry asc`;
+  const path = `${endpoint}?${SELECT_PDN_LINES}${filter}&$orderby=DocEntry desc`;
   const docs = dedupeByDocEntry(
     await sap.getAll<SapPdnDoc>(path, { pageSize: 100, maxPages: 100, env: "prod" }),
   );
   if (docs.length === 0) return { pulled: 0, maxUpdate: null };
+  if (docs.length >= 10_000) {
+    console.warn(`[mirror] ${endpoint}: plafond pagination 10000 atteint — fenêtre tronquée, découper en tranches (from/to).`);
+  }
 
   // BP fournisseur — créer le minimum si manquant
   await ensureBusinessPartners(docs, "V");
@@ -552,3 +665,51 @@ export const pullPdns = (opts: MirrorPullOpts) =>
  *  Nécessaire aux Achats NET (= Σ PDN − Σ retours) — curseur : lastPurchaseReturnUpdate. */
 export const pullPurchaseReturns = (opts: MirrorPullOpts) =>
   pullPurchaseDocs("PurchaseReturns", { header: "SapPurchaseReturn", line: "SapPurchaseReturnLine" }, opts);
+
+// ─────────────────────────────────────────────────────────────────
+// Reconstruction COMPLÈTE des 5 entités vente/achat, par tranches mensuelles
+// (plus récente d'abord) — anti-troncature ET anti-timeout.
+// ─────────────────────────────────────────────────────────────────
+
+export interface SlicedPullResult {
+  invoices: number; creditNotes: number; orders: number; pdns: number; purchaseReturns: number;
+  slices: number;
+  maxUpdate: {
+    invoice: Date | null; creditNote: Date | null; order: Date | null;
+    pdn: Date | null; purchaseReturn: Date | null;
+  };
+}
+
+/**
+ * Pull des 5 entités sur [from, to] découpé en tranches mensuelles, **la plus
+ * récente d'abord** (cf. monthlySlicesDesc). Garantit que le jour courant n'est
+ * jamais tronqué par le plafond de pagination (10 000 docs/pull) : chaque mois
+ * reste très en-deçà. Idempotent (upsert par DocEntry) → sûr à relancer.
+ *
+ * Utilisé par /sync/full-reset (resync PROD) et /sync/backfill (rétrospectif).
+ */
+export async function pullAllSalesSliced(from: Date, to: Date): Promise<SlicedPullResult> {
+  const slices = monthlySlicesDesc(from, to);
+  const res: SlicedPullResult = {
+    invoices: 0, creditNotes: 0, orders: 0, pdns: 0, purchaseReturns: 0,
+    slices: slices.length,
+    maxUpdate: { invoice: null, creditNote: null, order: null, pdn: null, purchaseReturn: null },
+  };
+  const bump = (cur: Date | null, m: Date | null) => (m && (!cur || m > cur) ? m : cur);
+
+  // Séquentiel entre tranches (récent→ancien), 5 entités en parallèle par
+  // tranche — borne la charge SAP et fait remonter le récent en premier.
+  for (const s of slices) {
+    const [inv, cn, ord, pdn, pret] = await Promise.all([
+      pullInvoices(s), pullCreditNotes(s), pullOrders(s), pullPdns(s), pullPurchaseReturns(s),
+    ]);
+    res.invoices += inv.pulled; res.creditNotes += cn.pulled; res.orders += ord.pulled;
+    res.pdns += pdn.pulled; res.purchaseReturns += pret.pulled;
+    res.maxUpdate.invoice = bump(res.maxUpdate.invoice, inv.maxUpdate);
+    res.maxUpdate.creditNote = bump(res.maxUpdate.creditNote, cn.maxUpdate);
+    res.maxUpdate.order = bump(res.maxUpdate.order, ord.maxUpdate);
+    res.maxUpdate.pdn = bump(res.maxUpdate.pdn, pdn.maxUpdate);
+    res.maxUpdate.purchaseReturn = bump(res.maxUpdate.purchaseReturn, pret.maxUpdate);
+  }
+  return res;
+}

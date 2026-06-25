@@ -4,10 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Truck, Boxes, Scale, Users, FileText, Receipt,
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
-  RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw,
+  RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw, Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ClientLink } from "@/components/ClientLink";
+import { broadcastActiveClient } from "@/lib/consoleSync";
 import {
   nextDeliveryDate, frenchHolidayLabel, nextWorkingDeliveryDay,
   formatDeliveryDate, addDaysISO,
@@ -42,6 +43,7 @@ interface Doc {
   numAtCard: string;
   trspCode: string | null;
   carrierName: string | null;
+  clientType: string | null;   // GMS | CHR | EXPORT | null
   lineCount: number;
   lines: Line[];
 }
@@ -82,6 +84,26 @@ const fmtKg = (v: number) => `${fmtNum(v)} kg`;
 const fmtEur = (v: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v);
 const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+/* ─────────────────────────────────────────────────────────────
+   Segment client (GMS / CHR / EXPORT) — filtre + différenciation
+───────────────────────────────────────────────────────────── */
+type Segment = "ALL" | "GMS" | "CHR" | "EXPORT" | "AUTRES";
+
+/** Une commande appartient-elle au segment filtré ? (AUTRES = type absent) */
+function matchSegment(d: { clientType: string | null }, seg: Segment): boolean {
+  if (seg === "ALL") return true;
+  if (seg === "AUTRES") return d.clientType !== "GMS" && d.clientType !== "CHR" && d.clientType !== "EXPORT";
+  return d.clientType === seg;
+}
+
+/** Styles par segment : pastille de filtre (active/inactive) + badge de ligne. */
+const SEG_UI: Record<Exclude<Segment, "ALL">, { label: string; active: string; badge: string }> = {
+  GMS:    { label: "GMS",    active: "bg-blue-600 text-white border-blue-600",       badge: "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" },
+  CHR:    { label: "CHR",    active: "bg-amber-500 text-white border-amber-500",     badge: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" },
+  EXPORT: { label: "Export", active: "bg-violet-600 text-white border-violet-600",   badge: "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" },
+  AUTRES: { label: "Autres", active: "bg-foreground text-background border-foreground", badge: "bg-muted text-muted-foreground" },
+};
 
 /* ═════════════════════════════════════════════════════════════
    Composant principal
@@ -172,6 +194,66 @@ export function LivraisonDetail() {
     [load],
   );
 
+  // ── Filtre par segment client (GMS / CHR / EXPORT) ──
+  const [segment, setSegment] = useState<Segment>("ALL");
+  // ── Repliage des groupes transporteur (clé = code transporteur) ──
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleCollapse = useCallback((key: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+
+  // Comptes par segment (sur l'ensemble, pour les pastilles du filtre).
+  const segCounts = useMemo(() => {
+    const c: Record<Segment, number> = { ALL: 0, GMS: 0, CHR: 0, EXPORT: 0, AUTRES: 0 };
+    if (!data) return c;
+    for (const car of data.carriers) for (const d of car.docs) {
+      c.ALL++;
+      if (d.clientType === "GMS") c.GMS++;
+      else if (d.clientType === "CHR") c.CHR++;
+      else if (d.clientType === "EXPORT") c.EXPORT++;
+      else c.AUTRES++;
+    }
+    return c;
+  }, [data]);
+
+  // Vue filtrée : on recoupe les commandes par segment et on recalcule les
+  // métriques (groupes + bandeau de synthèse) pour rester cohérent.
+  const view = useMemo(() => {
+    if (!data) return null;
+    if (segment === "ALL") return data;
+    const r1 = (n: number) => Math.round(n * 10) / 10;
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    const carriers = data.carriers
+      .map((c) => {
+        const docs = c.docs.filter((d) => matchSegment(d, segment));
+        return {
+          ...c, docs,
+          orders: docs.length,
+          colis: r1(docs.reduce((s, d) => s + d.colis, 0)),
+          weightKg: r1(docs.reduce((s, d) => s + d.weightKg, 0)),
+          totalHT: r2(docs.reduce((s, d) => s + d.totalHT, 0)),
+        };
+      })
+      .filter((c) => c.docs.length > 0);
+    const allDocs = carriers.flatMap((c) => c.docs);
+    const totals: Totals = {
+      orders: allDocs.length,
+      clients: new Set(allDocs.map((d) => d.cardCode)).size,
+      colis: r1(allDocs.reduce((s, d) => s + d.colis, 0)),
+      weightKg: r1(allDocs.reduce((s, d) => s + d.weightKg, 0)),
+      totalHT: r2(allDocs.reduce((s, d) => s + d.totalHT, 0)),
+    };
+    return { ...data, carriers, totals, count: allDocs.length };
+  }, [data, segment]);
+
+  const allKeys = useMemo(() => (view?.carriers ?? []).map((c) => c.code ?? "__none__"), [view]);
+  const allCollapsed = allKeys.length > 0 && allKeys.every((k) => collapsed.has(k));
+  const toggleAll = () => setCollapsed(allCollapsed ? new Set() : new Set(allKeys));
+
   return (
     <div className="space-y-5 animate-fade-up">
       {/* ── En-tête ── */}
@@ -209,8 +291,19 @@ export function LivraisonDetail() {
         onReport={() => setDate(nextWorkingDeliveryDay(date))}
       />
 
-      {/* ── Bandeau de synthèse ── */}
-      {data?.totals && <SummaryRow totals={data.totals} loading={loading} />}
+      {/* ── Bandeau de synthèse (reflète le filtre segment) ── */}
+      {view?.totals && <SummaryRow totals={view.totals} loading={loading} />}
+
+      {/* ── Filtre segment + repliage global ── */}
+      {data && data.count > 0 && (
+        <SegmentFilter
+          segment={segment}
+          counts={segCounts}
+          onPick={setSegment}
+          allCollapsed={allCollapsed}
+          onToggleAll={toggleAll}
+        />
+      )}
 
       {/* ── Contenu ── */}
       {error ? (
@@ -227,11 +320,25 @@ export function LivraisonDetail() {
         <LoadingState />
       ) : data && data.count === 0 ? (
         <EmptyState date={date} />
-      ) : data ? (
+      ) : view && view.count === 0 ? (
+        <div className="flex flex-col items-center justify-center text-center rounded-2xl border border-dashed border-border bg-card py-12 px-6">
+          <p className="text-[14px] font-semibold text-foreground">Aucune commande pour ce segment</p>
+          <p className="text-[12.5px] text-muted-foreground mt-1">
+            Aucune livraison « {segment === "AUTRES" ? "Autres" : segment} » ce jour-là.
+            <button onClick={() => setSegment("ALL")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir tout</button>
+          </p>
+        </div>
+      ) : view ? (
         <div className={`space-y-4 transition-opacity ${loading ? "opacity-60" : ""}`}>
-          {data.carriers.map((c) => (
-            <CarrierGroup key={c.code ?? "__none__"} carrier={c} carriers={carriers} onCarrierChange={changeCarrier} />
-          ))}
+          {view.carriers.map((c) => {
+            const key = c.code ?? "__none__";
+            return (
+              <CarrierGroup
+                key={key} carrier={c} carriers={carriers} onCarrierChange={changeCarrier}
+                collapsed={collapsed.has(key)} onToggleCollapse={() => toggleCollapse(key)}
+              />
+            );
+          })}
         </div>
       ) : null}
     </div>
@@ -376,18 +483,28 @@ function SummaryRow({ totals, loading }: { totals: Totals; loading: boolean }) {
    Groupe transporteur — en-tête + cartes clients
 ═════════════════════════════════════════════════════════════ */
 function CarrierGroup({
-  carrier, carriers, onCarrierChange,
+  carrier, carriers, onCarrierChange, collapsed, onToggleCollapse,
 }: {
   carrier: Carrier;
   carriers: CarrierOption[];
   onCarrierChange: (docEntry: number, sapValue: string) => Promise<boolean>;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }) {
   const unassigned = !carrier.code;
   return (
     <section className="rounded-2xl border border-border bg-card overflow-hidden">
-      {/* En-tête transporteur */}
-      <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-border bg-secondary/30">
+      {/* En-tête transporteur — cliquable pour replier/déplier le groupe */}
+      <div
+        role="button" tabIndex={0}
+        onClick={onToggleCollapse}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggleCollapse(); } }}
+        aria-expanded={!collapsed}
+        title={collapsed ? "Déplier ce transporteur" : "Replier ce transporteur"}
+        className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-border bg-secondary/30 hover:bg-secondary/50 cursor-pointer select-none transition-colors"
+      >
         <div className="flex items-center gap-2.5 min-w-0">
+          <ChevronDown className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform duration-200 ${collapsed ? "-rotate-90" : ""}`} />
           <span
             className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
               unassigned
@@ -413,13 +530,69 @@ function CarrierGroup({
         </div>
       </div>
 
-      {/* Cartes clients */}
-      <ul className="divide-y divide-border/60">
-        {carrier.docs.map((d) => (
-          <OrderRow key={d.docEntry} doc={d} carriers={carriers} onCarrierChange={onCarrierChange} />
-        ))}
-      </ul>
+      {/* Cartes clients (masquées si le groupe est replié) */}
+      {!collapsed && (
+        <ul className="divide-y divide-border/60">
+          {carrier.docs.map((d) => (
+            <OrderRow key={d.docEntry} doc={d} carriers={carriers} onCarrierChange={onCarrierChange} />
+          ))}
+        </ul>
+      )}
     </section>
+  );
+}
+
+/* ═════════════════════════════════════════════════════════════
+   Filtre par segment client (GMS / CHR / EXPORT) + repliage global
+═════════════════════════════════════════════════════════════ */
+function SegmentFilter({
+  segment, counts, onPick, allCollapsed, onToggleAll,
+}: {
+  segment: Segment;
+  counts: Record<Segment, number>;
+  onPick: (s: Segment) => void;
+  allCollapsed: boolean;
+  onToggleAll: () => void;
+}) {
+  // ALL toujours présent ; un segment n'apparaît que s'il a au moins 1 commande.
+  const segs: Segment[] = ["ALL", "GMS", "CHR", "EXPORT", "AUTRES"];
+  return (
+    <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {segs.map((s) => {
+          if (s !== "ALL" && counts[s] === 0) return null;
+          const isActive = segment === s;
+          const label = s === "ALL" ? "Tous" : SEG_UI[s as Exclude<Segment, "ALL">].label;
+          const activeCls = s === "ALL"
+            ? "bg-foreground text-background border-foreground"
+            : SEG_UI[s as Exclude<Segment, "ALL">].active;
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => onPick(s)}
+              aria-pressed={isActive}
+              className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border text-[12.5px] font-semibold transition-colors ${
+                isActive ? activeCls : "border-border bg-card text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+              }`}
+            >
+              {label}
+              <span className={`tnum text-[11px] font-bold ${isActive ? "opacity-90" : "opacity-60"}`}>
+                {counts[s]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        onClick={onToggleAll}
+        className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors shrink-0"
+      >
+        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${allCollapsed ? "-rotate-90" : ""}`} />
+        {allCollapsed ? "Tout déplier" : "Tout replier"}
+      </button>
+    </div>
   );
 }
 
@@ -447,6 +620,37 @@ function OrderRow({
   const [open, setOpen] = useState(false);
   const [savingCarrier, setSavingCarrier] = useState(false);
 
+  // N° de commande (réf. client) — éditable directement sur la ligne. Sauvé sur
+  // blur/Entrée (PATCH NumAtCard) seulement si modifié. `savedRef` = dernière
+  // valeur enregistrée (évite de muter la prop `doc` et les ré-enregistrements).
+  const [refDraft, setRefDraft] = useState(doc.numAtCard ?? "");
+  const [savedRef, setSavedRef] = useState(doc.numAtCard ?? "");
+  const [savingRef, setSavingRef] = useState(false);
+  async function saveRef() {
+    const val = refDraft.trim();
+    if (val === savedRef.trim()) return;   // inchangé
+    setSavingRef(true);
+    try {
+      const res = await fetch(`/api/sap/orders/${doc.docEntry}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ numAtCard: val }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || j?.ok === false) {
+        toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement du n° de commande");
+        setRefDraft(savedRef);   // rollback affichage
+        return;
+      }
+      setSavedRef(val);
+      toast.success(val ? `N° de commande enregistré (#${doc.docNum})` : `N° de commande retiré (#${doc.docNum})`);
+    } catch {
+      toast.error("SAP injoignable — n° de commande non enregistré");
+      setRefDraft(savedRef);
+    } finally {
+      setSavingRef(false);
+    }
+  }
+
   // Le transporteur courant doit rester sélectionnable même s'il n'est pas dans
   // la table Carrier (code SAP brut) → on l'injecte en tête si besoin.
   const options: CarrierOption[] = useMemo(() => {
@@ -464,6 +668,37 @@ function OrderRow({
     setSavingCarrier(false);
   }
 
+  // Modification : on résout le client puis on DIFFUSE la cible à l'Écran 2 (même
+  // fenêtre, aucun nouvel onglet). L'Écran 2 bascule en saisie sur ce BL (mode
+  // collant) et pré-remplit le panier avec ses lignes, éditables.
+  const [modifBusy, setModifBusy] = useState(false);
+  async function startModif() {
+    setModifBusy(true);
+    try {
+      const r = await fetch(`/api/clients/resolve?code=${encodeURIComponent(doc.cardCode)}`);
+      const j = await r.json().catch(() => null);
+      if (!j?.id) {
+        toast.error("Client introuvable en télévente — modification impossible depuis ici.");
+        return;
+      }
+      broadcastActiveClient({
+        clientId: j.id,
+        clientName: doc.cardName,
+        stockSharePct: 100,
+        client: null,
+        modif: { docEntry: doc.docEntry, docNum: doc.docNum },
+      });
+      toast.success(`Modification du BL #${doc.docNum} chargée sur l'Écran 2`, {
+        description: "La saisie s'ouvre sur l'Écran 2 (même fenêtre).",
+        duration: 6000,
+      });
+    } catch {
+      toast.error("Échec du chargement de la modification.");
+    } finally {
+      setModifBusy(false);
+    }
+  }
+
   return (
     <li>
       <div className="flex items-center gap-3 px-4 sm:px-5 py-3 hover:bg-secondary/25 transition-colors">
@@ -475,6 +710,11 @@ function OrderRow({
               name={doc.cardName}
               className="text-[14.5px] font-semibold text-foreground truncate text-left hover:underline decoration-brand-500/60 underline-offset-2 max-w-full"
             />
+            {doc.clientType && (SEG_UI[doc.clientType as Exclude<Segment, "ALL">] ?? null) && (
+              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEG_UI[doc.clientType as Exclude<Segment, "ALL">].badge}`}>
+                {SEG_UI[doc.clientType as Exclude<Segment, "ALL">].label}
+              </span>
+            )}
             {!doc.open && (
               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide">
                 <CheckCircle2 className="h-2.5 w-2.5" /> Livrée
@@ -484,11 +724,10 @@ function OrderRow({
           <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground flex-wrap">
             <span className="font-mono text-foreground/60">{doc.cardCode}</span>
             <span>· BL n°{doc.docNum}</span>
-            {doc.numAtCard && <span className="truncate">· réf. {doc.numAtCard}</span>}
             <span className="hidden sm:inline">· {fmtEur(doc.totalHT)} HT</span>
           </div>
           {/* Changement de transporteur direct */}
-          <div className="mt-1.5 inline-flex items-center gap-1.5">
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <Truck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <div className="relative">
               <select
@@ -510,6 +749,22 @@ function OrderRow({
                 <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
               )}
             </div>
+            {/* N° de commande (réf. client) — éditable directement ici */}
+            <div className="relative inline-flex items-center">
+              <FileText className="pointer-events-none absolute left-2 h-3 w-3 text-muted-foreground" />
+              <input
+                value={refDraft}
+                onChange={(e) => setRefDraft(e.target.value)}
+                onBlur={saveRef}
+                onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                disabled={savingRef}
+                placeholder="N° commande"
+                title="N° de commande (réf. client) — Entrée ou clic ailleurs pour enregistrer"
+                aria-label={`N° de commande de la livraison ${doc.docNum}`}
+                className="h-7 w-[140px] rounded-md border border-border bg-card pl-7 pr-6 text-[11.5px] font-medium text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
+              />
+              {savingRef && <Loader2 className="pointer-events-none absolute right-1.5 h-3 w-3 animate-spin text-muted-foreground" />}
+            </div>
           </div>
         </div>
 
@@ -523,6 +778,18 @@ function OrderRow({
             <p className="text-[14px] font-semibold tnum text-foreground/85 leading-none">{fmtNum(doc.weightKg)}</p>
             <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-0.5">kg</p>
           </div>
+          {doc.open && (
+            <button
+              type="button"
+              onClick={startModif}
+              disabled={modifBusy}
+              title={`Modifier le BL #${doc.docNum} (sur l'Écran 2) — quantités + ajout de lignes`}
+              className="inline-flex items-center gap-1 h-9 px-2.5 rounded-lg border border-amber-300/70 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-900/20 text-[12px] font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/35 active:scale-95 transition-all disabled:opacity-60"
+            >
+              {modifBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />}
+              <span className="hidden sm:inline">Modifier</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}

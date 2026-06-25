@@ -3,8 +3,8 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import {
-  Loader2, RefreshCw, ChevronDown, ChevronRight, Search, Plus, Trash2,
-  ShoppingCart, Check, RotateCcw, AlertTriangle, Star, Gift, Megaphone,
+  Loader2, RefreshCw, ChevronDown, ChevronRight, ChevronUp, Search, Plus, Trash2,
+  ShoppingCart, Check, RotateCcw, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock, X,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
@@ -45,6 +45,20 @@ interface CartLine {
   stepColis: number;
   // C2 — promo appliquée à la ligne (remise SAP envoyée à la création du bon)
   promo: Promo | null; discountPercent: number; freeUnits: number;
+  // freeUnits saisi À LA MAIN (sélecteur « offert ») → ne pas recalculer depuis la
+  // promo quand la quantité change. true dès que l'utilisateur touche le sélecteur.
+  freeManual?: boolean;
+  // Mode MODIFICATION : ligne déjà présente sur le BL. null/absent = nouvelle
+  // ligne. Le BL est ré-enregistré en remplacement complet → une ligne retirée
+  // du panier est supprimée du BL, l'ordre du panier = l'ordre des lignes.
+  // `qty`/`price` = valeurs d'origine (détection de changement) ; `pieces` = la
+  // quantité SAP brute d'origine (renvoyée telle quelle si la qté n'a pas bougé,
+  // pour ne pas réintroduire d'arrondi colis↔pièces) ; `lot` = lot préservé ;
+  // `closed` = ligne déjà livrée (verrouillée : ni édition ni suppression).
+  originalLine?: {
+    lineNum: number; warehouse: string | null; qty: number; price: number | null;
+    pieces: number; lot: string | null; closed: boolean;
+  } | null;
 }
 interface DeliveryMode { id: string; name: string; sapCardCode: string; isDefault: boolean }
 // B3 — `count` présent quand la liste vient de /api/clients/[id]/carriers (nb de cdes)
@@ -52,20 +66,20 @@ interface Carrier { id: string; name: string; count?: number }
 
 /* ── C2 — Helpers promo (purs) ─────────────────────────────── */
 
-/** Recalcule les COLIS OFFERTS d'une ligne promo (X_PLUS_Y ou FREE).
- *  X_PLUS_Y (« 5 achetés + 1 offert ») : le(s) offert(s) sont DANS la quantité
- *    saisie → freeUnits = freeQty × floor(qty / (buyQty + freeQty)). discountPercent
- *    sert UNIQUEMENT à l'affichage panier (le bon SAP, lui, fait une ligne à 0).
- *  FREE (« 1 colis offert ») : freeQty colis offerts EN PLUS de la quantité saisie,
- *    sans seuil d'achat → freeUnits = freeQty (dès qu'on commande l'article).
+/** Recalcule les COLIS OFFERTS d'une ligne promo (X_PLUS_Y ou FREE). Dans les
+ *  deux cas, les offerts s'AJOUTENT à la quantité saisie (ligne à 0 € sur le bon).
+ *  X_PLUS_Y (« 5 achetés + 1 offert ») : pour chaque buyQty commandés → freeQty
+ *    offerts en plus → freeUnits = freeQty × floor(qty / buyQty). (Ex. 5 → +1, 10 → +2.)
+ *  FREE (« 1 colis offert ») : freeQty offerts dès qu'on commande l'article (sans seuil).
  *  No-op pour les autres lignes — appelé à chaque changement de quantité. */
 function applyPromoFree(line: CartLine): CartLine {
+  if (line.freeManual) return line;   // « offert » saisi à la main → on n'écrase pas
   const pr = line.promo;
   const qty = line.quantity;
   if (pr?.kind === "X_PLUS_Y" && pr.buyQty > 0 && pr.freeQty > 0) {
-    const freeUnits = qty > 0 ? pr.freeQty * Math.floor(qty / (pr.buyQty + pr.freeQty)) : 0;
-    const discountPercent = freeUnits > 0 ? Math.round((freeUnits / qty) * 100 * 100) / 100 : 0;
-    return { ...line, freeUnits, discountPercent };
+    // « buyQty achetés + freeQty offert » : offert(s) EN PLUS, par tranche de buyQty.
+    const freeUnits = qty > 0 ? pr.freeQty * Math.floor(qty / pr.buyQty) : 0;
+    return { ...line, freeUnits, discountPercent: 0 };
   }
   if (pr?.kind === "FREE" && pr.freeQty > 0) {
     return { ...line, freeUnits: qty > 0 ? pr.freeQty : 0, discountPercent: 0 };
@@ -153,8 +167,13 @@ interface GroupEntry { key: string; name: string; prods: Product[]; pinned?: boo
  *   C4 — densité d'affichage Compact / Normal / Aéré : RÉGLÉE sur /parametres
  *        (localStorage televente:ecran2Density), lue ici + listener storage
  */
-export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
+export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifier: modifierProp = null, onExitModif }: {
   clientId: string; clientName: string; stockSharePct?: number;
+  /** Cible de MODIFICATION (diffusée par « Détail livraison ») : on pré-remplit le
+   *  panier avec les lignes du BL et on enregistre sur ce BL. */
+  modifier?: { docEntry: number; docNum: number } | null;
+  /** Quitter la modification → l'écran 2 reprend la synchro normale. */
+  onExitModif?: () => void;
 }) {
   const [grouped, setGrouped] = useState<Record<string, Product[]>>({});
   const [loading, setLoading] = useState(false);
@@ -189,6 +208,62 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
   const [encoursPrompt, setEncoursPrompt] = useState<
     { lines: ApiLine[]; message: string; encours?: { balance: number; creditLimit: number } } | null
   >(null);
+  // Mode MODIFICATION (piloté par « Détail livraison » via l'URL) : on charge le
+  // BL existant, on PRÉ-REMPLIT le panier avec ses lignes (éditables), et la
+  // validation enregistre sur CE BL (jamais de 2ᵉ bon).
+  const [modif, setModif] = useState(modifierProp);
+  const [modifMeta, setModifMeta] = useState<{ dueDate?: string; editable?: boolean } | null>(null);
+  const [prefilling, setPrefilling] = useState(false);
+  // Note BL éditable (texte promo/divers) → commentaires du bon. Pré-remplie au chargement.
+  const [comments, setComments] = useState("");
+
+  /** Charge (ou recharge) le BL ciblé et pré-remplit le panier avec ses lignes.
+   *  Rappelé après un enregistrement pour refléter l'état SAP réel — et pour que
+   *  les lignes fraîchement ajoutées portent leur LineNum (pas de ré-ajout). */
+  const loadModif = useCallback(async (target: { docEntry: number; docNum: number }) => {
+    setPrefilling(true);
+    try {
+      const r = await fetch(`/api/sap/orders/${target.docEntry}/modif`, { cache: "no-store" });
+      const j = await r.json();
+      if (!j?.ok) { toast.error("Chargement du BL impossible", { description: j?.error, duration: 8000 }); return; }
+      setModifMeta({ dueDate: j.dueDate, editable: j.editable });
+      setComments(j.noteText ?? "");
+      setNumAtCard(j.numAtCard ?? "");
+      type PrefillLine = {
+        lineNum: number; warehouse: string | null; lot: string | null; closed: boolean;
+        itemCode: string; itemName: string;
+        unit: string; priceUnit: string; packDivisor: number; availByWarehouse: Record<string, number>;
+        quantity: number; qtyPieces: number; price: number | null; marque: string | null; condi: string | null;
+        pays: string | null; variete: string | null; stepColis: number;
+      };
+      setCart((j.cartLines ?? []).map((l: PrefillLine) => ({
+        itemCode: l.itemCode, itemName: l.itemName, unit: l.unit, priceUnit: l.priceUnit,
+        packDivisor: l.packDivisor, availByWarehouse: l.availByWarehouse,
+        quantity: l.quantity, price: l.price,
+        marque: l.marque, condi: l.condi, pays: l.pays, variete: l.variete,
+        stepColis: l.stepColis && l.stepColis > 0 ? l.stepColis : 1,
+        promo: null, discountPercent: 0, freeUnits: 0,
+        originalLine: {
+          lineNum: l.lineNum, warehouse: l.warehouse, qty: l.quantity, price: l.price,
+          pieces: l.qtyPieces, lot: l.lot, closed: l.closed,
+        },
+      })));
+      if (j.editable === false) {
+        toast.warning("Commande clôturée — la modification sera refusée par SAP.", { duration: 8000 });
+      }
+    } catch {
+      toast.error("Chargement du BL impossible (SAP injoignable).");
+    } finally {
+      setPrefilling(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    setModif(modifierProp);
+    if (modifierProp) { loadModif(modifierProp); }
+    else { setModifMeta(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modifierProp?.docEntry]);
 
   // ── Reset quand le client change ──
   useEffect(() => {
@@ -413,7 +488,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
         marque: p.uMarque ?? null, condi: p.uCondi ?? p.uUvc ?? null, pays: p.uPays ?? null,
         variete: p.frgnName ?? null,
         stepColis,
-        promo, discountPercent, freeUnits: 0,
+        promo, discountPercent, freeUnits: 0, freeManual: false,
+        originalLine: null,   // ajoutée via le stock → nouvelle ligne du BL
       })];
     });
   };
@@ -421,6 +497,42 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
   const updateLine = (i: number, patch: Partial<CartLine>) =>
     setCart((c) => c.map((l, k) => k === i ? applyPromoFree({ ...l, ...patch }) : l));
   const removeLine = (i: number) => setCart((c) => c.filter((_, k) => k !== i));
+  /** Réordonne une ligne (modif) : échange avec la voisine. dir = -1 (monter) / +1 (descendre). */
+  const moveLine = (i: number, dir: -1 | 1) =>
+    setCart((c) => {
+      const j = i + dir;
+      if (j < 0 || j >= c.length) return c;
+      const next = c.slice();
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+
+  /** C2 — Bascule la promotion d'une ligne (jamais imposée) : applique la promo
+   *  active de l'article si absente, la retire sinon. Marche aussi sur les
+   *  lignes déjà au BL. PERCENT : ajuste le prix net affiché (et le restaure au
+   *  retrait) ; X_PLUS_Y / FREE : (re)calcule les colis offerts via applyPromoFree. */
+  const togglePromo = (i: number) =>
+    setCart((cur) => cur.map((l, k) => {
+      if (k !== i) return l;
+      if (l.promo) {
+        // Retrait : on restaure le prix plein si une remise % avait été appliquée.
+        let price = l.price;
+        if (l.promo.kind === "PERCENT" && l.discountPercent > 0 && l.discountPercent < 100 && price != null) {
+          price = Math.round((price / (1 - l.discountPercent / 100)) * 100) / 100;
+        }
+        return { ...l, promo: null, discountPercent: 0, freeUnits: 0, freeManual: false, price };
+      }
+      const pr = promos[l.itemCode];
+      if (!pr) return l;
+      let price = l.price;
+      let discountPercent = 0;
+      if (pr.kind === "PERCENT" && pr.value > 0 && pr.value < 100) {
+        discountPercent = pr.value;
+        if (price != null) price = Math.round(price * (1 - pr.value / 100) * 100) / 100;
+      }
+      // freeManual:false → la promo (re)calcule les colis offerts (X+Y / offert).
+      return applyPromoFree({ ...l, promo: pr, discountPercent, price, freeManual: false });
+    }));
   /** Retire un item du panier par son itemCode (utilisé par le toggle Add/Done). */
   const removeFromCartByCode = (itemCode: string) =>
     setCart((c) => c.filter((l) => l.itemCode !== itemCode));
@@ -438,7 +550,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
         itemCode: l.itemCode, itemName: l.itemName, unit: l.displayUnit, priceUnit: l.priceUnit,
         packDivisor: l.packDivisor, availByWarehouse: l.availByWarehouse, quantity: l.quantity, price: l.price,
         marque: null, condi: null, pays: null, variete: null, stepColis: 1,
-        promo: null, discountPercent: 0, freeUnits: 0,
+        promo: null, discountPercent: 0, freeUnits: 0, originalLine: null,
       })));
       toast.success(`Dernière commande #${json.docNum} rejouée`);
     } catch { toast.error("Erreur rejeu"); }
@@ -446,13 +558,11 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
   };
 
   // Prix à la pièce × (colis × pièces/colis) = total ligne.
-  // C2 — X_PLUS_Y : le prix affiché reste PLEIN, la remise (= colis offerts)
-  // s'applique sur le total. PERCENT : le prix affiché est DÉJÀ remisé → rien à déduire.
+  // Les colis offerts (X_PLUS_Y / FREE) sont une LIGNE séparée à 0 € → ils ne
+  // réduisent pas ce total. PERCENT : le prix affiché est DÉJÀ net → rien à déduire.
   const lineHT = (l: CartLine) => {
     if (!l.price) return 0;
-    const brut = l.price * l.quantity * l.packDivisor;
-    if (l.promo?.kind === "X_PLUS_Y" && l.discountPercent > 0) return brut * (1 - l.discountPercent / 100);
-    return brut;
+    return l.price * l.quantity * l.packDivisor;
   };
   const totalHT = useMemo(() => cart.reduce((s, l) => s + lineHT(l), 0), [cart]);
 
@@ -506,15 +616,13 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
     return true;
   };
 
-  const buildApiLines = (): ApiLine[] =>
-    cart.flatMap((l) => {
+  const buildApiLines = (lines: CartLine[] = cart): ApiLine[] =>
+    lines.flatMap((l) => {
       const kind = l.promo?.kind;
-      const freeUnits = (kind === "X_PLUS_Y" || kind === "FREE") ? Math.max(0, Math.floor(l.freeUnits)) : 0;
-      // Quantité TOTALE expédiée (colis) :
-      //   X_PLUS_Y → les offerts sont DANS la qté saisie (le 6ᵉ d'un 5+1) ;
-      //   FREE     → les offerts s'AJOUTENT par-dessus la qté saisie ;
-      //   autres   → qté saisie.
-      const paidQty = kind === "FREE" ? l.quantity : Math.max(0, l.quantity - freeUnits);
+      // Colis offerts (promo X+Y / offert OU saisis à la main) : EN PLUS de la qté
+      // saisie, en ligne séparée à 0 €. La quantité saisie est entièrement payante.
+      const freeUnits = Math.max(0, Math.floor(l.freeUnits ?? 0));
+      const paidQty = l.quantity;
       const totalQty = paidQty + freeUnits;
 
       // C2 — PERCENT : le prix panier est NET (déjà remisé) → on renvoie le BRUT
@@ -562,6 +670,93 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
     });
 
   const submit = async () => {
+    // ── Mode MODIFICATION : ré-enregistre le BL en REMPLACEMENT COMPLET ──
+    // (même BL/DocNum) — supprimer/modifier/réordonner/ajouter, comme un bon normal.
+    if (modif) {
+      if (modifMeta?.editable === false) { toast.error("BL clôturé — modification impossible."); return; }
+      if (cart.length === 0) { toast.error("Le BL doit garder au moins une ligne."); return; }
+      // Liste FINALE (ordre du panier = ordre des lignes du BL) :
+      //  - ligne existante → conservée, lot préservé ; qté brute d'origine si
+      //    inchangée (pas d'arrondi colis↔pièces), sinon reconvertie.
+      //  - nouvelle ligne → découpée par entrepôt (buildApiLines) ; lot/TPF serveur.
+      type FinalLine = {
+        itemCode: string; quantity: number; warehouseCode?: string;
+        price?: number; discountPercent?: number; keep?: boolean; lot?: string | null;
+      };
+      const lines: FinalLine[] = [];
+      for (const l of cart) {
+        const o = l.originalLine;
+        const kind = l.promo?.kind;
+        if (o) {
+          // Ligne existante → CONSERVÉE (lot préservé). La qté saisie est payante ;
+          // les colis offerts (promo OU saisis à la main) partent en ligne SÉPARÉE à 0 €.
+          const freeColis = Math.max(0, Math.floor(l.freeUnits));
+          const qtyChanged = Math.abs(l.quantity - o.qty) > 1e-6;
+          const paidPieces = qtyChanged ? Math.round(l.quantity * l.packDivisor * 1000) / 1000 : o.pieces;
+          // Remise % (PERCENT) portée sur la ligne : prix brut + DiscountPercent.
+          let price = l.price;
+          let discountPercent: number | undefined;
+          if (kind === "PERCENT" && l.discountPercent > 0 && l.discountPercent < 100 && price != null) {
+            discountPercent = Math.round(l.discountPercent * 100) / 100;
+            price = Math.round((price / (1 - l.discountPercent / 100)) * 10000) / 10000; // net → brut
+          }
+          if (paidPieces > 0) {
+            lines.push({
+              itemCode: l.itemCode, quantity: paidPieces,
+              ...(o.warehouse ? { warehouseCode: o.warehouse } : {}),
+              ...(price != null && price > 0 ? { price } : {}),
+              ...(discountPercent != null ? { discountPercent } : {}),
+              keep: true, lot: o.lot,
+            });
+          }
+          // Ligne(s) offerte(s) → nouvelle ligne à 0 € (même article/entrepôt, 100 % remise).
+          if (freeColis > 0) {
+            lines.push({
+              itemCode: l.itemCode, quantity: Math.round(freeColis * l.packDivisor * 1000) / 1000,
+              ...(o.warehouse ? { warehouseCode: o.warehouse } : {}),
+              ...(l.price != null && l.price > 0 ? { price: l.price } : {}),
+              discountPercent: 100,
+              keep: false,
+            });
+          }
+        } else {
+          // Nouvelle ligne → buildApiLines (split entrepôt + promo + lot/TPF serveur).
+          for (const a of buildApiLines([l])) {
+            lines.push({
+              itemCode: a.itemCode, quantity: a.quantity,
+              ...(a.warehouseCode ? { warehouseCode: a.warehouseCode } : {}),
+              ...(a.price != null ? { price: a.price } : {}),
+              ...(a.discountPercent != null ? { discountPercent: a.discountPercent } : {}),
+              keep: false,
+            });
+          }
+        }
+      }
+      if (lines.length === 0) { toast.error("Le BL doit garder au moins une ligne."); return; }
+      setSubmitting(true);
+      try {
+        const res = await fetch(`/api/sap/orders/${modif.docEntry}/modif`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lines, comments: comments.trim(), numAtCard: numAtCard.trim() }),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.ok) {
+          toast.error("❌ Modification refusée", { description: json?.error, duration: 10000 });
+          return;
+        }
+        const fmt = (n: number | null | undefined) => n != null ? n.toFixed(2) : "—";
+        toast.success(
+          `✅ BL #${json.docNum} enregistré — ${json.totalLines} ligne(s) · total ${fmt(json.totalTTC)} € TTC`,
+          { duration: 10000 },
+        );
+        // Pas de rechargement : le remplacement complet est idempotent (ré-enregistrer
+        // renvoie le même panier) → on garde l'état affiché, promos comprises.
+      } catch (e) {
+        toast.error(`❌ ${e instanceof Error ? e.message : "Erreur réseau"}`);
+      } finally { setSubmitting(false); }
+      return;
+    }
+
     if (cart.length === 0) { toast.error("Panier vide"); return; }
     setSubmitting(true);
     try {
@@ -769,7 +964,12 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
                       const kgC     = !isKg ? colisKg(p) : null;          // B4
                       // Chips dimensionnés par la densité (C4)
                       const chipCls = `inline-flex items-center px-2 rounded-[5px] font-semibold ${ui.chip}`;
-                      const toggleCart = () => inCart ? removeFromCartByCode(p.itemCode) : addToCart(p);
+                      // Seule une ligne déjà LIVRÉE (clôturée) ne peut pas être retirée.
+                      const hasClosedLine = !!modif && cart.some((l) => l.itemCode === p.itemCode && l.originalLine?.closed);
+                      const toggleCart = () => {
+                        if (inCart) { if (hasClosedLine) return; removeFromCartByCode(p.itemCode); }
+                        else addToCart(p);
+                      };
                       return (
                         <li key={p.id}>
                           {/* Ligne = div role=button (et non <button>) : l'étoile favoris
@@ -889,16 +1089,22 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
               <Megaphone className="h-3.5 w-3.5" />
               Promotions{promoList.length > 0 ? ` (${promoList.length})` : ""}
             </button>
-            <button type="button" onClick={replayLast} disabled={replaying}
-              className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-60">
-              {replaying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Rejouer la dernière
-            </button>
+            {!modif && (
+              <button type="button" onClick={replayLast} disabled={replaying}
+                className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-60">
+                {replaying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Rejouer la dernière
+              </button>
+            )}
           </div>
         </div>
+        {modif && <ModifBanner docNum={modif.docNum} meta={modifMeta} prefilling={prefilling} onExit={onExitModif} />}
         <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
           {cart.length === 0 && (
-            <p className="text-[14px] text-muted-foreground italic py-4 text-center">
-              Clique un produit à gauche pour l&apos;ajouter.
+            <p className="text-[14px] text-muted-foreground italic py-4 text-center inline-flex items-center justify-center gap-2 w-full">
+              {prefilling
+                ? <><Loader2 className="h-4 w-4 animate-spin" /> Chargement du BL…</>
+                : modif ? "BL vide — clique un produit à gauche pour l'ajouter."
+                        : "Clique un produit à gauche pour l'ajouter."}
             </p>
           )}
           {cart.map((l, i) => {
@@ -906,6 +1112,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
             const over = l.quantity > max;
             const sellShort = max <= 0;             // entièrement à découvert
             const partialShort = over && !sellShort;
+            const locked = !!l.originalLine?.closed; // ligne déjà livrée → verrouillée
             return (
               <div key={i} className={`rounded-lg border p-2 ${sellShort ? "border-rose-400/60 bg-rose-50/40 dark:bg-rose-950/15" : "border-border"}`}>
                 <div className="flex items-start justify-between gap-1">
@@ -917,10 +1124,25 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
                           À DÉCOUVERT
                         </span>
                       )}
-                      {/* C2 — rappel promo sur la ligne panier : « −10 % » ou « 5+1 » */}
-                      {l.promo && (
-                        <span className="inline-flex h-5 items-center px-1.5 rounded text-[11px] font-bold bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-400/60 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/50">
-                          {promoBadge(l.promo)}
+                      {/* C2 — promo PAR LIGNE, jamais imposée : appliquer/retirer en 1 clic
+                          (badge actif = clic pour retirer ; sinon chip discret si une promo
+                          existe pour l'article). Marche aussi sur les lignes déjà au BL. */}
+                      {l.promo ? (
+                        <button type="button" onClick={() => togglePromo(i)} title="Retirer la promotion"
+                          className="inline-flex h-5 items-center gap-1 px-1.5 rounded text-[11px] font-bold bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-400/60 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/50 hover:bg-rose-200 dark:hover:bg-rose-500/40">
+                          {promoBadge(l.promo)} <X className="h-2.5 w-2.5" />
+                        </button>
+                      ) : (promos[l.itemCode] && !locked) ? (
+                        <button type="button" onClick={() => togglePromo(i)} title="Appliquer la promotion"
+                          className="inline-flex h-5 items-center gap-1 px-1.5 rounded text-[11px] font-semibold border border-dashed border-rose-300 text-rose-600 hover:bg-rose-50 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-950/30">
+                          <Megaphone className="h-2.5 w-2.5" /> {promoBadge(promos[l.itemCode])}
+                        </button>
+                      ) : null}
+                      {/* Modification : ligne déjà LIVRÉE → verrouillée (ni édition ni retrait) */}
+                      {locked && (
+                        <span title="Ligne déjà livrée — verrouillée"
+                          className="inline-flex h-5 items-center gap-1 px-1.5 rounded text-[11px] font-bold bg-muted text-muted-foreground">
+                          <Lock className="h-3 w-3" /> livré
                         </span>
                       )}
                     </div>
@@ -945,48 +1167,85 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
                       );
                     })()}
                   </div>
-                  <button type="button" onClick={() => removeLine(i)} className="text-muted-foreground/50 hover:text-rose-500 shrink-0">
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  {/* Actions de ligne : réordonner (modif) + supprimer (sauf ligne livrée).
+                      En remplacement complet, retirer une ligne du panier la supprime du BL ;
+                      l'ordre du panier = l'ordre des lignes du BL. */}
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    {modif && (
+                      <div className="flex flex-col -my-0.5">
+                        <button type="button" tabIndex={-1} onClick={() => moveLine(i, -1)} disabled={i === 0}
+                          aria-label="Monter la ligne" title="Monter"
+                          className="text-muted-foreground/40 hover:text-foreground disabled:opacity-20 leading-none">
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button type="button" tabIndex={-1} onClick={() => moveLine(i, 1)} disabled={i === cart.length - 1}
+                          aria-label="Descendre la ligne" title="Descendre"
+                          className="text-muted-foreground/40 hover:text-foreground disabled:opacity-20 leading-none">
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
+                    {!locked && (
+                      <button type="button" onClick={() => removeLine(i)} className="text-muted-foreground/50 hover:text-rose-500">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5 mt-2">
-                  {/* Stepper « un colis » : −/+ avancent du poids/nombre d'un colis */}
+                <div className={`flex items-center gap-1.5 mt-2 ${locked ? "opacity-60" : ""}`}>
+                  {/* On VEND au colis : −/+ avancent d'un colis. Mais on AFFICHE dans
+                      l'unité de base (kg/pie) = qté_colis × packDivisor → fraises
+                      4/8/12 kg, framboises 12/24/36 bqe. */}
                   <div className="inline-flex items-center rounded-lg border border-border overflow-hidden shrink-0">
                     <button
-                      type="button" tabIndex={-1}
-                      onClick={() => updateLine(i, { quantity: Math.max(0, Math.round((l.quantity - l.stepColis) * 100) / 100) })}
+                      type="button" tabIndex={-1} disabled={locked}
+                      onClick={() => updateLine(i, { quantity: Math.max(0, Math.round((l.quantity - l.stepColis) * 1000) / 1000) })}
                       aria-label="Retirer un colis"
-                      className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-muted-foreground hover:bg-secondary/60 active:scale-95"
+                      className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-muted-foreground hover:bg-secondary/60 active:scale-95 disabled:opacity-40 disabled:hover:bg-transparent"
                     >−</button>
-                    <NumberInput value={l.quantity} onValueChange={(n) => updateLine(i, { quantity: n ?? 0 })}
-                      min={0} step={l.stepColis}
-                      aria-label={`Quantité ${l.itemName}`}
-                      className={`h-11 w-16 text-center text-[17px] font-semibold tnum border-x border-border bg-background px-1 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 ${over ? "text-amber-600 dark:text-amber-400" : ""}`} />
+                    <NumberInput value={Math.round(l.quantity * l.packDivisor * 100) / 100}
+                      onValueChange={(n) => updateLine(i, { quantity: (n ?? 0) / l.packDivisor })}
+                      min={0} step={l.stepColis * l.packDivisor} disabled={locked}
+                      aria-label={`Quantité ${l.itemName} (en ${l.priceUnit})`}
+                      className={`h-11 w-[72px] text-center text-[17px] font-semibold tnum border-x border-border bg-background px-1 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 ${over ? "text-amber-600 dark:text-amber-400" : ""}`} />
                     <button
-                      type="button" tabIndex={-1}
-                      onClick={() => updateLine(i, { quantity: Math.round((l.quantity + l.stepColis) * 100) / 100 })}
+                      type="button" tabIndex={-1} disabled={locked}
+                      onClick={() => updateLine(i, { quantity: Math.round((l.quantity + l.stepColis) * 1000) / 1000 })}
                       aria-label="Ajouter un colis"
-                      className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-brand-600 dark:text-brand-400 hover:bg-secondary/60 active:scale-95"
+                      className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-brand-600 dark:text-brand-400 hover:bg-secondary/60 active:scale-95 disabled:opacity-40 disabled:hover:bg-transparent"
                     >+</button>
                   </div>
-                  <span className="text-[12px] text-muted-foreground w-9">{l.unit}</span>
+                  <span className="text-[12px] text-muted-foreground w-9">{l.priceUnit}</span>
                   <span className="text-muted-foreground">×</span>
                   <NumberInput value={l.price} onValueChange={(n) => updateLine(i, { price: n })}
-                    min={0} step={0.1} decimals={2} allowEmpty placeholder="prix"
+                    min={0} step={0.1} decimals={2} allowEmpty placeholder="prix" disabled={locked}
                     aria-label={`Prix ${l.itemName}`}
                     className="h-11 w-[84px] text-right text-[17px] font-semibold tnum rounded-lg border border-border bg-background px-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500" />
                   <span className="text-[12px] text-muted-foreground">€/{l.priceUnit}</span>
                   <span className="ml-auto text-[15px] font-bold tnum">{l.price ? lineHT(l).toFixed(2) : "—"}</span>
                 </div>
+                {/* Colis OFFERTS (à 0 €) — sélecteur indépendant de la qté payée.
+                    Permet « 0 payé + 1 offert » (juste offert) ou « N payés + M offerts ». */}
+                {!locked && (
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <Gift className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+                    <span className="text-[11px] font-medium text-muted-foreground">Offert</span>
+                    <div className="inline-flex items-center rounded-md border border-border overflow-hidden">
+                      <button type="button" tabIndex={-1}
+                        onClick={() => updateLine(i, { freeUnits: Math.max(0, Math.round((l.freeUnits - l.stepColis) * 1000) / 1000), freeManual: true })}
+                        aria-label="Retirer un colis offert"
+                        className="h-7 w-8 inline-flex items-center justify-center text-[16px] font-bold text-muted-foreground hover:bg-secondary/60 active:scale-95">−</button>
+                      <span className={`w-11 text-center text-[14px] font-semibold tnum border-x border-border ${l.freeUnits > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>{Math.round(l.freeUnits * l.packDivisor * 100) / 100}</span>
+                      <button type="button" tabIndex={-1}
+                        onClick={() => updateLine(i, { freeUnits: Math.round((l.freeUnits + l.stepColis) * 1000) / 1000, freeManual: true })}
+                        aria-label="Ajouter un colis offert"
+                        className="h-7 w-8 inline-flex items-center justify-center text-[16px] font-bold text-rose-600 dark:text-rose-400 hover:bg-secondary/60 active:scale-95">+</button>
+                    </div>
+                    <span className="text-[11px] text-muted-foreground">{l.priceUnit} à 0 €</span>
+                  </div>
+                )}
                 {l.packDivisor > 1 && l.price != null && (
                   <p className="text-[11px] text-muted-foreground mt-0.5">{l.quantity} colis × {l.packDivisor} {l.priceUnit} × {l.price}€</p>
-                )}
-                {/* C2 — colis offerts (X_PLUS_Y / FREE) : ligne séparée à 0 € sur le bon */}
-                {(l.promo?.kind === "X_PLUS_Y" || l.promo?.kind === "FREE") && l.freeUnits > 0 && (
-                  <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400 mt-1 inline-flex items-center gap-1">
-                    <Gift className="h-3 w-3" />
-                    {l.freeUnits} colis offert{l.freeUnits > 1 ? "s" : ""} — ligne à 0 € sur le bon
-                  </p>
                 )}
                 {sellShort ? (
                   <p className="text-[11px] text-rose-600 dark:text-rose-400 mt-1">
@@ -1002,39 +1261,82 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
 
         {/* Pied : date, mode, n° cmd, total, créer */}
         <div className="shrink-0 pt-2 mt-2 border-t border-border space-y-2">
-          {modes.length > 0 && (
-            <select value={modeId} onChange={(e) => setModeId(e.target.value)}
-              className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2">
-              {modes.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.sapCardCode})</option>)}
-            </select>
+          {/* En modification, le BL existe déjà : mode/transporteur/date/réf sont figés. */}
+          {!modif && (
+            <>
+              {modes.length > 0 && (
+                <select value={modeId} onChange={(e) => setModeId(e.target.value)}
+                  className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2">
+                  {modes.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.sapCardCode})</option>)}
+                </select>
+              )}
+              {carriers.length > 0 && (
+                <select value={carrierId} onChange={(e) => setCarrierId(e.target.value)}
+                  aria-label="Transporteur"
+                  className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2">
+                  <option value="">Transporteur — non précisé</option>
+                  {/* B3 — count présent quand la liste est filtrée par client (habitudes) */}
+                  {carriers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      🚚 {c.name}{c.count ? ` · ${c.count} cde${c.count > 1 ? "s" : ""}` : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <div className="flex gap-1.5">
+                <input type="datetime-local" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)}
+                  className="flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2" />
+              </div>
+              <input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="N° de commande (réf. client)"
+                className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2" />
+            </>
           )}
-          {carriers.length > 0 && (
-            <select value={carrierId} onChange={(e) => setCarrierId(e.target.value)}
-              aria-label="Transporteur"
-              className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2">
-              <option value="">Transporteur — non précisé</option>
-              {/* B3 — count présent quand la liste est filtrée par client (habitudes) */}
-              {carriers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  🚚 {c.name}{c.count ? ` · ${c.count} cde${c.count > 1 ? "s" : ""}` : ""}
-                </option>
-              ))}
-            </select>
+          {/* N° de commande (réf. client) — éditable aussi en modification */}
+          {modif && (
+            <div className="space-y-1">
+              <label htmlFor="bl-numatcard" className="text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
+                N° de commande (réf. client)
+              </label>
+              <input id="bl-numatcard" value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)}
+                placeholder="N° de commande (réf. client)"
+                className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+            </div>
           )}
-          <div className="flex gap-1.5">
-            <input type="datetime-local" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)}
-              className="flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2" />
-          </div>
-          <input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="N° de commande (réf. client)"
-            className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2" />
+          {/* Ligne TEXTE du BL (colonne « T » = dlt_Text dans SAP) — note/promo */}
+          {modif && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label htmlFor="bl-note" className="text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
+                  Ligne texte sur le BL
+                </label>
+                {cart.some((l) => l.promo) && (
+                  <button type="button"
+                    onClick={() => setComments((c) => {
+                      const t = buildPromoComment();
+                      if (!t) return c;
+                      return c.trim() ? `${c.trim()} · ${t}` : t;
+                    })}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline">
+                    <Megaphone className="h-3 w-3" /> Insérer le texte promo
+                  </button>
+                )}
+              </div>
+              <input id="bl-note" value={comments} onChange={(e) => setComments(e.target.value)}
+                maxLength={254} placeholder="Ex. Framboise offerte (promo 5+1)…"
+                className="w-full h-9 rounded-md border border-border bg-background text-[13px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+            </div>
+          )}
           <div className="flex items-center justify-between text-[14px]">
-            <span className="text-muted-foreground">Total HT estimé</span>
+            <span className="text-muted-foreground">{modif ? "Total HT du BL" : "Total HT estimé"}</span>
             <span className="font-bold tnum text-foreground">{totalHT.toFixed(2)} €</span>
           </div>
-          <button type="button" onClick={submit} disabled={submitting || cart.length === 0}
-            className="w-full h-11 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[15px] font-semibold inline-flex items-center justify-center gap-2">
+          <button type="button" onClick={submit}
+            disabled={submitting || prefilling || cart.length === 0 || (!!modif && modifMeta?.editable === false)}
+            className={`w-full h-11 rounded-xl disabled:opacity-50 text-white text-[15px] font-semibold inline-flex items-center justify-center gap-2 ${
+              modif ? "bg-amber-600 hover:bg-amber-700" : "bg-emerald-600 hover:bg-emerald-700"
+            }`}>
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShoppingCart className="h-4 w-4" />}
-            Créer la commande ({cart.length})
+            {modif ? `Enregistrer le BL #${modif.docNum}` : `Créer la commande (${cart.length})`}
           </button>
         </div>
       </div>
@@ -1126,6 +1428,59 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100 }: {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/* ═════════════════════════════════════════════════════════════
+   Bandeau « Modification » — rappelle le BL en cours d'édition.
+   Les lignes du BL sont pré-remplies dans le panier (éditables) :
+   le bandeau ne fait que le rappel du contexte. Piloté par
+   « Détail livraison » (URL → Écran 2).
+═════════════════════════════════════════════════════════════ */
+function ModifBanner({
+  docNum, meta, prefilling, onExit,
+}: {
+  docNum: number;
+  meta: { dueDate?: string; editable?: boolean } | null;
+  prefilling: boolean;
+  onExit?: () => void;
+}) {
+  const dateLabel = meta?.dueDate
+    ? new Date(meta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })
+    : null;
+  const closed = meta?.editable === false;
+
+  return (
+    <div className="mb-2 shrink-0 rounded-lg border border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15 overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-amber-500 text-white shrink-0">
+          <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[12.5px] font-semibold text-amber-800 dark:text-amber-200 leading-tight">
+            Modification du BL #{docNum}
+          </p>
+          <p className="text-[10.5px] text-amber-700/80 dark:text-amber-300/80">
+            Modifie, supprime, réordonne ou ajoute des lignes — enregistré sur ce même BL{dateLabel ? ` · livraison ${dateLabel}` : ""}.
+          </p>
+        </div>
+        {prefilling && (
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600 dark:text-amber-300 shrink-0" />
+        )}
+        {onExit && (
+          <button type="button" onClick={onExit}
+            title="Quitter la modification et revenir à la saisie normale (synchro écran 1)"
+            className="inline-flex items-center gap-1 h-7 px-2 rounded-md border border-amber-300/70 dark:border-amber-500/40 text-[11px] font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/35 shrink-0">
+            <X className="h-3 w-3" /> Quitter
+          </button>
+        )}
+      </div>
+      {closed && (
+        <p className="px-3 pb-2 text-[11px] font-medium text-rose-600 dark:text-rose-400">
+          ⚠️ Commande clôturée — la modification sera refusée par SAP.
+        </p>
+      )}
     </div>
   );
 }

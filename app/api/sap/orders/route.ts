@@ -5,6 +5,7 @@ import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { getTrclDefaultCarrier } from "@/lib/clientCarriers";
 import { sap } from "@/lib/sapb1";
+import { mirrorCreatedOrder } from "@/lib/sapMirror";
 import { decrementLocalStock } from "@/lib/stockSync";
 import { getLotMaps, resolveLotDetailed, LOT_PENDING } from "@/lib/lotResolver";
 import { chooseLot } from "@/lib/gervifrais-calc";
@@ -500,6 +501,19 @@ export async function POST(req: NextRequest) {
         } catch (e) {
           console.warn("[Order] PATCH réconciliation TPF échoué (non-bloquant):", (e as Error).message);
         }
+      }
+    }
+
+    // ── 3.6. Insert OPTIMISTE dans le miroir local (KPI du jour à latence 0) ──
+    // Pendant du décrément de stock optimiste : la commande remonte dans les
+    // agrégats pilotage (accueil / Écran 1) SANS attendre la prochaine synchro
+    // SAP. Réutilise `enriched` déjà ramené — aucun appel SAP supplémentaire.
+    // Idempotent : la synchro suivante réécrira proprement la ligne.
+    if (enriched) {
+      try {
+        await mirrorCreatedOrder(enriched);
+      } catch (e) {
+        console.warn("[Order] Miroir optimiste échoué (non-bloquant, rattrapé à la synchro):", (e as Error).message);
       }
     }
 

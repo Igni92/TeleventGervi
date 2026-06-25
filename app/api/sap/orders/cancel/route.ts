@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
+import { mirrorCancelOrder } from "@/lib/sapMirror";
 
 /**
  * POST /api/sap/orders/cancel
@@ -33,6 +34,15 @@ export async function POST(req: NextRequest) {
   try {
     await sap.post(`Orders(${body.docEntry})/Cancel`, undefined);
     console.log(`[Order] Annulée — DocEntry ${body.docEntry} (DB ${process.env.SAP_B1_COMPANY_DB})`);
+
+    // Miroir : retire la commande des agrégats du jour (cancelled=true) sans
+    // attendre de resync — TeleVent est la source de vérité. Non-bloquant.
+    try {
+      await mirrorCancelOrder(body.docEntry);
+    } catch (e) {
+      console.warn("[Order] Miroir annulation échoué (non-bloquant):", (e as Error).message);
+    }
+
     return NextResponse.json({ ok: true, docEntry: body.docEntry, cancelled: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
