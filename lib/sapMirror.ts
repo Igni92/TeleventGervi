@@ -559,6 +559,21 @@ export async function mirrorCreatedOrder(order: CreatedOrderForMirror): Promise<
   invalidate("pilotage:");
 }
 
+/**
+ * Marque une commande comme ANNULÉE dans le miroir (pendant TeleVent du Cancel
+ * SAP). Comme l'insert optimiste : TeleVent est la source de vérité, on ne
+ * dépend pas d'une resync pour que la commande disparaisse des agrégats du jour
+ * (aggregateActivity filtre `cancelled = false`). `updateMany` = no-op si la
+ * commande n'est pas (encore) dans le miroir.
+ */
+export async function mirrorCancelOrder(docEntry: number): Promise<void> {
+  await prisma.sapOrder.updateMany({
+    where: { docEntry },
+    data: { cancelled: true, syncedAt: new Date() },
+  });
+  invalidate("pilotage:");
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Documents d'ACHAT — PurchaseDeliveryNotes (entrées fournisseur) et
 // PurchaseReturns (avoirs/retours fournisseurs). Mêmes colonnes, même

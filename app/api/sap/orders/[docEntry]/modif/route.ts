@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
+import { mirrorCreatedOrder, type CreatedOrderForMirror } from "@/lib/sapMirror";
 import { getLotMaps, resolveLotDetailed, LOT_PENDING } from "@/lib/lotResolver";
 import { chooseLot, unitInfo } from "@/lib/gervifrais-calc";
 
@@ -319,10 +320,24 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
       patchBody,
       { headers: { "B1S-ReplaceCollectionsOnPatch": "true" } },
     );
-    type Refetched = { DocTotal?: number; VatSum?: number };
+    type Refetched = CreatedOrderForMirror & { DocTotal?: number; VatSum?: number };
     let refetched: Refetched | null = null;
-    try { refetched = await sap.get<Refetched>(`Orders(${docEntry})?$select=DocTotal,VatSum`); }
-    catch { /* non bloquant */ }
+    try {
+      refetched = await sap.get<Refetched>(
+        `Orders(${docEntry})?$select=DocEntry,DocNum,DocDate,CardCode,CardName,DocTotal,VatSum,DocumentLines`,
+      );
+    } catch { /* non bloquant */ }
+
+    // Miroir : re-upsert la commande modifiée (lignes + totaux remplacés) — même
+    // ON CONFLICT que la création. TeleVent est la source de vérité, aucune
+    // resync SAP. Réutilise le refetch ci-dessus — 0 appel SAP supplémentaire.
+    if (refetched?.DocEntry != null && refetched.DocDate && refetched.CardCode) {
+      try {
+        await mirrorCreatedOrder(refetched);
+      } catch (e) {
+        console.warn(`[Modif] Miroir échoué (non-bloquant):`, (e as Error).message);
+      }
+    }
 
     return NextResponse.json({
       ok: true,
