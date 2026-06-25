@@ -40,7 +40,7 @@ type SapLine = {
 };
 type SapOrder = {
   DocEntry: number; DocNum: number; CardCode: string; DocDueDate: string;
-  DocumentStatus?: string; Cancelled?: string; Comments?: string; DocumentLines: SapLine[];
+  DocumentStatus?: string; Cancelled?: string; Comments?: string; NumAtCard?: string; DocumentLines: SapLine[];
 };
 type SapExpense = { ExpensCode: number; Name: string; U_Taux: number; OutputVATGroup: string };
 
@@ -54,7 +54,7 @@ async function loadOrder(
   let order: SapOrder;
   try {
     order = await sap.get<SapOrder>(
-      `Orders(${docEntry})?$select=DocEntry,DocNum,CardCode,DocDueDate,DocumentStatus,Cancelled,Comments,DocumentLines`,
+      `Orders(${docEntry})?$select=DocEntry,DocNum,CardCode,DocDueDate,DocumentStatus,Cancelled,Comments,NumAtCard,DocumentLines`,
     );
   } catch {
     return { error: NextResponse.json({ ok: false, error: `Commande ${docEntry} introuvable dans SAP.` }, { status: 404 }) };
@@ -151,6 +151,7 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ docEntry
     dueDate: order.DocDueDate,
     editable,
     noteText,          // texte de(s) ligne(s) « Texte » du BL (note/promo)
+    numAtCard: order.NumAtCard ?? "",   // N° de commande (réf. client)
     cartLines,
   });
 }
@@ -179,7 +180,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   if (!Number.isFinite(docEntry)) return NextResponse.json({ error: "docEntry invalide" }, { status: 400 });
 
-  let body: { lines?: FinalLine[]; comments?: string };
+  let body: { lines?: FinalLine[]; comments?: string; numAtCard?: string };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -313,6 +314,8 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
     documentLines.push({ LineNum: documentLines.length, LineType: "dlt_Text", FreeText: note.slice(0, 254) });
   }
   const patchBody: Record<string, unknown> = { DocumentLines: documentLines };
+  // N° de commande (réf. client) — écrit seulement si fourni (undefined = inchangé).
+  if (typeof body.numAtCard === "string") patchBody.NumAtCard = body.numAtCard.trim().slice(0, 100);
 
   try {
     await sap.patch(

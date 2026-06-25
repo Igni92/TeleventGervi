@@ -228,6 +228,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       if (!j?.ok) { toast.error("Chargement du BL impossible", { description: j?.error, duration: 8000 }); return; }
       setModifMeta({ dueDate: j.dueDate, editable: j.editable });
       setComments(j.noteText ?? "");
+      setNumAtCard(j.numAtCard ?? "");
       type PrefillLine = {
         lineNum: number; warehouse: string | null; lot: string | null; closed: boolean;
         itemCode: string; itemName: string;
@@ -736,7 +737,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       try {
         const res = await fetch(`/api/sap/orders/${modif.docEntry}/modif`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lines, comments: comments.trim() }),
+          body: JSON.stringify({ lines, comments: comments.trim(), numAtCard: numAtCard.trim() }),
         });
         const json = await res.json();
         if (!res.ok || !json.ok) {
@@ -1289,6 +1290,17 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
               <input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="N° de commande (réf. client)"
                 className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2" />
             </>
+          )}
+          {/* N° de commande (réf. client) — éditable aussi en modification */}
+          {modif && (
+            <div className="space-y-1">
+              <label htmlFor="bl-numatcard" className="text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
+                N° de commande (réf. client)
+              </label>
+              <input id="bl-numatcard" value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)}
+                placeholder="N° de commande (réf. client)"
+                className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+            </div>
           )}
           {/* Ligne TEXTE du BL (colonne « T » = dlt_Text dans SAP) — note/promo */}
           {modif && (
