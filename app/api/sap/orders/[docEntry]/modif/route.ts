@@ -34,7 +34,7 @@ import { chooseLot, unitInfo } from "@/lib/gervifrais-calc";
 
 type SapLine = {
   LineNum: number; ItemCode: string; ItemDescription?: string; Quantity: number;
-  Price?: number; WarehouseCode?: string; LineStatus?: string;
+  Price?: number; WarehouseCode?: string; LineStatus?: string; U_NoLot?: string;
 };
 type SapOrder = {
   DocEntry: number; DocNum: number; CardCode: string; DocDueDate: string;
@@ -114,6 +114,8 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ docEntry
     return {
       lineNum: l.LineNum,
       warehouse: l.WarehouseCode ?? null,
+      lot: l.U_NoLot ?? null,                       // lot d'origine (préservé au remplacement)
+      closed: l.LineStatus === "bost_Close",        // ligne déjà livrée → verrouillée
       itemCode: l.ItemCode,
       itemName: p?.itemName || l.ItemDescription || l.ItemCode,
       unit: displayUnit,
@@ -141,9 +143,21 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ docEntry
   });
 }
 
-interface UpdateLine { lineNum: number; quantity: number; price?: number }
-interface AdditionLine {
-  itemCode: string; quantity: number; warehouseCode?: string; price?: number; discountPercent?: number;
+/**
+ * Ligne FINALE envoyée par le front (ordre du tableau = ordre du BL) :
+ *   - `keep` + `lot` : ligne conservée → on préserve son lot d'origine.
+ *   - sinon : nouvelle ligne → lot résolu (FIFO) côté serveur.
+ * `quantity` est en unité de stock SAP (pie/kg). Le découpe-entrepôt est déjà
+ * fait côté front (une entrée par couple article×entrepôt).
+ */
+interface FinalLine {
+  itemCode: string;
+  quantity: number;
+  warehouseCode?: string;
+  price?: number;
+  discountPercent?: number;
+  keep?: boolean;
+  lot?: string | null;
 }
 
 export async function POST(req: NextRequest, props: { params: Promise<{ docEntry: string }> }) {
@@ -153,14 +167,14 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   if (!Number.isFinite(docEntry)) return NextResponse.json({ error: "docEntry invalide" }, { status: 400 });
 
-  let body: { updates?: UpdateLine[]; additions?: AdditionLine[] };
+  let body: { lines?: FinalLine[] };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
-  const updates = (body.updates ?? []).filter((u) => Number.isInteger(u.lineNum) && u.quantity > 0);
-  const additions = (body.additions ?? []).filter((l) => l.itemCode && l.quantity > 0);
-  if (updates.length === 0 && additions.length === 0) {
-    return NextResponse.json({ error: "Aucune ligne à modifier ou à ajouter" }, { status: 400 });
+  const lines = (body.lines ?? []).filter((l) => l.itemCode && l.quantity > 0);
+  // SAP refuse un document sans ligne → on impose au moins une ligne.
+  if (lines.length === 0) {
+    return NextResponse.json({ error: "Un bon de livraison doit garder au moins une ligne." }, { status: 400 });
   }
 
   const loaded = await loadOrder(docEntry, session);
@@ -174,91 +188,89 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
     );
   }
 
-  const existingLineNums = (order.DocumentLines || []).map((l) => l.LineNum);
-  let nextLineNum = existingLineNums.length ? Math.max(...existingLineNums) + 1 : 0;
-
-  // ── Lignes existantes modifiées (par LineNum) ──
-  const documentLines: Record<string, unknown>[] = updates.map((u) => {
-    const dl: Record<string, unknown> = { LineNum: u.lineNum, Quantity: u.quantity };
-    if (u.price != null && u.price > 0) { dl.UnitPrice = u.price; dl.Price = u.price; }
-    return dl;
+  // ── Référentiels (pour U_GER_*, TPF, et lot des NOUVELLES lignes) ──
+  const itemCodes = Array.from(new Set(lines.map((l) => l.itemCode)));
+  const prods = await prisma.product.findMany({
+    where: { itemCode: { in: itemCodes } },
+    select: {
+      itemCode: true, uPays: true, uMarque: true, uCondi: true,
+      salesUnitWeight: true, salesQtyPerPackUnit: true,
+    },
   });
+  const productMap = new Map(prods.map((p) => [p.itemCode, p]));
 
-  // ── Nouvelles lignes : enrichies comme à la création ──
-  if (additions.length > 0) {
-    const addCodes = Array.from(new Set(additions.map((l) => l.itemCode)));
-    const prods = await prisma.product.findMany({
-      where: { itemCode: { in: addCodes } },
-      select: {
-        itemCode: true, uPays: true, uMarque: true, uCondi: true,
-        salesUnitWeight: true, salesQtyPerPackUnit: true,
-      },
-    });
-    const productMap = new Map(prods.map((p) => [p.itemCode, p]));
-
-    // Stock SAP réel (filet anti faux-négatif pour la décision de lot).
-    const sapStockByItem = new Map<string, number>();
+  // Stock (signaux pour la décision de lot des nouvelles lignes uniquement).
+  const sapStockByItem = new Map<string, number>();
+  const availableByItem = new Map<string, number>();
+  const needLot = lines.some((l) => !(l.keep && l.lot));
+  if (needLot) {
     try {
-      const filter = addCodes.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
+      const filter = itemCodes.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
       const r = await sap.get<{ value: { ItemCode: string; QuantityOnStock?: number }[] }>(
         `Items?$select=ItemCode,QuantityOnStock&$filter=${filter}`,
       );
       for (const it of r.value ?? []) if (typeof it.QuantityOnStock === "number") sapStockByItem.set(it.ItemCode, it.QuantityOnStock);
     } catch { /* SAP renverra l'erreur réelle au PATCH si un item est invalide */ }
-
-    const availableByItem = new Map<string, number>();
     const stocks = await prisma.productStock.findMany({
-      where: { product: { itemCode: { in: addCodes } } },
+      where: { product: { itemCode: { in: itemCodes } } },
       select: { available: true, product: { select: { itemCode: true } } },
     });
     for (const s of stocks) {
       const code = s.product.itemCode;
       availableByItem.set(code, (availableByItem.get(code) ?? 0) + s.available);
     }
+  }
+  const lotMaps = needLot ? await getLotMaps() : null;
 
-    const lotMaps = await getLotMaps();
+  const TPF_AUTO = (process.env.GERVIFRAIS_AUTO_TAX ?? "true") !== "false";
+  const expenses = new Map<number, SapExpense>();
+  if (TPF_AUTO) {
+    try {
+      const r = await sap.get<{ value: SapExpense[] }>("AdditionalExpenses?$top=50");
+      for (const e of r.value || []) expenses.set(e.ExpensCode, e);
+    } catch { /* TPF best-effort */ }
+  }
+  const itfelMaster = expenses.get(2);
+  const ddgMaster = expenses.get(3);
 
-    const TPF_AUTO = (process.env.GERVIFRAIS_AUTO_TAX ?? "true") !== "false";
-    const expenses = new Map<number, SapExpense>();
-    if (TPF_AUTO) {
-      try {
-        const r = await sap.get<{ value: SapExpense[] }>("AdditionalExpenses?$top=50");
-        for (const e of r.value || []) expenses.set(e.ExpensCode, e);
-      } catch { /* TPF best-effort */ }
+  // ── Reconstruction COMPLÈTE des lignes (LineNum 0..N dans l'ordre reçu) ──
+  let keptLines = 0, newLines = 0;
+  const documentLines: Record<string, unknown>[] = lines.map((l, idx) => {
+    const meta = productMap.get(l.itemCode);
+    const line: Record<string, unknown> = {
+      LineNum: idx,                 // séquentiel → fixe l'ordre des lignes du BL
+      ItemCode: l.itemCode,
+      Quantity: l.quantity,
+    };
+    if (l.warehouseCode) line.WarehouseCode = l.warehouseCode;
+    if (l.price != null && l.price > 0) { line.UnitPrice = l.price; line.Price = l.price; }
+    if (typeof l.discountPercent === "number" && Number.isFinite(l.discountPercent) && l.discountPercent > 0) {
+      line.DiscountPercent = Math.min(100, Math.max(0, l.discountPercent));
     }
-    const itfelMaster = expenses.get(2);
-    const ddgMaster = expenses.get(3);
+    if (meta?.uPays) line.U_GER_Pays = meta.uPays;
+    if (meta?.uMarque) line.U_GER_Marque = meta.uMarque;
+    if (meta?.uCondi) line.U_GER_Condi = meta.uCondi;
+    if (l.warehouseCode) line.U_NomMag = WAREHOUSE_NAMES[l.warehouseCode] ?? l.warehouseCode;
 
-    for (const l of additions) {
-      const meta = productMap.get(l.itemCode);
-      const line: Record<string, unknown> = {
-        LineNum: nextLineNum++,
-        ItemCode: l.itemCode,
-        Quantity: l.quantity,
-      };
-      if (l.warehouseCode) line.WarehouseCode = l.warehouseCode;
-      if (l.price != null && l.price > 0) { line.UnitPrice = l.price; line.Price = l.price; }
-      if (typeof l.discountPercent === "number" && Number.isFinite(l.discountPercent) && l.discountPercent > 0) {
-        line.DiscountPercent = Math.min(100, Math.max(0, l.discountPercent));
-      }
-      if (meta?.uPays) line.U_GER_Pays = meta.uPays;
-      if (meta?.uMarque) line.U_GER_Marque = meta.uMarque;
-      if (meta?.uCondi) line.U_GER_Condi = meta.uCondi;
-      if (l.warehouseCode) line.U_NomMag = WAREHOUSE_NAMES[l.warehouseCode] ?? l.warehouseCode;
+    if (TPF_AUTO) {
+      const lineHT = (l.price ?? 0) > 0 ? l.price! * l.quantity : 0;
+      const packDiv = meta?.salesQtyPerPackUnit && meta.salesQtyPerPackUnit > 1 ? meta.salesQtyPerPackUnit : 1;
+      const nbColis = l.quantity / packDiv;
+      const lineExpenses: Record<string, unknown>[] = [];
+      const itfelAmt = itfelMaster && lineHT > 0 ? Math.round(lineHT * ((itfelMaster.U_Taux || 0.21) / 100) * 100) / 100 : 0;
+      const ddgAmt = ddgMaster && nbColis > 0 ? Math.round(nbColis * (ddgMaster.U_Taux || 0.02) * 100) / 100 : 0;
+      if (itfelAmt > 0) lineExpenses.push({ GroupCode: 1, ExpenseCode: 2, LineTotal: itfelAmt });
+      if (ddgAmt > 0) lineExpenses.push({ GroupCode: 2, ExpenseCode: 3, LineTotal: ddgAmt });
+      if (lineExpenses.length > 0) line.DocumentLineAdditionalExpenses = lineExpenses;
+    }
 
-      if (TPF_AUTO) {
-        const lineHT = (l.price ?? 0) > 0 ? l.price! * l.quantity : 0;
-        const packDiv = meta?.salesQtyPerPackUnit && meta.salesQtyPerPackUnit > 1 ? meta.salesQtyPerPackUnit : 1;
-        const nbColis = l.quantity / packDiv;
-        const lineExpenses: Record<string, unknown>[] = [];
-        const itfelAmt = itfelMaster && lineHT > 0 ? Math.round(lineHT * ((itfelMaster.U_Taux || 0.21) / 100) * 100) / 100 : 0;
-        const ddgAmt = ddgMaster && nbColis > 0 ? Math.round(nbColis * (ddgMaster.U_Taux || 0.02) * 100) / 100 : 0;
-        if (itfelAmt > 0) lineExpenses.push({ GroupCode: 1, ExpenseCode: 2, LineTotal: itfelAmt });
-        if (ddgAmt > 0) lineExpenses.push({ GroupCode: 2, ExpenseCode: 3, LineTotal: ddgAmt });
-        if (lineExpenses.length > 0) line.DocumentLineAdditionalExpenses = lineExpenses;
-      }
-
-      const resolved = resolveLotDetailed(lotMaps, l.itemCode, l.warehouseCode);
+    // Lot : conservé tel quel pour une ligne existante, résolu (FIFO) pour une nouvelle.
+    if (l.keep && l.lot) {
+      keptLines++;
+      line.U_NoLot = l.lot;
+    } else {
+      newLines++;
+      const resolved = lotMaps ? resolveLotDetailed(lotMaps, l.itemCode, l.warehouseCode) : { lot: null };
       const choice = chooseLot({
         resolvedLot: resolved.lot,
         localAvailable: availableByItem.get(l.itemCode) ?? 0,
@@ -266,14 +278,22 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
         envDefault: process.env.GERVIFRAIS_LOT_DEFAUT ?? null,
       });
       line.U_NoLot = choice.lot || LOT_PENDING;
-
-      documentLines.push(line);
     }
-  }
 
-  // ── PATCH SAP unique : fusion par LineNum (maj des existantes + ajout des nouvelles) ──
+    return line;
+  });
+
+  // ── PATCH SAP : remplacement COMPLET de la collection de lignes ──
+  // B1S-ReplaceCollectionsOnPatch:true → SAP remplace toute la collection
+  // DocumentLines par celle envoyée (au lieu de fusionner par LineNum). C'est le
+  // SEUL moyen fiable de SUPPRIMER une ligne et de RÉORDONNER dans ce SAP — un
+  // PATCH normal conserve les lignes omises. Le numéro de BL (DocNum) est préservé.
   try {
-    await sap.patch(`Orders(${docEntry})`, { DocumentLines: documentLines });
+    await sap.patch(
+      `Orders(${docEntry})`,
+      { DocumentLines: documentLines },
+      { headers: { "B1S-ReplaceCollectionsOnPatch": "true" } },
+    );
     type Refetched = { DocTotal?: number; VatSum?: number };
     let refetched: Refetched | null = null;
     try { refetched = await sap.get<Refetched>(`Orders(${docEntry})?$select=DocTotal,VatSum`); }
@@ -283,8 +303,9 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
       ok: true,
       docEntry,
       docNum: order.DocNum,
-      updatedLines: updates.length,
-      addedLines: additions.length,
+      totalLines: documentLines.length,
+      keptLines,
+      newLines,
       totalTTC: refetched?.DocTotal ?? null,
       totalHT: refetched ? (refetched.DocTotal ?? 0) - (refetched.VatSum ?? 0) : null,
     });

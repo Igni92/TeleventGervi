@@ -3,8 +3,8 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import {
-  Loader2, RefreshCw, ChevronDown, ChevronRight, Search, Plus, Trash2,
-  ShoppingCart, Check, RotateCcw, AlertTriangle, Star, Gift, Megaphone, Pencil,
+  Loader2, RefreshCw, ChevronDown, ChevronRight, ChevronUp, Search, Plus, Trash2,
+  ShoppingCart, Check, RotateCcw, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
@@ -45,13 +45,17 @@ interface CartLine {
   stepColis: number;
   // C2 — promo appliquée à la ligne (remise SAP envoyée à la création du bon)
   promo: Promo | null; discountPercent: number; freeUnits: number;
-  // Mode MODIFICATION : ligne déjà présente sur le BL (mapping 1:1 avec le
-  // LineNum SAP). null/absent = nouvelle ligne (sera ajoutée au BL). Une ligne
-  // existante se met à jour par LineNum, ne se supprime pas (jamais de 2ᵉ BL).
+  // Mode MODIFICATION : ligne déjà présente sur le BL. null/absent = nouvelle
+  // ligne. Le BL est ré-enregistré en remplacement complet → une ligne retirée
+  // du panier est supprimée du BL, l'ordre du panier = l'ordre des lignes.
   // `qty`/`price` = valeurs d'origine (détection de changement) ; `pieces` = la
   // quantité SAP brute d'origine (renvoyée telle quelle si la qté n'a pas bougé,
-  // pour ne pas réintroduire d'arrondi colis↔pièces sur une ligne intouchée).
-  originalLine?: { lineNum: number; warehouse: string | null; qty: number; price: number | null; pieces: number } | null;
+  // pour ne pas réintroduire d'arrondi colis↔pièces) ; `lot` = lot préservé ;
+  // `closed` = ligne déjà livrée (verrouillée : ni édition ni suppression).
+  originalLine?: {
+    lineNum: number; warehouse: string | null; qty: number; price: number | null;
+    pieces: number; lot: string | null; closed: boolean;
+  } | null;
 }
 interface DeliveryMode { id: string; name: string; sapCardCode: string; isDefault: boolean }
 // B3 — `count` présent quand la liste vient de /api/clients/[id]/carriers (nb de cdes)
@@ -217,7 +221,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       if (!j?.ok) { toast.error("Chargement du BL impossible", { description: j?.error, duration: 8000 }); return; }
       setModifMeta({ dueDate: j.dueDate, editable: j.editable });
       type PrefillLine = {
-        lineNum: number; warehouse: string | null; itemCode: string; itemName: string;
+        lineNum: number; warehouse: string | null; lot: string | null; closed: boolean;
+        itemCode: string; itemName: string;
         unit: string; priceUnit: string; packDivisor: number; availByWarehouse: Record<string, number>;
         quantity: number; qtyPieces: number; price: number | null; marque: string | null; condi: string | null;
         pays: string | null; variete: string | null; stepColis: number;
@@ -229,7 +234,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
         marque: l.marque, condi: l.condi, pays: l.pays, variete: l.variete,
         stepColis: l.stepColis && l.stepColis > 0 ? l.stepColis : 1,
         promo: null, discountPercent: 0, freeUnits: 0,
-        originalLine: { lineNum: l.lineNum, warehouse: l.warehouse, qty: l.quantity, price: l.price, pieces: l.qtyPieces },
+        originalLine: {
+          lineNum: l.lineNum, warehouse: l.warehouse, qty: l.quantity, price: l.price,
+          pieces: l.qtyPieces, lot: l.lot, closed: l.closed,
+        },
       })));
       if (j.editable === false) {
         toast.warning("Commande clôturée — la modification sera refusée par SAP.", { duration: 8000 });
@@ -480,6 +488,15 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   const updateLine = (i: number, patch: Partial<CartLine>) =>
     setCart((c) => c.map((l, k) => k === i ? applyPromoFree({ ...l, ...patch }) : l));
   const removeLine = (i: number) => setCart((c) => c.filter((_, k) => k !== i));
+  /** Réordonne une ligne (modif) : échange avec la voisine. dir = -1 (monter) / +1 (descendre). */
+  const moveLine = (i: number, dir: -1 | 1) =>
+    setCart((c) => {
+      const j = i + dir;
+      if (j < 0 || j >= c.length) return c;
+      const next = c.slice();
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
   /** Retire un item du panier par son itemCode (utilisé par le toggle Add/Done). */
   const removeFromCartByCode = (itemCode: string) =>
     setCart((c) => c.filter((l) => l.itemCode !== itemCode));
@@ -621,36 +638,50 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     });
 
   const submit = async () => {
-    // ── Mode MODIFICATION : enregistre sur le BL existant (jamais de 2ᵉ bon) ──
+    // ── Mode MODIFICATION : ré-enregistre le BL en REMPLACEMENT COMPLET ──
+    // (même BL/DocNum) — supprimer/modifier/réordonner/ajouter, comme un bon normal.
     if (modif) {
       if (modifMeta?.editable === false) { toast.error("BL clôturé — modification impossible."); return; }
-      // Lignes existantes : mise à jour par LineNum, UNIQUEMENT si réellement
-      // modifiée (qté ou prix). Une ligne intouchée est omise → SAP la conserve
-      // telle quelle (fusion par LineNum), sans réintroduire d'arrondi colis↔pièces.
-      const updates: { lineNum: number; quantity: number; price?: number }[] = [];
+      if (cart.length === 0) { toast.error("Le BL doit garder au moins une ligne."); return; }
+      // Liste FINALE (ordre du panier = ordre des lignes du BL) :
+      //  - ligne existante → conservée, lot préservé ; qté brute d'origine si
+      //    inchangée (pas d'arrondi colis↔pièces), sinon reconvertie.
+      //  - nouvelle ligne → découpée par entrepôt (buildApiLines) ; lot/TPF serveur.
+      type FinalLine = {
+        itemCode: string; quantity: number; warehouseCode?: string;
+        price?: number; discountPercent?: number; keep?: boolean; lot?: string | null;
+      };
+      const lines: FinalLine[] = [];
       for (const l of cart) {
         const o = l.originalLine;
-        if (!o) continue;
-        const qtyChanged = Math.abs(l.quantity - o.qty) > 1e-6;
-        const priceChanged = (l.price ?? null) !== (o.price ?? null);
-        if (!qtyChanged && !priceChanged) continue;   // inchangée → laissée telle quelle
-        // Qté changée → reconversion colis→pièces ; sinon on renvoie la pièce d'origine exacte.
-        const pieces = qtyChanged ? Math.round(l.quantity * l.packDivisor * 1000) / 1000 : o.pieces;
-        if (pieces <= 0) continue;   // une ligne existante ne tombe pas à 0 (garde-fou UI)
-        updates.push({
-          lineNum: o.lineNum,
-          quantity: pieces,
-          ...(l.price != null && l.price > 0 ? { price: l.price } : {}),
-        });
+        if (o) {
+          const qtyChanged = Math.abs(l.quantity - o.qty) > 1e-6;
+          const pieces = qtyChanged ? Math.round(l.quantity * l.packDivisor * 1000) / 1000 : o.pieces;
+          if (pieces <= 0) continue;
+          lines.push({
+            itemCode: l.itemCode, quantity: pieces,
+            ...(o.warehouse ? { warehouseCode: o.warehouse } : {}),
+            ...(l.price != null && l.price > 0 ? { price: l.price } : {}),
+            keep: true, lot: o.lot,
+          });
+        } else {
+          for (const a of buildApiLines([l])) {
+            lines.push({
+              itemCode: a.itemCode, quantity: a.quantity,
+              ...(a.warehouseCode ? { warehouseCode: a.warehouseCode } : {}),
+              ...(a.price != null ? { price: a.price } : {}),
+              ...(a.discountPercent != null ? { discountPercent: a.discountPercent } : {}),
+              keep: false,
+            });
+          }
+        }
       }
-      // Nouvelles lignes : ajoutées au BL (lot/TPF/U_GER calculés côté serveur).
-      const additions = buildApiLines(cart.filter((l) => !l.originalLine));
-      if (updates.length === 0 && additions.length === 0) { toast.error("Rien à enregistrer."); return; }
+      if (lines.length === 0) { toast.error("Le BL doit garder au moins une ligne."); return; }
       setSubmitting(true);
       try {
         const res = await fetch(`/api/sap/orders/${modif.docEntry}/modif`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ updates, additions }),
+          body: JSON.stringify({ lines }),
         });
         const json = await res.json();
         if (!res.ok || !json.ok) {
@@ -658,14 +689,11 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
           return;
         }
         const fmt = (n: number | null | undefined) => n != null ? n.toFixed(2) : "—";
-        const bits: string[] = [];
-        if (json.updatedLines) bits.push(`${json.updatedLines} modifiée(s)`);
-        if (json.addedLines) bits.push(`${json.addedLines} ajoutée(s)`);
         toast.success(
-          `✅ BL #${json.docNum} enregistré${bits.length ? ` — ${bits.join(", ")}` : ""} · total ${fmt(json.totalTTC)} € TTC`,
+          `✅ BL #${json.docNum} enregistré — ${json.totalLines} ligne(s) · total ${fmt(json.totalTTC)} € TTC`,
           { duration: 10000 },
         );
-        await loadModif(modif);   // recharge l'état SAP réel (les nouvelles lignes portent un LineNum)
+        await loadModif(modif);   // recharge l'état SAP réel (nouvelles lignes = LineNum à jour)
       } catch (e) {
         toast.error(`❌ ${e instanceof Error ? e.message : "Erreur réseau"}`);
       } finally { setSubmitting(false); }
@@ -879,10 +907,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                       const kgC     = !isKg ? colisKg(p) : null;          // B4
                       // Chips dimensionnés par la densité (C4)
                       const chipCls = `inline-flex items-center px-2 rounded-[5px] font-semibold ${ui.chip}`;
-                      // En modif, une ligne déjà sur le BL ne se retire pas via le stock.
-                      const isExistingLine = !!modif && cart.some((l) => l.itemCode === p.itemCode && l.originalLine);
+                      // Seule une ligne déjà LIVRÉE (clôturée) ne peut pas être retirée.
+                      const hasClosedLine = !!modif && cart.some((l) => l.itemCode === p.itemCode && l.originalLine?.closed);
                       const toggleCart = () => {
-                        if (inCart) { if (isExistingLine) return; removeFromCartByCode(p.itemCode); }
+                        if (inCart) { if (hasClosedLine) return; removeFromCartByCode(p.itemCode); }
                         else addToCart(p);
                       };
                       return (
@@ -1027,6 +1055,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             const over = l.quantity > max;
             const sellShort = max <= 0;             // entièrement à découvert
             const partialShort = over && !sellShort;
+            const locked = !!l.originalLine?.closed; // ligne déjà livrée → verrouillée
             return (
               <div key={i} className={`rounded-lg border p-2 ${sellShort ? "border-rose-400/60 bg-rose-50/40 dark:bg-rose-950/15" : "border-border"}`}>
                 <div className="flex items-start justify-between gap-1">
@@ -1044,17 +1073,11 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                           {promoBadge(l.promo)}
                         </span>
                       )}
-                      {/* Modification : ligne déjà présente sur le BL (vs nouvelle ligne) */}
-                      {modif && l.originalLine && (
-                        <span title="Ligne déjà sur le BL — quantité/prix modifiables"
-                          className="inline-flex h-5 items-center px-1.5 rounded text-[11px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-500/25 dark:text-amber-200">
-                          déjà au BL
-                        </span>
-                      )}
-                      {modif && !l.originalLine && (
-                        <span title="Nouvelle ligne — sera ajoutée au BL"
-                          className="inline-flex h-5 items-center px-1.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-500/25 dark:text-emerald-200">
-                          + ajout
+                      {/* Modification : ligne déjà LIVRÉE → verrouillée (ni édition ni retrait) */}
+                      {locked && (
+                        <span title="Ligne déjà livrée — verrouillée"
+                          className="inline-flex h-5 items-center gap-1 px-1.5 rounded text-[11px] font-bold bg-muted text-muted-foreground">
+                          <Lock className="h-3 w-3" /> livré
                         </span>
                       )}
                     </div>
@@ -1079,39 +1102,55 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                       );
                     })()}
                   </div>
-                  {/* En modification, une ligne déjà sur le BL ne se supprime pas
-                      (SAP ne supprime pas une ligne par PATCH) — seules les
-                      nouvelles lignes (et tout le panier hors modif) sont retirables. */}
-                  {(!modif || !l.originalLine) && (
-                    <button type="button" onClick={() => removeLine(i)} className="text-muted-foreground/50 hover:text-rose-500 shrink-0">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  )}
+                  {/* Actions de ligne : réordonner (modif) + supprimer (sauf ligne livrée).
+                      En remplacement complet, retirer une ligne du panier la supprime du BL ;
+                      l'ordre du panier = l'ordre des lignes du BL. */}
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    {modif && (
+                      <div className="flex flex-col -my-0.5">
+                        <button type="button" tabIndex={-1} onClick={() => moveLine(i, -1)} disabled={i === 0}
+                          aria-label="Monter la ligne" title="Monter"
+                          className="text-muted-foreground/40 hover:text-foreground disabled:opacity-20 leading-none">
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button type="button" tabIndex={-1} onClick={() => moveLine(i, 1)} disabled={i === cart.length - 1}
+                          aria-label="Descendre la ligne" title="Descendre"
+                          className="text-muted-foreground/40 hover:text-foreground disabled:opacity-20 leading-none">
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
+                    {!locked && (
+                      <button type="button" onClick={() => removeLine(i)} className="text-muted-foreground/50 hover:text-rose-500">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5 mt-2">
+                <div className={`flex items-center gap-1.5 mt-2 ${locked ? "opacity-60" : ""}`}>
                   {/* Stepper « un colis » : −/+ avancent du poids/nombre d'un colis */}
                   <div className="inline-flex items-center rounded-lg border border-border overflow-hidden shrink-0">
                     <button
-                      type="button" tabIndex={-1}
+                      type="button" tabIndex={-1} disabled={locked}
                       onClick={() => updateLine(i, { quantity: Math.max(0, Math.round((l.quantity - l.stepColis) * 100) / 100) })}
                       aria-label="Retirer un colis"
-                      className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-muted-foreground hover:bg-secondary/60 active:scale-95"
+                      className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-muted-foreground hover:bg-secondary/60 active:scale-95 disabled:opacity-40 disabled:hover:bg-transparent"
                     >−</button>
                     <NumberInput value={l.quantity} onValueChange={(n) => updateLine(i, { quantity: n ?? 0 })}
-                      min={0} step={l.stepColis}
+                      min={0} step={l.stepColis} disabled={locked}
                       aria-label={`Quantité ${l.itemName}`}
                       className={`h-11 w-16 text-center text-[17px] font-semibold tnum border-x border-border bg-background px-1 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 ${over ? "text-amber-600 dark:text-amber-400" : ""}`} />
                     <button
-                      type="button" tabIndex={-1}
+                      type="button" tabIndex={-1} disabled={locked}
                       onClick={() => updateLine(i, { quantity: Math.round((l.quantity + l.stepColis) * 100) / 100 })}
                       aria-label="Ajouter un colis"
-                      className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-brand-600 dark:text-brand-400 hover:bg-secondary/60 active:scale-95"
+                      className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-brand-600 dark:text-brand-400 hover:bg-secondary/60 active:scale-95 disabled:opacity-40 disabled:hover:bg-transparent"
                     >+</button>
                   </div>
                   <span className="text-[12px] text-muted-foreground w-9">{l.unit}</span>
                   <span className="text-muted-foreground">×</span>
                   <NumberInput value={l.price} onValueChange={(n) => updateLine(i, { price: n })}
-                    min={0} step={0.1} decimals={2} allowEmpty placeholder="prix"
+                    min={0} step={0.1} decimals={2} allowEmpty placeholder="prix" disabled={locked}
                     aria-label={`Prix ${l.itemName}`}
                     className="h-11 w-[84px] text-right text-[17px] font-semibold tnum rounded-lg border border-border bg-background px-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500" />
                   <span className="text-[12px] text-muted-foreground">€/{l.priceUnit}</span>
@@ -1306,7 +1345,7 @@ function ModifBanner({
             Modification du BL #{docNum}
           </p>
           <p className="text-[10.5px] text-amber-700/80 dark:text-amber-300/80">
-            Ajuste les quantités/prix des lignes existantes ou ajoute des articles — enregistré sur ce BL{dateLabel ? ` · livraison ${dateLabel}` : ""}.
+            Modifie, supprime, réordonne ou ajoute des lignes — enregistré sur ce même BL{dateLabel ? ` · livraison ${dateLabel}` : ""}.
           </p>
         </div>
         {prefilling && (
