@@ -163,10 +163,15 @@ export async function GET() {
 
     const calls = calledTodayMap.get(c.id) ?? [];
     const futureSnooze = c.rappels.some((r) => new Date(r.dateRappel) > now);
-    // Pre-commande snooze: client a déjà passé une commande programmée pour
-    // une date future — pas besoin de le rappeler avant cette date.
+    // Pré-commande snooze : le client a déjà une commande programmée pour un
+    // JOUR DE LIVRAISON ULTÉRIEUR → inutile de le rappeler avant. On compare au
+    // DÉBUT du jour de livraison (todayEnd = minuit demain, heure de Paris) et
+    // NON à l'instant courant : un client livré AUJOURD'HUI doit réapparaître
+    // dès le matin pour qu'on l'appelle pour la livraison du lendemain. Avec
+    // `> now`, il restait masqué jusqu'à l'heure de livraison (ex. 09:00 par
+    // défaut du constructeur de commande), voire toute la journée.
     const preCommandeSnooze = c.appels.some(
-      (a) => a.type === "COMMANDE" && a.scheduledFor && new Date(a.scheduledFor) > now,
+      (a) => a.type === "COMMANDE" && a.scheduledFor && new Date(a.scheduledFor) >= todayEnd,
     );
 
     const insights = computeInsights(c.appels);
