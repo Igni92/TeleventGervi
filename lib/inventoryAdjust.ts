@@ -96,6 +96,8 @@ export function summarizeMoves(moves: InventoryMove[]) {
     nbSorties: moves.filter((m) => m.sens === "sortie").length,
     nbEntrees: moves.filter((m) => m.sens === "entree").length,
     totalValue: round2(moves.reduce((s, m) => s + (m.sens === "entree" ? m.value : -m.value), 0)),
+    // Démarque inconnue = valeur des manques (sorties), en positif.
+    demarqueValue: round2(moves.filter((m) => m.sens === "sortie").reduce((s, m) => s + m.value, 0)),
   };
 }
 
@@ -157,11 +159,11 @@ async function postDoc(
  */
 export async function executeAdjustment(session: InventorySession, actor: string): Promise<InventoryAdjustment> {
   const moves = await computeAdjustmentPlan(session);
-  const { nbSorties, nbEntrees, totalValue } = summarizeMoves(moves);
+  const { nbSorties, nbEntrees, totalValue, demarqueValue } = summarizeMoves(moves);
   const env = sap.getEnvironment().env;
   const base: InventoryAdjustment = {
     status: "done", at: new Date().toISOString(), by: actor, moves,
-    nbSorties, nbEntrees, totalValue,
+    nbSorties, nbEntrees, totalValue, demarqueValue,
     sapExitDocNum: null, sapExitEntry: null, sapEntryDocNum: null, sapEntryEntry: null, sapEnv: env,
   };
   if (moves.length === 0) return base; // aucun écart → no-op
