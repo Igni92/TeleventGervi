@@ -4,7 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import {
   ChevronDown, Mail, ArrowRight, Loader2, Users,
-  Building2, Globe, Store, Check, X, Percent, Shield, ShieldCheck,
+  Building2, Globe, Store, Check, X, Percent, Shield, ShieldCheck, Boxes,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -32,15 +32,21 @@ interface Props {
   isAdmin?: boolean;
   /** Admin « bootstrap » (codé en dur, lib/permissions.ts) → non rétrogradable ici. */
   isBootstrapAdmin?: boolean;
+  /** Rôle préparateur (« en charge du stock ») — peut repasser sur les inventaires. */
+  isPreparateur?: boolean;
+  /** Préparateur « bootstrap » (lib/inventory : défaut + PREPARATEUR_EMAILS) → figé ici. */
+  isBootstrapPreparateur?: boolean;
 }
 
-export function CommercialCard({ userId, name, commercialKey, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false }: Props) {
+export function CommercialCard({ userId, name, commercialKey, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false, isPreparateur = false, isBootstrapPreparateur = false }: Props) {
   const [claiming, setClaiming] = useState<string | null>(null);
   const [isPresent, setIsPresent] = useState(present);
   const [share, setShare] = useState(stockSharePct);
   const [savingPresence, setSavingPresence] = useState(false);
   const [admin, setAdmin] = useState(isAdmin);
   const [savingAdmin, setSavingAdmin] = useState(false);
+  const [prep, setPrep] = useState(isPreparateur);
+  const [savingPrep, setSavingPrep] = useState(false);
   // Nom affiché sans le suffixe société (« … - Gervifrais ») qui tronque sur mobile.
   const displayName = name.split(/\s+[-–]\s+/)[0].trim() || name;
 
@@ -51,6 +57,15 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
     try { await patch({ isAdmin: next }); toast.success(next ? `${name} est désormais admin` : `${name} repassé en commercial`); }
     catch { setAdmin(!next); toast.error("Erreur changement de rôle"); }
     finally { setSavingAdmin(false); }
+  }
+
+  async function togglePrep() {
+    if (isBootstrapPreparateur) return; // préparateur système (env/code) : figé
+    const next = !prep;
+    setPrep(next); setSavingPrep(true);
+    try { await patch({ isPreparateur: next }); toast.success(next ? `${name} est désormais préparateur (stock)` : `${name} n'est plus préparateur`); }
+    catch { setPrep(!next); toast.error("Erreur changement de rôle"); }
+    finally { setSavingPrep(false); }
   }
 
   async function patch(payload: Record<string, unknown>) {
@@ -183,6 +198,31 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
               >
                 {savingAdmin ? <Loader2 className="h-3 w-3 animate-spin" /> : admin ? <ShieldCheck className="h-3 w-3" /> : <Shield className="h-3 w-3" />}
                 {admin ? "Admin" : "Commercial"}
+              </button>
+            )}
+
+            {/* Rôle préparateur (en charge du stock) — peut repasser sur les inventaires */}
+            {isBootstrapPreparateur ? (
+              <span
+                className="inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300"
+                title="Préparateur défini dans la configuration (PREPARATEUR_EMAILS) — non modifiable ici"
+              >
+                <Boxes className="h-3 w-3" /> Préparateur système
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={togglePrep}
+                disabled={savingPrep}
+                title={prep ? "Retirer le rôle préparateur (stock)" : "Désigner préparateur (en charge du stock)"}
+                className={`inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-amber-500 focus:outline-none ${
+                  prep
+                    ? "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300"
+                    : "bg-secondary/60 text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {savingPrep ? <Loader2 className="h-3 w-3 animate-spin" /> : <Boxes className="h-3 w-3" />}
+                {prep ? "Préparateur" : "Préparateur ?"}
               </button>
             )}
           </div>

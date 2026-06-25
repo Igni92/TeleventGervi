@@ -30,7 +30,7 @@ import {
  *   ACCUEIL     — hub principal (badge notifications non lues, refresh ~60 s)
  *   OPÉRATIONS  — le quotidien télévente : Console, Plan d'appel, Clients
  *   LOGISTIQUE  — Stock, Entrées (badge incidents ouverts), Fabrication
- *   PILOTAGE    — Stats, Encours, Commerciaux
+ *   PILOTAGE    — Stats, Encours, Effectifs
  *   SYSTÈME     — Paramètres
  *   (footer)    — bascule SAP, colorimétrie, thème, compte
  *
@@ -91,7 +91,7 @@ const GROUPS: { label: string | null; items: NavItem[]; collapsible?: boolean }[
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },
       { href: "/fabrication", label: "Fabrication", icon: Factory },
       { href: "/encours", label: "Encours", icon: Receipt },
-      { href: "/commerciaux", label: "Commerciaux", icon: Briefcase },
+      { href: "/commerciaux", label: "Effectifs", icon: Briefcase },
     ],
   },
   {
@@ -163,7 +163,7 @@ function useBadges(): Record<string, number> {
     return () => { cancelled = true; clearInterval(t); };
   }, []);
 
-  // Inventaires soumis non revus (admin) — refresh ~2 min.
+  // Inventaires soumis non revus (admin / préparateur) — refresh ~2 min.
   useEffect(() => {
     let cancelled = false;
     const load = () => {

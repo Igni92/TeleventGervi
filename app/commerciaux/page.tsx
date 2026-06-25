@@ -2,10 +2,11 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getAccessScope, ADMIN_EMAILS } from "@/lib/permissions";
+import { preparateurEmails } from "@/lib/inventory";
 import { CommercialCard } from "@/components/commerciaux/CommercialCard";
 import { CommerciauxSapList } from "./CommerciauxSapList";
 
-export const metadata = { title: "Commerciaux | TeleVent" };
+export const metadata = { title: "Effectifs | TeleVent" };
 export const dynamic = "force-dynamic";
 
 export default async function CommerciauxPage() {
@@ -24,16 +25,24 @@ export default async function CommerciauxPage() {
       select: { id: true, name: true, email: true, stockSharePct: true },
       orderBy: { name: "asc" },
     });
-    // Rôle admin (colonne hors client typé tant que generate n'est pas relancé →
-    // lecture raw, repli silencieux si la colonne n'existe pas encore).
+    // Rôles admin / préparateur (colonnes hors client typé tant que generate n'est
+    // pas relancé → lecture raw, repli silencieux si les colonnes n'existent pas).
     const adminByUser = new Map<string, boolean>();
+    const prepByUser = new Map<string, boolean>();
     try {
-      const rows = await prisma.$queryRawUnsafe<{ id: string; isAdmin: boolean }[]>(
-        `SELECT "id", "isAdmin" FROM "User"`,
+      const rows = await prisma.$queryRawUnsafe<{ id: string; isAdmin: boolean; isPreparateur: boolean }[]>(
+        `SELECT "id", "isAdmin", "isPreparateur" FROM "User"`,
       );
-      for (const r of rows) adminByUser.set(r.id, r.isAdmin);
-    } catch { /* colonne isAdmin pas encore créée (DDL non lancée) → tous false */ }
+      for (const r of rows) { adminByUser.set(r.id, r.isAdmin); prepByUser.set(r.id, r.isPreparateur); }
+    } catch {
+      // Colonne isPreparateur absente ? Repli sur isAdmin seul (DDL partielle).
+      try {
+        const rows = await prisma.$queryRawUnsafe<{ id: string; isAdmin: boolean }[]>(`SELECT "id", "isAdmin" FROM "User"`);
+        for (const r of rows) adminByUser.set(r.id, r.isAdmin);
+      } catch { /* aucune colonne de rôle → tout false */ }
+    }
     const bootstrapAdmins = new Set(ADMIN_EMAILS.map((e) => e.toLowerCase()));
+    const bootstrapPreparateurs = new Set(preparateurEmails());
 
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     const presences = await prisma.presence.findMany({ where: { date: todayStart } });
@@ -81,6 +90,8 @@ export default async function CommerciauxPage() {
             const trig = name.split(/[\s.\-_]+/).filter(Boolean).map((w) => w[0]?.toUpperCase() ?? "").join("");
             const key = countMap.has(trig) ? trig : (countMap.has(name) ? name : trig);
             const counts = countMap.get(key) ?? { ALL: 0, CHR: 0, GMS: 0, EXPORT: 0, OTHER: 0 };
+            const emailLc = user.email?.toLowerCase();
+            const bootstrapPrep = !!emailLc && bootstrapPreparateurs.has(emailLc);
             return (
               <CommercialCard
                 key={user.id}
@@ -94,6 +105,8 @@ export default async function CommerciauxPage() {
                 stockSharePct={user.stockSharePct ?? 100}
                 isBootstrapAdmin={!!user.email && bootstrapAdmins.has(user.email.toLowerCase())}
                 isAdmin={(!!user.email && bootstrapAdmins.has(user.email.toLowerCase())) || (adminByUser.get(user.id) ?? false)}
+                isBootstrapPreparateur={bootstrapPrep}
+                isPreparateur={bootstrapPrep || (prepByUser.get(user.id) ?? false)}
               />
             );
           })}
@@ -130,14 +143,14 @@ export default async function CommerciauxPage() {
   return (
     <div className="space-y-8 animate-fade-up">
       <header>
-        <p className="kicker mb-1.5">Force de vente</p>
+        <p className="kicker mb-1.5">Équipe &amp; rôles</p>
         <h1 className="font-display text-[34px] font-semibold text-foreground tracking-tight leading-none">
-          Commerciaux
+          Effectifs
         </h1>
         <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
-          Commerciaux SAP avec activité sur 12 mois : CA net facturé, volume BL (kg),
-          clients actifs et tendance hebdo. Clic sur une carte → fiche détaillée
-          (états commercial et comptable).
+          Commerciaux SAP (activité sur 12 mois : CA net, volume BL, clients actifs) et,
+          pour les administrateurs, gestion de l&apos;équipe : présence du jour, % de stock
+          attribué et rôles (admin, préparateur en charge du stock).
         </p>
       </header>
 

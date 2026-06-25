@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import {
-  listSessions, getSession, saveSession, isPreparateurEmail, sanitizePhotos,
+  listSessions, getSession, saveSession, isPreparateur, sanitizePhotos,
   type InventoryLine, type InventorySession,
 } from "@/lib/inventory";
 
@@ -17,36 +17,63 @@ function stripPhotos(s: InventorySession): InventorySession {
   return { ...s, photos: [], nbPhotos: s.photos?.length ?? 0 };
 }
 
+/** Identité de l'opérateur courant (email, repli nom). */
+function actorOf(session: { user?: { email?: string | null; name?: string | null } }): string {
+  return session.user?.email ?? session.user?.name ?? "?";
+}
+
+/** Normalise les lignes reçues : ne garde que celles réellement comptées.
+ *  L'écart est arrondi au 0,1 — MÊME granularité que le client (lib inv-utils
+ *  ecartOf + sapInfo) et que l'affichage (fmt) : la pastille « écart » vue avant
+ *  envoi reste identique à celle stockée (sinon un écart < 0,05 « flippait »). */
+function parseLines(raw: unknown): InventoryLine[] {
+  const arr = Array.isArray(raw) ? (raw as Omit<InventoryLine, "ecart">[]) : [];
+  return arr
+    .filter((l) => l && l.itemCode && Number.isFinite(l.realQty))
+    .map((l) => ({
+      itemCode: String(l.itemCode),
+      itemName: String(l.itemName ?? l.itemCode),
+      sapQty: Number(l.sapQty) || 0,
+      realQty: Number(l.realQty) || 0,
+      unit: String(l.unit ?? ""),
+      ecart: Math.round(((Number(l.realQty) || 0) - (Number(l.sapQty) || 0)) * 10) / 10,
+    }));
+}
+
 /**
  * GET — sessions d'inventaire.
  *   • `?id=<id>` → UNE session complète (photos incluses) pour le détail/lightbox.
  *   • sinon      → la LISTE, photos retirées (payload léger), `nbPhotos` conservé.
- * Admin : tout. Préparateur : uniquement les siennes.
+ * Admin OU préparateur (« personne en charge du stock ») : tout (ils peuvent
+ * repasser dessus). Autre compte : uniquement ses propres comptages.
  */
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   const admin = await requireAdmin(session);
+  const prep = await isPreparateur(session.user.email);
+  const canManage = admin || prep;       // peut voir tout + valider / rouvrir / corriger
   const email = session.user.email?.toLowerCase() ?? "";
 
   const id = new URL(req.url).searchParams.get("id");
   if (id) {
     const s = await getSession(id);
     if (!s) return NextResponse.json({ error: "Session introuvable" }, { status: 404 });
-    if (!admin && s.createdBy.toLowerCase() !== email) {
+    if (!canManage && s.createdBy.toLowerCase() !== email) {
       return NextResponse.json({ error: "Réservé" }, { status: 403 });
     }
     return NextResponse.json({ session: { ...s, photos: s.photos ?? [] } });
   }
 
   let sessions = await listSessions();
-  if (!admin) sessions = sessions.filter((s) => s.createdBy.toLowerCase() === email);
+  if (!canManage) sessions = sessions.filter((s) => s.createdBy.toLowerCase() === email);
 
   return NextResponse.json({
     sessions: sessions.map(stripPhotos),
     isAdmin: admin,
-    isPreparateur: isPreparateurEmail(session.user.email),
-    pendingReview: admin ? sessions.filter((s) => s.status === "submitted").length : 0,
+    isPreparateur: prep,
+    canManage,
+    pendingReview: canManage ? sessions.filter((s) => s.status === "submitted").length : 0,
   });
 }
 
@@ -59,19 +86,8 @@ export async function POST(req: NextRequest) {
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
-  const raw = Array.isArray(body.lines) ? body.lines : [];
   // On ne garde que les lignes effectivement comptées (realQty renseigné).
-  const lines: InventoryLine[] = raw
-    .filter((l) => l && l.itemCode && Number.isFinite(l.realQty))
-    .map((l) => ({
-      itemCode: String(l.itemCode),
-      itemName: String(l.itemName ?? l.itemCode),
-      sapQty: Number(l.sapQty) || 0,
-      realQty: Number(l.realQty) || 0,
-      unit: String(l.unit ?? ""),
-      ecart: Math.round(((Number(l.realQty) || 0) - (Number(l.sapQty) || 0)) * 100) / 100,
-    }));
-
+  const lines = parseLines(body.lines);
   const photos = sanitizePhotos(body.photos, newId, nowIso);
 
   if (lines.length === 0 && photos.length === 0) {
@@ -81,7 +97,7 @@ export async function POST(req: NextRequest) {
   const s: InventorySession = {
     id: newId(),
     status: "submitted",
-    createdBy: session.user.email ?? session.user.name ?? "?",
+    createdBy: actorOf(session),
     note: (body.note ?? "").trim().slice(0, 500),
     lines,
     photos,
@@ -95,22 +111,80 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ ok: true, session: stripPhotos(s) });
 }
 
-/** PATCH — admin marque une session « revue ». */
+/**
+ * PATCH — « repasser dessus » une session, réservé à l'admin OU au préparateur
+ * (personne en charge du stock).
+ *   • action "review" (défaut) → submitted → reviewed (validation).
+ *   • action "reopen"          → reviewed → submitted (réouverture pour re-contrôle).
+ */
 export async function PATCH(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  if (!(await requireAdmin(session))) {
-    return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+  const canManage = (await requireAdmin(session)) || (await isPreparateur(session.user.email));
+  if (!canManage) {
+    return NextResponse.json({ error: "Réservé aux administrateurs et préparateurs" }, { status: 403 });
   }
   const body = await req.json().catch(() => null);
   const id = body?.id as string | undefined;
   if (!id) return NextResponse.json({ error: "id requis" }, { status: 400 });
+  const action = body?.action === "reopen" ? "reopen" : "review";
 
   const s = await getSession(id);
   if (!s) return NextResponse.json({ error: "Session introuvable" }, { status: 404 });
-  s.status = "reviewed";
-  s.reviewedAt = nowIso();
-  s.reviewedBy = session.user.email ?? session.user.name ?? "?";
+
+  const actor = actorOf(session);
+  if (action === "reopen") {
+    s.status = "submitted";
+    s.reviewedAt = null;
+    s.reviewedBy = null;
+    s.reopenedAt = nowIso();
+    s.reopenedBy = actor;
+  } else {
+    s.status = "reviewed";
+    s.reviewedAt = nowIso();
+    s.reviewedBy = actor;
+  }
+  await saveSession(s);
+  return NextResponse.json({ ok: true, session: stripPhotos(s) });
+}
+
+/**
+ * PUT — corrige / recompte une session existante EN PLACE (admin OU préparateur).
+ * Remplace lignes / photos / note, recalcule les écarts, repasse la session en
+ * « submitted » (à re-valider) et trace l'auteur de la correction. Permet de
+ * « repasser dessus » un inventaire déjà envoyé ou déjà revu.
+ */
+export async function PUT(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  const canManage = (await requireAdmin(session)) || (await isPreparateur(session.user.email));
+  if (!canManage) {
+    return NextResponse.json({ error: "Réservé aux administrateurs et préparateurs" }, { status: 403 });
+  }
+
+  let body: { id?: string; note?: string; lines?: Omit<InventoryLine, "ecart">[]; photos?: unknown };
+  try { body = await req.json(); }
+  catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
+  if (!body.id) return NextResponse.json({ error: "id requis" }, { status: 400 });
+
+  const s = await getSession(body.id);
+  if (!s) return NextResponse.json({ error: "Session introuvable" }, { status: 404 });
+
+  const lines = parseLines(body.lines);
+  const photos = sanitizePhotos(body.photos, newId, nowIso);
+  if (lines.length === 0 && photos.length === 0) {
+    return NextResponse.json({ error: "Ajoute au moins un comptage ou une photo." }, { status: 400 });
+  }
+
+  s.note = (body.note ?? "").trim().slice(0, 500);
+  s.lines = lines;
+  s.photos = photos;
+  s.nbEcarts = lines.filter((l) => Math.abs(l.ecart) > 0.001).length;
+  s.status = "submitted";       // une correction repasse en « à revoir »
+  s.reviewedAt = null;
+  s.reviewedBy = null;
+  s.updatedAt = nowIso();
+  s.updatedBy = actorOf(session);
   await saveSession(s);
   return NextResponse.json({ ok: true, session: stripPhotos(s) });
 }

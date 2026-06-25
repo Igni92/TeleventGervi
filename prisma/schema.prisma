@@ -45,6 +45,13 @@ model User {
   // lib/permissions.ts (ADMIN_EMAILS) restent admins « bootstrap » indélogeables ;
   // ce flag permet d'en ajouter d'autres sans redéploiement.
   isAdmin       Boolean    @default(false)
+  // Rôle préparateur (« personne en charge du stock ») gérable depuis l'écran
+  // Effectifs. Donne le droit de valider / rouvrir / corriger les inventaires
+  // (cf. lib/inventory.isPreparateur). Les emails bootstrap (DEFAULT_PREPARATEURS
+  // + PREPARATEUR_EMAILS) restent préparateurs indélogeables ; ce flag en ajoute
+  // d'autres sans redéploiement. Accédé en raw SQL (colonne hors client typé tant
+  // que generate n'est pas relancé) — cf. scripts/ddl-user-ispreparateur.mjs.
+  isPreparateur Boolean    @default(false)
   accounts      Account[]
   sessions      Session[]
   presences     Presence[]

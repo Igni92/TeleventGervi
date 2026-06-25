@@ -19,7 +19,7 @@ const NAV: NavItem[] = [
   { href: "/fabrication", label: "Fabrication", icon: Factory, keywords: "production deco kit" },
   { href: "/dashboard", label: "Stats · Carte", icon: LayoutDashboard, keywords: "pilotage dashboard géo carte" },
   { href: "/encours", label: "Encours", icon: Receipt, keywords: "factures impayés" },
-  { href: "/commerciaux", label: "Commerciaux", icon: Briefcase, keywords: "objectifs slp" },
+  { href: "/commerciaux", label: "Effectifs", icon: Briefcase, keywords: "commerciaux objectifs slp équipe personnel préparateur rôles" },
   { href: "/parametres", label: "Paramètres", icon: Settings, keywords: "réglages sap import thème" },
 ];
 

@@ -79,7 +79,7 @@ const AXES: Axis[] = [
     label: "Administrateur",
     desc: "Pilotage & réglages",
     tiles: [
-      { href: "/commerciaux", label: "Commerciaux", icon: Briefcase },
+      { href: "/commerciaux", label: "Effectifs", icon: Briefcase },
       { href: "/promos", label: "Promotions", icon: Tag },
       { href: "/parametres", label: "Paramètres", icon: Settings },
     ],
@@ -124,7 +124,7 @@ function useCommandesDueBadge(): number {
   return n;
 }
 
-/** Inventaires soumis non revus — pastille tuile inventaire (admins). */
+/** Inventaires soumis non revus — pastille tuile inventaire (admins / préparateurs). */
 function useInventaireBadge(): number {
   const [n, setN] = useState(0);
   useEffect(() => {
