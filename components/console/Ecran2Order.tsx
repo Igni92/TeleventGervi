@@ -221,7 +221,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       const j = await r.json();
       if (!j?.ok) { toast.error("Chargement du BL impossible", { description: j?.error, duration: 8000 }); return; }
       setModifMeta({ dueDate: j.dueDate, editable: j.editable });
-      setComments(j.comments ?? "");
+      setComments(j.noteText ?? "");
       type PrefillLine = {
         lineNum: number; warehouse: string | null; lot: string | null; closed: boolean;
         itemCode: string; itemName: string;
@@ -1267,12 +1267,12 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                 className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2" />
             </>
           )}
-          {/* Note BL éditable (texte promo / divers) — enregistrée dans les commentaires du bon */}
+          {/* Ligne TEXTE du BL (colonne « T » = dlt_Text dans SAP) — note/promo */}
           {modif && (
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <label htmlFor="bl-note" className="text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
-                  Note sur le BL
+                  Ligne texte sur le BL
                 </label>
                 {cart.some((l) => l.promo) && (
                   <button type="button"

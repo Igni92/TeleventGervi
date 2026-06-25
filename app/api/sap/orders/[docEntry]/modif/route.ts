@@ -35,6 +35,7 @@ import { chooseLot, unitInfo } from "@/lib/gervifrais-calc";
 type SapLine = {
   LineNum: number; ItemCode: string; ItemDescription?: string; Quantity: number;
   Price?: number; WarehouseCode?: string; LineStatus?: string; U_NoLot?: string;
+  LineType?: string; FreeText?: string;
 };
 type SapOrder = {
   DocEntry: number; DocNum: number; CardCode: string; DocDueDate: string;
@@ -77,9 +78,18 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ docEntry
 
   const editable = order.DocumentStatus === "bost_Open" && order.Cancelled !== "tYES";
 
+  // Lignes ARTICLE (panier) vs lignes TEXTE (note/promo, colonne « T » dans SAP).
+  // Une ligne texte n'a pas d'ItemCode ; on en extrait le FreeText pour la note.
+  const allLines = order.DocumentLines || [];
+  const regularLines = allLines.filter((l) => l.ItemCode);
+  const noteText = allLines
+    .filter((l) => !l.ItemCode && (l.FreeText ?? "").trim())
+    .map((l) => (l.FreeText ?? "").trim())
+    .join("\n");
+
   // Référentiel produits (unité d'affichage, emballage, tags, stocks) pour
   // reconvertir chaque ligne SAP en ligne de panier éditable.
-  const itemCodes = Array.from(new Set((order.DocumentLines || []).map((l) => l.ItemCode)));
+  const itemCodes = Array.from(new Set(regularLines.map((l) => l.ItemCode)));
   const prods = await prisma.product.findMany({
     where: { itemCode: { in: itemCodes } },
     select: {
@@ -91,7 +101,7 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ docEntry
   });
   const prodMap = new Map(prods.map((p) => [p.itemCode, p]));
 
-  const cartLines = (order.DocumentLines || []).map((l) => {
+  const cartLines = regularLines.map((l) => {
     const p = prodMap.get(l.ItemCode);
     const info = unitInfo(p?.salesUnit, p?.salesQtyPerPackUnit, p?.salesItemsPerUnit ?? null, p?.salesUnitWeight);
     const { packDivisor, displayUnit, priceUnit } = info;
@@ -139,7 +149,7 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ docEntry
     docNum: order.DocNum,
     dueDate: order.DocDueDate,
     editable,
-    comments: order.Comments ?? "",
+    noteText,          // texte de(s) ligne(s) « Texte » du BL (note/promo)
     cartLines,
   });
 }
@@ -294,10 +304,14 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
   // DocumentLines par celle envoyée (au lieu de fusionner par LineNum). C'est le
   // SEUL moyen fiable de SUPPRIMER une ligne et de RÉORDONNER dans ce SAP — un
   // PATCH normal conserve les lignes omises. Le numéro de BL (DocNum) est préservé.
-  // Note BL éditable (texte promo/divers) — écrite dans les commentaires du bon
-  // uniquement si fournie (undefined = on n'y touche pas).
+  // Note/promo → ligne de type TEXTE (colonne « T » dans SAP = dlt_Text), ajoutée
+  // en fin de BL. On reconstruit toute la collection, donc l'éventuelle ligne texte
+  // d'origine est remplacée par celle-ci (vide = pas de ligne texte).
+  const note = typeof body.comments === "string" ? body.comments.trim() : "";
+  if (note) {
+    documentLines.push({ LineNum: documentLines.length, LineType: "dlt_Text", FreeText: note.slice(0, 254) });
+  }
   const patchBody: Record<string, unknown> = { DocumentLines: documentLines };
-  if (typeof body.comments === "string") patchBody.Comments = body.comments.slice(0, 254);
 
   try {
     await sap.patch(
