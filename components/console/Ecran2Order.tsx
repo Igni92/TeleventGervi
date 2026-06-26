@@ -1113,6 +1113,17 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             const sellShort = max <= 0;             // entièrement à découvert
             const partialShort = over && !sellShort;
             const locked = !!l.originalLine?.closed; // ligne déjà livrée → verrouillée
+            // Saisie AU COLIS : le panier stocke `quantity` (en unité de base via
+            // packDivisor — kg/pie) ; on SAISIT en colis et on AFFICHE la conversion
+            // en unité de base. `baseUnitsPerColis` = stepColis × packDivisor (ex.
+            // 4 kg, 12 pie). Article sans colis réel (=1) → saisie en unité de base.
+            const baseUnitsPerColis = Math.round(l.stepColis * l.packDivisor * 1000) / 1000;
+            const hasColis = baseUnitsPerColis > 1;
+            const baseQty = Math.round(l.quantity * l.packDivisor * 100) / 100;
+            const colisCount = hasColis ? Math.round((l.quantity / l.stepColis) * 100) / 100 : baseQty;
+            const freeColis = hasColis
+              ? Math.round((l.freeUnits / l.stepColis) * 100) / 100
+              : Math.round(l.freeUnits * l.packDivisor * 100) / 100;
             return (
               <div key={i} className={`rounded-lg border p-2 ${sellShort ? "border-rose-400/60 bg-rose-50/40 dark:bg-rose-950/15" : "border-border"}`}>
                 <div className="flex items-start justify-between gap-1">
@@ -1193,9 +1204,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                   </div>
                 </div>
                 <div className={`flex items-center gap-1.5 mt-2 ${locked ? "opacity-60" : ""}`}>
-                  {/* On VEND au colis : −/+ avancent d'un colis. Mais on AFFICHE dans
-                      l'unité de base (kg/pie) = qté_colis × packDivisor → fraises
-                      4/8/12 kg, framboises 12/24/36 bqe. */}
+                  {/* On SAISIT au colis (−/+ avancent d'un colis) et on AFFICHE la
+                      conversion en unité de base : « 9 colis (36 kg) × 7.20 ».
+                      Article sans colis réel → saisie directe en unité de base. */}
                   <div className="inline-flex items-center rounded-lg border border-border overflow-hidden shrink-0">
                     <button
                       type="button" tabIndex={-1} disabled={locked}
@@ -1203,11 +1214,11 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                       aria-label="Retirer un colis"
                       className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-muted-foreground hover:bg-secondary/60 active:scale-95 disabled:opacity-40 disabled:hover:bg-transparent"
                     >−</button>
-                    <NumberInput value={Math.round(l.quantity * l.packDivisor * 100) / 100}
-                      onValueChange={(n) => updateLine(i, { quantity: (n ?? 0) / l.packDivisor })}
-                      min={0} step={l.stepColis * l.packDivisor} disabled={locked}
-                      aria-label={`Quantité ${l.itemName} (en ${l.priceUnit})`}
-                      className={`h-11 w-[72px] text-center text-[17px] font-semibold tnum border-x border-border bg-background px-1 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 ${over ? "text-amber-600 dark:text-amber-400" : ""}`} />
+                    <NumberInput value={hasColis ? colisCount : baseQty}
+                      onValueChange={(n) => updateLine(i, { quantity: hasColis ? Math.round((n ?? 0) * l.stepColis * 1000) / 1000 : (n ?? 0) / l.packDivisor })}
+                      min={0} step={hasColis ? 1 : baseUnitsPerColis} disabled={locked}
+                      aria-label={`Quantité ${l.itemName} (en ${hasColis ? "colis" : l.priceUnit})`}
+                      className={`h-11 w-[64px] text-center text-[17px] font-semibold tnum border-x border-border bg-background px-1 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 ${over ? "text-amber-600 dark:text-amber-400" : ""}`} />
                     <button
                       type="button" tabIndex={-1} disabled={locked}
                       onClick={() => updateLine(i, { quantity: Math.round((l.quantity + l.stepColis) * 1000) / 1000 })}
@@ -1215,7 +1226,13 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                       className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-brand-600 dark:text-brand-400 hover:bg-secondary/60 active:scale-95 disabled:opacity-40 disabled:hover:bg-transparent"
                     >+</button>
                   </div>
-                  <span className="text-[12px] text-muted-foreground w-9">{l.priceUnit}</span>
+                  {hasColis ? (
+                    <span className="text-[12px] text-muted-foreground whitespace-nowrap">
+                      colis <span className="text-foreground/70 tnum">({baseQty} {l.priceUnit})</span>
+                    </span>
+                  ) : (
+                    <span className="text-[12px] text-muted-foreground w-9">{l.priceUnit}</span>
+                  )}
                   <span className="text-muted-foreground">×</span>
                   <NumberInput value={l.price} onValueChange={(n) => updateLine(i, { price: n })}
                     min={0} step={0.1} decimals={2} allowEmpty placeholder="prix" disabled={locked}
@@ -1235,17 +1252,19 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                         onClick={() => updateLine(i, { freeUnits: Math.max(0, Math.round((l.freeUnits - l.stepColis) * 1000) / 1000), freeManual: true })}
                         aria-label="Retirer un colis offert"
                         className="h-7 w-8 inline-flex items-center justify-center text-[16px] font-bold text-muted-foreground hover:bg-secondary/60 active:scale-95">−</button>
-                      <span className={`w-11 text-center text-[14px] font-semibold tnum border-x border-border ${l.freeUnits > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>{Math.round(l.freeUnits * l.packDivisor * 100) / 100}</span>
+                      <span className={`w-11 text-center text-[14px] font-semibold tnum border-x border-border ${l.freeUnits > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>{freeColis}</span>
                       <button type="button" tabIndex={-1}
                         onClick={() => updateLine(i, { freeUnits: Math.round((l.freeUnits + l.stepColis) * 1000) / 1000, freeManual: true })}
                         aria-label="Ajouter un colis offert"
                         className="h-7 w-8 inline-flex items-center justify-center text-[16px] font-bold text-rose-600 dark:text-rose-400 hover:bg-secondary/60 active:scale-95">+</button>
                     </div>
-                    <span className="text-[11px] text-muted-foreground">{l.priceUnit} à 0 €</span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {hasColis ? "colis" : l.priceUnit} à 0 €
+                      {hasColis && l.freeUnits > 0 && (
+                        <span className="text-foreground/60 tnum"> ({Math.round(l.freeUnits * l.packDivisor * 100) / 100} {l.priceUnit})</span>
+                      )}
+                    </span>
                   </div>
-                )}
-                {l.packDivisor > 1 && l.price != null && (
-                  <p className="text-[11px] text-muted-foreground mt-0.5">{l.quantity} colis × {l.packDivisor} {l.priceUnit} × {l.price}€</p>
                 )}
                 {sellShort ? (
                   <p className="text-[11px] text-rose-600 dark:text-rose-400 mt-1">
