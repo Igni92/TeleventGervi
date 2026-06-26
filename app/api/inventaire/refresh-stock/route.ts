@@ -21,8 +21,8 @@ export async function POST() {
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
   try {
-    const { refreshed, total } = await refreshInStockMirror();
-    return NextResponse.json({ ok: true, refreshed, total });
+    const { refreshed, total, sapMs, dbMs } = await refreshInStockMirror();
+    return NextResponse.json({ ok: true, refreshed, total, sapMs, dbMs });
   } catch (e) {
     return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 502 });
   }
