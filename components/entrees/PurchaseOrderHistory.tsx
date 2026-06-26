@@ -309,12 +309,25 @@ export function PurchaseOrderHistory() {
 
 type EditLine = {
   itemCode: string; itemName: string; ratio: number;
-  packageQuantity: number; price: string; warehouseCode: "000" | "01" | "R1";
+  packageQuantity: number; price: string; lineTotal: string; forceTotal: boolean;
+  warehouseCode: "000" | "01" | "R1";
   pays: string | null; marque: string | null; condt: string | null; variete: string | null;
 };
 const PO_WAREHOUSES: { code: "000" | "01" | "R1"; label: string }[] = [
   { code: "000", label: "000 · A/C-A/D" }, { code: "01", label: "01 · Stock" }, { code: "R1", label: "R1 · J+1" },
 ];
+/** Total HT effectif d'une ligne : forcé si `forceTotal`, sinon PU × colis × ratio. */
+const effLineTotal = (l: EditLine): number | null => {
+  if (l.forceTotal) { const t = parseFloat(l.lineTotal); return Number.isFinite(t) ? t : null; }
+  const p = l.price === "" ? null : parseFloat(l.price);
+  return p != null && Number.isFinite(p) ? p * l.packageQuantity * l.ratio : null;
+};
+/** PU /pie effectif : déduit du total forcé si besoin. */
+const effPU = (l: EditLine): number | null => {
+  if (!l.forceTotal) { const p = l.price === "" ? null : parseFloat(l.price); return p != null && Number.isFinite(p) ? p : null; }
+  const t = parseFloat(l.lineTotal); const denom = l.packageQuantity * l.ratio;
+  return Number.isFinite(t) && denom > 0 ? Math.round((t / denom) * 10000) / 10000 : null;
+};
 
 function PoDetail({ po, onReceive, receiving, onModified }: {
   po: PurchaseOrder; onReceive: (docEntry: number) => void; receiving: boolean; onModified: () => void | Promise<void>;
@@ -323,33 +336,55 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editLines, setEditLines] = useState<EditLine[]>([]);
+  const [swapIdx, setSwapIdx] = useState<number | null>(null); // ligne dont on remplace l'article
 
   const beginEdit = () => {
     setEditLines(po.lines.map((l) => {
       const pkg = l.packageQuantity ?? l.pieceQuantity ?? 0;
       const ratio = pkg > 0 && l.pieceQuantity ? Math.max(1, Math.round((l.pieceQuantity / pkg) * 1000) / 1000) : 1;
       const whs = (["000", "01", "R1"] as const).find((w) => w === l.warehouse) ?? "01";
+      // Prix unitaire absent mais total présent → la ligne avait un total forcé.
+      const forceTotal = (l.price == null || l.price <= 0) && l.lineTotal != null && l.lineTotal > 0;
       return {
         itemCode: l.itemCode, itemName: l.itemName ?? l.itemCode, ratio,
-        packageQuantity: pkg, price: l.price != null ? String(l.price) : "", warehouseCode: whs,
+        packageQuantity: pkg,
+        price: l.price != null && l.price > 0 ? String(l.price) : "",
+        lineTotal: l.lineTotal != null ? String(l.lineTotal) : "",
+        forceTotal, warehouseCode: whs,
         pays: l.uPays, marque: l.uMarque, condt: l.uCondi, variete: l.frgnName ?? null,
       };
     }));
+    setSwapIdx(null);
     setEditing(true);
   };
-  const addEditLine = (p: ProductHit) => setEditLines((cur) => {
-    if (cur.some((l) => l.itemCode === p.itemCode)) { toast.info(`${p.itemCode} déjà présent`); return cur; }
-    const ratio = p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1 ? p.salesQtyPerPackUnit : 1;
-    return [...cur, { itemCode: p.itemCode, itemName: p.itemName, ratio, packageQuantity: 1, price: "", warehouseCode: "01", pays: p.uPays, marque: p.uMarque, condt: p.uCondi, variete: p.frgnName }];
-  });
   const updateEditLine = (i: number, patch: Partial<EditLine>) => setEditLines((c) => c.map((l, k) => (k === i ? { ...l, ...patch } : l)));
-  const removeEditLine = (i: number) => setEditLines((c) => c.filter((_, k) => k !== i));
-  const editTotalHT = editLines.reduce((s, l) => { const p = l.price === "" ? null : parseFloat(l.price); return s + (p != null ? p * l.packageQuantity * l.ratio : 0); }, 0);
+  const removeEditLine = (i: number) => { setEditLines((c) => c.filter((_, k) => k !== i)); setSwapIdx(null); };
+  // Sélection d'un article : remplace la ligne en cours (swapIdx) ou en ajoute une.
+  const onPickProduct = (p: ProductHit) => {
+    const ratio = p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1 ? p.salesQtyPerPackUnit : 1;
+    if (swapIdx != null) {
+      const idx = swapIdx;
+      setEditLines((c) => c.map((l, k) => (k === idx
+        ? { ...l, itemCode: p.itemCode, itemName: p.itemName, ratio, pays: p.uPays, marque: p.uMarque, condt: p.uCondi, variete: p.frgnName }
+        : l)));
+      setSwapIdx(null);
+      return;
+    }
+    setEditLines((cur) => {
+      if (cur.some((l) => l.itemCode === p.itemCode)) { toast.info(`${p.itemCode} déjà présent`); return cur; }
+      return [...cur, { itemCode: p.itemCode, itemName: p.itemName, ratio, packageQuantity: 1, price: "", lineTotal: "", forceTotal: false, warehouseCode: "01", pays: p.uPays, marque: p.uMarque, condt: p.uCondi, variete: p.frgnName }];
+    });
+  };
+  const editTotalHT = editLines.reduce((s, l) => s + (effLineTotal(l) ?? 0), 0);
 
   const save = async () => {
     const payload = editLines
       .filter((l) => l.packageQuantity > 0)
-      .map((l) => ({ itemCode: l.itemCode, packageQuantity: l.packageQuantity, warehouseCode: l.warehouseCode, price: l.price ? parseFloat(l.price) : undefined }));
+      .map((l) => {
+        const base = { itemCode: l.itemCode, packageQuantity: l.packageQuantity, warehouseCode: l.warehouseCode };
+        if (l.forceTotal) { const t = parseFloat(l.lineTotal); return { ...base, lineTotal: Number.isFinite(t) ? t : undefined }; }
+        return { ...base, price: l.price ? parseFloat(l.price) : undefined };
+      });
     if (payload.length === 0) { toast.error("Garde au moins une ligne."); return; }
     setSaving(true);
     try {
@@ -380,8 +415,13 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
         </div>
 
         <div className="space-y-1.5">
-          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Ajouter un article</label>
-          <ProductPicker onPick={addEditLine} />
+          <label className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">
+            {swapIdx != null ? `Remplacer l'article de la ligne ${swapIdx + 1}` : "Ajouter un article"}
+            {swapIdx != null && (
+              <button type="button" onClick={() => setSwapIdx(null)} className="normal-case text-[11px] font-medium text-muted-foreground underline hover:text-foreground">annuler</button>
+            )}
+          </label>
+          <ProductPicker onPick={onPickProduct} />
         </div>
 
         <div className="rounded-lg border border-border overflow-x-auto">
@@ -390,22 +430,22 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
               <tr>
                 <th className="text-left px-2 py-2 font-semibold">Article</th>
                 <th className="text-left px-2 py-2 font-semibold w-24">Qté colis</th>
-                <th className="text-left px-2 py-2 font-semibold w-36">Entrepôt</th>
+                <th className="text-left px-2 py-2 font-semibold w-32">Entrepôt</th>
                 <th className="text-right px-2 py-2 font-semibold w-24">PU /pie HT</th>
-                <th className="text-right px-2 py-2 font-semibold w-24">Total HT</th>
+                <th className="text-right px-2 py-2 font-semibold w-28">Total HT</th>
                 <th className="w-8" />
               </tr>
             </thead>
             <tbody>
               {editLines.map((l, i) => {
                 const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, frgnName: l.variete });
-                const priceNum = l.price === "" ? null : parseFloat(l.price);
-                const lineHT = priceNum != null ? priceNum * l.packageQuantity * l.ratio : null;
                 return (
-                  <tr key={`${l.itemCode}-${i}`} className="border-t border-border align-top">
+                  <tr key={`${l.itemCode}-${i}`} className={`border-t border-border align-top ${swapIdx === i ? "bg-violet-50 dark:bg-violet-500/10" : ""}`}>
                     <td className="px-2 py-2">
                       <div className="font-semibold text-foreground">{dz.fruit}</div>
-                      <div className="font-mono text-[11px] text-muted-foreground">{l.itemCode}</div>
+                      <button type="button" onClick={() => setSwapIdx(swapIdx === i ? null : i)} className="group inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground hover:text-violet-600 dark:hover:text-violet-400" title="Changer l'article">
+                        {l.itemCode} <Pencil className="h-3 w-3 opacity-50 group-hover:opacity-100" />
+                      </button>
                       <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-0.5" />
                     </td>
                     <td className="px-2 py-2"><NumberInput value={l.packageQuantity} onValueChange={(n) => updateEditLine(i, { packageQuantity: n ?? 0 })} min={0} step={1} className="text-right h-9 w-20" /></td>
@@ -414,8 +454,11 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
                         {PO_WAREHOUSES.map((w) => <option key={w.code} value={w.code}>{w.label}</option>)}
                       </select>
                     </td>
-                    <td className="px-2 py-2"><NumberInput value={priceNum} onValueChange={(n) => updateEditLine(i, { price: n == null ? "" : String(n) })} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className="text-right h-9 w-24" /></td>
-                    <td className="px-2 py-2 text-right tnum font-medium whitespace-nowrap">{lineHT != null ? eur(lineHT) : <span className="text-muted-foreground/60">—</span>}</td>
+                    <td className="px-2 py-2"><NumberInput value={effPU(l)} onValueChange={(n) => updateEditLine(i, { price: n == null ? "" : String(n), forceTotal: false, lineTotal: "" })} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className="text-right h-9 w-24" /></td>
+                    <td className="px-2 py-2">
+                      <NumberInput value={effLineTotal(l)} onValueChange={(n) => updateEditLine(i, { lineTotal: n == null ? "" : String(n), forceTotal: n != null })} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className={`text-right h-9 w-24 ${l.forceTotal ? "ring-1 ring-amber-400" : ""}`} />
+                      {l.forceTotal && <div className="mt-0.5 text-right text-[9.5px] font-semibold uppercase text-amber-600 dark:text-amber-400">forcé</div>}
+                    </td>
                     <td className="px-2 py-2 text-right"><Button variant="ghost" size="icon-sm" onClick={() => removeEditLine(i)} aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></Button></td>
                   </tr>
                 );
@@ -433,7 +476,11 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
             </tfoot>
           </table>
         </div>
-        <p className="text-[11px] text-muted-foreground">Le total HT exact (taxes incluses) est recalculé par SAP à l&apos;enregistrement.</p>
+        <p className="text-[11px] text-muted-foreground">
+          Édite le <b>code</b> (clic sur le code → choisis le nouvel article), les <b>colis</b>, le <b>PU HT</b> ou
+          force le <b>Total HT</b> (SAP recalcule le PU). Total document = somme des lignes. Les taxes sont
+          recalculées par SAP à l&apos;enregistrement.
+        </p>
       </div>
     );
   }
