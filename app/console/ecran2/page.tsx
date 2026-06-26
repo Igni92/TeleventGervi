@@ -15,7 +15,7 @@ import {
   type ActiveClientState, type ActiveClientInfo,
 } from "@/lib/consoleSync";
 import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
-import { fullNameFromSlp } from "@/lib/salespeople";
+import { displayNameFromSlp } from "@/lib/salespeople";
 
 type ModifTarget = { docEntry: number; docNum: number; clientId: string | null; clientName: string | null };
 
@@ -160,7 +160,7 @@ function ClientBanner({
     { label: "Direct 2", value: info.tel3 },
   ].filter((t): t is { label: string; value: string } => !!t.value) : [];
 
-  const commercialName = fullNameFromSlp(info?.commercial);
+  const commercialName = displayNameFromSlp(info?.commercial);
 
   const incidents = info?.openIncidents ?? 0;
   const lastDays = info?.lastOrderDays;
