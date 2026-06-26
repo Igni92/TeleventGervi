@@ -551,9 +551,9 @@ function CarrierGroup({
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3 sm:gap-4 shrink-0 text-right">
+        <div className="flex items-center gap-6 sm:gap-8 shrink-0 text-right">
           <Metric label="Cmd." value={fmtInt(carrier.orders)} />
-          <Metric label="Colis" value={fmtNum(carrier.colis)} strong />
+          <Metric label="Colis" value={fmtNum(carrier.colis)} />
           <Metric label="kg" value={fmtNum(carrier.weightKg)} className="hidden sm:block" />
         </div>
       </div>
@@ -624,12 +624,10 @@ function SegmentFilter({
   );
 }
 
-function Metric({ label, value, strong, className }: { label: string; value: string; strong?: boolean; className?: string }) {
+function Metric({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
-    <div className={className}>
-      <p className={`tnum leading-none ${strong ? "text-[17px] font-bold text-foreground" : "text-[14px] font-semibold text-foreground/85"}`}>
-        {value}
-      </p>
+    <div className={`min-w-[42px] text-right ${className ?? ""}`}>
+      <p className="text-[15px] font-bold tnum leading-none text-foreground">{value}</p>
       <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-0.5">{label}</p>
     </div>
   );
@@ -829,13 +827,13 @@ function OrderRow({
         </div>
 
         {/* Colis / poids — repère logistique */}
-        <div className="flex items-center gap-3 sm:gap-5 shrink-0">
-          <div className="text-right">
-            <p className="text-[18px] font-bold tnum text-foreground leading-none">{fmtNum(doc.colis)}</p>
+        <div className="flex items-center gap-6 sm:gap-8 shrink-0">
+          <div className="text-right min-w-[44px]">
+            <p className="text-[15px] font-bold tnum text-foreground leading-none">{fmtNum(doc.colis)}</p>
             <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-0.5">colis</p>
           </div>
           <div className="text-right min-w-[44px]">
-            <p className="text-[14px] font-semibold tnum text-foreground/85 leading-none">{fmtNum(doc.weightKg)}</p>
+            <p className="text-[15px] font-bold tnum text-foreground leading-none">{fmtNum(doc.weightKg)}</p>
             <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-0.5">kg</p>
           </div>
           {doc.open && (
