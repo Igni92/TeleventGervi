@@ -430,7 +430,8 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
       const json = await res.json().catch(() => null);
       if (res.ok && json?.ok) {
         const fresh = await loadProducts();
-        toast.success(`Stock SAP à jour — ${json.refreshed}/${json.total} article(s).`);
+        const timing = json.sapMs != null ? ` (SAP ${(json.sapMs / 1000).toFixed(1)}s · BDD ${(json.dbMs / 1000).toFixed(1)}s)` : "";
+        toast.success(`Stock SAP à jour — ${json.refreshed}/${json.total} article(s)${timing}.`);
         return fresh;
       }
       toast.error(json?.error ?? "Mise à jour du stock SAP impossible — comptage sur le dernier stock connu.");
