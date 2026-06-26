@@ -89,6 +89,54 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Mode ENTITIES : découvre ce que le Service Layer expose et qui matche
+  // TRCL/SERG (service document + $metadata), puis teste-lit chaque candidat.
+  // Sert à VÉRIFIER que SERG_TRCL a bien été exposée (et sous quel nom).
+  if (sp.get("entities") !== null) {
+    const terms = (sp.get("entities") || "TRCL,SERG").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+    const hit = (name: string) => terms.some((t) => name.toUpperCase().includes(t));
+    const found = new Set<string>(["U_SERG_TRCL", "SERG_TRCL"]);
+    const discovery: Record<string, unknown> = {};
+
+    // a) Service document (liste des entity sets, en JSON)
+    try {
+      const root = await sap.get<{ value?: { name?: string; url?: string }[] }>("", { env: "prod" });
+      const names = (root.value ?? []).map((e) => e.name || e.url || "").filter(Boolean);
+      discovery.serviceDocMatches = names.filter(hit);
+      names.filter(hit).forEach((n) => found.add(n));
+    } catch (e) { discovery.serviceDocError = e instanceof Error ? e.message : String(e); }
+
+    // b) $metadata (XML brut) — repère EntityType/EntitySet Name="…"
+    try {
+      const meta = await sap.get<string>("$metadata", { env: "prod" });
+      const xml = typeof meta === "string" ? meta : JSON.stringify(meta);
+      const names = [...xml.matchAll(/Name="([^"]+)"/g)].map((m) => m[1]);
+      const matches = [...new Set(names.filter(hit))];
+      discovery.metadataMatches = matches;
+      matches.forEach((n) => found.add(n));
+    } catch (e) { discovery.metadataError = e instanceof Error ? e.message : String(e); }
+
+    // c) test-lecture de chaque candidat
+    const probes = await Promise.all([...found].map(async (name) => {
+      try {
+        const rows = await sap.getAll<Record<string, unknown>>(`${encodeURIComponent(name)}?$top=2`, { env: "prod", maxPages: 1, pageSize: 2 });
+        return { name, ok: true, sample: rows.length, columns: Object.keys(rows[0] ?? {}) };
+      } catch (e) {
+        return { name, ok: false, error: (e instanceof Error ? e.message : String(e)).slice(0, 160) };
+      }
+    }));
+
+    const readable = probes.filter((p) => p.ok);
+    return NextResponse.json({
+      ok: true, mode: "entities",
+      SERG_TRCL_accessible: readable.length > 0,
+      verdict: readable.length
+        ? `✅ Exposée et lisible via : ${readable.map((p) => p.name).join(", ")}`
+        : "❌ Toujours pas lisible (aucun candidat ne répond) — l'intégrateur n'a pas (encore) exposé SERG_TRCL au Service Layer, ou pas pour cet utilisateur.",
+      discovery, probes,
+    });
+  }
+
   try {
     // 1. BL cibles (par DocNum, sinon 6 récents, éventuellement filtrés client)
     type Ord = Record<string, unknown> & { DocNum: number; DocEntry: number; CardCode: string; CardName?: string; U_TrspCode?: string };
