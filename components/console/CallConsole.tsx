@@ -20,6 +20,7 @@ import {
 } from "@/lib/useConsoleShortcuts";
 import { HabitudesBanner } from "@/components/console/HabitudesBanner";
 import { broadcastActiveClient } from "@/lib/consoleSync";
+import { fullNameFromSlp } from "@/lib/salespeople";
 import { loadCallNote, saveCallNote, clearCallNote } from "@/lib/callNoteStorage";
 import { MonitorSmartphone } from "lucide-react";
 import { BLDialog } from "@/components/console/BLDialog";
@@ -1122,7 +1123,7 @@ function ActiveClient({
           {client.commercial && (
             <span className="inline-flex items-center gap-1">
               <User className="h-3 w-3" />
-              {client.commercial}
+              {fullNameFromSlp(client.commercial)}
             </span>
           )}
         </div>

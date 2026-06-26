@@ -54,7 +54,7 @@ import { ImportModal } from "@/components/ImportModal";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelative } from "@/lib/utils";
-import { SALESPEOPLE } from "@/lib/salespeople";
+import { SALESPEOPLE, fullNameFromSlp } from "@/lib/salespeople";
 import { standardizePhone, formatPhoneDisplay } from "@/lib/phone";
 
 interface Client {
@@ -462,7 +462,7 @@ export function ClientTable() {
                       )}
                     </div>
                     <div className="text-[12px] font-mono text-muted-foreground mt-1">
-                      {client.code}{client.commercial ? ` · ${client.commercial}` : ""}
+                      {client.code}{client.commercial ? ` · ${fullNameFromSlp(client.commercial)}` : ""}
                     </div>
                   </Link>
                   <ClientRowMenu client={client} onReminderCreated={fetchClients} />
@@ -582,9 +582,9 @@ export function ClientTable() {
                     )}
                   </TableCell>
                   <TableCell className="px-4 py-3 text-[12.5px] text-slate-600 dark:text-slate-300">
-                    <div>{client.commercial || <span className="text-slate-300 dark:text-slate-600">—</span>}</div>
+                    <div>{fullNameFromSlp(client.commercial) || <span className="text-slate-300 dark:text-slate-600">—</span>}</div>
                     {client.vendeur && client.vendeur !== client.commercial && (
-                      <div className="text-[10.5px] text-muted-foreground">vend. {client.vendeur}</div>
+                      <div className="text-[10.5px] text-muted-foreground">vend. {fullNameFromSlp(client.vendeur)}</div>
                     )}
                   </TableCell>
                   <TableCell className="px-4 py-3 font-mono text-[12px] text-slate-500 dark:text-slate-400 whitespace-nowrap">

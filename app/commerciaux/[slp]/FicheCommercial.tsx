@@ -9,6 +9,7 @@ import { SurfaceCard } from "@/components/ui/surface-card";
 import { Delta } from "@/components/ui/delta";
 import { TrendArea } from "@/components/charts/TrendArea";
 import { ClientLink } from "@/components/ClientLink";
+import { fullNameFromSlp } from "@/lib/salespeople";
 
 /**
  * Fiche commercial SAP — deux états, deux sources :
@@ -113,7 +114,7 @@ export function FicheCommercial({ slp }: { slp: string }) {
             </span>
             <div>
               <p className="kicker mb-0.5">Fiche commercial SAP</p>
-              <h1 className="font-display text-[30px] font-semibold text-foreground tracking-tight leading-none">{slp}</h1>
+              <h1 className="font-display text-[30px] font-semibold text-foreground tracking-tight leading-none">{fullNameFromSlp(slp) ?? slp}</h1>
             </div>
           </div>
         </div>
