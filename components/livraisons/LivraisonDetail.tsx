@@ -709,26 +709,6 @@ function OrderRow({
     finally { setSavingPrep(false); }
   }
 
-  // Statut « avoir / exclu » — BL facturé puis avoir total (ou doublon) déduit à
-  // 100% des totaux. Manuel, optimiste, persisté par DocEntry.
-  const [excluded, setExcluded] = useState(doc.excluded);
-  const [savingExcl, setSavingExcl] = useState(false);
-  async function toggleExcluded() {
-    const next = !excluded;
-    setExcluded(next);
-    setSavingExcl(true);
-    try {
-      const res = await fetch("/api/livraisons/excluded", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docEntry: doc.docEntry, excluded: next }),
-      });
-      const j = await res.json().catch(() => null);
-      if (!res.ok || j?.ok === false) { setExcluded(!next); toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement"); return; }
-      toast.success(next ? `BL #${doc.docNum} marqué « avoir » (déduit)` : `BL #${doc.docNum} réintégré`);
-    } catch { setExcluded(!next); toast.error("Échec de l'enregistrement"); }
-    finally { setSavingExcl(false); }
-  }
-
   // Le transporteur courant doit rester sélectionnable même s'il n'est pas dans
   // la table Carrier (code SAP brut) → on l'injecte en tête si besoin.
   const options: CarrierOption[] = useMemo(() => {
@@ -779,7 +759,7 @@ function OrderRow({
 
   return (
     <li>
-      <div className={`flex items-center gap-3 px-4 sm:px-5 py-3 hover:bg-secondary/25 transition-colors ${excluded ? "opacity-50" : ""}`}>
+      <div className={`flex items-center gap-3 px-4 sm:px-5 py-3 hover:bg-secondary/25 transition-colors ${doc.excluded ? "opacity-50" : ""}`}>
         {/* Identité client */}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
@@ -812,20 +792,12 @@ function OrderRow({
                 <CheckCircle2 className="h-2.5 w-2.5" /> Livrée
               </span>
             )}
-            <button
-              type="button"
-              onClick={toggleExcluded}
-              disabled={savingExcl}
-              title={excluded ? "BL déduit (avoir total / doublon) — cliquer pour réintégrer" : "Marquer ce BL « avoir » (facturé puis avoir total / doublon) → déduit à 100% des totaux"}
-              className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 ${
-                excluded
-                  ? "bg-rose-500 text-white hover:bg-rose-600"
-                  : "border border-border text-muted-foreground hover:border-rose-400/60 hover:text-rose-600 dark:hover:text-rose-400"
-              }`}
-            >
-              {savingExcl ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <RotateCcw className="h-2.5 w-2.5" />}
-              {excluded ? "Avoir — déduit" : "Avoir ?"}
-            </button>
+            {doc.excluded && (
+              <span title="BL totalement avoiré (facturé puis avoir total / doublon) — déduit des totaux"
+                className="inline-flex items-center gap-1 rounded-full bg-rose-500 text-white px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide">
+                <RotateCcw className="h-2.5 w-2.5" /> Avoir — déduit
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground flex-wrap">
             <span className="font-mono text-foreground/60">{doc.cardCode}</span>
