@@ -30,9 +30,36 @@ type Receipt = {
   docEntry: number; docNum: number; lot: string; docDate: string;
   cardCode: string; cardName?: string; numAtCard: string;
   editable?: boolean;
+  // Annulations (SAP) : ce doc EST une annulation, ou la réception A ÉTÉ annulée.
+  isCancellation?: boolean; cancelsDocNum?: number | null;
+  cancelled?: boolean; cancelledByDocNum?: number | null;
   total: number; totalTTC: number; totalHT: number; totalTVA: number;
   comments: string; lineCount: number; lines: ReceiptLine[];
 };
+
+/** Vrai si la ligne n'est pas une vraie réception « vivante » (annulée ou doc d'annulation). */
+const isVoided = (d: Receipt): boolean => !!d.cancelled || !!d.isCancellation;
+
+/** Pastille de statut d'annulation (sinon rien). */
+function CancelBadge({ d, className = "" }: { d: Receipt; className?: string }) {
+  if (d.isCancellation) {
+    return (
+      <span className={`inline-flex items-center gap-1 rounded-full bg-slate-500/15 px-2 py-0.5 text-[10.5px] font-semibold text-slate-600 dark:text-slate-300 ${className}`}>
+        <Ban className="h-3 w-3" />
+        Annulation{d.cancelsDocNum ? ` · #${d.cancelsDocNum}` : ""}
+      </span>
+    );
+  }
+  if (d.cancelled) {
+    return (
+      <span className={`inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10.5px] font-semibold text-rose-600 dark:text-rose-300 ${className}`}>
+        <Ban className="h-3 w-3" />
+        Annulée{d.cancelledByDocNum ? ` · #${d.cancelledByDocNum}` : ""}
+      </span>
+    );
+  }
+  return null;
+}
 
 /** Édition du prix d'une ligne d'EM (prix unitaire OU total HT forcé). */
 type PriceEdit = { lineNum: number; pieceQuantity: number; price: string; lineTotal: string; forceTotal: boolean };
@@ -169,22 +196,29 @@ export function GoodsReceiptHistory() {
           <p className="text-[12px] italic text-muted-foreground py-2">Aucune entrée ne correspond à la recherche.</p>
         )}
 
-        {filtered.length > 0 && (
-          <div className="flex flex-wrap gap-6 pb-1">
-            <Stat label="Entrées" value={<AnimatedNumber value={filtered.length} />} />
-            <Stat
-              label="Valeur cumulée (HT)"
-              tone="emerald"
-              value={
-                <AnimatedNumber
-                  value={filtered.reduce((s, d) => s + (d.totalHT ?? 0), 0)}
-                  format={(n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n)}
-                />
-              }
-            />
-            <Stat label="Lignes" value={<AnimatedNumber value={filtered.reduce((s, d) => s + (d.lineCount ?? 0), 0)} />} />
-          </div>
-        )}
+        {filtered.length > 0 && (() => {
+          // Les annulations (doc d'annulation + réception annulée) ne représentent
+          // aucun stock entré net → exclues des cumuls (mais visibles, marquées).
+          const live = filtered.filter((d) => !isVoided(d));
+          const voided = filtered.length - live.length;
+          return (
+            <div className="flex flex-wrap gap-6 pb-1">
+              <Stat label="Entrées" value={<AnimatedNumber value={live.length} />} />
+              <Stat
+                label="Valeur cumulée (HT)"
+                tone="emerald"
+                value={
+                  <AnimatedNumber
+                    value={live.reduce((s, d) => s + (d.totalHT ?? 0), 0)}
+                    format={(n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n)}
+                  />
+                }
+              />
+              <Stat label="Lignes" value={<AnimatedNumber value={live.reduce((s, d) => s + (d.lineCount ?? 0), 0)} />} />
+              {voided > 0 && <Stat label="Annulées" value={<AnimatedNumber value={voided} />} />}
+            </div>
+          );
+        })()}
 
         {/* Mobile : liste de cartes — le tap OUVRE le détail en plein écran
             (pas d'accordéon : le détail ne tient pas en ligne sur téléphone). */}
@@ -197,10 +231,13 @@ export function GoodsReceiptHistory() {
                   key={d.docEntry}
                   type="button"
                   onClick={() => setLargeEntry(d.docEntry)}
-                  className="w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40"
+                  className={`w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40 ${isVoided(d) ? "opacity-60" : ""}`}
                 >
                   <div className="min-w-0 flex-1">
-                    <span className="font-mono font-semibold text-[16px] text-foreground">#{d.docNum}</span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className={`font-mono font-semibold text-[16px] ${isVoided(d) ? "line-through text-muted-foreground" : "text-foreground"}`}>#{d.docNum}</span>
+                      <CancelBadge d={d} />
+                    </span>
                     <div className="text-[14px] text-foreground/90 mt-0.5 truncate" title={d.cardName}>
                       {d.cardName || d.cardCode}
                     </div>
@@ -248,13 +285,16 @@ export function GoodsReceiptHistory() {
                   const rows = [
                     <tr
                       key={d.docEntry}
-                      className={`border-t border-border cursor-pointer transition-colors ${isOpen ? "bg-secondary/40" : "hover:bg-secondary/30"}`}
+                      className={`border-t border-border cursor-pointer transition-colors ${isOpen ? "bg-secondary/40" : "hover:bg-secondary/30"} ${isVoided(d) ? "opacity-60" : ""}`}
                       onClick={() => toggle(d.docEntry)}
                     >
                       <td className="px-2 py-2 text-center text-muted-foreground">
                         {isOpen ? <ChevronDown className="h-3.5 w-3.5 inline" /> : <ChevronRight className="h-3.5 w-3.5 inline" />}
                       </td>
-                      <td className="px-3 py-2 font-mono font-semibold">#{d.docNum}</td>
+                      <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">
+                        <span className={isVoided(d) ? "line-through text-muted-foreground" : ""}>#{d.docNum}</span>
+                        <CancelBadge d={d} className="ml-1.5 align-middle" />
+                      </td>
                       <td className="px-3 py-2 font-mono text-muted-foreground">{d.lot}</td>
                       <td className="px-3 py-2">
                         <div className="font-mono font-medium truncate" title={d.cardName}>{d.cardCode}</div>
@@ -535,6 +575,28 @@ function ReceiptDetail({
       </div>
       {receipt.comments && <p className={`italic text-muted-foreground ${big ? "text-[13px]" : "text-[11.5px]"}`}>« {receipt.comments} »</p>}
 
+      {/* Bandeau d'annulation — l'EM n'est plus un stock entré « vivant » */}
+      {receipt.isCancellation && (
+        <div className="flex items-start gap-2 rounded-lg border border-slate-400/40 bg-slate-500/10 px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200">
+          <Ban className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            <b>Document d&apos;annulation</b>
+            {receipt.cancelsDocNum ? <> de la réception <span className="font-mono">#{receipt.cancelsDocNum}</span></> : null} —
+            il inverse le stock entré. Ce n&apos;est pas une nouvelle entrée.
+          </span>
+        </div>
+      )}
+      {receipt.cancelled && (
+        <div className="flex items-start gap-2 rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-[12.5px] text-rose-700 dark:text-rose-200">
+          <Ban className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            <b>Réception annulée</b>
+            {receipt.cancelledByDocNum ? <> par l&apos;annulation <span className="font-mono">#{receipt.cancelledByDocNum}</span></> : null} —
+            le stock entré a été ressorti.
+          </span>
+        </div>
+      )}
+
 
       {/* Mobile : lignes empilées (le tableau large déborde) + totaux */}
       <div className="md:hidden space-y-2">
@@ -677,10 +739,12 @@ function ReceiptDetail({
             <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
             Déclarer un incident
           </Button>
-          {/* Retour fournisseur (partiel/total) */}
-          <Button variant="outline" size="sm" onClick={openReturn} className="gap-1.5">
-            <Undo2 className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" /> Retour fournisseur
-          </Button>
+          {/* Retour fournisseur (partiel/total) — pas sur une EM annulée. */}
+          {!isVoided(receipt) && (
+            <Button variant="outline" size="sm" onClick={openReturn} className="gap-1.5">
+              <Undo2 className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" /> Retour fournisseur
+            </Button>
+          )}
           {/* Annuler la réception (sort le stock entré) — masqué si EM clôturée (facturée). */}
           {canEditPrices && (
             !cancelConfirm ? (
