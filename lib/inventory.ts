@@ -251,6 +251,71 @@ export async function setDeliveryPrepared(docEntry: number, prepared: boolean, b
   await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
 }
 
+/* ──────────────────── BL « préparateur affecté » ────────────────────
+ * Le préparateur qui ouvre une commande en grand se l'affecte. Persisté par
+ * DocEntry (clé `livprep:<docEntry>`, valeur = { by, at }).
+ */
+const LIV_PREP_PREFIX = "livprep:";
+
+/** Map DocEntry → nom/email du préparateur affecté. */
+export async function getDeliveryPreparer(): Promise<Map<number, string>> {
+  const m = new Map<number, string>();
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_PREP_PREFIX } } });
+    for (const r of rows) {
+      const docEntry = Number(r.key.slice(LIV_PREP_PREFIX.length));
+      if (!Number.isFinite(docEntry)) continue;
+      try {
+        const by = (JSON.parse(r.value) as { by?: string }).by?.trim();
+        if (by) m.set(docEntry, by);
+      } catch { /* ignore */ }
+    }
+  } catch { /* table absente */ }
+  return m;
+}
+
+/** Affecte (by non vide) ou retire (by vide/null) le préparateur d'un BL. */
+export async function setDeliveryPreparer(docEntry: number, by: string | null): Promise<void> {
+  const key = LIV_PREP_PREFIX + docEntry;
+  if (!by || !by.trim()) {
+    try { await prisma.appSetting.delete({ where: { key } }); } catch { /* déjà absent */ }
+    return;
+  }
+  const value = JSON.stringify({ by: by.trim(), at: new Date().toISOString() });
+  await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+}
+
+/* ──────────────────── BL « incomplète — à reprendre » ────────────────────
+ * Une commande renvoyée sur la file car PAS entièrement préparée est signalée
+ * (clé `livincomplete:<docEntry>`). Sert de notification dans le Détail livraison.
+ */
+const LIV_INCOMPLETE_PREFIX = "livincomplete:";
+
+/** Map DocEntry → incomplète (à reprendre) des BL signalés. */
+export async function getDeliveryIncomplete(): Promise<Map<number, boolean>> {
+  const m = new Map<number, boolean>();
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_INCOMPLETE_PREFIX } } });
+    for (const r of rows) {
+      const docEntry = Number(r.key.slice(LIV_INCOMPLETE_PREFIX.length));
+      if (!Number.isFinite(docEntry)) continue;
+      try { if ((JSON.parse(r.value) as { incomplete?: boolean }).incomplete) m.set(docEntry, true); } catch { /* ignore */ }
+    }
+  } catch { /* table absente */ }
+  return m;
+}
+
+/** Signale (true) ou lève (false) le statut « incomplète — à reprendre » d'un BL. */
+export async function setDeliveryIncomplete(docEntry: number, incomplete: boolean, by?: string): Promise<void> {
+  const key = LIV_INCOMPLETE_PREFIX + docEntry;
+  if (!incomplete) {
+    try { await prisma.appSetting.delete({ where: { key } }); } catch { /* déjà absent */ }
+    return;
+  }
+  const value = JSON.stringify({ incomplete: true, at: new Date().toISOString(), by: by ?? null });
+  await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+}
+
 /* ──────────────────── BL « avoir / exclu » (déduction 100%) ────────────────────
  * Un BL totalement avoiré (facturé puis avoir total) ou en doublon est marqué
  * MANUELLEMENT « avoir » : il est alors DÉDUIT à 100% des totaux du Détail
