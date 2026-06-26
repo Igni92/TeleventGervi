@@ -200,17 +200,23 @@ export async function saveSession(s: InventorySession): Promise<void> {
   });
 }
 
-/** Ensemble des DocEntry actés « préparés » (= faits) sur les 21 derniers jours
- *  — union des pré-étapes d'inventaire. Sert à afficher la coche « faite » dans
- *  « Détail livraison » (même fenêtre que prep-orders, qui ne les repropose plus). */
-export async function getPreparedDocEntries(): Promise<Set<number>> {
-  const cutoff = Date.now() - 21 * 24 * 60 * 60 * 1000;
-  const set = new Set<number>();
+/**
+ * Statut de préparation issu de la DERNIÈRE pré-étape d'inventaire récente (≤ 2 j).
+ * ⚠️ Dans la pré-étape, le préparateur coche les commandes **PAS encore préparées**
+ * (« encore en rayon ») — stockées, malgré leur nom, dans `prep.preparedDocEntries`.
+ * Donc, pour « Détail livraison » :
+ *   • hasPrep=false → pas d'inventaire récent → aucune coche.
+ *   • sinon : une commande est « FAITE » si elle n'est PAS dans `notPrepared`.
+ * (Transitoire : recompté à chaque inventaire → on ne prend que la plus récente.)
+ */
+export async function getPrepStatus(): Promise<{ notPrepared: Set<number>; hasPrep: boolean }> {
   try {
-    for (const s of await listSessions()) {
-      if (new Date(s.createdAt).getTime() < cutoff) continue;
-      for (const d of s.prep?.preparedDocEntries ?? []) set.add(d);
+    for (const s of await listSessions()) {       // tri décroissant par createdAt
+      if (!s.prep) continue;
+      const at = s.prep.at ?? s.createdAt;
+      if (Date.now() - new Date(at).getTime() > 2 * 24 * 60 * 60 * 1000) break; // trop ancien
+      return { notPrepared: new Set(s.prep.preparedDocEntries ?? []), hasPrep: true };
     }
-  } catch { /* pas de trace → aucune préparée */ }
-  return set;
+  } catch { /* pas de trace */ }
+  return { notPrepared: new Set(), hasPrep: false };
 }
