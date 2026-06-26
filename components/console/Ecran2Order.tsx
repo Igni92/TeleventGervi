@@ -1159,10 +1159,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
               : Math.round(l.freeUnits * l.packDivisor * 100) / 100;
             return (
               <div key={i} className={`rounded-lg border p-2 ${sellShort ? "border-rose-400/60 bg-rose-50/40 dark:bg-rose-950/15" : "border-border"}`}>
-                <div className="flex items-start justify-between gap-1">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <p className="text-[14px] font-medium text-foreground truncate">{l.itemName}</p>
+                <div className="flex items-start justify-between gap-1.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-x-1.5 gap-y-1 flex-wrap">
+                      <p className="text-[14px] font-medium text-foreground shrink-0">{l.itemName}</p>
                       {sellShort && (
                         <span className="inline-flex h-5 items-center px-1.5 rounded text-[11px] font-bold bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300">
                           À DÉCOUVERT
@@ -1189,27 +1189,21 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                           <Lock className="h-3 w-3" /> livré
                         </span>
                       )}
+                      {/* Tags désignation — inline à droite du libellé (lignes compactes, code masqué) */}
+                      {(() => {
+                        const calibre = hints[l.itemCode]?.calibre ? `cal. ${hints[l.itemCode]!.calibre}` : null;
+                        const chips = [
+                          l.marque && ["bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100", l.marque],
+                          l.condi && ["bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100", l.condi],
+                          calibre && ["bg-teal-100 text-teal-800 dark:bg-teal-500/30 dark:text-teal-100", calibre],
+                          l.variete && ["bg-rose-100 text-rose-800 dark:bg-rose-500/30 dark:text-rose-100", l.variete],
+                          l.pays && ["bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100", l.pays],
+                        ].filter(Boolean) as [string, string][];
+                        return chips.map(([cls, txt], ci) => (
+                          <span key={ci} className={`inline-flex items-center px-1.5 py-px rounded-[5px] text-[10.5px] font-semibold ${cls}`}>{txt}</span>
+                        ));
+                      })()}
                     </div>
-                    <p className="text-[11px] font-mono text-muted-foreground/70">{l.itemCode}</p>
-                    {/* Tags produit (mêmes couleurs que la liste stock) */}
-                    {(() => {
-                      const calibre = hints[l.itemCode]?.calibre ? `cal. ${hints[l.itemCode]!.calibre}` : null;
-                      const chips = [
-                        l.marque && ["bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100", l.marque],
-                        l.condi && ["bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100", l.condi],
-                        calibre && ["bg-teal-100 text-teal-800 dark:bg-teal-500/30 dark:text-teal-100", calibre],
-                        l.variete && ["bg-rose-100 text-rose-800 dark:bg-rose-500/30 dark:text-rose-100", l.variete],
-                        l.pays && ["bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100", l.pays],
-                      ].filter(Boolean) as [string, string][];
-                      if (chips.length === 0) return null;
-                      return (
-                        <span className="mt-1 flex items-center gap-1 flex-wrap">
-                          {chips.map(([cls, txt], ci) => (
-                            <span key={ci} className={`inline-flex items-center px-1.5 py-px rounded-[5px] text-[10.5px] font-semibold ${cls}`}>{txt}</span>
-                          ))}
-                        </span>
-                      );
-                    })()}
                   </div>
                   {/* Actions de ligne : réordonner (modif) + supprimer (sauf ligne livrée).
                       En remplacement complet, retirer une ligne du panier la supprime du BL ;
@@ -1236,7 +1230,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                     )}
                   </div>
                 </div>
-                <div className={`flex items-center gap-1.5 mt-2 ${locked ? "opacity-60" : ""}`}>
+                <div className={`flex items-center gap-1.5 mt-1.5 ${locked ? "opacity-60" : ""}`}>
                   {/* On SAISIT au colis (−/+ avancent d'un colis) et on AFFICHE la
                       conversion en unité de base : « 9 colis (36 kg) × 7.20 ».
                       Article sans colis réel → saisie directe en unité de base. */}
@@ -1261,7 +1255,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                   </div>
                   {hasColis ? (
                     <span className="text-[12px] text-muted-foreground whitespace-nowrap">
-                      colis <span className="text-foreground/70 tnum">({baseQty} {l.priceUnit})</span>
+                      colis <span className="text-[13.5px] font-semibold text-foreground tnum">({baseQty}&nbsp;{l.priceUnit})</span>
                     </span>
                   ) : (
                     <span className="text-[12px] text-muted-foreground w-9">{l.priceUnit}</span>
