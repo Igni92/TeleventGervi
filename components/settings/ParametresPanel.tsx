@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useReducedMotion } from "framer-motion";
+import Link from "next/link";
 import {
-  Moon, Sun, Palette, LayoutList, Sparkles, BadgePercent, Check, Wand2, Database, Contrast,
+  Moon, Sun, Palette, LayoutList, Sparkles, BadgePercent, Check, Wand2, Database, Contrast, Tags, ChevronRight,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { ClientImportButton } from "@/components/clients/ClientImportButton";
@@ -319,6 +320,25 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
             </button>
           )}
         </div>
+      </SurfaceCard>
+
+      {/* 3 ter ── Marques & logos (page dédiée) ───────────────────── */}
+      <SurfaceCard accent="violet" title="Marques & logos" icon={<Tags className="h-3.5 w-3.5" />}>
+        <Link
+          href="/parametres/marques"
+          className="flex items-center justify-between gap-4 -m-1 p-1 rounded-lg hover:bg-secondary/40 transition-colors group"
+        >
+          <div className="min-w-0">
+            <p className="text-[13.5px] font-semibold text-foreground">Logos des marques</p>
+            <p className="text-[12px] text-muted-foreground mt-0.5 max-w-md">
+              Associe un logo à chaque marque du catalogue. Ils s&apos;affichent dans la console,
+              entre le stock et la désignation du produit.
+            </p>
+          </div>
+          <span className="shrink-0 inline-flex items-center gap-1 text-[12.5px] font-semibold text-brand-600 dark:text-brand-400">
+            Gérer <ChevronRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
+          </span>
+        </Link>
       </SurfaceCard>
 
       {/* 4 ── Animations ───────────────────────────────────────────── */}

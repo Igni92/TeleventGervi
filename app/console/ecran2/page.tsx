@@ -489,27 +489,27 @@ function WeekStripMini({ docs }: { docs: DeliveryDoc[] }) {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayKey = dayKey(today);
   return (
-    <div className="shrink-0 flex items-end gap-[2px]" title="Livraisons de la semaine — poids livré par jour">
-      <Truck className="h-3 w-3 text-muted-foreground/60 mb-[5px] mr-0.5 shrink-0" />
+    <div className="shrink-0 flex items-end gap-[3px]" title="Livraisons de la semaine — poids livré par jour">
+      <Truck className="h-4 w-4 text-muted-foreground/60 mb-[7px] mr-1 shrink-0" />
       {days.map((day) => {
         const weekend = day.dow >= 5;
         const isToday = day.key === todayKey;
         return (
-          <div key={day.key} className="flex flex-col items-center gap-0.5">
-            <span className={`text-[7px] font-bold leading-none ${
+          <div key={day.key} className="flex flex-col items-center gap-1">
+            <span className={`text-[9px] font-bold leading-none ${
               isToday ? "text-brand-600 dark:text-brand-400"
               : weekend ? "text-muted-foreground/40" : "text-muted-foreground/70"
             }`}>{JOURS_INI[day.dow]}</span>
             {day.del ? (
               <div
                 title={`${day.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "2-digit", month: "2-digit" })} — ${Math.round(day.del.weightKg)} kg · ${day.del.colis} colis (${day.del.count} cde${day.del.count > 1 ? "s" : ""})`}
-                className={`h-[18px] w-[18px] rounded-[4px] flex items-center justify-center text-white shadow-sm bg-gradient-to-br from-brand-400 to-brand-600 ${day.future ? "ring-1 ring-brand-300/70" : ""}`}
+                className={`h-[28px] w-[28px] rounded-md flex items-center justify-center text-white shadow-sm bg-gradient-to-br from-brand-400 to-brand-600 ${day.future ? "ring-1 ring-brand-300/70" : ""}`}
               >
-                <span className="text-[7px] font-bold leading-none tnum">{kgChip(day.del.weightKg)}</span>
+                <span className="text-[9.5px] font-bold leading-none tnum">{kgChip(day.del.weightKg)}</span>
               </div>
             ) : (
-              <div className="h-[18px] w-[18px] flex items-center justify-center">
-                <span className={`h-[3px] w-[3px] rounded-full ${weekend ? "bg-muted-foreground/15" : "bg-muted-foreground/30"}`} />
+              <div className="h-[28px] w-[28px] flex items-center justify-center">
+                <span className={`h-1 w-1 rounded-full ${weekend ? "bg-muted-foreground/15" : "bg-muted-foreground/30"}`} />
               </div>
             )}
           </div>

@@ -254,6 +254,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   const [favGroups, setFavGroups] = useState<Set<string>>(new Set());
   // C2 — promos actives, indexées par itemCode (1 promo max appliquée par article)
   const [promos, setPromos] = useState<Record<string, Promo>>({});
+  // Logos de marques (réglés sur /parametres/marques) → affichés dans la liste
+  // stock, entre le stock et la désignation. Clé normalisée (minuscule/trim).
+  const [brandLogos, setBrandLogos] = useState<Map<string, string>>(new Map());
   // C4 — densité d'affichage de la liste stock (réglée sur /parametres, lue ici)
   const [density, setDensity] = useState<Density>("normal");
   // Panier
@@ -456,6 +459,21 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  // ── Logos de marques (réglés sur /parametres/marques) — chargés une fois ──
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/marques/logos", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j: { logos?: { marque: string; logoUrl: string }[] }) => {
+        if (cancelled) return;
+        const m = new Map<string, string>();
+        for (const l of j.logos ?? []) m.set(l.marque.trim().toLowerCase(), l.logoUrl);
+        setBrandLogos(m);
+      })
+      .catch(() => { /* pas de logos → liste inchangée */ });
+    return () => { cancelled = true; };
   }, []);
 
   // ── Charge le stock ──
@@ -1008,6 +1026,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                       // Méta-chips visibles : marque · conditionnement · calibre · origine.
                       // Calibre = U_GER_CALIBRE (via Hint, chargé après) — distinct du condi.
                       const marque  = cleanTag(p.uMarque ?? h?.marque);
+                      const brandLogo = marque ? brandLogos.get(marque.toLowerCase()) : undefined;
                       const condi   = cleanTag(p.uCondi ?? p.uUvc);          // ex. 8×500g
                       const calibreRaw = cleanTag(h?.calibre);
                       const calibre = calibreRaw ? `cal. ${calibreRaw}` : null;
@@ -1068,8 +1087,19 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                                 </>
                               )}
                             </span>
-                            {/* Col 3 — Produit : nom + chips (promo · marque · condi · calibre · origine) + code + colis/kg */}
-                            <span className="min-w-0">
+                            {/* Col 3 — Produit : (logo marque) + nom + chips + code + colis/kg.
+                                Le logo se place entre le stock (col 2) et la désignation. */}
+                            <span className="min-w-0 flex items-center gap-2">
+                              {brandLogo && (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={brandLogo}
+                                  alt={marque ?? ""}
+                                  title={marque ?? undefined}
+                                  className="h-9 w-9 object-contain shrink-0 rounded-sm"
+                                />
+                              )}
+                              <span className="min-w-0 flex-1">
                               <span className={`block ${ui.name} font-semibold text-foreground truncate leading-tight`}>
                                 {p.itemName}
                               </span>
@@ -1090,6 +1120,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                                     colis de {fmtKg(kgC)} kg
                                   </span>
                                 )}
+                              </span>
                               </span>
                             </span>
                             {/* Col 4 — Prix conseillé (aligné à droite) */}
