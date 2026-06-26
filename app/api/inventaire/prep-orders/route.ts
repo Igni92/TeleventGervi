@@ -4,23 +4,23 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { segmentOfGroup } from "@/lib/segments";
-import { listSessions } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/inventaire/prep-orders
  *
- * Pré-étape de l'inventaire : liste les commandes SAP OUVERTES susceptibles
- * d'être DÉJÀ PRÉPARÉES, c.-à-d. dont la marchandise s'apprête à quitter le stock.
- * Périmètre métier (validé) :
+ * Pré-étape de l'inventaire : liste les commandes SAP OUVERTES en cours.
+ * Périmètre métier :
  *   • clients GMS / EXPORT / CHR (segment déduit du groupe SAP, cf. lib/segments) ;
  *   • livraison prévue à J+1 … J+4 (fenêtre de préparation).
  *
- * Le préparateur COCHE les commandes effectivement préparées : leur quantité (en
- * colis) est RETIRÉE du stock théorique côté écran :
- *   stock théorique = stock physique (inStock) − commandes préparées (cochées).
- * Les commandes non cochées restent comptées (marchandise encore en rayon).
+ * Le stock théorique du comptage part de `available` (= inStock − committed) :
+ * SAP réserve déjà la marchandise de TOUTES les commandes ouvertes → un manque ne
+ * reflète jamais une commande qui part. Le préparateur COCHE ici les commandes
+ * encore NON préparées (marchandise toujours en rayon) : `committed` les avait
+ * retirées à tort, on RÉINTÈGRE donc leurs colis côté écran pour éviter un faux
+ * excédent. Les commandes déjà préparées (parties) ne sont pas cochées.
  */
 
 const KEEP_SEGMENTS = new Set(["GMS", "EXPORT", "CHR"]);
@@ -71,21 +71,8 @@ export async function GET() {
     );
   }
 
-  // On ne garde d'emblée que les commandes livrées dans la fenêtre J+1…J+4.
+  // On ne garde que les commandes livrées dans la fenêtre J+1…J+4.
   orders = orders.filter((o) => o.DocDueDate && allowedDueDays.has(parisDay(o.DocDueDate)));
-
-  // Commandes DÉJÀ actées « préparées » lors d'un inventaire précédent : c'est
-  // acquis, on ne les repropose pas. (On borne aux 21 derniers jours : au-delà,
-  // une commande encore ouverte est forcément un cas à revoir.)
-  const cutoff = now - 21 * DAY_MS;
-  const alreadyPrepared = new Set<number>();
-  try {
-    for (const s of await listSessions()) {
-      if (new Date(s.createdAt).getTime() < cutoff) continue;
-      for (const d of s.prep?.preparedDocEntries ?? []) alreadyPrepared.add(d);
-    }
-  } catch { /* pas de trace → on propose tout */ }
-  orders = orders.filter((o) => !alreadyPrepared.has(o.DocEntry));
 
   // Segment client (GMS/EXPORT/CHR) déduit du groupe SAP. Colonnes lues en raw SQL
   // (groupe & géo non typés dans le client Prisma, cf. lib/pilotageGeo).

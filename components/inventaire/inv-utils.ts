@@ -38,22 +38,23 @@ export const fmtDate = (s: string) =>
   new Date(s).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 /**
- * Stock SAP « réel » (PHYSIQUE) exprimé EXCLUSIVEMENT en COLIS. On part du
- * `inStock` (marchandise physiquement présente) et NON du disponible : les
- * réservations (committed) ne sortent pas la marchandise tant que le BL n'est pas
- * posté → Hugo les compte. Le stock théorique se déduit ensuite côté écran en
- * RETIRANT les commandes déjà PRÉPARÉES (marchandise sur le quai / partie).
- * Conversion via le diviseur exact `unitsPerColis` (lib/colis, source unique
- * partagée avec la régularisation SAP).
+ * Stock SAP théorique exprimé EXCLUSIVEMENT en COLIS. Base = `available`
+ * (= inStock − committed) : le « committed » de SAP réserve la marchandise de
+ * TOUTES les commandes ouvertes (faites ET non faites) → la base ne compte JAMAIS
+ * la marchandise d'une commande comme un manque. Un écart négatif ne reflète donc
+ * que de la VRAIE démarque, jamais une commande qui part. Les commandes NON
+ * préparées (marchandise encore physiquement en rayon) sont, elles, réintégrées
+ * au cas par cas côté écran (committed les avait retirées à tort).
+ * Conversion via le diviseur exact `unitsPerColis` (lib/colis, source unique).
  */
 export function sapInfo(p: Product): { qty: number; unit: string } {
-  const inStock = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.inStock ?? 0), 0);
+  const avail = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.available ?? 0), 0);
   const { unitsPerColis } = colisInfo({
     salesUnit: p.salesUnit,
     salesQtyPerPackUnit: p.salesQtyPerPackUnit,
     salesUnitWeight: p.salesUnitWeight,
   });
-  return { qty: Math.round((inStock / unitsPerColis) * 10) / 10, unit: "colis" };
+  return { qty: Math.round((avail / unitsPerColis) * 10) / 10, unit: "colis" };
 }
 
 /**
