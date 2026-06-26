@@ -180,6 +180,30 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, mode: "serg", note: "U_Timbre est en en-tête (par client) ; transporteur/tournée/heure/défaut dans une des collections SERG_TRS#.", data });
   }
 
+  // Mode RAWSERG : dump BRUT de SERGTRS (sans filtre) — voir ce que contient
+  // vraiment l'objet : domaine de U_CardCode + structure complète (children
+  // inlinés via GET unitaire). ?rawserg[=N]  (N objets complets, défaut 6)
+  if (sp.get("rawserg") !== null) {
+    try {
+      const n = Math.min(Math.max(parseInt(sp.get("rawserg") || "6", 10) || 6, 1), 25);
+      const heads = await sap.getAll<Record<string, unknown>>(`SERGTRS?$top=60`, { env: "prod", maxPages: 1, pageSize: 60 });
+      const cardCodesSample = [...new Set(heads.map((h) => JSON.stringify(h.U_CardCode ?? null)))].slice(0, 80);
+      const full: unknown[] = [];
+      for (const h of heads.slice(0, n)) {
+        let obj: Record<string, unknown> | null = null;
+        let via: string | null = null;
+        for (const k of [h.DocEntry, typeof h.Code === "string" ? `'${h.Code}'` : h.Code]) {
+          if (k === null || k === undefined) continue;
+          try { obj = await sap.get<Record<string, unknown>>(`SERGTRS(${k})`, { env: "prod" }); via = `SERGTRS(${k})`; break; } catch { /* clé suivante */ }
+        }
+        full.push({ key: via, headerKeys: { Code: h.Code, DocEntry: h.DocEntry, U_CardCode: h.U_CardCode, U_Timbre: h.U_Timbre }, object: obj });
+      }
+      return NextResponse.json({ ok: true, mode: "rawserg", totalHeadsReturned: heads.length, cardCodesSample, full });
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
+  }
+
   try {
     // 1. BL cibles (par DocNum, sinon 6 récents, éventuellement filtrés client)
     type Ord = Record<string, unknown> & { DocNum: number; DocEntry: number; CardCode: string; CardName?: string; U_TrspCode?: string };
