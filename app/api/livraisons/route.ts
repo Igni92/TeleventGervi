@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
-import { getPrepStatus } from "@/lib/inventory";
+import { getDeliveryPrepared } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -107,9 +107,10 @@ export async function GET(req: NextRequest) {
       /* table Carrier absente → on affichera le code brut */
     }
 
-    // Statut « faite » depuis la dernière pré-étape d'inventaire : une commande est
-    // FAITE si un inventaire récent existe ET qu'elle n'est PAS cochée « non préparée ».
-    const { notPrepared, hasPrep } = await getPrepStatus().catch(() => ({ notPrepared: new Set<number>(), hasPrep: false }));
+    // Statut « faite » MANUEL : coché à la main par le préparateur (persisté par
+    // DocEntry). Aucune déduction automatique depuis l'inventaire (qui marquait
+    // tout à tort). Une commande n'est « faite » que si on l'a cochée.
+    const faiteByDoc = await getDeliveryPrepared().catch(() => new Map<number, boolean>());
 
     // Type client (GMS / CHR / EXPORT) par CardCode — pour le filtre par segment.
     // Le CardCode d'un BL peut être le code principal OU un code d'adresse de
@@ -175,7 +176,7 @@ export async function GET(req: NextRequest) {
         trspCode,
         carrierName: trspCode ? carrierByCode.get(trspCode) ?? trspCode : null,
         clientType: typeByCardCode.get(d.CardCode) ?? null,   // GMS | CHR | EXPORT | null
-        prepared: hasPrep && !notPrepared.has(d.DocEntry),    // « faite » = pas cochée « non préparée »
+        prepared: faiteByDoc.get(d.DocEntry) ?? false,        // « faite » = coché manuellement
         lineCount: lines.length,
         lines,
       };

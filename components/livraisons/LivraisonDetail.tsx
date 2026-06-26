@@ -689,6 +689,25 @@ function OrderRow({
     }
   }
 
+  // Statut « faite » (préparée) — MANUEL, basculé directement ici. Optimiste +
+  // persistance par DocEntry (aucune déduction auto depuis l'inventaire).
+  const [prepared, setPrepared] = useState(doc.prepared);
+  const [savingPrep, setSavingPrep] = useState(false);
+  async function togglePrepared() {
+    const next = !prepared;
+    setPrepared(next);
+    setSavingPrep(true);
+    try {
+      const res = await fetch("/api/livraisons/prepared", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: doc.docEntry, prepared: next }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || j?.ok === false) { setPrepared(!next); toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement"); return; }
+    } catch { setPrepared(!next); toast.error("Échec de l'enregistrement"); }
+    finally { setSavingPrep(false); }
+  }
+
   // Le transporteur courant doit rester sélectionnable même s'il n'est pas dans
   // la table Carrier (code SAP brut) → on l'injecte en tête si besoin.
   const options: CarrierOption[] = useMemo(() => {
@@ -753,12 +772,20 @@ function OrderRow({
                 {SEG_UI[doc.clientType as Exclude<Segment, "ALL">].label}
               </span>
             )}
-            {doc.prepared && (
-              <span title="Commande préparée (actée à l'inventaire)"
-                className="inline-flex items-center gap-1 rounded-full bg-emerald-500 text-white px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide">
-                <CheckCircle2 className="h-2.5 w-2.5" /> Faite
-              </span>
-            )}
+            <button
+              type="button"
+              onClick={togglePrepared}
+              disabled={savingPrep}
+              title={prepared ? "Commande préparée (faite) — cliquer pour annuler" : "Marquer la commande comme préparée (faite)"}
+              className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 ${
+                prepared
+                  ? "bg-emerald-500 text-white hover:bg-emerald-600"
+                  : "border border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"
+              }`}
+            >
+              {savingPrep ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <CheckCircle2 className="h-2.5 w-2.5" />}
+              {prepared ? "Faite" : "À préparer"}
+            </button>
             {!doc.open && (
               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide">
                 <CheckCircle2 className="h-2.5 w-2.5" /> Livrée
