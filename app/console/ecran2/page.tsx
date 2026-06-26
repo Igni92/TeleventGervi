@@ -403,10 +403,10 @@ function InterlocuteursStrip({ clientId }: { clientId: string }) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Cadence de livraison — frise « °°°■°°°■ » sur les 21 derniers
-   jours : un point pour un jour sans livraison, un carré plein
-   (poids dans le carré) pour un jour livré. + commentaires des
-   dernières commandes (s'il y en a). Source : /api/sap/orders.
+   Cadence de livraison — frise d'UNE semaine (Lun→Dim) : jour en
+   haut (Lun, Mar…), puis un point pour un jour sans livraison ou un
+   carré plein (poids dans le carré) pour un jour livré. + commentaires
+   des dernières commandes (s'il y en a). Source : /api/sap/orders.
 ───────────────────────────────────────────────────────────── */
 
 interface DeliveryDoc {
@@ -428,7 +428,8 @@ function parseKey(k: string): Date {
   return new Date(y, m - 1, d);
 }
 
-const WINDOW_DAYS = 21;
+/** Libellés courts des jours, semaine commençant le LUNDI. */
+const JOURS_LMD = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"] as const;
 
 function DeliveryHistoryStrip({ clientId }: { clientId: string }) {
   const [docs, setDocs] = useState<DeliveryDoc[]>([]);
@@ -466,26 +467,33 @@ function DeliveryHistoryStrip({ clientId }: { clientId: string }) {
     byDay.set(key, e);
   }
 
-  // Fenêtre de 21 jours, calée sur la livraison la plus récente (qui peut être
-  // à venir : J+1) sinon sur aujourd'hui.
+  // Une seule semaine (Lun→Dim), celle qui contient la livraison la plus
+  // récente (éventuellement à venir : J+1) sinon la semaine en cours.
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const keys = [...byDay.keys()].sort();
-  let end = today;
-  if (keys.length) { const last = parseKey(keys[keys.length - 1]); if (last > end) end = last; }
-  const days: { dt: Date; key: string; del: { weightKg: number; colis: number; count: number } | null; future: boolean }[] = [];
-  for (let i = WINDOW_DAYS - 1; i >= 0; i--) {
-    const dt = new Date(end); dt.setDate(dt.getDate() - i);
+  let anchor = today;
+  if (keys.length) { const last = parseKey(keys[keys.length - 1]); if (last > anchor) anchor = last; }
+  // Lundi de la semaine d'ancrage (getDay : 0=Dim … 6=Sam).
+  const monday = new Date(anchor);
+  monday.setDate(anchor.getDate() + (anchor.getDay() === 0 ? -6 : 1 - anchor.getDay()));
+  const days: { dt: Date; key: string; dow: number; del: { weightKg: number; colis: number; count: number } | null; future: boolean }[] = [];
+  for (let i = 0; i < 7; i++) {
+    const dt = new Date(monday); dt.setDate(monday.getDate() + i);
     const key = dayKey(dt);
-    days.push({ dt, key, del: byDay.get(key) ?? null, future: dt > today });
+    days.push({ dt, key, dow: i, del: byDay.get(key) ?? null, future: dt > today });
   }
   const hasDeliveries = byDay.size > 0;
+  const weekLabel = `${monday.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })} – ${days[6].dt.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}`;
 
   // Commentaires des dernières commandes (docs déjà triés DocEntry desc).
+  // On EXCLUT la signature TeleVent par défaut (« BL - Televent : MM », « EM -
+  // Televent : … ») : c'est le texte auto, pas une vraie note.
+  const isDefaultSignature = (t: string) => /^[A-Za-z0-9]{1,5}\s*-\s*Telev[ei]nt\s*:/i.test(t);
   const comments: { date: string; text: string; docNum: number }[] = [];
   const seenComment = new Set<string>();
   for (const d of docs) {
     const text = (d.comments ?? "").trim();
-    if (!text || seenComment.has(text)) continue;
+    if (!text || seenComment.has(text) || isDefaultSignature(text)) continue;
     seenComment.add(text);
     comments.push({ date: d.dueDate || d.docDate, text, docNum: d.docNum });
     if (comments.length >= 3) break;
@@ -496,21 +504,28 @@ function DeliveryHistoryStrip({ clientId }: { clientId: string }) {
       {/* En-tête + frise cadence */}
       <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] font-semibold text-foreground/80">
         <Truck className="h-3 w-3 text-muted-foreground" />
-        Livraisons récentes
+        Livraisons de la semaine
         {hasDeliveries && (
-          <span className="text-muted-foreground/60 font-normal normal-case tracking-normal">
-            · 3 dernières semaines
+          <span className="text-muted-foreground/60 font-normal normal-case tracking-normal tnum">
+            · {weekLabel}
           </span>
         )}
       </div>
 
       {hasDeliveries ? (
-        <div className="flex items-end gap-[3px] pt-0.5">
+        <div className="flex items-start gap-[3px] pt-0.5">
           {days.map((day) => {
-            const label = day.dt.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
-            const weekend = day.dt.getDay() === 0 || day.dt.getDay() === 6;
+            const weekend = day.dow >= 5; // Sam / Dim
+            const isToday = day.key === dayKey(today);
             return (
               <div key={day.key} className="flex-1 min-w-0 flex flex-col items-center gap-1">
+                {/* Jour en HAUT (Lun, Mar…) */}
+                <span className={`text-[9px] font-semibold leading-none uppercase tracking-tight ${
+                  isToday ? "text-brand-600 dark:text-brand-400"
+                  : weekend ? "text-muted-foreground/40" : "text-muted-foreground/80"
+                }`}>
+                  {JOURS_LMD[day.dow]}
+                </span>
                 {day.del ? (
                   <div
                     title={`${day.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" })} — ${Math.round(day.del.weightKg)} kg · ${day.del.colis} colis (${day.del.count} cde${day.del.count > 1 ? "s" : ""})`}
@@ -525,10 +540,9 @@ function DeliveryHistoryStrip({ clientId }: { clientId: string }) {
                     <span className={`h-1 w-1 rounded-full ${weekend ? "bg-muted-foreground/15" : "bg-muted-foreground/30"}`} />
                   </div>
                 )}
-                <span className={`text-[8px] leading-none tnum tracking-tight ${
-                  day.del ? "text-foreground/70 font-semibold" : "text-transparent"
-                }`}>
-                  {label}
+                {/* Date du jour, sous le carré (gris, discret) */}
+                <span className="text-[8px] leading-none tnum tracking-tight text-muted-foreground/50">
+                  {day.dt.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}
                 </span>
               </div>
             );
