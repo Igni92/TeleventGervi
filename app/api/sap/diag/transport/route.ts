@@ -89,6 +89,145 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Mode ENTITIES : découvre ce que le Service Layer expose et qui matche
+  // TRCL/SERG (service document + $metadata), puis teste-lit chaque candidat.
+  // Sert à VÉRIFIER que SERG_TRCL a bien été exposée (et sous quel nom).
+  if (sp.get("entities") !== null) {
+    const terms = (sp.get("entities") || "TRCL,SERG").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+    const hit = (name: string) => terms.some((t) => name.toUpperCase().includes(t));
+    const found = new Set<string>(["U_SERG_TRCL", "SERG_TRCL"]);
+    const discovery: Record<string, unknown> = {};
+
+    // a) Service document (liste des entity sets, en JSON)
+    try {
+      const root = await sap.get<{ value?: { name?: string; url?: string }[] }>("", { env: "prod" });
+      const names = (root.value ?? []).map((e) => e.name || e.url || "").filter(Boolean);
+      discovery.serviceDocMatches = names.filter(hit);
+      names.filter(hit).forEach((n) => found.add(n));
+    } catch (e) { discovery.serviceDocError = e instanceof Error ? e.message : String(e); }
+
+    // b) $metadata (XML brut) — repère EntityType/EntitySet Name="…"
+    try {
+      const meta = await sap.get<string>("$metadata", { env: "prod" });
+      const xml = typeof meta === "string" ? meta : JSON.stringify(meta);
+      const names = [...xml.matchAll(/Name="([^"]+)"/g)].map((m) => m[1]);
+      const matches = [...new Set(names.filter(hit))];
+      discovery.metadataMatches = matches;
+      matches.forEach((n) => found.add(n));
+    } catch (e) { discovery.metadataError = e instanceof Error ? e.message : String(e); }
+
+    // c) test-lecture de chaque candidat
+    const probes = await Promise.all([...found].map(async (name) => {
+      try {
+        const rows = await sap.getAll<Record<string, unknown>>(`${encodeURIComponent(name)}?$top=2`, { env: "prod", maxPages: 1, pageSize: 2 });
+        return { name, ok: true, sample: rows.length, columns: Object.keys(rows[0] ?? {}) };
+      } catch (e) {
+        return { name, ok: false, error: (e instanceof Error ? e.message : String(e)).slice(0, 160) };
+      }
+    }));
+
+    const readable = probes.filter((p) => p.ok);
+    return NextResponse.json({
+      ok: true, mode: "entities",
+      SERG_TRCL_accessible: readable.length > 0,
+      verdict: readable.length
+        ? `✅ Exposée et lisible via : ${readable.map((p) => p.name).join(", ")}`
+        : "❌ Toujours pas lisible (aucun candidat ne répond) — l'intégrateur n'a pas (encore) exposé SERG_TRCL au Service Layer, ou pas pour cet utilisateur.",
+      discovery, probes,
+    });
+  }
+
+  // Mode SERG : déplie l'UDO SERGTRS (en-tête + collections enfant) pour
+  // un/des client(s) → comprendre la structure réelle (où vivent transporteur,
+  // tournée, heure, défaut, timbre). ?serg=AARR,ABET,APET
+  if (sp.get("serg") !== null) {
+    const cards = (sp.get("serg") || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const data: Record<string, unknown> = {};
+    for (const cc of cards) {
+      const filt = `$filter=${encodeURIComponent(`U_CardCode eq '${cc.replace(/'/g, "''")}'`)}`;
+      let strategy: string | null = null;
+      let rows: Record<string, unknown>[] | null = null;
+      let error: string | null = null;
+      // 1) filtre + $expand des 3 collections
+      try {
+        rows = await sap.getAll<Record<string, unknown>>(
+          `SERGTRS?${filt}&$expand=SERG_TRS1Collection,SERG_TRS2Collection,SERG_TRS3Collection`,
+          { env: "prod", maxPages: 2, pageSize: 50 },
+        );
+        strategy = "filter+expand";
+      } catch {
+        // 2) en-têtes puis GET unitaire par DocEntry / Code (children inlinés)
+        try {
+          const heads = await sap.getAll<{ Code?: unknown; DocEntry?: unknown }>(
+            `SERGTRS?${filt}&$select=Code,DocEntry,U_CardCode,U_Timbre`,
+            { env: "prod", maxPages: 2, pageSize: 50 },
+          );
+          rows = [];
+          for (const h of heads) {
+            let full: Record<string, unknown> | null = null;
+            const keys = [h.DocEntry, typeof h.Code === "string" ? `'${h.Code}'` : h.Code];
+            for (const k of keys) {
+              if (k === null || k === undefined) continue;
+              try { full = await sap.get<Record<string, unknown>>(`SERGTRS(${k})`, { env: "prod" }); break; } catch { /* clé suivante */ }
+            }
+            rows.push(full ?? (h as Record<string, unknown>));
+          }
+          strategy = "headers+single";
+        } catch (e2) { error = e2 instanceof Error ? e2.message : String(e2); }
+      }
+      data[cc] = { strategy, error, count: rows?.length ?? null, rows };
+    }
+    return NextResponse.json({ ok: true, mode: "serg", note: "U_Timbre est en en-tête (par client) ; transporteur/tournée/heure/défaut dans une des collections SERG_TRS#.", data });
+  }
+
+  // Mode RAWSERG : dump BRUT de SERGTRS (sans filtre) — voir ce que contient
+  // vraiment l'objet : domaine de U_CardCode + structure complète (children
+  // inlinés via GET unitaire). ?rawserg[=N]  (N objets complets, défaut 6)
+  if (sp.get("rawserg") !== null) {
+    try {
+      const n = Math.min(Math.max(parseInt(sp.get("rawserg") || "6", 10) || 6, 1), 25);
+      const heads = await sap.getAll<Record<string, unknown>>(`SERGTRS?$top=60`, { env: "prod", maxPages: 1, pageSize: 60 });
+      const cardCodesSample = [...new Set(heads.map((h) => JSON.stringify(h.U_CardCode ?? null)))].slice(0, 80);
+      const full: unknown[] = [];
+      for (const h of heads.slice(0, n)) {
+        let obj: Record<string, unknown> | null = null;
+        let via: string | null = null;
+        for (const k of [h.DocEntry, typeof h.Code === "string" ? `'${h.Code}'` : h.Code]) {
+          if (k === null || k === undefined) continue;
+          try { obj = await sap.get<Record<string, unknown>>(`SERGTRS(${k})`, { env: "prod" }); via = `SERGTRS(${k})`; break; } catch { /* clé suivante */ }
+        }
+        full.push({ key: via, headerKeys: { Code: h.Code, DocEntry: h.DocEntry, U_CardCode: h.U_CardCode, U_Timbre: h.U_Timbre }, object: obj });
+      }
+      return NextResponse.json({ ok: true, mode: "rawserg", totalHeadsReturned: heads.length, cardCodesSample, full });
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
+  }
+
+  // Mode BP : dump des champs U_* + adresse de la FICHE CLIENT (BusinessPartners)
+  // pour voir si le transporteur/tournée par défaut du client y vit (UDF), et
+  // récupérer son département (pour rapprocher de SERG_TRS1.U_Des). ?bp=AARR,ABET
+  if (sp.get("bp") !== null) {
+    const cards = (sp.get("bp") || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const data: Record<string, unknown> = {};
+    for (const cc of cards) {
+      try {
+        const bp = await sap.get<Record<string, unknown>>(`BusinessPartners('${cc.replace(/'/g, "''")}')`, { env: "prod" });
+        const ship = (bp.BPAddresses as Array<Record<string, unknown>> | undefined)?.filter((a) => a.AddressType === "bo_ShipTo")
+          .map((a) => ({ AddressName: a.AddressName, Street: a.Street, ZipCode: a.ZipCode, City: a.City, County: a.County }));
+        data[cc] = {
+          CardCode: bp.CardCode, CardName: bp.CardName,
+          ZipCode: bp.ZipCode, City: bp.City, MailZipCode: bp.MailZipCode, MailCity: bp.MailCity,
+          shipTo: ship,
+          uFields: uFields(bp),
+        };
+      } catch (e) {
+        data[cc] = { error: e instanceof Error ? e.message : String(e) };
+      }
+    }
+    return NextResponse.json({ ok: true, mode: "bp", note: "Cherche U_TrspCode / tournée / heure sur la fiche client + son département (ZipCode/County) pour rapprocher de SERG_TRS1.U_Des.", data });
+  }
+
   try {
     // 1. BL cibles (par DocNum, sinon 6 récents, éventuellement filtrés client)
     type Ord = Record<string, unknown> & { DocNum: number; DocEntry: number; CardCode: string; CardName?: string; U_TrspCode?: string };

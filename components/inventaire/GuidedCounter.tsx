@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { designationProduit } from "@/lib/produit-designation";
-import { fmt, sapInfo, baseInfo, ecartOf, fruitEmoji, type Product } from "./inv-utils";
+import { fmt, sapInfo, ecartOf, productTile, type Product } from "./inv-utils";
 
 export function GuidedCounter({
   products,
@@ -39,14 +39,12 @@ export function GuidedCounter({
 
   if (N === 0) return null;
   const p = products[cursor];
-  const sap = sapInfo(p);
-  // Comptage en colis (interne) ; AFFICHAGE en unité de base (× perColis).
-  const base = baseInfo(p);
-  const toBase = (colis: number) => Math.round(colis * base.perColis * 10) / 10;
+  const sap = sapInfo(p);                       // stock attendu, en COLIS
   const real = counts[p.itemCode] ?? null;
   const ecart = ecartOf(real, sap.qty);
   const isLast = cursor >= N - 1;
   const isFirst = cursor <= 0;
+  const hasModif = real != null;                // une valeur réelle a été notifiée
 
   const move = (d: number) => {
     setDir(d);
@@ -96,8 +94,8 @@ export function GuidedCounter({
             <SurfaceCard accent="sky" animate={false} className="p-5 sm:p-6">
               {/* Identité produit */}
               <div className="flex items-start gap-4">
-                <div className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-muted text-[34px] leading-none">
-                  {fruitEmoji(p)}
+                <div className={`grid h-16 w-16 shrink-0 place-items-center rounded-2xl text-[30px] font-bold leading-none ${productTile(p).color}`}>
+                  {productTile(p).initial}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-[22px] font-bold leading-tight text-foreground">{p.itemName}</div>
@@ -112,34 +110,36 @@ export function GuidedCounter({
                 </div>
               </div>
 
-              {/* Stock attendu SAP */}
+              {/* Stock attendu SAP (en colis) */}
               <div className="mt-5 rounded-2xl bg-muted/60 p-4 text-center">
                 <div className="kicker !block">Stock attendu · SAP</div>
                 <div className="mt-1 text-[34px] font-bold leading-none tnum text-foreground">
-                  {fmt(toBase(sap.qty))} <span className="text-[16px] font-semibold text-muted-foreground">{base.unit}</span>
+                  {fmt(sap.qty)} <span className="text-[16px] font-semibold text-muted-foreground">colis</span>
                 </div>
-                {base.perColis > 1 && (
-                  <div className="mt-1 text-[12px] text-muted-foreground tnum">≈ {fmt(sap.qty)} colis</div>
-                )}
               </div>
 
-              {/* Saisie du réel */}
+              {/* ① Le stock est bon → Conforme */}
+              <Button variant="success" size="lg" className="mt-4 h-14 w-full text-[16px]" onClick={conforme}>
+                <Check className="!size-5" /> Conforme — {fmt(sap.qty)} colis
+              </Button>
+
+              {/* ② Sinon : notifier la quantité réelle (en colis) */}
               <div className="mt-4">
                 <label className="mb-1.5 block text-[12px] font-semibold text-muted-foreground">
-                  Stock compté (réel) — saisie au colis, affichée en {base.unit}
+                  Sinon, saisis le stock réel (colis) puis « Suivant »
                 </label>
                 <div className="flex items-center gap-2">
                   <Button variant="outline" size="icon" className="h-14 w-14 shrink-0" onClick={() => bump(-1)} aria-label="−1 colis">
                     <Minus className="!size-5" />
                   </Button>
                   <NumberInput
-                    value={real != null ? toBase(real) : null}
-                    onValueChange={(n) => setCount(p.itemCode, n == null ? null : Math.round((n / base.perColis) * 1000) / 1000)}
+                    value={real}
+                    onValueChange={(n) => setCount(p.itemCode, n)}
                     min={0}
-                    step={base.perColis}
+                    step={1}
                     allowEmpty
                     placeholder="—"
-                    aria-label={`Stock compté (en ${base.unit})`}
+                    aria-label="Stock compté (en colis)"
                     className="h-14 flex-1 text-center text-[28px] font-bold"
                   />
                   <Button variant="outline" size="icon" className="h-14 w-14 shrink-0" onClick={() => bump(1)} aria-label="+1 colis">
@@ -147,57 +147,45 @@ export function GuidedCounter({
                   </Button>
                 </div>
 
-                {/* Repère colis (la saisie avance d'un colis) */}
-                {real != null && base.perColis > 1 && (
-                  <div className="mt-1.5 text-center text-[12px] text-muted-foreground tnum">= {fmt(real)} colis</div>
-                )}
-
-                {/* Écart en direct */}
+                {/* Écart en direct (colis) */}
                 <div className="mt-2 flex h-6 items-center justify-center">
                   {ecart != null && (
                     ecart === 0 ? (
                       <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-emerald-600 dark:text-emerald-400">
-                        <Check className="h-4 w-4" /> Conforme au stock SAP
+                        <Check className="h-4 w-4" /> Identique au stock SAP
                       </span>
                     ) : (
                       <span className={`inline-flex items-center gap-1 text-[13px] font-bold tnum ${ecart > 0 ? "text-sky-600 dark:text-sky-400" : "text-amber-600 dark:text-amber-400"}`}>
-                        Écart {ecart > 0 ? `+${fmt(toBase(ecart))}` : fmt(toBase(ecart))} {base.unit}
+                        Écart {ecart > 0 ? `+${fmt(ecart)}` : fmt(ecart)} colis
                       </span>
                     )
                   )}
+                  {hasModif && (
+                    <button
+                      type="button"
+                      onClick={() => setCount(p.itemCode, null)}
+                      className="ml-3 inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-3.5 w-3.5" /> Effacer
+                    </button>
+                  )}
                 </div>
-              </div>
-
-              {/* Actions rapides */}
-              <div className="mt-2 grid grid-cols-1 gap-2">
-                <Button variant="success" size="lg" className="h-12 text-[15px]" onClick={conforme}>
-                  <Check className="!size-5" /> Conforme — {fmt(toBase(sap.qty))} {base.unit}
-                </Button>
-                {real != null && (
-                  <button
-                    type="button"
-                    onClick={() => setCount(p.itemCode, null)}
-                    className="inline-flex items-center justify-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="h-3.5 w-3.5" /> Effacer la saisie
-                  </button>
-                )}
               </div>
             </SurfaceCard>
           </motion.div>
         </AnimatePresence>
       </div>
 
-      {/* Navigation bas (sticky sur mobile) */}
+      {/* Navigation bas (sticky sur mobile) — Suivant validant la modif saisie */}
       <div className="sticky bottom-0 z-10 flex items-center gap-2 bg-gradient-to-t from-background via-background/95 to-transparent pb-1 pt-2">
         <Button variant="outline" size="lg" className="h-12 px-4" onClick={() => move(-1)} disabled={isFirst} aria-label="Précédent">
           <ChevronLeft />
         </Button>
-        <Button size="lg" className="h-12 flex-1 text-[15px]" onClick={next}>
+        <Button size="lg" className="h-12 flex-1 text-[15px]" onClick={next} disabled={!hasModif} title={hasModif ? undefined : "Saisis le stock réel, ou utilise « Conforme »"}>
           {isLast ? (
             <><ListChecks className="!size-5" /> Voir le récap</>
           ) : (
-            <>{real != null ? "Valider & suivant" : "Passer"} <ChevronRight className="!size-5" /></>
+            <>Suivant (modif) <ChevronRight className="!size-5" /></>
           )}
         </Button>
       </div>

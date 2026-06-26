@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
-import { getPrepStatus } from "@/lib/inventory";
+import { getDeliveryPrepared, getDeliveryExcluded } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +53,7 @@ export async function GET(req: NextRequest) {
     Comments?: string;
     NumAtCard?: string;
     U_TrspCode?: string;
+    U_TrspHeur?: string;
     DocumentLines?: ListedLine[];
   };
 
@@ -67,7 +68,7 @@ export async function GET(req: NextRequest) {
     let orders: SapOrderListed[];
     try {
       orders = await sap.getAll<SapOrderListed>(
-        `Orders?$select=${BASE_SELECT},U_TrspCode&$filter=${filter}&$orderby=CardName asc`,
+        `Orders?$select=${BASE_SELECT},U_TrspCode,U_TrspHeur&$filter=${filter}&$orderby=CardName asc`,
         { pageSize: 200, maxPages: 20 },
       );
     } catch {
@@ -107,9 +108,13 @@ export async function GET(req: NextRequest) {
       /* table Carrier absente → on affichera le code brut */
     }
 
-    // Statut « faite » depuis la dernière pré-étape d'inventaire : une commande est
-    // FAITE si un inventaire récent existe ET qu'elle n'est PAS cochée « non préparée ».
-    const { notPrepared, hasPrep } = await getPrepStatus().catch(() => ({ notPrepared: new Set<number>(), hasPrep: false }));
+    // Statut « faite » MANUEL : coché à la main par le préparateur (persisté par
+    // DocEntry). Aucune déduction automatique depuis l'inventaire (qui marquait
+    // tout à tort). Une commande n'est « faite » que si on l'a cochée.
+    const faiteByDoc = await getDeliveryPrepared().catch(() => new Map<number, boolean>());
+    // BL marqués « avoir / exclu » (facturé puis avoir total, doublon) → déduits
+    // à 100% des totaux mais conservés (grisés) dans la liste.
+    const avoirByDoc = await getDeliveryExcluded().catch(() => new Map<number, boolean>());
 
     // Type client (GMS / CHR / EXPORT) par CardCode — pour le filtre par segment.
     // Le CardCode d'un BL peut être le code principal OU un code d'adresse de
@@ -173,9 +178,12 @@ export async function GET(req: NextRequest) {
         comments: d.Comments ?? "",
         numAtCard: d.NumAtCard ?? "",
         trspCode,
+        trspHeure: d.U_TrspHeur?.trim() || null,
         carrierName: trspCode ? carrierByCode.get(trspCode) ?? trspCode : null,
         clientType: typeByCardCode.get(d.CardCode) ?? null,   // GMS | CHR | EXPORT | null
-        prepared: hasPrep && !notPrepared.has(d.DocEntry),    // « faite » = pas cochée « non préparée »
+        prepared: faiteByDoc.get(d.DocEntry) ?? false,        // « faite » = coché manuellement
+        // « avoir/exclu » : surcharge manuelle si présente, sinon détecté auto (ci-dessous).
+        excluded: avoirByDoc.has(d.DocEntry) ? !!avoirByDoc.get(d.DocEntry) : false,
         lineCount: lines.length,
         lines,
       };
@@ -183,6 +191,49 @@ export async function GET(req: NextRequest) {
     // Demande métier : on n'affiche QUE les magasins segmentés (GMS / CHR / EXPORT).
     // Les clients sans segment n'apparaissent pas dans Détail livraison.
     .filter((d) => d.clientType === "GMS" || d.clientType === "CHR" || d.clientType === "EXPORT");
+
+    // ── Détection AUTOMATIQUE des BL totalement avoirés (facturé puis avoir total) ──
+    // Un avoir SAP (CreditNote) NON annulé dont le montant TTC = le total d'un BL
+    // du jour pour le MÊME client, daté APRÈS ce BL → ce BL a été totalement
+    // avoiré (souvent un doublon recréé). On le déduit à 100% (sauf surcharge
+    // manuelle explicite, qui reste prioritaire). Best-effort : peu de clients par
+    // jour → rapide ; en cas d'échec SAP, on ne déduit rien (repli sur le manuel).
+    try {
+      const cc = Array.from(new Set(docs.map((d) => d.cardCode).filter(Boolean)));
+      if (cc.length) {
+        const since = new Date(Date.parse(date) - 45 * 86_400_000).toISOString().slice(0, 10);
+        const orCard = cc.map((c) => `CardCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
+        const cnFilter = encodeURIComponent(`(${orCard}) and DocDate ge '${since}' and Cancelled eq 'tNO'`);
+        const notes = await sap.getAll<{ CardCode: string; DocTotal?: number; DocDate?: string }>(
+          `CreditNotes?$select=CardCode,DocTotal,DocDate&$filter=${cnFilter}&$orderby=DocEntry asc`,
+          { pageSize: 100, maxPages: 5 },
+        );
+        // BL par client, plus ANCIEN (DocEntry) d'abord — l'original avoiré précède
+        // le BL recréé.
+        const byClient = new Map<string, typeof docs>();
+        for (const d of [...docs].sort((a, b) => a.docEntry - b.docEntry)) {
+          const a = byClient.get(d.cardCode) ?? [];
+          a.push(d);
+          byClient.set(d.cardCode, a);
+        }
+        const matched = new Set<number>();
+        for (const n of notes) {
+          const amt = Math.abs(n.DocTotal ?? 0);
+          if (amt <= 0.01) continue;
+          const noteDay = (n.DocDate ?? "").slice(0, 10);
+          const cand = (byClient.get(n.CardCode) ?? []).find(
+            (d) =>
+              !matched.has(d.docEntry) &&
+              Math.abs((d.totalTTC ?? 0) - amt) <= 0.05 &&        // total avoiré = total du BL
+              (!noteDay || noteDay >= (d.docDate ?? "").slice(0, 10)), // avoir postérieur au BL
+          );
+          if (!cand) continue;
+          matched.add(cand.docEntry);
+          // La surcharge MANUELLE reste prioritaire (l'utilisateur a tranché).
+          if (!avoirByDoc.has(cand.docEntry)) cand.excluded = true;
+        }
+      }
+    } catch { /* avoirs best-effort → pas de déduction auto */ }
 
     // ── Regroupement par transporteur ──
     type Doc = (typeof docs)[number];
@@ -194,16 +245,21 @@ export async function GET(req: NextRequest) {
       g.docs.push(d);
       groups.set(key, g);
     }
+    // Totaux : les BL « avoir/exclu » sont DÉDUITS (100%) — on agrège sur les BL
+    // non exclus uniquement, mais on garde tous les BL dans les listes (grisés).
     const carriers = Array.from(groups.values())
-      .map((g) => ({
-        code: g.code,
-        name: g.name,
-        orders: g.docs.length,
-        colis: Math.round(g.docs.reduce((s, d) => s + d.colis, 0) * 10) / 10,
-        weightKg: Math.round(g.docs.reduce((s, d) => s + d.weightKg, 0) * 10) / 10,
-        totalHT: Math.round(g.docs.reduce((s, d) => s + d.totalHT, 0) * 100) / 100,
-        docs: g.docs,
-      }))
+      .map((g) => {
+        const counted = g.docs.filter((d) => !d.excluded);
+        return {
+          code: g.code,
+          name: g.name,
+          orders: counted.length,
+          colis: Math.round(counted.reduce((s, d) => s + d.colis, 0) * 10) / 10,
+          weightKg: Math.round(counted.reduce((s, d) => s + d.weightKg, 0) * 10) / 10,
+          totalHT: Math.round(counted.reduce((s, d) => s + d.totalHT, 0) * 100) / 100,
+          docs: g.docs,
+        };
+      })
       // « Non affecté » toujours en dernier ; sinon tri par volume de colis.
       .sort((a, b) => {
         if (!a.code && b.code) return 1;
@@ -211,12 +267,13 @@ export async function GET(req: NextRequest) {
         return b.colis - a.colis;
       });
 
+    const counted = docs.filter((d) => !d.excluded);
     const totals = {
-      orders: docs.length,
-      clients: new Set(docs.map((d) => d.cardCode)).size,
-      colis: Math.round(docs.reduce((s, d) => s + d.colis, 0) * 10) / 10,
-      weightKg: Math.round(docs.reduce((s, d) => s + d.weightKg, 0) * 10) / 10,
-      totalHT: Math.round(docs.reduce((s, d) => s + d.totalHT, 0) * 100) / 100,
+      orders: counted.length,
+      clients: new Set(counted.map((d) => d.cardCode)).size,
+      colis: Math.round(counted.reduce((s, d) => s + d.colis, 0) * 10) / 10,
+      weightKg: Math.round(counted.reduce((s, d) => s + d.weightKg, 0) * 10) / 10,
+      totalHT: Math.round(counted.reduce((s, d) => s + d.totalHT, 0) * 100) / 100,
     };
 
     return NextResponse.json({

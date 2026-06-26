@@ -12,7 +12,159 @@ import { sap, type SapItem } from "@/lib/sapb1";
 
 const WAREHOUSES = new Set(["000", "01", "R1"]);
 
-/** Re-pull les ItemWarehouseInfo des codes donnés et upsert ProductStock. */
+/**
+ * Écrit en base le stock (totalStock + ProductStock par entrepôt) d'UN article
+ * SAP déjà résolu vers son productId local. Renvoie false si l'article ne porte
+ * aucun entrepôt suivi (→ on ne touche pas au stock existant : jamais de remise à
+ * zéro accidentelle). Partagé par refreshItemStocks (par code) et
+ * refreshInStockMirror (pull groupé).
+ */
+async function writeItemStock(productId: string, it: SapItem): Promise<boolean> {
+  const stocks = (it.ItemWarehouseInfoCollection ?? []).filter((w) => WAREHOUSES.has(w.WarehouseCode));
+  if (stocks.length === 0) return false;
+  await prisma.product.update({
+    where: { id: productId },
+    data: { totalStock: it.QuantityOnStock ?? 0, syncedAt: new Date() },
+  });
+  await Promise.all(stocks.map((w) => {
+    const inStock = w.InStock ?? 0;
+    const committed = w.Committed ?? 0;
+    const ordered = w.Ordered ?? 0;
+    return prisma.productStock.upsert({
+      where: { productId_warehouse: { productId, warehouse: w.WarehouseCode } },
+      update: { inStock, committed, ordered, available: inStock - committed, syncedAt: new Date() },
+      create: { productId, warehouse: w.WarehouseCode, inStock, committed, ordered, available: inStock - committed },
+    });
+  }));
+  return true;
+}
+
+/**
+ * Rafraîchit le stock de TOUS les articles « en stock » côté SAP en UN appel
+ * groupé (filtre serveur `QuantityOnStock gt 0`, pagination parallèle 500/page —
+ * exactement le chemin éprouvé par la synchro catalogue), au lieu d'une requête
+ * filtrée par paquet de codes. C'est 10-30× moins d'allers-retours SAP → le
+ * pré-comptage d'inventaire passe de « très long » à quasi instantané.
+ *
+ * Couvre aussi les ÉPUISÉS : un article que le miroir croyait en stock mais que
+ * SAP ne renvoie plus (stock retombé à 0) est remis à 0 localement — sinon le
+ * comptage afficherait un « stock attendu » périmé.
+ */
+export async function refreshInStockMirror(): Promise<{ refreshed: number; total: number; sapMs: number; dbMs: number }> {
+  const t0 = Date.now();
+  // 1. SAP : articles valides, non gelés, stock total > 0 (un seul filtre serveur).
+  const ITEMS_FILTER = "Valid eq 'tYES' and Frozen eq 'tNO' and QuantityOnStock gt 0";
+  const SELECT = "ItemCode,QuantityOnStock,ItemWarehouseInfoCollection";
+  let sapItems: SapItem[];
+  try {
+    sapItems = await sap.getAllParallel<SapItem>(
+      `Items?$filter=${ITEMS_FILTER}&$select=${SELECT}`,
+      `Items/$count?$filter=${ITEMS_FILTER}`,
+      { pageSize: 500, env: "prod" },
+    );
+  } catch {
+    // Repli : pagination séquentielle si /$count indispo sur ce Service Layer.
+    sapItems = await sap.getAll<SapItem>(
+      `Items?$filter=${ITEMS_FILTER}&$select=${SELECT}`,
+      { pageSize: 500, env: "prod" },
+    );
+  }
+
+  const sapMs = Date.now() - t0;
+
+  // 2. Résoudre les ids produits du miroir pour les codes SAP renvoyés.
+  const sapCodes = sapItems.map((it) => it.ItemCode);
+  const sapCodeSet = new Set(sapCodes);
+  const products = await prisma.product.findMany({
+    where: { itemCode: { in: sapCodes } },
+    select: { id: true, itemCode: true },
+  });
+  const idByCode = new Map(products.map((p) => [p.itemCode, p.id]));
+
+  // 3. Écritures EN BLOC (créations groupées + UPDATE … FROM (VALUES …)) — même
+  //    technique que la synchro catalogue. Quelques requêtes SQL au lieu de
+  //    centaines d'upserts un-par-un : c'est ici que se gagne l'essentiel du temps
+  //    (avant : ~500 articles × ~3 entrepôts ≈ 2000 allers-retours Postgres).
+  const SQL_BATCH = 200;
+  const productRows: { id: string; totalStock: number }[] = [];
+  const stockRows: { productId: string; warehouse: string; inStock: number; committed: number; ordered: number; available: number }[] = [];
+  for (const it of sapItems) {
+    const productId = idByCode.get(it.ItemCode);
+    if (!productId) continue;                                          // pas dans le miroir → ignoré
+    const whs = (it.ItemWarehouseInfoCollection ?? []).filter((w) => WAREHOUSES.has(w.WarehouseCode));
+    if (whs.length === 0) continue;                                    // pas d'entrepôt suivi → on ne touche pas au stock
+    productRows.push({ id: productId, totalStock: it.QuantityOnStock ?? 0 });
+    for (const w of whs) {
+      const inStock = w.InStock ?? 0;
+      const committed = w.Committed ?? 0;
+      stockRows.push({ productId, warehouse: w.WarehouseCode, inStock, committed, ordered: w.Ordered ?? 0, available: inStock - committed });
+    }
+  }
+
+  // 3a. Product.totalStock (les articles existent déjà dans le miroir → UPDATE seul).
+  for (let i = 0; i < productRows.length; i += SQL_BATCH) {
+    const slice = productRows.slice(i, i + SQL_BATCH);
+    const values: string[] = [];
+    const params: unknown[] = [];
+    let p = 1;
+    for (const r of slice) { values.push(`($${p++}::text,$${p++}::float8)`); params.push(r.id, r.totalStock); }
+    await prisma.$executeRawUnsafe(
+      `UPDATE "Product" AS pr SET "totalStock"=v."totalStock","syncedAt"=NOW()
+       FROM (VALUES ${values.join(",")}) AS v("id","totalStock") WHERE pr."id" = v."id"`,
+      ...params,
+    );
+  }
+
+  // 3b. ProductStock : créations manquantes (skipDuplicates) puis UPDATE des valeurs.
+  for (let i = 0; i < stockRows.length; i += SQL_BATCH) {
+    const slice = stockRows.slice(i, i + SQL_BATCH);
+    await prisma.productStock.createMany({ data: slice, skipDuplicates: true });
+    const values: string[] = [];
+    const params: unknown[] = [];
+    let p = 1;
+    for (const s of slice) {
+      values.push(`($${p++}::text,$${p++}::text,$${p++}::float8,$${p++}::float8,$${p++}::float8,$${p++}::float8)`);
+      params.push(s.productId, s.warehouse, s.inStock, s.committed, s.ordered, s.available);
+    }
+    await prisma.$executeRawUnsafe(
+      `UPDATE "ProductStock" AS st SET
+         "inStock"=v."inStock","committed"=v."committed","ordered"=v."ordered","available"=v."available","syncedAt"=NOW()
+       FROM (VALUES ${values.join(",")}) AS v("productId","warehouse","inStock","committed","ordered","available")
+       WHERE st."productId" = v."productId" AND st."warehouse" = v."warehouse"`,
+      ...params,
+    );
+  }
+  const refreshed = productRows.length;
+
+  // 4. ÉPUISÉS : en stock dans le miroir mais absents du retour SAP → remettre à 0.
+  const mirrorInStock = await prisma.product.findMany({
+    where: { isPackaging: false, stocks: { some: { inStock: { gt: 0 } } } },
+    select: { id: true, itemCode: true },
+  });
+  const depletedIds = mirrorInStock.filter((p) => !sapCodeSet.has(p.itemCode)).map((p) => p.id);
+  if (depletedIds.length > 0) {
+    await prisma.productStock.updateMany({
+      where: { productId: { in: depletedIds } },
+      data: { inStock: 0, available: 0, syncedAt: new Date() },
+    });
+    await prisma.product.updateMany({
+      where: { id: { in: depletedIds } },
+      data: { totalStock: 0, syncedAt: new Date() },
+    });
+  }
+
+  const dbMs = Date.now() - t0 - sapMs;
+  console.info(`[stockSync] refreshInStockMirror : ${refreshed}/${sapItems.length} articles — SAP ${sapMs}ms, DB ${dbMs}ms`);
+  return { refreshed, total: sapItems.length, sapMs, dbMs };
+}
+
+/**
+ * Re-pull les ItemWarehouseInfo des codes donnés et upsert ProductStock.
+ * PERF : un seul appel SAP par PAQUET de codes (filtre OData `ItemCode eq … or …`)
+ * au lieu d'un appel par article — ~20× moins d'allers-retours. Sécurité : si un
+ * article ne revient PAS avec ses entrepôts (collection vide), on ne touche pas à
+ * son stock (jamais de remise à zéro accidentelle).
+ */
 export async function refreshItemStocks(itemCodes: string[]): Promise<number> {
   const unique = Array.from(new Set(itemCodes.filter(Boolean)));
   if (unique.length === 0) return 0;
@@ -23,39 +175,61 @@ export async function refreshItemStocks(itemCodes: string[]): Promise<number> {
   });
   const idByCode = new Map(products.map((p) => [p.itemCode, p.id]));
 
+  const CODES_PER_REQ = 20;   // articles par requête SAP
+  const CONCURRENCY = 5;      // requêtes SAP en parallèle
+  const reqs: string[][] = [];
+  for (let i = 0; i < unique.length; i += CODES_PER_REQ) reqs.push(unique.slice(i, i + CODES_PER_REQ));
+
+  const upsertItem = async (it: SapItem): Promise<boolean> => {
+    const productId = idByCode.get(it.ItemCode);
+    if (!productId) return false;                  // pas dans le miroir → on ignore
+    return writeItemStock(productId, it);          // entrepôts vides → false (pas de RAZ)
+  };
+
   let updated = 0;
-  const CHUNK = 10;
-  for (let i = 0; i < unique.length; i += CHUNK) {
-    const batch = unique.slice(i, i + CHUNK);
-    await Promise.all(batch.map(async (code) => {
-      const productId = idByCode.get(code);
-      if (!productId) return;
+  const done = new Set<string>();   // codes effectivement mis à jour par le batch
+  for (let i = 0; i < reqs.length; i += CONCURRENCY) {
+    const wave = reqs.slice(i, i + CONCURRENCY);
+    const waves = await Promise.all(wave.map(async (codes) => {
+      const filter = codes.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
       try {
-        const it = await sap.get<SapItem>(
-          `Items('${encodeURIComponent(code)}')?$select=ItemCode,QuantityOnStock,ItemWarehouseInfoCollection`,
+        const r = await sap.get<{ value: SapItem[] }>(
+          `Items?$top=${codes.length}&$select=ItemCode,QuantityOnStock,ItemWarehouseInfoCollection&$filter=${encodeURIComponent(filter)}`,
         );
-        const stocks = (it.ItemWarehouseInfoCollection ?? []).filter((w) =>
-          WAREHOUSES.has(w.WarehouseCode),
-        );
-        await prisma.product.update({
-          where: { id: productId },
-          data: { totalStock: it.QuantityOnStock ?? 0, syncedAt: new Date() },
-        });
-        await Promise.all(stocks.map((w) => {
-          const inStock = w.InStock ?? 0;
-          const committed = w.Committed ?? 0;
-          const ordered = w.Ordered ?? 0;
-          return prisma.productStock.upsert({
-            where: { productId_warehouse: { productId, warehouse: w.WarehouseCode } },
-            update: { inStock, committed, ordered, available: inStock - committed, syncedAt: new Date() },
-            create: { productId, warehouse: w.WarehouseCode, inStock, committed, ordered, available: inStock - committed },
-          });
-        }));
-        updated++;
+        return r.value ?? [];
       } catch (e) {
-        console.warn(`[stockSync] refresh ${code} échoué:`, (e as Error).message);
+        console.warn(`[stockSync] batch refresh échoué (${codes.length} codes):`, (e as Error).message);
+        return [];
       }
     }));
+    for (const items of waves) {
+      for (const it of items) {
+        try { if (await upsertItem(it)) { updated++; done.add(it.ItemCode); } }
+        catch (e) { console.warn(`[stockSync] upsert ${it.ItemCode} échoué:`, (e as Error).message); }
+      }
+    }
+  }
+
+  // SÉCURITÉ : si le batch n'a pas couvert un article (ex. ce Service Layer ne
+  // renvoie pas la collection entrepôt en mode liste), on reprend ces codes en
+  // requête PAR ARTICLE (méthode éprouvée). En cas de batch totalement KO, le
+  // résultat est donc identique à l'ancien comportement (correct), jamais pire.
+  const missed = unique.filter((c) => idByCode.has(c) && !done.has(c));
+  if (missed.length > 0) {
+    const PER_ITEM_CONC = 10;
+    for (let i = 0; i < missed.length; i += PER_ITEM_CONC) {
+      const batch = missed.slice(i, i + PER_ITEM_CONC);
+      await Promise.all(batch.map(async (code) => {
+        try {
+          const it = await sap.get<SapItem>(
+            `Items('${encodeURIComponent(code)}')?$select=ItemCode,QuantityOnStock,ItemWarehouseInfoCollection`,
+          );
+          if (await upsertItem(it)) updated++;
+        } catch (e) {
+          console.warn(`[stockSync] refresh ${code} échoué:`, (e as Error).message);
+        }
+      }));
+    }
   }
   return updated;
 }

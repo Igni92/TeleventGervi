@@ -220,3 +220,61 @@ export async function getPrepStatus(): Promise<{ notPrepared: Set<number>; hasPr
   } catch { /* pas de trace */ }
   return { notPrepared: new Set(), hasPrep: false };
 }
+
+/* ───────────────────────── Statut « Faite » MANUEL ─────────────────────────
+ * Le statut « faite » (commande préparée) d'un BL est désormais MANUEL : le
+ * préparateur le bascule à la main sur « Détail livraison ». Stocké par DocEntry
+ * dans AppSetting (clé `livfaite:<docEntry>`). Une commande n'est JAMAIS « faite »
+ * tant qu'on ne l'a pas cochée (plus de déduction automatique depuis l'inventaire,
+ * qui marquait tout à tort).
+ */
+const LIV_FAITE_PREFIX = "livfaite:";
+
+/** Map DocEntry → faite (true/false) des BL marqués manuellement. */
+export async function getDeliveryPrepared(): Promise<Map<number, boolean>> {
+  const m = new Map<number, boolean>();
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_FAITE_PREFIX } } });
+    for (const r of rows) {
+      const docEntry = Number(r.key.slice(LIV_FAITE_PREFIX.length));
+      if (!Number.isFinite(docEntry)) continue;
+      try { m.set(docEntry, !!(JSON.parse(r.value) as { prepared?: boolean }).prepared); } catch { /* ignore */ }
+    }
+  } catch { /* table absente → aucune marque */ }
+  return m;
+}
+
+/** Bascule le statut « faite » d'un BL (persisté). */
+export async function setDeliveryPrepared(docEntry: number, prepared: boolean, by: string): Promise<void> {
+  const key = LIV_FAITE_PREFIX + docEntry;
+  const value = JSON.stringify({ prepared, at: new Date().toISOString(), by });
+  await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+}
+
+/* ──────────────────── BL « avoir / exclu » (déduction 100%) ────────────────────
+ * Un BL totalement avoiré (facturé puis avoir total) ou en doublon est marqué
+ * MANUELLEMENT « avoir » : il est alors DÉDUIT à 100% des totaux du Détail
+ * livraison (et affiché grisé). Persisté par DocEntry (clé `livavoir:<docEntry>`).
+ */
+const LIV_AVOIR_PREFIX = "livavoir:";
+
+/** Map DocEntry → exclu (avoir total) des BL marqués manuellement. */
+export async function getDeliveryExcluded(): Promise<Map<number, boolean>> {
+  const m = new Map<number, boolean>();
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_AVOIR_PREFIX } } });
+    for (const r of rows) {
+      const docEntry = Number(r.key.slice(LIV_AVOIR_PREFIX.length));
+      if (!Number.isFinite(docEntry)) continue;
+      try { m.set(docEntry, !!(JSON.parse(r.value) as { excluded?: boolean }).excluded); } catch { /* ignore */ }
+    }
+  } catch { /* table absente */ }
+  return m;
+}
+
+/** Bascule le statut « avoir / exclu » d'un BL (persisté). */
+export async function setDeliveryExcluded(docEntry: number, excluded: boolean, by: string): Promise<void> {
+  const key = LIV_AVOIR_PREFIX + docEntry;
+  const value = JSON.stringify({ excluded, at: new Date().toISOString(), by });
+  await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+}

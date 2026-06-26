@@ -418,16 +418,39 @@ export async function GET(req: NextRequest) {
       LineTotal?: number;             // total ligne HT
       TaxPercentagePerRow?: number;   // taux TVA de la ligne
       LineStatus?: string;            // bost_Open | bost_Close (ligne facturée)
+      BaseType?: number;              // type du document de base (20 = réception → doc d'annulation)
+      BaseEntry?: number;             // DocEntry du document de base
     };
     type SapPdnListed = {
       DocEntry: number; DocNum: number; DocDate: string; CardCode: string; CardName?: string;
       NumAtCard?: string; DocTotal?: number; VatSum?: number; Comments?: string;
-      DocumentStatus?: string; DocumentLines?: ListedLine[];
+      DocumentStatus?: string; Cancelled?: string; DocumentLines?: ListedLine[];
     };
     const docs = await sap.get<{ value: SapPdnListed[] }>(
       `PurchaseDeliveryNotes?$top=${last}&$orderby=DocEntry desc`
-      + `&$select=DocEntry,DocNum,DocDate,CardCode,CardName,NumAtCard,DocTotal,VatSum,Comments,DocumentStatus,DocumentLines`,
+      + `&$select=DocEntry,DocNum,DocDate,CardCode,CardName,NumAtCard,DocTotal,VatSum,Comments,DocumentStatus,Cancelled,DocumentLines`,
     );
+
+    // ── Détection des ANNULATIONS ───────────────────────────────
+    // SAP « Annuler » crée un document d'annulation (une PurchaseDeliveryNote qui
+    // INVERSE la réception) : ses lignes pointent la réception d'origine via
+    // BaseType = 20 (oPurchaseDeliveryNotes). La réception d'origine, elle, porte
+    // Cancelled = tYES. On relie les deux pour pouvoir les marquer dans l'UI.
+    const PDN_OBJTYPE = 20;
+    const listed = docs.value || [];
+    const byEntry = new Map(listed.map((d) => [d.DocEntry, d]));
+    const cancelBaseEntryOf = (d: SapPdnListed): number | null => {
+      for (const l of d.DocumentLines || []) {
+        if (Number(l.BaseType) === PDN_OBJTYPE && l.BaseEntry != null) return l.BaseEntry;
+      }
+      return null;
+    };
+    // DocEntry de la réception annulée → document d'annulation qui la référence.
+    const cancellationByBaseEntry = new Map<number, SapPdnListed>();
+    for (const d of listed) {
+      const be = cancelBaseEntryOf(d);
+      if (be != null) cancellationByBaseEntry.set(be, d);
+    }
 
     // Enrichissement local : désignation complète (Fruit/Pays/Marque/Condt) +
     // ratio colis pour reconstituer la quantité « type condt » dans le détail.
@@ -447,13 +470,20 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       db: process.env.SAP_B1_COMPANY_DB,
-      count: docs.value?.length || 0,
-      docs: (docs.value || []).map((d) => {
+      count: listed.length,
+      docs: listed.map((d) => {
         const lines = d.DocumentLines || [];
         const totalTTC = d.DocTotal ?? 0;
         const totalTVA = d.VatSum ?? 0;
         const sumLines = lines.reduce((s, l) => s + (l.LineTotal ?? 0), 0);
         const totalHT = sumLines > 0 ? sumLines : Math.max(0, totalTTC - totalTVA);
+        // Statut annulation : ce doc EST une annulation (BaseType 20) ou A ÉTÉ annulé.
+        const cancelBaseEntry = cancelBaseEntryOf(d);
+        const isCancellation = cancelBaseEntry != null;
+        const cancelsDocNum = isCancellation ? (byEntry.get(cancelBaseEntry as number)?.DocNum ?? null) : null;
+        const cancellationDoc = cancellationByBaseEntry.get(d.DocEntry);
+        const cancelled = !isCancellation && (d.Cancelled === "tYES" || cancellationDoc != null);
+        const cancelledByDocNum = cancellationDoc?.DocNum ?? null;
         return {
           docEntry: d.DocEntry,
           docNum: d.DocNum,
@@ -462,8 +492,14 @@ export async function GET(req: NextRequest) {
           cardCode: d.CardCode,
           cardName: d.CardName,
           numAtCard: d.NumAtCard ?? "",
-          // Éditable (prix) tant que l'EM n'est pas clôturée (facture A/P créée).
-          editable: d.DocumentStatus !== "bost_Close",
+          // Annulations : un doc d'annulation ou une réception annulée n'est plus
+          // un vrai stock entré → ni prix éditable, ni action (annuler/retour).
+          isCancellation,
+          cancelsDocNum,
+          cancelled,
+          cancelledByDocNum,
+          // Éditable (prix) tant que l'EM n'est pas clôturée (facture A/P créée) ni annulée.
+          editable: d.DocumentStatus !== "bost_Close" && !isCancellation && !cancelled,
           total: totalTTC,        // rétro-compat : « total » = TTC
           totalTTC,
           totalHT,

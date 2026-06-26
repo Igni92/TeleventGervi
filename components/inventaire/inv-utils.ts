@@ -104,6 +104,29 @@ export function fruitEmoji(p: { itemName?: string | null; groupName?: string | n
 }
 
 /* --------------------------------------------------------------------------
+ * Tuile produit PROPRE : initiale du nom + couleur STABLE (hash du code).
+ * Remplace les emojis « devinés » (souvent faux) par un repère toujours correct
+ * et lisible, façon avatar.
+ * ------------------------------------------------------------------------ */
+const TILE_COLORS = [
+  "bg-rose-100 text-rose-700 dark:bg-rose-500/25 dark:text-rose-200",
+  "bg-amber-100 text-amber-700 dark:bg-amber-500/25 dark:text-amber-200",
+  "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/25 dark:text-emerald-200",
+  "bg-sky-100 text-sky-700 dark:bg-sky-500/25 dark:text-sky-200",
+  "bg-violet-100 text-violet-700 dark:bg-violet-500/25 dark:text-violet-200",
+  "bg-teal-100 text-teal-700 dark:bg-teal-500/25 dark:text-teal-200",
+  "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-500/25 dark:text-fuchsia-200",
+];
+export function productTile(p: { itemName?: string | null; itemCode?: string | null }): { initial: string; color: string } {
+  const name = (p.itemName ?? "").trim();
+  const initial = (name.replace(/[^\p{L}\p{N}]/u, "")[0] ?? "?").toUpperCase();
+  const key = (p.itemCode || name || "?");
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return { initial, color: TILE_COLORS[h % TILE_COLORS.length] };
+}
+
+/* --------------------------------------------------------------------------
  * Regroupement par FAMILLE (pour proposer « petit à petit »).
  * ------------------------------------------------------------------------ */
 export type Family = {

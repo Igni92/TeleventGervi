@@ -17,7 +17,7 @@ import { PhotoStep } from "./PhotoStep";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { designationProduit } from "@/lib/produit-designation";
 import {
-  buildFamilies, sapInfo, ecartOf, fmt, fmtDate, fruitEmoji, MAX_PHOTOS,
+  buildFamilies, sapInfo, ecartOf, fmt, fmtDate, fruitEmoji, productTile, MAX_PHOTOS,
   type Product, type DraftPhoto,
 } from "./inv-utils";
 
@@ -70,6 +70,13 @@ type Mode = "home" | "count" | "recap";
 type Scope = { products: Product[]; label: string; startIndex: number };
 /** Ligne du récap (produit en stock OU ligne orpheline d'une correction). */
 type RecapRow = { itemCode: string; itemName: string; sapQty: number; real: number; unit: string; ecart: number; emoji: string; orphan: boolean };
+
+/** Pastille de segment client (GMS / CHR / EXPORT) — couleurs distinctes. */
+const SEG_BADGE: Record<string, string> = {
+  GMS: "bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300",
+  CHR: "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300",
+  EXPORT: "bg-teal-100 text-teal-700 dark:bg-teal-500/20 dark:text-teal-300",
+};
 
 const DRAFT_KEY = "tv-inv-draft-v2";
 const PHOTOS_KEY = "tv-inv-photos-v2";
@@ -131,13 +138,15 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   const [sessionPhotos, setSessionPhotos] = useState<Record<string, PhotoDTO[] | "loading">>({});
 
   /* ---------------------------- Chargements ---------------------------- */
-  const loadProducts = useCallback(async () => {
+  const loadProducts = useCallback(async (): Promise<Product[]> => {
     setLoading(true);
     try {
       const res = await fetch("/api/products?inStock=true&limit=400", { cache: "no-store" });
       const json = await res.json();
-      setProducts(json.products ?? []);
-    } catch { setProducts([]); }
+      const list: Product[] = json.products ?? [];
+      setProducts(list);
+      return list;
+    } catch { setProducts([]); return []; }
     finally { setLoading(false); }
   }, []);
 
@@ -247,15 +256,16 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   // rayon). On gonfle `available` (entrepôt 01) : sapInfo() et tout l'aval
   // reflètent alors le stock théorique. En CORRECTION, on n'ajuste pas (la base a
   // déjà été figée à la création de l'inventaire).
-  const effectiveProducts = useMemo(() => {
-    if (editing || addUnitsByItem.size === 0) return products;
-    return products.map((p) => {
+  const withAddBack = useCallback((list: Product[]) => {
+    if (editing || addUnitsByItem.size === 0) return list;
+    return list.map((p) => {
       const add = addUnitsByItem.get(p.itemCode);
       if (!add) return p;
       const w = p.stockByWarehouse["01"] ?? { available: 0, inStock: 0 };
       return { ...p, stockByWarehouse: { ...p.stockByWarehouse, "01": { ...w, available: (w.available ?? 0) + add } } };
     });
-  }, [products, addUnitsByItem, editing]);
+  }, [addUnitsByItem, editing]);
+  const effectiveProducts = useMemo(() => withAddBack(products), [withAddBack, products]);
 
   const { families, ordered } = useMemo(() => buildFamilies(effectiveProducts), [effectiveProducts]);
   const productByCode = useMemo(() => new Map(ordered.map((p) => [p.itemCode, p])), [ordered]);
@@ -411,29 +421,38 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     setMode("home");
   }
 
-  /** Import du stock SAP (avant comptage) — rafraîchit puis recharge les produits. */
-  async function refreshStock(): Promise<void> {
+  /** Import du stock SAP (avant comptage). Renvoie la liste FRAÎCHE des produits
+   *  (ou null si l'import a échoué) pour figer le comptage sur ces quantités. */
+  async function refreshStock(): Promise<Product[] | null> {
     setRefreshing(true);
     try {
       const res = await fetch("/api/inventaire/refresh-stock", { method: "POST" });
       const json = await res.json().catch(() => null);
       if (res.ok && json?.ok) {
-        await loadProducts();
-        toast.success(`Stock SAP à jour — ${json.refreshed}/${json.total} article(s).`);
-      } else {
-        toast.error(json?.error ?? "Mise à jour du stock SAP impossible — comptage sur le dernier stock connu.");
+        const fresh = await loadProducts();
+        const timing = json.sapMs != null ? ` (SAP ${(json.sapMs / 1000).toFixed(1)}s · BDD ${(json.dbMs / 1000).toFixed(1)}s)` : "";
+        toast.success(`Stock SAP à jour — ${json.refreshed}/${json.total} article(s)${timing}.`);
+        return fresh;
       }
+      toast.error(json?.error ?? "Mise à jour du stock SAP impossible — comptage sur le dernier stock connu.");
+      return null;
     } catch {
       toast.error("Mise à jour du stock SAP impossible — comptage sur le dernier stock connu.");
+      return null;
     } finally {
       setRefreshing(false);
     }
   }
 
-  /** Démarre l'inventaire complet en important d'abord le stock SAP. */
+  /** Démarre l'inventaire complet APRÈS l'import du stock SAP (désormais rapide :
+   *  appels groupés + limité aux produits en stock) → on compte d'emblée contre
+   *  des quantités à jour. */
   async function startFullCount() {
-    await refreshStock();
-    startCount(ordered, "Inventaire complet");
+    const fresh = await refreshStock();
+    // On fige le comptage sur la liste FRAÎCHE (sinon la closure garderait l'ancien
+    // stock malgré l'import qu'on vient de faire).
+    const { ordered: freshOrdered } = buildFamilies(withAddBack(fresh ?? products));
+    startCount(freshOrdered, "Inventaire complet");
   }
 
   /** Ouvre l'aperçu de régularisation SAP pour une session (admin/direction). */
@@ -811,8 +830,8 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
             <div className={`-mx-1 divide-y divide-border/60 overflow-y-auto ${editing ? "max-h-[60vh]" : "max-h-[44vh]"}`}>
               {recapRows.map((r) => (
                 <div key={r.itemCode} className="flex items-center gap-2.5 px-1 py-2">
-                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-[18px] leading-none">
-                    {r.emoji}
+                  <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[14px] font-bold leading-none ${productTile({ itemName: r.itemName, itemCode: r.itemCode }).color}`}>
+                    {productTile({ itemName: r.itemName, itemCode: r.itemCode }).initial}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
@@ -957,9 +976,14 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                             {checked && <CheckCircle2 className="h-3.5 w-3.5" />}
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[12.5px] font-medium text-foreground">{o.cardName}</span>
+                            <span className="flex items-center gap-1.5">
+                              <span className="truncate text-[12.5px] font-medium text-foreground">{o.cardName}</span>
+                              <span className={`shrink-0 rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide ${SEG_BADGE[o.segment] ?? "bg-muted text-muted-foreground"}`}>
+                                {o.segment}
+                              </span>
+                            </span>
                             <span className="block truncate text-[10.5px] text-muted-foreground">
-                              N°{o.docNum} · {o.segment}{o.transport ? ` · ${o.transport}` : ""} · livr. {shortDue(o.docDueDate)}
+                              N°{o.docNum}{o.transport ? ` · ${o.transport}` : ""} · livr. {shortDue(o.docDueDate)}
                             </span>
                           </span>
                           <span className={`shrink-0 text-right text-[11px] font-semibold ${checked ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}>
@@ -1006,61 +1030,80 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
       .slice(0, 40);
     const demarque = recent.map((s) => (s.adjustment ? s.adjustment.demarqueValue ?? null : null));
 
+    const colDate = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" });
+    const colTime = (iso: string) => new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+
     return (
-      <SurfaceCard accent="sky" className="p-5 space-y-3">
+      <SurfaceCard accent="sky" className="p-5 space-y-4">
         <h2 className="flex items-center gap-2 text-[14px] font-semibold text-foreground">
           <ClipboardList className="h-4 w-4 text-muted-foreground" /> Comparatif des {recent.length} dernier(s) inventaire(s)
         </h2>
         {rows.length === 0 ? (
           <p className="py-2 text-[12px] italic text-muted-foreground">Aucun écart sur les derniers inventaires.</p>
         ) : (
-          <div className="-mx-1 overflow-x-auto">
-            <table className="w-full min-w-[420px] text-[12px]">
-              <thead>
-                <tr className="text-left text-muted-foreground">
-                  <th className="px-2 py-1.5 font-medium">Article</th>
-                  {recent.map((s) => (
-                    <th key={s.id} className="whitespace-nowrap px-2 py-1.5 text-right font-medium">{fmtDate(s.createdAt)}</th>
+          <>
+            <div className="overflow-x-auto rounded-xl border border-border">
+              <table className="w-full min-w-[460px] border-collapse text-[12px]">
+                <thead>
+                  <tr className="bg-secondary/50">
+                    <th className="sticky left-0 z-10 bg-secondary/50 px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Article</th>
+                    {recent.map((s) => (
+                      <th key={s.id} className="whitespace-nowrap px-3 py-2 text-center font-semibold text-foreground">
+                        <div className="text-[11.5px] capitalize">{colDate(s.createdAt)}</div>
+                        <div className="text-[9.5px] font-normal text-muted-foreground tnum">{colTime(s.createdAt)}</div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, ri) => (
+                    <tr key={r.code} className={`border-t border-border/50 ${ri % 2 ? "bg-muted/20" : ""}`}>
+                      <td className={`sticky left-0 z-10 px-3 py-2 ${ri % 2 ? "bg-muted/20" : "bg-card"}`}>
+                        <div className="max-w-[180px] truncate font-medium text-foreground">{r.name}</div>
+                        <div className="font-mono text-[10px] text-muted-foreground">{r.code}</div>
+                        {productChips(r.code, "mt-0.5")}
+                      </td>
+                      {r.ecarts.slice(0, recent.length).map((e, i) => (
+                        <td key={i} className="px-3 py-2 text-center">
+                          {e == null || Math.abs(e) <= 0.001 ? (
+                            <span className="text-muted-foreground/30">·</span>
+                          ) : (
+                            <span className={`inline-flex min-w-[46px] justify-center rounded-md px-1.5 py-0.5 text-[11.5px] font-bold tnum ${
+                              e < 0
+                                ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
+                                : "bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300"
+                            }`}>
+                              {e > 0 ? `+${fmt(e)}` : fmt(e)}
+                            </span>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
                   ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60">
-                {rows.map((r) => (
-                  <tr key={r.code}>
-                    <td className="px-2 py-1.5">
-                      <div className="max-w-[180px] truncate font-medium text-foreground">{r.name}</div>
-                      <div className="font-mono text-[10.5px] text-muted-foreground">{r.code}</div>
-                      {productChips(r.code, "mt-0.5")}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-border bg-rose-50/60 dark:bg-rose-500/10">
+                    <td className="sticky left-0 z-10 bg-rose-50/60 px-3 py-2.5 text-[10.5px] font-bold uppercase tracking-wide text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
+                      Démarque inconnue
                     </td>
-                    {r.ecarts.slice(0, recent.length).map((e, i) => (
-                      <td key={i} className="px-2 py-1.5 text-right tnum">
-                        {e == null ? (
-                          <span className="text-muted-foreground/40">—</span>
-                        ) : (
-                          <span className={`font-semibold ${e < 0 ? "text-amber-600 dark:text-amber-400" : "text-sky-600 dark:text-sky-400"}`}>
-                            {e > 0 ? `+${fmt(e)}` : fmt(e)}
-                          </span>
-                        )}
+                    {demarque.map((d, i) => (
+                      <td key={i} className="px-3 py-2.5 text-center">
+                        {d == null
+                          ? <span className="text-muted-foreground/40">—</span>
+                          : <span className="text-[13px] font-bold tnum text-rose-600 dark:text-rose-400">{d.toFixed(2)} €</span>}
                       </td>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t border-border">
-                  <td className="px-2 py-2 text-[11.5px] font-semibold text-muted-foreground">Démarque inconnue</td>
-                  {demarque.map((d, i) => (
-                    <td key={i} className="px-2 py-2 text-right font-bold tnum text-rose-600 dark:text-rose-400">
-                      {d == null ? <span className="text-muted-foreground/40">—</span> : `${d.toFixed(2)} €`}
-                    </td>
-                  ))}
-                </tr>
-              </tfoot>
-            </table>
-            <p className="mt-2 px-2 text-[10.5px] text-muted-foreground">
-              Écarts en colis (− manque, + excédent). La démarque (€) s&apos;affiche une fois l&apos;inventaire régularisé.
+                </tfoot>
+              </table>
+            </div>
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[10.5px] text-muted-foreground">
+              <span>Écarts en colis :</span>
+              <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded bg-amber-400" /> − manque</span>
+              <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded bg-sky-400" /> + excédent</span>
+              <span className="text-muted-foreground/70">· la démarque (€) s&apos;affiche une fois l&apos;inventaire régularisé.</span>
             </p>
-          </div>
+          </>
         )}
       </SurfaceCard>
     );
