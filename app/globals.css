@@ -571,6 +571,14 @@ html[data-hover-contrast] [class*="hover:bg-accent"]:hover {
   background-color: hsl(var(--accent) / var(--hover-contrast));
 }
 
+/* ═══════════════════════════════════════════════════════════
+   ICÔNES — toutes les icônes (lucide) 30% plus grandes partout
+   (demande). `zoom` agrandit ET reflue la mise en page (la boîte
+   grandit), contrairement à transform:scale qui déborderait. Ne
+   touche QUE les icônes lucide (pas les graphiques / sparklines).
+═══════════════════════════════════════════════════════════ */
+svg.lucide { zoom: 1.3; }
+
 /* Console-specific — soft swap between active clients */
 @keyframes client-swap {
   from { opacity: 0; transform: translateY(6px); filter: blur(4px); }
