@@ -41,6 +41,7 @@ type SapOrder = {
   CardCode: string;
   CardName?: string | null;
   U_TrspCode?: string | null;
+  Cancelled?: string;
   DocumentLines?: SapLine[];
 };
 
@@ -62,7 +63,7 @@ export async function GET() {
       "Orders?$filter=" +
         encodeURIComponent("DocumentStatus eq 'bost_Open'") +
         "&$orderby=DocDueDate asc" +
-        "&$select=DocEntry,DocNum,DocDueDate,CardCode,CardName,U_TrspCode,DocumentLines",
+        "&$select=DocEntry,DocNum,DocDueDate,CardCode,CardName,U_TrspCode,Cancelled,DocumentLines",
     );
   } catch (e) {
     return NextResponse.json(
@@ -71,8 +72,11 @@ export async function GET() {
     );
   }
 
-  // On ne garde que les commandes livrées dans la fenêtre J+1…J+4.
-  orders = orders.filter((o) => o.DocDueDate && allowedDueDays.has(parisDay(o.DocDueDate)));
+  // On exclut les commandes ANNULÉES (déduction 100% : elles ne partent pas) et on
+  // ne garde que celles livrées dans la fenêtre J+1…J+4.
+  orders = orders.filter(
+    (o) => o.Cancelled !== "tYES" && o.DocDueDate && allowedDueDays.has(parisDay(o.DocDueDate)),
+  );
 
   // Segment client (GMS/EXPORT/CHR) déduit du groupe SAP. Colonnes lues en raw SQL
   // (groupe & géo non typés dans le client Prisma, cf. lib/pilotageGeo).
