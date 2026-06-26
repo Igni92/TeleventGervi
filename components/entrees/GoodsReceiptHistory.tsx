@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ClipboardList, Search, ChevronRight, ChevronDown,
-  AlertTriangle, Truck, X, Maximize2, Ban,
+  AlertTriangle, Truck, X, Maximize2, Ban, Undo2,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
@@ -365,6 +365,34 @@ function ReceiptDetail({
   // Annulation de la réception (EM) — uniquement si non clôturée (pas facturée).
   const [cancelConfirm, setCancelConfirm] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  // Retour fournisseur (partiel/total) — colis à retourner par ligne.
+  const [returnOpen, setReturnOpen] = useState(false);
+  const [returnQty, setReturnQty] = useState<Record<number, string>>({});
+  const [returning, setReturning] = useState(false);
+  const openReturn = () => {
+    const init: Record<number, string> = {};
+    receipt.lines.forEach((l) => { init[l.lineNum] = String(l.packageQuantity ?? l.pieceQuantity ?? 0); });
+    setReturnQty(init);
+    setReturnOpen(true);
+  };
+  const submitReturn = async () => {
+    const lines = receipt.lines
+      .map((l) => ({ lineNum: l.lineNum, packageQuantity: parseFloat(returnQty[l.lineNum] ?? "0") }))
+      .filter((l) => Number.isFinite(l.packageQuantity) && l.packageQuantity > 0);
+    if (lines.length === 0) { toast.error("Indique au moins une quantité à retourner."); return; }
+    setReturning(true);
+    try {
+      const res = await fetch(`/api/sap/goods-receipts/${receipt.docEntry}/return`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j.ok) { toast.error(j.error || "Retour impossible"); return; }
+      toast.success(`Retour fournisseur #${j.docNum} créé depuis l'EM #${receipt.docNum}`);
+      setReturnOpen(false);
+      await onModified?.();
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setReturning(false); }
+  };
   const cancelReceipt = async () => {
     setCancelling(true);
     try {
@@ -649,6 +677,10 @@ function ReceiptDetail({
             <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
             Déclarer un incident
           </Button>
+          {/* Retour fournisseur (partiel/total) */}
+          <Button variant="outline" size="sm" onClick={openReturn} className="gap-1.5">
+            <Undo2 className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" /> Retour fournisseur
+          </Button>
           {/* Annuler la réception (sort le stock entré) — masqué si EM clôturée (facturée). */}
           {canEditPrices && (
             !cancelConfirm ? (
@@ -672,6 +704,48 @@ function ReceiptDetail({
               </span>
             )
           )}
+        </div>
+      )}
+
+      {/* Panneau RETOUR FOURNISSEUR — colis à retourner par ligne (défaut = reçu) */}
+      {returnOpen && (
+        <div className="rounded-xl border border-sky-400/50 bg-sky-50/60 dark:bg-sky-950/20 p-3 space-y-2.5">
+          <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+            <Undo2 className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+            Retour fournisseur — entrée #{receipt.docNum}
+          </div>
+          <p className="text-[11.5px] text-muted-foreground">
+            Choisis le nombre de colis à retourner par ligne (0 = ne pas retourner). SAP crée un
+            retour qui <b>sort le stock</b> et sert de base à un avoir fournisseur.
+          </p>
+          <ul className="space-y-1.5">
+            {receipt.lines.map((l) => {
+              const maxQ = l.packageQuantity ?? l.pieceQuantity ?? 0;
+              const unit = l.packageQuantity != null ? "colis" : "pie";
+              return (
+                <li key={l.lineNum} className="flex items-center gap-2 text-[12.5px]">
+                  <span className="min-w-0 flex-1 truncate text-foreground">{l.itemName ?? l.itemCode}</span>
+                  <span className="text-[11px] text-muted-foreground shrink-0">reçu {maxQ} {unit}</span>
+                  <NumberInput
+                    value={returnQty[l.lineNum] === "" || returnQty[l.lineNum] == null ? null : parseFloat(returnQty[l.lineNum])}
+                    onValueChange={(n) => setReturnQty((c) => ({ ...c, [l.lineNum]: n == null ? "" : String(n) }))}
+                    min={0} max={maxQ} step={1} decimals={2} allowEmpty placeholder="0"
+                    className="h-8 w-20 text-right shrink-0"
+                  />
+                </li>
+              );
+            })}
+          </ul>
+          <div className="flex items-center gap-2 pt-0.5">
+            <button type="button" onClick={submitReturn} disabled={returning}
+              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[13px] font-semibold disabled:opacity-60">
+              {returning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />} Créer le retour
+            </button>
+            <button type="button" onClick={() => setReturnOpen(false)} disabled={returning}
+              className="inline-flex items-center h-9 px-4 rounded-lg border border-border text-[13px] font-medium text-muted-foreground hover:text-foreground">
+              Fermer
+            </button>
+          </div>
         </div>
       )}
     </div>
