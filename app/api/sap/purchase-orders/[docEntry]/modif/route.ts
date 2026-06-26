@@ -29,7 +29,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   if (!Number.isFinite(docEntry)) return NextResponse.json({ error: "docEntry invalide" }, { status: 400 });
 
-  let body: { lines?: { itemCode: string; packageQuantity: number; warehouseCode: string; price?: number }[] };
+  let body: { lines?: { itemCode: string; packageQuantity: number; warehouseCode: string; price?: number; lineTotal?: number }[] };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -87,7 +87,14 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
       PackageQuantity: l.packageQuantity,
       WarehouseCode: l.warehouseCode,
     };
-    if (l.price != null && l.price > 0) { line.UnitPrice = l.price; line.Price = l.price; }
+    // Total HT FORCÉ (l.lineTotal) → SAP recalcule le prix unitaire depuis le
+    // total. Sinon, prix unitaire saisi (le total se déduit de qté × PU).
+    if (l.lineTotal != null && l.lineTotal >= 0) {
+      line.LineTotal = l.lineTotal;
+    } else if (l.price != null && l.price > 0) {
+      line.UnitPrice = l.price;
+      line.Price = l.price;
+    }
     return line;
   });
 
