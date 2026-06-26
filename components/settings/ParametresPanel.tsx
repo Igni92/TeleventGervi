@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useReducedMotion } from "framer-motion";
 import {
-  Moon, Sun, Palette, LayoutList, Sparkles, BadgePercent, Check, Wand2, Database,
+  Moon, Sun, Palette, LayoutList, Sparkles, BadgePercent, Check, Wand2, Database, Contrast,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { ClientImportButton } from "@/components/clients/ClientImportButton";
@@ -13,6 +13,7 @@ import { useTheme } from "@/components/ThemeProvider";
 import { cn } from "@/lib/utils";
 import {
   SETTING_KEYS, readSetting, writeSetting, onSettingChange,
+  hoverContrastKey, applyHoverContrast, HOVER_CONTRAST_DEFAULT,
 } from "@/components/settings/app-settings";
 
 /**
@@ -146,7 +147,7 @@ function applyDensity(id: DensityId) {
   else document.documentElement.setAttribute("data-density", id);
 }
 
-export function ParametresPanel({ admin = false }: { admin?: boolean }) {
+export function ParametresPanel({ admin = false, userKey = null }: { admin?: boolean; userKey?: string | null }) {
   const { theme, toggleTheme } = useTheme();
   const systemReduce = useReducedMotion();
 
@@ -155,6 +156,9 @@ export function ParametresPanel({ admin = false }: { admin?: boolean }) {
   const [animations, setAnimations] = useState<"auto" | "on" | "off">("auto");
   const [promoAnim, setPromoAnim] = useState<"on" | "off">("on");
   const [promoNotifs, setPromoNotifs] = useState<"on" | "off">("on");
+  // Contraste de survol — PROPRE à l'utilisateur connecté (clé suffixée).
+  const [contrast, setContrast] = useState<number>(HOVER_CONTRAST_DEFAULT);
+  const [contrastSet, setContrastSet] = useState<boolean>(false);
 
   // Hydratation depuis le stockage local + abonnement aux changements (autres
   // onglets / autres widgets qui écriraient les mêmes clés).
@@ -174,20 +178,41 @@ export function ParametresPanel({ admin = false }: { admin?: boolean }) {
     setPromoAnim(readSetting(SETTING_KEYS.promoBannerAnim, "on") === "off" ? "off" : "on");
     setPromoNotifs(readSetting(SETTING_KEYS.promoNotifs, "on") === "off" ? "off" : "on");
 
+    // Contraste de survol propre à l'utilisateur (valeur vide = jamais réglé).
+    const cRaw = readSetting(hoverContrastKey(userKey), "");
+    if (cRaw !== "" && Number.isFinite(Number(cRaw))) {
+      const cv = Math.max(0, Math.min(100, Number(cRaw)));
+      setContrast(cv); setContrastSet(true);
+    } else {
+      setContrast(HOVER_CONTRAST_DEFAULT); setContrastSet(false);
+    }
+
     return onSettingChange((key, value) => {
       if (key === SETTING_KEYS.colorimetrie && value) setColorimetrie(value as ColorId);
       if (key === SETTING_KEYS.density && value) { setDensite(value as DensityId); applyDensity(value as DensityId); }
       if (key === SETTING_KEYS.animations && value) setAnimations(value as typeof animations);
       if (key === SETTING_KEYS.promoBannerAnim) setPromoAnim(value === "off" ? "off" : "on");
       if (key === SETTING_KEYS.promoNotifs) setPromoNotifs(value === "off" ? "off" : "on");
+      if (key === hoverContrastKey(userKey)) {
+        if (value && Number.isFinite(Number(value))) { setContrast(Math.max(0, Math.min(100, Number(value)))); setContrastSet(true); }
+        else { setContrast(HOVER_CONTRAST_DEFAULT); setContrastSet(false); }
+      }
     });
-  }, []);
+  }, [userKey]);
 
   const onColorimetrie = (id: ColorId) => {
     setColorimetrie(id);
     applyColorimetrie(id);
     // Notifie l'onglet courant (le storage natif couvre les autres onglets).
     writeSetting(SETTING_KEYS.colorimetrie, id);
+  };
+
+  /** Réglage du contraste de survol : applique à chaud + mémorise (par user). */
+  const onContrast = (pct: number) => {
+    const v = Math.max(0, Math.min(100, Math.round(pct)));
+    setContrast(v); setContrastSet(true);
+    applyHoverContrast(v);
+    writeSetting(hoverContrastKey(userKey), String(v));
   };
 
   const effectiveAnim =
@@ -243,6 +268,57 @@ export function ParametresPanel({ admin = false }: { admin?: boolean }) {
             options={DENSITES}
           />
         </SettingRow>
+      </SurfaceCard>
+
+      {/* 3 bis ── Contraste de survol (propre à l'utilisateur) ──────── */}
+      <SurfaceCard accent="sky" title="Contraste de survol" icon={<Contrast className="h-3.5 w-3.5" />}>
+        <div className="space-y-4">
+          <SettingRow
+            title="Surbrillance au survol"
+            desc="Intensité de la surbrillance quand le curseur passe d'une ligne à l'autre, partout dans l'application. Réglage propre à votre session — il vous suit, même sur un poste partagé."
+          >
+            <div className="flex items-center gap-3 min-w-[210px]">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={contrast}
+                onChange={(e) => onContrast(Number(e.target.value))}
+                aria-label="Contraste de la surbrillance au survol"
+                className="w-40 h-1.5 rounded-full appearance-none cursor-pointer bg-secondary accent-brand-500"
+              />
+              <span className="tnum text-[13px] font-semibold text-foreground w-10 text-right">
+                {contrast}%
+              </span>
+            </div>
+          </SettingRow>
+          {/* Aperçu : 3 lignes qui réagissent au survol comme le reste de l'app. */}
+          <div className="rounded-lg border border-border/60 overflow-hidden">
+            {["Survolez-moi pour voir l'effet", "Ligne d'exemple", "Ligne d'exemple"].map((t, i) => (
+              <div
+                key={i}
+                className="px-3 py-2 text-[12.5px] text-foreground/80 hover:bg-secondary transition-colors cursor-default border-b border-border/40 last:border-0"
+              >
+                {t}
+              </div>
+            ))}
+          </div>
+          {contrastSet && (
+            <button
+              type="button"
+              onClick={() => {
+                setContrastSet(false);
+                setContrast(HOVER_CONTRAST_DEFAULT);
+                applyHoverContrast(null);
+                writeSetting(hoverContrastKey(userKey), "");
+              }}
+              className="text-[11.5px] font-medium text-muted-foreground hover:text-foreground hover:underline"
+            >
+              Réinitialiser (rendu par défaut)
+            </button>
+          )}
+        </div>
       </SurfaceCard>
 
       {/* 4 ── Animations ───────────────────────────────────────────── */}

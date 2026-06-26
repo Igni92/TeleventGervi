@@ -6,6 +6,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Loader2, ShieldAlert, Users, ArrowRight, Eye, Target, X, BadgeEuro } from "lucide-react";
 import { Sparkline } from "@/components/charts/Sparkline";
+import { fullNameFromSlp } from "@/lib/salespeople";
 
 /**
  * Liste des commerciaux (rattachés à un compte TeleVent) — activité 12 mois.
@@ -151,7 +152,7 @@ function CommercialCard({ c, isAdmin, onObjectifs }: { c: CommercialSap; isAdmin
             </span>
             <div className="min-w-0">
               <p className="text-[14px] font-semibold text-foreground leading-tight truncate" title={c.email}>
-                {localPart(c.email)}
+                {fullNameFromSlp(c.email) ?? localPart(c.email)}
               </p>
               <p className="text-[10px] text-muted-foreground truncate">{c.email}</p>
             </div>

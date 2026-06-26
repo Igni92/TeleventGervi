@@ -11,6 +11,8 @@ export default async function ParametresPage() {
   if (!session) redirect("/login");
   // L'import clients SAP (action sensible) n'apparaît dans Paramètres que pour un admin.
   const admin = await requireAdmin(session);
+  // Identité de session : sert à mémoriser le contraste de survol PAR utilisateur.
+  const userKey = session.user?.email ?? null;
 
   return (
     <div className="space-y-6 animate-fade-up">
@@ -25,7 +27,7 @@ export default async function ParametresPage() {
           reste mémorisé sur ce poste.
         </p>
       </header>
-      <ParametresPanel admin={admin} />
+      <ParametresPanel admin={admin} userKey={userKey} />
     </div>
   );
 }

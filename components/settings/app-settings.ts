@@ -36,7 +36,46 @@ export const SETTING_KEYS = {
    * Honoré par AmbientBackground (attribut `data-reduce-anim` sur <html>).
    */
   animations: "televente:animations",
+  /**
+   * Contraste de la surbrillance au survol des lignes (0–100). PROPRE À CHAQUE
+   * UTILISATEUR : la clé réelle est suffixée par l'identité de session
+   * (cf. hoverContrastKey) pour que jm/mm aient chacun leur réglage, même sur
+   * un poste partagé. Honoré par HoverContrastGate (var `--hover-contrast` +
+   * attribut `data-hover-contrast` sur <html>).
+   */
+  hoverContrast: "televente:hoverContrast",
 } as const;
+
+/** Valeur de contraste de survol par défaut (en %, 0–100). */
+export const HOVER_CONTRAST_DEFAULT = 60;
+
+/**
+ * Clé localStorage du contraste de survol POUR UN UTILISATEUR donné. On
+ * suffixe par l'e-mail (ou un id) de session : le réglage suit la personne,
+ * pas le poste — deux commerciaux sur la même machine gardent chacun le leur.
+ */
+export function hoverContrastKey(user: string | null | undefined): string {
+  const id = (user ?? "").trim().toLowerCase() || "anon";
+  return `${SETTING_KEYS.hoverContrast}:${id}`;
+}
+
+/**
+ * Applique le contraste de survol sur <html> : pose `--hover-contrast` (0–1) et
+ * l'attribut `data-hover-contrast` qui active les règles CSS. `null` retire le
+ * réglage (retour au rendu Tailwind d'origine).
+ */
+export function applyHoverContrast(pct: number | null): void {
+  if (typeof document === "undefined") return;
+  const r = document.documentElement;
+  if (pct == null) {
+    r.removeAttribute("data-hover-contrast");
+    r.style.removeProperty("--hover-contrast");
+    return;
+  }
+  const clamped = Math.max(0, Math.min(100, pct));
+  r.style.setProperty("--hover-contrast", String(clamped / 100));
+  r.setAttribute("data-hover-contrast", "1");
+}
 
 /** Évènement same-tab émis après chaque écriture via writeSetting. */
 export const SETTINGS_EVENT = "televente:setting";

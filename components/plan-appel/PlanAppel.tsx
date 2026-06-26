@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { SALESPEOPLE, nameFromInitials, normalizeSlp } from "@/lib/salespeople";
+import { SALESPEOPLE, fullNameFromSlp, normalizeSlp } from "@/lib/salespeople";
 import { ClientLink } from "@/components/ClientLink";
 import { SortArrow, nextSort, type SortDir } from "@/components/ui/sort";
 import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
@@ -109,7 +109,7 @@ function AssignSelect({ value, options, placeholder, onChange }: {
     >
       <option value="">{placeholder}</option>
       {/* On stocke le trigramme (valeur), on affiche le nom TeleVent (label). */}
-      {opts.map((o) => <option key={o} value={o}>{nameFromInitials(o) ?? o}</option>)}
+      {opts.map((o) => <option key={o} value={o}>{fullNameFromSlp(o) ?? o}</option>)}
     </select>
   );
 }
@@ -296,9 +296,9 @@ export function PlanAppel() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher (code, nom)…" className="pl-9" />
         </div>
-        <FilterSelect value={vendeur} onChange={setVendeur} placeholder="Vendeur" options={[["", "Tous vendeurs"], ...VENDEURS.map((v) => [v, nameFromInitials(v) ?? v] as [string, string])]} />
+        <FilterSelect value={vendeur} onChange={setVendeur} placeholder="Vendeur" options={[["", "Tous vendeurs"], ...VENDEURS.map((v) => [v, fullNameFromSlp(v) ?? v] as [string, string])]} />
         <FilterSelect value={commercial} onChange={setCommercial} placeholder="Commercial"
-          options={[["", "Tous commerciaux"], ["__none__", "Non assigné"], ...VENDEURS.map((v) => [v, nameFromInitials(v) ?? v] as [string, string])]} />
+          options={[["", "Tous commerciaux"], ["__none__", "Non assigné"], ...VENDEURS.map((v) => [v, fullNameFromSlp(v) ?? v] as [string, string])]} />
         <FilterSelect value={type} onChange={setType} placeholder="Type" options={[["", "Tous types"], ["GMS", "GMS"], ["EXPORT", "EXPORT"], ["CHR", "CHR"]]} />
         <FilterSelect value={active} onChange={setActive} placeholder="Activation" options={[["", "Actif + inactif"], ["actifs", "Actifs"], ["inactifs", "À activer"]]} />
         <FilterSelect value={stale} onChange={setStale} placeholder="Retard cde" options={[["", "Toute ancienneté"], ["14", "≥ 14 j"], ["30", "≥ 30 j"], ["60", "≥ 60 j"]]} />
@@ -378,7 +378,7 @@ export function PlanAppel() {
                     )}
                   </div>
                   <div className="text-[12px] font-mono text-muted-foreground mt-1">
-                    {c.code}{c.vendeur ? ` · vend. ${c.vendeur}` : ""}
+                    {c.code}{c.vendeur ? ` · vend. ${fullNameFromSlp(c.vendeur)}` : ""}
                   </div>
                 </Link>
               </div>
@@ -460,7 +460,7 @@ function BulkActionSelect({ label, options, onPick }: { label: string; options: 
       className="h-8 rounded-md border border-brand-400/50 bg-card text-[12px] px-2 font-medium focus:outline-none focus:ring-1 focus:ring-brand-500"
     >
       <option value="">{label}…</option>
-      {options.map((o) => <option key={o} value={o}>{nameFromInitials(o) ?? o}</option>)}
+      {options.map((o) => <option key={o} value={o}>{fullNameFromSlp(o) ?? o}</option>)}
       <option value="__none__">— retirer —</option>
     </select>
   );

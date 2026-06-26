@@ -547,6 +547,30 @@ html[data-anim="force"] .ambient-aurora-2 { animation: ambient-drift-b 23s ease-
 html[data-anim="force"] .ambient-rings-spin { animation: ambient-spin 60s linear infinite; }
 html[data-anim="force"] .ambient-rings-spin-r { animation: ambient-spin 85s linear infinite reverse; }
 
+/* ═══════════════════════════════════════════════════════════
+   CONTRASTE DE SURVOL (réglage « Contraste » — page /parametres,
+   propre à chaque utilisateur/session). Pilote l'intensité de la
+   surbrillance quand le curseur passe d'une ligne à l'autre sur
+   TOUTE l'app : la quasi-totalité des lignes interactives utilise
+   `hover:bg-secondary|muted|accent` — on harmonise leur opacité de
+   survol via la variable `--hover-contrast` (0 → invisible,
+   1 → plein). Activé seulement si l'attribut `data-hover-contrast`
+   est posé sur <html> (HoverContrastGate) : sans réglage explicite,
+   l'app garde exactement son rendu d'origine.
+
+   Spécificité (html[attr] + [class*] + :hover) > classe Tailwind
+   `.hover\:bg-secondary\/60:hover` → override sans !important. */
+:root { --hover-contrast: 0.6; }
+html[data-hover-contrast] [class*="hover:bg-secondary"]:hover {
+  background-color: hsl(var(--secondary) / var(--hover-contrast));
+}
+html[data-hover-contrast] [class*="hover:bg-muted"]:hover {
+  background-color: hsl(var(--muted) / var(--hover-contrast));
+}
+html[data-hover-contrast] [class*="hover:bg-accent"]:hover {
+  background-color: hsl(var(--accent) / var(--hover-contrast));
+}
+
 /* Console-specific — soft swap between active clients */
 @keyframes client-swap {
   from { opacity: 0; transform: translateY(6px); filter: blur(4px); }
