@@ -69,8 +69,8 @@ function isDue(d: { open: boolean; dueDate: string | null }): boolean {
 
 function DueBadge() {
   return (
-    <span className="inline-flex items-center gap-1 rounded-md px-2 h-6 text-[11px] font-semibold bg-amber-500/15 border border-amber-500/60 text-amber-600 dark:text-amber-400">
-      <AlertTriangle className="h-3 w-3" /> À réceptionner
+    <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2 h-6 text-[11px] font-semibold bg-amber-500/15 border border-amber-500/60 text-amber-600 dark:text-amber-400">
+      <AlertTriangle className="h-3 w-3 shrink-0" /> À réceptionner
     </span>
   );
 }
@@ -258,7 +258,7 @@ export function PurchaseOrderHistory() {
                   <th className="text-left px-3 py-2 font-semibold">Fournisseur</th>
                   <th className="text-left px-3 py-2 font-semibold w-24">Commande</th>
                   <th className="text-left px-3 py-2 font-semibold w-24">Livraison</th>
-                  <th className="text-left px-3 py-2 font-semibold w-28">Statut</th>
+                  <th className="text-left px-3 py-2 font-semibold w-36">Statut</th>
                   <th className="text-right px-3 py-2 font-semibold w-28">Total HT</th>
                   <th className="w-10" />
                 </tr>
