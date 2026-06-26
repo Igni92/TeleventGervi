@@ -194,6 +194,32 @@ export function LivraisonDetail() {
     [load],
   );
 
+  // Changement de DATE DE LIVRAISON d'une commande (écrit ORDR.DocDueDate), puis
+  // rechargement (la commande quitte la vue si elle change de jour).
+  const changeDate = useCallback(
+    async (docEntry: number, dueDate: string): Promise<boolean> => {
+      try {
+        const res = await fetch(`/api/sap/orders/${docEntry}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dueDate }),
+        });
+        const j = await res.json().catch(() => null);
+        if (!res.ok || !j?.ok) {
+          toast.error(j?.error ? `Échec : ${j.error}` : "Échec du changement de date");
+          return false;
+        }
+        toast.success(`Livraison déplacée au ${formatDeliveryDate(dueDate)}`);
+        load();
+        return true;
+      } catch {
+        toast.error("SAP injoignable — date non modifiée");
+        return false;
+      }
+    },
+    [load],
+  );
+
   // ── Filtre par segment client (GMS / CHR / EXPORT) ──
   const [segment, setSegment] = useState<Segment>("ALL");
   // ── Repliage des groupes transporteur (clé = code transporteur) ──
@@ -334,7 +360,7 @@ export function LivraisonDetail() {
             const key = c.code ?? "__none__";
             return (
               <CarrierGroup
-                key={key} carrier={c} carriers={carriers} onCarrierChange={changeCarrier}
+                key={key} carrier={c} carriers={carriers} onCarrierChange={changeCarrier} onDateChange={changeDate}
                 collapsed={collapsed.has(key)} onToggleCollapse={() => toggleCollapse(key)}
               />
             );
@@ -483,11 +509,12 @@ function SummaryRow({ totals, loading }: { totals: Totals; loading: boolean }) {
    Groupe transporteur — en-tête + cartes clients
 ═════════════════════════════════════════════════════════════ */
 function CarrierGroup({
-  carrier, carriers, onCarrierChange, collapsed, onToggleCollapse,
+  carrier, carriers, onCarrierChange, onDateChange, collapsed, onToggleCollapse,
 }: {
   carrier: Carrier;
   carriers: CarrierOption[];
   onCarrierChange: (docEntry: number, sapValue: string) => Promise<boolean>;
+  onDateChange: (docEntry: number, dueDate: string) => Promise<boolean>;
   collapsed: boolean;
   onToggleCollapse: () => void;
 }) {
@@ -534,7 +561,7 @@ function CarrierGroup({
       {!collapsed && (
         <ul className="divide-y divide-border/60">
           {carrier.docs.map((d) => (
-            <OrderRow key={d.docEntry} doc={d} carriers={carriers} onCarrierChange={onCarrierChange} />
+            <OrderRow key={d.docEntry} doc={d} carriers={carriers} onCarrierChange={onCarrierChange} onDateChange={onDateChange} />
           ))}
         </ul>
       )}
@@ -611,14 +638,26 @@ function Metric({ label, value, strong, className }: { label: string; value: str
    Ligne commande — repliable vers le détail des lignes
 ═════════════════════════════════════════════════════════════ */
 function OrderRow({
-  doc, carriers, onCarrierChange,
+  doc, carriers, onCarrierChange, onDateChange,
 }: {
   doc: Doc;
   carriers: CarrierOption[];
   onCarrierChange: (docEntry: number, sapValue: string) => Promise<boolean>;
+  onDateChange: (docEntry: number, dueDate: string) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
   const [savingCarrier, setSavingCarrier] = useState(false);
+
+  // Date de livraison (DocDueDate) — modifiable directement sur la ligne. Au
+  // changement → PATCH + rechargement (la commande quitte la vue si elle bouge).
+  const dueISO = (doc.dueDate ?? "").slice(0, 10);
+  const [savingDate, setSavingDate] = useState(false);
+  async function handleDate(value: string) {
+    if (!value || value === dueISO) return;
+    setSavingDate(true);
+    await onDateChange(doc.docEntry, value);
+    setSavingDate(false);
+  }
 
   // N° de commande (réf. client) — éditable directement sur la ligne. Sauvé sur
   // blur/Entrée (PATCH NumAtCard) seulement si modifié. `savedRef` = dernière
@@ -764,6 +803,20 @@ function OrderRow({
                 className="h-7 w-[140px] rounded-md border border-border bg-card pl-7 pr-6 text-[11.5px] font-medium text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
               />
               {savingRef && <Loader2 className="pointer-events-none absolute right-1.5 h-3 w-3 animate-spin text-muted-foreground" />}
+            </div>
+            {/* Date de livraison — modifiable directement ici */}
+            <div className="relative inline-flex items-center">
+              <CalendarDays className="pointer-events-none absolute left-2 h-3 w-3 text-muted-foreground" />
+              <input
+                type="date"
+                value={dueISO}
+                disabled={savingDate || !doc.open}
+                onChange={(e) => e.target.value && handleDate(e.target.value)}
+                title={doc.open ? "Changer la date de livraison du BL" : "Commande livrée — date figée"}
+                aria-label={`Date de livraison de la commande ${doc.docNum}`}
+                className="h-7 rounded-md border border-border bg-card pl-7 pr-2 text-[11.5px] font-medium text-foreground tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60 disabled:cursor-not-allowed"
+              />
+              {savingDate && <Loader2 className="pointer-events-none absolute right-1.5 h-3 w-3 animate-spin text-muted-foreground" />}
             </div>
           </div>
         </div>
