@@ -218,13 +218,17 @@ export function PromoBanner({
         "flex items-center gap-2.5",
         compact ? "px-3 py-1.5 min-h-[44px]" : "px-4 py-2.5 min-h-[58px]",
       )}>
-        {/* Label « PROMOS » façon BFM — boîte rouge, toujours visible */}
-        <span className={cn(
-          "shrink-0 inline-flex items-center gap-1 rounded-md bg-rose-500 font-extrabold uppercase tracking-[0.1em] text-white",
-          compact ? "px-1.5 py-0.5 text-[9.5px]" : "px-2 py-1 text-[10.5px]",
-        )}>
+        {/* Label « PROMOS » façon BFM — boîte rouge, cliquable → page Promotions */}
+        <Link
+          href="/promos"
+          title="Voir les promotions"
+          className={cn(
+            "shrink-0 inline-flex items-center gap-1 rounded-md bg-rose-500 font-extrabold uppercase tracking-[0.1em] text-white transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300",
+            compact ? "px-1.5 py-0.5 text-[9.5px]" : "px-2 py-1 text-[10.5px]",
+          )}
+        >
           <BadgePercent className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} /> Promos
-        </span>
+        </Link>
 
         {animOn ? (
           // ── Ticker défilant continu (crawl BFM) : boucle sans couture ──
