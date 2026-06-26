@@ -53,6 +53,7 @@ export async function GET(req: NextRequest) {
     Comments?: string;
     NumAtCard?: string;
     U_TrspCode?: string;
+    U_TrspHeur?: string;
     DocumentLines?: ListedLine[];
   };
 
@@ -67,7 +68,7 @@ export async function GET(req: NextRequest) {
     let orders: SapOrderListed[];
     try {
       orders = await sap.getAll<SapOrderListed>(
-        `Orders?$select=${BASE_SELECT},U_TrspCode&$filter=${filter}&$orderby=CardName asc`,
+        `Orders?$select=${BASE_SELECT},U_TrspCode,U_TrspHeur&$filter=${filter}&$orderby=CardName asc`,
         { pageSize: 200, maxPages: 20 },
       );
     } catch {
@@ -177,6 +178,7 @@ export async function GET(req: NextRequest) {
         comments: d.Comments ?? "",
         numAtCard: d.NumAtCard ?? "",
         trspCode,
+        trspHeure: d.U_TrspHeur?.trim() || null,
         carrierName: trspCode ? carrierByCode.get(trspCode) ?? trspCode : null,
         clientType: typeByCardCode.get(d.CardCode) ?? null,   // GMS | CHR | EXPORT | null
         prepared: faiteByDoc.get(d.DocEntry) ?? false,        // « faite » = coché manuellement

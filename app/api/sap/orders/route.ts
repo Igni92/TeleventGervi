@@ -4,6 +4,7 @@ import { docLabel } from "@/lib/docLabel";
 import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { getTrclDefaultCarrier } from "@/lib/clientCarriers";
+import { getTransporteurTimbre } from "@/lib/transporteurs";
 import { sap } from "@/lib/sapb1";
 import { mirrorCreatedOrder } from "@/lib/sapMirror";
 import { decrementLocalStock } from "@/lib/stockSync";
@@ -362,7 +363,17 @@ export async function POST(req: NextRequest) {
       console.warn(`[Order] Résolution transporteur par défaut (SERG_TRCL) échouée (non-bloquant):`, (e as Error).message);
     }
   }
-  if (trspCode) payload.U_TrspCode = trspCode;
+  if (trspCode) {
+    payload.U_TrspCode = trspCode;
+    // Timbre du transporteur (en-tête SERGTRS) → ORDR.U_Timbre. L'heure de tournée
+    // (U_TrspHeur) reste fixée dans « Détail livraison » (choix de la tournée).
+    try {
+      const timbre = await getTransporteurTimbre(trspCode);
+      if (timbre != null) payload.U_Timbre = timbre;
+    } catch (e) {
+      console.warn(`[Order] Timbre SERGTRS '${trspCode}' non résolu (non-bloquant):`, (e as Error).message);
+    }
+  }
   // ⚠️ Plus de DocumentAdditionalExpenses doc-level — TPF2/TPF3 sont désormais
   // attachés par ligne dans DocumentLineAdditionalExpenses (cf. BL #24011199 manuel)
 

@@ -204,6 +204,30 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Mode BP : dump des champs U_* + adresse de la FICHE CLIENT (BusinessPartners)
+  // pour voir si le transporteur/tournée par défaut du client y vit (UDF), et
+  // récupérer son département (pour rapprocher de SERG_TRS1.U_Des). ?bp=AARR,ABET
+  if (sp.get("bp") !== null) {
+    const cards = (sp.get("bp") || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const data: Record<string, unknown> = {};
+    for (const cc of cards) {
+      try {
+        const bp = await sap.get<Record<string, unknown>>(`BusinessPartners('${cc.replace(/'/g, "''")}')`, { env: "prod" });
+        const ship = (bp.BPAddresses as Array<Record<string, unknown>> | undefined)?.filter((a) => a.AddressType === "bo_ShipTo")
+          .map((a) => ({ AddressName: a.AddressName, Street: a.Street, ZipCode: a.ZipCode, City: a.City, County: a.County }));
+        data[cc] = {
+          CardCode: bp.CardCode, CardName: bp.CardName,
+          ZipCode: bp.ZipCode, City: bp.City, MailZipCode: bp.MailZipCode, MailCity: bp.MailCity,
+          shipTo: ship,
+          uFields: uFields(bp),
+        };
+      } catch (e) {
+        data[cc] = { error: e instanceof Error ? e.message : String(e) };
+      }
+    }
+    return NextResponse.json({ ok: true, mode: "bp", note: "Cherche U_TrspCode / tournée / heure sur la fiche client + son département (ZipCode/County) pour rapprocher de SERG_TRS1.U_Des.", data });
+  }
+
   try {
     // 1. BL cibles (par DocNum, sinon 6 récents, éventuellement filtrés client)
     type Ord = Record<string, unknown> & { DocNum: number; DocEntry: number; CardCode: string; CardName?: string; U_TrspCode?: string };

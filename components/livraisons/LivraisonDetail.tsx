@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Truck, Boxes, Scale, Users, FileText, Receipt,
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
@@ -15,6 +15,7 @@ import {
 } from "@/lib/livraison";
 
 interface CarrierOption { name: string; sapValue: string }
+interface Tournee { lineId: number; nom: string; des: string; heure: string | null }
 
 /* ─────────────────────────────────────────────────────────────
    Types (miroir de /api/livraisons)
@@ -42,6 +43,7 @@ interface Doc {
   comments: string;
   numAtCard: string;
   trspCode: string | null;
+  trspHeure: string | null;
   carrierName: string | null;
   clientType: string | null;   // GMS | CHR | EXPORT | null
   prepared: boolean;           // « faite » — coché manuellement
@@ -116,22 +118,42 @@ export function LivraisonDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [carriers, setCarriers] = useState<CarrierOption[]>([]);
+  // Tournées par transporteur (SERGTRS), chargées à la demande quand on ouvre le
+  // sélecteur de tournée d'une commande. Cache mémoire + dédup des fetchs.
+  const [tourneesByCode, setTourneesByCode] = useState<Record<string, Tournee[]>>({});
+  const tourneesLoading = useRef<Set<string>>(new Set());
 
-  // Liste des transporteurs (pour le changement direct par commande).
+  // Catalogue des transporteurs (SERGTRS) pour le changement direct par commande.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/carriers")
+    fetch("/api/transporteurs")
       .then((r) => r.json())
       .then((j) => {
         if (cancelled || !j?.ok) return;
-        const opts: CarrierOption[] = (j.carriers ?? [])
-          .filter((c: { sapValue?: string | null }) => c.sapValue)
-          .map((c: { name: string; sapValue: string }) => ({ name: c.name, sapValue: c.sapValue }));
+        const opts: CarrierOption[] = (j.transporteurs ?? [])
+          .filter((t: { code?: string | null }) => t.code)
+          .map((t: { name: string; code: string }) => ({ name: t.name, sapValue: t.code }));
         setCarriers(opts);
       })
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
+
+  // Charge (une fois) les tournées d'un transporteur pour peupler le sélecteur.
+  const loadTournees = useCallback(async (code: string) => {
+    const key = code.trim().toUpperCase();
+    if (!key || tourneesByCode[key] || tourneesLoading.current.has(key)) return;
+    tourneesLoading.current.add(key);
+    try {
+      const r = await fetch(`/api/transporteurs?code=${encodeURIComponent(code)}`);
+      const j = await r.json().catch(() => null);
+      if (j?.ok && j.transporteur) {
+        setTourneesByCode((prev) => ({ ...prev, [key]: j.transporteur.tournees ?? [] }));
+      }
+    } catch { /* ignore */ } finally {
+      tourneesLoading.current.delete(key);
+    }
+  }, [tourneesByCode]);
 
   const auto = useMemo(() => nextDeliveryDate(), []);
   const holiday = frenchHolidayLabel(date);
@@ -175,21 +197,50 @@ export function LivraisonDetail() {
   const changeCarrier = useCallback(
     async (docEntry: number, sapValue: string): Promise<boolean> => {
       try {
+        // Changer de transporteur réinitialise la tournée (heure) : elle dépend du
+        // transporteur. On envoie trspHeure:"" → le serveur vide U_TrspHeur et
+        // re-résout U_Timbre pour le nouveau transporteur.
         const res = await fetch(`/api/sap/orders/${docEntry}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ trspCode: sapValue }),
+          body: JSON.stringify({ trspCode: sapValue, trspHeure: "" }),
         });
         const j = await res.json().catch(() => null);
         if (!res.ok || !j?.ok) {
           toast.error(j?.error ? `Échec : ${j.error}` : "Échec du changement de transporteur");
           return false;
         }
-        toast.success(sapValue ? "Transporteur mis à jour" : "Transporteur retiré");
+        toast.success(sapValue ? "Transporteur mis à jour — choisis la tournée" : "Transporteur retiré");
         load();
         return true;
       } catch {
         toast.error("SAP injoignable — transporteur non modifié");
+        return false;
+      }
+    },
+    [load],
+  );
+
+  // Changement de TOURNÉE d'une commande → pose U_TrspHeur (heure de la tournée)
+  // et re-confirme le transporteur (le serveur re-résout U_Timbre). "" = aucune.
+  const changeTournee = useCallback(
+    async (docEntry: number, trspCode: string, heure: string): Promise<boolean> => {
+      try {
+        const res = await fetch(`/api/sap/orders/${docEntry}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trspCode, trspHeure: heure }),
+        });
+        const j = await res.json().catch(() => null);
+        if (!res.ok || !j?.ok) {
+          toast.error(j?.error ? `Échec : ${j.error}` : "Échec du changement de tournée");
+          return false;
+        }
+        toast.success(heure ? `Tournée mise à jour (${heure.slice(0, 5)})` : "Tournée retirée");
+        load();
+        return true;
+      } catch {
+        toast.error("SAP injoignable — tournée non modifiée");
         return false;
       }
     },
@@ -363,6 +414,7 @@ export function LivraisonDetail() {
             return (
               <CarrierGroup
                 key={key} carrier={c} carriers={carriers} onCarrierChange={changeCarrier} onDateChange={changeDate}
+                tourneesByCode={tourneesByCode} onLoadTournees={loadTournees} onTourneeChange={changeTournee}
                 collapsed={collapsed.has(key)} onToggleCollapse={() => toggleCollapse(key)}
               />
             );
@@ -511,12 +563,17 @@ function SummaryRow({ totals, loading }: { totals: Totals; loading: boolean }) {
    Groupe transporteur — en-tête + cartes clients
 ═════════════════════════════════════════════════════════════ */
 function CarrierGroup({
-  carrier, carriers, onCarrierChange, onDateChange, collapsed, onToggleCollapse,
+  carrier, carriers, onCarrierChange, onDateChange,
+  tourneesByCode, onLoadTournees, onTourneeChange,
+  collapsed, onToggleCollapse,
 }: {
   carrier: Carrier;
   carriers: CarrierOption[];
   onCarrierChange: (docEntry: number, sapValue: string) => Promise<boolean>;
   onDateChange: (docEntry: number, dueDate: string) => Promise<boolean>;
+  tourneesByCode: Record<string, Tournee[]>;
+  onLoadTournees: (code: string) => void;
+  onTourneeChange: (docEntry: number, trspCode: string, heure: string) => Promise<boolean>;
   collapsed: boolean;
   onToggleCollapse: () => void;
 }) {
@@ -563,7 +620,12 @@ function CarrierGroup({
       {!collapsed && (
         <ul className="divide-y divide-border/60">
           {carrier.docs.map((d) => (
-            <OrderRow key={d.docEntry} doc={d} carriers={carriers} onCarrierChange={onCarrierChange} onDateChange={onDateChange} />
+            <OrderRow
+              key={d.docEntry} doc={d} carriers={carriers}
+              onCarrierChange={onCarrierChange} onDateChange={onDateChange}
+              tournees={d.trspCode ? tourneesByCode[d.trspCode.toUpperCase()] : undefined}
+              onLoadTournees={onLoadTournees} onTourneeChange={onTourneeChange}
+            />
           ))}
         </ul>
       )}
@@ -638,15 +700,31 @@ function Metric({ label, value, className }: { label: string; value: string; cla
    Ligne commande — repliable vers le détail des lignes
 ═════════════════════════════════════════════════════════════ */
 function OrderRow({
-  doc, carriers, onCarrierChange, onDateChange,
+  doc, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange,
 }: {
   doc: Doc;
   carriers: CarrierOption[];
   onCarrierChange: (docEntry: number, sapValue: string) => Promise<boolean>;
   onDateChange: (docEntry: number, dueDate: string) => Promise<boolean>;
+  tournees: Tournee[] | undefined;
+  onLoadTournees: (code: string) => void;
+  onTourneeChange: (docEntry: number, trspCode: string, heure: string) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
   const [savingCarrier, setSavingCarrier] = useState(false);
+  const [savingTournee, setSavingTournee] = useState(false);
+
+  // Charge les tournées du transporteur courant (une fois) pour le sélecteur.
+  useEffect(() => {
+    if (doc.open && doc.trspCode) onLoadTournees(doc.trspCode);
+  }, [doc.open, doc.trspCode, onLoadTournees]);
+
+  async function handleTournee(heure: string) {
+    if (!doc.trspCode || heure === (doc.trspHeure ?? "")) return;
+    setSavingTournee(true);
+    await onTourneeChange(doc.docEntry, doc.trspCode, heure);
+    setSavingTournee(false);
+  }
 
   // Date de livraison (DocDueDate) — modifiable directement sur la ligne. Au
   // changement → PATCH + rechargement (la commande quitte la vue si elle bouge).
@@ -855,6 +933,35 @@ function OrderRow({
                 <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
               )}
             </div>
+            {/* Tournée du transporteur → fixe l'heure (U_TrspHeur). Visible dès qu'un
+                transporteur est affecté et la commande ouverte. */}
+            {doc.open && doc.trspCode && (
+              <div className="relative">
+                <select
+                  value={doc.trspHeure ?? ""}
+                  disabled={savingTournee || !tournees}
+                  onChange={(e) => handleTournee(e.target.value)}
+                  aria-label={`Tournée de la commande ${doc.docNum}`}
+                  title={tournees ? "Choisir la tournée (fixe l'heure)" : "Chargement des tournées…"}
+                  className="h-7 max-w-[220px] rounded-md border border-border bg-card pl-2 pr-7 text-[11.5px] font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60 disabled:cursor-not-allowed appearance-none truncate cursor-pointer"
+                >
+                  <option value="">{tournees ? "Tournée…" : "Chargement…"}</option>
+                  {doc.trspHeure && !(tournees ?? []).some((t) => t.heure === doc.trspHeure) && (
+                    <option value={doc.trspHeure}>{doc.trspHeure.slice(0, 5)} (actuelle)</option>
+                  )}
+                  {(tournees ?? []).filter((t) => t.heure).map((t) => (
+                    <option key={t.lineId} value={t.heure as string}>
+                      {t.nom}{t.des ? ` (${t.des})` : ""} — {(t.heure as string).slice(0, 5)}
+                    </option>
+                  ))}
+                </select>
+                {savingTournee ? (
+                  <Loader2 className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 animate-spin text-muted-foreground" />
+                ) : (
+                  <Clock className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                )}
+              </div>
+            )}
             {/* N° de commande (réf. client) — éditable directement ici */}
             <div className="relative inline-flex items-center">
               <FileText className="pointer-events-none absolute left-2 h-3 w-3 text-muted-foreground" />
