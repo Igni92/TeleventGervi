@@ -6,11 +6,12 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Loader2, Send, CheckCircle2, AlertTriangle, ClipboardList, Camera, ChevronRight,
   ChevronLeft, Pencil, X, ImageIcon, ScanLine, PackageCheck, RotateCcw, Save,
-  PackageMinus, PackagePlus, Database, AlertCircle, Boxes,
+  PackageMinus, PackagePlus, Database, AlertCircle, Boxes, Search, Plus,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { GuidedCounter } from "./GuidedCounter";
 import { PhotoStep } from "./PhotoStep";
@@ -28,6 +29,8 @@ type MoveDTO = {
   itemCode: string; itemName: string; sens: "entree" | "sortie";
   ecartColis: number; unitsPerColis: number; qtyUnits: number;
   lot: string | null; unitPrice: number; value: number;
+  uPays?: string | null; uMarque?: string | null; uCondi?: string | null; frgnName?: string | null;
+  warehouses?: { warehouse: string; qtyUnits: number; lot: string | null }[];
 };
 type AdjustmentDTO = {
   status: "done" | "error"; at: string; by: string;
@@ -68,8 +71,8 @@ function estimateBytes(dataUrl: string): number {
 type Counts = Record<string, number | null>;
 type Mode = "home" | "count" | "recap";
 type Scope = { products: Product[]; label: string; startIndex: number };
-/** Ligne du récap (produit en stock OU ligne orpheline d'une correction). */
-type RecapRow = { itemCode: string; itemName: string; sapQty: number; real: number; unit: string; ecart: number; emoji: string; orphan: boolean };
+/** Ligne du récap (produit en stock, ligne orpheline d'une correction, ou article ajouté). */
+type RecapRow = { itemCode: string; itemName: string; sapQty: number; real: number; unit: string; ecart: number; emoji: string; orphan: boolean; extra: boolean };
 
 /** Pastille de segment client (GMS / CHR / EXPORT) — couleurs distinctes. */
 const SEG_BADGE: Record<string, string> = {
@@ -136,6 +139,13 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   // Lightbox + photos de session (admin/historique, chargées à la demande)
   const [preview, setPreview] = useState<string | null>(null);
   const [sessionPhotos, setSessionPhotos] = useState<Record<string, PhotoDTO[] | "loading">>({});
+
+  // Ajout d'un article ABSENT du comptage dans le récap (ex. réf. inversée
+  // Driscolls/Holly) : recherche dans tout le catalogue (même à 0 en stock SAP).
+  const [addQuery, setAddQuery] = useState("");
+  const [addResults, setAddResults] = useState<Product[] | null>(null);
+  const [addLoading, setAddLoading] = useState(false);
+  const [extraProducts, setExtraProducts] = useState<Product[]>([]);
 
   /* ---------------------------- Chargements ---------------------------- */
   const loadProducts = useCallback(async (): Promise<Product[]> => {
@@ -265,7 +275,14 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
       return { ...p, stockByWarehouse: { ...p.stockByWarehouse, "01": { ...w, available: (w.available ?? 0) + add } } };
     });
   }, [addUnitsByItem, editing]);
-  const effectiveProducts = useMemo(() => withAddBack(products), [withAddBack, products]);
+  const effectiveProducts = useMemo(() => {
+    const base = withAddBack(products);
+    if (extraProducts.length === 0) return base;
+    // Articles ajoutés à la main (absents du stock) → fusionnés, sans doublon.
+    const have = new Set(base.map((p) => p.itemCode));
+    return [...base, ...extraProducts.filter((p) => !have.has(p.itemCode))];
+  }, [withAddBack, products, extraProducts]);
+  const extraCodes = useMemo(() => new Set(extraProducts.map((p) => p.itemCode)), [extraProducts]);
 
   const { families, ordered } = useMemo(() => buildFamilies(effectiveProducts), [effectiveProducts]);
   const productByCode = useMemo(() => new Map(ordered.map((p) => [p.itemCode, p])), [ordered]);
@@ -284,6 +301,35 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     setCounts((c) => ({ ...c, [itemCode]: n }));
   }, []);
 
+  /* --- Ajout d'un article ABSENT du comptage (recherche catalogue complet) --- */
+  const searchAddProducts = useCallback(async (q: string) => {
+    const term = q.trim();
+    if (term.length < 2) { setAddResults(null); return; }
+    setAddLoading(true);
+    try {
+      const res = await fetch(`/api/products?search=${encodeURIComponent(term)}&limit=20`, { cache: "no-store" });
+      const json = await res.json();
+      setAddResults((json.products ?? []) as Product[]);
+    } catch { setAddResults([]); }
+    finally { setAddLoading(false); }
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => searchAddProducts(addQuery), 250);
+    return () => clearTimeout(t);
+  }, [addQuery, searchAddProducts]);
+
+  function addExtraProduct(p: Product) {
+    setExtraProducts((cur) => (cur.some((x) => x.itemCode === p.itemCode) ? cur : [...cur, p]));
+    // La ligne démarre « conforme » (réel = SAP) ; on saisit ensuite les colis réels.
+    setCounts((c) => (isCounted(c[p.itemCode]) ? c : { ...c, [p.itemCode]: sapInfo(p).qty }));
+    setAddQuery(""); setAddResults(null);
+  }
+  /** Retire une ligne du récap (et l'article ajouté correspondant, le cas échéant). */
+  function removeRecapRow(itemCode: string) {
+    setCount(itemCode, null);
+    setExtraProducts((cur) => cur.filter((p) => p.itemCode !== itemCode));
+  }
+
   const countedProducts = useMemo(
     () => ordered.filter((p) => isCounted(counts[p.itemCode])),
     [ordered, counts],
@@ -300,27 +346,31 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   // l'envoi, pour que ce qui est montré == ce qui est enregistré.
   const recapRows = useMemo<RecapRow[]>(() => {
     const editLineByCode = new Map((editing?.lines ?? []).map((l) => [l.itemCode, l] as const));
+    const extraOrder = new Map(extraProducts.map((p, i) => [p.itemCode, i] as const));
     const rows: RecapRow[] = [];
     for (const [itemCode, val] of Object.entries(counts)) {
       if (!isCounted(val)) continue;
       const real = val as number;
+      const isExtra = extraCodes.has(itemCode);
       const p = productByCode.get(itemCode);
       if (p) {
         const s = sapInfo(p);
-        rows.push({ itemCode, itemName: p.itemName, sapQty: s.qty, real, unit: s.unit, ecart: ecartOf(real, s.qty) ?? 0, emoji: fruitEmoji(p), orphan: false });
+        rows.push({ itemCode, itemName: p.itemName, sapQty: s.qty, real, unit: s.unit, ecart: ecartOf(real, s.qty) ?? 0, emoji: fruitEmoji(p), orphan: false, extra: isExtra });
       } else {
         const el = editLineByCode.get(itemCode);
-        if (el) rows.push({ itemCode, itemName: el.itemName, sapQty: el.sapQty, real, unit: el.unit, ecart: Math.round((real - el.sapQty) * 10) / 10, emoji: fruitEmoji({ itemName: el.itemName }), orphan: true });
+        if (el) rows.push({ itemCode, itemName: el.itemName, sapQty: el.sapQty, real, unit: el.unit, ecart: Math.round((real - el.sapQty) * 10) / 10, emoji: fruitEmoji({ itemName: el.itemName }), orphan: true, extra: isExtra });
       }
     }
-    // En correction : ordre alphabétique STABLE (les lignes ne sautent pas quand
-    // on modifie une quantité). Sinon : écarts les plus forts en tête.
-    return rows.sort((a, b) =>
-      editing
+    // Articles AJOUTÉS à la main toujours en tête (ordre d'ajout, stable). Sinon :
+    // en correction, ordre alphabétique stable ; sinon écarts les plus forts d'abord.
+    return rows.sort((a, b) => {
+      if (a.extra !== b.extra) return a.extra ? -1 : 1;
+      if (a.extra && b.extra) return (extraOrder.get(a.itemCode) ?? 0) - (extraOrder.get(b.itemCode) ?? 0);
+      return editing
         ? a.itemName.localeCompare(b.itemName)
-        : Math.abs(b.ecart) - Math.abs(a.ecart) || a.itemName.localeCompare(b.itemName),
-    );
-  }, [counts, productByCode, editing]);
+        : Math.abs(b.ecart) - Math.abs(a.ecart) || a.itemName.localeCompare(b.itemName);
+    });
+  }, [counts, productByCode, editing, extraCodes, extraProducts]);
   const nbCountedAll = recapRows.length;            // inclut les lignes hors stock (correction)
   const nbEcartsAll = useMemo(() => recapRows.filter((r) => r.ecart !== 0).length, [recapRows]);
 
@@ -368,6 +418,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
       if (editing) {
         toast.success(`Inventaire corrigé — ${json.session.nbEcarts} écart(s)${photos.length ? ` · ${photos.length} photo(s)` : ""}.`, { duration: 6000 });
         setEditing(null);
+        setExtraProducts([]); setAddQuery(""); setAddResults(null);
         loadDraftFromStorage();   // restaure le brouillon « nouveau comptage »
       } else {
         toast.success(
@@ -376,6 +427,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
         );
         setCounts({}); setNote(""); setPhotos([]);
         setPrepared(new Set()); setPrepOrders(null); setPrepOpen(false);
+        setExtraProducts([]); setAddQuery(""); setAddResults(null);
         try { localStorage.removeItem(DRAFT_KEY); localStorage.removeItem(PHOTOS_KEY); localStorage.removeItem(PREP_KEY); } catch { /* ignore */ }
       }
       setMode("home");
@@ -417,6 +469,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   /** Abandonne la correction en cours et restaure le brouillon « nouveau comptage ». */
   function cancelEdit() {
     setEditing(null);
+    setExtraProducts([]); setAddQuery(""); setAddResults(null);
     loadDraftFromStorage();
     setMode("home");
   }
@@ -641,26 +694,40 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                       <span className="ml-auto font-semibold text-foreground tnum">Impact ≈ {plan.totalValue >= 0 ? "+" : ""}{plan.totalValue.toFixed(2)} €</span>
                     </div>
                     <div className="divide-y divide-border/60 rounded-lg border border-border">
-                      {plan.moves.map((m) => (
-                        <div key={m.itemCode} className="flex items-center gap-2.5 p-2.5">
-                          <div className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${m.sens === "sortie" ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"}`}>
-                            {m.sens === "sortie" ? <PackageMinus className="h-4 w-4" /> : <PackagePlus className="h-4 w-4" />}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-[12.5px] font-semibold text-foreground">{m.itemName}</div>
-                            <div className="text-[11px] text-muted-foreground tnum">
-                              {m.sens === "sortie" ? "Sortir" : "Entrer"} {fmt(m.qtyUnits)} u. ({fmt(Math.abs(m.ecartColis))} colis)
-                              {m.lot ? ` · ${m.lot}` : " · lot ?"}
+                      {plan.moves.map((m) => {
+                        const dz = designationProduit({ itemName: m.itemName, uPays: m.uPays, uMarque: m.uMarque, uCondi: m.uCondi, frgnName: m.frgnName });
+                        // Répartition entrepôts en COLIS (on ne parle qu'au colis).
+                        const whTxt = (m.warehouses ?? [])
+                          .filter((w) => w.qtyUnits > 0)
+                          .map((w) => `${w.warehouse} ${fmt(Math.round((w.qtyUnits / (m.unitsPerColis || 1)) * 10) / 10)}`)
+                          .join(" · ");
+                        const prixColis = m.unitPrice > 0 ? m.unitPrice * (m.unitsPerColis || 1) : 0;
+                        return (
+                          <div key={m.itemCode} className="flex items-center gap-2.5 p-2.5">
+                            <div className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${m.sens === "sortie" ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"}`}>
+                              {m.sens === "sortie" ? <PackageMinus className="h-4 w-4" /> : <PackagePlus className="h-4 w-4" />}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="truncate text-[12.5px] font-semibold text-foreground">{m.itemName}</span>
+                                <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">{m.itemCode}</span>
+                              </div>
+                              <div className="text-[11px] text-muted-foreground tnum">
+                                {m.sens === "sortie" ? "Sortir" : "Entrer"} {fmt(Math.abs(m.ecartColis))} colis
+                                {m.lot ? ` · ${m.lot}` : " · lot ?"}
+                                {whTxt ? ` · ${whTxt}` : ""}
+                              </div>
+                              <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1" />
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <div className={`text-[12px] font-bold tnum ${m.sens === "sortie" ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                                {m.sens === "sortie" ? "−" : "+"}{m.value.toFixed(2)} €
+                              </div>
+                              {prixColis > 0 && <div className="text-[10px] text-muted-foreground tnum">{prixColis.toFixed(2)} €/colis</div>}
                             </div>
                           </div>
-                          <div className="shrink-0 text-right">
-                            <div className={`text-[12px] font-bold tnum ${m.sens === "sortie" ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                              {m.sens === "sortie" ? "−" : "+"}{m.value.toFixed(2)} €
-                            </div>
-                            {m.unitPrice > 0 && <div className="text-[10px] text-muted-foreground tnum">{m.unitPrice.toFixed(2)} €/u</div>}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </>
                 )}
@@ -809,6 +876,45 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
           </div>
         )}
 
+        {/* Ajout d'un article ABSENT du comptage (réf. inversée, hors stock SAP…) */}
+        <SurfaceCard accent="emerald" className="p-4 space-y-2">
+          <h3 className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
+            <Plus className="h-4 w-4 text-emerald-600 dark:text-emerald-400" /> Ajouter un article absent du comptage
+          </h3>
+          <p className="text-[11.5px] text-muted-foreground">
+            Recherche un article du catalogue (même à 0 en stock SAP) — utile en cas de réf. inversée. Il s&apos;ajoute au récap, tu saisis les colis comptés.
+          </p>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input value={addQuery} onChange={(e) => setAddQuery(e.target.value)} placeholder="Code ou nom d'article…" className="pl-9" />
+            {addLoading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+          </div>
+          {addResults && addResults.length > 0 && (
+            <div className="max-h-56 divide-y divide-border/60 overflow-y-auto rounded-lg border border-border">
+              {addResults.map((p) => {
+                const already = isCounted(counts[p.itemCode]);
+                const s = sapInfo(p);
+                return (
+                  <button key={p.id} type="button" disabled={already} onClick={() => addExtraProduct(p)}
+                    className="flex w-full items-center gap-2 px-2.5 py-2 text-left hover:bg-secondary/40 disabled:opacity-50">
+                    <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[13px] font-bold ${productTile({ itemName: p.itemName, itemCode: p.itemCode }).color}`}>
+                      {productTile({ itemName: p.itemName, itemCode: p.itemCode }).initial}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[12.5px] font-semibold text-foreground">{p.itemName}</div>
+                      <div className="font-mono text-[11px] text-muted-foreground">{p.itemCode} · SAP {fmt(s.qty)} {s.unit}</div>
+                    </div>
+                    {already ? <span className="shrink-0 text-[11px] text-muted-foreground">déjà au récap</span> : <Plus className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {addResults && addResults.length === 0 && addQuery.trim().length >= 2 && !addLoading && (
+            <p className="text-[11.5px] italic text-muted-foreground">Aucun article ne correspond.</p>
+          )}
+        </SurfaceCard>
+
         {/* Lignes comptées (produits en stock + lignes hors stock d'une correction).
             En correction : chaque quantité réelle est éditable DIRECTEMENT ici. */}
         <SurfaceCard accent="sky" className="p-4">
@@ -836,14 +942,20 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       <span className="truncate text-[13px] font-semibold text-foreground">{r.itemName}</span>
-                      {r.orphan && (
+                      <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">{r.itemCode}</span>
+                      {r.extra && (
+                        <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" title="Article ajouté à la main (absent du comptage)">
+                          ajouté
+                        </span>
+                      )}
+                      {r.orphan && !r.extra && (
                         <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground" title="Article qui n'est plus listé en stock SAP">
                           hors stock
                         </span>
                       )}
                     </div>
                     <div className="text-[11.5px] text-muted-foreground tnum">
-                      {editing ? (
+                      {(editing || r.extra) ? (
                         <>SAP {fmt(r.sapQty)} {r.unit}</>
                       ) : (
                         <>SAP {fmt(r.sapQty)} → réel <b className="text-foreground">{fmt(r.real)}</b> {r.unit}</>
@@ -852,21 +964,21 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                     {productChips(r.itemCode, "mt-1")}
                   </div>
 
-                  {editing && (
+                  {(editing || r.extra) && (
                     <NumberInput
                       value={(counts[r.itemCode] ?? 0) as number}
                       onValueChange={(n) => setCount(r.itemCode, n)}
                       min={0}
                       step={1}
-                      aria-label={`Quantité réelle — ${r.itemName}`}
+                      aria-label={`Quantité réelle (colis) — ${r.itemName}`}
                       className="h-9 w-[68px] shrink-0 rounded-lg border-border bg-background px-1 text-center text-[14px] font-semibold tnum text-foreground"
                     />
                   )}
 
-                  <span className={`shrink-0 ${editing ? "w-12 text-right" : ""} text-[13px] font-bold tnum ${r.ecart === 0 ? "text-emerald-600 dark:text-emerald-400" : r.ecart > 0 ? "text-sky-600 dark:text-sky-400" : "text-amber-600 dark:text-amber-400"}`}>
+                  <span className={`shrink-0 ${(editing || r.extra) ? "w-12 text-right" : ""} text-[13px] font-bold tnum ${r.ecart === 0 ? "text-emerald-600 dark:text-emerald-400" : r.ecart > 0 ? "text-sky-600 dark:text-sky-400" : "text-amber-600 dark:text-amber-400"}`}>
                     {r.ecart === 0 ? "OK" : r.ecart > 0 ? `+${fmt(r.ecart)}` : fmt(r.ecart)}
                   </span>
-                  <button onClick={() => setCount(r.itemCode, null)} className="shrink-0 text-muted-foreground/60 hover:text-rose-500" aria-label="Retirer la ligne">
+                  <button onClick={() => removeRecapRow(r.itemCode)} className="shrink-0 text-muted-foreground/60 hover:text-rose-500" aria-label="Retirer la ligne">
                     <X className="h-4 w-4" />
                   </button>
                 </div>

@@ -50,9 +50,17 @@ export interface InventoryMove {
   ecartColis: number;
   unitsPerColis: number;
   qtyUnits: number;      // |écart| en unités SAP
-  lot: string | null;    // EM<DocNum>
+  lot: string | null;    // EM<DocNum> (lot primaire — affichage / U_NoLot non-batch)
   unitPrice: number;     // €/unité d'inventaire
   value: number;         // qtyUnits × unitPrice (≥ 0)
+  // Désignation (affichage récap : tags marque / condt / variété / pays).
+  uPays?: string | null;
+  uMarque?: string | null;
+  uCondi?: string | null;
+  frgnName?: string | null;
+  /** Répartition par entrepôt RÉELLEMENT postée (vérifiée contre le stock miroir),
+   *  avec le lot résolu pour CET entrepôt (batch × magasin cohérents). */
+  warehouses?: { warehouse: string; qtyUnits: number; lot: string | null }[];
 }
 
 /** Trace de l'ajustement de stock SAP déclenché à la validation d'un inventaire. */
