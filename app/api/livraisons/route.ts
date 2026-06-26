@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
-import { getDeliveryPrepared } from "@/lib/inventory";
+import { getDeliveryPrepared, getDeliveryExcluded } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -111,6 +111,9 @@ export async function GET(req: NextRequest) {
     // DocEntry). Aucune déduction automatique depuis l'inventaire (qui marquait
     // tout à tort). Une commande n'est « faite » que si on l'a cochée.
     const faiteByDoc = await getDeliveryPrepared().catch(() => new Map<number, boolean>());
+    // BL marqués « avoir / exclu » (facturé puis avoir total, doublon) → déduits
+    // à 100% des totaux mais conservés (grisés) dans la liste.
+    const avoirByDoc = await getDeliveryExcluded().catch(() => new Map<number, boolean>());
 
     // Type client (GMS / CHR / EXPORT) par CardCode — pour le filtre par segment.
     // Le CardCode d'un BL peut être le code principal OU un code d'adresse de
@@ -177,6 +180,7 @@ export async function GET(req: NextRequest) {
         carrierName: trspCode ? carrierByCode.get(trspCode) ?? trspCode : null,
         clientType: typeByCardCode.get(d.CardCode) ?? null,   // GMS | CHR | EXPORT | null
         prepared: faiteByDoc.get(d.DocEntry) ?? false,        // « faite » = coché manuellement
+        excluded: avoirByDoc.get(d.DocEntry) ?? false,        // « avoir/exclu » → déduit des totaux
         lineCount: lines.length,
         lines,
       };
@@ -195,16 +199,21 @@ export async function GET(req: NextRequest) {
       g.docs.push(d);
       groups.set(key, g);
     }
+    // Totaux : les BL « avoir/exclu » sont DÉDUITS (100%) — on agrège sur les BL
+    // non exclus uniquement, mais on garde tous les BL dans les listes (grisés).
     const carriers = Array.from(groups.values())
-      .map((g) => ({
-        code: g.code,
-        name: g.name,
-        orders: g.docs.length,
-        colis: Math.round(g.docs.reduce((s, d) => s + d.colis, 0) * 10) / 10,
-        weightKg: Math.round(g.docs.reduce((s, d) => s + d.weightKg, 0) * 10) / 10,
-        totalHT: Math.round(g.docs.reduce((s, d) => s + d.totalHT, 0) * 100) / 100,
-        docs: g.docs,
-      }))
+      .map((g) => {
+        const counted = g.docs.filter((d) => !d.excluded);
+        return {
+          code: g.code,
+          name: g.name,
+          orders: counted.length,
+          colis: Math.round(counted.reduce((s, d) => s + d.colis, 0) * 10) / 10,
+          weightKg: Math.round(counted.reduce((s, d) => s + d.weightKg, 0) * 10) / 10,
+          totalHT: Math.round(counted.reduce((s, d) => s + d.totalHT, 0) * 100) / 100,
+          docs: g.docs,
+        };
+      })
       // « Non affecté » toujours en dernier ; sinon tri par volume de colis.
       .sort((a, b) => {
         if (!a.code && b.code) return 1;
@@ -212,12 +221,13 @@ export async function GET(req: NextRequest) {
         return b.colis - a.colis;
       });
 
+    const counted = docs.filter((d) => !d.excluded);
     const totals = {
-      orders: docs.length,
-      clients: new Set(docs.map((d) => d.cardCode)).size,
-      colis: Math.round(docs.reduce((s, d) => s + d.colis, 0) * 10) / 10,
-      weightKg: Math.round(docs.reduce((s, d) => s + d.weightKg, 0) * 10) / 10,
-      totalHT: Math.round(docs.reduce((s, d) => s + d.totalHT, 0) * 100) / 100,
+      orders: counted.length,
+      clients: new Set(counted.map((d) => d.cardCode)).size,
+      colis: Math.round(counted.reduce((s, d) => s + d.colis, 0) * 10) / 10,
+      weightKg: Math.round(counted.reduce((s, d) => s + d.weightKg, 0) * 10) / 10,
+      totalHT: Math.round(counted.reduce((s, d) => s + d.totalHT, 0) * 100) / 100,
     };
 
     return NextResponse.json({
