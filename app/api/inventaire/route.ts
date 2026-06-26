@@ -32,7 +32,7 @@ function parsePrep(raw: unknown): InventoryPrep | null {
   return {
     preparedDocNums: nums.slice(0, 1000),
     preparedDocEntries: entries.slice(0, 1000),
-    removedColis: Math.round((Number(r.removedColis) || 0) * 10) / 10,
+    addedColis: Math.round((Number(r.addedColis) || 0) * 10) / 10,
     ordersScanned: Math.max(0, Math.floor(Number(r.ordersScanned) || 0)),
     at: nowIso(),
   };

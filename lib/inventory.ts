@@ -98,11 +98,11 @@ export interface InventorySession {
   nbPhotos?: number;
 }
 
-/** Trace de la pré-étape : commandes GMS/Export/CHR (J+1…J+4) cochées « préparées ». */
+/** Trace de la pré-étape : commandes GMS/Export/CHR (J+1…J+4) cochées « non préparées ». */
 export interface InventoryPrep {
-  preparedDocNums: number[];    // n° des commandes cochées préparées
-  preparedDocEntries: number[]; // DocEntry (acté → non reproposé ensuite)
-  removedColis: number;         // total colis retirés du stock théorique
+  preparedDocNums: number[];    // n° des commandes cochées (non préparées, encore en rayon)
+  preparedDocEntries: number[]; // DocEntry correspondants
+  addedColis: number;           // total colis réintégrés au stock théorique
   ordersScanned: number;        // nb de commandes proposées (fenêtre J+1…J+4)
   at: string;
 }
