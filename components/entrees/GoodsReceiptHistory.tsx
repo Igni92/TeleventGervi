@@ -389,24 +389,30 @@ function ReceiptDetail({
   const totTVA = canEditPrices ? liveTotals.tva : (receipt.totalTVA ?? 0);
   const totTTC = canEditPrices ? liveTotals.ttc : (receipt.totalTTC ?? receipt.total ?? 0);
 
-  // Enregistre UNE ligne (prix unitaire OU total forcé) quand on quitte la case.
+  // Enregistre les prix quand on quitte une case.
+  // ⚠️ SAP Service Layer : un PATCH DocumentLines partiel est appliqué de façon
+  // POSITIONNELLE (la 1re ligne du tableau), pas par LineNum — envoyer une seule
+  // ligne écrasait donc toujours la 1re ligne (bug « seul le 1er prix modifié »).
+  // On transmet TOUT le jeu de lignes (ordre conservé + LineNum) : correct quelle
+  // que soit l'interprétation (positionnelle OU par LineNum) du Service Layer.
   const saveLine = async (i: number) => {
     const e = priceEdits[i];
     if (!e || !canEditPrices) return;
-    const sig = sigOf(e);
-    if (lastSaved.current.get(e.lineNum) === sig) return;       // inchangé → rien à faire
-    lastSaved.current.set(e.lineNum, sig);                      // optimiste (évite le double POST)
-    const body = e.forceTotal
-      ? { lineNum: e.lineNum, lineTotal: e.lineTotal === "" ? undefined : parseFloat(e.lineTotal) }
-      : { lineNum: e.lineNum, price: e.price === "" ? undefined : parseFloat(e.price) };
+    if (lastSaved.current.get(e.lineNum) === sigOf(e)) return;  // cette ligne inchangée → rien
+    const allLines = priceEdits.map((pe) => pe.forceTotal
+      ? { lineNum: pe.lineNum, lineTotal: pe.lineTotal === "" ? undefined : parseFloat(pe.lineTotal) }
+      : { lineNum: pe.lineNum, price: pe.price === "" ? undefined : parseFloat(pe.price) });
+    // Optimiste : marque TOUTES les lignes comme sauvées (le PATCH les couvre).
+    const prevSigs = new Map(lastSaved.current);
+    priceEdits.forEach((pe) => lastSaved.current.set(pe.lineNum, sigOf(pe)));
     setSavingLines((c) => new Set(c).add(e.lineNum));
     try {
       const res = await fetch(`/api/sap/goods-receipts/${receipt.docEntry}/modif`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: [body] }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: allLines }),
       });
       const j = await res.json();
-      if (!res.ok || !j.ok) { lastSaved.current.delete(e.lineNum); toast.error(j.error || "Erreur SAP"); return; }
-    } catch (err) { lastSaved.current.delete(e.lineNum); toast.error((err as Error).message); }
+      if (!res.ok || !j.ok) { lastSaved.current = prevSigs; toast.error(j.error || "Erreur SAP"); return; }
+    } catch (err) { lastSaved.current = prevSigs; toast.error((err as Error).message); }
     finally { setSavingLines((c) => { const n = new Set(c); n.delete(e.lineNum); return n; }); }
   };
 
