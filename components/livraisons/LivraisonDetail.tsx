@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { ClientLink } from "@/components/ClientLink";
+import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { broadcastActiveClient } from "@/lib/consoleSync";
 import {
   nextDeliveryDate, frenchHolidayLabel, nextWorkingDeliveryDay,
@@ -27,6 +28,9 @@ interface Line {
   colis: number;
   weightKg: number;
   warehouse: string | null;
+  marque?: string | null;
+  condt?: string | null;
+  pays?: string | null;
 }
 interface Doc {
   docEntry: number;
@@ -878,12 +882,13 @@ function OrderRow({
             )}
           </div>
           <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground flex-wrap">
-            <span className="font-mono text-foreground/60">{doc.cardCode}</span>
-            <span>· BL n°{doc.docNum}</span>
+            <span className="font-mono text-foreground/60 hidden sm:inline">{doc.cardCode}</span>
+            <span><span className="hidden sm:inline">· </span>BL n°{doc.docNum}</span>
             <span className="hidden sm:inline">· {fmtEur(doc.totalHT)} HT</span>
           </div>
-          {/* Changement de transporteur direct */}
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {/* Changement de transporteur / tournée / réf / date — dispatch (desktop
+              uniquement : sur mobile on garde l'écran focalisé sur la préparation). */}
+          <div className="mt-1.5 hidden md:flex flex-wrap items-center gap-1.5">
             <Truck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <div className="relative">
               <select
@@ -983,59 +988,63 @@ function OrderRow({
               onClick={startModif}
               disabled={modifBusy}
               title={`Modifier le BL #${doc.docNum} (sur l'Écran 2) — quantités + ajout de lignes`}
-              className="inline-flex items-center gap-1 h-9 px-2.5 rounded-lg border border-amber-300/70 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-900/20 text-[12px] font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/35 active:scale-95 transition-all disabled:opacity-60"
+              className="hidden md:inline-flex items-center gap-1 h-9 px-2.5 rounded-lg border border-amber-300/70 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-900/20 text-[12px] font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/35 active:scale-95 transition-all disabled:opacity-60"
             >
               {modifBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />}
               <span className="hidden sm:inline">Modifier</span>
             </button>
           )}
+          {/* Repli desktop uniquement : sur mobile le contenu est toujours affiché. */}
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
             aria-label={open ? "Replier le détail" : "Voir le détail"}
             aria-expanded={open}
-            className="h-9 w-9 inline-flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
+            className="hidden md:inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
           >
             <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
           </button>
         </div>
       </div>
 
-      {/* Détail des lignes */}
-      {open && (
-        <div className="px-4 sm:px-5 pb-3.5 pt-0.5">
-          <div className="rounded-xl border border-border/70 bg-secondary/20 overflow-hidden">
-            {doc.comments && (
-              <p className="px-3 py-2 text-[11.5px] text-muted-foreground border-b border-border/60 italic">
-                {doc.comments}
-              </p>
-            )}
-            <table className="w-full text-[12px]">
-              <thead className="text-[9px] uppercase tracking-wider text-muted-foreground bg-card/40">
-                <tr>
-                  <th className="text-left font-semibold px-3 py-1.5">Article</th>
-                  <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap">Colis</th>
-                  <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Qté</th>
-                  <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap">kg</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {doc.lines.map((l, i) => (
-                  <tr key={`${l.itemCode}-${i}`}>
-                    <td className="px-3 py-1.5 min-w-0">
+      {/* Contenu de la commande — TOUJOURS visible sur mobile (préparation),
+          repliable sur desktop via le chevron. Chaque ligne porte ses tags
+          (marque · conditionnement · origine). */}
+      <div className={`px-4 sm:px-5 pb-3.5 pt-0.5 block ${open ? "md:block" : "md:hidden"}`}>
+        <div className="rounded-xl border border-border/70 bg-secondary/20 overflow-hidden">
+          {doc.comments && (
+            <p className="px-3 py-2 text-[11.5px] text-muted-foreground border-b border-border/60 italic">
+              {doc.comments}
+            </p>
+          )}
+          <table className="w-full text-[12px]">
+            <thead className="text-[9px] uppercase tracking-wider text-muted-foreground bg-card/40">
+              <tr>
+                <th className="text-left font-semibold px-3 py-1.5">Article</th>
+                <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap">Colis</th>
+                <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Qté</th>
+                <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap">kg</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40">
+              {doc.lines.map((l, i) => (
+                <tr key={`${l.itemCode}-${i}`}>
+                  <td className="px-3 py-1.5 min-w-0">
+                    <div className="flex items-baseline gap-1.5 flex-wrap">
                       <span className="font-medium text-foreground/90">{l.itemName}</span>
-                      <span className="ml-1.5 font-mono text-[10px] text-muted-foreground/70">{l.itemCode}</span>
-                    </td>
-                    <td className="px-3 py-1.5 text-right tnum font-semibold text-foreground">{fmtNum(l.colis)}</td>
-                    <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell">{fmtNum(l.quantity)}</td>
-                    <td className="px-3 py-1.5 text-right tnum text-muted-foreground">{fmtNum(l.weightKg)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      <span className="font-mono text-[10px] text-muted-foreground/70 hidden sm:inline">{l.itemCode}</span>
+                    </div>
+                    <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} className="mt-1" />
+                  </td>
+                  <td className="px-3 py-1.5 text-right tnum font-semibold text-foreground align-top">{fmtNum(l.colis)}</td>
+                  <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell align-top">{fmtNum(l.quantity)}</td>
+                  <td className="px-3 py-1.5 text-right tnum text-muted-foreground align-top">{fmtNum(l.weightKg)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
     </li>
   );
 }
