@@ -11,6 +11,22 @@ function actorOf(session: { user?: { email?: string | null; name?: string | null
   return session.user?.email ?? session.user?.name ?? "?";
 }
 
+/** Vrai si RIEN n'a été posté dans SAP par cette tentative (aucun doc créé). */
+function nothingPosted(a: NonNullable<Awaited<ReturnType<typeof getSession>>>["adjustment"]): boolean {
+  return !a || (a.sapExitDocNum == null && a.sapEntryDocNum == null);
+}
+
+/**
+ * Session VERROUILLÉE = stock réellement régularisé dans SAP. Un ajustement qui a
+ * ÉCHOUÉ sans rien poster (ex. sortie SAP refusée) ne verrouille PAS : l'inventaire
+ * reste corrigeable et re-régularisable. Une réussite, ou un échec PARTIEL (un doc
+ * déjà posté), verrouille pour éviter un double mouvement.
+ */
+function isLocked(s: NonNullable<Awaited<ReturnType<typeof getSession>>>): boolean {
+  if (s.status !== "adjusted" || !s.adjustment) return false;
+  return !(s.adjustment.status === "error" && nothingPosted(s.adjustment));
+}
+
 /**
  * GET /api/inventaire/adjust?id=<id>  — APERÇU (aucune écriture SAP).
  * Renvoie les mouvements qui seraient postés (sorties/entrées, lots EM, valeurs)
@@ -32,7 +48,9 @@ export async function GET(req: NextRequest) {
     ok: true,
     sapEnv: sap.getEnvironment().env,
     sapCompany: sap.getEnvironment().company,
-    alreadyAdjusted: !!s.adjustment,
+    // « Déjà ajusté » = VERROUILLÉ : seulement si quelque chose a vraiment été
+    // posté dans SAP. Un échec total (rien posté) reste re-tentable.
+    alreadyAdjusted: isLocked(s),
     adjustment: s.adjustment ?? null,
     moves,
     ...summarizeMoves(moves),
@@ -58,27 +76,33 @@ export async function POST(req: NextRequest) {
   const s = await getSession(id);
   if (!s) return NextResponse.json({ error: "Session introuvable" }, { status: 404 });
 
-  // Garde anti-double-écriture : une session déjà régularisée (même en erreur) ne
-  // se rejoue pas automatiquement — sinon on risque un double mouvement de stock.
-  if (s.adjustment) {
+  // Garde anti-double-écriture : on refuse uniquement si du stock a VRAIMENT été
+  // posté (réussite, ou échec PARTIEL avec un doc déjà créé). Un échec TOTAL
+  // (rien posté, ex. sortie refusée) ne verrouille pas → on peut re-tenter.
+  if (isLocked(s)) {
     return NextResponse.json(
-      { error: s.adjustment.status === "error"
-          ? "Régularisation déjà tentée et en erreur — à reprendre manuellement dans SAP."
-          : "Inventaire déjà régularisé." , adjustment: s.adjustment },
+      { error: "Inventaire déjà régularisé.", adjustment: s.adjustment },
       { status: 409 },
     );
   }
 
   const actor = actorOf(session);
   const adjustment = await executeAdjustment(s, actor);
+  const posted = adjustment.sapExitDocNum != null || adjustment.sapEntryDocNum != null;
 
-  // Persiste la trace + bascule l'état. Même en erreur partielle on enregistre
-  // (statut adjusted) pour éviter un re-post : l'admin reconcilie dans SAP.
+  // Persiste la trace dans tous les cas (visibilité de la dernière tentative).
   s.adjustment = adjustment;
-  s.status = "adjusted";
-  if (!s.reviewedAt) { s.reviewedAt = adjustment.at; s.reviewedBy = actor; }
+  if (adjustment.status === "done" || posted) {
+    // Réussite, ou échec PARTIEL (un doc posté) → on VERROUILLE (reconcilie dans SAP).
+    s.status = "adjusted";
+    if (!s.reviewedAt) { s.reviewedAt = adjustment.at; s.reviewedBy = actor; }
+  } else {
+    // Échec TOTAL (rien posté) → on NE verrouille PAS : l'inventaire reste
+    // corrigeable et re-régularisable (l'erreur est conservée pour affichage).
+    s.status = "reviewed";
+  }
   await saveSession(s);
 
   const httpStatus = adjustment.status === "error" ? 502 : 200;
-  return NextResponse.json({ ok: adjustment.status !== "error", adjustment }, { status: httpStatus });
+  return NextResponse.json({ ok: adjustment.status !== "error", adjustment, locked: isLocked(s) }, { status: httpStatus });
 }

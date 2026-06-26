@@ -213,6 +213,10 @@ export async function PUT(req: NextRequest) {
   s.status = "submitted";       // une correction repasse en « à revoir »
   s.reviewedAt = null;
   s.reviewedBy = null;
+  // Une correction modifie le contenu compté → l'éventuelle tentative de
+  // régularisation précédente (souvent en erreur) n'a plus de sens : on la purge
+  // pour repartir propre (sinon le récap garderait une trace d'échec périmée).
+  s.adjustment = null;
   s.updatedAt = nowIso();
   s.updatedBy = actorOf(session);
   await saveSession(s);
