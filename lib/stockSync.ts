@@ -13,6 +13,106 @@ import { sap, type SapItem } from "@/lib/sapb1";
 const WAREHOUSES = new Set(["000", "01", "R1"]);
 
 /**
+ * Écrit en base le stock (totalStock + ProductStock par entrepôt) d'UN article
+ * SAP déjà résolu vers son productId local. Renvoie false si l'article ne porte
+ * aucun entrepôt suivi (→ on ne touche pas au stock existant : jamais de remise à
+ * zéro accidentelle). Partagé par refreshItemStocks (par code) et
+ * refreshInStockMirror (pull groupé).
+ */
+async function writeItemStock(productId: string, it: SapItem): Promise<boolean> {
+  const stocks = (it.ItemWarehouseInfoCollection ?? []).filter((w) => WAREHOUSES.has(w.WarehouseCode));
+  if (stocks.length === 0) return false;
+  await prisma.product.update({
+    where: { id: productId },
+    data: { totalStock: it.QuantityOnStock ?? 0, syncedAt: new Date() },
+  });
+  await Promise.all(stocks.map((w) => {
+    const inStock = w.InStock ?? 0;
+    const committed = w.Committed ?? 0;
+    const ordered = w.Ordered ?? 0;
+    return prisma.productStock.upsert({
+      where: { productId_warehouse: { productId, warehouse: w.WarehouseCode } },
+      update: { inStock, committed, ordered, available: inStock - committed, syncedAt: new Date() },
+      create: { productId, warehouse: w.WarehouseCode, inStock, committed, ordered, available: inStock - committed },
+    });
+  }));
+  return true;
+}
+
+/**
+ * Rafraîchit le stock de TOUS les articles « en stock » côté SAP en UN appel
+ * groupé (filtre serveur `QuantityOnStock gt 0`, pagination parallèle 500/page —
+ * exactement le chemin éprouvé par la synchro catalogue), au lieu d'une requête
+ * filtrée par paquet de codes. C'est 10-30× moins d'allers-retours SAP → le
+ * pré-comptage d'inventaire passe de « très long » à quasi instantané.
+ *
+ * Couvre aussi les ÉPUISÉS : un article que le miroir croyait en stock mais que
+ * SAP ne renvoie plus (stock retombé à 0) est remis à 0 localement — sinon le
+ * comptage afficherait un « stock attendu » périmé.
+ */
+export async function refreshInStockMirror(): Promise<{ refreshed: number; total: number }> {
+  // 1. SAP : articles valides, non gelés, stock total > 0 (un seul filtre serveur).
+  const ITEMS_FILTER = "Valid eq 'tYES' and Frozen eq 'tNO' and QuantityOnStock gt 0";
+  const SELECT = "ItemCode,QuantityOnStock,ItemWarehouseInfoCollection";
+  let sapItems: SapItem[];
+  try {
+    sapItems = await sap.getAllParallel<SapItem>(
+      `Items?$filter=${ITEMS_FILTER}&$select=${SELECT}`,
+      `Items/$count?$filter=${ITEMS_FILTER}`,
+      { pageSize: 500, env: "prod" },
+    );
+  } catch {
+    // Repli : pagination séquentielle si /$count indispo sur ce Service Layer.
+    sapItems = await sap.getAll<SapItem>(
+      `Items?$filter=${ITEMS_FILTER}&$select=${SELECT}`,
+      { pageSize: 500, env: "prod" },
+    );
+  }
+
+  // 2. Résoudre les ids produits du miroir pour les codes SAP renvoyés.
+  const sapCodes = sapItems.map((it) => it.ItemCode);
+  const sapCodeSet = new Set(sapCodes);
+  const products = await prisma.product.findMany({
+    where: { itemCode: { in: sapCodes } },
+    select: { id: true, itemCode: true },
+  });
+  const idByCode = new Map(products.map((p) => [p.itemCode, p.id]));
+
+  // 3. Upserts en base, par vagues parallèles (DB locale → rapide).
+  let refreshed = 0;
+  const UPSERT_CONC = 25;
+  for (let i = 0; i < sapItems.length; i += UPSERT_CONC) {
+    const slice = sapItems.slice(i, i + UPSERT_CONC);
+    const oks = await Promise.all(slice.map(async (it) => {
+      const productId = idByCode.get(it.ItemCode);
+      if (!productId) return false;
+      try { return await writeItemStock(productId, it); }
+      catch (e) { console.warn(`[stockSync] upsert ${it.ItemCode} échoué:`, (e as Error).message); return false; }
+    }));
+    refreshed += oks.filter(Boolean).length;
+  }
+
+  // 4. ÉPUISÉS : en stock dans le miroir mais absents du retour SAP → remettre à 0.
+  const mirrorInStock = await prisma.product.findMany({
+    where: { isPackaging: false, stocks: { some: { inStock: { gt: 0 } } } },
+    select: { id: true, itemCode: true },
+  });
+  const depletedIds = mirrorInStock.filter((p) => !sapCodeSet.has(p.itemCode)).map((p) => p.id);
+  if (depletedIds.length > 0) {
+    await prisma.productStock.updateMany({
+      where: { productId: { in: depletedIds } },
+      data: { inStock: 0, available: 0, syncedAt: new Date() },
+    });
+    await prisma.product.updateMany({
+      where: { id: { in: depletedIds } },
+      data: { totalStock: 0, syncedAt: new Date() },
+    });
+  }
+
+  return { refreshed, total: sapItems.length };
+}
+
+/**
  * Re-pull les ItemWarehouseInfo des codes donnés et upsert ProductStock.
  * PERF : un seul appel SAP par PAQUET de codes (filtre OData `ItemCode eq … or …`)
  * au lieu d'un appel par article — ~20× moins d'allers-retours. Sécurité : si un
@@ -36,24 +136,8 @@ export async function refreshItemStocks(itemCodes: string[]): Promise<number> {
 
   const upsertItem = async (it: SapItem): Promise<boolean> => {
     const productId = idByCode.get(it.ItemCode);
-    if (!productId) return false;
-    const stocks = (it.ItemWarehouseInfoCollection ?? []).filter((w) => WAREHOUSES.has(w.WarehouseCode));
-    if (stocks.length === 0) return false;   // pas d'info entrepôt → on ne zappe pas le stock existant
-    await prisma.product.update({
-      where: { id: productId },
-      data: { totalStock: it.QuantityOnStock ?? 0, syncedAt: new Date() },
-    });
-    await Promise.all(stocks.map((w) => {
-      const inStock = w.InStock ?? 0;
-      const committed = w.Committed ?? 0;
-      const ordered = w.Ordered ?? 0;
-      return prisma.productStock.upsert({
-        where: { productId_warehouse: { productId, warehouse: w.WarehouseCode } },
-        update: { inStock, committed, ordered, available: inStock - committed, syncedAt: new Date() },
-        create: { productId, warehouse: w.WarehouseCode, inStock, committed, ordered, available: inStock - committed },
-      });
-    }));
-    return true;
+    if (!productId) return false;                  // pas dans le miroir → on ignore
+    return writeItemStock(productId, it);          // entrepôts vides → false (pas de RAZ)
   };
 
   let updated = 0;
