@@ -180,7 +180,8 @@ export async function GET(req: NextRequest) {
         carrierName: trspCode ? carrierByCode.get(trspCode) ?? trspCode : null,
         clientType: typeByCardCode.get(d.CardCode) ?? null,   // GMS | CHR | EXPORT | null
         prepared: faiteByDoc.get(d.DocEntry) ?? false,        // « faite » = coché manuellement
-        excluded: avoirByDoc.get(d.DocEntry) ?? false,        // « avoir/exclu » → déduit des totaux
+        // « avoir/exclu » : surcharge manuelle si présente, sinon détecté auto (ci-dessous).
+        excluded: avoirByDoc.has(d.DocEntry) ? !!avoirByDoc.get(d.DocEntry) : false,
         lineCount: lines.length,
         lines,
       };
@@ -188,6 +189,49 @@ export async function GET(req: NextRequest) {
     // Demande métier : on n'affiche QUE les magasins segmentés (GMS / CHR / EXPORT).
     // Les clients sans segment n'apparaissent pas dans Détail livraison.
     .filter((d) => d.clientType === "GMS" || d.clientType === "CHR" || d.clientType === "EXPORT");
+
+    // ── Détection AUTOMATIQUE des BL totalement avoirés (facturé puis avoir total) ──
+    // Un avoir SAP (CreditNote) NON annulé dont le montant TTC = le total d'un BL
+    // du jour pour le MÊME client, daté APRÈS ce BL → ce BL a été totalement
+    // avoiré (souvent un doublon recréé). On le déduit à 100% (sauf surcharge
+    // manuelle explicite, qui reste prioritaire). Best-effort : peu de clients par
+    // jour → rapide ; en cas d'échec SAP, on ne déduit rien (repli sur le manuel).
+    try {
+      const cc = Array.from(new Set(docs.map((d) => d.cardCode).filter(Boolean)));
+      if (cc.length) {
+        const since = new Date(Date.parse(date) - 45 * 86_400_000).toISOString().slice(0, 10);
+        const orCard = cc.map((c) => `CardCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
+        const cnFilter = encodeURIComponent(`(${orCard}) and DocDate ge '${since}' and Cancelled eq 'tNO'`);
+        const notes = await sap.getAll<{ CardCode: string; DocTotal?: number; DocDate?: string }>(
+          `CreditNotes?$select=CardCode,DocTotal,DocDate&$filter=${cnFilter}&$orderby=DocEntry asc`,
+          { pageSize: 100, maxPages: 5 },
+        );
+        // BL par client, plus ANCIEN (DocEntry) d'abord — l'original avoiré précède
+        // le BL recréé.
+        const byClient = new Map<string, typeof docs>();
+        for (const d of [...docs].sort((a, b) => a.docEntry - b.docEntry)) {
+          const a = byClient.get(d.cardCode) ?? [];
+          a.push(d);
+          byClient.set(d.cardCode, a);
+        }
+        const matched = new Set<number>();
+        for (const n of notes) {
+          const amt = Math.abs(n.DocTotal ?? 0);
+          if (amt <= 0.01) continue;
+          const noteDay = (n.DocDate ?? "").slice(0, 10);
+          const cand = (byClient.get(n.CardCode) ?? []).find(
+            (d) =>
+              !matched.has(d.docEntry) &&
+              Math.abs((d.totalTTC ?? 0) - amt) <= 0.05 &&        // total avoiré = total du BL
+              (!noteDay || noteDay >= (d.docDate ?? "").slice(0, 10)), // avoir postérieur au BL
+          );
+          if (!cand) continue;
+          matched.add(cand.docEntry);
+          // La surcharge MANUELLE reste prioritaire (l'utilisateur a tranché).
+          if (!avoirByDoc.has(cand.docEntry)) cand.excluded = true;
+        }
+      }
+    } catch { /* avoirs best-effort → pas de déduction auto */ }
 
     // ── Regroupement par transporteur ──
     type Doc = (typeof docs)[number];
