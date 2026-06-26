@@ -25,7 +25,7 @@ export interface Salesperson {
 export const SALESPEOPLE: Salesperson[] = [
   { initials: "MM", code: 16, email: "m.mandine@gervifrais.com", surname: "MANDINE", firstName: "Maxyme" },
   { initials: "JMG", code: 1, email: "jm.gunslay@gervifrais.com", surname: "GUNSLAY", firstName: "Jean-Michel" },
-  { initials: "AG", code: 7, email: "m.essombe@gervifrais.com", surname: "ESSOMBE", firstName: "" },
+  { initials: "AG", code: 7, email: "m.essombe@gervifrais.com", surname: "ESSOMBE", firstName: "Mailys" },
 ];
 
 const localPart = (email: string) => email.split("@")[0];
