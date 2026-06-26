@@ -27,14 +27,67 @@ const EPS = 0.001;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** Prénom (tout sauf le nom de famille) à partir d'un nom complet. */
+function firstNameOf(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return parts[0] ?? fullName.trim();
+  return parts.slice(0, -1).join(" ");
+}
+
+/**
+ * Prénom affichable d'un opérateur pour le commentaire SAP : si c'est un email,
+ * on résout le nom complet dans la table User (→ prénom), sinon repli sur la
+ * partie locale de l'email. Best-effort (jamais bloquant).
+ */
+async function displayFirstName(emailOrName: string): Promise<string> {
+  const raw = (emailOrName ?? "").trim();
+  if (!raw) return "?";
+  if (raw.includes("@")) {
+    try {
+      const rows = await prisma.$queryRawUnsafe<{ name: string | null }[]>(
+        `SELECT "name" FROM "User" WHERE LOWER("email") = $1 LIMIT 1`,
+        raw.toLowerCase(),
+      );
+      const full = rows[0]?.name?.trim();
+      if (full) return firstNameOf(full);
+    } catch { /* repli */ }
+    return raw.split("@")[0];
+  }
+  return firstNameOf(raw);
+}
+
 /**
  * Prix d'achat unitaire (€/unité d'inventaire) — basé sur l'ENTRÉE MARCHANDISE.
- * 1) Prix de l'EM EXACTE du lot sorti/entré (lot = « EM<DocNum> ») : c'est la
- *    marchandise qu'on bouge → on la valorise à SON prix d'achat réel.
- * 2) Repli : dernière EM non annulée de l'article (si le lot n'a pas de ligne).
+ * 1) SOURCE DE VÉRITÉ : la ligne de l'EM EXACTE du lot (lot = « EM<DocNum> »),
+ *    lue EN DIRECT dans SAP — le miroir local peut être périmé pour une EM
+ *    récente (d'où un prix faux). Prix net = LineTotal/Quantity (tient compte
+ *    d'un total forcé), repli sur Price.
+ * 2) Repli miroir : prix de l'EM du lot si déjà synchronisée localement.
+ * 3) Repli : dernière EM non annulée de l'article.
  */
 async function purchaseUnitPrice(itemCode: string, lot: string | null): Promise<number> {
   const docNum = lot ? /^EM(\d+)$/.exec(lot)?.[1] : undefined;
+
+  // 1) Prix LIVE de l'EM exacte (SAP).
+  if (docNum) {
+    try {
+      type PdnLine = { ItemCode?: string; Price?: number; Quantity?: number; LineTotal?: number };
+      const r = await sap.get<{ value: { DocumentLines?: PdnLine[] }[] }>(
+        `PurchaseDeliveryNotes?$filter=DocNum eq ${Number(docNum)}&$select=DocNum,DocumentLines&$top=1`,
+      );
+      const line = (r.value?.[0]?.DocumentLines ?? []).find((l) => l.ItemCode === itemCode);
+      if (line) {
+        const perUnit = line.Quantity && line.Quantity > 0 && line.LineTotal != null && line.LineTotal > 0
+          ? line.LineTotal / line.Quantity
+          : (line.Price ?? 0);
+        if (perUnit > 0) return round2(perUnit);
+      }
+    } catch (e) {
+      console.warn(`[inventoryAdjust] lecture prix live EM${docNum} (${itemCode}) échouée:`, (e as Error).message);
+    }
+  }
+
+  // 2) Repli miroir : prix de l'EM du lot (si déjà synchronisée).
   if (docNum) {
     try {
       const rows = await prisma.$queryRawUnsafe<{ unitCost: number | null }[]>(
@@ -50,6 +103,8 @@ async function purchaseUnitPrice(itemCode: string, lot: string | null): Promise<
       if (c != null && Number.isFinite(c) && c > 0) return round2(c);
     } catch { /* repli ci-dessous */ }
   }
+
+  // 3) Repli : dernière EM non annulée de l'article.
   try {
     const rows = await prisma.$queryRawUnsafe<{ unitCost: number | null }[]>(
       `SELECT (em."lineTotal" / NULLIF(em."quantity", 0))::float8 AS "unitCost"
@@ -324,7 +379,13 @@ export async function executeAdjustment(session: InventorySession, actor: string
   const manageBatch = new Map<string, boolean>(prods.map((p) => [p.itemCode, p.manageBatch] as [string, boolean]));
 
   const docDate = new Date().toISOString().slice(0, 10);
-  const comments = `Inventaire ${session.id} — régularisation (compté par ${session.createdBy}) — validé par ${actor}`.slice(0, 254);
+  // Commentaire SAP concis : « INV <id> - Inventaire <prénom compteur> - Regul
+  // <prénom validateur> » (prénoms résolus depuis la table User).
+  const [counterName, validatorName] = await Promise.all([
+    displayFirstName(session.createdBy),
+    displayFirstName(actor),
+  ]);
+  const comments = `INV ${session.id} - Inventaire ${counterName} - Regul ${validatorName}`.slice(0, 254);
 
   const sorties = moves.filter((m) => m.sens === "sortie");
   const entrees = moves.filter((m) => m.sens === "entree");
