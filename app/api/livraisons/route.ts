@@ -94,6 +94,9 @@ export async function GET(req: NextRequest) {
             salesUnit: true,
             salesUnitWeight: true,
             salesQtyPerPackUnit: true,
+            uMarque: true,
+            uCondi: true,
+            uPays: true,
           },
         })
       : [];
@@ -158,6 +161,10 @@ export async function GET(req: NextRequest) {
           colis: Math.round(((l.Quantity || 0) / div) * 10) / 10,
           weightKg: Math.round((l.Quantity || 0) * weightOfItem(l.ItemCode) * 10) / 10,
           warehouse: l.WarehouseCode ?? null,
+          // Tags désignation (préparation) — marque · conditionnement · origine.
+          marque: p?.uMarque ?? null,
+          condt: p?.uCondi ?? null,
+          pays: p?.uPays ?? null,
         };
       });
       const colis = lines.reduce((s, l) => s + l.colis, 0);
