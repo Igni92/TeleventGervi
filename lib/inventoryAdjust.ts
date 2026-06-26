@@ -29,12 +29,36 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
  * Prix d'achat unitaire (€/unité d'inventaire) — basé sur l'ENTRÉE MARCHANDISE.
- * 1) Prix de l'EM EXACTE du lot sorti/entré (lot = « EM<DocNum> ») : c'est la
- *    marchandise qu'on bouge → on la valorise à SON prix d'achat réel.
- * 2) Repli : dernière EM non annulée de l'article (si le lot n'a pas de ligne).
+ * 1) SOURCE DE VÉRITÉ : la ligne de l'EM EXACTE du lot (lot = « EM<DocNum> »),
+ *    lue EN DIRECT dans SAP — le miroir local peut être périmé pour une EM
+ *    récente (d'où un prix faux). Prix net = LineTotal/Quantity (tient compte
+ *    d'un total forcé), repli sur Price.
+ * 2) Repli miroir : prix de l'EM du lot si déjà synchronisée localement.
+ * 3) Repli : dernière EM non annulée de l'article.
  */
 async function purchaseUnitPrice(itemCode: string, lot: string | null): Promise<number> {
   const docNum = lot ? /^EM(\d+)$/.exec(lot)?.[1] : undefined;
+
+  // 1) Prix LIVE de l'EM exacte (SAP).
+  if (docNum) {
+    try {
+      type PdnLine = { ItemCode?: string; Price?: number; Quantity?: number; LineTotal?: number };
+      const r = await sap.get<{ value: { DocumentLines?: PdnLine[] }[] }>(
+        `PurchaseDeliveryNotes?$filter=DocNum eq ${Number(docNum)}&$select=DocNum,DocumentLines&$top=1`,
+      );
+      const line = (r.value?.[0]?.DocumentLines ?? []).find((l) => l.ItemCode === itemCode);
+      if (line) {
+        const perUnit = line.Quantity && line.Quantity > 0 && line.LineTotal != null && line.LineTotal > 0
+          ? line.LineTotal / line.Quantity
+          : (line.Price ?? 0);
+        if (perUnit > 0) return round2(perUnit);
+      }
+    } catch (e) {
+      console.warn(`[inventoryAdjust] lecture prix live EM${docNum} (${itemCode}) échouée:`, (e as Error).message);
+    }
+  }
+
+  // 2) Repli miroir : prix de l'EM du lot (si déjà synchronisée).
   if (docNum) {
     try {
       const rows = await prisma.$queryRawUnsafe<{ unitCost: number | null }[]>(
@@ -50,6 +74,8 @@ async function purchaseUnitPrice(itemCode: string, lot: string | null): Promise<
       if (c != null && Number.isFinite(c) && c > 0) return round2(c);
     } catch { /* repli ci-dessous */ }
   }
+
+  // 3) Repli : dernière EM non annulée de l'article.
   try {
     const rows = await prisma.$queryRawUnsafe<{ unitCost: number | null }[]>(
       `SELECT (em."lineTotal" / NULLIF(em."quantity", 0))::float8 AS "unitCost"

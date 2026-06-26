@@ -707,7 +707,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                         // Répartition entrepôts en COLIS (on ne parle qu'au colis).
                         const whTxt = (m.warehouses ?? [])
                           .filter((w) => w.qtyUnits > 0)
-                          .map((w) => `${w.warehouse} ${fmt(Math.round((w.qtyUnits / (m.unitsPerColis || 1)) * 10) / 10)}`)
+                          .map((w) => `${w.warehouse}: ${fmt(Math.round((w.qtyUnits / (m.unitsPerColis || 1)) * 10) / 10)}`)
                           .join(" · ");
                         const prixColis = m.unitPrice > 0 ? m.unitPrice * (m.unitsPerColis || 1) : 0;
                         return (
@@ -721,8 +721,8 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                                 <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">{m.itemCode}</span>
                               </div>
                               <div className="text-[11px] text-muted-foreground tnum">
-                                {m.sens === "sortie" ? "Sortir" : "Entrer"} {fmt(Math.abs(m.ecartColis))} colis
-                                {m.lot ? ` · ${m.lot}` : " · lot ?"}
+                                <span className="font-mono font-semibold text-foreground">{m.lot ?? "lot ?"}</span>
+                                {" · "}{m.sens === "sortie" ? "Sortir" : "Entrer"} {fmt(Math.abs(m.ecartColis))} colis
                                 {whTxt ? ` · ${whTxt}` : ""}
                               </div>
                               <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1" />
