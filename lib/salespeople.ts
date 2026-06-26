@@ -23,7 +23,7 @@ export interface Salesperson {
 }
 
 export const SALESPEOPLE: Salesperson[] = [
-  { initials: "MM", code: 16, email: "m.mandine@gervifrais.com", surname: "MANDINE", fullName: "Maxime Mandine" },
+  { initials: "MM", code: 16, email: "m.mandine@gervifrais.com", surname: "MANDINE", fullName: "Maxyme Mandine" },
   { initials: "JMG", code: 1, email: "jm.gunslay@gervifrais.com", surname: "GUNSLAY", fullName: "Jean-Michel Gunslay" },
   { initials: "AG", code: 7, email: "m.essombe@gervifrais.com", surname: "ESSOMBE", fullName: "M. Essombe" },
 ];
