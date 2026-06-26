@@ -4,14 +4,17 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, PackageCheck, Search, ChevronRight, X, Truck, AlertTriangle,
+  Pencil, Plus, Save, Trash2,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
 import { DesignationChips } from "./DesignationChips";
+import { ProductPicker, type ProductHit } from "./GoodsReceiptForm";
 
 type PoLine = {
   itemCode: string; itemName?: string;
@@ -297,17 +300,152 @@ export function PurchaseOrderHistory() {
               <span className="truncate min-w-0">Commande fournisseur N° {largeDoc?.docNum}</span>
             </DialogTitle>
           </DialogHeader>
-          {largeDoc && <PoDetail po={largeDoc} onReceive={receive} receiving={receiving} />}
+          {largeDoc && <PoDetail po={largeDoc} onReceive={receive} receiving={receiving} onModified={load} />}
         </DialogContent>
       </Dialog>
     </div>
   );
 }
 
-function PoDetail({ po, onReceive, receiving }: { po: PurchaseOrder; onReceive: (docEntry: number) => void; receiving: boolean }) {
+type EditLine = {
+  itemCode: string; itemName: string; ratio: number;
+  packageQuantity: number; price: string; warehouseCode: "000" | "01" | "R1";
+  pays: string | null; marque: string | null; condt: string | null; variete: string | null;
+};
+const PO_WAREHOUSES: { code: "000" | "01" | "R1"; label: string }[] = [
+  { code: "000", label: "000 · A/C-A/D" }, { code: "01", label: "01 · Stock" }, { code: "R1", label: "R1 · J+1" },
+];
+
+function PoDetail({ po, onReceive, receiving, onModified }: {
+  po: PurchaseOrder; onReceive: (docEntry: number) => void; receiving: boolean; onModified: () => void | Promise<void>;
+}) {
   const [confirm, setConfirm] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editLines, setEditLines] = useState<EditLine[]>([]);
+
+  const beginEdit = () => {
+    setEditLines(po.lines.map((l) => {
+      const pkg = l.packageQuantity ?? l.pieceQuantity ?? 0;
+      const ratio = pkg > 0 && l.pieceQuantity ? Math.max(1, Math.round((l.pieceQuantity / pkg) * 1000) / 1000) : 1;
+      const whs = (["000", "01", "R1"] as const).find((w) => w === l.warehouse) ?? "01";
+      return {
+        itemCode: l.itemCode, itemName: l.itemName ?? l.itemCode, ratio,
+        packageQuantity: pkg, price: l.price != null ? String(l.price) : "", warehouseCode: whs,
+        pays: l.uPays, marque: l.uMarque, condt: l.uCondi, variete: l.frgnName ?? null,
+      };
+    }));
+    setEditing(true);
+  };
+  const addEditLine = (p: ProductHit) => setEditLines((cur) => {
+    if (cur.some((l) => l.itemCode === p.itemCode)) { toast.info(`${p.itemCode} déjà présent`); return cur; }
+    const ratio = p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1 ? p.salesQtyPerPackUnit : 1;
+    return [...cur, { itemCode: p.itemCode, itemName: p.itemName, ratio, packageQuantity: 1, price: "", warehouseCode: "01", pays: p.uPays, marque: p.uMarque, condt: p.uCondi, variete: p.frgnName }];
+  });
+  const updateEditLine = (i: number, patch: Partial<EditLine>) => setEditLines((c) => c.map((l, k) => (k === i ? { ...l, ...patch } : l)));
+  const removeEditLine = (i: number) => setEditLines((c) => c.filter((_, k) => k !== i));
+  const editTotalHT = editLines.reduce((s, l) => { const p = l.price === "" ? null : parseFloat(l.price); return s + (p != null ? p * l.packageQuantity * l.ratio : 0); }, 0);
+
+  const save = async () => {
+    const payload = editLines
+      .filter((l) => l.packageQuantity > 0)
+      .map((l) => ({ itemCode: l.itemCode, packageQuantity: l.packageQuantity, warehouseCode: l.warehouseCode, price: l.price ? parseFloat(l.price) : undefined }));
+    if (payload.length === 0) { toast.error("Garde au moins une ligne."); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/sap/purchase-orders/${po.docEntry}/modif`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: payload }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j.ok) { toast.error(j.error || "Erreur SAP"); return; }
+      toast.success(`Commande #${po.docNum} modifiée`);
+      setEditing(false);
+      await onModified();
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setSaving(false); }
+  };
+
+  // ── Mode ÉDITION (commande pas encore réceptionnée) ──
+  if (editing) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[14px] font-semibold text-foreground">Modifier la commande</span>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={saving}>Annuler</Button>
+            <Button size="sm" onClick={save} disabled={saving || editLines.length === 0}>
+              {saving ? <Loader2 className="animate-spin" /> : <Save className="h-4 w-4" />} Enregistrer
+            </Button>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Ajouter un article</label>
+          <ProductPicker onPick={addEditLine} />
+        </div>
+
+        <div className="rounded-lg border border-border overflow-x-auto">
+          <table className="w-full text-[12.5px]">
+            <thead className="bg-secondary/40 text-[10.5px] uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="text-left px-2 py-2 font-semibold">Article</th>
+                <th className="text-left px-2 py-2 font-semibold w-24">Qté colis</th>
+                <th className="text-left px-2 py-2 font-semibold w-36">Entrepôt</th>
+                <th className="text-right px-2 py-2 font-semibold w-24">PU /pie HT</th>
+                <th className="text-right px-2 py-2 font-semibold w-24">Total HT</th>
+                <th className="w-8" />
+              </tr>
+            </thead>
+            <tbody>
+              {editLines.map((l, i) => {
+                const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, frgnName: l.variete });
+                const priceNum = l.price === "" ? null : parseFloat(l.price);
+                const lineHT = priceNum != null ? priceNum * l.packageQuantity * l.ratio : null;
+                return (
+                  <tr key={`${l.itemCode}-${i}`} className="border-t border-border align-top">
+                    <td className="px-2 py-2">
+                      <div className="font-semibold text-foreground">{dz.fruit}</div>
+                      <div className="font-mono text-[11px] text-muted-foreground">{l.itemCode}</div>
+                      <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-0.5" />
+                    </td>
+                    <td className="px-2 py-2"><NumberInput value={l.packageQuantity} onValueChange={(n) => updateEditLine(i, { packageQuantity: n ?? 0 })} min={0} step={1} className="text-right h-9 w-20" /></td>
+                    <td className="px-2 py-2">
+                      <select value={l.warehouseCode} onChange={(e) => updateEditLine(i, { warehouseCode: e.target.value as EditLine["warehouseCode"] })} className="h-9 w-full rounded-md border border-input bg-background px-2 text-[12.5px]">
+                        {PO_WAREHOUSES.map((w) => <option key={w.code} value={w.code}>{w.label}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-2 py-2"><NumberInput value={priceNum} onValueChange={(n) => updateEditLine(i, { price: n == null ? "" : String(n) })} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className="text-right h-9 w-24" /></td>
+                    <td className="px-2 py-2 text-right tnum font-medium whitespace-nowrap">{lineHT != null ? eur(lineHT) : <span className="text-muted-foreground/60">—</span>}</td>
+                    <td className="px-2 py-2 text-right"><Button variant="ghost" size="icon-sm" onClick={() => removeEditLine(i)} aria-label="Supprimer"><Trash2 className="h-3.5 w-3.5" /></Button></td>
+                  </tr>
+                );
+              })}
+              {editLines.length === 0 && (
+                <tr><td colSpan={6} className="px-2 py-4 text-center text-[12px] italic text-muted-foreground">Ajoute au moins une ligne.</td></tr>
+              )}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-border bg-secondary/30">
+                <td colSpan={4} className="px-2 py-2 text-right text-[10.5px] uppercase tracking-wide font-semibold text-muted-foreground">Total HT</td>
+                <td className="px-2 py-2 text-right tnum font-bold text-foreground whitespace-nowrap">{eur(editTotalHT)}</td>
+                <td />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <p className="text-[11px] text-muted-foreground">Le total HT exact (taxes incluses) est recalculé par SAP à l&apos;enregistrement.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
+      {/* Modifier la commande (tant qu'elle n'est pas réceptionnée) */}
+      {po.open && (
+        <Button variant="outline" size="sm" onClick={beginEdit} className="gap-1.5">
+          <Pencil className="h-3.5 w-3.5" /> Modifier la commande
+        </Button>
+      )}
       {/* Action : valider la réception → crée l'entrée marchandise */}
       {po.open && (
         <div className="rounded-xl border border-amber-400/50 bg-amber-50/60 dark:bg-amber-950/20 p-3">
