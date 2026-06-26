@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, PackageCheck, Search, ChevronRight, X, Truck, AlertTriangle,
-  Pencil, Plus, Save, Trash2,
+  Pencil, Plus, Save, Trash2, Ban,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
@@ -337,6 +337,25 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
   const [saving, setSaving] = useState(false);
   const [editLines, setEditLines] = useState<EditLine[]>([]);
   const [swapIdx, setSwapIdx] = useState<number | null>(null); // ligne dont on remplace l'article
+  // Annulation de la commande fournisseur (tant qu'elle n'est pas réceptionnée).
+  const [cancelConfirm, setCancelConfirm] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  const cancelOrder = async () => {
+    setCancelling(true);
+    try {
+      const res = await fetch("/api/sap/purchase-orders/cancel", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: po.docEntry }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j.ok) { toast.error(j.error || "Annulation impossible"); return; }
+      toast.success(`Commande fournisseur #${po.docNum} annulée`);
+      setCancelConfirm(false);
+      await onModified();
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setCancelling(false); }
+  };
 
   const beginEdit = () => {
     setEditLines(po.lines.map((l) => {
@@ -487,11 +506,31 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
 
   return (
     <div className="space-y-5">
-      {/* Modifier la commande (tant qu'elle n'est pas réceptionnée) */}
+      {/* Modifier / annuler la commande (tant qu'elle n'est pas réceptionnée) */}
       {po.open && (
-        <Button variant="outline" size="sm" onClick={beginEdit} className="gap-1.5">
-          <Pencil className="h-3.5 w-3.5" /> Modifier la commande
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={beginEdit} className="gap-1.5">
+            <Pencil className="h-3.5 w-3.5" /> Modifier la commande
+          </Button>
+          {!cancelConfirm ? (
+            <Button variant="outline" size="sm" onClick={() => setCancelConfirm(true)}
+              className="gap-1.5 text-rose-600 dark:text-rose-400 hover:text-rose-700 border-rose-300/60 dark:border-rose-500/30">
+              <Ban className="h-3.5 w-3.5" /> Annuler la commande
+            </Button>
+          ) : (
+            <div className="inline-flex items-center gap-2">
+              <span className="text-[12.5px] text-foreground">Annuler la commande #{po.docNum} ?</span>
+              <button type="button" onClick={cancelOrder} disabled={cancelling}
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[12.5px] font-semibold disabled:opacity-60">
+                {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Confirmer
+              </button>
+              <button type="button" onClick={() => setCancelConfirm(false)} disabled={cancelling}
+                className="inline-flex items-center h-8 px-3 rounded-lg border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground">
+                Non
+              </button>
+            </div>
+          )}
+        </div>
       )}
       {/* Action : valider la réception → crée l'entrée marchandise */}
       {po.open && (

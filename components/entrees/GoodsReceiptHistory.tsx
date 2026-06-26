@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ClipboardList, Search, ChevronRight, ChevronDown,
-  AlertTriangle, Truck, X, Maximize2,
+  AlertTriangle, Truck, X, Maximize2, Ban,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
@@ -286,6 +286,7 @@ export function GoodsReceiptHistory() {
                             incidents={byDoc.get(d.docEntry) ?? []}
                             onIncidentChanged={reloadIncidents}
                             onNumAtCardChange={updateNumAtCard}
+                            onModified={load}
                             onEnlarge={() => setLargeEntry(d.docEntry)}
                           />
                         </td>
@@ -320,6 +321,7 @@ export function GoodsReceiptHistory() {
               incidents={byDoc.get(largeDoc.docEntry) ?? []}
               onIncidentChanged={reloadIncidents}
               onNumAtCardChange={updateNumAtCard}
+              onModified={load}
             />
           )}
         </DialogContent>
@@ -345,12 +347,14 @@ function Stat({ label, value, tone }: { label: string; value: React.ReactNode; t
    directement depuis cette consultation.
    ───────────────────────────────────────────────────────────────── */
 function ReceiptDetail({
-  receipt, incidents, onIncidentChanged, onNumAtCardChange, large, onEnlarge,
+  receipt, incidents, onIncidentChanged, onNumAtCardChange, onModified, large, onEnlarge,
 }: {
   receipt: Receipt;
   incidents: { id: string; type: string | null; note: string | null; resolved: boolean; createdAt: string; createdBy: string | null }[];
   onIncidentChanged: () => void;
   onNumAtCardChange: (docEntry: number, numAtCard: string) => void;
+  /** Rafraîchit la liste après une annulation de réception. */
+  onModified?: () => void | Promise<void>;
   /** Affichage agrandi (modale plein cadre) — textes et espacements plus grands. */
   large?: boolean;
   /** Ouvre l'affichage agrandi (visible seulement en mode normal). */
@@ -358,6 +362,24 @@ function ReceiptDetail({
 }) {
   const [declareOpen, setDeclareOpen] = useState(false);
   const [savingBl, setSavingBl] = useState(false);
+  // Annulation de la réception (EM) — uniquement si non clôturée (pas facturée).
+  const [cancelConfirm, setCancelConfirm] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const cancelReceipt = async () => {
+    setCancelling(true);
+    try {
+      const res = await fetch("/api/sap/goods-receipts/cancel", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: receipt.docEntry }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j.ok) { toast.error(j.error || "Annulation impossible"); return; }
+      toast.success(`Entrée marchandise #${receipt.docNum} annulée — stock sorti`);
+      setCancelConfirm(false);
+      await onModified?.();
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setCancelling(false); }
+  };
 
   // Édition des PRIX (prix unitaire / total HT forcé) — la marchandise est entrée,
   // donc ni quantité ni article ne changent. ACTIVE PAR DÉFAUT, et chaque case
@@ -615,17 +637,42 @@ function ReceiptDetail({
         </ul>
       )}
 
-      {/* Déclaration d'un incident depuis la consultation */}
+      {/* Actions : déclarer un incident · annuler la réception */}
       {declareOpen ? (
         <InlineIncidentDeclare
           receipt={{ docEntry: receipt.docEntry, docNum: receipt.docNum, lot: receipt.lot, cardCode: receipt.cardCode, cardName: receipt.cardName }}
           onCreated={() => { setDeclareOpen(false); onIncidentChanged(); }}
         />
       ) : (
-        <Button variant="outline" size="sm" onClick={() => setDeclareOpen(true)}>
-          <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-          Déclarer un incident
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={() => setDeclareOpen(true)}>
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+            Déclarer un incident
+          </Button>
+          {/* Annuler la réception (sort le stock entré) — masqué si EM clôturée (facturée). */}
+          {canEditPrices && (
+            !cancelConfirm ? (
+              <Button variant="outline" size="sm" onClick={() => setCancelConfirm(true)}
+                className="gap-1.5 text-rose-600 dark:text-rose-400 hover:text-rose-700 border-rose-300/60 dark:border-rose-500/30">
+                <Ban className="h-3.5 w-3.5" /> Annuler la réception
+              </Button>
+            ) : (
+              <span className="inline-flex items-center gap-2">
+                <span className={`${big ? "text-[13.5px]" : "text-[12.5px]"} text-foreground`}>
+                  Annuler l&apos;entrée #{receipt.docNum} ? Le stock entré sera sorti.
+                </span>
+                <button type="button" onClick={cancelReceipt} disabled={cancelling}
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[12.5px] font-semibold disabled:opacity-60">
+                  {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Confirmer
+                </button>
+                <button type="button" onClick={() => setCancelConfirm(false)} disabled={cancelling}
+                  className="inline-flex items-center h-8 px-3 rounded-lg border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground">
+                  Non
+                </button>
+              </span>
+            )
+          )}
+        </div>
       )}
     </div>
   );
