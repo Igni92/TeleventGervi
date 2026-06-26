@@ -44,6 +44,7 @@ interface Doc {
   trspCode: string | null;
   carrierName: string | null;
   clientType: string | null;   // GMS | CHR | EXPORT | null
+  prepared: boolean;           // « faite » — actée à l'inventaire
   lineCount: number;
   lines: Line[];
 }
@@ -752,6 +753,12 @@ function OrderRow({
             {doc.clientType && (SEG_UI[doc.clientType as Exclude<Segment, "ALL">] ?? null) && (
               <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEG_UI[doc.clientType as Exclude<Segment, "ALL">].badge}`}>
                 {SEG_UI[doc.clientType as Exclude<Segment, "ALL">].label}
+              </span>
+            )}
+            {doc.prepared && (
+              <span title="Commande préparée (actée à l'inventaire)"
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-500 text-white px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide">
+                <CheckCircle2 className="h-2.5 w-2.5" /> Faite
               </span>
             )}
             {!doc.open && (

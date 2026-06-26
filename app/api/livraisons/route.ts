@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
+import { getPreparedDocEntries } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -106,6 +107,9 @@ export async function GET(req: NextRequest) {
       /* table Carrier absente → on affichera le code brut */
     }
 
+    // Commandes actées « préparées » (faites) à l'inventaire → coche dans la vue.
+    const preparedSet = await getPreparedDocEntries().catch(() => new Set<number>());
+
     // Type client (GMS / CHR / EXPORT) par CardCode — pour le filtre par segment.
     // Le CardCode d'un BL peut être le code principal OU un code d'adresse de
     // livraison (ClientDeliveryMode.sapCardCode) : on couvre les deux.
@@ -170,6 +174,7 @@ export async function GET(req: NextRequest) {
         trspCode,
         carrierName: trspCode ? carrierByCode.get(trspCode) ?? trspCode : null,
         clientType: typeByCardCode.get(d.CardCode) ?? null,   // GMS | CHR | EXPORT | null
+        prepared: preparedSet.has(d.DocEntry),                // « faite » (actée à l'inventaire)
         lineCount: lines.length,
         lines,
       };
