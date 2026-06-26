@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   MonitorSmartphone, Loader2, Phone, AlertTriangle, Clock,
   TrendingUp, TrendingDown, Minus, ShoppingCart, User, Users, Mail,
-  ExternalLink, Calendar, ArrowLeft,
+  Calendar, ArrowLeft, Truck, MessageSquareText,
 } from "lucide-react";
 import { Ecran2Order } from "@/components/console/Ecran2Order";
 import { rememberConsoleScreen } from "@/components/console/ConsoleScreenGate";
@@ -15,6 +15,7 @@ import {
   type ActiveClientState, type ActiveClientInfo,
 } from "@/lib/consoleSync";
 import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
+import { fullNameFromSlp } from "@/lib/salespeople";
 
 type ModifTarget = { docEntry: number; docNum: number; clientId: string | null; clientName: string | null };
 
@@ -105,21 +106,10 @@ export default function Ecran2Page() {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Notes legacy — fallback regex pour clients pas encore migrés
-   vers les champs structurés Client.email / Client.sapGroupName.
-───────────────────────────────────────────────────────────── */
-
-function extractGroupeLegacy(notes: string | null): string | null {
-  if (!notes) return null;
-  const m = notes.match(/^\s*(?:Niveau|Groupe|Cat[ée]gorie)\s*[:\-]\s*(.+?)\s*$/im);
-  if (m) return m[1].trim();
-  return null;
-}
-
-/* ─────────────────────────────────────────────────────────────
    Bandeau client riche — toutes les infos contextuelles pour
-   conduire l'entretien (téléphones, groupe, interlocuteurs,
-   habitudes, incidents) + accès rapide au compte.
+   conduire l'entretien (téléphones, commercial, interlocuteurs,
+   habitudes, incidents, cadence de livraison). Le nom du client
+   est cliquable → fiche complète (plus de bouton dédié).
 ───────────────────────────────────────────────────────────── */
 
 const JOURS_FR = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"] as const;
@@ -166,7 +156,7 @@ function ClientBanner({
     { label: "Direct 2", value: info.tel3 },
   ].filter((t): t is { label: string; value: string } => !!t.value) : [];
 
-  const groupe = info?.sapGroupName ?? extractGroupeLegacy(info?.notes ?? null);
+  const commercialName = fullNameFromSlp(info?.commercial);
 
   const incidents = info?.openIncidents ?? 0;
   const lastDays = info?.lastOrderDays;
@@ -184,7 +174,7 @@ function ClientBanner({
 
   return (
     <header className="shrink-0 panel divide-y divide-border">
-      {/* ── Ligne 1 — Identité + groupe + téléphones + accès compte ── */}
+      {/* ── Ligne 1 — Identité (nom = lien fiche) + commercial + téléphones ── */}
       <div className="px-4 py-3 flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <p className="kicker mb-1 inline-flex items-center gap-3">
@@ -194,9 +184,22 @@ function ClientBanner({
             <Ecran1Link />
           </p>
           <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-[22px] font-semibold tracking-tight text-foreground leading-tight truncate">
-              {clientName}
-            </h1>
+            {/* Le nom EST le lien vers la fiche complète (plus de bouton dédié). */}
+            {clientId ? (
+              <Link
+                href={`/clients/${clientId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Ouvrir la fiche client complète (nouvel onglet)"
+                className="text-[22px] font-semibold tracking-tight text-foreground leading-tight truncate hover:text-brand-600 dark:hover:text-brand-400 hover:underline decoration-2 underline-offset-2 transition-colors"
+              >
+                {clientName}
+              </Link>
+            ) : (
+              <h1 className="text-[22px] font-semibold tracking-tight text-foreground leading-tight truncate">
+                {clientName}
+              </h1>
+            )}
             {info?.type && (
               <span className={`text-[10px] font-bold tracking-[0.14em] uppercase px-2 py-0.5 rounded ${
                 info.type === "EXPORT" ? "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" :
@@ -214,45 +217,26 @@ function ClientBanner({
                 <AlertTriangle className="h-3 w-3" /> {incidents} incident{incidents > 1 ? "s" : ""}
               </span>
             )}
-            {clientId && (
-              <Link
-                href={`/clients/${clientId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Ouvrir la fiche client complète (nouvel onglet)"
-                className="ml-1 inline-flex items-center gap-1 text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:underline"
-              >
-                <ExternalLink className="h-3 w-3" />
-                Ouvrir le compte
-              </Link>
-            )}
           </div>
-          {/* Ligne meta : code + commercial + groupe client (extrait des notes) */}
-          <div className="flex items-center gap-3 mt-1.5 text-[11.5px] text-muted-foreground flex-wrap">
-            {info?.code && <span className="font-mono text-foreground/70">{info.code}</span>}
-            {info?.commercial && (
-              <span className="inline-flex items-center gap-1">
-                <User className="h-3 w-3" /> {info.commercial}
-              </span>
-            )}
-            {groupe && (
-              <span className="inline-flex items-center gap-1">
-                <span className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground/70">
-                  Groupe
+          {/* Ligne meta : commercial (nom complet, plus d'acronyme) + e-mail */}
+          {(commercialName || info?.email) && (
+            <div className="flex items-center gap-3 mt-1.5 text-[11.5px] text-muted-foreground flex-wrap">
+              {commercialName && (
+                <span className="inline-flex items-center gap-1" title="Commercial en charge">
+                  <User className="h-3 w-3" /> {commercialName}
                 </span>
-                <span className="text-foreground/85 font-medium">{groupe}</span>
-              </span>
-            )}
-            {info?.email && (
-              <a
-                href={`mailto:${info.email}`}
-                className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-400 hover:underline truncate max-w-[220px]"
-                title={info.email}
-              >
-                <Mail className="h-3 w-3" /> {info.email}
-              </a>
-            )}
-          </div>
+              )}
+              {info?.email && (
+                <a
+                  href={`mailto:${info.email}`}
+                  className="inline-flex items-center gap-1 text-brand-600 dark:text-brand-400 hover:underline truncate max-w-[260px]"
+                  title={info.email}
+                >
+                  <Mail className="h-3 w-3" /> {info.email}
+                </a>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Téléphones — colonne droite, alignés (label fixe 60px, n° tnum) */}
@@ -312,6 +296,9 @@ function ClientBanner({
 
       {/* ── Ligne 3 — Interlocuteurs (fetch direct, clé = clientId) ── */}
       {clientId && <InterlocuteursStrip clientId={clientId} />}
+
+      {/* ── Ligne 4 — Cadence de livraison + commentaires des dernières cdes ── */}
+      {clientId && <DeliveryHistoryStrip clientId={clientId} />}
     </header>
   );
 }
@@ -411,6 +398,165 @@ function InterlocuteursStrip({ clientId }: { clientId: string }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Cadence de livraison — frise « °°°■°°°■ » sur les 21 derniers
+   jours : un point pour un jour sans livraison, un carré plein
+   (poids dans le carré) pour un jour livré. + commentaires des
+   dernières commandes (s'il y en a). Source : /api/sap/orders.
+───────────────────────────────────────────────────────────── */
+
+interface DeliveryDoc {
+  docEntry: number; docNum: number; docDate: string; dueDate: string;
+  weightKg?: number | null; colis?: number | null; comments?: string | null;
+  total?: number;
+}
+
+/** Compact « 248 » / « 1,2t » pour tenir dans un petit carré. */
+function kgChip(kg: number): string {
+  if (kg >= 1000) return (kg / 1000).toFixed(kg >= 10000 ? 0 : 1).replace(".", ",") + "t";
+  return String(Math.round(kg));
+}
+function dayKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function parseKey(k: string): Date {
+  const [y, m, d] = k.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+const WINDOW_DAYS = 21;
+
+function DeliveryHistoryStrip({ clientId }: { clientId: string }) {
+  const [docs, setDocs] = useState<DeliveryDoc[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setDocs([]);
+    fetch(`/api/sap/orders?clientId=${encodeURIComponent(clientId)}&last=20`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j: { docs?: DeliveryDoc[] }) => { if (!cancelled) setDocs(j.docs ?? []); })
+      .catch(() => { if (!cancelled) setDocs([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [clientId]);
+
+  if (loading) {
+    return (
+      <div className="px-4 py-2 inline-flex items-center gap-2 text-[11px] text-muted-foreground">
+        <Truck className="h-3 w-3" /> <Loader2 className="h-3 w-3 animate-spin" /> Livraisons…
+      </div>
+    );
+  }
+
+  // Agrège les commandes par jour de livraison prévu (DocDueDate).
+  const byDay = new Map<string, { weightKg: number; colis: number; count: number }>();
+  for (const d of docs) {
+    const key = (d.dueDate || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
+    const e = byDay.get(key) ?? { weightKg: 0, colis: 0, count: 0 };
+    e.weightKg += d.weightKg ?? 0;
+    e.colis += d.colis ?? 0;
+    e.count += 1;
+    byDay.set(key, e);
+  }
+
+  // Fenêtre de 21 jours, calée sur la livraison la plus récente (qui peut être
+  // à venir : J+1) sinon sur aujourd'hui.
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const keys = [...byDay.keys()].sort();
+  let end = today;
+  if (keys.length) { const last = parseKey(keys[keys.length - 1]); if (last > end) end = last; }
+  const days: { dt: Date; key: string; del: { weightKg: number; colis: number; count: number } | null; future: boolean }[] = [];
+  for (let i = WINDOW_DAYS - 1; i >= 0; i--) {
+    const dt = new Date(end); dt.setDate(dt.getDate() - i);
+    const key = dayKey(dt);
+    days.push({ dt, key, del: byDay.get(key) ?? null, future: dt > today });
+  }
+  const hasDeliveries = byDay.size > 0;
+
+  // Commentaires des dernières commandes (docs déjà triés DocEntry desc).
+  const comments: { date: string; text: string; docNum: number }[] = [];
+  const seenComment = new Set<string>();
+  for (const d of docs) {
+    const text = (d.comments ?? "").trim();
+    if (!text || seenComment.has(text)) continue;
+    seenComment.add(text);
+    comments.push({ date: d.dueDate || d.docDate, text, docNum: d.docNum });
+    if (comments.length >= 3) break;
+  }
+
+  return (
+    <div className="px-4 py-2.5 space-y-2">
+      {/* En-tête + frise cadence */}
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] font-semibold text-foreground/80">
+        <Truck className="h-3 w-3 text-muted-foreground" />
+        Livraisons récentes
+        {hasDeliveries && (
+          <span className="text-muted-foreground/60 font-normal normal-case tracking-normal">
+            · 3 dernières semaines
+          </span>
+        )}
+      </div>
+
+      {hasDeliveries ? (
+        <div className="flex items-end gap-[3px] pt-0.5">
+          {days.map((day) => {
+            const label = day.dt.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+            const weekend = day.dt.getDay() === 0 || day.dt.getDay() === 6;
+            return (
+              <div key={day.key} className="flex-1 min-w-0 flex flex-col items-center gap-1">
+                {day.del ? (
+                  <div
+                    title={`${day.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" })} — ${Math.round(day.del.weightKg)} kg · ${day.del.colis} colis (${day.del.count} cde${day.del.count > 1 ? "s" : ""})`}
+                    className={`aspect-square w-full max-w-[34px] rounded-md flex items-center justify-center shadow-sm text-white bg-gradient-to-br from-brand-400 to-brand-600 ${
+                      day.future ? "ring-2 ring-brand-300/70 ring-offset-1 ring-offset-card animate-pulse" : ""
+                    }`}
+                  >
+                    <span className="text-[8.5px] font-bold leading-none tnum px-0.5">{kgChip(day.del.weightKg)}</span>
+                  </div>
+                ) : (
+                  <div className="aspect-square w-full max-w-[34px] flex items-center justify-center">
+                    <span className={`h-1 w-1 rounded-full ${weekend ? "bg-muted-foreground/15" : "bg-muted-foreground/30"}`} />
+                  </div>
+                )}
+                <span className={`text-[8px] leading-none tnum tracking-tight ${
+                  day.del ? "text-foreground/70 font-semibold" : "text-transparent"
+                }`}>
+                  {label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="text-[11px] italic text-muted-foreground/60">Aucune livraison récente.</p>
+      )}
+
+      {/* Commentaires des dernières commandes */}
+      {comments.length > 0 && (
+        <div className="space-y-1 pt-1">
+          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] font-semibold text-foreground/80">
+            <MessageSquareText className="h-3 w-3 text-muted-foreground" />
+            Notes des dernières commandes
+          </div>
+          <ul className="space-y-1">
+            {comments.map((c) => (
+              <li key={c.docNum} className="flex items-start gap-2 text-[11.5px] rounded-md border border-border bg-card/60 px-2 py-1">
+                <span className="shrink-0 text-[9.5px] font-semibold tnum text-muted-foreground mt-0.5">
+                  {new Date(c.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}
+                </span>
+                <span className="text-foreground/85 leading-snug">{c.text}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

@@ -18,12 +18,14 @@ export interface Salesperson {
   email: string;
   /** Patronyme SAP (pour normaliser un nom complet « Jean-Michel GUNSLAY … »). */
   surname: string;
+  /** Nom complet « Prénom NOM » — affiché à la place du trigramme/acronyme. */
+  fullName: string;
 }
 
 export const SALESPEOPLE: Salesperson[] = [
-  { initials: "MM", code: 16, email: "m.mandine@gervifrais.com", surname: "MANDINE" },
-  { initials: "JMG", code: 1, email: "jm.gunslay@gervifrais.com", surname: "GUNSLAY" },
-  { initials: "AG", code: 7, email: "m.essombe@gervifrais.com", surname: "ESSOMBE" },
+  { initials: "MM", code: 16, email: "m.mandine@gervifrais.com", surname: "MANDINE", fullName: "Maxime Mandine" },
+  { initials: "JMG", code: 1, email: "jm.gunslay@gervifrais.com", surname: "GUNSLAY", fullName: "Jean-Michel Gunslay" },
+  { initials: "AG", code: 7, email: "m.essombe@gervifrais.com", surname: "ESSOMBE", fullName: "M. Essombe" },
 ];
 
 const localPart = (email: string) => email.split("@")[0];
@@ -66,6 +68,20 @@ export function normalizeSlp(raw: string | null | undefined): string | null {
     if (up.includes(s.surname)) return s.initials;
   }
   return v; // inconnu → conservé tel quel (nettoyé)
+}
+
+/**
+ * Nom complet « Prénom NOM » d'un commercial depuis N'IMPORTE QUELLE
+ * représentation (trigramme, email, localPart, nom SAP). Sert à remplacer
+ * partout les acronymes (JMG…) par le nom lisible. Repli : si non reconnu, on
+ * renvoie la valeur d'origine nettoyée (jamais de perte de donnée).
+ */
+export function fullNameFromSlp(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const norm = normalizeSlp(raw);
+  if (!norm) return null;
+  const sp = BY_INITIALS.get(norm.toUpperCase());
+  return sp?.fullName ?? norm;
 }
 
 /** Trigramme SAP (MM/JMG/AG) depuis l'email du compte — repli statique quand
