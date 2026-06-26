@@ -64,6 +64,15 @@ const fmtDate = (s?: string): string => {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${p(d.getFullYear() % 100)}`;
 };
+/** Vrai si la date tombe AUJOURD'HUI — l'annulation d'une EM n'est acceptée par
+ *  SAP que le jour de sa création (contrairement à un BL de vente). */
+const isToday = (s?: string): boolean => {
+  if (!s) return false;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return false;
+  const n = new Date();
+  return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+};
 /** Montant € à 2 décimales (séparateur FR). */
 const eur = (n: number): string =>
   n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
@@ -681,8 +690,15 @@ function ReceiptDetail({
           <Button variant="outline" size="sm" onClick={openReturn} className="gap-1.5">
             <Undo2 className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" /> Retour fournisseur
           </Button>
-          {/* Annuler la réception (sort le stock entré) — masqué si EM clôturée (facturée). */}
-          {canEditPrices && (
+          {/* Annuler la réception (sort le stock entré) — uniquement le JOUR de la
+              réception (limite SAP) et si l'EM n'est pas clôturée (facturée).
+              Sinon, c'est le « Retour fournisseur » qui s'applique. */}
+          {canEditPrices && !isToday(receipt.docDate) && (
+            <span className="text-[11px] text-muted-foreground/70 italic">
+              Annulation possible le jour de la réception uniquement — sinon, utilise le retour fournisseur.
+            </span>
+          )}
+          {canEditPrices && isToday(receipt.docDate) && (
             !cancelConfirm ? (
               <Button variant="outline" size="sm" onClick={() => setCancelConfirm(true)}
                 className="gap-1.5 text-rose-600 dark:text-rose-400 hover:text-rose-700 border-rose-300/60 dark:border-rose-500/30">
