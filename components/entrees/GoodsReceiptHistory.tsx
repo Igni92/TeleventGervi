@@ -44,6 +44,15 @@ const emEffTotal = (e: PriceEdit): number | null => {
   if (e.forceTotal) { const t = parseFloat(e.lineTotal); return Number.isFinite(t) ? t : null; }
   const p = e.price === "" ? null : parseFloat(e.price); return p != null && Number.isFinite(p) ? p * e.pieceQuantity : null;
 };
+/** État d'édition initial des prix, dérivé des lignes de l'EM. */
+function toPriceEdits(lines: ReceiptLine[]): PriceEdit[] {
+  return lines.map((l) => ({
+    lineNum: l.lineNum, pieceQuantity: l.pieceQuantity,
+    price: l.price != null && l.price > 0 ? String(l.price) : "",
+    lineTotal: l.lineTotal != null ? String(l.lineTotal) : "",
+    forceTotal: (l.price == null || l.price <= 0) && l.lineTotal != null && l.lineTotal > 0,
+  }));
+}
 
 /** Date au format jj.mm.aa (points, année sur 2 chiffres). */
 const fmtDate = (s?: string): string => {
@@ -353,24 +362,12 @@ function ReceiptDetail({
   const [savingBl, setSavingBl] = useState(false);
 
   // Édition des PRIX (prix unitaire / total HT forcé) — la marchandise est entrée,
-  // donc ni quantité ni article ne changent.
-  const [editingPrices, setEditingPrices] = useState(false);
-  const [savingPrices, setSavingPrices] = useState(false);
-  const [priceEdits, setPriceEdits] = useState<PriceEdit[]>([]);
+  // donc ni quantité ni article ne changent. ACTIVE PAR DÉFAUT (pas de bouton) tant
+  // que l'EM est éditable ; (ré)initialisée à l'ouverture et après enregistrement.
   const canEditPrices = receipt.editable !== false;
-
-  const beginPriceEdit = () => {
-    setPriceEdits(receipt.lines.map((l) => {
-      const forceTotal = (l.price == null || l.price <= 0) && l.lineTotal != null && l.lineTotal > 0;
-      return {
-        lineNum: l.lineNum, pieceQuantity: l.pieceQuantity,
-        price: l.price != null && l.price > 0 ? String(l.price) : "",
-        lineTotal: l.lineTotal != null ? String(l.lineTotal) : "",
-        forceTotal,
-      };
-    }));
-    setEditingPrices(true);
-  };
+  const [savingPrices, setSavingPrices] = useState(false);
+  const [priceEdits, setPriceEdits] = useState<PriceEdit[]>(() => toPriceEdits(receipt.lines));
+  useEffect(() => { setPriceEdits(toPriceEdits(receipt.lines)); }, [receipt]);
   const updatePriceEdit = (i: number, patch: Partial<PriceEdit>) =>
     setPriceEdits((c) => c.map((e, k) => (k === i ? { ...e, ...patch } : e)));
 
@@ -388,7 +385,6 @@ function ReceiptDetail({
       const j = await res.json();
       if (!res.ok || !j.ok) { toast.error(j.error || "Erreur SAP"); return; }
       toast.success(`Prix de l'entrée #${receipt.docNum} mis à jour`);
-      setEditingPrices(false);
       onUpdated?.();
     } catch (e) { toast.error((e as Error).message); }
     finally { setSavingPrices(false); }
@@ -463,21 +459,16 @@ function ReceiptDetail({
       </div>
       {receipt.comments && <p className={`italic text-muted-foreground ${big ? "text-[13px]" : "text-[11.5px]"}`}>« {receipt.comments} »</p>}
 
-      {/* Édition des prix (PU / Total HT forcé) — la quantité et l'article ne changent pas. */}
+      {/* Édition des prix ACTIVE PAR DÉFAUT (PU / Total HT forcé). Quantité et article inchangés. */}
       {canEditPrices && (
-        editingPrices ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" onClick={savePrices} disabled={savingPrices}>
-              {savingPrices ? <Loader2 className="animate-spin" /> : <Save className="h-3.5 w-3.5" />} Enregistrer les prix
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setEditingPrices(false)} disabled={savingPrices}>Annuler</Button>
-            <span className="text-[11px] text-muted-foreground">Modifie le PU /pie, ou force le Total HT (SAP recalcule le PU).</span>
-          </div>
-        ) : (
-          <Button variant="outline" size="sm" onClick={beginPriceEdit}>
-            <Pencil className="h-3.5 w-3.5" /> Modifier les prix
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-foreground"><Pencil className="h-3.5 w-3.5 text-muted-foreground" /> Prix modifiables</span>
+          <Button size="sm" onClick={savePrices} disabled={savingPrices}>
+            {savingPrices ? <Loader2 className="animate-spin" /> : <Save className="h-3.5 w-3.5" />} Enregistrer les prix
           </Button>
-        )
+          <Button variant="ghost" size="sm" onClick={() => setPriceEdits(toPriceEdits(receipt.lines))} disabled={savingPrices}>Réinitialiser</Button>
+          <span className="text-[11px] text-muted-foreground">Modifie le PU /pie, ou force le Total HT (SAP recalcule le PU).</span>
+        </div>
       )}
 
       {/* Mobile : lignes empilées (le tableau large déborde) + totaux */}
@@ -494,7 +485,7 @@ function ReceiptDetail({
                   <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
                 </div>
                 <div className="text-right shrink-0">
-                  {editingPrices && priceEdits[i] ? (
+                  {canEditPrices && priceEdits[i] ? (
                     <NumberInput value={emEffTotal(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { lineTotal: n == null ? "" : String(n), forceTotal: n != null })} min={0} step={0.01} decimals={2} allowEmpty placeholder="Total HT" className={`h-9 w-28 text-right ${priceEdits[i].forceTotal ? "ring-1 ring-amber-400" : ""}`} />
                   ) : (
                     <>
@@ -507,7 +498,7 @@ function ReceiptDetail({
               <div className="flex items-center gap-2 mt-2 text-[13px] text-muted-foreground tnum">
                 <span className="text-foreground font-medium">{fmtColis(l.packageQuantity)} colis</span>
                 <span>·</span>
-                {editingPrices && priceEdits[i] ? (
+                {canEditPrices && priceEdits[i] ? (
                   <span className="inline-flex items-center gap-1">PU <NumberInput value={emEffPU(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { price: n == null ? "" : String(n), forceTotal: false, lineTotal: "" })} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className="h-8 w-20 text-right" /></span>
                 ) : (
                   <span>PU {l.price != null ? eur(l.price) : "—"}</span>
@@ -553,12 +544,12 @@ function ReceiptDetail({
                   <td className={td}><Chip kind="calibre">{dz.variete}</Chip></td>
                   <td className={td}><Chip kind="condt">{dz.condt}</Chip></td>
                   <td className={`text-right tnum ${td}`}>
-                    {editingPrices && priceEdits[i] ? (
+                    {canEditPrices && priceEdits[i] ? (
                       <NumberInput value={emEffPU(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { price: n == null ? "" : String(n), forceTotal: false, lineTotal: "" })} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className="h-8 w-24 text-right" />
                     ) : (l.price != null ? eur(l.price) : "—")}
                   </td>
                   <td className={`text-right tnum font-medium ${td}`}>
-                    {editingPrices && priceEdits[i] ? (
+                    {canEditPrices && priceEdits[i] ? (
                       <NumberInput value={emEffTotal(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { lineTotal: n == null ? "" : String(n), forceTotal: n != null })} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className={`h-8 w-24 text-right ${priceEdits[i].forceTotal ? "ring-1 ring-amber-400" : ""}`} />
                     ) : (lineHT != null ? eur(lineHT) : "—")}
                   </td>
