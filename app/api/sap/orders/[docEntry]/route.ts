@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
+import { getTransporteurTimbre } from "@/lib/transporteurs";
 
 /**
  * GET   /api/sap/orders/[docEntry]   → détail d'une commande (lignes) pour affichage/édition
@@ -61,6 +62,8 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ docEntr
     numAtCard?: string; comments?: string;
     /** Transporteur → ORDR.U_TrspCode. "" / null = désaffecter. */
     trspCode?: string | null;
+    /** Heure de la tournée choisie → ORDR.U_TrspHeur ("HH:MM:SS"). */
+    trspHeure?: string | null;
     /** Date de livraison → ORDR.DocDueDate (format YYYY-MM-DD). */
     dueDate?: string;
   };
@@ -77,8 +80,27 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ docEntr
   }
   if (body.numAtCard !== undefined) patch.NumAtCard = body.numAtCard.trim();
   if (body.comments !== undefined) patch.Comments = body.comments;
-  // Changement de transporteur depuis « Détail livraison ».
-  if (body.trspCode !== undefined) patch.U_TrspCode = (body.trspCode ?? "").trim();
+  // Changement de transporteur depuis « Détail livraison » : pose les 3 champs BL
+  //   U_TrspCode (transporteur) + U_TrspHeur (heure de la tournée choisie)
+  //   + U_Timbre (timbre du transporteur, résolu côté serveur via SERGTRS —
+  //    jamais depuis le client : c'est un montant).
+  if (body.trspCode !== undefined) {
+    const code = (body.trspCode ?? "").trim();
+    patch.U_TrspCode = code;
+    if (!code) {
+      // « Non affecté » → on remet l'heure et le timbre à zéro pour rester cohérent.
+      patch.U_TrspHeur = null;
+      patch.U_Timbre = 0;
+    } else {
+      if (body.trspHeure !== undefined) patch.U_TrspHeur = (body.trspHeure ?? "").trim() || null;
+      try {
+        const timbre = await getTransporteurTimbre(code);
+        if (timbre != null) patch.U_Timbre = timbre;
+      } catch (e) {
+        console.warn(`[orders PATCH] Timbre SERGTRS '${code}' non résolu (non-bloquant):`, (e as Error).message);
+      }
+    }
+  }
   // Changement de date de livraison depuis « Détail livraison ».
   if (typeof body.dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.dueDate)) patch.DocDueDate = body.dueDate;
 
