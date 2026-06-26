@@ -52,6 +52,14 @@ type SessionDTO = {
   prep?: { preparedDocNums: number[]; addedColis: number; ordersScanned: number; at: string } | null;
 };
 
+/** Session VERROUILLÉE = stock réellement régularisé dans SAP. Un échec TOTAL
+ *  (rien posté) ne verrouille pas → l'inventaire reste corrigeable et re-tentable. */
+const sessionLocked = (s: SessionDTO): boolean => {
+  if (s.status !== "adjusted" || !s.adjustment) return false;
+  const nothingPosted = s.adjustment.sapExitDocNum == null && s.adjustment.sapEntryDocNum == null;
+  return !(s.adjustment.status === "error" && nothingPosted);
+};
+
 /** Commande IDF ouverte proposée à la pré-étape (cf. /api/inventaire/prep-orders). */
 type PrepLineDTO = { itemCode: string; itemName: string; qtyUnits: number; colis: number };
 type PrepOrderDTO = {
@@ -1249,9 +1257,9 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                     {s.updatedBy && (
                       <div className="text-[11px] text-sky-600/90 dark:text-sky-400/90">Dernière correction par {s.updatedBy}</div>
                     )}
-                    {s.status === "adjusted" && s.adjustment && (
+                    {s.adjustment && (sessionLocked(s) || s.adjustment.status === "error") && (
                       <div className={`text-[11px] ${s.adjustment.status === "error" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600/90 dark:text-emerald-400/90"}`}>
-                        {s.adjustment.status === "error" ? "⚠ Régularisation en erreur" : "Stock régularisé"} par {s.adjustment.by}
+                        {s.adjustment.status === "error" ? (sessionLocked(s) ? "⚠ Régularisation partielle en erreur" : "⚠ Régularisation échouée (rien posté — à reprendre)") : "Stock régularisé"} par {s.adjustment.by}
                         {s.adjustment.sapExitDocNum ? ` · sortie #${s.adjustment.sapExitDocNum}` : ""}
                         {s.adjustment.sapEntryDocNum ? ` · entrée #${s.adjustment.sapEntryDocNum}` : ""}
                         {` · ${s.adjustment.nbSorties}↓/${s.adjustment.nbEntrees}↑`}
@@ -1260,16 +1268,18 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                     )}
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                    {s.status === "adjusted" ? (
+                    {sessionLocked(s) ? (
                       <span className={`inline-flex items-center gap-1 text-[12px] ${s.adjustment?.status === "error" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>
                         {s.adjustment?.status === "error" ? <AlertCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />} régularisé
                       </span>
+                    ) : s.adjustment?.status === "error" ? (
+                      <span className="inline-flex items-center gap-1 text-[12px] text-rose-600 dark:text-rose-400"><AlertCircle className="h-3.5 w-3.5" /> échec — à reprendre</span>
                     ) : s.status === "reviewed" ? (
                       <span className="inline-flex items-center gap-1 text-[12px] text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /> revu</span>
                     ) : (
                       <span className="text-[12px] font-semibold text-amber-600 dark:text-amber-400">à revoir</span>
                     )}
-                    {canManage && s.status !== "adjusted" && (
+                    {canManage && !sessionLocked(s) && (
                       <>
                         {s.nbEcarts > 0 && (
                           <Button size="sm" onClick={() => openAdjust(s)}>
