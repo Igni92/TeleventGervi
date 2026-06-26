@@ -138,13 +138,15 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   const [sessionPhotos, setSessionPhotos] = useState<Record<string, PhotoDTO[] | "loading">>({});
 
   /* ---------------------------- Chargements ---------------------------- */
-  const loadProducts = useCallback(async () => {
+  const loadProducts = useCallback(async (): Promise<Product[]> => {
     setLoading(true);
     try {
       const res = await fetch("/api/products?inStock=true&limit=400", { cache: "no-store" });
       const json = await res.json();
-      setProducts(json.products ?? []);
-    } catch { setProducts([]); }
+      const list: Product[] = json.products ?? [];
+      setProducts(list);
+      return list;
+    } catch { setProducts([]); return []; }
     finally { setLoading(false); }
   }, []);
 
@@ -254,15 +256,16 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   // rayon). On gonfle `available` (entrepôt 01) : sapInfo() et tout l'aval
   // reflètent alors le stock théorique. En CORRECTION, on n'ajuste pas (la base a
   // déjà été figée à la création de l'inventaire).
-  const effectiveProducts = useMemo(() => {
-    if (editing || addUnitsByItem.size === 0) return products;
-    return products.map((p) => {
+  const withAddBack = useCallback((list: Product[]) => {
+    if (editing || addUnitsByItem.size === 0) return list;
+    return list.map((p) => {
       const add = addUnitsByItem.get(p.itemCode);
       if (!add) return p;
       const w = p.stockByWarehouse["01"] ?? { available: 0, inStock: 0 };
       return { ...p, stockByWarehouse: { ...p.stockByWarehouse, "01": { ...w, available: (w.available ?? 0) + add } } };
     });
-  }, [products, addUnitsByItem, editing]);
+  }, [addUnitsByItem, editing]);
+  const effectiveProducts = useMemo(() => withAddBack(products), [withAddBack, products]);
 
   const { families, ordered } = useMemo(() => buildFamilies(effectiveProducts), [effectiveProducts]);
   const productByCode = useMemo(() => new Map(ordered.map((p) => [p.itemCode, p])), [ordered]);
@@ -418,31 +421,37 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     setMode("home");
   }
 
-  /** Import du stock SAP (avant comptage) — rafraîchit puis recharge les produits. */
-  async function refreshStock(): Promise<void> {
+  /** Import du stock SAP (avant comptage). Renvoie la liste FRAÎCHE des produits
+   *  (ou null si l'import a échoué) pour figer le comptage sur ces quantités. */
+  async function refreshStock(): Promise<Product[] | null> {
     setRefreshing(true);
     try {
       const res = await fetch("/api/inventaire/refresh-stock", { method: "POST" });
       const json = await res.json().catch(() => null);
       if (res.ok && json?.ok) {
-        await loadProducts();
+        const fresh = await loadProducts();
         toast.success(`Stock SAP à jour — ${json.refreshed}/${json.total} article(s).`);
-      } else {
-        toast.error(json?.error ?? "Mise à jour du stock SAP impossible — comptage sur le dernier stock connu.");
+        return fresh;
       }
+      toast.error(json?.error ?? "Mise à jour du stock SAP impossible — comptage sur le dernier stock connu.");
+      return null;
     } catch {
       toast.error("Mise à jour du stock SAP impossible — comptage sur le dernier stock connu.");
+      return null;
     } finally {
       setRefreshing(false);
     }
   }
 
-  /** Démarre l'inventaire complet IMMÉDIATEMENT (sur le stock déjà chargé) et
-   *  actualise le stock SAP en ARRIÈRE-PLAN — le récap recalcule les écarts dès
-   *  que l'actualisation est prête. Plus d'attente longue avant de compter. */
-  function startFullCount() {
-    startCount(ordered, "Inventaire complet");
-    void refreshStock();   // non bloquant : tourne pendant le comptage
+  /** Démarre l'inventaire complet APRÈS l'import du stock SAP (désormais rapide :
+   *  appels groupés + limité aux produits en stock) → on compte d'emblée contre
+   *  des quantités à jour. */
+  async function startFullCount() {
+    const fresh = await refreshStock();
+    // On fige le comptage sur la liste FRAÎCHE (sinon la closure garderait l'ancien
+    // stock malgré l'import qu'on vient de faire).
+    const { ordered: freshOrdered } = buildFamilies(withAddBack(fresh ?? products));
+    startCount(freshOrdered, "Inventaire complet");
   }
 
   /** Ouvre l'aperçu de régularisation SAP pour une session (admin/direction). */
