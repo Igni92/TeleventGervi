@@ -12,7 +12,13 @@ import { sap, type SapItem } from "@/lib/sapb1";
 
 const WAREHOUSES = new Set(["000", "01", "R1"]);
 
-/** Re-pull les ItemWarehouseInfo des codes donnés et upsert ProductStock. */
+/**
+ * Re-pull les ItemWarehouseInfo des codes donnés et upsert ProductStock.
+ * PERF : un seul appel SAP par PAQUET de codes (filtre OData `ItemCode eq … or …`)
+ * au lieu d'un appel par article — ~20× moins d'allers-retours. Sécurité : si un
+ * article ne revient PAS avec ses entrepôts (collection vide), on ne touche pas à
+ * son stock (jamais de remise à zéro accidentelle).
+ */
 export async function refreshItemStocks(itemCodes: string[]): Promise<number> {
   const unique = Array.from(new Set(itemCodes.filter(Boolean)));
   if (unique.length === 0) return 0;
@@ -23,39 +29,54 @@ export async function refreshItemStocks(itemCodes: string[]): Promise<number> {
   });
   const idByCode = new Map(products.map((p) => [p.itemCode, p.id]));
 
+  const CODES_PER_REQ = 20;   // articles par requête SAP
+  const CONCURRENCY = 5;      // requêtes SAP en parallèle
+  const reqs: string[][] = [];
+  for (let i = 0; i < unique.length; i += CODES_PER_REQ) reqs.push(unique.slice(i, i + CODES_PER_REQ));
+
+  const upsertItem = async (it: SapItem): Promise<boolean> => {
+    const productId = idByCode.get(it.ItemCode);
+    if (!productId) return false;
+    const stocks = (it.ItemWarehouseInfoCollection ?? []).filter((w) => WAREHOUSES.has(w.WarehouseCode));
+    if (stocks.length === 0) return false;   // pas d'info entrepôt → on ne zappe pas le stock existant
+    await prisma.product.update({
+      where: { id: productId },
+      data: { totalStock: it.QuantityOnStock ?? 0, syncedAt: new Date() },
+    });
+    await Promise.all(stocks.map((w) => {
+      const inStock = w.InStock ?? 0;
+      const committed = w.Committed ?? 0;
+      const ordered = w.Ordered ?? 0;
+      return prisma.productStock.upsert({
+        where: { productId_warehouse: { productId, warehouse: w.WarehouseCode } },
+        update: { inStock, committed, ordered, available: inStock - committed, syncedAt: new Date() },
+        create: { productId, warehouse: w.WarehouseCode, inStock, committed, ordered, available: inStock - committed },
+      });
+    }));
+    return true;
+  };
+
   let updated = 0;
-  const CHUNK = 10;
-  for (let i = 0; i < unique.length; i += CHUNK) {
-    const batch = unique.slice(i, i + CHUNK);
-    await Promise.all(batch.map(async (code) => {
-      const productId = idByCode.get(code);
-      if (!productId) return;
+  for (let i = 0; i < reqs.length; i += CONCURRENCY) {
+    const wave = reqs.slice(i, i + CONCURRENCY);
+    const waves = await Promise.all(wave.map(async (codes) => {
+      const filter = codes.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
       try {
-        const it = await sap.get<SapItem>(
-          `Items('${encodeURIComponent(code)}')?$select=ItemCode,QuantityOnStock,ItemWarehouseInfoCollection`,
+        const r = await sap.get<{ value: SapItem[] }>(
+          `Items?$top=${codes.length}&$select=ItemCode,QuantityOnStock,ItemWarehouseInfoCollection&$filter=${encodeURIComponent(filter)}`,
         );
-        const stocks = (it.ItemWarehouseInfoCollection ?? []).filter((w) =>
-          WAREHOUSES.has(w.WarehouseCode),
-        );
-        await prisma.product.update({
-          where: { id: productId },
-          data: { totalStock: it.QuantityOnStock ?? 0, syncedAt: new Date() },
-        });
-        await Promise.all(stocks.map((w) => {
-          const inStock = w.InStock ?? 0;
-          const committed = w.Committed ?? 0;
-          const ordered = w.Ordered ?? 0;
-          return prisma.productStock.upsert({
-            where: { productId_warehouse: { productId, warehouse: w.WarehouseCode } },
-            update: { inStock, committed, ordered, available: inStock - committed, syncedAt: new Date() },
-            create: { productId, warehouse: w.WarehouseCode, inStock, committed, ordered, available: inStock - committed },
-          });
-        }));
-        updated++;
+        return r.value ?? [];
       } catch (e) {
-        console.warn(`[stockSync] refresh ${code} échoué:`, (e as Error).message);
+        console.warn(`[stockSync] batch refresh échoué (${codes.length} codes):`, (e as Error).message);
+        return [];
       }
     }));
+    for (const items of waves) {
+      for (const it of items) {
+        try { if (await upsertItem(it)) updated++; }
+        catch (e) { console.warn(`[stockSync] upsert ${it.ItemCode} échoué:`, (e as Error).message); }
+      }
+    }
   }
   return updated;
 }
