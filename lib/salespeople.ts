@@ -18,14 +18,14 @@ export interface Salesperson {
   email: string;
   /** Patronyme SAP (pour normaliser un nom complet « Jean-Michel GUNSLAY … »). */
   surname: string;
-  /** Nom complet « Prénom NOM » — affiché à la place du trigramme/acronyme. */
-  fullName: string;
+  /** Prénom affiché à la place du trigramme/acronyme (vide si inconnu). */
+  firstName: string;
 }
 
 export const SALESPEOPLE: Salesperson[] = [
-  { initials: "MM", code: 16, email: "m.mandine@gervifrais.com", surname: "MANDINE", fullName: "Maxyme Mandine" },
-  { initials: "JMG", code: 1, email: "jm.gunslay@gervifrais.com", surname: "GUNSLAY", fullName: "Jean-Michel Gunslay" },
-  { initials: "AG", code: 7, email: "m.essombe@gervifrais.com", surname: "ESSOMBE", fullName: "M. Essombe" },
+  { initials: "MM", code: 16, email: "m.mandine@gervifrais.com", surname: "MANDINE", firstName: "Maxyme" },
+  { initials: "JMG", code: 1, email: "jm.gunslay@gervifrais.com", surname: "GUNSLAY", firstName: "Jean-Michel" },
+  { initials: "AG", code: 7, email: "m.essombe@gervifrais.com", surname: "ESSOMBE", firstName: "" },
 ];
 
 const localPart = (email: string) => email.split("@")[0];
@@ -70,18 +70,28 @@ export function normalizeSlp(raw: string | null | undefined): string | null {
   return v; // inconnu → conservé tel quel (nettoyé)
 }
 
+const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s);
+
 /**
- * Nom complet « Prénom NOM » d'un commercial depuis N'IMPORTE QUELLE
- * représentation (trigramme, email, localPart, nom SAP). Sert à remplacer
- * partout les acronymes (JMG…) par le nom lisible. Repli : si non reconnu, on
- * renvoie la valeur d'origine nettoyée (jamais de perte de donnée).
+ * Nom AFFICHÉ d'un commercial depuis N'IMPORTE QUELLE représentation (trigramme,
+ * email, localPart, nom SAP). Règle : on n'affiche que le PRÉNOM ; sauf si deux
+ * commerciaux ont le même prénom → on ajoute l'initiale du nom de famille
+ * (« Jean-Michel G. »). Si le prénom est inconnu, on retombe sur le nom de
+ * famille ; si le commercial n'est pas reconnu, sur la valeur d'origine nettoyée.
  */
-export function fullNameFromSlp(raw: string | null | undefined): string | null {
+export function displayNameFromSlp(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const norm = normalizeSlp(raw);
   if (!norm) return null;
   const sp = BY_INITIALS.get(norm.toUpperCase());
-  return sp?.fullName ?? norm;
+  if (!sp) return norm; // commercial inconnu → valeur nettoyée, jamais de perte
+  const first = sp.firstName.trim();
+  if (!first) return titleCase(sp.surname); // prénom inconnu → nom de famille
+  // Collision de prénom avec un autre commercial → on désambiguïse par l'initiale du nom.
+  const collision = SALESPEOPLE.some(
+    (o) => o.initials !== sp.initials && o.firstName.trim().toLowerCase() === first.toLowerCase(),
+  );
+  return collision ? `${first} ${sp.surname.charAt(0).toUpperCase()}.` : first;
 }
 
 /** Trigramme SAP (MM/JMG/AG) depuis l'email du compte — repli statique quand
