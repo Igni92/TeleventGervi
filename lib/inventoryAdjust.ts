@@ -12,14 +12,16 @@
  * « adjusted » (adjustment.status === "done") ne peut pas être re-postée.
  */
 import { prisma } from "@/lib/prisma";
-import { sap } from "@/lib/sapb1";
+import { sap, type SapItem } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
-import { getLotMaps, resolveLotDetailed } from "@/lib/lotResolver";
+import { getLotMaps, resolveLotDetailed, type LotMaps } from "@/lib/lotResolver";
 import { applyInventoryDelta } from "@/lib/stockSync";
 import type { InventoryMove, InventoryAdjustment, InventorySession } from "@/lib/inventory";
 
-/** Entrepôt physique régularisé (stock comptable). */
+/** Entrepôt physique régularisé (stock comptable, par défaut / repli). */
 const WAREHOUSE = "01";
+/** Entrepôts inventoriés (mêmes que la synchro stock). */
+const WAREHOUSES = new Set(["000", "01", "R1"]);
 /** Seuil sous lequel un écart converti en unités SAP est ignoré (bruit d'arrondi). */
 const EPS = 0.001;
 
@@ -261,20 +263,60 @@ async function postDoc(
 }
 
 /**
+ * Re-vérifie le stock SAP RÉEL (live) juste avant de poster les SORTIES et
+ * réajuste la répartition par entrepôt en conséquence — le miroir peut être plus
+ * « riche » que SAP (ventes survenues depuis la synchro pré-comptage), ce qui
+ * faisait échouer la sortie en « Quantity falls into negative inventory ». On
+ * PLAFONNE chaque sortie au stock réellement disponible (jamais de négatif), et
+ * on prélève uniquement dans les entrepôts qui ont la marchandise. Best-effort :
+ * si la lecture SAP échoue, on garde la répartition miroir (jamais pire).
+ */
+async function reconcileExitsWithLiveStock(sorties: InventoryMove[], maps: LotMaps | null): Promise<void> {
+  await Promise.all(sorties.map(async (m) => {
+    try {
+      const it = await sap.get<SapItem>(
+        `Items('${encodeURIComponent(m.itemCode)}')?$select=ItemCode,ItemWarehouseInfoCollection`,
+      );
+      const live = (it.ItemWarehouseInfoCollection ?? [])
+        .filter((w) => WAREHOUSES.has(w.WarehouseCode))
+        .map((w) => ({ warehouse: w.WarehouseCode, inStock: Math.max(0, w.InStock ?? 0) }));
+      const liveTotal = round2(live.reduce((s, w) => s + w.inStock, 0));
+      if (liveTotal <= EPS) return;                 // rien en stock SAP → on n'aggrave pas
+      const cappedQty = Math.min(m.qtyUnits, liveTotal);
+      const alloc = allocateWarehouses("sortie", live, cappedQty);
+      m.warehouses = alloc.map((a) => ({
+        warehouse: a.warehouse,
+        qtyUnits: a.qtyUnits,
+        lot: maps ? resolveLotDetailed(maps, m.itemCode, a.warehouse).lot : (m.lot ?? null),
+      }));
+      if (cappedQty < m.qtyUnits - EPS) {
+        // SAP a déjà moins que prévu → on sort tout ce qui reste (mise à 0), le
+        // « manque » résiduel est déjà reflété dans SAP.
+        console.warn(`[inventoryAdjust] ${m.itemCode}: sortie plafonnée au stock SAP réel ${cappedQty} (demandé ${m.qtyUnits}).`);
+        m.qtyUnits = cappedQty;
+        m.value = round2(cappedQty * m.unitPrice);
+        m.lot = m.warehouses[0]?.lot ?? m.lot;
+      }
+    } catch (e) {
+      console.warn(`[inventoryAdjust] re-check stock live ${m.itemCode} échoué (répartition miroir conservée):`, (e as Error).message);
+    }
+  }));
+}
+
+/**
  * Exécute la régularisation : poste la SORTIE (manques) puis l'ENTRÉE (excédents)
  * dans SAP, met à jour le miroir local et renvoie la trace. En cas d'échec partiel
  * (sortie OK, entrée KO), renvoie une trace `status:"error"` avec ce qui a été posté.
  */
 export async function executeAdjustment(session: InventorySession, actor: string): Promise<InventoryAdjustment> {
   const moves = await computeAdjustmentPlan(session);
-  const { nbSorties, nbEntrees, totalValue, demarqueValue } = summarizeMoves(moves);
   const env = sap.getEnvironment().env;
-  const base: InventoryAdjustment = {
-    status: "done", at: new Date().toISOString(), by: actor, moves,
-    nbSorties, nbEntrees, totalValue, demarqueValue,
-    sapExitDocNum: null, sapExitEntry: null, sapEntryDocNum: null, sapEntryEntry: null, sapEnv: env,
-  };
-  if (moves.length === 0) return base; // aucun écart → no-op
+  if (moves.length === 0) {
+    return {
+      status: "done", at: new Date().toISOString(), by: actor, moves, ...summarizeMoves(moves),
+      sapExitDocNum: null, sapExitEntry: null, sapEntryDocNum: null, sapEntryEntry: null, sapEnv: env,
+    };
+  }
 
   // manageBatch par article (pour choisir BatchNumbers vs U_NoLot).
   const codes = Array.from(new Set(moves.map((m) => m.itemCode)));
@@ -286,6 +328,21 @@ export async function executeAdjustment(session: InventorySession, actor: string
 
   const sorties = moves.filter((m) => m.sens === "sortie");
   const entrees = moves.filter((m) => m.sens === "entree");
+
+  // VÉRIF STOCK SAP RÉEL avant les sorties (évite « negative inventory »).
+  if (sorties.length > 0) {
+    let maps: LotMaps | null = null;
+    try { maps = await getLotMaps(); } catch { maps = null; }
+    await reconcileExitsWithLiveStock(sorties, maps);
+  }
+
+  // Résumé recalculé APRÈS un éventuel plafonnement des sorties.
+  const { nbSorties, nbEntrees, totalValue, demarqueValue } = summarizeMoves(moves);
+  const base: InventoryAdjustment = {
+    status: "done", at: new Date().toISOString(), by: actor, moves,
+    nbSorties, nbEntrees, totalValue, demarqueValue,
+    sapExitDocNum: null, sapExitEntry: null, sapEntryDocNum: null, sapEntryEntry: null, sapEnv: env,
+  };
 
   // 1) SORTIE des manques.
   if (sorties.length > 0) {
