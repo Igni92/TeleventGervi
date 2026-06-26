@@ -485,15 +485,21 @@ function DeliveryHistoryStrip({ clientId }: { clientId: string }) {
   const hasDeliveries = byDay.size > 0;
   const weekLabel = `${monday.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })} – ${days[6].dt.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}`;
 
-  // Commentaires des dernières commandes (docs déjà triés DocEntry desc).
-  // On EXCLUT la signature TeleVent par défaut (« BL - Televent : MM », « EM -
-  // Televent : … ») : c'est le texte auto, pas une vraie note.
-  const isDefaultSignature = (t: string) => /^[A-Za-z0-9]{1,5}\s*-\s*Telev[ei]nt\s*:/i.test(t);
+  // Notes des dernières commandes (docs déjà triés DocEntry desc).
+  // Une « note » = uniquement ce que le commercial tape en remarque. On EXCLUT
+  // donc tout le texte AUTO du champ Comments SAP :
+  //   • signature par défaut « BL - Televent : MM », « EM - Televent : … »
+  //   • mention promo auto « PROMO : … »
+  //   • simples numéros / références (aucune lettre → n° de commande, pas une note)
+  const isAutoComment = (t: string) =>
+    /^[A-Za-z0-9]{1,5}\s*-\s*Telev[ei]nt\s*:/i.test(t)   // signature TeleVent
+    || /^promo\s*:/i.test(t)                              // mention promo auto
+    || !/[A-Za-zÀ-ÿ]/.test(t);                            // que des chiffres/ponctuation → n° de cde
   const comments: { date: string; text: string; docNum: number }[] = [];
   const seenComment = new Set<string>();
   for (const d of docs) {
     const text = (d.comments ?? "").trim();
-    if (!text || seenComment.has(text) || isDefaultSignature(text)) continue;
+    if (!text || seenComment.has(text) || isAutoComment(text)) continue;
     seenComment.add(text);
     comments.push({ date: d.dueDate || d.docDate, text, docNum: d.docNum });
     if (comments.length >= 3) break;
