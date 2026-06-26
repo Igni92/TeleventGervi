@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ChevronDown, ChevronRight, ChevronUp, Search, Plus, Trash2,
-  ShoppingCart, Check, RotateCcw, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock, X,
+  ShoppingCart, Check, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock, X,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
@@ -94,17 +94,6 @@ function promoBadge(pr: Promo): string {
   return `${pr.buyQty}+${pr.freeQty}`;
 }
 
-/** Période lisible d'une promo : « 02/06 → 15/06 », « jusqu'au 15/06 », « permanente ». */
-function promoPeriod(pr: Promo): string {
-  const f = (s?: string | null) =>
-    s ? new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) : null;
-  const a = f(pr.startsAt), b = f(pr.endsAt);
-  if (a && b) return `${a} → ${b}`;
-  if (a) return `dès le ${a}`;
-  if (b) return `jusqu'au ${b}`;
-  return "permanente";
-}
-
 /* ── B4 — Poids d'un colis (kg), null-safe ─────────────────── */
 function colisKg(p: Product): number | null {
   const w = p.salesUnitWeight, perPack = p.salesQtyPerPackUnit;
@@ -167,6 +156,73 @@ interface GroupEntry { key: string; name: string; prods: Product[]; pinned?: boo
  *   C4 — densité d'affichage Compact / Normal / Aéré : RÉGLÉE sur /parametres
  *        (localStorage televente:ecran2Density), lue ici + listener storage
  */
+const SHORTCUTS_KEY = "televente:cmd-raccourcis";
+
+/**
+ * Raccourcis produits personnalisables (remplacent l'ancien compteur « Promotions »).
+ * Liste de codes mémorisée en localStorage (par poste) ; un clic ajoute le produit
+ * au panier via onPick. Ajout/retrait inline.
+ */
+function OrderShortcuts({ onPick }: { onPick: (code: string) => void }) {
+  const [shortcuts, setShortcuts] = useState<string[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SHORTCUTS_KEY);
+      if (raw) {
+        const a = JSON.parse(raw);
+        if (Array.isArray(a)) setShortcuts(a.filter((x) => typeof x === "string"));
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const persist = (next: string[]) => {
+    setShortcuts(next);
+    try { localStorage.setItem(SHORTCUTS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  };
+  const add = (v: string) => {
+    const t = v.trim().toUpperCase();
+    if (!t || shortcuts.includes(t)) return;
+    persist([...shortcuts, t]);
+  };
+
+  return (
+    <div className="flex items-center gap-1 flex-wrap justify-end">
+      {shortcuts.map((s) => (
+        <span key={s} className="group inline-flex items-center overflow-hidden rounded-md border border-border bg-secondary/50 text-[11.5px] font-semibold">
+          <button type="button" onClick={() => onPick(s)} title={`Ajouter ${s} au panier`}
+            className="px-1.5 py-0.5 text-foreground/90 hover:bg-secondary">{s}</button>
+          <button type="button" onClick={() => persist(shortcuts.filter((x) => x !== s))}
+            title="Retirer le raccourci" aria-label={`Retirer le raccourci ${s}`}
+            className="px-1 py-0.5 text-muted-foreground/60 hover:bg-secondary hover:text-rose-500">×</button>
+        </span>
+      ))}
+      {adding ? (
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { add(draft); setDraft(""); setAdding(false); }
+            else if (e.key === "Escape") { setDraft(""); setAdding(false); }
+          }}
+          onBlur={() => { add(draft); setDraft(""); setAdding(false); }}
+          placeholder="code…"
+          aria-label="Nouveau raccourci"
+          className="h-6 w-[76px] rounded-md border border-border bg-background px-1.5 text-[11.5px] uppercase focus:outline-none focus:ring-1 focus:ring-brand-500"
+        />
+      ) : (
+        <button type="button" onClick={() => setAdding(true)} title="Ajouter un raccourci produit"
+          className="inline-flex items-center gap-0.5 rounded-md border border-dashed border-border px-1.5 py-0.5 text-[11.5px] font-semibold text-muted-foreground hover:border-brand-400/60 hover:text-foreground">
+          <Plus className="h-3 w-3" /> Raccourci
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifier: modifierProp = null, onExitModif }: {
   clientId: string; clientName: string; stockSharePct?: number;
   /** Cible de MODIFICATION (diffusée par « Détail livraison ») : on pré-remplit le
@@ -189,9 +245,6 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   const [favGroups, setFavGroups] = useState<Set<string>>(new Set());
   // C2 — promos actives, indexées par itemCode (1 promo max appliquée par article)
   const [promos, setPromos] = useState<Record<string, Promo>>({});
-  // C2 — liste complète des promos actives (Dialog « Promotions »)
-  const [promoList, setPromoList] = useState<Promo[]>([]);
-  const [promosOpen, setPromosOpen] = useState(false);
   // C4 — densité d'affichage de la liste stock (réglée sur /parametres, lue ici)
   const [density, setDensity] = useState<Density>("normal");
   // Panier
@@ -372,7 +425,6 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     fetch(`/api/promos?active=1`).then((r) => r.json())
       .then((d) => {
         const list = (d?.promos ?? []) as Promo[];
-        setPromoList(list);
         const map: Record<string, Promo> = {};
         for (const pr of list) {
           if (pr?.itemCode && !map[pr.itemCode]) map[pr.itemCode] = pr;
@@ -493,6 +545,28 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       })];
     });
   };
+  /** Raccourci : ajoute un produit au panier par code (catalogue chargé, repli API /products). */
+  const addByShortcut = async (codeOrName: string) => {
+    const q = codeOrName.trim();
+    if (!q) return;
+    const lc = q.toLowerCase();
+    const all = Object.values(grouped).flat();
+    let p: Product | undefined =
+      all.find((x) => x.itemCode.toLowerCase() === lc)
+      || all.find((x) => x.itemCode.toLowerCase().includes(lc) || x.itemName.toLowerCase().includes(lc));
+    if (!p) {
+      try {
+        const res = await fetch(`/api/products?search=${encodeURIComponent(q)}&limit=1`);
+        const json = await res.json();
+        p = (json.products ?? [])[0] as Product | undefined;
+      } catch { /* repli silencieux */ }
+    }
+    if (!p) { toast.error(`Aucun produit pour « ${q} »`); return; }
+    if (cart.some((l) => l.itemCode === p!.itemCode)) { toast.info(`${p.itemName} déjà au panier`); return; }
+    if (!hints[p.itemCode]) loadHints([p.itemCode]);
+    addToCart(p);
+    toast.success(`${p.itemName} ajouté`);
+  };
   // applyPromoFree est no-op hors promo X_PLUS_Y/FREE → recalcul sûr à chaque changement de quantité.
   const updateLine = (i: number, patch: Partial<CartLine>) =>
     setCart((c) => c.map((l, k) => k === i ? applyPromoFree({ ...l, ...patch }) : l));
@@ -537,25 +611,6 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   const removeFromCartByCode = (itemCode: string) =>
     setCart((c) => c.filter((l) => l.itemCode !== itemCode));
 
-  // Rejouer la dernière commande → remplit le panier (1 clic)
-  const [replaying, setReplaying] = useState(false);
-  const replayLast = async () => {
-    setReplaying(true);
-    try {
-      const res = await fetch(`/api/sap/orders/last?clientId=${encodeURIComponent(clientId)}`);
-      const json = await res.json();
-      if (!json.found || !json.lines?.length) { toast("Aucune commande précédente"); return; }
-      // Lignes rejouées SANS promo : les prix historiques sont conservés tels quels.
-      setCart(json.lines.map((l: { itemCode: string; itemName: string; displayUnit: string; priceUnit: string; packDivisor: number; availByWarehouse: Record<string, number>; quantity: number; price: number | null }) => ({
-        itemCode: l.itemCode, itemName: l.itemName, unit: l.displayUnit, priceUnit: l.priceUnit,
-        packDivisor: l.packDivisor, availByWarehouse: l.availByWarehouse, quantity: l.quantity, price: l.price,
-        marque: null, condi: null, pays: null, variete: null, stepColis: 1,
-        promo: null, discountPercent: 0, freeUnits: 0, originalLine: null,
-      })));
-      toast.success(`Dernière commande #${json.docNum} rejouée`);
-    } catch { toast.error("Erreur rejeu"); }
-    finally { setReplaying(false); }
-  };
 
   // Prix à la pièce × (colis × pièces/colis) = total ligne.
   // Les colis offerts (X_PLUS_Y / FREE) sont une LIGNE séparée à 0 € → ils ne
@@ -827,15 +882,6 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     return head.concat(normal);
   }, [grouped, favorites, favGroups]);
 
-  // C2 — nom d'article par code (Dialog Promotions : libellé lisible)
-  const itemNameByCode = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const prods of Object.values(grouped)) {
-      for (const p of prods) if (!m.has(p.itemCode)) m.set(p.itemCode, p.itemName);
-    }
-    return m;
-  }, [grouped]);
-
   return (
     <div className="flex flex-col h-full min-h-0 gap-2">
       {/* ── C2 — Bandeau promotions (contenu/visibilité gérés par le composant) ── */}
@@ -1081,21 +1127,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
           <p className="kicker inline-flex items-center gap-1.5">
             <ShoppingCart className="h-3 w-3" /> Commande
           </p>
-          <div className="flex items-center gap-3">
-            {/* C2 — récap des promos actives (l'affichage liste stock est supprimé) */}
-            <button type="button" onClick={() => setPromosOpen(true)}
-              title="Voir les promotions actives"
-              className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-rose-600 dark:text-rose-400 hover:underline">
-              <Megaphone className="h-3.5 w-3.5" />
-              Promotions{promoList.length > 0 ? ` (${promoList.length})` : ""}
-            </button>
-            {!modif && (
-              <button type="button" onClick={replayLast} disabled={replaying}
-                className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-60">
-                {replaying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Rejouer la dernière
-              </button>
-            )}
-          </div>
+          {/* Raccourcis produits personnalisables (ajout direct au panier) */}
+          <OrderShortcuts onPick={addByShortcut} />
         </div>
         {modif && <ModifBanner docNum={modif.docNum} meta={modifMeta} prefilling={prefilling} onExit={onExitModif} />}
         <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
@@ -1241,29 +1274,18 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                   <span className="text-[12px] text-muted-foreground">€/{l.priceUnit}</span>
                   <span className="ml-auto text-[15px] font-bold tnum">{l.price ? lineHT(l).toFixed(2) : "—"}</span>
                 </div>
-                {/* Colis OFFERTS (à 0 €) — sélecteur indépendant de la qté payée.
-                    Permet « 0 payé + 1 offert » (juste offert) ou « N payés + M offerts ». */}
-                {!locked && (
-                  <div className="flex items-center gap-1.5 mt-1.5">
-                    <Gift className="h-3.5 w-3.5 text-rose-500 shrink-0" />
-                    <span className="text-[11px] font-medium text-muted-foreground">Offert</span>
-                    <div className="inline-flex items-center rounded-md border border-border overflow-hidden">
-                      <button type="button" tabIndex={-1}
-                        onClick={() => updateLine(i, { freeUnits: Math.max(0, Math.round((l.freeUnits - l.stepColis) * 1000) / 1000), freeManual: true })}
-                        aria-label="Retirer un colis offert"
-                        className="h-7 w-8 inline-flex items-center justify-center text-[16px] font-bold text-muted-foreground hover:bg-secondary/60 active:scale-95">−</button>
-                      <span className={`w-11 text-center text-[14px] font-semibold tnum border-x border-border ${l.freeUnits > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>{freeColis}</span>
-                      <button type="button" tabIndex={-1}
-                        onClick={() => updateLine(i, { freeUnits: Math.round((l.freeUnits + l.stepColis) * 1000) / 1000, freeManual: true })}
-                        aria-label="Ajouter un colis offert"
-                        className="h-7 w-8 inline-flex items-center justify-center text-[16px] font-bold text-rose-600 dark:text-rose-400 hover:bg-secondary/60 active:scale-95">+</button>
-                    </div>
-                    <span className="text-[11px] text-muted-foreground">
-                      {hasColis ? "colis" : l.priceUnit} à 0 €
-                      {hasColis && l.freeUnits > 0 && (
-                        <span className="text-foreground/60 tnum"> ({Math.round(l.freeUnits * l.packDivisor * 100) / 100} {l.priceUnit})</span>
-                      )}
+                {/* Colis OFFERTS — lecture seule : non modifiable directement (piloté par
+                    les promotions ; X+Y / FREE l'ajoutent automatiquement). */}
+                {l.freeUnits > 0 && (
+                  <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-rose-600 dark:text-rose-400">
+                    <Gift className="h-3.5 w-3.5 shrink-0" />
+                    <span className="font-medium">
+                      {freeColis} {hasColis ? "colis" : l.priceUnit} offert{freeColis > 1 ? "s" : ""}
                     </span>
+                    {hasColis && (
+                      <span className="text-foreground/50 tnum">({Math.round(l.freeUnits * l.packDivisor * 100) / 100} {l.priceUnit})</span>
+                    )}
+                    <span className="text-muted-foreground">· promo</span>
                   </div>
                 )}
                 {sellShort ? (
@@ -1361,57 +1383,6 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       </div>
       </div>{/* /flex deux colonnes */}
 
-      {/* ── C2 — Dialog « Promotions » : promos actives (libellé · article · type · période) ── */}
-      <Dialog open={promosOpen} onOpenChange={setPromosOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Megaphone className="h-4 w-4 text-rose-500" /> Promotions actives
-            </DialogTitle>
-          </DialogHeader>
-          <DialogDescription className="text-[12.5px]">
-            La remise est appliquée automatiquement au panier quand l&apos;article est ajouté.
-          </DialogDescription>
-          {promoList.length === 0 ? (
-            <p className="text-[13.5px] text-muted-foreground italic py-3 text-center">
-              Aucune promotion active en ce moment.
-            </p>
-          ) : (
-            <ul className="max-h-[50vh] overflow-y-auto divide-y divide-border/50 -mx-1 px-1">
-              {promoList.map((pr) => {
-                const itemName = itemNameByCode.get(pr.itemCode) ?? pr.itemCode;
-                return (
-                  <li key={pr.id} className="py-2.5 flex items-start gap-2.5">
-                    <span className="shrink-0 inline-flex h-6 items-center px-2 rounded-md text-[12px] font-bold bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-400/60 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/50">
-                      {promoBadge(pr)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-[14px] font-semibold text-foreground truncate">
-                        {pr.label?.trim() || itemName}
-                      </span>
-                      <span className="block text-[12px] text-muted-foreground truncate">
-                        {itemName} · <span className="font-mono text-[11px]">{pr.itemCode}</span>
-                      </span>
-                      <span className="block text-[11.5px] text-muted-foreground/80 mt-0.5">
-                        {pr.kind === "PERCENT"
-                          ? `Remise ${promoBadge(pr)} sur le prix conseillé`
-                          : `${pr.buyQty} achetés + ${pr.freeQty} offert${pr.freeQty > 1 ? "s" : ""}`}
-                        {" · "}{promoPeriod(pr)}
-                      </span>
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <div className="flex justify-between items-center pt-2 border-t border-border">
-            <a href="/promos" className="text-[12.5px] font-semibold text-brand-600 dark:text-brand-400 hover:underline">
-              Gérer les promotions →
-            </a>
-            <Button variant="ghost" onClick={() => setPromosOpen(false)}>Fermer</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* ── Modale de confirmation encours (remplace window.confirm) ── */}
       <Dialog open={!!encoursPrompt} onOpenChange={(o) => { if (!o) setEncoursPrompt(null); }}>
