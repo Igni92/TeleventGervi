@@ -178,7 +178,10 @@ export async function GET(req: NextRequest) {
         lineCount: lines.length,
         lines,
       };
-    });
+    })
+    // Demande métier : on n'affiche QUE les magasins segmentés (GMS / CHR / EXPORT).
+    // Les clients sans segment n'apparaissent pas dans Détail livraison.
+    .filter((d) => d.clientType === "GMS" || d.clientType === "CHR" || d.clientType === "EXPORT");
 
     // ── Regroupement par transporteur ──
     type Doc = (typeof docs)[number];
