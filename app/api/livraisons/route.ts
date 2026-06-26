@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
-import { getDeliveryPrepared, getDeliveryExcluded } from "@/lib/inventory";
+import { getDeliveryPrepared, getDeliveryExcluded, getDeliveryPreparer, getDeliveryIncomplete } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -118,6 +118,9 @@ export async function GET(req: NextRequest) {
     // BL marqués « avoir / exclu » (facturé puis avoir total, doublon) → déduits
     // à 100% des totaux mais conservés (grisés) dans la liste.
     const avoirByDoc = await getDeliveryExcluded().catch(() => new Map<number, boolean>());
+    // Préparateur affecté + signalement « incomplète (à reprendre) » par BL.
+    const prepByDoc = await getDeliveryPreparer().catch(() => new Map<number, string>());
+    const incompleteByDoc = await getDeliveryIncomplete().catch(() => new Map<number, boolean>());
 
     // Type client (GMS / CHR / EXPORT) par CardCode — pour le filtre par segment.
     // Le CardCode d'un BL peut être le code principal OU un code d'adresse de
@@ -189,6 +192,8 @@ export async function GET(req: NextRequest) {
         carrierName: trspCode ? carrierByCode.get(trspCode) ?? trspCode : null,
         clientType: typeByCardCode.get(d.CardCode) ?? null,   // GMS | CHR | EXPORT | null
         prepared: faiteByDoc.get(d.DocEntry) ?? false,        // « faite » = coché manuellement
+        preparer: prepByDoc.get(d.DocEntry) ?? null,          // préparateur affecté (qui a ouvert)
+        incomplete: incompleteByDoc.get(d.DocEntry) ?? false, // « à reprendre » — remise sur la file
         // « avoir/exclu » : surcharge manuelle si présente, sinon détecté auto (ci-dessous).
         excluded: avoirByDoc.has(d.DocEntry) ? !!avoirByDoc.get(d.DocEntry) : false,
         lineCount: lines.length,

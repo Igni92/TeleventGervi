@@ -5,8 +5,10 @@ import {
   Truck, Boxes, Scale, Users, FileText, Receipt,
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
   RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw, Pencil,
+  Maximize2, UserCheck, Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ClientLink } from "@/components/ClientLink";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { broadcastActiveClient } from "@/lib/consoleSync";
@@ -51,6 +53,8 @@ interface Doc {
   carrierName: string | null;
   clientType: string | null;   // GMS | CHR | EXPORT | null
   prepared: boolean;           // « faite » — coché manuellement
+  preparer?: string | null;    // préparateur affecté (qui a ouvert la commande)
+  incomplete?: boolean;        // « à reprendre » — remise sur la file (pas finie)
   excluded: boolean;           // « avoir / exclu » — déduit 100% des totaux
   lineCount: number;
   lines: Line[];
@@ -776,9 +780,15 @@ function OrderRow({
   // persistance par DocEntry (aucune déduction auto depuis l'inventaire).
   const [prepared, setPrepared] = useState(doc.prepared);
   const [savingPrep, setSavingPrep] = useState(false);
-  async function togglePrepared() {
-    const next = !prepared;
+  // Préparateur affecté + signalement « à reprendre » + vue en grand.
+  const [preparer, setPreparer] = useState<string | null>(doc.preparer ?? null);
+  const [incomplete, setIncomplete] = useState<boolean>(!!doc.incomplete);
+  const [bigOpen, setBigOpen] = useState(false);
+  const [requeuing, setRequeuing] = useState(false);
+
+  async function setPreparedTo(next: boolean) {
     setPrepared(next);
+    if (next) setIncomplete(false);
     setSavingPrep(true);
     try {
       const res = await fetch("/api/livraisons/prepared", {
@@ -789,6 +799,37 @@ function OrderRow({
       if (!res.ok || j?.ok === false) { setPrepared(!next); toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement"); return; }
     } catch { setPrepared(!next); toast.error("Échec de l'enregistrement"); }
     finally { setSavingPrep(false); }
+  }
+  const togglePrepared = () => setPreparedTo(!prepared);
+
+  // Ouvrir la commande en grand → s'affecter comme préparateur (qui clique prépare).
+  async function openBig() {
+    setBigOpen(true);
+    try {
+      const res = await fetch("/api/livraisons/preparer", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: doc.docEntry, action: "claim" }),
+      });
+      const j = await res.json().catch(() => null);
+      if (res.ok && j?.ok) { setPreparer(j.preparer ?? null); setIncomplete(false); }
+    } catch { /* affectation non bloquante */ }
+  }
+
+  // Pas entièrement préparée → remise sur la file + signalement (notification).
+  async function requeue() {
+    setRequeuing(true);
+    try {
+      const res = await fetch("/api/livraisons/preparer", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: doc.docEntry, action: "requeue" }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) { toast.error(j?.error || "Échec"); return; }
+      setPreparer(null); setIncomplete(true); setPrepared(false);
+      setBigOpen(false);
+      toast.warning(`Commande #${doc.docNum} non terminée — remise sur la file`);
+    } catch { toast.error("Échec"); }
+    finally { setRequeuing(false); }
   }
 
   // Le transporteur courant doit rester sélectionnable même s'il n'est pas dans
@@ -860,15 +901,27 @@ function OrderRow({
               onClick={togglePrepared}
               disabled={savingPrep}
               title={prepared ? "Commande préparée (faite) — cliquer pour annuler" : "Marquer la commande comme préparée (faite)"}
-              className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 ${
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 ${
                 prepared
                   ? "bg-emerald-500 text-white hover:bg-emerald-600"
-                  : "border border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"
+                  : "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-400/50 hover:bg-amber-500/25"
               }`}
             >
-              {savingPrep ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <CheckCircle2 className="h-2.5 w-2.5" />}
+              {savingPrep ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
               {prepared ? "Faite" : "À préparer"}
             </button>
+            {incomplete && (
+              <span title="Pas entièrement préparée — remise sur la file"
+                className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                <AlertTriangle className="h-3 w-3" /> À reprendre
+              </span>
+            )}
+            {preparer && !prepared && (
+              <span title={`En préparation par ${preparer}`}
+                className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2 py-0.5 text-[10px] font-semibold">
+                <UserCheck className="h-3 w-3" /> {preparer}
+              </span>
+            )}
             {!doc.open && (
               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide">
                 <CheckCircle2 className="h-2.5 w-2.5" /> Livrée
@@ -972,16 +1025,26 @@ function OrderRow({
           </div>
         </div>
 
-        {/* Colis / poids — repère logistique */}
-        <div className="flex items-center gap-6 sm:gap-8 shrink-0">
+        {/* Colis / poids — repère logistique (poids masqué sur mobile) */}
+        <div className="flex items-center gap-4 sm:gap-8 shrink-0">
           <div className="text-right min-w-[44px]">
-            <p className="text-[15px] font-bold tnum text-foreground leading-none">{fmtNum(doc.colis)}</p>
+            <p className="text-[17px] sm:text-[15px] font-bold tnum text-foreground leading-none">{fmtNum(doc.colis)}</p>
             <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-0.5">colis</p>
           </div>
-          <div className="text-right min-w-[44px]">
+          <div className="text-right min-w-[44px] hidden sm:block">
             <p className="text-[15px] font-bold tnum text-foreground leading-none">{fmtNum(doc.weightKg)}</p>
             <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-0.5">kg</p>
           </div>
+          {/* Ouvrir en grand (+ affecter au préparateur qui clique) */}
+          <button
+            type="button"
+            onClick={openBig}
+            title="Ouvrir la commande en grand (et se l'affecter)"
+            aria-label={`Ouvrir la commande ${doc.docNum} en grand`}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-brand-300/60 dark:border-brand-500/40 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-900/35 active:scale-95 transition-all"
+          >
+            <Maximize2 className="h-4 w-4" />
+          </button>
           {doc.open && (
             <button
               type="button"
@@ -1020,15 +1083,21 @@ function OrderRow({
           <table className="w-full text-[12px]">
             <thead className="text-[9px] uppercase tracking-wider text-muted-foreground bg-card/40">
               <tr>
+                <th className="text-center font-semibold px-2 py-1.5 w-14 whitespace-nowrap">Colis</th>
                 <th className="text-left font-semibold px-3 py-1.5">Article</th>
-                <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap">Colis</th>
                 <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Qté</th>
-                <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap">kg</th>
+                <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">kg</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40">
               {doc.lines.map((l, i) => (
                 <tr key={`${l.itemCode}-${i}`}>
+                  {/* Colisage en premier (gauche) — repère principal de préparation */}
+                  <td className="px-2 py-1.5 text-center align-top">
+                    <span className="inline-flex min-w-[28px] items-center justify-center rounded-md bg-brand-500/15 px-1.5 py-0.5 text-[14px] font-bold tnum text-brand-700 dark:text-brand-300">
+                      {fmtNum(l.colis)}
+                    </span>
+                  </td>
                   <td className="px-3 py-1.5 min-w-0">
                     <div className="flex items-baseline gap-1.5 flex-wrap">
                       <span className="font-medium text-foreground/90">{l.itemName}</span>
@@ -1036,15 +1105,81 @@ function OrderRow({
                     </div>
                     <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} className="mt-1" />
                   </td>
-                  <td className="px-3 py-1.5 text-right tnum font-semibold text-foreground align-top">{fmtNum(l.colis)}</td>
                   <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell align-top">{fmtNum(l.quantity)}</td>
-                  <td className="px-3 py-1.5 text-right tnum text-muted-foreground align-top">{fmtNum(l.weightKg)}</td>
+                  <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell align-top">{fmtNum(l.weightKg)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Vue en GRAND — préparation focalisée + affectation au préparateur */}
+      <Dialog open={bigOpen} onOpenChange={setBigOpen}>
+        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
+          <DialogHeader className="text-left">
+            <DialogTitle className="flex items-center gap-2 pr-8 text-[17px]">
+              <Boxes className="h-5 w-5 text-brand-600 dark:text-brand-400 shrink-0" />
+              <span className="truncate min-w-0">{doc.cardName}</span>
+              <span className="text-[12px] font-normal text-muted-foreground shrink-0">· BL n°{doc.docNum}</span>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex items-center gap-4 flex-wrap">
+            <span className="text-[26px] font-bold tnum text-foreground leading-none">
+              {fmtNum(doc.colis)} <span className="text-[12px] font-medium uppercase text-muted-foreground">colis</span>
+            </span>
+            <span className="text-[15px] font-semibold tnum text-muted-foreground">{fmtNum(doc.weightKg)} kg</span>
+            {preparer && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2.5 py-1 text-[12px] font-semibold">
+                <UserCheck className="h-3.5 w-3.5" /> Préparée par {preparer}
+              </span>
+            )}
+            {prepared && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2.5 py-1 text-[12px] font-bold uppercase">
+                <CheckCircle2 className="h-3.5 w-3.5" /> Faite
+              </span>
+            )}
+          </div>
+          {doc.comments && <p className="text-[12.5px] italic text-muted-foreground">« {doc.comments} »</p>}
+
+          {/* Lignes en grand : colisage à gauche + tags */}
+          <ul className="divide-y divide-border/50 rounded-xl border border-border overflow-hidden">
+            {doc.lines.map((l, i) => (
+              <li key={`big-${l.itemCode}-${i}`} className="flex items-start gap-3 px-3 py-2.5">
+                <span className="inline-flex min-w-[44px] items-center justify-center rounded-lg bg-brand-500/15 px-2 py-1 text-[18px] font-bold tnum text-brand-700 dark:text-brand-300 shrink-0">
+                  {fmtNum(l.colis)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[14px] font-semibold text-foreground">{l.itemName}</p>
+                  <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} className="mt-1" />
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          {/* Actions de préparation */}
+          <div className="flex items-center gap-2 flex-wrap pt-1">
+            <button
+              type="button"
+              onClick={() => { setPreparedTo(true); setBigOpen(false); }}
+              disabled={savingPrep}
+              className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[14px] font-semibold disabled:opacity-60"
+            >
+              <CheckCircle2 className="h-4 w-4" /> Préparation terminée
+            </button>
+            <button
+              type="button"
+              onClick={requeue}
+              disabled={requeuing}
+              className="inline-flex items-center gap-2 h-11 px-5 rounded-xl border border-rose-300/70 dark:border-rose-500/40 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-[14px] font-semibold disabled:opacity-60"
+            >
+              {requeuing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
+              Pas terminée — remettre sur la file
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </li>
   );
 }

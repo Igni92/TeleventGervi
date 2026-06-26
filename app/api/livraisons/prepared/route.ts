@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { setDeliveryPrepared } from "@/lib/inventory";
+import { setDeliveryPrepared, setDeliveryIncomplete } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +25,8 @@ export async function POST(req: NextRequest) {
 
   try {
     await setDeliveryPrepared(docEntry, prepared, session.user.email ?? session.user.name ?? "?");
+    // Marquer « faite » lève tout signalement « incomplète — à reprendre ».
+    if (prepared) await setDeliveryIncomplete(docEntry, false);
     return NextResponse.json({ ok: true, docEntry, prepared });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
