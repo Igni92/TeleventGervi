@@ -57,6 +57,7 @@ export async function refreshItemStocks(itemCodes: string[]): Promise<number> {
   };
 
   let updated = 0;
+  const done = new Set<string>();   // codes effectivement mis à jour par le batch
   for (let i = 0; i < reqs.length; i += CONCURRENCY) {
     const wave = reqs.slice(i, i + CONCURRENCY);
     const waves = await Promise.all(wave.map(async (codes) => {
@@ -73,9 +74,31 @@ export async function refreshItemStocks(itemCodes: string[]): Promise<number> {
     }));
     for (const items of waves) {
       for (const it of items) {
-        try { if (await upsertItem(it)) updated++; }
+        try { if (await upsertItem(it)) { updated++; done.add(it.ItemCode); } }
         catch (e) { console.warn(`[stockSync] upsert ${it.ItemCode} échoué:`, (e as Error).message); }
       }
+    }
+  }
+
+  // SÉCURITÉ : si le batch n'a pas couvert un article (ex. ce Service Layer ne
+  // renvoie pas la collection entrepôt en mode liste), on reprend ces codes en
+  // requête PAR ARTICLE (méthode éprouvée). En cas de batch totalement KO, le
+  // résultat est donc identique à l'ancien comportement (correct), jamais pire.
+  const missed = unique.filter((c) => idByCode.has(c) && !done.has(c));
+  if (missed.length > 0) {
+    const PER_ITEM_CONC = 10;
+    for (let i = 0; i < missed.length; i += PER_ITEM_CONC) {
+      const batch = missed.slice(i, i + PER_ITEM_CONC);
+      await Promise.all(batch.map(async (code) => {
+        try {
+          const it = await sap.get<SapItem>(
+            `Items('${encodeURIComponent(code)}')?$select=ItemCode,QuantityOnStock,ItemWarehouseInfoCollection`,
+          );
+          if (await upsertItem(it)) updated++;
+        } catch (e) {
+          console.warn(`[stockSync] refresh ${code} échoué:`, (e as Error).message);
+        }
+      }));
     }
   }
   return updated;
