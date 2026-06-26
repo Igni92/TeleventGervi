@@ -134,6 +134,10 @@ function Ecran1Link() {
 function ClientBanner({
   clientId, clientName, info,
 }: { clientId: string | null; clientName: string | null; info: ActiveClientInfo | null }) {
+  // Fetch unique des dernières livraisons (mini-frise à droite du nom + notes).
+  // Appelé AVANT tout return conditionnel (règle des hooks) ; no-op si pas de client.
+  const { docs: deliveryDocs } = useClientDeliveries(clientId);
+
   if (!clientName) {
     return (
       <header className="shrink-0 panel px-4 py-3">
@@ -217,6 +221,8 @@ function ClientBanner({
                 <AlertTriangle className="h-3 w-3" /> {incidents} incident{incidents > 1 ? "s" : ""}
               </span>
             )}
+            {/* Mini-frise « livraisons de la semaine » — compacte, à droite du nom. */}
+            <div className="ml-auto pl-2"><WeekStripMini docs={deliveryDocs} /></div>
           </div>
           {/* Ligne meta : commercial (nom complet, plus d'acronyme) + e-mail */}
           {(commercialName || info?.email) && (
@@ -297,8 +303,8 @@ function ClientBanner({
       {/* ── Ligne 3 — Interlocuteurs (fetch direct, clé = clientId) ── */}
       {clientId && <InterlocuteursStrip clientId={clientId} />}
 
-      {/* ── Ligne 4 — Cadence de livraison + commentaires des dernières cdes ── */}
-      {clientId && <DeliveryHistoryStrip clientId={clientId} />}
+      {/* ── Ligne 4 — Notes des dernières commandes (vraies remarques) ── */}
+      <OrderNotes docs={deliveryDocs} />
     </header>
   );
 }
@@ -403,10 +409,10 @@ function InterlocuteursStrip({ clientId }: { clientId: string }) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Cadence de livraison — frise d'UNE semaine (Lun→Dim) : jour en
-   haut (Lun, Mar…), puis un point pour un jour sans livraison ou un
-   carré plein (poids dans le carré) pour un jour livré. + commentaires
-   des dernières commandes (s'il y en a). Source : /api/sap/orders.
+   Livraisons de la semaine — MINI-frise compacte (Lun→Dim) posée à
+   droite du nom client : carré plein (poids dedans) le jour livré,
+   point sinon. + notes des dernières commandes (vraies remarques).
+   Source unique : /api/sap/orders (un seul fetch, partagé).
 ───────────────────────────────────────────────────────────── */
 
 interface DeliveryDoc {
@@ -428,17 +434,17 @@ function parseKey(k: string): Date {
   return new Date(y, m - 1, d);
 }
 
-/** Libellés courts des jours, semaine commençant le LUNDI. */
-const JOURS_LMD = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"] as const;
+/** Initiales 1 lettre par jour (Lun→Dim) pour la mini-frise. */
+const JOURS_INI = ["L", "M", "M", "J", "V", "S", "D"] as const;
 
-function DeliveryHistoryStrip({ clientId }: { clientId: string }) {
+/** Fetch unique des dernières commandes d'un client (frise + notes). */
+function useClientDeliveries(clientId: string | null) {
   const [docs, setDocs] = useState<DeliveryDoc[]>([]);
-  const [loading, setLoading] = useState(true);
-
+  const [loading, setLoading] = useState(false);
   useEffect(() => {
+    if (!clientId) { setDocs([]); setLoading(false); return; }
     let cancelled = false;
-    setLoading(true);
-    setDocs([]);
+    setLoading(true); setDocs([]);
     fetch(`/api/sap/orders?clientId=${encodeURIComponent(clientId)}&last=20`, { cache: "no-store" })
       .then((r) => r.json())
       .then((j: { docs?: DeliveryDoc[] }) => { if (!cancelled) setDocs(j.docs ?? []); })
@@ -446,137 +452,107 @@ function DeliveryHistoryStrip({ clientId }: { clientId: string }) {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [clientId]);
+  return { docs, loading };
+}
 
-  if (loading) {
-    return (
-      <div className="px-4 py-2 inline-flex items-center gap-2 text-[11px] text-muted-foreground">
-        <Truck className="h-3 w-3" /> <Loader2 className="h-3 w-3 animate-spin" /> Livraisons…
-      </div>
-    );
-  }
+type DayCell = { dt: Date; key: string; dow: number; del: { weightKg: number; colis: number; count: number } | null; future: boolean };
 
-  // Agrège les commandes par jour de livraison prévu (DocDueDate).
+/** Semaine Lun→Dim d'ancrage (celle de la dernière livraison, sinon en cours). */
+function computeWeek(docs: DeliveryDoc[]): { days: DayCell[]; hasDeliveries: boolean } {
   const byDay = new Map<string, { weightKg: number; colis: number; count: number }>();
   for (const d of docs) {
     const key = (d.dueDate || "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
     const e = byDay.get(key) ?? { weightKg: 0, colis: 0, count: 0 };
-    e.weightKg += d.weightKg ?? 0;
-    e.colis += d.colis ?? 0;
-    e.count += 1;
+    e.weightKg += d.weightKg ?? 0; e.colis += d.colis ?? 0; e.count += 1;
     byDay.set(key, e);
   }
-
-  // Une seule semaine (Lun→Dim), celle qui contient la livraison la plus
-  // récente (éventuellement à venir : J+1) sinon la semaine en cours.
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const keys = [...byDay.keys()].sort();
   let anchor = today;
   if (keys.length) { const last = parseKey(keys[keys.length - 1]); if (last > anchor) anchor = last; }
-  // Lundi de la semaine d'ancrage (getDay : 0=Dim … 6=Sam).
   const monday = new Date(anchor);
   monday.setDate(anchor.getDate() + (anchor.getDay() === 0 ? -6 : 1 - anchor.getDay()));
-  const days: { dt: Date; key: string; dow: number; del: { weightKg: number; colis: number; count: number } | null; future: boolean }[] = [];
+  const days: DayCell[] = [];
   for (let i = 0; i < 7; i++) {
     const dt = new Date(monday); dt.setDate(monday.getDate() + i);
     const key = dayKey(dt);
     days.push({ dt, key, dow: i, del: byDay.get(key) ?? null, future: dt > today });
   }
-  const hasDeliveries = byDay.size > 0;
-  const weekLabel = `${monday.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })} – ${days[6].dt.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}`;
+  return { days, hasDeliveries: byDay.size > 0 };
+}
 
-  // Notes des dernières commandes (docs déjà triés DocEntry desc).
-  // Une « note » = uniquement ce que le commercial tape en remarque. On EXCLUT
-  // donc tout le texte AUTO du champ Comments SAP :
-  //   • signature par défaut « BL - Televent : MM », « EM - Televent : … »
-  //   • mention promo auto « PROMO : … »
-  //   • simples numéros / références (aucune lettre → n° de commande, pas une note)
+/** MINI-frise « semaine » — compacte, à poser à droite du nom client. */
+function WeekStripMini({ docs }: { docs: DeliveryDoc[] }) {
+  const { days, hasDeliveries } = computeWeek(docs);
+  if (!hasDeliveries) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const todayKey = dayKey(today);
+  return (
+    <div className="shrink-0 flex items-end gap-[2px]" title="Livraisons de la semaine — poids livré par jour">
+      <Truck className="h-3 w-3 text-muted-foreground/60 mb-[5px] mr-0.5 shrink-0" />
+      {days.map((day) => {
+        const weekend = day.dow >= 5;
+        const isToday = day.key === todayKey;
+        return (
+          <div key={day.key} className="flex flex-col items-center gap-0.5">
+            <span className={`text-[7px] font-bold leading-none ${
+              isToday ? "text-brand-600 dark:text-brand-400"
+              : weekend ? "text-muted-foreground/40" : "text-muted-foreground/70"
+            }`}>{JOURS_INI[day.dow]}</span>
+            {day.del ? (
+              <div
+                title={`${day.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "2-digit", month: "2-digit" })} — ${Math.round(day.del.weightKg)} kg · ${day.del.colis} colis (${day.del.count} cde${day.del.count > 1 ? "s" : ""})`}
+                className={`h-[18px] w-[18px] rounded-[4px] flex items-center justify-center text-white shadow-sm bg-gradient-to-br from-brand-400 to-brand-600 ${day.future ? "ring-1 ring-brand-300/70" : ""}`}
+              >
+                <span className="text-[7px] font-bold leading-none tnum">{kgChip(day.del.weightKg)}</span>
+              </div>
+            ) : (
+              <div className="h-[18px] w-[18px] flex items-center justify-center">
+                <span className={`h-[3px] w-[3px] rounded-full ${weekend ? "bg-muted-foreground/15" : "bg-muted-foreground/30"}`} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Notes des dernières commandes — UNIQUEMENT les vraies remarques tapées.
+ *  On exclut le texte auto du champ Comments SAP : signature par défaut
+ *  « BL - Televent : MM », mention promo « PROMO : … », simples n° de commande. */
+function OrderNotes({ docs }: { docs: DeliveryDoc[] }) {
   const isAutoComment = (t: string) =>
-    /^[A-Za-z0-9]{1,5}\s*-\s*Telev[ei]nt\s*:/i.test(t)   // signature TeleVent
-    || /^promo\s*:/i.test(t)                              // mention promo auto
-    || !/[A-Za-zÀ-ÿ]/.test(t);                            // que des chiffres/ponctuation → n° de cde
+    /^[A-Za-z0-9]{1,5}\s*-\s*Telev[ei]nt\s*:/i.test(t)
+    || /^promo\s*:/i.test(t)
+    || !/[A-Za-zÀ-ÿ]/.test(t);
   const comments: { date: string; text: string; docNum: number }[] = [];
-  const seenComment = new Set<string>();
+  const seen = new Set<string>();
   for (const d of docs) {
     const text = (d.comments ?? "").trim();
-    if (!text || seenComment.has(text) || isAutoComment(text)) continue;
-    seenComment.add(text);
+    if (!text || seen.has(text) || isAutoComment(text)) continue;
+    seen.add(text);
     comments.push({ date: d.dueDate || d.docDate, text, docNum: d.docNum });
     if (comments.length >= 3) break;
   }
-
+  if (comments.length === 0) return null;
   return (
-    <div className="px-4 py-2.5 space-y-2">
-      {/* En-tête + frise cadence */}
+    <div className="px-4 py-2 space-y-1">
       <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] font-semibold text-foreground/80">
-        <Truck className="h-3 w-3 text-muted-foreground" />
-        Livraisons de la semaine
-        {hasDeliveries && (
-          <span className="text-muted-foreground/60 font-normal normal-case tracking-normal tnum">
-            · {weekLabel}
-          </span>
-        )}
+        <MessageSquareText className="h-3 w-3 text-muted-foreground" />
+        Notes des dernières commandes
       </div>
-
-      {hasDeliveries ? (
-        <div className="flex items-start gap-[3px] pt-0.5">
-          {days.map((day) => {
-            const weekend = day.dow >= 5; // Sam / Dim
-            const isToday = day.key === dayKey(today);
-            return (
-              <div key={day.key} className="flex-1 min-w-0 flex flex-col items-center gap-1">
-                {/* Jour en HAUT (Lun, Mar…) */}
-                <span className={`text-[9px] font-semibold leading-none uppercase tracking-tight ${
-                  isToday ? "text-brand-600 dark:text-brand-400"
-                  : weekend ? "text-muted-foreground/40" : "text-muted-foreground/80"
-                }`}>
-                  {JOURS_LMD[day.dow]}
-                </span>
-                {day.del ? (
-                  <div
-                    title={`${day.dt.toLocaleDateString("fr-FR", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" })} — ${Math.round(day.del.weightKg)} kg · ${day.del.colis} colis (${day.del.count} cde${day.del.count > 1 ? "s" : ""})`}
-                    className={`aspect-square w-full max-w-[34px] rounded-md flex items-center justify-center shadow-sm text-white bg-gradient-to-br from-brand-400 to-brand-600 ${
-                      day.future ? "ring-2 ring-brand-300/70 ring-offset-1 ring-offset-card animate-pulse" : ""
-                    }`}
-                  >
-                    <span className="text-[8.5px] font-bold leading-none tnum px-0.5">{kgChip(day.del.weightKg)}</span>
-                  </div>
-                ) : (
-                  <div className="aspect-square w-full max-w-[34px] flex items-center justify-center">
-                    <span className={`h-1 w-1 rounded-full ${weekend ? "bg-muted-foreground/15" : "bg-muted-foreground/30"}`} />
-                  </div>
-                )}
-                {/* Date du jour, sous le carré (gris, discret) */}
-                <span className="text-[8px] leading-none tnum tracking-tight text-muted-foreground/50">
-                  {day.dt.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <p className="text-[11px] italic text-muted-foreground/60">Aucune livraison récente.</p>
-      )}
-
-      {/* Commentaires des dernières commandes */}
-      {comments.length > 0 && (
-        <div className="space-y-1 pt-1">
-          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] font-semibold text-foreground/80">
-            <MessageSquareText className="h-3 w-3 text-muted-foreground" />
-            Notes des dernières commandes
-          </div>
-          <ul className="space-y-1">
-            {comments.map((c) => (
-              <li key={c.docNum} className="flex items-start gap-2 text-[11.5px] rounded-md border border-border bg-card/60 px-2 py-1">
-                <span className="shrink-0 text-[9.5px] font-semibold tnum text-muted-foreground mt-0.5">
-                  {new Date(c.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}
-                </span>
-                <span className="text-foreground/85 leading-snug">{c.text}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <ul className="space-y-1">
+        {comments.map((c) => (
+          <li key={c.docNum} className="flex items-start gap-2 text-[11.5px] rounded-md border border-border bg-card/60 px-2 py-1">
+            <span className="shrink-0 text-[9.5px] font-semibold tnum text-muted-foreground mt-0.5">
+              {new Date(c.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}
+            </span>
+            <span className="text-foreground/85 leading-snug">{c.text}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

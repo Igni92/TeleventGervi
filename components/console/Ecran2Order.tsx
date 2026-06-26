@@ -107,6 +107,15 @@ function fmtKg(kg: number): string {
   return kg % 1 === 0 ? kg.toFixed(0) : String(kg);
 }
 
+/** Valeur de tag « propre » : ignore les placeholders vides ou « - » (tiret(s)
+ *  seul(s)) → on ne fait PAS apparaître le tag dans ce cas. */
+function cleanTag(v: string | null | undefined): string | null {
+  if (v == null) return null;
+  const t = v.trim();
+  if (!t || /^-+$/.test(t)) return null;
+  return t;
+}
+
 /* ── C4 — Densité d'affichage de la liste stock ────────────── */
 type Density = "compact" | "normal" | "aere";
 const DENSITY_KEY = "televente:ecran2Density";
@@ -998,11 +1007,12 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                       const dispo = stockSharePct < 100 ? perso : total;
                       // Méta-chips visibles : marque · conditionnement · calibre · origine.
                       // Calibre = U_GER_CALIBRE (via Hint, chargé après) — distinct du condi.
-                      const marque  = p.uMarque ?? h?.marque ?? null;
-                      const condi   = p.uCondi ?? p.uUvc ?? null;          // ex. 8×500g
-                      const calibre = h?.calibre ? `cal. ${h.calibre}` : null;
-                      const variete = (p.frgnName ?? "").trim() || null;     // variété (FrgnName)
-                      const pays    = p.uPays ?? h?.pays ?? null;
+                      const marque  = cleanTag(p.uMarque ?? h?.marque);
+                      const condi   = cleanTag(p.uCondi ?? p.uUvc);          // ex. 8×500g
+                      const calibreRaw = cleanTag(h?.calibre);
+                      const calibre = calibreRaw ? `cal. ${calibreRaw}` : null;
+                      const variete = cleanTag(p.frgnName);                  // variété (FrgnName)
+                      const pays    = cleanTag(p.uPays ?? h?.pays);
                       const isFav   = favorites.has(p.itemCode);          // C1
                       // C2 — plus de badge promo sur la liste stock : la remise
                       // auto au panier reste (cf. addToCart), le récap vit dans
@@ -1191,13 +1201,18 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                       )}
                       {/* Tags désignation — inline à droite du libellé (lignes compactes, code masqué) */}
                       {(() => {
-                        const calibre = hints[l.itemCode]?.calibre ? `cal. ${hints[l.itemCode]!.calibre}` : null;
+                        const calibreRaw = cleanTag(hints[l.itemCode]?.calibre);
+                        const calibre = calibreRaw ? `cal. ${calibreRaw}` : null;
+                        const marque = cleanTag(l.marque);
+                        const condi = cleanTag(l.condi);
+                        const variete = cleanTag(l.variete);
+                        const pays = cleanTag(l.pays);
                         const chips = [
-                          l.marque && ["bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100", l.marque],
-                          l.condi && ["bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100", l.condi],
+                          marque && ["bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100", marque],
+                          condi && ["bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100", condi],
                           calibre && ["bg-teal-100 text-teal-800 dark:bg-teal-500/30 dark:text-teal-100", calibre],
-                          l.variete && ["bg-rose-100 text-rose-800 dark:bg-rose-500/30 dark:text-rose-100", l.variete],
-                          l.pays && ["bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100", l.pays],
+                          variete && ["bg-rose-100 text-rose-800 dark:bg-rose-500/30 dark:text-rose-100", variete],
+                          pays && ["bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100", pays],
                         ].filter(Boolean) as [string, string][];
                         return chips.map(([cls, txt], ci) => (
                           <span key={ci} className={`inline-flex items-center px-1.5 py-px rounded-[5px] text-[10.5px] font-semibold ${cls}`}>{txt}</span>
