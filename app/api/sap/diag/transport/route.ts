@@ -137,6 +137,49 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  // Mode SERG : déplie l'UDO SERGTRS (en-tête + collections enfant) pour
+  // un/des client(s) → comprendre la structure réelle (où vivent transporteur,
+  // tournée, heure, défaut, timbre). ?serg=AARR,ABET,APET
+  if (sp.get("serg") !== null) {
+    const cards = (sp.get("serg") || "").split(",").map((s) => s.trim()).filter(Boolean);
+    const data: Record<string, unknown> = {};
+    for (const cc of cards) {
+      const filt = `$filter=${encodeURIComponent(`U_CardCode eq '${cc.replace(/'/g, "''")}'`)}`;
+      let strategy: string | null = null;
+      let rows: Record<string, unknown>[] | null = null;
+      let error: string | null = null;
+      // 1) filtre + $expand des 3 collections
+      try {
+        rows = await sap.getAll<Record<string, unknown>>(
+          `SERGTRS?${filt}&$expand=SERG_TRS1Collection,SERG_TRS2Collection,SERG_TRS3Collection`,
+          { env: "prod", maxPages: 2, pageSize: 50 },
+        );
+        strategy = "filter+expand";
+      } catch {
+        // 2) en-têtes puis GET unitaire par DocEntry / Code (children inlinés)
+        try {
+          const heads = await sap.getAll<{ Code?: unknown; DocEntry?: unknown }>(
+            `SERGTRS?${filt}&$select=Code,DocEntry,U_CardCode,U_Timbre`,
+            { env: "prod", maxPages: 2, pageSize: 50 },
+          );
+          rows = [];
+          for (const h of heads) {
+            let full: Record<string, unknown> | null = null;
+            const keys = [h.DocEntry, typeof h.Code === "string" ? `'${h.Code}'` : h.Code];
+            for (const k of keys) {
+              if (k === null || k === undefined) continue;
+              try { full = await sap.get<Record<string, unknown>>(`SERGTRS(${k})`, { env: "prod" }); break; } catch { /* clé suivante */ }
+            }
+            rows.push(full ?? (h as Record<string, unknown>));
+          }
+          strategy = "headers+single";
+        } catch (e2) { error = e2 instanceof Error ? e2.message : String(e2); }
+      }
+      data[cc] = { strategy, error, count: rows?.length ?? null, rows };
+    }
+    return NextResponse.json({ ok: true, mode: "serg", note: "U_Timbre est en en-tête (par client) ; transporteur/tournée/heure/défaut dans une des collections SERG_TRS#.", data });
+  }
+
   try {
     // 1. BL cibles (par DocNum, sinon 6 récents, éventuellement filtrés client)
     type Ord = Record<string, unknown> & { DocNum: number; DocEntry: number; CardCode: string; CardName?: string; U_TrspCode?: string };
