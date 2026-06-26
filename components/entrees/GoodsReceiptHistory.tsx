@@ -4,11 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ClipboardList, Search, ChevronRight, ChevronDown,
-  AlertTriangle, Truck, X, Maximize2,
+  AlertTriangle, Truck, X, Maximize2, Pencil, Save,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
@@ -18,6 +19,7 @@ import {
 } from "./ReceptionIncidents";
 
 type ReceiptLine = {
+  lineNum: number;
   itemCode: string; itemName?: string;
   pieceQuantity: number; packageQuantity: number | null;
   warehouse?: string;
@@ -27,8 +29,20 @@ type ReceiptLine = {
 type Receipt = {
   docEntry: number; docNum: number; lot: string; docDate: string;
   cardCode: string; cardName?: string; numAtCard: string;
+  editable?: boolean;
   total: number; totalTTC: number; totalHT: number; totalTVA: number;
   comments: string; lineCount: number; lines: ReceiptLine[];
+};
+
+/** Édition du prix d'une ligne d'EM (prix unitaire OU total HT forcé). */
+type PriceEdit = { lineNum: number; pieceQuantity: number; price: string; lineTotal: string; forceTotal: boolean };
+const emEffPU = (e: PriceEdit): number | null => {
+  if (e.forceTotal) { const t = parseFloat(e.lineTotal); return Number.isFinite(t) && e.pieceQuantity > 0 ? Math.round((t / e.pieceQuantity) * 10000) / 10000 : null; }
+  const p = e.price === "" ? null : parseFloat(e.price); return p != null && Number.isFinite(p) ? p : null;
+};
+const emEffTotal = (e: PriceEdit): number | null => {
+  if (e.forceTotal) { const t = parseFloat(e.lineTotal); return Number.isFinite(t) ? t : null; }
+  const p = e.price === "" ? null : parseFloat(e.price); return p != null && Number.isFinite(p) ? p * e.pieceQuantity : null;
 };
 
 /** Date au format jj.mm.aa (points, année sur 2 chiffres). */
@@ -261,6 +275,7 @@ export function GoodsReceiptHistory() {
                             incidents={byDoc.get(d.docEntry) ?? []}
                             onIncidentChanged={reloadIncidents}
                             onNumAtCardChange={updateNumAtCard}
+                            onUpdated={load}
                             onEnlarge={() => setLargeEntry(d.docEntry)}
                           />
                         </td>
@@ -295,6 +310,7 @@ export function GoodsReceiptHistory() {
               incidents={byDoc.get(largeDoc.docEntry) ?? []}
               onIncidentChanged={reloadIncidents}
               onNumAtCardChange={updateNumAtCard}
+              onUpdated={load}
             />
           )}
         </DialogContent>
@@ -320,12 +336,14 @@ function Stat({ label, value, tone }: { label: string; value: React.ReactNode; t
    directement depuis cette consultation.
    ───────────────────────────────────────────────────────────────── */
 function ReceiptDetail({
-  receipt, incidents, onIncidentChanged, onNumAtCardChange, large, onEnlarge,
+  receipt, incidents, onIncidentChanged, onNumAtCardChange, onUpdated, large, onEnlarge,
 }: {
   receipt: Receipt;
   incidents: { id: string; type: string | null; note: string | null; resolved: boolean; createdAt: string; createdBy: string | null }[];
   onIncidentChanged: () => void;
   onNumAtCardChange: (docEntry: number, numAtCard: string) => void;
+  /** Recharge la liste après modification des prix. */
+  onUpdated?: () => void;
   /** Affichage agrandi (modale plein cadre) — textes et espacements plus grands. */
   large?: boolean;
   /** Ouvre l'affichage agrandi (visible seulement en mode normal). */
@@ -333,6 +351,48 @@ function ReceiptDetail({
 }) {
   const [declareOpen, setDeclareOpen] = useState(false);
   const [savingBl, setSavingBl] = useState(false);
+
+  // Édition des PRIX (prix unitaire / total HT forcé) — la marchandise est entrée,
+  // donc ni quantité ni article ne changent.
+  const [editingPrices, setEditingPrices] = useState(false);
+  const [savingPrices, setSavingPrices] = useState(false);
+  const [priceEdits, setPriceEdits] = useState<PriceEdit[]>([]);
+  const canEditPrices = receipt.editable !== false;
+
+  const beginPriceEdit = () => {
+    setPriceEdits(receipt.lines.map((l) => {
+      const forceTotal = (l.price == null || l.price <= 0) && l.lineTotal != null && l.lineTotal > 0;
+      return {
+        lineNum: l.lineNum, pieceQuantity: l.pieceQuantity,
+        price: l.price != null && l.price > 0 ? String(l.price) : "",
+        lineTotal: l.lineTotal != null ? String(l.lineTotal) : "",
+        forceTotal,
+      };
+    }));
+    setEditingPrices(true);
+  };
+  const updatePriceEdit = (i: number, patch: Partial<PriceEdit>) =>
+    setPriceEdits((c) => c.map((e, k) => (k === i ? { ...e, ...patch } : e)));
+
+  const savePrices = async () => {
+    const payload = priceEdits.map((e) =>
+      e.forceTotal
+        ? { lineNum: e.lineNum, lineTotal: e.lineTotal === "" ? undefined : parseFloat(e.lineTotal) }
+        : { lineNum: e.lineNum, price: e.price === "" ? undefined : parseFloat(e.price) },
+    );
+    setSavingPrices(true);
+    try {
+      const res = await fetch(`/api/sap/goods-receipts/${receipt.docEntry}/modif`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: payload }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j.ok) { toast.error(j.error || "Erreur SAP"); return; }
+      toast.success(`Prix de l'entrée #${receipt.docNum} mis à jour`);
+      setEditingPrices(false);
+      onUpdated?.();
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setSavingPrices(false); }
+  };
 
   // Jeu de tailles : compact (inline) vs agrandi (modale).
   const big = !!large;
@@ -403,6 +463,23 @@ function ReceiptDetail({
       </div>
       {receipt.comments && <p className={`italic text-muted-foreground ${big ? "text-[13px]" : "text-[11.5px]"}`}>« {receipt.comments} »</p>}
 
+      {/* Édition des prix (PU / Total HT forcé) — la quantité et l'article ne changent pas. */}
+      {canEditPrices && (
+        editingPrices ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={savePrices} disabled={savingPrices}>
+              {savingPrices ? <Loader2 className="animate-spin" /> : <Save className="h-3.5 w-3.5" />} Enregistrer les prix
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setEditingPrices(false)} disabled={savingPrices}>Annuler</Button>
+            <span className="text-[11px] text-muted-foreground">Modifie le PU /pie, ou force le Total HT (SAP recalcule le PU).</span>
+          </div>
+        ) : (
+          <Button variant="outline" size="sm" onClick={beginPriceEdit}>
+            <Pencil className="h-3.5 w-3.5" /> Modifier les prix
+          </Button>
+        )
+      )}
+
       {/* Mobile : lignes empilées (le tableau large déborde) + totaux */}
       <div className="md:hidden space-y-2">
         {receipt.lines.map((l, i) => {
@@ -417,14 +494,24 @@ function ReceiptDetail({
                   <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
                 </div>
                 <div className="text-right shrink-0">
-                  <div className="text-[15px] font-bold tnum text-foreground">{lineHT != null ? eur(lineHT) : "—"}</div>
-                  <div className="text-[11px] text-muted-foreground">HT</div>
+                  {editingPrices && priceEdits[i] ? (
+                    <NumberInput value={emEffTotal(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { lineTotal: n == null ? "" : String(n), forceTotal: n != null })} min={0} step={0.01} decimals={2} allowEmpty placeholder="Total HT" className={`h-9 w-28 text-right ${priceEdits[i].forceTotal ? "ring-1 ring-amber-400" : ""}`} />
+                  ) : (
+                    <>
+                      <div className="text-[15px] font-bold tnum text-foreground">{lineHT != null ? eur(lineHT) : "—"}</div>
+                      <div className="text-[11px] text-muted-foreground">HT</div>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-2 mt-2 text-[13px] text-muted-foreground tnum">
                 <span className="text-foreground font-medium">{fmtColis(l.packageQuantity)} colis</span>
                 <span>·</span>
-                <span>PU {l.price != null ? eur(l.price) : "—"}</span>
+                {editingPrices && priceEdits[i] ? (
+                  <span className="inline-flex items-center gap-1">PU <NumberInput value={emEffPU(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { price: n == null ? "" : String(n), forceTotal: false, lineTotal: "" })} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className="h-8 w-20 text-right" /></span>
+                ) : (
+                  <span>PU {l.price != null ? eur(l.price) : "—"}</span>
+                )}
               </div>
             </div>
           );
@@ -465,8 +552,16 @@ function ReceiptDetail({
                   <td className={td}><Chip kind="marque">{dz.marque}</Chip></td>
                   <td className={td}><Chip kind="calibre">{dz.variete}</Chip></td>
                   <td className={td}><Chip kind="condt">{dz.condt}</Chip></td>
-                  <td className={`text-right tnum ${td}`}>{l.price != null ? eur(l.price) : "—"}</td>
-                  <td className={`text-right tnum font-medium ${td}`}>{lineHT != null ? eur(lineHT) : "—"}</td>
+                  <td className={`text-right tnum ${td}`}>
+                    {editingPrices && priceEdits[i] ? (
+                      <NumberInput value={emEffPU(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { price: n == null ? "" : String(n), forceTotal: false, lineTotal: "" })} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className="h-8 w-24 text-right" />
+                    ) : (l.price != null ? eur(l.price) : "—")}
+                  </td>
+                  <td className={`text-right tnum font-medium ${td}`}>
+                    {editingPrices && priceEdits[i] ? (
+                      <NumberInput value={emEffTotal(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { lineTotal: n == null ? "" : String(n), forceTotal: n != null })} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className={`h-8 w-24 text-right ${priceEdits[i].forceTotal ? "ring-1 ring-amber-400" : ""}`} />
+                    ) : (lineHT != null ? eur(lineHT) : "—")}
+                  </td>
                 </tr>
               );
             })}

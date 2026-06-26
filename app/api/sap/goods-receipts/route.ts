@@ -410,20 +410,23 @@ export async function GET(req: NextRequest) {
 
   try {
     type ListedLine = {
+      LineNum: number;                // n° de ligne SAP (pour l'édition de prix)
       ItemCode: string; ItemDescription?: string;
       Quantity: number; PackageQuantity?: number;
       WarehouseCode?: string;
       Price?: number;                 // prix unitaire HT (unité de stock)
       LineTotal?: number;             // total ligne HT
       TaxPercentagePerRow?: number;   // taux TVA de la ligne
+      LineStatus?: string;            // bost_Open | bost_Close (ligne facturée)
     };
     type SapPdnListed = {
       DocEntry: number; DocNum: number; DocDate: string; CardCode: string; CardName?: string;
-      NumAtCard?: string; DocTotal?: number; VatSum?: number; Comments?: string; DocumentLines?: ListedLine[];
+      NumAtCard?: string; DocTotal?: number; VatSum?: number; Comments?: string;
+      DocumentStatus?: string; DocumentLines?: ListedLine[];
     };
     const docs = await sap.get<{ value: SapPdnListed[] }>(
       `PurchaseDeliveryNotes?$top=${last}&$orderby=DocEntry desc`
-      + `&$select=DocEntry,DocNum,DocDate,CardCode,CardName,NumAtCard,DocTotal,VatSum,Comments,DocumentLines`,
+      + `&$select=DocEntry,DocNum,DocDate,CardCode,CardName,NumAtCard,DocTotal,VatSum,Comments,DocumentStatus,DocumentLines`,
     );
 
     // Enrichissement local : désignation complète (Fruit/Pays/Marque/Condt) +
@@ -459,6 +462,8 @@ export async function GET(req: NextRequest) {
           cardCode: d.CardCode,
           cardName: d.CardName,
           numAtCard: d.NumAtCard ?? "",
+          // Éditable (prix) tant que l'EM n'est pas clôturée (facture A/P créée).
+          editable: d.DocumentStatus !== "bost_Close",
           total: totalTTC,        // rétro-compat : « total » = TTC
           totalTTC,
           totalHT,
@@ -469,6 +474,7 @@ export async function GET(req: NextRequest) {
             const p = pMap.get(l.ItemCode);
             const ratio = (p?.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) ? p.salesQtyPerPackUnit : 1;
             return {
+              lineNum: l.LineNum,
               itemCode: l.ItemCode,
               itemName: l.ItemDescription || p?.itemName || l.ItemCode,
               pieceQuantity: l.Quantity,
