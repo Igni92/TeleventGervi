@@ -27,6 +27,35 @@ const EPS = 0.001;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** Prénom (tout sauf le nom de famille) à partir d'un nom complet. */
+function firstNameOf(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return parts[0] ?? fullName.trim();
+  return parts.slice(0, -1).join(" ");
+}
+
+/**
+ * Prénom affichable d'un opérateur pour le commentaire SAP : si c'est un email,
+ * on résout le nom complet dans la table User (→ prénom), sinon repli sur la
+ * partie locale de l'email. Best-effort (jamais bloquant).
+ */
+async function displayFirstName(emailOrName: string): Promise<string> {
+  const raw = (emailOrName ?? "").trim();
+  if (!raw) return "?";
+  if (raw.includes("@")) {
+    try {
+      const rows = await prisma.$queryRawUnsafe<{ name: string | null }[]>(
+        `SELECT "name" FROM "User" WHERE LOWER("email") = $1 LIMIT 1`,
+        raw.toLowerCase(),
+      );
+      const full = rows[0]?.name?.trim();
+      if (full) return firstNameOf(full);
+    } catch { /* repli */ }
+    return raw.split("@")[0];
+  }
+  return firstNameOf(raw);
+}
+
 /**
  * Prix d'achat unitaire (€/unité d'inventaire) — basé sur l'ENTRÉE MARCHANDISE.
  * 1) SOURCE DE VÉRITÉ : la ligne de l'EM EXACTE du lot (lot = « EM<DocNum> »),
@@ -350,7 +379,13 @@ export async function executeAdjustment(session: InventorySession, actor: string
   const manageBatch = new Map<string, boolean>(prods.map((p) => [p.itemCode, p.manageBatch] as [string, boolean]));
 
   const docDate = new Date().toISOString().slice(0, 10);
-  const comments = `Inventaire ${session.id} — régularisation (compté par ${session.createdBy}) — validé par ${actor}`.slice(0, 254);
+  // Commentaire SAP concis : « INV <id> - Inventaire <prénom compteur> - Regul
+  // <prénom validateur> » (prénoms résolus depuis la table User).
+  const [counterName, validatorName] = await Promise.all([
+    displayFirstName(session.createdBy),
+    displayFirstName(actor),
+  ]);
+  const comments = `INV ${session.id} - Inventaire ${counterName} - Regul ${validatorName}`.slice(0, 254);
 
   const sorties = moves.filter((m) => m.sens === "sortie");
   const entrees = moves.filter((m) => m.sens === "entree");
