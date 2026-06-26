@@ -335,7 +335,7 @@ export function Sidebar() {
                         />
                       )}
                       <span className="relative shrink-0">
-                        <Icon className={`h-[17px] w-[17px] ${active ? "text-brand-400" : ""}`} strokeWidth={active ? 2.2 : 1.8} />
+                        <Icon className={`h-[21px] w-[21px] ${active ? "text-brand-400" : ""}`} strokeWidth={active ? 2.2 : 1.8} />
                         {badge && badgeCount > 0 && (
                           <span className={`absolute -top-1.5 -right-2 min-w-[15px] h-[15px] px-0.5 rounded-full text-[9px] font-bold flex items-center justify-center ring-2 ring-[#0b1018] ${BADGE_STYLE[badge]}`}>
                             {badgeCount > 9 ? "9+" : badgeCount}
