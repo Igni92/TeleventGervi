@@ -61,6 +61,8 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ docEntr
     numAtCard?: string; comments?: string;
     /** Transporteur → ORDR.U_TrspCode. "" / null = désaffecter. */
     trspCode?: string | null;
+    /** Date de livraison → ORDR.DocDueDate (format YYYY-MM-DD). */
+    dueDate?: string;
   };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -77,6 +79,8 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ docEntr
   if (body.comments !== undefined) patch.Comments = body.comments;
   // Changement de transporteur depuis « Détail livraison ».
   if (body.trspCode !== undefined) patch.U_TrspCode = (body.trspCode ?? "").trim();
+  // Changement de date de livraison depuis « Détail livraison ».
+  if (typeof body.dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.dueDate)) patch.DocDueDate = body.dueDate;
 
   try {
     await sap.patch(`Orders(${params.docEntry})`, patch);
