@@ -199,3 +199,18 @@ export async function saveSession(s: InventorySession): Promise<void> {
     create: { key: PREFIX + s.id, value: JSON.stringify(s) },
   });
 }
+
+/** Ensemble des DocEntry actés « préparés » (= faits) sur les 21 derniers jours
+ *  — union des pré-étapes d'inventaire. Sert à afficher la coche « faite » dans
+ *  « Détail livraison » (même fenêtre que prep-orders, qui ne les repropose plus). */
+export async function getPreparedDocEntries(): Promise<Set<number>> {
+  const cutoff = Date.now() - 21 * 24 * 60 * 60 * 1000;
+  const set = new Set<number>();
+  try {
+    for (const s of await listSessions()) {
+      if (new Date(s.createdAt).getTime() < cutoff) continue;
+      for (const d of s.prep?.preparedDocEntries ?? []) set.add(d);
+    }
+  } catch { /* pas de trace → aucune préparée */ }
+  return set;
+}
