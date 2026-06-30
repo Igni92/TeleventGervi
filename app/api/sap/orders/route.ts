@@ -358,6 +358,26 @@ export async function POST(req: NextRequest) {
       `(${choice.reason}${resolved.source ? `/${resolved.source}` : ""} — dispo locale ${availLocal}, stock SAP ${sapOnHand ?? "?"})`,
     );
 
+    // Cohérence lot ↔ magasin (vente à découvert) : si le lot retenu provient d'un
+    // AUTRE magasin que celui de la ligne (repli "item" → byItemWarehouse), on
+    // DÉPLACE la ligne vers ce magasin — sinon on livre depuis un magasin sans
+    // stock pour ce lot → « stock dispo négatif ». Uniquement pour un VRAI lot EM
+    // (pas le sentinel à découvert, repris plus tard par la réception) et quand la
+    // ligne portait déjà un magasin (on déplace, on n'en invente jamais un).
+    if (
+      choice.lot !== LOT_PENDING &&
+      resolved.source === "item" &&
+      resolved.warehouse &&
+      l.warehouseCode &&
+      resolved.warehouse !== l.warehouseCode
+    ) {
+      line.WarehouseCode = resolved.warehouse;
+      line.U_NomMag = WAREHOUSE_NAMES[resolved.warehouse] ?? resolved.warehouse;
+      console.log(
+        `[Order] Magasin aligné sur le lot ${l.itemCode} : ${l.warehouseCode} → ${resolved.warehouse} (lot ${choice.lot})`,
+      );
+    }
+
     documentLines.push(line);
   }
 

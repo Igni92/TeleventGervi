@@ -15,6 +15,9 @@ import { ColorimetrieSwitcher } from "@/components/ColorimetrieSwitcher";
 import { Logo } from "@/components/Logo";
 import { SapEnvSwitch } from "@/components/SapEnvSwitch";
 import { SignalLoader } from "@/components/ui/page-loader";
+import { RolePreviewControl } from "@/components/role-preview/RolePreviewControl";
+import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
+import { navAllowedForPreview } from "@/lib/rolePreview";
 import { SPRING } from "@/lib/motion";
 import {
   DropdownMenu,
@@ -184,6 +187,7 @@ function useBadges(): Record<string, number> {
 export function Sidebar() {
   const { data: session } = useSession();
   const pathname = usePathname();
+  const { previewRole } = useRolePreview();
   const [rail, setRail] = useState(false);
   const badges = useBadges();
   // Voile de navigation : label de la page en cours d'ouverture (null = caché).
@@ -277,8 +281,12 @@ export function Sidebar() {
       {/* ── Navigation groupée ─────────────────────────── */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden px-3 pb-2 pt-1 space-y-4">
         {GROUPS.map((group) => {
+          // Aperçu « voir comme » : on masque les entrées hors périmètre du rôle
+          // prévisualisé (préparateur = ses 2 écrans). Sans aperçu : tout visible.
+          const items = group.items.filter((it) => navAllowedForPreview(it.href, previewRole));
+          if (items.length === 0) return null;
           const collapsible = !!group.collapsible && !rail;
-          const hasActive = group.items.some((it) => isActive(it.href));
+          const hasActive = items.some((it) => isActive(it.href));
           // Replié par défaut ; s'ouvre seul si la page active est dedans.
           const open = !collapsible || gestionOpen || hasActive;
           return (
@@ -302,7 +310,7 @@ export function Sidebar() {
             ))}
             {open && (
             <ul className="space-y-0.5">
-              {group.items.map(({ href, label, icon: Icon, badge }) => {
+              {items.map(({ href, label, icon: Icon, badge }) => {
                 const active = isActive(href);
                 const badgeCount = badge ? badges[badge] ?? 0 : 0;
                 return (
@@ -384,6 +392,9 @@ export function Sidebar() {
 
       {/* ── Footer système ─────────────────────────────── */}
       <div className="shrink-0 border-t border-white/[0.07] px-3 py-3 space-y-2.5">
+        {/* « Voir comme » (admin/direction) — masqué en rail (libellé trop large) */}
+        {!rail && <RolePreviewControl />}
+
         {/* Bascule SAP prod/test — masquée en rail (badge trop large) */}
         {!rail && <SapEnvSwitch />}
 

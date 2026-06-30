@@ -9,6 +9,8 @@ import {
   Settings, Tag,
   type LucideIcon,
 } from "lucide-react";
+import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
+import { navAllowedForPreview } from "@/lib/rolePreview";
 
 /**
  * Écran d'accueil MOBILE — un lanceur en tuiles « façon application », volontairement
@@ -139,6 +141,7 @@ function useInventaireBadge(): number {
 }
 
 export function MobileTiles({ className }: { className?: string }) {
+  const { previewRole } = useRolePreview();
   const badges: Record<BadgeKey, number> = {
     receptionIncidents: useReceptionBadge(),
     commandesDue: useCommandesDueBadge(),
@@ -148,6 +151,9 @@ export function MobileTiles({ className }: { className?: string }) {
   return (
     <div className={`space-y-6 ${className ?? ""}`}>
       {AXES.map((axis) => {
+        // Aperçu « voir comme » : ne montrer que les tuiles du périmètre du rôle.
+        const tiles = axis.tiles.filter((t) => navAllowedForPreview(t.href, previewRole));
+        if (tiles.length === 0) return null;
         const accent = ACCENT[axis.key];
         return (
           <section key={axis.key}>
@@ -156,11 +162,11 @@ export function MobileTiles({ className }: { className?: string }) {
               <h2 className="text-[17px] font-semibold text-foreground leading-none">{axis.label}</h2>
             </div>
             <div className="grid grid-cols-2 gap-2.5">
-              {axis.tiles.map((t, idx) => {
+              {tiles.map((t, idx) => {
                 const Icon = t.icon;
                 const count = t.badge ? badges[t.badge] ?? 0 : 0;
                 // Dernière tuile d'un axe au nombre impair → pleine largeur (pas de trou).
-                const fillRow = idx === axis.tiles.length - 1 && axis.tiles.length % 2 === 1;
+                const fillRow = idx === tiles.length - 1 && tiles.length % 2 === 1;
                 return (
                   <Link
                     key={t.href + t.label}
