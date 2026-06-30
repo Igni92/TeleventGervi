@@ -1165,7 +1165,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     const colTime = (iso: string) => new Date(iso).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 
     return (
-      <SurfaceCard accent="sky" className="p-5 space-y-4">
+      <SurfaceCard accent="sky" className="hidden md:block p-5 space-y-4">
         <h2 className="flex items-center gap-2 text-[14px] font-semibold text-foreground">
           <ClipboardList className="h-4 w-4 text-muted-foreground" /> Comparatif des {recent.length} dernier(s) inventaire(s)
         </h2>
@@ -1243,7 +1243,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   /* ----------------------------- Historique ----------------------------- */
   function renderHistory() {
     return (
-      <SurfaceCard accent="amber" className="p-5 space-y-3">
+      <SurfaceCard accent="amber" className="hidden md:block p-5 space-y-3">
         <h2 className="flex items-center gap-2 text-[14px] font-semibold text-foreground">
           <AlertTriangle className="h-4 w-4 text-muted-foreground" /> États d&apos;inventaire {canManage ? "" : "(les miens)"}
         </h2>
