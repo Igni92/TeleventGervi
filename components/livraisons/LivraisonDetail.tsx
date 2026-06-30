@@ -1096,14 +1096,14 @@ function OrderRow({
               {doc.lines.map((l, i) => (
                 <tr key={`${l.itemCode}-${i}`}>
                   {/* Colisage en premier (gauche) — repère principal de préparation */}
-                  <td className="px-2 py-1.5 text-center align-top">
-                    <span className="inline-flex min-w-[28px] items-center justify-center rounded-md bg-brand-500/15 px-1.5 py-0.5 text-[14px] font-bold tnum text-brand-700 dark:text-brand-300">
+                  <td className="px-2 py-1.5 text-center align-middle">
+                    <span className="inline-flex min-w-[28px] items-center justify-center rounded-md bg-foreground/10 px-1.5 py-0.5 text-[14px] font-bold tnum text-foreground">
                       {fmtNum(l.colis)}
                     </span>
                   </td>
-                  <td className="px-3 py-1.5 min-w-0">
-                    <div className="flex items-start gap-2.5">
-                      <BrandLogo marque={l.marque} logos={brandLogos} size="md" className="mt-0.5" />
+                  <td className="px-3 py-1.5 min-w-0 align-middle">
+                    <div className="flex items-center gap-2.5">
+                      <BrandLogo marque={l.marque} logos={brandLogos} size="md" zoomable />
                       <div className="min-w-0">
                         <div className="flex items-baseline gap-1.5 flex-wrap">
                           <span className="font-medium text-foreground/90">{l.itemName}</span>
@@ -1113,8 +1113,8 @@ function OrderRow({
                       </div>
                     </div>
                   </td>
-                  <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell align-top">{fmtNum(l.quantity)}</td>
-                  <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell align-top">{fmtNum(l.weightKg)}</td>
+                  <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell align-middle">{fmtNum(l.quantity)}</td>
+                  <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell align-middle">{fmtNum(l.weightKg)}</td>
                 </tr>
               ))}
             </tbody>
@@ -1154,15 +1154,15 @@ function OrderRow({
           {/* Lignes en grand : colisage à gauche + tags */}
           <ul className="divide-y divide-border/50 rounded-xl border border-border overflow-hidden">
             {doc.lines.map((l, i) => (
-              <li key={`big-${l.itemCode}-${i}`} className="flex items-start gap-3 px-3 py-2.5">
-                <span className="inline-flex min-w-[44px] items-center justify-center rounded-lg bg-brand-500/15 px-2 py-1 text-[18px] font-bold tnum text-brand-700 dark:text-brand-300 shrink-0">
+              <li key={`big-${l.itemCode}-${i}`} className="flex items-center gap-3 px-3 py-2.5">
+                <span className="inline-flex min-w-[44px] items-center justify-center rounded-lg bg-foreground/10 px-2 py-1 text-[18px] font-bold tnum text-foreground shrink-0">
                   {fmtNum(l.colis)}
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-[14px] font-semibold text-foreground">{l.itemName}</p>
                   <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} className="mt-1" />
                 </div>
-                <BrandLogo marque={l.marque} logos={brandLogos} size="lg" className="self-center" />
+                <BrandLogo marque={l.marque} logos={brandLogos} size="lg" className="self-center" zoomable />
               </li>
             ))}
           </ul>

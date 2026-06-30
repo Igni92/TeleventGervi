@@ -311,7 +311,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
 
   /** Logo de marque d'un article (null si la marque n'a pas de logo). */
   const productLogo = (itemCode: string, size: "sm" | "md" | "lg" = "md", className?: string) => (
-    <BrandLogo marque={productByCode.get(itemCode)?.uMarque} logos={brandLogos} size={size} className={className} />
+    <BrandLogo marque={productByCode.get(itemCode)?.uMarque} logos={brandLogos} size={size} className={className} zoomable />
   );
   const setCount = useCallback((itemCode: string, n: number | null) => {
     setCounts((c) => ({ ...c, [itemCode]: n }));

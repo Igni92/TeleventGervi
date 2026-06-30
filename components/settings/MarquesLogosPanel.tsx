@@ -9,8 +9,8 @@ import { SurfaceCard } from "@/components/ui/surface-card";
 interface Marque { marque: string; logoUrl: string | null }
 
 /** Redimensionne une image (fichier) en data-URL PNG ≤ `max` px — logo léger.
- *  128 px : reste net même affiché en grand (console, préparation, inventaire). */
-function fileToLogoDataUrl(file: File, max = 128): Promise<string> {
+ *  256 px : reste net même en vue agrandie (clic sur le logo → lightbox). */
+function fileToLogoDataUrl(file: File, max = 256): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("Lecture du fichier impossible"));

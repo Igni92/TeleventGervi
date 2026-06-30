@@ -111,7 +111,7 @@ export function GuidedCounter({
                   })()}
                   <div className="mt-1.5 font-mono text-[11px] text-muted-foreground">{p.itemCode}</div>
                 </div>
-                <BrandLogo marque={p.uMarque} logos={brandLogos} size="lg" className="ml-auto self-start" />
+                <BrandLogo marque={p.uMarque} logos={brandLogos} size="lg" className="ml-auto self-start" zoomable />
               </div>
 
               {/* Stock attendu SAP (en colis) */}
