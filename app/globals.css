@@ -14,7 +14,7 @@
     --popover:           0 0% 100%;
     --popover-foreground:222 47% 7%;
     --primary:           42 95% 44%;          /* or profond — lisible sur blanc */
-    --primary-foreground: 45 70% 99%;
+    --primary-foreground: 222 45% 9%;          /* texte SOMBRE sur l'or clair (AA ≥ 4,5:1, cf. agrume/fraise) */
     --secondary:         220 14% 96%;
     --secondary-foreground: 222 47% 7%;
     --muted:             220 14% 96%;
@@ -528,6 +528,12 @@
   .skeleton { animation: none; background: hsl(var(--muted)); }
   /* Boucles décoratives de la fiche (status-light, barres signal) : figées. */
   .signal-bar, .animate-soft-pulse { animation: none !important; }
+  /* Balai général : neutralise toutes les classes d'animation génériques
+     (entrées fade/scale/slide…) pour qui demande moins de mouvement. Le
+     skeleton garde son fond muté ci-dessus (override par sélecteur propre). */
+  .animate-fade-up, .animate-fade-in, .animate-scale-in, .animate-slide-right,
+  .animate-client-swap, .animate-success-burst,
+  [class*="animate-"] { animation: none !important; }
 }
 
 /* Réglage televente:animations (page /parametres), posé sur <html> par

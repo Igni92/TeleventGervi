@@ -245,7 +245,7 @@ export function Sidebar() {
       {/* ── Logo + collapse ─────────────────────────────── */}
       <div className={`flex items-center h-[60px] shrink-0 ${rail ? "justify-center px-0" : "justify-between pl-5 pr-3"}`}>
         <Link href="/" className="flex items-center gap-2.5 group select-none" title="TeleVent — Accueil">
-          <div className="relative flex h-[30px] w-[30px] items-center justify-center rounded-[9px] bg-gradient-to-br from-brand-500 to-brand-700 transition-all duration-300 group-hover:from-brand-400 group-hover:to-brand-600 group-hover:shadow-[0_0_18px_rgba(99,102,241,0.55)]">
+          <div className="relative flex h-[30px] w-[30px] items-center justify-center rounded-[9px] bg-gradient-to-br from-brand-500 to-brand-700 transition-all duration-300 group-hover:from-brand-400 group-hover:to-brand-600 group-hover:shadow-[0_0_18px_hsl(var(--brand-500)/0.55)]">
             <svg viewBox="0 0 24 24" className="h-4 w-4 text-white" fill="none">
               <path d="M3 12h2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               <path d="M7 9v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -295,13 +295,13 @@ export function Sidebar() {
                 type="button"
                 onClick={toggleGestion}
                 aria-expanded={open}
-                className="w-full px-2 mb-1.5 flex items-center justify-between text-[9.5px] uppercase tracking-[0.18em] font-bold text-white/30 hover:text-white/55 transition-colors"
+                className="w-full px-2 mb-1.5 flex items-center justify-between text-[9.5px] uppercase tracking-[0.18em] font-bold text-white/55 hover:text-white/75 transition-colors"
               >
                 <span className="whitespace-nowrap">{group.label}</span>
                 <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${open ? "" : "-rotate-90"}`} />
               </button>
             ) : (
-              <p className="px-2 mb-1.5 text-[9.5px] uppercase tracking-[0.18em] font-bold text-white/30 whitespace-nowrap">
+              <p className="px-2 mb-1.5 text-[9.5px] uppercase tracking-[0.18em] font-bold text-white/55 whitespace-nowrap">
                 {group.label}
               </p>
             ))}
@@ -314,6 +314,7 @@ export function Sidebar() {
                   <li key={href} className="relative group/item">
                     <Link
                       href={href}
+                      aria-current={active ? "page" : undefined}
                       onClick={(e) => {
                         // Pas de voile si déjà sur la page, ou clic modifié
                         // (nouvel onglet : ctrl/cmd/shift/clic molette).
@@ -323,15 +324,15 @@ export function Sidebar() {
                       title={rail ? label : undefined}
                       className={`relative flex items-center rounded-lg h-9 transition-colors duration-150 ${
                         rail ? "justify-center px-0" : "gap-3 px-2.5"
-                      } ${active ? "text-white" : "text-white/45 hover:text-white/85 hover:bg-white/[0.05]"}`}
+                      } ${active ? "text-white" : "text-white/70 hover:text-white/85 hover:bg-white/[0.05]"}`}
                     >
                       {/* Pastille active animée — glisse d'un item à l'autre */}
                       {active && (
                         <motion.span
                           layoutId="sidebar-active"
                           transition={SPRING.snappy}
-                          className="absolute inset-0 rounded-lg bg-white/[0.08] shadow-[inset_2px_0_0_0_hsl(var(--brand-500,243_75%_59%))]"
-                          style={{ boxShadow: "inset 2.5px 0 0 0 rgb(99 102 241), 0 0 18px rgba(99,102,241,0.12)" }}
+                          className="absolute inset-0 rounded-lg bg-white/[0.08] shadow-[inset_2px_0_0_0_hsl(var(--brand-500,45_96%_42%))]"
+                          style={{ boxShadow: "inset 2.5px 0 0 0 hsl(var(--brand-500)), 0 0 18px hsl(var(--brand-500) / 0.12)" }}
                         />
                       )}
                       <span className="relative shrink-0">
@@ -413,7 +414,7 @@ export function Sidebar() {
                   rail ? "justify-center py-1.5" : "gap-2.5 px-2 py-1.5"
                 }`}
               >
-                <div className="h-[28px] w-[28px] rounded-full bg-gradient-to-br from-brand-500 to-purple-600 flex items-center justify-center text-white text-[10.5px] font-bold shadow-[0_0_0_2px_rgba(99,102,241,0.25)] shrink-0">
+                <div className="h-[28px] w-[28px] rounded-full bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center text-white text-[10.5px] font-bold shadow-[0_0_0_2px_hsl(var(--brand-500)/0.25)] shrink-0">
                   {initials}
                 </div>
                 {!rail && (
@@ -466,7 +467,7 @@ export function Sidebar() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.97 }}
             transition={SPRING.snappy}
-            className="flex items-center gap-4 rounded-2xl border border-white/[0.1] bg-[#11161f] px-6 py-4 shadow-[0_20px_60px_rgba(0,0,0,0.5),0_0_30px_rgba(99,102,241,0.12)]"
+            className="flex items-center gap-4 rounded-2xl border border-white/[0.1] bg-[#11161f] px-6 py-4 shadow-[0_20px_60px_rgba(0,0,0,0.5),0_0_30px_hsl(var(--brand-500)/0.12)]"
           >
             <SignalLoader />
             <div>
