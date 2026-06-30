@@ -106,9 +106,53 @@ export async function POST(req: NextRequest) {
   if (!Array.isArray(body.lines) || body.lines.length === 0) {
     return NextResponse.json({ error: "Au moins 1 ligne requise" }, { status: 400 });
   }
+  // ── #14 — Validation fine des lignes (avant tout appel SAP) ──
+  // Rejet propre (400 + message FR) plutôt qu'un 500 SAP opaque sur :
+  //   • quantité non finie (NaN/Infinity) ou ≤ 0
+  //   • prix non fini (NaN/Infinity) ou < 0 (le prix 0 = tarif SAP, autorisé)
   for (const l of body.lines) {
-    if (!l.itemCode || !l.quantity || l.quantity <= 0) {
-      return NextResponse.json({ error: `Ligne invalide : ${JSON.stringify(l)}` }, { status: 400 });
+    if (!l.itemCode) {
+      return NextResponse.json({ error: `Ligne sans article (itemCode manquant).` }, { status: 400 });
+    }
+    if (!Number.isFinite(l.quantity) || l.quantity <= 0) {
+      return NextResponse.json(
+        { error: `Quantité invalide pour l'article ${l.itemCode} : elle doit être un nombre supérieur à 0.` },
+        { status: 400 },
+      );
+    }
+    if (l.price != null && (!Number.isFinite(l.price) || l.price < 0)) {
+      return NextResponse.json(
+        { error: `Prix invalide pour l'article ${l.itemCode} : il doit être un nombre positif ou nul.` },
+        { status: 400 },
+      );
+    }
+  }
+  // ── #14 — Validation de la date de livraison (parseable + plage raisonnable) ──
+  // On accepte d'hier (−1 j, tolérance fuseau/saisie de la veille au soir) jusqu'à
+  // +1 an. Hors plage ou non parseable → 400 clair plutôt qu'un DocDueDate absurde
+  // poussé dans SAP.
+  {
+    const due = new Date(body.deliveryDate);
+    if (Number.isNaN(due.getTime())) {
+      return NextResponse.json(
+        { error: `Date de livraison illisible : « ${body.deliveryDate} ».` },
+        { status: 400 },
+      );
+    }
+    const now = Date.now();
+    const minDate = now - 24 * 60 * 60 * 1000;            // hier
+    const maxDate = now + 366 * 24 * 60 * 60 * 1000;      // +1 an
+    if (due.getTime() < minDate) {
+      return NextResponse.json(
+        { error: `Date de livraison dans le passé. Choisis une date à partir d'aujourd'hui.` },
+        { status: 400 },
+      );
+    }
+    if (due.getTime() > maxDate) {
+      return NextResponse.json(
+        { error: `Date de livraison trop lointaine (plus d'un an). Vérifie la date saisie.` },
+        { status: 400 },
+      );
     }
   }
 

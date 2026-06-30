@@ -269,6 +269,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   const [carriers, setCarriers] = useState<Carrier[]>([]);
   const [carrierId, setCarrierId] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // #12 — quantités déjà confirmées (par itemCode) : évite de re-demander une
+  // confirmation à CHAQUE frappe une fois que l'utilisateur a validé le gros volume.
+  const confirmedBigQty = useMemo(() => new Set<string>(), []);
   // Modale de confirmation encours (remplace window.confirm natif)
   const [encoursPrompt, setEncoursPrompt] = useState<
     { lines: ApiLine[]; message: string; encours?: { balance: number; creditLimit: number } } | null
@@ -752,6 +755,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     });
 
   const submit = async () => {
+    // #9 — Anti-double-clic : si un envoi est déjà en cours, on IGNORE le re-clic.
+    // (Le bouton est aussi `disabled`, mais ce garde couvre la fenêtre de course
+    //  entre deux clics rapides avant le re-render.) Évite le double-BL.
+    if (submitting) return;
     // ── Mode MODIFICATION : ré-enregistre le BL en REMPLACEMENT COMPLET ──
     // (même BL/DocNum) — supprimer/modifier/réordonner/ajouter, comme un bon normal.
     if (modif) {
@@ -1198,6 +1205,41 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             const freeColis = hasColis
               ? Math.round((l.freeUnits / l.stepColis) * 100) / 100
               : Math.round(l.freeUnits * l.packDivisor * 100) / 100;
+            // #12 — Plafond SOUPLE anti-saisie aberrante, exprimé dans l'unité
+            // AFFICHÉE du champ (colis si hasColis, sinon unité de base). On
+            // confirme au-delà de 200 colis OU de 50× le stock dispo connu (>0).
+            // `max` est en unité de base / packDivisor ; on le convertit dans
+            // l'unité du champ pour comparer des grandeurs homogènes.
+            const SOFT_CAP_COLIS = 200;
+            const availInField = hasColis
+              ? (max * l.packDivisor) / l.stepColis   // base/packDiv → colis
+              : max * l.packDivisor;                  // base/packDiv → unité de base
+            const absoluteCap = hasColis ? SOFT_CAP_COLIS : SOFT_CAP_COLIS * baseUnitsPerColis;
+            const relativeCap = availInField > 0 ? availInField * 50 : Infinity;
+            const lineSoftMax = Math.min(absoluteCap, relativeCap);
+            const fieldUnitLabel = hasColis ? "colis" : l.priceUnit;
+            // Garde anti-aberration : confirme une grosse saisie (sans bloquer).
+            const guardBigQty = (typed: number) => {
+              if (confirmedBigQty.has(l.itemCode)) return;   // déjà confirmé pour cette ligne
+              const rounded = Math.round(typed * 100) / 100;
+              const cap = Math.round(lineSoftMax * 100) / 100;
+              toast.warning(`Confirmer ${rounded} ${fieldUnitLabel} pour ${l.itemName} ?`, {
+                description: "Quantité inhabituellement élevée — vérifie qu'il n'y a pas d'erreur de saisie.",
+                duration: 12000,
+                action: {
+                  label: "Oui, c'est correct",
+                  onClick: () => { confirmedBigQty.add(l.itemCode); },
+                },
+                cancel: {
+                  label: "Corriger",
+                  onClick: () => {
+                    // Revient au plafond souple (dans l'unité de base stockée).
+                    const backBase = hasColis ? cap * l.stepColis : cap / l.packDivisor;
+                    updateLine(i, { quantity: Math.round(backBase * 1000) / 1000 });
+                  },
+                },
+              });
+            };
             return (
               <div key={i} className={`rounded-lg border p-2 ${sellShort ? "border-rose-400/60 bg-rose-50/40 dark:bg-rose-950/15" : "border-border"}`}>
                 <div className="flex items-start justify-between gap-1.5">
@@ -1290,6 +1332,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                     <NumberInput value={hasColis ? colisCount : baseQty}
                       onValueChange={(n) => updateLine(i, { quantity: hasColis ? Math.round((n ?? 0) * l.stepColis * 1000) / 1000 : (n ?? 0) / l.packDivisor })}
                       min={0} step={hasColis ? 1 : baseUnitsPerColis} disabled={locked}
+                      softMax={lineSoftMax} onSoftMaxExceeded={guardBigQty}
                       aria-label={`Quantité ${l.itemName} (en ${hasColis ? "colis" : l.priceUnit})`}
                       className={`h-11 w-[64px] text-center text-[17px] font-semibold tnum border-x border-border bg-background px-1 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 ${over ? "text-amber-600 dark:text-amber-400" : ""}`} />
                     <button

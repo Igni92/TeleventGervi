@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -32,12 +32,21 @@ const THROTTLE_MS = 20_000;
 interface DocLine { ItemCode: string }
 interface Doc { DocEntry: number; DocumentLines?: DocLine[] }
 
-export async function POST() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  }
+/**
+ * Auth machine pour cron Vercel : `Authorization: Bearer <CRON_SECRET>` ou
+ * en-tête `x-cron-secret`. Désactivé si `CRON_SECRET` n'est pas défini.
+ */
+function isCronAuthorized(req: NextRequest): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  const bearer = req.headers.get("authorization");
+  if (bearer === `Bearer ${secret}`) return true;
+  if (req.headers.get("x-cron-secret") === secret) return true;
+  return false;
+}
 
+/** Cœur du pull delta, partagé entre déclenchement manuel (POST) et cron (GET). */
+async function runDeltaSync() {
   // Singleton cursor (id=1) — créé à la 1ère exécution
   await prisma.stockSyncCursor.upsert({ where: { id: 1 }, update: {}, create: { id: 1 } });
 
@@ -145,8 +154,24 @@ export async function POST() {
   }
 }
 
-/** GET → état courant du curseur (debug). */
-export async function GET() {
+/** Déclenchement manuel (consoles) — contrôle session INCHANGÉ. */
+export async function POST() {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  }
+  return runDeltaSync();
+}
+
+/**
+ * GET :
+ *  - cron Vercel (auth CRON_SECRET, sans session) → lance le pull delta ;
+ *  - sinon, comportement existant INCHANGÉ : session requise → état du curseur (debug).
+ */
+export async function GET(req: NextRequest) {
+  if (isCronAuthorized(req)) {
+    return runDeltaSync();
+  }
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });

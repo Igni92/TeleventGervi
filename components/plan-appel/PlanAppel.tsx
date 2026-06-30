@@ -8,10 +8,14 @@ import {
   Check, Columns3, X, UserPlus,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
 import { SALESPEOPLE, displayNameFromSlp, normalizeSlp } from "@/lib/salespeople";
 import { ClientLink } from "@/components/ClientLink";
 import { SortArrow, nextSort, type SortDir } from "@/components/ui/sort";
@@ -178,6 +182,9 @@ export function PlanAppel() {
   // Sélection en série + masquage de colonnes
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [hidden, setHidden] = useState<Set<string>>(new Set());
+  // Confirmation avant désactivation en série (clients qui ne seront plus rappelés).
+  const [confirmDeactivate, setConfirmDeactivate] = useState<{ ids: string[] } | null>(null);
+  const [confirmLoading, setConfirmLoading] = useState(false);
   const show = (id: string) => !hidden.has(id);
   // Tri par colonne (client : la liste est chargée en entier).
   const [sort, setSort] = useState<{ key: string | null; dir: SortDir }>({ key: null, dir: "asc" });
@@ -214,23 +221,58 @@ export function PlanAppel() {
     } catch { toast.error("Échec de l'assignation"); fetchData(); }
   }, [fetchData]);
 
-  // Assignation / activation EN SÉRIE des clients cochés
+  // Appel réseau brut d'assignation/activation en série — logique inchangée.
+  // Met à jour l'état local en optimiste, renvoie le nombre de clients impactés.
+  const postBulk = async (
+    ids: string[],
+    patch: { vendeur?: string | null; commercial?: string | null; activeTelevente?: boolean },
+  ): Promise<number> => {
+    const idSet = new Set(ids);
+    setData((cur) => cur.map((c) => idSet.has(c.id) ? { ...c, ...patch } : c));
+    const r = await fetch("/api/clients/assign-bulk", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, ...patch }),
+    });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error();
+    return j.updated as number;
+  };
+
+  // Assignation / activation EN SÉRIE des clients cochés.
+  // La DÉSACTIVATION passe par une confirmation (cf. runBulkDeactivate) car
+  // un client désactivé ne sera plus jamais rappelé.
   const bulkAssign = async (patch: { vendeur?: string | null; commercial?: string | null; activeTelevente?: boolean }) => {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
-    setData((cur) => cur.map((c) => selected.has(c.id) ? { ...c, ...patch } : c));
     try {
-      const r = await fetch("/api/clients/assign-bulk", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, ...patch }),
-      });
-      const j = await r.json();
-      if (!r.ok || !j.ok) throw new Error();
+      const updated = await postBulk(ids, patch);
       const what = patch.vendeur !== undefined ? `vendeur ${patch.vendeur ?? "—"}`
         : patch.commercial !== undefined ? `commercial ${patch.commercial ?? "—"}`
         : patch.activeTelevente ? "activés" : "désactivés";
-      toast.success(`${j.updated} client(s) → ${what}`);
+      toast.success(`${updated} client(s) → ${what}`);
       setSelected(new Set());
     } catch { toast.error("Échec de l'action en série"); fetchData(); }
+  };
+
+  // Désactivation en série confirmée : exécute puis propose un toast réversible.
+  const runBulkDeactivate = async (ids: string[]) => {
+    setConfirmLoading(true);
+    try {
+      const updated = await postBulk(ids, { activeTelevente: false });
+      setConfirmDeactivate(null);
+      setSelected(new Set());
+      toast.success(`${updated} client(s) désactivé(s)`, {
+        action: {
+          label: "Annuler",
+          onClick: async () => {
+            try {
+              await postBulk(ids, { activeTelevente: true });
+              toast.success(`${ids.length} client(s) réactivé(s)`);
+            } catch { toast.error("Échec de la réactivation"); fetchData(); }
+          },
+        },
+      });
+    } catch { toast.error("Échec de l'action en série"); fetchData(); }
+    finally { setConfirmLoading(false); }
   };
 
   const toggleOne = useCallback((id: string) => setSelected((cur) => {
@@ -340,7 +382,7 @@ export function PlanAppel() {
             className="h-8 px-2.5 rounded-md text-[12px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-1">
             <Check className="h-3.5 w-3.5" /> Activer
           </button>
-          <button type="button" onClick={() => bulkAssign({ activeTelevente: false })}
+          <button type="button" onClick={() => setConfirmDeactivate({ ids: Array.from(selected) })}
             className="h-8 px-2.5 rounded-md text-[12px] font-semibold border border-rose-400/60 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/30 inline-flex items-center gap-1">
             <X className="h-3.5 w-3.5" /> Désactiver
           </button>
@@ -445,6 +487,39 @@ export function PlanAppel() {
           {data.length} client(s){sort.key ? " · tri personnalisé (clic sur les colonnes)" : " · triés par commande la plus ancienne"}.
         </p>
       )}
+
+      {/* Confirmation avant désactivation en série — ces clients ne seront plus rappelés. */}
+      <Dialog
+        open={confirmDeactivate !== null}
+        onOpenChange={(o) => { if (!o && !confirmLoading) setConfirmDeactivate(null); }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Désactiver {confirmDeactivate?.ids.length ?? 0} client{(confirmDeactivate?.ids.length ?? 0) > 1 ? "s" : ""} en télévente ?
+            </DialogTitle>
+            <DialogDescription className="pt-1">
+              {confirmDeactivate?.ids.length ?? 0} client{(confirmDeactivate?.ids.length ?? 0) > 1 ? "s ne seront plus" : " ne sera plus"} jamais
+              proposé{(confirmDeactivate?.ids.length ?? 0) > 1 ? "s" : ""} au rappel. Vous pourrez
+              {(confirmDeactivate?.ids.length ?? 0) > 1 ? " les" : " le"} réactiver à tout moment.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDeactivate(null)} disabled={confirmLoading}>
+              Annuler
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => { if (confirmDeactivate) runBulkDeactivate(confirmDeactivate.ids); }}
+              disabled={confirmLoading || !confirmDeactivate?.ids.length}
+            >
+              {confirmLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Désactiver
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

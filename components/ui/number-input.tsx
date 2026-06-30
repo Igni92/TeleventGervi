@@ -25,6 +25,15 @@ export interface NumberInputProps
   decimals?: number;
   min?: number;
   max?: number;
+  /**
+   * Plafond SOUPLE (anti-saisie aberrante) : ne CLAMPE pas — laisse passer la
+   * valeur mais notifie le parent via `onSoftMaxExceeded` à la validation
+   * (blur / Enter / flèche) pour qu'il demande une confirmation. Indépendant de
+   * `max` (qui reste un clamp dur). Ignoré si absent.
+   */
+  softMax?: number;
+  /** Appelé quand une valeur validée dépasse `softMax` (cf. softMax). */
+  onSoftMaxExceeded?: (n: number) => void;
   /** Incrément des flèches ↑/↓. Défaut 1. */
   step?: number;
   /** Champ vide autorisé → renvoie null (sinon 0). */
@@ -50,7 +59,7 @@ function display(n: number | null, decimals?: number): string {
 }
 
 export const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(function NumberInput(
-  { value, onValueChange, decimals, min, max, step = 1, allowEmpty = false, className, onFocus, onBlur, onKeyDown, ...rest },
+  { value, onValueChange, decimals, min, max, softMax, onSoftMaxExceeded, step = 1, allowEmpty = false, className, onFocus, onBlur, onKeyDown, ...rest },
   ref,
 ) {
   const [focused, setFocused] = React.useState(false);
@@ -58,6 +67,12 @@ export const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
 
   // Au repos : affichage formaté depuis la prop. En édition : le brouillon libre.
   const shown = focused ? draft : display(value, decimals);
+
+  // Anti-saisie aberrante : prévient le parent (sans clamper) si la valeur
+  // validée franchit le plafond souple. Le parent décide (confirmation).
+  const checkSoftMax = (v: number) => {
+    if (softMax != null && v > softMax) onSoftMaxExceeded?.(v);
+  };
 
   const commit = (raw: string) => {
     const parsed = parseLoose(raw);
@@ -67,6 +82,7 @@ export const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
     }
     const v = clamp(parsed, min, max);
     onValueChange(v);
+    checkSoftMax(v);
     return v;
   };
 
@@ -109,6 +125,7 @@ export const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           const rounded = decimals != null ? Number(next.toFixed(decimals)) : next;
           setDraft(String(rounded));
           onValueChange(rounded);
+          checkSoftMax(rounded);
         } else if (e.key === "Enter") {
           commit(draft);
         }

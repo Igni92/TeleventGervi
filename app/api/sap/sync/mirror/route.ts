@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
@@ -29,13 +29,22 @@ export const maxDuration = 300;
 
 const THROTTLE_MS = 60_000;
 
-export async function POST() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  if (!(await requireAdmin(session))) {
-    return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
-  }
+/**
+ * Auth machine pour cron Vercel : `Authorization: Bearer <CRON_SECRET>` ou
+ * en-tête `x-cron-secret`. Vercel ajoute automatiquement le Bearer aux requêtes
+ * cron. Désactivé si `CRON_SECRET` n'est pas défini (aucun bypass possible).
+ */
+function isCronAuthorized(req: NextRequest): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  const bearer = req.headers.get("authorization");
+  if (bearer === `Bearer ${secret}`) return true;
+  if (req.headers.get("x-cron-secret") === secret) return true;
+  return false;
+}
 
+/** Cœur de la synchro miroir, partagé entre le déclenchement manuel (POST) et le cron (GET). */
+async function runMirrorSync() {
   const cursor = await prisma.sapMirrorCursor.upsert({
     where: { id: 1 },
     update: {},
@@ -97,4 +106,22 @@ export async function POST() {
     console.error("[sync/mirror]", message);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
+}
+
+/** Déclenchement manuel (console admin) — contrôle session/admin INCHANGÉ. */
+export async function POST() {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await requireAdmin(session))) {
+    return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+  }
+  return runMirrorSync();
+}
+
+/** Déclenchement machine (cron Vercel) — auth par CRON_SECRET, sans session. */
+export async function GET(req: NextRequest) {
+  if (!isCronAuthorized(req)) {
+    return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  }
+  return runMirrorSync();
 }

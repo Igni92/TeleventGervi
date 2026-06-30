@@ -22,6 +22,7 @@ import {
   UserPlus,
   X,
   Check,
+  AlertTriangle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -32,6 +33,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -820,20 +829,57 @@ function ClientRowMenu({
   onReminderCreated: () => void;
 }) {
   const [reminderOpen, setReminderOpen] = useState(false);
+  // Confirmation avant désactivation (action lourde : le client ne sera plus rappelé).
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmLoading, setConfirmLoading] = useState(false);
 
-  const toggleActivation = async () => {
-    const next = !client.activeTelevente;
+  // Appel réseau d'activation/désactivation — logique inchangée.
+  const setActivation = async (next: boolean) => {
+    const res = await fetch(`/api/clients/${client.id}/assign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activeTelevente: next }),
+    });
+    if (!res.ok) throw new Error();
+  };
+
+  // Activation : 1 clic (action sans risque).
+  const activate = async () => {
     try {
-      const res = await fetch(`/api/clients/${client.id}/assign`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ activeTelevente: next }),
-      });
-      if (!res.ok) throw new Error();
-      toast.success(next ? `${client.nom} activé en télévente` : `${client.nom} désactivé`);
+      await setActivation(true);
+      toast.success(`${client.nom} activé en télévente`);
       onReminderCreated(); // = refresh de la liste
     } catch {
       toast.error("Erreur lors du changement d'activation");
+    }
+  };
+
+  // Désactivation : exécutée seulement après confirmation explicite (modale).
+  const confirmDeactivate = async () => {
+    setConfirmLoading(true);
+    try {
+      await setActivation(false);
+      setConfirmOpen(false);
+      onReminderCreated(); // = refresh de la liste
+      toast.success(`1 client désactivé`, {
+        description: client.nom,
+        action: {
+          label: "Annuler",
+          onClick: async () => {
+            try {
+              await setActivation(true);
+              toast.success(`${client.nom} réactivé en télévente`);
+              onReminderCreated();
+            } catch {
+              toast.error("Erreur lors de la réactivation");
+            }
+          },
+        },
+      });
+    } catch {
+      toast.error("Erreur lors du changement d'activation");
+    } finally {
+      setConfirmLoading(false);
     }
   };
 
@@ -853,7 +899,10 @@ function ClientRowMenu({
             {client.code}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={toggleActivation} className="cursor-pointer text-[13px]">
+          <DropdownMenuItem
+            onClick={() => (client.activeTelevente ? setConfirmOpen(true) : activate())}
+            className="cursor-pointer text-[13px]"
+          >
             {client.activeTelevente ? (
               <><X className="mr-2 h-3.5 w-3.5 text-rose-500" /> Désactiver en télévente</>
             ) : (
@@ -891,6 +940,40 @@ function ClientRowMenu({
         onOpenChange={setReminderOpen}
         onReminderCreated={onReminderCreated}
       />
+
+      {/* Confirmation avant désactivation — le client ne sera plus jamais rappelé. */}
+      <Dialog open={confirmOpen} onOpenChange={(o) => !confirmLoading && setConfirmOpen(o)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Désactiver ce client en télévente ?
+            </DialogTitle>
+            <DialogDescription className="pt-1">
+              <span className="font-semibold text-foreground">{client.nom}</span> ne sera plus
+              jamais proposé au rappel. Vous pourrez le réactiver à tout moment depuis sa fiche
+              ou cette liste.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmOpen(false)}
+              disabled={confirmLoading}
+            >
+              Annuler
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDeactivate}
+              disabled={confirmLoading}
+            >
+              {confirmLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Désactiver
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
