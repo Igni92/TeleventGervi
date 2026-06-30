@@ -22,6 +22,9 @@ import { Calendar, CalendarClock, CalendarDays, Sprout, TrendingUp, Receipt, Tru
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { requireAdmin } from "@/lib/permissions";
+import { computeInsights } from "@/lib/insights";
+import { computePriority } from "@/lib/priority";
+import { caByClientCode } from "@/lib/clientRevenue";
 
 export async function generateMetadata(props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -69,6 +72,29 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
   });
 
   if (!client) notFound();
+
+  // ── Cycle de vie + valeur client (CRM #5/#17) — dérivés À LA LECTURE, rien
+  // n'est stocké. Signaux : historique d'appels (cadence/récence, lib/insights)
+  // + CA 12 mois glissants (palier de valeur, lib/clientRevenue). Best-effort :
+  // si le CA échoue, le palier retombe sur D et le badge reste pertinent.
+  const last180 = new Date();
+  last180.setDate(last180.getDate() - 180);
+  const [appels, caMap] = await Promise.all([
+    prisma.appelLog.findMany({
+      where: { clientId: client.id, heureAppel: { gte: last180 } },
+      select: { type: true, heureAppel: true },
+      orderBy: { heureAppel: "desc" },
+    }),
+    caByClientCode([client.code]).catch(() => new Map<string, number>()),
+  ]);
+  const insights = computeInsights(appels);
+  const ca12m = caMap.get(client.code) ?? 0;
+  const { lifecycle, tier } = computePriority({
+    lastOrderDays: insights.lastOrderDays,
+    medianIntervalDays: insights.medianIntervalDays,
+    trend30: insights.trend30,
+    ca12m,
+  });
 
   const formData = {
     id: client.id,
@@ -215,6 +241,8 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
         type={client.type}
         commercial={client.commercial}
         admin={admin}
+        lifecycle={lifecycle}
+        tier={tier}
       />
 
       <ClientTabs commercial={commercialPane} compta={comptaPane} logistique={logistiquePane} />

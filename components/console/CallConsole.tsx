@@ -1180,6 +1180,29 @@ function ActiveClient({
         </div>
       </div>
 
+      {/* ── Prochaine action (next-best-action) — CRM : l'app dit QUOI faire,
+           pas seulement « voici des données ». La phrase vient du score serveur
+           (lib/priority). Affichée pour les états à traiter ; un client dans sa
+           cadence n'a pas besoin d'injonction. */}
+      {client.lifecycle && client.priority && LIFECYCLE_PILL[client.lifecycle.state] && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] font-semibold ${LIFECYCLE_PILL[client.lifecycle.state]}`}
+          >
+            <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            {client.priority.reason}
+          </span>
+          {client.tier && (client.tier.tier === "A" || client.tier.tier === "B") && (
+            <span className="text-[11.5px] text-muted-foreground">
+              {client.tier.label}
+              {typeof client.ca12m === "number" && client.ca12m > 0
+                ? ` · ${Math.round(client.ca12m).toLocaleString("fr-FR")} € sur 12 mois`
+                : ""}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* ── Habitudes (bandeau fixe — toujours visible, non draggable) ── */}
       <HabitudesBanner
         clientId={client.id}
