@@ -6,6 +6,9 @@ Tout push sur `main` déclenche un déploiement **production** ; les autres bran
 créent des **previews**. Le build local de référence : `npm run build`
 (`prisma generate && next build`).
 
+> Si les pushes ne déclenchent plus de build : **Vercel → Settings → Git →
+> Disconnect/Reconnect** le dépôt (le webhook GitHub→Vercel peut se désactiver).
+
 ## Variable d'environnement à définir : `CRON_SECRET`
 Les routes de synchro SAP acceptent un **déclenchement machine** (cron Vercel) en
 plus du déclenchement manuel admin. L'authentification machine se fait par un
