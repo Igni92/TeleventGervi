@@ -1097,7 +1097,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                             {/* Col 3 — Produit : (logo marque) + nom + chips + code + colis/kg.
                                 Le logo se place entre le stock (col 2) et la désignation. */}
                             <span className="min-w-0 flex items-center gap-2">
-                              <BrandLogo marque={marque} logos={brandLogos} size="md" />
+                              <BrandLogo marque={marque} logos={brandLogos} size="xl" />
                               <span className="min-w-0 flex-1">
                               <span className={`block ${ui.name} font-semibold text-foreground truncate leading-tight`}>
                                 {p.itemName}
