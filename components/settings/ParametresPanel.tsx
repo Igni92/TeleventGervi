@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useReducedMotion } from "framer-motion";
 import Link from "next/link";
 import {
-  Moon, Sun, Palette, LayoutList, Sparkles, BadgePercent, Check, Wand2, Database, Contrast, Tags, ChevronRight, CalendarClock,
+  Moon, Sun, Palette, LayoutList, Sparkles, BadgePercent, Wand2, Database, Contrast, Tags, ChevronRight, CalendarClock,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { ShelfLifePanel } from "@/components/settings/ShelfLifePanel";
@@ -80,7 +80,6 @@ function SegmentToggle<T extends string>({
             )}
             {o.icon}
             {o.label}
-            {active && <Check className="h-3 w-3 ml-0.5 text-brand-500" />}
           </button>
         );
       })}
