@@ -7,6 +7,7 @@ import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
+import { BrandLogo } from "@/components/BrandLogo";
 import { designationProduit } from "@/lib/produit-designation";
 import { fmt, sapInfo, ecartOf, productTile, type Product } from "./inv-utils";
 
@@ -15,6 +16,7 @@ export function GuidedCounter({
   scopeLabel,
   counts,
   setCount,
+  brandLogos,
   startIndex = 0,
   onExit,
   onFinish,
@@ -23,6 +25,7 @@ export function GuidedCounter({
   scopeLabel: string;
   counts: Record<string, number | null>;
   setCount: (itemCode: string, n: number | null) => void;
+  brandLogos?: Map<string, string>;
   startIndex?: number;
   onExit: () => void;
   onFinish: () => void;
@@ -108,6 +111,7 @@ export function GuidedCounter({
                   })()}
                   <div className="mt-1.5 font-mono text-[11px] text-muted-foreground">{p.itemCode}</div>
                 </div>
+                <BrandLogo marque={p.uMarque} logos={brandLogos} size="lg" className="ml-auto self-start" />
               </div>
 
               {/* Stock attendu SAP (en colis) */}

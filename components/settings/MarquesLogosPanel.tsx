@@ -8,8 +8,9 @@ import { SurfaceCard } from "@/components/ui/surface-card";
 
 interface Marque { marque: string; logoUrl: string | null }
 
-/** Redimensionne une image (fichier) en data-URL PNG ≤ `max` px — logo léger. */
-function fileToLogoDataUrl(file: File, max = 96): Promise<string> {
+/** Redimensionne une image (fichier) en data-URL PNG ≤ `max` px — logo léger.
+ *  128 px : reste net même affiché en grand (console, préparation, inventaire). */
+function fileToLogoDataUrl(file: File, max = 128): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("Lecture du fichier impossible"));
@@ -109,7 +110,8 @@ export function MarquesLogosPanel() {
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <p className="text-[12px] text-muted-foreground max-w-md">
               Associe un logo à chaque marque du catalogue. Le logo s&apos;affiche ensuite
-              dans la console (liste produits), entre le stock et la désignation.
+              dans la console (liste produits), dans le détail des livraisons à préparer
+              et dans l&apos;inventaire du stock.
             </p>
             <span className="text-[11.5px] font-semibold text-muted-foreground tnum shrink-0">
               {withLogo}/{marques.length} avec logo
@@ -139,10 +141,10 @@ export function MarquesLogosPanel() {
               {filtered.map((m) => (
                 <li key={m.marque} className="flex items-center gap-3 px-3 py-2.5 bg-card/40">
                   {/* Aperçu logo */}
-                  <span className="h-10 w-10 shrink-0 rounded-md border border-border bg-background flex items-center justify-center overflow-hidden">
+                  <span className="h-12 w-12 shrink-0 rounded-md border border-border bg-background flex items-center justify-center overflow-hidden">
                     {m.logoUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={m.logoUrl} alt={m.marque} className="max-h-9 max-w-9 object-contain" />
+                      <img src={m.logoUrl} alt={m.marque} className="max-h-11 max-w-11 object-contain" />
                     ) : (
                       <ImageOff className="h-4 w-4 text-muted-foreground/40" />
                     )}

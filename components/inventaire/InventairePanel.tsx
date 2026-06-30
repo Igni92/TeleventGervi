@@ -16,6 +16,8 @@ import { NumberInput } from "@/components/ui/number-input";
 import { GuidedCounter } from "./GuidedCounter";
 import { PhotoStep } from "./PhotoStep";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
+import { BrandLogo } from "@/components/BrandLogo";
+import { useBrandLogos } from "@/lib/useBrandLogos";
 import { designationProduit } from "@/lib/produit-designation";
 import {
   buildFamilies, sapInfo, ecartOf, fmt, fmtDate, fruitEmoji, productTile, MAX_PHOTOS,
@@ -294,6 +296,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
 
   const { families, ordered } = useMemo(() => buildFamilies(effectiveProducts), [effectiveProducts]);
   const productByCode = useMemo(() => new Map(ordered.map((p) => [p.itemCode, p])), [ordered]);
+  const brandLogos = useBrandLogos();
 
   /** Tags désignation (marque/condt/calibre/pays) d'un article — mêmes couleurs que les commandes. */
   const productChips = (itemCode: string, className?: string) => {
@@ -305,6 +308,11 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     });
     return <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className={className} />;
   };
+
+  /** Logo de marque d'un article (null si la marque n'a pas de logo). */
+  const productLogo = (itemCode: string, size: "sm" | "md" | "lg" = "md", className?: string) => (
+    <BrandLogo marque={productByCode.get(itemCode)?.uMarque} logos={brandLogos} size={size} className={className} />
+  );
   const setCount = useCallback((itemCode: string, n: number | null) => {
     setCounts((c) => ({ ...c, [itemCode]: n }));
   }, []);
@@ -600,6 +608,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
               scopeLabel={scope.label}
               counts={counts}
               setCount={setCount}
+              brandLogos={brandLogos}
               startIndex={scope.startIndex}
               onExit={() => setMode(editing ? "recap" : "home")}
               onFinish={() => setMode("recap")}
@@ -908,6 +917,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                     <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[13px] font-bold ${productTile({ itemName: p.itemName, itemCode: p.itemCode }).color}`}>
                       {productTile({ itemName: p.itemName, itemCode: p.itemCode }).initial}
                     </div>
+                    <BrandLogo marque={p.uMarque} logos={brandLogos} size="sm" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[12.5px] font-semibold text-foreground">{p.itemName}</div>
                       <div className="font-mono text-[11px] text-muted-foreground">{p.itemCode} · SAP {fmt(s.qty)} {s.unit}</div>
@@ -947,6 +957,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                   <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[14px] font-bold leading-none ${productTile({ itemName: r.itemName, itemCode: r.itemCode }).color}`}>
                     {productTile({ itemName: r.itemName, itemCode: r.itemCode }).initial}
                   </div>
+                  {productLogo(r.itemCode, "md")}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       <span className="truncate text-[13px] font-semibold text-foreground">{r.itemName}</span>
