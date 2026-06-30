@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/permissions";
 import { sap } from "@/lib/sapb1";
 
 /**
@@ -14,6 +15,9 @@ import { sap } from "@/lib/sapb1";
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  // #7 — Annuler une entrée marchandise sort du stock dans SAP : action sensible
+  // de la chaîne fournisseur, réservée aux admins / direction (pas un commercial).
+  if (!(await requireAdmin(session))) return NextResponse.json({ error: "Réservé à l'administration / direction" }, { status: 403 });
 
   let body: { docEntry?: number };
   try { body = await req.json(); }

@@ -27,6 +27,16 @@ export async function POST(req: NextRequest) {
     if (!Array.isArray(clientIds) || clientIds.length === 0) {
       return NextResponse.json({ error: "clientIds requis" }, { status: 400 });
     }
+    // #19 — Borne anti-opération de masse incontrôlée : on refuse au-delà de 500
+    // clients en une fois (garde-fou contre une suppression/réassignation
+    // accidentelle de tout le portefeuille). Le requireAdmin ci-dessus reste exigé.
+    const MAX_BULK = 500;
+    if (clientIds.length > MAX_BULK) {
+      return NextResponse.json(
+        { error: `Trop de clients sélectionnés (${clientIds.length}). Maximum ${MAX_BULK} par opération.` },
+        { status: 400 },
+      );
+    }
 
     if (action === "assignCommercial") {
       // value = commercial name (string) or null/empty to unassign

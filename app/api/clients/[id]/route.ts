@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getAccessScope, clientInScope } from "@/lib/permissions";
+import { getAccessScope, clientInScope, requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { clientSchema } from "@/lib/validations";
 import { sap } from "@/lib/sapb1";
@@ -115,8 +115,17 @@ export async function DELETE(_req: NextRequest, props: { params: Promise<{ id: s
   const params = await props.params;
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  if (!(await clientInScope(await getAccessScope(session), params.id)))
+  const scope = await getAccessScope(session);
+  if (!(await clientInScope(scope, params.id)))
     return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
+  // #19 — La SUPPRESSION d'une fiche client est une action destructive : réservée
+  // aux admins / direction (un commercial ne supprime jamais un client, même le
+  // sien). Le contrôle de périmètre ci-dessus est conservé en plus.
+  if (!(await requireAdmin(session)))
+    return NextResponse.json({ error: "Réservé à l'administration / direction" }, { status: 403 });
+  // TODO (#19) : passer en soft-delete (archivage) plutôt qu'un hard-delete dès
+  // qu'un champ d'archivage existera au schéma (ex. Client.archivedAt). Tant que
+  // le schéma n'a pas ce champ, on conserve la suppression définitive, gatée admin.
 
   try {
     const existing = await prisma.client.findUnique({ where: { id: params.id } });

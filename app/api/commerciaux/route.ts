@@ -69,7 +69,11 @@ export async function PATCH(req: NextRequest) {
     await prisma.$executeRawUnsafe(`UPDATE "User" SET "isAdmin" = $1 WHERE "id" = $2`, body.isAdmin, body.userId);
   }
   // Rôle direction — peut tout gérer SAUF le rôle admin et la base SAP. Raw SQL.
+  // #30 — Octroyer/retirer `isDirection` confère (ou retire) un ACCÈS GLOBAL
+  // (la direction voit tout comme un admin). C'est une élévation de privilège :
+  // réservée à l'ADMIN STRICT (la direction ne peut pas se coopter elle-même).
   if (typeof body.isDirection === "boolean") {
+    if (!strictAdmin) return NextResponse.json({ error: "Seul un administrateur peut modifier le rôle direction" }, { status: 403 });
     await prisma.$executeRawUnsafe(`UPDATE "User" SET "isDirection" = $1 WHERE "id" = $2`, body.isDirection, body.userId);
   }
   // Rôle préparateur (« personne en charge du stock ») — droit de valider /
