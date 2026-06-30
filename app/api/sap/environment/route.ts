@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { requireStrictAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
+import { writeAudit } from "@/lib/audit";
 
 /**
  * Environnement SAP actif (prod ↔ test) — basculable à chaud.
@@ -48,6 +49,7 @@ export async function POST(req: NextRequest) {
     `;
     const who = session.user.name ?? session.user.email ?? "?";
     console.log(`[SAP env] Bascule → ${env} (${sap.getEnvironment().company}) par ${who}`);
+    await writeAudit({ session, action: "ENV_SWITCH", entity: "SapEnvironment", summary: `Bascule base SAP → ${env}`, details: { to: env, company: sap.getEnvironment().company } });
     return NextResponse.json({ ok: true, ...sap.getEnvironment() });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

@@ -590,9 +590,11 @@ export async function POST(req: NextRequest) {
         data: {
           clientId: client.id,
           type: "COMMANDE",
+          outcome: "COMMANDE",
           note: noteParts.join(" — "),
           heureAppel: new Date(),
           scheduledFor: new Date(body.deliveryDate),
+          createdBy: session.user?.email ?? null,
         },
       });
     } catch (e) {

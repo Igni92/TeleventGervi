@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { requireAdmin, requireStrictAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { parisStartOfDay } from "@/lib/paris-time";
+import { writeAudit } from "@/lib/audit";
 
 // Début du jour en heure de Paris — cohérent avec /api/console et
 // /api/temp-assignments (qui lisent/écrivent ces Presence sur la même borne).
@@ -85,6 +86,16 @@ export async function PATCH(req: NextRequest) {
   // même convention (cf. scripts/ddl-user-roles.mjs).
   if (typeof body.isCommercial === "boolean") {
     await prisma.$executeRawUnsafe(`UPDATE "User" SET "isCommercial" = $1 WHERE "id" = $2`, body.isCommercial, body.userId);
+  }
+
+  // #8/#30 — trace les modifications de rôle (l'octroi de isAdmin/isDirection est
+  // une élévation de privilège : on garde une preuve de qui l'a fait et quand).
+  const roleChanges: Record<string, boolean> = {};
+  for (const r of ["isAdmin", "isDirection", "isPreparateur", "isCommercial"] as const) {
+    if (typeof body[r] === "boolean") roleChanges[r] = body[r] as boolean;
+  }
+  if (Object.keys(roleChanges).length > 0) {
+    await writeAudit({ session, action: "ROLE_GRANT", entity: "User", entityId: body.userId, summary: "Modification de rôle(s)", details: roleChanges });
   }
 
   return NextResponse.json({ ok: true });

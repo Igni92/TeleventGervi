@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { requirePreparateurOrAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
+import { writeAudit } from "@/lib/audit";
 
 const WHITELIST_WHS = new Set(["000", "01", "R1"]);
 
@@ -115,6 +116,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
       );
       totals = { totalTTC: r.DocTotal ?? null, totalHT: (r.DocTotal ?? 0) - (r.VatSum ?? 0) };
     } catch { /* non bloquant */ }
+    await writeAudit({ session, action: "PO_MODIF", entity: "PurchaseOrder", entityId: String(docEntry), summary: `Modification commande fournisseur #${po.DocNum}`, details: { docNum: po.DocNum, totalLines: DocumentLines.length, ...totals } });
     return NextResponse.json({ ok: true, docEntry, docNum: po.DocNum, totalLines: DocumentLines.length, ...totals });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
