@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requirePreparateurOrAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
-import { setShelfLife, removeShelfLife } from "@/lib/shelfLife";
+import { setShelfLife, removeShelfLife, getGroupShelfLife, setGroupDays } from "@/lib/shelfLife";
+import { FRESHNESS_GROUPS } from "@/lib/freshnessGroups";
 
 /**
  * Durée de vie par défaut (jours) par article (#1/#6 — pré-remplissage DLC).
@@ -29,7 +30,9 @@ export async function GET() {
     itemName: nameOf.get(r.itemCode) ?? null,
     days: r.days,
   }));
-  return NextResponse.json({ items });
+  const groupDays = await getGroupShelfLife();
+  const groups = FRESHNESS_GROUPS.map((g) => ({ key: g.key, label: g.label, days: groupDays[g.key] ?? null }));
+  return NextResponse.json({ items, groups });
 }
 
 export async function POST(req: NextRequest) {
@@ -39,15 +42,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Réservé à la préparation / l'administration" }, { status: 403 });
   }
 
-  let body: { itemCode?: string; days?: number };
+  let body: { itemCode?: string; groupKey?: string; days?: number };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "JSON invalide" }, { status: 400 });
   }
 
+  // ── Durée de vie par GROUPE de fruits (Fraises / Framboises / … / Autres) ──
+  if (body.groupKey) {
+    const groupKey = body.groupKey.trim();
+    if (!FRESHNESS_GROUPS.some((g) => g.key === groupKey)) {
+      return NextResponse.json({ error: "Groupe inconnu" }, { status: 400 });
+    }
+    const gDays = Number(body.days);
+    if (!Number.isFinite(gDays)) return NextResponse.json({ error: "Nombre de jours invalide" }, { status: 400 });
+    if (gDays > 365) return NextResponse.json({ error: "Le nombre de jours doit être compris entre 1 et 365." }, { status: 400 });
+    await setGroupDays(groupKey, gDays); // gDays ≤ 0 → retire le défaut du groupe
+    return NextResponse.json({ ok: true, groupKey, days: gDays > 0 ? Math.round(gDays) : null });
+  }
+
   const itemCode = (body.itemCode ?? "").trim();
-  if (!itemCode) return NextResponse.json({ error: "itemCode requis" }, { status: 400 });
+  if (!itemCode) return NextResponse.json({ error: "itemCode ou groupKey requis" }, { status: 400 });
 
   const days = Number(body.days);
   if (!Number.isFinite(days)) return NextResponse.json({ error: "Nombre de jours invalide" }, { status: 400 });

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Plus, Search, Trash2, PackagePlus, CheckCircle2 } from "lucide-react";
+import { freshnessGroupKey } from "@/lib/freshnessGroups";
 import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
@@ -226,18 +227,25 @@ export function GoodsReceiptForm() {
   const [lines, setLines] = useState<Line[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [lastReceipt, setLastReceipt] = useState<{ docNum: number; lot: string } | null>(null);
-  // Durées de vie par défaut (jours) par article → pré-remplit la DLC à l'ajout
-  // d'une ligne (= date du jour + jours). Réglées dans Paramètres › Fraîcheur.
+  // Durées de vie par défaut (jours) → pré-remplit la DLC à l'ajout d'une ligne
+  // (= date du jour + jours). Exception article prioritaire sur le défaut du
+  // groupe. Réglées dans Paramètres › « Fraîcheur · DLC par défaut ».
   const [shelfLife, setShelfLife] = useState<Record<string, number>>({});
+  const [groupDays, setGroupDays] = useState<Record<string, number>>({});
   useEffect(() => {
     let cancel = false;
     fetch("/api/products/shelf-life", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
-        if (cancel || !j?.items) return;
+        if (cancel || !j) return;
         const map: Record<string, number> = {};
-        for (const it of j.items as { itemCode: string; days: number }[]) map[it.itemCode] = it.days;
+        for (const it of (j.items ?? []) as { itemCode: string; days: number }[]) map[it.itemCode] = it.days;
         setShelfLife(map);
+        const gm: Record<string, number> = {};
+        for (const g of (j.groups ?? []) as { key: string; days: number | null }[]) {
+          if (g.days && g.days > 0) gm[g.key] = g.days;
+        }
+        setGroupDays(gm);
       })
       .catch(() => {});
     return () => {
@@ -252,7 +260,8 @@ export function GoodsReceiptForm() {
         return cur;
       }
       const ratio = (p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) ? p.salesQtyPerPackUnit : 1;
-      const sl = shelfLife[p.itemCode];
+      // DLC par défaut : exception article si définie, sinon défaut du groupe de fruits.
+      const sl = shelfLife[p.itemCode] ?? groupDays[freshnessGroupKey(p.itemName)];
       return [...cur, {
         itemCode: p.itemCode,
         itemName: p.itemName,
@@ -268,7 +277,7 @@ export function GoodsReceiptForm() {
         dlc: sl && sl > 0 ? plusDaysISO(sl) : "",
       }];
     });
-  }, [shelfLife]);
+  }, [shelfLife, groupDays]);
 
   const updateLine = (i: number, patch: Partial<Line>) =>
     setLines((c) => c.map((l, k) => k === i ? { ...l, ...patch } : l));
