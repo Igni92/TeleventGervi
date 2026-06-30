@@ -281,6 +281,51 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  // Mode SQLQ : SERG_TRCL exposée comme SQLQuery Service Layer (GERVI_SERG_TRCL).
+  // Liste les SQLQueries, exécute la/les candidate(s) via /List, montre colonnes
+  // + échantillon + lignes des clients demandés. ?sqlq=ABET,AARR,APET
+  if (sp.get("sqlq") !== null) {
+    const cards = (sp.get("sqlq") || "").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+    const out: Record<string, unknown> = {};
+    let saved: { SqlCode?: string; SqlName?: string }[] = [];
+    try {
+      const q = await sap.get<{ value?: { SqlCode?: string; SqlName?: string }[] }>("SQLQueries", { env: "prod" });
+      saved = q.value ?? [];
+      out.savedQueries = saved.map((s) => ({ SqlCode: s.SqlCode, SqlName: s.SqlName }));
+    } catch (e) { out.listError = e instanceof Error ? e.message : String(e); }
+
+    const candidates = [...new Set([
+      ...saved.filter((s) => /TRCL|SERG/i.test(`${s.SqlCode} ${s.SqlName}`)).map((s) => s.SqlCode).filter(Boolean) as string[],
+      "GERVI_SERG_TRCL",
+    ])];
+    out.candidates = candidates;
+
+    const exec: Record<string, unknown> = {};
+    for (const code of candidates) {
+      try {
+        const rows = await sap.getAll<Record<string, unknown>>(
+          `SQLQueries(${encodeURIComponent(`'${code.replace(/'/g, "''")}'`)})/List`,
+          { env: "prod", pageSize: 200, maxPages: 30 },
+        );
+        // Devine la colonne CardCode (le SQL peut aliaser les noms).
+        const cardKey = Object.keys(rows[0] ?? {}).find((k) => /cardcode/i.test(k))
+          ?? Object.keys(rows[0] ?? {}).find((k) => /card/i.test(k)) ?? null;
+        const byClient: Record<string, unknown[]> = {};
+        if (cardKey) for (const cc of cards) {
+          byClient[cc] = rows.filter((r) => String(r[cardKey] ?? "").trim().toUpperCase() === cc);
+        }
+        exec[code] = {
+          ok: true, total: rows.length, columns: Object.keys(rows[0] ?? {}),
+          cardKeyGuess: cardKey, sample: rows.slice(0, 3), byClient,
+        };
+      } catch (e) {
+        exec[code] = { ok: false, error: (e instanceof Error ? e.message : String(e)).slice(0, 200) };
+      }
+    }
+    out.exec = exec;
+    return NextResponse.json({ ok: true, mode: "sqlq", ...out });
+  }
+
   try {
     // 1. BL cibles (par DocNum, sinon 6 récents, éventuellement filtrés client)
     type Ord = Record<string, unknown> & { DocNum: number; DocEntry: number; CardCode: string; CardName?: string; U_TrspCode?: string };
