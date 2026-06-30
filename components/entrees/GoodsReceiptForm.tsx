@@ -208,6 +208,16 @@ export function ProductPicker({ onPick }: { onPick: (p: ProductHit) => void }) {
   );
 }
 
+/** Date du jour + n jours, au format YYYY-MM-DD (local). */
+function plusDaysISO(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export function GoodsReceiptForm() {
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [docDate, setDocDate] = useState(todayISO());
@@ -216,6 +226,24 @@ export function GoodsReceiptForm() {
   const [lines, setLines] = useState<Line[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [lastReceipt, setLastReceipt] = useState<{ docNum: number; lot: string } | null>(null);
+  // Durées de vie par défaut (jours) par article → pré-remplit la DLC à l'ajout
+  // d'une ligne (= date du jour + jours). Réglées dans Paramètres › Fraîcheur.
+  const [shelfLife, setShelfLife] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancel = false;
+    fetch("/api/products/shelf-life", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancel || !j?.items) return;
+        const map: Record<string, number> = {};
+        for (const it of j.items as { itemCode: string; days: number }[]) map[it.itemCode] = it.days;
+        setShelfLife(map);
+      })
+      .catch(() => {});
+    return () => {
+      cancel = true;
+    };
+  }, []);
 
   const addLine = useCallback((p: ProductHit) => {
     setLines((cur) => {
@@ -224,6 +252,7 @@ export function GoodsReceiptForm() {
         return cur;
       }
       const ratio = (p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) ? p.salesQtyPerPackUnit : 1;
+      const sl = shelfLife[p.itemCode];
       return [...cur, {
         itemCode: p.itemCode,
         itemName: p.itemName,
@@ -236,10 +265,10 @@ export function GoodsReceiptForm() {
         marque: p.uMarque,
         condt: p.uCondi,
         variete: p.frgnName,
-        dlc: "",
+        dlc: sl && sl > 0 ? plusDaysISO(sl) : "",
       }];
     });
-  }, []);
+  }, [shelfLife]);
 
   const updateLine = (i: number, patch: Partial<Line>) =>
     setLines((c) => c.map((l, k) => k === i ? { ...l, ...patch } : l));

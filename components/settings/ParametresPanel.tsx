@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { useReducedMotion } from "framer-motion";
 import Link from "next/link";
 import {
-  Moon, Sun, Palette, LayoutList, Sparkles, BadgePercent, Check, Wand2, Database, Contrast, Tags, ChevronRight,
+  Moon, Sun, Palette, LayoutList, Sparkles, BadgePercent, Check, Wand2, Database, Contrast, Tags, ChevronRight, CalendarClock,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
+import { ShelfLifePanel } from "@/components/settings/ShelfLifePanel";
 import { ClientImportButton } from "@/components/clients/ClientImportButton";
 import { ResyncButton } from "@/components/admin/ResyncButton";
 import { ProductsSyncButton } from "@/components/admin/ProductsSyncButton";
@@ -340,6 +341,13 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
           </span>
         </Link>
       </SurfaceCard>
+
+      {/* Fraîcheur · DLC par défaut — durée de vie (jours) par article. */}
+      {admin && (
+        <SurfaceCard accent="amber" title="Fraîcheur · DLC par défaut" icon={<CalendarClock className="h-3.5 w-3.5" />}>
+          <ShelfLifePanel />
+        </SurfaceCard>
+      )}
 
       {/* 4 ── Animations ───────────────────────────────────────────── */}
       <SurfaceCard accent="violet" title="Animations" icon={<Wand2 className="h-3.5 w-3.5" />}>

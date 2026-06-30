@@ -964,3 +964,14 @@ model LotDlc {
   @@index([itemCode])
   @@index([expirationDate])
 }
+
+// Durée de vie par défaut (en JOURS) par article — réglée dans les Paramètres.
+// Sert à pré-remplir la DLC à la réception (date de réception + days). Côté
+// TeleVent uniquement (ne touche pas SAP, survit à la synchro produits).
+model ItemShelfLife {
+  itemCode  String   @id
+  days      Int
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
