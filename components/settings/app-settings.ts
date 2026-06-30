@@ -29,6 +29,12 @@ export const SETTING_KEYS = {
   /** modale « Nouvelles promotions » à l'ouverture : "on" | "off" (défaut on) */
   promoNotifs: "televente:promoNotifs",
   /**
+   * Affichage des logos de marque (console, détail livraison, inventaire) :
+   * "on" (défaut) → logos visibles · "off" → masqués partout.
+   * Honoré par le hook useBrandLogos (map vide quand off → aucun logo rendu).
+   */
+  brandLogos: "televente:brandLogos",
+  /**
    * Animations d'ambiance globales (aurora, anneaux radar du fond) :
    *   "on"   → animées
    *   "off"  → figées (fond statique)
