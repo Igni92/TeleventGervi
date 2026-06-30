@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { incrementLocalStock } from "@/lib/stockSync";
 import { bumpLot, LOT_PENDING } from "@/lib/lotResolver";
+import { buildWhsBudget, remainingForItem, pickReceiptWarehouse, consumeBudget } from "@/lib/receiptRetro";
 
 /**
  * POST /api/sap/goods-receipts
@@ -237,19 +238,20 @@ export async function POST(req: NextRequest) {
   //    serveur.
   //    Best-effort : on log mais on ne casse pas la création du PDN si ça échoue.
 
-  // Quantité reçue par item (en pie, unité d'inventaire). Budget PARTAGÉ entre
-  // la propagation BL (Orders, servis d'abord) et la propagation fabrication
-  // (InventoryGenExits) : la marchandise reçue couvre les deux types de découvert.
-  const receivedByItem = new Map<string, number>();
-  for (const l of resolvedLines) {
-    receivedByItem.set(l.itemCode, (receivedByItem.get(l.itemCode) ?? 0) + l.pieceQty);
-  }
-  const remainingByItem = new Map(receivedByItem);
+  // Budget de couverture par (article × MAGASIN), en pie. Sert à la fois à savoir
+  // s'il reste de quoi couvrir un découvert ET à choisir le MAGASIN à affecter à
+  // la ligne : le lot EM déplace la ligne vers le magasin où la marchandise a été
+  // RÉELLEMENT reçue (sinon la ligne reste sur un magasin sans stock → dispo
+  // négatif). Budget PARTAGÉ entre propagation BL (Orders, servis d'abord) et
+  // fabrication (InventoryGenExits) : la marchandise reçue couvre les deux.
+  const budget = buildWhsBudget(resolvedLines.map((l) => ({
+    itemCode: l.itemCode, warehouseCode: l.warehouseCode, pieceQty: l.pieceQty,
+  })));
 
   let retroPatchCount = 0;
   try {
     type SapOrderLine = {
-      LineNum: number; ItemCode: string; Quantity: number; U_NoLot?: string;
+      LineNum: number; ItemCode: string; Quantity: number; U_NoLot?: string; WarehouseCode?: string;
     };
     type SapOrderForRetro = {
       DocEntry: number; DocNum: number; DocDate: string; DocumentStatus: string;
@@ -270,15 +272,21 @@ export async function POST(req: NextRequest) {
       const patchLines: Record<string, unknown>[] = [];
       for (const ln of (ord.DocumentLines || [])) {
         // Filtrage côté serveur : ligne en attente de lot ET item présent dans
-        // ce PDN (remaining = 0 pour les items hors PDN → skip).
+        // ce PDN (reliquat = 0 pour les items hors PDN → skip).
         if (ln.U_NoLot !== LOT_PENDING) continue;
-        const remaining = remainingByItem.get(ln.ItemCode) ?? 0;
-        if (remaining <= 0) continue;
+        if (remainingForItem(budget, ln.ItemCode) <= 0) continue;
+        // Magasin de la réception à affecter : le lot DÉPLACE la ligne vers le
+        // magasin où la marchandise a été reçue (évite le dispo négatif sur le
+        // magasin d'origine, sans stock). On garde le magasin courant s'il a reçu.
+        const whs = pickReceiptWarehouse(budget, ln.ItemCode, ln.WarehouseCode);
+        if (!whs) continue;
         // FIFO simple : on accepte le BL si on a au moins la qté demandée, sinon
         // on patch quand même (le BL ne sera couvert que partiellement, mais lot
         // affecté) — TODO : split ligne si on veut être strict.
-        patchLines.push({ LineNum: ln.LineNum, U_NoLot: lotCode });
-        remainingByItem.set(ln.ItemCode, Math.max(0, remaining - ln.Quantity));
+        const patch: Record<string, unknown> = { LineNum: ln.LineNum, U_NoLot: lotCode };
+        if (whs !== ln.WarehouseCode) patch.WarehouseCode = whs;
+        patchLines.push(patch);
+        consumeBudget(budget, ln.ItemCode, whs, ln.Quantity);
       }
       if (patchLines.length > 0) {
         await sap.patch(`Orders(${ord.DocEntry})`, { DocumentLines: patchLines });
@@ -304,7 +312,7 @@ export async function POST(req: NextRequest) {
   let retroFabricationCount = 0;
   try {
     type SapExitLine = {
-      LineNum: number; ItemCode: string; Quantity: number; U_NoLot?: string;
+      LineNum: number; ItemCode: string; Quantity: number; U_NoLot?: string; WarehouseCode?: string;
     };
     type SapExitForRetro = {
       DocEntry: number; DocNum: number; DocumentLines: SapExitLine[];
@@ -322,11 +330,14 @@ export async function POST(req: NextRequest) {
       const patchLines: Record<string, unknown>[] = [];
       for (const ln of (exit.DocumentLines || [])) {
         if (ln.U_NoLot !== LOT_PENDING) continue;
-        const remaining = remainingByItem.get(ln.ItemCode) ?? 0;
-        if (remaining <= 0) continue;
-        patchLines.push({ LineNum: ln.LineNum, U_NoLot: lotCode });
+        if (remainingForItem(budget, ln.ItemCode) <= 0) continue;
+        const whs = pickReceiptWarehouse(budget, ln.ItemCode, ln.WarehouseCode);
+        if (!whs) continue;
+        const patch: Record<string, unknown> = { LineNum: ln.LineNum, U_NoLot: lotCode };
+        if (whs !== ln.WarehouseCode) patch.WarehouseCode = whs;
+        patchLines.push(patch);
         patchedItems.add(ln.ItemCode);
-        remainingByItem.set(ln.ItemCode, Math.max(0, remaining - ln.Quantity));
+        consumeBudget(budget, ln.ItemCode, whs, ln.Quantity);
       }
       if (patchLines.length > 0) {
         await sap.patch(`InventoryGenExits(${exit.DocEntry})`, { DocumentLines: patchLines });

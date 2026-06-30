@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
+import { isRestrictedPreparateur } from "@/lib/preparateur";
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
@@ -35,18 +36,18 @@ export default auth((req) => {
     return NextResponse.redirect(new URL("/clients", origin));
   }
 
-  // RÔLE PRÉPARATEUR : accès restreint au SEUL onglet inventaire. Tout autre
-  // chemin applicatif est renvoyé vers /inventaire (les routes /api et les
-  // assets restent accessibles pour que la page fonctionne).
-  const email = (req.auth?.user?.email ?? "").trim().toLowerCase();
-  const preparateurs = ["h.vachey@gervifrais.com", ...(process.env.PREPARATEUR_EMAILS || "").split(",")]
-    .map((e) => e.trim().toLowerCase()).filter(Boolean);
-  if (email && preparateurs.includes(email)) {
-    const allowed = pathname.startsWith("/inventaire")
+  // RÔLE PRÉPARATEUR : accès restreint à ses écrans de PRÉPARATION — le Détail
+  // livraison (préparation de commande) ET l'Inventaire (comptage du stock).
+  // Tout autre chemin applicatif est renvoyé vers le Détail livraison (écran
+  // principal de préparation). Les routes /api et les assets restent
+  // accessibles pour que les pages fonctionnent.
+  if (isRestrictedPreparateur(req.auth?.user?.email)) {
+    const allowed = pathname.startsWith("/livraisons")
+      || pathname.startsWith("/inventaire")
       || pathname.startsWith("/api")
       || pathname.startsWith("/login");
     if (!allowed) {
-      return NextResponse.redirect(new URL("/inventaire", origin));
+      return NextResponse.redirect(new URL("/livraisons", origin));
     }
   }
 

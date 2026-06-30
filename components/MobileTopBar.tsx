@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { Home, LogOut, Moon, Sun } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
+import { RolePreviewControl } from "@/components/role-preview/RolePreviewControl";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -74,6 +75,9 @@ export function MobileTopBar({ className }: { className?: string }) {
         <span className="min-w-0 flex-1 truncate text-[16px] font-semibold tracking-tight text-foreground">
           {section ?? "TeleVent"}
         </span>
+
+        {/* Voir comme (admin/direction) — icône seule pour préserver la place */}
+        <RolePreviewControl compact />
 
         {/* Thème — visible en clair ET en sombre (≠ toggle sidebar blanc-sur-blanc) */}
         <button

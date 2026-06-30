@@ -2,7 +2,9 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/permissions";
 import { isPreparateur } from "@/lib/inventory";
+import { isRestrictedPreparateur } from "@/lib/preparateur";
 import { InventairePanel } from "@/components/inventaire/InventairePanel";
+import { PreparateurNav } from "@/components/PreparateurNav";
 
 export const metadata = { title: "Inventaire" };
 export const dynamic = "force-dynamic";
@@ -15,6 +17,7 @@ export default async function InventairePage() {
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-up">
+      {isRestrictedPreparateur(session.user?.email) && <PreparateurNav current="inventaire" />}
       <div>
         <p className="kicker mb-2 hidden md:block">Préparation · stock physique</p>
         <h1 className="text-[26px] sm:text-[32px] font-bold text-foreground tracking-tight leading-none">

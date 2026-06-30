@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { resolveLot, bumpLot, _resetLotCache, type LotMaps } from "./lotResolver";
+import { resolveLot, resolveLotDetailed, bumpLot, _resetLotCache, type LotMaps } from "./lotResolver";
 
 function maps(): LotMaps {
-  return { byItemWhs: new Map(), byItem: new Map() };
+  return { byItemWhs: new Map(), byItem: new Map(), byItemWarehouse: new Map() };
 }
 
 describe("resolveLot — résolution Gervifrais EM<DocNum>", () => {
@@ -29,6 +29,36 @@ describe("resolveLot — résolution Gervifrais EM<DocNum>", () => {
 
   it("renvoie le fallback EM0000 si rien ne correspond", () => {
     expect(resolveLot(maps(), "INCONNU", "01")).toBe("EM0000");
+  });
+});
+
+describe("resolveLotDetailed — magasin du lot (alignement vente à découvert)", () => {
+  it("source 'whs' → magasin = l'entrepôt interrogé", () => {
+    const m = maps();
+    m.byItemWhs.set("FE1SL|000", 22739);
+    const r = resolveLotDetailed(m, "FE1SL", "000");
+    expect(r).toMatchObject({ lot: "EM22739", source: "whs", warehouse: "000" });
+  });
+
+  it("repli 'item' → magasin = celui de la dernière EM (byItemWarehouse)", () => {
+    // La ligne est sur 000 (jamais reçu là) ; la dernière EM de l'article est sur 01.
+    const m = maps();
+    m.byItem.set("FRAMB", 23074);
+    m.byItemWarehouse.set("FRAMB", "01");
+    const r = resolveLotDetailed(m, "FRAMB", "000");
+    expect(r).toMatchObject({ lot: "EM23074", source: "item", warehouse: "01" });
+  });
+
+  it("repli 'item' sans magasin connu → warehouse null", () => {
+    const m = maps();
+    m.byItem.set("X", 100);
+    expect(resolveLotDetailed(m, "X", "01").warehouse).toBeNull();
+  });
+
+  it("aucune correspondance → lot et magasin null", () => {
+    expect(resolveLotDetailed(maps(), "INCONNU", "01")).toEqual({
+      lot: null, source: null, docNum: null, warehouse: null,
+    });
   });
 });
 

@@ -1,15 +1,20 @@
 import * as React from "react";
 
 /**
- * Logo de marque réutilisable — taille centralisée pour rester cohérent partout
- * (console liste produits, détail livraison/préparation, inventaire du stock).
- * Rend `null` si la marque n'a pas de logo associé → aucune place réservée.
+ * Logo de marque réutilisable. Taille NORMALISÉE par la HAUTEUR : tous les logos
+ * s'affichent à la même hauteur quelle que soit la forme du fichier source
+ * (carré, paysage, portrait) → rendu uniforme « rangée de logos ». La largeur
+ * suit le ratio (plafonnée pour ne pas déborder ; object-contain évite toute
+ * déformation si le plafond est atteint).
+ *
+ * Rend `null` si la marque n'a pas de logo (ou si l'affichage des logos est
+ * désactivé dans les paramètres → la Map fournie est vide).
  */
 const SIZES = {
-  sm: "h-9 w-9",     // listes compactes
-  md: "h-12 w-12",   // table préparation, récap
-  lg: "h-16 w-16",   // écrans focalisés (comptage guidé, vue en grand)
-  xl: "h-16 w-28",   // liste console — logo bien visible, occupe l'espace dispo
+  sm: "h-9 max-w-[90px]",    // listes compactes
+  md: "h-11 max-w-[120px]",  // table préparation, récap
+  lg: "h-14 max-w-[150px]",  // écrans focalisés (comptage guidé, vue en grand)
+  xl: "h-16 max-w-[170px]",  // liste console
 } as const;
 
 /** Valeur de marque exploitable (ignore les placeholders vides « - », « — », « . »). */
@@ -42,7 +47,7 @@ export function BrandLogo({
       src={src}
       alt={marque ?? ""}
       title={marque ?? undefined}
-      className={`${SIZES[size]} shrink-0 rounded-sm object-contain ${className}`}
+      className={`${SIZES[size]} w-auto shrink-0 rounded-sm object-contain ${className}`}
     />
   );
 }

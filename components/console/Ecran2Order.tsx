@@ -13,6 +13,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { PromoBanner } from "@/components/promos/PromoBanner";
 import { BrandLogo } from "@/components/BrandLogo";
+import { useBrandLogos } from "@/lib/useBrandLogos";
 
 interface StockEntry { available: number }
 interface Product {
@@ -256,8 +257,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   // C2 — promos actives, indexées par itemCode (1 promo max appliquée par article)
   const [promos, setPromos] = useState<Record<string, Promo>>({});
   // Logos de marques (réglés sur /parametres/marques) → affichés dans la liste
-  // stock, entre le stock et la désignation. Clé normalisée (minuscule/trim).
-  const [brandLogos, setBrandLogos] = useState<Map<string, string>>(new Map());
+  // stock, entre le stock et la désignation. Hook partagé : 1 seul fetch pour
+  // toute l'app + respect du réglage « Afficher les logos » (paramètres).
+  const brandLogos = useBrandLogos();
   // C4 — densité d'affichage de la liste stock (réglée sur /parametres, lue ici)
   const [density, setDensity] = useState<Density>("normal");
   // Panier
@@ -463,21 +465,6 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, []);
-
-  // ── Logos de marques (réglés sur /parametres/marques) — chargés une fois ──
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/marques/logos", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((j: { logos?: { marque: string; logoUrl: string }[] }) => {
-        if (cancelled) return;
-        const m = new Map<string, string>();
-        for (const l of j.logos ?? []) m.set(l.marque.trim().toLowerCase(), l.logoUrl);
-        setBrandLogos(m);
-      })
-      .catch(() => { /* pas de logos → liste inchangée */ });
-    return () => { cancelled = true; };
   }, []);
 
   // ── Charge le stock ──

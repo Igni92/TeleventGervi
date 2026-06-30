@@ -23,6 +23,10 @@ import { LOT_PENDING as LOT_PENDING_PURE } from "./gervifrais-calc";
 export type LotMaps = {
   byItemWhs: Map<string, number>;  // key = `${itemCode}|${warehouseCode}`
   byItem:    Map<string, number>;
+  /** Magasin de la DERNIÈRE EM (avec magasin) de l'article — pour aligner le
+   *  magasin sur le lot lors du repli "item" (vente à découvert : le lot doit
+   *  amener la ligne dans le magasin où il a été reçu). */
+  byItemWarehouse: Map<string, string>;
 };
 
 /**
@@ -45,7 +49,7 @@ const PAGE_SIZE = 200;
 let cache: { at: number; maps: LotMaps; partial: boolean } | null = null;
 
 function emptyMaps(): LotMaps {
-  return { byItemWhs: new Map(), byItem: new Map() };
+  return { byItemWhs: new Map(), byItem: new Map(), byItemWarehouse: new Map() };
 }
 
 /** Renvoie les maps (cache 10 min). Scanne les ~1500 derniers PDN au refresh. */
@@ -59,6 +63,8 @@ export async function getLotMaps(): Promise<LotMaps> {
   let scanned = 0;
   let partial = false;
   const t0 = Date.now();
+  // DocNum de la dernière EM AVEC magasin par article (pour byItemWarehouse).
+  const bestWhsDoc = new Map<string, number>();
   try {
     let skip = 0;
     while (skip < MAX_DOCS) {
@@ -80,6 +86,11 @@ export async function getLotMaps(): Promise<LotMaps> {
             const key = `${l.ItemCode}|${l.WarehouseCode}`;
             if (!maps.byItemWhs.has(key) || d.DocNum > maps.byItemWhs.get(key)!) {
               maps.byItemWhs.set(key, d.DocNum);
+            }
+            // Magasin de la dernière EM (avec magasin) de l'article → repli "item".
+            if (d.DocNum > (bestWhsDoc.get(l.ItemCode) ?? -1)) {
+              bestWhsDoc.set(l.ItemCode, d.DocNum);
+              maps.byItemWarehouse.set(l.ItemCode, l.WarehouseCode);
             }
           }
         }
@@ -112,6 +123,10 @@ export type ResolvedLot = {
   lot: string | null;                       // "EM<DocNum>" ou null si introuvable
   source: "whs" | "item" | null;            // précision de la résolution
   docNum: number | null;
+  /** Magasin où ce lot a été reçu : l'entrepôt interrogé pour la source "whs",
+   *  le magasin de la dernière EM pour le repli "item" (peut être null si
+   *  inconnu). Permet d'aligner le magasin de la ligne sur le lot retenu. */
+  warehouse: string | null;
 };
 
 /**
@@ -122,11 +137,11 @@ export type ResolvedLot = {
 export function resolveLotDetailed(maps: LotMaps, itemCode: string, warehouseCode?: string): ResolvedLot {
   if (warehouseCode) {
     const n = maps.byItemWhs.get(`${itemCode}|${warehouseCode}`);
-    if (n) return { lot: `EM${n}`, source: "whs", docNum: n };
+    if (n) return { lot: `EM${n}`, source: "whs", docNum: n, warehouse: warehouseCode };
   }
   const g = maps.byItem.get(itemCode);
-  if (g) return { lot: `EM${g}`, source: "item", docNum: g };
-  return { lot: null, source: null, docNum: null };
+  if (g) return { lot: `EM${g}`, source: "item", docNum: g, warehouse: maps.byItemWarehouse.get(itemCode) ?? null };
+  return { lot: null, source: null, docNum: null, warehouse: null };
 }
 
 /**
@@ -157,6 +172,9 @@ export function bumpLot(itemCode: string, warehouseCode: string | undefined, doc
     if (!maps.byItemWhs.has(key) || docNum > maps.byItemWhs.get(key)!) {
       maps.byItemWhs.set(key, docNum);
     }
+    // Si ce PDN est désormais le plus récent de l'article, son magasin devient le
+    // repli "item" (cohérent avec byItem ci-dessus).
+    if (maps.byItem.get(itemCode) === docNum) maps.byItemWarehouse.set(itemCode, warehouseCode);
   }
 }
 
