@@ -1,8 +1,8 @@
 {
   "regions": ["cdg1"],
   "crons": [
-    { "path": "/api/sap/sync/mirror", "schedule": "0,10,20,30,40,50 * * * *" },
-    { "path": "/api/sap/sync/delta", "schedule": "5,15,25,35,45,55 * * * *" },
-    { "path": "/api/inventaire/refresh-stock", "schedule": "0,15,30,45 * * * *" }
+    { "path": "/api/sap/sync/mirror", "schedule": "0 3 * * *" },
+    { "path": "/api/sap/sync/delta", "schedule": "30 3 * * *" },
+    { "path": "/api/inventaire/refresh-stock", "schedule": "0 4 * * *" }
   ]
 }
