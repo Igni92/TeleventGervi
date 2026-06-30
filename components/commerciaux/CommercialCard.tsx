@@ -4,9 +4,10 @@ import { useState } from "react";
 import { toast } from "sonner";
 import {
   ChevronDown, Mail, ArrowRight, Loader2, Users,
-  Building2, Globe, Store, Check, X, Percent, Lock,
+  Building2, Globe, Store, Check, X, Percent, Lock, Eye,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +16,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
+import { previewRoleForPerson, previewHome } from "@/lib/rolePreview";
 
 interface Counts { ALL: number; CHR: number; GMS: number; EXPORT: number; OTHER: number; }
 
@@ -40,9 +43,14 @@ interface Props {
   isDirection?: boolean;
   /** Le SPECTATEUR est-il admin strict ? Seul lui peut (dé)cocher le rôle Admin. */
   canEditAdmin?: boolean;
+  /** Préparateur « accès restreint » (verrouillé par le middleware sur ses 2 écrans).
+   *  Détermine l'aperçu « Voir comme » fidèle à ce que la personne voit vraiment. */
+  restrictedPreparateur?: boolean;
 }
 
-export function CommercialCard({ userId, name, commercialKey, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false, isPreparateur = false, isCommercial = true, isDirection = false, canEditAdmin = false }: Props) {
+export function CommercialCard({ userId, name, commercialKey, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false, isPreparateur = false, isCommercial = true, isDirection = false, canEditAdmin = false, restrictedPreparateur = false }: Props) {
+  const router = useRouter();
+  const { canPreview, setPreviewRole } = useRolePreview();
   const [claiming, setClaiming] = useState<string | null>(null);
   const [isPresent, setIsPresent] = useState(present);
   const [share, setShare] = useState(stockSharePct);
@@ -239,6 +247,31 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
           Voir clients
           <ArrowRight className="h-3 w-3" />
         </Link>
+
+        {/* « Voir comme » — aperçu de l'app telle que CETTE personne la voit
+            (admin/direction uniquement ; inutile sur sa propre carte). On résout
+            le rôle effectif depuis ses rôles réels, on nomme l'aperçu, et on ouvre
+            sa page d'atterrissage. */}
+        {canPreview && !isMe && (
+          <button
+            type="button"
+            onClick={() => {
+              const role = previewRoleForPerson({
+                restrictedPreparateur,
+                isAdmin: admin,
+                isDirection: direction,
+                isCommercial: comm,
+                isPreparateur: prep,
+              });
+              setPreviewRole(role, displayName);
+              router.push(previewHome(role));
+            }}
+            title={`Voir l'application comme ${displayName}`}
+            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] font-medium text-brand-600 dark:text-brand-300 hover:bg-brand-500/10 transition-colors active:scale-[0.97]"
+          >
+            <Eye className="h-3 w-3" /> Voir comme
+          </button>
+        )}
 
         {!isMe && counts.ALL > 0 && (
           <div className="hidden md:block">

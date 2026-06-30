@@ -42,3 +42,25 @@ export function navAllowedForPreview(href: string, role: PreviewRole | null): bo
 export function previewHome(role: PreviewRole): string {
   return role === "preparateur" ? "/livraisons" : "/accueil";
 }
+
+/**
+ * Rôle d'aperçu le plus représentatif de ce qu'une PERSONNE voit réellement,
+ * d'après ses rôles. Ordre :
+ *   1. préparateur « accès restreint » (verrouillé par le middleware, quel que
+ *      soit le reste) → vue restreinte à ses 2 écrans ;
+ *   2. admin / direction → vue complète (management) ;
+ *   3. préparateur « pur » (sans casquette commerciale) → vue restreinte ;
+ *   4. sinon → vue commerciale (complète aujourd'hui).
+ */
+export function previewRoleForPerson(p: {
+  restrictedPreparateur?: boolean;
+  isAdmin?: boolean;
+  isDirection?: boolean;
+  isCommercial?: boolean;
+  isPreparateur?: boolean;
+}): PreviewRole {
+  if (p.restrictedPreparateur) return "preparateur";
+  if (p.isAdmin || p.isDirection) return "direction";
+  if (p.isPreparateur && !p.isCommercial) return "preparateur";
+  return "commercial";
+}

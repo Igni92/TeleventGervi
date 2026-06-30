@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getAccessScope, requireStrictAdmin, ADMIN_EMAILS } from "@/lib/permissions";
+import { isRestrictedPreparateur } from "@/lib/preparateur";
 import { CommercialCard } from "@/components/commerciaux/CommercialCard";
 import { CommerciauxSapList } from "./CommerciauxSapList";
 
@@ -110,6 +111,7 @@ export default async function CommerciauxPage() {
                 isCommercial={commByUser.get(user.id) ?? true}
                 isDirection={dirByUser.get(user.id) ?? false}
                 canEditAdmin={strictAdmin}
+                restrictedPreparateur={isRestrictedPreparateur(user.email)}
               />
             );
           })}
