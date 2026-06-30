@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { requireAdmin } from "@/lib/permissions";
+import { requirePreparateurOrAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 
@@ -29,8 +29,8 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   // #7 — Modifier une commande fournisseur est une écriture de la chaîne d'achat :
-  // réservée aux admins / direction (pas accessible à un simple commercial).
-  if (!(await requireAdmin(session))) return NextResponse.json({ error: "Réservé à l'administration / direction" }, { status: 403 });
+  // réservée à la préparation / l'administration (pas accessible à un simple commercial).
+  if (!(await requirePreparateurOrAdmin(session))) return NextResponse.json({ error: "Réservé à la préparation / l'administration" }, { status: 403 });
   if (!Number.isFinite(docEntry)) return NextResponse.json({ error: "docEntry invalide" }, { status: 400 });
 
   let body: { lines?: { itemCode: string; packageQuantity: number; warehouseCode: string; price?: number; lineTotal?: number }[] };

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { requireAdmin } from "@/lib/permissions";
+import { requirePreparateurOrAdmin } from "@/lib/permissions";
 import { sap } from "@/lib/sapb1";
 import { incrementLocalStock } from "@/lib/stockSync";
 import { bumpLot } from "@/lib/lotResolver";
@@ -21,8 +21,8 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   // #7 — Valider la réception crée une entrée marchandise et incrémente le stock :
-  // écriture de la chaîne fournisseur réservée aux admins / direction (pas un commercial).
-  if (!(await requireAdmin(session))) return NextResponse.json({ error: "Réservé à l'administration / direction" }, { status: 403 });
+  // écriture de la chaîne fournisseur réservée à la préparation / l'administration (pas un commercial).
+  if (!(await requirePreparateurOrAdmin(session))) return NextResponse.json({ error: "Réservé à la préparation / l'administration" }, { status: 403 });
 
   let body: { docEntry?: number };
   try { body = await req.json(); }

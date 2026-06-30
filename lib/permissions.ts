@@ -113,6 +113,29 @@ export async function requireAdmin(session: Session | null): Promise<boolean> {
 }
 
 /**
+ * True si la session est admin/direction (cf. requireAdmin) OU si l'utilisateur
+ * est PRÉPARATEUR (User.isPreparateur = true). Palier dédié aux écritures de la
+ * chaîne fournisseur / stock (réception d'une commande, annulation d'une entrée
+ * marchandise, modification/annulation d'une commande fournisseur) : ces actions
+ * appartiennent à l'entrepôt — un commercial pur n'y a pas accès, mais le
+ * préparateur si. Lecture défensive (repli sur false si la colonne manque).
+ */
+export async function requirePreparateurOrAdmin(session: Session | null): Promise<boolean> {
+  if (await requireAdmin(session)) return true;
+  const email = session?.user?.email?.trim().toLowerCase() ?? null;
+  if (!email) return false;
+  try {
+    const rows = await prisma.$queryRawUnsafe<{ isPreparateur: boolean | null }[]>(
+      `SELECT "isPreparateur" FROM "User" WHERE LOWER("email") = $1 LIMIT 1`,
+      email,
+    );
+    return !!rows[0]?.isPreparateur;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * True UNIQUEMENT pour un administrateur (bootstrap ADMIN_EMAILS OU User.isAdmin) —
  * la DIRECTION en est exclue. Réservé aux deux actions que seul l'admin maîtrise :
  *   1. basculer la base SAP prod ↔ test (/api/sap/environment) ;
