@@ -11,6 +11,8 @@ import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ClientLink } from "@/components/ClientLink";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
+import { BrandLogo } from "@/components/BrandLogo";
+import { useBrandLogos } from "@/lib/useBrandLogos";
 import { broadcastActiveClient } from "@/lib/consoleSync";
 import {
   nextDeliveryDate, frenchHolidayLabel, nextWorkingDeliveryDay,
@@ -721,6 +723,7 @@ function OrderRow({
   const [open, setOpen] = useState(false);
   const [savingCarrier, setSavingCarrier] = useState(false);
   const [savingTournee, setSavingTournee] = useState(false);
+  const brandLogos = useBrandLogos();
 
   // Charge les tournées du transporteur courant (une fois) pour le sélecteur.
   useEffect(() => {
@@ -1099,11 +1102,16 @@ function OrderRow({
                     </span>
                   </td>
                   <td className="px-3 py-1.5 min-w-0">
-                    <div className="flex items-baseline gap-1.5 flex-wrap">
-                      <span className="font-medium text-foreground/90">{l.itemName}</span>
-                      <span className="font-mono text-[10px] text-muted-foreground/70 hidden sm:inline">{l.itemCode}</span>
+                    <div className="flex items-start gap-2.5">
+                      <BrandLogo marque={l.marque} logos={brandLogos} size="md" className="mt-0.5" />
+                      <div className="min-w-0">
+                        <div className="flex items-baseline gap-1.5 flex-wrap">
+                          <span className="font-medium text-foreground/90">{l.itemName}</span>
+                          <span className="font-mono text-[10px] text-muted-foreground/70 hidden sm:inline">{l.itemCode}</span>
+                        </div>
+                        <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} className="mt-1" />
+                      </div>
                     </div>
-                    <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} className="mt-1" />
                   </td>
                   <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell align-top">{fmtNum(l.quantity)}</td>
                   <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell align-top">{fmtNum(l.weightKg)}</td>
@@ -1154,6 +1162,7 @@ function OrderRow({
                   <p className="text-[14px] font-semibold text-foreground">{l.itemName}</p>
                   <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} className="mt-1" />
                 </div>
+                <BrandLogo marque={l.marque} logos={brandLogos} size="lg" className="self-center" />
               </li>
             ))}
           </ul>

@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { PromoBanner } from "@/components/promos/PromoBanner";
+import { BrandLogo } from "@/components/BrandLogo";
 
 interface StockEntry { available: number }
 interface Product {
@@ -1033,7 +1034,6 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                       // Méta-chips visibles : marque · conditionnement · calibre · origine.
                       // Calibre = U_GER_CALIBRE (via Hint, chargé après) — distinct du condi.
                       const marque  = cleanTag(p.uMarque ?? h?.marque);
-                      const brandLogo = marque ? brandLogos.get(marque.toLowerCase()) : undefined;
                       const condi   = cleanTag(p.uCondi ?? p.uUvc);          // ex. 8×500g
                       const calibreRaw = cleanTag(h?.calibre);
                       const calibre = calibreRaw ? `cal. ${calibreRaw}` : null;
@@ -1097,15 +1097,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                             {/* Col 3 — Produit : (logo marque) + nom + chips + code + colis/kg.
                                 Le logo se place entre le stock (col 2) et la désignation. */}
                             <span className="min-w-0 flex items-center gap-2">
-                              {brandLogo && (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={brandLogo}
-                                  alt={marque ?? ""}
-                                  title={marque ?? undefined}
-                                  className="h-9 w-9 object-contain shrink-0 rounded-sm"
-                                />
-                              )}
+                              <BrandLogo marque={marque} logos={brandLogos} size="md" />
                               <span className="min-w-0 flex-1">
                               <span className={`block ${ui.name} font-semibold text-foreground truncate leading-tight`}>
                                 {p.itemName}
