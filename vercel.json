@@ -1,8 +1,3 @@
 {
-  "regions": ["cdg1"],
-  "crons": [
-    { "path": "/api/sap/sync/mirror", "schedule": "0 3 * * *" },
-    { "path": "/api/sap/sync/delta", "schedule": "30 3 * * *" },
-    { "path": "/api/inventaire/refresh-stock", "schedule": "0 4 * * *" }
-  ]
+  "regions": ["cdg1"]
 }
