@@ -109,6 +109,85 @@ const fmtColis = (n: number | null | undefined): string => {
   return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(".", ",");
 };
 
+/* ─────────────────────────────────────────────────────────────────
+   Fraîcheur / DLC des lots — version CLIENT.
+   ⚠️ `lib/lotDlc.ts` importe `@/lib/prisma` au niveau module : l'importer ici
+   (composant client) embarquerait Prisma dans le bundle navigateur. On
+   ré-implémente donc `freshnessLabel` à l'identique (mêmes seuils, mêmes
+   libellés « DLC J-x / J+x », jour de Paris), purement côté client.
+   ───────────────────────────────────────────────────────────────── */
+type FreshnessTone = "green" | "amber" | "red" | "muted";
+
+/** Début de journée (00:00 heure de Paris) → instant UTC, en ms. */
+const parisDayMs = (ref: Date = new Date()): number => {
+  const [y, m, d] = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(ref).split("-").map(Number);
+  return Date.UTC(y, m - 1, d);
+};
+
+/** Jours « pleins » (heure de Paris) entre aujourd'hui et la DLC. */
+const daysUntil = (expiration: Date): number =>
+  Math.round((parisDayMs(expiration) - parisDayMs()) / 86_400_000);
+
+/** Étiquette + ton d'une DLC — miroir de `lib/lotDlc.freshnessLabel`. */
+const freshnessLabel = (
+  expiration: Date | null | undefined,
+): { label: string; tone: FreshnessTone } => {
+  if (!expiration) return { label: "DLC non saisie", tone: "muted" };
+  const d = expiration instanceof Date ? expiration : new Date(expiration);
+  if (Number.isNaN(d.getTime())) return { label: "DLC non saisie", tone: "muted" };
+  const days = daysUntil(d);
+  const rel = days > 0 ? `J-${days}` : `J+${Math.abs(days)}`;
+  const tone: FreshnessTone = days > 3 ? "green" : days >= 1 ? "amber" : "red";
+  return { label: `DLC ${rel}`, tone };
+};
+
+/** Classes Tailwind d'un badge fraîcheur selon le ton. */
+const FRESHNESS_TONE: Record<FreshnessTone, string> = {
+  green: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  amber: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  red: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+  muted: "bg-muted/40 text-muted-foreground",
+};
+
+/** Petit badge fraîcheur (lecture seule). `dlc === undefined` → pas encore chargé. */
+function FreshnessBadge({ dlc, className = "" }: { dlc: string | null | undefined; className?: string }) {
+  if (dlc === undefined) return null; // DLC pas encore récupérée (ou endpoint HS) → rien
+  const { label, tone } = freshnessLabel(dlc ? new Date(dlc) : null);
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${FRESHNESS_TONE[tone]} ${className}`}>
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Récupère en UN appel groupé les DLC d'une liste de lots (« EM<DocNum> »).
+ * Défensif : endpoint HS / non-OK → Map vide (aucun badge, jamais d'erreur).
+ * Renvoie batchNumber → ISO|null (clé absente si non encore connue).
+ */
+function useDlcMap(batchNumbers: string[]): Record<string, string | null> {
+  const [dlc, setDlc] = useState<Record<string, string | null>>({});
+  const key = useMemo(() => Array.from(new Set(batchNumbers.filter(Boolean))).sort().join(","), [batchNumbers]);
+  useEffect(() => {
+    if (!key) { setDlc({}); return; }
+    let cancel = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/lots/dlc?batches=${encodeURIComponent(key)}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const json = (await res.json()) as { dlc?: Record<string, string | null> };
+        if (!cancel && json && typeof json.dlc === "object" && json.dlc) setDlc(json.dlc);
+      } catch {
+        /* endpoint HS → on garde l'état courant, aucun badge n'apparaît */
+      }
+    })();
+    return () => { cancel = true; };
+  }, [key]);
+  return dlc;
+}
+
 /** Liste des entrées marchandises (SAP PurchaseDeliveryNotes) — recherche + détail. */
 export function GoodsReceiptHistory() {
   const [docs, setDocs] = useState<Receipt[]>([]);
@@ -133,6 +212,10 @@ export function GoodsReceiptHistory() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // DLC (fraîcheur) : un seul fetch groupé pour TOUS les lots chargés.
+  const allBatches = useMemo(() => docs.map((d) => d.lot).filter(Boolean), [docs]);
+  const dlcMap = useDlcMap(allBatches);
 
   // Recherche : fournisseur (code/nom) · code article · numéro (EM / BL) · date.
   const filtered = useMemo(() => {
@@ -243,9 +326,10 @@ export function GoodsReceiptHistory() {
                   className={`w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40 ${isVoided(d) ? "opacity-60" : ""}`}
                 >
                   <div className="min-w-0 flex-1">
-                    <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1.5 flex-wrap">
                       <span className={`font-mono font-semibold text-[16px] ${isVoided(d) ? "line-through text-muted-foreground" : "text-foreground"}`}>#{d.docNum}</span>
                       <CancelBadge d={d} />
+                      <FreshnessBadge dlc={dlcMap[d.lot]} />
                     </span>
                     <div className="text-[14px] text-foreground/90 mt-0.5 truncate" title={d.cardName}>
                       {d.cardName || d.cardCode}
@@ -304,7 +388,10 @@ export function GoodsReceiptHistory() {
                         <span className={isVoided(d) ? "line-through text-muted-foreground" : ""}>#{d.docNum}</span>
                         <CancelBadge d={d} className="ml-1.5 align-middle" />
                       </td>
-                      <td className="px-3 py-2 font-mono text-muted-foreground">{d.lot}</td>
+                      <td className="px-3 py-2 font-mono text-muted-foreground whitespace-nowrap">
+                        {d.lot}
+                        <FreshnessBadge dlc={dlcMap[d.lot]} className="ml-1.5 align-middle" />
+                      </td>
                       <td className="px-3 py-2">
                         <div className="font-mono font-medium truncate" title={d.cardName}>{d.cardCode}</div>
                         {d.numAtCard && <div className="text-[11px] text-muted-foreground tnum">{d.numAtCard}</div>}
@@ -361,6 +448,7 @@ export function GoodsReceiptHistory() {
               <span className="truncate min-w-0">Entrée marchandise N° {largeDoc?.docNum}</span>
               {/* Lot = « EM{docNum} » → redondant avec le N° ci-dessus : masqué sur mobile pour tenir sur UNE ligne. */}
               {largeDoc?.lot && <span className="hidden sm:inline text-[13px] font-normal font-mono text-muted-foreground shrink-0">· {largeDoc.lot}</span>}
+              {largeDoc?.lot && <FreshnessBadge dlc={dlcMap[largeDoc.lot]} className="shrink-0" />}
             </DialogTitle>
           </DialogHeader>
           {largeDoc && (

@@ -243,9 +243,10 @@ export function CallConsole() {
   const logAppel = useCallback(async (
     type: "COMMANDE" | "DEMAIN",
     scheduledFor?: string,
+    outcome?: "COMMANDE" | "DEMAIN" | "NRP" | "REFUS" | "REPONDEUR" | "LITIGE" | "RAPPELE",
   ) => {
     if (!active) return;
-    setActionLoading(type);
+    setActionLoading(outcome ?? type);
     try {
       const res = await fetch("/api/appels", {
         method: "POST",
@@ -253,6 +254,7 @@ export function CallConsole() {
         body: JSON.stringify({
           clientId: active.id,
           type,
+          outcome: outcome ?? type,
           note: callNote.trim() || undefined,
           scheduledFor: scheduledFor || undefined,
         }),
@@ -261,10 +263,19 @@ export function CallConsole() {
       const dateLabel = scheduledFor
         ? new Date(scheduledFor).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })
         : null;
+      const OUTCOME_LABELS: Record<string, string> = {
+        NRP: "📵 Pas de réponse",
+        REPONDEUR: "📨 Répondeur",
+        REFUS: "🚫 Refus",
+        LITIGE: "⚠️ Litige",
+        RAPPELE: "↩️ Rappellera",
+      };
       toast.success(
         type === "COMMANDE"
           ? `✅ ${dateLabel ? `Pré-commande ${dateLabel}` : "Commande"} — ${active.nom}`
-          : `📅 À demain — ${active.nom}`,
+          : outcome && OUTCOME_LABELS[outcome]
+            ? `${OUTCOME_LABELS[outcome]} — ${active.nom}`
+            : `📅 À demain — ${active.nom}`,
       );
       // Action journalisée → la note rapide n'a plus lieu d'être conservée.
       clearCallNote(active.id);
@@ -582,6 +593,7 @@ export function CallConsole() {
           <ActionPanel
             client={active}
             onDemain={() => logAppel("DEMAIN")}
+            onOutcome={(o) => logAppel("DEMAIN", undefined, o)}
             onRappel={() => setRappelOpen(true)}
             onBL={() => setBlOpen(true)}
             onSkip={advance}
@@ -1765,11 +1777,12 @@ function Block({
 }
 
 function ActionPanel({
-  client, onDemain, onRappel, onBL, onSkip, actionLoading,
+  client, onDemain, onOutcome, onRappel, onBL, onSkip, actionLoading,
   callNote, setCallNote, keymap,
 }: {
   client: Client | null;
   onDemain: () => void;
+  onOutcome: (o: "NRP" | "REPONDEUR" | "REFUS" | "RAPPELE") => void;
   onRappel: () => void;
   onBL: () => void;
   onSkip: () => void;
@@ -1893,6 +1906,26 @@ function ActionPanel({
           tipLabel="Rappel programmé"
           tipContent={<>Choisit une date et heure précises pour rappeler ce client.<br/>L&apos;événement est ajouté à ton calendrier Microsoft.</>}
         />
+        {/* Motifs de non-vente — loguent l'appel (il compte alors dans le taux de
+            conversion, contrairement à « Passer ») et passent au client suivant. */}
+        <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+          {([
+            ["NRP", "Pas de réponse"],
+            ["REPONDEUR", "Répondeur"],
+            ["REFUS", "Refus"],
+            ["RAPPELE", "Rappellera"],
+          ] as const).map(([o, label]) => (
+            <button
+              key={o}
+              type="button"
+              onClick={() => onOutcome(o)}
+              disabled={actionLoading != null}
+              className="px-2 py-1.5 rounded-lg text-[11px] font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 disabled:opacity-50 transition-colors"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           onClick={onSkip}

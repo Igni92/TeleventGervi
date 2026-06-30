@@ -37,6 +37,7 @@ type Line = {
   marque: string | null;                       // désignation : marque
   condt: string | null;                        // désignation : conditionnement
   variete: string | null;                      // désignation : variété (FrgnName)
+  dlc: string;                                  // DLC optionnelle (fraîcheur) — "" si non saisie (YYYY-MM-DD)
 };
 
 const WAREHOUSES: { code: "000" | "01" | "R1"; label: string }[] = [
@@ -235,6 +236,7 @@ export function GoodsReceiptForm() {
         marque: p.uMarque,
         condt: p.uCondi,
         variete: p.frgnName,
+        dlc: "",
       }];
     });
   }, []);
@@ -292,6 +294,39 @@ export function GoodsReceiptForm() {
           ? `${lines.length} ligne(s) — stock incrémenté. ${retro} BL ouvert(s) du jour relié(s) à ce lot.`
           : `${lines.length} ligne(s) — stock incrémenté.`,
       });
+
+      // ── DLC (fraîcheur) : best-effort, ne bloque JAMAIS la réception ──
+      // Le n° de lot créé est exposé par l'API : json.lot === "EM<DocNum>"
+      // (cf. app/api/sap/goods-receipts/route.ts → { lot, docNum }). On POST
+      // chaque DLC saisie vers /api/lots/dlc. Une seule DLC par lot (toutes les
+      // lignes de cette EM partagent le même batchNumber) : on dédoublonne par
+      // itemCode et on laisse l'upsert serveur trancher si plusieurs diffèrent.
+      const batchNumber: string | undefined =
+        typeof json.lot === "string" && json.lot
+          ? json.lot
+          : (typeof json.docNum === "number" ? `EM${json.docNum}` : undefined);
+      const dlcLines = lines.filter((l) => l.dlc.trim() !== "");
+      if (batchNumber && dlcLines.length > 0) {
+        const results = await Promise.allSettled(
+          dlcLines.map((l) =>
+            fetch("/api/lots/dlc", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ batchNumber, itemCode: l.itemCode, expirationDate: l.dlc }),
+            }).then((r) => { if (!r.ok) throw new Error(String(r.status)); }),
+          ),
+        );
+        const failed = results.filter((r) => r.status === "rejected").length;
+        if (failed === 0) {
+          toast.info(`Fraîcheur enregistrée pour le lot ${batchNumber} (${dlcLines.length} DLC).`);
+        } else {
+          toast.info(`Réception OK — ${dlcLines.length - failed}/${dlcLines.length} DLC enregistrée(s) (le reste a échoué, sans impact sur l'entrée).`);
+        }
+      } else if (!batchNumber && dlcLines.length > 0) {
+        // Cas théorique : la réponse n'expose pas le lot → on n'enregistre pas à l'aveugle.
+        toast.info("Réception créée, mais le n° de lot n'a pas été renvoyé : DLC non enregistrée(s).");
+      }
+
       setLastReceipt({ docNum: json.docNum, lot: json.lot });
       reset();
     } catch (e) {
@@ -371,8 +406,8 @@ export function GoodsReceiptForm() {
                     />
                   </div>
                 </div>
-                <div className="flex items-end justify-between gap-3">
-                  <div className="flex-1 min-w-0">
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
                     <label className="block text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">Entrepôt</label>
                     <select
                       value={l.warehouseCode}
@@ -383,6 +418,17 @@ export function GoodsReceiptForm() {
                       {WAREHOUSES.map((w) => <option key={w.code} value={w.code}>{w.label}</option>)}
                     </select>
                   </div>
+                  <div>
+                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">DLC (optionnel)</label>
+                    <input
+                      type="date"
+                      value={l.dlc}
+                      onChange={(e) => updateLine(i, { dlc: e.target.value })}
+                      className="h-11 w-full rounded-md border border-input bg-background px-2 text-[14px]"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-end justify-end gap-3">
                   <div className="text-right shrink-0">
                     <span className="block text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Total HT</span>
                     <span className="text-[18px] font-bold tnum text-foreground">{lineHT != null ? fmtEur(lineHT) : "—"}</span>
@@ -411,6 +457,7 @@ export function GoodsReceiptForm() {
                 <th className="text-left px-2 py-2 font-semibold">Variété</th>
                 <th className="text-left px-2 py-2 font-semibold">Condt</th>
                 <th className="text-left px-2 py-2 font-semibold w-36">Entrepôt</th>
+                <th className="text-left px-2 py-2 font-semibold w-36">DLC</th>
                 <th className="text-right px-2 py-2 font-semibold w-24">Prix /pie HT</th>
                 <th className="text-right px-2 py-2 font-semibold w-24">Total HT</th>
                 <th className="w-8" />
@@ -452,6 +499,14 @@ export function GoodsReceiptForm() {
                       </select>
                     </td>
                     <td className="px-2 py-2">
+                      <input
+                        type="date"
+                        value={l.dlc}
+                        onChange={(e) => updateLine(i, { dlc: e.target.value })}
+                        className="h-9 w-full rounded-md border border-input bg-background px-2 text-[12.5px]"
+                      />
+                    </td>
+                    <td className="px-2 py-2">
                       <NumberInput
                         value={priceNum}
                         onValueChange={(n) => updateLine(i, { price: n == null ? "" : String(n) })}
@@ -473,7 +528,7 @@ export function GoodsReceiptForm() {
             </tbody>
             <tfoot>
               <tr className="border-t border-border bg-secondary/30">
-                <td colSpan={9} className="px-2 py-2 text-right text-[10.5px] uppercase tracking-wide font-semibold text-muted-foreground">
+                <td colSpan={10} className="px-2 py-2 text-right text-[10.5px] uppercase tracking-wide font-semibold text-muted-foreground">
                   Total HT
                 </td>
                 <td className="px-2 py-2 text-right tnum font-bold text-foreground whitespace-nowrap">
