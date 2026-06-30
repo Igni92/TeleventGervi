@@ -88,6 +88,10 @@ export type RappelFormValues = z.infer<typeof rappelSchema>;
 export const appelLogSchema = z.object({
   clientId: z.string().min(1),
   type: z.enum(["COMMANDE", "DEMAIN"]),
+  // Issue de l'appel (audit) — optionnel, rétrocompatible avec `type`.
+  outcome: z
+    .enum(["COMMANDE", "DEMAIN", "NRP", "REFUS", "REPONDEUR", "LITIGE", "RAPPELE"])
+    .optional(),
   note: z.string().max(500).optional().or(z.literal("")),
   // Pré-commande : ISO date string. Si présent, le client est snoozé jusqu'à
   // cette date (commande déjà enregistrée, pas besoin de rappeler).

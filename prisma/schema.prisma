@@ -550,6 +550,7 @@ model Rappel {
   note       String?
   msEventId  String?
   statut     String   @default("PLANIFIE") // PLANIFIE | FAIT | ANNULE
+  createdBy  String? // email/trigramme de l'auteur du rappel (#31)
   createdAt  DateTime @default(now())
 }
 
@@ -558,13 +559,17 @@ model AppelLog {
   id           String    @id @default(cuid())
   clientId     String
   client       Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  type         String // COMMANDE | DEMAIN
+  type         String // COMMANDE | DEMAIN (issue principale — rétrocompat)
+  // Issue détaillée de l'appel (#41) : COMMANDE | DEMAIN | NRP | REFUS |
+  // REPONDEUR | LITIGE | RAPPELE. Sert au vrai taux de conversion / motifs.
+  outcome      String?
   note         String?
   heureAppel   DateTime  @default(now())
   // Pré-commande : date de livraison/traitement programmée.
   // Quand renseigné, le client est "snoozé" — il n'apparaît plus dans la queue
   // tant que cette date n'est pas dépassée (pas besoin de le rappeler avant).
   scheduledFor DateTime?
+  createdBy    String? // email/trigramme de l'auteur de l'appel (#31)
   createdAt    DateTime  @default(now())
 }
 
@@ -921,4 +926,41 @@ model RelanceLog {
   @@index([clientId])
   @@index([level])
   @@index([sentAt])
+}
+
+// ════════════════════════════════════════════════════════════════
+//   CRM — Lot 2 : journal d'audit + DLC côté TeleVent
+// ════════════════════════════════════════════════════════════════
+
+// Journal d'audit applicatif (#8) — trace les actions sensibles
+// (annulation BL/EM/commande, modif de prix, suppression, bascule SAP,
+// octroi de rôle). Consultable pour la traçabilité / les litiges.
+model AuditLog {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  actorEmail String? // email de l'auteur
+  actorName  String?
+  action     String // ex. CLIENT_DELETE | ORDER_CANCEL | EM_CANCEL | PO_CANCEL | PO_MODIF | ENV_SWITCH | ROLE_GRANT
+  entity     String? // ex. Client | SapOrder | PurchaseOrder | User
+  entityId   String? // id / docEntry concerné
+  summary    String? // résumé lisible
+  details    Json? // contexte structuré (avant/après, montants…)
+
+  @@index([createdAt])
+  @@index([action])
+}
+
+// DLC saisie côté TeleVent par lot (#1/#6) — NE touche PAS SAP, et survit
+// donc à la synchro miroir (qui écrase ProductBatch). Clé = n° de lot (EM<docNum>).
+model LotDlc {
+  id             String    @id @default(cuid())
+  batchNumber    String    @unique // ex. "EM14878"
+  itemCode       String?
+  expirationDate DateTime? // DLC
+  createdBy      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([itemCode])
+  @@index([expirationDate])
 }

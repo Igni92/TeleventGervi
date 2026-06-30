@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getAccessScope, clientInScope, clientIdsInScope } from "@/lib/permissions";
+import { getAccessScope, clientInScope, clientIdsInScope, getOwnSlpName } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { appelLogSchema } from "@/lib/validations";
 
@@ -49,10 +49,15 @@ export async function POST(req: NextRequest) {
     const client = await prisma.client.findUnique({ where: { id: data.clientId } });
     if (!client) return NextResponse.json({ error: "Client introuvable" }, { status: 404 });
 
+    // Auteur : email de session, à défaut le trigramme commercial, sinon null.
+    const createdBy = session.user?.email ?? (await getOwnSlpName(session)) ?? null;
+
     const appel = await prisma.appelLog.create({
       data: {
         clientId: data.clientId,
         type: data.type,
+        outcome: data.outcome ?? undefined,
+        createdBy,
         note: data.note || null,
         heureAppel: new Date(),
         scheduledFor: data.scheduledFor ? new Date(data.scheduledFor) : null,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requirePreparateurOrAdmin } from "@/lib/permissions";
 import { sap } from "@/lib/sapb1";
+import { writeAudit } from "@/lib/audit";
 
 /**
  * POST /api/sap/goods-receipts/cancel
@@ -51,6 +52,14 @@ export async function POST(req: NextRequest) {
   try {
     await sap.post(`PurchaseDeliveryNotes(${docEntry})/Cancel`, undefined);
     console.log(`[EM] Annulée — DocEntry ${docEntry} (DB ${process.env.SAP_B1_COMPANY_DB})`);
+    await writeAudit({
+      session,
+      action: "EM_CANCEL",
+      entity: "PurchaseDeliveryNote",
+      entityId: String(docEntry),
+      summary: `Annulation entrée marchandise — DocEntry ${docEntry} (n° ${pdn.DocNum})`,
+      details: { docEntry, docNum: pdn.DocNum },
+    });
     return NextResponse.json({ ok: true, docEntry, docNum: pdn.DocNum, cancelled: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

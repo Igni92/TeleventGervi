@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { clientSchema } from "@/lib/validations";
 import { sap } from "@/lib/sapb1";
 import { standardizePhone } from "@/lib/phone";
+import { writeAudit } from "@/lib/audit";
 
 export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -131,6 +132,14 @@ export async function DELETE(_req: NextRequest, props: { params: Promise<{ id: s
     const existing = await prisma.client.findUnique({ where: { id: params.id } });
     if (!existing) return NextResponse.json({ error: "Client introuvable" }, { status: 404 });
     await prisma.client.delete({ where: { id: params.id } });
+    await writeAudit({
+      session,
+      action: "CLIENT_DELETE",
+      entity: "Client",
+      entityId: params.id,
+      summary: `Suppression du client ${existing.code ?? params.id}`,
+      details: { code: existing.code, nom: existing.nom },
+    });
     return NextResponse.json({ message: "Client supprimé" });
   } catch (error) {
     console.error("[DELETE /api/clients/[id]]", error);

@@ -4,6 +4,7 @@ import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { mirrorCancelOrder } from "@/lib/sapMirror";
+import { writeAudit } from "@/lib/audit";
 
 /**
  * POST /api/sap/orders/cancel
@@ -42,6 +43,15 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       console.warn("[Order] Miroir annulation échoué (non-bloquant):", (e as Error).message);
     }
+
+    await writeAudit({
+      session,
+      action: "ORDER_CANCEL",
+      entity: "SapOrder",
+      entityId: String(body.docEntry),
+      summary: `Annulation BL — DocEntry ${body.docEntry}`,
+      details: { docEntry: body.docEntry, cardCode: ord?.cardCode ?? null },
+    });
 
     return NextResponse.json({ ok: true, docEntry: body.docEntry, cancelled: true });
   } catch (e) {

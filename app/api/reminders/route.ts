@@ -108,6 +108,7 @@ export async function POST(req: NextRequest) {
         note: data.note || null,
         msEventId,
         statut: "PLANIFIE",
+        createdBy: session.user?.email ?? null,
       },
       include: {
         client: { select: { nom: true, code: true } },
