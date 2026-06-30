@@ -158,7 +158,10 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
   const [animations, setAnimations] = useState<"auto" | "on" | "off">("auto");
   const [promoAnim, setPromoAnim] = useState<"on" | "off">("on");
   const [promoNotifs, setPromoNotifs] = useState<"on" | "off">("on");
-  const [brandLogos, setBrandLogos] = useState<"on" | "off">("on");
+  // Logos de marque — réglables indépendamment par zone.
+  const [logoConsole, setLogoConsole] = useState<"on" | "off">("on");
+  const [logoLivraison, setLogoLivraison] = useState<"on" | "off">("on");
+  const [logoInventaire, setLogoInventaire] = useState<"on" | "off">("on");
   // Contraste de survol — PROPRE à l'utilisateur connecté (clé suffixée).
   const [contrast, setContrast] = useState<number>(HOVER_CONTRAST_DEFAULT);
   const [contrastSet, setContrastSet] = useState<boolean>(false);
@@ -180,7 +183,9 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
 
     setPromoAnim(readSetting(SETTING_KEYS.promoBannerAnim, "on") === "off" ? "off" : "on");
     setPromoNotifs(readSetting(SETTING_KEYS.promoNotifs, "on") === "off" ? "off" : "on");
-    setBrandLogos(readSetting(SETTING_KEYS.brandLogos, "on") === "off" ? "off" : "on");
+    setLogoConsole(readSetting(SETTING_KEYS.brandLogosConsole, "on") === "off" ? "off" : "on");
+    setLogoLivraison(readSetting(SETTING_KEYS.brandLogosLivraison, "on") === "off" ? "off" : "on");
+    setLogoInventaire(readSetting(SETTING_KEYS.brandLogosInventaire, "on") === "off" ? "off" : "on");
 
     // Contraste de survol propre à l'utilisateur (valeur vide = jamais réglé).
     const cRaw = readSetting(hoverContrastKey(userKey), "");
@@ -197,7 +202,9 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
       if (key === SETTING_KEYS.animations && value) setAnimations(value as typeof animations);
       if (key === SETTING_KEYS.promoBannerAnim) setPromoAnim(value === "off" ? "off" : "on");
       if (key === SETTING_KEYS.promoNotifs) setPromoNotifs(value === "off" ? "off" : "on");
-      if (key === SETTING_KEYS.brandLogos) setBrandLogos(value === "off" ? "off" : "on");
+      if (key === SETTING_KEYS.brandLogosConsole) setLogoConsole(value === "off" ? "off" : "on");
+      if (key === SETTING_KEYS.brandLogosLivraison) setLogoLivraison(value === "off" ? "off" : "on");
+      if (key === SETTING_KEYS.brandLogosInventaire) setLogoInventaire(value === "off" ? "off" : "on");
       if (key === hoverContrastKey(userKey)) {
         if (value && Number.isFinite(Number(value))) { setContrast(Math.max(0, Math.min(100, Number(value)))); setContrastSet(true); }
         else { setContrast(HOVER_CONTRAST_DEFAULT); setContrastSet(false); }
@@ -329,14 +336,31 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
       {/* 3 ter ── Marques & logos (réglage + page dédiée) ─────────── */}
       <SurfaceCard accent="violet" title="Marques & logos" icon={<Tags className="h-3.5 w-3.5" />}>
         <div className="space-y-4">
-          <SettingRow
-            title="Afficher les logos de marque"
-            desc="Logos affichés à côté des produits dans la console, le détail des livraisons à préparer et l'inventaire du stock. Désactivé : aucun logo (les logos enregistrés sont conservés)."
-          >
+          <p className="text-[12px] text-muted-foreground -mt-1 max-w-md">
+            Affiche les logos à côté des produits — activable indépendamment par zone.
+            Désactivé : aucun logo dans la zone (les logos enregistrés sont conservés).
+          </p>
+          <SettingRow title="Logos dans la console">
             <SegmentToggle
-              ariaLabel="Affichage des logos de marque"
-              value={brandLogos}
-              onChange={(v) => { setBrandLogos(v); writeSetting(SETTING_KEYS.brandLogos, v); }}
+              ariaLabel="Logos de marque dans la console"
+              value={logoConsole}
+              onChange={(v) => { setLogoConsole(v); writeSetting(SETTING_KEYS.brandLogosConsole, v); }}
+              options={ONOFF}
+            />
+          </SettingRow>
+          <SettingRow title="Logos en préparation (livraisons)">
+            <SegmentToggle
+              ariaLabel="Logos de marque dans le détail des livraisons"
+              value={logoLivraison}
+              onChange={(v) => { setLogoLivraison(v); writeSetting(SETTING_KEYS.brandLogosLivraison, v); }}
+              options={ONOFF}
+            />
+          </SettingRow>
+          <SettingRow title="Logos dans l'inventaire">
+            <SegmentToggle
+              ariaLabel="Logos de marque dans l'inventaire du stock"
+              value={logoInventaire}
+              onChange={(v) => { setLogoInventaire(v); writeSetting(SETTING_KEYS.brandLogosInventaire, v); }}
               options={ONOFF}
             />
           </SettingRow>

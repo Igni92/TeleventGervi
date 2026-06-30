@@ -259,7 +259,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   // Logos de marques (réglés sur /parametres/marques) → affichés dans la liste
   // stock, entre le stock et la désignation. Hook partagé : 1 seul fetch pour
   // toute l'app + respect du réglage « Afficher les logos » (paramètres).
-  const brandLogos = useBrandLogos();
+  const brandLogos = useBrandLogos("console");
   // C4 — densité d'affichage de la liste stock (réglée sur /parametres, lue ici)
   const [density, setDensity] = useState<Density>("normal");
   // Panier

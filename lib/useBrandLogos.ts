@@ -10,11 +10,20 @@ import { SETTING_KEYS, readSetting, onSettingChange } from "@/components/setting
  *
  * La Map est indexée par marque normalisée (trim + minuscules) → data-URL.
  *
- * Respecte le réglage local « Afficher les logos » (SETTING_KEYS.brandLogos) :
- * quand il est sur "off", le hook renvoie une Map VIDE → BrandLogo ne rend rien
- * partout (console, détail livraison, inventaire), sans toucher aux logos stockés.
+ * Respecte le réglage local « Afficher les logos » PROPRE À CHAQUE ZONE
+ * (console / livraison / inventaire). Quand la zone est sur "off", le hook
+ * renvoie une Map VIDE → BrandLogo ne rend rien dans cette zone, sans toucher
+ * aux logos stockés ni aux autres zones.
  */
 type LogoMap = Map<string, string>;
+
+export type LogoZone = "console" | "livraison" | "inventaire";
+
+const ZONE_KEY: Record<LogoZone, string> = {
+  console: SETTING_KEYS.brandLogosConsole,
+  livraison: SETTING_KEYS.brandLogosLivraison,
+  inventaire: SETTING_KEYS.brandLogosInventaire,
+};
 
 const EMPTY: LogoMap = new Map();
 
@@ -37,23 +46,20 @@ function loadLogos(): Promise<LogoMap> {
   return inflight;
 }
 
-/** Lit le réglage d'affichage des logos (défaut : activé). */
-function logosEnabled(): boolean {
-  return readSetting(SETTING_KEYS.brandLogos, "on") !== "off";
-}
-
-/** Renvoie la Map des logos — vide tant que le chargement n'est pas terminé,
- *  ou si l'affichage des logos est désactivé dans les paramètres. */
-export function useBrandLogos(): LogoMap {
+/** Renvoie la Map des logos pour une zone — vide tant que le chargement n'est
+ *  pas terminé, ou si l'affichage des logos est désactivé pour cette zone. */
+export function useBrandLogos(zone: LogoZone): LogoMap {
+  const key = ZONE_KEY[zone];
   const [logos, setLogos] = useState<LogoMap>(() => cache ?? new Map());
-  const [enabled, setEnabled] = useState<boolean>(() => logosEnabled());
+  const [enabled, setEnabled] = useState<boolean>(() => readSetting(key, "on") !== "off");
   useEffect(() => {
     let cancelled = false;
     loadLogos().then((m) => { if (!cancelled) setLogos(m); });
-    const off = onSettingChange((key, value) => {
-      if (key === SETTING_KEYS.brandLogos) setEnabled(value !== "off");
+    setEnabled(readSetting(key, "on") !== "off");
+    const off = onSettingChange((k, value) => {
+      if (k === key) setEnabled(value !== "off");
     });
     return () => { cancelled = true; off(); };
-  }, []);
+  }, [key]);
   return enabled ? logos : EMPTY;
 }

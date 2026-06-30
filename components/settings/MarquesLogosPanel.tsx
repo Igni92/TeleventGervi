@@ -109,9 +109,11 @@ export function MarquesLogosPanel() {
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <p className="text-[12px] text-muted-foreground max-w-md">
-              Associe un logo à chaque marque du catalogue. Le logo s&apos;affiche ensuite
-              dans la console (liste produits), dans le détail des livraisons à préparer
-              et dans l&apos;inventaire du stock.
+              Associe un logo à chaque marque. Il s&apos;affiche dans une tuile blanche
+              carrée uniforme (console, préparation, inventaire). Pour un rendu net :
+              <b> PNG à fond transparent ou blanc</b>, logo détouré et centré, idéalement
+              carré (≥ 128&nbsp;px). Les logos clairs sur fond transparent sont à éviter
+              (invisibles sur fond blanc).
             </p>
             <span className="text-[11.5px] font-semibold text-muted-foreground tnum shrink-0">
               {withLogo}/{marques.length} avec logo
@@ -140,11 +142,11 @@ export function MarquesLogosPanel() {
             <ul className="divide-y divide-border/60 rounded-lg border border-border/60 overflow-hidden">
               {filtered.map((m) => (
                 <li key={m.marque} className="flex items-center gap-3 px-3 py-2.5 bg-card/40">
-                  {/* Aperçu logo */}
-                  <span className="h-12 w-12 shrink-0 rounded-md border border-border bg-background flex items-center justify-center overflow-hidden">
+                  {/* Aperçu logo — même tuile blanche que l'affichage réel */}
+                  <span className="h-12 w-12 shrink-0 rounded-lg bg-white ring-1 ring-black/10 flex items-center justify-center overflow-hidden p-1">
                     {m.logoUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={m.logoUrl} alt={m.marque} className="max-h-11 max-w-11 object-contain" />
+                      <img src={m.logoUrl} alt={m.marque} className="max-h-full max-w-full object-contain" />
                     ) : (
                       <ImageOff className="h-4 w-4 text-muted-foreground/40" />
                     )}

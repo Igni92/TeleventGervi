@@ -723,7 +723,7 @@ function OrderRow({
   const [open, setOpen] = useState(false);
   const [savingCarrier, setSavingCarrier] = useState(false);
   const [savingTournee, setSavingTournee] = useState(false);
-  const brandLogos = useBrandLogos();
+  const brandLogos = useBrandLogos("livraison");
 
   // Charge les tournées du transporteur courant (une fois) pour le sélecteur.
   useEffect(() => {

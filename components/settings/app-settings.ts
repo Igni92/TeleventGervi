@@ -29,11 +29,13 @@ export const SETTING_KEYS = {
   /** modale « Nouvelles promotions » à l'ouverture : "on" | "off" (défaut on) */
   promoNotifs: "televente:promoNotifs",
   /**
-   * Affichage des logos de marque (console, détail livraison, inventaire) :
-   * "on" (défaut) → logos visibles · "off" → masqués partout.
-   * Honoré par le hook useBrandLogos (map vide quand off → aucun logo rendu).
+   * Affichage des logos de marque, RÉGLABLE PAR ZONE ("on" défaut · "off" masqué).
+   * Chacune est indépendante → on peut couper les logos dans la console mais les
+   * garder dans l'inventaire, etc. Honoré par useBrandLogos(zone) (map vide → rien).
    */
-  brandLogos: "televente:brandLogos",
+  brandLogosConsole: "televente:brandLogos:console",
+  brandLogosLivraison: "televente:brandLogos:livraison",
+  brandLogosInventaire: "televente:brandLogos:inventaire",
   /**
    * Animations d'ambiance globales (aurora, anneaux radar du fond) :
    *   "on"   → animées

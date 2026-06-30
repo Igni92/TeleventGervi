@@ -296,7 +296,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
 
   const { families, ordered } = useMemo(() => buildFamilies(effectiveProducts), [effectiveProducts]);
   const productByCode = useMemo(() => new Map(ordered.map((p) => [p.itemCode, p])), [ordered]);
-  const brandLogos = useBrandLogos();
+  const brandLogos = useBrandLogos("inventaire");
 
   /** Tags désignation (marque/condt/calibre/pays) d'un article — mêmes couleurs que les commandes. */
   const productChips = (itemCode: string, className?: string) => {
