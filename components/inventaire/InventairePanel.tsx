@@ -19,6 +19,7 @@ import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { BrandLogo } from "@/components/BrandLogo";
 import { useBrandLogos } from "@/lib/useBrandLogos";
 import { designationProduit } from "@/lib/produit-designation";
+import { displayPersonName } from "@/lib/userNames";
 import {
   buildFamilies, sapInfo, ecartOf, fmt, fmtDate, fruitEmoji, productTile, MAX_PHOTOS,
   type Product, type DraftPhoto,
@@ -679,7 +680,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
             <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand-500/15 text-brand-600 dark:text-brand-300"><Boxes className="h-5 w-5" /></div>
             <div className="min-w-0 flex-1">
               <h3 className="text-[15px] font-bold text-foreground">Régulariser le stock SAP</h3>
-              <p className="text-[11.5px] text-muted-foreground">Inventaire du {fmtDate(adjustFor.createdAt)} · {adjustFor.createdBy}</p>
+              <p className="text-[11.5px] text-muted-foreground">Inventaire du {fmtDate(adjustFor.createdAt)} · {displayPersonName(adjustFor.createdBy)}</p>
             </div>
             <button onClick={() => !adjusting && closeAdjust()} className="grid h-8 w-8 place-items-center rounded-full text-muted-foreground hover:bg-muted" aria-label="Fermer"><X className="h-4 w-4" /></button>
           </div>
@@ -877,7 +878,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
             </h2>
             <p className="text-[12px] text-muted-foreground tnum">
               {editing
-                ? `${fmtDate(editing.createdAt)} · ${editing.createdBy}`
+                ? `${fmtDate(editing.createdAt)} · ${displayPersonName(editing.createdBy)}`
                 : `${nbCountedAll} article(s) · ${nbEcartsAll} écart(s) · ${photos.length} photo(s)`}
             </p>
           </div>
@@ -1257,20 +1258,20 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
               <div key={s.id} className="rounded-xl border border-border p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="text-[13px] font-semibold text-foreground">{fmtDate(s.createdAt)} · {s.createdBy}</div>
+                    <div className="text-[13px] font-semibold text-foreground">{fmtDate(s.createdAt)} · {displayPersonName(s.createdBy)}</div>
                     <div className="text-[12px] text-muted-foreground">
                       {s.lines.length} article(s) · {s.nbEcarts} écart(s)
                       {nbPhotos > 0 ? ` · ${nbPhotos} photo(s)` : ""}{s.note ? ` · « ${s.note} »` : ""}
                     </div>
                     {s.status === "reviewed" && s.reviewedBy && (
-                      <div className="text-[11px] text-emerald-600/90 dark:text-emerald-400/90">Revu par {s.reviewedBy}</div>
+                      <div className="text-[11px] text-emerald-600/90 dark:text-emerald-400/90">Revu par {displayPersonName(s.reviewedBy)}</div>
                     )}
                     {s.updatedBy && (
-                      <div className="text-[11px] text-sky-600/90 dark:text-sky-400/90">Dernière correction par {s.updatedBy}</div>
+                      <div className="text-[11px] text-sky-600/90 dark:text-sky-400/90">Dernière correction par {displayPersonName(s.updatedBy)}</div>
                     )}
                     {s.adjustment && (sessionLocked(s) || s.adjustment.status === "error") && (
                       <div className={`text-[11px] ${s.adjustment.status === "error" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600/90 dark:text-emerald-400/90"}`}>
-                        {s.adjustment.status === "error" ? (sessionLocked(s) ? "⚠ Régularisation partielle en erreur" : "⚠ Régularisation échouée (rien posté — à reprendre)") : "Stock régularisé"} par {s.adjustment.by}
+                        {s.adjustment.status === "error" ? (sessionLocked(s) ? "⚠ Régularisation partielle en erreur" : "⚠ Régularisation échouée (rien posté — à reprendre)") : "Stock régularisé"} par {displayPersonName(s.adjustment.by)}
                         {s.adjustment.sapExitDocNum ? ` · sortie #${s.adjustment.sapExitDocNum}` : ""}
                         {s.adjustment.sapEntryDocNum ? ` · entrée #${s.adjustment.sapEntryDocNum}` : ""}
                         {` · ${s.adjustment.nbSorties}↓/${s.adjustment.nbEntrees}↑`}

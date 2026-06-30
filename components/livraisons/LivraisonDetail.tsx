@@ -5,7 +5,7 @@ import {
   Truck, Boxes, Scale, Users, FileText, Receipt,
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
   RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw, Pencil,
-  Maximize2, UserCheck, Undo2,
+  Maximize2, UserCheck, Undo2, ListChecks,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -13,6 +13,7 @@ import { ClientLink } from "@/components/ClientLink";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { BrandLogo } from "@/components/BrandLogo";
 import { useBrandLogos } from "@/lib/useBrandLogos";
+import { displayPersonName } from "@/lib/userNames";
 import { broadcastActiveClient } from "@/lib/consoleSync";
 import {
   nextDeliveryDate, frenchHolidayLabel, nextWorkingDeliveryDay,
@@ -55,6 +56,7 @@ interface Doc {
   carrierName: string | null;
   clientType: string | null;   // GMS | CHR | EXPORT | null
   prepared: boolean;           // « faite » — coché manuellement
+  preparedBy?: string | null;  // qui a marqué la commande « faite »
   preparer?: string | null;    // préparateur affecté (qui a ouvert la commande)
   incomplete?: boolean;        // « à reprendre » — remise sur la file (pas finie)
   excluded: boolean;           // « avoir / exclu » — déduit 100% des totaux
@@ -100,23 +102,15 @@ const fmtEur = (v: number) =>
 const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 /* ─────────────────────────────────────────────────────────────
-   Segment client (GMS / CHR / EXPORT) — filtre + différenciation
+   Onglet d'état de préparation — À préparer / Fait
 ───────────────────────────────────────────────────────────── */
-type Segment = "ALL" | "GMS" | "CHR" | "EXPORT" | "AUTRES";
+type StatusTab = "A_PREPARER" | "FAIT";
 
-/** Une commande appartient-elle au segment filtré ? (AUTRES = type absent) */
-function matchSegment(d: { clientType: string | null }, seg: Segment): boolean {
-  if (seg === "ALL") return true;
-  if (seg === "AUTRES") return d.clientType !== "GMS" && d.clientType !== "CHR" && d.clientType !== "EXPORT";
-  return d.clientType === seg;
-}
-
-/** Styles par segment : pastille de filtre (active/inactive) + badge de ligne. */
-const SEG_UI: Record<Exclude<Segment, "ALL">, { label: string; active: string; badge: string }> = {
-  GMS:    { label: "GMS",    active: "bg-blue-600 text-white border-blue-600",       badge: "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" },
-  CHR:    { label: "CHR",    active: "bg-amber-500 text-white border-amber-500",     badge: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" },
-  EXPORT: { label: "Export", active: "bg-violet-600 text-white border-violet-600",   badge: "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" },
-  AUTRES: { label: "Autres", active: "bg-foreground text-background border-foreground", badge: "bg-muted text-muted-foreground" },
+/** Badge de ligne par segment client (conservé pour CHR / EXPORT, le tag GMS
+ *  n'étant plus affiché — la distinction utile est désormais À préparer / Fait). */
+const SEG_UI: Record<"CHR" | "EXPORT", { label: string; badge: string }> = {
+  CHR:    { label: "CHR",    badge: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" },
+  EXPORT: { label: "Export", badge: "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" },
 };
 
 /* ═════════════════════════════════════════════════════════════
@@ -286,8 +280,25 @@ export function LivraisonDetail() {
     [load],
   );
 
-  // ── Filtre par segment client (GMS / CHR / EXPORT) ──
-  const [segment, setSegment] = useState<Segment>("ALL");
+  // ── Onglet d'état : « À préparer » (par défaut) / « Fait » ──
+  const [statusTab, setStatusTab] = useState<StatusTab>("A_PREPARER");
+
+  // Mise à jour optimiste d'UNE commande dans `data` (statut « faite », auteur,
+  // « à reprendre »…) → la carte change d'onglet sans recharger toute la liste.
+  const patchDoc = useCallback((docEntry: number, patch: Partial<Doc>) => {
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            carriers: prev.carriers.map((c) => ({
+              ...c,
+              docs: c.docs.map((d) => (d.docEntry === docEntry ? { ...d, ...patch } : d)),
+            })),
+          }
+        : prev,
+    );
+  }, []);
+
   // ── Repliage des groupes transporteur (clé = code transporteur) ──
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleCollapse = useCallback((key: string) => {
@@ -298,30 +309,24 @@ export function LivraisonDetail() {
     });
   }, []);
 
-  // Comptes par segment (sur l'ensemble, pour les pastilles du filtre).
-  const segCounts = useMemo(() => {
-    const c: Record<Segment, number> = { ALL: 0, GMS: 0, CHR: 0, EXPORT: 0, AUTRES: 0 };
-    if (!data) return c;
-    for (const car of data.carriers) for (const d of car.docs) {
-      c.ALL++;
-      if (d.clientType === "GMS") c.GMS++;
-      else if (d.clientType === "CHR") c.CHR++;
-      else if (d.clientType === "EXPORT") c.EXPORT++;
-      else c.AUTRES++;
+  // Comptes par état (sur l'ensemble, pour les compteurs des onglets).
+  const statusCounts = useMemo(() => {
+    let aPreparer = 0, fait = 0;
+    if (data) for (const car of data.carriers) for (const d of car.docs) {
+      if (d.prepared) fait++; else aPreparer++;
     }
-    return c;
+    return { aPreparer, fait };
   }, [data]);
 
-  // Vue filtrée : on recoupe les commandes par segment et on recalcule les
-  // métriques (groupes + bandeau de synthèse) pour rester cohérent.
+  // Vue filtrée par onglet (À préparer / Fait) : on recoupe les commandes et on
+  // recalcule les métriques (groupes + bandeau de synthèse) pour rester cohérent.
   const view = useMemo(() => {
     if (!data) return null;
-    if (segment === "ALL") return data;
     const r1 = (n: number) => Math.round(n * 10) / 10;
     const r2 = (n: number) => Math.round(n * 100) / 100;
     const carriers = data.carriers
       .map((c) => {
-        const docs = c.docs.filter((d) => matchSegment(d, segment));
+        const docs = c.docs.filter((d) => (statusTab === "FAIT" ? d.prepared : !d.prepared));
         return {
           ...c, docs,
           orders: docs.length,
@@ -340,7 +345,7 @@ export function LivraisonDetail() {
       totalHT: r2(allDocs.reduce((s, d) => s + d.totalHT, 0)),
     };
     return { ...data, carriers, totals, count: allDocs.length };
-  }, [data, segment]);
+  }, [data, statusTab]);
 
   const allKeys = useMemo(() => (view?.carriers ?? []).map((c) => c.code ?? "__none__"), [view]);
   const allCollapsed = allKeys.length > 0 && allKeys.every((k) => collapsed.has(k));
@@ -383,15 +388,15 @@ export function LivraisonDetail() {
         onReport={() => setDate(nextWorkingDeliveryDay(date))}
       />
 
-      {/* ── Bandeau de synthèse (reflète le filtre segment) ── */}
+      {/* ── Bandeau de synthèse (reflète l'onglet À préparer / Fait) ── */}
       {view?.totals && <SummaryRow totals={view.totals} loading={loading} />}
 
-      {/* ── Filtre segment + repliage global ── */}
+      {/* ── Onglets À préparer / Fait + repliage global ── */}
       {data && data.count > 0 && (
-        <SegmentFilter
-          segment={segment}
-          counts={segCounts}
-          onPick={setSegment}
+        <StatusTabs
+          tab={statusTab}
+          counts={statusCounts}
+          onPick={setStatusTab}
           allCollapsed={allCollapsed}
           onToggleAll={toggleAll}
         />
@@ -414,11 +419,26 @@ export function LivraisonDetail() {
         <EmptyState date={date} />
       ) : view && view.count === 0 ? (
         <div className="flex flex-col items-center justify-center text-center rounded-2xl border border-dashed border-border bg-card py-12 px-6">
-          <p className="text-[14px] font-semibold text-foreground">Aucune commande pour ce segment</p>
-          <p className="text-[12.5px] text-muted-foreground mt-1">
-            Aucune livraison « {segment === "AUTRES" ? "Autres" : segment} » ce jour-là.
-            <button onClick={() => setSegment("ALL")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir tout</button>
-          </p>
+          {statusTab === "A_PREPARER" ? (
+            <>
+              <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 mb-3">
+                <CheckCircle2 className="h-6 w-6" strokeWidth={1.8} />
+              </span>
+              <p className="text-[14px] font-semibold text-foreground">Tout est préparé</p>
+              <p className="text-[12.5px] text-muted-foreground mt-1">
+                Aucune commande en attente de préparation.
+                <button onClick={() => setStatusTab("FAIT")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir les commandes faites</button>
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-[14px] font-semibold text-foreground">Aucune commande préparée</p>
+              <p className="text-[12.5px] text-muted-foreground mt-1">
+                Rien n&apos;a encore été marqué « fait ».
+                <button onClick={() => setStatusTab("A_PREPARER")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir à préparer</button>
+              </p>
+            </>
+          )}
         </div>
       ) : view ? (
         <div className={`space-y-4 transition-opacity ${loading ? "opacity-60" : ""}`}>
@@ -429,6 +449,7 @@ export function LivraisonDetail() {
                 key={key} carrier={c} carriers={carriers} onCarrierChange={changeCarrier} onDateChange={changeDate}
                 tourneesByCode={tourneesByCode} onLoadTournees={loadTournees} onTourneeChange={changeTournee}
                 collapsed={collapsed.has(key)} onToggleCollapse={() => toggleCollapse(key)}
+                onPatchDoc={patchDoc}
               />
             );
           })}
@@ -578,7 +599,7 @@ function SummaryRow({ totals, loading }: { totals: Totals; loading: boolean }) {
 function CarrierGroup({
   carrier, carriers, onCarrierChange, onDateChange,
   tourneesByCode, onLoadTournees, onTourneeChange,
-  collapsed, onToggleCollapse,
+  collapsed, onToggleCollapse, onPatchDoc,
 }: {
   carrier: Carrier;
   carriers: CarrierOption[];
@@ -589,6 +610,7 @@ function CarrierGroup({
   onTourneeChange: (docEntry: number, trspCode: string, heure: string) => Promise<boolean>;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  onPatchDoc: (docEntry: number, patch: Partial<Doc>) => void;
 }) {
   const unassigned = !carrier.code;
   return (
@@ -638,6 +660,7 @@ function CarrierGroup({
               onCarrierChange={onCarrierChange} onDateChange={onDateChange}
               tournees={d.trspCode ? tourneesByCode[d.trspCode.toUpperCase()] : undefined}
               onLoadTournees={onLoadTournees} onTourneeChange={onTourneeChange}
+              onPatchDoc={onPatchDoc}
             />
           ))}
         </ul>
@@ -647,42 +670,41 @@ function CarrierGroup({
 }
 
 /* ═════════════════════════════════════════════════════════════
-   Filtre par segment client (GMS / CHR / EXPORT) + repliage global
+   Onglets d'état — À préparer / Fait + repliage global
 ═════════════════════════════════════════════════════════════ */
-function SegmentFilter({
-  segment, counts, onPick, allCollapsed, onToggleAll,
+function StatusTabs({
+  tab, counts, onPick, allCollapsed, onToggleAll,
 }: {
-  segment: Segment;
-  counts: Record<Segment, number>;
-  onPick: (s: Segment) => void;
+  tab: StatusTab;
+  counts: { aPreparer: number; fait: number };
+  onPick: (t: StatusTab) => void;
   allCollapsed: boolean;
   onToggleAll: () => void;
 }) {
-  // ALL toujours présent ; un segment n'apparaît que s'il a au moins 1 commande.
-  const segs: Segment[] = ["ALL", "GMS", "CHR", "EXPORT", "AUTRES"];
+  const tabs: { key: StatusTab; label: string; count: number; icon: typeof Clock; active: string }[] = [
+    { key: "A_PREPARER", label: "À préparer", count: counts.aPreparer, icon: Clock,        active: "bg-amber-500 text-white border-amber-500" },
+    { key: "FAIT",       label: "Fait",       count: counts.fait,      icon: CheckCircle2, active: "bg-emerald-500 text-white border-emerald-500" },
+  ];
   return (
     <div className="flex items-center justify-between gap-3 flex-wrap">
-      <div className="flex items-center gap-1.5 flex-wrap">
-        {segs.map((s) => {
-          if (s !== "ALL" && counts[s] === 0) return null;
-          const isActive = segment === s;
-          const label = s === "ALL" ? "Tous" : SEG_UI[s as Exclude<Segment, "ALL">].label;
-          const activeCls = s === "ALL"
-            ? "bg-foreground text-background border-foreground"
-            : SEG_UI[s as Exclude<Segment, "ALL">].active;
+      <div className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card p-1">
+        {tabs.map((t) => {
+          const Icon = t.icon;
+          const isActive = tab === t.key;
           return (
             <button
-              key={s}
+              key={t.key}
               type="button"
-              onClick={() => onPick(s)}
+              onClick={() => onPick(t.key)}
               aria-pressed={isActive}
-              className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border text-[12.5px] font-semibold transition-colors ${
-                isActive ? activeCls : "border-border bg-card text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+              className={`inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg border text-[12.5px] font-semibold transition-colors ${
+                isActive ? t.active : "border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/60"
               }`}
             >
-              {label}
+              <Icon className="h-3.5 w-3.5" strokeWidth={2.2} />
+              {t.label}
               <span className={`tnum text-[11px] font-bold ${isActive ? "opacity-90" : "opacity-60"}`}>
-                {counts[s]}
+                {t.count}
               </span>
             </button>
           );
@@ -713,7 +735,7 @@ function Metric({ label, value, className }: { label: string; value: string; cla
    Ligne commande — repliable vers le détail des lignes
 ═════════════════════════════════════════════════════════════ */
 function OrderRow({
-  doc, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange,
+  doc, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange, onPatchDoc,
 }: {
   doc: Doc;
   carriers: CarrierOption[];
@@ -722,6 +744,7 @@ function OrderRow({
   tournees: Tournee[] | undefined;
   onLoadTournees: (code: string) => void;
   onTourneeChange: (docEntry: number, trspCode: string, heure: string) => Promise<boolean>;
+  onPatchDoc: (docEntry: number, patch: Partial<Doc>) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [savingCarrier, setSavingCarrier] = useState(false);
@@ -786,15 +809,20 @@ function OrderRow({
   // persistance par DocEntry (aucune déduction auto depuis l'inventaire).
   const [prepared, setPrepared] = useState(doc.prepared);
   const [savingPrep, setSavingPrep] = useState(false);
-  // Préparateur affecté + signalement « à reprendre » + vue en grand.
+  // Préparateur affecté + auteur du « fait » + signalement « à reprendre » + vue en grand.
   const [preparer, setPreparer] = useState<string | null>(doc.preparer ?? null);
+  const [preparedBy, setPreparedBy] = useState<string | null>(doc.preparedBy ?? null);
   const [incomplete, setIncomplete] = useState<boolean>(!!doc.incomplete);
   const [bigOpen, setBigOpen] = useState(false);
   const [requeuing, setRequeuing] = useState(false);
+  // Vérification avant de marquer « faite » (évite les validations par erreur).
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   async function setPreparedTo(next: boolean) {
     setPrepared(next);
     if (next) setIncomplete(false);
+    // Optimiste : la carte change d'onglet (À préparer ↔ Fait) immédiatement.
+    onPatchDoc(doc.docEntry, { prepared: next, ...(next ? { incomplete: false } : {}) });
     setSavingPrep(true);
     try {
       const res = await fetch("/api/livraisons/prepared", {
@@ -802,11 +830,28 @@ function OrderRow({
         body: JSON.stringify({ docEntry: doc.docEntry, prepared: next }),
       });
       const j = await res.json().catch(() => null);
-      if (!res.ok || j?.ok === false) { setPrepared(!next); toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement"); return; }
-    } catch { setPrepared(!next); toast.error("Échec de l'enregistrement"); }
+      if (!res.ok || j?.ok === false) {
+        setPrepared(!next);
+        onPatchDoc(doc.docEntry, { prepared: !next });
+        toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement");
+        return;
+      }
+      // Auteur du « fait » (« Fait par … ») renvoyé par l'API.
+      const by = next ? (j?.by ?? null) : null;
+      setPreparedBy(by);
+      onPatchDoc(doc.docEntry, { preparedBy: by });
+    } catch {
+      setPrepared(!next);
+      onPatchDoc(doc.docEntry, { prepared: !next });
+      toast.error("Échec de l'enregistrement");
+    }
     finally { setSavingPrep(false); }
   }
-  const togglePrepared = () => setPreparedTo(!prepared);
+  // Marquer « faite » passe par une vérification ; annuler le « fait » est direct.
+  const togglePrepared = () => {
+    if (prepared) setPreparedTo(false);
+    else setConfirmOpen(true);
+  };
 
   // Ouvrir la commande en grand → s'affecter comme préparateur (qui clique prépare).
   async function openBig() {
@@ -817,7 +862,10 @@ function OrderRow({
         body: JSON.stringify({ docEntry: doc.docEntry, action: "claim" }),
       });
       const j = await res.json().catch(() => null);
-      if (res.ok && j?.ok) { setPreparer(j.preparer ?? null); setIncomplete(false); }
+      if (res.ok && j?.ok) {
+        setPreparer(j.preparer ?? null); setIncomplete(false);
+        onPatchDoc(doc.docEntry, { preparer: j.preparer ?? null, incomplete: false });
+      }
     } catch { /* affectation non bloquante */ }
   }
 
@@ -831,8 +879,9 @@ function OrderRow({
       });
       const j = await res.json().catch(() => null);
       if (!res.ok || !j?.ok) { toast.error(j?.error || "Échec"); return; }
-      setPreparer(null); setIncomplete(true); setPrepared(false);
+      setPreparer(null); setIncomplete(true); setPrepared(false); setPreparedBy(null);
       setBigOpen(false);
+      onPatchDoc(doc.docEntry, { preparer: null, incomplete: true, prepared: false, preparedBy: null });
       toast.warning(`Commande #${doc.docNum} non terminée — remise sur la file`);
     } catch { toast.error("Échec"); }
     finally { setRequeuing(false); }
@@ -889,6 +938,24 @@ function OrderRow({
   return (
     <li>
       <div className={`flex items-center gap-3 px-4 sm:px-5 py-3 hover:bg-secondary/25 transition-colors ${doc.excluded ? "opacity-50" : ""}`}>
+        {/* Bouton d'état — toujours en tête, verticalement centré (placement
+            constant, indépendant du retour à la ligne des badges). */}
+        <button
+          type="button"
+          onClick={togglePrepared}
+          disabled={savingPrep}
+          title={prepared ? "Commande préparée (faite) — cliquer pour annuler" : "Marquer la commande comme préparée (faite)"}
+          aria-pressed={prepared}
+          className={`inline-flex shrink-0 items-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-lg text-[12px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 ${
+            prepared
+              ? "bg-emerald-500 text-white hover:bg-emerald-600"
+              : "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-400/50 hover:bg-amber-500/25"
+          }`}
+        >
+          {savingPrep ? <Loader2 className="h-4 w-4 animate-spin" /> : prepared ? <CheckCircle2 className="h-4 w-4" /> : <Clock className="h-4 w-4" />}
+          <span className="hidden sm:inline">{prepared ? "Faite" : "À préparer"}</span>
+        </button>
+
         {/* Identité client */}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
@@ -897,25 +964,17 @@ function OrderRow({
               name={doc.cardName}
               className="text-[14.5px] font-semibold text-foreground truncate text-left hover:underline decoration-brand-500/60 underline-offset-2 max-w-full"
             />
-            {doc.clientType && (SEG_UI[doc.clientType as Exclude<Segment, "ALL">] ?? null) && (
-              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEG_UI[doc.clientType as Exclude<Segment, "ALL">].badge}`}>
-                {SEG_UI[doc.clientType as Exclude<Segment, "ALL">].label}
+            {doc.clientType && (SEG_UI[doc.clientType as keyof typeof SEG_UI] ?? null) && (
+              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEG_UI[doc.clientType as keyof typeof SEG_UI].badge}`}>
+                {SEG_UI[doc.clientType as keyof typeof SEG_UI].label}
               </span>
             )}
-            <button
-              type="button"
-              onClick={togglePrepared}
-              disabled={savingPrep}
-              title={prepared ? "Commande préparée (faite) — cliquer pour annuler" : "Marquer la commande comme préparée (faite)"}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 ${
-                prepared
-                  ? "bg-emerald-500 text-white hover:bg-emerald-600"
-                  : "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-400/50 hover:bg-amber-500/25"
-              }`}
-            >
-              {savingPrep ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              {prepared ? "Faite" : "À préparer"}
-            </button>
+            {prepared && (preparedBy ?? preparer) && (
+              <span title={`Préparée par ${displayPersonName(preparedBy ?? preparer)}`}
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 text-[10px] font-semibold">
+                <UserCheck className="h-3 w-3" /> Fait par {displayPersonName(preparedBy ?? preparer)}
+              </span>
+            )}
             {incomplete && (
               <span title="Pas entièrement préparée — remise sur la file"
                 className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
@@ -923,9 +982,9 @@ function OrderRow({
               </span>
             )}
             {preparer && !prepared && (
-              <span title={`En préparation par ${preparer}`}
+              <span title={`En préparation par ${displayPersonName(preparer)}`}
                 className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2 py-0.5 text-[10px] font-semibold">
-                <UserCheck className="h-3 w-3" /> {preparer}
+                <UserCheck className="h-3 w-3" /> {displayPersonName(preparer)}
               </span>
             )}
             {!doc.open && (
@@ -1141,9 +1200,9 @@ function OrderRow({
               {fmtNum(doc.colis)} <span className="text-[12px] font-medium uppercase text-muted-foreground">colis</span>
             </span>
             <span className="text-[15px] font-semibold tnum text-muted-foreground">{fmtNum(doc.weightKg)} kg</span>
-            {preparer && (
+            {(preparedBy ?? preparer) && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2.5 py-1 text-[12px] font-semibold">
-                <UserCheck className="h-3.5 w-3.5" /> Préparée par {preparer}
+                <UserCheck className="h-3.5 w-3.5" /> {prepared ? "Fait par" : "Préparée par"} {displayPersonName(preparedBy ?? preparer)}
               </span>
             )}
             {prepared && (
@@ -1188,6 +1247,44 @@ function OrderRow({
             >
               {requeuing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
               Pas terminée — remettre sur la file
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Vérification avant de marquer « faite » (évite les validations par erreur) */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader className="text-left">
+            <DialogTitle className="flex items-center gap-2 pr-8 text-[16px]">
+              <ListChecks className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              Confirmer la préparation
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-[13px] text-muted-foreground">
+            Confirme que la commande de <b className="text-foreground">{doc.cardName}</b> (BL n°{doc.docNum})
+            est <b className="text-foreground">entièrement préparée</b>.
+          </p>
+          <div className="flex items-center gap-3 rounded-xl border border-border bg-secondary/30 px-3.5 py-2.5">
+            <span className="text-[22px] font-bold tnum text-foreground leading-none">{fmtNum(doc.colis)}</span>
+            <span className="text-[11px] uppercase tracking-wide text-muted-foreground">colis</span>
+            <span className="ml-auto text-[12.5px] font-semibold tnum text-muted-foreground">{fmtNum(doc.weightKg)} kg · {doc.lineCount} article(s)</span>
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setConfirmOpen(false)}
+              className="inline-flex flex-1 items-center justify-center h-11 px-4 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={() => { setConfirmOpen(false); setPreparedTo(true); }}
+              disabled={savingPrep}
+              className="inline-flex flex-1 items-center justify-center gap-2 h-11 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[14px] font-semibold disabled:opacity-60"
+            >
+              <CheckCircle2 className="h-4 w-4" /> Confirmer la préparation
             </button>
           </div>
         </DialogContent>

@@ -22,12 +22,14 @@ export async function POST(req: NextRequest) {
   const docEntry = Number(body.docEntry);
   if (!Number.isFinite(docEntry)) return NextResponse.json({ error: "docEntry requis" }, { status: 400 });
   const prepared = body.prepared === true;
+  // Nom-prénom d'abord (affichage « Fait par … »), email en repli.
+  const me = session.user.name?.trim() || session.user.email || "?";
 
   try {
-    await setDeliveryPrepared(docEntry, prepared, session.user.email ?? session.user.name ?? "?");
+    await setDeliveryPrepared(docEntry, prepared, me);
     // Marquer « faite » lève tout signalement « incomplète — à reprendre ».
     if (prepared) await setDeliveryIncomplete(docEntry, false);
-    return NextResponse.json({ ok: true, docEntry, prepared });
+    return NextResponse.json({ ok: true, docEntry, prepared, by: prepared ? me : null });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }

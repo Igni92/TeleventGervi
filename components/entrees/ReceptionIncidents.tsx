@@ -9,6 +9,7 @@ import {
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { displayPersonName } from "@/lib/userNames";
 
 /**
  * Incidents de réception marchandise (litige fournisseur sur une entrée).
@@ -219,7 +220,7 @@ export function OpenReceptionIncidents({
               {i.note && <p className="text-[12px] text-muted-foreground mt-0.5">{i.note}</p>}
               <p className="text-[10.5px] text-muted-foreground/70 mt-0.5">
                 {new Date(i.createdAt).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
-                {i.createdBy ? ` · ${i.createdBy}` : ""}
+                {i.createdBy ? ` · ${displayPersonName(i.createdBy)}` : ""}
               </p>
             </div>
             <Button variant="ghost" size="sm" onClick={() => resolve(i.id)} title="Marquer résolu">

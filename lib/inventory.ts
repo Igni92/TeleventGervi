@@ -252,6 +252,24 @@ export async function getDeliveryPrepared(): Promise<Map<number, boolean>> {
   return m;
 }
 
+/** Map DocEntry → auteur (« by ») du marquage « faite », pour les BL faits.
+ *  Permet d'afficher « Fait par … » dans le Détail livraison. */
+export async function getDeliveryPreparedBy(): Promise<Map<number, string>> {
+  const m = new Map<number, string>();
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_FAITE_PREFIX } } });
+    for (const r of rows) {
+      const docEntry = Number(r.key.slice(LIV_FAITE_PREFIX.length));
+      if (!Number.isFinite(docEntry)) continue;
+      try {
+        const v = JSON.parse(r.value) as { prepared?: boolean; by?: string };
+        if (v.prepared && v.by?.trim()) m.set(docEntry, v.by.trim());
+      } catch { /* ignore */ }
+    }
+  } catch { /* table absente → aucune marque */ }
+  return m;
+}
+
 /** Bascule le statut « faite » d'un BL (persisté). */
 export async function setDeliveryPrepared(docEntry: number, prepared: boolean, by: string): Promise<void> {
   const key = LIV_FAITE_PREFIX + docEntry;
