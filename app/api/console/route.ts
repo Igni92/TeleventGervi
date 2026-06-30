@@ -3,6 +3,8 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { computeInsights } from "@/lib/insights";
+import { computePriority } from "@/lib/priority";
+import { caByClientCode } from "@/lib/clientRevenue";
 import { getAccessScope, getOwnSlpName } from "@/lib/permissions";
 import { parisStartOfDay, parisEndOfDay, parisDayOfWeek } from "@/lib/paris-time";
 
@@ -122,6 +124,12 @@ export async function GET() {
     orderBy: { nom: "asc" },
   });
 
+  // ── Valeur client : CA 12 mois glissants (miroir SAP) par code ──
+  // Alimente le palier A/B/C/D et le score de priorité (audit 07 #48). Best-effort :
+  // si l'agrégat échoue (miroir incomplet, etc.), on retombe sur une priorité
+  // « urgence seule » — la console ne doit JAMAIS casser pour un défaut de CA.
+  const caByCode = await caByClientCode(clients.map((c) => c.code), now).catch(() => new Map<string, number>());
+
   // Today's calls (used to detect "already called today" + stats).
   // Business rule: COMMANDE always overrides DEMAIN on the same day.
   // We still keep both entries in DB for audit, but stats count each client once.
@@ -153,7 +161,16 @@ export async function GET() {
   // We also attach behavioral insights (computed in-memory from the appel
   // history we just fetched) and trim the appels list to the most recent 5
   // for the UI — full history was needed only for insights.
-  type Enriched = (typeof clients)[number] & { insights: ReturnType<typeof computeInsights> };
+  type Enriched = (typeof clients)[number] & {
+    insights: ReturnType<typeof computeInsights>;
+    claimedFrom: string | null;
+    ownerAbsent: boolean;
+    openIncidents: number;
+    lifecycle: ReturnType<typeof computePriority>["lifecycle"];
+    tier: ReturnType<typeof computePriority>["tier"];
+    ca12m: number;
+    priority: { score: number; reason: string };
+  };
   const queue: Enriched[] = [];
   const done: Enriched[] = [];
   for (const c of clients) {
@@ -175,11 +192,28 @@ export async function GET() {
     );
 
     const insights = computeInsights(c.appels);
+    const openIncidents = openIncByClient.get(c.id) ?? 0;
+    // ── Priorité « valeur × urgence » (audit 07 #43/#44/#48) ──
+    // Calculée SERVEUR à partir des signaux déjà en mémoire : cycle de vie
+    // relatif à la cadence + palier de valeur (CA 12 mois) + incidents ouverts.
+    const ca12m = caByCode.get(c.code) ?? 0;
+    const priority = computePriority({
+      lastOrderDays: insights.lastOrderDays,
+      medianIntervalDays: insights.medianIntervalDays,
+      trend30: insights.trend30,
+      ca12m,
+      openIncidents,
+    });
     const claimedFrom = claimedMap.get(c.id) ?? null;
     const enriched = {
       ...c,
       appels: c.appels.slice(0, 5),
       insights,
+      // Cycle de vie + palier de valeur dérivés (cf. lib/lifecycle, lib/clientValue)
+      lifecycle: priority.lifecycle,
+      tier: priority.tier,
+      ca12m,
+      priority: { score: priority.score, reason: priority.reason },
       // null = not claimed; string = name of the commercial I claimed this from
       claimedFrom,
       // « à couvrir » = VRAIE couverture d'un collègue absent.
@@ -190,14 +224,28 @@ export async function GET() {
       // aujourd'hui (TempAssignment → claimedFrom) dont le commercial d'origine
       // est effectivement absent ce jour.
       ownerAbsent: !!(claimedFrom && absentNames.has(claimedFrom)),
-      openIncidents: openIncByClient.get(c.id) ?? 0,
-    } as Enriched & { claimedFrom: string | null; ownerAbsent: boolean; openIncidents: number };
+      openIncidents,
+    } as Enriched;
 
     if (calls.length > 0) done.push(enriched);
     else if (futureSnooze) continue;
     else if (preCommandeSnooze) continue;
     else queue.push(enriched);
   }
+
+  // ── Tri SERVEUR de la file par PRIORITÉ « valeur × urgence » (audit 07 #43) ──
+  // Remplace le tri calendaire/alphabétique : les gros comptes en retard relatif
+  // à leur cadence remontent en tête, au lieu d'être noyés. Départage : heure
+  // optimale (médiane) croissante — on appelle d'abord ceux qui décrochent tôt —
+  // puis nom, pour un ordre stable et reproductible.
+  queue.sort((a, b) => {
+    const ds = b.priority.score - a.priority.score;
+    if (Math.abs(ds) > 0.01) return ds;
+    const ha = a.insights?.medianHour ?? a.insights?.bestHour?.hour ?? 99;
+    const hb = b.insights?.medianHour ?? b.insights?.bestHour?.hour ?? 99;
+    if (ha !== hb) return ha - hb;
+    return a.nom.localeCompare(b.nom, "fr");
+  });
 
   // Today aggregates — counted per client, not per log entry.
   // A client appealed twice (DEMAIN then COMMANDE) counts as ONE call → COMMANDE wins.
