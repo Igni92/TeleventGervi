@@ -140,9 +140,12 @@ export function LivraisonDetail() {
       .then((r) => r.json())
       .then((j) => {
         if (cancelled || !j?.ok) return;
+        // Libellé = le CODE transporteur (ce que l'utilisateur connaît : « ANTOINE »,
+        // « DELANCHY FT86 ») et ce qui est stocké dans U_TrspCode — pas la raison
+        // sociale SERGTRS (ex. « SOFRIPA » pour ANTOINE), qui prêtait à confusion.
         const opts: CarrierOption[] = (j.transporteurs ?? [])
           .filter((t: { code?: string | null }) => t.code)
-          .map((t: { name: string; code: string }) => ({ name: t.name, sapValue: t.code }));
+          .map((t: { name: string; code: string }) => ({ name: t.code, sapValue: t.code }));
         setCarriers(opts);
       })
       .catch(() => {});

@@ -57,6 +57,18 @@ export async function GET(req: NextRequest) {
   const card = sp.get("card");
   const scan = sp.get("scan");
 
+  // Mode WHOAMI : révèle l'utilisateur technique Service Layer avec lequel l'app
+  // se connecte (pour dire à l'intégrateur QUEL compte autoriser sur SERG_TRCL).
+  if (sp.get("whoami") !== null) {
+    return NextResponse.json({
+      ok: true, mode: "whoami",
+      serviceLayerUser: process.env.SAP_B1_USERNAME ?? null,
+      companyDB: process.env.SAP_B1_COMPANY_DB ?? null,
+      baseUrl: (process.env.SAP_B1_BASE_URL ?? "").replace(/\/+$/, ""),
+      note: "C'est CE compte (utilisateur Service Layer) qu'il faut autoriser à lire SERG_TRCL — pas un utilisateur de l'interface SAP.",
+    });
+  }
+
   // Mode SCAN : agrège l'historique récent PAR transporteur (U_TrspCode) →
   // valeurs U_TrspHeur / U_Timbre observées. Révèle la config par transporteur.
   if (scan !== null) {
