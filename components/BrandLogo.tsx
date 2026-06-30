@@ -6,9 +6,10 @@ import * as React from "react";
  * Rend `null` si la marque n'a pas de logo associé → aucune place réservée.
  */
 const SIZES = {
-  sm: "h-9 w-9",    // listes compactes
-  md: "h-12 w-12",  // taille par défaut (liste console, table préparation, récap)
-  lg: "h-16 w-16",  // écrans focalisés (comptage guidé, vue en grand)
+  sm: "h-9 w-9",     // listes compactes
+  md: "h-12 w-12",   // table préparation, récap
+  lg: "h-16 w-16",   // écrans focalisés (comptage guidé, vue en grand)
+  xl: "h-16 w-28",   // liste console — logo bien visible, occupe l'espace dispo
 } as const;
 
 /** Valeur de marque exploitable (ignore les placeholders vides « - », « — », « . »). */
