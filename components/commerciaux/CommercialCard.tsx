@@ -267,7 +267,7 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
               router.push(previewHome(role));
             }}
             title={`Voir l'application comme ${displayName}`}
-            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] font-medium text-brand-600 dark:text-brand-300 hover:bg-brand-500/10 transition-colors active:scale-[0.97]"
+            className="hidden md:inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] font-medium text-brand-600 dark:text-brand-300 hover:bg-brand-500/10 transition-colors active:scale-[0.97]"
           >
             <Eye className="h-3 w-3" /> Voir comme
           </button>
