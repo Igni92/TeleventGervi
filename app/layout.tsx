@@ -15,8 +15,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: { default: "TeleVent", template: "%s | TeleVent" },
-  description: "Application de gestion télévente professionnelle",
+  title: { default: "Gervi · Télévente", template: "%s · Gervi" },
+  description: "Gervi — CRM de télévente du grossiste en fruits frais.",
   robots: "noindex, nofollow",
 };
 

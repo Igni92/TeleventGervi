@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ColorimetrieSwitcher } from "@/components/ColorimetrieSwitcher";
+import { Logo } from "@/components/Logo";
 import { SapEnvSwitch } from "@/components/SapEnvSwitch";
 import { SignalLoader } from "@/components/ui/page-loader";
 import { SPRING } from "@/lib/motion";
@@ -244,15 +245,9 @@ export function Sidebar() {
 
       {/* ── Logo + collapse ─────────────────────────────── */}
       <div className={`flex items-center h-[60px] shrink-0 ${rail ? "justify-center px-0" : "justify-between pl-5 pr-3"}`}>
-        <Link href="/" className="flex items-center gap-2.5 group select-none" title="TeleVent — Accueil">
-          <div className="relative flex h-[30px] w-[30px] items-center justify-center rounded-[9px] bg-gradient-to-br from-brand-500 to-brand-700 transition-all duration-300 group-hover:from-brand-400 group-hover:to-brand-600 group-hover:shadow-[0_0_18px_hsl(var(--brand-500)/0.55)]">
-            <svg viewBox="0 0 24 24" className="h-4 w-4 text-white" fill="none">
-              <path d="M3 12h2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              <path d="M7 9v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              <path d="M11 5v14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              <path d="M15 8v8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              <path d="M19 11v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
+        <Link href="/" className="flex items-center gap-2.5 group select-none" title="Gervi — Accueil">
+          <div className="relative flex h-[30px] w-[30px] items-center justify-center text-white transition-transform duration-300 group-hover:scale-110">
+            <Logo className="h-[28px] w-[28px]" />
             <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-emerald-400 ring-2 ring-[#0b1018] animate-soft-pulse" />
           </div>
           <AnimatePresence initial={false}>
@@ -261,9 +256,9 @@ export function Sidebar() {
                 initial={{ opacity: 0, x: -6 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -6 }}
-                className="text-[15px] font-semibold tracking-[-0.02em] text-white/90 group-hover:text-white transition-colors whitespace-nowrap"
+                className="text-[16px] font-bold tracking-[-0.02em] text-white/90 group-hover:text-white transition-colors whitespace-nowrap"
               >
-                Tele<span className="text-brand-400 italic font-light">Vent</span>
+                Gerv<span className="text-brand-400">i</span>
               </motion.span>
             )}
           </AnimatePresence>
