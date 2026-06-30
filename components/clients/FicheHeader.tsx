@@ -2,6 +2,9 @@ import Link from "next/link";
 import { ArrowLeft, Hash, UserRound } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { RgpdExportButton } from "@/components/clients/RgpdExportButton";
+import { LifecycleBadge } from "@/components/clients/LifecycleBadge";
+import type { LifecycleResult } from "@/lib/lifecycle";
+import type { ValueTier } from "@/lib/clientValue";
 
 /**
  * En-tête « console d'identité » de la fiche client (DA « salle de signal »).
@@ -50,9 +53,17 @@ interface FicheHeaderProps {
   type?: string | null;
   commercial?: string | null;
   admin: boolean;
+  /**
+   * État du cycle de vie (dérivé par `lib/lifecycle.ts`). Optionnel : tant que
+   * le câblage des signaux comportementaux n'est pas fait côté page, le badge
+   * n'apparaît pas — additif, ne casse rien.
+   */
+  lifecycle?: LifecycleResult | null;
+  /** Palier de valeur A/B/C/D (dérivé par `lib/clientValue.ts`). Optionnel. */
+  tier?: ValueTier | null;
 }
 
-export function FicheHeader({ clientId, name, code, type, commercial, admin }: FicheHeaderProps) {
+export function FicheHeader({ clientId, name, code, type, commercial, admin, lifecycle, tier }: FicheHeaderProps) {
   const badge = type ? TYPE_BADGE[type] : undefined;
 
   return (
@@ -102,6 +113,7 @@ export function FicheHeader({ clientId, name, code, type, commercial, admin }: F
                 {name}
               </h1>
               {badge && <Badge variant={badge.variant}>{badge.label}</Badge>}
+              {lifecycle && <LifecycleBadge lifecycle={lifecycle} tier={tier} />}
             </div>
 
             {/* Barre de coordonnées */}
