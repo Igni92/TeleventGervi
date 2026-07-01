@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getAccessScope, requireStrictAdmin, ADMIN_EMAILS } from "@/lib/permissions";
 import { CommercialCard } from "@/components/commerciaux/CommercialCard";
+import { EffectifsPreviewBar } from "@/components/role-preview/EffectifsPreviewBar";
 import { CommerciauxSapList } from "./CommerciauxSapList";
 
 export const metadata = { title: "Effectifs | Gervi" };
@@ -84,6 +85,8 @@ export default async function CommerciauxPage() {
             temporairement les clients d&apos;un collègue absent.
           </p>
         </div>
+        {/* « Voir comme » (admin/direction) — remplace le sélecteur global du menu */}
+        <EffectifsPreviewBar />
         <div className="grid gap-3 sm:grid-cols-2">
           {users.map((user) => {
             const name = user.name || user.email || "—";

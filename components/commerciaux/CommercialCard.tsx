@@ -4,9 +4,12 @@ import { useState } from "react";
 import { toast } from "sonner";
 import {
   ChevronDown, Mail, ArrowRight, Loader2, Users,
-  Building2, Globe, Store, Check, X, Percent, Lock,
+  Building2, Globe, Store, Check, X, Percent, Lock, Eye,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
+import { previewHome, PREVIEW_ROLE_LABELS, type PreviewRole } from "@/lib/rolePreview";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,6 +64,15 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
   const [savingLiv, setSavingLiv] = useState(false);
   // Nom affiché sans le suffixe société (« … - Gervifrais ») qui tronque sur mobile.
   const displayName = name.split(/\s+[-–]\s+/)[0].trim() || name;
+
+  // « Voir comme » ce membre (aperçu chrome) — réservé admin/direction (canPreview).
+  const router = useRouter();
+  const { canPreview, setPreviewRole } = useRolePreview();
+  const memberRole: PreviewRole = livreur ? "livreur" : prep ? "preparateur" : direction ? "direction" : "commercial";
+  function viewAsMember() {
+    setPreviewRole(memberRole);
+    router.push(previewHome(memberRole));
+  }
 
   async function toggleAdmin() {
     if (isBootstrapAdmin) return; // admin système : non modifiable depuis l'UI
@@ -239,6 +251,18 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
               <RoleCheck label="Livreur" active={livreur} saving={savingLiv} onToggle={toggleLivreur}
                 title={livreur ? "Retirer le rôle livreur" : "Désigner livreur (livraison + fiche client)"} />
             </div>
+
+            {/* « Voir comme ce membre » — aperçu de l'app (admin/direction) */}
+            {canPreview && (
+              <button
+                type="button"
+                onClick={viewAsMember}
+                title={`Voir l'application comme ${displayName} (aperçu ${PREVIEW_ROLE_LABELS[memberRole]})`}
+                className="mt-2 inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border text-[12px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+              >
+                <Eye className="h-3.5 w-3.5" /> Voir comme {PREVIEW_ROLE_LABELS[memberRole]}
+              </button>
+            )}
           </div>
         </div>
       </div>

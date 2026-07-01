@@ -8,15 +8,14 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, Package, PackagePlus, Factory, ClipboardList, Receipt, AlertTriangle,
-  Home, Settings, PackageCheck, ClipboardCheck, Truck,
+  Home, Settings, PackageCheck, ClipboardCheck, Truck, Eye,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Logo } from "@/components/Logo";
 import { SapEnvSwitch } from "@/components/SapEnvSwitch";
 import { SignalLoader } from "@/components/ui/page-loader";
-import { RolePreviewControl } from "@/components/role-preview/RolePreviewControl";
 import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
-import { navAllowedForPreview } from "@/lib/rolePreview";
+import { navAllowedForPreview, PREVIEW_ROLE_LABELS } from "@/lib/rolePreview";
 import { SPRING } from "@/lib/motion";
 import {
   DropdownMenu,
@@ -186,7 +185,7 @@ function useBadges(): Record<string, number> {
 export function Sidebar() {
   const { data: session } = useSession();
   const pathname = usePathname();
-  const { previewRole } = useRolePreview();
+  const { previewRole, setPreviewRole } = useRolePreview();
   const [rail, setRail] = useState(false);
   const badges = useBadges();
   // Voile de navigation : label de la page en cours d'ouverture (null = caché).
@@ -391,8 +390,21 @@ export function Sidebar() {
 
       {/* ── Footer système ─────────────────────────────── */}
       <div className="shrink-0 border-t border-white/[0.07] px-3 py-3 space-y-2.5">
-        {/* « Voir comme » (admin/direction) — masqué en rail (libellé trop large) */}
-        {!rail && <RolePreviewControl />}
+        {/* « Voir comme » a été déplacé dans Effectifs (par membre + vue réelle).
+            En aperçu actif, un retour rapide « Vue réelle » reste ici pour ne
+            jamais rester bloqué dans un aperçu restreint. */}
+        {!rail && previewRole && (
+          <button
+            type="button"
+            onClick={() => setPreviewRole(null)}
+            title="Quitter l'aperçu et revenir à la vue réelle"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 h-9 text-[12.5px] font-medium bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30 hover:bg-amber-500/25 transition-colors"
+          >
+            <Eye className="h-[18px] w-[18px] shrink-0" />
+            <span className="truncate">Aperçu : {PREVIEW_ROLE_LABELS[previewRole]}</span>
+            <span className="ml-auto text-[11px] font-semibold underline underline-offset-2">Vue réelle</span>
+          </button>
+        )}
 
         {/* Bascule SAP prod/test — masquée en rail (badge trop large) */}
         {!rail && <SapEnvSwitch />}
