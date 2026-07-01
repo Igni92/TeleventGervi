@@ -4,9 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Loader2, ShieldAlert, Users, ArrowRight, Eye, Target, X, BadgeEuro } from "lucide-react";
+import { Loader2, ShieldAlert, Users, ArrowRight, Eye, EyeOff, Target, X, BadgeEuro } from "lucide-react";
 import { Sparkline } from "@/components/charts/Sparkline";
 import { displayNameFromSlp } from "@/lib/salespeople";
+import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
+import { isLogisticsPreviewRole, PREVIEW_ROLE_LABELS } from "@/lib/rolePreview";
 
 /**
  * Liste des commerciaux (rattachés à un compte TeleVent) — activité 12 mois.
@@ -62,6 +64,11 @@ const avatarOf = (email: string) => {
 };
 
 export function CommerciauxSapList() {
+  const { previewRole } = useRolePreview();
+  // Aperçu « terrain logistique » (préparateur / livreur) : les chiffres des
+  // commerciaux (CA / marge / prime) ne les concernent pas → on les masque.
+  const hideFigures = isLogisticsPreviewRole(previewRole);
+
   const [data, setData] = useState<CommercialSap[] | null>(null);
   const [restricted, setRestricted] = useState<string | null>(null);
   const [error, setError] = useState(false);
@@ -79,10 +86,24 @@ export function CommerciauxSapList() {
       .catch(() => setError(true));
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (hideFigures) return; // aperçu terrain : on ne charge même pas les chiffres
+    load();
+  }, [load, hideFigures]);
 
   const patchObjectifs = (slp: string, patch: Partial<CommercialSap>) =>
     setData((cur) => (cur ? cur.map((c) => (c.slpName === slp ? { ...c, ...patch } : c)) : cur));
+
+  if (hideFigures) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+        <EyeOff className="h-4 w-4 text-muted-foreground shrink-0" />
+        <p className="text-[13px] text-muted-foreground">
+          Chiffres des commerciaux masqués{previewRole ? ` en aperçu ${PREVIEW_ROLE_LABELS[previewRole]}` : ""}.
+        </p>
+      </div>
+    );
+  }
 
   if (error) {
     return (

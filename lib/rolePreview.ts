@@ -49,3 +49,14 @@ export function navAllowedForPreview(href: string, role: PreviewRole | null): bo
 export function previewHome(role: PreviewRole): string {
   return role === "preparateur" || role === "livreur" ? "/livraisons" : "/accueil";
 }
+
+/**
+ * Rôles « terrain logistique » (préparateur, livreur) : leur périmètre se borne
+ * à la logistique. Dans l'aperçu on masque donc, pour eux :
+ *   - les onglets Commercial & Comptabilité de la fiche client → Logistique seule ;
+ *   - les chiffres des commerciaux (CA / marge / prime) de l'écran Effectifs.
+ * Aperçu VISUEL uniquement : les droits réels restent côté serveur.
+ */
+export function isLogisticsPreviewRole(role: PreviewRole | null): boolean {
+  return role === "preparateur" || role === "livreur";
+}
