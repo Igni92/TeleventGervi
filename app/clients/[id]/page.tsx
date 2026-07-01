@@ -18,10 +18,11 @@ import { ClientTabs } from "@/components/clients/ClientTabs";
 import { FicheActions } from "@/components/clients/FicheActions";
 import { FicheHeader } from "@/components/clients/FicheHeader";
 import { SectionCard } from "@/components/clients/SectionCard";
-import { Calendar, CalendarClock, CalendarDays, Sprout, TrendingUp, Receipt, Truck, UserRound, MapPin } from "lucide-react";
+import { Calendar, CalendarClock, CalendarDays, Clock, Sprout, TrendingUp, Receipt, Truck, UserRound, MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
-import { requireAdmin } from "@/lib/permissions";
+import { requireAdmin, isLivreur } from "@/lib/permissions";
+import { ReceptionSlots } from "@/components/clients/ReceptionSlots";
 import { computeInsights } from "@/lib/insights";
 import { computePriority } from "@/lib/priority";
 import { caByClientCode } from "@/lib/clientRevenue";
@@ -60,6 +61,8 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
   const session = await auth();
   if (!session) redirect("/login");
   const admin = await requireAdmin(session);
+  // Créneaux de réception + GPS : réservés aux livreurs / direction / admins.
+  const canSeeLogistics = admin || (await isLivreur(session));
 
   const client = await prisma.client.findUnique({
     where: { id: params.id },
@@ -218,6 +221,12 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
             <ReceptionEmailForm clientId={client.id} />
           </SectionCard>
         ) },
+        // Créneaux de réception + GPS (SAP) — livreurs / direction / admins uniquement.
+        ...(canSeeLogistics ? [{ id: "creneaux", label: "Créneaux & GPS", node: (
+          <SectionCard accent="violet" title="Créneaux de réception & GPS" subtitle="Horaires du magasin, temps de chargement, coordonnées (SAP)" icon={<Clock />}>
+            <ReceptionSlots clientId={client.id} />
+          </SectionCard>
+        ) }] : []),
         { id: "adresse-livraison", label: "Adresse de livraison", node: (
           <SectionCard accent="emerald" title="Adresse de livraison" subtitle="Synchronisée avec SAP (« Livrer à » · bo_ShipTo)" icon={<MapPin />}>
             <DeliveryAddressForm clientId={client.id} />
