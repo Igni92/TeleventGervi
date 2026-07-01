@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from "sonner";
 import { Providers } from "./providers";
 import { AmbientBackground } from "@/components/AmbientBackground";
+import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 
 // One sans for everything — Inter is screen-engineered for max legibility.
 // "Premium" comes from spacing, hierarchy, and restraint — not font swaps.
@@ -51,6 +52,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             }}
           />
         </Providers>
+        <ServiceWorkerRegister />
       </body>
     </html>
   );
