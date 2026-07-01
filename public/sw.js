@@ -14,6 +14,13 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+// Handler `fetch` minimal (pass-through réseau, AUCUN cache offline) : requis
+// par les navigateurs pour rendre l'app « installable » (bouton Installer).
+// On ne modifie pas les réponses — l'app reste une app en ligne temps réel.
+self.addEventListener("fetch", () => {
+  // No-op : on laisse le navigateur gérer la requête normalement.
+});
+
 self.addEventListener("push", (event) => {
   let data = {};
   try {
