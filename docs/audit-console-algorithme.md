@@ -224,7 +224,9 @@ optimise du bruit.
 - ✅ **Lot C** — `cadenceStatus` (en retard vs fréquence) ; **retry NRP** (un
   « pas de réponse » garde le client dans la file, badge RETENTER).
 - ✅ **Lot D** — **bandeau in-app « rappels dus »** + **push PWA** (Web-Push,
-  service worker, cron `/api/cron/reminders`, opt-in par appareil).
+  service worker, opt-in par appareil). **Sans cron** (Vercel Hobby = 1/jour) :
+  le push est déclenché côté client (`/api/push/flush`) quand la console est
+  ouverte → l'agent reçoit ses rappels échus sur ses autres appareils (mobile).
 
 Tests : `lib/insights.test.ts` (TZ été/hiver, décroché > densité, NRP, legacy,
 cadence). Suite complète **203 verts**, lint 0.
@@ -237,9 +239,9 @@ cadence). Suite complète **203 verts**, lint 0.
 2. **Clés VAPID** : `npx web-push generate-vapid-keys` → renseigner
    `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (cf. `.env.example`).
    Sans elles, l'app tourne normalement, push simplement masqué.
-3. **Cron** : définir `CRON_SECRET` (Vercel l'injecte en `Authorization`). Le
-   cron est déclaré dans `vercel.json` (`*/5 * * * *`, nécessite un plan Vercel
-   autorisant cette fréquence — sinon ajuster).
+3. **Pas de cron** : le push de rappels est déclenché côté client
+   (`/api/push/flush`) à l'ouverture/rafraîchissement de la console — Vercel
+   Hobby limitant les crons à 1/jour. Le bandeau in-app ne dépend de rien.
 4. **Icônes PWA** : `public/icon-192.png` / `icon-512.png` sont des placeholders
    (anneau radar de marque) — à remplacer par le vrai logo si souhaité.
 

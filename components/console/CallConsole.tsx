@@ -145,6 +145,12 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
         if (prev && json.queue.some((c) => c.id === prev)) return prev;
         return json.queue[0]?.id ?? null;
       });
+      // Pas de cron (Vercel Hobby = 1/jour) : quand des rappels sont dus et que
+      // la console est ouverte, on pousse la notif vers les autres appareils de
+      // l'agent (best-effort, marque notifiedAt côté serveur → pas de doublon).
+      if ((json.dueRappels?.length ?? 0) > 0) {
+        fetch("/api/push/flush", { method: "POST" }).catch(() => {});
+      }
     } catch {
       toast.error("Erreur de chargement de la console");
     } finally {

@@ -1,9 +1,3 @@
 {
-  "regions": ["cdg1"],
-  "crons": [
-    {
-      "path": "/api/cron/reminders",
-      "schedule": "*/5 * * * *"
-    }
-  ]
+  "regions": ["cdg1"]
 }
