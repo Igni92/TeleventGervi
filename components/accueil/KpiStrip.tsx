@@ -1,24 +1,23 @@
 "use client";
 
-import { Euro, Package, ShoppingCart, Users } from "lucide-react";
+import { Euro, Package, ShoppingCart } from "lucide-react";
 import { SurfaceCard, type Accent } from "@/components/ui/surface-card";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { Delta } from "@/components/ui/delta";
 import { useJson } from "./use-json";
 
 /**
- * Bandeau KPI du jour — 4 tuiles « gros chiffre » alimentées par
+ * Bandeau KPI du jour — 3 tuiles « gros chiffre » alimentées par
  * GET /api/pilotage/activity?g=day (source SapOrder, vue commerciale).
  *
- * CA HT (BL), volume kg (règle maison : volume TOUJOURS en kg), nb commandes,
- * clients servis — chacun avec pastille N vs N-1 (même jour, année précédente).
+ * CA HT (BL), volume kg (règle maison : volume TOUJOURS en kg), nb commandes
+ * — chacun avec pastille N vs N-1 (même jour, année précédente).
  */
 
 interface ActivityBucket {
   volume?: number;
   weightKg?: number;
   ordersCount?: number;
-  activeClients?: number;
 }
 interface ActivityResponse {
   curr?: ActivityBucket;
@@ -58,13 +57,6 @@ const TILES: TileDef[] = [
     suffix: "",
     pick: (b) => b.ordersCount ?? 0,
   },
-  {
-    label: "Clients",
-    icon: <Users className="h-3.5 w-3.5" />,
-    accent: "violet",
-    suffix: "",
-    pick: (b) => b.activeClients ?? 0,
-  },
 ];
 
 export function KpiStrip() {
@@ -73,7 +65,7 @@ export function KpiStrip() {
   const prev = data?.prev;
 
   return (
-    <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
       {TILES.map((t, i) => {
         const value = t.pick(curr);
         const prevValue = prev ? t.pick(prev) : null;

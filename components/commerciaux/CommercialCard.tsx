@@ -43,11 +43,13 @@ interface Props {
   isDirection?: boolean;
   /** Rôle livreur — accès restreint (livraison + fiche client logistique). */
   isLivreur?: boolean;
+  /** Rôle agréeur — passe une commande fournisseur en entrée marchandise (sans créer). */
+  isAgreeur?: boolean;
   /** Le SPECTATEUR est-il admin strict ? Seul lui peut (dé)cocher le rôle Admin. */
   canEditAdmin?: boolean;
 }
 
-export function CommercialCard({ userId, name, commercialKey, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false, isPreparateur = false, isCommercial = true, isDirection = false, isLivreur = false, canEditAdmin = false }: Props) {
+export function CommercialCard({ userId, name, commercialKey, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false, isPreparateur = false, isCommercial = true, isDirection = false, isLivreur = false, isAgreeur = false, canEditAdmin = false }: Props) {
   const [claiming, setClaiming] = useState<string | null>(null);
   const [isPresent, setIsPresent] = useState(present);
   const [share, setShare] = useState(stockSharePct);
@@ -62,6 +64,8 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
   const [savingDir, setSavingDir] = useState(false);
   const [livreur, setLivreur] = useState(isLivreur);
   const [savingLiv, setSavingLiv] = useState(false);
+  const [agreeur, setAgreeur] = useState(isAgreeur);
+  const [savingAgr, setSavingAgr] = useState(false);
   // Nom affiché sans le suffixe société (« … - Gervifrais ») qui tronque sur mobile.
   const displayName = name.split(/\s+[-–]\s+/)[0].trim() || name;
 
@@ -113,6 +117,14 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
     try { await patch({ isLivreur: next }); toast.success(next ? `${name} est désormais livreur` : `${name} n'est plus livreur`); }
     catch { setLivreur(!next); toast.error("Erreur changement de rôle"); }
     finally { setSavingLiv(false); }
+  }
+
+  async function toggleAgreeur() {
+    const next = !agreeur;
+    setAgreeur(next); setSavingAgr(true);
+    try { await patch({ isAgreeur: next }); toast.success(next ? `${name} est désormais agréeur (réception des commandes)` : `${name} n'est plus agréeur`); }
+    catch { setAgreeur(!next); toast.error("Erreur changement de rôle"); }
+    finally { setSavingAgr(false); }
   }
 
   async function patch(payload: Record<string, unknown>) {
@@ -250,6 +262,8 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
                     : "Rôle admin — réservé aux administrateurs"} />
               <RoleCheck label="Livreur" active={livreur} saving={savingLiv} onToggle={toggleLivreur}
                 title={livreur ? "Retirer le rôle livreur" : "Désigner livreur (livraison + fiche client)"} />
+              <RoleCheck label="Agréeur" active={agreeur} saving={savingAgr} onToggle={toggleAgreeur}
+                title={agreeur ? "Retirer le rôle agréeur" : "Désigner agréeur (passe une commande fournisseur en entrée marchandise, sans pouvoir créer)"} />
             </div>
 
             {/* « Voir comme ce membre » — aperçu de l'app (admin/direction) */}

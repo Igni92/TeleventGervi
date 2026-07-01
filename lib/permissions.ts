@@ -155,6 +155,40 @@ export async function isLivreur(session: Session | null): Promise<boolean> {
 }
 
 /**
+ * True si l'utilisateur connecté porte le rôle AGRÉEUR. L'agréeur a un droit
+ * UNIQUE : « passer » une commande fournisseur en entrée marchandise (réception
+ * → PurchaseDeliveryNote). Il ne peut créer NI une commande fournisseur NI une
+ * entrée marchandise (cf. requireCanReceivePurchaseOrder + les routes de création
+ * qui bloquent un agréeur « pur »). Lecture défensive (repli false si la colonne
+ * manque). Immédiat (relit la base à chaque appel — pas de cache session).
+ */
+export async function isAgreeur(session: Session | null): Promise<boolean> {
+  const email = session?.user?.email?.trim().toLowerCase() ?? null;
+  if (!email) return false;
+  try {
+    const rows = await prisma.$queryRawUnsafe<{ isAgreeur: boolean | null }[]>(
+      `SELECT "isAgreeur" FROM "User" WHERE LOWER("email") = $1 LIMIT 1`,
+      email,
+    );
+    return !!rows[0]?.isAgreeur;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True si la session peut RÉCEPTIONNER une commande fournisseur (la « passer » en
+ * entrée marchandise) : préparateur OU admin/direction (requirePreparateurOrAdmin)
+ * OU AGRÉEUR. C'est le SEUL geste de la chaîne fournisseur ouvert à l'agréeur —
+ * la création (commande / entrée) et les autres écritures (annulation, modif)
+ * restent réservées à la préparation / l'administration.
+ */
+export async function requireCanReceivePurchaseOrder(session: Session | null): Promise<boolean> {
+  if (await requirePreparateurOrAdmin(session)) return true;
+  return await isAgreeur(session);
+}
+
+/**
  * True UNIQUEMENT pour un administrateur (bootstrap ADMIN_EMAILS OU User.isAdmin) —
  * la DIRECTION en est exclue. Réservé aux deux actions que seul l'admin maîtrise :
  *   1. basculer la base SAP prod ↔ test (/api/sap/environment) ;

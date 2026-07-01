@@ -46,7 +46,7 @@ export async function PATCH(req: NextRequest) {
   // Le rôle ADMIN ne peut être modifié QUE par un admin strict (pas la direction).
   const strictAdmin = await requireStrictAdmin(session);
 
-  let body: { userId?: string; present?: boolean; stockSharePct?: number; isAdmin?: boolean; isPreparateur?: boolean; isCommercial?: boolean; isDirection?: boolean; isLivreur?: boolean };
+  let body: { userId?: string; present?: boolean; stockSharePct?: number; isAdmin?: boolean; isPreparateur?: boolean; isCommercial?: boolean; isDirection?: boolean; isLivreur?: boolean; isAgreeur?: boolean };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
   if (!body.userId) return NextResponse.json({ error: "userId requis" }, { status: 400 });
 
@@ -91,11 +91,16 @@ export async function PATCH(req: NextRequest) {
   if (typeof body.isLivreur === "boolean") {
     await prisma.$executeRawUnsafe(`UPDATE "User" SET "isLivreur" = $1 WHERE "id" = $2`, body.isLivreur, body.userId);
   }
+  // Rôle agréeur (passe une commande fournisseur en entrée marchandise, sans
+  // pouvoir créer ni l'une ni l'autre). Raw SQL, même convention.
+  if (typeof body.isAgreeur === "boolean") {
+    await prisma.$executeRawUnsafe(`UPDATE "User" SET "isAgreeur" = $1 WHERE "id" = $2`, body.isAgreeur, body.userId);
+  }
 
   // #8/#30 — trace les modifications de rôle (l'octroi de isAdmin/isDirection est
   // une élévation de privilège : on garde une preuve de qui l'a fait et quand).
   const roleChanges: Record<string, boolean> = {};
-  for (const r of ["isAdmin", "isDirection", "isPreparateur", "isCommercial", "isLivreur"] as const) {
+  for (const r of ["isAdmin", "isDirection", "isPreparateur", "isCommercial", "isLivreur", "isAgreeur"] as const) {
     if (typeof body[r] === "boolean") roleChanges[r] = body[r] as boolean;
   }
   if (Object.keys(roleChanges).length > 0) {
