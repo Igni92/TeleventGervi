@@ -5,7 +5,7 @@ import {
   Truck, Boxes, Scale, Users, FileText, Receipt,
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
   RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw, Pencil,
-  Maximize2, UserCheck, Undo2, ListChecks,
+  Maximize2, UserCheck, Undo2, ListChecks, UserCog, ArrowRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -449,7 +449,7 @@ export function LivraisonDetail() {
                 key={key} carrier={c} carriers={carriers} onCarrierChange={changeCarrier} onDateChange={changeDate}
                 tourneesByCode={tourneesByCode} onLoadTournees={loadTournees} onTourneeChange={changeTournee}
                 collapsed={collapsed.has(key)} onToggleCollapse={() => toggleCollapse(key)}
-                onPatchDoc={patchDoc}
+                onPatchDoc={patchDoc} onReload={() => load()}
               />
             );
           })}
@@ -599,7 +599,7 @@ function SummaryRow({ totals, loading }: { totals: Totals; loading: boolean }) {
 function CarrierGroup({
   carrier, carriers, onCarrierChange, onDateChange,
   tourneesByCode, onLoadTournees, onTourneeChange,
-  collapsed, onToggleCollapse, onPatchDoc,
+  collapsed, onToggleCollapse, onPatchDoc, onReload,
 }: {
   carrier: Carrier;
   carriers: CarrierOption[];
@@ -611,6 +611,7 @@ function CarrierGroup({
   collapsed: boolean;
   onToggleCollapse: () => void;
   onPatchDoc: (docEntry: number, patch: Partial<Doc>) => void;
+  onReload: () => void;
 }) {
   const unassigned = !carrier.code;
   return (
@@ -660,7 +661,7 @@ function CarrierGroup({
               onCarrierChange={onCarrierChange} onDateChange={onDateChange}
               tournees={d.trspCode ? tourneesByCode[d.trspCode.toUpperCase()] : undefined}
               onLoadTournees={onLoadTournees} onTourneeChange={onTourneeChange}
-              onPatchDoc={onPatchDoc}
+              onPatchDoc={onPatchDoc} onReload={onReload}
             />
           ))}
         </ul>
@@ -735,7 +736,7 @@ function Metric({ label, value, className }: { label: string; value: string; cla
    Ligne commande — repliable vers le détail des lignes
 ═════════════════════════════════════════════════════════════ */
 function OrderRow({
-  doc, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange, onPatchDoc,
+  doc, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange, onPatchDoc, onReload,
 }: {
   doc: Doc;
   carriers: CarrierOption[];
@@ -745,6 +746,7 @@ function OrderRow({
   onLoadTournees: (code: string) => void;
   onTourneeChange: (docEntry: number, trspCode: string, heure: string) => Promise<boolean>;
   onPatchDoc: (docEntry: number, patch: Partial<Doc>) => void;
+  onReload: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [savingCarrier, setSavingCarrier] = useState(false);
@@ -935,6 +937,66 @@ function OrderRow({
     }
   }
 
+  // ── Changer le CLIENT du BL (« re-coder ») : annule la commande et la recrée à
+  //    l'identique sous un autre CardCode. Cas d'usage : mauvais client validé.
+  //    Garde-fou : dialog de confirmation + aperçu du client cible avant exécution.
+  const [rebindOpen, setRebindOpen] = useState(false);
+  const [newCode, setNewCode] = useState("");
+  const [preview, setPreview] = useState<
+    | { state: "idle" }
+    | { state: "loading" }
+    | { state: "error"; message: string }
+    | { state: "ok"; cardCode: string; cardName: string; frozen: boolean; valid: boolean }
+  >({ state: "idle" });
+  const [rebinding, setRebinding] = useState(false);
+
+  // Aperçu (débounce) : valide le CardCode saisi et affiche le nom du client cible.
+  useEffect(() => {
+    const code = newCode.trim();
+    if (!rebindOpen || code.length < 2) { setPreview({ state: "idle" }); return; }
+    if (code.toUpperCase() === doc.cardCode.toUpperCase()) {
+      setPreview({ state: "error", message: "C'est déjà le client de cette commande." });
+      return;
+    }
+    let cancelled = false;
+    setPreview({ state: "loading" });
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/sap/orders/rebind?cardCode=${encodeURIComponent(code)}`);
+        const j = await r.json().catch(() => null);
+        if (cancelled) return;
+        if (!r.ok || !j?.ok) { setPreview({ state: "error", message: j?.error || "Client introuvable." }); return; }
+        setPreview({ state: "ok", cardCode: j.cardCode, cardName: j.cardName, frozen: j.frozen, valid: j.valid });
+      } catch {
+        if (!cancelled) setPreview({ state: "error", message: "SAP injoignable." });
+      }
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [newCode, rebindOpen, doc.cardCode]);
+
+  const canRebind = preview.state === "ok" && !preview.frozen && preview.valid;
+
+  async function confirmRebind() {
+    if (preview.state !== "ok" || !canRebind) return;
+    setRebinding(true);
+    try {
+      const res = await fetch("/api/sap/orders/rebind", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: doc.docEntry, newCardCode: preview.cardCode }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) { toast.error(j?.error || "Échec du changement de client"); return; }
+      if (j.warning) toast.warning(j.warning, { duration: 10000 });
+      else toast.success(`BL recréé pour ${preview.cardName} (#${j.newDocNum}) — ancien #${j.oldDocNum} annulé`, { duration: 7000 });
+      setRebindOpen(false); setNewCode(""); setPreview({ state: "idle" });
+      onReload();
+    } catch {
+      toast.error("SAP injoignable — client non modifié");
+    } finally {
+      setRebinding(false);
+    }
+  }
+
   return (
     <li>
       <div className={`flex items-center gap-3 px-4 sm:px-5 py-3 hover:bg-secondary/25 transition-colors ${doc.excluded ? "opacity-50" : ""}`}>
@@ -1122,6 +1184,18 @@ function OrderRow({
               <span className="hidden sm:inline">Modifier</span>
             </button>
           )}
+          {/* Changer le client (re-coder le BL) — mauvais client validé */}
+          {doc.open && (
+            <button
+              type="button"
+              onClick={() => setRebindOpen(true)}
+              title={`Changer le client du BL #${doc.docNum} (annule et recrée sous un autre code)`}
+              className="hidden md:inline-flex items-center gap-1 h-9 px-2.5 rounded-lg border border-border bg-card text-[12px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
+            >
+              <UserCog className="h-3.5 w-3.5" strokeWidth={2.2} />
+              <span className="hidden sm:inline">Client</span>
+            </button>
+          )}
           {/* Repli desktop uniquement : sur mobile le contenu est toujours affiché. */}
           <button
             type="button"
@@ -1285,6 +1359,93 @@ function OrderRow({
               className="inline-flex flex-1 items-center justify-center gap-2 h-11 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[14px] font-semibold disabled:opacity-60"
             >
               <CheckCircle2 className="h-4 w-4" /> Confirmer la préparation
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Changer le client du BL (re-coder) — garde-fou : annule + recrée */}
+      <Dialog open={rebindOpen} onOpenChange={(o) => { if (!rebinding) { setRebindOpen(o); if (!o) { setNewCode(""); setPreview({ state: "idle" }); } } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader className="text-left">
+            <DialogTitle className="flex items-center gap-2 pr-8 text-[16px]">
+              <UserCog className="h-5 w-5 text-brand-600 dark:text-brand-400 shrink-0" />
+              Changer le client — BL n°{doc.docNum}
+            </DialogTitle>
+          </DialogHeader>
+
+          {/* Client actuel → nouveau */}
+          <div className="flex items-center gap-2 rounded-xl border border-border bg-secondary/30 px-3.5 py-2.5 text-[13px]">
+            <div className="min-w-0">
+              <p className="text-[9.5px] uppercase tracking-wide text-muted-foreground">Actuel</p>
+              <p className="font-semibold text-foreground truncate">{doc.cardName}</p>
+              <p className="font-mono text-[11px] text-muted-foreground">{doc.cardCode}</p>
+            </div>
+            <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 mx-1" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[9.5px] uppercase tracking-wide text-muted-foreground">Nouveau</p>
+              {preview.state === "ok" ? (
+                <>
+                  <p className="font-semibold text-emerald-700 dark:text-emerald-300 truncate">{preview.cardName}</p>
+                  <p className="font-mono text-[11px] text-muted-foreground">{preview.cardCode}</p>
+                </>
+              ) : (
+                <p className="text-[12px] text-muted-foreground italic">Saisis le code ci-dessous…</p>
+              )}
+            </div>
+          </div>
+
+          {/* Saisie du nouveau code client */}
+          <div>
+            <label className="text-[12px] font-medium text-foreground">Code du client cible</label>
+            <div className="relative mt-1">
+              <input
+                value={newCode}
+                onChange={(e) => setNewCode(e.target.value.toUpperCase())}
+                placeholder="Ex. ACAL"
+                autoFocus
+                disabled={rebinding}
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 pr-9 text-[14px] font-medium text-foreground tracking-wide focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
+              />
+              {preview.state === "loading" && <Loader2 className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />}
+              {preview.state === "ok" && !preview.frozen && preview.valid && <CheckCircle2 className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-emerald-500" />}
+            </div>
+            {preview.state === "error" && (
+              <p className="mt-1 text-[11.5px] text-rose-600 dark:text-rose-400">{preview.message}</p>
+            )}
+            {preview.state === "ok" && (preview.frozen || !preview.valid) && (
+              <p className="mt-1 text-[11.5px] text-rose-600 dark:text-rose-400">
+                Client {preview.frozen ? "gelé" : "invalide"} dans SAP — commande impossible.
+              </p>
+            )}
+          </div>
+
+          {/* Garde-fou */}
+          <div className="flex items-start gap-2 rounded-xl border border-amber-300/60 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15 px-3.5 py-2.5">
+            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-[11.5px] text-amber-800 dark:text-amber-300 leading-relaxed">
+              L&apos;ancien BL <b>#{doc.docNum}</b> sera <b>annulé</b> et un <b>nouveau BL</b> recréé à l&apos;identique
+              (mêmes articles, prix, date, transporteur) pour le client cible. Action <b>irréversible</b> côté SAP.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => { setRebindOpen(false); setNewCode(""); setPreview({ state: "idle" }); }}
+              disabled={rebinding}
+              className="inline-flex flex-1 items-center justify-center h-11 px-4 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={confirmRebind}
+              disabled={!canRebind || rebinding}
+              className="inline-flex flex-1 items-center justify-center gap-2 h-11 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-[13.5px] font-semibold disabled:opacity-50"
+            >
+              {rebinding ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCog className="h-4 w-4" />}
+              Annuler & recréer
             </button>
           </div>
         </DialogContent>
