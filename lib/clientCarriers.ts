@@ -126,14 +126,53 @@ async function fetchTrclRows(cardCode: string): Promise<TrclRow[] | null> {
   }
 }
 
+// ── Vue SERG_TRCL COMPLÈTE en cache (perf) ──────────────────────────────────
+// /api/livraisons a besoin de la tournée de TOUS les clients du jour. Plutôt que
+// N requêtes filtrées (lentes), on charge la vue entière UNE fois (lignes
+// affectées seulement), on indexe par client et on met en cache (coalescé).
+const ALL_TTL_MS = 30 * 60 * 1000;
+let allTrclCache: { at: number; byCard: Map<string, TrclRow[]> } | null = null;
+let allTrclInflight: Promise<Map<string, TrclRow[]> | null> | null = null;
+
+async function getAllTrclRowsByCard(): Promise<Map<string, TrclRow[]> | null> {
+  if (allTrclCache && Date.now() - allTrclCache.at < ALL_TTL_MS) return allTrclCache.byCard;
+  if (allTrclInflight) return allTrclInflight;
+  allTrclInflight = (async () => {
+    try {
+      const rows = await sap.getV2ViewAll<TrclRow>(TRCL_VIEW, {
+        filter: "U_TrspCode ne ''",  // uniquement les lignes RÉELLEMENT affectées
+        pageSize: 500, maxPages: 40, env: "prod",
+      });
+      const byCard = new Map<string, TrclRow[]>();
+      for (const r of rows) {
+        const cc = (r.U_CardCode ?? "").toString().trim().toUpperCase();
+        if (!cc) continue;
+        let arr = byCard.get(cc);
+        if (!arr) { arr = []; byCard.set(cc, arr); }
+        arr.push(r);
+      }
+      allTrclCache = { at: Date.now(), byCard };
+      return byCard;
+    } catch (e) {
+      console.warn(`[clientCarriers] Chargement complet vue ${TRCL_VIEW} échoué:`, (e as Error).message);
+      return null;
+    } finally {
+      allTrclInflight = null;
+    }
+  })();
+  return allTrclInflight;
+}
+
 /**
  * Transporteurs/tournées d'un client depuis SERG_TRCL UNIQUEMENT (vue v2), SANS
- * fallback histogramme (léger — pour /api/livraisons, appelé par client).
- * null si la vue est illisible ou le client absent.
+ * fallback histogramme. Lit la vue COMPLÈTE en cache (1 requête pour toute la
+ * journée). null si la vue est illisible ou le client absent.
  */
 export async function getClientTrclCarriers(cardCode: string): Promise<ClientCarrierStat[] | null> {
-  const rows = await fetchTrclRows(cardCode.trim());
-  if (!rows) return null;
+  const byCard = await getAllTrclRowsByCard();
+  if (!byCard) return null;
+  const rows = byCard.get(cardCode.trim().toUpperCase());
+  if (!rows || rows.length === 0) return null;
   const res = await buildFromTrcl(rows);
   return res ? res.carriers : null;
 }
@@ -326,4 +365,5 @@ export async function getTrclDefaultCarrier(cardCode: string): Promise<ClientCar
 export function _resetClientCarriersCache(): void {
   cache.clear();
   trclRowsCache.clear();
+  allTrclCache = null;
 }
