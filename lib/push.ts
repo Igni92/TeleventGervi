@@ -11,6 +11,7 @@
  * pas fournie.
  */
 import webpush from "web-push";
+import { prisma } from "@/lib/prisma";
 
 let configured = false;
 let configuredOk = false;
@@ -82,5 +83,36 @@ export async function sendPush(target: PushTarget, payload: PushPayload): Promis
     if (status === 404 || status === 410) return "gone";
     console.error("[push] échec d'envoi:", status ?? e);
     return "error";
+  }
+}
+
+/**
+ * Envoie une notification à TOUS les abonnés push (opt-in via la cloche), en
+ * excluant éventuellement un email (ex. l'auteur de l'action). Best-effort et
+ * parallèle ; nettoie les abonnements expirés. Renvoie le nb d'envois réussis.
+ * Ne throw jamais (à appeler en fire-and-forget depuis les routes).
+ */
+export async function notifyAll(payload: PushPayload, opts: { exceptEmail?: string | null } = {}): Promise<number> {
+  if (!ensureConfigured()) return 0;
+  try {
+    const subs = await prisma.pushSubscription.findMany({
+      where: opts.exceptEmail ? { NOT: { email: opts.exceptEmail } } : {},
+    });
+    if (subs.length === 0) return 0;
+    const gone: string[] = [];
+    const results = await Promise.all(
+      subs.map(async (t) => {
+        const r = await sendPush({ endpoint: t.endpoint, p256dh: t.p256dh, auth: t.auth }, payload);
+        if (r === "gone") gone.push(t.endpoint);
+        return r === "ok";
+      }),
+    );
+    if (gone.length) {
+      await prisma.pushSubscription.deleteMany({ where: { endpoint: { in: gone } } }).catch(() => {});
+    }
+    return results.filter(Boolean).length;
+  } catch (e) {
+    console.error("[push] notifyAll échec:", e);
+    return 0;
   }
 }
