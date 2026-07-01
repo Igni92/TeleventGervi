@@ -6,10 +6,11 @@ import { useRouter } from "next/navigation";
 import {
   MonitorSmartphone, Loader2, Phone, AlertTriangle, Clock,
   TrendingUp, TrendingDown, Minus, ShoppingCart, User, Users, Mail,
-  Calendar, ArrowLeft, Truck, MessageSquareText,
+  Calendar, ArrowLeft, Truck, MessageSquareText, Search,
 } from "lucide-react";
 import { Ecran2Order } from "@/components/console/Ecran2Order";
 import { rememberConsoleScreen } from "@/components/console/ConsoleScreenGate";
+import { Input } from "@/components/ui/input";
 import {
   subscribeActiveClient, readActiveClient, requestActiveClient, clearModif,
   type ActiveClientState, type ActiveClientInfo,
@@ -18,6 +19,8 @@ import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
 import { displayNameFromSlp } from "@/lib/salespeople";
 
 type ModifTarget = { docEntry: number; docNum: number; clientId: string | null; clientName: string | null };
+/** Compte chargé MANUELLEMENT via la recherche (hors file de télévente). */
+type ManualClient = { clientId: string; clientName: string; info: ActiveClientInfo | null };
 
 /**
  * Écran 2 (fenêtre détachée) — optimisé **marge + relation client + incident**.
@@ -32,6 +35,10 @@ type ModifTarget = { docEntry: number; docNum: number; clientId: string | null; 
 export default function Ecran2Page() {
   const [state, setState] = useState<ActiveClientState | null>(null);
   const [modif, setModif] = useState<ModifTarget | null>(null);
+  // Compte sélectionné MANUELLEMENT via la recherche (pour créer un BL sans
+  // passer par la file de télévente). Prioritaire sur le client synchronisé de
+  // l'écran 1 ; « collant » jusqu'au clic « Suivre l'écran 1 ».
+  const [manual, setManual] = useState<ManualClient | null>(null);
   const [ready, setReady] = useState(false);
   // Réf pour lire l'état « en modif ? » dans le callback de souscription (collant).
   const inModif = useRef(false);
@@ -71,15 +78,28 @@ export default function Ecran2Page() {
     if (s) setState({ ...s, modif: null });
   }, []);
 
-  const clientId = modif ? modif.clientId : (state?.clientId ?? null);
-  const clientName = modif ? modif.clientName : (state?.clientName ?? null);
+  // Recherche → sélection d'un compte : on quitte toute modif en cours et on
+  // bascule l'écran 2 sur ce client (mode manuel, hors synchro écran 1).
+  const pickManual = useCallback((c: SearchClient) => {
+    if (inModif.current) { clearModif(); setModif(null); }
+    setManual({ clientId: c.id, clientName: c.nom, info: infoFromSearch(c) });
+  }, []);
+  // « Suivre l'écran 1 » → on abandonne le compte recherché et on reprend le
+  // client synchronisé.
+  const clearManual = useCallback(() => setManual(null), []);
+
+  const clientId = modif ? modif.clientId : (manual?.clientId ?? state?.clientId ?? null);
+  const clientName = modif ? modif.clientName : (manual?.clientName ?? state?.clientName ?? null);
   const sharePct = state?.stockSharePct ?? 100;
-  const info = modif ? null : (state?.client ?? null);
+  const info = modif ? null : (manual ? manual.info : (state?.client ?? null));
   const modifier = modif ? { docEntry: modif.docEntry, docNum: modif.docNum } : null;
 
   return (
     <div className="h-full flex flex-col gap-3 animate-fade-up min-h-0">
-      <ClientBanner clientId={clientId} clientName={clientName} info={info} />
+      <ClientBanner
+        clientId={clientId} clientName={clientName} info={info}
+        manual={manual != null} onPick={pickManual} onClearManual={clearManual}
+      />
 
       {/* Constructeur de commande — prend tout l'espace restant */}
       <div className="flex-1 min-h-0">
@@ -96,7 +116,7 @@ export default function Ecran2Page() {
         ) : (
           <div className="h-full flex items-center justify-center panel">
             <p className="hidden md:block text-[13px] text-muted-foreground text-center max-w-xs">
-              Sélectionne un client sur l&apos;écran 1 — son stock et la saisie de commande apparaîtront ici.
+              Sélectionne un client sur l&apos;écran 1 — ou recherche un compte ci-dessus — pour afficher son stock et saisir une commande ici.
             </p>
           </div>
         )}
@@ -132,25 +152,51 @@ function Ecran1Link() {
 }
 
 function ClientBanner({
-  clientId, clientName, info,
-}: { clientId: string | null; clientName: string | null; info: ActiveClientInfo | null }) {
+  clientId, clientName, info, manual, onPick, onClearManual,
+}: {
+  clientId: string | null; clientName: string | null; info: ActiveClientInfo | null;
+  manual: boolean; onPick: (c: SearchClient) => void; onClearManual: () => void;
+}) {
   // Fetch unique des dernières livraisons (mini-frise à droite du nom + notes).
   // Appelé AVANT tout return conditionnel (règle des hooks) ; no-op si pas de client.
   const { docs: deliveryDocs } = useClientDeliveries(clientId);
 
+  // Recherche d'un compte (créer un BL hors file de télévente) — toujours
+  // accessible, quel que soit l'état de synchronisation.
+  const searchRow = (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 min-w-0">
+        <ClientSearch onPick={onPick} placeholder="Rechercher un compte (nom ou code)…" />
+      </div>
+      {manual && (
+        <button
+          type="button"
+          onClick={onClearManual}
+          title="Abandonner ce compte et revenir au client synchronisé depuis l'écran 1"
+          className="shrink-0 inline-flex items-center gap-1 h-9 px-2.5 rounded-md border border-border bg-card text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-brand-400 transition-colors"
+        >
+          <MonitorSmartphone className="h-3.5 w-3.5" /> Suivre l&apos;écran 1
+        </button>
+      )}
+    </div>
+  );
+
   if (!clientName) {
     return (
-      <header className="shrink-0 panel px-4 py-3">
-        <div className="flex items-center justify-between gap-2">
-          <p className="kicker mb-0.5 inline-flex items-center gap-1.5">
-            <MonitorSmartphone className="h-3 w-3" /> Écran 2 · synchronisé
-          </p>
-          <Ecran1Link />
-        </div>
-        <h1 className="text-[19px] font-semibold tracking-tight text-muted-foreground">
-          En attente d&apos;un client…
-        </h1>
-      </header>
+      <div className="shrink-0 space-y-2.5">
+        {searchRow}
+        <header className="panel px-4 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="kicker mb-0.5 inline-flex items-center gap-1.5">
+              <MonitorSmartphone className="h-3 w-3" /> Écran 2 · synchronisé
+            </p>
+            <Ecran1Link />
+          </div>
+          <h1 className="text-[19px] font-semibold tracking-tight text-muted-foreground">
+            En attente d&apos;un client…
+          </h1>
+        </header>
+      </div>
     );
   }
 
@@ -177,13 +223,15 @@ function ClientBanner({
                    :                                "text-muted-foreground";
 
   return (
-    <header className="shrink-0 panel divide-y divide-border">
+    <div className="shrink-0 space-y-2.5">
+      {searchRow}
+      <header className="panel divide-y divide-border">
       {/* ── Ligne 1 — Identité (nom = lien fiche) + commercial + téléphones ── */}
       <div className="px-4 py-3 flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <p className="kicker mb-1 inline-flex items-center gap-3">
             <span className="inline-flex items-center gap-1.5">
-              <MonitorSmartphone className="h-3 w-3" /> Écran 2 · synchronisé
+              <MonitorSmartphone className="h-3 w-3" /> Écran 2 · {manual ? "compte recherché" : "synchronisé"}
             </span>
             <Ecran1Link />
           </p>
@@ -305,7 +353,148 @@ function ClientBanner({
 
       {/* ── Ligne 4 — Notes des dernières commandes (vraies remarques) ── */}
       <OrderNotes docs={deliveryDocs} />
-    </header>
+      </header>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Recherche de compte — charge n'importe quel client (dans le
+   périmètre de l'utilisateur) sur l'écran 2 pour créer un BL sans
+   passer par la file de télévente. Dropdown clavier-navigable ;
+   requête débouncée sur /api/clients (auth + scope côté serveur).
+───────────────────────────────────────────────────────────── */
+
+interface SearchClient {
+  id: string; code: string; nom: string; type: string | null;
+  commercial: string | null;
+  tel1: string | null; tel2: string | null; tel3: string | null;
+  email: string | null;
+  sapGroupCode: number | null; sapGroupName: string | null;
+  notes: string | null; joursAppel: string | null;
+}
+
+/** Construit un ActiveClientInfo (bandeau) depuis un résultat de recherche.
+ *  Les champs dérivés des insights (dernière cde, créneau, tendance…) ne sont
+ *  pas fournis par /api/clients → null (le bandeau les masque proprement). */
+function infoFromSearch(c: SearchClient): ActiveClientInfo {
+  return {
+    code: c.code, type: c.type, commercial: c.commercial,
+    tel1: c.tel1, tel2: c.tel2, tel3: c.tel3, email: c.email,
+    sapGroupCode: c.sapGroupCode, sapGroupName: c.sapGroupName,
+    notes: c.notes, joursAppel: c.joursAppel,
+    openIncidents: null, lastOrderDays: null, ordersCount: null,
+    medianHour: null, bestDayOfWeek: null, trend30: null,
+  };
+}
+
+function ClientSearch({ onPick, placeholder }: {
+  onPick: (c: SearchClient) => void; placeholder?: string;
+}) {
+  const [term, setTerm] = useState("");
+  const [results, setResults] = useState<SearchClient[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const seq = useRef(0);
+
+  // Requête débouncée (≥ 2 caractères). Un compteur de séquence ignore les
+  // réponses périmées : une frappe rapide ne doit pas écraser un résultat récent.
+  useEffect(() => {
+    const t = term.trim();
+    if (t.length < 2) { setResults([]); setLoading(false); setOpen(false); return; }
+    const my = ++seq.current;
+    setLoading(true);
+    const h = setTimeout(() => {
+      fetch(`/api/clients?search=${encodeURIComponent(t)}&limit=8`, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((j: { clients?: SearchClient[] }) => {
+          if (my !== seq.current) return;
+          setResults(j.clients ?? []);
+          setActiveIdx(0);
+          setOpen(true);
+        })
+        .catch(() => { if (my === seq.current) setResults([]); })
+        .finally(() => { if (my === seq.current) setLoading(false); });
+    }, 250);
+    return () => clearTimeout(h);
+  }, [term]);
+
+  // Ferme le dropdown au clic hors du composant.
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+
+  const pick = useCallback((c: SearchClient) => {
+    onPick(c);
+    setTerm(""); setResults([]); setOpen(false);
+  }, [onPick]);
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape") { setOpen(false); e.currentTarget.blur(); return; }
+    if (!open || results.length === 0) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx((i) => Math.min(i + 1, results.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIdx((i) => Math.max(i - 1, 0)); }
+    else if (e.key === "Enter") { e.preventDefault(); const c = results[activeIdx]; if (c) pick(c); }
+  };
+
+  return (
+    <div ref={boxRef} className="relative">
+      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+      <Input
+        value={term}
+        onChange={(e) => setTerm(e.target.value)}
+        onKeyDown={onKeyDown}
+        onFocus={() => { if (results.length > 0) setOpen(true); }}
+        placeholder={placeholder ?? "Rechercher un compte…"}
+        className="pl-9 h-9 text-[13px]"
+        aria-label="Rechercher un compte client"
+      />
+      {loading && (
+        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />
+      )}
+      {open && (
+        <div className="absolute z-50 left-0 right-0 mt-1 rounded-lg border border-border bg-card shadow-xl overflow-hidden">
+          {results.length === 0 ? (
+            <p className="px-3 py-2.5 text-[12px] text-muted-foreground">Aucun compte trouvé.</p>
+          ) : (
+            <ul className="max-h-[280px] overflow-y-auto py-1">
+              {results.map((c, i) => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onMouseEnter={() => setActiveIdx(i)}
+                    onClick={() => pick(c)}
+                    className={`w-full text-left px-3 py-1.5 flex items-center gap-2 transition-colors ${
+                      i === activeIdx ? "bg-brand-50 dark:bg-brand-950/40" : "hover:bg-secondary/40"
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[12.5px] font-medium text-foreground truncate">{c.nom}</span>
+                      <span className="block text-[10.5px] font-mono tnum text-muted-foreground">{c.code}</span>
+                    </span>
+                    {c.type && (
+                      <span className={`shrink-0 text-[9px] font-bold tracking-wider px-1.5 py-px rounded ${
+                        c.type === "EXPORT" ? "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" :
+                        c.type === "GMS"    ? "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" :
+                                              "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
+                      }`}>
+                        {c.type}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
