@@ -167,7 +167,9 @@ function FreshnessBadge({ dlc, className = "" }: { dlc: string | null | undefine
  * Défensif : endpoint HS / non-OK → Map vide (aucun badge, jamais d'erreur).
  * Renvoie batchNumber → ISO|null (clé absente si non encore connue).
  */
-function useDlcMap(batchNumbers: string[]): Record<string, string | null> {
+function useDlcMap(
+  batchNumbers: string[],
+): [Record<string, string | null>, (batchNumber: string, iso: string | null) => void] {
   const [dlc, setDlc] = useState<Record<string, string | null>>({});
   const key = useMemo(() => Array.from(new Set(batchNumbers.filter(Boolean))).sort().join(","), [batchNumbers]);
   useEffect(() => {
@@ -178,14 +180,18 @@ function useDlcMap(batchNumbers: string[]): Record<string, string | null> {
         const res = await fetch(`/api/lots/dlc?batches=${encodeURIComponent(key)}`, { cache: "no-store" });
         if (!res.ok) return;
         const json = (await res.json()) as { dlc?: Record<string, string | null> };
-        if (!cancel && json && typeof json.dlc === "object" && json.dlc) setDlc(json.dlc);
+        if (!cancel && json && typeof json.dlc === "object" && json.dlc) setDlc((c) => ({ ...c, ...json.dlc }));
       } catch {
         /* endpoint HS → on garde l'état courant, aucun badge n'apparaît */
       }
     })();
     return () => { cancel = true; };
   }, [key]);
-  return dlc;
+  // Mise à jour optimiste après saisie d'une DLC dans le détail (évite un refetch).
+  const merge = useCallback((batchNumber: string, iso: string | null) => {
+    setDlc((c) => ({ ...c, [batchNumber]: iso }));
+  }, []);
+  return [dlc, merge];
 }
 
 /** Liste des entrées marchandises (SAP PurchaseDeliveryNotes) — recherche + détail. */
@@ -215,7 +221,7 @@ export function GoodsReceiptHistory() {
 
   // DLC (fraîcheur) : un seul fetch groupé pour TOUS les lots chargés.
   const allBatches = useMemo(() => docs.map((d) => d.lot).filter(Boolean), [docs]);
-  const dlcMap = useDlcMap(allBatches);
+  const [dlcMap, mergeDlc] = useDlcMap(allBatches);
 
   // Recherche : fournisseur (code/nom) · code article · numéro (EM / BL) · date.
   const filtered = useMemo(() => {
@@ -329,7 +335,6 @@ export function GoodsReceiptHistory() {
                     <span className="inline-flex items-center gap-1.5 flex-wrap">
                       <span className={`font-mono font-semibold text-[16px] ${isVoided(d) ? "line-through text-muted-foreground" : "text-foreground"}`}>#{d.docNum}</span>
                       <CancelBadge d={d} />
-                      <FreshnessBadge dlc={dlcMap[d.lot]} />
                     </span>
                     <div className="text-[14px] text-foreground/90 mt-0.5 truncate" title={d.cardName}>
                       {d.cardName || d.cardCode}
@@ -390,7 +395,6 @@ export function GoodsReceiptHistory() {
                       </td>
                       <td className="px-3 py-2 font-mono text-muted-foreground whitespace-nowrap">
                         {d.lot}
-                        <FreshnessBadge dlc={dlcMap[d.lot]} className="ml-1.5 align-middle" />
                       </td>
                       <td className="px-3 py-2">
                         <div className="font-mono font-medium truncate" title={d.cardName}>{d.cardCode}</div>
@@ -419,6 +423,8 @@ export function GoodsReceiptHistory() {
                         <td colSpan={8} className="bg-secondary/20 px-4 py-4 border-t border-border/60">
                           <ReceiptDetail
                             receipt={d}
+                            dlc={dlcMap[d.lot]}
+                            onDlcSaved={mergeDlc}
                             incidents={byDoc.get(d.docEntry) ?? []}
                             onIncidentChanged={reloadIncidents}
                             onNumAtCardChange={updateNumAtCard}
@@ -456,6 +462,8 @@ export function GoodsReceiptHistory() {
             <ReceiptDetail
               large
               receipt={largeDoc}
+              dlc={dlcMap[largeDoc.lot]}
+              onDlcSaved={mergeDlc}
               incidents={byDoc.get(largeDoc.docEntry) ?? []}
               onIncidentChanged={reloadIncidents}
               onNumAtCardChange={updateNumAtCard}
@@ -485,9 +493,13 @@ function Stat({ label, value, tone }: { label: string; value: React.ReactNode; t
    directement depuis cette consultation.
    ───────────────────────────────────────────────────────────────── */
 function ReceiptDetail({
-  receipt, incidents, onIncidentChanged, onNumAtCardChange, onModified, large, onEnlarge,
+  receipt, dlc, onDlcSaved, incidents, onIncidentChanged, onNumAtCardChange, onModified, large, onEnlarge,
 }: {
   receipt: Receipt;
+  /** DLC (ISO) du lot — `undefined` = pas encore chargée, `null` = non saisie. */
+  dlc?: string | null;
+  /** Remonte la DLC enregistrée pour mise à jour optimiste (batchNumber, ISO|null). */
+  onDlcSaved?: (batchNumber: string, iso: string | null) => void;
   incidents: { id: string; type: string | null; note: string | null; resolved: boolean; createdAt: string; createdBy: string | null }[];
   onIncidentChanged: () => void;
   onNumAtCardChange: (docEntry: number, numAtCard: string) => void;
@@ -602,6 +614,43 @@ function ReceiptDetail({
       if (!res.ok || !j.ok) { lastSaved.current = prevSigs; toast.error(j.error || "Erreur SAP"); return; }
     } catch (err) { lastSaved.current = prevSigs; toast.error((err as Error).message); }
     finally { setSavingLines((c) => { const n = new Set(c); n.delete(e.lineNum); return n; }); }
+  };
+
+  // ── DLC (fraîcheur) du lot — saisie/édition depuis le détail, sur la ligne ──
+  // La DLC est unique par lot (« EM<docNum> ») : toutes les lignes du détail
+  // pointent donc sur la même échéance. Saisie côté TeleVent (jamais SAP).
+  const [dlcISO, setDlcISO] = useState<string | null | undefined>(dlc);
+  const [savingDlc, setSavingDlc] = useState(false);
+  const lastSavedDlc = useRef<string>(dlc ? dlc.slice(0, 10) : "");
+  useEffect(() => {
+    setDlcISO(dlc);
+    lastSavedDlc.current = dlc ? dlc.slice(0, 10) : "";
+  }, [dlc, receipt.docEntry]);
+  const dlcInputValue = dlcISO ? dlcISO.slice(0, 10) : "";
+  const saveDlc = async (value: string, itemCode: string) => {
+    if (value === lastSavedDlc.current) return;                 // inchangé → rien
+    setSavingDlc(true);
+    try {
+      const res = await fetch("/api/lots/dlc", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchNumber: receipt.lot, itemCode, expirationDate: value || null }),
+      });
+      const j = await res.json();
+      if (!res.ok || j.ok === false) {
+        // Échec (droits, réseau…) : on revient à la dernière valeur enregistrée.
+        setDlcISO(lastSavedDlc.current ? new Date(lastSavedDlc.current).toISOString() : null);
+        toast.error(j.error || "DLC non enregistrée");
+        return;
+      }
+      const iso = value ? new Date(value).toISOString() : null;
+      lastSavedDlc.current = value;
+      setDlcISO(iso);
+      onDlcSaved?.(receipt.lot, iso);
+      toast.success(value ? `DLC du lot ${receipt.lot} enregistrée` : `DLC du lot ${receipt.lot} effacée`);
+    } catch (e) {
+      setDlcISO(lastSavedDlc.current ? new Date(lastSavedDlc.current).toISOString() : null);
+      toast.error((e as Error).message);
+    } finally { setSavingDlc(false); }
   };
 
   // Jeu de tailles : compact (inline) vs agrandi (modale).
@@ -729,6 +778,19 @@ function ReceiptDetail({
                   <span>PU {l.price != null ? eur(l.price) : "—"}</span>
                 )}
               </div>
+              {/* DLC (fraîcheur) du lot — sur la ligne, éditable */}
+              <div className="flex items-center gap-2 mt-2 text-[13px]">
+                <span className="text-muted-foreground shrink-0">DLC</span>
+                <input
+                  type="date"
+                  value={dlcInputValue}
+                  onChange={(e) => setDlcISO(e.target.value ? new Date(e.target.value).toISOString() : null)}
+                  onBlur={(e) => saveDlc(e.target.value, l.itemCode)}
+                  className="h-8 rounded-md border border-input bg-background px-2 text-[12px] tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                />
+                <FreshnessBadge dlc={dlcISO} />
+                {savingDlc && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+              </div>
             </div>
           );
         })}
@@ -751,6 +813,7 @@ function ReceiptDetail({
               <th className={`text-left font-semibold ${th}`}>Marque</th>
               <th className={`text-left font-semibold ${th}`}>Variété</th>
               <th className={`text-left font-semibold ${th}`}>Condt</th>
+              <th className={`text-left font-semibold w-40 ${th}`}>DLC</th>
               <th className={`text-right font-semibold w-24 ${th}`}>PU HT</th>
               <th className={`text-right font-semibold w-24 ${th}`}>Total HT</th>
             </tr>
@@ -768,6 +831,21 @@ function ReceiptDetail({
                   <td className={td}><Chip kind="marque">{dz.marque}</Chip></td>
                   <td className={td}><Chip kind="calibre">{dz.variete}</Chip></td>
                   <td className={td}><Chip kind="condt">{dz.condt}</Chip></td>
+                  <td className={td}>
+                    {/* DLC (fraîcheur) du lot — sur la ligne, éditable */}
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="date"
+                        value={dlcInputValue}
+                        onChange={(e) => setDlcISO(e.target.value ? new Date(e.target.value).toISOString() : null)}
+                        onBlur={(e) => saveDlc(e.target.value, l.itemCode)}
+                        className="h-8 rounded-md border border-input bg-background px-2 text-[12px] tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                      />
+                      {savingDlc
+                        ? <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
+                        : <FreshnessBadge dlc={dlcISO} className="shrink-0" />}
+                    </div>
+                  </td>
                   <td className={`text-right tnum ${td}`}>
                     {canEditPrices && priceEdits[i] ? (
                       <NumberInput value={emEffPU(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { price: n == null ? "" : String(n), forceTotal: false, lineTotal: "" })} onBlur={() => saveLine(i)} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className="h-8 w-24 text-right" />
@@ -787,15 +865,15 @@ function ReceiptDetail({
           </tbody>
           <tfoot>
             <tr className="border-t border-border bg-secondary/30">
-              <td colSpan={7} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total HT</td>
+              <td colSpan={8} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total HT</td>
               <td colSpan={2} className={`text-right tnum font-semibold text-foreground ${td} ${totVal}`}>{eur(totHT)}</td>
             </tr>
             <tr className="bg-secondary/20">
-              <td colSpan={7} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>TVA</td>
+              <td colSpan={8} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>TVA</td>
               <td colSpan={2} className={`text-right tnum text-muted-foreground ${td}`}>{eur(totTVA)}</td>
             </tr>
             <tr className="bg-secondary/30 border-t border-border">
-              <td colSpan={7} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total TTC</td>
+              <td colSpan={8} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total TTC</td>
               <td colSpan={2} className={`text-right tnum font-bold text-foreground ${td} ${totVal}`}>{eur(totTTC)}</td>
             </tr>
           </tfoot>
