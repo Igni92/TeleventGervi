@@ -1520,18 +1520,22 @@ function ModifBanner({
         {prefilling && (
           <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600 dark:text-amber-300 shrink-0" />
         )}
-        {onExit && (
-          <button type="button" onClick={onExit}
-            title="Quitter la modification et revenir à la saisie normale (synchro écran 1)"
-            className="inline-flex items-center gap-1 h-7 px-2 rounded-md border border-amber-300/70 dark:border-amber-500/40 text-[11px] font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/35 shrink-0">
-            <X className="h-3 w-3" /> Quitter
-          </button>
-        )}
       </div>
       {closed && (
         <p className="px-3 pb-2 text-[11px] font-medium text-rose-600 dark:text-rose-400">
           ⚠️ Commande clôturée — la modification sera refusée par SAP.
         </p>
+      )}
+      {/* Quitter la modification — bouton pleine largeur, bien visible (remplace
+          le petit bouton contour coincé à droite du bandeau, peu repérable). */}
+      {onExit && (
+        <div className="px-3 pb-2.5 pt-0.5">
+          <button type="button" onClick={onExit}
+            title="Quitter la modification et revenir à la saisie normale (synchro écran 1)"
+            className="inline-flex w-full items-center justify-center gap-1.5 h-9 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-[12.5px] font-semibold active:scale-[0.99] transition-colors">
+            <X className="h-4 w-4" /> Quitter la modification
+          </button>
+        </div>
       )}
     </div>
   );
