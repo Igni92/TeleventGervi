@@ -116,6 +116,13 @@ function docStatus(d: { prepared: boolean; departed?: boolean }): StatusTab {
   return "A_PREPARER";
 }
 
+/** Libellés courts des états — réutilisés par les actions groupées (transporteur). */
+const STATUS_LABEL: Record<StatusTab, string> = {
+  A_PREPARER: "À préparer",
+  FAIT: "Fait",
+  DEPART: "Départ",
+};
+
 /** Badge de ligne par segment client (conservé pour CHR / EXPORT, le tag GMS
  *  n'étant plus affiché — la distinction utile est désormais À préparer / Fait). */
 const SEG_UI: Record<"CHR" | "EXPORT", { label: string; badge: string }> = {
@@ -316,6 +323,49 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
     );
   }, []);
 
+  // ── Action GROUPÉE par transporteur : bascule toutes les commandes du groupe
+  //    (celles de l'onglet courant) vers un état. Optimiste + persistance par
+  //    commande (mêmes routes que le bouton individuel). En cas d'échec partiel,
+  //    on recharge pour resynchroniser. `source` = onglet courant (état commun). ──
+  const bulkSetStatus = useCallback(
+    async (docEntries: number[], target: StatusTab) => {
+      const source = statusTab;
+      if (docEntries.length === 0 || source === target) return;
+      const patch: Partial<Doc> = {
+        prepared: target !== "A_PREPARER",
+        departed: target === "DEPART",
+      };
+      docEntries.forEach((de) => patchDoc(de, patch));
+      const post = (url: string, body: Record<string, unknown>) =>
+        fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      try {
+        const calls: Promise<boolean>[] = [];
+        for (const de of docEntries) {
+          // Quitter « Départ » : lever d'abord le drapeau départ.
+          if (source === "DEPART" && target !== "DEPART") {
+            calls.push(post("/api/livraisons/departed", { docEntry: de, departed: false }).then((r) => r.ok).catch(() => false));
+          }
+          if (target === "DEPART") {
+            calls.push(post("/api/livraisons/departed", { docEntry: de, departed: true }).then((r) => r.ok).catch(() => false));
+          } else {
+            calls.push(post("/api/livraisons/prepared", { docEntry: de, prepared: target === "FAIT" }).then((r) => r.ok).catch(() => false));
+          }
+        }
+        const oks = await Promise.all(calls);
+        if (oks.some((ok) => !ok)) {
+          toast.error("Certaines commandes n'ont pas pu être mises à jour — actualisation.");
+          load();
+          return;
+        }
+        toast.success(`${docEntries.length} commande${docEntries.length > 1 ? "s" : ""} → ${STATUS_LABEL[target]}`);
+      } catch {
+        toast.error("Échec de la mise à jour groupée — actualisation.");
+        load();
+      }
+    },
+    [statusTab, patchDoc, load],
+  );
+
   // ── Repliage des groupes transporteur (clé = code transporteur) ──
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleCollapse = useCallback((key: string) => {
@@ -325,6 +375,24 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
       return next;
     });
   }, []);
+
+  // Préparateur / livreur : transporteurs REPLIÉS par défaut — le préparateur
+  // déplie le groupe qu'il prépare. On replie chaque groupe dès sa 1re apparition,
+  // sans jamais ré-écraser un dépliage manuel ensuite. (Dispatcheurs = inchangé.)
+  const seenCarrierKeys = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (canDispatch || !data) return;
+    const fresh = data.carriers
+      .map((c) => c.code ?? "__none__")
+      .filter((k) => !seenCarrierKeys.current.has(k));
+    if (fresh.length === 0) return;
+    fresh.forEach((k) => seenCarrierKeys.current.add(k));
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      fresh.forEach((k) => next.add(k));
+      return next;
+    });
+  }, [data, canDispatch]);
 
   // Comptes par état (sur l'ensemble, pour les compteurs des onglets).
   const statusCounts = useMemo(() => {
@@ -479,6 +547,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
                 tourneesByCode={tourneesByCode} onLoadTournees={loadTournees} onTourneeChange={changeTournee}
                 collapsed={collapsed.has(key)} onToggleCollapse={() => toggleCollapse(key)}
                 onPatchDoc={patchDoc} onReload={() => load()} canDispatch={canDispatch}
+                statusTab={statusTab} onBulkStatus={bulkSetStatus}
               />
             );
           })}
@@ -629,6 +698,7 @@ function CarrierGroup({
   carrier, carriers, onCarrierChange, onDateChange,
   tourneesByCode, onLoadTournees, onTourneeChange,
   collapsed, onToggleCollapse, onPatchDoc, onReload, canDispatch,
+  statusTab, onBulkStatus,
 }: {
   carrier: Carrier;
   carriers: CarrierOption[];
@@ -642,17 +712,52 @@ function CarrierGroup({
   onPatchDoc: (docEntry: number, patch: Partial<Doc>) => void;
   onReload: () => void;
   canDispatch: boolean;
+  statusTab: StatusTab;
+  onBulkStatus: (docEntries: number[], target: StatusTab) => void;
 }) {
   const unassigned = !carrier.code;
+  const docEntries = carrier.docs.map((d) => d.docEntry);
+
+  // Bouton d'avancement groupé — CHANGE selon l'onglet : À préparer → Fait →
+  // Départ. (Départ = état terminal → pas de bouton d'avancement.)
+  const forward =
+    statusTab === "A_PREPARER"
+      ? { target: "FAIT" as StatusTab, short: "Fait", long: "Tout marquer fait", Icon: CheckCircle2, cls: "bg-emerald-500 hover:bg-emerald-600 text-white" }
+      : statusTab === "FAIT"
+      ? { target: "DEPART" as StatusTab, short: "Départ", long: "Tout marquer départ", Icon: Truck, cls: "bg-sky-500 hover:bg-sky-600 text-white" }
+      : null;
+
+  // Menu clic droit (desktop) sur l'en-tête transporteur → change l'état de TOUT
+  // le groupe (À préparer / Fait / Départ). Accès mobile = le bouton ci-dessus.
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  function onHeaderContextMenu(e: ReactMouseEvent) {
+    e.preventDefault();
+    setMenu({ x: Math.min(e.clientX, window.innerWidth - 224), y: Math.min(e.clientY, window.innerHeight - 148) });
+  }
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null); };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [menu]);
+
   return (
     <section className="rounded-2xl border border-border bg-card overflow-hidden">
-      {/* En-tête transporteur — cliquable pour replier/déplier le groupe */}
+      {/* En-tête transporteur — clic = replier/déplier ; clic droit = état groupé */}
       <div
         role="button" tabIndex={0}
         onClick={onToggleCollapse}
+        onContextMenu={onHeaderContextMenu}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggleCollapse(); } }}
         aria-expanded={!collapsed}
-        title={collapsed ? "Déplier ce transporteur" : "Replier ce transporteur"}
+        title={collapsed ? "Déplier ce transporteur (clic droit : changer l'état du groupe)" : "Replier ce transporteur (clic droit : changer l'état du groupe)"}
         className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-border bg-secondary/30 hover:bg-secondary/50 cursor-pointer select-none transition-colors"
       >
         <div className="flex items-center gap-2.5 min-w-0">
@@ -675,12 +780,51 @@ function CarrierGroup({
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-6 sm:gap-8 shrink-0 text-right">
+        <div className="flex items-center gap-3 sm:gap-8 shrink-0 text-right">
+          {/* Avancement GROUPÉ — bouton qui change selon l'onglet, tactile sur mobile */}
+          {forward && docEntries.length > 0 && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onBulkStatus(docEntries, forward.target); }}
+              title={`Passer les ${docEntries.length} commande(s) de ${carrier.name} à « ${STATUS_LABEL[forward.target]} »`}
+              className={`inline-flex shrink-0 items-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-lg text-[11.5px] font-bold uppercase tracking-wide active:scale-95 transition-colors ${forward.cls}`}
+            >
+              <forward.Icon className="h-4 w-4" />
+              <span className="sm:hidden">{forward.short}</span>
+              <span className="hidden sm:inline">{forward.long}</span>
+            </button>
+          )}
           <Metric label="Cmd." value={fmtInt(carrier.orders)} />
           <Metric label="Colis" value={fmtNum(carrier.colis)} />
           <Metric label="kg" value={fmtNum(carrier.weightKg)} className="hidden sm:block" />
         </div>
       </div>
+
+      {/* Menu clic droit (desktop) — état groupé du transporteur */}
+      {menu && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
+          />
+          <div
+            role="menu"
+            className="fixed z-50 min-w-[214px] overflow-hidden rounded-lg border border-border bg-card py-1 shadow-lg animate-fade-up"
+            style={{ top: menu.y, left: menu.x }}
+          >
+            <p className="px-3 py-1.5 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground border-b border-border/60 truncate">
+              {carrier.name} · {docEntries.length} cmd.
+            </p>
+            <MenuItem icon={Clock} accent="text-amber-600 dark:text-amber-400" active={statusTab === "A_PREPARER"}
+              onClick={() => { setMenu(null); onBulkStatus(docEntries, "A_PREPARER"); }}>Tout : à préparer</MenuItem>
+            <MenuItem icon={CheckCircle2} accent="text-emerald-600 dark:text-emerald-400" active={statusTab === "FAIT"}
+              onClick={() => { setMenu(null); onBulkStatus(docEntries, "FAIT"); }}>Tout : fait</MenuItem>
+            <MenuItem icon={Truck} accent="text-sky-600 dark:text-sky-400" active={statusTab === "DEPART"}
+              onClick={() => { setMenu(null); onBulkStatus(docEntries, "DEPART"); }}>Tout : départ</MenuItem>
+          </div>
+        </>
+      )}
 
       {/* Cartes clients (masquées si le groupe est replié) */}
       {!collapsed && (
@@ -1126,7 +1270,7 @@ function OrderRow({
             ? "Commande partie en livraison — cliquer pour la ramener à « fait »"
             : prepared ? "Commande préparée (faite) — cliquer pour annuler" : "Marquer la commande comme préparée (faite)"}
           aria-pressed={prepared || departed}
-          className={`inline-flex shrink-0 items-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-lg text-[12px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 ${
+          className={`inline-flex shrink-0 items-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-[12px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 active:scale-95 ${
             departed
               ? "bg-sky-500 text-white hover:bg-sky-600"
               : prepared
@@ -1137,7 +1281,8 @@ function OrderRow({
           {(savingPrep || savingDepart)
             ? <Loader2 className="h-4 w-4 animate-spin" />
             : departed ? <Truck className="h-4 w-4" /> : prepared ? <CheckCircle2 className="h-4 w-4" /> : <Clock className="h-4 w-4" />}
-          <span className="hidden sm:inline">{departed ? "Parti" : prepared ? "Faite" : "À préparer"}</span>
+          {/* Libellé visible aussi sur mobile — bouton de préparation lisible et facile à toucher. */}
+          <span>{departed ? "Parti" : prepared ? "Faite" : "À préparer"}</span>
         </button>
 
         {/* Identité client */}
@@ -1290,15 +1435,16 @@ function OrderRow({
             <p className="text-[15px] font-bold tnum text-foreground leading-none">{fmtNum(doc.weightKg)}</p>
             <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-0.5">kg</p>
           </div>
-          {/* Ouvrir en grand (+ affecter au préparateur qui clique) */}
+          {/* Ouvrir en grand (+ affecter au préparateur qui clique) — cible tactile
+              agrandie sur mobile pour lancer la préparation d'un pouce. */}
           <button
             type="button"
             onClick={openBig}
             title="Ouvrir la commande en grand (et se l'affecter)"
             aria-label={`Ouvrir la commande ${doc.docNum} en grand`}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-brand-300/60 dark:border-brand-500/40 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-900/35 active:scale-95 transition-all"
+            className="inline-flex h-11 w-11 sm:h-9 sm:w-9 items-center justify-center rounded-lg border border-brand-300/60 dark:border-brand-500/40 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-900/35 active:scale-95 transition-all"
           >
-            <Maximize2 className="h-4 w-4" />
+            <Maximize2 className="h-[18px] w-[18px] sm:h-4 sm:w-4" />
           </button>
           {canDispatch && doc.open && (
             <button

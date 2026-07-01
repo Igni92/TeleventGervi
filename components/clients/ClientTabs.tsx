@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { Briefcase, Receipt, Truck } from "lucide-react";
 import { DUR, EASE } from "@/lib/motion";
 import { cn } from "@/lib/utils";
+import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
+import { isLogisticsPreviewRole } from "@/lib/rolePreview";
 
 /**
  * Onglets de la fiche client : Commercial / Comptabilité / Logistique.
@@ -12,6 +14,9 @@ import { cn } from "@/lib/utils";
  * Léger (pas de Radix). State local + transition fade-up entre vues.
  * Les contenus sont passés en props : la page reste un Server Component
  * et délègue uniquement la bascule UI à ce composant client.
+ *
+ * En aperçu « terrain logistique » (Préparateur / Livreur), seule la fiche
+ * Logistique est exposée — ni Commercial ni Comptabilité (aperçu VISUEL).
  */
 
 type Tab = "commercial" | "compta" | "logistique";
@@ -24,9 +29,18 @@ interface ClientTabsProps {
 }
 
 export function ClientTabs({ commercial, compta, logistique, defaultTab = "commercial" }: ClientTabsProps) {
+  const { previewRole } = useRolePreview();
+  const logisticsOnly = isLogisticsPreviewRole(previewRole);
+
   const [tab, setTab] = useState<Tab>(defaultTab);
   const reduce = useReducedMotion();
 
+  // Aperçu terrain : on force l'onglet Logistique (les autres sont masqués).
+  useEffect(() => {
+    if (logisticsOnly) setTab("logistique");
+  }, [logisticsOnly]);
+
+  const activeTab: Tab = logisticsOnly ? "logistique" : tab;
   const panes: Record<Tab, React.ReactNode> = { commercial, compta, logistique };
 
   return (
@@ -36,24 +50,28 @@ export function ClientTabs({ commercial, compta, logistique, defaultTab = "comme
         aria-label="Sections fiche client"
         className="sticky top-16 z-30 mb-5 inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-xl border border-border glass p-1 shadow-sm md:top-2"
       >
-        <TabButton active={tab === "commercial"} reduce={!!reduce} onClick={() => setTab("commercial")} icon={<Briefcase className="h-3.5 w-3.5" />}>
-          Commercial
-        </TabButton>
-        <TabButton active={tab === "compta"} reduce={!!reduce} onClick={() => setTab("compta")} icon={<Receipt className="h-3.5 w-3.5" />}>
-          Comptabilité
-        </TabButton>
-        <TabButton active={tab === "logistique"} reduce={!!reduce} onClick={() => setTab("logistique")} icon={<Truck className="h-3.5 w-3.5" />}>
+        {!logisticsOnly && (
+          <>
+            <TabButton active={activeTab === "commercial"} reduce={!!reduce} onClick={() => setTab("commercial")} icon={<Briefcase className="h-3.5 w-3.5" />}>
+              Commercial
+            </TabButton>
+            <TabButton active={activeTab === "compta"} reduce={!!reduce} onClick={() => setTab("compta")} icon={<Receipt className="h-3.5 w-3.5" />}>
+              Comptabilité
+            </TabButton>
+          </>
+        )}
+        <TabButton active={activeTab === "logistique"} reduce={!!reduce} onClick={() => setTab("logistique")} icon={<Truck className="h-3.5 w-3.5" />}>
           Logistique
         </TabButton>
       </div>
       <motion.div
-        key={tab}
+        key={activeTab}
         initial={reduce ? false : { opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: DUR.base, ease: EASE.out }}
         role="tabpanel"
       >
-        {panes[tab]}
+        {panes[activeTab]}
       </motion.div>
     </div>
   );
