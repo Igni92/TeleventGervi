@@ -34,11 +34,12 @@ export default async function CommerciauxPage() {
     const commByUser = new Map<string, boolean>();
     const dirByUser = new Map<string, boolean>();
     const livByUser = new Map<string, boolean>();
+    const agrByUser = new Map<string, boolean>();
     try {
-      const rows = await prisma.$queryRawUnsafe<{ id: string; isAdmin: boolean; isPreparateur: boolean; isCommercial: boolean; isDirection: boolean; isLivreur: boolean }[]>(
-        `SELECT "id", "isAdmin", "isPreparateur", "isCommercial", "isDirection", "isLivreur" FROM "User"`,
+      const rows = await prisma.$queryRawUnsafe<{ id: string; isAdmin: boolean; isPreparateur: boolean; isCommercial: boolean; isDirection: boolean; isLivreur: boolean; isAgreeur: boolean }[]>(
+        `SELECT "id", "isAdmin", "isPreparateur", "isCommercial", "isDirection", "isLivreur", "isAgreeur" FROM "User"`,
       );
-      for (const r of rows) { adminByUser.set(r.id, r.isAdmin); prepByUser.set(r.id, r.isPreparateur); commByUser.set(r.id, r.isCommercial); dirByUser.set(r.id, r.isDirection); livByUser.set(r.id, r.isLivreur); }
+      for (const r of rows) { adminByUser.set(r.id, r.isAdmin); prepByUser.set(r.id, r.isPreparateur); commByUser.set(r.id, r.isCommercial); dirByUser.set(r.id, r.isDirection); livByUser.set(r.id, r.isLivreur); agrByUser.set(r.id, r.isAgreeur); }
     } catch {
       // Colonnes de rôle partiellement absentes ? Repli sur isAdmin seul.
       try {
@@ -114,6 +115,7 @@ export default async function CommerciauxPage() {
                 isCommercial={commByUser.get(user.id) ?? true}
                 isDirection={dirByUser.get(user.id) ?? false}
                 isLivreur={livByUser.get(user.id) ?? false}
+                isAgreeur={agrByUser.get(user.id) ?? false}
                 canEditAdmin={strictAdmin}
               />
             );

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { docLabel } from "@/lib/docLabel";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
+import { isAgreeur, requirePreparateurOrAdmin } from "@/lib/permissions";
 
 const WHITELIST_WHS = new Set(["000", "01", "R1"]);
 
@@ -18,6 +19,13 @@ const WHITELIST_WHS = new Set(["000", "01", "R1"]);
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  // L'AGRÉEUR ne peut PAS créer de commande fournisseur (son seul droit est de
+  // « passer » une commande existante en entrée marchandise). On bloque donc un
+  // agréeur qui n'a pas par ailleurs un rôle de gestion (préparateur / admin /
+  // direction, qui eux gardent le droit de création).
+  if (!(await requirePreparateurOrAdmin(session)) && (await isAgreeur(session))) {
+    return NextResponse.json({ error: "L'agréeur ne peut pas créer de commande fournisseur." }, { status: 403 });
+  }
 
   let body: {
     cardCode?: string; dueDate?: string; numAtCard?: string; comment?: string;

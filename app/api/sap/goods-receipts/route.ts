@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { docLabel } from "@/lib/docLabel";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
+import { isAgreeur, requirePreparateurOrAdmin } from "@/lib/permissions";
 import { incrementLocalStock } from "@/lib/stockSync";
 import { bumpLot, LOT_PENDING } from "@/lib/lotResolver";
 import { buildWhsBudget, remainingForItem, pickReceiptWarehouse, consumeBudget } from "@/lib/receiptRetro";
@@ -65,6 +66,13 @@ interface CreateBody {
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  // L'AGRÉEUR ne peut PAS créer d'entrée marchandise (son seul droit est de
+  // « passer » une commande fournisseur existante en entrée marchandise via
+  // /purchase-orders/receive). On bloque donc un agréeur qui n'a pas par ailleurs
+  // un rôle de gestion (préparateur / admin / direction).
+  if (!(await requirePreparateurOrAdmin(session)) && (await isAgreeur(session))) {
+    return NextResponse.json({ error: "L'agréeur ne peut pas créer d'entrée marchandise." }, { status: 403 });
+  }
 
   let body: CreateBody;
   try { body = await req.json(); }
