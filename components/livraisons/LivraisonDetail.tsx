@@ -483,7 +483,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
       />
 
       {/* ── Bandeau de synthèse (reflète l'onglet À préparer / Fait) ── */}
-      {view?.totals && <SummaryRow totals={view.totals} loading={loading} />}
+      {view?.totals && <SummaryRow totals={view.totals} loading={loading} showRevenue={canDispatch} />}
 
       {/* ── Onglets À préparer / Fait + repliage global ── */}
       {data && data.count > 0 && (
@@ -668,16 +668,17 @@ function DatePanel({
 /* ═════════════════════════════════════════════════════════════
    Bandeau de synthèse — chiffres clés de la tournée
 ═════════════════════════════════════════════════════════════ */
-function SummaryRow({ totals, loading }: { totals: Totals; loading: boolean }) {
+function SummaryRow({ totals, loading, showRevenue }: { totals: Totals; loading: boolean; showRevenue: boolean }) {
   const stats = [
     { icon: FileText, label: "Commandes", value: fmtInt(totals.orders), accent: "text-brand-600 dark:text-brand-400" },
     { icon: Users, label: "Clients", value: fmtInt(totals.clients), accent: "text-sky-600 dark:text-sky-400" },
     { icon: Boxes, label: "Colis", value: fmtNum(totals.colis), accent: "text-violet-600 dark:text-violet-400", hero: true },
     { icon: Scale, label: "Poids net", value: fmtKg(totals.weightKg), accent: "text-emerald-600 dark:text-emerald-400" },
-    { icon: Receipt, label: "Total HT", value: fmtEur(totals.totalHT), accent: "text-amber-600 dark:text-amber-400" },
+    // Total HT — chiffre commercial : masqué pour préparateur / livreur.
+    ...(showRevenue ? [{ icon: Receipt, label: "Total HT", value: fmtEur(totals.totalHT), accent: "text-amber-600 dark:text-amber-400" }] : []),
   ];
   return (
-    <div className={`grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 transition-opacity ${loading ? "opacity-60" : ""}`}>
+    <div className={`grid grid-cols-2 sm:grid-cols-3 ${showRevenue ? "lg:grid-cols-5" : "lg:grid-cols-4"} gap-2.5 transition-opacity ${loading ? "opacity-60" : ""}`}>
       {stats.map((s) => {
         const Icon = s.icon;
         return (
@@ -1400,7 +1401,8 @@ function OrderRow({
           <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground flex-wrap">
             <span className="font-mono text-foreground/60 hidden sm:inline">{doc.cardCode}</span>
             <span><span className="hidden sm:inline">· </span>BL n°{doc.docNum}</span>
-            <span className="hidden sm:inline">· {fmtEur(doc.totalHT)} HT</span>
+            {/* Total HT — chiffre commercial : masqué pour préparateur / livreur. */}
+            {canDispatch && <span className="hidden sm:inline">· {fmtEur(doc.totalHT)} HT</span>}
           </div>
           {/* Changement de transporteur / tournée / réf / date — dispatch (desktop
               uniquement + réservé aux commerciaux/admins ; masqué aux préparateurs
