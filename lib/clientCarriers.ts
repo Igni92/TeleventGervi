@@ -46,6 +46,8 @@ export type ClientCarrierStat = {
   count: number;
   // Tournée de livraison (SERG_TRCL.U_DistBy) — additif, absent en fallback.
   tour?: string | null;
+  // Heure de tournée (SERG_TRCL.U_Heure) convertie en "HH:MM:SS" → ORDR.U_TrspHeur.
+  heure?: string | null;
 };
 
 export type ClientCarriersResult = {
@@ -58,7 +60,6 @@ export type ClientCarriersResult = {
 };
 
 const TTL_MS = 10 * 60 * 1000;             // cache résultat par client
-const TRCL_PROBE_TTL_MS = 6 * 60 * 60 * 1000; // re-sonde l'exposition TRCL toutes les 6 h
 const HISTORY_MONTHS = 24;
 
 // Cache module-level par CardCode — évite de marteler SAP pendant la prise de
@@ -84,48 +85,57 @@ interface TrclRow {
   Code?: string;
   U_CardCode?: string | null;
   U_TrspCode?: string | null;
-  U_DistBy?: string | null;     // tournée (« Distribué par »)
+  U_DistBy?: string | null;     // tournée (« Distribué par »), ex. "NORD"
+  U_Heure?: string | null;      // heure de tournée, format "10H30"
   U_TrspDef?: string | null;    // 'O' = transporteur par défaut
   U_DesTransp?: string | null;  // désignation libre du transporteur
 }
 
-// Chemins candidats : exposition UDT standard (U_<table>) puis service UDO
-// (si un UDO nommé SERG_TRCL est enregistré un jour). Mémorise le 1ᵉʳ qui
-// répond ; cache négatif 6 h pour ne pas payer 2 requêtes 400 à chaque client.
-const TRCL_PATHS = ["U_SERG_TRCL", "SERG_TRCL"] as const;
-let trclPath: string | null = null;       // chemin lisible détecté
-let trclProbedAt = 0;                     // date de la dernière sonde
+// SERG_TRCL est exposée en VUE Service Layer **v2** (view.svc) :
+// GET /b1s/v2/view.svc/GERVI_SERG_TRCLB1SLQuery. On lit les lignes d'un client
+// via sap.getV2View (filtre U_CardCode). En cas d'échec → fallback histogramme.
+const TRCL_VIEW = "GERVI_SERG_TRCLB1SLQuery";
 
-async function resolveTrclPath(): Promise<string | null> {
-  if (trclPath) return trclPath;
-  if (Date.now() - trclProbedAt < TRCL_PROBE_TTL_MS) return null; // sonde récente : toujours indisponible
-  trclProbedAt = Date.now();
-  for (const p of TRCL_PATHS) {
-    try {
-      await sap.get(`${p}?$top=1`, { env: "prod" });
-      trclPath = p;
-      console.log(`[clientCarriers] UDT SERG_TRCL exposée via '${p}' — bascule sur la vérité métier`);
-      return p;
-    } catch { /* Service Not Found → candidat suivant */ }
-  }
-  return null;
+/** "10H30" / "5H00" → "10:30:00" / "05:00:00" (format U_TrspHeur du BL). */
+export function heureVueToBL(v: string | null | undefined): string | null {
+  const m = /^\s*(\d{1,2})\s*[Hh:]\s*(\d{0,2})\s*$/.exec((v ?? "").toString());
+  if (!m) return null;
+  return `${m[1].padStart(2, "0")}:${(m[2] || "0").padStart(2, "0")}:00`;
 }
 
-/** Lignes SERG_TRCL d'un client (null si l'UDT n'est pas lisible). */
+// Cache des lignes brutes de la vue par client (évite de re-lire la vue pour la
+// prise de commande ET l'écran livraison — même TTL que le résultat).
+const trclRowsCache = new Map<string, { at: number; rows: TrclRow[] }>();
+
+/** Lignes SERG_TRCL d'un client via la vue v2 (null si la lecture échoue). */
 async function fetchTrclRows(cardCode: string): Promise<TrclRow[] | null> {
-  const path = await resolveTrclPath();
-  if (!path) return null;
+  const key = cardCode.trim().toUpperCase();
+  const hit = trclRowsCache.get(key);
+  if (hit && Date.now() - hit.at < TTL_MS) return hit.rows;
   try {
-    return await sap.getAll<TrclRow>(
-      `${path}?$filter=${encodeURIComponent(`U_CardCode eq '${odataQuote(cardCode)}'`)}`,
-      { env: "prod", pageSize: 50, maxPages: 4 },
-    );
+    const rows = await sap.getV2View<TrclRow>(TRCL_VIEW, {
+      filter: `U_CardCode eq '${odataQuote(cardCode)}'`,
+      top: 100,
+      env: "prod",
+    });
+    trclRowsCache.set(key, { at: Date.now(), rows });
+    return rows;
   } catch (e) {
-    // Exposition perdue entre-temps (changement SAP) → invalide et fallback.
-    console.warn(`[clientCarriers] Lecture ${path} échouée, fallback histogramme:`, (e as Error).message);
-    trclPath = null;
+    console.warn(`[clientCarriers] Lecture vue ${TRCL_VIEW} échouée (${cardCode}), fallback histogramme:`, (e as Error).message);
     return null;
   }
+}
+
+/**
+ * Transporteurs/tournées d'un client depuis SERG_TRCL UNIQUEMENT (vue v2), SANS
+ * fallback histogramme (léger — pour /api/livraisons, appelé par client).
+ * null si la vue est illisible ou le client absent.
+ */
+export async function getClientTrclCarriers(cardCode: string): Promise<ClientCarrierStat[] | null> {
+  const rows = await fetchTrclRows(cardCode.trim());
+  if (!rows) return null;
+  const res = await buildFromTrcl(rows);
+  return res ? res.carriers : null;
 }
 
 /* ─────────────────── Fallback : histogramme Orders 24 mois ──────────────── */
@@ -204,13 +214,14 @@ async function buildFromTrcl(rows: TrclRow[]): Promise<ClientCarriersResult | nu
   // Une ligne = un couple (transporteur, tournée). Dédoublonne par TrspCode en
   // agrégeant les tournées ; la ligne U_TrspDef='O' (ou à défaut la 1ʳᵉ) est
   // la ligne principale → priorité 2 et tête de liste.
-  const byCode = new Map<string, { tours: string[]; isDefault: boolean; order: number }>();
+  const byCode = new Map<string, { tours: string[]; isDefault: boolean; order: number; heure: string | null }>();
   rows.forEach((r, i) => {
     const code = (r.U_TrspCode ?? "").toString().trim().toUpperCase();
-    if (!code) return;
+    if (!code) return; // lignes « vides » de la vue (slots non affectés) ignorées
     const tour = (r.U_DistBy ?? "").toString().trim();
-    const cur = byCode.get(code) ?? { tours: [], isDefault: false, order: i };
+    const cur = byCode.get(code) ?? { tours: [], isDefault: false, order: i, heure: null };
     if (tour && !cur.tours.includes(tour)) cur.tours.push(tour);
+    if (!cur.heure) cur.heure = heureVueToBL(r.U_Heure);  // 1re heure non vide
     if ((r.U_TrspDef ?? "").toString().trim().toUpperCase() === "O") cur.isDefault = true;
     byCode.set(code, cur);
   });
@@ -236,6 +247,7 @@ async function buildFromTrcl(rows: TrclRow[]): Promise<ClientCarriersResult | nu
       sapValue: code,
       count: info.isDefault ? 2 : 1, // indicateur de priorité (contrat conservé)
       tour: info.tours.length ? info.tours.join(" / ") : null,
+      heure: info.heure,
     });
   }
   if (carriers.length === 0) return null;
@@ -313,6 +325,5 @@ export async function getTrclDefaultCarrier(cardCode: string): Promise<ClientCar
 /** Vide le cache — utile pour les tests / debug. */
 export function _resetClientCarriersCache(): void {
   cache.clear();
-  trclPath = null;
-  trclProbedAt = 0;
+  trclRowsCache.clear();
 }

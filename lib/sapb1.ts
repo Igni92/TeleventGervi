@@ -391,6 +391,33 @@ export const sap = {
     return all;
   },
 
+  /**
+   * Lecture d'une VUE (semantic layer) via le Service Layer **v2** : endpoint
+   * `/b1s/v2/view.svc/<vue>`. Les vues SL (ex. `GERVI_SERG_TRCLB1SLQuery`) ne
+   * sont pas exposées en v1 ; on reconstruit l'URL v2 à partir de la base v1 et
+   * on réutilise la session (cookie B1SESSION commun v1/v2) + l'agent TLS.
+   * Renvoie le tableau `value`. Options : filtre OData, top, env.
+   */
+  async getV2View<T = unknown>(
+    viewName: string,
+    opts: { filter?: string; top?: number; env?: SapEnv } = {},
+  ): Promise<T[]> {
+    let env = opts.env;
+    if (!env) {
+      if (!envLoaded) await loadEnvFromDb();
+      env = activeEnv;
+    }
+    const base = CFG[env].base.replace(/\/+$/, "");
+    const v2base = base.replace(/\/v1$/, "/v2");
+    let url = `${v2base}/view.svc/${encodeURIComponent(viewName)}`;
+    const qs: string[] = [];
+    if (opts.filter) qs.push(`$filter=${encodeURIComponent(opts.filter)}`);
+    if (opts.top) qs.push(`$top=${opts.top}`);
+    if (qs.length) url += `?${qs.join("&")}`;
+    const res = await call<{ value?: T[] }>(url, { env });
+    return res.value ?? [];
+  },
+
   /** Cookie de session de l'environnement actif (debug). */
   getCookieHeader: () => sessions[activeEnv],
 };

@@ -796,8 +796,18 @@ function OrderRow({
   const selectedTourneeId = useMemo(() => {
     const list = tournees ?? [];
     const saved = doc.savedTournee;
-    if (saved && saved.trspCode === doc.trspCode && saved.lineId != null && list.some((t) => t.lineId === saved.lineId)) {
-      return String(saved.lineId);
+    if (saved && saved.trspCode === doc.trspCode) {
+      // par LineId (mémoire app), sinon par NOM de tournée (SERG_TRCL U_DistBy =
+      // SERGTRS U_Nom), sinon par heure — dans cet ordre de fiabilité.
+      if (saved.lineId != null && list.some((t) => t.lineId === saved.lineId)) return String(saved.lineId);
+      if (saved.nom) {
+        const byNom = list.find((t) => t.nom && t.nom.toUpperCase() === saved.nom!.toUpperCase());
+        if (byNom) return String(byNom.lineId);
+      }
+      if (saved.heure) {
+        const byH = list.find((t) => t.heure === saved.heure);
+        if (byH) return String(byH.lineId);
+      }
     }
     if (doc.trspHeure) {
       const m = list.find((t) => t.heure === doc.trspHeure);

@@ -417,37 +417,37 @@ export async function POST(req: NextRequest) {
   } else if (body.carrierCode?.trim()) {
     trspCode = body.carrierCode.trim();
   } else {
-    // 1) Tournée MÉMORISÉE du client (choisie une fois dans « Détail livraison »)
-    //    → transporteur + heure de tournée, ré-appliqués automatiquement.
+    // 1) Défaut SERG_TRCL (vue v2, vérité métier) → transporteur + heure de tournée.
     try {
-      const mem = await getClientTournee(cardCode);
-      if (mem) {
-        trspCode = mem.trspCode;
-        trspHeure = mem.heure;
-        console.log(`[Order] Tournée mémorisée ${cardCode} → ${mem.trspCode}${mem.nom ? ` (${mem.nom})` : ""}${mem.heure ? ` @${mem.heure}` : ""}`);
+      const def = await getTrclDefaultCarrier(cardCode);
+      if (def) {
+        trspCode = def.sapValue;
+        trspHeure = def.heure ?? null;
+        console.log(`[Order] Défaut SERG_TRCL ${cardCode} → ${def.sapValue}${def.tour ? ` (tournée ${def.tour})` : ""}${def.heure ? ` @${def.heure}` : ""}`);
       }
     } catch (e) {
-      console.warn(`[Order] Lecture tournée mémorisée ${cardCode} échouée (non-bloquant):`, (e as Error).message);
+      console.warn(`[Order] Résolution défaut SERG_TRCL ${cardCode} échouée (non-bloquant):`, (e as Error).message);
     }
-    // 2) Sinon, défaut SERG_TRCL (indisponible aujourd'hui → null : on ne pose rien).
+    // 2) Repli : tournée mémorisée par l'app (si SERG_TRCL indispo pour ce client).
     if (!trspCode) {
       try {
-        const def = await getTrclDefaultCarrier(cardCode);
-        if (def) {
-          trspCode = def.sapValue;
-          console.log(`[Order] Transporteur par défaut SERG_TRCL ${cardCode} → ${def.sapValue}${def.tour ? ` (tournée ${def.tour})` : ""}`);
+        const mem = await getClientTournee(cardCode);
+        if (mem) {
+          trspCode = mem.trspCode;
+          trspHeure = mem.heure;
+          console.log(`[Order] Tournée mémorisée ${cardCode} → ${mem.trspCode}${mem.heure ? ` @${mem.heure}` : ""}`);
         } else {
-          console.log(`[Order] Pas de défaut (ni mémoire ni SERG_TRCL) pour ${cardCode} — à régler dans Détail livraison`);
+          console.log(`[Order] Pas de défaut (ni SERG_TRCL ni mémoire) pour ${cardCode} — à régler dans Détail livraison`);
         }
       } catch (e) {
-        console.warn(`[Order] Résolution transporteur par défaut (SERG_TRCL) échouée (non-bloquant):`, (e as Error).message);
+        console.warn(`[Order] Lecture tournée mémorisée ${cardCode} échouée (non-bloquant):`, (e as Error).message);
       }
     }
   }
   if (trspCode) {
     payload.U_TrspCode = trspCode;
-    // Heure de la tournée mémorisée → ORDR.U_TrspHeur (le BL remonte dans l'état
-    // « récap transporteur »). Absente si le client n'a pas encore de tournée mémo.
+    // Heure de la tournée → ORDR.U_TrspHeur (le BL remonte dans l'état « récap
+    // transporteur »). Absente si aucune tournée connue pour ce client.
     if (trspHeure) payload.U_TrspHeur = trspHeure;
     // Timbre du transporteur (en-tête SERGTRS) → ORDR.U_Timbre.
     try {
