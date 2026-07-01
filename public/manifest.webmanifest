@@ -2,7 +2,7 @@
   "name": "Gervi · Télévente",
   "short_name": "Gervi",
   "description": "CRM de télévente — console d'appels, rappels et notifications.",
-  "start_url": "/console",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#0b1018",
