@@ -6,6 +6,7 @@ import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
 import { getDeliveryPrepared, getDeliveryPreparedBy, getDeliveryDeparted, getDeliveryDepartedBy, getDeliveryExcluded, getDeliveryPreparer, getDeliveryIncomplete } from "@/lib/inventory";
 import { getClientTournees, type ClientTournee } from "@/lib/clientTournee";
+import { getClientTrclCarriers } from "@/lib/clientCarriers";
 
 export const dynamic = "force-dynamic";
 
@@ -152,9 +153,15 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Tournée MÉMORISÉE par client (pour pré-sélectionner la bonne tournée dans le
-    // sélecteur, sans ambiguïté quand plusieurs tournées partagent la même heure).
+    // Tournée MÉMORISÉE par client (repli si SERG_TRCL indisponible pour ce client).
     const savedTourneeByCard = await getClientTournees(cardCodes).catch(() => new Map<string, ClientTournee>());
+
+    // Tournées RÉELLES par client depuis SERG_TRCL (vue v2) — pour afficher/
+    // pré-sélectionner la bonne tournée par BL. Best-effort, en parallèle, caché.
+    const trclByCard = new Map<string, Awaited<ReturnType<typeof getClientTrclCarriers>>>();
+    await Promise.all(cardCodes.map(async (cc) => {
+      try { trclByCard.set(cc, await getClientTrclCarriers(cc)); } catch { /* best-effort */ }
+    }));
 
     const weightOfItem = (code: string) => pMap.get(code)?.salesUnitWeight ?? 0;
     const colisDivOf = (code: string) => {
@@ -199,7 +206,16 @@ export async function GET(req: NextRequest) {
         numAtCard: d.NumAtCard ?? "",
         trspCode,
         trspHeure: d.U_TrspHeur?.trim() || null,
-        savedTournee: savedTourneeByCard.get(d.CardCode) ?? null,   // tournée mémorisée du client
+        // Tournée réelle (SERG_TRCL) pour CE transporteur, sinon défaut client,
+        // sinon repli mémoire — pré-sélectionne la bonne tournée par BL.
+        savedTournee: ((): ClientTournee | null => {
+          const cs = trclByCard.get(d.CardCode);
+          if (cs && cs.length) {
+            const m = (trspCode ? cs.find((c) => c.sapValue === trspCode) : null) ?? cs[0];
+            if (m) return { trspCode: m.sapValue, heure: m.heure ?? null, nom: m.tour ?? null, des: null, lineId: null };
+          }
+          return savedTourneeByCard.get(d.CardCode) ?? null;
+        })(),
         carrierName: trspCode ? carrierByCode.get(trspCode) ?? trspCode : null,
         clientType: typeByCardCode.get(d.CardCode) ?? null,   // GMS | CHR | EXPORT | null
         prepared: faiteByDoc.get(d.DocEntry) ?? false,        // « faite » = coché manuellement
