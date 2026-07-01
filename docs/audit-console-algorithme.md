@@ -212,3 +212,42 @@ resurfacé dans la console à l'heure due.
 Le **Lot A** (parisianisation + exploitation d'`outcome`) est le préalable
 indispensable : sans une mesure juste du décroché, tout raffinement en aval
 optimise du bruit.
+
+---
+
+## 8. État d'implémentation (branche `claude/console-algorithm-audit-3ut26e`)
+
+- ✅ **Lot A** — `computeInsights` parisianisé (`parisHourMinute`) ; `outcome`
+  remonté dans `/api/console` et exploité → **taux de décroché par créneau**.
+- ✅ **Lot B** — créneaux **30 min** avec repli heure pleine ; **cold-start** par
+  type de client (les clients neufs ne finissent plus en fin de file).
+- ✅ **Lot C** — `cadenceStatus` (en retard vs fréquence) ; **retry NRP** (un
+  « pas de réponse » garde le client dans la file, badge RETENTER).
+- ✅ **Lot D** — **bandeau in-app « rappels dus »** + **push PWA** (Web-Push,
+  service worker, cron `/api/cron/reminders`, opt-in par appareil).
+
+Tests : `lib/insights.test.ts` (TZ été/hiver, décroché > densité, NRP, legacy,
+cadence). Suite complète **203 verts**, lint 0.
+
+### Étapes de déploiement (à faire côté prod — non automatisables ici)
+
+1. **Base de données** : appliquer la migration
+   `prisma/migrations/manual/20260701_push_notifications.sql`
+   (`psql "$DATABASE_URL" -f …` ou Supabase), puis `prisma generate` au build.
+2. **Clés VAPID** : `npx web-push generate-vapid-keys` → renseigner
+   `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (cf. `.env.example`).
+   Sans elles, l'app tourne normalement, push simplement masqué.
+3. **Cron** : définir `CRON_SECRET` (Vercel l'injecte en `Authorization`). Le
+   cron est déclaré dans `vercel.json` (`*/5 * * * *`, nécessite un plan Vercel
+   autorisant cette fréquence — sinon ajuster).
+4. **Icônes PWA** : `public/icon-192.png` / `icon-512.png` sont des placeholders
+   (anneau radar de marque) — à remplacer par le vrai logo si souhaité.
+
+### Pistes suivantes (non implémentées)
+
+- Notification push « créneau optimal atteint » pour un client (le cron est
+  déjà architecturé pour l'accueillir — nécessite un état de dédup par
+  client/jour pour éviter le bruit).
+- Cadence pilotant réellement `joursAppel` (aujourd'hui : signal d'écart affiché,
+  pas d'action automatique).
+- Décroché au niveau **contact** (interlocuteur) et non seulement client.
