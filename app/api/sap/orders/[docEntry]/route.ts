@@ -4,6 +4,7 @@ import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { getTransporteurTimbre } from "@/lib/transporteurs";
+import { setClientTournee } from "@/lib/clientTournee";
 
 /**
  * GET   /api/sap/orders/[docEntry]   → détail d'une commande (lignes) pour affichage/édition
@@ -64,6 +65,8 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ docEntr
     trspCode?: string | null;
     /** Heure de la tournée choisie → ORDR.U_TrspHeur ("HH:MM:SS"). */
     trspHeure?: string | null;
+    /** Détails de la tournée choisie → mémorisés pour ce client (auto-remplissage). */
+    tournee?: { nom?: string | null; des?: string | null; lineId?: number | null };
     /** Date de livraison → ORDR.DocDueDate (format YYYY-MM-DD). */
     dueDate?: string;
   };
@@ -106,6 +109,22 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ docEntr
 
   try {
     await sap.patch(`Orders(${params.docEntry})`, patch);
+    // Mémorise (best-effort) la tournée choisie pour ce client → ré-appliquée
+    // automatiquement aux prochaines commandes. "" = désaffecté → on oublie.
+    if (ord?.cardCode && body.trspCode !== undefined) {
+      const code = (body.trspCode ?? "").trim();
+      try {
+        await setClientTournee(ord.cardCode, code ? {
+          trspCode: code,
+          heure: (body.trspHeure ?? "").toString().trim() || null,
+          nom: body.tournee?.nom ?? null,
+          des: body.tournee?.des ?? null,
+          lineId: body.tournee?.lineId ?? null,
+        } : null);
+      } catch (e) {
+        console.warn(`[orders PATCH] Mémorisation tournée ${ord.cardCode} échouée (non-bloquant):`, (e as Error).message);
+      }
+    }
     const o = await sap.get<Order>(`Orders(${params.docEntry})`);
     return NextResponse.json({ ok: true, total: o.DocTotal ?? 0, totalHT: (o.DocTotal ?? 0) - (o.VatSum ?? 0) });
   } catch (e) {

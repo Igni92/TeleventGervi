@@ -5,6 +5,7 @@ import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
 import { getDeliveryPrepared, getDeliveryPreparedBy, getDeliveryDeparted, getDeliveryDepartedBy, getDeliveryExcluded, getDeliveryPreparer, getDeliveryIncomplete } from "@/lib/inventory";
+import { getClientTournees, type ClientTournee } from "@/lib/clientTournee";
 
 export const dynamic = "force-dynamic";
 
@@ -151,6 +152,10 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Tournée MÉMORISÉE par client (pour pré-sélectionner la bonne tournée dans le
+    // sélecteur, sans ambiguïté quand plusieurs tournées partagent la même heure).
+    const savedTourneeByCard = await getClientTournees(cardCodes).catch(() => new Map<string, ClientTournee>());
+
     const weightOfItem = (code: string) => pMap.get(code)?.salesUnitWeight ?? 0;
     const colisDivOf = (code: string) => {
       const p = pMap.get(code);
@@ -194,6 +199,7 @@ export async function GET(req: NextRequest) {
         numAtCard: d.NumAtCard ?? "",
         trspCode,
         trspHeure: d.U_TrspHeur?.trim() || null,
+        savedTournee: savedTourneeByCard.get(d.CardCode) ?? null,   // tournée mémorisée du client
         carrierName: trspCode ? carrierByCode.get(trspCode) ?? trspCode : null,
         clientType: typeByCardCode.get(d.CardCode) ?? null,   // GMS | CHR | EXPORT | null
         prepared: faiteByDoc.get(d.DocEntry) ?? false,        // « faite » = coché manuellement
