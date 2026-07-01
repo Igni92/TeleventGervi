@@ -393,7 +393,7 @@ function CreatePromoDialog({
               </div>
             </div>
           ) : (
-            <div className="flex items-end gap-3">
+            <div className="flex flex-wrap items-end gap-3">
               <div>
                 <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
                   Colis achetés
@@ -438,7 +438,7 @@ function CreatePromoDialog({
               Promo permanente <span className="text-muted-foreground">(sans date de fin)</span>
             </label>
             {!permanent && (
-              <div className="grid grid-cols-2 gap-2 mt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
                 <div>
                   <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
                     Début (optionnel)

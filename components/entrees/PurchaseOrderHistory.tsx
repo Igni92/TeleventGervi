@@ -10,7 +10,7 @@ import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
 import { DesignationChips } from "./DesignationChips";
@@ -256,7 +256,7 @@ export function PurchaseOrderHistory() {
 
         {/* Desktop : tableau */}
         {filtered.length > 0 && (
-          <div className="hidden md:block rounded-lg border border-border overflow-hidden">
+          <div className="hidden md:block rounded-lg border border-border overflow-x-auto">
             <table className="w-full text-[13px]">
               <thead className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
                 <tr>
@@ -302,6 +302,7 @@ export function PurchaseOrderHistory() {
               <PackageCheck className="h-5 w-5 shrink-0 text-violet-600 dark:text-violet-400" />
               <span className="truncate min-w-0">Commande fournisseur N° {largeDoc?.docNum}</span>
             </DialogTitle>
+            <DialogDescription className="sr-only">Détail de la commande fournisseur : lignes commandées et réception.</DialogDescription>
           </DialogHeader>
           {largeDoc && <PoDetail po={largeDoc} onReceive={receive} receiving={receiving} onModified={load} />}
         </DialogContent>

@@ -790,7 +790,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
             </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2 text-center">
             <Stat label="En stock" value={products.length} />
             <Stat label="Écarts" value={nbEcarts} tone={nbEcarts > 0 ? "amber" : "muted"} />
             <Stat label="Photos" value={photos.length} tone={photos.length > 0 ? "sky" : "muted"} />

@@ -324,7 +324,7 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
 
           {/* ── 3. Récap avant validation ── */}
           {recap && (
-            <div className="rounded-lg border border-border overflow-hidden">
+            <div className="rounded-lg border border-border overflow-x-auto">
               <div className="px-3 py-2 bg-secondary/40">
                 <p className="text-[12px] uppercase tracking-wide font-semibold text-foreground">
                   Récapitulatif — {colis(parentColis)} colis {options.parent.itemCode}

@@ -10,7 +10,7 @@ import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
 import { DesignationChips, Chip } from "./DesignationChips";
@@ -450,6 +450,7 @@ export function GoodsReceiptHistory() {
               {largeDoc?.lot && <span className="hidden sm:inline text-[13px] font-normal font-mono text-muted-foreground shrink-0">· {largeDoc.lot}</span>}
               {largeDoc?.lot && <FreshnessBadge dlc={dlcMap[largeDoc.lot]} className="shrink-0" />}
             </DialogTitle>
+            <DialogDescription className="sr-only">Détail de l&apos;entrée marchandise : lignes reçues, lot et fraîcheur.</DialogDescription>
           </DialogHeader>
           {largeDoc && (
             <ReceiptDetail

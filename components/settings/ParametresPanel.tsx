@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useReducedMotion } from "framer-motion";
 import Link from "next/link";
 import {
-  Moon, Sun, Palette, LayoutList, Sparkles, BadgePercent, Check, Wand2, Database, Contrast, Tags, ChevronRight, CalendarClock,
+  Moon, Sun, ZoomIn, Sparkles, BadgePercent, Check, Wand2, Database, Contrast, Tags, ChevronRight, CalendarClock,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { ShelfLifePanel } from "@/components/settings/ShelfLifePanel";
@@ -15,20 +15,20 @@ import { useTheme } from "@/components/ThemeProvider";
 import { cn } from "@/lib/utils";
 import {
   SETTING_KEYS, readSetting, writeSetting, onSettingChange,
-  hoverContrastKey, applyHoverContrast, HOVER_CONTRAST_DEFAULT,
+  hoverContrastKey, applyHoverContrast, HOVER_CONTRAST_DEFAULT, HOVER_CONTRAST_MAX,
+  UI_ZOOM_VALUES, UI_ZOOM_DEFAULT, applyUiZoom, type UiZoomValue,
 } from "@/components/settings/app-settings";
 
 /**
- * Panneau « Paramètres » — CONSOLIDE les réglages d'affichage jusqu'ici dispersés
- * (thème, colorimétrie, densité, animations, bandeau promo) sur une page dédiée.
+ * Panneau « Paramètres » — CONSOLIDE les réglages d'affichage : thème, CONFORT
+ * D'AFFICHAGE (zoom d'interface + densité), contraste de survol, animations,
+ * bandeau promo. La colorimétrie a été retirée (marque = Or unique).
  *
  * Persistance : 100 % via le mécanisme localStorage existant —
  *   - thème clair/sombre  → ThemeProvider (clé `tv-theme`)
- *   - colorimétrie        → `televent-theme` + attribut data-theme (logique
- *                           reprise de ColorimetrieSwitcher)
- *   - densité / animations / promos → writeSetting (SETTING_KEYS)
+ *   - zoom / densité / animations / promos → writeSetting (SETTING_KEYS)
  * Tous les consommateurs (Console Écran 2, PromoBanner, AmbientBackground)
- * réagissent à chaud via onSettingChange / l'attribut data-theme.
+ * réagissent à chaud via onSettingChange / les attributs posés sur <html>.
  */
 
 /* ── Brique réutilisable : groupe de boutons segmentés (DA PilotageScreen2) ── */
@@ -109,10 +109,11 @@ function SettingRow({
 
 /* ── Constantes (alignées sur les composants d'origine) ─────────────────── */
 
-const COLORIMETRIE: SegOption<"or" | "agrume" | "fraise">[] = [
-  { id: "or",     label: "Or",     hint: "Classique",        swatch: "#facc15" },
-  { id: "agrume", label: "Agrume", hint: "Peps · conseillé", swatch: "#f97316" },
-  { id: "fraise", label: "Fraise", hint: "Peps max",         swatch: "#f43f5e" },
+const ZOOMS: SegOption<UiZoomValue>[] = [
+  { id: "100", label: "Normale",     hint: "Taille standard (défaut)" },
+  { id: "110", label: "Grande",      hint: "+10 %" },
+  { id: "125", label: "Très grande", hint: "+25 % — confort de lecture" },
+  { id: "140", label: "Maximale",    hint: "+40 % — vue très agrandie" },
 ];
 
 const DENSITES: SegOption<"compact" | "normal" | "aere">[] = [
@@ -132,16 +133,7 @@ const ONOFF: SegOption<"on" | "off">[] = [
   { id: "off", label: "Désactivé" },
 ];
 
-type ColorId = (typeof COLORIMETRIE)[number]["id"];
-
 type DensityId = (typeof DENSITES)[number]["id"];
-
-/** Applique la colorimétrie (même logique que ColorimetrieSwitcher). */
-function applyColorimetrie(id: ColorId) {
-  try { localStorage.setItem(SETTING_KEYS.colorimetrie, id); } catch { /* ignore */ }
-  if (id === "or") document.documentElement.removeAttribute("data-theme");
-  else document.documentElement.setAttribute("data-theme", id);
-}
 
 /** Applique la densité GLOBALE → attribut data-density sur <html> (cf. globals.css). */
 function applyDensity(id: DensityId) {
@@ -153,7 +145,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
   const { theme, toggleTheme } = useTheme();
   const systemReduce = useReducedMotion();
 
-  const [colorimetrie, setColorimetrie] = useState<ColorId>("or");
+  const [zoom, setZoom] = useState<UiZoomValue>(UI_ZOOM_DEFAULT);
   const [densite, setDensite] = useState<DensityId>("normal");
   const [animations, setAnimations] = useState<"auto" | "on" | "off">("auto");
   const [promoAnim, setPromoAnim] = useState<"on" | "off">("on");
@@ -169,9 +161,10 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
   // Hydratation depuis le stockage local + abonnement aux changements (autres
   // onglets / autres widgets qui écriraient les mêmes clés).
   useEffect(() => {
-    const fromAttr = document.documentElement.getAttribute("data-theme");
-    const savedColor = (fromAttr || readSetting(SETTING_KEYS.colorimetrie, "or")) as ColorId;
-    setColorimetrie(COLORIMETRIE.some((c) => c.id === savedColor) ? savedColor : "or");
+    const z = readSetting(SETTING_KEYS.uiZoom, UI_ZOOM_DEFAULT);
+    const zv = (UI_ZOOM_VALUES.includes(z as UiZoomValue) ? z : UI_ZOOM_DEFAULT) as UiZoomValue;
+    setZoom(zv);
+    applyUiZoom(zv); // resynchronise --app-zoom au cas où (idempotent)
 
     const d = readSetting(SETTING_KEYS.density, "normal");
     const dv = (["compact", "normal", "aere"].includes(d) ? d : "normal") as DensityId;
@@ -197,7 +190,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
     }
 
     return onSettingChange((key, value) => {
-      if (key === SETTING_KEYS.colorimetrie && value) setColorimetrie(value as ColorId);
+      if (key === SETTING_KEYS.uiZoom && value) { setZoom(value as UiZoomValue); applyUiZoom(value as UiZoomValue); }
       if (key === SETTING_KEYS.density && value) { setDensite(value as DensityId); applyDensity(value as DensityId); }
       if (key === SETTING_KEYS.animations && value) setAnimations(value as typeof animations);
       if (key === SETTING_KEYS.promoBannerAnim) setPromoAnim(value === "off" ? "off" : "on");
@@ -212,16 +205,16 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
     });
   }, [userKey]);
 
-  const onColorimetrie = (id: ColorId) => {
-    setColorimetrie(id);
-    applyColorimetrie(id);
+  const onZoom = (v: UiZoomValue) => {
+    setZoom(v);
+    applyUiZoom(v);
     // Notifie l'onglet courant (le storage natif couvre les autres onglets).
-    writeSetting(SETTING_KEYS.colorimetrie, id);
+    writeSetting(SETTING_KEYS.uiZoom, v);
   };
 
   /** Réglage du contraste de survol : applique à chaud + mémorise (par user). */
   const onContrast = (pct: number) => {
-    const v = Math.max(0, Math.min(100, Math.round(pct)));
+    const v = Math.max(0, Math.min(HOVER_CONTRAST_MAX, Math.round(pct)));
     setContrast(v); setContrastSet(true);
     applyHoverContrast(v);
     writeSetting(hoverContrastKey(userKey), String(v));
@@ -252,34 +245,33 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
         </SettingRow>
       </SurfaceCard>
 
-      {/* 2 ── Colorimétrie ─────────────────────────────────────────── */}
-      <SurfaceCard accent="amber" title="Colorimétrie" icon={<Palette className="h-3.5 w-3.5" />}>
-        <SettingRow
-          title="Accent de l'application"
-          desc="Change la couleur d'accent (boutons, liens, surbrillances). Le fond anthracite et les couleurs d'alerte ne bougent pas."
-        >
-          <SegmentToggle
-            ariaLabel="Colorimétrie de l'application"
-            value={colorimetrie}
-            onChange={onColorimetrie}
-            options={COLORIMETRIE}
-          />
-        </SettingRow>
-      </SurfaceCard>
-
-      {/* 3 ── Densité ──────────────────────────────────────────────── */}
-      <SurfaceCard accent="sky" title="Densité" icon={<LayoutList className="h-3.5 w-3.5" />}>
-        <SettingRow
-          title="Densité de l'affichage"
-          desc="Compacité générale de toute l'application (espacements des listes, cartes, tableaux). Compact = plus d'informations à l'écran, Aéré = lecture plus confortable."
-        >
-          <SegmentToggle
-            ariaLabel="Densité d'affichage de l'application"
-            value={densite}
-            onChange={(v) => { setDensite(v); applyDensity(v); writeSetting(SETTING_KEYS.density, v); }}
-            options={DENSITES}
-          />
-        </SettingRow>
+      {/* 2 ── Confort d'affichage : ZOOM + DENSITÉ (accessibilité Direction) ── */}
+      <SurfaceCard accent="amber" title="Confort d'affichage" icon={<ZoomIn className="h-3.5 w-3.5" />}>
+        <div className="space-y-4">
+          <SettingRow
+            title="Taille de l'interface"
+            desc="Agrandit TOUT l'affichage — texte, boutons, espacements — comme un zoom navigateur. À monter si l'écran est difficile à lire."
+          >
+            <SegmentToggle
+              ariaLabel="Taille (zoom) de l'interface"
+              value={zoom}
+              onChange={onZoom}
+              options={ZOOMS}
+            />
+          </SettingRow>
+          <div className="h-px bg-border/60" />
+          <SettingRow
+            title="Densité (espacements)"
+            desc="Air autour des éléments (listes, cartes, tableaux), indépendamment du zoom. Compact = plus d'informations à l'écran, Aéré = lecture plus reposante."
+          >
+            <SegmentToggle
+              ariaLabel="Densité d'affichage de l'application"
+              value={densite}
+              onChange={(v) => { setDensite(v); applyDensity(v); writeSetting(SETTING_KEYS.density, v); }}
+              options={DENSITES}
+            />
+          </SettingRow>
+        </div>
       </SurfaceCard>
 
       {/* 3 bis ── Contraste de survol (propre à l'utilisateur) ──────── */}
@@ -287,13 +279,13 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
         <div className="space-y-4">
           <SettingRow
             title="Surbrillance au survol"
-            desc="Intensité de la surbrillance quand le curseur passe d'une ligne à l'autre, partout dans l'application. Réglage propre à votre session — il vous suit, même sur un poste partagé."
+            desc="Intensité de la surbrillance (teintée or) quand le curseur passe d'une ligne à l'autre, partout dans l'application. Poussez au-delà de 100 % pour une ligne active bien plus visible. Réglage propre à votre session — il vous suit, même sur un poste partagé."
           >
             <div className="flex items-center gap-3 min-w-[210px]">
               <input
                 type="range"
                 min={0}
-                max={100}
+                max={HOVER_CONTRAST_MAX}
                 step={5}
                 value={contrast}
                 onChange={(e) => onContrast(Number(e.target.value))}

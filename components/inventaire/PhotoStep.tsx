@@ -112,7 +112,7 @@ export function PhotoStep({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {photos.map((p) => (
             <div key={p.id} className="group relative aspect-square overflow-hidden rounded-lg border border-border bg-muted">
               {/* eslint-disable-next-line @next/next/no-img-element */}

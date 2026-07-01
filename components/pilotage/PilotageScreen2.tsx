@@ -779,12 +779,12 @@ function MonthDrilldownDrawer({
           </button>
         </header>
 
-        <div className="flex-1 overflow-auto p-5 grid grid-cols-12 gap-4">
-          {loading && <p className="col-span-12 text-center text-muted-foreground text-[13px]">Chargement…</p>}
+        <div className="flex-1 overflow-auto p-5 grid grid-cols-1 lg:grid-cols-12 gap-4">
+          {loading && <p className="col-span-1 lg:col-span-12 text-center text-muted-foreground text-[13px]">Chargement…</p>}
           {!loading && data && (
             <>
               {/* Distribution jour par jour, labels = initiale du jour (L M M J V S D) */}
-              <section className="col-span-12 bg-secondary/30 rounded-lg p-3">
+              <section className="col-span-1 lg:col-span-12 bg-secondary/30 rounded-lg p-3">
                 <h3 className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">
                   Distribution {mode === "ca" ? "CA" : "Poids"} par jour
                 </h3>
@@ -816,7 +816,7 @@ function MonthDrilldownDrawer({
               </section>
 
               {/* Top clients */}
-              <section className="col-span-7 bg-secondary/30 rounded-lg p-3">
+              <section className="col-span-1 lg:col-span-7 bg-secondary/30 rounded-lg p-3">
                 <h3 className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">
                   Top 5 clients
                 </h3>
@@ -838,7 +838,7 @@ function MonthDrilldownDrawer({
               </section>
 
               {/* Top familles (regroupées) + donut de répartition */}
-              <section className="col-span-5 bg-secondary/30 rounded-lg p-3">
+              <section className="col-span-1 lg:col-span-5 bg-secondary/30 rounded-lg p-3">
                 <h3 className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">
                   Top familles {mode === "ca" ? "· CA" : "· Poids"}
                 </h3>

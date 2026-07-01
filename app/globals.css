@@ -104,10 +104,20 @@
   }
 
   /* ═══════════════════════════════════════════════════════════
-     COLORIMÉTRIES alternatives — basculées via [data-theme] sur <html>.
-     On ne change QUE l'accent (échelle brand + primary/ring) ; le fond
-     anthracite et les couleurs sémantiques (error/warning/success) restent.
-     Placé après .dark pour gagner en ordre de cascade (même spécificité).
+     ZOOM D'INTERFACE — confort visuel / accessibilité Direction.
+     `--app-zoom` (posée sur <html> par les réglages, cf. app-settings.ts)
+     agrandit TOUT le contenu applicatif, texte figé en px compris — comme un
+     zoom navigateur. Scopé à `.app-zoom-root` (wrapper du contenu dans
+     app/layout.tsx) pour NE PAS agrandir le fond d'ambiance fixe. Absent = 1.
+  ═══════════════════════════════════════════════════════════ */
+  .app-zoom-root { zoom: var(--app-zoom, 1); }
+
+  /* ═══════════════════════════════════════════════════════════
+     COLORIMÉTRIES alternatives — DÉPRÉCIÉES (marque = Or unique).
+     Le sélecteur de colorimétrie a été retiré ; plus rien ne pose `data-theme`,
+     donc ces règles n'activent jamais. Conservées inertes pour réactivation
+     éventuelle. On ne change QUE l'accent ; le fond et les couleurs sémantiques
+     restent. Placé après .dark pour l'ordre de cascade (même spécificité).
   ═══════════════════════════════════════════════════════════ */
 
   /* AGRUME — orange vif, énergique et appétissant (recommandé council) */
@@ -567,14 +577,16 @@ html[data-anim="force"] .ambient-rings-spin-r { animation: ambient-spin 85s line
    Spécificité (html[attr] + [class*] + :hover) > classe Tailwind
    `.hover\:bg-secondary\/60:hover` → override sans !important. */
 :root { --hover-contrast: 0.6; }
-html[data-hover-contrast] [class*="hover:bg-secondary"]:hover {
-  background-color: hsl(var(--secondary) / var(--hover-contrast));
-}
-html[data-hover-contrast] [class*="hover:bg-muted"]:hover {
-  background-color: hsl(var(--muted) / var(--hover-contrast));
-}
+/* Surbrillance au survol — TEINTÉE MARQUE (or) au lieu du gris `--secondary`
+   quasi invisible en mode sombre (même à 100 %). C'était la cause racine : on
+   ne jouait que sur l'OPACITÉ d'une couleur trop proche du fond. L'alpha suit
+   --hover-contrast (0 → 2) via un facteur 0.32 : ~19 % de teinte à 60 %, ~32 %
+   à 100 %, jusqu'à ~64 % à 200 % — nettement lisible pour un utilisateur à
+   faible acuité (Direction). */
+html[data-hover-contrast] [class*="hover:bg-secondary"]:hover,
+html[data-hover-contrast] [class*="hover:bg-muted"]:hover,
 html[data-hover-contrast] [class*="hover:bg-accent"]:hover {
-  background-color: hsl(var(--accent) / var(--hover-contrast));
+  background-color: hsl(var(--brand-500) / calc(var(--hover-contrast) * 0.32));
 }
 
 /* ═══════════════════════════════════════════════════════════

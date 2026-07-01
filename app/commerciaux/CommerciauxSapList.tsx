@@ -165,7 +165,7 @@ function CommercialCard({ c, isAdmin, onObjectifs }: { c: CommercialSap; isAdmin
           <p className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground inline-flex items-center gap-1">
             Ses ventes <span className="font-normal normal-case tracking-normal text-muted-foreground/70">· il a saisi le BL</span>
           </p>
-          <div className="mt-1 grid grid-cols-3 gap-x-3">
+          <div className="mt-1 grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-1">
             <div>
               <p className="text-[15px] font-bold tnum text-foreground leading-tight">{fmtEur(c.caNetYtd)}</p>
               <p className="text-[9.5px] text-muted-foreground">CA net YTD</p>
@@ -348,7 +348,7 @@ function ObjectifModal({
               <br />La marge « nette transport » n&apos;est pas encore déduite.
             </p>
             {isAdmin && (
-              <div className="grid grid-cols-2 gap-2 mt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
                 <label className="block">
                   <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Taux (%)</span>
                   <input

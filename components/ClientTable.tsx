@@ -791,7 +791,7 @@ function BulkActionBar({
                 onClick={() => onAssignCommercial(name)}
                 className="cursor-pointer text-[13px] flex items-center gap-2"
               >
-                <span className="h-5 w-5 rounded-full bg-gradient-to-br from-brand-500 to-purple-600 flex items-center justify-center text-white text-[10px] font-bold shrink-0">
+                <span className="h-5 w-5 rounded-full bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white text-[10px] font-bold shrink-0">
                   {name.charAt(0).toUpperCase()}
                 </span>
                 <span className="truncate">{name}</span>

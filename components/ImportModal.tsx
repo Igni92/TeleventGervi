@@ -9,6 +9,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogTrigger,
 } from "@/components/ui/dialog";
 
@@ -267,6 +268,9 @@ export function ImportModal({ onImported }: ImportModalProps) {
             <FileText className="h-5 w-5 text-brand-600 dark:text-brand-400" />
             Import clients depuis CSV
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Importez une liste de clients depuis un fichier CSV (code, nom, téléphones).
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">

@@ -7,7 +7,7 @@ import {
   LayoutGrid, ChevronRight, ChevronDown, RotateCcw, AlertTriangle,
 } from "lucide-react";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -369,12 +369,12 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
             <FileText className="h-5 w-5 text-brand-600 dark:text-brand-400" />
             Créer une commande client
           </DialogTitle>
-          <p className="text-[12.5px] text-muted-foreground mt-1">
+          <DialogDescription className="text-[12.5px] text-muted-foreground mt-1">
             Client : <span className="font-semibold text-foreground">{clientName}</span>
             {selectedMode && (
               <> · Mode : <span className="font-medium">{selectedMode.name}</span> ({selectedMode.sapCardCode})</>
             )}
-          </p>
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 mt-2">

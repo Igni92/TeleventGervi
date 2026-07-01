@@ -143,7 +143,7 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
     <div className="bg-card rounded-xl border border-border p-4 flex items-start justify-between gap-3 hover:border-foreground/20 transition-colors">
       <div className="flex items-start gap-3 min-w-0 flex-1">
         {/* Avatar */}
-        <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gradient-to-br from-brand-500 to-purple-600 flex items-center justify-center text-white font-bold text-[13px] shadow-[0_0_0_2px_rgba(99,102,241,0.18)]">
+        <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white font-bold text-[13px] shadow-[0_0_0_2px_hsl(var(--brand-500)_/_0.18)]">
           {name.charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
@@ -163,7 +163,7 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
           )}
 
           {/* Type breakdown */}
-          <div className="flex items-center gap-3 mt-2 text-[11px] text-muted-foreground tnum">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px] text-muted-foreground tnum">
             <span className="font-semibold text-foreground">{counts.ALL}</span>
             <span>clients</span>
             <span className="opacity-30">·</span>

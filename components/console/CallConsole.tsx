@@ -14,6 +14,8 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import type { ClientInsights } from "@/lib/insights";
 import { dayOfWeekLabel, summaryRecommendation, hourWindowLabel, pickupSlotLabel } from "@/lib/insights";
+import type { LifecycleResult, LifecycleState } from "@/lib/lifecycle";
+import type { ValueTier } from "@/lib/clientValue";
 import { useConsolePrefs, SECTION_LABELS, type SectionId } from "@/lib/useConsolePrefs";
 import {
   useConsoleShortcuts, SHORTCUT_LABELS, displayKey, isBindableKey,
@@ -46,7 +48,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { InfoTip } from "@/components/ui/info-tip";
 import { formatDate, formatDateInput, formatRelative } from "@/lib/utils";
@@ -76,6 +78,14 @@ interface Client {
   notes: string | null; joursAppel: string | null;
   rappels: Rappel[]; appels: AppelLog[];
   insights?: ClientInsights;
+  /** Cycle de vie dérivé serveur (lib/lifecycle) — pilote le badge de la file. */
+  lifecycle?: LifecycleResult;
+  /** Palier de valeur A/B/C/D (lib/clientValue) issu du CA 12 mois. */
+  tier?: ValueTier;
+  /** CA 12 mois glissants (€ HT). */
+  ca12m?: number;
+  /** Score de priorité « valeur × urgence » + phrase d'action (lib/priority). */
+  priority?: { score: number; reason: string };
   /** null = not claimed; string = original commercial name (I covered this client today) */
   claimedFrom?: string | null;
   /** true = client REPRIS aujourd'hui dont le commercial d'origine est absent → vraie couverture */
@@ -105,10 +115,22 @@ interface ConsoleData {
 
 const JOURS_FR: Record<number, string> = { 0:"Dim",1:"Lun",2:"Mar",3:"Mer",4:"Jeu",5:"Ven",6:"Sam" };
 
+/**
+ * Couleurs du badge CYCLE DE VIE dans la file — alignées sur LifecycleBadge.
+ * Seuls les états « à traiter » portent une pastille ; ACTIF/NOUVEAU restent
+ * nus pour garder la file lisible (l'enjeu, c'est ce qui décroche).
+ */
+const LIFECYCLE_PILL: Partial<Record<LifecycleState, string>> = {
+  EN_RETARD: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
+  A_RISQUE: "bg-orange-100 text-orange-700 dark:bg-orange-950/60 dark:text-orange-300",
+  ENDORMI: "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+  PERDU: "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",
+};
+
 /* ─────────────────────────────────────────────────────────────
    Main component — single-page daily workspace
 ───────────────────────────────────────────────────────────── */
-type SortMode = "name" | "hour" | "type" | "lastOrder";
+type SortMode = "priorite" | "name" | "hour" | "type" | "lastOrder";
 
 export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: boolean; meInitials?: string | null }) {
   const [data, setData] = useState<ConsoleData | null>(null);
@@ -117,7 +139,7 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
   // Menu contextuel (clic droit) sur une ligne de la file — actions portefeuille.
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; client: Client } | null>(null);
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<SortMode>("hour");
+  const [sortBy, setSortBy] = useState<SortMode>("priorite");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [rappelOpen, setRappelOpen] = useState(false);
   const [blOpen, setBlOpen] = useState(false);
@@ -245,7 +267,10 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
       );
     }
 
-    // Tri
+    // Tri. « priorité » = ordre SERVEUR (valeur × urgence) : on ne re-trie pas,
+    // la file arrive déjà priorisée côté API (lib/priority). Les autres modes
+    // restent des surcharges manuelles cosmétiques.
+    if (sortBy === "priorite") return q;
     q.sort((a, b) => {
       switch (sortBy) {
         case "name":
@@ -585,6 +610,7 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
                 </span>
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="priorite">Priorité (valeur × urgence)</SelectItem>
                 <SelectItem value="hour">Heure optimale</SelectItem>
                 <SelectItem value="name">Nom (A–Z)</SelectItem>
                 <SelectItem value="type">Type</SelectItem>
@@ -1063,25 +1089,38 @@ const QueueRow = React.memo(function QueueRow({
               <Clock className="h-2.5 w-2.5" /> RETENTER
             </span>
           )}
-          {/* Pastille "À relancer" — pas de commande depuis +7j (ou jamais sur la fenêtre).
-              Style aligné sur la pastille type (GMS) : rond, uppercase, couleur dédiée. */}
+          {/* Pastille CYCLE DE VIE — RELATIVE à la cadence du client (lib/lifecycle).
+              Remplace l'ancien seuil fixe « +7 j » : un client quotidien est « en
+              retard » bien plus vite qu'un mensuel. Seuls les états à traiter
+              (en retard / à risque / endormi / perdu) portent une pastille ; le
+              titre porte la « prochaine action » (jours + cadence). */}
           {(() => {
-            const d = client.insights?.lastOrderDays;
-            const needsRevival = d == null || d > 7;
-            if (!needsRevival) return null;
-            const label = d == null ? "JAMAIS" : `+${d}J`;
-            const title = d == null
-              ? "Aucune commande sur la fenêtre — à relancer"
-              : `Dernière commande il y a ${d} jours — à relancer`;
+            const lc = client.lifecycle;
+            if (!lc) return null;
+            const cls = LIFECYCLE_PILL[lc.state];
+            if (!cls) return null; // ACTIF / NOUVEAU → file épurée
             return (
               <span
-                className="shrink-0 text-[9px] font-bold tracking-wider px-1.5 py-px rounded bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
-                title={title}
+                className={`shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-px rounded ${cls}`}
+                title={client.priority?.reason ?? lc.label}
               >
-                {label}
+                {lc.label}
               </span>
             );
           })()}
+          {/* Chip VALEUR — gros comptes (A/B) seulement, pour « ne pas rater le gros ». */}
+          {client.tier && (client.tier.tier === "A" || client.tier.tier === "B") && (
+            <span
+              className="shrink-0 inline-flex items-center rounded bg-secondary/80 px-1 py-px font-mono text-[9px] font-bold text-foreground/70 ring-1 ring-border"
+              title={`Valeur client : ${client.tier.label}${
+                typeof client.ca12m === "number" && client.ca12m > 0
+                  ? ` · ${Math.round(client.ca12m).toLocaleString("fr-FR")} € sur 12 mois`
+                  : ""
+              }`}
+            >
+              {client.tier.tier}
+            </span>
+          )}
           {phone && (
             <span
               className={`ml-auto shrink-0 font-mono tnum text-[11.5px] leading-none ${
@@ -1368,6 +1407,29 @@ function ActiveClient({
           )}
         </div>
       </div>
+
+      {/* ── Prochaine action (next-best-action) — CRM : l'app dit QUOI faire,
+           pas seulement « voici des données ». La phrase vient du score serveur
+           (lib/priority). Affichée pour les états à traiter ; un client dans sa
+           cadence n'a pas besoin d'injonction. */}
+      {client.lifecycle && client.priority && LIFECYCLE_PILL[client.lifecycle.state] && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] font-semibold ${LIFECYCLE_PILL[client.lifecycle.state]}`}
+          >
+            <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            {client.priority.reason}
+          </span>
+          {client.tier && (client.tier.tier === "A" || client.tier.tier === "B") && (
+            <span className="text-[11.5px] text-muted-foreground">
+              {client.tier.label}
+              {typeof client.ca12m === "number" && client.ca12m > 0
+                ? ` · ${Math.round(client.ca12m).toLocaleString("fr-FR")} € sur 12 mois`
+                : ""}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* ── Habitudes (bandeau fixe — toujours visible, non draggable) ── */}
       <HabitudesBanner
@@ -2386,11 +2448,10 @@ function RappelDialog({
             <BellRing className="h-5 w-5 text-brand-600 dark:text-brand-400" />
             Programmer un rappel
           </DialogTitle>
-          {client && (
-            <p className="text-[12.5px] text-muted-foreground mt-1">
-              pour <span className="font-medium text-foreground">{client.nom}</span>
-            </p>
-          )}
+          <DialogDescription className="text-[12.5px] text-muted-foreground mt-1">
+            Choisissez la date et l&apos;heure du rappel
+            {client ? <> pour <span className="font-medium text-foreground">{client.nom}</span></> : null}.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 mt-2">
           <div className="space-y-2">
@@ -2467,9 +2528,9 @@ function ShortcutsDialog({
             <Settings className="h-5 w-5 text-brand-600 dark:text-brand-400" />
             Raccourcis clavier
           </DialogTitle>
-          <p className="text-[12.5px] text-muted-foreground mt-1">
+          <DialogDescription className="text-[12.5px] text-muted-foreground mt-1">
             Clique sur une touche pour la remplacer. Persisté localement.
-          </p>
+          </DialogDescription>
         </DialogHeader>
 
         <ul className="mt-2 divide-y divide-border">

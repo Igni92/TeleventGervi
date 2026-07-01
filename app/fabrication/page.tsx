@@ -12,7 +12,7 @@ export default async function FabricationPage() {
     <div className="space-y-8 animate-fade-up">
       <div>
         <p className="kicker mb-2">SAP B1 · Ordre de production</p>
-        <h1 className="text-[32px] font-bold text-foreground tracking-tight leading-none">
+        <h1 className="text-[24px] sm:text-[28px] md:text-[32px] font-bold text-foreground tracking-tight leading-none">
           Fabrication
         </h1>
         <p className="hidden md:block text-[13px] text-muted-foreground mt-3 max-w-2xl">

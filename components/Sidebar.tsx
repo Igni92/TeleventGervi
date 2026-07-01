@@ -11,7 +11,6 @@ import {
   Home, Settings, PackageCheck, ClipboardCheck, Truck,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { ColorimetrieSwitcher } from "@/components/ColorimetrieSwitcher";
 import { Logo } from "@/components/Logo";
 import { SapEnvSwitch } from "@/components/SapEnvSwitch";
 import { SignalLoader } from "@/components/ui/page-loader";
@@ -399,7 +398,6 @@ export function Sidebar() {
         {!rail && <SapEnvSwitch />}
 
         <div className={`flex items-center ${rail ? "flex-col gap-1.5" : "gap-1"}`}>
-          <ColorimetrieSwitcher />
           <ThemeToggle />
           {rail && (
             <button

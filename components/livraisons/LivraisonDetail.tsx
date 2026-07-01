@@ -8,7 +8,7 @@ import {
   Maximize2, UserCheck, Undo2, ListChecks, UserCog, ArrowRight,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ClientLink } from "@/components/ClientLink";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { BrandLogo } from "@/components/BrandLogo";
@@ -1281,6 +1281,7 @@ function OrderRow({
               <span className="truncate min-w-0">{doc.cardName}</span>
               <span className="text-[12px] font-normal text-muted-foreground shrink-0">· BL n°{doc.docNum}</span>
             </DialogTitle>
+            <DialogDescription className="sr-only">Détail de la livraison : lignes, colis et poids du bon de livraison.</DialogDescription>
           </DialogHeader>
 
           <div className="flex items-center gap-4 flex-wrap">
