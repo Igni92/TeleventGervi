@@ -8,8 +8,9 @@ import {
   ChevronRight,
   Loader2, Calendar, Sparkles, ArrowUpDown,
   StickyNote, History, User, TrendingUp, TrendingDown, Minus,
-  MessageSquare, AlertTriangle, Settings, Mail, ArrowUpRight,
+  MessageSquare, AlertTriangle, Settings, Mail, ArrowUpRight, Star, Ban, Send,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import type { ClientInsights } from "@/lib/insights";
 import { dayOfWeekLabel, summaryRecommendation, hourWindowLabel, pickupSlotLabel } from "@/lib/insights";
@@ -20,8 +21,9 @@ import {
 } from "@/lib/useConsoleShortcuts";
 import { HabitudesBanner } from "@/components/console/HabitudesBanner";
 import { broadcastActiveClient } from "@/lib/consoleSync";
-import { displayNameFromSlp } from "@/lib/salespeople";
+import { displayNameFromSlp, SALESPEOPLE } from "@/lib/salespeople";
 import { loadCallNote, saveCallNote, clearCallNote } from "@/lib/callNoteStorage";
+import { loadFavPhone, saveFavPhone, type PhoneKey } from "@/lib/favPhoneStorage";
 import { MonitorSmartphone } from "lucide-react";
 import { BLDialog } from "@/components/console/BLDialog";
 import { NotificationsBell } from "@/components/console/NotificationsBell";
@@ -108,10 +110,12 @@ const JOURS_FR: Record<number, string> = { 0:"Dim",1:"Lun",2:"Mar",3:"Mer",4:"Je
 ───────────────────────────────────────────────────────────── */
 type SortMode = "name" | "hour" | "type" | "lastOrder";
 
-export function CallConsole() {
+export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: boolean; meInitials?: string | null }) {
   const [data, setData] = useState<ConsoleData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Menu contextuel (clic droit) sur une ligne de la file — actions portefeuille.
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; client: Client } | null>(null);
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortMode>("hour");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -149,6 +153,40 @@ export function CallConsole() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  /* ── Actions portefeuille (menu clic droit) — admin uniquement ──────────── */
+  const openCtxMenu = useCallback((e: React.MouseEvent, client: Client) => {
+    if (!isAdmin) return;              // non-admin → menu natif du navigateur
+    e.preventDefault();
+    setCtxMenu({ x: e.clientX, y: e.clientY, client });
+  }, [isAdmin]);
+
+  const assignClient = useCallback(async (client: Client, body: Record<string, unknown>, okMsg: string) => {
+    setCtxMenu(null);
+    try {
+      const res = await fetch(`/api/clients/${client.id}/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Échec");
+      toast.success(okMsg);
+      fetchData();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Échec de l'opération");
+    }
+  }, [fetchData]);
+
+  const deactivateClient = useCallback((client: Client) => {
+    if (!window.confirm(`Passer « ${client.nom} » en inactif ? Il quittera la file d'appel.`)) { setCtxMenu(null); return; }
+    assignClient(client, { activeTelevente: false }, `${client.nom} — passé en inactif`);
+  }, [assignClient]);
+
+  const reassignClient = useCallback((client: Client, initials: string) => {
+    // Réassigne UNIQUEMENT le vendeur (télévente) → le client bascule dans la
+    // console du commercial cible. Le « commercial » (account manager) ne bouge pas.
+    assignClient(client, { vendeur: initials }, `${client.nom} — envoyé à ${displayNameFromSlp(initials) ?? initials}`);
+  }, [assignClient]);
 
   const allClients = useMemo(
     () => [...(data?.queue ?? []), ...(data?.done ?? [])],
@@ -576,6 +614,7 @@ export function CallConsole() {
                     client={c}
                     active={c.id === activeId}
                     onSelect={setActiveId}
+                    onContext={isAdmin ? openCtxMenu : undefined}
                   />
                 ))}
               </ol>
@@ -598,6 +637,7 @@ export function CallConsole() {
                       active={c.id === activeId}
                       done
                       onSelect={setActiveId}
+                      onContext={isAdmin ? openCtxMenu : undefined}
                     />
                   ))}
                 </ol>
@@ -694,7 +734,74 @@ export function CallConsole() {
           }}
         />
       )}
+
+      {/* ── Menu contextuel (clic droit sur une ligne de file) — admin ──── */}
+      {ctxMenu && (
+        <ClientContextMenu
+          menu={ctxMenu}
+          meInitials={meInitials}
+          onClose={() => setCtxMenu(null)}
+          onDeactivate={deactivateClient}
+          onReassign={reassignClient}
+        />
+      )}
     </div>
+  );
+}
+
+/** Menu contextuel d'une ligne de file (clic droit) : inactiver / réassigner. */
+function ClientContextMenu({
+  menu, meInitials, onClose, onDeactivate, onReassign,
+}: {
+  menu: { x: number; y: number; client: Client };
+  meInitials: string | null;
+  onClose: () => void;
+  onDeactivate: (client: Client) => void;
+  onReassign: (client: Client, initials: string) => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const targets = SALESPEOPLE.filter((s) => s.initials !== meInitials);
+  // Repositionne le menu pour rester dans la fenêtre (bord droit / bas).
+  const MW = 224;
+  const MH = 92 + targets.length * 34;
+  const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
+  const left = Math.max(8, Math.min(menu.x, vw - MW - 8));
+  const top = Math.max(8, Math.min(menu.y, vh - MH - 8));
+  const item = "flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-secondary transition-colors";
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[130]"
+      onClick={onClose}
+      onContextMenu={(e) => { e.preventDefault(); onClose(); }}
+    >
+      <div
+        className="absolute min-w-[224px] rounded-xl border border-border bg-card shadow-2xl py-1.5 animate-fade-in"
+        style={{ left, top }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="px-3 pb-1 text-[11px] font-semibold text-foreground truncate">{menu.client.nom}</p>
+        <button type="button" className={item} onClick={() => onDeactivate(menu.client)}>
+          <Ban className="h-4 w-4 shrink-0 text-rose-500" /> Passer en inactif
+        </button>
+        <div className="my-1 h-px bg-border/70" />
+        <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Envoyer à</p>
+        {targets.length === 0 ? (
+          <p className="px-3 py-1 text-[12px] italic text-muted-foreground">Aucun autre commercial</p>
+        ) : targets.map((s) => (
+          <button key={s.initials} type="button" className={item} onClick={() => onReassign(menu.client, s.initials)}>
+            <Send className="h-4 w-4 shrink-0 text-brand-500" /> {s.firstName || s.initials}
+          </button>
+        ))}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -874,7 +981,8 @@ const QueueRow = React.memo(function QueueRow({
   active,
   done,
   onSelect,
-}: { client: Client; active: boolean; done?: boolean; onSelect: (id: string) => void }) {
+  onContext,
+}: { client: Client; active: boolean; done?: boolean; onSelect: (id: string) => void; onContext?: (e: React.MouseEvent, client: Client) => void }) {
   // Créneau affiché : décroché perso (hourWindowLabel privilégie bestPickup),
   // sinon repli sur l'heure typique du type (cold-start).
   let window = client.insights ? hourWindowLabel(client.insights) : null;
@@ -890,6 +998,8 @@ const QueueRow = React.memo(function QueueRow({
     <li>
       <button
         onClick={() => onSelect(client.id)}
+        onContextMenu={onContext ? (e) => onContext(e, client) : undefined}
+        title={onContext ? "Clic droit : inactiver ou réassigner" : undefined}
         className={`w-full text-left px-3 py-1.5 border-l-2 transition-colors duration-150 group
           ${active
             ? "bg-brand-50/60 dark:bg-brand-950/30 border-l-brand-500"
@@ -1908,6 +2018,34 @@ function Block({
   );
 }
 
+/** Étoile « favori » d'un numéro — bouton isolé (clic ≠ appel du lien tel:). */
+function FavStar({
+  active, onToggle, onYellow = false, className = "",
+}: {
+  active: boolean;
+  onToggle: () => void;
+  onYellow?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(); }}
+      aria-pressed={active}
+      title={active ? "Retirer des favoris" : "Définir comme numéro favori (affiché en jaune)"}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${
+        onYellow
+          ? "text-primary-foreground/75 hover:text-primary-foreground hover:bg-black/10"
+          : active
+            ? "text-brand-500"
+            : "text-muted-foreground/45 hover:text-brand-500 hover:bg-secondary"
+      } ${className}`}
+    >
+      <Star className={`h-4 w-4 ${active ? "fill-current" : ""}`} />
+    </button>
+  );
+}
+
 function ActionPanel({
   client, onDemain, onOutcome, onRappel, onBL, onSkip, actionLoading,
   callNote, setCallNote, keymap,
@@ -1923,6 +2061,18 @@ function ActionPanel({
   setCallNote: (v: string) => void;
   keymap: Record<ShortcutAction, string>;
 }) {
+  // Numéro favori (mis en avant en jaune), persisté par client sur ce poste.
+  const clientId = client?.id ?? null;
+  const [favPhone, setFavPhone] = useState<PhoneKey | null>(null);
+  useEffect(() => { setFavPhone(loadFavPhone(clientId)); }, [clientId]);
+  const toggleFav = useCallback((k: PhoneKey) => {
+    setFavPhone((cur) => {
+      const next = cur === k ? null : k;
+      saveFavPhone(clientId, next);
+      return next;
+    });
+  }, [clientId]);
+
   if (!client) {
     return (
       <div className="p-5 text-center py-10 text-[12.5px] text-muted-foreground">
@@ -1931,11 +2081,14 @@ function ActionPanel({
     );
   }
 
-  const tels = [
-    { label: "Standard", value: client.tel1 },
-    { label: "Direct 1", value: client.tel2 },
-    { label: "Direct 2", value: client.tel3 },
-  ].filter((t) => t.value);
+  const allTels = [
+    { fav: "tel1" as PhoneKey, label: "Standard", value: client.tel1 },
+    { fav: "tel2" as PhoneKey, label: "Direct 1", value: client.tel2 },
+    { fav: "tel3" as PhoneKey, label: "Direct 2", value: client.tel3 },
+  ].filter((t): t is { fav: PhoneKey; label: string; value: string } => !!t.value);
+  // Le favori (s'il existe encore) passe en gros/jaune ; sinon le premier dispo.
+  const primaryTel = allTels.find((t) => t.fav === favPhone) ?? allTels[0];
+  const secondaryTels = allTels.filter((t) => t !== primaryTel);
 
   return (
     <div className="flex flex-col h-full animate-fade-in min-h-0">
@@ -1944,32 +2097,43 @@ function ActionPanel({
         {/* ── Téléphones — n°1 = CTA d'appel géant, les autres en compact ── */}
         <section>
           <p className="kicker mb-3">Appeler</p>
-          {tels.length === 0 ? (
+          {!primaryTel ? (
             <p className="text-[12px] italic text-muted-foreground py-2">Aucun numéro renseigné.</p>
           ) : (
             <div className="space-y-2">
-              {/* Numéro principal — gros, le plus accessible (loi de Fitts) */}
-              <a
-                href={`tel:${standardizePhone(tels[0].value)}`}
-                className="group flex items-center gap-3 px-4 py-4 rounded-2xl bg-primary text-primary-foreground shadow-[0_2px_14px_rgba(250,204,21,0.3)] hover:brightness-105 hover:shadow-[0_4px_22px_rgba(250,204,21,0.45)] transition-all active:scale-[0.99]"
-              >
-                <Phone className="h-6 w-6 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">{tels[0].label}</p>
-                  <p className="text-[22px] font-mono font-bold tnum leading-tight truncate">{formatPhoneDisplay(tels[0].value)}</p>
-                </div>
-              </a>
-              {/* Numéros secondaires — compacts */}
-              {tels.slice(1).map((t) => (
+              {/* Numéro principal (favori s'il existe) — gros, jaune (loi de Fitts).
+                  L'étoile est un bouton SÉPARÉ du lien tel: (clic ≠ appel). */}
+              <div className="relative">
                 <a
-                  key={t.label}
-                  href={`tel:${standardizePhone(t.value)}`}
-                  className="group flex items-center gap-2.5 px-3 py-2 rounded-lg bg-secondary/40 hover:bg-secondary border border-border transition-all"
+                  href={`tel:${standardizePhone(primaryTel.value)}`}
+                  className="group flex items-center gap-3 px-4 py-4 pr-12 rounded-2xl bg-primary text-primary-foreground shadow-[0_2px_14px_rgba(250,204,21,0.3)] hover:brightness-105 hover:shadow-[0_4px_22px_rgba(250,204,21,0.45)] transition-all active:scale-[0.99]"
                 >
-                  <Phone className="h-3.5 w-3.5 text-brand-500 dark:text-brand-400 shrink-0" />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground w-16 shrink-0">{t.label}</span>
-                  <span className="text-[13px] font-mono font-semibold text-foreground tnum truncate">{formatPhoneDisplay(t.value)}</span>
+                  <Phone className="h-6 w-6 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">{primaryTel.label}</p>
+                    <p className="text-[22px] font-mono font-bold tnum leading-tight truncate">{formatPhoneDisplay(primaryTel.value)}</p>
+                  </div>
                 </a>
+                <FavStar
+                  active={favPhone === primaryTel.fav}
+                  onToggle={() => toggleFav(primaryTel.fav)}
+                  onYellow
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2"
+                />
+              </div>
+              {/* Numéros secondaires — compacts, chacun étoilable pour passer en jaune */}
+              {secondaryTels.map((t) => (
+                <div key={t.fav} className="flex items-center gap-1.5">
+                  <a
+                    href={`tel:${standardizePhone(t.value)}`}
+                    className="group flex flex-1 min-w-0 items-center gap-2.5 px-3 py-2 rounded-lg bg-secondary/40 hover:bg-secondary border border-border transition-all"
+                  >
+                    <Phone className="h-3.5 w-3.5 text-brand-500 dark:text-brand-400 shrink-0" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground w-16 shrink-0">{t.label}</span>
+                    <span className="text-[13px] font-mono font-semibold text-foreground tnum truncate">{formatPhoneDisplay(t.value)}</span>
+                  </a>
+                  <FavStar active={favPhone === t.fav} onToggle={() => toggleFav(t.fav)} />
+                </div>
               ))}
             </div>
           )}
