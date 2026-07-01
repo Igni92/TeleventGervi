@@ -135,10 +135,24 @@ const SEG_UI: Record<"CHR" | "EXPORT", { label: string; badge: string }> = {
    Composant principal
 ═════════════════════════════════════════════════════════════ */
 /** Clé + libellé de la TOURNÉE d'une commande (sous-groupe sous le transporteur).
- *  Nom de tournée réel (SERG_TRCL U_DistBy) si connu, sinon l'heure, sinon « Sans tournée ». */
-function docTourneeKeyLabel(d: Doc): { key: string; label: string } {
-  const nom = (d.savedTournee?.nom ?? "").trim();
-  if (nom) return { key: `T:${nom.toUpperCase()}`, label: nom };
+ *  On veut le NOM de la tournée (IDF, IDF 2, NORD…), pas l'heure :
+ *   1) nom mémorisé (SERG_TRCL U_DistBy) s'il est connu ;
+ *   2) sinon on le résout dans le catalogue du transporteur (`tournees`) — comme
+ *      le sélecteur de ligne — par LineId mémorisé, puis par heure du BL ;
+ *   3) repli ultime sur l'heure, puis « Sans tournée ». */
+function docTourneeKeyLabel(d: Doc, tournees?: Tournee[]): { key: string; label: string } {
+  const savedNom = (d.savedTournee?.nom ?? "").trim();
+  if (savedNom) return { key: `T:${savedNom.toUpperCase()}`, label: savedNom };
+
+  if (tournees && tournees.length) {
+    const saved = d.savedTournee;
+    let t: Tournee | undefined;
+    if (saved?.lineId != null) t = tournees.find((x) => x.lineId === saved.lineId);
+    if (!t && d.trspHeure) t = tournees.find((x) => x.heure === d.trspHeure);
+    const nom = (t?.nom ?? "").trim();
+    if (nom) return { key: `T:${nom.toUpperCase()}`, label: nom };
+  }
+
   const h = (d.trspHeure ?? "").slice(0, 5);
   if (h) return { key: `H:${h}`, label: `Tournée ${h}` };
   return { key: "T:__none__", label: "Sans tournée" };
@@ -436,12 +450,13 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
     for (const c of view?.carriers ?? []) {
       const ck = c.code ?? "__none__";
       keys.push(ck);
+      const trn = tourneesByCode[(c.code ?? "").toUpperCase()];
       const subs = new Set<string>();
-      for (const d of c.docs) subs.add(docTourneeKeyLabel(d).key);
+      for (const d of c.docs) subs.add(docTourneeKeyLabel(d, trn).key);
       for (const s of subs) keys.push(`${ck}::${s}`);
     }
     return keys;
-  }, [view]);
+  }, [view, tourneesByCode]);
   const allCollapsed = allKeys.length > 0 && !allKeys.some((k) => expanded.has(k));
   const toggleAll = () => setExpanded(allCollapsed ? new Set(allKeys) : new Set());
 
@@ -729,17 +744,25 @@ function CarrierGroup({
   const collapsed = !expanded.has(carrierKey);
   const docEntries = carrier.docs.map((d) => d.docEntry);
 
-  // Sous-groupes par TOURNÉE (Nord, Frévial…) au sein du transporteur.
+  // Sous-groupes par TOURNÉE nommée (IDF, IDF 2, NORD…) au sein du transporteur.
+  // On résout le nom via le catalogue de tournées du transporteur (SERGTRS).
+  const carrierTournees = tourneesByCode[(carrier.code ?? "").toUpperCase()];
   const tourneeGroups = useMemo(() => {
     const map = new Map<string, { key: string; label: string; docs: Doc[] }>();
     for (const d of carrier.docs) {
-      const { key, label } = docTourneeKeyLabel(d);
+      const { key, label } = docTourneeKeyLabel(d, carrierTournees);
       const g = map.get(key) ?? { key, label, docs: [] };
       g.docs.push(d);
       map.set(key, g);
     }
     return [...map.values()].sort((a, b) => b.docs.length - a.docs.length || a.label.localeCompare(b.label, "fr"));
-  }, [carrier.docs]);
+  }, [carrier.docs, carrierTournees]);
+
+  // Dès que le transporteur est déplié, on charge son catalogue de tournées pour
+  // nommer les sous-groupes (IDF, NORD…) sans attendre l'ouverture d'une commande.
+  useEffect(() => {
+    if (!collapsed && carrier.code) onLoadTournees(carrier.code);
+  }, [collapsed, carrier.code, onLoadTournees]);
 
   // Bouton d'avancement groupé — CHANGE selon l'onglet : À préparer → Fait →
   // Départ. (Départ = état terminal → pas de bouton d'avancement.)
