@@ -338,6 +338,39 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, mode: "sqlq", ...out });
   }
 
+  // Mode VIEW : SERG_TRCL exposée en VUE via le Service Layer v2 (view.svc).
+  // ?view=ABET,AARR,APET → login v1 (cookie partagé), GET v2/view.svc/<vue>,
+  // colonnes + échantillon + lignes par client. (v1 → v2 : cookie B1SESSION commun.)
+  if (sp.get("view") !== null) {
+    const cards = (sp.get("view") || "").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+    const viewName = sp.get("viewName") || "GERVI_SERG_TRCLB1SLQuery";
+    const base = (process.env.SAP_B1_BASE_URL ?? "").replace(/\/+$/, "");
+    const v2base = base.replace(/\/v1$/, "/v2");
+    const viewUrl = `${v2base}/view.svc/${encodeURIComponent(viewName)}`;
+    const out: Record<string, unknown> = { viewName, viewUrl };
+    try {
+      const sample = await sap.get<{ value?: Record<string, unknown>[] }>(`${viewUrl}?$top=5`, { env: "prod" });
+      const rows = sample.value ?? [];
+      const columns = Object.keys(rows[0] ?? {});
+      out.columns = columns;
+      out.sample = rows;
+      const cardKey = columns.find((k) => /cardcode/i.test(k)) ?? columns.find((k) => /card/i.test(k)) ?? null;
+      out.cardKeyGuess = cardKey;
+      const byClient: Record<string, unknown> = {};
+      if (cardKey) for (const cc of cards) {
+        try {
+          const r = await sap.get<{ value?: Record<string, unknown>[] }>(
+            `${viewUrl}?$filter=${encodeURIComponent(`${cardKey} eq '${cc.replace(/'/g, "''")}'`)}&$top=50`, { env: "prod" });
+          byClient[cc] = r.value ?? [];
+        } catch (e) { byClient[cc] = { error: (e instanceof Error ? e.message : String(e)).slice(0, 160) }; }
+      }
+      out.byClient = byClient;
+      return NextResponse.json({ ok: true, mode: "view", accessible: true, ...out });
+    } catch (e) {
+      return NextResponse.json({ ok: false, mode: "view", accessible: false, ...out, error: e instanceof Error ? e.message : String(e) }, { status: 200 });
+    }
+  }
+
   try {
     // 1. BL cibles (par DocNum, sinon 6 récents, éventuellement filtrés client)
     type Ord = Record<string, unknown> & { DocNum: number; DocEntry: number; CardCode: string; CardName?: string; U_TrspCode?: string };
