@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
-import { getDeliveryPrepared, getDeliveryPreparedBy, getDeliveryExcluded, getDeliveryPreparer, getDeliveryIncomplete } from "@/lib/inventory";
+import { getDeliveryPrepared, getDeliveryPreparedBy, getDeliveryDeparted, getDeliveryDepartedBy, getDeliveryExcluded, getDeliveryPreparer, getDeliveryIncomplete } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -117,6 +117,9 @@ export async function GET(req: NextRequest) {
     const faiteByDoc = await getDeliveryPrepared().catch(() => new Map<number, boolean>());
     // Auteur du marquage « faite » → affichage « Fait par … » dans le Détail livraison.
     const preparedByDoc = await getDeliveryPreparedBy().catch(() => new Map<number, string>());
+    // Statut « départ » (parti en livraison) + son auteur.
+    const departedByDocEntry = await getDeliveryDeparted().catch(() => new Map<number, boolean>());
+    const departedByDoc = await getDeliveryDepartedBy().catch(() => new Map<number, string>());
     // BL marqués « avoir / exclu » (facturé puis avoir total, doublon) → déduits
     // à 100% des totaux mais conservés (grisés) dans la liste.
     const avoirByDoc = await getDeliveryExcluded().catch(() => new Map<number, boolean>());
@@ -195,6 +198,8 @@ export async function GET(req: NextRequest) {
         clientType: typeByCardCode.get(d.CardCode) ?? null,   // GMS | CHR | EXPORT | null
         prepared: faiteByDoc.get(d.DocEntry) ?? false,        // « faite » = coché manuellement
         preparedBy: preparedByDoc.get(d.DocEntry) ?? null,    // qui a marqué « faite »
+        departed: departedByDocEntry.get(d.DocEntry) ?? false, // « départ » = parti en livraison
+        departedBy: departedByDoc.get(d.DocEntry) ?? null,    // qui a marqué « départ »
         preparer: prepByDoc.get(d.DocEntry) ?? null,          // préparateur affecté (qui a ouvert)
         incomplete: incompleteByDoc.get(d.DocEntry) ?? false, // « à reprendre » — remise sur la file
         // « avoir/exclu » : surcharge manuelle si présente, sinon détecté auto (ci-dessous).

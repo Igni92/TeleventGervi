@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import {
   Truck, Boxes, Scale, Users, FileText, Receipt,
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
@@ -57,6 +57,8 @@ interface Doc {
   clientType: string | null;   // GMS | CHR | EXPORT | null
   prepared: boolean;           // « faite » — coché manuellement
   preparedBy?: string | null;  // qui a marqué la commande « faite »
+  departed?: boolean;          // « départ » — partie en livraison
+  departedBy?: string | null;  // qui a marqué le « départ »
   preparer?: string | null;    // préparateur affecté (qui a ouvert la commande)
   incomplete?: boolean;        // « à reprendre » — remise sur la file (pas finie)
   excluded: boolean;           // « avoir / exclu » — déduit 100% des totaux
@@ -102,9 +104,16 @@ const fmtEur = (v: number) =>
 const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 /* ─────────────────────────────────────────────────────────────
-   Onglet d'état de préparation — À préparer / Fait
+   Onglet d'état — À préparer / Fait / Départ (progression)
 ───────────────────────────────────────────────────────────── */
-type StatusTab = "A_PREPARER" | "FAIT";
+type StatusTab = "A_PREPARER" | "FAIT" | "DEPART";
+
+/** État courant d'une commande (mutuellement exclusif) : parti > préparé > à préparer. */
+function docStatus(d: { prepared: boolean; departed?: boolean }): StatusTab {
+  if (d.departed) return "DEPART";
+  if (d.prepared) return "FAIT";
+  return "A_PREPARER";
+}
 
 /** Badge de ligne par segment client (conservé pour CHR / EXPORT, le tag GMS
  *  n'étant plus affiché — la distinction utile est désormais À préparer / Fait). */
@@ -116,7 +125,7 @@ const SEG_UI: Record<"CHR" | "EXPORT", { label: string; badge: string }> = {
 /* ═════════════════════════════════════════════════════════════
    Composant principal
 ═════════════════════════════════════════════════════════════ */
-export function LivraisonDetail() {
+export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   const [date, setDate] = useState<string>(() => nextDeliveryDate());
   const [data, setData] = useState<ApiResp | null>(null);
   const [loading, setLoading] = useState(true);
@@ -311,22 +320,23 @@ export function LivraisonDetail() {
 
   // Comptes par état (sur l'ensemble, pour les compteurs des onglets).
   const statusCounts = useMemo(() => {
-    let aPreparer = 0, fait = 0;
+    let aPreparer = 0, fait = 0, depart = 0;
     if (data) for (const car of data.carriers) for (const d of car.docs) {
-      if (d.prepared) fait++; else aPreparer++;
+      const s = docStatus(d);
+      if (s === "DEPART") depart++; else if (s === "FAIT") fait++; else aPreparer++;
     }
-    return { aPreparer, fait };
+    return { aPreparer, fait, depart };
   }, [data]);
 
-  // Vue filtrée par onglet (À préparer / Fait) : on recoupe les commandes et on
-  // recalcule les métriques (groupes + bandeau de synthèse) pour rester cohérent.
+  // Vue filtrée par onglet (À préparer / Fait / Départ) : on recoupe les commandes
+  // et on recalcule les métriques (groupes + bandeau de synthèse) pour rester cohérent.
   const view = useMemo(() => {
     if (!data) return null;
     const r1 = (n: number) => Math.round(n * 10) / 10;
     const r2 = (n: number) => Math.round(n * 100) / 100;
     const carriers = data.carriers
       .map((c) => {
-        const docs = c.docs.filter((d) => (statusTab === "FAIT" ? d.prepared : !d.prepared));
+        const docs = c.docs.filter((d) => docStatus(d) === statusTab);
         return {
           ...c, docs,
           orders: docs.length,
@@ -430,12 +440,23 @@ export function LivraisonDetail() {
                 <button onClick={() => setStatusTab("FAIT")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir les commandes faites</button>
               </p>
             </>
-          ) : (
+          ) : statusTab === "FAIT" ? (
             <>
               <p className="text-[14px] font-semibold text-foreground">Aucune commande préparée</p>
               <p className="text-[12.5px] text-muted-foreground mt-1">
                 Rien n&apos;a encore été marqué « fait ».
                 <button onClick={() => setStatusTab("A_PREPARER")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir à préparer</button>
+              </p>
+            </>
+          ) : (
+            <>
+              <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/12 text-sky-600 dark:text-sky-400 mb-3">
+                <Truck className="h-6 w-6" strokeWidth={1.8} />
+              </span>
+              <p className="text-[14px] font-semibold text-foreground">Aucune commande partie</p>
+              <p className="text-[12.5px] text-muted-foreground mt-1">
+                Aucune livraison n&apos;a encore quitté l&apos;entrepôt.
+                <button onClick={() => setStatusTab("FAIT")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir les commandes faites</button>
               </p>
             </>
           )}
@@ -449,7 +470,7 @@ export function LivraisonDetail() {
                 key={key} carrier={c} carriers={carriers} onCarrierChange={changeCarrier} onDateChange={changeDate}
                 tourneesByCode={tourneesByCode} onLoadTournees={loadTournees} onTourneeChange={changeTournee}
                 collapsed={collapsed.has(key)} onToggleCollapse={() => toggleCollapse(key)}
-                onPatchDoc={patchDoc} onReload={() => load()}
+                onPatchDoc={patchDoc} onReload={() => load()} canDispatch={canDispatch}
               />
             );
           })}
@@ -599,7 +620,7 @@ function SummaryRow({ totals, loading }: { totals: Totals; loading: boolean }) {
 function CarrierGroup({
   carrier, carriers, onCarrierChange, onDateChange,
   tourneesByCode, onLoadTournees, onTourneeChange,
-  collapsed, onToggleCollapse, onPatchDoc, onReload,
+  collapsed, onToggleCollapse, onPatchDoc, onReload, canDispatch,
 }: {
   carrier: Carrier;
   carriers: CarrierOption[];
@@ -612,6 +633,7 @@ function CarrierGroup({
   onToggleCollapse: () => void;
   onPatchDoc: (docEntry: number, patch: Partial<Doc>) => void;
   onReload: () => void;
+  canDispatch: boolean;
 }) {
   const unassigned = !carrier.code;
   return (
@@ -661,7 +683,7 @@ function CarrierGroup({
               onCarrierChange={onCarrierChange} onDateChange={onDateChange}
               tournees={d.trspCode ? tourneesByCode[d.trspCode.toUpperCase()] : undefined}
               onLoadTournees={onLoadTournees} onTourneeChange={onTourneeChange}
-              onPatchDoc={onPatchDoc} onReload={onReload}
+              onPatchDoc={onPatchDoc} onReload={onReload} canDispatch={canDispatch}
             />
           ))}
         </ul>
@@ -677,7 +699,7 @@ function StatusTabs({
   tab, counts, onPick, allCollapsed, onToggleAll,
 }: {
   tab: StatusTab;
-  counts: { aPreparer: number; fait: number };
+  counts: { aPreparer: number; fait: number; depart: number };
   onPick: (t: StatusTab) => void;
   allCollapsed: boolean;
   onToggleAll: () => void;
@@ -685,6 +707,7 @@ function StatusTabs({
   const tabs: { key: StatusTab; label: string; count: number; icon: typeof Clock; active: string }[] = [
     { key: "A_PREPARER", label: "À préparer", count: counts.aPreparer, icon: Clock,        active: "bg-amber-500 text-white border-amber-500" },
     { key: "FAIT",       label: "Fait",       count: counts.fait,      icon: CheckCircle2, active: "bg-emerald-500 text-white border-emerald-500" },
+    { key: "DEPART",     label: "Départ",     count: counts.depart,    icon: Truck,        active: "bg-sky-500 text-white border-sky-500" },
   ];
   return (
     <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -736,7 +759,7 @@ function Metric({ label, value, className }: { label: string; value: string; cla
    Ligne commande — repliable vers le détail des lignes
 ═════════════════════════════════════════════════════════════ */
 function OrderRow({
-  doc, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange, onPatchDoc, onReload,
+  doc, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange, onPatchDoc, onReload, canDispatch,
 }: {
   doc: Doc;
   carriers: CarrierOption[];
@@ -747,6 +770,7 @@ function OrderRow({
   onTourneeChange: (docEntry: number, trspCode: string, heure: string) => Promise<boolean>;
   onPatchDoc: (docEntry: number, patch: Partial<Doc>) => void;
   onReload: () => void;
+  canDispatch: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [savingCarrier, setSavingCarrier] = useState(false);
@@ -851,9 +875,48 @@ function OrderRow({
   }
   // Marquer « faite » passe par une vérification ; annuler le « fait » est direct.
   const togglePrepared = () => {
+    if (departed) return;                  // une commande partie ne se re-bascule pas ici
     if (prepared) setPreparedTo(false);
     else setConfirmOpen(true);
   };
+
+  // Statut « départ » (partie en livraison) — 3ᵉ état. Optimiste + persistance.
+  const [departed, setDeparted] = useState<boolean>(!!doc.departed);
+  const [departedBy, setDepartedBy] = useState<string | null>(doc.departedBy ?? null);
+  const [savingDepart, setSavingDepart] = useState(false);
+
+  async function setDepartedTo(next: boolean) {
+    setDeparted(next);
+    if (next) setPrepared(true);           // partir implique « faite »
+    onPatchDoc(doc.docEntry, { departed: next, ...(next ? { prepared: true } : {}) });
+    setSavingDepart(true);
+    try {
+      const res = await fetch("/api/livraisons/departed", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: doc.docEntry, departed: next }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || j?.ok === false) {
+        setDeparted(!next);
+        onPatchDoc(doc.docEntry, { departed: !next });
+        toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement");
+        return;
+      }
+      const by = next ? (j?.by ?? null) : null;
+      setDepartedBy(by);
+      onPatchDoc(doc.docEntry, { departedBy: by });
+    } catch {
+      setDeparted(!next);
+      onPatchDoc(doc.docEntry, { departed: !next });
+      toast.error("Échec de l'enregistrement");
+    }
+    finally { setSavingDepart(false); }
+  }
+
+  // Transitions d'état déclenchées depuis le menu contextuel (clic droit).
+  function markAPreparer() { if (departed) setDepartedTo(false); if (prepared) setPreparedTo(false); }
+  function markFait()      { if (departed) setDepartedTo(false); if (!prepared) setPreparedTo(true); }
+  function markDepart()    { if (!departed) setDepartedTo(true); }
 
   // Ouvrir la commande en grand → s'affecter comme préparateur (qui clique prépare).
   async function openBig() {
@@ -881,9 +944,9 @@ function OrderRow({
       });
       const j = await res.json().catch(() => null);
       if (!res.ok || !j?.ok) { toast.error(j?.error || "Échec"); return; }
-      setPreparer(null); setIncomplete(true); setPrepared(false); setPreparedBy(null);
+      setPreparer(null); setIncomplete(true); setPrepared(false); setPreparedBy(null); setDeparted(false);
       setBigOpen(false);
-      onPatchDoc(doc.docEntry, { preparer: null, incomplete: true, prepared: false, preparedBy: null });
+      onPatchDoc(doc.docEntry, { preparer: null, incomplete: true, prepared: false, preparedBy: null, departed: false });
       toast.warning(`Commande #${doc.docNum} non terminée — remise sur la file`);
     } catch { toast.error("Échec"); }
     finally { setRequeuing(false); }
@@ -997,14 +1060,14 @@ function OrderRow({
     }
   }
 
-  // ── Menu contextuel (clic droit sur la ligne) → « Changer le client » ──
+  // ── Menu contextuel (clic droit sur la ligne) → actions d'état + dispatch ──
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   function onRowContextMenu(e: ReactMouseEvent) {
-    if (!doc.open) return;                                    // re-codage : commande ouverte seulement
+    if (!doc.open) return;                                    // commande livrée/annulée : pas d'action
     const el = e.target as HTMLElement;
     if (el.closest("input, select, textarea")) return;        // garde le menu natif dans les champs (copier/coller)
     e.preventDefault();
-    setMenu({ x: Math.min(e.clientX, window.innerWidth - 220), y: Math.min(e.clientY, window.innerHeight - 80) });
+    setMenu({ x: Math.min(e.clientX, window.innerWidth - 220), y: Math.min(e.clientY, window.innerHeight - 88) });
   }
   useEffect(() => {
     if (!menu) return;
@@ -1020,6 +1083,8 @@ function OrderRow({
     };
   }, [menu]);
 
+  const docStatusOf: StatusTab = departed ? "DEPART" : prepared ? "FAIT" : "A_PREPARER";
+
   return (
     <li>
       <div
@@ -1027,21 +1092,27 @@ function OrderRow({
         className={`flex items-center gap-3 px-4 sm:px-5 py-3 hover:bg-secondary/25 transition-colors ${doc.excluded ? "opacity-50" : ""}`}
       >
         {/* Bouton d'état — toujours en tête, verticalement centré (placement
-            constant, indépendant du retour à la ligne des badges). */}
+            constant). 3 états : À préparer → Fait → Parti. Clic droit = menu complet. */}
         <button
           type="button"
-          onClick={togglePrepared}
-          disabled={savingPrep}
-          title={prepared ? "Commande préparée (faite) — cliquer pour annuler" : "Marquer la commande comme préparée (faite)"}
-          aria-pressed={prepared}
+          onClick={departed ? () => setDepartedTo(false) : togglePrepared}
+          disabled={savingPrep || savingDepart}
+          title={departed
+            ? "Commande partie en livraison — cliquer pour la ramener à « fait »"
+            : prepared ? "Commande préparée (faite) — cliquer pour annuler" : "Marquer la commande comme préparée (faite)"}
+          aria-pressed={prepared || departed}
           className={`inline-flex shrink-0 items-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-lg text-[12px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 ${
-            prepared
+            departed
+              ? "bg-sky-500 text-white hover:bg-sky-600"
+              : prepared
               ? "bg-emerald-500 text-white hover:bg-emerald-600"
               : "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-400/50 hover:bg-amber-500/25"
           }`}
         >
-          {savingPrep ? <Loader2 className="h-4 w-4 animate-spin" /> : prepared ? <CheckCircle2 className="h-4 w-4" /> : <Clock className="h-4 w-4" />}
-          <span className="hidden sm:inline">{prepared ? "Faite" : "À préparer"}</span>
+          {(savingPrep || savingDepart)
+            ? <Loader2 className="h-4 w-4 animate-spin" />
+            : departed ? <Truck className="h-4 w-4" /> : prepared ? <CheckCircle2 className="h-4 w-4" /> : <Clock className="h-4 w-4" />}
+          <span className="hidden sm:inline">{departed ? "Parti" : prepared ? "Faite" : "À préparer"}</span>
         </button>
 
         {/* Identité client */}
@@ -1057,10 +1128,16 @@ function OrderRow({
                 {SEG_UI[doc.clientType as keyof typeof SEG_UI].label}
               </span>
             )}
-            {prepared && (preparedBy ?? preparer) && (
+            {prepared && !departed && (preparedBy ?? preparer) && (
               <span title={`Préparée par ${displayPersonName(preparedBy ?? preparer)}`}
                 className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 text-[10px] font-semibold">
                 <UserCheck className="h-3 w-3" /> Fait par {displayPersonName(preparedBy ?? preparer)}
+              </span>
+            )}
+            {departed && (
+              <span title={departedBy ? `Parti — ${displayPersonName(departedBy)}` : "Partie en livraison"}
+                className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                <Truck className="h-3 w-3" /> Parti{departedBy ? ` · ${displayPersonName(departedBy)}` : ""}
               </span>
             )}
             {incomplete && (
@@ -1093,8 +1170,9 @@ function OrderRow({
             <span className="hidden sm:inline">· {fmtEur(doc.totalHT)} HT</span>
           </div>
           {/* Changement de transporteur / tournée / réf / date — dispatch (desktop
-              uniquement : sur mobile on garde l'écran focalisé sur la préparation). */}
-          <div className="mt-1.5 hidden md:flex flex-wrap items-center gap-1.5">
+              uniquement + réservé aux commerciaux/admins ; masqué aux préparateurs
+              qui n'ont qu'à préparer, pas à dispatcher). */}
+          <div className={`mt-1.5 ${canDispatch ? "hidden md:flex" : "hidden"} flex-wrap items-center gap-1.5`}>
             <Truck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <div className="relative">
               <select
@@ -1198,7 +1276,7 @@ function OrderRow({
           >
             <Maximize2 className="h-4 w-4" />
           </button>
-          {doc.open && (
+          {canDispatch && doc.open && (
             <button
               type="button"
               onClick={startModif}
@@ -1476,22 +1554,52 @@ function OrderRow({
           />
           <div
             role="menu"
-            className="fixed z-50 min-w-[200px] overflow-hidden rounded-lg border border-border bg-card py-1 shadow-lg animate-fade-up"
+            className="fixed z-50 min-w-[210px] overflow-hidden rounded-lg border border-border bg-card py-1 shadow-lg animate-fade-up"
             style={{ top: menu.y, left: menu.x }}
           >
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => { setMenu(null); setRebindOpen(true); }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-foreground hover:bg-secondary/60"
-            >
-              <UserCog className="h-4 w-4 text-brand-600 dark:text-brand-400 shrink-0" />
-              Changer le client…
-            </button>
+            {/* Actions logistiques (commerciaux / admins) */}
+            {canDispatch && (
+              <>
+                <MenuItem icon={Pencil} onClick={() => { setMenu(null); startModif(); }}>Modifier la commande</MenuItem>
+                <MenuItem icon={UserCog} onClick={() => { setMenu(null); setRebindOpen(true); }}>Changer le client…</MenuItem>
+                <div className="my-1 h-px bg-border" />
+              </>
+            )}
+            {/* Changement d'état — accessible aux préparateurs / livreurs */}
+            <MenuItem icon={Clock} accent="text-amber-600 dark:text-amber-400" active={docStatusOf === "A_PREPARER"}
+              onClick={() => { setMenu(null); markAPreparer(); }}>À préparer</MenuItem>
+            <MenuItem icon={CheckCircle2} accent="text-emerald-600 dark:text-emerald-400" active={docStatusOf === "FAIT"}
+              onClick={() => { setMenu(null); markFait(); }}>Fait</MenuItem>
+            <MenuItem icon={Truck} accent="text-sky-600 dark:text-sky-400" active={docStatusOf === "DEPART"}
+              onClick={() => { setMenu(null); markDepart(); }}>Départ</MenuItem>
           </div>
         </>
       )}
     </li>
+  );
+}
+
+/** Élément de menu contextuel — icône + libellé, coche si état courant. */
+function MenuItem({
+  icon: Icon, children, onClick, accent, active,
+}: {
+  icon: typeof Clock;
+  children: ReactNode;
+  onClick: () => void;
+  accent?: string;
+  active?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-foreground hover:bg-secondary/60"
+    >
+      <Icon className={`h-4 w-4 shrink-0 ${accent ?? "text-brand-600 dark:text-brand-400"}`} />
+      <span className="flex-1">{children}</span>
+      {active && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-foreground/50" />}
+    </button>
   );
 }
 

@@ -277,6 +277,51 @@ export async function setDeliveryPrepared(docEntry: number, prepared: boolean, b
   await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
 }
 
+/* ───────────────────────── Statut « Départ » (livraison) ─────────────────────
+ * 3ᵉ état après « faite » : la commande est PARTIE en livraison (chargée). Marqué
+ * manuellement (livreur / admin) sur « Détail livraison ». Stocké par DocEntry
+ * dans AppSetting (clé `livdepart:<docEntry>`, valeur = { departed, at, by }).
+ */
+const LIV_DEPART_PREFIX = "livdepart:";
+
+/** Map DocEntry → parti (true/false) des BL marqués « départ ». */
+export async function getDeliveryDeparted(): Promise<Map<number, boolean>> {
+  const m = new Map<number, boolean>();
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_DEPART_PREFIX } } });
+    for (const r of rows) {
+      const docEntry = Number(r.key.slice(LIV_DEPART_PREFIX.length));
+      if (!Number.isFinite(docEntry)) continue;
+      try { m.set(docEntry, !!(JSON.parse(r.value) as { departed?: boolean }).departed); } catch { /* ignore */ }
+    }
+  } catch { /* table absente → aucune marque */ }
+  return m;
+}
+
+/** Map DocEntry → auteur (« by ») du marquage « départ », pour les BL partis. */
+export async function getDeliveryDepartedBy(): Promise<Map<number, string>> {
+  const m = new Map<number, string>();
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_DEPART_PREFIX } } });
+    for (const r of rows) {
+      const docEntry = Number(r.key.slice(LIV_DEPART_PREFIX.length));
+      if (!Number.isFinite(docEntry)) continue;
+      try {
+        const v = JSON.parse(r.value) as { departed?: boolean; by?: string };
+        if (v.departed && v.by?.trim()) m.set(docEntry, v.by.trim());
+      } catch { /* ignore */ }
+    }
+  } catch { /* table absente → aucune marque */ }
+  return m;
+}
+
+/** Bascule le statut « départ » d'un BL (persisté). */
+export async function setDeliveryDeparted(docEntry: number, departed: boolean, by: string): Promise<void> {
+  const key = LIV_DEPART_PREFIX + docEntry;
+  const value = JSON.stringify({ departed, at: new Date().toISOString(), by });
+  await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+}
+
 /* ──────────────────── BL « préparateur affecté » ────────────────────
  * Le préparateur qui ouvre une commande en grand se l'affecte. Persisté par
  * DocEntry (clé `livprep:<docEntry>`, valeur = { by, at }).
