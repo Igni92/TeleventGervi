@@ -60,6 +60,10 @@ model User {
   // peut ni modifier le rôle admin d'un compte ni basculer la base SAP prod/test
   // (cf. requireStrictAdmin). Désigné en base depuis Effectifs (pas de bootstrap).
   isDirection   Boolean    @default(false)
+  // Rôle LIVREUR — accès restreint (livraison + fiche client logistique). Désigné
+  // en base depuis Effectifs. Accédé en raw SQL (colonne hors client typé tant que
+  // generate n'est pas relancé). Cf. lib/permissions.isLivreur.
+  isLivreur     Boolean    @default(false)
   accounts      Account[]
   sessions      Session[]
   presences     Presence[]

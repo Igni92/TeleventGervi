@@ -38,11 +38,13 @@ interface Props {
   isCommercial?: boolean;
   /** Rôle direction — accès global ; gère tous les rôles SAUF admin. */
   isDirection?: boolean;
+  /** Rôle livreur — accès restreint (livraison + fiche client logistique). */
+  isLivreur?: boolean;
   /** Le SPECTATEUR est-il admin strict ? Seul lui peut (dé)cocher le rôle Admin. */
   canEditAdmin?: boolean;
 }
 
-export function CommercialCard({ userId, name, commercialKey, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false, isPreparateur = false, isCommercial = true, isDirection = false, canEditAdmin = false }: Props) {
+export function CommercialCard({ userId, name, commercialKey, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false, isPreparateur = false, isCommercial = true, isDirection = false, isLivreur = false, canEditAdmin = false }: Props) {
   const [claiming, setClaiming] = useState<string | null>(null);
   const [isPresent, setIsPresent] = useState(present);
   const [share, setShare] = useState(stockSharePct);
@@ -55,6 +57,8 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
   const [savingComm, setSavingComm] = useState(false);
   const [direction, setDirection] = useState(isDirection);
   const [savingDir, setSavingDir] = useState(false);
+  const [livreur, setLivreur] = useState(isLivreur);
+  const [savingLiv, setSavingLiv] = useState(false);
   // Nom affiché sans le suffixe société (« … - Gervifrais ») qui tronque sur mobile.
   const displayName = name.split(/\s+[-–]\s+/)[0].trim() || name;
 
@@ -89,6 +93,14 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
     try { await patch({ isCommercial: next }); toast.success(next ? `${name} est désormais commercial` : `${name} n'est plus commercial`); }
     catch { setComm(!next); toast.error("Erreur changement de rôle"); }
     finally { setSavingComm(false); }
+  }
+
+  async function toggleLivreur() {
+    const next = !livreur;
+    setLivreur(next); setSavingLiv(true);
+    try { await patch({ isLivreur: next }); toast.success(next ? `${name} est désormais livreur` : `${name} n'est plus livreur`); }
+    catch { setLivreur(!next); toast.error("Erreur changement de rôle"); }
+    finally { setSavingLiv(false); }
   }
 
   async function patch(payload: Record<string, unknown>) {
@@ -224,7 +236,8 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
                   : canEditAdmin
                     ? (admin ? "Retirer les droits administrateur" : "Promouvoir administrateur")
                     : "Rôle admin — réservé aux administrateurs"} />
-              <RoleCheck label="Livreur" disabled note="bientôt" title="Rôle livreur — bientôt disponible" />
+              <RoleCheck label="Livreur" active={livreur} saving={savingLiv} onToggle={toggleLivreur}
+                title={livreur ? "Retirer le rôle livreur" : "Désigner livreur (livraison + fiche client)"} />
             </div>
           </div>
         </div>

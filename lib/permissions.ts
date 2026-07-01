@@ -136,6 +136,25 @@ export async function requirePreparateurOrAdmin(session: Session | null): Promis
 }
 
 /**
+ * True si l'utilisateur connecté porte le rôle LIVREUR (accès restreint :
+ * livraison + fiche client logistique). Lecture défensive (repli false si la
+ * colonne manque). Immédiat (relit la base à chaque appel — pas de cache session).
+ */
+export async function isLivreur(session: Session | null): Promise<boolean> {
+  const email = session?.user?.email?.trim().toLowerCase() ?? null;
+  if (!email) return false;
+  try {
+    const rows = await prisma.$queryRawUnsafe<{ isLivreur: boolean | null }[]>(
+      `SELECT "isLivreur" FROM "User" WHERE LOWER("email") = $1 LIMIT 1`,
+      email,
+    );
+    return !!rows[0]?.isLivreur;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * True UNIQUEMENT pour un administrateur (bootstrap ADMIN_EMAILS OU User.isAdmin) —
  * la DIRECTION en est exclue. Réservé aux deux actions que seul l'admin maîtrise :
  *   1. basculer la base SAP prod ↔ test (/api/sap/environment) ;
