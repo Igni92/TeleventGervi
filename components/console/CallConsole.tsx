@@ -8,11 +8,12 @@ import {
   ChevronRight,
   Loader2, Calendar, Sparkles, ArrowUpDown,
   StickyNote, History, User, TrendingUp, TrendingDown, Minus,
-  MessageSquare, AlertTriangle, Settings, Mail, ArrowUpRight,
+  MessageSquare, AlertTriangle, Settings, Mail, ArrowUpRight, Star, Ban, Send,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import type { ClientInsights } from "@/lib/insights";
-import { dayOfWeekLabel, summaryRecommendation, hourWindowLabel } from "@/lib/insights";
+import { dayOfWeekLabel, summaryRecommendation, hourWindowLabel, pickupSlotLabel } from "@/lib/insights";
 import type { LifecycleResult, LifecycleState } from "@/lib/lifecycle";
 import type { ValueTier } from "@/lib/clientValue";
 import { useConsolePrefs, SECTION_LABELS, type SectionId } from "@/lib/useConsolePrefs";
@@ -22,10 +23,12 @@ import {
 } from "@/lib/useConsoleShortcuts";
 import { HabitudesBanner } from "@/components/console/HabitudesBanner";
 import { broadcastActiveClient } from "@/lib/consoleSync";
-import { displayNameFromSlp } from "@/lib/salespeople";
+import { displayNameFromSlp, SALESPEOPLE } from "@/lib/salespeople";
 import { loadCallNote, saveCallNote, clearCallNote } from "@/lib/callNoteStorage";
+import { loadFavPhone, saveFavPhone, type PhoneKey } from "@/lib/favPhoneStorage";
 import { MonitorSmartphone } from "lucide-react";
 import { BLDialog } from "@/components/console/BLDialog";
+import { NotificationsBell } from "@/components/console/NotificationsBell";
 import { SapOrderHistory } from "@/components/console/SapOrderHistory";
 import { SapGroupBadge } from "@/components/clients/SapGroupBadge";
 import {
@@ -89,9 +92,22 @@ interface Client {
   ownerAbsent?: boolean;
   /** nb d'incidents ouverts (BL) — affiché dans la file */
   openIncidents?: number;
+  /** Repli cold-start : heure de décroché typique des clients du même type
+   *  (quand ce client n'a pas assez d'historique perso). */
+  fallbackHour?: number | null;
+  /** Tenté aujourd'hui sans décroché (NRP/répondeur) → à re-tenter plus tard. */
+  retryAfterNrp?: boolean;
+}
+interface DueRappel {
+  id: string;
+  clientId: string;
+  clientNom: string;
+  dateRappel: string;
+  note: string | null;
 }
 interface ConsoleData {
   queue: Client[]; done: Client[];
+  dueRappels?: DueRappel[];
   stats: { remaining: number; called: number; commandes: number; demains: number; conversion: number };
   presence?: { present: string[]; absent: string[]; toCover: number };
   me?: { stockSharePct: number };
@@ -116,10 +132,12 @@ const LIFECYCLE_PILL: Partial<Record<LifecycleState, string>> = {
 ───────────────────────────────────────────────────────────── */
 type SortMode = "priorite" | "name" | "hour" | "type" | "lastOrder";
 
-export function CallConsole() {
+export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: boolean; meInitials?: string | null }) {
   const [data, setData] = useState<ConsoleData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Menu contextuel (clic droit) sur une ligne de la file — actions portefeuille.
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; client: Client } | null>(null);
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortMode>("priorite");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -149,6 +167,12 @@ export function CallConsole() {
         if (prev && json.queue.some((c) => c.id === prev)) return prev;
         return json.queue[0]?.id ?? null;
       });
+      // Pas de cron (Vercel Hobby = 1/jour) : quand des rappels sont dus et que
+      // la console est ouverte, on pousse la notif vers les autres appareils de
+      // l'agent (best-effort, marque notifiedAt côté serveur → pas de doublon).
+      if ((json.dueRappels?.length ?? 0) > 0) {
+        fetch("/api/push/flush", { method: "POST" }).catch(() => {});
+      }
     } catch {
       toast.error("Erreur de chargement de la console");
     } finally {
@@ -157,6 +181,40 @@ export function CallConsole() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  /* ── Actions portefeuille (menu clic droit) — admin uniquement ──────────── */
+  const openCtxMenu = useCallback((e: React.MouseEvent, client: Client) => {
+    if (!isAdmin) return;              // non-admin → menu natif du navigateur
+    e.preventDefault();
+    setCtxMenu({ x: e.clientX, y: e.clientY, client });
+  }, [isAdmin]);
+
+  const assignClient = useCallback(async (client: Client, body: Record<string, unknown>, okMsg: string) => {
+    setCtxMenu(null);
+    try {
+      const res = await fetch(`/api/clients/${client.id}/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Échec");
+      toast.success(okMsg);
+      fetchData();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Échec de l'opération");
+    }
+  }, [fetchData]);
+
+  const deactivateClient = useCallback((client: Client) => {
+    if (!window.confirm(`Passer « ${client.nom} » en inactif ? Il quittera la file d'appel.`)) { setCtxMenu(null); return; }
+    assignClient(client, { activeTelevente: false }, `${client.nom} — passé en inactif`);
+  }, [assignClient]);
+
+  const reassignClient = useCallback((client: Client, initials: string) => {
+    // Réassigne UNIQUEMENT le vendeur (télévente) → le client bascule dans la
+    // console du commercial cible. Le « commercial » (account manager) ne bouge pas.
+    assignClient(client, { vendeur: initials }, `${client.nom} — envoyé à ${displayNameFromSlp(initials) ?? initials}`);
+  }, [assignClient]);
 
   const allClients = useMemo(
     () => [...(data?.queue ?? []), ...(data?.done ?? [])],
@@ -179,7 +237,8 @@ export function CallConsole() {
         openIncidents: active.openIncidents ?? null,
         lastOrderDays: active.insights?.lastOrderDays ?? null,
         ordersCount: active.appels.filter((a) => a.type === "COMMANDE").length,
-        medianHour: active.insights?.medianHour
+        medianHour: active.insights?.recommendedHour
+          ?? active.insights?.medianHour
           ?? active.insights?.bestHour?.hour
           ?? null,
         bestDayOfWeek: active.insights?.bestDayOfWeek?.dow ?? null,
@@ -225,9 +284,11 @@ export function CallConsole() {
         }
         case "hour":
         default: {
-          // Sort by optimal call hour (median) — clients without insights go last
-          const ha = a.insights?.medianHour ?? a.insights?.bestHour?.hour ?? 99;
-          const hb = b.insights?.medianHour ?? b.insights?.bestHour?.hour ?? 99;
+          // Tri par heure optimale d'appel : on privilégie l'heure de DÉCROCHÉ
+          // (recommendedHour), avec repli sur l'heure typique du type (cold-start)
+          // pour ne pas reléguer les clients neufs en fin de file.
+          const ha = a.insights?.recommendedHour ?? a.fallbackHour ?? a.insights?.medianHour ?? 99;
+          const hb = b.insights?.recommendedHour ?? b.fallbackHour ?? b.insights?.medianHour ?? 99;
           return ha - hb;
         }
       }
@@ -399,6 +460,24 @@ export function CallConsole() {
     }
   }, [active, fetchData]);
 
+  /* ── Marque un rappel « fait » (bandeau des rappels dus) ─────────────── */
+  const markRappelDone = useCallback(async (rappelId: string) => {
+    // Retrait optimiste du bandeau.
+    setData((cur) => cur ? { ...cur, dueRappels: (cur.dueRappels ?? []).filter((r) => r.id !== rappelId) } : cur);
+    try {
+      const res = await fetch("/api/reminders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: rappelId, statut: "FAIT" }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Rappel marqué comme fait");
+    } catch {
+      toast.error("Erreur — rappel non mis à jour");
+      fetchData();
+    }
+  }, [fetchData]);
+
   /* ── Keyboard shortcuts (personnalisables — voir useConsoleShortcuts) ── */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -455,16 +534,30 @@ export function CallConsole() {
       {/* ── Top stat strip ─────────────────────────────────── */}
       <div className="shrink-0 flex items-start justify-between gap-4">
         <ConsoleHeader stats={stats} />
-        <button
-          type="button"
-          onClick={() => window.open("/console/ecran2", "televent-ecran2", "width=720,height=900")}
-          title="Ouvre une 2e fenêtre (stock perso + saisie BL) synchronisée — à glisser sur ton 2e écran"
-          className="shrink-0 hidden md:inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-[12px] font-medium text-foreground/80 hover:text-foreground hover:border-brand-400 transition-colors"
-        >
-          <MonitorSmartphone className="h-3.5 w-3.5" />
-          2ᵉ écran
-        </button>
+        <div className="shrink-0 flex items-center gap-2">
+          <NotificationsBell />
+          <button
+            type="button"
+            onClick={() => window.open("/console/ecran2", "televent-ecran2", "width=720,height=900")}
+            title="Ouvre une 2e fenêtre (stock perso + saisie BL) synchronisée — à glisser sur ton 2e écran"
+            className="hidden md:inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-[12px] font-medium text-foreground/80 hover:text-foreground hover:border-brand-400 transition-colors"
+          >
+            <MonitorSmartphone className="h-3.5 w-3.5" />
+            2ᵉ écran
+          </button>
+        </div>
       </div>
+
+      {/* ── Bandeau rappels DUS maintenant ─────────────────── */}
+      {(data?.dueRappels?.length ?? 0) > 0 && (
+        <DueRappelsBanner
+          items={data!.dueRappels!}
+          onOpen={(clientId) => {
+            if (allClients.some((c) => c.id === clientId)) setActiveId(clientId);
+          }}
+          onDone={markRappelDone}
+        />
+      )}
 
       {/* ── Bandeau présence / distribution ────────────────── */}
       {data?.presence && (data.presence.absent.length > 0) && (
@@ -553,6 +646,7 @@ export function CallConsole() {
                     client={c}
                     active={c.id === activeId}
                     onSelect={setActiveId}
+                    onContext={isAdmin ? openCtxMenu : undefined}
                   />
                 ))}
               </ol>
@@ -575,6 +669,7 @@ export function CallConsole() {
                       active={c.id === activeId}
                       done
                       onSelect={setActiveId}
+                      onContext={isAdmin ? openCtxMenu : undefined}
                     />
                   ))}
                 </ol>
@@ -671,7 +766,74 @@ export function CallConsole() {
           }}
         />
       )}
+
+      {/* ── Menu contextuel (clic droit sur une ligne de file) — admin ──── */}
+      {ctxMenu && (
+        <ClientContextMenu
+          menu={ctxMenu}
+          meInitials={meInitials}
+          onClose={() => setCtxMenu(null)}
+          onDeactivate={deactivateClient}
+          onReassign={reassignClient}
+        />
+      )}
     </div>
+  );
+}
+
+/** Menu contextuel d'une ligne de file (clic droit) : inactiver / réassigner. */
+function ClientContextMenu({
+  menu, meInitials, onClose, onDeactivate, onReassign,
+}: {
+  menu: { x: number; y: number; client: Client };
+  meInitials: string | null;
+  onClose: () => void;
+  onDeactivate: (client: Client) => void;
+  onReassign: (client: Client, initials: string) => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const targets = SALESPEOPLE.filter((s) => s.initials !== meInitials);
+  // Repositionne le menu pour rester dans la fenêtre (bord droit / bas).
+  const MW = 224;
+  const MH = 92 + targets.length * 34;
+  const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
+  const left = Math.max(8, Math.min(menu.x, vw - MW - 8));
+  const top = Math.max(8, Math.min(menu.y, vh - MH - 8));
+  const item = "flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-secondary transition-colors";
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[130]"
+      onClick={onClose}
+      onContextMenu={(e) => { e.preventDefault(); onClose(); }}
+    >
+      <div
+        className="absolute min-w-[224px] rounded-xl border border-border bg-card shadow-2xl py-1.5 animate-fade-in"
+        style={{ left, top }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="px-3 pb-1 text-[11px] font-semibold text-foreground truncate">{menu.client.nom}</p>
+        <button type="button" className={item} onClick={() => onDeactivate(menu.client)}>
+          <Ban className="h-4 w-4 shrink-0 text-rose-500" /> Passer en inactif
+        </button>
+        <div className="my-1 h-px bg-border/70" />
+        <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Envoyer à</p>
+        {targets.length === 0 ? (
+          <p className="px-3 py-1 text-[12px] italic text-muted-foreground">Aucun autre commercial</p>
+        ) : targets.map((s) => (
+          <button key={s.initials} type="button" className={item} onClick={() => onReassign(menu.client, s.initials)}>
+            <Send className="h-4 w-4 shrink-0 text-brand-500" /> {s.firstName || s.initials}
+          </button>
+        ))}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -720,6 +882,55 @@ function ConsoleHeader({ stats }: { stats: ConsoleData["stats"] }) {
         />
       </div>
     </header>
+  );
+}
+
+/**
+ * Bandeau « rappels dus maintenant » — surface les Rappel PLANIFIE dont l'heure
+ * est passée, indépendamment du calendrier Outlook. Clic sur le nom = sélectionne
+ * le client dans la file ; « Fait » = clôt le rappel.
+ */
+function DueRappelsBanner({
+  items, onOpen, onDone,
+}: {
+  items: DueRappel[];
+  onOpen: (clientId: string) => void;
+  onDone: (rappelId: string) => void;
+}) {
+  return (
+    <div className="shrink-0 rounded-lg bg-brand-50 dark:bg-brand-950/30 border border-brand-300/60 dark:border-brand-500/40 px-3 py-2.5">
+      <div className="flex items-center gap-2 mb-1.5">
+        <BellRing className="h-4 w-4 text-brand-600 dark:text-brand-400 shrink-0" />
+        <p className="text-[12.5px] font-semibold text-brand-900 dark:text-brand-200">
+          {items.length} rappel{items.length > 1 ? "s" : ""} dû{items.length > 1 ? "s" : ""} maintenant
+        </p>
+      </div>
+      <ul className="space-y-1">
+        {items.slice(0, 6).map((r) => (
+          <li key={r.id} className="flex items-center gap-2 text-[12px]">
+            <button
+              type="button"
+              onClick={() => onOpen(r.clientId)}
+              className="font-medium text-foreground hover:text-brand-600 truncate max-w-[45%] text-left"
+              title="Sélectionner ce client"
+            >
+              {r.clientNom}
+            </button>
+            <span className="text-muted-foreground tnum shrink-0">
+              {new Date(r.dateRappel).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+            </span>
+            {r.note && <span className="text-muted-foreground/80 italic truncate flex-1 min-w-0">— {r.note}</span>}
+            <button
+              type="button"
+              onClick={() => onDone(r.id)}
+              className="ml-auto shrink-0 inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 border border-emerald-400/40"
+            >
+              <CheckCircle2 className="h-3 w-3" /> Fait
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -802,8 +1013,14 @@ const QueueRow = React.memo(function QueueRow({
   active,
   done,
   onSelect,
-}: { client: Client; active: boolean; done?: boolean; onSelect: (id: string) => void }) {
-  const window = client.insights ? hourWindowLabel(client.insights) : null;
+  onContext,
+}: { client: Client; active: boolean; done?: boolean; onSelect: (id: string) => void; onContext?: (e: React.MouseEvent, client: Client) => void }) {
+  // Créneau affiché : décroché perso (hourWindowLabel privilégie bestPickup),
+  // sinon repli sur l'heure typique du type (cold-start).
+  let window = client.insights ? hourWindowLabel(client.insights) : null;
+  if ((!window || window === "—") && client.fallbackHour != null) {
+    window = `~${client.fallbackHour}h`;
+  }
   // Direct line first if available, fallback to standard
   const phone = client.tel2 || client.tel1;
   const isDirect = !!client.tel2;
@@ -813,6 +1030,8 @@ const QueueRow = React.memo(function QueueRow({
     <li>
       <button
         onClick={() => onSelect(client.id)}
+        onContextMenu={onContext ? (e) => onContext(e, client) : undefined}
+        title={onContext ? "Clic droit : inactiver ou réassigner" : undefined}
         className={`w-full text-left px-3 py-1.5 border-l-2 transition-colors duration-150 group
           ${active
             ? "bg-brand-50/60 dark:bg-brand-950/30 border-l-brand-500"
@@ -859,6 +1078,15 @@ const QueueRow = React.memo(function QueueRow({
               title={`${client.openIncidents} incident(s) ouvert(s)`}
             >
               <AlertTriangle className="h-2.5 w-2.5" /> {client.openIncidents}
+            </span>
+          )}
+          {/* Tenté aujourd'hui sans décroché → à re-tenter plus tard (autre créneau). */}
+          {!done && client.retryAfterNrp && (
+            <span
+              className="shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold tracking-wider px-1.5 py-px rounded bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
+              title="Tenté aujourd'hui sans réponse — à retenter plus tard"
+            >
+              <Clock className="h-2.5 w-2.5" /> RETENTER
             </span>
           )}
           {/* Pastille CYCLE DE VIE — RELATIVE à la cadence du client (lib/lifecycle).
@@ -1006,7 +1234,7 @@ function ActiveClient({
   // NB. `stock` a été retiré : la consultation de stock vit sur l'Écran 2.
   const renderers: Record<SectionId, () => React.ReactNode> = {
     insights: () =>
-      client.insights && (client.insights.bestHour || client.insights.bestDayOfWeek || client.insights.medianIntervalDays) ? (
+      client.insights && (client.insights.bestPickup || client.insights.answerRate !== null || client.insights.bestHour || client.insights.bestDayOfWeek || client.insights.medianIntervalDays) ? (
         <InsightsBlock insights={client.insights} {...collapseProps("insights")} />
       ) : null,
 
@@ -1704,9 +1932,25 @@ function InsightsBlock({
 
       {!collapsed && (
       <div className="grid grid-cols-2 gap-x-5 gap-y-3 text-[12px]">
+        {insights.bestPickup && (
+          <Metric
+            label="Décroche le plus"
+            value={pickupSlotLabel(insights.bestPickup)}
+            hint={`${insights.bestPickup.rate}% de décroché · ${insights.bestPickup.attempts} tent.`}
+            info="Créneau où ce client RÉPOND le plus au téléphone (décrochés ÷ tentatives). C'est le meilleur moment pour le joindre — indépendant de l'heure où l'agent saisit."
+          />
+        )}
+        {insights.answerRate !== null && !insights.bestPickup && (
+          <Metric
+            label="Taux de décroché"
+            value={`${insights.answerRate}%`}
+            hint={`${insights.connectedCount}/${insights.attemptsCount} tentatives`}
+            info="Part des appels où quelqu'un a décroché. Un créneau précis apparaîtra dès qu'assez de tentatives seront loggées."
+          />
+        )}
         {insights.bestHour && (
           <Metric
-            label="Meilleure heure"
+            label="Commande le plus"
             value={insights.hourWindow
               ? `${insights.hourWindow.start}h – ${insights.hourWindow.end}h`
               : `${insights.bestHour.hour}h`}
@@ -1726,8 +1970,12 @@ function InsightsBlock({
           <Metric
             label="Fréquence"
             value={`~${insights.medianIntervalDays} j`}
-            hint="entre commandes (médiane)"
-            info="Intervalle médian entre deux commandes successives. La médiane est plus robuste aux écarts ponctuels que la moyenne."
+            hint={
+              insights.cadenceStatus === "overdue" ? "⚠️ en retard sur sa cadence"
+              : insights.cadenceStatus === "due" ? "à commander bientôt"
+              : "entre commandes (médiane)"
+            }
+            info="Intervalle médian entre deux commandes successives. La médiane est plus robuste aux écarts ponctuels que la moyenne. « En retard » = dernière commande au-delà de 1,5× cet intervalle."
           />
         )}
         {insights.conversionRate !== null && (
@@ -1838,6 +2086,34 @@ function Block({
   );
 }
 
+/** Étoile « favori » d'un numéro — bouton isolé (clic ≠ appel du lien tel:). */
+function FavStar({
+  active, onToggle, onYellow = false, className = "",
+}: {
+  active: boolean;
+  onToggle: () => void;
+  onYellow?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(); }}
+      aria-pressed={active}
+      title={active ? "Retirer des favoris" : "Définir comme numéro favori (affiché en jaune)"}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${
+        onYellow
+          ? "text-primary-foreground/75 hover:text-primary-foreground hover:bg-black/10"
+          : active
+            ? "text-brand-500"
+            : "text-muted-foreground/45 hover:text-brand-500 hover:bg-secondary"
+      } ${className}`}
+    >
+      <Star className={`h-4 w-4 ${active ? "fill-current" : ""}`} />
+    </button>
+  );
+}
+
 function ActionPanel({
   client, onDemain, onOutcome, onRappel, onBL, onSkip, actionLoading,
   callNote, setCallNote, keymap,
@@ -1853,6 +2129,18 @@ function ActionPanel({
   setCallNote: (v: string) => void;
   keymap: Record<ShortcutAction, string>;
 }) {
+  // Numéro favori (mis en avant en jaune), persisté par client sur ce poste.
+  const clientId = client?.id ?? null;
+  const [favPhone, setFavPhone] = useState<PhoneKey | null>(null);
+  useEffect(() => { setFavPhone(loadFavPhone(clientId)); }, [clientId]);
+  const toggleFav = useCallback((k: PhoneKey) => {
+    setFavPhone((cur) => {
+      const next = cur === k ? null : k;
+      saveFavPhone(clientId, next);
+      return next;
+    });
+  }, [clientId]);
+
   if (!client) {
     return (
       <div className="p-5 text-center py-10 text-[12.5px] text-muted-foreground">
@@ -1861,11 +2149,14 @@ function ActionPanel({
     );
   }
 
-  const tels = [
-    { label: "Standard", value: client.tel1 },
-    { label: "Direct 1", value: client.tel2 },
-    { label: "Direct 2", value: client.tel3 },
-  ].filter((t) => t.value);
+  const allTels = [
+    { fav: "tel1" as PhoneKey, label: "Standard", value: client.tel1 },
+    { fav: "tel2" as PhoneKey, label: "Direct 1", value: client.tel2 },
+    { fav: "tel3" as PhoneKey, label: "Direct 2", value: client.tel3 },
+  ].filter((t): t is { fav: PhoneKey; label: string; value: string } => !!t.value);
+  // Le favori (s'il existe encore) passe en gros/jaune ; sinon le premier dispo.
+  const primaryTel = allTels.find((t) => t.fav === favPhone) ?? allTels[0];
+  const secondaryTels = allTels.filter((t) => t !== primaryTel);
 
   return (
     <div className="flex flex-col h-full animate-fade-in min-h-0">
@@ -1874,32 +2165,43 @@ function ActionPanel({
         {/* ── Téléphones — n°1 = CTA d'appel géant, les autres en compact ── */}
         <section>
           <p className="kicker mb-3">Appeler</p>
-          {tels.length === 0 ? (
+          {!primaryTel ? (
             <p className="text-[12px] italic text-muted-foreground py-2">Aucun numéro renseigné.</p>
           ) : (
             <div className="space-y-2">
-              {/* Numéro principal — gros, le plus accessible (loi de Fitts) */}
-              <a
-                href={`tel:${standardizePhone(tels[0].value)}`}
-                className="group flex items-center gap-3 px-4 py-4 rounded-2xl bg-primary text-primary-foreground shadow-[0_2px_14px_rgba(250,204,21,0.3)] hover:brightness-105 hover:shadow-[0_4px_22px_rgba(250,204,21,0.45)] transition-all active:scale-[0.99]"
-              >
-                <Phone className="h-6 w-6 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">{tels[0].label}</p>
-                  <p className="text-[22px] font-mono font-bold tnum leading-tight truncate">{formatPhoneDisplay(tels[0].value)}</p>
-                </div>
-              </a>
-              {/* Numéros secondaires — compacts */}
-              {tels.slice(1).map((t) => (
+              {/* Numéro principal (favori s'il existe) — gros, jaune (loi de Fitts).
+                  L'étoile est un bouton SÉPARÉ du lien tel: (clic ≠ appel). */}
+              <div className="relative">
                 <a
-                  key={t.label}
-                  href={`tel:${standardizePhone(t.value)}`}
-                  className="group flex items-center gap-2.5 px-3 py-2 rounded-lg bg-secondary/40 hover:bg-secondary border border-border transition-all"
+                  href={`tel:${standardizePhone(primaryTel.value)}`}
+                  className="group flex items-center gap-3 px-4 py-4 pr-12 rounded-2xl bg-primary text-primary-foreground shadow-[0_2px_14px_rgba(250,204,21,0.3)] hover:brightness-105 hover:shadow-[0_4px_22px_rgba(250,204,21,0.45)] transition-all active:scale-[0.99]"
                 >
-                  <Phone className="h-3.5 w-3.5 text-brand-500 dark:text-brand-400 shrink-0" />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground w-16 shrink-0">{t.label}</span>
-                  <span className="text-[13px] font-mono font-semibold text-foreground tnum truncate">{formatPhoneDisplay(t.value)}</span>
+                  <Phone className="h-6 w-6 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">{primaryTel.label}</p>
+                    <p className="text-[22px] font-mono font-bold tnum leading-tight truncate">{formatPhoneDisplay(primaryTel.value)}</p>
+                  </div>
                 </a>
+                <FavStar
+                  active={favPhone === primaryTel.fav}
+                  onToggle={() => toggleFav(primaryTel.fav)}
+                  onYellow
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2"
+                />
+              </div>
+              {/* Numéros secondaires — compacts, chacun étoilable pour passer en jaune */}
+              {secondaryTels.map((t) => (
+                <div key={t.fav} className="flex items-center gap-1.5">
+                  <a
+                    href={`tel:${standardizePhone(t.value)}`}
+                    className="group flex flex-1 min-w-0 items-center gap-2.5 px-3 py-2 rounded-lg bg-secondary/40 hover:bg-secondary border border-border transition-all"
+                  >
+                    <Phone className="h-3.5 w-3.5 text-brand-500 dark:text-brand-400 shrink-0" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground w-16 shrink-0">{t.label}</span>
+                    <span className="text-[13px] font-mono font-semibold text-foreground tnum truncate">{formatPhoneDisplay(t.value)}</span>
+                  </a>
+                  <FavStar active={favPhone === t.fav} onToggle={() => toggleFav(t.fav)} />
+                </div>
               ))}
             </div>
           )}

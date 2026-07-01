@@ -114,11 +114,12 @@ export async function GET(req: NextRequest) {
       CardCode: string; CardName?: string; NumAtCard?: string;
       DocTotal?: number; VatSum?: number; Comments?: string;
       DocumentStatus?: string;        // bost_Open | bost_Close
+      Cancelled?: string;             // tYES | tNO — commande annulée
       DocumentLines?: ListedLine[];
     };
     const docs = await sap.get<{ value: SapPoListed[] }>(
       `PurchaseOrders?$top=${last}&$orderby=DocEntry desc`
-      + `&$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,NumAtCard,DocTotal,VatSum,Comments,DocumentStatus,DocumentLines`,
+      + `&$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,NumAtCard,DocTotal,VatSum,Comments,DocumentStatus,Cancelled,DocumentLines`,
     );
 
     // Enrichissement local : désignation complète (Fruit/Pays/Marque/Condt) +
@@ -146,6 +147,7 @@ export async function GET(req: NextRequest) {
         const totalTVA = d.VatSum ?? 0;
         const sumLines = lines.reduce((s, l) => s + (l.LineTotal ?? 0), 0);
         const totalHT = sumLines > 0 ? sumLines : Math.max(0, totalTTC - totalTVA);
+        const cancelled = d.Cancelled === "tYES";
         return {
           docEntry: d.DocEntry,
           docNum: d.DocNum,
@@ -154,7 +156,10 @@ export async function GET(req: NextRequest) {
           cardCode: d.CardCode,
           cardName: d.CardName,
           numAtCard: d.NumAtCard ?? "",
+          // Une commande annulée est clôturée dans SAP (bost_Close) mais n'a jamais
+          // été réceptionnée : on ne la considère pas « ouverte » (pas d'actions).
           open: d.DocumentStatus !== "bost_Close",   // Ouverte tant que non clôturée
+          cancelled,                                 // Annulée (≠ réceptionnée)
           total: totalTTC,
           totalTTC,
           totalHT,

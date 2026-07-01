@@ -118,7 +118,7 @@ export async function GET() {
       appels: {
         where: { heureAppel: { gte: last180 } },
         orderBy: { heureAppel: "desc" },
-        select: { id: true, type: true, note: true, heureAppel: true, scheduledFor: true },
+        select: { id: true, type: true, outcome: true, note: true, heureAppel: true, scheduledFor: true },
       },
     },
     orderBy: { nom: "asc" },
@@ -139,16 +139,23 @@ export async function GET() {
       // Stats cohérentes avec la file scopée : on ne compte que MES clients actifs.
       clientId: { in: scopeIdList },
     },
-    select: { id: true, clientId: true, type: true, heureAppel: true },
+    select: { id: true, clientId: true, type: true, outcome: true, heureAppel: true },
     orderBy: { heureAppel: "desc" },
   });
-  const calledTodayMap = new Map<string, { type: string; heureAppel: Date }[]>();
+  // Issue = contact établi ? (COMMANDE/DEMAIN/REFUS/RAPPELE/LITIGE) vs
+  // « personne au bout du fil » (NRP/REPONDEUR). Un client dont TOUTES les
+  // tentatives du jour sont sans décroché doit être RE-PROPOSÉ (retry), pas
+  // sorti de la file jusqu'à son prochain jour d'appel.
+  const NON_CONNECT = new Set(["NRP", "REPONDEUR"]);
+  const isConnectLog = (l: { type: string; outcome: string | null }) =>
+    !NON_CONNECT.has((l.outcome && l.outcome.trim()) || l.type);
+  const calledTodayMap = new Map<string, { type: string; outcome: string | null; heureAppel: Date }[]>();
   // Per-client "final outcome" of the day
   type Outcome = { hadCmd: boolean; hadDem: boolean };
   const outcomeByClient = new Map<string, Outcome>();
   for (const l of todayLogs) {
     const arr = calledTodayMap.get(l.clientId) ?? [];
-    arr.push({ type: l.type, heureAppel: l.heureAppel });
+    arr.push({ type: l.type, outcome: l.outcome, heureAppel: l.heureAppel });
     calledTodayMap.set(l.clientId, arr);
 
     const o = outcomeByClient.get(l.clientId) ?? { hadCmd: false, hadDem: false };
@@ -161,18 +168,32 @@ export async function GET() {
   // We also attach behavioral insights (computed in-memory from the appel
   // history we just fetched) and trim the appels list to the most recent 5
   // for the UI — full history was needed only for insights.
+  type Insights = ReturnType<typeof computeInsights>;
   type Enriched = (typeof clients)[number] & {
-    insights: ReturnType<typeof computeInsights>;
+    insights: Insights;
     claimedFrom: string | null;
     ownerAbsent: boolean;
     openIncidents: number;
+    // Cycle de vie + palier de valeur + score de priorité (audit 07 #43/#44/#48)
     lifecycle: ReturnType<typeof computePriority>["lifecycle"];
     tier: ReturnType<typeof computePriority>["tier"];
     ca12m: number;
     priority: { score: number; reason: string };
+    // Repli « cold-start » : heure de décroché typique des clients du même TYPE,
+    // utilisée quand le client n'a pas assez d'historique perso (recommendedHour null).
+    fallbackHour: number | null;
+    // Tenté aujourd'hui sans décroché (NRP/répondeur) → à re-tenter plus tard.
+    retryAfterNrp: boolean;
   };
-  const queue: Enriched[] = [];
-  const done: Enriched[] = [];
+
+  // ── Passe 1 : calcule les insights + garde les candidats du jour ──
+  const candidates: {
+    c: (typeof clients)[number];
+    insights: Insights;
+    calls: { type: string; outcome: string | null; heureAppel: Date }[];
+    futureSnooze: boolean;
+    preCommandeSnooze: boolean;
+  }[] = [];
   for (const c of clients) {
     if (!c.joursAppel) continue;
     const days = c.joursAppel.split(",").map(Number);
@@ -190,12 +211,32 @@ export async function GET() {
     const preCommandeSnooze = c.appels.some(
       (a) => a.type === "COMMANDE" && a.scheduledFor && new Date(a.scheduledFor) >= todayEnd,
     );
+    candidates.push({ c, insights: computeInsights(c.appels), calls, futureSnooze, preCommandeSnooze });
+  }
 
-    const insights = computeInsights(c.appels);
+  // ── Repli par type : heure de décroché typique (médiane des recommendedHour
+  //    des clients bien renseignés). Sert de créneau par défaut aux clients
+  //    neufs / peu actifs pour qu'ils ne finissent pas en fin de file. ──
+  const hoursByType = new Map<string, number[]>();
+  for (const { c, insights } of candidates) {
+    const t = c.type ?? "_";
+    const h = insights.bestPickup?.hour ?? (insights.confidence !== "low" ? insights.recommendedHour : null);
+    if (h != null) { const arr = hoursByType.get(t) ?? []; arr.push(h); hoursByType.set(t, arr); }
+  }
+  const fallbackByType = new Map<string, number>();
+  hoursByType.forEach((arr, t) => {
+    const s = [...arr].sort((a, b) => a - b);
+    fallbackByType.set(t, s[Math.floor(s.length / 2)]);
+  });
+
+  // ── Passe 2 : construit la file / les faits ──
+  const queue: Enriched[] = [];
+  const done: Enriched[] = [];
+  for (const { c, insights, calls, futureSnooze, preCommandeSnooze } of candidates) {
+    const claimedFrom = claimedMap.get(c.id) ?? null;
     const openIncidents = openIncByClient.get(c.id) ?? 0;
-    // ── Priorité « valeur × urgence » (audit 07 #43/#44/#48) ──
-    // Calculée SERVEUR à partir des signaux déjà en mémoire : cycle de vie
-    // relatif à la cadence + palier de valeur (CA 12 mois) + incidents ouverts.
+    // ── Priorité « valeur × urgence » (audit 07 #43/#44/#48) : cycle de vie
+    //    relatif à la cadence + palier de valeur (CA 12 mois) + incidents. ──
     const ca12m = caByCode.get(c.code) ?? 0;
     const priority = computePriority({
       lastOrderDays: insights.lastOrderDays,
@@ -204,7 +245,14 @@ export async function GET() {
       ca12m,
       openIncidents,
     });
-    const claimedFrom = claimedMap.get(c.id) ?? null;
+    const fallbackHour = insights.recommendedHour == null
+      ? (fallbackByType.get(c.type ?? "_") ?? null)
+      : null;
+    // Contact établi aujourd'hui ? Si OUI → traité (done). Si NON mais des
+    // tentatives existent (que des NRP/répondeur) → on le garde dans la file
+    // pour re-tenter plus tard dans la journée (retryAfterNrp).
+    const hadConnect = calls.some(isConnectLog);
+    const retryAfterNrp = !hadConnect && calls.length > 0;
     const enriched = {
       ...c,
       appels: c.appels.slice(0, 5),
@@ -216,21 +264,18 @@ export async function GET() {
       priority: { score: priority.score, reason: priority.reason },
       // null = not claimed; string = name of the commercial I claimed this from
       claimedFrom,
-      // « à couvrir » = VRAIE couverture d'un collègue absent.
-      // La file est scopée par VENDEUR (mon trigramme), pas par l'account
-      // manager `commercial`. Le simple fait que l'account manager d'un de mes
-      // clients habituels soit absent n'est donc PAS une couverture et ne doit
-      // pas afficher ce badge. On ne le déclenche que pour un client REPRIS
-      // aujourd'hui (TempAssignment → claimedFrom) dont le commercial d'origine
-      // est effectivement absent ce jour.
+      // « à couvrir » = VRAIE couverture d'un collègue absent (client REPRIS
+      // aujourd'hui dont le commercial d'origine est effectivement absent).
       ownerAbsent: !!(claimedFrom && absentNames.has(claimedFrom)),
       openIncidents,
+      fallbackHour,
+      retryAfterNrp,
     } as Enriched;
 
-    if (calls.length > 0) done.push(enriched);
+    if (hadConnect) done.push(enriched);
     else if (futureSnooze) continue;
     else if (preCommandeSnooze) continue;
-    else queue.push(enriched);
+    else queue.push(enriched); // inclut les « retry NRP » du jour
   }
 
   // ── Tri SERVEUR de la file par PRIORITÉ « valeur × urgence » (audit 07 #43) ──
@@ -241,8 +286,9 @@ export async function GET() {
   queue.sort((a, b) => {
     const ds = b.priority.score - a.priority.score;
     if (Math.abs(ds) > 0.01) return ds;
-    const ha = a.insights?.medianHour ?? a.insights?.bestHour?.hour ?? 99;
-    const hb = b.insights?.medianHour ?? b.insights?.bestHour?.hour ?? 99;
+    // Départage : heure de décroché recommandée (cf. main), repli médiane.
+    const ha = a.insights?.recommendedHour ?? a.insights?.medianHour ?? a.fallbackHour ?? 99;
+    const hb = b.insights?.recommendedHour ?? b.insights?.medianHour ?? b.fallbackHour ?? 99;
     if (ha !== hb) return ha - hb;
     return a.nom.localeCompare(b.nom, "fr");
   });
@@ -261,9 +307,29 @@ export async function GET() {
   // collègue absent (cf. ownerAbsent ci-dessus, qui implique claimedFrom).
   const toCover = queue.filter((c) => (c as { ownerAbsent?: boolean }).ownerAbsent).length;
 
+  // ── Rappels DUS maintenant (bandeau in-app) ──
+  // Mes rappels planifiés dont l'heure est passée : à traiter tout de suite.
+  // Routés par auteur (createdBy = email de session) — cohérent avec le push.
+  const myEmail = session.user?.email ?? null;
+  const dueRappels = myEmail
+    ? (await prisma.rappel.findMany({
+        where: { statut: "PLANIFIE", createdBy: myEmail, dateRappel: { lte: now } },
+        include: { client: { select: { id: true, nom: true } } },
+        orderBy: { dateRappel: "asc" },
+        take: 50,
+      })).map((r) => ({
+        id: r.id,
+        clientId: r.clientId,
+        clientNom: r.client?.nom ?? "Client",
+        dateRappel: r.dateRappel,
+        note: r.note,
+      }))
+    : [];
+
   return NextResponse.json({
     queue,
     done,
+    dueRappels,
     stats: {
       remaining: queue.length,
       called: calledToday,

@@ -28,6 +28,7 @@ type PurchaseOrder = {
   docEntry: number; docNum: number; docDate: string; dueDate: string | null;
   cardCode: string; cardName?: string; numAtCard: string;
   open: boolean;
+  cancelled: boolean;
   total: number; totalTTC: number; totalHT: number; totalTVA: number;
   comments: string; lineCount: number; lines: PoLine[];
 };
@@ -47,14 +48,16 @@ const fmtColis = (n: number | null | undefined): string => {
   return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(".", ",");
 };
 
-function StatusBadge({ open, large }: { open: boolean; large?: boolean }) {
+function StatusBadge({ open, cancelled, large }: { open: boolean; cancelled?: boolean; large?: boolean }) {
+  const tone = cancelled
+    ? "bg-rose-500/15 border border-rose-500/50 text-rose-600 dark:text-rose-400"
+    : open
+      ? "bg-amber-500/15 border border-amber-500/50 text-amber-600 dark:text-amber-400"
+      : "bg-emerald-500/15 border border-emerald-500/50 text-emerald-600 dark:text-emerald-400";
+  const label = cancelled ? "Annulée" : open ? "Ouverte" : "Clôturée";
   return (
-    <span className={`inline-flex items-center gap-1 rounded-md font-semibold ${large ? "px-2.5 h-7 text-[12px]" : "px-2 h-6 text-[11px]"} ${
-      open
-        ? "bg-amber-500/15 border border-amber-500/50 text-amber-600 dark:text-amber-400"
-        : "bg-emerald-500/15 border border-emerald-500/50 text-emerald-600 dark:text-emerald-400"
-    }`}>
-      {open ? "Ouverte" : "Clôturée"}
+    <span className={`inline-flex items-center gap-1 rounded-md font-semibold ${large ? "px-2.5 h-7 text-[12px]" : "px-2 h-6 text-[11px]"} ${tone}`}>
+      {label}
     </span>
   );
 }
@@ -230,7 +233,7 @@ export function PurchaseOrderHistory() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-mono font-semibold text-[16px] text-foreground">#{d.docNum}</span>
-                    {isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} />}
+                    {isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}
                   </div>
                   <div className="text-[14px] text-foreground/90 mt-0.5 truncate" title={d.cardName}>
                     {d.cardName || d.cardCode}
@@ -280,7 +283,7 @@ export function PurchaseOrderHistory() {
                     </td>
                     <td className="px-3 py-2 tnum text-muted-foreground">{fmtDate(d.docDate)}</td>
                     <td className="px-3 py-2 tnum text-muted-foreground">{fmtDate(d.dueDate)}</td>
-                    <td className="px-3 py-2">{isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} />}</td>
+                    <td className="px-3 py-2">{isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}</td>
                     <td className="px-3 py-2 text-right tnum font-semibold">{eur(d.totalHT ?? 0)}</td>
                     <td className="px-2 py-2 text-right"><ChevronRight className="h-4 w-4 text-muted-foreground/50 inline" /></td>
                   </tr>
@@ -580,7 +583,7 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
           <span className="font-mono font-semibold">{po.cardCode}</span>
           {po.cardName && <span className="text-muted-foreground">· {po.cardName}</span>}
         </span>
-        <StatusBadge open={po.open} large />
+        <StatusBadge open={po.open} cancelled={po.cancelled} large />
         <span className="text-[14px] text-muted-foreground tnum">Commandé le {fmtDate(po.docDate)}</span>
         {po.dueDate && <span className="text-[14px] text-muted-foreground tnum">Livraison prévue {fmtDate(po.dueDate)}</span>}
         {po.numAtCard && <span className="text-[14px] text-muted-foreground">Réf. {po.numAtCard}</span>}
@@ -609,7 +612,9 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
                 <span className="text-foreground font-medium">{fmtColis(l.packageQuantity)} colis</span>
                 <span>·</span>
                 <span>PU {l.price != null ? eur(l.price) : "—"}</span>
-                {!l.open && <span className="text-emerald-600 dark:text-emerald-400">· reçue</span>}
+                {po.cancelled
+                  ? <span className="text-rose-600 dark:text-rose-400">· annulée</span>
+                  : !l.open && <span className="text-emerald-600 dark:text-emerald-400">· reçue</span>}
               </div>
             </div>
           );
@@ -649,8 +654,14 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
                   <td className="px-3 py-2.5 text-right tnum">{l.price != null ? eur(l.price) : "—"}</td>
                   <td className="px-3 py-2.5 text-right tnum font-semibold">{lineHT != null ? eur(lineHT) : "—"}</td>
                   <td className="px-3 py-2.5">
-                    <span className={l.open ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}>
-                      {l.open ? "Ouverte" : "Reçue"}
+                    <span className={
+                      po.cancelled
+                        ? "text-rose-600 dark:text-rose-400"
+                        : l.open
+                          ? "text-amber-600 dark:text-amber-400"
+                          : "text-emerald-600 dark:text-emerald-400"
+                    }>
+                      {po.cancelled ? "Annulée" : l.open ? "Ouverte" : "Reçue"}
                     </span>
                   </td>
                 </tr>

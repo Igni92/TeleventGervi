@@ -18,6 +18,8 @@ export const metadata: Metadata = {
   title: { default: "Gervi · Télévente", template: "%s · Gervi" },
   description: "Gervi — CRM de télévente du grossiste en fruits frais.",
   robots: "noindex, nofollow",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: "Gervi", statusBarStyle: "black-translucent" },
 };
 
 export const viewport: Viewport = {
