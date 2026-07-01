@@ -53,6 +53,7 @@ interface Doc {
   numAtCard: string;
   trspCode: string | null;
   trspHeure: string | null;
+  savedTournee: { trspCode: string; heure: string | null; nom?: string | null; des?: string | null; lineId?: number | null } | null;
   carrierName: string | null;
   clientType: string | null;   // GMS | CHR | EXPORT | null
   prepared: boolean;           // « faite » — coché manuellement
@@ -240,19 +241,26 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   // Changement de TOURNÉE d'une commande → pose U_TrspHeur (heure de la tournée)
   // et re-confirme le transporteur (le serveur re-résout U_Timbre). "" = aucune.
   const changeTournee = useCallback(
-    async (docEntry: number, trspCode: string, heure: string): Promise<boolean> => {
+    async (docEntry: number, trspCode: string, tournee: Tournee | null): Promise<boolean> => {
       try {
         const res = await fetch(`/api/sap/orders/${docEntry}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ trspCode, trspHeure: heure }),
+          body: JSON.stringify({
+            trspCode,
+            trspHeure: tournee?.heure ?? "",
+            // Détails mémorisés pour ce client (ré-appliqués aux prochains BL).
+            tournee: tournee ? { nom: tournee.nom, des: tournee.des, lineId: tournee.lineId } : undefined,
+          }),
         });
         const j = await res.json().catch(() => null);
         if (!res.ok || !j?.ok) {
           toast.error(j?.error ? `Échec : ${j.error}` : "Échec du changement de tournée");
           return false;
         }
-        toast.success(heure ? `Tournée mise à jour (${heure.slice(0, 5)})` : "Tournée retirée");
+        toast.success(tournee?.heure
+          ? `Tournée : ${tournee.nom || tournee.heure.slice(0, 5)} — mémorisée pour ce client`
+          : "Tournée retirée");
         load();
         return true;
       } catch {
@@ -628,7 +636,7 @@ function CarrierGroup({
   onDateChange: (docEntry: number, dueDate: string) => Promise<boolean>;
   tourneesByCode: Record<string, Tournee[]>;
   onLoadTournees: (code: string) => void;
-  onTourneeChange: (docEntry: number, trspCode: string, heure: string) => Promise<boolean>;
+  onTourneeChange: (docEntry: number, trspCode: string, tournee: Tournee | null) => Promise<boolean>;
   collapsed: boolean;
   onToggleCollapse: () => void;
   onPatchDoc: (docEntry: number, patch: Partial<Doc>) => void;
@@ -767,7 +775,7 @@ function OrderRow({
   onDateChange: (docEntry: number, dueDate: string) => Promise<boolean>;
   tournees: Tournee[] | undefined;
   onLoadTournees: (code: string) => void;
-  onTourneeChange: (docEntry: number, trspCode: string, heure: string) => Promise<boolean>;
+  onTourneeChange: (docEntry: number, trspCode: string, tournee: Tournee | null) => Promise<boolean>;
   onPatchDoc: (docEntry: number, patch: Partial<Doc>) => void;
   onReload: () => void;
   canDispatch: boolean;
@@ -782,10 +790,27 @@ function OrderRow({
     if (doc.open && doc.trspCode) onLoadTournees(doc.trspCode);
   }, [doc.open, doc.trspCode, onLoadTournees]);
 
-  async function handleTournee(heure: string) {
-    if (!doc.trspCode || heure === (doc.trspHeure ?? "")) return;
+  // Tournée pré-sélectionnée (par LineId, pour désambiguïser les heures égales) :
+  // la tournée MÉMORISÉE du client d'abord, sinon la 1re qui correspond à l'heure
+  // portée par le BL (U_TrspHeur).
+  const selectedTourneeId = useMemo(() => {
+    const list = tournees ?? [];
+    const saved = doc.savedTournee;
+    if (saved && saved.trspCode === doc.trspCode && saved.lineId != null && list.some((t) => t.lineId === saved.lineId)) {
+      return String(saved.lineId);
+    }
+    if (doc.trspHeure) {
+      const m = list.find((t) => t.heure === doc.trspHeure);
+      if (m) return String(m.lineId);
+    }
+    return "";
+  }, [tournees, doc.savedTournee, doc.trspCode, doc.trspHeure]);
+
+  async function handleTournee(lineIdStr: string) {
+    if (!doc.trspCode || lineIdStr === selectedTourneeId) return;
+    const t = (tournees ?? []).find((x) => String(x.lineId) === lineIdStr) ?? null;
     setSavingTournee(true);
-    await onTourneeChange(doc.docEntry, doc.trspCode, heure);
+    await onTourneeChange(doc.docEntry, doc.trspCode, t);
     setSavingTournee(false);
   }
 
@@ -1199,19 +1224,18 @@ function OrderRow({
             {doc.open && doc.trspCode && (
               <div className="relative">
                 <select
-                  value={doc.trspHeure ?? ""}
+                  value={selectedTourneeId}
                   disabled={savingTournee || !tournees}
                   onChange={(e) => handleTournee(e.target.value)}
                   aria-label={`Tournée de la commande ${doc.docNum}`}
-                  title={tournees ? "Choisir la tournée (fixe l'heure)" : "Chargement des tournées…"}
+                  title={tournees ? "Choisir la tournée (fixe l'heure, mémorisée pour le client)" : "Chargement des tournées…"}
                   className="h-7 max-w-[220px] rounded-md border border-border bg-card pl-2 pr-7 text-[11.5px] font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60 disabled:cursor-not-allowed appearance-none truncate cursor-pointer"
                 >
-                  <option value="">{tournees ? "Tournée…" : "Chargement…"}</option>
-                  {doc.trspHeure && !(tournees ?? []).some((t) => t.heure === doc.trspHeure) && (
-                    <option value={doc.trspHeure}>{doc.trspHeure.slice(0, 5)} (actuelle)</option>
-                  )}
+                  <option value="">
+                    {!tournees ? "Chargement…" : (selectedTourneeId === "" && doc.trspHeure ? `${doc.trspHeure.slice(0, 5)} (à confirmer)` : "Tournée…")}
+                  </option>
                   {(tournees ?? []).filter((t) => t.heure).map((t) => (
-                    <option key={t.lineId} value={t.heure as string}>
+                    <option key={t.lineId} value={String(t.lineId)}>
                       {t.nom}{t.des ? ` (${t.des})` : ""} — {(t.heure as string).slice(0, 5)}
                     </option>
                   ))}

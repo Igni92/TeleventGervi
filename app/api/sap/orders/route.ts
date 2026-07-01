@@ -5,6 +5,7 @@ import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { getTrclDefaultCarrier } from "@/lib/clientCarriers";
 import { getTransporteurTimbre } from "@/lib/transporteurs";
+import { getClientTournee } from "@/lib/clientTournee";
 import { sap } from "@/lib/sapb1";
 import { mirrorCreatedOrder } from "@/lib/sapMirror";
 import { decrementLocalStock } from "@/lib/stockSync";
@@ -406,6 +407,7 @@ export async function POST(req: NextRequest) {
   // (U_TrspDef='O'). On NE prend JAMAIS « le plus utilisé » : si SERG_TRCL n'est
   // pas lisible, on ne pose rien → défaut SAP, ajustable dans « Détail livraison ».
   let trspCode: string | null = null;
+  let trspHeure: string | null = null;
   if (body.carrierId) {
     const rows = await prisma.$queryRawUnsafe<{ sapValue: string | null; active: boolean }[]>(
       `SELECT "sapValue", "active" FROM "Carrier" WHERE "id" = $1 LIMIT 1`,
@@ -415,22 +417,39 @@ export async function POST(req: NextRequest) {
   } else if (body.carrierCode?.trim()) {
     trspCode = body.carrierCode.trim();
   } else {
+    // 1) Tournée MÉMORISÉE du client (choisie une fois dans « Détail livraison »)
+    //    → transporteur + heure de tournée, ré-appliqués automatiquement.
     try {
-      const def = await getTrclDefaultCarrier(cardCode);
-      if (def) {
-        trspCode = def.sapValue;
-        console.log(`[Order] Transporteur par défaut SERG_TRCL ${cardCode} → ${def.sapValue}${def.tour ? ` (tournée ${def.tour})` : ""}`);
-      } else {
-        console.log(`[Order] Pas de défaut SERG_TRCL pour ${cardCode} — U_TrspCode non posé (défaut SAP / à régler dans Détail livraison)`);
+      const mem = await getClientTournee(cardCode);
+      if (mem) {
+        trspCode = mem.trspCode;
+        trspHeure = mem.heure;
+        console.log(`[Order] Tournée mémorisée ${cardCode} → ${mem.trspCode}${mem.nom ? ` (${mem.nom})` : ""}${mem.heure ? ` @${mem.heure}` : ""}`);
       }
     } catch (e) {
-      console.warn(`[Order] Résolution transporteur par défaut (SERG_TRCL) échouée (non-bloquant):`, (e as Error).message);
+      console.warn(`[Order] Lecture tournée mémorisée ${cardCode} échouée (non-bloquant):`, (e as Error).message);
+    }
+    // 2) Sinon, défaut SERG_TRCL (indisponible aujourd'hui → null : on ne pose rien).
+    if (!trspCode) {
+      try {
+        const def = await getTrclDefaultCarrier(cardCode);
+        if (def) {
+          trspCode = def.sapValue;
+          console.log(`[Order] Transporteur par défaut SERG_TRCL ${cardCode} → ${def.sapValue}${def.tour ? ` (tournée ${def.tour})` : ""}`);
+        } else {
+          console.log(`[Order] Pas de défaut (ni mémoire ni SERG_TRCL) pour ${cardCode} — à régler dans Détail livraison`);
+        }
+      } catch (e) {
+        console.warn(`[Order] Résolution transporteur par défaut (SERG_TRCL) échouée (non-bloquant):`, (e as Error).message);
+      }
     }
   }
   if (trspCode) {
     payload.U_TrspCode = trspCode;
-    // Timbre du transporteur (en-tête SERGTRS) → ORDR.U_Timbre. L'heure de tournée
-    // (U_TrspHeur) reste fixée dans « Détail livraison » (choix de la tournée).
+    // Heure de la tournée mémorisée → ORDR.U_TrspHeur (le BL remonte dans l'état
+    // « récap transporteur »). Absente si le client n'a pas encore de tournée mémo.
+    if (trspHeure) payload.U_TrspHeur = trspHeure;
+    // Timbre du transporteur (en-tête SERGTRS) → ORDR.U_Timbre.
     try {
       const timbre = await getTransporteurTimbre(trspCode);
       if (timbre != null) payload.U_Timbre = timbre;
