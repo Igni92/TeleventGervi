@@ -1405,7 +1405,7 @@ function OrderRow({
           {/* Changement de transporteur / tournée / réf / date — dispatch (desktop
               uniquement + réservé aux commerciaux/admins ; masqué aux préparateurs
               qui n'ont qu'à préparer, pas à dispatcher). */}
-          <div className={`mt-1.5 ${canDispatch ? "hidden md:flex" : "hidden"} flex-wrap items-center gap-1.5`}>
+          <div className={`mt-1.5 ${canDispatch ? "hidden lg:flex" : "hidden"} flex-wrap items-center gap-1.5`}>
             <Truck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <div className="relative">
               <select
@@ -1515,7 +1515,7 @@ function OrderRow({
               onClick={startModif}
               disabled={modifBusy}
               title={`Modifier le BL #${doc.docNum} (sur l'Écran 2) — quantités + ajout de lignes`}
-              className="hidden md:inline-flex items-center gap-1 h-9 px-2.5 rounded-lg border border-amber-300/70 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-900/20 text-[12px] font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/35 active:scale-95 transition-all disabled:opacity-60"
+              className="hidden lg:inline-flex items-center gap-1 h-9 px-2.5 rounded-lg border border-amber-300/70 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-900/20 text-[12px] font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/35 active:scale-95 transition-all disabled:opacity-60"
             >
               {modifBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />}
               <span className="hidden sm:inline">Modifier</span>
@@ -1527,7 +1527,7 @@ function OrderRow({
             onClick={() => setOpen((o) => !o)}
             aria-label={open ? "Replier le détail" : "Voir le détail"}
             aria-expanded={open}
-            className="hidden md:inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
+            className="hidden lg:inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
           >
             <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
           </button>
@@ -1537,7 +1537,7 @@ function OrderRow({
       {/* Contenu de la commande — TOUJOURS visible sur mobile (préparation),
           repliable sur desktop via le chevron. Chaque ligne porte ses tags
           (marque · conditionnement · origine). */}
-      <div className={`px-4 sm:px-5 pb-3.5 pt-0.5 block ${open ? "md:block" : "md:hidden"}`}>
+      <div className={`px-4 sm:px-5 pb-3.5 pt-0.5 block ${open ? "lg:block" : "lg:hidden"}`}>
         <div className="rounded-xl border border-border/70 bg-secondary/20 overflow-hidden">
           {doc.comments && (
             <p className="px-3 py-2 text-[11.5px] text-muted-foreground border-b border-border/60 italic">
