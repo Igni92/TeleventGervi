@@ -8,8 +8,9 @@ import {
   ChevronRight,
   Loader2, Calendar, Sparkles, ArrowUpDown,
   StickyNote, History, User, TrendingUp, TrendingDown, Minus,
-  MessageSquare, AlertTriangle, Settings, Mail, ArrowUpRight, Star,
+  MessageSquare, AlertTriangle, Settings, Mail, ArrowUpRight, Star, Ban, Send,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import type { ClientInsights } from "@/lib/insights";
 import { dayOfWeekLabel, summaryRecommendation, hourWindowLabel } from "@/lib/insights";
@@ -20,7 +21,7 @@ import {
 } from "@/lib/useConsoleShortcuts";
 import { HabitudesBanner } from "@/components/console/HabitudesBanner";
 import { broadcastActiveClient } from "@/lib/consoleSync";
-import { displayNameFromSlp } from "@/lib/salespeople";
+import { displayNameFromSlp, SALESPEOPLE } from "@/lib/salespeople";
 import { loadCallNote, saveCallNote, clearCallNote } from "@/lib/callNoteStorage";
 import { loadFavPhone, saveFavPhone, type PhoneKey } from "@/lib/favPhoneStorage";
 import { MonitorSmartphone } from "lucide-react";
@@ -95,10 +96,12 @@ const JOURS_FR: Record<number, string> = { 0:"Dim",1:"Lun",2:"Mar",3:"Mer",4:"Je
 ───────────────────────────────────────────────────────────── */
 type SortMode = "name" | "hour" | "type" | "lastOrder";
 
-export function CallConsole() {
+export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: boolean; meInitials?: string | null }) {
   const [data, setData] = useState<ConsoleData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Menu contextuel (clic droit) sur une ligne de la file — actions portefeuille.
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; client: Client } | null>(null);
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortMode>("hour");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -136,6 +139,38 @@ export function CallConsole() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  /* ── Actions portefeuille (menu clic droit) — admin uniquement ──────────── */
+  const openCtxMenu = useCallback((e: React.MouseEvent, client: Client) => {
+    if (!isAdmin) return;              // non-admin → menu natif du navigateur
+    e.preventDefault();
+    setCtxMenu({ x: e.clientX, y: e.clientY, client });
+  }, [isAdmin]);
+
+  const assignClient = useCallback(async (client: Client, body: Record<string, unknown>, okMsg: string) => {
+    setCtxMenu(null);
+    try {
+      const res = await fetch(`/api/clients/${client.id}/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Échec");
+      toast.success(okMsg);
+      fetchData();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Échec de l'opération");
+    }
+  }, [fetchData]);
+
+  const deactivateClient = useCallback((client: Client) => {
+    if (!window.confirm(`Passer « ${client.nom} » en inactif ? Il quittera la file d'appel.`)) { setCtxMenu(null); return; }
+    assignClient(client, { activeTelevente: false }, `${client.nom} — passé en inactif`);
+  }, [assignClient]);
+
+  const reassignClient = useCallback((client: Client, initials: string) => {
+    assignClient(client, { vendeur: initials, commercial: initials }, `${client.nom} — envoyé à ${displayNameFromSlp(initials) ?? initials}`);
+  }, [assignClient]);
 
   const allClients = useMemo(
     () => [...(data?.queue ?? []), ...(data?.done ?? [])],
@@ -528,6 +563,7 @@ export function CallConsole() {
                     client={c}
                     active={c.id === activeId}
                     onSelect={setActiveId}
+                    onContext={isAdmin ? openCtxMenu : undefined}
                   />
                 ))}
               </ol>
@@ -550,6 +586,7 @@ export function CallConsole() {
                       active={c.id === activeId}
                       done
                       onSelect={setActiveId}
+                      onContext={isAdmin ? openCtxMenu : undefined}
                     />
                   ))}
                 </ol>
@@ -646,7 +683,74 @@ export function CallConsole() {
           }}
         />
       )}
+
+      {/* ── Menu contextuel (clic droit sur une ligne de file) — admin ──── */}
+      {ctxMenu && (
+        <ClientContextMenu
+          menu={ctxMenu}
+          meInitials={meInitials}
+          onClose={() => setCtxMenu(null)}
+          onDeactivate={deactivateClient}
+          onReassign={reassignClient}
+        />
+      )}
     </div>
+  );
+}
+
+/** Menu contextuel d'une ligne de file (clic droit) : inactiver / réassigner. */
+function ClientContextMenu({
+  menu, meInitials, onClose, onDeactivate, onReassign,
+}: {
+  menu: { x: number; y: number; client: Client };
+  meInitials: string | null;
+  onClose: () => void;
+  onDeactivate: (client: Client) => void;
+  onReassign: (client: Client, initials: string) => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const targets = SALESPEOPLE.filter((s) => s.initials !== meInitials);
+  // Repositionne le menu pour rester dans la fenêtre (bord droit / bas).
+  const MW = 224;
+  const MH = 92 + targets.length * 34;
+  const vw = typeof window !== "undefined" ? window.innerWidth : 9999;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 9999;
+  const left = Math.max(8, Math.min(menu.x, vw - MW - 8));
+  const top = Math.max(8, Math.min(menu.y, vh - MH - 8));
+  const item = "flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-foreground hover:bg-secondary transition-colors";
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[130]"
+      onClick={onClose}
+      onContextMenu={(e) => { e.preventDefault(); onClose(); }}
+    >
+      <div
+        className="absolute min-w-[224px] rounded-xl border border-border bg-card shadow-2xl py-1.5 animate-fade-in"
+        style={{ left, top }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="px-3 pb-1 text-[11px] font-semibold text-foreground truncate">{menu.client.nom}</p>
+        <button type="button" className={item} onClick={() => onDeactivate(menu.client)}>
+          <Ban className="h-4 w-4 shrink-0 text-rose-500" /> Passer en inactif
+        </button>
+        <div className="my-1 h-px bg-border/70" />
+        <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Envoyer à</p>
+        {targets.length === 0 ? (
+          <p className="px-3 py-1 text-[12px] italic text-muted-foreground">Aucun autre commercial</p>
+        ) : targets.map((s) => (
+          <button key={s.initials} type="button" className={item} onClick={() => onReassign(menu.client, s.initials)}>
+            <Send className="h-4 w-4 shrink-0 text-brand-500" /> {s.firstName || s.initials}
+          </button>
+        ))}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -777,7 +881,8 @@ const QueueRow = React.memo(function QueueRow({
   active,
   done,
   onSelect,
-}: { client: Client; active: boolean; done?: boolean; onSelect: (id: string) => void }) {
+  onContext,
+}: { client: Client; active: boolean; done?: boolean; onSelect: (id: string) => void; onContext?: (e: React.MouseEvent, client: Client) => void }) {
   const window = client.insights ? hourWindowLabel(client.insights) : null;
   // Direct line first if available, fallback to standard
   const phone = client.tel2 || client.tel1;
@@ -788,6 +893,8 @@ const QueueRow = React.memo(function QueueRow({
     <li>
       <button
         onClick={() => onSelect(client.id)}
+        onContextMenu={onContext ? (e) => onContext(e, client) : undefined}
+        title={onContext ? "Clic droit : inactiver ou réassigner" : undefined}
         className={`w-full text-left px-3 py-1.5 border-l-2 transition-colors duration-150 group
           ${active
             ? "bg-brand-50/60 dark:bg-brand-950/30 border-l-brand-500"
