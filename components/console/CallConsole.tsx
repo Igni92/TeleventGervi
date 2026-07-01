@@ -113,6 +113,30 @@ interface ConsoleData {
   me?: { stockSharePct: number };
 }
 
+/** Résultat brut de /api/clients (recherche de comptes hors file). Ne contient
+ *  ni insights ni historique complet — juste l'identité + contacts + groupe. */
+interface GlobalHit {
+  id: string; code: string; nom: string; type: string | null;
+  commercial: string | null;
+  tel1: string | null; tel2: string | null; tel3: string | null;
+  email: string | null;
+  sapGroupCode: number | null; sapGroupName: string | null;
+  notes: string | null; joursAppel: string | null;
+}
+
+/** Adapte un compte trouvé (hors file) au type `Client` de la console. Les
+ *  listes rappels/appels sont vides (pas d'historique télévente chargé) et les
+ *  champs dérivés (insights, cycle de vie, valeur…) restent absents. */
+function clientFromSearch(r: GlobalHit): Client {
+  return {
+    id: r.id, code: r.code, nom: r.nom, type: r.type, commercial: r.commercial,
+    tel1: r.tel1, tel2: r.tel2, tel3: r.tel3, email: r.email,
+    sapGroupCode: r.sapGroupCode, sapGroupName: r.sapGroupName,
+    notes: r.notes, joursAppel: r.joursAppel,
+    rappels: [], appels: [],
+  };
+}
+
 const JOURS_FR: Record<number, string> = { 0:"Dim",1:"Lun",2:"Mar",3:"Mer",4:"Jeu",5:"Ven",6:"Sam" };
 
 /**
@@ -139,6 +163,19 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
   // Menu contextuel (clic droit) sur une ligne de la file — actions portefeuille.
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; client: Client } | null>(null);
   const [search, setSearch] = useState("");
+  // Recherche « globale » : comptes HORS file d'appel (pour créer un BL sans
+  // passer par la télévente). La même saisie filtre la file ET interroge
+  // /api/clients ; les comptes trouvés hors file apparaissent sous « Autres
+  // comptes ». Le compte choisi devient client actif (fiche + envoi écran 2).
+  const [globalResults, setGlobalResults] = useState<Client[]>([]);
+  const [globalLoading, setGlobalLoading] = useState(false);
+  // Compte sélectionné hors file (n'existe pas dans queue/done) — conservé pour
+  // que `active` puisse le résoudre même s'il n'est dans aucune liste.
+  const [manualActive, setManualActive] = useState<Client | null>(null);
+  const globalSeq = useRef(0);
+  // Miroir de `manualActive` pour le lire dans fetchData (mémoïsé, deps []) sans
+  // le recréer : évite que la réconciliation d'activeId éjecte un compte hors file.
+  const manualActiveRef = useRef<Client | null>(null);
   const [sortBy, setSortBy] = useState<SortMode>("priorite");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [rappelOpen, setRappelOpen] = useState(false);
@@ -165,6 +202,9 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
       setData(json);
       setActiveId((prev) => {
         if (prev && json.queue.some((c) => c.id === prev)) return prev;
+        // Compte hors file sélectionné via la recherche → on le garde actif
+        // (il n'est pas dans la file, mais l'utilisateur travaille dessus).
+        if (prev && manualActiveRef.current?.id === prev) return prev;
         return json.queue[0]?.id ?? null;
       });
       // Pas de cron (Vercel Hobby = 1/jour) : quand des rappels sont dus et que
@@ -181,6 +221,28 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  /* ── Recherche de comptes hors file (débouncée) ──────────────
+     Même terme que le filtre de file. Un compteur de séquence ignore les
+     réponses périmées. /api/clients est authentifié + scopé côté serveur
+     (un commercial ne trouve que SES comptes ; admin = tous). */
+  useEffect(() => {
+    const term = search.trim();
+    if (term.length < 2) { setGlobalResults([]); setGlobalLoading(false); return; }
+    const my = ++globalSeq.current;
+    setGlobalLoading(true);
+    const h = setTimeout(() => {
+      fetch(`/api/clients?search=${encodeURIComponent(term)}&limit=8`, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((j: { clients?: GlobalHit[] }) => {
+          if (my !== globalSeq.current) return;
+          setGlobalResults((j.clients ?? []).map(clientFromSearch));
+        })
+        .catch(() => { if (my === globalSeq.current) setGlobalResults([]); })
+        .finally(() => { if (my === globalSeq.current) setGlobalLoading(false); });
+    }, 250);
+    return () => clearTimeout(h);
+  }, [search]);
 
   /* ── Actions portefeuille (menu clic droit) — admin uniquement ──────────── */
   const openCtxMenu = useCallback((e: React.MouseEvent, client: Client) => {
@@ -220,7 +282,19 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
     () => [...(data?.queue ?? []), ...(data?.done ?? [])],
     [data],
   );
-  const active = allClients.find((c) => c.id === activeId) ?? null;
+  // Client actif : d'abord dans la file (queue/done) ; sinon un compte
+  // sélectionné hors file via la recherche (manualActive).
+  const active = allClients.find((c) => c.id === activeId)
+    ?? (manualActive && manualActive.id === activeId ? manualActive : null);
+
+  // Sélection d'un compte hors file → il devient actif (fiche au centre +
+  // diffusion vers l'écran 2). On le mémorise pour que `active` le résolve.
+  const pickGlobal = useCallback((c: Client) => {
+    setManualActive(c);
+    setActiveId(c.id);
+  }, []);
+  // Garde le miroir à jour pour la réconciliation d'activeId dans fetchData.
+  manualActiveRef.current = manualActive;
 
   /* ── Diffuse le client actif vers l'écran 2 (mode 2 écrans) ── */
   useEffect(() => {
@@ -529,6 +603,12 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
 
   const stats = data?.stats ?? { remaining: 0, called: 0, commandes: 0, demains: 0, conversion: 0 };
 
+  // « Autres comptes » : résultats de recherche qui ne sont PAS déjà dans la
+  // file (queue/done) — pour ne pas dédoubler. Affichés sous la file.
+  const queueIds = new Set(allClients.map((c) => c.id));
+  const externalResults = globalResults.filter((c) => !queueIds.has(c.id));
+  const showGlobal = search.trim().length >= 2 && (globalLoading || externalResults.length > 0);
+
   return (
     <div className="h-full flex flex-col gap-5 animate-fade-up min-h-0">
       {/* ── Top stat strip ─────────────────────────────────── */}
@@ -591,7 +671,7 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
                 ref={searchRef}
-                placeholder="Rechercher…"
+                placeholder="Rechercher un compte (file + hors file)…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-9 h-9 text-[13px]"
@@ -652,6 +732,61 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
               </ol>
             )}
 
+            {/* Autres comptes (hors file d'appel) — recherche globale. Cliquer
+                un compte l'affiche au centre + l'envoie sur l'écran 2 pour un BL. */}
+            {showGlobal && (
+              <div className="border-t border-border mt-2">
+                <div className="px-4 py-3 flex items-center justify-between">
+                  <span className="kicker inline-flex items-center gap-1.5">
+                    <Search className="h-3 w-3" /> Autres comptes · hors file
+                  </span>
+                  {globalLoading
+                    ? <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                    : <span className="text-[11px] tnum text-muted-foreground">{externalResults.length}</span>}
+                </div>
+                {externalResults.length === 0 ? (
+                  !globalLoading && (
+                    <p className="px-4 pb-3 text-[11.5px] text-muted-foreground italic">Aucun autre compte.</p>
+                  )
+                ) : (
+                  <ol>
+                    {externalResults.map((c) => (
+                      <li key={c.id}>
+                        <button
+                          onClick={() => pickGlobal(c)}
+                          className={`w-full text-left px-3 py-1.5 border-l-2 transition-colors duration-150 group
+                            ${c.id === activeId
+                              ? "bg-brand-50/60 dark:bg-brand-950/30 border-l-brand-500"
+                              : "border-l-transparent hover:bg-secondary/40"}`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`h-2 w-2 rounded-full shrink-0 ${
+                              c.id === activeId ? "bg-brand-500 dot-accent" : "bg-border group-hover:bg-foreground/30"
+                            }`} />
+                            <p className={`text-[12.5px] truncate tracking-tight min-w-0 ${
+                              c.id === activeId ? "font-semibold text-foreground" : "font-medium text-foreground/85"
+                            }`}>
+                              {c.nom}
+                            </p>
+                            {c.type && (
+                              <span className={`shrink-0 text-[9px] font-bold tracking-wider px-1.5 py-px rounded leading-tight ${
+                                c.type === "EXPORT" ? "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" :
+                                c.type === "GMS"    ? "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" :
+                                                      "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
+                              }`}>
+                                {c.type}
+                              </span>
+                            )}
+                            <span className="ml-auto shrink-0 font-mono tnum text-[10.5px] text-muted-foreground">{c.code}</span>
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            )}
+
             {/* Done section */}
             {(data?.done.length ?? 0) > 0 && (
               <div className="border-t border-border mt-2">
@@ -693,19 +828,29 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
           {!active ? (
             <EmptyActive />
           ) : (
-            <ActiveClient
-              client={active}
-              notesDraft={notesDraft}
-              setNotesDraft={setNotesDraft}
-              saveNotes={saveNotes}
-              savingNotes={savingNotes}
-              saveEmail={saveEmail}
-              prefs={prefs}
-              toggleVisibility={toggleVisibility}
-              toggleCollapsed={toggleCollapsed}
-              reorder={reorder}
-              resetPrefs={resetPrefs}
-            />
+            <>
+              {/* Compte hors file (sélectionné via la recherche) : rappel qu'il
+                  est aussi poussé sur l'écran 2 pour la saisie du BL. */}
+              {!queueIds.has(active.id) && (
+                <div className="mb-3 inline-flex items-center gap-1.5 rounded-md border border-amber-300/70 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1 text-[11px] font-medium text-amber-800 dark:text-amber-200">
+                  <MonitorSmartphone className="h-3.5 w-3.5" />
+                  Compte hors file d&apos;appel — affiché sur l&apos;écran 2 pour créer un BL
+                </div>
+              )}
+              <ActiveClient
+                client={active}
+                notesDraft={notesDraft}
+                setNotesDraft={setNotesDraft}
+                saveNotes={saveNotes}
+                savingNotes={savingNotes}
+                saveEmail={saveEmail}
+                prefs={prefs}
+                toggleVisibility={toggleVisibility}
+                toggleCollapsed={toggleCollapsed}
+                reorder={reorder}
+                resetPrefs={resetPrefs}
+              />
+            </>
           )}
         </main>
 
