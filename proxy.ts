@@ -75,8 +75,13 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization)
      * - favicon.ico
-     * - public files
+     * - sw.js + manifest.webmanifest : fichiers PWA que le navigateur récupère
+     *   SOUVENT SANS cookie (donc sans session) → l'auth les redirigeait vers
+     *   /login, cassant l'installation (Android : simple raccourci « G » au lieu
+     *   d'installer l'app) et l'enregistrement du service worker. Ils ne
+     *   contiennent aucune donnée sensible → toujours publics.
+     * - fichiers statiques (images, icônes, json, txt).
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|json|txt|webmanifest)$).*)",
   ],
 };
