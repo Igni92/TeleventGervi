@@ -8,7 +8,7 @@ import {
   ChevronRight,
   Loader2, Calendar, Sparkles, ArrowUpDown,
   StickyNote, History, User, TrendingUp, TrendingDown, Minus,
-  MessageSquare, AlertTriangle, Settings, Mail, ArrowUpRight,
+  MessageSquare, AlertTriangle, Settings, Mail, ArrowUpRight, Star,
 } from "lucide-react";
 import Link from "next/link";
 import type { ClientInsights } from "@/lib/insights";
@@ -22,6 +22,7 @@ import { HabitudesBanner } from "@/components/console/HabitudesBanner";
 import { broadcastActiveClient } from "@/lib/consoleSync";
 import { displayNameFromSlp } from "@/lib/salespeople";
 import { loadCallNote, saveCallNote, clearCallNote } from "@/lib/callNoteStorage";
+import { loadFavPhone, saveFavPhone, type PhoneKey } from "@/lib/favPhoneStorage";
 import { MonitorSmartphone } from "lucide-react";
 import { BLDialog } from "@/components/console/BLDialog";
 import { SapOrderHistory } from "@/components/console/SapOrderHistory";
@@ -1776,6 +1777,34 @@ function Block({
   );
 }
 
+/** Étoile « favori » d'un numéro — bouton isolé (clic ≠ appel du lien tel:). */
+function FavStar({
+  active, onToggle, onYellow = false, className = "",
+}: {
+  active: boolean;
+  onToggle: () => void;
+  onYellow?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(); }}
+      aria-pressed={active}
+      title={active ? "Retirer des favoris" : "Définir comme numéro favori (affiché en jaune)"}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${
+        onYellow
+          ? "text-primary-foreground/75 hover:text-primary-foreground hover:bg-black/10"
+          : active
+            ? "text-brand-500"
+            : "text-muted-foreground/45 hover:text-brand-500 hover:bg-secondary"
+      } ${className}`}
+    >
+      <Star className={`h-4 w-4 ${active ? "fill-current" : ""}`} />
+    </button>
+  );
+}
+
 function ActionPanel({
   client, onDemain, onOutcome, onRappel, onBL, onSkip, actionLoading,
   callNote, setCallNote, keymap,
@@ -1791,6 +1820,18 @@ function ActionPanel({
   setCallNote: (v: string) => void;
   keymap: Record<ShortcutAction, string>;
 }) {
+  // Numéro favori (mis en avant en jaune), persisté par client sur ce poste.
+  const clientId = client?.id ?? null;
+  const [favPhone, setFavPhone] = useState<PhoneKey | null>(null);
+  useEffect(() => { setFavPhone(loadFavPhone(clientId)); }, [clientId]);
+  const toggleFav = useCallback((k: PhoneKey) => {
+    setFavPhone((cur) => {
+      const next = cur === k ? null : k;
+      saveFavPhone(clientId, next);
+      return next;
+    });
+  }, [clientId]);
+
   if (!client) {
     return (
       <div className="p-5 text-center py-10 text-[12.5px] text-muted-foreground">
@@ -1799,11 +1840,14 @@ function ActionPanel({
     );
   }
 
-  const tels = [
-    { label: "Standard", value: client.tel1 },
-    { label: "Direct 1", value: client.tel2 },
-    { label: "Direct 2", value: client.tel3 },
-  ].filter((t) => t.value);
+  const allTels = [
+    { fav: "tel1" as PhoneKey, label: "Standard", value: client.tel1 },
+    { fav: "tel2" as PhoneKey, label: "Direct 1", value: client.tel2 },
+    { fav: "tel3" as PhoneKey, label: "Direct 2", value: client.tel3 },
+  ].filter((t): t is { fav: PhoneKey; label: string; value: string } => !!t.value);
+  // Le favori (s'il existe encore) passe en gros/jaune ; sinon le premier dispo.
+  const primaryTel = allTels.find((t) => t.fav === favPhone) ?? allTels[0];
+  const secondaryTels = allTels.filter((t) => t !== primaryTel);
 
   return (
     <div className="flex flex-col h-full animate-fade-in min-h-0">
@@ -1812,32 +1856,43 @@ function ActionPanel({
         {/* ── Téléphones — n°1 = CTA d'appel géant, les autres en compact ── */}
         <section>
           <p className="kicker mb-3">Appeler</p>
-          {tels.length === 0 ? (
+          {!primaryTel ? (
             <p className="text-[12px] italic text-muted-foreground py-2">Aucun numéro renseigné.</p>
           ) : (
             <div className="space-y-2">
-              {/* Numéro principal — gros, le plus accessible (loi de Fitts) */}
-              <a
-                href={`tel:${standardizePhone(tels[0].value)}`}
-                className="group flex items-center gap-3 px-4 py-4 rounded-2xl bg-primary text-primary-foreground shadow-[0_2px_14px_rgba(250,204,21,0.3)] hover:brightness-105 hover:shadow-[0_4px_22px_rgba(250,204,21,0.45)] transition-all active:scale-[0.99]"
-              >
-                <Phone className="h-6 w-6 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">{tels[0].label}</p>
-                  <p className="text-[22px] font-mono font-bold tnum leading-tight truncate">{formatPhoneDisplay(tels[0].value)}</p>
-                </div>
-              </a>
-              {/* Numéros secondaires — compacts */}
-              {tels.slice(1).map((t) => (
+              {/* Numéro principal (favori s'il existe) — gros, jaune (loi de Fitts).
+                  L'étoile est un bouton SÉPARÉ du lien tel: (clic ≠ appel). */}
+              <div className="relative">
                 <a
-                  key={t.label}
-                  href={`tel:${standardizePhone(t.value)}`}
-                  className="group flex items-center gap-2.5 px-3 py-2 rounded-lg bg-secondary/40 hover:bg-secondary border border-border transition-all"
+                  href={`tel:${standardizePhone(primaryTel.value)}`}
+                  className="group flex items-center gap-3 px-4 py-4 pr-12 rounded-2xl bg-primary text-primary-foreground shadow-[0_2px_14px_rgba(250,204,21,0.3)] hover:brightness-105 hover:shadow-[0_4px_22px_rgba(250,204,21,0.45)] transition-all active:scale-[0.99]"
                 >
-                  <Phone className="h-3.5 w-3.5 text-brand-500 dark:text-brand-400 shrink-0" />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground w-16 shrink-0">{t.label}</span>
-                  <span className="text-[13px] font-mono font-semibold text-foreground tnum truncate">{formatPhoneDisplay(t.value)}</span>
+                  <Phone className="h-6 w-6 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">{primaryTel.label}</p>
+                    <p className="text-[22px] font-mono font-bold tnum leading-tight truncate">{formatPhoneDisplay(primaryTel.value)}</p>
+                  </div>
                 </a>
+                <FavStar
+                  active={favPhone === primaryTel.fav}
+                  onToggle={() => toggleFav(primaryTel.fav)}
+                  onYellow
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2"
+                />
+              </div>
+              {/* Numéros secondaires — compacts, chacun étoilable pour passer en jaune */}
+              {secondaryTels.map((t) => (
+                <div key={t.fav} className="flex items-center gap-1.5">
+                  <a
+                    href={`tel:${standardizePhone(t.value)}`}
+                    className="group flex flex-1 min-w-0 items-center gap-2.5 px-3 py-2 rounded-lg bg-secondary/40 hover:bg-secondary border border-border transition-all"
+                  >
+                    <Phone className="h-3.5 w-3.5 text-brand-500 dark:text-brand-400 shrink-0" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground w-16 shrink-0">{t.label}</span>
+                    <span className="text-[13px] font-mono font-semibold text-foreground tnum truncate">{formatPhoneDisplay(t.value)}</span>
+                  </a>
+                  <FavStar active={favPhone === t.fav} onToggle={() => toggleFav(t.fav)} />
+                </div>
               ))}
             </div>
           )}
