@@ -4,7 +4,7 @@ import { ShieldAlert } from "lucide-react";
 import { getAccessScope, UNMAPPED_MESSAGE } from "@/lib/permissions";
 import { FicheCommercial } from "./FicheCommercial";
 
-export const metadata = { title: "Fiche commercial | TeleVent" };
+export const metadata = { title: "Fiche commercial | Gervi" };
 export const dynamic = "force-dynamic";
 
 /**

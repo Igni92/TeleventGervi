@@ -5,7 +5,7 @@ import { getAccessScope, requireStrictAdmin, ADMIN_EMAILS } from "@/lib/permissi
 import { CommercialCard } from "@/components/commerciaux/CommercialCard";
 import { CommerciauxSapList } from "./CommerciauxSapList";
 
-export const metadata = { title: "Effectifs | TeleVent" };
+export const metadata = { title: "Effectifs | Gervi" };
 export const dynamic = "force-dynamic";
 
 export default async function CommerciauxPage() {
@@ -76,7 +76,7 @@ export default async function CommerciauxPage() {
     teamSection = (
       <section className="space-y-4">
         <div>
-          <p className="kicker mb-1">Équipe TeleVent</p>
+          <p className="kicker mb-1">Équipe Gervi</p>
           <p className="hidden md:block text-[12.5px] text-muted-foreground max-w-2xl">
             Comptes connectés : présence du jour, % de stock attribué et menu{" "}
             <span className="font-medium text-foreground">Récupérer ▾</span> pour reprendre

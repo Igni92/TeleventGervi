@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
 export const metadata = {
-  title: "Nouveau client | TeleVent",
+  title: "Nouveau client | Gervi",
 };
 
 export default async function NewClientPage() {
