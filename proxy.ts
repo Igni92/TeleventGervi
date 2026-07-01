@@ -51,6 +51,20 @@ export default auth((req) => {
     }
   }
 
+  // RÔLE LIVREUR (flag en base porté dans le jeton) : accès restreint au Détail
+  // livraison (où il marque « départ ») ET aux fiches clients (créneaux/GPS). Tout
+  // autre chemin est renvoyé vers le Détail livraison. Les /api et assets passent.
+  // NB : le flag vient du jeton → prend effet à la (re)connexion du livreur.
+  else if (req.auth?.user?.isLivreur === true) {
+    const allowed = pathname.startsWith("/livraisons")
+      || pathname.startsWith("/clients")
+      || pathname.startsWith("/api")
+      || pathname.startsWith("/login");
+    if (!allowed) {
+      return NextResponse.redirect(new URL("/livraisons", origin));
+    }
+  }
+
   return NextResponse.next();
 });
 

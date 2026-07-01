@@ -1,4 +1,4 @@
-import NextAuth from "next-auth";
+import NextAuth, { type DefaultSession } from "next-auth";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
@@ -48,7 +48,7 @@ export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
       }
       return true;
     },
-    async jwt({ token, account }) {
+    async jwt({ token, account, user }) {
       // Le jeton Microsoft (Graph) reste UNIQUEMENT dans le JWT chiffré (cookie
       // httpOnly), jamais recopié dans la session renvoyée au navigateur via
       // /api/auth/session. Les routes serveur le relisent via getToken()
@@ -58,7 +58,25 @@ export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
         token.refreshToken = account.refresh_token;
         token.expiresAt = account.expires_at;
       }
+      // Rôle LIVREUR porté dans le jeton pour le verrou middleware (Edge, sans
+      // accès base). Résolu à la connexion. DÉFENSIF : toute erreur est avalée →
+      // jamais bloquant pour le login (au pire, pas de verrou pour cette session).
+      if (user?.email) {
+        try {
+          const rows = await prisma.$queryRawUnsafe<{ isLivreur: boolean | null }[]>(
+            `SELECT "isLivreur" FROM "User" WHERE LOWER("email") = LOWER($1) LIMIT 1`,
+            user.email,
+          );
+          token.isLivreur = !!rows[0]?.isLivreur;
+        } catch { /* colonne absente / base indispo → pas de verrou (login OK) */ }
+      }
       return token;
+    },
+    async session({ session, token }) {
+      // Expose le rôle livreur au middleware (req.auth.user.isLivreur) et aux
+      // composants. N'altère rien d'autre de la session.
+      if (session.user) session.user.isLivreur = token.isLivreur === true;
+      return session;
     },
   },
   pages: {
@@ -84,7 +102,7 @@ const TEST_NO_AUTH = process.env.VERCEL_ENV === "preview";
 // Email admin (cf. ADMIN_EMAILS) → la préversion voit les données réelles
 // (sinon périmètre vide = 0 client / 0 encours). Préversion uniquement.
 const FAKE_SESSION = {
-  user: { name: "Test (préversion)", email: "m.mandine@gervifrais.com" },
+  user: { name: "Test (préversion)", email: "m.mandine@gervifrais.com", isLivreur: false },
   expires: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
 };
 
@@ -102,5 +120,15 @@ declare module "next-auth/jwt" {
     accessToken?: string;
     refreshToken?: string;
     expiresAt?: number;
+    isLivreur?: boolean;
+  }
+}
+
+// Champ de rôle exposé dans la session (lu par le middleware et les composants).
+declare module "next-auth" {
+  interface Session {
+    user: {
+      isLivreur?: boolean;
+    } & DefaultSession["user"];
   }
 }
