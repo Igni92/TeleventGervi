@@ -418,6 +418,34 @@ export const sap = {
     return res.value ?? [];
   },
 
+  /** Comme getV2View, mais PAGINÉ ($top/$skip) — pour charger une vue entière. */
+  async getV2ViewAll<T = unknown>(
+    viewName: string,
+    opts: { filter?: string; pageSize?: number; maxPages?: number; env?: SapEnv } = {},
+  ): Promise<T[]> {
+    let env = opts.env;
+    if (!env) {
+      if (!envLoaded) await loadEnvFromDb();
+      env = activeEnv;
+    }
+    const { filter, pageSize = 500, maxPages = 40 } = opts;
+    const base = CFG[env].base.replace(/\/+$/, "");
+    const v2base = base.replace(/\/v1$/, "/v2");
+    const viewUrl = `${v2base}/view.svc/${encodeURIComponent(viewName)}`;
+    const all: T[] = [];
+    for (let page = 0; page < maxPages; page++) {
+      const qs: string[] = [];
+      if (filter) qs.push(`$filter=${encodeURIComponent(filter)}`);
+      qs.push(`$top=${pageSize}`);
+      if (page > 0) qs.push(`$skip=${page * pageSize}`);
+      const res = await call<{ value?: T[] }>(`${viewUrl}?${qs.join("&")}`, { env });
+      const batch = res.value ?? [];
+      all.push(...batch);
+      if (batch.length < pageSize) break;
+    }
+    return all;
+  },
+
   /** Cookie de session de l'environnement actif (debug). */
   getCookieHeader: () => sessions[activeEnv],
 };
