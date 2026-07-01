@@ -543,15 +543,39 @@ model StockSyncCursor {
 }
 
 model Rappel {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   clientId   String
-  client     Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client     Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
   dateRappel DateTime
   note       String?
   msEventId  String?
-  statut     String   @default("PLANIFIE") // PLANIFIE | FAIT | ANNULE
+  statut     String    @default("PLANIFIE") // PLANIFIE | FAIT | ANNULE
   createdBy  String? // email/trigramme de l'auteur du rappel (#31)
-  createdAt  DateTime @default(now())
+  // Horodatage de l'envoi de la notification push « rappel dû » (cron). NULL =
+  // pas encore notifié → évite les doublons de push. Colonne ajoutée en manuel
+  // (cf. prisma/migrations/manual/20260701_push_notifications.sql).
+  notifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([statut, dateRappel])
+}
+
+// Abonnement Web-Push (PWA) d'un utilisateur pour un navigateur/appareil donné.
+// Un utilisateur peut en avoir plusieurs (bureau + mobile). Alimenté par
+// /api/push/subscribe ; consommé par le cron /api/cron/reminders.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  // Propriétaire = User.id (session). Sert à router les notifs vers le bon agent.
+  userId    String
+  // Email de session (repli d'affichage / audit) — l'user peut ne pas être mappé.
+  email     String?
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 // Historique des appels téléphoniques

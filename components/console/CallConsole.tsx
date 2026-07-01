@@ -13,7 +13,7 @@ import {
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import type { ClientInsights } from "@/lib/insights";
-import { dayOfWeekLabel, summaryRecommendation, hourWindowLabel } from "@/lib/insights";
+import { dayOfWeekLabel, summaryRecommendation, hourWindowLabel, pickupSlotLabel } from "@/lib/insights";
 import { useConsolePrefs, SECTION_LABELS, type SectionId } from "@/lib/useConsolePrefs";
 import {
   useConsoleShortcuts, SHORTCUT_LABELS, displayKey, isBindableKey,
@@ -26,6 +26,7 @@ import { loadCallNote, saveCallNote, clearCallNote } from "@/lib/callNoteStorage
 import { loadFavPhone, saveFavPhone, type PhoneKey } from "@/lib/favPhoneStorage";
 import { MonitorSmartphone } from "lucide-react";
 import { BLDialog } from "@/components/console/BLDialog";
+import { NotificationsBell } from "@/components/console/NotificationsBell";
 import { SapOrderHistory } from "@/components/console/SapOrderHistory";
 import { SapGroupBadge } from "@/components/clients/SapGroupBadge";
 import {
@@ -81,9 +82,22 @@ interface Client {
   ownerAbsent?: boolean;
   /** nb d'incidents ouverts (BL) — affiché dans la file */
   openIncidents?: number;
+  /** Repli cold-start : heure de décroché typique des clients du même type
+   *  (quand ce client n'a pas assez d'historique perso). */
+  fallbackHour?: number | null;
+  /** Tenté aujourd'hui sans décroché (NRP/répondeur) → à re-tenter plus tard. */
+  retryAfterNrp?: boolean;
+}
+interface DueRappel {
+  id: string;
+  clientId: string;
+  clientNom: string;
+  dateRappel: string;
+  note: string | null;
 }
 interface ConsoleData {
   queue: Client[]; done: Client[];
+  dueRappels?: DueRappel[];
   stats: { remaining: number; called: number; commandes: number; demains: number; conversion: number };
   presence?: { present: string[]; absent: string[]; toCover: number };
   me?: { stockSharePct: number };
@@ -131,6 +145,12 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
         if (prev && json.queue.some((c) => c.id === prev)) return prev;
         return json.queue[0]?.id ?? null;
       });
+      // Pas de cron (Vercel Hobby = 1/jour) : quand des rappels sont dus et que
+      // la console est ouverte, on pousse la notif vers les autres appareils de
+      // l'agent (best-effort, marque notifiedAt côté serveur → pas de doublon).
+      if ((json.dueRappels?.length ?? 0) > 0) {
+        fetch("/api/push/flush", { method: "POST" }).catch(() => {});
+      }
     } catch {
       toast.error("Erreur de chargement de la console");
     } finally {
@@ -195,7 +215,8 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
         openIncidents: active.openIncidents ?? null,
         lastOrderDays: active.insights?.lastOrderDays ?? null,
         ordersCount: active.appels.filter((a) => a.type === "COMMANDE").length,
-        medianHour: active.insights?.medianHour
+        medianHour: active.insights?.recommendedHour
+          ?? active.insights?.medianHour
           ?? active.insights?.bestHour?.hour
           ?? null,
         bestDayOfWeek: active.insights?.bestDayOfWeek?.dow ?? null,
@@ -238,9 +259,11 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
         }
         case "hour":
         default: {
-          // Sort by optimal call hour (median) — clients without insights go last
-          const ha = a.insights?.medianHour ?? a.insights?.bestHour?.hour ?? 99;
-          const hb = b.insights?.medianHour ?? b.insights?.bestHour?.hour ?? 99;
+          // Tri par heure optimale d'appel : on privilégie l'heure de DÉCROCHÉ
+          // (recommendedHour), avec repli sur l'heure typique du type (cold-start)
+          // pour ne pas reléguer les clients neufs en fin de file.
+          const ha = a.insights?.recommendedHour ?? a.fallbackHour ?? a.insights?.medianHour ?? 99;
+          const hb = b.insights?.recommendedHour ?? b.fallbackHour ?? b.insights?.medianHour ?? 99;
           return ha - hb;
         }
       }
@@ -412,6 +435,24 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
     }
   }, [active, fetchData]);
 
+  /* ── Marque un rappel « fait » (bandeau des rappels dus) ─────────────── */
+  const markRappelDone = useCallback(async (rappelId: string) => {
+    // Retrait optimiste du bandeau.
+    setData((cur) => cur ? { ...cur, dueRappels: (cur.dueRappels ?? []).filter((r) => r.id !== rappelId) } : cur);
+    try {
+      const res = await fetch("/api/reminders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: rappelId, statut: "FAIT" }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Rappel marqué comme fait");
+    } catch {
+      toast.error("Erreur — rappel non mis à jour");
+      fetchData();
+    }
+  }, [fetchData]);
+
   /* ── Keyboard shortcuts (personnalisables — voir useConsoleShortcuts) ── */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -468,16 +509,30 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
       {/* ── Top stat strip ─────────────────────────────────── */}
       <div className="shrink-0 flex items-start justify-between gap-4">
         <ConsoleHeader stats={stats} />
-        <button
-          type="button"
-          onClick={() => window.open("/console/ecran2", "televent-ecran2", "width=720,height=900")}
-          title="Ouvre une 2e fenêtre (stock perso + saisie BL) synchronisée — à glisser sur ton 2e écran"
-          className="shrink-0 hidden md:inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-[12px] font-medium text-foreground/80 hover:text-foreground hover:border-brand-400 transition-colors"
-        >
-          <MonitorSmartphone className="h-3.5 w-3.5" />
-          2ᵉ écran
-        </button>
+        <div className="shrink-0 flex items-center gap-2">
+          <NotificationsBell />
+          <button
+            type="button"
+            onClick={() => window.open("/console/ecran2", "televent-ecran2", "width=720,height=900")}
+            title="Ouvre une 2e fenêtre (stock perso + saisie BL) synchronisée — à glisser sur ton 2e écran"
+            className="hidden md:inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-[12px] font-medium text-foreground/80 hover:text-foreground hover:border-brand-400 transition-colors"
+          >
+            <MonitorSmartphone className="h-3.5 w-3.5" />
+            2ᵉ écran
+          </button>
+        </div>
       </div>
+
+      {/* ── Bandeau rappels DUS maintenant ─────────────────── */}
+      {(data?.dueRappels?.length ?? 0) > 0 && (
+        <DueRappelsBanner
+          items={data!.dueRappels!}
+          onOpen={(clientId) => {
+            if (allClients.some((c) => c.id === clientId)) setActiveId(clientId);
+          }}
+          onDone={markRappelDone}
+        />
+      )}
 
       {/* ── Bandeau présence / distribution ────────────────── */}
       {data?.presence && (data.presence.absent.length > 0) && (
@@ -804,6 +859,55 @@ function ConsoleHeader({ stats }: { stats: ConsoleData["stats"] }) {
   );
 }
 
+/**
+ * Bandeau « rappels dus maintenant » — surface les Rappel PLANIFIE dont l'heure
+ * est passée, indépendamment du calendrier Outlook. Clic sur le nom = sélectionne
+ * le client dans la file ; « Fait » = clôt le rappel.
+ */
+function DueRappelsBanner({
+  items, onOpen, onDone,
+}: {
+  items: DueRappel[];
+  onOpen: (clientId: string) => void;
+  onDone: (rappelId: string) => void;
+}) {
+  return (
+    <div className="shrink-0 rounded-lg bg-brand-50 dark:bg-brand-950/30 border border-brand-300/60 dark:border-brand-500/40 px-3 py-2.5">
+      <div className="flex items-center gap-2 mb-1.5">
+        <BellRing className="h-4 w-4 text-brand-600 dark:text-brand-400 shrink-0" />
+        <p className="text-[12.5px] font-semibold text-brand-900 dark:text-brand-200">
+          {items.length} rappel{items.length > 1 ? "s" : ""} dû{items.length > 1 ? "s" : ""} maintenant
+        </p>
+      </div>
+      <ul className="space-y-1">
+        {items.slice(0, 6).map((r) => (
+          <li key={r.id} className="flex items-center gap-2 text-[12px]">
+            <button
+              type="button"
+              onClick={() => onOpen(r.clientId)}
+              className="font-medium text-foreground hover:text-brand-600 truncate max-w-[45%] text-left"
+              title="Sélectionner ce client"
+            >
+              {r.clientNom}
+            </button>
+            <span className="text-muted-foreground tnum shrink-0">
+              {new Date(r.dateRappel).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+            </span>
+            {r.note && <span className="text-muted-foreground/80 italic truncate flex-1 min-w-0">— {r.note}</span>}
+            <button
+              type="button"
+              onClick={() => onDone(r.id)}
+              className="ml-auto shrink-0 inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 border border-emerald-400/40"
+            >
+              <CheckCircle2 className="h-3 w-3" /> Fait
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Stat({
   label, value, suffix = "", tone, info, icon: Icon, delay = 0,
 }: {
@@ -885,7 +989,12 @@ const QueueRow = React.memo(function QueueRow({
   onSelect,
   onContext,
 }: { client: Client; active: boolean; done?: boolean; onSelect: (id: string) => void; onContext?: (e: React.MouseEvent, client: Client) => void }) {
-  const window = client.insights ? hourWindowLabel(client.insights) : null;
+  // Créneau affiché : décroché perso (hourWindowLabel privilégie bestPickup),
+  // sinon repli sur l'heure typique du type (cold-start).
+  let window = client.insights ? hourWindowLabel(client.insights) : null;
+  if ((!window || window === "—") && client.fallbackHour != null) {
+    window = `~${client.fallbackHour}h`;
+  }
   // Direct line first if available, fallback to standard
   const phone = client.tel2 || client.tel1;
   const isDirect = !!client.tel2;
@@ -943,6 +1052,15 @@ const QueueRow = React.memo(function QueueRow({
               title={`${client.openIncidents} incident(s) ouvert(s)`}
             >
               <AlertTriangle className="h-2.5 w-2.5" /> {client.openIncidents}
+            </span>
+          )}
+          {/* Tenté aujourd'hui sans décroché → à re-tenter plus tard (autre créneau). */}
+          {!done && client.retryAfterNrp && (
+            <span
+              className="shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold tracking-wider px-1.5 py-px rounded bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
+              title="Tenté aujourd'hui sans réponse — à retenter plus tard"
+            >
+              <Clock className="h-2.5 w-2.5" /> RETENTER
             </span>
           )}
           {/* Pastille "À relancer" — pas de commande depuis +7j (ou jamais sur la fenêtre).
@@ -1077,7 +1195,7 @@ function ActiveClient({
   // NB. `stock` a été retiré : la consultation de stock vit sur l'Écran 2.
   const renderers: Record<SectionId, () => React.ReactNode> = {
     insights: () =>
-      client.insights && (client.insights.bestHour || client.insights.bestDayOfWeek || client.insights.medianIntervalDays) ? (
+      client.insights && (client.insights.bestPickup || client.insights.answerRate !== null || client.insights.bestHour || client.insights.bestDayOfWeek || client.insights.medianIntervalDays) ? (
         <InsightsBlock insights={client.insights} {...collapseProps("insights")} />
       ) : null,
 
@@ -1752,9 +1870,25 @@ function InsightsBlock({
 
       {!collapsed && (
       <div className="grid grid-cols-2 gap-x-5 gap-y-3 text-[12px]">
+        {insights.bestPickup && (
+          <Metric
+            label="Décroche le plus"
+            value={pickupSlotLabel(insights.bestPickup)}
+            hint={`${insights.bestPickup.rate}% de décroché · ${insights.bestPickup.attempts} tent.`}
+            info="Créneau où ce client RÉPOND le plus au téléphone (décrochés ÷ tentatives). C'est le meilleur moment pour le joindre — indépendant de l'heure où l'agent saisit."
+          />
+        )}
+        {insights.answerRate !== null && !insights.bestPickup && (
+          <Metric
+            label="Taux de décroché"
+            value={`${insights.answerRate}%`}
+            hint={`${insights.connectedCount}/${insights.attemptsCount} tentatives`}
+            info="Part des appels où quelqu'un a décroché. Un créneau précis apparaîtra dès qu'assez de tentatives seront loggées."
+          />
+        )}
         {insights.bestHour && (
           <Metric
-            label="Meilleure heure"
+            label="Commande le plus"
             value={insights.hourWindow
               ? `${insights.hourWindow.start}h – ${insights.hourWindow.end}h`
               : `${insights.bestHour.hour}h`}
@@ -1774,8 +1908,12 @@ function InsightsBlock({
           <Metric
             label="Fréquence"
             value={`~${insights.medianIntervalDays} j`}
-            hint="entre commandes (médiane)"
-            info="Intervalle médian entre deux commandes successives. La médiane est plus robuste aux écarts ponctuels que la moyenne."
+            hint={
+              insights.cadenceStatus === "overdue" ? "⚠️ en retard sur sa cadence"
+              : insights.cadenceStatus === "due" ? "à commander bientôt"
+              : "entre commandes (médiane)"
+            }
+            info="Intervalle médian entre deux commandes successives. La médiane est plus robuste aux écarts ponctuels que la moyenne. « En retard » = dernière commande au-delà de 1,5× cet intervalle."
           />
         )}
         {insights.conversionRate !== null && (

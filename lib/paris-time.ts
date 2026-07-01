@@ -44,3 +44,22 @@ export function parisDayOfWeek(ref: Date = new Date()): number {
   const wd = new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short" }).format(ref);
   return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(wd);
 }
+
+// Formatteur réutilisé (coûteux à instancier) pour extraire heure+minute murales
+// de Paris. Indispensable pour l'analyse comportementale : le serveur tourne en
+// UTC → `Date.getHours()` renverrait l'heure UTC (décalage 1–2 h), ce qui
+// fausserait « l'heure où le client décroche » ET le tri de la file.
+const HM_FMT = new Intl.DateTimeFormat("en-GB", {
+  timeZone: TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
+
+/** Heure + minute murales à Paris (0–23 / 0–59) pour un instant donné. */
+export function parisHourMinute(ref: Date): { hour: number; minute: number } {
+  const p = Object.fromEntries(HM_FMT.formatToParts(ref).map((x) => [x.type, x.value]));
+  return { hour: Number(p.hour), minute: Number(p.minute) };
+}
+
+/** Heure murale à Paris (0–23) — pratique quand la minute n'importe pas. */
+export function parisHour(ref: Date): number {
+  return parisHourMinute(ref).hour;
+}
