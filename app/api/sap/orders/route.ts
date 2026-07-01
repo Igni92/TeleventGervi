@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { getTrclDefaultCarrier } from "@/lib/clientCarriers";
 import { getTransporteurTimbre } from "@/lib/transporteurs";
 import { getClientTournee } from "@/lib/clientTournee";
+import { notifyAll } from "@/lib/push";
 import { sap } from "@/lib/sapb1";
 import { mirrorCreatedOrder } from "@/lib/sapMirror";
 import { decrementLocalStock } from "@/lib/stockSync";
@@ -646,6 +647,24 @@ export async function POST(req: NextRequest) {
       });
     } catch (e) {
       console.error("[Order] AppelLog post-create failed (non-fatal):", e);
+    }
+
+    // ── 4b. Notification push « nouvelle commande » (abonnés opt-in, sauf l'auteur) ──
+    try {
+      const clientNom = client.nom ?? cardCode;
+      const nbLignes = body.lines.length;
+      const ttc = enriched?.DocTotal ?? created.DocTotal ?? 0;
+      await notifyAll(
+        {
+          title: "🆕 Nouvelle commande",
+          body: `${clientNom} — ${nbLignes} ligne${nbLignes > 1 ? "s" : ""}${ttc ? ` · ${Math.round(ttc)} € TTC` : ""} (BL n°${created.DocNum})`,
+          url: "/livraisons",
+          tag: `order-${created.DocEntry}`,
+        },
+        { exceptEmail: session.user?.email ?? null },
+      );
+    } catch (e) {
+      console.error("[Order] Notif push nouvelle commande échouée (non-fatal):", e);
     }
 
     return NextResponse.json({
