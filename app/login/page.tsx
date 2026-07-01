@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { LoginButton } from "./LoginButton";
 import { Shield, Zap, BarChart2 } from "lucide-react";
 
-export const metadata = { title: "Connexion | TeleVent" };
+export const metadata = { title: "Connexion | Gervi" };
 
 const FEATURES = [
   { icon: Zap,        text: "Suivi appels en temps réel" },
@@ -56,7 +56,7 @@ export default async function LoginPage() {
             </div>
             <div className="text-center">
               <h1 className="text-2xl font-bold text-white tracking-tight">
-                Tele<span className="text-brand-400">Vent</span>
+                Gerv<span className="text-brand-400">i</span>
               </h1>
               <p className="text-white/40 text-sm mt-1">
                 Gestion télévente professionnelle
@@ -90,7 +90,7 @@ export default async function LoginPage() {
 
         {/* Footer */}
         <p className="text-center text-white/20 text-[11px] mt-5">
-          &copy; {new Date().getFullYear()} TeleVent — Tous droits réservés
+          &copy; {new Date().getFullYear()} Gervi — Tous droits réservés
         </p>
       </div>
     </div>

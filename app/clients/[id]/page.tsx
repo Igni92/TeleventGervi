@@ -30,7 +30,7 @@ export async function generateMetadata(props: { params: Promise<{ id: string }> 
     select: { nom: true },
   });
   return {
-    title: client ? `${client.nom} | TeleVent` : "Client | TeleVent",
+    title: client ? `${client.nom} | Gervi` : "Client | Gervi",
   };
 }
 

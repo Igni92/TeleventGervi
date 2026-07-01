@@ -73,7 +73,7 @@ export function MobileTopBar({ className }: { className?: string }) {
 
         {/* Titre de section — tronqué, ne déborde jamais */}
         <span className="min-w-0 flex-1 truncate text-[16px] font-semibold tracking-tight text-foreground">
-          {section ?? "TeleVent"}
+          {section ?? "Gervi"}
         </span>
 
         {/* Voir comme (admin/direction) — icône seule pour préserver la place */}
