@@ -13,12 +13,13 @@ type Logistics = {
   tpsCharg: string | number | null;
 };
 
-/** Formate une valeur d'heure SAP (nombre HHMM « 830 » / « 1730 » ou chaîne « 08:30 »). */
+/** Formate une heure de réception SAP (smallint HHMM : 830 → 08:30, 1730 → 17:30).
+ *  0 (ou négatif) = créneau non renseigné → null. */
 function fmtTime(v: string | number | null): string | null {
   if (v == null || v === "") return null;
-  if (typeof v === "number" || /^\d+$/.test(String(v))) {
+  if (typeof v === "number" || /^-?\d+$/.test(String(v))) {
     const n = Number(v);
-    if (!Number.isFinite(n)) return String(v);
+    if (!Number.isFinite(n) || n <= 0) return null;   // 0 / négatif = non renseigné
     const h = Math.floor(n / 100), m = n % 100;
     if (h > 23 || m > 59) return String(v);
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
@@ -81,7 +82,9 @@ export function ReceptionSlots({ clientId }: { clientId: string }) {
   const s1 = slot(data?.recepDeb1 ?? null, data?.recepFin1 ?? null);
   const s2 = slot(data?.recepDeb2 ?? null, data?.recepFin2 ?? null);
   const lat = num(data?.gpsLat ?? null), lon = num(data?.gpsLon ?? null);
-  const tps = fmtTime(data?.tpsCharg ?? null) ?? (num(data?.tpsCharg ?? null) != null ? `${num(data?.tpsCharg ?? null)} min` : null);
+  // Temps de chargement = un nombre de MINUTES (smallint), pas une heure HHMM.
+  const tpsMin = num(data?.tpsCharg ?? null);
+  const tps = tpsMin != null ? `${tpsMin} min` : null;
   const hasAny = s1 || s2 || (lat != null && lon != null) || tps;
 
   if (!hasAny) {
