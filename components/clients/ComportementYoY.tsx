@@ -63,7 +63,7 @@ export function ComportementYoY({ clientId }: { clientId: string }) {
         <span className="mx-1.5 opacity-50">·</span>
         comparé à la même période <span className="font-mono text-foreground">{data.period.previousYear}</span>
       </p>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <Kpi label="Volume"      curr={data.current.kg}       prev={data.previous.kg}       fmt={formatKg} />
         <Kpi label="CA HT"       curr={data.current.ca}       prev={data.previous.ca}       fmt={FMT_EUR} />
         <Kpi label="Commandes"   curr={data.current.nbOrders} prev={data.previous.nbOrders} fmt={(v) => FMT_NUM(v)} />

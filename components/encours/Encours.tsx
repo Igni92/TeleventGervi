@@ -322,7 +322,7 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
         )}
 
         {/* Résumé paliers (au brut) */}
-        <div className="shrink-0 grid grid-cols-3 gap-2 px-5 py-3 border-b border-border">
+        <div className="shrink-0 grid grid-cols-1 sm:grid-cols-3 gap-2 px-5 py-3 border-b border-border">
           <MiniStat label="Retard 30-45 j" value={eurOrDash(client.b3045)} tone="amber" />
           <MiniStat label="Retard 45-90 j" value={eurOrDash(client.b4590)} tone="rose" />
           <MiniStat label="Retard > 90 j" value={eurOrDash(client.b90)} tone="rose" />

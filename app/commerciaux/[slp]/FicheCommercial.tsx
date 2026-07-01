@@ -114,7 +114,7 @@ export function FicheCommercial({ slp }: { slp: string }) {
             </span>
             <div>
               <p className="kicker mb-0.5">Fiche commercial SAP</p>
-              <h1 className="font-display text-[30px] font-semibold text-foreground tracking-tight leading-none">{displayNameFromSlp(slp) ?? slp}</h1>
+              <h1 className="font-display text-[22px] sm:text-[30px] font-semibold text-foreground tracking-tight leading-none">{displayNameFromSlp(slp) ?? slp}</h1>
             </div>
           </div>
         </div>

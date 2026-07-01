@@ -69,7 +69,7 @@ export function DeliveryAddressForm({ clientId }: { clientId: string }) {
       <div className="space-y-2">
         <Input placeholder="N° et rue" value={a.street} onChange={set("street")} aria-label="Rue" />
         <Input placeholder="Complément (bâtiment, quai, BP…)" value={a.block} onChange={set("block")} aria-label="Complément" />
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <Input placeholder="Code postal" value={a.zipCode} onChange={set("zipCode")} aria-label="Code postal" />
           <Input placeholder="Ville" value={a.city} onChange={set("city")} className="col-span-2" aria-label="Ville" />
         </div>

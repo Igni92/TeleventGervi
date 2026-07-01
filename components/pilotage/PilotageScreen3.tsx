@@ -164,7 +164,7 @@ function TotalsPanel({ data }: { data: ReturnType<typeof useGeoData>["data"] }) 
   const unlocatedPct = t.ca > 0 ? (data.unlocated.ca / t.ca) * 100 : 0;
   return (
     <div className="h-full flex flex-col justify-between">
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {stats.map((s) => (
           <div key={s.label} className="rounded-lg bg-secondary/40 px-2.5 py-2">
             <p className="text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground">{s.label}</p>

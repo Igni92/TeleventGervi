@@ -553,7 +553,7 @@ export function ProductsTable() {
                                 )}
                               </button>
                               {isExpanded && (
-                                <div className="px-4 pb-4 pt-3 bg-secondary/20">
+                                <div className="px-4 pb-4 pt-3 bg-secondary/20 overflow-x-auto">
                                   <BatchList batches={batches[p.id]} product={p} />
                                 </div>
                               )}

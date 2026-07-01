@@ -253,7 +253,7 @@ export function PurchaseOrderHistory() {
 
         {/* Desktop : tableau */}
         {filtered.length > 0 && (
-          <div className="hidden md:block rounded-lg border border-border overflow-hidden">
+          <div className="hidden md:block rounded-lg border border-border overflow-x-auto">
             <table className="w-full text-[13px]">
               <thead className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
                 <tr>

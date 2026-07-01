@@ -163,7 +163,7 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
           )}
 
           {/* Type breakdown */}
-          <div className="flex items-center gap-3 mt-2 text-[11px] text-muted-foreground tnum">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px] text-muted-foreground tnum">
             <span className="font-semibold text-foreground">{counts.ALL}</span>
             <span>clients</span>
             <span className="opacity-30">·</span>

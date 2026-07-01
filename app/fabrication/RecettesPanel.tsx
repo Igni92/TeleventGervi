@@ -294,7 +294,7 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
             {components.length === 0 ? (
               <p className="text-[12.5px] italic text-muted-foreground py-1">Ajoute au moins une famille.</p>
             ) : (
-              <div className="rounded-lg border border-border overflow-hidden">
+              <div className="rounded-lg border border-border overflow-x-auto">
                 <table className="w-full text-[13.5px]">
                   <thead className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
                     <tr>
@@ -343,7 +343,7 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
                 Aucun coût. Ajoute main d&apos;œuvre, emballage, carton… (€ par colis fini).
               </p>
             ) : (
-              <div className="rounded-lg border border-border overflow-hidden">
+              <div className="rounded-lg border border-border overflow-x-auto">
                 <table className="w-full text-[13.5px]">
                   <tbody>
                     {costs.map((c, i) => (
