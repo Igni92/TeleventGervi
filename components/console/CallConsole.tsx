@@ -169,7 +169,9 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
   }, [assignClient]);
 
   const reassignClient = useCallback((client: Client, initials: string) => {
-    assignClient(client, { vendeur: initials, commercial: initials }, `${client.nom} — envoyé à ${displayNameFromSlp(initials) ?? initials}`);
+    // Réassigne UNIQUEMENT le vendeur (télévente) → le client bascule dans la
+    // console du commercial cible. Le « commercial » (account manager) ne bouge pas.
+    assignClient(client, { vendeur: initials }, `${client.nom} — envoyé à ${displayNameFromSlp(initials) ?? initials}`);
   }, [assignClient]);
 
   const allClients = useMemo(
