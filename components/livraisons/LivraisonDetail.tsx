@@ -116,7 +116,7 @@ const SEG_UI: Record<"CHR" | "EXPORT", { label: string; badge: string }> = {
 /* ═════════════════════════════════════════════════════════════
    Composant principal
 ═════════════════════════════════════════════════════════════ */
-export function LivraisonDetail() {
+export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   const [date, setDate] = useState<string>(() => nextDeliveryDate());
   const [data, setData] = useState<ApiResp | null>(null);
   const [loading, setLoading] = useState(true);
@@ -449,7 +449,7 @@ export function LivraisonDetail() {
                 key={key} carrier={c} carriers={carriers} onCarrierChange={changeCarrier} onDateChange={changeDate}
                 tourneesByCode={tourneesByCode} onLoadTournees={loadTournees} onTourneeChange={changeTournee}
                 collapsed={collapsed.has(key)} onToggleCollapse={() => toggleCollapse(key)}
-                onPatchDoc={patchDoc} onReload={() => load()}
+                onPatchDoc={patchDoc} onReload={() => load()} canDispatch={canDispatch}
               />
             );
           })}
@@ -599,7 +599,7 @@ function SummaryRow({ totals, loading }: { totals: Totals; loading: boolean }) {
 function CarrierGroup({
   carrier, carriers, onCarrierChange, onDateChange,
   tourneesByCode, onLoadTournees, onTourneeChange,
-  collapsed, onToggleCollapse, onPatchDoc, onReload,
+  collapsed, onToggleCollapse, onPatchDoc, onReload, canDispatch,
 }: {
   carrier: Carrier;
   carriers: CarrierOption[];
@@ -612,6 +612,7 @@ function CarrierGroup({
   onToggleCollapse: () => void;
   onPatchDoc: (docEntry: number, patch: Partial<Doc>) => void;
   onReload: () => void;
+  canDispatch: boolean;
 }) {
   const unassigned = !carrier.code;
   return (
@@ -661,7 +662,7 @@ function CarrierGroup({
               onCarrierChange={onCarrierChange} onDateChange={onDateChange}
               tournees={d.trspCode ? tourneesByCode[d.trspCode.toUpperCase()] : undefined}
               onLoadTournees={onLoadTournees} onTourneeChange={onTourneeChange}
-              onPatchDoc={onPatchDoc} onReload={onReload}
+              onPatchDoc={onPatchDoc} onReload={onReload} canDispatch={canDispatch}
             />
           ))}
         </ul>
@@ -736,7 +737,7 @@ function Metric({ label, value, className }: { label: string; value: string; cla
    Ligne commande — repliable vers le détail des lignes
 ═════════════════════════════════════════════════════════════ */
 function OrderRow({
-  doc, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange, onPatchDoc, onReload,
+  doc, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange, onPatchDoc, onReload, canDispatch,
 }: {
   doc: Doc;
   carriers: CarrierOption[];
@@ -747,6 +748,7 @@ function OrderRow({
   onTourneeChange: (docEntry: number, trspCode: string, heure: string) => Promise<boolean>;
   onPatchDoc: (docEntry: number, patch: Partial<Doc>) => void;
   onReload: () => void;
+  canDispatch: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [savingCarrier, setSavingCarrier] = useState(false);
@@ -1000,7 +1002,7 @@ function OrderRow({
   // ── Menu contextuel (clic droit sur la ligne) → « Changer le client » ──
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   function onRowContextMenu(e: ReactMouseEvent) {
-    if (!doc.open) return;                                    // re-codage : commande ouverte seulement
+    if (!canDispatch || !doc.open) return;                    // re-codage : commerciaux/admins, commande ouverte
     const el = e.target as HTMLElement;
     if (el.closest("input, select, textarea")) return;        // garde le menu natif dans les champs (copier/coller)
     e.preventDefault();
@@ -1093,8 +1095,9 @@ function OrderRow({
             <span className="hidden sm:inline">· {fmtEur(doc.totalHT)} HT</span>
           </div>
           {/* Changement de transporteur / tournée / réf / date — dispatch (desktop
-              uniquement : sur mobile on garde l'écran focalisé sur la préparation). */}
-          <div className="mt-1.5 hidden md:flex flex-wrap items-center gap-1.5">
+              uniquement + réservé aux commerciaux/admins ; masqué aux préparateurs
+              qui n'ont qu'à préparer, pas à dispatcher). */}
+          <div className={`mt-1.5 ${canDispatch ? "hidden md:flex" : "hidden"} flex-wrap items-center gap-1.5`}>
             <Truck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <div className="relative">
               <select
@@ -1198,7 +1201,7 @@ function OrderRow({
           >
             <Maximize2 className="h-4 w-4" />
           </button>
-          {doc.open && (
+          {canDispatch && doc.open && (
             <button
               type="button"
               onClick={startModif}
