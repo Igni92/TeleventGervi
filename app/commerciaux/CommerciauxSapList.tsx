@@ -4,11 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Loader2, ShieldAlert, Users, ArrowRight, Eye, EyeOff, Target, X, BadgeEuro } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Loader2, ShieldAlert, Users, ArrowRight, ChevronLeft, ChevronRight, Eye, EyeOff, Target, X, BadgeEuro } from "lucide-react";
 import { Sparkline } from "@/components/charts/Sparkline";
 import { displayNameFromSlp } from "@/lib/salespeople";
 import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
 import { isLogisticsPreviewRole, PREVIEW_ROLE_LABELS } from "@/lib/rolePreview";
+import { DUR, EASE } from "@/lib/motion";
 
 /**
  * Liste des commerciaux (rattachés à un compte TeleVent) — activité 12 mois.
@@ -74,6 +76,11 @@ export function CommerciauxSapList() {
   const [error, setError] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [objOpen, setObjOpen] = useState<CommercialSap | null>(null);
+  // Carousel : on affiche UN commercial à la fois (index) et on garde le sens du
+  // dernier déplacement (dir) pour orienter l'animation de glissement.
+  const [index, setIndex] = useState(0);
+  const [dir, setDir] = useState(0);
+  const reduce = useReducedMotion();
 
   const load = useCallback(() => {
     return fetch("/api/commerciaux/sap", { cache: "no-store" })
@@ -90,6 +97,22 @@ export function CommerciauxSapList() {
     if (hideFigures) return; // aperçu terrain : on ne charge même pas les chiffres
     load();
   }, [load, hideFigures]);
+
+  // Navigation clavier ← / → entre commerciaux (inactive si une popup est ouverte
+  // ou si le focus est dans un champ de saisie).
+  const count = data?.length ?? 0;
+  useEffect(() => {
+    if (count < 2) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (objOpen) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); setDir(-1); setIndex((i) => (i - 1 + count) % count); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); setDir(1); setIndex((i) => (i + 1) % count); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [count, objOpen]);
 
   const patchObjectifs = (slp: string, patch: Partial<CommercialSap>) =>
     setData((cur) => (cur ? cur.map((c) => (c.slpName === slp ? { ...c, ...patch } : c)) : cur));
@@ -135,13 +158,67 @@ export function CommerciauxSapList() {
     );
   }
 
+  // Index borné (si la liste rétrécit après un rechargement) + commercial courant.
+  const safeIndex = Math.min(index, data.length - 1);
+  const current = data[safeIndex];
+  const go = (delta: number) => {
+    setDir(delta);
+    setIndex((safeIndex + delta + data.length) % data.length);
+  };
+  const jump = (i: number) => { setDir(i > safeIndex ? 1 : -1); setIndex(i); };
+
+  const slide = {
+    enter: (d: number) => ({ opacity: 0, x: reduce ? 0 : d >= 0 ? 36 : -36 }),
+    center: { opacity: 1, x: 0 },
+    exit: (d: number) => ({ opacity: 0, x: reduce ? 0 : d >= 0 ? -36 : 36 }),
+  };
+
   return (
     <>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {data.map((c) => (
-          <CommercialCard key={c.slpName} c={c} isAdmin={isAdmin} onObjectifs={() => setObjOpen(c)} />
-        ))}
-      </div>
+      {data.length === 1 ? (
+        <CommercialCard c={current} isAdmin={isAdmin} onObjectifs={() => setObjOpen(current)} />
+      ) : (
+        <div className="relative overflow-hidden" role="region" aria-roledescription="carrousel" aria-label="Commerciaux">
+          {/* Flèches latérales (écrans larges) — dans les gouttières de la carte */}
+          <NavArrow dir="prev" onClick={() => go(-1)} className="hidden lg:flex absolute left-2 top-1/2 -translate-y-1/2 z-10" />
+          <NavArrow dir="next" onClick={() => go(1)} className="hidden lg:flex absolute right-2 top-1/2 -translate-y-1/2 z-10" />
+
+          <AnimatePresence initial={false} custom={dir} mode="wait">
+            <motion.div
+              key={current.slpName}
+              custom={dir}
+              variants={slide}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: DUR.base, ease: EASE.out }}
+            >
+              <CommercialCard c={current} isAdmin={isAdmin} onObjectifs={() => setObjOpen(current)} />
+            </motion.div>
+          </AnimatePresence>
+
+          {/* Pager : flèches (mobile) + points cliquables + compteur */}
+          <div className="mt-3 flex items-center justify-center gap-3">
+            <NavArrow dir="prev" onClick={() => go(-1)} small className="lg:hidden" />
+            <div className="flex items-center gap-1.5">
+              {data.map((c, i) => (
+                <button
+                  key={c.slpName}
+                  type="button"
+                  onClick={() => jump(i)}
+                  aria-label={`Voir ${displayNameFromSlp(c.email) ?? localPart(c.email)}`}
+                  aria-current={i === safeIndex}
+                  className={`h-1.5 rounded-full transition-all focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none ${
+                    i === safeIndex ? "w-5 bg-brand-500" : "w-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/50"
+                  }`}
+                />
+              ))}
+            </div>
+            <NavArrow dir="next" onClick={() => go(1)} small className="lg:hidden" />
+            <span className="ml-1 text-[11px] tnum text-muted-foreground">{safeIndex + 1}/{data.length}</span>
+          </div>
+        </div>
+      )}
       {objOpen && (
         <ObjectifModal
           c={data.find((x) => x.slpName === objOpen.slpName) ?? objOpen}
@@ -155,84 +232,89 @@ export function CommerciauxSapList() {
   );
 }
 
-/* ── Carte commercial ──────────────────────────────────────── */
+/* ── Flèche de navigation du carousel ──────────────────────── */
+function NavArrow({ dir, onClick, small = false, className = "" }: { dir: "prev" | "next"; onClick: () => void; small?: boolean; className?: string }) {
+  const Icon = dir === "prev" ? ChevronLeft : ChevronRight;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={dir === "prev" ? "Commercial précédent" : "Commercial suivant"}
+      className={`${small ? "h-8 w-8" : "h-10 w-10"} shrink-0 inline-flex items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:text-foreground hover:border-foreground/30 hover:bg-secondary/60 focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none ${className}`}
+    >
+      <Icon className={small ? "h-4 w-4" : "h-5 w-5"} />
+    </button>
+  );
+}
+
+/* ── Carte commercial (large, une par écran dans le carousel) ─── */
 function CommercialCard({ c, isAdmin, onObjectifs }: { c: CommercialSap; isAdmin: boolean; onObjectifs: () => void }) {
   const pctCa = c.objectifCa > 0 ? Math.round((c.caNetYtd / c.objectifCa) * 100) : null;
   const primePct = Math.round(c.primeRate * 1000) / 10; // 0.05 → 5
   const primeSince = fmtDateShort(c.primeSince);
+  const name = displayNameFromSlp(c.email) ?? localPart(c.email);
   return (
-    <div className="relative bg-card border border-border border-l-4 border-l-brand-500 rounded-xl p-4">
-      <Link
-        href={`/commerciaux/${encodeURIComponent(c.slpName)}`}
-        className="group block hover:opacity-95"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="h-9 w-9 rounded-full bg-gradient-to-br from-brand-500 to-violet-600 flex items-center justify-center text-white text-[12px] font-bold shrink-0">
-              {avatarOf(c.email)}
-            </span>
-            <div className="min-w-0">
-              <p className="text-[14px] font-semibold text-foreground leading-tight truncate" title={c.email}>
-                {displayNameFromSlp(c.email) ?? localPart(c.email)}
-              </p>
-              <p className="text-[10px] text-muted-foreground truncate">{c.email}</p>
-            </div>
-          </div>
-          <ArrowRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-brand-500 group-hover:translate-x-0.5 transition-all shrink-0 mt-1" />
-        </div>
-
-        {/* Ventes SAISIES par lui (vendeur = slpName) */}
-        <div className="mt-3">
-          <p className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground inline-flex items-center gap-1">
-            Ses ventes <span className="font-normal normal-case tracking-normal text-muted-foreground/70">· il a saisi le BL</span>
-          </p>
-          <div className="mt-1 grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-1">
-            <div>
-              <p className="text-[15px] font-bold tnum text-foreground leading-tight">{fmtEur(c.caNetYtd)}</p>
-              <p className="text-[9.5px] text-muted-foreground">CA net YTD</p>
-            </div>
-            <div>
-              <p className="text-[15px] font-bold tnum text-foreground leading-tight">{fmtEur(c.margeBruteYtd)}</p>
-              <p className="text-[9.5px] text-muted-foreground">Marge brute</p>
-            </div>
-            <div>
-              <p className="text-[15px] font-bold tnum text-foreground leading-tight">{fmtKg(c.volumeKgYtd)}</p>
-              <p className="text-[9.5px] text-muted-foreground">Volume BL</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Ventes de SES CLIENTS (portefeuille : Client.commercial = lui) */}
-        <div className="mt-2.5 flex items-center justify-between rounded-lg bg-secondary/40 px-2.5 py-1.5">
-          <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1">
-            <Users className="h-3 w-3" /> Ventes de ses clients
-            <span className="text-muted-foreground/60">· {c.clientsActifs} actifs</span>
-          </span>
-          <span className="text-[13px] font-bold tnum text-foreground">{fmtEur(c.caPortefeuilleYtd)}</span>
-        </div>
-
-        {/* PRIME : taux × marge brute du portefeuille (commandes depuis primeSince) */}
-        <div
-          className="mt-2 flex items-center justify-between rounded-lg bg-emerald-50 dark:bg-emerald-950/30 ring-1 ring-inset ring-emerald-300/50 dark:ring-emerald-500/30 px-2.5 py-1.5"
-          title={`${primePct} % de la marge brute du portefeuille · commandes depuis le ${primeSince} (marge nette transport à venir)`}
+    <div className="relative bg-card border border-border border-l-4 border-l-brand-500 rounded-2xl p-4 sm:p-5 lg:px-14 lg:py-6 overflow-hidden">
+      {/* En-tête : identité (lien fiche) + « Voir comme » (admin) */}
+      <div className="flex items-start justify-between gap-3">
+        <Link
+          href={`/commerciaux/${encodeURIComponent(c.slpName)}`}
+          className="group flex items-center gap-3 min-w-0"
         >
-          <span className="text-[10px] text-emerald-700 dark:text-emerald-300 inline-flex items-center gap-1 min-w-0">
-            <BadgeEuro className="h-3 w-3 shrink-0" /> Prime ({primePct} %)
-            <span className="text-emerald-600/70 dark:text-emerald-400/70 truncate">· marge {fmtEur(c.primeMargeBrute)}</span>
+          <span className="h-12 w-12 rounded-full bg-gradient-to-br from-brand-500 to-violet-600 flex items-center justify-center text-white text-[15px] font-bold shrink-0">
+            {avatarOf(c.email)}
           </span>
-          <span className="text-[14px] font-bold tnum text-emerald-700 dark:text-emerald-300 shrink-0">{fmtEur2(c.prime)}</span>
-        </div>
+          <div className="min-w-0">
+            <p className="text-[18px] font-semibold text-foreground leading-tight truncate inline-flex items-center gap-1.5" title={c.email}>
+              {name}
+              <ArrowRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-brand-500 group-hover:translate-x-0.5 transition-all shrink-0" />
+            </p>
+            <p className="text-[11px] text-muted-foreground truncate">{c.email}</p>
+          </div>
+        </Link>
+        {isAdmin && (
+          <Link
+            href={`/dashboard?as=${encodeURIComponent(c.slpName)}`}
+            title={`Voir le cockpit comme ${localPart(c.email)}`}
+            className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-semibold bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-900/50 transition-colors"
+          >
+            <Eye className="h-3.5 w-3.5" /> Voir comme
+          </Link>
+        )}
+      </div>
 
-        <div className="mt-2.5">
-          <Sparkline data={c.spark} responsive height={28} tone="brand" aria-label={`CA hebdo de ${localPart(c.email)} sur 12 semaines`} />
-          <p className="text-[9px] text-muted-foreground mt-0.5">CA facturé · 12 dernières semaines</p>
-        </div>
-      </Link>
+      {/* Stats : ventes saisies + portefeuille + prime, sur une seule ligne (écrans larges) */}
+      <p className="mt-4 text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground inline-flex items-center gap-1">
+        Ses ventes <span className="font-normal normal-case tracking-normal text-muted-foreground/70">· il a saisi le BL</span>
+      </p>
+      <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+        <Tile value={fmtEur(c.caNetYtd)} label="CA net YTD" />
+        <Tile value={fmtEur(c.margeBruteYtd)} label="Marge brute" />
+        <Tile value={fmtKg(c.volumeKgYtd)} label="Volume BL" />
+        <Tile
+          value={fmtEur(c.caPortefeuilleYtd)}
+          label={`Ventes clients · ${c.clientsActifs} actifs`}
+          icon={Users}
+        />
+        <Tile
+          value={fmtEur2(c.prime)}
+          label={`Prime ${primePct} % · marge ${fmtEur(c.primeMargeBrute)}`}
+          icon={BadgeEuro}
+          tone="emerald"
+          title={`${primePct} % de la marge brute du portefeuille · commandes depuis le ${primeSince} (marge nette transport à venir)`}
+        />
+      </div>
 
-      {/* Objectifs : résumé + bouton popup (hors du <Link>) */}
-      <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-border/60 pt-2">
-        <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.1em] font-semibold text-muted-foreground">
-          <Target className="h-3 w-3" /> Objectif CA
+      {/* Tendance CA — grande sparkline pleine largeur */}
+      <div className="mt-4">
+        <Sparkline data={c.spark} responsive height={56} tone="brand" aria-label={`CA hebdo de ${localPart(c.email)} sur 12 semaines`} />
+        <p className="text-[9.5px] text-muted-foreground mt-1">CA facturé · 12 dernières semaines</p>
+      </div>
+
+      {/* Objectifs : résumé + bouton popup */}
+      <div className="mt-4 flex items-center justify-between gap-2 border-t border-border/60 pt-3">
+        <span className="inline-flex items-center gap-1 text-[10.5px] uppercase tracking-[0.1em] font-semibold text-muted-foreground">
+          <Target className="h-3.5 w-3.5" /> Objectif CA
           {pctCa !== null ? (
             <span className={`ml-1 tnum font-bold normal-case tracking-normal ${pctCa >= 100 ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{pctCa}%</span>
           ) : (
@@ -242,21 +324,41 @@ function CommercialCard({ c, isAdmin, onObjectifs }: { c: CommercialSap; isAdmin
         <button
           type="button"
           onClick={onObjectifs}
-          className="inline-flex items-center gap-1 h-6 px-2 rounded-md text-[10.5px] font-semibold bg-brand-100 dark:bg-brand-950/40 text-brand-700 dark:text-brand-300 hover:bg-brand-200 dark:hover:bg-brand-900/50 transition-colors focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none"
+          className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-semibold bg-brand-100 dark:bg-brand-950/40 text-brand-700 dark:text-brand-300 hover:bg-brand-200 dark:hover:bg-brand-900/50 transition-colors focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none"
         >
-          <Target className="h-3 w-3" /> {isAdmin ? "Gérer les objectifs" : "Objectifs"}
+          <Target className="h-3.5 w-3.5" /> {isAdmin ? "Gérer les objectifs" : "Objectifs"}
         </button>
       </div>
+    </div>
+  );
+}
 
-      {isAdmin && (
-        <Link
-          href={`/dashboard?as=${encodeURIComponent(c.slpName)}`}
-          title={`Voir le cockpit comme ${localPart(c.email)}`}
-          className="absolute top-3 right-3 z-10 inline-flex items-center gap-1 h-6 px-2 rounded-md text-[10px] font-semibold bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-900/50 transition-colors"
-        >
-          <Eye className="h-3 w-3" /> Voir comme
-        </Link>
-      )}
+/* ── Tuile de statistique de la carte large ────────────────── */
+function Tile({
+  value, label, icon: Icon, tone = "default", title,
+}: {
+  value: string;
+  label: string;
+  icon?: typeof Users;
+  tone?: "default" | "emerald";
+  title?: string;
+}) {
+  const emerald = tone === "emerald";
+  return (
+    <div
+      title={title}
+      className={`rounded-xl px-3 py-2.5 ${
+        emerald
+          ? "bg-emerald-50 dark:bg-emerald-950/30 ring-1 ring-inset ring-emerald-300/50 dark:ring-emerald-500/30"
+          : "bg-secondary/40"
+      }`}
+    >
+      <p className={`text-[17px] lg:text-[19px] font-bold tnum leading-tight truncate ${emerald ? "text-emerald-700 dark:text-emerald-300" : "text-foreground"}`}>
+        {value}
+      </p>
+      <p className={`mt-0.5 flex items-center gap-1 text-[9.5px] truncate ${emerald ? "text-emerald-600/80 dark:text-emerald-400/80" : "text-muted-foreground"}`}>
+        {Icon && <Icon className="h-3 w-3 shrink-0" />} <span className="truncate">{label}</span>
+      </p>
     </div>
   );
 }
