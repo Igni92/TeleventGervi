@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { LoginButton } from "./LoginButton";
-import { Phone, Shield, Zap, BarChart2 } from "lucide-react";
+import { Shield, Zap, BarChart2 } from "lucide-react";
 
 export const metadata = { title: "Connexion | TeleVent" };
 
@@ -50,10 +50,9 @@ export default async function LoginPage() {
           {/* Logo */}
           <div className="flex flex-col items-center gap-4 mb-8">
             <div className="relative">
-              <div className="absolute inset-0 rounded-2xl bg-brand-600 blur-xl opacity-40 scale-110" />
-              <div className="relative h-14 w-14 rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center shadow-[0_0_0_1px_rgba(255,255,255,0.1)]">
-                <Phone className="h-6 w-6 text-white" strokeWidth={2} />
-              </div>
+              <div className="absolute inset-0 rounded-full blur-2xl opacity-30 scale-125" style={{ background: "#F4006C" }} />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo-mark.png" alt="Gervi" className="relative h-20 w-20 object-contain drop-shadow-[0_4px_20px_rgba(244,0,108,0.35)]" />
             </div>
             <div className="text-center">
               <h1 className="text-2xl font-bold text-white tracking-tight">
