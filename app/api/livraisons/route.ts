@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
-import { getDeliveryPrepared, getDeliveryPreparedBy, getDeliveryDeparted, getDeliveryDepartedBy, getDeliveryExcluded, getDeliveryPreparer, getDeliveryIncomplete } from "@/lib/inventory";
+import { getDeliveryPrepared, getDeliveryPreparedBy, getDeliveryDeparted, getDeliveryDepartedBy, getDeliveryExcluded, getDeliveryPreparer, getDeliveryIncomplete, getDeliveryWaiting, type DeliveryWaiting } from "@/lib/inventory";
 import { getClientTournees, type ClientTournee } from "@/lib/clientTournee";
 import { getClientTrclCarriers } from "@/lib/clientCarriers";
 
@@ -128,6 +128,8 @@ export async function GET(req: NextRequest) {
     // Préparateur affecté + signalement « incomplète (à reprendre) » par BL.
     const prepByDoc = await getDeliveryPreparer().catch(() => new Map<number, string>());
     const incompleteByDoc = await getDeliveryIncomplete().catch(() => new Map<number, boolean>());
+    // Commandes PARTIELLES « en attente » (manquant à réceptionner) par BL.
+    const waitingByDoc = await getDeliveryWaiting().catch(() => new Map<number, DeliveryWaiting>());
 
     // Type client (GMS / CHR / EXPORT) par CardCode — pour le filtre par segment.
     // Le CardCode d'un BL peut être le code principal OU un code d'adresse de
@@ -224,6 +226,9 @@ export async function GET(req: NextRequest) {
         departedBy: departedByDoc.get(d.DocEntry) ?? null,    // qui a marqué « départ »
         preparer: prepByDoc.get(d.DocEntry) ?? null,          // préparateur affecté (qui a ouvert)
         incomplete: incompleteByDoc.get(d.DocEntry) ?? false, // « à reprendre » — remise sur la file
+        waiting: waitingByDoc.has(d.DocEntry),                // « en attente » — commande partielle
+        waitingBy: waitingByDoc.get(d.DocEntry)?.by ?? null,  // qui a mis en attente
+        waitingMissing: waitingByDoc.get(d.DocEntry)?.missing ?? [], // ItemCode(s) manquants attendus
         // « avoir/exclu » : surcharge manuelle si présente, sinon détecté auto (ci-dessous).
         excluded: avoirByDoc.has(d.DocEntry) ? !!avoirByDoc.get(d.DocEntry) : false,
         lineCount: lines.length,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { setDeliveryPrepared, setDeliveryIncomplete } from "@/lib/inventory";
+import { setDeliveryPrepared, setDeliveryIncomplete, setDeliveryWaiting } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -27,8 +27,12 @@ export async function POST(req: NextRequest) {
 
   try {
     await setDeliveryPrepared(docEntry, prepared, me);
-    // Marquer « faite » lève tout signalement « incomplète — à reprendre ».
-    if (prepared) await setDeliveryIncomplete(docEntry, false);
+    // Marquer « faite » lève tout signalement « incomplète — à reprendre » et
+    // toute mise « en attente » (le manquant a été réceptionné → commande finie).
+    if (prepared) {
+      await setDeliveryIncomplete(docEntry, false);
+      await setDeliveryWaiting(docEntry, false);
+    }
     return NextResponse.json({ ok: true, docEntry, prepared, by: prepared ? me : null });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });

@@ -387,6 +387,66 @@ export async function setDeliveryIncomplete(docEntry: number, incomplete: boolea
   await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
 }
 
+/* ──────────────────── BL « en attente » (commande partielle / manquant) ────────────────────
+ * Une commande PARTIELLEMENT préparée dont il manque un ou plusieurs articles
+ * (« manquants ») est mise EN ATTENTE : on attend la réception du manquant pour
+ * la finir. 4ᵉ état, distinct de « à reprendre » (qui, lui, remet tout sur la
+ * file). Persisté par DocEntry (clé `livattente:<docEntry>`, valeur =
+ * { waiting, at, by, missing[] }). `missing` = ItemCode(s) attendus.
+ */
+const LIV_ATTENTE_PREFIX = "livattente:";
+
+export interface DeliveryWaiting {
+  by: string | null;      // qui a mis la commande en attente
+  missing: string[];      // ItemCode(s) manquants attendus
+  at: string;             // horodatage ISO
+}
+
+/** Map DocEntry → infos d'attente. Présence dans la map = « en attente » ; les
+ *  BL non en attente sont absents (clé supprimée). */
+export async function getDeliveryWaiting(): Promise<Map<number, DeliveryWaiting>> {
+  const m = new Map<number, DeliveryWaiting>();
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_ATTENTE_PREFIX } } });
+    for (const r of rows) {
+      const docEntry = Number(r.key.slice(LIV_ATTENTE_PREFIX.length));
+      if (!Number.isFinite(docEntry)) continue;
+      try {
+        const v = JSON.parse(r.value) as { waiting?: boolean; by?: string | null; missing?: unknown; at?: string };
+        if (!v.waiting) continue;
+        m.set(docEntry, {
+          by: (typeof v.by === "string" && v.by.trim()) ? v.by.trim() : null,
+          missing: Array.isArray(v.missing) ? v.missing.filter((x): x is string => typeof x === "string") : [],
+          at: v.at ?? "",
+        });
+      } catch { /* ignore */ }
+    }
+  } catch { /* table absente → aucune attente */ }
+  return m;
+}
+
+/** Met (waiting=true) ou lève (false) le statut « en attente » d'un BL, avec la
+ *  liste des articles manquants (ItemCode) qu'on attend. */
+export async function setDeliveryWaiting(
+  docEntry: number,
+  waiting: boolean,
+  by?: string | null,
+  missing?: string[],
+): Promise<void> {
+  const key = LIV_ATTENTE_PREFIX + docEntry;
+  if (!waiting) {
+    try { await prisma.appSetting.delete({ where: { key } }); } catch { /* déjà absent */ }
+    return;
+  }
+  const value = JSON.stringify({
+    waiting: true,
+    at: new Date().toISOString(),
+    by: (by && by.trim()) ? by.trim() : null,
+    missing: Array.isArray(missing) ? missing.filter((x) => typeof x === "string").slice(0, 200) : [],
+  });
+  await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+}
+
 /* ──────────────────── BL « avoir / exclu » (déduction 100%) ────────────────────
  * Un BL totalement avoiré (facturé puis avoir total) ou en doublon est marqué
  * MANUELLEMENT « avoir » : il est alors DÉDUIT à 100% des totaux du Détail

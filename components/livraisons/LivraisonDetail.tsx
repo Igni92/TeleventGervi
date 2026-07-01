@@ -7,6 +7,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
   RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw, Pencil,
   Maximize2, UserCheck, Undo2, ListChecks, UserCog, ArrowRight,
+  PauseCircle, PackageSearch,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -63,6 +64,9 @@ interface Doc {
   departedBy?: string | null;  // qui a marqué le « départ »
   preparer?: string | null;    // préparateur affecté (qui a ouvert la commande)
   incomplete?: boolean;        // « à reprendre » — remise sur la file (pas finie)
+  waiting?: boolean;           // « en attente » — commande partielle (manquant à réceptionner)
+  waitingBy?: string | null;   // qui a mis la commande en attente
+  waitingMissing?: string[];   // ItemCode(s) manquants attendus
   excluded: boolean;           // « avoir / exclu » — déduit 100% des totaux
   lineCount: number;
   lines: Line[];
@@ -108,18 +112,21 @@ const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : 
 /* ─────────────────────────────────────────────────────────────
    Onglet d'état — À préparer / Fait / Départ (progression)
 ───────────────────────────────────────────────────────────── */
-type StatusTab = "A_PREPARER" | "FAIT" | "DEPART";
+type StatusTab = "A_PREPARER" | "EN_ATTENTE" | "FAIT" | "DEPART";
 
-/** État courant d'une commande (mutuellement exclusif) : parti > préparé > à préparer. */
-function docStatus(d: { prepared: boolean; departed?: boolean }): StatusTab {
+/** État courant d'une commande (mutuellement exclusif) :
+ *  parti > préparé > en attente > à préparer. */
+function docStatus(d: { prepared: boolean; departed?: boolean; waiting?: boolean }): StatusTab {
   if (d.departed) return "DEPART";
   if (d.prepared) return "FAIT";
+  if (d.waiting) return "EN_ATTENTE";
   return "A_PREPARER";
 }
 
 /** Libellés courts des états — réutilisés par les actions groupées (transporteur). */
 const STATUS_LABEL: Record<StatusTab, string> = {
   A_PREPARER: "À préparer",
+  EN_ATTENTE: "En attente",
   FAIT: "Fait",
   DEPART: "Départ",
 };
@@ -343,8 +350,9 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
       const source = statusTab;
       if (docEntries.length === 0 || source === target) return;
       const patch: Partial<Doc> = {
-        prepared: target !== "A_PREPARER",
+        prepared: target === "FAIT" || target === "DEPART",
         departed: target === "DEPART",
+        waiting: target === "EN_ATTENTE",
       };
       docEntries.forEach((de) => patchDoc(de, patch));
       const post = (url: string, body: Record<string, unknown>) =>
@@ -356,8 +364,14 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
           if (source === "DEPART" && target !== "DEPART") {
             calls.push(post("/api/livraisons/departed", { docEntry: de, departed: false }).then((r) => r.ok).catch(() => false));
           }
+          // Quitter « En attente » : lever d'abord le drapeau d'attente.
+          if (source === "EN_ATTENTE" && target !== "EN_ATTENTE") {
+            calls.push(post("/api/livraisons/waiting", { docEntry: de, waiting: false }).then((r) => r.ok).catch(() => false));
+          }
           if (target === "DEPART") {
             calls.push(post("/api/livraisons/departed", { docEntry: de, departed: true }).then((r) => r.ok).catch(() => false));
+          } else if (target === "EN_ATTENTE") {
+            calls.push(post("/api/livraisons/waiting", { docEntry: de, waiting: true }).then((r) => r.ok).catch(() => false));
           } else {
             calls.push(post("/api/livraisons/prepared", { docEntry: de, prepared: target === "FAIT" }).then((r) => r.ok).catch(() => false));
           }
@@ -393,12 +407,15 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
 
   // Comptes par état (sur l'ensemble, pour les compteurs des onglets).
   const statusCounts = useMemo(() => {
-    let aPreparer = 0, fait = 0, depart = 0;
+    let aPreparer = 0, enAttente = 0, fait = 0, depart = 0;
     if (data) for (const car of data.carriers) for (const d of car.docs) {
       const s = docStatus(d);
-      if (s === "DEPART") depart++; else if (s === "FAIT") fait++; else aPreparer++;
+      if (s === "DEPART") depart++;
+      else if (s === "FAIT") fait++;
+      else if (s === "EN_ATTENTE") enAttente++;
+      else aPreparer++;
     }
-    return { aPreparer, fait, depart };
+    return { aPreparer, enAttente, fait, depart };
   }, [data]);
 
   // Vue filtrée par onglet (À préparer / Fait / Départ) : on recoupe les commandes
@@ -522,6 +539,17 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
               <p className="text-[12.5px] text-muted-foreground mt-1">
                 Aucune commande en attente de préparation.
                 <button onClick={() => setStatusTab("FAIT")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir les commandes faites</button>
+              </p>
+            </>
+          ) : statusTab === "EN_ATTENTE" ? (
+            <>
+              <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-500/12 text-orange-600 dark:text-orange-400 mb-3">
+                <PauseCircle className="h-6 w-6" strokeWidth={1.8} />
+              </span>
+              <p className="text-[14px] font-semibold text-foreground">Aucune commande en attente</p>
+              <p className="text-[12.5px] text-muted-foreground mt-1">
+                Aucune commande partielle en attente d&apos;une réception.
+                <button onClick={() => setStatusTab("A_PREPARER")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir à préparer</button>
               </p>
             </>
           ) : statusTab === "FAIT" ? (
@@ -746,6 +774,8 @@ function CarrierGroup({
   const forward =
     statusTab === "A_PREPARER"
       ? { target: "FAIT" as StatusTab, short: "Fait", long: "Tout marquer fait", Icon: CheckCircle2, cls: "bg-emerald-500 hover:bg-emerald-600 text-white" }
+      : statusTab === "EN_ATTENTE"
+      ? { target: "FAIT" as StatusTab, short: "Reçu", long: "Tout : reçu, fait", Icon: CheckCircle2, cls: "bg-emerald-500 hover:bg-emerald-600 text-white" }
       : statusTab === "FAIT"
       ? { target: "DEPART" as StatusTab, short: "Départ", long: "Tout marquer départ", Icon: Truck, cls: "bg-sky-500 hover:bg-sky-600 text-white" }
       : null;
@@ -905,13 +935,14 @@ function StatusTabs({
   tab, counts, onPick, allCollapsed, onToggleAll,
 }: {
   tab: StatusTab;
-  counts: { aPreparer: number; fait: number; depart: number };
+  counts: { aPreparer: number; enAttente: number; fait: number; depart: number };
   onPick: (t: StatusTab) => void;
   allCollapsed: boolean;
   onToggleAll: () => void;
 }) {
   const tabs: { key: StatusTab; label: string; count: number; icon: typeof Clock; active: string }[] = [
     { key: "A_PREPARER", label: "À préparer", count: counts.aPreparer, icon: Clock,        active: "bg-amber-500 text-white border-amber-500" },
+    { key: "EN_ATTENTE", label: "En attente", count: counts.enAttente, icon: PauseCircle,  active: "bg-orange-500 text-white border-orange-500" },
     { key: "FAIT",       label: "Fait",       count: counts.fait,      icon: CheckCircle2, active: "bg-emerald-500 text-white border-emerald-500" },
     { key: "DEPART",     label: "Départ",     count: counts.depart,    icon: Truck,        active: "bg-sky-500 text-white border-sky-500" },
   ];
@@ -1077,11 +1108,31 @@ function OrderRow({
   // Vérification avant de marquer « faite » (évite les validations par erreur).
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  // ── État « en attente » (commande PARTIELLE) : il manque un ou plusieurs
+  //    articles, on attend leur réception pour finir. Optimiste + persistance.
+  const [waiting, setWaiting] = useState<boolean>(!!doc.waiting);
+  const [waitingBy, setWaitingBy] = useState<string | null>(doc.waitingBy ?? null);
+  const [waitingMissing, setWaitingMissing] = useState<string[]>(doc.waitingMissing ?? []);
+  const [savingWaiting, setSavingWaiting] = useState(false);
+  // Sélection des lignes manquantes dans la vue en grand (ItemCode).
+  const [missingSel, setMissingSel] = useState<Set<string>>(() => new Set(doc.waitingMissing ?? []));
+  // Dialog de gestion d'une commande déjà en attente (réceptionné → finaliser / lever).
+  const [waitingActionOpen, setWaitingActionOpen] = useState(false);
+  // ItemCode → nom d'article (affichage des manquants dans les badges / dialogs).
+  const nameByCode = useMemo(
+    () => new Map(doc.lines.map((l) => [l.itemCode, l.itemName])),
+    [doc.lines],
+  );
+  const missingLabel = (codes: string[]) =>
+    codes.map((c) => nameByCode.get(c) ?? c).join(", ");
+
   async function setPreparedTo(next: boolean) {
     setPrepared(next);
-    if (next) setIncomplete(false);
+    // Marquer « faite » lève « à reprendre » ET « en attente » (le manquant a
+    // été réceptionné → la commande est finie).
+    if (next) { setIncomplete(false); setWaiting(false); }
     // Optimiste : la carte change d'onglet (À préparer ↔ Fait) immédiatement.
-    onPatchDoc(doc.docEntry, { prepared: next, ...(next ? { incomplete: false } : {}) });
+    onPatchDoc(doc.docEntry, { prepared: next, ...(next ? { incomplete: false, waiting: false } : {}) });
     setSavingPrep(true);
     try {
       const res = await fetch("/api/livraisons/prepared", {
@@ -1112,6 +1163,46 @@ function OrderRow({
     if (prepared) setPreparedTo(false);
     else setConfirmOpen(true);
   };
+
+  // Mise EN ATTENTE (commande partielle) ou levée de l'attente. `missing` =
+  // ItemCode(s) manquants attendus (par défaut : la sélection de la vue en grand).
+  async function setWaitingTo(next: boolean, missing?: string[]) {
+    const miss = next ? (missing ?? Array.from(missingSel)) : [];
+    setWaiting(next);
+    setWaitingMissing(miss);
+    // En attente ⇒ ni « faite » ni « partie ».
+    if (next) { setPrepared(false); setDeparted(false); }
+    onPatchDoc(doc.docEntry, { waiting: next, waitingMissing: miss, ...(next ? { prepared: false, departed: false } : {}) });
+    setSavingWaiting(true);
+    try {
+      const res = await fetch("/api/livraisons/waiting", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: doc.docEntry, waiting: next, missing: miss }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || j?.ok === false) {
+        setWaiting(!next);
+        onPatchDoc(doc.docEntry, { waiting: !next });
+        toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement");
+        return;
+      }
+      const by = next ? (j?.by ?? null) : null;
+      setWaitingBy(by);
+      onPatchDoc(doc.docEntry, { waitingBy: by });
+      if (next) {
+        toast.warning(
+          `Commande #${doc.docNum} en attente${miss.length ? ` — manquant : ${missingLabel(miss)}` : ""}`,
+          { description: "Elle repartira dès réception du manquant." },
+        );
+      } else {
+        toast.success(`Attente levée — commande #${doc.docNum} à préparer`);
+      }
+    } catch {
+      setWaiting(!next);
+      onPatchDoc(doc.docEntry, { waiting: !next });
+      toast.error("Échec de l'enregistrement");
+    } finally { setSavingWaiting(false); }
+  }
 
   // Statut « départ » (partie en livraison) — 3ᵉ état. Optimiste + persistance.
   const [departed, setDeparted] = useState<boolean>(!!doc.departed);
@@ -1147,9 +1238,9 @@ function OrderRow({
   }
 
   // Transitions d'état déclenchées depuis le menu contextuel (clic droit).
-  function markAPreparer() { if (departed) setDepartedTo(false); if (prepared) setPreparedTo(false); }
-  function markFait()      { if (departed) setDepartedTo(false); if (!prepared) setPreparedTo(true); }
-  function markDepart()    { if (!departed) setDepartedTo(true); }
+  function markAPreparer() { if (departed) setDepartedTo(false); if (prepared) setPreparedTo(false); if (waiting) setWaitingTo(false); }
+  function markFait()      { if (departed) setDepartedTo(false); if (!prepared) setPreparedTo(true); } // setPreparedTo(true) lève l'attente
+  function markDepart()    { if (waiting) setWaitingTo(false); if (!departed) setDepartedTo(true); }
 
   // Ouvrir la commande en grand → s'affecter comme préparateur (qui clique prépare).
   async function openBig() {
@@ -1316,7 +1407,7 @@ function OrderRow({
     };
   }, [menu]);
 
-  const docStatusOf: StatusTab = departed ? "DEPART" : prepared ? "FAIT" : "A_PREPARER";
+  const docStatusOf: StatusTab = departed ? "DEPART" : prepared ? "FAIT" : waiting ? "EN_ATTENTE" : "A_PREPARER";
 
   return (
     <li>
@@ -1328,25 +1419,29 @@ function OrderRow({
             constant). 3 états : À préparer → Fait → Parti. Clic droit = menu complet. */}
         <button
           type="button"
-          onClick={departed ? () => setDepartedTo(false) : togglePrepared}
-          disabled={savingPrep || savingDepart}
+          onClick={departed ? () => setDepartedTo(false) : waiting ? () => setWaitingActionOpen(true) : togglePrepared}
+          disabled={savingPrep || savingDepart || savingWaiting}
           title={departed
             ? "Commande partie en livraison — cliquer pour la ramener à « fait »"
+            : waiting
+            ? "Commande partielle en attente d'un manquant — cliquer pour gérer (réception / reprise)"
             : prepared ? "Commande préparée (faite) — cliquer pour annuler" : "Marquer la commande comme préparée (faite)"}
-          aria-pressed={prepared || departed}
+          aria-pressed={prepared || departed || waiting}
           className={`inline-flex shrink-0 items-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-[12px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 active:scale-95 ${
             departed
               ? "bg-sky-500 text-white hover:bg-sky-600"
               : prepared
               ? "bg-emerald-500 text-white hover:bg-emerald-600"
+              : waiting
+              ? "bg-orange-500 text-white hover:bg-orange-600"
               : "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-400/50 hover:bg-amber-500/25"
           }`}
         >
-          {(savingPrep || savingDepart)
+          {(savingPrep || savingDepart || savingWaiting)
             ? <Loader2 className="h-4 w-4 animate-spin" />
-            : departed ? <Truck className="h-4 w-4" /> : prepared ? <CheckCircle2 className="h-4 w-4" /> : <Clock className="h-4 w-4" />}
+            : departed ? <Truck className="h-4 w-4" /> : prepared ? <CheckCircle2 className="h-4 w-4" /> : waiting ? <PauseCircle className="h-4 w-4" /> : <Clock className="h-4 w-4" />}
           {/* Libellé visible aussi sur mobile — bouton de préparation lisible et facile à toucher. */}
-          <span>{departed ? "Parti" : prepared ? "Faite" : "À préparer"}</span>
+          <span>{departed ? "Parti" : prepared ? "Faite" : waiting ? "En attente" : "À préparer"}</span>
         </button>
 
         {/* Identité client */}
@@ -1372,6 +1467,13 @@ function OrderRow({
               <span title={departedBy ? `Parti — ${displayPersonName(departedBy)}` : "Partie en livraison"}
                 className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
                 <Truck className="h-3 w-3" /> Parti{departedBy ? ` · ${displayPersonName(departedBy)}` : ""}
+              </span>
+            )}
+            {waiting && !prepared && !departed && (
+              <span
+                title={`Commande partielle en attente d'un manquant${waitingMissing.length ? ` : ${missingLabel(waitingMissing)}` : ""}${waitingBy ? ` — ${displayPersonName(waitingBy)}` : ""}`}
+                className="inline-flex items-center gap-1 rounded-full bg-orange-500/15 text-orange-700 dark:text-orange-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                <PauseCircle className="h-3 w-3" /> En attente{waitingMissing.length ? ` · ${waitingMissing.length} manquant${waitingMissing.length > 1 ? "s" : ""}` : ""}
               </span>
             )}
             {incomplete && (
@@ -1612,23 +1714,76 @@ function OrderRow({
                 <CheckCircle2 className="h-3.5 w-3.5" /> Faite
               </span>
             )}
+            {waiting && !prepared && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/15 text-orange-700 dark:text-orange-300 px-2.5 py-1 text-[12px] font-bold uppercase">
+                <PauseCircle className="h-3.5 w-3.5" /> En attente
+              </span>
+            )}
           </div>
           {doc.comments && <p className="text-[12.5px] italic text-muted-foreground">« {doc.comments} »</p>}
 
-          {/* Lignes en grand : colisage à gauche + tags */}
+          {/* Bandeau « en attente » — commande partielle : rappel des manquants +
+              action de reprise dès la réception (garde le « quoi faire » visible). */}
+          {waiting && !prepared && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-orange-300/60 dark:border-orange-500/30 bg-orange-50 dark:bg-orange-900/15 px-3.5 py-2.5">
+              <PackageSearch className="h-4 w-4 text-orange-600 dark:text-orange-400 shrink-0 mt-0.5" />
+              <p className="text-[12px] text-orange-800 dark:text-orange-300 leading-relaxed">
+                Commande <b>partielle en attente</b> d&apos;une réception.
+                {waitingMissing.length > 0
+                  ? <> Manquant{waitingMissing.length > 1 ? "s" : ""} : <b>{missingLabel(waitingMissing)}</b>.</>
+                  : " Aucun article précisé."}
+                {waitingBy ? <span className="opacity-80"> — mise en attente par {displayPersonName(waitingBy)}.</span> : null}
+              </p>
+            </div>
+          )}
+
+          {/* Lignes en grand : colisage à gauche + tags. Chaque ligne peut être
+              marquée « manquant » (article à réceptionner) → mise en attente. */}
+          {!prepared && (
+            <p className="text-[11.5px] text-muted-foreground -mb-1">
+              Il manque un article ? Marque-le <b>« manquant »</b> puis mets la commande en attente : elle repartira à sa réception.
+            </p>
+          )}
           <ul className="divide-y divide-border/50 rounded-xl border border-border overflow-hidden">
-            {doc.lines.map((l, i) => (
-              <li key={`big-${l.itemCode}-${i}`} className="flex items-center gap-3 px-3 py-2.5">
-                <span className="inline-flex min-w-[44px] items-center justify-center rounded-lg bg-foreground/10 px-2 py-1 text-[18px] font-bold tnum text-foreground shrink-0">
-                  {fmtNum(l.colis)}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[14px] font-semibold text-foreground">{l.itemName}</p>
-                  <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} className="mt-1" />
-                </div>
-                <BrandLogo marque={l.marque} logos={brandLogos} size="lg" className="self-center" zoomable />
-              </li>
-            ))}
+            {doc.lines.map((l, i) => {
+              const isMissing = missingSel.has(l.itemCode);
+              return (
+                <li
+                  key={`big-${l.itemCode}-${i}`}
+                  className={`flex items-center gap-3 px-3 py-2.5 transition-colors ${isMissing ? "bg-orange-50 dark:bg-orange-900/15" : ""}`}
+                >
+                  <span className="inline-flex min-w-[44px] items-center justify-center rounded-lg bg-foreground/10 px-2 py-1 text-[18px] font-bold tnum text-foreground shrink-0">
+                    {fmtNum(l.colis)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-[14px] font-semibold ${isMissing ? "text-orange-800 dark:text-orange-300" : "text-foreground"}`}>{l.itemName}</p>
+                    <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} className="mt-1" />
+                  </div>
+                  {/* Bascule « manquant » — masquée une fois la commande faite. */}
+                  {!prepared && (
+                    <button
+                      type="button"
+                      onClick={() => setMissingSel((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(l.itemCode)) next.delete(l.itemCode); else next.add(l.itemCode);
+                        return next;
+                      })}
+                      aria-pressed={isMissing}
+                      title={isMissing ? "Retirer des manquants" : "Marquer cet article manquant"}
+                      className={`inline-flex shrink-0 items-center gap-1.5 h-9 px-3 rounded-lg text-[12px] font-semibold transition-colors active:scale-95 ${
+                        isMissing
+                          ? "bg-orange-500 text-white hover:bg-orange-600"
+                          : "border border-border text-muted-foreground hover:text-orange-700 dark:hover:text-orange-300 hover:border-orange-300/70 hover:bg-orange-50 dark:hover:bg-orange-900/20"
+                      }`}
+                    >
+                      <PackageX className="h-4 w-4" />
+                      Manquant
+                    </button>
+                  )}
+                  <BrandLogo marque={l.marque} logos={brandLogos} size="lg" className="self-center" zoomable />
+                </li>
+              );
+            })}
           </ul>
 
           {/* Actions de préparation */}
@@ -1639,8 +1794,34 @@ function OrderRow({
               disabled={savingPrep}
               className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[14px] font-semibold disabled:opacity-60"
             >
-              <CheckCircle2 className="h-4 w-4" /> Préparation terminée
+              <CheckCircle2 className="h-4 w-4" /> {waiting ? "Réception arrivée — finaliser" : "Préparation terminée"}
             </button>
+            {/* Commande PARTIELLE → en attente d'un manquant (ou mise à jour des manquants). */}
+            {!prepared && (
+              <button
+                type="button"
+                onClick={() => { setWaitingTo(true, Array.from(missingSel)); setBigOpen(false); }}
+                disabled={savingWaiting}
+                title="Commande partielle : on attend la réception du (des) manquant(s) pour la finir"
+                className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-[14px] font-semibold disabled:opacity-60"
+              >
+                {savingWaiting ? <Loader2 className="h-4 w-4 animate-spin" /> : <PauseCircle className="h-4 w-4" />}
+                {waiting
+                  ? "Mettre à jour l'attente"
+                  : `Mettre en attente${missingSel.size ? ` (${missingSel.size} manquant${missingSel.size > 1 ? "s" : ""})` : ""}`}
+              </button>
+            )}
+            {/* Lever l'attente → la commande retourne « à préparer ». */}
+            {waiting && (
+              <button
+                type="button"
+                onClick={() => { setWaitingTo(false); }}
+                disabled={savingWaiting}
+                className="inline-flex items-center gap-2 h-11 px-5 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-60"
+              >
+                <Undo2 className="h-4 w-4" /> Lever l&apos;attente
+              </button>
+            )}
             <button
               type="button"
               onClick={requeue}
@@ -1687,6 +1868,57 @@ function OrderRow({
               className="inline-flex flex-1 items-center justify-center gap-2 h-11 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[14px] font-semibold disabled:opacity-60"
             >
               <CheckCircle2 className="h-4 w-4" /> Confirmer la préparation
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Gestion d'une commande EN ATTENTE : le manquant est-il réceptionné ?
+          → finaliser (Fait) ; sinon remettre à préparer (lever l'attente). */}
+      <Dialog open={waitingActionOpen} onOpenChange={setWaitingActionOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader className="text-left">
+            <DialogTitle className="flex items-center gap-2 pr-8 text-[16px]">
+              <PauseCircle className="h-5 w-5 text-orange-600 dark:text-orange-400 shrink-0" />
+              Commande en attente
+            </DialogTitle>
+            <DialogDescription className="sr-only">Gérer une commande partielle en attente d&apos;une réception.</DialogDescription>
+          </DialogHeader>
+          <p className="text-[13px] text-muted-foreground">
+            La commande de <b className="text-foreground">{doc.cardName}</b> (BL n°{doc.docNum}) est
+            <b className="text-foreground"> partielle</b> : on attend la réception d&apos;un manquant pour la finir.
+          </p>
+          {waitingMissing.length > 0 && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-orange-300/60 dark:border-orange-500/30 bg-orange-50 dark:bg-orange-900/15 px-3.5 py-2.5">
+              <PackageSearch className="h-4 w-4 text-orange-600 dark:text-orange-400 shrink-0 mt-0.5" />
+              <p className="text-[12px] text-orange-800 dark:text-orange-300 leading-relaxed">
+                Manquant{waitingMissing.length > 1 ? "s" : ""} attendu{waitingMissing.length > 1 ? "s" : ""} : <b>{missingLabel(waitingMissing)}</b>.
+              </p>
+            </div>
+          )}
+          <div className="flex flex-col gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => { setWaitingActionOpen(false); setPreparedTo(true); }}
+              disabled={savingPrep || savingWaiting}
+              className="inline-flex items-center justify-center gap-2 h-11 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[14px] font-semibold disabled:opacity-60"
+            >
+              <CheckCircle2 className="h-4 w-4" /> Réception arrivée — finaliser
+            </button>
+            <button
+              type="button"
+              onClick={() => { setWaitingActionOpen(false); setWaitingTo(false); }}
+              disabled={savingWaiting}
+              className="inline-flex items-center justify-center gap-2 h-11 px-4 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60"
+            >
+              <Undo2 className="h-4 w-4" /> Remettre à préparer
+            </button>
+            <button
+              type="button"
+              onClick={() => setWaitingActionOpen(false)}
+              className="inline-flex items-center justify-center h-9 px-4 rounded-xl text-[13px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Fermer
             </button>
           </div>
         </DialogContent>
@@ -1804,6 +2036,8 @@ function OrderRow({
             {/* Changement d'état — accessible aux préparateurs / livreurs */}
             <MenuItem icon={Clock} accent="text-amber-600 dark:text-amber-400" active={docStatusOf === "A_PREPARER"}
               onClick={() => { setMenu(null); markAPreparer(); }}>À préparer</MenuItem>
+            <MenuItem icon={PauseCircle} accent="text-orange-600 dark:text-orange-400" active={docStatusOf === "EN_ATTENTE"}
+              onClick={() => { setMenu(null); if (waiting) setWaitingActionOpen(true); else openBig(); }}>En attente (manquant)…</MenuItem>
             <MenuItem icon={CheckCircle2} accent="text-emerald-600 dark:text-emerald-400" active={docStatusOf === "FAIT"}
               onClick={() => { setMenu(null); markFait(); }}>Fait</MenuItem>
             <MenuItem icon={Truck} accent="text-sky-600 dark:text-sky-400" active={docStatusOf === "DEPART"}
