@@ -45,7 +45,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { InfoTip } from "@/components/ui/info-tip";
 import { formatDate, formatDateInput, formatRelative } from "@/lib/utils";
@@ -2146,11 +2146,10 @@ function RappelDialog({
             <BellRing className="h-5 w-5 text-brand-600 dark:text-brand-400" />
             Programmer un rappel
           </DialogTitle>
-          {client && (
-            <p className="text-[12.5px] text-muted-foreground mt-1">
-              pour <span className="font-medium text-foreground">{client.nom}</span>
-            </p>
-          )}
+          <DialogDescription className="text-[12.5px] text-muted-foreground mt-1">
+            Choisissez la date et l&apos;heure du rappel
+            {client ? <> pour <span className="font-medium text-foreground">{client.nom}</span></> : null}.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 mt-2">
           <div className="space-y-2">
@@ -2227,9 +2226,9 @@ function ShortcutsDialog({
             <Settings className="h-5 w-5 text-brand-600 dark:text-brand-400" />
             Raccourcis clavier
           </DialogTitle>
-          <p className="text-[12.5px] text-muted-foreground mt-1">
+          <DialogDescription className="text-[12.5px] text-muted-foreground mt-1">
             Clique sur une touche pour la remplacer. Persisté localement.
-          </p>
+          </DialogDescription>
         </DialogHeader>
 
         <ul className="mt-2 divide-y divide-border">

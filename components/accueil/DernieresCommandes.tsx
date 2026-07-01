@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { Boxes, Scale, History, FileText, Loader2, ChevronRight } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ClientLink } from "@/components/ClientLink";
 import { useJson } from "./use-json";
 
@@ -131,6 +131,7 @@ export function DernieresCommandes() {
               Bon de livraison{open?.docNum ? ` N° ${open.docNum}` : ""}
               {open?.status === "bost_Close" && <span className="text-[13px] font-normal text-muted-foreground">· clôturé</span>}
             </DialogTitle>
+            <DialogDescription className="sr-only">Détail des lignes du bon de livraison SAP sélectionné.</DialogDescription>
           </DialogHeader>
 
           {open && (
