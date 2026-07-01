@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { ClientInsights } from "@/lib/insights";
-import { dayOfWeekLabel, summaryRecommendation, hourWindowLabel } from "@/lib/insights";
+import { dayOfWeekLabel, summaryRecommendation, hourWindowLabel, pickupSlotLabel } from "@/lib/insights";
 import { useConsolePrefs, SECTION_LABELS, type SectionId } from "@/lib/useConsolePrefs";
 import {
   useConsoleShortcuts, SHORTCUT_LABELS, displayKey, isBindableKey,
@@ -79,6 +79,11 @@ interface Client {
   ownerAbsent?: boolean;
   /** nb d'incidents ouverts (BL) — affiché dans la file */
   openIncidents?: number;
+  /** Repli cold-start : heure de décroché typique des clients du même type
+   *  (quand ce client n'a pas assez d'historique perso). */
+  fallbackHour?: number | null;
+  /** Tenté aujourd'hui sans décroché (NRP/répondeur) → à re-tenter plus tard. */
+  retryAfterNrp?: boolean;
 }
 interface ConsoleData {
   queue: Client[]; done: Client[];
@@ -157,7 +162,8 @@ export function CallConsole() {
         openIncidents: active.openIncidents ?? null,
         lastOrderDays: active.insights?.lastOrderDays ?? null,
         ordersCount: active.appels.filter((a) => a.type === "COMMANDE").length,
-        medianHour: active.insights?.medianHour
+        medianHour: active.insights?.recommendedHour
+          ?? active.insights?.medianHour
           ?? active.insights?.bestHour?.hour
           ?? null,
         bestDayOfWeek: active.insights?.bestDayOfWeek?.dow ?? null,
@@ -200,9 +206,11 @@ export function CallConsole() {
         }
         case "hour":
         default: {
-          // Sort by optimal call hour (median) — clients without insights go last
-          const ha = a.insights?.medianHour ?? a.insights?.bestHour?.hour ?? 99;
-          const hb = b.insights?.medianHour ?? b.insights?.bestHour?.hour ?? 99;
+          // Tri par heure optimale d'appel : on privilégie l'heure de DÉCROCHÉ
+          // (recommendedHour), avec repli sur l'heure typique du type (cold-start)
+          // pour ne pas reléguer les clients neufs en fin de file.
+          const ha = a.insights?.recommendedHour ?? a.fallbackHour ?? a.insights?.medianHour ?? 99;
+          const hb = b.insights?.recommendedHour ?? b.fallbackHour ?? b.insights?.medianHour ?? 99;
           return ha - hb;
         }
       }
@@ -777,7 +785,12 @@ const QueueRow = React.memo(function QueueRow({
   done,
   onSelect,
 }: { client: Client; active: boolean; done?: boolean; onSelect: (id: string) => void }) {
-  const window = client.insights ? hourWindowLabel(client.insights) : null;
+  // Créneau affiché : décroché perso (hourWindowLabel privilégie bestPickup),
+  // sinon repli sur l'heure typique du type (cold-start).
+  let window = client.insights ? hourWindowLabel(client.insights) : null;
+  if ((!window || window === "—") && client.fallbackHour != null) {
+    window = `~${client.fallbackHour}h`;
+  }
   // Direct line first if available, fallback to standard
   const phone = client.tel2 || client.tel1;
   const isDirect = !!client.tel2;
@@ -833,6 +846,15 @@ const QueueRow = React.memo(function QueueRow({
               title={`${client.openIncidents} incident(s) ouvert(s)`}
             >
               <AlertTriangle className="h-2.5 w-2.5" /> {client.openIncidents}
+            </span>
+          )}
+          {/* Tenté aujourd'hui sans décroché → à re-tenter plus tard (autre créneau). */}
+          {!done && client.retryAfterNrp && (
+            <span
+              className="shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold tracking-wider px-1.5 py-px rounded bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
+              title="Tenté aujourd'hui sans réponse — à retenter plus tard"
+            >
+              <Clock className="h-2.5 w-2.5" /> RETENTER
             </span>
           )}
           {/* Pastille "À relancer" — pas de commande depuis +7j (ou jamais sur la fenêtre).
@@ -967,7 +989,7 @@ function ActiveClient({
   // NB. `stock` a été retiré : la consultation de stock vit sur l'Écran 2.
   const renderers: Record<SectionId, () => React.ReactNode> = {
     insights: () =>
-      client.insights && (client.insights.bestHour || client.insights.bestDayOfWeek || client.insights.medianIntervalDays) ? (
+      client.insights && (client.insights.bestPickup || client.insights.answerRate !== null || client.insights.bestHour || client.insights.bestDayOfWeek || client.insights.medianIntervalDays) ? (
         <InsightsBlock insights={client.insights} {...collapseProps("insights")} />
       ) : null,
 
@@ -1642,9 +1664,25 @@ function InsightsBlock({
 
       {!collapsed && (
       <div className="grid grid-cols-2 gap-x-5 gap-y-3 text-[12px]">
+        {insights.bestPickup && (
+          <Metric
+            label="Décroche le plus"
+            value={pickupSlotLabel(insights.bestPickup)}
+            hint={`${insights.bestPickup.rate}% de décroché · ${insights.bestPickup.attempts} tent.`}
+            info="Créneau où ce client RÉPOND le plus au téléphone (décrochés ÷ tentatives). C'est le meilleur moment pour le joindre — indépendant de l'heure où l'agent saisit."
+          />
+        )}
+        {insights.answerRate !== null && !insights.bestPickup && (
+          <Metric
+            label="Taux de décroché"
+            value={`${insights.answerRate}%`}
+            hint={`${insights.connectedCount}/${insights.attemptsCount} tentatives`}
+            info="Part des appels où quelqu'un a décroché. Un créneau précis apparaîtra dès qu'assez de tentatives seront loggées."
+          />
+        )}
         {insights.bestHour && (
           <Metric
-            label="Meilleure heure"
+            label="Commande le plus"
             value={insights.hourWindow
               ? `${insights.hourWindow.start}h – ${insights.hourWindow.end}h`
               : `${insights.bestHour.hour}h`}
@@ -1664,8 +1702,12 @@ function InsightsBlock({
           <Metric
             label="Fréquence"
             value={`~${insights.medianIntervalDays} j`}
-            hint="entre commandes (médiane)"
-            info="Intervalle médian entre deux commandes successives. La médiane est plus robuste aux écarts ponctuels que la moyenne."
+            hint={
+              insights.cadenceStatus === "overdue" ? "⚠️ en retard sur sa cadence"
+              : insights.cadenceStatus === "due" ? "à commander bientôt"
+              : "entre commandes (médiane)"
+            }
+            info="Intervalle médian entre deux commandes successives. La médiane est plus robuste aux écarts ponctuels que la moyenne. « En retard » = dernière commande au-delà de 1,5× cet intervalle."
           />
         )}
         {insights.conversionRate !== null && (
