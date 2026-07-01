@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   Truck, Boxes, Scale, Users, FileText, Receipt,
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
@@ -866,7 +867,7 @@ function CarrierGroup({
       })}
 
       {/* Menu clic droit (desktop) — état groupé du transporteur */}
-      {menu && (
+      {menu && typeof document !== "undefined" && createPortal(
         <>
           <div
             className="fixed inset-0 z-40"
@@ -888,7 +889,8 @@ function CarrierGroup({
             <MenuItem icon={Truck} accent="text-sky-600 dark:text-sky-400" active={statusTab === "DEPART"}
               onClick={() => { setMenu(null); onBulkStatus(docEntries, "DEPART"); }}>Tout : départ</MenuItem>
           </div>
-        </>
+        </>,
+        document.body,
       )}
 
     </section>
@@ -1775,8 +1777,9 @@ function OrderRow({
         </DialogContent>
       </Dialog>
 
-      {/* Menu contextuel (clic droit sur la ligne) */}
-      {menu && (
+      {/* Menu contextuel (clic droit sur la ligne) — porté dans <body> pour un
+          positionnement fiable (échappe à tout ancêtre transformé). */}
+      {menu && typeof document !== "undefined" && createPortal(
         <>
           <div
             className="fixed inset-0 z-40"
@@ -1804,7 +1807,8 @@ function OrderRow({
             <MenuItem icon={Truck} accent="text-sky-600 dark:text-sky-400" active={docStatusOf === "DEPART"}
               onClick={() => { setMenu(null); markDepart(); }}>Départ</MenuItem>
           </div>
-        </>
+        </>,
+        document.body,
       )}
     </li>
   );
