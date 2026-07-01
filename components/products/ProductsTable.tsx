@@ -940,7 +940,7 @@ function StockUnitModal({
               Par groupe article — le calcul de conversion est appliqué partout.
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Fermer" className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+          <button type="button" onClick={onClose} aria-label="Fermer" className="h-9 w-9 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60">
             <X className="h-4 w-4" />
           </button>
         </div>

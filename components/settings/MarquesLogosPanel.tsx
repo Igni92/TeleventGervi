@@ -162,7 +162,7 @@ export function MarquesLogosPanel() {
                       type="button"
                       onClick={() => pickFor(m.marque)}
                       disabled={busy === m.marque}
-                      className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12px] font-semibold bg-secondary/60 hover:bg-secondary text-foreground disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 h-9 px-2.5 rounded-md text-[12px] font-semibold bg-secondary/60 hover:bg-secondary text-foreground disabled:opacity-50"
                     >
                       {busy === m.marque ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
                       {m.logoUrl ? "Remplacer" : "Logo"}
@@ -173,7 +173,7 @@ export function MarquesLogosPanel() {
                         onClick={() => removeLogo(m.marque)}
                         disabled={busy === m.marque}
                         title="Retirer le logo"
-                        className="h-8 w-8 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 disabled:opacity-50"
+                        className="h-9 w-9 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 disabled:opacity-50"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
