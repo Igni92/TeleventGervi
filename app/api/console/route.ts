@@ -262,9 +262,29 @@ export async function GET() {
   // collègue absent (cf. ownerAbsent ci-dessus, qui implique claimedFrom).
   const toCover = queue.filter((c) => (c as { ownerAbsent?: boolean }).ownerAbsent).length;
 
+  // ── Rappels DUS maintenant (bandeau in-app) ──
+  // Mes rappels planifiés dont l'heure est passée : à traiter tout de suite.
+  // Routés par auteur (createdBy = email de session) — cohérent avec le push.
+  const myEmail = session.user?.email ?? null;
+  const dueRappels = myEmail
+    ? (await prisma.rappel.findMany({
+        where: { statut: "PLANIFIE", createdBy: myEmail, dateRappel: { lte: now } },
+        include: { client: { select: { id: true, nom: true } } },
+        orderBy: { dateRappel: "asc" },
+        take: 50,
+      })).map((r) => ({
+        id: r.id,
+        clientId: r.clientId,
+        clientNom: r.client?.nom ?? "Client",
+        dateRappel: r.dateRappel,
+        note: r.note,
+      }))
+    : [];
+
   return NextResponse.json({
     queue,
     done,
+    dueRappels,
     stats: {
       remaining: queue.length,
       called: calledToday,

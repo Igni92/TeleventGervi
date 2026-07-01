@@ -24,6 +24,7 @@ import { displayNameFromSlp } from "@/lib/salespeople";
 import { loadCallNote, saveCallNote, clearCallNote } from "@/lib/callNoteStorage";
 import { MonitorSmartphone } from "lucide-react";
 import { BLDialog } from "@/components/console/BLDialog";
+import { NotificationsBell } from "@/components/console/NotificationsBell";
 import { SapOrderHistory } from "@/components/console/SapOrderHistory";
 import { SapGroupBadge } from "@/components/clients/SapGroupBadge";
 import {
@@ -85,8 +86,16 @@ interface Client {
   /** Tenté aujourd'hui sans décroché (NRP/répondeur) → à re-tenter plus tard. */
   retryAfterNrp?: boolean;
 }
+interface DueRappel {
+  id: string;
+  clientId: string;
+  clientNom: string;
+  dateRappel: string;
+  note: string | null;
+}
 interface ConsoleData {
   queue: Client[]; done: Client[];
+  dueRappels?: DueRappel[];
   stats: { remaining: number; called: number; commandes: number; demains: number; conversion: number };
   presence?: { present: string[]; absent: string[]; toCover: number };
   me?: { stockSharePct: number };
@@ -382,6 +391,24 @@ export function CallConsole() {
     }
   }, [active, fetchData]);
 
+  /* ── Marque un rappel « fait » (bandeau des rappels dus) ─────────────── */
+  const markRappelDone = useCallback(async (rappelId: string) => {
+    // Retrait optimiste du bandeau.
+    setData((cur) => cur ? { ...cur, dueRappels: (cur.dueRappels ?? []).filter((r) => r.id !== rappelId) } : cur);
+    try {
+      const res = await fetch("/api/reminders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: rappelId, statut: "FAIT" }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Rappel marqué comme fait");
+    } catch {
+      toast.error("Erreur — rappel non mis à jour");
+      fetchData();
+    }
+  }, [fetchData]);
+
   /* ── Keyboard shortcuts (personnalisables — voir useConsoleShortcuts) ── */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -438,16 +465,30 @@ export function CallConsole() {
       {/* ── Top stat strip ─────────────────────────────────── */}
       <div className="shrink-0 flex items-start justify-between gap-4">
         <ConsoleHeader stats={stats} />
-        <button
-          type="button"
-          onClick={() => window.open("/console/ecran2", "televent-ecran2", "width=720,height=900")}
-          title="Ouvre une 2e fenêtre (stock perso + saisie BL) synchronisée — à glisser sur ton 2e écran"
-          className="shrink-0 hidden md:inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-[12px] font-medium text-foreground/80 hover:text-foreground hover:border-brand-400 transition-colors"
-        >
-          <MonitorSmartphone className="h-3.5 w-3.5" />
-          2ᵉ écran
-        </button>
+        <div className="shrink-0 flex items-center gap-2">
+          <NotificationsBell />
+          <button
+            type="button"
+            onClick={() => window.open("/console/ecran2", "televent-ecran2", "width=720,height=900")}
+            title="Ouvre une 2e fenêtre (stock perso + saisie BL) synchronisée — à glisser sur ton 2e écran"
+            className="hidden md:inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-[12px] font-medium text-foreground/80 hover:text-foreground hover:border-brand-400 transition-colors"
+          >
+            <MonitorSmartphone className="h-3.5 w-3.5" />
+            2ᵉ écran
+          </button>
+        </div>
       </div>
+
+      {/* ── Bandeau rappels DUS maintenant ─────────────────── */}
+      {(data?.dueRappels?.length ?? 0) > 0 && (
+        <DueRappelsBanner
+          items={data!.dueRappels!}
+          onOpen={(clientId) => {
+            if (allClients.some((c) => c.id === clientId)) setActiveId(clientId);
+          }}
+          onDone={markRappelDone}
+        />
+      )}
 
       {/* ── Bandeau présence / distribution ────────────────── */}
       {data?.presence && (data.presence.absent.length > 0) && (
@@ -702,6 +743,55 @@ function ConsoleHeader({ stats }: { stats: ConsoleData["stats"] }) {
         />
       </div>
     </header>
+  );
+}
+
+/**
+ * Bandeau « rappels dus maintenant » — surface les Rappel PLANIFIE dont l'heure
+ * est passée, indépendamment du calendrier Outlook. Clic sur le nom = sélectionne
+ * le client dans la file ; « Fait » = clôt le rappel.
+ */
+function DueRappelsBanner({
+  items, onOpen, onDone,
+}: {
+  items: DueRappel[];
+  onOpen: (clientId: string) => void;
+  onDone: (rappelId: string) => void;
+}) {
+  return (
+    <div className="shrink-0 rounded-lg bg-brand-50 dark:bg-brand-950/30 border border-brand-300/60 dark:border-brand-500/40 px-3 py-2.5">
+      <div className="flex items-center gap-2 mb-1.5">
+        <BellRing className="h-4 w-4 text-brand-600 dark:text-brand-400 shrink-0" />
+        <p className="text-[12.5px] font-semibold text-brand-900 dark:text-brand-200">
+          {items.length} rappel{items.length > 1 ? "s" : ""} dû{items.length > 1 ? "s" : ""} maintenant
+        </p>
+      </div>
+      <ul className="space-y-1">
+        {items.slice(0, 6).map((r) => (
+          <li key={r.id} className="flex items-center gap-2 text-[12px]">
+            <button
+              type="button"
+              onClick={() => onOpen(r.clientId)}
+              className="font-medium text-foreground hover:text-brand-600 truncate max-w-[45%] text-left"
+              title="Sélectionner ce client"
+            >
+              {r.clientNom}
+            </button>
+            <span className="text-muted-foreground tnum shrink-0">
+              {new Date(r.dateRappel).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+            </span>
+            {r.note && <span className="text-muted-foreground/80 italic truncate flex-1 min-w-0">— {r.note}</span>}
+            <button
+              type="button"
+              onClick={() => onDone(r.id)}
+              className="ml-auto shrink-0 inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 border border-emerald-400/40"
+            >
+              <CheckCircle2 className="h-3 w-3" /> Fait
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

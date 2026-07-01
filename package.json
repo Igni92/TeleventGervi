@@ -61,12 +61,14 @@
     "sonner": "^1.7.1",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
+    "web-push": "^3.6.7",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
     "autoprefixer": "^10.5.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
@@ -79,17 +81,53 @@
     "vitest": "^4.1.8"
   },
   "overrides": {
-    "@visx/axis": { "react": "$react", "react-dom": "$react-dom" },
-    "@visx/curve": { "react": "$react", "react-dom": "$react-dom" },
-    "@visx/event": { "react": "$react", "react-dom": "$react-dom" },
-    "@visx/geo": { "react": "$react", "react-dom": "$react-dom" },
-    "@visx/gradient": { "react": "$react", "react-dom": "$react-dom" },
-    "@visx/grid": { "react": "$react", "react-dom": "$react-dom" },
-    "@visx/group": { "react": "$react", "react-dom": "$react-dom" },
-    "@visx/responsive": { "react": "$react", "react-dom": "$react-dom" },
-    "@visx/scale": { "react": "$react", "react-dom": "$react-dom" },
-    "@visx/shape": { "react": "$react", "react-dom": "$react-dom" },
-    "@visx/text": { "react": "$react", "react-dom": "$react-dom" },
-    "@visx/tooltip": { "react": "$react", "react-dom": "$react-dom" }
+    "@visx/axis": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    },
+    "@visx/curve": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    },
+    "@visx/event": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    },
+    "@visx/geo": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    },
+    "@visx/gradient": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    },
+    "@visx/grid": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    },
+    "@visx/group": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    },
+    "@visx/responsive": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    },
+    "@visx/scale": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    },
+    "@visx/shape": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    },
+    "@visx/text": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    },
+    "@visx/tooltip": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    }
   }
 }
