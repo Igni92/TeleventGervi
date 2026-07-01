@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
   Truck, Boxes, Scale, Users, FileText, Receipt,
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
@@ -997,9 +997,35 @@ function OrderRow({
     }
   }
 
+  // ── Menu contextuel (clic droit sur la ligne) → « Changer le client » ──
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  function onRowContextMenu(e: ReactMouseEvent) {
+    if (!doc.open) return;                                    // re-codage : commande ouverte seulement
+    const el = e.target as HTMLElement;
+    if (el.closest("input, select, textarea")) return;        // garde le menu natif dans les champs (copier/coller)
+    e.preventDefault();
+    setMenu({ x: Math.min(e.clientX, window.innerWidth - 220), y: Math.min(e.clientY, window.innerHeight - 80) });
+  }
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null); };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [menu]);
+
   return (
     <li>
-      <div className={`flex items-center gap-3 px-4 sm:px-5 py-3 hover:bg-secondary/25 transition-colors ${doc.excluded ? "opacity-50" : ""}`}>
+      <div
+        onContextMenu={onRowContextMenu}
+        className={`flex items-center gap-3 px-4 sm:px-5 py-3 hover:bg-secondary/25 transition-colors ${doc.excluded ? "opacity-50" : ""}`}
+      >
         {/* Bouton d'état — toujours en tête, verticalement centré (placement
             constant, indépendant du retour à la ligne des badges). */}
         <button
@@ -1182,18 +1208,6 @@ function OrderRow({
             >
               {modifBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />}
               <span className="hidden sm:inline">Modifier</span>
-            </button>
-          )}
-          {/* Changer le client (re-coder le BL) — mauvais client validé */}
-          {doc.open && (
-            <button
-              type="button"
-              onClick={() => setRebindOpen(true)}
-              title={`Changer le client du BL #${doc.docNum} (annule et recrée sous un autre code)`}
-              className="hidden md:inline-flex items-center gap-1 h-9 px-2.5 rounded-lg border border-border bg-card text-[12px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
-            >
-              <UserCog className="h-3.5 w-3.5" strokeWidth={2.2} />
-              <span className="hidden sm:inline">Client</span>
             </button>
           )}
           {/* Repli desktop uniquement : sur mobile le contenu est toujours affiché. */}
@@ -1450,6 +1464,32 @@ function OrderRow({
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Menu contextuel (clic droit sur la ligne) */}
+      {menu && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
+          />
+          <div
+            role="menu"
+            className="fixed z-50 min-w-[200px] overflow-hidden rounded-lg border border-border bg-card py-1 shadow-lg animate-fade-up"
+            style={{ top: menu.y, left: menu.x }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => { setMenu(null); setRebindOpen(true); }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-foreground hover:bg-secondary/60"
+            >
+              <UserCog className="h-4 w-4 text-brand-600 dark:text-brand-400 shrink-0" />
+              Changer le client…
+            </button>
+          </div>
+        </>
+      )}
     </li>
   );
 }
