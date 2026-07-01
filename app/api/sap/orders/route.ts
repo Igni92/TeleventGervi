@@ -90,6 +90,10 @@ interface CreateOrderBody {
   // SAP cible est ORDR.U_TrspCode (confirmé par l'utilisateur).
   carrierId?: string;
   carrierCode?: string;
+  // Choix EXPLICITE transporteur + tournée à la création (prioritaire sur le
+  // défaut SERG_TRCL). trspHeure = heure de la tournée ("HH:MM:SS") → U_TrspHeur.
+  trspCode?: string;
+  trspHeure?: string;
   lines: OrderLine[];
 }
 
@@ -408,7 +412,11 @@ export async function POST(req: NextRequest) {
   // pas lisible, on ne pose rien → défaut SAP, ajustable dans « Détail livraison ».
   let trspCode: string | null = null;
   let trspHeure: string | null = null;
-  if (body.carrierId) {
+  if (body.trspCode?.trim()) {
+    // Choix explicite à la création (sélecteur du dialogue BL) — prioritaire.
+    trspCode = body.trspCode.trim();
+    trspHeure = (body.trspHeure ?? "").trim() || null;
+  } else if (body.carrierId) {
     const rows = await prisma.$queryRawUnsafe<{ sapValue: string | null; active: boolean }[]>(
       `SELECT "sapValue", "active" FROM "Carrier" WHERE "id" = $1 LIMIT 1`,
       body.carrierId,

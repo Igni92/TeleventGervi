@@ -126,6 +126,16 @@ const SEG_UI: Record<"CHR" | "EXPORT", { label: string; badge: string }> = {
 /* ═════════════════════════════════════════════════════════════
    Composant principal
 ═════════════════════════════════════════════════════════════ */
+/** Clé + libellé de la TOURNÉE d'une commande (sous-groupe sous le transporteur).
+ *  Nom de tournée réel (SERG_TRCL U_DistBy) si connu, sinon l'heure, sinon « Sans tournée ». */
+function docTourneeKeyLabel(d: Doc): { key: string; label: string } {
+  const nom = (d.savedTournee?.nom ?? "").trim();
+  if (nom) return { key: `T:${nom.toUpperCase()}`, label: nom };
+  const h = (d.trspHeure ?? "").slice(0, 5);
+  if (h) return { key: `H:${h}`, label: `Tournée ${h}` };
+  return { key: "T:__none__", label: "Sans tournée" };
+}
+
 export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   const [date, setDate] = useState<string>(() => nextDeliveryDate());
   const [data, setData] = useState<ApiResp | null>(null);
@@ -316,10 +326,11 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
     );
   }, []);
 
-  // ── Repliage des groupes transporteur (clé = code transporteur) ──
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const toggleCollapse = useCallback((key: string) => {
-    setCollapsed((prev) => {
+  // ── Repliage : on stocke les groupes DÉPLIÉS (défaut = tout replié). Clés =
+  //    code transporteur, et sous-groupes tournée `<transporteur>::<tournée>`.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleKey = useCallback((key: string) => {
+    setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key); else next.add(key);
       return next;
@@ -365,9 +376,20 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
     return { ...data, carriers, totals, count: allDocs.length };
   }, [data, statusTab]);
 
-  const allKeys = useMemo(() => (view?.carriers ?? []).map((c) => c.code ?? "__none__"), [view]);
-  const allCollapsed = allKeys.length > 0 && allKeys.every((k) => collapsed.has(k));
-  const toggleAll = () => setCollapsed(allCollapsed ? new Set() : new Set(allKeys));
+  // Toutes les clés dépliables : transporteurs + sous-groupes tournée.
+  const allKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const c of view?.carriers ?? []) {
+      const ck = c.code ?? "__none__";
+      keys.push(ck);
+      const subs = new Set<string>();
+      for (const d of c.docs) subs.add(docTourneeKeyLabel(d).key);
+      for (const s of subs) keys.push(`${ck}::${s}`);
+    }
+    return keys;
+  }, [view]);
+  const allCollapsed = allKeys.length > 0 && !allKeys.some((k) => expanded.has(k));
+  const toggleAll = () => setExpanded(allCollapsed ? new Set(allKeys) : new Set());
 
   return (
     <div className="space-y-5 animate-fade-up">
@@ -475,9 +497,9 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
             const key = c.code ?? "__none__";
             return (
               <CarrierGroup
-                key={key} carrier={c} carriers={carriers} onCarrierChange={changeCarrier} onDateChange={changeDate}
+                key={key} carrier={c} carrierKey={key} carriers={carriers} onCarrierChange={changeCarrier} onDateChange={changeDate}
                 tourneesByCode={tourneesByCode} onLoadTournees={loadTournees} onTourneeChange={changeTournee}
-                collapsed={collapsed.has(key)} onToggleCollapse={() => toggleCollapse(key)}
+                expanded={expanded} onToggle={toggleKey}
                 onPatchDoc={patchDoc} onReload={() => load()} canDispatch={canDispatch}
               />
             );
@@ -626,31 +648,46 @@ function SummaryRow({ totals, loading }: { totals: Totals; loading: boolean }) {
    Groupe transporteur — en-tête + cartes clients
 ═════════════════════════════════════════════════════════════ */
 function CarrierGroup({
-  carrier, carriers, onCarrierChange, onDateChange,
+  carrier, carrierKey, carriers, onCarrierChange, onDateChange,
   tourneesByCode, onLoadTournees, onTourneeChange,
-  collapsed, onToggleCollapse, onPatchDoc, onReload, canDispatch,
+  expanded, onToggle, onPatchDoc, onReload, canDispatch,
 }: {
   carrier: Carrier;
+  carrierKey: string;
   carriers: CarrierOption[];
   onCarrierChange: (docEntry: number, sapValue: string) => Promise<boolean>;
   onDateChange: (docEntry: number, dueDate: string) => Promise<boolean>;
   tourneesByCode: Record<string, Tournee[]>;
   onLoadTournees: (code: string) => void;
   onTourneeChange: (docEntry: number, trspCode: string, tournee: Tournee | null) => Promise<boolean>;
-  collapsed: boolean;
-  onToggleCollapse: () => void;
+  expanded: Set<string>;
+  onToggle: (key: string) => void;
   onPatchDoc: (docEntry: number, patch: Partial<Doc>) => void;
   onReload: () => void;
   canDispatch: boolean;
 }) {
   const unassigned = !carrier.code;
+  const collapsed = !expanded.has(carrierKey);
+
+  // Sous-groupes par TOURNÉE (Nord, Frévial…) au sein du transporteur.
+  const tourneeGroups = useMemo(() => {
+    const map = new Map<string, { key: string; label: string; docs: Doc[] }>();
+    for (const d of carrier.docs) {
+      const { key, label } = docTourneeKeyLabel(d);
+      const g = map.get(key) ?? { key, label, docs: [] };
+      g.docs.push(d);
+      map.set(key, g);
+    }
+    return [...map.values()].sort((a, b) => b.docs.length - a.docs.length || a.label.localeCompare(b.label, "fr"));
+  }, [carrier.docs]);
+
   return (
     <section className="rounded-2xl border border-border bg-card overflow-hidden">
       {/* En-tête transporteur — cliquable pour replier/déplier le groupe */}
       <div
         role="button" tabIndex={0}
-        onClick={onToggleCollapse}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggleCollapse(); } }}
+        onClick={() => onToggle(carrierKey)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(carrierKey); } }}
         aria-expanded={!collapsed}
         title={collapsed ? "Déplier ce transporteur" : "Replier ce transporteur"}
         className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-border bg-secondary/30 hover:bg-secondary/50 cursor-pointer select-none transition-colors"
@@ -682,20 +719,49 @@ function CarrierGroup({
         </div>
       </div>
 
-      {/* Cartes clients (masquées si le groupe est replié) */}
-      {!collapsed && (
-        <ul className="divide-y divide-border/60">
-          {carrier.docs.map((d) => (
-            <OrderRow
-              key={d.docEntry} doc={d} carriers={carriers}
-              onCarrierChange={onCarrierChange} onDateChange={onDateChange}
-              tournees={d.trspCode ? tourneesByCode[d.trspCode.toUpperCase()] : undefined}
-              onLoadTournees={onLoadTournees} onTourneeChange={onTourneeChange}
-              onPatchDoc={onPatchDoc} onReload={onReload} canDispatch={canDispatch}
-            />
-          ))}
-        </ul>
-      )}
+      {/* Sous-groupes TOURNÉE (masqués si le transporteur est replié) */}
+      {!collapsed && tourneeGroups.map((tg) => {
+        const subKey = `${carrierKey}::${tg.key}`;
+        const subCollapsed = !expanded.has(subKey);
+        return (
+          <div key={subKey}>
+            {/* Sous-en-tête tournée — cliquable */}
+            <div
+              role="button" tabIndex={0}
+              onClick={() => onToggle(subKey)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(subKey); } }}
+              aria-expanded={!subCollapsed}
+              title={subCollapsed ? "Déplier cette tournée" : "Replier cette tournée"}
+              className="flex items-center justify-between gap-3 pl-8 sm:pl-11 pr-4 sm:pr-5 py-2 border-b border-border/60 bg-secondary/15 hover:bg-secondary/30 cursor-pointer select-none transition-colors"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform duration-200 ${subCollapsed ? "-rotate-90" : ""}`} />
+                <span className="text-[9px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">Tournée</span>
+                <span className="text-[13px] font-semibold text-foreground truncate">{tg.label}</span>
+              </div>
+              <div className="flex items-center gap-4 sm:gap-6 shrink-0 text-right">
+                <Metric label="Cmd." value={fmtInt(tg.docs.length)} />
+                <Metric label="Colis" value={fmtNum(tg.docs.reduce((s, d) => s + d.colis, 0))} />
+                <Metric label="kg" value={fmtNum(tg.docs.reduce((s, d) => s + d.weightKg, 0))} className="hidden sm:block" />
+              </div>
+            </div>
+            {/* Commandes de la tournée */}
+            {!subCollapsed && (
+              <ul className="divide-y divide-border/60">
+                {tg.docs.map((d) => (
+                  <OrderRow
+                    key={d.docEntry} doc={d} carriers={carriers}
+                    onCarrierChange={onCarrierChange} onDateChange={onDateChange}
+                    tournees={d.trspCode ? tourneesByCode[d.trspCode.toUpperCase()] : undefined}
+                    onLoadTournees={onLoadTournees} onTourneeChange={onTourneeChange}
+                    onPatchDoc={onPatchDoc} onReload={onReload} canDispatch={canDispatch}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
     </section>
   );
 }
