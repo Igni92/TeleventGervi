@@ -24,6 +24,15 @@ export const SETTING_KEYS = {
    * exactement la même clé/valeur, donc rien à migrer.
    */
   density: "televente:ecran2Density",
+  /**
+   * Zoom d'affichage GLOBAL de l'app — CONFORT VISUEL (accessibilité Direction).
+   * Valeurs : "100" | "110" | "125" | "140" (pourcentage). Pilote la variable CSS
+   * `--app-zoom` sur <html>, consommée par `.app-zoom-root` (cf. globals.css +
+   * app/layout.tsx). "100" = défaut, aucun zoom. Contrairement à la densité (qui
+   * ne joue que sur l'air/rem), le zoom agrandit TOUT — texte figé en px compris —
+   * exactement comme un zoom navigateur : c'est le levier « je n'y vois rien ».
+   */
+  uiZoom: "televente:uiZoom",
   /** animation/rotation auto du bandeau promos : "on" | "off" (défaut on) */
   promoBannerAnim: "televente:promoBannerAnim",
   /** modale « Nouvelles promotions » à l'ouverture : "on" | "off" (défaut on) */
@@ -54,8 +63,35 @@ export const SETTING_KEYS = {
   hoverContrast: "televente:hoverContrast",
 } as const;
 
-/** Valeur de contraste de survol par défaut (en %, 0–100). */
+/** Valeur de contraste de survol par défaut (en %). */
 export const HOVER_CONTRAST_DEFAULT = 60;
+/**
+ * Plafond du contraste de survol (en %). Relevé de 100 → 200 : la surbrillance
+ * est désormais TEINTÉE MARQUE (cf. globals.css) et non plus une simple opacité
+ * du gris `--secondary` quasi invisible — au-delà de 100 % elle continue de se
+ * renforcer, pour les postes/utilisateurs à faible acuité visuelle (Direction).
+ */
+export const HOVER_CONTRAST_MAX = 200;
+
+/** Paliers de zoom d'interface proposés (en %). "100" = aucun zoom (défaut). */
+export const UI_ZOOM_VALUES = ["100", "110", "125", "140"] as const;
+export type UiZoomValue = (typeof UI_ZOOM_VALUES)[number];
+export const UI_ZOOM_DEFAULT: UiZoomValue = "100";
+
+/**
+ * Applique le zoom d'interface : pose (ou retire) la variable CSS `--app-zoom`
+ * sur <html>, consommée par `.app-zoom-root`. Une valeur inconnue retombe sur
+ * 100 % (aucun zoom). Robuste côté serveur (no-op si `document` absent).
+ */
+export function applyUiZoom(pct: string | null): void {
+  if (typeof document === "undefined") return;
+  const r = document.documentElement;
+  const v: UiZoomValue = UI_ZOOM_VALUES.includes(pct as UiZoomValue)
+    ? (pct as UiZoomValue)
+    : UI_ZOOM_DEFAULT;
+  if (v === UI_ZOOM_DEFAULT) r.style.removeProperty("--app-zoom");
+  else r.style.setProperty("--app-zoom", String(Number(v) / 100));
+}
 
 /**
  * Clé localStorage du contraste de survol POUR UN UTILISATEUR donné. On
@@ -80,7 +116,7 @@ export function applyHoverContrast(pct: number | null): void {
     r.style.removeProperty("--hover-contrast");
     return;
   }
-  const clamped = Math.max(0, Math.min(100, pct));
+  const clamped = Math.max(0, Math.min(HOVER_CONTRAST_MAX, pct));
   r.style.setProperty("--hover-contrast", String(clamped / 100));
   r.setAttribute("data-hover-contrast", "1");
 }
