@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { isAgreeur, requirePreparateurOrAdmin } from "@/lib/permissions";
 import { PurchaseOrderHistory } from "@/components/entrees/PurchaseOrderHistory";
 import { PurchaseOrderForm } from "@/components/entrees/PurchaseOrderForm";
 
@@ -9,6 +10,10 @@ export const dynamic = "force-dynamic";
 export default async function CommandesFournisseursPage() {
   const session = await auth();
   if (!session) redirect("/login");
+  // L'AGRÉEUR « pur » (sans rôle de gestion) ne peut PAS créer de commande
+  // fournisseur : on masque le formulaire de création. Il conserve l'historique
+  // et l'action « Réceptionner → entrée marchandise » (son seul droit).
+  const agreeurOnly = (await isAgreeur(session)) && !(await requirePreparateurOrAdmin(session));
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-up">
       <div>
@@ -22,7 +27,7 @@ export default async function CommandesFournisseursPage() {
           l&apos;entrée marchandise correspondante et clôture la commande.
         </p>
       </div>
-      <PurchaseOrderForm />
+      {!agreeurOnly && <PurchaseOrderForm />}
       <PurchaseOrderHistory />
     </div>
   );

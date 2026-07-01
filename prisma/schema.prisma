@@ -64,6 +64,12 @@ model User {
   // en base depuis Effectifs. Accédé en raw SQL (colonne hors client typé tant que
   // generate n'est pas relancé). Cf. lib/permissions.isLivreur.
   isLivreur     Boolean    @default(false)
+  // Rôle AGRÉEUR — droit UNIQUE de « passer » une commande fournisseur en entrée
+  // marchandise (réception d'une commande → PurchaseDeliveryNote), MAIS ne peut
+  // créer NI une commande fournisseur NI une entrée marchandise. Désigné en base
+  // depuis Effectifs. Accédé en raw SQL (colonne hors client typé tant que generate
+  // n'est pas relancé). Cf. lib/permissions.isAgreeur / requireCanReceivePurchaseOrder.
+  isAgreeur     Boolean    @default(false)
   accounts      Account[]
   sessions      Session[]
   presences     Presence[]
