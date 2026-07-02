@@ -32,7 +32,7 @@ import {
  *   ACCUEIL     — hub principal (badge notifications non lues, refresh ~60 s)
  *   OPÉRATIONS  — le quotidien télévente : Console, Plan d'appel, Clients
  *   LOGISTIQUE  — Stock, Entrées (badge incidents ouverts), Fabrication
- *   PILOTAGE    — Stats, Encours, Effectifs
+ *   PILOTAGE    — Statistiques, Encours clients, Équipe commerciale
  *   SYSTÈME     — Paramètres
  *   (footer)    — bascule SAP, colorimétrie, thème, compte
  *
@@ -68,10 +68,10 @@ const GROUPS: { label: string | null; items: NavItem[]; collapsible?: boolean }[
     // Cœur télévente — le quotidien, toujours visible (televent first).
     label: "Télévente",
     items: [
-      { href: "/console", label: "Console", icon: Radio },
+      { href: "/console", label: "Console d'appels", icon: Radio },
       { href: "/plan-appel", label: "Plan d'appel", icon: ClipboardList },
       { href: "/clients", label: "Clients", icon: Users },
-      { href: "/livraisons", label: "Détail livraison", icon: Truck },
+      { href: "/livraisons", label: "Préparation livraisons", icon: Truck },
     ],
   },
   {
@@ -79,7 +79,7 @@ const GROUPS: { label: string | null; items: NavItem[]; collapsible?: boolean }[
     label: "Stock & stats",
     items: [
       { href: "/products", label: "Stock", icon: Package },
-      { href: "/dashboard", label: "Stats", icon: LayoutDashboard },
+      { href: "/dashboard", label: "Statistiques", icon: LayoutDashboard },
     ],
   },
   {
@@ -88,12 +88,12 @@ const GROUPS: { label: string | null; items: NavItem[]; collapsible?: boolean }[
     label: "Gestion",
     collapsible: true,
     items: [
-      { href: "/entrees", label: "Entrées", icon: PackagePlus, badge: "receptionIncidents" },
-      { href: "/commandes-fournisseurs", label: "Cmd. fourn.", icon: PackageCheck, badge: "commandesDue" },
+      { href: "/entrees", label: "Entrées marchandises", icon: PackagePlus, badge: "receptionIncidents" },
+      { href: "/commandes-fournisseurs", label: "Commandes fournisseurs", icon: PackageCheck, badge: "commandesDue" },
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },
       { href: "/fabrication", label: "Fabrication", icon: Factory },
-      { href: "/encours", label: "Encours", icon: Receipt },
-      { href: "/commerciaux", label: "Effectifs", icon: Briefcase },
+      { href: "/encours", label: "Encours clients", icon: Receipt },
+      { href: "/commerciaux", label: "Équipe commerciale", icon: Briefcase },
     ],
   },
   {
