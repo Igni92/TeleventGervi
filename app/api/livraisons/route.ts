@@ -13,6 +13,32 @@ import { isLivreur } from "@/lib/permissions";
 export const dynamic = "force-dynamic";
 
 /**
+ * ISO local de la PRISE de la commande dans le système (création SAP) :
+ * CreationDate (jour) + CreationTime/DocTime — « 10:48:00 », « 1048 » ou 1048
+ * selon la version du Service Layer. Sans heure exploitable → null (une date
+ * seule n'apporte rien à l'affichage « Prise · HH:MM »).
+ */
+function sapCreationISO(date?: string, time?: string | number | null): string | null {
+  const day = (date ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  let hh: number, mm: number;
+  const t = time ?? "";
+  if (typeof t === "string" && /^\d{1,2}:\d{2}/.test(t)) {
+    const [h, m] = t.split(":");
+    hh = Number(h); mm = Number(m);
+  } else if (String(t).trim() !== "" && Number.isFinite(Number(t))) {
+    const n = Number(t);
+    hh = Math.floor(n / 100); mm = n % 100;
+  } else {
+    return null;
+  }
+  if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh > 23 || mm > 59) return null;
+  const p = (x: number) => String(x).padStart(2, "0");
+  // ISO SANS fuseau : l'heure SAP est locale (entrepôt) — new Date() la lit telle quelle.
+  return `${day}T${p(hh)}:${p(mm)}:00`;
+}
+
+/**
  * GET /api/livraisons?date=YYYY-MM-DD
  *
  * « Détail livraison » — toutes les commandes SAP (Sales Orders) dont la date
@@ -62,6 +88,9 @@ export async function GET(req: NextRequest) {
     NumAtCard?: string;
     U_TrspCode?: string;
     U_TrspHeur?: string;
+    CreationDate?: string;
+    CreationTime?: string | number;
+    DocTime?: string | number;
     DocumentLines?: ListedLine[];
   };
 
@@ -70,20 +99,27 @@ export async function GET(req: NextRequest) {
     "DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,VatSum,DocumentStatus,Cancelled,Comments,NumAtCard,DocumentLines";
 
   try {
-    // U_TrspCode (transporteur) est un champ custom : on l'inclut, mais on
-    // retombe sur le select de base si le Service Layer le refuse (DB sans ce
-    // champ) — la livraison reste lisible, simplement « Non affecté ».
-    let orders: SapOrderListed[];
-    try {
-      orders = await sap.getAll<SapOrderListed>(
-        `Orders?$select=${BASE_SELECT},U_TrspCode,U_TrspHeur&$filter=${filter}&$orderby=CardName asc`,
-        { pageSize: 200, maxPages: 20 },
-      );
-    } catch {
-      orders = await sap.getAll<SapOrderListed>(
-        `Orders?$select=${BASE_SELECT}&$filter=${filter}&$orderby=CardName asc`,
-        { pageSize: 200, maxPages: 20 },
-      );
+    // Champs FACULTATIFS selon la version du Service Layer : U_TrspCode/U_TrspHeur
+    // (champs custom) et l'heure de PRISE de la commande (CreationTime, sinon
+    // DocTime). On tente du plus riche au plus pauvre — la livraison reste
+    // lisible sans ces champs (« Non affecté », pas d'heure de prise).
+    const EXTRA_SELECTS = [
+      ",U_TrspCode,U_TrspHeur,CreationDate,CreationTime",
+      ",U_TrspCode,U_TrspHeur,CreationDate,DocTime",
+      ",U_TrspCode,U_TrspHeur",
+      "",
+    ];
+    let orders: SapOrderListed[] = [];
+    for (let i = 0; i < EXTRA_SELECTS.length; i++) {
+      try {
+        orders = await sap.getAll<SapOrderListed>(
+          `Orders?$select=${BASE_SELECT}${EXTRA_SELECTS[i]}&$filter=${filter}&$orderby=CardName asc`,
+          { pageSize: 200, maxPages: 20 },
+        );
+        break;
+      } catch (e) {
+        if (i === EXTRA_SELECTS.length - 1) throw e;   // plus aucun repli → vraie erreur
+      }
     }
 
     const live = orders.filter((o) => o.Cancelled !== "tYES");
@@ -254,6 +290,8 @@ export async function GET(req: NextRequest) {
         docNum: d.DocNum,
         docDate: d.DocDate,
         dueDate: d.DocDueDate,
+        // Heure de PRISE de la commande dans le système (création SAP).
+        takenAt: sapCreationISO(d.CreationDate, d.CreationTime ?? d.DocTime),
         cardCode: d.CardCode,
         cardName: d.CardName ?? d.CardCode,
         // Nom complet (fiche client) pour les documents imprimés.

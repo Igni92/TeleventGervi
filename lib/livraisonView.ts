@@ -33,6 +33,7 @@ export interface Doc {
   docNum: number;
   docDate: string;
   dueDate: string;
+  takenAt?: string | null;     // heure de PRISE de la commande (création SAP)
   cardCode: string;
   cardName: string;
   cardFullName?: string;       // nom COMPLET (fiche client) pour les documents imprimés
