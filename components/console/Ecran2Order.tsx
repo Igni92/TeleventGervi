@@ -889,77 +889,80 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   }, [grouped, favorites, favGroups]);
 
   return (
-    <div className="flex flex-col h-full min-h-0 gap-2">
+    <div className="flex flex-col h-full min-h-0 gap-1.5">
       {/* ── C2 — Bandeau promotions (contenu/visibilité gérés par le composant) ── */}
       <PromoBanner context="commande" />
 
-      {/* ── Bandeau HAUT discret : contexte de modification + n° de commande
-             (réf. client) + texte sur le BL — création ET modification. Sorti du
-             panier pour ne plus encombrer la zone de saisie des lignes. ── */}
+      {/* ── Bandeau HAUT ultra-compact (une seule ligne, hauteur mini) : contexte
+             de modification + n° de commande (réf. client) + texte sur le BL —
+             création ET modification. Chaque pixel vertical gagné revient à la
+             liste produits. ── */}
       <div
-        className={`shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border px-2.5 py-1.5 ${
+        className={`shrink-0 flex items-center gap-x-2 rounded-md border px-2 py-1 ${
           modif
             ? "border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15"
             : "border-border bg-card"
         }`}
       >
         {modif && (
-          <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-amber-800 dark:text-amber-200 shrink-0">
-            <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />
-            Modification du BL #{modif.docNum}
+          <span
+            className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-amber-800 dark:text-amber-200 shrink-0"
+            title={`Modification du BL #${modif.docNum} — modifie, supprime ou ajoute des lignes, enregistré sur ce même BL${
+              modifMeta?.dueDate ? ` · livraison ${new Date(modifMeta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}` : ""}`}
+          >
+            <Pencil className="h-3 w-3" strokeWidth={2.2} />
+            BL #{modif.docNum}
             {modifMeta?.dueDate && (
-              <span className="font-normal text-amber-700/80 dark:text-amber-300/80">
-                · livraison {new Date(modifMeta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}
+              <span className="font-normal text-amber-700/80 dark:text-amber-300/80 hidden xl:inline">
+                · {new Date(modifMeta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}
               </span>
             )}
-            {prefilling && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {prefilling && <Loader2 className="h-3 w-3 animate-spin" />}
           </span>
         )}
         {modif && modifMeta?.editable === false && (
-          <span className="text-[11px] font-medium text-rose-600 dark:text-rose-400 shrink-0">
-            ⚠️ Commande clôturée — la modification sera refusée par SAP.
+          <span className="text-[10.5px] font-medium text-rose-600 dark:text-rose-400 shrink-0" title="Commande clôturée — la modification sera refusée par SAP.">
+            ⚠️ clôturée
           </span>
         )}
-        <div className="flex items-center gap-2 flex-1 min-w-[280px]">
-          <input
-            value={numAtCard}
-            onChange={(e) => setNumAtCard(e.target.value)}
-            placeholder="N° de commande (réf. client)"
-            aria-label="N° de commande (réf. client)"
-            className="h-8 w-[190px] rounded-md border border-border bg-background text-[12.5px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500"
-          />
-          <input
-            value={comments}
-            onChange={(e) => setComments(e.target.value)}
-            maxLength={254}
-            placeholder="Texte sur le BL (note, promo…)"
-            aria-label="Ligne texte sur le BL"
-            title="Ligne texte du BL (colonne « T » dans SAP) — note / promo"
-            className="h-8 flex-1 min-w-[160px] rounded-md border border-border bg-background text-[12.5px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500"
-          />
-          {cart.some((l) => l.promo) && (
-            <button
-              type="button"
-              onClick={() => setComments((c) => {
-                const t = buildPromoComment();
-                if (!t) return c;
-                return c.trim() ? `${c.trim()} · ${t}` : t;
-              })}
-              title="Insérer le récap des promos du panier dans le texte du BL"
-              className="inline-flex items-center gap-1 shrink-0 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline"
-            >
-              <Megaphone className="h-3 w-3" /> Texte promo
-            </button>
-          )}
-        </div>
+        <input
+          value={numAtCard}
+          onChange={(e) => setNumAtCard(e.target.value)}
+          placeholder="N° de commande (réf. client)"
+          aria-label="N° de commande (réf. client)"
+          className="h-[26px] w-[170px] rounded border border-border bg-background text-[12px] px-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
+        />
+        <input
+          value={comments}
+          onChange={(e) => setComments(e.target.value)}
+          maxLength={254}
+          placeholder="Texte sur le BL (note, promo…)"
+          aria-label="Ligne texte sur le BL"
+          title="Ligne texte du BL (colonne « T » dans SAP) — note / promo"
+          className="h-[26px] flex-1 min-w-[120px] rounded border border-border bg-background text-[12px] px-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
+        />
+        {cart.some((l) => l.promo) && (
+          <button
+            type="button"
+            onClick={() => setComments((c) => {
+              const t = buildPromoComment();
+              if (!t) return c;
+              return c.trim() ? `${c.trim()} · ${t}` : t;
+            })}
+            title="Insérer le récap des promos du panier dans le texte du BL"
+            className="inline-flex items-center gap-1 shrink-0 text-[10.5px] font-semibold text-rose-600 dark:text-rose-400 hover:underline"
+          >
+            <Megaphone className="h-3 w-3" /> Promo
+          </button>
+        )}
         {modif && onExitModif && (
           <button
             type="button"
             onClick={onExitModif}
             title="Quitter la modification et revenir à la saisie normale (synchro écran 1)"
-            className="inline-flex shrink-0 items-center gap-1.5 h-8 px-3 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-[12px] font-semibold active:scale-[0.98] transition-colors"
+            className="inline-flex shrink-0 items-center gap-1 h-[26px] px-2 rounded bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-semibold active:scale-[0.98] transition-colors"
           >
-            <X className="h-3.5 w-3.5" /> Quitter la modification
+            <X className="h-3 w-3" /> Quitter
           </button>
         )}
       </div>
