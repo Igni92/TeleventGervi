@@ -227,10 +227,27 @@ export async function GET(req: NextRequest) {
           pays: p?.uPays ?? null,
         };
       });
-      const colis = lines.reduce((s, l) => s + l.colisRaw, 0);
-      const weightKg = lines.reduce((s, l) => s + l.weightRaw, 0);
+      // Fusion des lignes d'un MÊME article (ex. ligne gratuite en plus de la
+      // ligne facturée) : le préparateur ne voit qu'UNE ligne, quantités et
+      // colis cumulés. Les sommations restent sur les valeurs brutes ;
+      // l'arrondi 0,1 par ligne est recalculé APRÈS fusion.
+      const mergedByItem = new Map<string, (typeof lines)[number]>();
+      for (const l of lines) {
+        const g = mergedByItem.get(l.itemCode);
+        if (!g) { mergedByItem.set(l.itemCode, { ...l }); continue; }
+        g.quantity += l.quantity;
+        g.colisRaw += l.colisRaw;
+        g.weightRaw += l.weightRaw;
+      }
+      const mergedLines = [...mergedByItem.values()].map((l) => ({
+        ...l,
+        colis: Math.round(l.colisRaw * 10) / 10,
+        weightKg: Math.round(l.weightRaw * 10) / 10,
+      }));
+      const colis = mergedLines.reduce((s, l) => s + l.colisRaw, 0);
+      const weightKg = mergedLines.reduce((s, l) => s + l.weightRaw, 0);
       // Lignes émises SANS les champs bruts (sommation serveur uniquement).
-      const outLines = lines.map(({ colisRaw: _c, weightRaw: _w, ...rest }) => rest);
+      const outLines = mergedLines.map(({ colisRaw: _c, weightRaw: _w, ...rest }) => rest);
       const trspCode = d.U_TrspCode?.trim() || null;
       return {
         docEntry: d.DocEntry,
