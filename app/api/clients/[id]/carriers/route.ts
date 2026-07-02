@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { getClientCarriers } from "@/lib/clientCarriers";
+import { getClientTournee } from "@/lib/clientTournee";
 
 /**
  * GET /api/clients/[id]/carriers
@@ -16,6 +17,9 @@ import { getClientCarriers } from "@/lib/clientCarriers";
  *   - triés par count desc ; defaultId = le plus utilisé
  *   - client sans historique → carriers: [] + defaultId: null
  *     (le front retombe alors sur la liste complète /api/carriers)
+ *   - ADDITIF : `savedTournee` = tournée MÉMORISÉE du client (lib/clientTournee,
+ *     alimentée par « Détail livraison » et la création de bon) — sert à
+ *     pré-sélectionner la tournée par défaut à la création (useTourneeSelection).
  *
  * Cache : lib/clientCarriers.ts garde un cache module-level 10 min par CardCode.
  */
@@ -33,13 +37,16 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
   if (!client) return NextResponse.json({ error: "Client introuvable" }, { status: 404 });
   if (!client.code) return NextResponse.json({ carriers: [], defaultId: null });
 
+  // Tournée mémorisée (additif, best-effort) — pré-sélection du défaut au front.
+  const savedTournee = await getClientTournee(client.code).catch(() => null);
+
   try {
     const result = await getClientCarriers(client.code);
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, savedTournee });
   } catch (e) {
     // Résilience : SAP indisponible → contrat respecté avec liste vide, le front
     // retombe sur la liste complète. On log côté serveur pour diagnostic.
     console.warn(`[clients/${params.id}/carriers] Historique SAP indisponible:`, (e as Error).message);
-    return NextResponse.json({ carriers: [], defaultId: null });
+    return NextResponse.json({ carriers: [], defaultId: null, savedTournee });
   }
 }

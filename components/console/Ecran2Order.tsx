@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { PromoBanner } from "@/components/promos/PromoBanner";
 import { BrandLogo } from "@/components/BrandLogo";
 import { useBrandLogos } from "@/lib/useBrandLogos";
+import { useTourneeSelection } from "@/lib/useTourneeSelection";
 
 interface StockEntry { available: number }
 interface Product {
@@ -63,8 +64,6 @@ interface CartLine {
   } | null;
 }
 interface DeliveryMode { id: string; name: string; sapCardCode: string; isDefault: boolean }
-// B3 — `count` présent quand la liste vient de /api/clients/[id]/carriers (nb de cdes)
-interface Carrier { id: string; name: string; count?: number }
 
 /* ── C2 — Helpers promo (purs) ─────────────────────────────── */
 
@@ -268,9 +267,14 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   const [numAtCard, setNumAtCard] = useState("");
   const [modes, setModes] = useState<DeliveryMode[]>([]);
   const [modeId, setModeId] = useState("");
-  // C11/B3 — transporteur (ORDR.U_TrspCode). Liste filtrée par client si dispo.
-  const [carriers, setCarriers] = useState<Carrier[]>([]);
-  const [carrierId, setCarrierId] = useState("");
+  // C11/B3 — transporteur + TOURNÉE (ORDR.U_TrspCode / U_TrspHeur), OBLIGATOIRES
+  // sur le bon. Pré-remplis automatiquement avec le défaut du client (SERG_TRCL
+  // → mémoire app → tournée unique) — l'utilisateur ne change que par exception.
+  const {
+    carriers, carrierSap, setCarrierSap,
+    tournees, tourneeId, setTourneeId,
+    validateTournee, tourneePayload,
+  } = useTourneeSelection(clientId);
   const [submitting, setSubmitting] = useState(false);
   // #12 — quantités déjà confirmées (par itemCode) : évite de re-demander une
   // confirmation à CHAQUE frappe une fois que l'utilisateur a validé le gros volume.
@@ -349,36 +353,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     }).catch(() => {});
   }, [clientId]);
 
-  // ── B3 — Transporteurs filtrés par client ──
-  // /api/clients/[id]/carriers renvoie les transporteurs réellement utilisés par
-  // ce client (+ defaultId présélectionné). Liste vide ou erreur → fallback sur
-  // la liste complète /api/carriers (comportement historique), sans présélection.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch(`/api/clients/${clientId}/carriers`);
-        if (r.ok) {
-          const d = await r.json();
-          const list: Carrier[] = d?.carriers ?? [];
-          if (list.length > 0) {
-            if (cancelled) return;
-            setCarriers(list);
-            const def = typeof d?.defaultId === "string" && list.some((c) => c.id === d.defaultId)
-              ? d.defaultId : "";
-            setCarrierId(def);
-            return;
-          }
-        }
-      } catch { /* fallback liste complète ci-dessous */ }
-      try {
-        const r = await fetch(`/api/carriers`);
-        const d = await r.json();
-        if (!cancelled) { setCarriers(d.carriers ?? []); setCarrierId(""); }
-      } catch { if (!cancelled) setCarriers([]); }
-    })();
-    return () => { cancelled = true; };
-  }, [clientId]);
+  // (B3 — transporteurs filtrés par client + tournée : déplacé dans
+  //  useTourneeSelection, partagé avec BLDialog. Défaut client pré-sélectionné.)
 
   // ── C1 — Favoris (chargés une fois, propres à l'utilisateur connecté) ──
   useEffect(() => {
@@ -670,7 +646,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         clientId, deliveryModeId: modeId || undefined,
-        carrierId: carrierId || undefined,
+        // Transporteur + tournée EXPLICITES (trspCode/trspHeure/tournee) —
+        // toujours présents (validés avant l'envoi), mémorisés côté serveur.
+        ...(tourneePayload() ?? {}),
         deliveryDate: new Date(deliveryDate).toISOString(),
         numAtCard: numAtCard.trim() || undefined, confirmEncours, lines: apiLines,
         comments: buildPromoComment(),   // undefined → champ omis (pas de promo)
@@ -835,6 +813,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     }
 
     if (cart.length === 0) { toast.error("Panier vide"); return; }
+    // Garde-fou TOURNÉE : un bon ne part jamais sans transporteur + tournée
+    // (pré-remplis avec le défaut client — l'erreur ne sort que par exception).
+    const tourneeError = validateTournee();
+    if (tourneeError) { toast.error(tourneeError); return; }
     setSubmitting(true);
     try {
       const apiLines = buildApiLines();
@@ -1373,19 +1355,51 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                   {modes.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.sapCardCode})</option>)}
                 </select>
               )}
-              {carriers.length > 0 && (
-                <select value={carrierId} onChange={(e) => setCarrierId(e.target.value)}
-                  aria-label="Transporteur"
-                  className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2">
-                  <option value="">Transporteur — non précisé</option>
-                  {/* B3 — count présent quand la liste est filtrée par client (habitudes) */}
-                  {carriers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      🚚 {c.name}{c.count ? ` · ${c.count} cde${c.count > 1 ? "s" : ""}` : ""}
-                    </option>
-                  ))}
-                </select>
-              )}
+              {/* Transporteur + TOURNÉE — obligatoires sur le bon, pré-remplis avec
+                  le défaut du client. Bordure ambre tant qu'un choix manque. */}
+              {(() => {
+                const needsTournee = !!carrierSap && tournees !== undefined && tournees.some((t) => t.heure);
+                const missingCarrier = !carrierSap;
+                const missingTournee = needsTournee && !tourneeId;
+                const warnCls = "border-amber-400/70 bg-amber-50/50 dark:bg-amber-950/20";
+                return (
+                  <div className="flex gap-1.5">
+                    <select value={carrierSap} onChange={(e) => setCarrierSap(e.target.value)}
+                      aria-label="Transporteur"
+                      title="Transporteur du bon (défaut du client pré-sélectionné)"
+                      className={`min-w-0 flex-1 h-9 rounded-md border bg-background text-[13.5px] px-2 ${
+                        missingCarrier ? warnCls : "border-border"}`}>
+                      <option value="" disabled>🚚 Transporteur…</option>
+                      {/* B3 — count présent quand la liste est filtrée par client (habitudes) */}
+                      {carriers.map((c) => (
+                        <option key={c.id} value={c.sapValue}>
+                          🚚 {c.name}{c.count ? ` · ${c.count} cde${c.count > 1 ? "s" : ""}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <select value={tourneeId} onChange={(e) => setTourneeId(e.target.value)}
+                      disabled={!carrierSap || tournees === undefined || (tournees !== undefined && !needsTournee)}
+                      aria-label="Tournée"
+                      title={!carrierSap ? "Choisis d'abord le transporteur"
+                        : tournees === undefined ? "Chargement des tournées…"
+                        : needsTournee ? "Tournée du bon (fixe l'heure, mémorisée pour le client)"
+                        : "Aucune tournée définie pour ce transporteur"}
+                      className={`min-w-0 flex-1 h-9 rounded-md border bg-background text-[13.5px] px-2 disabled:opacity-60 ${
+                        missingTournee ? warnCls : "border-border"}`}>
+                      <option value="" disabled>
+                        {!carrierSap ? "Tournée…"
+                          : tournees === undefined ? "Chargement…"
+                          : needsTournee ? "Tournée…" : "Aucune tournée définie"}
+                      </option>
+                      {(tournees ?? []).filter((t) => t.heure).map((t) => (
+                        <option key={t.lineId} value={String(t.lineId)}>
+                          {t.nom}{t.des ? ` (${t.des})` : ""} — {(t.heure as string).slice(0, 5)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })()}
               <div className="flex gap-1.5">
                 <input type="datetime-local" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)}
                   className="flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2" />

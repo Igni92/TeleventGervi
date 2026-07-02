@@ -5,7 +5,7 @@ import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { getTrclDefaultCarrier, getTrclCarrierHeure } from "@/lib/clientCarriers";
 import { getTransporteurTimbre } from "@/lib/transporteurs";
-import { getClientTournee } from "@/lib/clientTournee";
+import { getClientTournee, setClientTournee } from "@/lib/clientTournee";
 import { notifyAll } from "@/lib/push";
 import { sap } from "@/lib/sapb1";
 import { mirrorCreatedOrder } from "@/lib/sapMirror";
@@ -95,6 +95,9 @@ interface CreateOrderBody {
   // défaut SERG_TRCL). trspHeure = heure de la tournée ("HH:MM:SS") → U_TrspHeur.
   trspCode?: string;
   trspHeure?: string;
+  // Détails de la tournée choisie → mémorisés pour ce client au succès
+  // (auto-remplissage des prochaines créations — miroir du PATCH [docEntry]).
+  tournee?: { nom?: string | null; des?: string | null; lineId?: number | null };
   lines: OrderLine[];
 }
 
@@ -554,6 +557,28 @@ export async function POST(req: NextRequest) {
     const created = await sap.post<SapOrder>("/Orders", payload);
 
     console.log("[Order] ✅ SUCCESS — DocNum:", created.DocNum, "| DocEntry:", created.DocEntry, "| Total:", created.DocTotal);
+
+    // Mémorise (best-effort) la tournée CHOISIE à la création pour ce client —
+    // même mécanique que le PATCH « Détail livraison » : ré-appliquée en
+    // auto-remplissage aux prochaines commandes. Uniquement sur choix EXPLICITE
+    // (body.trspCode, envoyé par les sélecteurs de création) — jamais sur les
+    // défauts résolus serveur (ils re-dériveront de la même source la prochaine fois).
+    // Condition body.tournee : on n'enregistre QUE si une VRAIE tournée a été
+    // retenue — sinon on n'écrase pas une mémoire plus riche (nom/des/lineId
+    // posés par « Détail livraison ») avec des null.
+    if (body.trspCode?.trim() && body.tournee) {
+      try {
+        await setClientTournee(cardCode, {
+          trspCode: body.trspCode.trim(),
+          heure: trspHeure,
+          nom: body.tournee.nom ?? null,
+          des: body.tournee.des ?? null,
+          lineId: body.tournee.lineId ?? null,
+        });
+      } catch (e) {
+        console.warn(`[Order] Mémorisation tournée ${cardCode} échouée (non-bloquant):`, (e as Error).message);
+      }
+    }
 
     // Décrément optimiste local — latence 0 pour le commercial. La sync delta
     // corrigera au tick suivant si besoin (SAP est source de vérité).
