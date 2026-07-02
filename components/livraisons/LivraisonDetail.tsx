@@ -24,7 +24,8 @@ import {
 // Types (miroir de /api/livraisons) + logique de vue pure (testée à part).
 import {
   docStatus, computeStatusCounts, computeView, docTourneeKeyLabel, STATUS_LABEL,
-  type StatusTab, type Tournee, type Doc, type Carrier, type Totals, type ApiResp,
+  filterBySegment, computeSegmentCounts, SEGMENT_LABEL,
+  type StatusTab, type SegmentTab, type Tournee, type Doc, type Carrier, type Totals, type ApiResp,
 } from "@/lib/livraisonView";
 import { printOrderRecap } from "./printRecap";
 import { renderBonTransport } from "@/lib/bonTransport";
@@ -67,11 +68,12 @@ const fmtClock = (iso: string | null | undefined): string | null => {
  *  stock SAP négatif — achat à prévoir). */
 type ViewTab = StatusTab | "MANQUANTS";
 
-/** Badge de ligne par segment client (conservé pour CHR / EXPORT, le tag GMS
- *  n'étant plus affiché — la distinction utile est désormais À préparer / Fait). */
-const SEG_UI: Record<"CHR" | "EXPORT", { label: string; badge: string }> = {
+/** Badge de ligne par segment client (CHR / EXPORT / GMS) — repère visuel du
+ *  segment, en cohérence avec le filtre Tout / CHR / Export / GMS. */
+const SEG_UI: Record<"CHR" | "EXPORT" | "GMS", { label: string; badge: string }> = {
   CHR:    { label: "CHR",    badge: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" },
   EXPORT: { label: "Export", badge: "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" },
+  GMS:    { label: "GMS",    badge: "bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300" },
 };
 
 /* ═════════════════════════════════════════════════════════════
@@ -275,6 +277,10 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   //    « Manquants » (vue transverse des articles en stock SAP négatif) ──
   const [statusTab, setStatusTab] = useState<ViewTab>("A_PREPARER");
 
+  // ── Filtre par SEGMENT client : Tout / CHR / Export / GMS — recoupe TOUTES
+  //    les données en amont des onglets d'état (compteurs, vue, manquants). ──
+  const [segment, setSegment] = useState<SegmentTab>("TOUT");
+
   // Mise à jour optimiste d'UNE commande dans `data` (statut « faite », auteur,
   // « à reprendre »…) → la carte change d'onglet sans recharger toute la liste.
   const patchDoc = useCallback((docEntry: number, patch: Partial<Doc>) => {
@@ -386,29 +392,36 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
     return { ...data, carriers };
   }, [data, query]);
 
-  // Comptes par onglet (sur le résultat de recherche) — « Manquants » compte les
+  // Commandes recoupées par le filtre SEGMENT (appliqué APRÈS la recherche) —
+  // base de TOUT ce qui suit (compteurs d'état, vue, synthèse des manquants).
+  const segCarriers = useMemo(
+    () => filterBySegment(filteredData?.carriers ?? [], segment),
+    [filteredData, segment],
+  );
+  // Comptes du filtre segment — sur le résultat de recherche NON recoupé par
+  // segment (chaque pastille affiche son volume quel que soit le segment actif).
+  const segCounts = useMemo(() => computeSegmentCounts(filteredData?.carriers ?? []), [filteredData]);
+
+  // Comptes par onglet (sur recherche + segment actif) — « Manquants » compte les
   // commandes ayant au moins un article signalé. Logique pure dans lib/livraisonView.
-  const statusCounts = useMemo(
-    () => computeStatusCounts(filteredData?.carriers ?? []),
-    [filteredData],
-  );
+  const statusCounts = useMemo(() => computeStatusCounts(segCarriers), [segCarriers]);
 
-  // Vue filtrée par onglet : par état d'avancement (À préparer / Fait / Départ)
-  // ou par présence de manquants (onglet « Manquants », tous états confondus).
-  // Métriques recalculées (groupes + bandeau) — les BL « avoir / exclu » restent
-  // listés mais sont déduits, comme au serveur.
+  // Vue filtrée par recherche + segment + onglet : par état d'avancement
+  // (À préparer / Fait / Départ) ou par présence de manquants (onglet
+  // « Manquants », tous états confondus). Métriques recalculées (groupes +
+  // bandeau) — les BL « avoir / exclu » restent listés mais sont déduits.
   const view = useMemo(
-    () => (filteredData ? { ...filteredData, ...computeView(filteredData, statusTab) } : null),
-    [filteredData, statusTab],
+    () => (filteredData ? { ...filteredData, ...computeView({ carriers: segCarriers }, statusTab) } : null),
+    [filteredData, segCarriers, statusTab],
   );
 
-  // Synthèse des MANQUANTS par article (toutes commandes du jour confondues) :
+  // Synthèse des MANQUANTS par article (commandes du segment actif) :
   // stock SAP négatif + quantités/colis commandés + nb de commandes touchées.
   // Alimente l'encart de l'onglet « Manquants » (les achats à faire).
   const missingSummary = useMemo(() => {
     if (!data) return [];
     const byItem = new Map<string, { itemCode: string; itemName: string; stock: number | null; colis: number; quantity: number; docs: number }>();
-    for (const car of data.carriers) for (const d of car.docs) {
+    for (const car of segCarriers) for (const d of car.docs) {
       const codes = new Set(d.missingItems ?? []);
       if (codes.size === 0) continue;
       for (const l of d.lines) {
@@ -425,7 +438,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
       }
     }
     return [...byItem.values()].sort((a, b) => (a.stock ?? 0) - (b.stock ?? 0) || a.itemName.localeCompare(b.itemName, "fr"));
-  }, [data]);
+  }, [data, segCarriers]);
 
   // Toutes les clés dépliables : transporteurs + sous-groupes tournée.
   const allKeys = useMemo(() => {
@@ -486,7 +499,12 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
         onReport={() => setDate(nextWorkingDeliveryDay(date))}
       />
 
-      {/* ── Bandeau de synthèse (reflète l'onglet À préparer / Fait) ── */}
+      {/* ── Filtre segment client : Tout / CHR / Export / GMS ── */}
+      {data && data.count > 0 && (
+        <SegmentTabs segment={segment} counts={segCounts} onPick={setSegment} />
+      )}
+
+      {/* ── Bandeau de synthèse (reflète le segment + l'onglet À préparer / Fait) ── */}
       {view?.totals && <SummaryRow totals={view.totals} loading={loading} showRevenue={canDispatch} />}
 
       {/* ── Onglets À préparer / Fait + recherche d'un bon + repliage global ── */}
@@ -517,6 +535,17 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
         <LoadingState />
       ) : data && data.count === 0 ? (
         <EmptyState date={date} />
+      ) : data && !searching && segment !== "TOUT" && segCarriers.length === 0 ? (
+        <div className="flex flex-col items-center justify-center text-center rounded-2xl border border-dashed border-border bg-card py-12 px-6">
+          <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-secondary text-muted-foreground mb-3">
+            <Users className="h-6 w-6" strokeWidth={1.8} />
+          </span>
+          <p className="text-[14px] font-semibold text-foreground">Aucune commande {SEGMENT_LABEL[segment]}</p>
+          <p className="text-[12.5px] text-muted-foreground mt-1">
+            Aucun client {SEGMENT_LABEL[segment]} n&apos;est livré ce jour-là.
+            <button onClick={() => setSegment("TOUT")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir toutes les commandes</button>
+          </p>
+        </div>
       ) : view && view.count === 0 ? (
         <div className="flex flex-col items-center justify-center text-center rounded-2xl border border-dashed border-border bg-card py-12 px-6">
           {searching ? (
@@ -1246,6 +1275,51 @@ function BonTransportActions({
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/* ═════════════════════════════════════════════════════════════
+   Filtre segment client — Tout / CHR / Export / GMS
+═════════════════════════════════════════════════════════════ */
+function SegmentTabs({
+  segment, counts, onPick,
+}: {
+  segment: SegmentTab;
+  counts: Record<SegmentTab, number>;
+  onPick: (s: SegmentTab) => void;
+}) {
+  // Couleurs actives alignées sur les badges de ligne (SEG_UI).
+  const tabs: { key: SegmentTab; active: string }[] = [
+    { key: "TOUT",   active: "bg-brand-600 text-white border-brand-600" },
+    { key: "CHR",    active: "bg-amber-500 text-white border-amber-500" },
+    { key: "EXPORT", active: "bg-violet-500 text-white border-violet-500" },
+    { key: "GMS",    active: "bg-teal-500 text-white border-teal-500" },
+  ];
+  return (
+    <div className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card p-1 flex-wrap">
+      <span className="hidden sm:inline-flex items-center gap-1 pl-2 pr-1 text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
+        <Users className="h-3 w-3" /> Clients
+      </span>
+      {tabs.map((t) => {
+        const isActive = segment === t.key;
+        return (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => onPick(t.key)}
+            aria-pressed={isActive}
+            className={`inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg border text-[12.5px] font-semibold transition-colors ${
+              isActive ? t.active : "border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+            }`}
+          >
+            {SEGMENT_LABEL[t.key]}
+            <span className={`tnum text-[11px] font-bold ${isActive ? "opacity-90" : "opacity-60"}`}>
+              {counts[t.key]}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

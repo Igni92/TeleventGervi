@@ -4,6 +4,8 @@ import {
   computeStatusCounts,
   computeView,
   docTourneeKeyLabel,
+  filterBySegment,
+  computeSegmentCounts,
   type Doc,
   type Carrier,
   type Tournee,
@@ -138,6 +140,41 @@ describe("livraisonView — computeView (exclusion des BL avoirés)", () => {
     expect(v.totals.colis).toBe(0.3);
     expect(v.totals.weightKg).toBe(0.3);
     expect(v.totals.totalHT).toBe(0.33);
+  });
+});
+
+describe("livraisonView — filtre segment (Tout / CHR / Export / GMS)", () => {
+  const carriers = [
+    carrier([
+      doc({ docEntry: 1, clientType: "GMS" }),
+      doc({ docEntry: 2, clientType: "CHR" }),
+      doc({ docEntry: 3, clientType: null }),                              // client sans segment
+    ]),
+    carrier(
+      [
+        doc({ docEntry: 4, clientType: "EXPORT" }),
+        doc({ docEntry: 5, clientType: "CHR", excluded: true }),           // exclu → listé mais non compté
+      ],
+      { code: "DELANCHY", name: "Delanchy" },
+    ),
+  ];
+
+  it("TOUT ne filtre rien (clients sans segment inclus)", () => {
+    expect(filterBySegment(carriers, "TOUT")).toBe(carriers);
+  });
+
+  it("filtre par segment et retire les transporteurs vides", () => {
+    const chr = filterBySegment(carriers, "CHR");
+    expect(chr.flatMap((c) => c.docs.map((d) => d.docEntry))).toEqual([2, 5]);
+    const exp = filterBySegment(carriers, "EXPORT");
+    expect(exp.map((c) => c.code)).toEqual(["DELANCHY"]);
+    expect(exp[0].docs.map((d) => d.docEntry)).toEqual([4]);
+    const gms = filterBySegment(carriers, "GMS");
+    expect(gms.flatMap((c) => c.docs.map((d) => d.docEntry))).toEqual([1]);
+  });
+
+  it("compte par segment sans les BL exclus — TOUT inclut les sans-segment", () => {
+    expect(computeSegmentCounts(carriers)).toEqual({ TOUT: 4, CHR: 1, EXPORT: 1, GMS: 1 });
   });
 });
 

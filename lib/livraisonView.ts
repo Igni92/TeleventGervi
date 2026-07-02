@@ -134,6 +134,42 @@ export function computeStatusCounts(carriers: Carrier[]): { aPreparer: number; f
   return { aPreparer, fait, depart, manquants };
 }
 
+/* ─────────────────────── Filtre par segment client ────────────────────────── */
+
+/** Filtres de segment client : « TOUT » (y compris les clients sans segment)
+ *  ou un segment précis (CHR / EXPORT / GMS). */
+export type SegmentTab = "TOUT" | "CHR" | "EXPORT" | "GMS";
+
+export const SEGMENT_LABEL: Record<SegmentTab, string> = {
+  TOUT: "Tout",
+  CHR: "CHR",
+  EXPORT: "Export",
+  GMS: "GMS",
+};
+
+/** Recoupe les groupes transporteur par segment client. « TOUT » = aucune
+ *  restriction (les clients sans segment restent visibles). Les métriques des
+ *  groupes ne sont PAS recalculées ici — computeView s'en charge en aval. */
+export function filterBySegment(carriers: Carrier[], seg: SegmentTab): Carrier[] {
+  if (seg === "TOUT") return carriers;
+  return carriers
+    .map((c) => ({ ...c, docs: c.docs.filter((d) => d.clientType === seg) }))
+    .filter((c) => c.docs.length > 0);
+}
+
+/** Comptes par segment — même règle que computeStatusCounts : les BL
+ *  « avoir / exclu » ne comptent pas. « TOUT » inclut les clients sans segment. */
+export function computeSegmentCounts(carriers: Carrier[]): Record<SegmentTab, number> {
+  const counts: Record<SegmentTab, number> = { TOUT: 0, CHR: 0, EXPORT: 0, GMS: 0 };
+  for (const car of carriers) for (const d of car.docs) {
+    if (d.excluded) continue;
+    counts.TOUT++;
+    const t = d.clientType;
+    if (t === "CHR" || t === "EXPORT" || t === "GMS") counts[t]++;
+  }
+  return counts;
+}
+
 /* ───────────────────────── Vue filtrée par onglet ─────────────────────────── */
 
 const r1 = (n: number) => Math.round(n * 10) / 10;

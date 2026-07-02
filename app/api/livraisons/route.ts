@@ -294,10 +294,9 @@ export async function GET(req: NextRequest) {
         lineCount: outLines.length,
         lines: outLines,
       };
-    })
-    // Demande métier : on n'affiche QUE les magasins segmentés (GMS / CHR / EXPORT).
-    // Les clients sans segment n'apparaissent pas dans Détail livraison.
-    .filter((d) => d.clientType === "GMS" || d.clientType === "CHR" || d.clientType === "EXPORT");
+    });
+    // TOUTES les commandes clients sont renvoyées (segmentées ou non) — le
+    // filtre par segment (Tout / CHR / Export / GMS) se fait côté vue.
 
     // ── Détection AUTOMATIQUE des BL totalement avoirés (facturé puis avoir total) ──
     // Un avoir SAP (CreditNote) NON annulé dont le montant TTC = le total d'un BL
