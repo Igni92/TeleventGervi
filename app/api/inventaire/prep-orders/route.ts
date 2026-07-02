@@ -4,23 +4,26 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { segmentOfGroup } from "@/lib/segments";
+import { getDeliveryStatuses } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/inventaire/prep-orders
  *
- * Pré-étape de l'inventaire : liste les commandes SAP OUVERTES en cours.
- * Périmètre métier :
+ * Pré-étape de l'inventaire : liste les commandes SAP OUVERTES encore NON
+ * PRÉPARÉES. Périmètre métier :
  *   • clients GMS / EXPORT / CHR (segment déduit du groupe SAP, cf. lib/segments) ;
- *   • livraison prévue à J+1 … J+4 (fenêtre de préparation).
+ *   • livraison prévue à J+1 … J+4 (fenêtre de préparation) ;
+ *   • PAS encore marquées « faite » / « départ » dans le Détail livraison —
+ *     la source de vérité de la préparation : une commande faite n'est plus
+ *     en rayon, elle n'a pas à être réintégrée.
  *
  * Le stock théorique du comptage part de `available` (= inStock − committed) :
  * SAP réserve déjà la marchandise de TOUTES les commandes ouvertes → un manque ne
- * reflète jamais une commande qui part. Le préparateur COCHE ici les commandes
- * encore NON préparées (marchandise toujours en rayon) : `committed` les avait
- * retirées à tort, on RÉINTÈGRE donc leurs colis côté écran pour éviter un faux
- * excédent. Les commandes déjà préparées (parties) ne sont pas cochées.
+ * reflète jamais une commande qui part. Les commandes renvoyées ici (non faites,
+ * marchandise toujours en rayon) sont RÉINTÉGRÉES automatiquement côté écran :
+ * `committed` les avait retirées à tort, sinon faux excédent au comptage.
  */
 
 const KEEP_SEGMENTS = new Set(["GMS", "EXPORT", "CHR"]);
@@ -77,6 +80,16 @@ export async function GET() {
   orders = orders.filter(
     (o) => o.Cancelled !== "tYES" && o.DocDueDate && allowedDueDays.has(parisDay(o.DocDueDate)),
   );
+
+  // Ne garder que les commandes NON « faites » du Détail livraison : une commande
+  // marquée « faite » (ou partie) est préparée — sa marchandise n'est plus en
+  // rayon, rien à réintégrer. La pré-étape devient ainsi AUTOMATIQUE.
+  try {
+    const st = await getDeliveryStatuses();
+    orders = orders.filter(
+      (o) => !(st.prepared.get(o.DocEntry) ?? false) && !(st.departed.get(o.DocEntry) ?? false),
+    );
+  } catch { /* statuts indisponibles → liste complète (comportement historique) */ }
 
   // Segment client (GMS/EXPORT/CHR) déduit du groupe SAP. Colonnes lues en raw SQL
   // (groupe & géo non typés dans le client Prisma, cf. lib/pilotageGeo).
