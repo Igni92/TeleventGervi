@@ -264,3 +264,12 @@ livraison, à faire **signer au chauffeur** — et envoyable par mail.
 | Bon de transport imprimable | Bouton 🖨 sur l'en-tête du groupe transporteur → **2 exemplaires (ORIGINAL + COPIE)**, une page chacun (`lib/bonTransport`, partagé client/serveur). Par tournée : client (nom complet), BL n°, colis, poids ; colonne **Palettes vide** (remplie à la main au chargement) ; totaux ; zones de signature **expéditeur Gervifrais / chauffeur**. Couvre TOUTES les commandes du transporteur (pas seulement l'onglet affiché), hors BL avoirés. |
 | Envoi par mail | Bouton ✉ (commerciaux/admins) + dialog de confirmation (destinataire affiché) → `POST /api/livraisons/bon-transport` : données **reconstruites côté serveur depuis SAP**, envoi depuis la boîte partagée **commercial@gervifrais.com** (Graph `sendMailAsShared`, surchargeable `BON_TRANSPORT_FROM`) vers l'email de la fiche transporteur. |
 | Fiche transporteur | Bouton 📞 sur l'en-tête → dialog : **email + téléphones ajoutables** (libellé + numéro, ajout/retrait). Persistée par code transporteur (`AppSetting carrierinfo:<CODE>` — aucune migration), API `GET/POST /api/transporteurs/fiche`. Lecture ouverte, écriture commerciaux/admins. Coordonnées reprises sur le bon de transport. |
+
+---
+
+## 🕐 Détail livraison — heures « fait » / « départ » + recherche d'un bon (NOUVEAU)
+
+| Élément | Détail |
+|---------|--------|
+| Heures d'état conservées | Chaque clic « Fait » / « Départ » garde son **heure** (le `at` AppSetting, désormais exposé par l'API et renvoyé par les POST). Affichée sur le bon : badges de ligne « Fait par X · 14:32 », « Parti · 14:32 » et chips de la vue en grand (préfixe jj/mm si autre jour). Mises à jour optimistes, y compris en action groupée. |
+| Recherche d'un bon | Champ 🔍 à côté des onglets : filtre par **n° de BL, client (nom / nom complet / code) ou réf. client**, insensible aux accents. S'applique avant les onglets (compteurs recalculés), **déplie tout** pendant la recherche, Échap/✕ pour effacer, état vide dédié. |

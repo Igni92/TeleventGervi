@@ -246,8 +246,10 @@ const LIV_FAITE_PREFIX = "livfaite:";
 export async function getDeliveryStatuses(): Promise<{
   prepared: Map<number, boolean>;
   preparedBy: Map<number, string>;
+  preparedAt: Map<number, string>;
   departed: Map<number, boolean>;
   departedBy: Map<number, string>;
+  departedAt: Map<number, string>;
   preparer: Map<number, string>;
   incomplete: Map<number, boolean>;
   excluded: Map<number, boolean>;
@@ -255,8 +257,10 @@ export async function getDeliveryStatuses(): Promise<{
   const out = {
     prepared: new Map<number, boolean>(),
     preparedBy: new Map<number, string>(),
+    preparedAt: new Map<number, string>(),
     departed: new Map<number, boolean>(),
     departedBy: new Map<number, string>(),
+    departedAt: new Map<number, string>(),
     preparer: new Map<number, string>(),
     incomplete: new Map<number, boolean>(),
     excluded: new Map<number, boolean>(),
@@ -271,16 +275,20 @@ export async function getDeliveryStatuses(): Promise<{
       if (!prefix) continue;
       const docEntry = Number(r.key.slice(prefix.length));
       if (!Number.isFinite(docEntry)) continue;
-      let v: { prepared?: boolean; departed?: boolean; incomplete?: boolean; excluded?: boolean; by?: string };
+      let v: { prepared?: boolean; departed?: boolean; incomplete?: boolean; excluded?: boolean; by?: string; at?: string };
       try { v = JSON.parse(r.value); } catch { continue; }
       switch (prefix) {
         case LIV_FAITE_PREFIX:
           out.prepared.set(docEntry, !!v.prepared);
           if (v.prepared && v.by?.trim()) out.preparedBy.set(docEntry, v.by.trim());
+          // Heure du DERNIER clic « fait » — affichée sur le bon.
+          if (v.prepared && v.at) out.preparedAt.set(docEntry, v.at);
           break;
         case LIV_DEPART_PREFIX:
           out.departed.set(docEntry, !!v.departed);
           if (v.departed && v.by?.trim()) out.departedBy.set(docEntry, v.by.trim());
+          // Heure du DERNIER clic « départ » — affichée sur le bon.
+          if (v.departed && v.at) out.departedAt.set(docEntry, v.at);
           break;
         case LIV_PREP_PREFIX:
           if (v.by?.trim()) out.preparer.set(docEntry, v.by.trim());
@@ -297,11 +305,13 @@ export async function getDeliveryStatuses(): Promise<{
   return out;
 }
 
-/** Bascule le statut « faite » d'un BL (persisté). */
-export async function setDeliveryPrepared(docEntry: number, prepared: boolean, by: string): Promise<void> {
+/** Bascule le statut « faite » d'un BL (persisté). Renvoie l'heure du clic. */
+export async function setDeliveryPrepared(docEntry: number, prepared: boolean, by: string): Promise<string> {
   const key = LIV_FAITE_PREFIX + docEntry;
-  const value = JSON.stringify({ prepared, at: new Date().toISOString(), by });
+  const at = new Date().toISOString();
+  const value = JSON.stringify({ prepared, at, by });
   await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+  return at;
 }
 
 /** Statut « faite » d'UN BL (lecture ciblée) — { prepared, by } ou null si jamais marqué. */
@@ -323,11 +333,13 @@ export async function getDeliveryPreparedOne(docEntry: number): Promise<{ prepar
  */
 const LIV_DEPART_PREFIX = "livdepart:";
 
-/** Bascule le statut « départ » d'un BL (persisté). */
-export async function setDeliveryDeparted(docEntry: number, departed: boolean, by: string): Promise<void> {
+/** Bascule le statut « départ » d'un BL (persisté). Renvoie l'heure du clic. */
+export async function setDeliveryDeparted(docEntry: number, departed: boolean, by: string): Promise<string> {
   const key = LIV_DEPART_PREFIX + docEntry;
-  const value = JSON.stringify({ departed, at: new Date().toISOString(), by });
+  const at = new Date().toISOString();
+  const value = JSON.stringify({ departed, at, by });
   await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+  return at;
 }
 
 /* ──────────────────── BL « préparateur affecté » ────────────────────

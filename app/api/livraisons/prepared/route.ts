@@ -26,10 +26,10 @@ export async function POST(req: NextRequest) {
   const me = session.user.name?.trim() || session.user.email || "?";
 
   try {
-    await setDeliveryPrepared(docEntry, prepared, me);
+    const at = await setDeliveryPrepared(docEntry, prepared, me);
     // Marquer « faite » lève tout signalement « incomplète — à reprendre ».
     if (prepared) await setDeliveryIncomplete(docEntry, false);
-    return NextResponse.json({ ok: true, docEntry, prepared, by: prepared ? me : null });
+    return NextResponse.json({ ok: true, docEntry, prepared, by: prepared ? me : null, at: prepared ? at : null });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }

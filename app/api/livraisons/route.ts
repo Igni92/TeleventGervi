@@ -191,8 +191,8 @@ export async function GET(req: NextRequest) {
     const nameByCardCode = clientMeta.names;
     const pMap = new Map(prods.map((p) => [p.itemCode, p]));
     const {
-      prepared: faiteByDoc, preparedBy: preparedByDoc,
-      departed: departedByDocEntry, departedBy: departedByDoc,
+      prepared: faiteByDoc, preparedBy: preparedByDoc, preparedAt: preparedAtDoc,
+      departed: departedByDocEntry, departedBy: departedByDoc, departedAt: departedAtDoc,
       excluded: avoirByDoc, preparer: prepByDoc, incomplete: incompleteByDoc,
     } = statuses;
 
@@ -264,8 +264,10 @@ export async function GET(req: NextRequest) {
         clientType: typeByCardCode.get(d.CardCode) ?? null,   // GMS | CHR | EXPORT | null
         prepared: faiteByDoc.get(d.DocEntry) ?? false,        // « faite » = coché manuellement
         preparedBy: preparedByDoc.get(d.DocEntry) ?? null,    // qui a marqué « faite »
+        preparedAt: preparedAtDoc.get(d.DocEntry) ?? null,    // heure du clic « fait »
         departed: departedByDocEntry.get(d.DocEntry) ?? false, // « départ » = parti en livraison
         departedBy: departedByDoc.get(d.DocEntry) ?? null,    // qui a marqué « départ »
+        departedAt: departedAtDoc.get(d.DocEntry) ?? null,    // heure du clic « départ »
         preparer: prepByDoc.get(d.DocEntry) ?? null,          // préparateur affecté (qui a ouvert)
         incomplete: incompleteByDoc.get(d.DocEntry) ?? false, // « à reprendre » — remise sur la file
         // Articles MANQUANTS de ce BL = lignes dont le stock SAP total est négatif.
