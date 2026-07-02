@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   Truck, Boxes, Scale, Users, FileText, Receipt,
@@ -29,14 +29,16 @@ import {
 interface CarrierOption { name: string; sapValue: string }
 
 /* ─────────────────────────────────────────────────────────────
-   Formatters
+   Formatters — instances Intl créées UNE fois (module) : réinstancier un
+   NumberFormat à chaque appel coûtait des milliers d'objets par rendu.
 ───────────────────────────────────────────────────────────── */
-const fmtInt = (v: number) => new Intl.NumberFormat("fr-FR").format(Math.round(v));
-const fmtNum = (v: number) =>
-  new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(v);
+const NF_INT = new Intl.NumberFormat("fr-FR");
+const NF_NUM = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+const NF_EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+const fmtInt = (v: number) => NF_INT.format(Math.round(v));
+const fmtNum = (v: number) => NF_NUM.format(v);
 const fmtKg = (v: number) => `${fmtNum(v)} kg`;
-const fmtEur = (v: number) =>
-  new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v);
+const fmtEur = (v: number) => NF_EUR.format(v);
 const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 /** Badge de ligne par segment client (conservé pour CHR / EXPORT, le tag GMS
@@ -474,7 +476,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
                 key={key} carrier={c} carrierKey={key} carriers={carriers} onCarrierChange={changeCarrier} onDateChange={changeDate}
                 tourneesByCode={tourneesByCode} onLoadTournees={loadTournees} onTourneeChange={changeTournee}
                 expanded={expanded} onToggle={toggleKey}
-                onPatchDoc={patchDoc} onReload={() => load()} canDispatch={canDispatch}
+                onPatchDoc={patchDoc} onReload={load} canDispatch={canDispatch}
                 statusTab={statusTab} onBulkStatus={bulkSetStatus} gen={gen}
               />
             );
@@ -891,9 +893,11 @@ function Metric({ label, value, className }: { label: string; value: string; cla
 }
 
 /* ═════════════════════════════════════════════════════════════
-   Ligne commande — repliable vers le détail des lignes
+   Ligne commande — repliable vers le détail des lignes.
+   Mémoïsée : patchDoc met à jour les docs de façon immuable → seules les lignes
+   réellement modifiées re-rendent (le reste garde son identité de props).
 ═════════════════════════════════════════════════════════════ */
-function OrderRow({
+const OrderRow = memo(function OrderRow({
   doc, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange, onPatchDoc, onReload, canDispatch,
 }: {
   doc: Doc;
@@ -1790,7 +1794,7 @@ function OrderRow({
       )}
     </li>
   );
-}
+});
 
 /** Élément de menu contextuel — icône + libellé, coche si état courant. */
 function MenuItem({
