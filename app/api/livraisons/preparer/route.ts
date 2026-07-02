@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
   const docEntry = Number(body.docEntry);
-  if (!Number.isFinite(docEntry)) return NextResponse.json({ error: "docEntry requis" }, { status: 400 });
+  if (!Number.isInteger(docEntry) || docEntry <= 0) return NextResponse.json({ error: "docEntry invalide" }, { status: 400 });
 
   const me = session.user.name?.trim() || session.user.email || "?";
 
