@@ -54,6 +54,12 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   const [data, setData] = useState<ApiResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Génération des données : incrémentée à chaque (re)chargement RÉUSSI et
+  // incluse dans la key des lignes → les OrderRow remontent avec l'état serveur
+  // frais (leurs useState dupliquent doc.* au montage et deviendraient périmés
+  // après « Actualiser » ou une modification faite par un autre utilisateur).
+  // Les patchs optimistes (patchDoc) ne changent pas la génération.
+  const [gen, setGen] = useState(0);
   const [carriers, setCarriers] = useState<CarrierOption[]>([]);
   // Tournées par transporteur (SERGTRS), chargées à la demande quand on ouvre le
   // sélecteur de tournée d'une commande. Cache mémoire + dédup des fetchs.
@@ -95,7 +101,10 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
     }
   }, [tourneesByCode]);
 
-  const auto = useMemo(() => nextDeliveryDate(), []);
+  // Recalculée à CHAQUE rendu (coût négligeable) : figée au montage, la
+  // « prochaine livraison » devenait fausse si l'écran restait ouvert après
+  // minuit (poste entrepôt) — badge « Prochaine » et bouton retour périmés.
+  const auto = nextDeliveryDate();
   const holiday = frenchHolidayLabel(date);
   const isAuto = date === auto;
 
@@ -112,6 +121,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
             setData(null);
           } else {
             setData(j);
+            setGen((g) => g + 1);
           }
         })
         .catch((e) => {
@@ -452,7 +462,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
                 tourneesByCode={tourneesByCode} onLoadTournees={loadTournees} onTourneeChange={changeTournee}
                 expanded={expanded} onToggle={toggleKey}
                 onPatchDoc={patchDoc} onReload={() => load()} canDispatch={canDispatch}
-                statusTab={statusTab} onBulkStatus={bulkSetStatus}
+                statusTab={statusTab} onBulkStatus={bulkSetStatus} gen={gen}
               />
             );
           })}
@@ -604,7 +614,7 @@ function CarrierGroup({
   carrier, carrierKey, carriers, onCarrierChange, onDateChange,
   tourneesByCode, onLoadTournees, onTourneeChange,
   expanded, onToggle, onPatchDoc, onReload, canDispatch,
-  statusTab, onBulkStatus,
+  statusTab, onBulkStatus, gen,
 }: {
   carrier: Carrier;
   carrierKey: string;
@@ -621,6 +631,7 @@ function CarrierGroup({
   canDispatch: boolean;
   statusTab: StatusTab;
   onBulkStatus: (docEntries: number[], target: StatusTab) => void;
+  gen: number;
 }) {
   const unassigned = !carrier.code;
   const collapsed = !expanded.has(carrierKey);
@@ -759,7 +770,7 @@ function CarrierGroup({
               <ul className="divide-y divide-border/60">
                 {tg.docs.map((d) => (
                   <OrderRow
-                    key={d.docEntry} doc={d} carriers={carriers}
+                    key={`${d.docEntry}:${gen}`} doc={d} carriers={carriers}
                     onCarrierChange={onCarrierChange} onDateChange={onDateChange}
                     tournees={d.trspCode ? tourneesByCode[d.trspCode.toUpperCase()] : undefined}
                     onLoadTournees={onLoadTournees} onTourneeChange={onTourneeChange}
@@ -1195,6 +1206,37 @@ function OrderRow({
       toast.error("SAP injoignable — client non modifié");
     } finally {
       setRebinding(false);
+    }
+  }
+
+  // ── « Avoir / exclu » MANUEL (menu contextuel, dispatch uniquement) ──
+  //    Surcharge PRIORITAIRE sur la détection automatique des avoirs : le BL est
+  //    déduit à 100 % des totaux mais reste listé (grisé). Optimiste + rollback.
+  const [togglingExcluded, setTogglingExcluded] = useState(false);
+  async function toggleExcluded() {
+    if (togglingExcluded) return;
+    const next = !doc.excluded;
+    setTogglingExcluded(true);
+    onPatchDoc(doc.docEntry, { excluded: next });
+    try {
+      const res = await fetch("/api/livraisons/excluded", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: doc.docEntry, excluded: next }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || j?.ok === false) {
+        onPatchDoc(doc.docEntry, { excluded: !next });
+        toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement");
+        return;
+      }
+      toast.success(next
+        ? `BL n°${doc.docNum} marqué « avoir / exclu » — déduit des totaux`
+        : `BL n°${doc.docNum} réintégré dans les totaux`);
+    } catch {
+      onPatchDoc(doc.docEntry, { excluded: !next });
+      toast.error("Échec de l'enregistrement");
+    } finally {
+      setTogglingExcluded(false);
     }
   }
 
@@ -1703,6 +1745,10 @@ function OrderRow({
               <>
                 <MenuItem icon={Pencil} onClick={() => { setMenu(null); startModif(); }}>Modifier la commande</MenuItem>
                 <MenuItem icon={UserCog} onClick={() => { setMenu(null); setRebindOpen(true); }}>Changer le client…</MenuItem>
+                <MenuItem icon={RotateCcw} accent="text-rose-600 dark:text-rose-400" active={doc.excluded}
+                  onClick={() => { setMenu(null); toggleExcluded(); }}>
+                  {doc.excluded ? "Réintégrer dans les totaux" : "Avoir / exclure des totaux"}
+                </MenuItem>
                 <div className="my-1 h-px bg-border" />
               </>
             )}
