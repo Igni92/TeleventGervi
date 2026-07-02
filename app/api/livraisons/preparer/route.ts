@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { setDeliveryPreparer, setDeliveryPrepared, setDeliveryIncomplete, setDeliveryDeparted } from "@/lib/inventory";
+import { setDeliveryPreparer, setDeliveryPrepared, setDeliveryIncomplete, setDeliveryDeparted, getDeliveryPreparerOne } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +44,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, docEntry, preparer: null });
     }
     // claim (défaut) : je m'affecte la commande, je lève le « à reprendre ».
+    // Concurrence : si un AUTRE préparateur l'a déjà prise, on ne l'écrase PAS
+    // (sinon double préparation silencieuse) — on renvoie l'affectation en place.
+    const current = await getDeliveryPreparerOne(docEntry);
+    if (current && current !== me) {
+      return NextResponse.json({ ok: true, docEntry, preparer: current, alreadyClaimed: true });
+    }
     await setDeliveryPreparer(docEntry, me);
     await setDeliveryIncomplete(docEntry, false);
     return NextResponse.json({ ok: true, docEntry, preparer: me, incomplete: false });

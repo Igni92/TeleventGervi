@@ -1106,8 +1106,16 @@ const OrderRow = memo(function OrderRow({
       });
       const j = await res.json().catch(() => null);
       if (res.ok && j?.ok) {
-        setPreparer(j.preparer ?? null); setIncomplete(false);
-        onPatchDoc(doc.docEntry, { preparer: j.preparer ?? null, incomplete: false });
+        if (j.alreadyClaimed) {
+          // Un autre préparateur l'a déjà prise : on l'affiche (badge + toast)
+          // mais on laisse consulter le BL — on n'écrase pas son affectation.
+          setPreparer(j.preparer ?? null);
+          onPatchDoc(doc.docEntry, { preparer: j.preparer ?? null });
+          toast.info(`Déjà en préparation par ${displayPersonName(j.preparer)}`);
+        } else {
+          setPreparer(j.preparer ?? null); setIncomplete(false);
+          onPatchDoc(doc.docEntry, { preparer: j.preparer ?? null, incomplete: false });
+        }
       }
     } catch { /* affectation non bloquante */ }
   }

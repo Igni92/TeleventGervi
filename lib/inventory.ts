@@ -336,6 +336,17 @@ export async function setDeliveryDeparted(docEntry: number, departed: boolean, b
  */
 const LIV_PREP_PREFIX = "livprep:";
 
+/** Préparateur affecté à UN BL (lecture ciblée) — nom/email, ou null si aucun. */
+export async function getDeliveryPreparerOne(docEntry: number): Promise<string | null> {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: LIV_PREP_PREFIX + docEntry } });
+    if (!row) return null;
+    return (JSON.parse(row.value) as { by?: string }).by?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 /** Affecte (by non vide) ou retire (by vide/null) le préparateur d'un BL. */
 export async function setDeliveryPreparer(docEntry: number, by: string | null): Promise<void> {
   const key = LIV_PREP_PREFIX + docEntry;
