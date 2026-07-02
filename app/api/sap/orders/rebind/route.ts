@@ -45,8 +45,11 @@ type SapOrder = {
 /** Valide un CardCode dans SAP (existence + statut). Renvoie le BP ou une erreur. */
 async function fetchBusinessPartner(cardCode: string): Promise<SapBp | null> {
   try {
+    // Clé OData string : l'apostrophe se DOUBLE (encodeURIComponent ne l'échappe
+    // pas) — sinon un CardCode contenant « ' » casse/injecte la requête.
+    const key = encodeURIComponent(cardCode.replace(/'/g, "''"));
     return await sap.get<SapBp>(
-      `BusinessPartners('${encodeURIComponent(cardCode)}')?$select=CardCode,CardName,Frozen,Valid`,
+      `BusinessPartners('${key}')?$select=CardCode,CardName,Frozen,Valid`,
     );
   } catch {
     return null;

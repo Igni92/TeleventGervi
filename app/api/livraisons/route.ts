@@ -4,9 +4,11 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
-import { getDeliveryPrepared, getDeliveryPreparedBy, getDeliveryDeparted, getDeliveryDepartedBy, getDeliveryExcluded, getDeliveryPreparer, getDeliveryIncomplete, getDeliveryMissing, type MissingItem } from "@/lib/inventory";
+import { getDeliveryStatuses, getDeliveryMissing, type MissingItem } from "@/lib/inventory";
 import { getClientTournees, type ClientTournee } from "@/lib/clientTournee";
 import { getClientTrclCarriers } from "@/lib/clientCarriers";
+import { isRestrictedPreparateur } from "@/lib/preparateur";
+import { isLivreur } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -22,13 +24,17 @@ export const dynamic = "force-dynamic";
  * (depuis Product, comme /api/sap/orders) et libellé transporteur (U_TrspCode
  * résolu via la table Carrier). Les commandes annulées sont exclues.
  *
- * Réponse : { ok, db, date, holiday, count, totals, carriers[] }
+ * Réponse : { ok, date, holiday, count, totals, carriers[] }
  *   carriers[] = commandes groupées par transporteur (tri colis desc, « Non
  *   affecté » en dernier).
  */
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  // Rôles à accès restreint (préparateur verrouillé, livreur) : le CA (totalHT /
+  // totalTTC) est un chiffre commercial — masqué CÔTÉ SERVEUR, pas seulement
+  // dans l'UI (canDispatch), sinon il reste lisible en appelant l'API.
+  const restricted = isRestrictedPreparateur(session.user?.email) || (await isLivreur(session));
 
   const { searchParams } = new URL(req.url);
   const dateParam = searchParams.get("date");
@@ -82,88 +88,81 @@ export async function GET(req: NextRequest) {
 
     const live = orders.filter((o) => o.Cancelled !== "tYES");
 
-    // ── Référentiels locaux : produits (poids/colis) + transporteurs ──
+    // Clés des référentiels (synchrones), calculées une fois.
     const allItemCodes = Array.from(
       new Set(live.flatMap((d) => (d.DocumentLines || []).map((l) => l.ItemCode))),
     );
-    const prods = allItemCodes.length
-      ? await prisma.product.findMany({
-          where: { itemCode: { in: allItemCodes } },
-          select: {
-            itemCode: true,
-            itemName: true,
-            frgnName: true,
-            salesUnit: true,
-            salesUnitWeight: true,
-            salesQtyPerPackUnit: true,
-            uMarque: true,
-            uCondi: true,
-            uPays: true,
-          },
-        })
-      : [];
-    const pMap = new Map(prods.map((p) => [p.itemCode, p]));
-
-    // Transporteur : U_TrspCode (SAP) → libellé app (Carrier.sapValue → name).
-    const carrierByCode = new Map<string, string>();
-    try {
-      const carriers = await prisma.carrier.findMany({ select: { name: true, sapValue: true } });
-      for (const c of carriers) if (c.sapValue) carrierByCode.set(c.sapValue, c.name);
-    } catch {
-      /* table Carrier absente → on affichera le code brut */
-    }
-
-    // Statut « faite » MANUEL : coché à la main par le préparateur (persisté par
-    // DocEntry). Aucune déduction automatique depuis l'inventaire (qui marquait
-    // tout à tort). Une commande n'est « faite » que si on l'a cochée.
-    const faiteByDoc = await getDeliveryPrepared().catch(() => new Map<number, boolean>());
-    // Auteur du marquage « faite » → affichage « Fait par … » dans le Détail livraison.
-    const preparedByDoc = await getDeliveryPreparedBy().catch(() => new Map<number, string>());
-    // Statut « départ » (parti en livraison) + son auteur.
-    const departedByDocEntry = await getDeliveryDeparted().catch(() => new Map<number, boolean>());
-    const departedByDoc = await getDeliveryDepartedBy().catch(() => new Map<number, string>());
-    // BL marqués « avoir / exclu » (facturé puis avoir total, doublon) → déduits
-    // à 100% des totaux mais conservés (grisés) dans la liste.
-    const avoirByDoc = await getDeliveryExcluded().catch(() => new Map<number, boolean>());
-    // Préparateur affecté + signalement « incomplète (à reprendre) » par BL.
-    const prepByDoc = await getDeliveryPreparer().catch(() => new Map<number, string>());
-    const incompleteByDoc = await getDeliveryIncomplete().catch(() => new Map<number, boolean>());
-    // Articles signalés MANQUANTS par BL (rupture au picking) → onglet « Manquants ».
-    const missingByDoc = await getDeliveryMissing().catch(() => new Map<number, MissingItem[]>());
-
-    // Type client (GMS / CHR / EXPORT) par CardCode — pour le filtre par segment.
     // Le CardCode d'un BL peut être le code principal OU un code d'adresse de
     // livraison (ClientDeliveryMode.sapCardCode) : on couvre les deux.
     const cardCodes = Array.from(new Set(live.map((o) => o.CardCode).filter(Boolean)));
-    const typeByCardCode = new Map<string, string>();
-    if (cardCodes.length) {
-      try {
-        const clients = await prisma.client.findMany({
-          where: { code: { in: cardCodes } },
-          select: { code: true, type: true },
-        });
-        for (const c of clients) if (c.type) typeByCardCode.set(c.code, c.type);
-        const modes = await prisma.clientDeliveryMode.findMany({
-          where: { sapCardCode: { in: cardCodes } },
-          select: { sapCardCode: true, client: { select: { type: true } } },
-        });
-        for (const m of modes) {
-          if (m.client?.type && !typeByCardCode.has(m.sapCardCode)) typeByCardCode.set(m.sapCardCode, m.client.type);
-        }
-      } catch {
-        /* type optionnel → le filtre rangera ces BL en « Autres » */
-      }
-    }
 
-    // Tournée MÉMORISÉE par client (repli si SERG_TRCL indisponible pour ce client).
-    const savedTourneeByCard = await getClientTournees(cardCodes).catch(() => new Map<string, ClientTournee>());
-
-    // Tournées RÉELLES par client depuis SERG_TRCL (vue v2) — pour afficher/
-    // pré-sélectionner la bonne tournée par BL. Best-effort, en parallèle, caché.
-    const trclByCard = new Map<string, Awaited<ReturnType<typeof getClientTrclCarriers>>>();
-    await Promise.all(cardCodes.map(async (cc) => {
-      try { trclByCard.set(cc, await getClientTrclCarriers(cc)); } catch { /* best-effort */ }
-    }));
+    // ── Référentiels : tous INDÉPENDANTS entre eux → chargés EN PARALLÈLE
+    //    (produits, transporteurs, statuts manuels, type client, tournées
+    //    mémorisées, tournées réelles SERG_TRCL, articles manquants). Chaque bloc
+    //    gère son propre repli (best-effort) pour ne jamais faire échouer la livraison. ──
+    const [prods, carrierByCode, statuses, typeByCardCode, savedTourneeByCard, trclByCard, missingByDoc] = await Promise.all([
+      // Produits (poids / colis / désignation).
+      allItemCodes.length
+        ? prisma.product.findMany({
+            where: { itemCode: { in: allItemCodes } },
+            select: {
+              itemCode: true, itemName: true, frgnName: true, salesUnit: true,
+              salesUnitWeight: true, salesQtyPerPackUnit: true, uMarque: true, uCondi: true, uPays: true,
+            },
+          })
+        : Promise.resolve([]),
+      // Transporteur : U_TrspCode (SAP) → libellé app (Carrier.sapValue → name).
+      (async () => {
+        const m = new Map<string, string>();
+        try {
+          const carriers = await prisma.carrier.findMany({ select: { name: true, sapValue: true } });
+          for (const c of carriers) if (c.sapValue) m.set(c.sapValue, c.name);
+        } catch { /* table Carrier absente → code brut */ }
+        return m;
+      })(),
+      // Statuts manuels du Détail livraison, par DocEntry (une requête) :
+      //   « faite » + auteur, « départ » + auteur, « avoir / exclu »,
+      //   préparateur affecté, signalement « incomplète (à reprendre) ».
+      getDeliveryStatuses(),
+      // Type client (GMS / CHR / EXPORT) par CardCode — pour le filtre par segment.
+      (async () => {
+        const m = new Map<string, string>();
+        if (!cardCodes.length) return m;
+        try {
+          const clients = await prisma.client.findMany({
+            where: { code: { in: cardCodes } },
+            select: { code: true, type: true },
+          });
+          for (const c of clients) if (c.type) m.set(c.code, c.type);
+          const modes = await prisma.clientDeliveryMode.findMany({
+            where: { sapCardCode: { in: cardCodes } },
+            select: { sapCardCode: true, client: { select: { type: true } } },
+          });
+          for (const mo of modes) {
+            if (mo.client?.type && !m.has(mo.sapCardCode)) m.set(mo.sapCardCode, mo.client.type);
+          }
+        } catch { /* type optionnel → BL rangés en « Autres » */ }
+        return m;
+      })(),
+      // Tournée MÉMORISÉE par client (repli si SERG_TRCL indisponible).
+      getClientTournees(cardCodes).catch(() => new Map<string, ClientTournee>()),
+      // Tournées RÉELLES par client (SERG_TRCL vue v2) — best-effort, caché.
+      (async () => {
+        const m = new Map<string, Awaited<ReturnType<typeof getClientTrclCarriers>>>();
+        await Promise.all(cardCodes.map(async (cc) => {
+          try { m.set(cc, await getClientTrclCarriers(cc)); } catch { /* best-effort */ }
+        }));
+        return m;
+      })(),
+      // Articles signalés MANQUANTS par BL (rupture au picking) → onglet « Manquants ».
+      getDeliveryMissing().catch(() => new Map<number, MissingItem[]>()),
+    ]);
+    const pMap = new Map(prods.map((p) => [p.itemCode, p]));
+    const {
+      prepared: faiteByDoc, preparedBy: preparedByDoc,
+      departed: departedByDocEntry, departedBy: departedByDoc,
+      excluded: avoirByDoc, preparer: prepByDoc, incomplete: incompleteByDoc,
+    } = statuses;
 
     const weightOfItem = (code: string) => pMap.get(code)?.salesUnitWeight ?? 0;
     const colisDivOf = (code: string) => {
@@ -176,12 +175,19 @@ export async function GET(req: NextRequest) {
       const lines = (d.DocumentLines || []).map((l) => {
         const p = pMap.get(l.ItemCode);
         const div = colisDivOf(l.ItemCode) || 1;
+        // Valeurs BRUTES conservées pour la sommation ; l'arrondi 0,1 n'est
+        // appliqué qu'à l'AFFICHAGE par ligne (colis/weightKg). Sommer les valeurs
+        // déjà arrondies dérivait le total du BL (ex. 2 lignes à 0,05 → 0,2 ≠ 0,1).
+        const colisRaw = (l.Quantity || 0) / div;
+        const weightRaw = (l.Quantity || 0) * weightOfItem(l.ItemCode);
         return {
           itemCode: l.ItemCode,
           itemName: l.ItemDescription || p?.frgnName || p?.itemName || l.ItemCode,
           quantity: l.Quantity,
-          colis: Math.round(((l.Quantity || 0) / div) * 10) / 10,
-          weightKg: Math.round((l.Quantity || 0) * weightOfItem(l.ItemCode) * 10) / 10,
+          colisRaw,
+          weightRaw,
+          colis: Math.round(colisRaw * 10) / 10,
+          weightKg: Math.round(weightRaw * 10) / 10,
           warehouse: l.WarehouseCode ?? null,
           // Tags désignation (préparation) — marque · conditionnement · origine.
           marque: p?.uMarque ?? null,
@@ -189,8 +195,10 @@ export async function GET(req: NextRequest) {
           pays: p?.uPays ?? null,
         };
       });
-      const colis = lines.reduce((s, l) => s + l.colis, 0);
-      const weightKg = lines.reduce((s, l) => s + l.weightKg, 0);
+      const colis = lines.reduce((s, l) => s + l.colisRaw, 0);
+      const weightKg = lines.reduce((s, l) => s + l.weightRaw, 0);
+      // Lignes émises SANS les champs bruts (sommation serveur uniquement).
+      const outLines = lines.map(({ colisRaw: _c, weightRaw: _w, ...rest }) => rest);
       const trspCode = d.U_TrspCode?.trim() || null;
       return {
         docEntry: d.DocEntry,
@@ -230,8 +238,8 @@ export async function GET(req: NextRequest) {
         missingItems: (missingByDoc.get(d.DocEntry) ?? []).map((i) => i.itemCode),
         // « avoir/exclu » : surcharge manuelle si présente, sinon détecté auto (ci-dessous).
         excluded: avoirByDoc.has(d.DocEntry) ? !!avoirByDoc.get(d.DocEntry) : false,
-        lineCount: lines.length,
-        lines,
+        lineCount: outLines.length,
+        lines: outLines,
       };
     })
     // Demande métier : on n'affiche QUE les magasins segmentés (GMS / CHR / EXPORT).
@@ -248,12 +256,21 @@ export async function GET(req: NextRequest) {
       const cc = Array.from(new Set(docs.map((d) => d.cardCode).filter(Boolean)));
       if (cc.length) {
         const since = new Date(Date.parse(date) - 45 * 86_400_000).toISOString().slice(0, 10);
-        const orCard = cc.map((c) => `CardCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
-        const cnFilter = encodeURIComponent(`(${orCard}) and DocDate ge '${since}' and Cancelled eq 'tNO'`);
-        const notes = await sap.getAll<{ CardCode: string; DocTotal?: number; DocDate?: string }>(
-          `CreditNotes?$select=CardCode,DocTotal,DocDate&$filter=${cnFilter}&$orderby=DocEntry asc`,
-          { pageSize: 100, maxPages: 5 },
-        );
+        // Filtre OR chunké (25 clients/requête) : une seule URL avec tous les
+        // clients du jour pouvait dépasser plusieurs Ko et se faire rejeter par
+        // le Service Layer. Les lots partent en parallèle et sont fusionnés.
+        const CHUNK = 25;
+        const chunks: string[][] = [];
+        for (let i = 0; i < cc.length; i += CHUNK) chunks.push(cc.slice(i, i + CHUNK));
+        const notesByChunk = await Promise.all(chunks.map((group) => {
+          const orCard = group.map((c) => `CardCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
+          const cnFilter = encodeURIComponent(`(${orCard}) and DocDate ge '${since}' and Cancelled eq 'tNO'`);
+          return sap.getAll<{ CardCode: string; DocTotal?: number; DocDate?: string }>(
+            `CreditNotes?$select=CardCode,DocTotal,DocDate&$filter=${cnFilter}&$orderby=DocEntry asc`,
+            { pageSize: 100, maxPages: 5 },
+          );
+        }));
+        const notes = notesByChunk.flat();
         // BL par client, plus ANCIEN (DocEntry) d'abord — l'original avoiré précède
         // le BL recréé.
         const byClient = new Map<string, typeof docs>();
@@ -280,6 +297,12 @@ export async function GET(req: NextRequest) {
         }
       }
     } catch { /* avoirs best-effort → pas de déduction auto */ }
+
+    // Masquage CA pour les rôles restreints — APRÈS la détection d'avoirs (qui
+    // matche sur totalTTC) et AVANT les agrégats (totaux transporteurs à 0 aussi).
+    if (restricted) {
+      for (const d of docs) { d.totalHT = 0; d.totalTTC = 0; }
+    }
 
     // ── Regroupement par transporteur ──
     type Doc = (typeof docs)[number];
@@ -324,7 +347,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      db: process.env.SAP_B1_COMPANY_DB,
       date,
       holiday: frenchHolidayLabel(date),
       count: docs.length,
