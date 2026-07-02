@@ -683,24 +683,7 @@ function CarrierGroup({
 
   // Menu clic droit (desktop) sur l'en-tête transporteur → change l'état de TOUT
   // le groupe (À préparer / Fait / Départ). Accès mobile = le bouton ci-dessus.
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  function onHeaderContextMenu(e: ReactMouseEvent) {
-    e.preventDefault();
-    setMenu({ x: Math.min(e.clientX, window.innerWidth - 224), y: Math.min(e.clientY, window.innerHeight - 148) });
-  }
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null); };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
-    };
-  }, [menu]);
+  const { menu, openAt, close: closeMenu } = useContextMenu(224, 148);
 
   return (
     <section className="rounded-2xl border border-border bg-card overflow-hidden">
@@ -708,7 +691,7 @@ function CarrierGroup({
       <div
         role="button" tabIndex={0}
         onClick={() => onToggle(carrierKey)}
-        onContextMenu={onHeaderContextMenu}
+        onContextMenu={openAt}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(carrierKey); } }}
         aria-expanded={!collapsed}
         title={collapsed ? "Déplier ce transporteur (clic droit : changer l'état du groupe)" : "Replier ce transporteur (clic droit : changer l'état du groupe)"}
@@ -799,31 +782,18 @@ function CarrierGroup({
       })}
 
       {/* Menu clic droit (desktop) — état groupé du transporteur */}
-      {menu && typeof document !== "undefined" && createPortal(
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setMenu(null)}
-            onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
-          />
-          <div
-            role="menu"
-            className="fixed z-50 min-w-[214px] overflow-hidden rounded-lg border border-border bg-card py-1 shadow-lg animate-fade-up"
-            style={{ top: menu.y, left: menu.x }}
-          >
-            <p className="px-3 py-1.5 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground border-b border-border/60 truncate">
-              {carrier.name} · {docEntries.length} cmd.
-            </p>
-            <MenuItem icon={Clock} accent="text-amber-600 dark:text-amber-400" active={statusTab === "A_PREPARER"}
-              onClick={() => { setMenu(null); onBulkStatus(docEntries, "A_PREPARER"); }}>Tout : à préparer</MenuItem>
-            <MenuItem icon={CheckCircle2} accent="text-emerald-600 dark:text-emerald-400" active={statusTab === "FAIT"}
-              onClick={() => { setMenu(null); onBulkStatus(docEntries, "FAIT"); }}>Tout : fait</MenuItem>
-            <MenuItem icon={Truck} accent="text-sky-600 dark:text-sky-400" active={statusTab === "DEPART"}
-              onClick={() => { setMenu(null); onBulkStatus(docEntries, "DEPART"); }}>Tout : départ</MenuItem>
-          </div>
-        </>,
-        document.body,
-      )}
+      <ContextMenu menu={menu} onClose={closeMenu} minWidth={214} header={
+        <p className="px-3 py-1.5 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground border-b border-border/60 truncate">
+          {carrier.name} · {docEntries.length} cmd.
+        </p>
+      }>
+        <MenuItem icon={Clock} accent="text-amber-600 dark:text-amber-400" active={statusTab === "A_PREPARER"}
+          onClick={() => { closeMenu(); onBulkStatus(docEntries, "A_PREPARER"); }}>Tout : à préparer</MenuItem>
+        <MenuItem icon={CheckCircle2} accent="text-emerald-600 dark:text-emerald-400" active={statusTab === "FAIT"}
+          onClick={() => { closeMenu(); onBulkStatus(docEntries, "FAIT"); }}>Tout : fait</MenuItem>
+        <MenuItem icon={Truck} accent="text-sky-600 dark:text-sky-400" active={statusTab === "DEPART"}
+          onClick={() => { closeMenu(); onBulkStatus(docEntries, "DEPART"); }}>Tout : départ</MenuItem>
+      </ContextMenu>
 
     </section>
   );
@@ -1278,27 +1248,13 @@ const OrderRow = memo(function OrderRow({
   }
 
   // ── Menu contextuel (clic droit sur la ligne) → actions d'état + dispatch ──
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const { menu, openAt, close: closeMenu } = useContextMenu(220, 88);
   function onRowContextMenu(e: ReactMouseEvent) {
     if (!doc.open) return;                                    // commande livrée/annulée : pas d'action
     const el = e.target as HTMLElement;
     if (el.closest("input, select, textarea")) return;        // garde le menu natif dans les champs (copier/coller)
-    e.preventDefault();
-    setMenu({ x: Math.min(e.clientX, window.innerWidth - 220), y: Math.min(e.clientY, window.innerHeight - 88) });
+    openAt(e);
   }
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null); };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
-    };
-  }, [menu]);
 
   const docStatusOf: StatusTab = departed ? "DEPART" : prepared ? "FAIT" : "A_PREPARER";
 
@@ -1765,44 +1721,89 @@ const OrderRow = memo(function OrderRow({
 
       {/* Menu contextuel (clic droit sur la ligne) — porté dans <body> pour un
           positionnement fiable (échappe à tout ancêtre transformé). */}
-      {menu && typeof document !== "undefined" && createPortal(
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setMenu(null)}
-            onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
-          />
-          <div
-            role="menu"
-            className="fixed z-50 min-w-[210px] overflow-hidden rounded-lg border border-border bg-card py-1 shadow-lg animate-fade-up"
-            style={{ top: menu.y, left: menu.x }}
-          >
-            {/* Actions logistiques (commerciaux / admins) */}
-            {canDispatch && (
-              <>
-                <MenuItem icon={Pencil} onClick={() => { setMenu(null); startModif(); }}>Modifier la commande</MenuItem>
-                <MenuItem icon={UserCog} onClick={() => { setMenu(null); setRebindOpen(true); }}>Changer le client…</MenuItem>
-                <MenuItem icon={RotateCcw} accent="text-rose-600 dark:text-rose-400" active={doc.excluded}
-                  onClick={() => { setMenu(null); toggleExcluded(); }}>
-                  {doc.excluded ? "Réintégrer dans les totaux" : "Avoir / exclure des totaux"}
-                </MenuItem>
-                <div className="my-1 h-px bg-border" />
-              </>
-            )}
-            {/* Changement d'état — accessible aux préparateurs / livreurs */}
-            <MenuItem icon={Clock} accent="text-amber-600 dark:text-amber-400" active={docStatusOf === "A_PREPARER"}
-              onClick={() => { setMenu(null); markAPreparer(); }}>À préparer</MenuItem>
-            <MenuItem icon={CheckCircle2} accent="text-emerald-600 dark:text-emerald-400" active={docStatusOf === "FAIT"}
-              onClick={() => { setMenu(null); markFait(); }}>Fait</MenuItem>
-            <MenuItem icon={Truck} accent="text-sky-600 dark:text-sky-400" active={docStatusOf === "DEPART"}
-              onClick={() => { setMenu(null); markDepart(); }}>Départ</MenuItem>
-          </div>
-        </>,
-        document.body,
-      )}
+      <ContextMenu menu={menu} onClose={closeMenu}>
+        {/* Actions logistiques (commerciaux / admins) */}
+        {canDispatch && (
+          <>
+            <MenuItem icon={Pencil} onClick={() => { closeMenu(); startModif(); }}>Modifier la commande</MenuItem>
+            <MenuItem icon={UserCog} onClick={() => { closeMenu(); setRebindOpen(true); }}>Changer le client…</MenuItem>
+            <MenuItem icon={RotateCcw} accent="text-rose-600 dark:text-rose-400" active={doc.excluded}
+              onClick={() => { closeMenu(); toggleExcluded(); }}>
+              {doc.excluded ? "Réintégrer dans les totaux" : "Avoir / exclure des totaux"}
+            </MenuItem>
+            <div className="my-1 h-px bg-border" />
+          </>
+        )}
+        {/* Changement d'état — accessible aux préparateurs / livreurs */}
+        <MenuItem icon={Clock} accent="text-amber-600 dark:text-amber-400" active={docStatusOf === "A_PREPARER"}
+          onClick={() => { closeMenu(); markAPreparer(); }}>À préparer</MenuItem>
+        <MenuItem icon={CheckCircle2} accent="text-emerald-600 dark:text-emerald-400" active={docStatusOf === "FAIT"}
+          onClick={() => { closeMenu(); markFait(); }}>Fait</MenuItem>
+        <MenuItem icon={Truck} accent="text-sky-600 dark:text-sky-400" active={docStatusOf === "DEPART"}
+          onClick={() => { closeMenu(); markDepart(); }}>Départ</MenuItem>
+      </ContextMenu>
     </li>
   );
 });
+
+/* ═════════════════════════════════════════════════════════════
+   Menu contextuel (clic droit) — scaffolding partagé transporteur / ligne :
+   état de position, ouverture clampée à l'écran, fermeture (clic hors zone,
+   Escape, scroll, resize) et rendu portalisé dans <body>.
+═════════════════════════════════════════════════════════════ */
+function useContextMenu(clampW = 220, clampH = 96) {
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const close = useCallback(() => setMenu(null), []);
+  const openAt = useCallback((e: ReactMouseEvent) => {
+    e.preventDefault();
+    setMenu({ x: Math.min(e.clientX, window.innerWidth - clampW), y: Math.min(e.clientY, window.innerHeight - clampH) });
+  }, [clampW, clampH]);
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [menu, close]);
+  return { menu, openAt, close };
+}
+
+/** Conteneur portalisé du menu contextuel : backdrop de fermeture + panneau
+ *  positionné. `header` optionnel (titre du groupe), `children` = les items. */
+function ContextMenu({
+  menu, onClose, minWidth = 210, header, children,
+}: {
+  menu: { x: number; y: number } | null;
+  onClose: () => void;
+  minWidth?: number;
+  header?: ReactNode;
+  children: ReactNode;
+}) {
+  if (!menu || typeof document === "undefined") return null;
+  return createPortal(
+    <>
+      <div
+        className="fixed inset-0 z-40"
+        onClick={onClose}
+        onContextMenu={(e) => { e.preventDefault(); onClose(); }}
+      />
+      <div
+        role="menu"
+        className="fixed z-50 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-lg animate-fade-up"
+        style={{ top: menu.y, left: menu.x, minWidth }}
+      >
+        {header}
+        {children}
+      </div>
+    </>,
+    document.body,
+  );
+}
 
 /** Élément de menu contextuel — icône + libellé, coche si état courant. */
 function MenuItem({
