@@ -342,7 +342,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
 
   // ── Reset quand le client change ──
   useEffect(() => {
-    setCart([]); setNumAtCard("");
+    setCart([]); setNumAtCard(""); setComments("");
     const t = new Date(); t.setDate(t.getDate() + 1); t.setHours(9, 0, 0, 0);
     setDeliveryDate(formatDateInput(t));
     fetch(`/api/clients/${clientId}/delivery-modes`).then((r) => r.json()).then((d) => {
@@ -651,7 +651,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
         ...(tourneePayload() ?? {}),
         deliveryDate: new Date(deliveryDate).toISOString(),
         numAtCard: numAtCard.trim() || undefined, confirmEncours, lines: apiLines,
-        comments: buildPromoComment(),   // undefined → champ omis (pas de promo)
+        // Texte du BL : la saisie du bandeau haut prime ; sinon récap promo auto
+        // (comportement historique) ; undefined → champ omis.
+        comments: comments.trim() || buildPromoComment(),
       }),
     });
 
@@ -663,7 +665,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     }
     const fmt = (n: number | null | undefined) => n != null ? n.toFixed(2) : "—";
     toast.success(`✅ Commande #${json.docNum} créée — ${fmt(json.totalTTC)} € TTC`, { duration: 10000 });
-    setCart([]); setNumAtCard("");
+    setCart([]); setNumAtCard(""); setComments("");
     return true;
   };
 
@@ -890,6 +892,77 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     <div className="flex flex-col h-full min-h-0 gap-2">
       {/* ── C2 — Bandeau promotions (contenu/visibilité gérés par le composant) ── */}
       <PromoBanner context="commande" />
+
+      {/* ── Bandeau HAUT discret : contexte de modification + n° de commande
+             (réf. client) + texte sur le BL — création ET modification. Sorti du
+             panier pour ne plus encombrer la zone de saisie des lignes. ── */}
+      <div
+        className={`shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border px-2.5 py-1.5 ${
+          modif
+            ? "border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15"
+            : "border-border bg-card"
+        }`}
+      >
+        {modif && (
+          <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-amber-800 dark:text-amber-200 shrink-0">
+            <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />
+            Modification du BL #{modif.docNum}
+            {modifMeta?.dueDate && (
+              <span className="font-normal text-amber-700/80 dark:text-amber-300/80">
+                · livraison {new Date(modifMeta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}
+              </span>
+            )}
+            {prefilling && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          </span>
+        )}
+        {modif && modifMeta?.editable === false && (
+          <span className="text-[11px] font-medium text-rose-600 dark:text-rose-400 shrink-0">
+            ⚠️ Commande clôturée — la modification sera refusée par SAP.
+          </span>
+        )}
+        <div className="flex items-center gap-2 flex-1 min-w-[280px]">
+          <input
+            value={numAtCard}
+            onChange={(e) => setNumAtCard(e.target.value)}
+            placeholder="N° de commande (réf. client)"
+            aria-label="N° de commande (réf. client)"
+            className="h-8 w-[190px] rounded-md border border-border bg-background text-[12.5px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+          <input
+            value={comments}
+            onChange={(e) => setComments(e.target.value)}
+            maxLength={254}
+            placeholder="Texte sur le BL (note, promo…)"
+            aria-label="Ligne texte sur le BL"
+            title="Ligne texte du BL (colonne « T » dans SAP) — note / promo"
+            className="h-8 flex-1 min-w-[160px] rounded-md border border-border bg-background text-[12.5px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+          {cart.some((l) => l.promo) && (
+            <button
+              type="button"
+              onClick={() => setComments((c) => {
+                const t = buildPromoComment();
+                if (!t) return c;
+                return c.trim() ? `${c.trim()} · ${t}` : t;
+              })}
+              title="Insérer le récap des promos du panier dans le texte du BL"
+              className="inline-flex items-center gap-1 shrink-0 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline"
+            >
+              <Megaphone className="h-3 w-3" /> Texte promo
+            </button>
+          )}
+        </div>
+        {modif && onExitModif && (
+          <button
+            type="button"
+            onClick={onExitModif}
+            title="Quitter la modification et revenir à la saisie normale (synchro écran 1)"
+            className="inline-flex shrink-0 items-center gap-1.5 h-8 px-3 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-[12px] font-semibold active:scale-[0.98] transition-colors"
+          >
+            <X className="h-3.5 w-3.5" /> Quitter la modification
+          </button>
+        )}
+      </div>
 
       <div className="flex gap-3 flex-1 min-h-0">
       {/* ── Colonne STOCK (cliquable) — grille alignée, dense ──
@@ -1139,7 +1212,6 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
           {/* Raccourcis produits personnalisables (ajout direct au panier) */}
           <OrderShortcuts onPick={addByShortcut} />
         </div>
-        {modif && <ModifBanner docNum={modif.docNum} meta={modifMeta} prefilling={prefilling} onExit={onExitModif} />}
         <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
           {cart.length === 0 && (
             <p className="text-[14px] text-muted-foreground italic py-4 text-center inline-flex items-center justify-center gap-2 w-full">
@@ -1404,45 +1476,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                 <input type="datetime-local" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)}
                   className="flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2" />
               </div>
-              <input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="N° de commande (réf. client)"
-                className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2" />
             </>
           )}
-          {/* N° de commande (réf. client) — éditable aussi en modification */}
-          {modif && (
-            <div className="space-y-1">
-              <label htmlFor="bl-numatcard" className="text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
-                N° de commande (réf. client)
-              </label>
-              <input id="bl-numatcard" value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)}
-                placeholder="N° de commande (réf. client)"
-                className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
-            </div>
-          )}
-          {/* Ligne TEXTE du BL (colonne « T » = dlt_Text dans SAP) — note/promo */}
-          {modif && (
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <label htmlFor="bl-note" className="text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
-                  Ligne texte sur le BL
-                </label>
-                {cart.some((l) => l.promo) && (
-                  <button type="button"
-                    onClick={() => setComments((c) => {
-                      const t = buildPromoComment();
-                      if (!t) return c;
-                      return c.trim() ? `${c.trim()} · ${t}` : t;
-                    })}
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline">
-                    <Megaphone className="h-3 w-3" /> Insérer le texte promo
-                  </button>
-                )}
-              </div>
-              <input id="bl-note" value={comments} onChange={(e) => setComments(e.target.value)}
-                maxLength={254} placeholder="Ex. Framboise offerte (promo 5+1)…"
-                className="w-full h-9 rounded-md border border-border bg-background text-[13px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
-            </div>
-          )}
+          {/* N° de commande (réf. client) + ligne texte du BL : déplacés dans le
+              bandeau HAUT (création et modification) — le panier reste dédié aux lignes. */}
           <div className="flex items-center justify-between text-[14px]">
             <span className="text-muted-foreground">{modif ? "Total HT du BL" : "Total HT estimé"}</span>
             <span className="font-bold tnum text-foreground">{totalHT.toFixed(2)} €</span>
@@ -1498,59 +1535,5 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   );
 }
 
-/* ═════════════════════════════════════════════════════════════
-   Bandeau « Modification » — rappelle le BL en cours d'édition.
-   Les lignes du BL sont pré-remplies dans le panier (éditables) :
-   le bandeau ne fait que le rappel du contexte. Piloté par
-   « Détail livraison » (URL → Écran 2).
-═════════════════════════════════════════════════════════════ */
-function ModifBanner({
-  docNum, meta, prefilling, onExit,
-}: {
-  docNum: number;
-  meta: { dueDate?: string; editable?: boolean } | null;
-  prefilling: boolean;
-  onExit?: () => void;
-}) {
-  const dateLabel = meta?.dueDate
-    ? new Date(meta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })
-    : null;
-  const closed = meta?.editable === false;
-
-  return (
-    <div className="mb-2 shrink-0 rounded-lg border border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15 overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2">
-        <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-amber-500 text-white shrink-0">
-          <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-[12.5px] font-semibold text-amber-800 dark:text-amber-200 leading-tight">
-            Modification du BL #{docNum}
-          </p>
-          <p className="text-[10.5px] text-amber-700/80 dark:text-amber-300/80">
-            Modifie, supprime, réordonne ou ajoute des lignes — enregistré sur ce même BL{dateLabel ? ` · livraison ${dateLabel}` : ""}.
-          </p>
-        </div>
-        {prefilling && (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600 dark:text-amber-300 shrink-0" />
-        )}
-      </div>
-      {closed && (
-        <p className="px-3 pb-2 text-[11px] font-medium text-rose-600 dark:text-rose-400">
-          ⚠️ Commande clôturée — la modification sera refusée par SAP.
-        </p>
-      )}
-      {/* Quitter la modification — bouton pleine largeur, bien visible (remplace
-          le petit bouton contour coincé à droite du bandeau, peu repérable). */}
-      {onExit && (
-        <div className="px-3 pb-2.5 pt-0.5">
-          <button type="button" onClick={onExit}
-            title="Quitter la modification et revenir à la saisie normale (synchro écran 1)"
-            className="inline-flex w-full items-center justify-center gap-1.5 h-9 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-[12.5px] font-semibold active:scale-[0.99] transition-colors">
-            <X className="h-4 w-4" /> Quitter la modification
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
+/* (L'ancien bandeau « Modification » du panier a été remplacé par le bandeau
+   discret en HAUT de l'écran — contexte + n° de commande + texte du BL.) */
