@@ -7,6 +7,8 @@ import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
 import { getDeliveryStatuses } from "@/lib/inventory";
 import { getClientTournees, type ClientTournee } from "@/lib/clientTournee";
 import { getClientTrclCarriers } from "@/lib/clientCarriers";
+import { isRestrictedPreparateur } from "@/lib/preparateur";
+import { isLivreur } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -22,13 +24,17 @@ export const dynamic = "force-dynamic";
  * (depuis Product, comme /api/sap/orders) et libellé transporteur (U_TrspCode
  * résolu via la table Carrier). Les commandes annulées sont exclues.
  *
- * Réponse : { ok, db, date, holiday, count, totals, carriers[] }
+ * Réponse : { ok, date, holiday, count, totals, carriers[] }
  *   carriers[] = commandes groupées par transporteur (tri colis desc, « Non
  *   affecté » en dernier).
  */
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  // Rôles à accès restreint (préparateur verrouillé, livreur) : le CA (totalHT /
+  // totalTTC) est un chiffre commercial — masqué CÔTÉ SERVEUR, pas seulement
+  // dans l'UI (canDispatch), sinon il reste lisible en appelant l'API.
+  const restricted = isRestrictedPreparateur(session.user?.email) || (await isLivreur(session));
 
   const { searchParams } = new URL(req.url);
   const dateParam = searchParams.get("date");
@@ -272,6 +278,12 @@ export async function GET(req: NextRequest) {
       }
     } catch { /* avoirs best-effort → pas de déduction auto */ }
 
+    // Masquage CA pour les rôles restreints — APRÈS la détection d'avoirs (qui
+    // matche sur totalTTC) et AVANT les agrégats (totaux transporteurs à 0 aussi).
+    if (restricted) {
+      for (const d of docs) { d.totalHT = 0; d.totalTTC = 0; }
+    }
+
     // ── Regroupement par transporteur ──
     type Doc = (typeof docs)[number];
     const groups = new Map<string, { code: string | null; name: string; docs: Doc[] }>();
@@ -315,7 +327,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      db: process.env.SAP_B1_COMPANY_DB,
       date,
       holiday: frenchHolidayLabel(date),
       count: docs.length,

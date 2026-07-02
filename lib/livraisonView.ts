@@ -78,7 +78,6 @@ export interface Totals {
 
 export interface ApiResp {
   ok: boolean;
-  db?: string;
   date: string;
   holiday: string | null;
   count: number;
