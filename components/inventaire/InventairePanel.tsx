@@ -179,21 +179,20 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     } catch { /* ignore */ }
   }, []);
 
-  // Commandes IDF ouvertes (pré-étape « non préparées »). Chargées à la demande.
-  const loadPrepOrders = useCallback(async () => {
+  // Commandes non « faites » du Détail livraison (pré-étape AUTOMATIQUE) : l'API
+  // ne renvoie que les commandes PAS encore préparées → tout est pré-coché,
+  // rien à pointer à la main (on peut encore décocher une exception).
+  const loadPrepOrders = useCallback(async (opts?: { open?: boolean }) => {
     setPrepLoading(true);
     setPrepError(null);
-    setPrepOpen(true);
+    if (opts?.open !== false) setPrepOpen(true);
     try {
       const res = await fetch("/api/inventaire/prep-orders", { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) { setPrepError(json.error ?? "Erreur SAP"); setPrepOrders(null); return; }
       const orders: PrepOrderDTO[] = json.orders ?? [];
       setPrepOrders(orders);
-      // On purge la sélection des commandes qui ne sont plus proposées (parties /
-      // hors fenêtre / déjà actées côté serveur).
-      const live = new Set(orders.map((o) => o.docEntry));
-      setPrepared((prev) => new Set([...prev].filter((d) => live.has(d))));
+      setPrepared(new Set(orders.map((o) => o.docEntry)));
     } catch (e) { setPrepError((e as Error).message); setPrepOrders(null); }
     finally { setPrepLoading(false); }
   }, []);
@@ -206,7 +205,9 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     });
   }, []);
 
-  useEffect(() => { loadProducts(); loadSessions(); }, [loadProducts, loadSessions]);
+  // Pré-étape chargée d'office (repliée) : la réintégration des commandes non
+  // « faites » s'applique sans aucune saisie manuelle.
+  useEffect(() => { loadProducts(); loadSessions(); loadPrepOrders({ open: false }); }, [loadProducts, loadSessions, loadPrepOrders]);
 
   /* --------------------- Persistance du brouillon ---------------------- */
   // Recharge le brouillon « nouveau comptage » depuis localStorage (sert aussi à
@@ -1056,8 +1057,8 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
             <span className="block text-[14px] font-semibold text-foreground">Commandes non préparées (encore en stock)</span>
             <span className="block text-[11.5px] text-muted-foreground">
               {nbChecked > 0
-                ? `${nbChecked} commande(s) non préparée(s) · +${fmt(addedColis)} colis réintégrés`
-                : "Optionnel — coche les commandes PAS encore préparées (marchandise toujours en rayon) pour la recompter."}
+                ? `${nbChecked} commande(s) non « faites » (Détail livraison) · +${fmt(addedColis)} colis réintégrés automatiquement`
+                : "Automatique — reprend les commandes non « faites » du Détail livraison (marchandise encore en rayon)."}
             </span>
           </span>
           {prepLoading ? (
@@ -1072,25 +1073,27 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
             {prepError && (
               <div className="flex items-center justify-between gap-2 rounded-lg bg-rose-50 px-3 py-2 text-[12px] text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
                 <span className="min-w-0 truncate">{prepError}</span>
-                <Button variant="ghost" size="sm" className="h-7 shrink-0" onClick={loadPrepOrders}>Réessayer</Button>
+                <Button variant="ghost" size="sm" className="h-7 shrink-0" onClick={() => loadPrepOrders()}>Réessayer</Button>
               </div>
             )}
 
             {!prepOrders && !prepLoading && !prepError && (
-              <Button variant="outline" size="sm" className="h-9" onClick={loadPrepOrders}>
-                <Database className="mr-1.5 h-4 w-4" /> Charger les commandes en cours (J+1 → J+4)
+              <Button variant="outline" size="sm" className="h-9" onClick={() => loadPrepOrders()}>
+                <Database className="mr-1.5 h-4 w-4" /> Charger les commandes non faites (J+1 → J+4)
               </Button>
             )}
 
             {prepOrders && prepOrders.length === 0 && (
-              <p className="py-1 text-[12px] italic text-muted-foreground">Aucune commande GMS/Export/CHR en cours (J+1 → J+4).</p>
+              <p className="py-1 text-[12px] italic text-muted-foreground">
+                Aucune commande non « faite » (GMS/Export/CHR, J+1 → J+4) — tout est déjà préparé, rien à réintégrer.
+              </p>
             )}
 
             {prepOrders && prepOrders.length > 0 && (
               <>
                 <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                  <span>{prepOrders.length} commande(s) · coche celles PAS encore préparées</span>
-                  <button type="button" onClick={loadPrepOrders} className="inline-flex items-center gap-1 hover:text-foreground">
+                  <span>{prepOrders.length} commande(s) non « faites » au Détail livraison — tout est pré-coché, décoche les exceptions</span>
+                  <button type="button" onClick={() => loadPrepOrders()} className="inline-flex items-center gap-1 hover:text-foreground">
                     <RotateCcw className="h-3 w-3" /> Rafraîchir
                   </button>
                 </div>
@@ -1127,9 +1130,10 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                   })}
                 </ul>
                 <p className="px-1 text-[10.5px] text-muted-foreground">
-                  Le stock théorique tient déjà compte de TOUTES les commandes (faites et non faites). Coche ici
-                  uniquement les commandes <b>non préparées</b> (marchandise encore en rayon) pour les <b>réintégrer</b>
-                  et éviter un faux excédent. +{fmt(addedColis)} colis.
+                  Le stock théorique tient déjà compte de TOUTES les commandes. Les commandes non
+                  « faites » du <b>Détail livraison</b> (marchandise encore en rayon) sont <b>réintégrées
+                  automatiquement</b> pour éviter un faux excédent — décoche une commande seulement si elle
+                  a été préparée sans être pointée « faite ». +{fmt(addedColis)} colis.
                 </p>
               </>
             )}

@@ -798,6 +798,39 @@ function CarrierGroup({
   const collapsed = !expanded.has(carrierKey);
   const docEntries = carrier.docs.map((d) => d.docEntry);
 
+  // ── Ré-attribution GROUPÉE du « Fait par » : toutes les commandes du groupe
+  //    (onglet courant) déjà marquées « faites » — clic droit sur l'en-tête. ──
+  const preparedEntries = carrier.docs.filter((d) => d.prepared || d.departed).map((d) => d.docEntry);
+  const [bulkByOpen, setBulkByOpen] = useState(false);
+  const [bulkBySaving, setBulkBySaving] = useState(false);
+  async function bulkChangePreparedBy(person: string) {
+    if (preparedEntries.length === 0) return;
+    setBulkBySaving(true);
+    try {
+      // { docEntry, by } sans `prepared` = ré-attribution (heure du clic conservée).
+      const oks = await Promise.all(preparedEntries.map((de) =>
+        fetch("/api/livraisons/prepared", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ docEntry: de, by: person }),
+        })
+          .then(async (r) => {
+            const j = await r.json().catch(() => null);
+            return r.ok && j?.ok !== false;
+          })
+          .catch(() => false),
+      ));
+      const failed = oks.filter((ok) => !ok).length;
+      if (failed) toast.error(`${failed} commande(s) n'ont pas pu être ré-attribuées — actualisation.`);
+      else toast.success(`${preparedEntries.length} commande(s) de ${carrier.name} — fait par ${displayPersonName(person)}`);
+      setBulkByOpen(false);
+      // Les OrderRow figent leur état au montage → rechargement (gen++) pour
+      // rafraîchir les badges « Fait par … » de toutes les lignes du groupe.
+      onReload();
+    } finally {
+      setBulkBySaving(false);
+    }
+  }
+
   // Sous-groupes par TOURNÉE nommée (IDF, IDF 2, NORD…) au sein du transporteur.
   // On résout le nom via le catalogue de tournées du transporteur (SERGTRS).
   const carrierTournees = tourneesByCode[(carrier.code ?? "").toUpperCase()];
@@ -832,7 +865,7 @@ function CarrierGroup({
   // Menu clic droit (desktop) sur l'en-tête transporteur → change l'état de TOUT
   // le groupe (À préparer / Fait / Départ). Accès mobile = le bouton ci-dessus.
   // Pas d'action groupée sur « Manquants » (états mélangés) → menu désactivé.
-  const { menu, openAt, close: closeMenu } = useContextMenu(224, 148);
+  const { menu, openAt, close: closeMenu } = useContextMenu(224, 196);
   const onHeaderContextMenu = (e: ReactMouseEvent) => { if (allowBulk) openAt(e); };
 
   return (
@@ -947,7 +980,31 @@ function CarrierGroup({
           onClick={() => { closeMenu(); onBulkStatus(docEntries, "FAIT"); }}>Tout : fait</MenuItem>
         <MenuItem icon={Truck} accent="text-sky-600 dark:text-sky-400" active={statusTab === "DEPART"}
           onClick={() => { closeMenu(); onBulkStatus(docEntries, "DEPART"); }}>Tout : départ</MenuItem>
+        {/* Ré-attribution GROUPÉE du « Fait par » — commandes déjà « faites » du groupe */}
+        {preparedEntries.length > 0 && (
+          <>
+            <div className="my-1 h-px bg-border" />
+            <MenuItem icon={UserCheck} accent="text-emerald-600 dark:text-emerald-400"
+              onClick={() => { closeMenu(); setBulkByOpen(true); }}>
+              Changer qui a fait… ({preparedEntries.length})
+            </MenuItem>
+          </>
+        )}
       </ContextMenu>
+
+      {/* Changer la PERSONNE créditée du « fait » sur TOUT le groupe */}
+      <PreparedByDialog
+        open={bulkByOpen}
+        onOpenChange={setBulkByOpen}
+        subtitle={<>
+          {carrier.name} — les <b className="text-foreground">{preparedEntries.length} commande{preparedEntries.length > 1 ? "s" : ""}</b>{" "}
+          déjà marquées « faites » de ce groupe seront créditées à la personne choisie
+          (les heures des clics « fait » sont conservées).
+        </>}
+        currentBy={null}
+        saving={bulkBySaving}
+        onPick={bulkChangePreparedBy}
+      />
 
     </section>
   );
@@ -1477,6 +1534,88 @@ function Metric({ label, value, className }: { label: string; value: string; cla
 }
 
 /* ═════════════════════════════════════════════════════════════
+   « Fait par… » — équipe + dialog de choix de la personne.
+   Partagés entre la ligne (OrderRow) et le groupe transporteur.
+═════════════════════════════════════════════════════════════ */
+/** Équipe de l'app (/api/users) — chargée à la PREMIÈRE activation, puis cachée. */
+function useTeam(active: boolean) {
+  const [team, setTeam] = useState<{ name: string | null; email: string | null }[] | null>(null);
+  useEffect(() => {
+    if (!active || team) return;
+    let cancelled = false;
+    fetch("/api/users")
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled) setTeam(j?.users ?? []); })
+      .catch(() => { if (!cancelled) setTeam([]); });
+    return () => { cancelled = true; };
+  }, [active, team]);
+  return team;
+}
+
+/** Dialog « Qui a fait cette commande ? » — liste l'équipe, un clic ré-attribue. */
+function PreparedByDialog({
+  open, onOpenChange, subtitle, currentBy, saving, onPick,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  subtitle: ReactNode;
+  /** Personne actuellement créditée (surlignée) — null si mixte / inconnue. */
+  currentBy: string | null;
+  saving: boolean;
+  onPick: (person: string) => void;
+}) {
+  const team = useTeam(open);
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!saving) onOpenChange(o); }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader className="text-left">
+          <DialogTitle className="flex items-center gap-2 pr-8 text-[16px]">
+            <UserCog className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            Qui a fait cette commande ?
+          </DialogTitle>
+          <DialogDescription className="text-[12px]">{subtitle}</DialogDescription>
+        </DialogHeader>
+        {team === null ? (
+          <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Chargement de l&apos;équipe…
+          </div>
+        ) : team.length === 0 ? (
+          <p className="text-[12.5px] text-muted-foreground py-2">Aucun utilisateur trouvé.</p>
+        ) : (
+          <ul className="max-h-[50vh] overflow-y-auto divide-y divide-border/60 rounded-xl border border-border">
+            {team.map((u) => {
+              const value = (u.name?.trim() || u.email || "").trim();
+              if (!value) return null;
+              const current = value === (currentBy ?? "").trim();
+              return (
+                <li key={u.email ?? value}>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => onPick(value)}
+                    className={`flex w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left text-[13.5px] font-medium transition-colors disabled:opacity-60 ${
+                      current
+                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                        : "text-foreground hover:bg-secondary/60"
+                    }`}
+                  >
+                    <span className="truncate">
+                      {displayPersonName(value)}
+                      <span className="ml-1.5 text-[11px] text-muted-foreground font-normal">{value}</span>
+                    </span>
+                    {current && <CheckCircle2 className="h-4 w-4 shrink-0" />}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ═════════════════════════════════════════════════════════════
    Ligne commande — repliable vers le détail des lignes.
    Mémoïsée : patchDoc met à jour les docs de façon immuable → seules les lignes
    réellement modifiées re-rendent (le reste garde son identité de props).
@@ -1599,19 +1738,9 @@ const OrderRow = memo(function OrderRow({
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   // ── Modifier la PERSONNE qui a fait la commande (« Fait par … ») ──
-  //    Dialog listant l'équipe (/api/users), chargée à la première ouverture.
+  //    Dialog partagé (PreparedByDialog) — badge cliquable et menu clic droit.
   const [editByOpen, setEditByOpen] = useState(false);
-  const [team, setTeam] = useState<{ name: string | null; email: string | null }[] | null>(null);
   const [savingBy, setSavingBy] = useState(false);
-  useEffect(() => {
-    if (!editByOpen || team) return;
-    let cancelled = false;
-    fetch("/api/users")
-      .then((r) => r.json())
-      .then((j) => { if (!cancelled) setTeam(j?.users ?? []); })
-      .catch(() => { if (!cancelled) setTeam([]); });
-    return () => { cancelled = true; };
-  }, [editByOpen, team]);
 
   async function changePreparedBy(person: string) {
     const prev = preparedBy;
@@ -1915,7 +2044,7 @@ const OrderRow = memo(function OrderRow({
   }
 
   // ── Menu contextuel (clic droit sur la ligne) → actions d'état + dispatch ──
-  const { menu, openAt, close: closeMenu } = useContextMenu(220, 88);
+  const { menu, openAt, close: closeMenu } = useContextMenu(220, 236);
   function onRowContextMenu(e: ReactMouseEvent) {
     if (!doc.open) return;                                    // commande livrée/annulée : pas d'action
     const el = e.target as HTMLElement;
@@ -2361,57 +2490,17 @@ const OrderRow = memo(function OrderRow({
       </Dialog>
 
       {/* Changer la PERSONNE qui a fait la commande (« Fait par … ») */}
-      <Dialog open={editByOpen} onOpenChange={(o) => { if (!savingBy) setEditByOpen(o); }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader className="text-left">
-            <DialogTitle className="flex items-center gap-2 pr-8 text-[16px]">
-              <UserCog className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              Qui a fait cette commande ?
-            </DialogTitle>
-            <DialogDescription className="text-[12px]">
-              BL n°{doc.docNum} — {doc.cardName}. La personne choisie remplace{" "}
-              <b className="text-foreground">{displayPersonName(preparedBy ?? preparer)}</b> (l&apos;heure du « fait » est conservée).
-            </DialogDescription>
-          </DialogHeader>
-          {team === null ? (
-            <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Chargement de l&apos;équipe…
-            </div>
-          ) : team.length === 0 ? (
-            <p className="text-[12.5px] text-muted-foreground py-2">Aucun utilisateur trouvé.</p>
-          ) : (
-            <ul className="max-h-[50vh] overflow-y-auto divide-y divide-border/60 rounded-xl border border-border">
-              {team.map((u) => {
-                const value = (u.name?.trim() || u.email || "").trim();
-                if (!value) return null;
-                const current = value === (preparedBy ?? "").trim();
-                return (
-                  <li key={u.email ?? value}>
-                    <button
-                      type="button"
-                      disabled={savingBy}
-                      onClick={() => changePreparedBy(value)}
-                      className={`flex w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left text-[13.5px] font-medium transition-colors disabled:opacity-60 ${
-                        current
-                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                          : "text-foreground hover:bg-secondary/60"
-                      }`}
-                    >
-                      <span className="truncate">
-                        {displayPersonName(value)}
-                        <span className="ml-1.5 text-[11px] text-muted-foreground font-normal">{value}</span>
-                      </span>
-                      {savingBy && !current
-                        ? null
-                        : current && <CheckCircle2 className="h-4 w-4 shrink-0" />}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </DialogContent>
-      </Dialog>
+      <PreparedByDialog
+        open={editByOpen}
+        onOpenChange={setEditByOpen}
+        subtitle={<>
+          BL n°{doc.docNum} — {doc.cardName}. La personne choisie remplace{" "}
+          <b className="text-foreground">{displayPersonName(preparedBy ?? preparer)}</b> (l&apos;heure du « fait » est conservée).
+        </>}
+        currentBy={preparedBy}
+        saving={savingBy}
+        onPick={changePreparedBy}
+      />
 
       {/* Vérification avant de marquer « faite » (évite les validations par erreur) */}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
@@ -2560,6 +2649,14 @@ const OrderRow = memo(function OrderRow({
           onClick={() => { closeMenu(); markFait(); }}>Fait</MenuItem>
         <MenuItem icon={Truck} accent="text-sky-600 dark:text-sky-400" active={docStatusOf === "DEPART"}
           onClick={() => { closeMenu(); markDepart(); }}>Départ</MenuItem>
+        {/* Ré-attribution du « Fait par » — commande déjà marquée « faite » uniquement */}
+        {prepared && (
+          <>
+            <div className="my-1 h-px bg-border" />
+            <MenuItem icon={UserCheck} accent="text-emerald-600 dark:text-emerald-400"
+              onClick={() => { closeMenu(); setEditByOpen(true); }}>Changer qui a fait…</MenuItem>
+          </>
+        )}
       </ContextMenu>
     </li>
   );

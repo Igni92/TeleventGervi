@@ -11,6 +11,7 @@ export interface PrintLine {
   itemCode: string;
   itemName: string;
   quantity: number;
+  unit?: string | null;   // unité de vente (PIE, KG, COLIS…) affichée après la quantité
   colis: number;
   weightKg: number;
   marque?: string | null;
@@ -66,8 +67,8 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
           ${details(l).length ? `<span class="det">— ${details(l).map(esc).join(" · ")}</span>` : ""}
           ${isMissing ? `<span class="flag">MANQUANT</span>` : ""}
         </td>
-        <td class="num">${num(l.quantity)}</td>
-        <td class="num">${num(l.weightKg)}</td>
+        <td class="num">${num(l.quantity)}${l.unit?.trim() ? ` <span class="unit">${esc(l.unit.trim().toLowerCase())}</span>` : ""}</td>
+        <td class="num">${num(l.weightKg)} <span class="unit">kg</span></td>
       </tr>`;
     })
     .join("");
@@ -91,13 +92,17 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   body { font: 14px/1.5 "Segoe UI", Arial, sans-serif; color: #111; padding: 16px; }
   @media print { body { padding: 0; } .noprint { display: none !important; } }
 
-  header { display: flex; justify-content: space-between; align-items: flex-start;
+  header { display: flex; justify-content: space-between; align-items: center; gap: 12px;
            border-bottom: 2.5px solid #111; padding-bottom: 10px; margin-bottom: 12px; }
+  .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .brand img.logo { height: 52px; width: auto; object-fit: contain; }
   header .title p { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #555; }
   header .title h1 { font-size: 22px; letter-spacing: -0.3px; }
+  /* BL en PETIT, date de livraison en GRAND (jour en surgras) — repère n°1 du bon. */
   header .bl { text-align: right; }
-  header .bl .num { font-size: 20px; font-weight: 700; }
-  header .bl .date { font-size: 13px; color: #333; }
+  header .bl .num { font-size: 13px; font-weight: 600; color: #333; }
+  header .bl .date { font-size: 19px; margin-top: 1px; }
+  header .bl .date b { font-weight: 900; }
 
   .infos { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 0;
            border: 1.5px solid #111; border-radius: 6px; overflow: hidden; margin-bottom: 14px; }
@@ -123,6 +128,7 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   td.art .flag { display: inline-block; margin-left: 8px; border: 1.5px solid #111;
                  border-radius: 3px; padding: 0 5px; font-size: 11px; font-weight: 800;
                  letter-spacing: 0.8px; color: #111; }
+  .unit { font-size: 11px; font-weight: 600; color: #555; }
   tfoot td { border-top: 2px solid #111; padding: 8px; font-weight: 700; font-size: 14px; }
   tfoot .label { text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
 
@@ -140,13 +146,16 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   <div class="noprint"><button onclick="window.print()">🖨 Imprimer</button></div>
 
   <header>
-    <div class="title">
-      <p>Gervi · Détail livraison</p>
-      <h1>Bon de préparation</h1>
+    <div class="brand">
+      <img class="logo" src="${esc(`${window.location.origin}/logo-mark.png`)}" alt="Gervifrais" />
+      <div class="title">
+        <p>Gervifrais · Détail livraison</p>
+        <h1>Bon de préparation</h1>
+      </div>
     </div>
     <div class="bl">
       <p class="num">BL n°${doc.docNum}</p>
-      <p class="date">Livraison du ${esc(ctx.dateLabel)}</p>
+      <p class="date">Livraison du <b>${esc(ctx.dateLabel)}</b></p>
     </div>
   </header>
 
@@ -168,10 +177,10 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
     <tfoot>
       <tr>
         <td></td>
-        <td style="text-align:center">${num(doc.colis)}</td>
+        <td style="text-align:center">${num(doc.colis)} <span class="unit">colis</span></td>
         <td class="label">Total — ${doc.lines.length} article${doc.lines.length > 1 ? "s" : ""}</td>
         <td class="num">${num(doc.lines.reduce((s, l) => s + l.quantity, 0))}</td>
-        <td class="num">${num(doc.weightKg)}</td>
+        <td class="num">${num(doc.weightKg)} <span class="unit">kg</span></td>
       </tr>
     </tfoot>
   </table>
