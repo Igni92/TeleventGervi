@@ -20,6 +20,7 @@ export interface Line {
   itemCode: string;
   itemName: string;
   quantity: number;
+  unit?: string | null;        // unité de vente (PIE, KG, COLIS…) — affichée sur le bon imprimé
   colis: number;
   weightKg: number;
   warehouse: string | null;

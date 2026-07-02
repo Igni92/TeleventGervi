@@ -252,6 +252,7 @@ export async function GET(req: NextRequest) {
           itemCode: l.ItemCode,
           itemName: l.ItemDescription || p?.frgnName || p?.itemName || l.ItemCode,
           quantity: l.Quantity,
+          unit: p?.salesUnit ?? null,   // unité de vente (PIE, KG, COLIS…) — bon imprimé
           colisRaw,
           weightRaw,
           colis: Math.round(colisRaw * 10) / 10,
