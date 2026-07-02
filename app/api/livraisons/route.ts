@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
-import { getDeliveryStatuses, getDeliveryMissing, type MissingItem } from "@/lib/inventory";
+import { getDeliveryStatuses } from "@/lib/inventory";
 import { getClientTournees, type ClientTournee } from "@/lib/clientTournee";
 import { getClientTrclCarriers } from "@/lib/clientCarriers";
 import { isRestrictedPreparateur } from "@/lib/preparateur";
@@ -97,10 +97,10 @@ export async function GET(req: NextRequest) {
     const cardCodes = Array.from(new Set(live.map((o) => o.CardCode).filter(Boolean)));
 
     // ── Référentiels : tous INDÉPENDANTS entre eux → chargés EN PARALLÈLE
-    //    (produits, transporteurs, statuts manuels, type client, tournées
-    //    mémorisées, tournées réelles SERG_TRCL, articles manquants). Chaque bloc
+    //    (produits, transporteurs, statuts manuels, type + nom client, tournées
+    //    mémorisées, tournées réelles SERG_TRCL, stocks SAP négatifs). Chaque bloc
     //    gère son propre repli (best-effort) pour ne jamais faire échouer la livraison. ──
-    const [prods, carrierByCode, statuses, typeByCardCode, savedTourneeByCard, trclByCard, missingByDoc] = await Promise.all([
+    const [prods, carrierByCode, statuses, clientMeta, savedTourneeByCard, trclByCard, negativeStocks] = await Promise.all([
       // Produits (poids / colis / désignation).
       allItemCodes.length
         ? prisma.product.findMany({
@@ -124,25 +124,32 @@ export async function GET(req: NextRequest) {
       //   « faite » + auteur, « départ » + auteur, « avoir / exclu »,
       //   préparateur affecté, signalement « incomplète (à reprendre) ».
       getDeliveryStatuses(),
-      // Type client (GMS / CHR / EXPORT) par CardCode — pour le filtre par segment.
+      // Type client (GMS / CHR / EXPORT) + NOM COMPLET (fiche télévente) par
+      // CardCode — filtre par segment + nom complet sur les documents imprimés
+      // (le CardName SAP est parfois tronqué/abrégé).
       (async () => {
-        const m = new Map<string, string>();
-        if (!cardCodes.length) return m;
+        const types = new Map<string, string>();
+        const names = new Map<string, string>();
+        if (!cardCodes.length) return { types, names };
         try {
           const clients = await prisma.client.findMany({
             where: { code: { in: cardCodes } },
-            select: { code: true, type: true },
+            select: { code: true, type: true, nom: true },
           });
-          for (const c of clients) if (c.type) m.set(c.code, c.type);
+          for (const c of clients) {
+            if (c.type) types.set(c.code, c.type);
+            if (c.nom?.trim()) names.set(c.code, c.nom.trim());
+          }
           const modes = await prisma.clientDeliveryMode.findMany({
             where: { sapCardCode: { in: cardCodes } },
-            select: { sapCardCode: true, client: { select: { type: true } } },
+            select: { sapCardCode: true, client: { select: { type: true, nom: true } } },
           });
           for (const mo of modes) {
-            if (mo.client?.type && !m.has(mo.sapCardCode)) m.set(mo.sapCardCode, mo.client.type);
+            if (mo.client?.type && !types.has(mo.sapCardCode)) types.set(mo.sapCardCode, mo.client.type);
+            if (mo.client?.nom?.trim() && !names.has(mo.sapCardCode)) names.set(mo.sapCardCode, mo.client.nom.trim());
           }
         } catch { /* type optionnel → BL rangés en « Autres » */ }
-        return m;
+        return { types, names };
       })(),
       // Tournée MÉMORISÉE par client (repli si SERG_TRCL indisponible).
       getClientTournees(cardCodes).catch(() => new Map<string, ClientTournee>()),
@@ -154,9 +161,34 @@ export async function GET(req: NextRequest) {
         }));
         return m;
       })(),
-      // Articles signalés MANQUANTS par BL (rupture au picking) → onglet « Manquants ».
-      getDeliveryMissing().catch(() => new Map<number, MissingItem[]>()),
+      // ── Articles MANQUANTS = stock SAP total NÉGATIF (somme tous entrepôts) ──
+      // Interrogé EN DIRECT dans SAP (le miroir local ne conserve pas les stocks
+      // négatifs) sur les seuls articles des commandes du jour, par lots de 20.
+      // Stock total < 0 = on a vendu plus qu'on ne détient → achat à faire.
+      // Filtre « < 0 » côté app : QuantityOnStock est un champ calculé que
+      // certains Service Layer refusent en $filter. Lot en échec → ignoré.
+      (async () => {
+        const neg: Record<string, number> = {};
+        const chunks: string[][] = [];
+        for (let i = 0; i < allItemCodes.length; i += 20) chunks.push(allItemCodes.slice(i, i + 20));
+        await Promise.all(chunks.map(async (chunk) => {
+          try {
+            const or = chunk.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
+            const items = await sap.getAll<{ ItemCode: string; QuantityOnStock?: number }>(
+              `Items?$select=ItemCode,QuantityOnStock&$filter=${encodeURIComponent(`(${or})`)}`,
+              { pageSize: 50, maxPages: 2 },
+            );
+            for (const it of items) {
+              const q = it.QuantityOnStock ?? 0;
+              if (q < 0) neg[it.ItemCode] = q;
+            }
+          } catch { /* lot en échec → pas de manquants pour ces articles */ }
+        }));
+        return neg;
+      })(),
     ]);
+    const typeByCardCode = clientMeta.types;
+    const nameByCardCode = clientMeta.names;
     const pMap = new Map(prods.map((p) => [p.itemCode, p]));
     const {
       prepared: faiteByDoc, preparedBy: preparedByDoc,
@@ -207,6 +239,8 @@ export async function GET(req: NextRequest) {
         dueDate: d.DocDueDate,
         cardCode: d.CardCode,
         cardName: d.CardName ?? d.CardCode,
+        // Nom complet (fiche client) pour les documents imprimés.
+        cardFullName: nameByCardCode.get(d.CardCode) ?? d.CardName ?? d.CardCode,
         totalHT: Math.round(((d.DocTotal ?? 0) - (d.VatSum ?? 0)) * 100) / 100,
         totalTTC: Math.round((d.DocTotal ?? 0) * 100) / 100,
         colis: Math.round(colis * 10) / 10,
@@ -234,8 +268,8 @@ export async function GET(req: NextRequest) {
         departedBy: departedByDoc.get(d.DocEntry) ?? null,    // qui a marqué « départ »
         preparer: prepByDoc.get(d.DocEntry) ?? null,          // préparateur affecté (qui a ouvert)
         incomplete: incompleteByDoc.get(d.DocEntry) ?? false, // « à reprendre » — remise sur la file
-        // Codes articles signalés MANQUANTS sur ce BL (rupture au picking).
-        missingItems: (missingByDoc.get(d.DocEntry) ?? []).map((i) => i.itemCode),
+        // Articles MANQUANTS de ce BL = lignes dont le stock SAP total est négatif.
+        missingItems: outLines.filter((l) => negativeStocks[l.itemCode] !== undefined).map((l) => l.itemCode),
         // « avoir/exclu » : surcharge manuelle si présente, sinon détecté auto (ci-dessous).
         excluded: avoirByDoc.has(d.DocEntry) ? !!avoirByDoc.get(d.DocEntry) : false,
         lineCount: outLines.length,
@@ -352,6 +386,8 @@ export async function GET(req: NextRequest) {
       count: docs.length,
       totals,
       carriers,
+      // Stock SAP total (négatif) par article manquant — pilote les achats.
+      negativeStocks,
     });
   } catch (e) {
     return NextResponse.json(

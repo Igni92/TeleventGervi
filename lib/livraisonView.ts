@@ -35,6 +35,7 @@ export interface Doc {
   dueDate: string;
   cardCode: string;
   cardName: string;
+  cardFullName?: string;       // nom COMPLET (fiche client) pour les documents imprimés
   totalHT: number;
   totalTTC: number;
   colis: number;
@@ -53,7 +54,7 @@ export interface Doc {
   departedBy?: string | null;  // qui a marqué le « départ »
   preparer?: string | null;    // préparateur affecté (qui a ouvert la commande)
   incomplete?: boolean;        // « à reprendre » — remise sur la file (pas finie)
-  missingItems?: string[];     // codes articles signalés MANQUANTS (rupture au picking)
+  missingItems?: string[];     // articles MANQUANTS (stock SAP total négatif)
   excluded: boolean;           // « avoir / exclu » — déduit 100 % des totaux
   lineCount: number;
   lines: Line[];
@@ -84,6 +85,8 @@ export interface ApiResp {
   count: number;
   totals: Totals;
   carriers: Carrier[];
+  /** Stock SAP total (négatif) par article manquant — pilote les achats. */
+  negativeStocks?: Record<string, number>;
   error?: string;
 }
 
