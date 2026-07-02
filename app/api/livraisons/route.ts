@@ -173,12 +173,19 @@ export async function GET(req: NextRequest) {
       const lines = (d.DocumentLines || []).map((l) => {
         const p = pMap.get(l.ItemCode);
         const div = colisDivOf(l.ItemCode) || 1;
+        // Valeurs BRUTES conservées pour la sommation ; l'arrondi 0,1 n'est
+        // appliqué qu'à l'AFFICHAGE par ligne (colis/weightKg). Sommer les valeurs
+        // déjà arrondies dérivait le total du BL (ex. 2 lignes à 0,05 → 0,2 ≠ 0,1).
+        const colisRaw = (l.Quantity || 0) / div;
+        const weightRaw = (l.Quantity || 0) * weightOfItem(l.ItemCode);
         return {
           itemCode: l.ItemCode,
           itemName: l.ItemDescription || p?.frgnName || p?.itemName || l.ItemCode,
           quantity: l.Quantity,
-          colis: Math.round(((l.Quantity || 0) / div) * 10) / 10,
-          weightKg: Math.round((l.Quantity || 0) * weightOfItem(l.ItemCode) * 10) / 10,
+          colisRaw,
+          weightRaw,
+          colis: Math.round(colisRaw * 10) / 10,
+          weightKg: Math.round(weightRaw * 10) / 10,
           warehouse: l.WarehouseCode ?? null,
           // Tags désignation (préparation) — marque · conditionnement · origine.
           marque: p?.uMarque ?? null,
@@ -186,8 +193,10 @@ export async function GET(req: NextRequest) {
           pays: p?.uPays ?? null,
         };
       });
-      const colis = lines.reduce((s, l) => s + l.colis, 0);
-      const weightKg = lines.reduce((s, l) => s + l.weightKg, 0);
+      const colis = lines.reduce((s, l) => s + l.colisRaw, 0);
+      const weightKg = lines.reduce((s, l) => s + l.weightRaw, 0);
+      // Lignes émises SANS les champs bruts (sommation serveur uniquement).
+      const outLines = lines.map(({ colisRaw: _c, weightRaw: _w, ...rest }) => rest);
       const trspCode = d.U_TrspCode?.trim() || null;
       return {
         docEntry: d.DocEntry,
@@ -225,8 +234,8 @@ export async function GET(req: NextRequest) {
         incomplete: incompleteByDoc.get(d.DocEntry) ?? false, // « à reprendre » — remise sur la file
         // « avoir/exclu » : surcharge manuelle si présente, sinon détecté auto (ci-dessous).
         excluded: avoirByDoc.has(d.DocEntry) ? !!avoirByDoc.get(d.DocEntry) : false,
-        lineCount: lines.length,
-        lines,
+        lineCount: outLines.length,
+        lines: outLines,
       };
     })
     // Demande métier : on n'affiche QUE les magasins segmentés (GMS / CHR / EXPORT).
