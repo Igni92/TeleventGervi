@@ -65,6 +65,11 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   // sélecteur de tournée d'une commande. Cache mémoire + dédup des fetchs.
   const [tourneesByCode, setTourneesByCode] = useState<Record<string, Tournee[]>>({});
   const tourneesLoading = useRef<Set<string>>(new Set());
+  // Miroir de tourneesByCode pour que loadTournees garde une identité STABLE
+  // (sinon elle change à chaque tournée chargée → tous les effets abonnés se
+  // re-déclenchent). On lit le cache via la ref, on dépend de rien.
+  const tourneesByCodeRef = useRef(tourneesByCode);
+  tourneesByCodeRef.current = tourneesByCode;
 
   // Catalogue des transporteurs (SERGTRS) pour le changement direct par commande.
   useEffect(() => {
@@ -88,7 +93,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   // Charge (une fois) les tournées d'un transporteur pour peupler le sélecteur.
   const loadTournees = useCallback(async (code: string) => {
     const key = code.trim().toUpperCase();
-    if (!key || tourneesByCode[key] || tourneesLoading.current.has(key)) return;
+    if (!key || tourneesByCodeRef.current[key] || tourneesLoading.current.has(key)) return;
     tourneesLoading.current.add(key);
     try {
       const r = await fetch(`/api/transporteurs?code=${encodeURIComponent(code)}`);
@@ -99,7 +104,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
     } catch { /* ignore */ } finally {
       tourneesLoading.current.delete(key);
     }
-  }, [tourneesByCode]);
+  }, []);
 
   // Recalculée à CHAQUE rendu (coût négligeable) : figée au montage, la
   // « prochaine livraison » devenait fausse si l'écran restait ouvert après
@@ -108,14 +113,22 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   const holiday = frenchHolidayLabel(date);
   const isAuto = date === auto;
 
+  // Garde d'obsolescence : chaque appel prend un numéro de séquence ; seule la
+  // réponse de la DERNIÈRE requête est appliquée. Sans ça, un load() manuel
+  // (Actualiser, changement transporteur/tournée/date) plus lent qu'un load()
+  // suivant pouvait réécraser des données plus récentes — ou annuler des patchs
+  // optimistes avec un instantané Prisma antérieur au POST.
+  const loadSeq = useRef(0);
   const load = useCallback(
     (signal?: AbortSignal) => {
+      const seq = ++loadSeq.current;
+      const fresh = () => !signal?.aborted && seq === loadSeq.current;
       setLoading(true);
       setError(null);
       fetch(`/api/livraisons?date=${date}`, { cache: "no-store", signal })
         .then(async (r) => {
           const j: ApiResp = await r.json();
-          if (signal?.aborted) return;
+          if (!fresh()) return;
           if (!j.ok) {
             setError(j.error || "Erreur de chargement.");
             setData(null);
@@ -125,10 +138,10 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
           }
         })
         .catch((e) => {
-          if (e?.name !== "AbortError") setError("SAP injoignable. Réessayez.");
+          if (fresh() && e?.name !== "AbortError") setError("SAP injoignable. Réessayez.");
         })
         .finally(() => {
-          if (!signal?.aborted) setLoading(false);
+          if (fresh()) setLoading(false);
         });
     },
     [date],
@@ -994,6 +1007,14 @@ function OrderRow({
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   async function setPreparedTo(next: boolean) {
+    // État antérieur capturé pour un rollback FIDÈLE en cas d'échec (marquer
+    // « faite » lève « à reprendre » — il faut le restaurer si le POST échoue,
+    // sinon le badge « À reprendre » disparaîtrait définitivement).
+    const prev = { prepared, incomplete };
+    const rollback = () => {
+      setPrepared(prev.prepared); setIncomplete(prev.incomplete);
+      onPatchDoc(doc.docEntry, { prepared: prev.prepared, incomplete: prev.incomplete });
+    };
     setPrepared(next);
     if (next) setIncomplete(false);
     // Optimiste : la carte change d'onglet (À préparer ↔ Fait) immédiatement.
@@ -1006,8 +1027,7 @@ function OrderRow({
       });
       const j = await res.json().catch(() => null);
       if (!res.ok || j?.ok === false) {
-        setPrepared(!next);
-        onPatchDoc(doc.docEntry, { prepared: !next });
+        rollback();
         toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement");
         return;
       }
@@ -1016,8 +1036,7 @@ function OrderRow({
       setPreparedBy(by);
       onPatchDoc(doc.docEntry, { preparedBy: by });
     } catch {
-      setPrepared(!next);
-      onPatchDoc(doc.docEntry, { prepared: !next });
+      rollback();
       toast.error("Échec de l'enregistrement");
     }
     finally { setSavingPrep(false); }
@@ -1035,6 +1054,14 @@ function OrderRow({
   const [savingDepart, setSavingDepart] = useState(false);
 
   async function setDepartedTo(next: boolean) {
+    // État antérieur capturé : marquer « départ » force « faite » (partir implique
+    // préparé) — en cas d'échec il faut restaurer le `prepared` d'origine, sinon
+    // une commande « à préparer » atterrirait à tort dans l'onglet « Fait ».
+    const prev = { departed, prepared };
+    const rollback = () => {
+      setDeparted(prev.departed); setPrepared(prev.prepared);
+      onPatchDoc(doc.docEntry, { departed: prev.departed, prepared: prev.prepared });
+    };
     setDeparted(next);
     if (next) setPrepared(true);           // partir implique « faite »
     onPatchDoc(doc.docEntry, { departed: next, ...(next ? { prepared: true } : {}) });
@@ -1046,8 +1073,7 @@ function OrderRow({
       });
       const j = await res.json().catch(() => null);
       if (!res.ok || j?.ok === false) {
-        setDeparted(!next);
-        onPatchDoc(doc.docEntry, { departed: !next });
+        rollback();
         toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement");
         return;
       }
@@ -1055,8 +1081,7 @@ function OrderRow({
       setDepartedBy(by);
       onPatchDoc(doc.docEntry, { departedBy: by });
     } catch {
-      setDeparted(!next);
-      onPatchDoc(doc.docEntry, { departed: !next });
+      rollback();
       toast.error("Échec de l'enregistrement");
     }
     finally { setSavingDepart(false); }
