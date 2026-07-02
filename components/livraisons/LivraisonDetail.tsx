@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   Truck, Boxes, Scale, Users, FileText, Receipt,
@@ -21,122 +21,36 @@ import {
   nextDeliveryDate, frenchHolidayLabel, nextWorkingDeliveryDay,
   formatDeliveryDate, addDaysISO,
 } from "@/lib/livraison";
+// Types (miroir de /api/livraisons) + logique de vue pure (testée à part).
+import {
+  docStatus, computeStatusCounts, computeView, docTourneeKeyLabel, STATUS_LABEL,
+  type StatusTab, type Tournee, type Doc, type Carrier, type Totals, type ApiResp,
+} from "@/lib/livraisonView";
 import { printOrderRecap } from "./printRecap";
 import { renderBonTransport } from "@/lib/bonTransport";
 
 interface CarrierOption { name: string; sapValue: string }
-interface Tournee { lineId: number; nom: string; des: string; heure: string | null }
 
 /* ─────────────────────────────────────────────────────────────
-   Types (miroir de /api/livraisons)
+   Formatters — instances Intl créées UNE fois (module) : réinstancier un
+   NumberFormat à chaque appel coûtait des milliers d'objets par rendu.
 ───────────────────────────────────────────────────────────── */
-interface Line {
-  itemCode: string;
-  itemName: string;
-  quantity: number;
-  colis: number;
-  weightKg: number;
-  warehouse: string | null;
-  marque?: string | null;
-  condt?: string | null;
-  pays?: string | null;
-}
-interface Doc {
-  docEntry: number;
-  docNum: number;
-  docDate: string;
-  dueDate: string;
-  cardCode: string;
-  cardName: string;
-  cardFullName?: string;       // nom COMPLET (fiche client) pour les documents imprimés
-  totalHT: number;
-  totalTTC: number;
-  colis: number;
-  weightKg: number;
-  open: boolean;
-  comments: string;
-  numAtCard: string;
-  trspCode: string | null;
-  trspHeure: string | null;
-  savedTournee: { trspCode: string; heure: string | null; nom?: string | null; des?: string | null; lineId?: number | null } | null;
-  carrierName: string | null;
-  clientType: string | null;   // GMS | CHR | EXPORT | null
-  prepared: boolean;           // « faite » — coché manuellement
-  preparedBy?: string | null;  // qui a marqué la commande « faite »
-  departed?: boolean;          // « départ » — partie en livraison
-  departedBy?: string | null;  // qui a marqué le « départ »
-  preparer?: string | null;    // préparateur affecté (qui a ouvert la commande)
-  incomplete?: boolean;        // « à reprendre » — remise sur la file (pas finie)
-  missingItems?: string[];     // articles MANQUANTS (stock SAP total négatif)
-  excluded: boolean;           // « avoir / exclu » — déduit 100% des totaux
-  lineCount: number;
-  lines: Line[];
-}
-interface Carrier {
-  code: string | null;
-  name: string;
-  orders: number;
-  colis: number;
-  weightKg: number;
-  totalHT: number;
-  docs: Doc[];
-}
-interface Totals {
-  orders: number;
-  clients: number;
-  colis: number;
-  weightKg: number;
-  totalHT: number;
-}
-interface ApiResp {
-  ok: boolean;
-  db?: string;
-  date: string;
-  holiday: string | null;
-  count: number;
-  totals: Totals;
-  carriers: Carrier[];
-  /** Stock SAP total (négatif) par article manquant — pilote les achats. */
-  negativeStocks?: Record<string, number>;
-  error?: string;
-}
-
 /** Fiche transporteur (coordonnées) — miroir de /api/transporteurs/fiche. */
 interface CarrierFiche { email: string | null; phones: { label: string; value: string }[] }
 
-/* ─────────────────────────────────────────────────────────────
-   Formatters
-───────────────────────────────────────────────────────────── */
-const fmtInt = (v: number) => new Intl.NumberFormat("fr-FR").format(Math.round(v));
-const fmtNum = (v: number) =>
-  new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(v);
+const NF_INT = new Intl.NumberFormat("fr-FR");
+const NF_NUM = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+const NF_EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+const fmtInt = (v: number) => NF_INT.format(Math.round(v));
+const fmtNum = (v: number) => NF_NUM.format(v);
 const fmtKg = (v: number) => `${fmtNum(v)} kg`;
-const fmtEur = (v: number) =>
-  new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v);
+const fmtEur = (v: number) => NF_EUR.format(v);
 const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
-/* ─────────────────────────────────────────────────────────────
-   Onglet d'état — À préparer / Fait / Départ (progression)
-───────────────────────────────────────────────────────────── */
-type StatusTab = "A_PREPARER" | "FAIT" | "DEPART";
-
-/** Onglets de la vue : les 3 états d'avancement + « Manquants » (vue transverse
- *  des commandes du jour ayant au moins un article signalé manquant). */
+/** Onglets de la vue : les 3 états d'avancement (StatusTab, cf. lib/livraisonView)
+ *  + « Manquants » (vue transverse des commandes ayant au moins un article en
+ *  stock SAP négatif — achat à prévoir). */
 type ViewTab = StatusTab | "MANQUANTS";
-
-/** État courant d'une commande (mutuellement exclusif) : parti > préparé > à préparer. */
-function docStatus(d: { prepared: boolean; departed?: boolean }): StatusTab {
-  if (d.departed) return "DEPART";
-  if (d.prepared) return "FAIT";
-  return "A_PREPARER";
-}
-
-/** Libellés courts des états — réutilisés par les actions groupées (transporteur). */
-const STATUS_LABEL: Record<StatusTab, string> = {
-  A_PREPARER: "À préparer",
-  FAIT: "Fait",
-  DEPART: "Départ",
-};
 
 /** Badge de ligne par segment client (conservé pour CHR / EXPORT, le tag GMS
  *  n'étant plus affiché — la distinction utile est désormais À préparer / Fait). */
@@ -148,40 +62,27 @@ const SEG_UI: Record<"CHR" | "EXPORT", { label: string; badge: string }> = {
 /* ═════════════════════════════════════════════════════════════
    Composant principal
 ═════════════════════════════════════════════════════════════ */
-/** Clé + libellé de la TOURNÉE d'une commande (sous-groupe sous le transporteur).
- *  On veut le NOM de la tournée (IDF, IDF 2, NORD…), pas l'heure :
- *   1) nom mémorisé (SERG_TRCL U_DistBy) s'il est connu ;
- *   2) sinon on le résout dans le catalogue du transporteur (`tournees`) — comme
- *      le sélecteur de ligne — par LineId mémorisé, puis par heure du BL ;
- *   3) repli ultime sur l'heure, puis « Sans tournée ». */
-function docTourneeKeyLabel(d: Doc, tournees?: Tournee[]): { key: string; label: string } {
-  const savedNom = (d.savedTournee?.nom ?? "").trim();
-  if (savedNom) return { key: `T:${savedNom.toUpperCase()}`, label: savedNom };
-
-  if (tournees && tournees.length) {
-    const saved = d.savedTournee;
-    let t: Tournee | undefined;
-    if (saved?.lineId != null) t = tournees.find((x) => x.lineId === saved.lineId);
-    if (!t && d.trspHeure) t = tournees.find((x) => x.heure === d.trspHeure);
-    const nom = (t?.nom ?? "").trim();
-    if (nom) return { key: `T:${nom.toUpperCase()}`, label: nom };
-  }
-
-  const h = (d.trspHeure ?? "").slice(0, 5);
-  if (h) return { key: `H:${h}`, label: `Tournée ${h}` };
-  return { key: "T:__none__", label: "Sans tournée" };
-}
-
 export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   const [date, setDate] = useState<string>(() => nextDeliveryDate());
   const [data, setData] = useState<ApiResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Génération des données : incrémentée à chaque (re)chargement RÉUSSI et
+  // incluse dans la key des lignes → les OrderRow remontent avec l'état serveur
+  // frais (leurs useState dupliquent doc.* au montage et deviendraient périmés
+  // après « Actualiser » ou une modification faite par un autre utilisateur).
+  // Les patchs optimistes (patchDoc) ne changent pas la génération.
+  const [gen, setGen] = useState(0);
   const [carriers, setCarriers] = useState<CarrierOption[]>([]);
   // Tournées par transporteur (SERGTRS), chargées à la demande quand on ouvre le
   // sélecteur de tournée d'une commande. Cache mémoire + dédup des fetchs.
   const [tourneesByCode, setTourneesByCode] = useState<Record<string, Tournee[]>>({});
   const tourneesLoading = useRef<Set<string>>(new Set());
+  // Miroir de tourneesByCode pour que loadTournees garde une identité STABLE
+  // (sinon elle change à chaque tournée chargée → tous les effets abonnés se
+  // re-déclenchent). On lit le cache via la ref, on dépend de rien.
+  const tourneesByCodeRef = useRef(tourneesByCode);
+  tourneesByCodeRef.current = tourneesByCode;
 
   // Catalogue des transporteurs (SERGTRS) pour le changement direct par commande.
   useEffect(() => {
@@ -205,7 +106,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   // Charge (une fois) les tournées d'un transporteur pour peupler le sélecteur.
   const loadTournees = useCallback(async (code: string) => {
     const key = code.trim().toUpperCase();
-    if (!key || tourneesByCode[key] || tourneesLoading.current.has(key)) return;
+    if (!key || tourneesByCodeRef.current[key] || tourneesLoading.current.has(key)) return;
     tourneesLoading.current.add(key);
     try {
       const r = await fetch(`/api/transporteurs?code=${encodeURIComponent(code)}`);
@@ -216,32 +117,44 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
     } catch { /* ignore */ } finally {
       tourneesLoading.current.delete(key);
     }
-  }, [tourneesByCode]);
+  }, []);
 
-  const auto = useMemo(() => nextDeliveryDate(), []);
+  // Recalculée à CHAQUE rendu (coût négligeable) : figée au montage, la
+  // « prochaine livraison » devenait fausse si l'écran restait ouvert après
+  // minuit (poste entrepôt) — badge « Prochaine » et bouton retour périmés.
+  const auto = nextDeliveryDate();
   const holiday = frenchHolidayLabel(date);
   const isAuto = date === auto;
 
+  // Garde d'obsolescence : chaque appel prend un numéro de séquence ; seule la
+  // réponse de la DERNIÈRE requête est appliquée. Sans ça, un load() manuel
+  // (Actualiser, changement transporteur/tournée/date) plus lent qu'un load()
+  // suivant pouvait réécraser des données plus récentes — ou annuler des patchs
+  // optimistes avec un instantané Prisma antérieur au POST.
+  const loadSeq = useRef(0);
   const load = useCallback(
     (signal?: AbortSignal) => {
+      const seq = ++loadSeq.current;
+      const fresh = () => !signal?.aborted && seq === loadSeq.current;
       setLoading(true);
       setError(null);
       fetch(`/api/livraisons?date=${date}`, { cache: "no-store", signal })
         .then(async (r) => {
           const j: ApiResp = await r.json();
-          if (signal?.aborted) return;
+          if (!fresh()) return;
           if (!j.ok) {
             setError(j.error || "Erreur de chargement.");
             setData(null);
           } else {
             setData(j);
+            setGen((g) => g + 1);
           }
         })
         .catch((e) => {
-          if (e?.name !== "AbortError") setError("SAP injoignable. Réessayez.");
+          if (fresh() && e?.name !== "AbortError") setError("SAP injoignable. Réessayez.");
         })
         .finally(() => {
-          if (!signal?.aborted) setLoading(false);
+          if (fresh()) setLoading(false);
         });
     },
     [date],
@@ -344,7 +257,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   );
 
   // ── Onglet d'état : « À préparer » (par défaut) / « Fait » / « Départ » /
-  //    « Manquants » (vue transverse des ruptures signalées au picking) ──
+  //    « Manquants » (vue transverse des articles en stock SAP négatif) ──
   const [statusTab, setStatusTab] = useState<ViewTab>("A_PREPARER");
 
   // Mise à jour optimiste d'UNE commande dans `data` (statut « faite », auteur,
@@ -374,21 +287,37 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
       const patch: Partial<Doc> = {
         prepared: target !== "A_PREPARER",
         departed: target === "DEPART",
+        // Marquer « fait » / « départ » lève le signalement « à reprendre » (règle serveur).
+        ...(target !== "A_PREPARER" ? { incomplete: false } : {}),
+        // Quitter un état efface son auteur ; l'auteur du nouvel état arrive avec la réponse.
+        ...(target === "A_PREPARER" ? { preparedBy: null } : {}),
+        ...(target !== "DEPART" ? { departedBy: null } : {}),
       };
       docEntries.forEach((de) => patchDoc(de, patch));
-      const post = (url: string, body: Record<string, unknown>) =>
-        fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      // POST + report de l'auteur renvoyé par l'API (badges « Fait par… » / « Parti · … »
+      // à jour sans recharger, comme pour le bouton individuel).
+      const post = (url: string, body: Record<string, unknown>, onBy?: (by: string | null) => void) =>
+        fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+          .then(async (r) => {
+            if (!r.ok) return false;
+            const j = await r.json().catch(() => null);
+            if (j?.ok === false) return false;
+            onBy?.(j?.by ?? null);
+            return true;
+          })
+          .catch(() => false);
       try {
         const calls: Promise<boolean>[] = [];
         for (const de of docEntries) {
           // Quitter « Départ » : lever d'abord le drapeau départ.
           if (source === "DEPART" && target !== "DEPART") {
-            calls.push(post("/api/livraisons/departed", { docEntry: de, departed: false }).then((r) => r.ok).catch(() => false));
+            calls.push(post("/api/livraisons/departed", { docEntry: de, departed: false }));
           }
           if (target === "DEPART") {
-            calls.push(post("/api/livraisons/departed", { docEntry: de, departed: true }).then((r) => r.ok).catch(() => false));
+            calls.push(post("/api/livraisons/departed", { docEntry: de, departed: true }, (by) => patchDoc(de, { departedBy: by })));
           } else {
-            calls.push(post("/api/livraisons/prepared", { docEntry: de, prepared: target === "FAIT" }).then((r) => r.ok).catch(() => false));
+            calls.push(post("/api/livraisons/prepared", { docEntry: de, prepared: target === "FAIT" },
+              (by) => patchDoc(de, { preparedBy: by })));
           }
         }
         const oks = await Promise.all(calls);
@@ -420,49 +349,21 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   // (Repliage par défaut : géré par l'état `expanded` — TOUT est replié par
   //  défaut, transporteurs comme tournées, pour tous les profils.)
 
-  // Comptes par état (sur l'ensemble, pour les compteurs des onglets).
-  // « Manquants » compte les COMMANDES ayant au moins un article signalé.
-  const statusCounts = useMemo(() => {
-    let aPreparer = 0, fait = 0, depart = 0, manquants = 0;
-    if (data) for (const car of data.carriers) for (const d of car.docs) {
-      const s = docStatus(d);
-      if (s === "DEPART") depart++; else if (s === "FAIT") fait++; else aPreparer++;
-      if ((d.missingItems?.length ?? 0) > 0) manquants++;
-    }
-    return { aPreparer, fait, depart, manquants };
-  }, [data]);
+  // Comptes par onglet (sur l'ensemble) — « Manquants » compte les commandes
+  // ayant au moins un article signalé. Logique pure dans lib/livraisonView.
+  const statusCounts = useMemo(
+    () => computeStatusCounts(data?.carriers ?? []),
+    [data],
+  );
 
-  // Vue filtrée par onglet : par état d'avancement (À préparer / Fait / Départ),
+  // Vue filtrée par onglet : par état d'avancement (À préparer / Fait / Départ)
   // ou par présence de manquants (onglet « Manquants », tous états confondus).
-  // On recalcule les métriques (groupes + bandeau de synthèse) pour rester cohérent.
-  const view = useMemo(() => {
-    if (!data) return null;
-    const r1 = (n: number) => Math.round(n * 10) / 10;
-    const r2 = (n: number) => Math.round(n * 100) / 100;
-    const carriers = data.carriers
-      .map((c) => {
-        const docs = c.docs.filter((d) =>
-          statusTab === "MANQUANTS" ? (d.missingItems?.length ?? 0) > 0 : docStatus(d) === statusTab,
-        );
-        return {
-          ...c, docs,
-          orders: docs.length,
-          colis: r1(docs.reduce((s, d) => s + d.colis, 0)),
-          weightKg: r1(docs.reduce((s, d) => s + d.weightKg, 0)),
-          totalHT: r2(docs.reduce((s, d) => s + d.totalHT, 0)),
-        };
-      })
-      .filter((c) => c.docs.length > 0);
-    const allDocs = carriers.flatMap((c) => c.docs);
-    const totals: Totals = {
-      orders: allDocs.length,
-      clients: new Set(allDocs.map((d) => d.cardCode)).size,
-      colis: r1(allDocs.reduce((s, d) => s + d.colis, 0)),
-      weightKg: r1(allDocs.reduce((s, d) => s + d.weightKg, 0)),
-      totalHT: r2(allDocs.reduce((s, d) => s + d.totalHT, 0)),
-    };
-    return { ...data, carriers, totals, count: allDocs.length };
-  }, [data, statusTab]);
+  // Métriques recalculées (groupes + bandeau) — les BL « avoir / exclu » restent
+  // listés mais sont déduits, comme au serveur.
+  const view = useMemo(
+    () => (data ? { ...data, ...computeView(data, statusTab) } : null),
+    [data, statusTab],
+  );
 
   // Synthèse des MANQUANTS par article (toutes commandes du jour confondues) :
   // stock SAP négatif + quantités/colis commandés + nb de commandes touchées.
@@ -633,8 +534,8 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
                 key={key} carrier={c} carrierKey={key} date={date} fullDocs={fullDocs} carriers={carriers} onCarrierChange={changeCarrier} onDateChange={changeDate}
                 tourneesByCode={tourneesByCode} onLoadTournees={loadTournees} onTourneeChange={changeTournee}
                 expanded={expanded} onToggle={toggleKey}
-                onPatchDoc={patchDoc} onReload={() => load()} canDispatch={canDispatch}
-                statusTab={statusTab} onBulkStatus={bulkSetStatus}
+                onPatchDoc={patchDoc} onReload={load} canDispatch={canDispatch}
+                statusTab={statusTab} onBulkStatus={bulkSetStatus} gen={gen}
               />
             );
           })}
@@ -786,7 +687,7 @@ function CarrierGroup({
   carrier, carrierKey, date, fullDocs, carriers, onCarrierChange, onDateChange,
   tourneesByCode, onLoadTournees, onTourneeChange,
   expanded, onToggle, onPatchDoc, onReload, canDispatch,
-  statusTab, onBulkStatus,
+  statusTab, onBulkStatus, gen,
 }: {
   carrier: Carrier;
   carrierKey: string;
@@ -805,6 +706,7 @@ function CarrierGroup({
   canDispatch: boolean;
   statusTab: ViewTab;
   onBulkStatus: (docEntries: number[], target: StatusTab) => void;
+  gen: number;
 }) {
   const unassigned = !carrier.code;
   const collapsed = !expanded.has(carrierKey);
@@ -843,25 +745,9 @@ function CarrierGroup({
 
   // Menu clic droit (desktop) sur l'en-tête transporteur → change l'état de TOUT
   // le groupe (À préparer / Fait / Départ). Accès mobile = le bouton ci-dessus.
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  function onHeaderContextMenu(e: ReactMouseEvent) {
-    if (!allowBulk) return;
-    e.preventDefault();
-    setMenu({ x: Math.min(e.clientX, window.innerWidth - 224), y: Math.min(e.clientY, window.innerHeight - 148) });
-  }
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null); };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
-    };
-  }, [menu]);
+  // Pas d'action groupée sur « Manquants » (états mélangés) → menu désactivé.
+  const { menu, openAt, close: closeMenu } = useContextMenu(224, 148);
+  const onHeaderContextMenu = (e: ReactMouseEvent) => { if (allowBulk) openAt(e); };
 
   return (
     <section className="rounded-2xl border border-border bg-card overflow-hidden">
@@ -948,7 +834,7 @@ function CarrierGroup({
               <ul className="divide-y divide-border/60">
                 {tg.docs.map((d) => (
                   <OrderRow
-                    key={d.docEntry} doc={d} carriers={carriers}
+                    key={`${d.docEntry}:${gen}`} doc={d} carriers={carriers}
                     onCarrierChange={onCarrierChange} onDateChange={onDateChange}
                     tournees={d.trspCode ? tourneesByCode[d.trspCode.toUpperCase()] : undefined}
                     onLoadTournees={onLoadTournees} onTourneeChange={onTourneeChange}
@@ -962,31 +848,18 @@ function CarrierGroup({
       })}
 
       {/* Menu clic droit (desktop) — état groupé du transporteur */}
-      {menu && typeof document !== "undefined" && createPortal(
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setMenu(null)}
-            onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
-          />
-          <div
-            role="menu"
-            className="fixed z-50 min-w-[214px] overflow-hidden rounded-lg border border-border bg-card py-1 shadow-lg animate-fade-up"
-            style={{ top: menu.y, left: menu.x }}
-          >
-            <p className="px-3 py-1.5 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground border-b border-border/60 truncate">
-              {carrier.name} · {docEntries.length} cmd.
-            </p>
-            <MenuItem icon={Clock} accent="text-amber-600 dark:text-amber-400" active={statusTab === "A_PREPARER"}
-              onClick={() => { setMenu(null); onBulkStatus(docEntries, "A_PREPARER"); }}>Tout : à préparer</MenuItem>
-            <MenuItem icon={CheckCircle2} accent="text-emerald-600 dark:text-emerald-400" active={statusTab === "FAIT"}
-              onClick={() => { setMenu(null); onBulkStatus(docEntries, "FAIT"); }}>Tout : fait</MenuItem>
-            <MenuItem icon={Truck} accent="text-sky-600 dark:text-sky-400" active={statusTab === "DEPART"}
-              onClick={() => { setMenu(null); onBulkStatus(docEntries, "DEPART"); }}>Tout : départ</MenuItem>
-          </div>
-        </>,
-        document.body,
-      )}
+      <ContextMenu menu={menu} onClose={closeMenu} minWidth={214} header={
+        <p className="px-3 py-1.5 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground border-b border-border/60 truncate">
+          {carrier.name} · {docEntries.length} cmd.
+        </p>
+      }>
+        <MenuItem icon={Clock} accent="text-amber-600 dark:text-amber-400" active={statusTab === "A_PREPARER"}
+          onClick={() => { closeMenu(); onBulkStatus(docEntries, "A_PREPARER"); }}>Tout : à préparer</MenuItem>
+        <MenuItem icon={CheckCircle2} accent="text-emerald-600 dark:text-emerald-400" active={statusTab === "FAIT"}
+          onClick={() => { closeMenu(); onBulkStatus(docEntries, "FAIT"); }}>Tout : fait</MenuItem>
+        <MenuItem icon={Truck} accent="text-sky-600 dark:text-sky-400" active={statusTab === "DEPART"}
+          onClick={() => { closeMenu(); onBulkStatus(docEntries, "DEPART"); }}>Tout : départ</MenuItem>
+      </ContextMenu>
 
     </section>
   );
@@ -1442,9 +1315,11 @@ function Metric({ label, value, className }: { label: string; value: string; cla
 }
 
 /* ═════════════════════════════════════════════════════════════
-   Ligne commande — repliable vers le détail des lignes
+   Ligne commande — repliable vers le détail des lignes.
+   Mémoïsée : patchDoc met à jour les docs de façon immuable → seules les lignes
+   réellement modifiées re-rendent (le reste garde son identité de props).
 ═════════════════════════════════════════════════════════════ */
-function OrderRow({
+const OrderRow = memo(function OrderRow({
   doc, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange, onPatchDoc, onReload, canDispatch,
 }: {
   doc: Doc;
@@ -1561,6 +1436,14 @@ function OrderRow({
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   async function setPreparedTo(next: boolean) {
+    // État antérieur capturé pour un rollback FIDÈLE en cas d'échec (marquer
+    // « faite » lève « à reprendre » — il faut le restaurer si le POST échoue,
+    // sinon le badge « À reprendre » disparaîtrait définitivement).
+    const prev = { prepared, incomplete };
+    const rollback = () => {
+      setPrepared(prev.prepared); setIncomplete(prev.incomplete);
+      onPatchDoc(doc.docEntry, { prepared: prev.prepared, incomplete: prev.incomplete });
+    };
     setPrepared(next);
     if (next) setIncomplete(false);
     // Optimiste : la carte change d'onglet (À préparer ↔ Fait) immédiatement.
@@ -1573,8 +1456,7 @@ function OrderRow({
       });
       const j = await res.json().catch(() => null);
       if (!res.ok || j?.ok === false) {
-        setPrepared(!next);
-        onPatchDoc(doc.docEntry, { prepared: !next });
+        rollback();
         toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement");
         return;
       }
@@ -1583,8 +1465,7 @@ function OrderRow({
       setPreparedBy(by);
       onPatchDoc(doc.docEntry, { preparedBy: by });
     } catch {
-      setPrepared(!next);
-      onPatchDoc(doc.docEntry, { prepared: !next });
+      rollback();
       toast.error("Échec de l'enregistrement");
     }
     finally { setSavingPrep(false); }
@@ -1602,6 +1483,14 @@ function OrderRow({
   const [savingDepart, setSavingDepart] = useState(false);
 
   async function setDepartedTo(next: boolean) {
+    // État antérieur capturé : marquer « départ » force « faite » (partir implique
+    // préparé) — en cas d'échec il faut restaurer le `prepared` d'origine, sinon
+    // une commande « à préparer » atterrirait à tort dans l'onglet « Fait ».
+    const prev = { departed, prepared };
+    const rollback = () => {
+      setDeparted(prev.departed); setPrepared(prev.prepared);
+      onPatchDoc(doc.docEntry, { departed: prev.departed, prepared: prev.prepared });
+    };
     setDeparted(next);
     if (next) setPrepared(true);           // partir implique « faite »
     onPatchDoc(doc.docEntry, { departed: next, ...(next ? { prepared: true } : {}) });
@@ -1613,8 +1502,7 @@ function OrderRow({
       });
       const j = await res.json().catch(() => null);
       if (!res.ok || j?.ok === false) {
-        setDeparted(!next);
-        onPatchDoc(doc.docEntry, { departed: !next });
+        rollback();
         toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement");
         return;
       }
@@ -1622,8 +1510,7 @@ function OrderRow({
       setDepartedBy(by);
       onPatchDoc(doc.docEntry, { departedBy: by });
     } catch {
-      setDeparted(!next);
-      onPatchDoc(doc.docEntry, { departed: !next });
+      rollback();
       toast.error("Échec de l'enregistrement");
     }
     finally { setSavingDepart(false); }
@@ -1644,8 +1531,16 @@ function OrderRow({
       });
       const j = await res.json().catch(() => null);
       if (res.ok && j?.ok) {
-        setPreparer(j.preparer ?? null); setIncomplete(false);
-        onPatchDoc(doc.docEntry, { preparer: j.preparer ?? null, incomplete: false });
+        if (j.alreadyClaimed) {
+          // Un autre préparateur l'a déjà prise : on l'affiche (badge + toast)
+          // mais on laisse consulter le BL — on n'écrase pas son affectation.
+          setPreparer(j.preparer ?? null);
+          onPatchDoc(doc.docEntry, { preparer: j.preparer ?? null });
+          toast.info(`Déjà en préparation par ${displayPersonName(j.preparer)}`);
+        } else {
+          setPreparer(j.preparer ?? null); setIncomplete(false);
+          onPatchDoc(doc.docEntry, { preparer: j.preparer ?? null, incomplete: false });
+        }
       }
     } catch { /* affectation non bloquante */ }
   }
@@ -1776,28 +1671,45 @@ function OrderRow({
     }
   }
 
+  // ── « Avoir / exclu » MANUEL (menu contextuel, dispatch uniquement) ──
+  //    Surcharge PRIORITAIRE sur la détection automatique des avoirs : le BL est
+  //    déduit à 100 % des totaux mais reste listé (grisé). Optimiste + rollback.
+  const [togglingExcluded, setTogglingExcluded] = useState(false);
+  async function toggleExcluded() {
+    if (togglingExcluded) return;
+    const next = !doc.excluded;
+    setTogglingExcluded(true);
+    onPatchDoc(doc.docEntry, { excluded: next });
+    try {
+      const res = await fetch("/api/livraisons/excluded", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: doc.docEntry, excluded: next }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || j?.ok === false) {
+        onPatchDoc(doc.docEntry, { excluded: !next });
+        toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement");
+        return;
+      }
+      toast.success(next
+        ? `BL n°${doc.docNum} marqué « avoir / exclu » — déduit des totaux`
+        : `BL n°${doc.docNum} réintégré dans les totaux`);
+    } catch {
+      onPatchDoc(doc.docEntry, { excluded: !next });
+      toast.error("Échec de l'enregistrement");
+    } finally {
+      setTogglingExcluded(false);
+    }
+  }
+
   // ── Menu contextuel (clic droit sur la ligne) → actions d'état + dispatch ──
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const { menu, openAt, close: closeMenu } = useContextMenu(220, 88);
   function onRowContextMenu(e: ReactMouseEvent) {
     if (!doc.open) return;                                    // commande livrée/annulée : pas d'action
     const el = e.target as HTMLElement;
     if (el.closest("input, select, textarea")) return;        // garde le menu natif dans les champs (copier/coller)
-    e.preventDefault();
-    setMenu({ x: Math.min(e.clientX, window.innerWidth - 220), y: Math.min(e.clientY, window.innerHeight - 88) });
+    openAt(e);
   }
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null); };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
-    };
-  }, [menu]);
 
   const docStatusOf: StatusTab = departed ? "DEPART" : prepared ? "FAIT" : "A_PREPARER";
 
@@ -2333,38 +2245,87 @@ function OrderRow({
 
       {/* Menu contextuel (clic droit sur la ligne) — porté dans <body> pour un
           positionnement fiable (échappe à tout ancêtre transformé). */}
-      {menu && typeof document !== "undefined" && createPortal(
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setMenu(null)}
-            onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}
-          />
-          <div
-            role="menu"
-            className="fixed z-50 min-w-[210px] overflow-hidden rounded-lg border border-border bg-card py-1 shadow-lg animate-fade-up"
-            style={{ top: menu.y, left: menu.x }}
-          >
-            {/* Actions logistiques (commerciaux / admins) */}
-            {canDispatch && (
-              <>
-                <MenuItem icon={Pencil} onClick={() => { setMenu(null); startModif(); }}>Modifier la commande</MenuItem>
-                <MenuItem icon={UserCog} onClick={() => { setMenu(null); setRebindOpen(true); }}>Changer le client…</MenuItem>
-                <div className="my-1 h-px bg-border" />
-              </>
-            )}
-            {/* Changement d'état — accessible aux préparateurs / livreurs */}
-            <MenuItem icon={Clock} accent="text-amber-600 dark:text-amber-400" active={docStatusOf === "A_PREPARER"}
-              onClick={() => { setMenu(null); markAPreparer(); }}>À préparer</MenuItem>
-            <MenuItem icon={CheckCircle2} accent="text-emerald-600 dark:text-emerald-400" active={docStatusOf === "FAIT"}
-              onClick={() => { setMenu(null); markFait(); }}>Fait</MenuItem>
-            <MenuItem icon={Truck} accent="text-sky-600 dark:text-sky-400" active={docStatusOf === "DEPART"}
-              onClick={() => { setMenu(null); markDepart(); }}>Départ</MenuItem>
-          </div>
-        </>,
-        document.body,
-      )}
+      <ContextMenu menu={menu} onClose={closeMenu}>
+        {/* Actions logistiques (commerciaux / admins) */}
+        {canDispatch && (
+          <>
+            <MenuItem icon={Pencil} onClick={() => { closeMenu(); startModif(); }}>Modifier la commande</MenuItem>
+            <MenuItem icon={UserCog} onClick={() => { closeMenu(); setRebindOpen(true); }}>Changer le client…</MenuItem>
+            <MenuItem icon={RotateCcw} accent="text-rose-600 dark:text-rose-400" active={doc.excluded}
+              onClick={() => { closeMenu(); toggleExcluded(); }}>
+              {doc.excluded ? "Réintégrer dans les totaux" : "Avoir / exclure des totaux"}
+            </MenuItem>
+            <div className="my-1 h-px bg-border" />
+          </>
+        )}
+        {/* Changement d'état — accessible aux préparateurs / livreurs */}
+        <MenuItem icon={Clock} accent="text-amber-600 dark:text-amber-400" active={docStatusOf === "A_PREPARER"}
+          onClick={() => { closeMenu(); markAPreparer(); }}>À préparer</MenuItem>
+        <MenuItem icon={CheckCircle2} accent="text-emerald-600 dark:text-emerald-400" active={docStatusOf === "FAIT"}
+          onClick={() => { closeMenu(); markFait(); }}>Fait</MenuItem>
+        <MenuItem icon={Truck} accent="text-sky-600 dark:text-sky-400" active={docStatusOf === "DEPART"}
+          onClick={() => { closeMenu(); markDepart(); }}>Départ</MenuItem>
+      </ContextMenu>
     </li>
+  );
+});
+
+/* ═════════════════════════════════════════════════════════════
+   Menu contextuel (clic droit) — scaffolding partagé transporteur / ligne :
+   état de position, ouverture clampée à l'écran, fermeture (clic hors zone,
+   Escape, scroll, resize) et rendu portalisé dans <body>.
+═════════════════════════════════════════════════════════════ */
+function useContextMenu(clampW = 220, clampH = 96) {
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const close = useCallback(() => setMenu(null), []);
+  const openAt = useCallback((e: ReactMouseEvent) => {
+    e.preventDefault();
+    setMenu({ x: Math.min(e.clientX, window.innerWidth - clampW), y: Math.min(e.clientY, window.innerHeight - clampH) });
+  }, [clampW, clampH]);
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [menu, close]);
+  return { menu, openAt, close };
+}
+
+/** Conteneur portalisé du menu contextuel : backdrop de fermeture + panneau
+ *  positionné. `header` optionnel (titre du groupe), `children` = les items. */
+function ContextMenu({
+  menu, onClose, minWidth = 210, header, children,
+}: {
+  menu: { x: number; y: number } | null;
+  onClose: () => void;
+  minWidth?: number;
+  header?: ReactNode;
+  children: ReactNode;
+}) {
+  if (!menu || typeof document === "undefined") return null;
+  return createPortal(
+    <>
+      <div
+        className="fixed inset-0 z-40"
+        onClick={onClose}
+        onContextMenu={(e) => { e.preventDefault(); onClose(); }}
+      />
+      <div
+        role="menu"
+        className="fixed z-50 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-lg animate-fade-up"
+        style={{ top: menu.y, left: menu.x, minWidth }}
+      >
+        {header}
+        {children}
+      </div>
+    </>,
+    document.body,
   );
 }
 
