@@ -64,7 +64,19 @@ describe("livraisonView — computeStatusCounts", () => {
         doc({ docEntry: 4, excluded: true }),                        // exclu → non compté
       ]),
     ];
-    expect(computeStatusCounts(carriers)).toEqual({ aPreparer: 1, fait: 1, depart: 1 });
+    expect(computeStatusCounts(carriers)).toEqual({ aPreparer: 1, fait: 1, depart: 1, manquants: 0 });
+  });
+
+  it("compte les commandes avec manquants (tous états, exclus compris)", () => {
+    const carriers = [
+      carrier([
+        doc({ docEntry: 1, missingItems: ["A1"] }),                              // à préparer + manquant
+        doc({ docEntry: 2, prepared: true, missingItems: ["B2", "C3"] }),        // fait + manquant
+        doc({ docEntry: 3, prepared: true }),                                    // fait, sans manquant
+        doc({ docEntry: 4, excluded: true, missingItems: ["D4"] }),              // exclu mais manquant à traiter
+      ]),
+    ];
+    expect(computeStatusCounts(carriers)).toEqual({ aPreparer: 1, fait: 2, depart: 0, manquants: 3 });
   });
 });
 
@@ -99,6 +111,20 @@ describe("livraisonView — computeView (exclusion des BL avoirés)", () => {
     const v = computeView({ carriers }, "DEPART");
     expect(v.carriers).toEqual([]);
     expect(v.totals.orders).toBe(0);
+  });
+
+  it("onglet MANQUANTS : filtre tous états confondus sur la présence d'un manquant", () => {
+    const carriersM = [
+      carrier([
+        doc({ docEntry: 1, colis: 10, totalHT: 100, cardCode: "A", missingItems: ["X"] }), // à préparer + manquant
+        doc({ docEntry: 2, colis: 5, totalHT: 50, cardCode: "B", prepared: true, departed: true, missingItems: ["Y"] }), // parti + manquant
+        doc({ docEntry: 3, colis: 2, totalHT: 20, cardCode: "A", prepared: true }),         // sans manquant → exclu de l'onglet
+      ]),
+    ];
+    const v = computeView({ carriers: carriersM }, "MANQUANTS");
+    expect(v.carriers[0].docs.map((d) => d.docEntry)).toEqual([1, 2]);
+    // weightKg = 25 + 25 (valeur par défaut du helper doc, non surchargée ici).
+    expect(v.totals).toEqual({ orders: 2, clients: 2, colis: 15, weightKg: 50, totalHT: 150 });
   });
 
   it("arrondit les sommes (0,1 colis/kg ; 0,01 €)", () => {

@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import {
   FileText, Plus, Trash2, Loader2, Search, Truck, Calendar, ShoppingCart,
-  LayoutGrid, ChevronRight, ChevronDown, RotateCcw, AlertTriangle,
+  LayoutGrid, ChevronRight, ChevronDown, RotateCcw, AlertTriangle, Clock,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -20,6 +20,7 @@ import {
 import { formatDateInput } from "@/lib/utils";
 import { parseDeliveryDays, defaultDeliveryDate } from "@/lib/deliveryDays";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
+import { useTourneeSelection } from "@/lib/useTourneeSelection";
 
 interface DeliveryMode { id: string; name: string; sapCardCode: string; isDefault: boolean }
 interface ProductHit {
@@ -77,6 +78,13 @@ const WAREHOUSE_LABELS: Record<string, string> = {
 export function BLDialog({ open, onOpenChange, clientId, clientName, stockSharePct = 100, onCreated }: Props) {
   const [modes, setModes] = useState<DeliveryMode[]>([]);
   const [modeId, setModeId] = useState<string>("");
+  // Transporteur + TOURNÉE — obligatoires sur le bon, pré-remplis avec le défaut
+  // du client (SERG_TRCL → mémoire app → tournée unique). Hook partagé (écran 2).
+  const {
+    carriers, carrierSap, setCarrierSap,
+    tournees, tourneeId, setTourneeId,
+    validateTournee, tourneePayload,
+  } = useTourneeSelection(clientId, open);
   const [deliveryDate, setDeliveryDate] = useState<string>("");
   const [comment, setComment] = useState<string>("");
   const [numAtCard, setNumAtCard] = useState<string>("");      // N° de commande client → SAP NumAtCard
@@ -268,6 +276,9 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
       body: JSON.stringify({
         clientId,
         deliveryModeId: modeId || undefined,
+        // Transporteur + tournée EXPLICITES (trspCode/trspHeure/tournee) —
+        // toujours présents (validés avant l'envoi), mémorisés côté serveur.
+        ...(tourneePayload() ?? {}),
         deliveryDate: new Date(deliveryDate).toISOString(),
         comment: comment.trim() || undefined,
         numAtCard: numAtCard.trim() || undefined,
@@ -279,6 +290,10 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
   const submit = async () => {
     if (lines.length === 0) { toast.error("Au moins 1 ligne"); return; }
     if (!deliveryDate) { toast.error("Date de livraison requise"); return; }
+    // Garde-fou TOURNÉE : un bon ne part jamais sans transporteur + tournée
+    // (pré-remplis avec le défaut client — l'erreur ne sort que par exception).
+    const tourneeError = validateTournee();
+    if (tourneeError) { toast.error(tourneeError); return; }
     setSubmitting(true);
     try {
       const apiLines = buildApiLines();
@@ -413,6 +428,60 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
                 onChange={(e) => setDeliveryDate(e.target.value)}
                 className="h-9"
               />
+            </div>
+          </div>
+
+          {/* Transporteur + TOURNÉE — obligatoires sur le bon, pré-remplis avec le
+              défaut du client. Bordure ambre tant qu'un choix manque. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground inline-flex items-center gap-1.5">
+                <Truck className="h-3 w-3" />Transporteur
+              </Label>
+              <Select value={carrierSap} onValueChange={setCarrierSap}>
+                <SelectTrigger className={`h-9 ${!carrierSap ? "border-amber-400/70" : ""}`}>
+                  <SelectValue placeholder="Choisir un transporteur" />
+                </SelectTrigger>
+                <SelectContent>
+                  {carriers.length === 0 && (
+                    <div className="px-2 py-1.5 text-[12px] italic text-muted-foreground">
+                      Aucun transporteur disponible
+                    </div>
+                  )}
+                  {carriers.map((c) => (
+                    <SelectItem key={c.id} value={c.sapValue}>
+                      {c.name}{c.count ? ` · ${c.count} cde${c.count > 1 ? "s" : ""}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground inline-flex items-center gap-1.5">
+                <Clock className="h-3 w-3" />Tournée
+              </Label>
+              {(() => {
+                const needsTournee = !!carrierSap && tournees !== undefined && tournees.some((t) => t.heure);
+                return (
+                  <Select value={tourneeId} onValueChange={setTourneeId}
+                    disabled={!carrierSap || tournees === undefined || !needsTournee}>
+                    <SelectTrigger className={`h-9 ${needsTournee && !tourneeId ? "border-amber-400/70" : ""}`}>
+                      <SelectValue placeholder={
+                        !carrierSap ? "Choisis d'abord le transporteur"
+                          : tournees === undefined ? "Chargement…"
+                          : needsTournee ? "Choisir la tournée" : "Aucune tournée définie"
+                      } />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(tournees ?? []).filter((t) => t.heure).map((t) => (
+                        <SelectItem key={t.lineId} value={String(t.lineId)}>
+                          {t.nom}{t.des ? ` (${t.des})` : ""} — {(t.heure as string).slice(0, 5)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                );
+              })()}
             </div>
           </div>
 

@@ -6,7 +6,7 @@ import {
   Truck, Boxes, Scale, Users, FileText, Receipt,
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
   RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw, Pencil,
-  Maximize2, UserCheck, Undo2, ListChecks, UserCog, ArrowRight,
+  Maximize2, UserCheck, Undo2, ListChecks, UserCog, ArrowRight, Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -25,6 +25,7 @@ import {
   docStatus, computeStatusCounts, computeView, docTourneeKeyLabel, STATUS_LABEL,
   type StatusTab, type Tournee, type Doc, type Carrier, type Totals, type ApiResp,
 } from "@/lib/livraisonView";
+import { printOrderRecap } from "./printRecap";
 
 interface CarrierOption { name: string; sapValue: string }
 
@@ -40,6 +41,11 @@ const fmtNum = (v: number) => NF_NUM.format(v);
 const fmtKg = (v: number) => `${fmtNum(v)} kg`;
 const fmtEur = (v: number) => NF_EUR.format(v);
 const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+/** Onglets de la vue : les 3 états d'avancement (StatusTab, cf. lib/livraisonView)
+ *  + « Manquants » (vue transverse des commandes ayant au moins un article
+ *  signalé manquant au picking). */
+type ViewTab = StatusTab | "MANQUANTS";
 
 /** Badge de ligne par segment client (conservé pour CHR / EXPORT, le tag GMS
  *  n'étant plus affiché — la distinction utile est désormais À préparer / Fait). */
@@ -245,8 +251,9 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
     [load],
   );
 
-  // ── Onglet d'état : « À préparer » (par défaut) / « Fait » ──
-  const [statusTab, setStatusTab] = useState<StatusTab>("A_PREPARER");
+  // ── Onglet d'état : « À préparer » (par défaut) / « Fait » / « Départ » /
+  //    « Manquants » (vue transverse des ruptures signalées au picking) ──
+  const [statusTab, setStatusTab] = useState<ViewTab>("A_PREPARER");
 
   // Mise à jour optimiste d'UNE commande dans `data` (statut « faite », auteur,
   // « à reprendre »…) → la carte change d'onglet sans recharger toute la liste.
@@ -337,19 +344,42 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   // (Repliage par défaut : géré par l'état `expanded` — TOUT est replié par
   //  défaut, transporteurs comme tournées, pour tous les profils.)
 
-  // Comptes par état (sur l'ensemble, pour les compteurs des onglets).
+  // Comptes par onglet (sur l'ensemble) — « Manquants » compte les commandes
+  // ayant au moins un article signalé. Logique pure dans lib/livraisonView.
   const statusCounts = useMemo(
     () => computeStatusCounts(data?.carriers ?? []),
     [data],
   );
 
-  // Vue filtrée par onglet (À préparer / Fait / Départ) : commandes recoupées et
-  // métriques recalculées (groupes + bandeau) — logique pure dans lib/livraisonView
-  // (les BL « avoir / exclu » restent listés mais sont déduits, comme au serveur).
+  // Vue filtrée par onglet : par état d'avancement (À préparer / Fait / Départ)
+  // ou par présence de manquants (onglet « Manquants », tous états confondus).
+  // Métriques recalculées (groupes + bandeau) — les BL « avoir / exclu » restent
+  // listés mais sont déduits, comme au serveur.
   const view = useMemo(
     () => (data ? { ...data, ...computeView(data, statusTab) } : null),
     [data, statusTab],
   );
+
+  // Synthèse des MANQUANTS par article (toutes commandes du jour confondues) :
+  // quantités/colis cumulés + nb de commandes touchées. Alimente l'encart de
+  // l'onglet « Manquants » (vision achats / réassort en un coup d'œil).
+  const missingSummary = useMemo(() => {
+    if (!data) return [];
+    const byItem = new Map<string, { itemCode: string; itemName: string; colis: number; quantity: number; docs: number }>();
+    for (const car of data.carriers) for (const d of car.docs) {
+      const codes = new Set(d.missingItems ?? []);
+      if (codes.size === 0) continue;
+      for (const l of d.lines) {
+        if (!codes.has(l.itemCode)) continue;
+        const g = byItem.get(l.itemCode) ?? { itemCode: l.itemCode, itemName: l.itemName, colis: 0, quantity: 0, docs: 0 };
+        g.colis += l.colis;
+        g.quantity += l.quantity;
+        g.docs += 1;
+        byItem.set(l.itemCode, g);
+      }
+    }
+    return [...byItem.values()].sort((a, b) => b.colis - a.colis || a.itemName.localeCompare(b.itemName, "fr"));
+  }, [data]);
 
   // Toutes les clés dépliables : transporteurs + sous-groupes tournée.
   const allKeys = useMemo(() => {
@@ -454,6 +484,18 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
                 <button onClick={() => setStatusTab("A_PREPARER")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir à préparer</button>
               </p>
             </>
+          ) : statusTab === "MANQUANTS" ? (
+            <>
+              <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 mb-3">
+                <PackageX className="h-6 w-6" strokeWidth={1.8} />
+              </span>
+              <p className="text-[14px] font-semibold text-foreground">Aucun manquant signalé</p>
+              <p className="text-[12.5px] text-muted-foreground mt-1">
+                Aucune commande du jour n&apos;a d&apos;article en rupture. Signalez un manquant
+                depuis le détail d&apos;une commande (bouton sur chaque ligne).
+                <button onClick={() => setStatusTab("A_PREPARER")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir à préparer</button>
+              </p>
+            </>
           ) : (
             <>
               <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/12 text-sky-600 dark:text-sky-400 mb-3">
@@ -469,6 +511,10 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
         </div>
       ) : view ? (
         <div className={`space-y-4 transition-opacity ${loading ? "opacity-60" : ""}`}>
+          {/* Synthèse des manquants par article — uniquement sur l'onglet Manquants */}
+          {statusTab === "MANQUANTS" && missingSummary.length > 0 && (
+            <MissingSummaryPanel items={missingSummary} />
+          )}
           {view.carriers.map((c) => {
             const key = c.code ?? "__none__";
             return (
@@ -644,7 +690,7 @@ function CarrierGroup({
   onPatchDoc: (docEntry: number, patch: Partial<Doc>) => void;
   onReload: () => void;
   canDispatch: boolean;
-  statusTab: StatusTab;
+  statusTab: ViewTab;
   onBulkStatus: (docEntries: number[], target: StatusTab) => void;
   gen: number;
 }) {
@@ -673,17 +719,21 @@ function CarrierGroup({
   }, [collapsed, carrier.code, onLoadTournees]);
 
   // Bouton d'avancement groupé — CHANGE selon l'onglet : À préparer → Fait →
-  // Départ. (Départ = état terminal → pas de bouton d'avancement.)
+  // Départ. (Départ = état terminal ; « Manquants » = vue transverse d'états
+  // mélangés → pas d'action groupée, on agit commande par commande.)
   const forward =
     statusTab === "A_PREPARER"
       ? { target: "FAIT" as StatusTab, short: "Fait", long: "Tout marquer fait", Icon: CheckCircle2, cls: "bg-emerald-500 hover:bg-emerald-600 text-white" }
       : statusTab === "FAIT"
       ? { target: "DEPART" as StatusTab, short: "Départ", long: "Tout marquer départ", Icon: Truck, cls: "bg-sky-500 hover:bg-sky-600 text-white" }
       : null;
+  const allowBulk = statusTab !== "MANQUANTS";
 
   // Menu clic droit (desktop) sur l'en-tête transporteur → change l'état de TOUT
   // le groupe (À préparer / Fait / Départ). Accès mobile = le bouton ci-dessus.
+  // Pas d'action groupée sur « Manquants » (états mélangés) → menu désactivé.
   const { menu, openAt, close: closeMenu } = useContextMenu(224, 148);
+  const onHeaderContextMenu = (e: ReactMouseEvent) => { if (allowBulk) openAt(e); };
 
   return (
     <section className="rounded-2xl border border-border bg-card overflow-hidden">
@@ -691,7 +741,7 @@ function CarrierGroup({
       <div
         role="button" tabIndex={0}
         onClick={() => onToggle(carrierKey)}
-        onContextMenu={openAt}
+        onContextMenu={onHeaderContextMenu}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(carrierKey); } }}
         aria-expanded={!collapsed}
         title={collapsed ? "Déplier ce transporteur (clic droit : changer l'état du groupe)" : "Replier ce transporteur (clic droit : changer l'état du groupe)"}
@@ -805,20 +855,21 @@ function CarrierGroup({
 function StatusTabs({
   tab, counts, onPick, allCollapsed, onToggleAll,
 }: {
-  tab: StatusTab;
-  counts: { aPreparer: number; fait: number; depart: number };
-  onPick: (t: StatusTab) => void;
+  tab: ViewTab;
+  counts: { aPreparer: number; fait: number; depart: number; manquants: number };
+  onPick: (t: ViewTab) => void;
   allCollapsed: boolean;
   onToggleAll: () => void;
 }) {
-  const tabs: { key: StatusTab; label: string; count: number; icon: typeof Clock; active: string }[] = [
+  const tabs: { key: ViewTab; label: string; count: number; icon: typeof Clock; active: string }[] = [
     { key: "A_PREPARER", label: "À préparer", count: counts.aPreparer, icon: Clock,        active: "bg-amber-500 text-white border-amber-500" },
     { key: "FAIT",       label: "Fait",       count: counts.fait,      icon: CheckCircle2, active: "bg-emerald-500 text-white border-emerald-500" },
     { key: "DEPART",     label: "Départ",     count: counts.depart,    icon: Truck,        active: "bg-sky-500 text-white border-sky-500" },
+    { key: "MANQUANTS",  label: "Manquants",  count: counts.manquants, icon: PackageX,     active: "bg-rose-500 text-white border-rose-500" },
   ];
   return (
     <div className="flex items-center justify-between gap-3 flex-wrap">
-      <div className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card p-1">
+      <div className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card p-1 flex-wrap">
         {tabs.map((t) => {
           const Icon = t.icon;
           const isActive = tab === t.key;
@@ -850,6 +901,60 @@ function StatusTabs({
         {allCollapsed ? "Tout déplier" : "Tout replier"}
       </button>
     </div>
+  );
+}
+
+/* ═════════════════════════════════════════════════════════════
+   Synthèse des manquants — cumul par article (onglet « Manquants »)
+═════════════════════════════════════════════════════════════ */
+function MissingSummaryPanel({
+  items,
+}: {
+  items: { itemCode: string; itemName: string; colis: number; quantity: number; docs: number }[];
+}) {
+  return (
+    <section className="rounded-2xl border border-rose-300/60 dark:border-rose-500/30 bg-card overflow-hidden">
+      <div className="flex items-center gap-2.5 px-4 sm:px-5 py-3 border-b border-rose-300/40 dark:border-rose-500/20 bg-rose-50 dark:bg-rose-900/15">
+        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-rose-500/15 text-rose-600 dark:text-rose-400">
+          <PackageX className="h-4 w-4" strokeWidth={2} />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[13.5px] font-semibold text-foreground leading-tight">
+            Articles manquants — synthèse du jour
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            {items.length} article{items.length > 1 ? "s" : ""} en rupture, cumul de toutes les commandes.
+          </p>
+        </div>
+      </div>
+      <table className="w-full text-[12.5px]">
+        <thead className="text-[9px] uppercase tracking-wider text-muted-foreground bg-secondary/30">
+          <tr>
+            <th className="text-left font-semibold px-4 sm:px-5 py-1.5">Article</th>
+            <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap">Colis</th>
+            <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Qté</th>
+            <th className="text-right font-semibold px-4 sm:px-5 py-1.5 whitespace-nowrap">Commandes</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border/50">
+          {items.map((it) => (
+            <tr key={it.itemCode}>
+              <td className="px-4 sm:px-5 py-2 min-w-0">
+                <span className="font-medium text-foreground">{it.itemName}</span>
+                <span className="font-mono text-[10px] text-muted-foreground/70 ml-2 hidden sm:inline">{it.itemCode}</span>
+              </td>
+              <td className="px-3 py-2 text-right">
+                <span className="inline-flex min-w-[28px] items-center justify-center rounded-md bg-rose-500/12 text-rose-700 dark:text-rose-300 px-1.5 py-0.5 text-[13px] font-bold tnum">
+                  {fmtNum(it.colis)}
+                </span>
+              </td>
+              <td className="px-3 py-2 text-right tnum text-muted-foreground hidden sm:table-cell">{fmtNum(it.quantity)}</td>
+              <td className="px-4 sm:px-5 py-2 text-right tnum font-semibold text-foreground">{fmtInt(it.docs)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }
 
@@ -885,6 +990,39 @@ const OrderRow = memo(function OrderRow({
   const [savingCarrier, setSavingCarrier] = useState(false);
   const [savingTournee, setSavingTournee] = useState(false);
   const brandLogos = useBrandLogos("livraison");
+
+  // ── Articles MANQUANTS (rupture au picking) — par ligne, persisté par BL. ──
+  // Source de vérité = doc.missingItems (mis à jour via onPatchDoc, optimiste),
+  // pour que l'onglet « Manquants » et sa synthèse restent cohérents sans reload.
+  const missingSet = useMemo(() => new Set(doc.missingItems ?? []), [doc.missingItems]);
+  const [savingMissing, setSavingMissing] = useState<Set<string>>(new Set());
+  async function toggleMissing(itemCode: string, itemName?: string) {
+    const next = !missingSet.has(itemCode);
+    const before = doc.missingItems ?? [];
+    const optimistic = next ? [...before, itemCode] : before.filter((c) => c !== itemCode);
+    onPatchDoc(doc.docEntry, { missingItems: optimistic });
+    setSavingMissing((s) => new Set(s).add(itemCode));
+    try {
+      const res = await fetch("/api/livraisons/manquants", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: doc.docEntry, itemCode, missing: next }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || j?.ok === false) {
+        onPatchDoc(doc.docEntry, { missingItems: before });
+        toast.error(j?.error ? `Échec : ${j.error}` : "Échec du signalement de manquant");
+        return;
+      }
+      onPatchDoc(doc.docEntry, { missingItems: j?.missingItems ?? optimistic });
+      if (next) toast.warning(`Manquant signalé — ${itemName ?? itemCode} (BL n°${doc.docNum})`);
+      else toast.success(`Manquant levé — ${itemName ?? itemCode}`);
+    } catch {
+      onPatchDoc(doc.docEntry, { missingItems: before });
+      toast.error("Échec du signalement de manquant");
+    } finally {
+      setSavingMissing((s) => { const n = new Set(s); n.delete(itemCode); return n; });
+    }
+  }
 
   // Charge les tournées du transporteur courant (une fois) pour le sélecteur.
   useEffect(() => {
@@ -1258,6 +1396,33 @@ const OrderRow = memo(function OrderRow({
 
   const docStatusOf: StatusTab = departed ? "DEPART" : prepared ? "FAIT" : "A_PREPARER";
 
+  // ── Récap imprimable (bon de préparation) — fenêtre dédiée + impression. ──
+  function handlePrint() {
+    const who = preparedBy ?? preparer;
+    const ok = printOrderRecap(
+      {
+        docNum: doc.docNum,
+        cardCode: doc.cardCode,
+        cardName: doc.cardName,
+        clientType: doc.clientType,
+        numAtCard: refDraft.trim() || doc.numAtCard,
+        comments: doc.comments,
+        colis: doc.colis,
+        weightKg: doc.weightKg,
+        lines: doc.lines,
+      },
+      {
+        dateLabel: formatDeliveryDate(doc.dueDate),
+        carrierName: doc.carrierName,
+        tourneeLabel: docTourneeKeyLabel(doc, tournees).label,
+        preparer: who ? displayPersonName(who) : null,
+        statusLabel: STATUS_LABEL[docStatusOf],
+        missingCodes: missingSet,
+      },
+    );
+    if (!ok) toast.error("Impression bloquée — autorisez les pop-ups pour ce site.");
+  }
+
   return (
     <li>
       <div
@@ -1318,6 +1483,12 @@ const OrderRow = memo(function OrderRow({
               <span title="Pas entièrement préparée — remise sur la file"
                 className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
                 <AlertTriangle className="h-3 w-3" /> À reprendre
+              </span>
+            )}
+            {missingSet.size > 0 && (
+              <span title="Articles signalés manquants (rupture au picking) sur cette commande"
+                className="inline-flex items-center gap-1 rounded-full bg-rose-500 text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                <PackageX className="h-3 w-3" /> {missingSet.size} manquant{missingSet.size > 1 ? "s" : ""}
               </span>
             )}
             {preparer && !prepared && (
@@ -1451,6 +1622,17 @@ const OrderRow = memo(function OrderRow({
           >
             <Maximize2 className="h-[18px] w-[18px] sm:h-4 sm:w-4" />
           </button>
+          {/* Récap imprimable (bon de préparation) — desktop ; sur mobile, passer
+              par la vue en grand qui porte le même bouton. */}
+          <button
+            type="button"
+            onClick={handlePrint}
+            title={`Imprimer le bon de préparation (BL n°${doc.docNum})`}
+            aria-label={`Imprimer le récap de la commande ${doc.docNum}`}
+            className="hidden sm:inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
+          >
+            <Printer className="h-4 w-4" />
+          </button>
           {canDispatch && doc.open && (
             <button
               type="button"
@@ -1493,11 +1675,14 @@ const OrderRow = memo(function OrderRow({
                 <th className="text-left font-semibold px-3 py-1.5">Article</th>
                 <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Qté</th>
                 <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">kg</th>
+                <th className="text-center font-semibold px-2 py-1.5 w-12 whitespace-nowrap" title="Signaler un article manquant (rupture au picking)">Mq</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40">
-              {doc.lines.map((l, i) => (
-                <tr key={`${l.itemCode}-${i}`}>
+              {doc.lines.map((l, i) => {
+                const isMissing = missingSet.has(l.itemCode);
+                return (
+                <tr key={`${l.itemCode}-${i}`} className={isMissing ? "bg-rose-500/5" : ""}>
                   {/* Colisage en premier (gauche) — repère principal de préparation */}
                   <td className="px-2 py-1.5 text-center align-middle">
                     <span className="inline-flex min-w-[28px] items-center justify-center rounded-md bg-foreground/10 px-1.5 py-0.5 text-[14px] font-bold tnum text-foreground">
@@ -1509,8 +1694,13 @@ const OrderRow = memo(function OrderRow({
                       <BrandLogo marque={l.marque} logos={brandLogos} size="md" zoomable />
                       <div className="min-w-0">
                         <div className="flex items-baseline gap-1.5 flex-wrap">
-                          <span className="font-medium text-foreground/90">{l.itemName}</span>
+                          <span className={`font-medium ${isMissing ? "text-muted-foreground line-through decoration-rose-500/60" : "text-foreground/90"}`}>{l.itemName}</span>
                           <span className="font-mono text-[10px] text-muted-foreground/70 hidden sm:inline">{l.itemCode}</span>
+                          {isMissing && (
+                            <span className="inline-flex items-center gap-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-300 px-1.5 py-px text-[9.5px] font-bold uppercase tracking-wide">
+                              Manquant
+                            </span>
+                          )}
                         </div>
                         <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} className="mt-1" />
                       </div>
@@ -1518,8 +1708,29 @@ const OrderRow = memo(function OrderRow({
                   </td>
                   <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell align-middle">{fmtNum(l.quantity)}</td>
                   <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell align-middle">{fmtNum(l.weightKg)}</td>
+                  {/* Signalement « manquant » — toggle par ligne, accessible à tous
+                      (préparateur compris), tactile sur mobile. */}
+                  <td className="px-2 py-1.5 text-center align-middle">
+                    <button
+                      type="button"
+                      onClick={() => toggleMissing(l.itemCode, l.itemName)}
+                      disabled={savingMissing.has(l.itemCode)}
+                      aria-pressed={isMissing}
+                      title={isMissing ? "Article signalé manquant — cliquer pour annuler" : "Signaler cet article manquant (rupture)"}
+                      className={`inline-flex h-9 w-9 sm:h-7 sm:w-7 items-center justify-center rounded-md border transition-colors active:scale-95 disabled:opacity-60 ${
+                        isMissing
+                          ? "bg-rose-500 border-rose-500 text-white hover:bg-rose-600"
+                          : "border-border text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-400/60 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                      }`}
+                    >
+                      {savingMissing.has(l.itemCode)
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : <PackageX className="h-3.5 w-3.5" />}
+                    </button>
+                  </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1555,20 +1766,46 @@ const OrderRow = memo(function OrderRow({
           </div>
           {doc.comments && <p className="text-[12.5px] italic text-muted-foreground">« {doc.comments} »</p>}
 
-          {/* Lignes en grand : colisage à gauche + tags */}
+          {/* Lignes en grand : colisage à gauche + tags + signalement manquant */}
           <ul className="divide-y divide-border/50 rounded-xl border border-border overflow-hidden">
-            {doc.lines.map((l, i) => (
-              <li key={`big-${l.itemCode}-${i}`} className="flex items-center gap-3 px-3 py-2.5">
+            {doc.lines.map((l, i) => {
+              const isMissing = missingSet.has(l.itemCode);
+              return (
+              <li key={`big-${l.itemCode}-${i}`} className={`flex items-center gap-3 px-3 py-2.5 ${isMissing ? "bg-rose-500/5" : ""}`}>
                 <span className="inline-flex min-w-[44px] items-center justify-center rounded-lg bg-foreground/10 px-2 py-1 text-[18px] font-bold tnum text-foreground shrink-0">
                   {fmtNum(l.colis)}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[14px] font-semibold text-foreground">{l.itemName}</p>
+                  <p className={`text-[14px] font-semibold ${isMissing ? "text-muted-foreground line-through decoration-rose-500/60" : "text-foreground"}`}>
+                    {l.itemName}
+                    {isMissing && (
+                      <span className="ml-2 inline-flex items-center rounded bg-rose-500/15 text-rose-600 dark:text-rose-300 px-1.5 py-px text-[10px] font-bold uppercase tracking-wide no-underline align-middle">
+                        Manquant
+                      </span>
+                    )}
+                  </p>
                   <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} className="mt-1" />
                 </div>
                 <BrandLogo marque={l.marque} logos={brandLogos} size="lg" className="self-center" zoomable />
+                <button
+                  type="button"
+                  onClick={() => toggleMissing(l.itemCode, l.itemName)}
+                  disabled={savingMissing.has(l.itemCode)}
+                  aria-pressed={isMissing}
+                  title={isMissing ? "Article signalé manquant — cliquer pour annuler" : "Signaler cet article manquant (rupture)"}
+                  className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border transition-colors active:scale-95 disabled:opacity-60 ${
+                    isMissing
+                      ? "bg-rose-500 border-rose-500 text-white hover:bg-rose-600"
+                      : "border-border text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-400/60 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                  }`}
+                >
+                  {savingMissing.has(l.itemCode)
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : <PackageX className="h-4 w-4" />}
+                </button>
               </li>
-            ))}
+              );
+            })}
           </ul>
 
           {/* Actions de préparation */}
@@ -1589,6 +1826,14 @@ const OrderRow = memo(function OrderRow({
             >
               {requeuing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
               Pas terminée — remettre sur la file
+            </button>
+            <button
+              type="button"
+              onClick={handlePrint}
+              title={`Imprimer le bon de préparation (BL n°${doc.docNum})`}
+              className="inline-flex items-center gap-2 h-11 px-5 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+            >
+              <Printer className="h-4 w-4" /> Imprimer
             </button>
           </div>
         </DialogContent>

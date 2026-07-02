@@ -53,6 +53,7 @@ export interface Doc {
   departedBy?: string | null;  // qui a marqué le « départ »
   preparer?: string | null;    // préparateur affecté (qui a ouvert la commande)
   incomplete?: boolean;        // « à reprendre » — remise sur la file (pas finie)
+  missingItems?: string[];     // codes articles signalés MANQUANTS (rupture au picking)
   excluded: boolean;           // « avoir / exclu » — déduit 100 % des totaux
   lineCount: number;
   lines: Line[];
@@ -90,11 +91,20 @@ export interface ApiResp {
 
 export type StatusTab = "A_PREPARER" | "FAIT" | "DEPART";
 
+/** Onglets de la vue : les 3 états d'avancement + « Manquants » (vue transverse
+ *  des commandes du jour ayant au moins un article signalé manquant au picking). */
+export type ViewTab = StatusTab | "MANQUANTS";
+
 /** État courant d'une commande (mutuellement exclusif) : parti > préparé > à préparer. */
 export function docStatus(d: { prepared: boolean; departed?: boolean }): StatusTab {
   if (d.departed) return "DEPART";
   if (d.prepared) return "FAIT";
   return "A_PREPARER";
+}
+
+/** Vrai si la commande a au moins un article signalé manquant (rupture picking). */
+export function hasMissing(d: { missingItems?: string[] }): boolean {
+  return (d.missingItems?.length ?? 0) > 0;
 }
 
 /** Libellés courts des états — réutilisés par les actions groupées (transporteur). */
@@ -104,16 +114,19 @@ export const STATUS_LABEL: Record<StatusTab, string> = {
   DEPART: "Départ",
 };
 
-/** Comptes par état pour les onglets — les BL « avoir / exclu » ne comptent pas
- *  (ils restent visibles, grisés, mais ne représentent aucun travail réel). */
-export function computeStatusCounts(carriers: Carrier[]): { aPreparer: number; fait: number; depart: number } {
-  let aPreparer = 0, fait = 0, depart = 0;
+/** Comptes par onglet — les BL « avoir / exclu » ne comptent pas dans les 3 états
+ *  (ils restent visibles, grisés, mais ne représentent aucun travail réel).
+ *  « Manquants » compte les COMMANDES ayant au moins un article signalé (tous
+ *  états confondus, exclus compris — la rupture reste à traiter). */
+export function computeStatusCounts(carriers: Carrier[]): { aPreparer: number; fait: number; depart: number; manquants: number } {
+  let aPreparer = 0, fait = 0, depart = 0, manquants = 0;
   for (const car of carriers) for (const d of car.docs) {
+    if (hasMissing(d)) manquants++;
     if (d.excluded) continue;
     const s = docStatus(d);
     if (s === "DEPART") depart++; else if (s === "FAIT") fait++; else aPreparer++;
   }
-  return { aPreparer, fait, depart };
+  return { aPreparer, fait, depart, manquants };
 }
 
 /* ───────────────────────── Vue filtrée par onglet ─────────────────────────── */
@@ -128,15 +141,16 @@ export interface ViewSlice {
 }
 
 /**
- * Recoupe les commandes par onglet (À préparer / Fait / Départ) et recalcule les
- * métriques (groupes + bandeau de synthèse). Même règle que le serveur : les BL
- * « avoir / exclu » restent dans les listes (affichés grisés) mais sont DÉDUITS
- * à 100 % des totaux, des métriques de groupe et du compte de commandes.
+ * Recoupe les commandes par onglet (À préparer / Fait / Départ, ou « Manquants »
+ * — tous états confondus) et recalcule les métriques (groupes + bandeau de
+ * synthèse). Même règle que le serveur : les BL « avoir / exclu » restent dans
+ * les listes (affichés grisés) mais sont DÉDUITS à 100 % des totaux, des
+ * métriques de groupe et du compte de commandes.
  */
-export function computeView(data: Pick<ApiResp, "carriers">, tab: StatusTab): ViewSlice {
+export function computeView(data: Pick<ApiResp, "carriers">, tab: ViewTab): ViewSlice {
   const carriers = data.carriers
     .map((c) => {
-      const docs = c.docs.filter((d) => docStatus(d) === tab);
+      const docs = c.docs.filter((d) => (tab === "MANQUANTS" ? hasMissing(d) : docStatus(d) === tab));
       const counted = docs.filter((d) => !d.excluded);
       return {
         ...c, docs,

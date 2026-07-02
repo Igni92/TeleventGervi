@@ -375,6 +375,56 @@ export async function setDeliveryIncomplete(docEntry: number, incomplete: boolea
   await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
 }
 
+/* ──────────────────── Lignes « MANQUANT » par BL ────────────────────
+ * Le préparateur signale les ARTICLES manquants (rupture au picking) ligne par
+ * ligne sur « Détail livraison ». Persisté par DocEntry (clé `livmanquant:<docEntry>`,
+ * valeur = { items: [{ itemCode, by, at }] }). Alimente l'onglet « Manquants »
+ * (liste des commandes touchées + synthèse par article).
+ */
+const LIV_MANQUANT_PREFIX = "livmanquant:";
+
+export interface MissingItem { itemCode: string; by?: string | null; at?: string }
+
+/** Map DocEntry → articles signalés manquants sur ce BL. */
+export async function getDeliveryMissing(): Promise<Map<number, MissingItem[]>> {
+  const m = new Map<number, MissingItem[]>();
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_MANQUANT_PREFIX } } });
+    for (const r of rows) {
+      const docEntry = Number(r.key.slice(LIV_MANQUANT_PREFIX.length));
+      if (!Number.isFinite(docEntry)) continue;
+      try {
+        const items = (JSON.parse(r.value) as { items?: MissingItem[] }).items ?? [];
+        if (items.length) m.set(docEntry, items.filter((i) => i?.itemCode?.trim()));
+      } catch { /* ignore */ }
+    }
+  } catch { /* table absente → aucun manquant */ }
+  return m;
+}
+
+/** Signale (true) ou lève (false) le « manquant » d'UN article d'un BL.
+ *  Retourne la liste à jour des articles manquants du BL. */
+export async function setDeliveryMissingItem(
+  docEntry: number, itemCode: string, missing: boolean, by?: string,
+): Promise<MissingItem[]> {
+  const key = LIV_MANQUANT_PREFIX + docEntry;
+  const code = itemCode.trim();
+  let items: MissingItem[] = [];
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key } });
+    if (row) items = ((JSON.parse(row.value) as { items?: MissingItem[] }).items ?? []).filter((i) => i?.itemCode?.trim());
+  } catch { /* absent / illisible → repart de zéro */ }
+  items = items.filter((i) => i.itemCode !== code);
+  if (missing) items.push({ itemCode: code, by: by ?? null, at: new Date().toISOString() });
+  if (items.length === 0) {
+    try { await prisma.appSetting.delete({ where: { key } }); } catch { /* déjà absent */ }
+    return [];
+  }
+  const value = JSON.stringify({ items });
+  await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+  return items;
+}
+
 /* ──────────────────── BL « avoir / exclu » (déduction 100%) ────────────────────
  * Un BL totalement avoiré (facturé puis avoir total) ou en doublon est marqué
  * MANUELLEMENT « avoir » : il est alors DÉDUIT à 100% des totaux du Détail

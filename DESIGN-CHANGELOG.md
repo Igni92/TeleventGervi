@@ -236,3 +236,17 @@ pour visualiser **où l'on livre le plus**, à partir de l'adresse SAP des clien
 - Cartes via **visx** (`@visx/geo` — Mercator/NaturalEarth), responsive, reduced-motion respecté.
 
 > ⚠️ Pré-requis données : lancer `node scripts/ddl-client-geo.mjs` puis **relancer l'import clients SAP** une fois pour peupler ville/CP/pays.
+
+---
+
+## 📦 Détail livraison — Onglet « Manquants » + récap imprimable (NOUVEAU)
+
+Deux besoins terrain sur `/livraisons` : **signaler les ruptures au picking** et
+**imprimer un vrai bon de préparation** par commande.
+
+| Élément | Détail |
+|---------|--------|
+| Toggle « manquant » par ligne | Bouton (PackageX) sur chaque article — tableau compact **et** vue en grand (cible 44 px sur mobile). Optimiste + rollback, persisté par BL (`AppSetting livmanquant:<docEntry>`, route `POST /api/livraisons/manquants`). Ligne barrée + fond rosé + chip « Manquant ». |
+| Onglet « Manquants » | 4ᵉ onglet (rose) à côté d'À préparer / Fait / Départ — vue **transverse** (tous états confondus) des commandes du jour ayant ≥ 1 article signalé. Badge « X manquant(s) » sur la ligne commande. Pas d'action groupée sur cet onglet (états mélangés). |
+| Synthèse par article | Encart en tête de l'onglet : cumul **colis / qté / nb de commandes** par article en rupture — vision achats/réassort en un coup d'œil. |
+| Récap imprimable | Bouton 🖨 par commande (ligne desktop + vue en grand) → fenêtre A4 autonome (`printOrderRecap`) : en-tête BL n° + date de livraison, client + segment, transporteur / tournée / réf client / préparateur / état, lignes avec **gros colisage** + cases à cocher, manquants barrés + encart rappel, totaux, zone signatures (préparé / contrôlé / chauffeur), « SAP fait foi ». Impression auto à l'ouverture. |

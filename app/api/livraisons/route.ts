@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
-import { getDeliveryStatuses } from "@/lib/inventory";
+import { getDeliveryStatuses, getDeliveryMissing, type MissingItem } from "@/lib/inventory";
 import { getClientTournees, type ClientTournee } from "@/lib/clientTournee";
 import { getClientTrclCarriers } from "@/lib/clientCarriers";
 import { isRestrictedPreparateur } from "@/lib/preparateur";
@@ -98,9 +98,9 @@ export async function GET(req: NextRequest) {
 
     // ── Référentiels : tous INDÉPENDANTS entre eux → chargés EN PARALLÈLE
     //    (produits, transporteurs, statuts manuels, type client, tournées
-    //    mémorisées, tournées réelles SERG_TRCL). Chaque bloc gère son propre
-    //    repli (best-effort) pour ne jamais faire échouer la livraison. ──
-    const [prods, carrierByCode, statuses, typeByCardCode, savedTourneeByCard, trclByCard] = await Promise.all([
+    //    mémorisées, tournées réelles SERG_TRCL, articles manquants). Chaque bloc
+    //    gère son propre repli (best-effort) pour ne jamais faire échouer la livraison. ──
+    const [prods, carrierByCode, statuses, typeByCardCode, savedTourneeByCard, trclByCard, missingByDoc] = await Promise.all([
       // Produits (poids / colis / désignation).
       allItemCodes.length
         ? prisma.product.findMany({
@@ -154,6 +154,8 @@ export async function GET(req: NextRequest) {
         }));
         return m;
       })(),
+      // Articles signalés MANQUANTS par BL (rupture au picking) → onglet « Manquants ».
+      getDeliveryMissing().catch(() => new Map<number, MissingItem[]>()),
     ]);
     const pMap = new Map(prods.map((p) => [p.itemCode, p]));
     const {
@@ -232,6 +234,8 @@ export async function GET(req: NextRequest) {
         departedBy: departedByDoc.get(d.DocEntry) ?? null,    // qui a marqué « départ »
         preparer: prepByDoc.get(d.DocEntry) ?? null,          // préparateur affecté (qui a ouvert)
         incomplete: incompleteByDoc.get(d.DocEntry) ?? false, // « à reprendre » — remise sur la file
+        // Codes articles signalés MANQUANTS sur ce BL (rupture au picking).
+        missingItems: (missingByDoc.get(d.DocEntry) ?? []).map((i) => i.itemCode),
         // « avoir/exclu » : surcharge manuelle si présente, sinon détecté auto (ci-dessous).
         excluded: avoirByDoc.has(d.DocEntry) ? !!avoirByDoc.get(d.DocEntry) : false,
         lineCount: outLines.length,
