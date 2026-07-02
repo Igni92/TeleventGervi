@@ -238,36 +238,63 @@ export async function getPrepStatus(): Promise<{ notPrepared: Set<number>; hasPr
  */
 const LIV_FAITE_PREFIX = "livfaite:";
 
-/** Map DocEntry → faite (true/false) des BL marqués manuellement. */
-export async function getDeliveryPrepared(): Promise<Map<number, boolean>> {
-  const m = new Map<number, boolean>();
+/**
+ * TOUS les statuts « Détail livraison » par DocEntry en UNE requête (au lieu de
+ * 7 scans séquentiels de AppSetting — les 5 préfixes liv* sont lus d'un coup et
+ * chaque ligne n'est parsée qu'une fois). Consommé par GET /api/livraisons.
+ */
+export async function getDeliveryStatuses(): Promise<{
+  prepared: Map<number, boolean>;
+  preparedBy: Map<number, string>;
+  departed: Map<number, boolean>;
+  departedBy: Map<number, string>;
+  preparer: Map<number, string>;
+  incomplete: Map<number, boolean>;
+  excluded: Map<number, boolean>;
+}> {
+  const out = {
+    prepared: new Map<number, boolean>(),
+    preparedBy: new Map<number, string>(),
+    departed: new Map<number, boolean>(),
+    departedBy: new Map<number, string>(),
+    preparer: new Map<number, string>(),
+    incomplete: new Map<number, boolean>(),
+    excluded: new Map<number, boolean>(),
+  };
+  const prefixes = [LIV_FAITE_PREFIX, LIV_DEPART_PREFIX, LIV_PREP_PREFIX, LIV_INCOMPLETE_PREFIX, LIV_AVOIR_PREFIX];
   try {
-    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_FAITE_PREFIX } } });
+    const rows = await prisma.appSetting.findMany({
+      where: { OR: prefixes.map((p) => ({ key: { startsWith: p } })) },
+    });
     for (const r of rows) {
-      const docEntry = Number(r.key.slice(LIV_FAITE_PREFIX.length));
+      const prefix = prefixes.find((p) => r.key.startsWith(p));
+      if (!prefix) continue;
+      const docEntry = Number(r.key.slice(prefix.length));
       if (!Number.isFinite(docEntry)) continue;
-      try { m.set(docEntry, !!(JSON.parse(r.value) as { prepared?: boolean }).prepared); } catch { /* ignore */ }
+      let v: { prepared?: boolean; departed?: boolean; incomplete?: boolean; excluded?: boolean; by?: string };
+      try { v = JSON.parse(r.value); } catch { continue; }
+      switch (prefix) {
+        case LIV_FAITE_PREFIX:
+          out.prepared.set(docEntry, !!v.prepared);
+          if (v.prepared && v.by?.trim()) out.preparedBy.set(docEntry, v.by.trim());
+          break;
+        case LIV_DEPART_PREFIX:
+          out.departed.set(docEntry, !!v.departed);
+          if (v.departed && v.by?.trim()) out.departedBy.set(docEntry, v.by.trim());
+          break;
+        case LIV_PREP_PREFIX:
+          if (v.by?.trim()) out.preparer.set(docEntry, v.by.trim());
+          break;
+        case LIV_INCOMPLETE_PREFIX:
+          if (v.incomplete) out.incomplete.set(docEntry, true);
+          break;
+        case LIV_AVOIR_PREFIX:
+          out.excluded.set(docEntry, !!v.excluded);
+          break;
+      }
     }
   } catch { /* table absente → aucune marque */ }
-  return m;
-}
-
-/** Map DocEntry → auteur (« by ») du marquage « faite », pour les BL faits.
- *  Permet d'afficher « Fait par … » dans le Détail livraison. */
-export async function getDeliveryPreparedBy(): Promise<Map<number, string>> {
-  const m = new Map<number, string>();
-  try {
-    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_FAITE_PREFIX } } });
-    for (const r of rows) {
-      const docEntry = Number(r.key.slice(LIV_FAITE_PREFIX.length));
-      if (!Number.isFinite(docEntry)) continue;
-      try {
-        const v = JSON.parse(r.value) as { prepared?: boolean; by?: string };
-        if (v.prepared && v.by?.trim()) m.set(docEntry, v.by.trim());
-      } catch { /* ignore */ }
-    }
-  } catch { /* table absente → aucune marque */ }
-  return m;
+  return out;
 }
 
 /** Bascule le statut « faite » d'un BL (persisté). */
@@ -277,43 +304,24 @@ export async function setDeliveryPrepared(docEntry: number, prepared: boolean, b
   await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
 }
 
+/** Statut « faite » d'UN BL (lecture ciblée) — { prepared, by } ou null si jamais marqué. */
+export async function getDeliveryPreparedOne(docEntry: number): Promise<{ prepared: boolean; by: string | null } | null> {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: LIV_FAITE_PREFIX + docEntry } });
+    if (!row) return null;
+    const v = JSON.parse(row.value) as { prepared?: boolean; by?: string };
+    return { prepared: !!v.prepared, by: v.by?.trim() || null };
+  } catch {
+    return null;
+  }
+}
+
 /* ───────────────────────── Statut « Départ » (livraison) ─────────────────────
  * 3ᵉ état après « faite » : la commande est PARTIE en livraison (chargée). Marqué
  * manuellement (livreur / admin) sur « Détail livraison ». Stocké par DocEntry
  * dans AppSetting (clé `livdepart:<docEntry>`, valeur = { departed, at, by }).
  */
 const LIV_DEPART_PREFIX = "livdepart:";
-
-/** Map DocEntry → parti (true/false) des BL marqués « départ ». */
-export async function getDeliveryDeparted(): Promise<Map<number, boolean>> {
-  const m = new Map<number, boolean>();
-  try {
-    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_DEPART_PREFIX } } });
-    for (const r of rows) {
-      const docEntry = Number(r.key.slice(LIV_DEPART_PREFIX.length));
-      if (!Number.isFinite(docEntry)) continue;
-      try { m.set(docEntry, !!(JSON.parse(r.value) as { departed?: boolean }).departed); } catch { /* ignore */ }
-    }
-  } catch { /* table absente → aucune marque */ }
-  return m;
-}
-
-/** Map DocEntry → auteur (« by ») du marquage « départ », pour les BL partis. */
-export async function getDeliveryDepartedBy(): Promise<Map<number, string>> {
-  const m = new Map<number, string>();
-  try {
-    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_DEPART_PREFIX } } });
-    for (const r of rows) {
-      const docEntry = Number(r.key.slice(LIV_DEPART_PREFIX.length));
-      if (!Number.isFinite(docEntry)) continue;
-      try {
-        const v = JSON.parse(r.value) as { departed?: boolean; by?: string };
-        if (v.departed && v.by?.trim()) m.set(docEntry, v.by.trim());
-      } catch { /* ignore */ }
-    }
-  } catch { /* table absente → aucune marque */ }
-  return m;
-}
 
 /** Bascule le statut « départ » d'un BL (persisté). */
 export async function setDeliveryDeparted(docEntry: number, departed: boolean, by: string): Promise<void> {
@@ -327,23 +335,6 @@ export async function setDeliveryDeparted(docEntry: number, departed: boolean, b
  * DocEntry (clé `livprep:<docEntry>`, valeur = { by, at }).
  */
 const LIV_PREP_PREFIX = "livprep:";
-
-/** Map DocEntry → nom/email du préparateur affecté. */
-export async function getDeliveryPreparer(): Promise<Map<number, string>> {
-  const m = new Map<number, string>();
-  try {
-    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_PREP_PREFIX } } });
-    for (const r of rows) {
-      const docEntry = Number(r.key.slice(LIV_PREP_PREFIX.length));
-      if (!Number.isFinite(docEntry)) continue;
-      try {
-        const by = (JSON.parse(r.value) as { by?: string }).by?.trim();
-        if (by) m.set(docEntry, by);
-      } catch { /* ignore */ }
-    }
-  } catch { /* table absente */ }
-  return m;
-}
 
 /** Affecte (by non vide) ou retire (by vide/null) le préparateur d'un BL. */
 export async function setDeliveryPreparer(docEntry: number, by: string | null): Promise<void> {
@@ -362,20 +353,6 @@ export async function setDeliveryPreparer(docEntry: number, by: string | null): 
  */
 const LIV_INCOMPLETE_PREFIX = "livincomplete:";
 
-/** Map DocEntry → incomplète (à reprendre) des BL signalés. */
-export async function getDeliveryIncomplete(): Promise<Map<number, boolean>> {
-  const m = new Map<number, boolean>();
-  try {
-    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_INCOMPLETE_PREFIX } } });
-    for (const r of rows) {
-      const docEntry = Number(r.key.slice(LIV_INCOMPLETE_PREFIX.length));
-      if (!Number.isFinite(docEntry)) continue;
-      try { if ((JSON.parse(r.value) as { incomplete?: boolean }).incomplete) m.set(docEntry, true); } catch { /* ignore */ }
-    }
-  } catch { /* table absente */ }
-  return m;
-}
-
 /** Signale (true) ou lève (false) le statut « incomplète — à reprendre » d'un BL. */
 export async function setDeliveryIncomplete(docEntry: number, incomplete: boolean, by?: string): Promise<void> {
   const key = LIV_INCOMPLETE_PREFIX + docEntry;
@@ -393,20 +370,6 @@ export async function setDeliveryIncomplete(docEntry: number, incomplete: boolea
  * livraison (et affiché grisé). Persisté par DocEntry (clé `livavoir:<docEntry>`).
  */
 const LIV_AVOIR_PREFIX = "livavoir:";
-
-/** Map DocEntry → exclu (avoir total) des BL marqués manuellement. */
-export async function getDeliveryExcluded(): Promise<Map<number, boolean>> {
-  const m = new Map<number, boolean>();
-  try {
-    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_AVOIR_PREFIX } } });
-    for (const r of rows) {
-      const docEntry = Number(r.key.slice(LIV_AVOIR_PREFIX.length));
-      if (!Number.isFinite(docEntry)) continue;
-      try { m.set(docEntry, !!(JSON.parse(r.value) as { excluded?: boolean }).excluded); } catch { /* ignore */ }
-    }
-  } catch { /* table absente */ }
-  return m;
-}
 
 /** Bascule le statut « avoir / exclu » d'un BL (persisté). */
 export async function setDeliveryExcluded(docEntry: number, excluded: boolean, by: string): Promise<void> {

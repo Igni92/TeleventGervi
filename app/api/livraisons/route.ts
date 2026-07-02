@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
-import { getDeliveryPrepared, getDeliveryPreparedBy, getDeliveryDeparted, getDeliveryDepartedBy, getDeliveryExcluded, getDeliveryPreparer, getDeliveryIncomplete } from "@/lib/inventory";
+import { getDeliveryStatuses } from "@/lib/inventory";
 import { getClientTournees, type ClientTournee } from "@/lib/clientTournee";
 import { getClientTrclCarriers } from "@/lib/clientCarriers";
 
@@ -113,21 +113,16 @@ export async function GET(req: NextRequest) {
       /* table Carrier absente → on affichera le code brut */
     }
 
-    // Statut « faite » MANUEL : coché à la main par le préparateur (persisté par
-    // DocEntry). Aucune déduction automatique depuis l'inventaire (qui marquait
-    // tout à tort). Une commande n'est « faite » que si on l'a cochée.
-    const faiteByDoc = await getDeliveryPrepared().catch(() => new Map<number, boolean>());
-    // Auteur du marquage « faite » → affichage « Fait par … » dans le Détail livraison.
-    const preparedByDoc = await getDeliveryPreparedBy().catch(() => new Map<number, string>());
-    // Statut « départ » (parti en livraison) + son auteur.
-    const departedByDocEntry = await getDeliveryDeparted().catch(() => new Map<number, boolean>());
-    const departedByDoc = await getDeliveryDepartedBy().catch(() => new Map<number, string>());
-    // BL marqués « avoir / exclu » (facturé puis avoir total, doublon) → déduits
-    // à 100% des totaux mais conservés (grisés) dans la liste.
-    const avoirByDoc = await getDeliveryExcluded().catch(() => new Map<number, boolean>());
-    // Préparateur affecté + signalement « incomplète (à reprendre) » par BL.
-    const prepByDoc = await getDeliveryPreparer().catch(() => new Map<number, string>());
-    const incompleteByDoc = await getDeliveryIncomplete().catch(() => new Map<number, boolean>());
+    // Statuts manuels du Détail livraison, par DocEntry, en UNE requête :
+    //   « faite » (coché à la main — aucune déduction auto) + son auteur,
+    //   « départ » (parti en livraison) + son auteur,
+    //   « avoir / exclu » (déduit 100% des totaux, conservé grisé),
+    //   préparateur affecté, signalement « incomplète (à reprendre) ».
+    const {
+      prepared: faiteByDoc, preparedBy: preparedByDoc,
+      departed: departedByDocEntry, departedBy: departedByDoc,
+      excluded: avoirByDoc, preparer: prepByDoc, incomplete: incompleteByDoc,
+    } = await getDeliveryStatuses();
 
     // Type client (GMS / CHR / EXPORT) par CardCode — pour le filtre par segment.
     // Le CardCode d'un BL peut être le code principal OU un code d'adresse de

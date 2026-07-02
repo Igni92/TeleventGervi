@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { setDeliveryPreparer, setDeliveryPrepared, setDeliveryIncomplete } from "@/lib/inventory";
+import { setDeliveryPreparer, setDeliveryPrepared, setDeliveryIncomplete, setDeliveryDeparted } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -30,11 +30,14 @@ export async function POST(req: NextRequest) {
 
   try {
     if (body.action === "requeue") {
-      // Pas entièrement préparée → retour sur la file + notification.
+      // Pas entièrement préparée → retour sur la file + notification. On lève
+      // aussi le « départ » (une commande remise sur la file n'est plus partie),
+      // sinon elle resterait classée « Départ » au prochain rechargement.
       await setDeliveryPreparer(docEntry, null);
       await setDeliveryPrepared(docEntry, false, me);
+      await setDeliveryDeparted(docEntry, false, me);
       await setDeliveryIncomplete(docEntry, true, me);
-      return NextResponse.json({ ok: true, docEntry, preparer: null, incomplete: true, prepared: false });
+      return NextResponse.json({ ok: true, docEntry, preparer: null, incomplete: true, prepared: false, departed: false });
     }
     if (body.action === "release") {
       await setDeliveryPreparer(docEntry, null);

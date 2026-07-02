@@ -20,79 +20,13 @@ import {
   nextDeliveryDate, frenchHolidayLabel, nextWorkingDeliveryDay,
   formatDeliveryDate, addDaysISO,
 } from "@/lib/livraison";
+// Types (miroir de /api/livraisons) + logique de vue pure (testée à part).
+import {
+  docStatus, computeStatusCounts, computeView, docTourneeKeyLabel, STATUS_LABEL,
+  type StatusTab, type Tournee, type Doc, type Carrier, type Totals, type ApiResp,
+} from "@/lib/livraisonView";
 
 interface CarrierOption { name: string; sapValue: string }
-interface Tournee { lineId: number; nom: string; des: string; heure: string | null }
-
-/* ─────────────────────────────────────────────────────────────
-   Types (miroir de /api/livraisons)
-───────────────────────────────────────────────────────────── */
-interface Line {
-  itemCode: string;
-  itemName: string;
-  quantity: number;
-  colis: number;
-  weightKg: number;
-  warehouse: string | null;
-  marque?: string | null;
-  condt?: string | null;
-  pays?: string | null;
-}
-interface Doc {
-  docEntry: number;
-  docNum: number;
-  docDate: string;
-  dueDate: string;
-  cardCode: string;
-  cardName: string;
-  totalHT: number;
-  totalTTC: number;
-  colis: number;
-  weightKg: number;
-  open: boolean;
-  comments: string;
-  numAtCard: string;
-  trspCode: string | null;
-  trspHeure: string | null;
-  savedTournee: { trspCode: string; heure: string | null; nom?: string | null; des?: string | null; lineId?: number | null } | null;
-  carrierName: string | null;
-  clientType: string | null;   // GMS | CHR | EXPORT | null
-  prepared: boolean;           // « faite » — coché manuellement
-  preparedBy?: string | null;  // qui a marqué la commande « faite »
-  departed?: boolean;          // « départ » — partie en livraison
-  departedBy?: string | null;  // qui a marqué le « départ »
-  preparer?: string | null;    // préparateur affecté (qui a ouvert la commande)
-  incomplete?: boolean;        // « à reprendre » — remise sur la file (pas finie)
-  excluded: boolean;           // « avoir / exclu » — déduit 100% des totaux
-  lineCount: number;
-  lines: Line[];
-}
-interface Carrier {
-  code: string | null;
-  name: string;
-  orders: number;
-  colis: number;
-  weightKg: number;
-  totalHT: number;
-  docs: Doc[];
-}
-interface Totals {
-  orders: number;
-  clients: number;
-  colis: number;
-  weightKg: number;
-  totalHT: number;
-}
-interface ApiResp {
-  ok: boolean;
-  db?: string;
-  date: string;
-  holiday: string | null;
-  count: number;
-  totals: Totals;
-  carriers: Carrier[];
-  error?: string;
-}
 
 /* ─────────────────────────────────────────────────────────────
    Formatters
@@ -105,25 +39,6 @@ const fmtEur = (v: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v);
 const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
-/* ─────────────────────────────────────────────────────────────
-   Onglet d'état — À préparer / Fait / Départ (progression)
-───────────────────────────────────────────────────────────── */
-type StatusTab = "A_PREPARER" | "FAIT" | "DEPART";
-
-/** État courant d'une commande (mutuellement exclusif) : parti > préparé > à préparer. */
-function docStatus(d: { prepared: boolean; departed?: boolean }): StatusTab {
-  if (d.departed) return "DEPART";
-  if (d.prepared) return "FAIT";
-  return "A_PREPARER";
-}
-
-/** Libellés courts des états — réutilisés par les actions groupées (transporteur). */
-const STATUS_LABEL: Record<StatusTab, string> = {
-  A_PREPARER: "À préparer",
-  FAIT: "Fait",
-  DEPART: "Départ",
-};
-
 /** Badge de ligne par segment client (conservé pour CHR / EXPORT, le tag GMS
  *  n'étant plus affiché — la distinction utile est désormais À préparer / Fait). */
 const SEG_UI: Record<"CHR" | "EXPORT", { label: string; badge: string }> = {
@@ -134,30 +49,6 @@ const SEG_UI: Record<"CHR" | "EXPORT", { label: string; badge: string }> = {
 /* ═════════════════════════════════════════════════════════════
    Composant principal
 ═════════════════════════════════════════════════════════════ */
-/** Clé + libellé de la TOURNÉE d'une commande (sous-groupe sous le transporteur).
- *  On veut le NOM de la tournée (IDF, IDF 2, NORD…), pas l'heure :
- *   1) nom mémorisé (SERG_TRCL U_DistBy) s'il est connu ;
- *   2) sinon on le résout dans le catalogue du transporteur (`tournees`) — comme
- *      le sélecteur de ligne — par LineId mémorisé, puis par heure du BL ;
- *   3) repli ultime sur l'heure, puis « Sans tournée ». */
-function docTourneeKeyLabel(d: Doc, tournees?: Tournee[]): { key: string; label: string } {
-  const savedNom = (d.savedTournee?.nom ?? "").trim();
-  if (savedNom) return { key: `T:${savedNom.toUpperCase()}`, label: savedNom };
-
-  if (tournees && tournees.length) {
-    const saved = d.savedTournee;
-    let t: Tournee | undefined;
-    if (saved?.lineId != null) t = tournees.find((x) => x.lineId === saved.lineId);
-    if (!t && d.trspHeure) t = tournees.find((x) => x.heure === d.trspHeure);
-    const nom = (t?.nom ?? "").trim();
-    if (nom) return { key: `T:${nom.toUpperCase()}`, label: nom };
-  }
-
-  const h = (d.trspHeure ?? "").slice(0, 5);
-  if (h) return { key: `H:${h}`, label: `Tournée ${h}` };
-  return { key: "T:__none__", label: "Sans tournée" };
-}
-
 export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   const [date, setDate] = useState<string>(() => nextDeliveryDate());
   const [data, setData] = useState<ApiResp | null>(null);
@@ -359,21 +250,37 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
       const patch: Partial<Doc> = {
         prepared: target !== "A_PREPARER",
         departed: target === "DEPART",
+        // Marquer « fait » / « départ » lève le signalement « à reprendre » (règle serveur).
+        ...(target !== "A_PREPARER" ? { incomplete: false } : {}),
+        // Quitter un état efface son auteur ; l'auteur du nouvel état arrive avec la réponse.
+        ...(target === "A_PREPARER" ? { preparedBy: null } : {}),
+        ...(target !== "DEPART" ? { departedBy: null } : {}),
       };
       docEntries.forEach((de) => patchDoc(de, patch));
-      const post = (url: string, body: Record<string, unknown>) =>
-        fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      // POST + report de l'auteur renvoyé par l'API (badges « Fait par… » / « Parti · … »
+      // à jour sans recharger, comme pour le bouton individuel).
+      const post = (url: string, body: Record<string, unknown>, onBy?: (by: string | null) => void) =>
+        fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+          .then(async (r) => {
+            if (!r.ok) return false;
+            const j = await r.json().catch(() => null);
+            if (j?.ok === false) return false;
+            onBy?.(j?.by ?? null);
+            return true;
+          })
+          .catch(() => false);
       try {
         const calls: Promise<boolean>[] = [];
         for (const de of docEntries) {
           // Quitter « Départ » : lever d'abord le drapeau départ.
           if (source === "DEPART" && target !== "DEPART") {
-            calls.push(post("/api/livraisons/departed", { docEntry: de, departed: false }).then((r) => r.ok).catch(() => false));
+            calls.push(post("/api/livraisons/departed", { docEntry: de, departed: false }));
           }
           if (target === "DEPART") {
-            calls.push(post("/api/livraisons/departed", { docEntry: de, departed: true }).then((r) => r.ok).catch(() => false));
+            calls.push(post("/api/livraisons/departed", { docEntry: de, departed: true }, (by) => patchDoc(de, { departedBy: by })));
           } else {
-            calls.push(post("/api/livraisons/prepared", { docEntry: de, prepared: target === "FAIT" }).then((r) => r.ok).catch(() => false));
+            calls.push(post("/api/livraisons/prepared", { docEntry: de, prepared: target === "FAIT" },
+              (by) => patchDoc(de, { preparedBy: by })));
           }
         }
         const oks = await Promise.all(calls);
@@ -406,43 +313,18 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   //  défaut, transporteurs comme tournées, pour tous les profils.)
 
   // Comptes par état (sur l'ensemble, pour les compteurs des onglets).
-  const statusCounts = useMemo(() => {
-    let aPreparer = 0, fait = 0, depart = 0;
-    if (data) for (const car of data.carriers) for (const d of car.docs) {
-      const s = docStatus(d);
-      if (s === "DEPART") depart++; else if (s === "FAIT") fait++; else aPreparer++;
-    }
-    return { aPreparer, fait, depart };
-  }, [data]);
+  const statusCounts = useMemo(
+    () => computeStatusCounts(data?.carriers ?? []),
+    [data],
+  );
 
-  // Vue filtrée par onglet (À préparer / Fait / Départ) : on recoupe les commandes
-  // et on recalcule les métriques (groupes + bandeau de synthèse) pour rester cohérent.
-  const view = useMemo(() => {
-    if (!data) return null;
-    const r1 = (n: number) => Math.round(n * 10) / 10;
-    const r2 = (n: number) => Math.round(n * 100) / 100;
-    const carriers = data.carriers
-      .map((c) => {
-        const docs = c.docs.filter((d) => docStatus(d) === statusTab);
-        return {
-          ...c, docs,
-          orders: docs.length,
-          colis: r1(docs.reduce((s, d) => s + d.colis, 0)),
-          weightKg: r1(docs.reduce((s, d) => s + d.weightKg, 0)),
-          totalHT: r2(docs.reduce((s, d) => s + d.totalHT, 0)),
-        };
-      })
-      .filter((c) => c.docs.length > 0);
-    const allDocs = carriers.flatMap((c) => c.docs);
-    const totals: Totals = {
-      orders: allDocs.length,
-      clients: new Set(allDocs.map((d) => d.cardCode)).size,
-      colis: r1(allDocs.reduce((s, d) => s + d.colis, 0)),
-      weightKg: r1(allDocs.reduce((s, d) => s + d.weightKg, 0)),
-      totalHT: r2(allDocs.reduce((s, d) => s + d.totalHT, 0)),
-    };
-    return { ...data, carriers, totals, count: allDocs.length };
-  }, [data, statusTab]);
+  // Vue filtrée par onglet (À préparer / Fait / Départ) : commandes recoupées et
+  // métriques recalculées (groupes + bandeau) — logique pure dans lib/livraisonView
+  // (les BL « avoir / exclu » restent listés mais sont déduits, comme au serveur).
+  const view = useMemo(
+    () => (data ? { ...data, ...computeView(data, statusTab) } : null),
+    [data, statusTab],
+  );
 
   // Toutes les clés dépliables : transporteurs + sous-groupes tournée.
   const allKeys = useMemo(() => {
