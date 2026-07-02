@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { docLabel } from "@/lib/docLabel";
 import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
-import { getTrclDefaultCarrier } from "@/lib/clientCarriers";
+import { getTrclDefaultCarrier, getTrclCarrierHeure } from "@/lib/clientCarriers";
 import { getTransporteurTimbre } from "@/lib/transporteurs";
 import { getClientTournee } from "@/lib/clientTournee";
 import { notifyAll } from "@/lib/push";
@@ -450,6 +450,34 @@ export async function POST(req: NextRequest) {
         }
       } catch (e) {
         console.warn(`[Order] Lecture tournée mémorisée ${cardCode} échouée (non-bloquant):`, (e as Error).message);
+      }
+    }
+  }
+  // ── Filet TOURNÉE : compléter l'heure quand le transporteur est choisi via
+  // l'UI (carrierId / carrierCode) — ce chemin ne transmet QUE le code, jamais
+  // l'heure, donc la commande partait avec le bon transporteur mais SANS sa
+  // tournée (U_TrspHeur vide → non rattachée au récap transporteur SAP).
+  // On résout l'heure de SA tournée depuis SERG_TRCL, puis à défaut depuis la
+  // tournée mémorisée du client si elle vise le même transporteur. Non-bloquant.
+  if (trspCode && !trspHeure) {
+    try {
+      const h = await getTrclCarrierHeure(cardCode, trspCode);
+      if (h) {
+        trspHeure = h;
+        console.log(`[Order] Heure de tournée SERG_TRCL ${cardCode}/${trspCode} → @${h}`);
+      }
+    } catch (e) {
+      console.warn(`[Order] Résolution heure tournée ${cardCode}/${trspCode} échouée (non-bloquant):`, (e as Error).message);
+    }
+    if (!trspHeure) {
+      try {
+        const mem = await getClientTournee(cardCode);
+        if (mem && mem.heure && mem.trspCode.trim().toUpperCase() === trspCode.trim().toUpperCase()) {
+          trspHeure = mem.heure;
+          console.log(`[Order] Heure de tournée mémorisée ${cardCode}/${trspCode} → @${mem.heure}`);
+        }
+      } catch (e) {
+        console.warn(`[Order] Lecture heure tournée mémorisée ${cardCode} échouée (non-bloquant):`, (e as Error).message);
       }
     }
   }
