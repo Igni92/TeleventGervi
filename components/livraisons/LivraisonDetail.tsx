@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
   RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw, Pencil,
   Maximize2, UserCheck, Undo2, ListChecks, UserCog, ArrowRight, Printer,
-  Send, Phone, Plus, Trash2,
+  Send, Phone, Plus, Trash2, Search, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -46,6 +46,21 @@ const fmtNum = (v: number) => NF_NUM.format(v);
 const fmtKg = (v: number) => `${fmtNum(v)} kg`;
 const fmtEur = (v: number) => NF_EUR.format(v);
 const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+/** Normalisation pour la recherche : minuscules, sans accents. */
+const normalize = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+/** Heure d'un clic d'état (« fait » / « départ ») — « 14:32 », préfixée du
+ *  jour (« 01/07 14:32 ») si le clic date d'un autre jour. */
+const fmtClock = (iso: string | null | undefined): string | null => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const time = d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  const now = new Date();
+  const sameDay = d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  return sameDay ? time : `${d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })} ${time}`;
+};
 
 /** Onglets de la vue : les 3 états d'avancement (StatusTab, cf. lib/livraisonView)
  *  + « Manquants » (vue transverse des commandes ayant au moins un article en
@@ -289,20 +304,21 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
         departed: target === "DEPART",
         // Marquer « fait » / « départ » lève le signalement « à reprendre » (règle serveur).
         ...(target !== "A_PREPARER" ? { incomplete: false } : {}),
-        // Quitter un état efface son auteur ; l'auteur du nouvel état arrive avec la réponse.
-        ...(target === "A_PREPARER" ? { preparedBy: null } : {}),
-        ...(target !== "DEPART" ? { departedBy: null } : {}),
+        // Quitter un état efface son auteur (et son heure) ; ceux du nouvel état
+        // arrivent avec la réponse.
+        ...(target === "A_PREPARER" ? { preparedBy: null, preparedAt: null } : {}),
+        ...(target !== "DEPART" ? { departedBy: null, departedAt: null } : {}),
       };
       docEntries.forEach((de) => patchDoc(de, patch));
-      // POST + report de l'auteur renvoyé par l'API (badges « Fait par… » / « Parti · … »
-      // à jour sans recharger, comme pour le bouton individuel).
-      const post = (url: string, body: Record<string, unknown>, onBy?: (by: string | null) => void) =>
+      // POST + report de l'auteur ET de l'heure renvoyés par l'API (badges
+      // « Fait par… · 14:32 » / « Parti · … » à jour sans recharger).
+      const post = (url: string, body: Record<string, unknown>, onDone?: (by: string | null, at: string | null) => void) =>
         fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
           .then(async (r) => {
             if (!r.ok) return false;
             const j = await r.json().catch(() => null);
             if (j?.ok === false) return false;
-            onBy?.(j?.by ?? null);
+            onDone?.(j?.by ?? null, j?.at ?? null);
             return true;
           })
           .catch(() => false);
@@ -314,10 +330,10 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
             calls.push(post("/api/livraisons/departed", { docEntry: de, departed: false }));
           }
           if (target === "DEPART") {
-            calls.push(post("/api/livraisons/departed", { docEntry: de, departed: true }, (by) => patchDoc(de, { departedBy: by })));
+            calls.push(post("/api/livraisons/departed", { docEntry: de, departed: true }, (by, at) => patchDoc(de, { departedBy: by, departedAt: at })));
           } else {
             calls.push(post("/api/livraisons/prepared", { docEntry: de, prepared: target === "FAIT" },
-              (by) => patchDoc(de, { preparedBy: by })));
+              (by, at) => patchDoc(de, { preparedBy: by, preparedAt: target === "FAIT" ? at : null })));
           }
         }
         const oks = await Promise.all(calls);
@@ -349,11 +365,32 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   // (Repliage par défaut : géré par l'état `expanded` — TOUT est replié par
   //  défaut, transporteurs comme tournées, pour tous les profils.)
 
-  // Comptes par onglet (sur l'ensemble) — « Manquants » compte les commandes
-  // ayant au moins un article signalé. Logique pure dans lib/livraisonView.
+  // ── Recherche d'un bon : n° de BL, client (nom / nom complet / code) ou
+  //    réf. client — insensible à la casse et aux accents. La recherche
+  //    s'applique AVANT les onglets (compteurs recalculés sur le résultat). ──
+  const [query, setQuery] = useState("");
+  const searching = query.trim().length > 0;
+  const filteredData = useMemo(() => {
+    if (!data) return null;
+    const q = normalize(query.trim());
+    if (!q) return data;
+    const match = (d: Doc) =>
+      String(d.docNum).includes(q) ||
+      normalize(d.cardCode).includes(q) ||
+      normalize(d.cardName).includes(q) ||
+      normalize(d.cardFullName ?? "").includes(q) ||
+      normalize(d.numAtCard ?? "").includes(q);
+    const carriers = data.carriers
+      .map((c) => ({ ...c, docs: c.docs.filter(match) }))
+      .filter((c) => c.docs.length > 0);
+    return { ...data, carriers };
+  }, [data, query]);
+
+  // Comptes par onglet (sur le résultat de recherche) — « Manquants » compte les
+  // commandes ayant au moins un article signalé. Logique pure dans lib/livraisonView.
   const statusCounts = useMemo(
-    () => computeStatusCounts(data?.carriers ?? []),
-    [data],
+    () => computeStatusCounts(filteredData?.carriers ?? []),
+    [filteredData],
   );
 
   // Vue filtrée par onglet : par état d'avancement (À préparer / Fait / Départ)
@@ -361,8 +398,8 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   // Métriques recalculées (groupes + bandeau) — les BL « avoir / exclu » restent
   // listés mais sont déduits, comme au serveur.
   const view = useMemo(
-    () => (data ? { ...data, ...computeView(data, statusTab) } : null),
-    [data, statusTab],
+    () => (filteredData ? { ...filteredData, ...computeView(filteredData, statusTab) } : null),
+    [filteredData, statusTab],
   );
 
   // Synthèse des MANQUANTS par article (toutes commandes du jour confondues) :
@@ -405,6 +442,12 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   }, [view, tourneesByCode]);
   const allCollapsed = allKeys.length > 0 && !allKeys.some((k) => expanded.has(k));
   const toggleAll = () => setExpanded(allCollapsed ? new Set(allKeys) : new Set());
+  // Pendant une recherche, TOUT est déplié : on veut voir le bon trouvé
+  // immédiatement, sans cliquer sur les groupes.
+  const effectiveExpanded = useMemo(
+    () => (searching ? new Set(allKeys) : expanded),
+    [searching, allKeys, expanded],
+  );
 
   return (
     <div className="space-y-5 animate-fade-up">
@@ -446,12 +489,14 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
       {/* ── Bandeau de synthèse (reflète l'onglet À préparer / Fait) ── */}
       {view?.totals && <SummaryRow totals={view.totals} loading={loading} showRevenue={canDispatch} />}
 
-      {/* ── Onglets À préparer / Fait + repliage global ── */}
+      {/* ── Onglets À préparer / Fait + recherche d'un bon + repliage global ── */}
       {data && data.count > 0 && (
         <StatusTabs
           tab={statusTab}
           counts={statusCounts}
           onPick={setStatusTab}
+          query={query}
+          onQuery={setQuery}
           allCollapsed={allCollapsed}
           onToggleAll={toggleAll}
         />
@@ -474,7 +519,19 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
         <EmptyState date={date} />
       ) : view && view.count === 0 ? (
         <div className="flex flex-col items-center justify-center text-center rounded-2xl border border-dashed border-border bg-card py-12 px-6">
-          {statusTab === "A_PREPARER" ? (
+          {searching ? (
+            <>
+              <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-secondary/60 text-muted-foreground mb-3">
+                <Search className="h-6 w-6" strokeWidth={1.8} />
+              </span>
+              <p className="text-[14px] font-semibold text-foreground">Aucun bon trouvé</p>
+              <p className="text-[12.5px] text-muted-foreground mt-1">
+                Rien ne correspond à « <b className="text-foreground">{query.trim()}</b> » dans cet onglet
+                (n° de BL, client, code ou réf. client).
+                <button onClick={() => setQuery("")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Effacer la recherche</button>
+              </p>
+            </>
+          ) : statusTab === "A_PREPARER" ? (
             <>
               <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 mb-3">
                 <CheckCircle2 className="h-6 w-6" strokeWidth={1.8} />
@@ -533,7 +590,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
               <CarrierGroup
                 key={key} carrier={c} carrierKey={key} date={date} fullDocs={fullDocs} carriers={carriers} onCarrierChange={changeCarrier} onDateChange={changeDate}
                 tourneesByCode={tourneesByCode} onLoadTournees={loadTournees} onTourneeChange={changeTournee}
-                expanded={expanded} onToggle={toggleKey}
+                expanded={effectiveExpanded} onToggle={toggleKey}
                 onPatchDoc={patchDoc} onReload={load} canDispatch={canDispatch}
                 statusTab={statusTab} onBulkStatus={bulkSetStatus} gen={gen}
               />
@@ -1194,14 +1251,16 @@ function BonTransportActions({
 }
 
 /* ═════════════════════════════════════════════════════════════
-   Onglets d'état — À préparer / Fait + repliage global
+   Onglets d'état — À préparer / Fait + recherche + repliage global
 ═════════════════════════════════════════════════════════════ */
 function StatusTabs({
-  tab, counts, onPick, allCollapsed, onToggleAll,
+  tab, counts, onPick, query, onQuery, allCollapsed, onToggleAll,
 }: {
   tab: ViewTab;
   counts: { aPreparer: number; fait: number; depart: number; manquants: number };
   onPick: (t: ViewTab) => void;
+  query: string;
+  onQuery: (q: string) => void;
   allCollapsed: boolean;
   onToggleAll: () => void;
 }) {
@@ -1236,14 +1295,39 @@ function StatusTabs({
           );
         })}
       </div>
-      <button
-        type="button"
-        onClick={onToggleAll}
-        className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors shrink-0"
-      >
-        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${allCollapsed ? "-rotate-90" : ""}`} />
-        {allCollapsed ? "Tout déplier" : "Tout replier"}
-      </button>
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* Recherche d'un bon : n° BL, client, code, réf. client */}
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => onQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") onQuery(""); }}
+            placeholder="Chercher un bon (client, n° BL…)"
+            aria-label="Chercher un bon de livraison (client, n° de BL, code ou réf. client)"
+            className="h-9 w-[220px] sm:w-[250px] rounded-lg border border-border bg-card pl-8 pr-8 text-[12.5px] font-medium text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-brand-500/40 [&::-webkit-search-cancel-button]:hidden"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => onQuery("")}
+              aria-label="Effacer la recherche"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onToggleAll}
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors shrink-0"
+        >
+          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${allCollapsed ? "-rotate-90" : ""}`} />
+          {allCollapsed ? "Tout déplier" : "Tout replier"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -1429,6 +1513,7 @@ const OrderRow = memo(function OrderRow({
   // Préparateur affecté + auteur du « fait » + signalement « à reprendre » + vue en grand.
   const [preparer, setPreparer] = useState<string | null>(doc.preparer ?? null);
   const [preparedBy, setPreparedBy] = useState<string | null>(doc.preparedBy ?? null);
+  const [preparedAt, setPreparedAt] = useState<string | null>(doc.preparedAt ?? null);
   const [incomplete, setIncomplete] = useState<boolean>(!!doc.incomplete);
   const [bigOpen, setBigOpen] = useState(false);
   const [requeuing, setRequeuing] = useState(false);
@@ -1460,10 +1545,12 @@ const OrderRow = memo(function OrderRow({
         toast.error(j?.error ? `Échec : ${j.error}` : "Échec de l'enregistrement");
         return;
       }
-      // Auteur du « fait » (« Fait par … ») renvoyé par l'API.
+      // Auteur + heure du « fait » (« Fait par … · 14:32 ») renvoyés par l'API.
       const by = next ? (j?.by ?? null) : null;
+      const at = next ? (j?.at ?? new Date().toISOString()) : null;
       setPreparedBy(by);
-      onPatchDoc(doc.docEntry, { preparedBy: by });
+      setPreparedAt(at);
+      onPatchDoc(doc.docEntry, { preparedBy: by, preparedAt: at });
     } catch {
       rollback();
       toast.error("Échec de l'enregistrement");
@@ -1480,6 +1567,7 @@ const OrderRow = memo(function OrderRow({
   // Statut « départ » (partie en livraison) — 3ᵉ état. Optimiste + persistance.
   const [departed, setDeparted] = useState<boolean>(!!doc.departed);
   const [departedBy, setDepartedBy] = useState<string | null>(doc.departedBy ?? null);
+  const [departedAt, setDepartedAt] = useState<string | null>(doc.departedAt ?? null);
   const [savingDepart, setSavingDepart] = useState(false);
 
   async function setDepartedTo(next: boolean) {
@@ -1507,8 +1595,10 @@ const OrderRow = memo(function OrderRow({
         return;
       }
       const by = next ? (j?.by ?? null) : null;
+      const at = next ? (j?.at ?? new Date().toISOString()) : null;
       setDepartedBy(by);
-      onPatchDoc(doc.docEntry, { departedBy: by });
+      setDepartedAt(at);
+      onPatchDoc(doc.docEntry, { departedBy: by, departedAt: at });
     } catch {
       rollback();
       toast.error("Échec de l'enregistrement");
@@ -1555,9 +1645,9 @@ const OrderRow = memo(function OrderRow({
       });
       const j = await res.json().catch(() => null);
       if (!res.ok || !j?.ok) { toast.error(j?.error || "Échec"); return; }
-      setPreparer(null); setIncomplete(true); setPrepared(false); setPreparedBy(null); setDeparted(false);
+      setPreparer(null); setIncomplete(true); setPrepared(false); setPreparedBy(null); setPreparedAt(null); setDeparted(false); setDepartedAt(null);
       setBigOpen(false);
-      onPatchDoc(doc.docEntry, { preparer: null, incomplete: true, prepared: false, preparedBy: null, departed: false });
+      onPatchDoc(doc.docEntry, { preparer: null, incomplete: true, prepared: false, preparedBy: null, preparedAt: null, departed: false, departedAt: null });
       toast.warning(`Commande #${doc.docNum} non terminée — remise sur la file`);
     } catch { toast.error("Échec"); }
     finally { setRequeuing(false); }
@@ -1783,15 +1873,15 @@ const OrderRow = memo(function OrderRow({
               </span>
             )}
             {prepared && !departed && (preparedBy ?? preparer) && (
-              <span title={`Préparée par ${displayPersonName(preparedBy ?? preparer)}`}
+              <span title={`Préparée par ${displayPersonName(preparedBy ?? preparer)}${fmtClock(preparedAt) ? ` à ${fmtClock(preparedAt)}` : ""}`}
                 className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 text-[10px] font-semibold">
-                <UserCheck className="h-3 w-3" /> Fait par {displayPersonName(preparedBy ?? preparer)}
+                <UserCheck className="h-3 w-3" /> Fait par {displayPersonName(preparedBy ?? preparer)}{fmtClock(preparedAt) ? ` · ${fmtClock(preparedAt)}` : ""}
               </span>
             )}
             {departed && (
-              <span title={departedBy ? `Parti — ${displayPersonName(departedBy)}` : "Partie en livraison"}
+              <span title={departedBy ? `Parti — ${displayPersonName(departedBy)}${fmtClock(departedAt) ? ` à ${fmtClock(departedAt)}` : ""}` : "Partie en livraison"}
                 className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
-                <Truck className="h-3 w-3" /> Parti{departedBy ? ` · ${displayPersonName(departedBy)}` : ""}
+                <Truck className="h-3 w-3" /> Parti{departedBy ? ` · ${displayPersonName(departedBy)}` : ""}{fmtClock(departedAt) ? ` · ${fmtClock(departedAt)}` : ""}
               </span>
             )}
             {incomplete && (
@@ -2053,8 +2143,15 @@ const OrderRow = memo(function OrderRow({
               </span>
             )}
             {prepared && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2.5 py-1 text-[12px] font-bold uppercase">
-                <CheckCircle2 className="h-3.5 w-3.5" /> Faite
+              <span title={fmtClock(preparedAt) ? `Marquée « faite » à ${fmtClock(preparedAt)}` : "Marquée « faite »"}
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2.5 py-1 text-[12px] font-bold uppercase">
+                <CheckCircle2 className="h-3.5 w-3.5" /> Faite{fmtClock(preparedAt) ? ` · ${fmtClock(preparedAt)}` : ""}
+              </span>
+            )}
+            {departed && (
+              <span title={fmtClock(departedAt) ? `Partie en livraison à ${fmtClock(departedAt)}` : "Partie en livraison"}
+                className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2.5 py-1 text-[12px] font-bold uppercase">
+                <Truck className="h-3.5 w-3.5" /> Parti{fmtClock(departedAt) ? ` · ${fmtClock(departedAt)}` : ""}
               </span>
             )}
           </div>

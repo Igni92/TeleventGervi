@@ -50,8 +50,10 @@ export interface Doc {
   clientType: string | null;   // GMS | CHR | EXPORT | null
   prepared: boolean;           // « faite » — coché manuellement
   preparedBy?: string | null;  // qui a marqué la commande « faite »
+  preparedAt?: string | null;  // heure (ISO) du clic « fait »
   departed?: boolean;          // « départ » — partie en livraison
   departedBy?: string | null;  // qui a marqué le « départ »
+  departedAt?: string | null;  // heure (ISO) du clic « départ »
   preparer?: string | null;    // préparateur affecté (qui a ouvert la commande)
   incomplete?: boolean;        // « à reprendre » — remise sur la file (pas finie)
   missingItems?: string[];     // articles MANQUANTS (stock SAP total négatif)
