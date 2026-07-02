@@ -314,6 +314,19 @@ export async function setDeliveryPrepared(docEntry: number, prepared: boolean, b
   return at;
 }
 
+/** Change l'AUTEUR du « fait » d'un BL déjà préparé (« Fait par … ») — l'heure
+ *  du clic d'origine est CONSERVÉE. Renvoie false si le BL n'est pas « faite ». */
+export async function setDeliveryPreparedBy(docEntry: number, by: string): Promise<boolean> {
+  const key = LIV_FAITE_PREFIX + docEntry;
+  const row = await prisma.appSetting.findUnique({ where: { key } });
+  if (!row) return false;
+  let v: { prepared?: boolean; at?: string; by?: string };
+  try { v = JSON.parse(row.value); } catch { return false; }
+  if (!v.prepared) return false;
+  await prisma.appSetting.update({ where: { key }, data: { value: JSON.stringify({ ...v, by }) } });
+  return true;
+}
+
 /** Statut « faite » d'UN BL (lecture ciblée) — { prepared, by } ou null si jamais marqué. */
 export async function getDeliveryPreparedOne(docEntry: number): Promise<{ prepared: boolean; by: string | null } | null> {
   try {

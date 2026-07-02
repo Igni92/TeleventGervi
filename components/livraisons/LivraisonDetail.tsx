@@ -24,7 +24,8 @@ import {
 // Types (miroir de /api/livraisons) + logique de vue pure (testée à part).
 import {
   docStatus, computeStatusCounts, computeView, docTourneeKeyLabel, STATUS_LABEL,
-  type StatusTab, type Tournee, type Doc, type Carrier, type Totals, type ApiResp,
+  filterBySegment, computeSegmentCounts, SEGMENT_LABEL,
+  type StatusTab, type SegmentTab, type Tournee, type Doc, type Carrier, type Totals, type ApiResp,
 } from "@/lib/livraisonView";
 import { printOrderRecap } from "./printRecap";
 import { renderBonTransport } from "@/lib/bonTransport";
@@ -67,11 +68,12 @@ const fmtClock = (iso: string | null | undefined): string | null => {
  *  stock SAP négatif — achat à prévoir). */
 type ViewTab = StatusTab | "MANQUANTS";
 
-/** Badge de ligne par segment client (conservé pour CHR / EXPORT, le tag GMS
- *  n'étant plus affiché — la distinction utile est désormais À préparer / Fait). */
-const SEG_UI: Record<"CHR" | "EXPORT", { label: string; badge: string }> = {
+/** Badge de ligne par segment client (CHR / EXPORT / GMS) — repère visuel du
+ *  segment, en cohérence avec le filtre Tout / CHR / Export / GMS. */
+const SEG_UI: Record<"CHR" | "EXPORT" | "GMS", { label: string; badge: string }> = {
   CHR:    { label: "CHR",    badge: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" },
   EXPORT: { label: "Export", badge: "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" },
+  GMS:    { label: "GMS",    badge: "bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300" },
 };
 
 /* ═════════════════════════════════════════════════════════════
@@ -275,6 +277,10 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   //    « Manquants » (vue transverse des articles en stock SAP négatif) ──
   const [statusTab, setStatusTab] = useState<ViewTab>("A_PREPARER");
 
+  // ── Filtre par SEGMENT client : Tout / CHR / Export / GMS — recoupe TOUTES
+  //    les données en amont des onglets d'état (compteurs, vue, manquants). ──
+  const [segment, setSegment] = useState<SegmentTab>("TOUT");
+
   // Mise à jour optimiste d'UNE commande dans `data` (statut « faite », auteur,
   // « à reprendre »…) → la carte change d'onglet sans recharger toute la liste.
   const patchDoc = useCallback((docEntry: number, patch: Partial<Doc>) => {
@@ -386,29 +392,36 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
     return { ...data, carriers };
   }, [data, query]);
 
-  // Comptes par onglet (sur le résultat de recherche) — « Manquants » compte les
+  // Commandes recoupées par le filtre SEGMENT (appliqué APRÈS la recherche) —
+  // base de TOUT ce qui suit (compteurs d'état, vue, synthèse des manquants).
+  const segCarriers = useMemo(
+    () => filterBySegment(filteredData?.carriers ?? [], segment),
+    [filteredData, segment],
+  );
+  // Comptes du filtre segment — sur le résultat de recherche NON recoupé par
+  // segment (chaque pastille affiche son volume quel que soit le segment actif).
+  const segCounts = useMemo(() => computeSegmentCounts(filteredData?.carriers ?? []), [filteredData]);
+
+  // Comptes par onglet (sur recherche + segment actif) — « Manquants » compte les
   // commandes ayant au moins un article signalé. Logique pure dans lib/livraisonView.
-  const statusCounts = useMemo(
-    () => computeStatusCounts(filteredData?.carriers ?? []),
-    [filteredData],
-  );
+  const statusCounts = useMemo(() => computeStatusCounts(segCarriers), [segCarriers]);
 
-  // Vue filtrée par onglet : par état d'avancement (À préparer / Fait / Départ)
-  // ou par présence de manquants (onglet « Manquants », tous états confondus).
-  // Métriques recalculées (groupes + bandeau) — les BL « avoir / exclu » restent
-  // listés mais sont déduits, comme au serveur.
+  // Vue filtrée par recherche + segment + onglet : par état d'avancement
+  // (À préparer / Fait / Départ) ou par présence de manquants (onglet
+  // « Manquants », tous états confondus). Métriques recalculées (groupes +
+  // bandeau) — les BL « avoir / exclu » restent listés mais sont déduits.
   const view = useMemo(
-    () => (filteredData ? { ...filteredData, ...computeView(filteredData, statusTab) } : null),
-    [filteredData, statusTab],
+    () => (filteredData ? { ...filteredData, ...computeView({ carriers: segCarriers }, statusTab) } : null),
+    [filteredData, segCarriers, statusTab],
   );
 
-  // Synthèse des MANQUANTS par article (toutes commandes du jour confondues) :
+  // Synthèse des MANQUANTS par article (commandes du segment actif) :
   // stock SAP négatif + quantités/colis commandés + nb de commandes touchées.
   // Alimente l'encart de l'onglet « Manquants » (les achats à faire).
   const missingSummary = useMemo(() => {
     if (!data) return [];
     const byItem = new Map<string, { itemCode: string; itemName: string; stock: number | null; colis: number; quantity: number; docs: number }>();
-    for (const car of data.carriers) for (const d of car.docs) {
+    for (const car of segCarriers) for (const d of car.docs) {
       const codes = new Set(d.missingItems ?? []);
       if (codes.size === 0) continue;
       for (const l of d.lines) {
@@ -425,7 +438,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
       }
     }
     return [...byItem.values()].sort((a, b) => (a.stock ?? 0) - (b.stock ?? 0) || a.itemName.localeCompare(b.itemName, "fr"));
-  }, [data]);
+  }, [data, segCarriers]);
 
   // Toutes les clés dépliables : transporteurs + sous-groupes tournée.
   const allKeys = useMemo(() => {
@@ -486,7 +499,12 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
         onReport={() => setDate(nextWorkingDeliveryDay(date))}
       />
 
-      {/* ── Bandeau de synthèse (reflète l'onglet À préparer / Fait) ── */}
+      {/* ── Filtre segment client : Tout / CHR / Export / GMS ── */}
+      {data && data.count > 0 && (
+        <SegmentTabs segment={segment} counts={segCounts} onPick={setSegment} />
+      )}
+
+      {/* ── Bandeau de synthèse (reflète le segment + l'onglet À préparer / Fait) ── */}
       {view?.totals && <SummaryRow totals={view.totals} loading={loading} showRevenue={canDispatch} />}
 
       {/* ── Onglets À préparer / Fait + recherche d'un bon + repliage global ── */}
@@ -517,6 +535,17 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
         <LoadingState />
       ) : data && data.count === 0 ? (
         <EmptyState date={date} />
+      ) : data && !searching && segment !== "TOUT" && segCarriers.length === 0 ? (
+        <div className="flex flex-col items-center justify-center text-center rounded-2xl border border-dashed border-border bg-card py-12 px-6">
+          <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-secondary text-muted-foreground mb-3">
+            <Users className="h-6 w-6" strokeWidth={1.8} />
+          </span>
+          <p className="text-[14px] font-semibold text-foreground">Aucune commande {SEGMENT_LABEL[segment]}</p>
+          <p className="text-[12.5px] text-muted-foreground mt-1">
+            Aucun client {SEGMENT_LABEL[segment]} n&apos;est livré ce jour-là.
+            <button onClick={() => setSegment("TOUT")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir toutes les commandes</button>
+          </p>
+        </div>
       ) : view && view.count === 0 ? (
         <div className="flex flex-col items-center justify-center text-center rounded-2xl border border-dashed border-border bg-card py-12 px-6">
           {searching ? (
@@ -820,8 +849,10 @@ function CarrierGroup({
       >
         <div className="flex items-center gap-2.5 min-w-0">
           <ChevronDown className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform duration-200 ${collapsed ? "-rotate-90" : ""}`} />
+          {/* Icône + kicker masqués sur MOBILE : l'en-tête est chargé (boutons +
+              métriques) et le NOM du transporteur se retrouvait écrasé. */}
           <span
-            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+            className={`hidden sm:inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
               unassigned
                 ? "bg-muted text-muted-foreground"
                 : "bg-brand-500/12 text-brand-600 dark:text-brand-400"
@@ -830,10 +861,10 @@ function CarrierGroup({
             <Truck className="h-4 w-4" strokeWidth={2} />
           </span>
           <div className="min-w-0">
-            <p className="text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground leading-none">
+            <p className="hidden sm:block text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground leading-none">
               Transporteur
             </p>
-            <p className={`text-[15px] font-semibold leading-tight mt-0.5 truncate ${unassigned ? "text-muted-foreground italic" : "text-foreground"}`}>
+            <p className={`text-[15px] font-semibold leading-tight sm:mt-0.5 truncate ${unassigned ? "text-muted-foreground italic" : "text-foreground"}`}>
               {carrier.name}
             </p>
           </div>
@@ -1055,14 +1086,16 @@ function BonTransportActions({
 
   return (
     <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-      {/* Imprimer le bon de transport (original + copie) — tous profils */}
+      {/* Imprimer le bon de transport (original + copie) — tous profils.
+          Masqué sur MOBILE : on n'imprime pas depuis le téléphone et le bouton
+          écrasait le nom du transporteur dans l'en-tête. */}
       {orderCount > 0 && (
         <button
           type="button"
           onClick={printBon}
           title={`Imprimer le bon de transport de ${carrier.name} (original + copie)`}
           aria-label={`Imprimer le bon de transport de ${carrier.name}`}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
+          className="hidden sm:inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
         >
           <Printer className="h-4 w-4" />
         </button>
@@ -1246,6 +1279,51 @@ function BonTransportActions({
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/* ═════════════════════════════════════════════════════════════
+   Filtre segment client — Tout / CHR / Export / GMS
+═════════════════════════════════════════════════════════════ */
+function SegmentTabs({
+  segment, counts, onPick,
+}: {
+  segment: SegmentTab;
+  counts: Record<SegmentTab, number>;
+  onPick: (s: SegmentTab) => void;
+}) {
+  // Couleurs actives alignées sur les badges de ligne (SEG_UI).
+  const tabs: { key: SegmentTab; active: string }[] = [
+    { key: "TOUT",   active: "bg-brand-600 text-white border-brand-600" },
+    { key: "CHR",    active: "bg-amber-500 text-white border-amber-500" },
+    { key: "EXPORT", active: "bg-violet-500 text-white border-violet-500" },
+    { key: "GMS",    active: "bg-teal-500 text-white border-teal-500" },
+  ];
+  return (
+    <div className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card p-1 flex-wrap">
+      <span className="hidden sm:inline-flex items-center gap-1 pl-2 pr-1 text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
+        <Users className="h-3 w-3" /> Clients
+      </span>
+      {tabs.map((t) => {
+        const isActive = segment === t.key;
+        return (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => onPick(t.key)}
+            aria-pressed={isActive}
+            className={`inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg border text-[12.5px] font-semibold transition-colors ${
+              isActive ? t.active : "border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+            }`}
+          >
+            {SEGMENT_LABEL[t.key]}
+            <span className={`tnum text-[11px] font-bold ${isActive ? "opacity-90" : "opacity-60"}`}>
+              {counts[t.key]}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -1519,6 +1597,50 @@ const OrderRow = memo(function OrderRow({
   const [requeuing, setRequeuing] = useState(false);
   // Vérification avant de marquer « faite » (évite les validations par erreur).
   const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // ── Modifier la PERSONNE qui a fait la commande (« Fait par … ») ──
+  //    Dialog listant l'équipe (/api/users), chargée à la première ouverture.
+  const [editByOpen, setEditByOpen] = useState(false);
+  const [team, setTeam] = useState<{ name: string | null; email: string | null }[] | null>(null);
+  const [savingBy, setSavingBy] = useState(false);
+  useEffect(() => {
+    if (!editByOpen || team) return;
+    let cancelled = false;
+    fetch("/api/users")
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled) setTeam(j?.users ?? []); })
+      .catch(() => { if (!cancelled) setTeam([]); });
+    return () => { cancelled = true; };
+  }, [editByOpen, team]);
+
+  async function changePreparedBy(person: string) {
+    const prev = preparedBy;
+    setSavingBy(true);
+    setPreparedBy(person);
+    onPatchDoc(doc.docEntry, { preparedBy: person });
+    try {
+      // { docEntry, by } sans `prepared` = ré-attribution (heure du clic conservée).
+      const res = await fetch("/api/livraisons/prepared", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: doc.docEntry, by: person }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || j?.ok === false) {
+        setPreparedBy(prev);
+        onPatchDoc(doc.docEntry, { preparedBy: prev });
+        toast.error(j?.error ? `Échec : ${j.error}` : "Échec du changement de personne");
+        return;
+      }
+      toast.success(`BL n°${doc.docNum} — fait par ${displayPersonName(person)}`);
+      setEditByOpen(false);
+    } catch {
+      setPreparedBy(prev);
+      onPatchDoc(doc.docEntry, { preparedBy: prev });
+      toast.error("Échec du changement de personne");
+    } finally {
+      setSavingBy(false);
+    }
+  }
 
   async function setPreparedTo(next: boolean) {
     // État antérieur capturé pour un rollback FIDÈLE en cas d'échec (marquer
@@ -1873,10 +1995,15 @@ const OrderRow = memo(function OrderRow({
               </span>
             )}
             {prepared && !departed && (preparedBy ?? preparer) && (
-              <span title={`Préparée par ${displayPersonName(preparedBy ?? preparer)}${fmtClock(preparedAt) ? ` à ${fmtClock(preparedAt)}` : ""}`}
-                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 text-[10px] font-semibold">
+              // Cliquable : changer la PERSONNE qui a fait la commande.
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setEditByOpen(true); }}
+                title={`Préparée par ${displayPersonName(preparedBy ?? preparer)}${fmtClock(preparedAt) ? ` à ${fmtClock(preparedAt)}` : ""} — cliquer pour changer la personne`}
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 text-[10px] font-semibold hover:bg-emerald-500/25 transition-colors">
                 <UserCheck className="h-3 w-3" /> Fait par {displayPersonName(preparedBy ?? preparer)}{fmtClock(preparedAt) ? ` · ${fmtClock(preparedAt)}` : ""}
-              </span>
+                <Pencil className="h-2.5 w-2.5 opacity-70" />
+              </button>
             )}
             {departed && (
               <span title={departedBy ? `Parti — ${displayPersonName(departedBy)}${fmtClock(departedAt) ? ` à ${fmtClock(departedAt)}` : ""}` : "Partie en livraison"}
@@ -1917,6 +2044,10 @@ const OrderRow = memo(function OrderRow({
           <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground flex-wrap">
             <span className="font-mono text-foreground/60 hidden sm:inline">{doc.cardCode}</span>
             <span><span className="hidden sm:inline">· </span>BL n°{doc.docNum}</span>
+            {/* Heure de PRISE de la commande dans le système (création SAP). */}
+            {fmtClock(doc.takenAt) && (
+              <span title={`Commande prise dans le système à ${fmtClock(doc.takenAt)}`}>· Prise {fmtClock(doc.takenAt)}</span>
+            )}
             {/* Total HT — chiffre commercial : masqué pour préparateur / livreur. */}
             {canDispatch && <span className="hidden sm:inline">· {fmtEur(doc.totalHT)} HT</span>}
           </div>
@@ -2137,10 +2268,25 @@ const OrderRow = memo(function OrderRow({
               {fmtNum(doc.colis)} <span className="text-[12px] font-medium uppercase text-muted-foreground">colis</span>
             </span>
             <span className="text-[15px] font-semibold tnum text-muted-foreground">{fmtNum(doc.weightKg)} kg</span>
-            {(preparedBy ?? preparer) && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2.5 py-1 text-[12px] font-semibold">
-                <UserCheck className="h-3.5 w-3.5" /> {prepared ? "Fait par" : "Préparée par"} {displayPersonName(preparedBy ?? preparer)}
+            {/* Heure de PRISE de la commande dans le système (création SAP). */}
+            {fmtClock(doc.takenAt) && (
+              <span title={`Commande prise dans le système à ${fmtClock(doc.takenAt)}`}
+                className="inline-flex items-center gap-1 rounded-full bg-secondary text-muted-foreground px-2.5 py-1 text-[12px] font-bold uppercase">
+                <Clock className="h-3.5 w-3.5" /> Prise · {fmtClock(doc.takenAt)}
               </span>
+            )}
+            {(preparedBy ?? preparer) && (
+              // Cliquable quand la commande est « faite » : changer la personne.
+              <button
+                type="button"
+                onClick={() => { if (prepared) setEditByOpen(true); }}
+                disabled={!prepared}
+                title={prepared ? "Changer la personne qui a fait la commande" : undefined}
+                className={`inline-flex items-center gap-1.5 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2.5 py-1 text-[12px] font-semibold ${prepared ? "hover:bg-sky-500/25 transition-colors" : "cursor-default"}`}
+              >
+                <UserCheck className="h-3.5 w-3.5" /> {prepared ? "Fait par" : "Préparée par"} {displayPersonName(preparedBy ?? preparer)}
+                {prepared && <Pencil className="h-3 w-3 opacity-70" />}
+              </button>
             )}
             {prepared && (
               <span title={fmtClock(preparedAt) ? `Marquée « faite » à ${fmtClock(preparedAt)}` : "Marquée « faite »"}
@@ -2211,6 +2357,59 @@ const OrderRow = memo(function OrderRow({
               <Printer className="h-4 w-4" /> Imprimer
             </button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Changer la PERSONNE qui a fait la commande (« Fait par … ») */}
+      <Dialog open={editByOpen} onOpenChange={(o) => { if (!savingBy) setEditByOpen(o); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader className="text-left">
+            <DialogTitle className="flex items-center gap-2 pr-8 text-[16px]">
+              <UserCog className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              Qui a fait cette commande ?
+            </DialogTitle>
+            <DialogDescription className="text-[12px]">
+              BL n°{doc.docNum} — {doc.cardName}. La personne choisie remplace{" "}
+              <b className="text-foreground">{displayPersonName(preparedBy ?? preparer)}</b> (l&apos;heure du « fait » est conservée).
+            </DialogDescription>
+          </DialogHeader>
+          {team === null ? (
+            <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Chargement de l&apos;équipe…
+            </div>
+          ) : team.length === 0 ? (
+            <p className="text-[12.5px] text-muted-foreground py-2">Aucun utilisateur trouvé.</p>
+          ) : (
+            <ul className="max-h-[50vh] overflow-y-auto divide-y divide-border/60 rounded-xl border border-border">
+              {team.map((u) => {
+                const value = (u.name?.trim() || u.email || "").trim();
+                if (!value) return null;
+                const current = value === (preparedBy ?? "").trim();
+                return (
+                  <li key={u.email ?? value}>
+                    <button
+                      type="button"
+                      disabled={savingBy}
+                      onClick={() => changePreparedBy(value)}
+                      className={`flex w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left text-[13.5px] font-medium transition-colors disabled:opacity-60 ${
+                        current
+                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                          : "text-foreground hover:bg-secondary/60"
+                      }`}
+                    >
+                      <span className="truncate">
+                        {displayPersonName(value)}
+                        <span className="ml-1.5 text-[11px] text-muted-foreground font-normal">{value}</span>
+                      </span>
+                      {savingBy && !current
+                        ? null
+                        : current && <CheckCircle2 className="h-4 w-4 shrink-0" />}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </DialogContent>
       </Dialog>
 
