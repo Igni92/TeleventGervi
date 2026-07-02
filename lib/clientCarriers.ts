@@ -361,6 +361,27 @@ export async function getTrclDefaultCarrier(cardCode: string): Promise<ClientCar
   return res.carriers.find((c) => c.id === res.defaultId) ?? res.carriers[0] ?? null;
 }
 
+/**
+ * Heure de tournée (U_TrspHeur, "HH:MM:SS") d'un transporteur PRÉCIS pour un
+ * client, telle que définie dans SERG_TRCL.
+ *
+ * Sert à COMPLÉTER U_TrspHeur à la création d'un bon quand le transporteur est
+ * choisi via l'UI (carrierId / carrierCode) : ce chemin ne transmet QUE le code
+ * transporteur, pas l'heure. Sans elle, la commande partait avec le bon
+ * transporteur mais SANS sa tournée → non rattachée dans le récap transporteur SAP.
+ *
+ * Renvoie null si la source n'est pas SERG_TRCL (fallback histogramme = pas
+ * d'heure), si le transporteur est absent du client, ou s'il n'a pas d'heure.
+ */
+export async function getTrclCarrierHeure(cardCode: string, trspCode: string): Promise<string | null> {
+  const code = (trspCode ?? "").trim().toUpperCase();
+  if (!code) return null;
+  const res = await getClientCarriers(cardCode);
+  if (res.source !== "trcl") return null;
+  const hit = res.carriers.find((c) => c.sapValue.trim().toUpperCase() === code);
+  return hit?.heure ?? null;
+}
+
 /** Vide le cache — utile pour les tests / debug. */
 export function _resetClientCarriersCache(): void {
   cache.clear();
