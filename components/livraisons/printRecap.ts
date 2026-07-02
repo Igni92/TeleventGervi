@@ -23,7 +23,6 @@ export interface PrintDoc {
   cardCode: string;
   cardName: string;
   clientType?: string | null;
-  comments?: string | null;
   colis: number;
   weightKg: number;
   lines: PrintLine[];
@@ -34,7 +33,6 @@ export interface PrintContext {
   dateLabel: string;
   carrierName?: string | null;
   tourneeLabel?: string | null;
-  preparer?: string | null;
   /** Codes articles manquants (stock SAP négatif) sur ce BL. */
   missingCodes?: Set<string>;
 }
@@ -74,7 +72,6 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   const infos: [string, string][] = [
     ["Transporteur", ctx.carrierName?.trim() || "Non affecté"],
     ["Tournée", ctx.tourneeLabel?.trim() || "—"],
-    ["Préparateur", ctx.preparer?.trim() || "—"],
   ];
 
   const html = `<!DOCTYPE html>
@@ -103,7 +100,7 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   .client .type { display: inline-block; border: 1.5px solid #111; border-radius: 4px;
                   padding: 1px 7px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.6px; }
 
-  .infos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
+  .infos { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0;
            border: 1.5px solid #111; border-radius: 6px; overflow: hidden; margin-bottom: 14px; }
   .infos > div { padding: 6px 9px; border-left: 1px solid #bbb; }
   .infos > div:first-child { border-left: none; }
@@ -137,9 +134,6 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   .manquants h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 4px; }
   .manquants li { margin-left: 16px; font-size: 12px; }
 
-  .comments { border-left: 3px solid #111; padding: 4px 10px; font-style: italic;
-              color: #333; margin-bottom: 14px; }
-
   .noprint { margin-bottom: 14px; }
   .noprint button { font: 600 13px "Segoe UI", Arial, sans-serif; padding: 8px 18px;
                     border: 1.5px solid #111; border-radius: 6px; background: #111;
@@ -171,8 +165,6 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   <div class="infos">
     ${infos.map(([k, v]) => `<div><p class="k">${esc(k)}</p><p class="v">${esc(v)}</p></div>`).join("")}
   </div>
-
-  ${doc.comments?.trim() ? `<p class="comments">« ${esc(doc.comments.trim())} »</p>` : ""}
 
   <table>
     <thead>

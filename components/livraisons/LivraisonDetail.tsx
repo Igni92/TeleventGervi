@@ -1713,9 +1713,10 @@ const OrderRow = memo(function OrderRow({
 
   const docStatusOf: StatusTab = departed ? "DEPART" : prepared ? "FAIT" : "A_PREPARER";
 
-  // ── Récap imprimable (bon de préparation) — fenêtre dédiée + impression. ──
+  // ── Récap imprimable (bon de préparation) — fenêtre dédiée + impression.
+  //    Volontairement épuré : ni préparateur, ni commentaires (promos…) — le
+  //    préparateur n'a besoin que du client, de la logistique et des lignes. ──
   function handlePrint() {
-    const who = preparedBy ?? preparer;
     const ok = printOrderRecap(
       {
         docNum: doc.docNum,
@@ -1723,7 +1724,6 @@ const OrderRow = memo(function OrderRow({
         // Nom COMPLET du client (fiche télévente) sur le document imprimé.
         cardName: doc.cardFullName ?? doc.cardName,
         clientType: doc.clientType,
-        comments: doc.comments,
         colis: doc.colis,
         weightKg: doc.weightKg,
         lines: doc.lines,
@@ -1732,7 +1732,6 @@ const OrderRow = memo(function OrderRow({
         dateLabel: formatDeliveryDate(doc.dueDate),
         carrierName: doc.carrierName,
         tourneeLabel: docTourneeKeyLabel(doc, tournees).label,
-        preparer: who ? displayPersonName(who) : null,
         missingCodes: missingSet,
       },
     );
