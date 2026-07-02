@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
-import { getDeliveryPrepared, getDeliveryPreparedBy, getDeliveryDeparted, getDeliveryDepartedBy, getDeliveryExcluded, getDeliveryPreparer, getDeliveryIncomplete, getDeliveryMissing, type MissingItem } from "@/lib/inventory";
+import { getDeliveryPrepared, getDeliveryPreparedBy, getDeliveryDeparted, getDeliveryDepartedBy, getDeliveryExcluded, getDeliveryPreparer, getDeliveryIncomplete } from "@/lib/inventory";
 import { getClientTournees, type ClientTournee } from "@/lib/clientTournee";
 import { getClientTrclCarriers } from "@/lib/clientCarriers";
 
@@ -128,27 +128,58 @@ export async function GET(req: NextRequest) {
     // Préparateur affecté + signalement « incomplète (à reprendre) » par BL.
     const prepByDoc = await getDeliveryPreparer().catch(() => new Map<number, string>());
     const incompleteByDoc = await getDeliveryIncomplete().catch(() => new Map<number, boolean>());
-    // Articles signalés MANQUANTS par BL (rupture au picking) → onglet « Manquants ».
-    const missingByDoc = await getDeliveryMissing().catch(() => new Map<number, MissingItem[]>());
+
+    // ── Articles MANQUANTS = stock SAP total NÉGATIF (somme tous entrepôts) ──
+    // Interrogé EN DIRECT dans SAP (le miroir local ne conserve pas les stocks
+    // négatifs) sur les seuls articles des commandes du jour. Un stock total < 0
+    // signifie qu'on a vendu plus qu'on ne détient → achat à faire. Best-effort :
+    // si SAP ne répond pas sur ce point, aucun manquant n'est signalé.
+    const negativeStocks: Record<string, number> = {};
+    {
+      const chunks: string[][] = [];
+      for (let i = 0; i < allItemCodes.length; i += 20) chunks.push(allItemCodes.slice(i, i + 20));
+      await Promise.all(chunks.map(async (chunk) => {
+        try {
+          const or = chunk.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
+          const items = await sap.getAll<{ ItemCode: string; QuantityOnStock?: number }>(
+            `Items?$select=ItemCode,QuantityOnStock&$filter=${encodeURIComponent(`(${or})`)}`,
+            { pageSize: 50, maxPages: 2 },
+          );
+          // Filtre « < 0 » côté app : QuantityOnStock est un champ calculé que
+          // certains Service Layer refusent en $filter.
+          for (const it of items) {
+            const q = it.QuantityOnStock ?? 0;
+            if (q < 0) negativeStocks[it.ItemCode] = q;
+          }
+        } catch { /* lot en échec → pas de manquants pour ces articles */ }
+      }));
+    }
 
     // Type client (GMS / CHR / EXPORT) par CardCode — pour le filtre par segment.
     // Le CardCode d'un BL peut être le code principal OU un code d'adresse de
     // livraison (ClientDeliveryMode.sapCardCode) : on couvre les deux.
     const cardCodes = Array.from(new Set(live.map((o) => o.CardCode).filter(Boolean)));
     const typeByCardCode = new Map<string, string>();
+    // Nom COMPLET du client (fiche télévente) — le CardName SAP est parfois
+    // tronqué/abrégé ; les documents imprimés utilisent le nom complet.
+    const nameByCardCode = new Map<string, string>();
     if (cardCodes.length) {
       try {
         const clients = await prisma.client.findMany({
           where: { code: { in: cardCodes } },
-          select: { code: true, type: true },
+          select: { code: true, type: true, nom: true },
         });
-        for (const c of clients) if (c.type) typeByCardCode.set(c.code, c.type);
+        for (const c of clients) {
+          if (c.type) typeByCardCode.set(c.code, c.type);
+          if (c.nom?.trim()) nameByCardCode.set(c.code, c.nom.trim());
+        }
         const modes = await prisma.clientDeliveryMode.findMany({
           where: { sapCardCode: { in: cardCodes } },
-          select: { sapCardCode: true, client: { select: { type: true } } },
+          select: { sapCardCode: true, client: { select: { type: true, nom: true } } },
         });
         for (const m of modes) {
           if (m.client?.type && !typeByCardCode.has(m.sapCardCode)) typeByCardCode.set(m.sapCardCode, m.client.type);
+          if (m.client?.nom?.trim() && !nameByCardCode.has(m.sapCardCode)) nameByCardCode.set(m.sapCardCode, m.client.nom.trim());
         }
       } catch {
         /* type optionnel → le filtre rangera ces BL en « Autres » */
@@ -199,6 +230,8 @@ export async function GET(req: NextRequest) {
         dueDate: d.DocDueDate,
         cardCode: d.CardCode,
         cardName: d.CardName ?? d.CardCode,
+        // Nom complet (fiche client) pour les documents imprimés.
+        cardFullName: nameByCardCode.get(d.CardCode) ?? d.CardName ?? d.CardCode,
         totalHT: Math.round(((d.DocTotal ?? 0) - (d.VatSum ?? 0)) * 100) / 100,
         totalTTC: Math.round((d.DocTotal ?? 0) * 100) / 100,
         colis: Math.round(colis * 10) / 10,
@@ -226,8 +259,8 @@ export async function GET(req: NextRequest) {
         departedBy: departedByDoc.get(d.DocEntry) ?? null,    // qui a marqué « départ »
         preparer: prepByDoc.get(d.DocEntry) ?? null,          // préparateur affecté (qui a ouvert)
         incomplete: incompleteByDoc.get(d.DocEntry) ?? false, // « à reprendre » — remise sur la file
-        // Codes articles signalés MANQUANTS sur ce BL (rupture au picking).
-        missingItems: (missingByDoc.get(d.DocEntry) ?? []).map((i) => i.itemCode),
+        // Articles MANQUANTS de ce BL = lignes dont le stock SAP total est négatif.
+        missingItems: lines.filter((l) => negativeStocks[l.itemCode] !== undefined).map((l) => l.itemCode),
         // « avoir/exclu » : surcharge manuelle si présente, sinon détecté auto (ci-dessous).
         excluded: avoirByDoc.has(d.DocEntry) ? !!avoirByDoc.get(d.DocEntry) : false,
         lineCount: lines.length,
@@ -330,6 +363,8 @@ export async function GET(req: NextRequest) {
       count: docs.length,
       totals,
       carriers,
+      // Stock SAP total (négatif) par article manquant — pilote les achats.
+      negativeStocks,
     });
   } catch (e) {
     return NextResponse.json(

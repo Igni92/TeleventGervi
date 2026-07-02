@@ -23,7 +23,6 @@ export interface PrintDoc {
   cardCode: string;
   cardName: string;
   clientType?: string | null;
-  numAtCard?: string | null;
   comments?: string | null;
   colis: number;
   weightKg: number;
@@ -36,9 +35,7 @@ export interface PrintContext {
   carrierName?: string | null;
   tourneeLabel?: string | null;
   preparer?: string | null;
-  /** Libellé d'état courant (À préparer / Fait / Départ). */
-  statusLabel?: string;
-  /** Codes articles signalés manquants sur ce BL. */
+  /** Codes articles manquants (stock SAP négatif) sur ce BL. */
   missingCodes?: Set<string>;
 }
 
@@ -77,9 +74,7 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   const infos: [string, string][] = [
     ["Transporteur", ctx.carrierName?.trim() || "Non affecté"],
     ["Tournée", ctx.tourneeLabel?.trim() || "—"],
-    ["Réf. client", doc.numAtCard?.trim() || "—"],
     ["Préparateur", ctx.preparer?.trim() || "—"],
-    ["État", ctx.statusLabel ?? "À préparer"],
   ];
 
   const html = `<!DOCTYPE html>
@@ -108,7 +103,7 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   .client .type { display: inline-block; border: 1.5px solid #111; border-radius: 4px;
                   padding: 1px 7px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.6px; }
 
-  .infos { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0;
+  .infos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
            border: 1.5px solid #111; border-radius: 6px; overflow: hidden; margin-bottom: 14px; }
   .infos > div { padding: 6px 9px; border-left: 1px solid #bbb; }
   .infos > div:first-child { border-left: none; }
@@ -144,13 +139,6 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
 
   .comments { border-left: 3px solid #111; padding: 4px 10px; font-style: italic;
               color: #333; margin-bottom: 14px; }
-
-  .sign { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 18px; }
-  .sign > div { border: 1px solid #999; border-radius: 6px; height: 64px; padding: 5px 8px; }
-  .sign p { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: #555; }
-
-  footer { margin-top: 12px; display: flex; justify-content: space-between;
-           font-size: 9.5px; color: #777; }
 
   .noprint { margin-bottom: 14px; }
   .noprint button { font: 600 13px "Segoe UI", Arial, sans-serif; padding: 8px 18px;
@@ -215,17 +203,6 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
       ${missingLines.map((l) => `<li><b>${esc(l.itemName)}</b> — ${num(l.colis)} colis (${num(l.quantity)} un.)</li>`).join("")}
     </ul>
   </div>` : ""}
-
-  <div class="sign">
-    <div><p>Préparé par</p></div>
-    <div><p>Contrôlé par</p></div>
-    <div><p>Chauffeur</p></div>
-  </div>
-
-  <footer>
-    <span>SAP fait foi — document de préparation interne.</span>
-    <span>Imprimé le ${new Date().toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}</span>
-  </footer>
 
   <script>window.addEventListener("load", function () { setTimeout(function () { window.print(); }, 150); });</script>
 </body>

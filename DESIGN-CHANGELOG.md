@@ -239,14 +239,28 @@ pour visualiser **où l'on livre le plus**, à partir de l'adresse SAP des clien
 
 ---
 
-## 📦 Détail livraison — Onglet « Manquants » + récap imprimable (NOUVEAU)
+## 📦 Détail livraison — Onglet « Manquants » (stock SAP) + bon de préparation imprimable (NOUVEAU)
 
-Deux besoins terrain sur `/livraisons` : **signaler les ruptures au picking** et
-**imprimer un vrai bon de préparation** par commande.
+Deux besoins terrain sur `/livraisons` : **voir les achats à faire** (articles en
+rupture SAP sur les commandes du jour) et **imprimer un vrai bon de préparation**
+par commande.
 
 | Élément | Détail |
 |---------|--------|
-| Toggle « manquant » par ligne | Bouton (PackageX) sur chaque article — tableau compact **et** vue en grand (cible 44 px sur mobile). Optimiste + rollback, persisté par BL (`AppSetting livmanquant:<docEntry>`, route `POST /api/livraisons/manquants`). Ligne barrée + fond rosé + chip « Manquant ». |
-| Onglet « Manquants » | 4ᵉ onglet (rose) à côté d'À préparer / Fait / Départ — vue **transverse** (tous états confondus) des commandes du jour ayant ≥ 1 article signalé. Badge « X manquant(s) » sur la ligne commande. Pas d'action groupée sur cet onglet (états mélangés). |
-| Synthèse par article | Encart en tête de l'onglet : cumul **colis / qté / nb de commandes** par article en rupture — vision achats/réassort en un coup d'œil. |
-| Récap imprimable | Bouton 🖨 par commande (ligne desktop + vue en grand) → fenêtre A4 autonome (`printOrderRecap`) : en-tête BL n° + date de livraison, client + segment, transporteur / tournée / réf client / préparateur / état, lignes avec **gros colisage** + cases à cocher, manquants barrés + encart rappel, totaux, zone signatures (préparé / contrôlé / chauffeur), « SAP fait foi ». Impression auto à l'ouverture. |
+| Manquants = stock SAP négatif | Détection **automatique** : sur les articles des commandes du jour, stock SAP total (tous entrepôts) interrogé **en direct** (le miroir local ne conserve pas les stocks négatifs, requêtes par lots de 20, best-effort). Stock < 0 → article « manquant ». Ligne barrée + fond rosé + chip « Manquant » sur la commande. |
+| Onglet « Manquants » | 4ᵉ onglet (rose) à côté d'À préparer / Fait / Départ — vue **transverse** (tous états confondus) des commandes du jour ayant ≥ 1 article en rupture. Badge « X manquant(s) » sur la ligne commande. Pas d'action groupée sur cet onglet (états mélangés). |
+| Synthèse « achats à prévoir » | Encart en tête de l'onglet : par article, **stock SAP (négatif) + colis/qté commandés + nb de commandes** — la liste de courses de la personne en charge. |
+| Bon de préparation imprimable | Bouton 🖨 par commande (ligne desktop + vue en grand) → fenêtre A4 autonome (`printOrderRecap`) : BL n° + date de livraison, **nom complet du client** (fiche télévente, pas le CardName SAP tronqué), transporteur / tournée / préparateur, lignes avec **gros colisage** + cases à cocher, manquants barrés + encart rappel, totaux. Impression auto. |
+
+---
+
+## 🚚 Bon de transport par transporteur + fiche transporteur (NOUVEAU)
+
+Récap de **toutes les commandes (palettes) d'un transporteur** pour un jour de
+livraison, à faire **signer au chauffeur** — et envoyable par mail.
+
+| Élément | Détail |
+|---------|--------|
+| Bon de transport imprimable | Bouton 🖨 sur l'en-tête du groupe transporteur → **2 exemplaires (ORIGINAL + COPIE)**, une page chacun (`lib/bonTransport`, partagé client/serveur). Par tournée : client (nom complet), BL n°, colis, poids ; colonne **Palettes vide** (remplie à la main au chargement) ; totaux ; zones de signature **expéditeur Gervifrais / chauffeur**. Couvre TOUTES les commandes du transporteur (pas seulement l'onglet affiché), hors BL avoirés. |
+| Envoi par mail | Bouton ✉ (commerciaux/admins) + dialog de confirmation (destinataire affiché) → `POST /api/livraisons/bon-transport` : données **reconstruites côté serveur depuis SAP**, envoi depuis la boîte partagée **commercial@gervifrais.com** (Graph `sendMailAsShared`, surchargeable `BON_TRANSPORT_FROM`) vers l'email de la fiche transporteur. |
+| Fiche transporteur | Bouton 📞 sur l'en-tête → dialog : **email + téléphones ajoutables** (libellé + numéro, ajout/retrait). Persistée par code transporteur (`AppSetting carrierinfo:<CODE>` — aucune migration), API `GET/POST /api/transporteurs/fiche`. Lecture ouverte, écriture commerciaux/admins. Coordonnées reprises sur le bon de transport. |

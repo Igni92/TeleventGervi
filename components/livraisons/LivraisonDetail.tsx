@@ -7,6 +7,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
   RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw, Pencil,
   Maximize2, UserCheck, Undo2, ListChecks, UserCog, ArrowRight, Printer,
+  Send, Phone, Plus, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -21,6 +22,7 @@ import {
   formatDeliveryDate, addDaysISO,
 } from "@/lib/livraison";
 import { printOrderRecap } from "./printRecap";
+import { renderBonTransport } from "@/lib/bonTransport";
 
 interface CarrierOption { name: string; sapValue: string }
 interface Tournee { lineId: number; nom: string; des: string; heure: string | null }
@@ -46,6 +48,7 @@ interface Doc {
   dueDate: string;
   cardCode: string;
   cardName: string;
+  cardFullName?: string;       // nom COMPLET (fiche client) pour les documents imprimés
   totalHT: number;
   totalTTC: number;
   colis: number;
@@ -64,7 +67,7 @@ interface Doc {
   departedBy?: string | null;  // qui a marqué le « départ »
   preparer?: string | null;    // préparateur affecté (qui a ouvert la commande)
   incomplete?: boolean;        // « à reprendre » — remise sur la file (pas finie)
-  missingItems?: string[];     // codes articles signalés MANQUANTS (rupture au picking)
+  missingItems?: string[];     // articles MANQUANTS (stock SAP total négatif)
   excluded: boolean;           // « avoir / exclu » — déduit 100% des totaux
   lineCount: number;
   lines: Line[];
@@ -93,8 +96,13 @@ interface ApiResp {
   count: number;
   totals: Totals;
   carriers: Carrier[];
+  /** Stock SAP total (négatif) par article manquant — pilote les achats. */
+  negativeStocks?: Record<string, number>;
   error?: string;
 }
+
+/** Fiche transporteur (coordonnées) — miroir de /api/transporteurs/fiche. */
+interface CarrierFiche { email: string | null; phones: { label: string; value: string }[] }
 
 /* ─────────────────────────────────────────────────────────────
    Formatters
@@ -457,24 +465,28 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   }, [data, statusTab]);
 
   // Synthèse des MANQUANTS par article (toutes commandes du jour confondues) :
-  // quantités/colis cumulés + nb de commandes touchées. Alimente l'encart de
-  // l'onglet « Manquants » (vision achats / réassort en un coup d'œil).
+  // stock SAP négatif + quantités/colis commandés + nb de commandes touchées.
+  // Alimente l'encart de l'onglet « Manquants » (les achats à faire).
   const missingSummary = useMemo(() => {
     if (!data) return [];
-    const byItem = new Map<string, { itemCode: string; itemName: string; colis: number; quantity: number; docs: number }>();
+    const byItem = new Map<string, { itemCode: string; itemName: string; stock: number | null; colis: number; quantity: number; docs: number }>();
     for (const car of data.carriers) for (const d of car.docs) {
       const codes = new Set(d.missingItems ?? []);
       if (codes.size === 0) continue;
       for (const l of d.lines) {
         if (!codes.has(l.itemCode)) continue;
-        const g = byItem.get(l.itemCode) ?? { itemCode: l.itemCode, itemName: l.itemName, colis: 0, quantity: 0, docs: 0 };
+        const g = byItem.get(l.itemCode) ?? {
+          itemCode: l.itemCode, itemName: l.itemName,
+          stock: data.negativeStocks?.[l.itemCode] ?? null,
+          colis: 0, quantity: 0, docs: 0,
+        };
         g.colis += l.colis;
         g.quantity += l.quantity;
         g.docs += 1;
         byItem.set(l.itemCode, g);
       }
     }
-    return [...byItem.values()].sort((a, b) => b.colis - a.colis || a.itemName.localeCompare(b.itemName, "fr"));
+    return [...byItem.values()].sort((a, b) => (a.stock ?? 0) - (b.stock ?? 0) || a.itemName.localeCompare(b.itemName, "fr"));
   }, [data]);
 
   // Toutes les clés dépliables : transporteurs + sous-groupes tournée.
@@ -585,10 +597,10 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
               <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 mb-3">
                 <PackageX className="h-6 w-6" strokeWidth={1.8} />
               </span>
-              <p className="text-[14px] font-semibold text-foreground">Aucun manquant signalé</p>
+              <p className="text-[14px] font-semibold text-foreground">Aucun manquant</p>
               <p className="text-[12.5px] text-muted-foreground mt-1">
-                Aucune commande du jour n&apos;a d&apos;article en rupture. Signalez un manquant
-                depuis le détail d&apos;une commande (bouton sur chaque ligne).
+                Aucun article des commandes du jour n&apos;est en stock SAP négatif
+                (tous entrepôts confondus). Rien à racheter.
                 <button onClick={() => setStatusTab("A_PREPARER")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir à préparer</button>
               </p>
             </>
@@ -613,9 +625,12 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
           )}
           {view.carriers.map((c) => {
             const key = c.code ?? "__none__";
+            // Commandes NON filtrées du transporteur (tous onglets) — le bon de
+            // transport couvre toute la tournée, pas seulement l'onglet affiché.
+            const fullDocs = data?.carriers.find((x) => (x.code ?? "__none__") === key)?.docs ?? c.docs;
             return (
               <CarrierGroup
-                key={key} carrier={c} carrierKey={key} carriers={carriers} onCarrierChange={changeCarrier} onDateChange={changeDate}
+                key={key} carrier={c} carrierKey={key} date={date} fullDocs={fullDocs} carriers={carriers} onCarrierChange={changeCarrier} onDateChange={changeDate}
                 tourneesByCode={tourneesByCode} onLoadTournees={loadTournees} onTourneeChange={changeTournee}
                 expanded={expanded} onToggle={toggleKey}
                 onPatchDoc={patchDoc} onReload={() => load()} canDispatch={canDispatch}
@@ -768,13 +783,15 @@ function SummaryRow({ totals, loading, showRevenue }: { totals: Totals; loading:
    Groupe transporteur — en-tête + cartes clients
 ═════════════════════════════════════════════════════════════ */
 function CarrierGroup({
-  carrier, carrierKey, carriers, onCarrierChange, onDateChange,
+  carrier, carrierKey, date, fullDocs, carriers, onCarrierChange, onDateChange,
   tourneesByCode, onLoadTournees, onTourneeChange,
   expanded, onToggle, onPatchDoc, onReload, canDispatch,
   statusTab, onBulkStatus,
 }: {
   carrier: Carrier;
   carrierKey: string;
+  date: string;
+  fullDocs: Doc[];
   carriers: CarrierOption[];
   onCarrierChange: (docEntry: number, sapValue: string) => Promise<boolean>;
   onDateChange: (docEntry: number, dueDate: string) => Promise<boolean>;
@@ -879,6 +896,8 @@ function CarrierGroup({
           </div>
         </div>
         <div className="flex items-center gap-3 sm:gap-8 shrink-0 text-right">
+          {/* Bon de transport (récap palettes) — imprimer / envoyer / fiche */}
+          <BonTransportActions carrier={carrier} date={date} canDispatch={canDispatch} docs={fullDocs} tournees={carrierTournees} />
           {/* Avancement GROUPÉ — bouton qui change selon l'onglet, tactile sur mobile */}
           {forward && docEntries.length > 0 && (
             <button
@@ -974,6 +993,334 @@ function CarrierGroup({
 }
 
 /* ═════════════════════════════════════════════════════════════
+   Bon de transport — imprimer (original + copie), envoyer par mail,
+   fiche transporteur (email + téléphones ajoutables)
+═════════════════════════════════════════════════════════════ */
+function BonTransportActions({
+  carrier, date, canDispatch, docs, tournees,
+}: {
+  carrier: Carrier;
+  date: string;
+  canDispatch: boolean;
+  /** Commandes NON filtrées du transporteur (tous onglets confondus). */
+  docs: Doc[];
+  tournees: Tournee[] | undefined;
+}) {
+  // Lignes du bon (hors BL avoirés/exclus), groupées par tournée nommée.
+  const rows = useMemo(
+    () =>
+      docs
+        .filter((d) => !d.excluded)
+        .map((d) => ({
+          tournee: docTourneeKeyLabel(d, tournees).label,
+          client: d.cardFullName ?? d.cardName,
+          docNum: d.docNum,
+          colis: d.colis,
+          weightKg: d.weightKg,
+        }))
+        .sort((a, b) => a.tournee.localeCompare(b.tournee, "fr") || a.client.localeCompare(b.client, "fr")),
+    [docs, tournees],
+  );
+  // ── Fiche transporteur (email + téléphones) ──
+  const [ficheOpen, setFicheOpen] = useState(false);
+  const [ficheLoading, setFicheLoading] = useState(false);
+  const [ficheSaving, setFicheSaving] = useState(false);
+  const [email, setEmail] = useState("");
+  const [phones, setPhones] = useState<{ label: string; value: string }[]>([]);
+
+  const loadFiche = useCallback(async (): Promise<CarrierFiche | null> => {
+    if (!carrier.code) return null;
+    try {
+      const r = await fetch(`/api/transporteurs/fiche?code=${encodeURIComponent(carrier.code)}`);
+      const j = await r.json().catch(() => null);
+      if (j?.ok) return j.fiche as CarrierFiche;
+    } catch { /* best-effort */ }
+    return null;
+  }, [carrier.code]);
+
+  async function openFiche() {
+    setFicheOpen(true);
+    setFicheLoading(true);
+    const f = await loadFiche();
+    if (f) { setEmail(f.email ?? ""); setPhones(f.phones ?? []); }
+    setFicheLoading(false);
+  }
+
+  async function saveFiche() {
+    if (!carrier.code) return;
+    setFicheSaving(true);
+    try {
+      const res = await fetch("/api/transporteurs/fiche", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: carrier.code, email, phones }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) { toast.error(j?.error || "Échec de l'enregistrement de la fiche"); return; }
+      toast.success(`Fiche ${carrier.name} enregistrée`);
+      setFicheOpen(false);
+    } catch {
+      toast.error("Échec de l'enregistrement de la fiche");
+    } finally {
+      setFicheSaving(false);
+    }
+  }
+
+  // ── Impression : ORIGINAL + COPIE (fenêtre ouverte SYNCHRONE pour passer les
+  //    bloqueurs de pop-ups, contenu écrit après chargement de la fiche). ──
+  function printBon() {
+    const w = window.open("", "_blank", "width=920,height=1050");
+    if (!w) { toast.error("Impression bloquée — autorisez les pop-ups pour ce site."); return; }
+    w.document.write("<p style=\"font-family:sans-serif;padding:16px\">Préparation du bon de transport…</p>");
+    (async () => {
+      const fiche = await loadFiche();
+      const html = renderBonTransport(
+        {
+          carrierName: carrier.name,
+          dateLabel: formatDeliveryDate(date),
+          email: fiche?.email ?? null,
+          phones: fiche?.phones ?? [],
+          rows,
+        },
+        { copies: ["ORIGINAL", "COPIE"], autoPrint: true },
+      );
+      w.document.open();
+      w.document.write(html);
+      w.document.close();
+    })();
+  }
+
+  // ── Envoi par mail (depuis commercial@gervifrais.com) — avec confirmation. ──
+  const [mailOpen, setMailOpen] = useState(false);
+  const [mailFiche, setMailFiche] = useState<CarrierFiche | null>(null);
+  const [mailLoading, setMailLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  async function openMail() {
+    setMailOpen(true);
+    setMailLoading(true);
+    setMailFiche(await loadFiche());
+    setMailLoading(false);
+  }
+
+  async function sendMail() {
+    if (!carrier.code) return;
+    setSending(true);
+    try {
+      const res = await fetch("/api/livraisons/bon-transport", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, trspCode: carrier.code }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) { toast.error(j?.error || "Échec de l'envoi du bon de transport"); return; }
+      toast.success(`Bon de transport envoyé à ${j.to}`, { description: `Depuis ${j.from} — ${j.orders} commande(s).`, duration: 7000 });
+      setMailOpen(false);
+    } catch {
+      toast.error("Échec de l'envoi du bon de transport");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const orderCount = rows.length;
+
+  return (
+    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+      {/* Imprimer le bon de transport (original + copie) — tous profils */}
+      {orderCount > 0 && (
+        <button
+          type="button"
+          onClick={printBon}
+          title={`Imprimer le bon de transport de ${carrier.name} (original + copie)`}
+          aria-label={`Imprimer le bon de transport de ${carrier.name}`}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
+        >
+          <Printer className="h-4 w-4" />
+        </button>
+      )}
+      {/* Envoyer par mail + fiche — commerciaux / admins, transporteur affecté */}
+      {canDispatch && carrier.code && (
+        <>
+          {orderCount > 0 && (
+            <button
+              type="button"
+              onClick={openMail}
+              title={`Envoyer le bon de transport à ${carrier.name} par mail (depuis commercial@gervifrais.com)`}
+              aria-label={`Envoyer le bon de transport de ${carrier.name} par mail`}
+              className="hidden sm:inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-brand-600 dark:hover:text-brand-400 hover:bg-secondary/60 active:scale-95 transition-all"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={openFiche}
+            title={`Fiche transporteur ${carrier.name} — email et téléphones`}
+            aria-label={`Fiche transporteur ${carrier.name}`}
+            className="hidden sm:inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
+          >
+            <Phone className="h-4 w-4" />
+          </button>
+        </>
+      )}
+
+      {/* ── Dialog fiche transporteur ── */}
+      <Dialog open={ficheOpen} onOpenChange={(o) => { if (!ficheSaving) setFicheOpen(o); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader className="text-left">
+            <DialogTitle className="flex items-center gap-2 pr-8 text-[16px]">
+              <Phone className="h-5 w-5 text-brand-600 dark:text-brand-400 shrink-0" />
+              Fiche transporteur — {carrier.name}
+            </DialogTitle>
+            <DialogDescription className="text-[12px]">
+              Coordonnées utilisées sur le bon de transport et pour son envoi par mail.
+            </DialogDescription>
+          </DialogHeader>
+          {ficheLoading ? (
+            <div className="flex items-center gap-2 py-4 text-[13px] text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Chargement de la fiche…
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className="text-[12px] font-medium text-foreground">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="contact@transporteur.fr"
+                  disabled={ficheSaving}
+                  className="mt-1 h-10 w-full rounded-lg border border-border bg-background px-3 text-[13.5px] font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
+                />
+              </div>
+              <div>
+                <label className="text-[12px] font-medium text-foreground">Téléphones</label>
+                <div className="mt-1 space-y-2">
+                  {phones.map((p, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        value={p.label}
+                        onChange={(e) => setPhones((prev) => prev.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                        placeholder="Libellé (ex. Exploitation)"
+                        disabled={ficheSaving}
+                        className="h-9 w-[42%] rounded-lg border border-border bg-background px-2.5 text-[12.5px] text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
+                      />
+                      <input
+                        value={p.value}
+                        onChange={(e) => setPhones((prev) => prev.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
+                        placeholder="06 12 34 56 78"
+                        disabled={ficheSaving}
+                        className="h-9 flex-1 rounded-lg border border-border bg-background px-2.5 text-[12.5px] tnum text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setPhones((prev) => prev.filter((_, j) => j !== i))}
+                        disabled={ficheSaving}
+                        title="Retirer ce numéro"
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors disabled:opacity-60"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setPhones((prev) => [...prev, { label: "", value: "" }])}
+                    disabled={ficheSaving || phones.length >= 10}
+                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-dashed border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Ajouter un téléphone
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setFicheOpen(false)}
+                  disabled={ficheSaving}
+                  className="inline-flex flex-1 items-center justify-center h-11 px-4 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  onClick={saveFiche}
+                  disabled={ficheSaving}
+                  className="inline-flex flex-1 items-center justify-center gap-2 h-11 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-[14px] font-semibold disabled:opacity-60"
+                >
+                  {ficheSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                  Enregistrer
+                </button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog confirmation d'envoi par mail ── */}
+      <Dialog open={mailOpen} onOpenChange={(o) => { if (!sending) setMailOpen(o); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader className="text-left">
+            <DialogTitle className="flex items-center gap-2 pr-8 text-[16px]">
+              <Send className="h-5 w-5 text-brand-600 dark:text-brand-400 shrink-0" />
+              Envoyer le bon de transport
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-[13px] text-muted-foreground">
+            Récap des <b className="text-foreground">{orderCount} commande{orderCount > 1 ? "s" : ""}</b> de{" "}
+            <b className="text-foreground">{carrier.name}</b> pour la livraison du{" "}
+            <b className="text-foreground">{formatDeliveryDate(date)}</b>, envoyé depuis{" "}
+            <b className="text-foreground">commercial@gervifrais.com</b>.
+          </p>
+          {mailLoading ? (
+            <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Lecture de la fiche transporteur…
+            </div>
+          ) : mailFiche?.email ? (
+            <div className="flex items-center gap-2 rounded-xl border border-border bg-secondary/30 px-3.5 py-2.5 text-[13px]">
+              <span className="text-[9.5px] uppercase tracking-wide text-muted-foreground shrink-0">Destinataire</span>
+              <span className="font-semibold text-foreground truncate">{mailFiche.email}</span>
+            </div>
+          ) : (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-300/60 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15 px-3.5 py-2.5">
+              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-[12px] text-amber-800 dark:text-amber-300">
+                Aucun email dans la fiche transporteur.
+                <button
+                  type="button"
+                  onClick={() => { setMailOpen(false); openFiche(); }}
+                  className="ml-1 font-semibold underline underline-offset-2"
+                >
+                  Renseigner la fiche
+                </button>
+              </p>
+            </div>
+          )}
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setMailOpen(false)}
+              disabled={sending}
+              className="inline-flex flex-1 items-center justify-center h-11 px-4 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={sendMail}
+              disabled={sending || mailLoading || !mailFiche?.email}
+              className="inline-flex flex-1 items-center justify-center gap-2 h-11 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-[14px] font-semibold disabled:opacity-50"
+            >
+              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              Envoyer
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+/* ═════════════════════════════════════════════════════════════
    Onglets d'état — À préparer / Fait + repliage global
 ═════════════════════════════════════════════════════════════ */
 function StatusTabs({
@@ -1034,7 +1381,7 @@ function StatusTabs({
 function MissingSummaryPanel({
   items,
 }: {
-  items: { itemCode: string; itemName: string; colis: number; quantity: number; docs: number }[];
+  items: { itemCode: string; itemName: string; stock: number | null; colis: number; quantity: number; docs: number }[];
 }) {
   return (
     <section className="rounded-2xl border border-rose-300/60 dark:border-rose-500/30 bg-card overflow-hidden">
@@ -1044,10 +1391,11 @@ function MissingSummaryPanel({
         </span>
         <div className="min-w-0">
           <p className="text-[13.5px] font-semibold text-foreground leading-tight">
-            Articles manquants — synthèse du jour
+            Articles manquants — achats à prévoir
           </p>
           <p className="text-[11px] text-muted-foreground">
-            {items.length} article{items.length > 1 ? "s" : ""} en rupture, cumul de toutes les commandes.
+            {items.length} article{items.length > 1 ? "s" : ""} en stock SAP négatif (tous entrepôts confondus)
+            sur les commandes du jour.
           </p>
         </div>
       </div>
@@ -1055,8 +1403,9 @@ function MissingSummaryPanel({
         <thead className="text-[9px] uppercase tracking-wider text-muted-foreground bg-secondary/30">
           <tr>
             <th className="text-left font-semibold px-4 sm:px-5 py-1.5">Article</th>
-            <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap">Colis</th>
-            <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Qté</th>
+            <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap">Stock SAP</th>
+            <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Colis cmd.</th>
+            <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Qté cmd.</th>
             <th className="text-right font-semibold px-4 sm:px-5 py-1.5 whitespace-nowrap">Commandes</th>
           </tr>
         </thead>
@@ -1069,9 +1418,10 @@ function MissingSummaryPanel({
               </td>
               <td className="px-3 py-2 text-right">
                 <span className="inline-flex min-w-[28px] items-center justify-center rounded-md bg-rose-500/12 text-rose-700 dark:text-rose-300 px-1.5 py-0.5 text-[13px] font-bold tnum">
-                  {fmtNum(it.colis)}
+                  {it.stock != null ? fmtNum(it.stock) : "—"}
                 </span>
               </td>
+              <td className="px-3 py-2 text-right tnum text-muted-foreground hidden sm:table-cell">{fmtNum(it.colis)}</td>
               <td className="px-3 py-2 text-right tnum text-muted-foreground hidden sm:table-cell">{fmtNum(it.quantity)}</td>
               <td className="px-4 sm:px-5 py-2 text-right tnum font-semibold text-foreground">{fmtInt(it.docs)}</td>
             </tr>
@@ -1113,38 +1463,8 @@ function OrderRow({
   const [savingTournee, setSavingTournee] = useState(false);
   const brandLogos = useBrandLogos("livraison");
 
-  // ── Articles MANQUANTS (rupture au picking) — par ligne, persisté par BL. ──
-  // Source de vérité = doc.missingItems (mis à jour via onPatchDoc, optimiste),
-  // pour que l'onglet « Manquants » et sa synthèse restent cohérents sans reload.
+  // ── Articles MANQUANTS = stock SAP total négatif (détecté par l'API). ──
   const missingSet = useMemo(() => new Set(doc.missingItems ?? []), [doc.missingItems]);
-  const [savingMissing, setSavingMissing] = useState<Set<string>>(new Set());
-  async function toggleMissing(itemCode: string, itemName?: string) {
-    const next = !missingSet.has(itemCode);
-    const before = doc.missingItems ?? [];
-    const optimistic = next ? [...before, itemCode] : before.filter((c) => c !== itemCode);
-    onPatchDoc(doc.docEntry, { missingItems: optimistic });
-    setSavingMissing((s) => new Set(s).add(itemCode));
-    try {
-      const res = await fetch("/api/livraisons/manquants", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docEntry: doc.docEntry, itemCode, missing: next }),
-      });
-      const j = await res.json().catch(() => null);
-      if (!res.ok || j?.ok === false) {
-        onPatchDoc(doc.docEntry, { missingItems: before });
-        toast.error(j?.error ? `Échec : ${j.error}` : "Échec du signalement de manquant");
-        return;
-      }
-      onPatchDoc(doc.docEntry, { missingItems: j?.missingItems ?? optimistic });
-      if (next) toast.warning(`Manquant signalé — ${itemName ?? itemCode} (BL n°${doc.docNum})`);
-      else toast.success(`Manquant levé — ${itemName ?? itemCode}`);
-    } catch {
-      onPatchDoc(doc.docEntry, { missingItems: before });
-      toast.error("Échec du signalement de manquant");
-    } finally {
-      setSavingMissing((s) => { const n = new Set(s); n.delete(itemCode); return n; });
-    }
-  }
 
   // Charge les tournées du transporteur courant (une fois) pour le sélecteur.
   useEffect(() => {
@@ -1488,9 +1808,9 @@ function OrderRow({
       {
         docNum: doc.docNum,
         cardCode: doc.cardCode,
-        cardName: doc.cardName,
+        // Nom COMPLET du client (fiche télévente) sur le document imprimé.
+        cardName: doc.cardFullName ?? doc.cardName,
         clientType: doc.clientType,
-        numAtCard: refDraft.trim() || doc.numAtCard,
         comments: doc.comments,
         colis: doc.colis,
         weightKg: doc.weightKg,
@@ -1501,7 +1821,6 @@ function OrderRow({
         carrierName: doc.carrierName,
         tourneeLabel: docTourneeKeyLabel(doc, tournees).label,
         preparer: who ? displayPersonName(who) : null,
-        statusLabel: STATUS_LABEL[docStatusOf],
         missingCodes: missingSet,
       },
     );
@@ -1571,7 +1890,7 @@ function OrderRow({
               </span>
             )}
             {missingSet.size > 0 && (
-              <span title="Articles signalés manquants (rupture au picking) sur cette commande"
+              <span title="Articles en stock SAP négatif (tous entrepôts) sur cette commande — achat à prévoir"
                 className="inline-flex items-center gap-1 rounded-full bg-rose-500 text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
                 <PackageX className="h-3 w-3" /> {missingSet.size} manquant{missingSet.size > 1 ? "s" : ""}
               </span>
@@ -1760,7 +2079,6 @@ function OrderRow({
                 <th className="text-left font-semibold px-3 py-1.5">Article</th>
                 <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Qté</th>
                 <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">kg</th>
-                <th className="text-center font-semibold px-2 py-1.5 w-12 whitespace-nowrap" title="Signaler un article manquant (rupture au picking)">Mq</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40">
@@ -1793,26 +2111,6 @@ function OrderRow({
                   </td>
                   <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell align-middle">{fmtNum(l.quantity)}</td>
                   <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell align-middle">{fmtNum(l.weightKg)}</td>
-                  {/* Signalement « manquant » — toggle par ligne, accessible à tous
-                      (préparateur compris), tactile sur mobile. */}
-                  <td className="px-2 py-1.5 text-center align-middle">
-                    <button
-                      type="button"
-                      onClick={() => toggleMissing(l.itemCode, l.itemName)}
-                      disabled={savingMissing.has(l.itemCode)}
-                      aria-pressed={isMissing}
-                      title={isMissing ? "Article signalé manquant — cliquer pour annuler" : "Signaler cet article manquant (rupture)"}
-                      className={`inline-flex h-9 w-9 sm:h-7 sm:w-7 items-center justify-center rounded-md border transition-colors active:scale-95 disabled:opacity-60 ${
-                        isMissing
-                          ? "bg-rose-500 border-rose-500 text-white hover:bg-rose-600"
-                          : "border-border text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-400/60 hover:bg-rose-50 dark:hover:bg-rose-950/30"
-                      }`}
-                    >
-                      {savingMissing.has(l.itemCode)
-                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        : <PackageX className="h-3.5 w-3.5" />}
-                    </button>
-                  </td>
                 </tr>
                 );
               })}
@@ -1872,22 +2170,6 @@ function OrderRow({
                   <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} className="mt-1" />
                 </div>
                 <BrandLogo marque={l.marque} logos={brandLogos} size="lg" className="self-center" zoomable />
-                <button
-                  type="button"
-                  onClick={() => toggleMissing(l.itemCode, l.itemName)}
-                  disabled={savingMissing.has(l.itemCode)}
-                  aria-pressed={isMissing}
-                  title={isMissing ? "Article signalé manquant — cliquer pour annuler" : "Signaler cet article manquant (rupture)"}
-                  className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border transition-colors active:scale-95 disabled:opacity-60 ${
-                    isMissing
-                      ? "bg-rose-500 border-rose-500 text-white hover:bg-rose-600"
-                      : "border-border text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-400/60 hover:bg-rose-50 dark:hover:bg-rose-950/30"
-                  }`}
-                >
-                  {savingMissing.has(l.itemCode)
-                    ? <Loader2 className="h-4 w-4 animate-spin" />
-                    : <PackageX className="h-4 w-4" />}
-                </button>
               </li>
               );
             })}
