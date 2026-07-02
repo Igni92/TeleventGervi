@@ -52,7 +52,7 @@ const AXES: Axis[] = [
     // livraison » fait exception : utile en mobilité pour préparer la tournée.
     tiles: [
       { href: "/clients", label: "Clients", icon: Users },
-      { href: "/livraisons", label: "Détail livraison", icon: Truck },
+      { href: "/livraisons", label: "Préparation livraisons", icon: Truck },
     ],
   },
   {
@@ -61,7 +61,7 @@ const AXES: Axis[] = [
     desc: "Approvisionnement & stock",
     tiles: [
       { href: "/entrees", label: "Entrées march.", icon: PackagePlus, badge: "receptionIncidents" },
-      { href: "/commandes-fournisseurs", label: "Cmd. fourn.", icon: PackageCheck, badge: "commandesDue" },
+      { href: "/commandes-fournisseurs", label: "Commandes fournisseurs", icon: PackageCheck, badge: "commandesDue" },
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },
       { href: "/products", label: "Stock", icon: Package },
       { href: "/fabrication", label: "Fabrication", icon: Factory },
@@ -72,7 +72,7 @@ const AXES: Axis[] = [
     label: "Comptable",
     desc: "Encours & finances",
     tiles: [
-      { href: "/encours", label: "Encours", icon: Receipt },
+      { href: "/encours", label: "Encours clients", icon: Receipt },
       { href: "/dashboard", label: "Statistiques", icon: LayoutDashboard },
     ],
   },
@@ -81,7 +81,7 @@ const AXES: Axis[] = [
     label: "Administrateur",
     desc: "Pilotage & réglages",
     tiles: [
-      { href: "/commerciaux", label: "Effectifs", icon: Briefcase },
+      { href: "/commerciaux", label: "Équipe commerciale", icon: Briefcase },
       { href: "/promos", label: "Promotions", icon: Tag },
       { href: "/parametres", label: "Paramètres", icon: Settings },
     ],

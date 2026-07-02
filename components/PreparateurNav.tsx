@@ -12,7 +12,7 @@ import { Truck, ClipboardCheck } from "lucide-react";
  * (comptage du stock). Masqué ≥ md (la sidebar prend le relais).
  */
 const TABS = [
-  { href: "/livraisons", key: "livraisons", label: "Détail livraison", icon: Truck },
+  { href: "/livraisons", key: "livraisons", label: "Préparation livraisons", icon: Truck },
   { href: "/inventaire", key: "inventaire", label: "Inventaire", icon: ClipboardCheck },
 ] as const;
 

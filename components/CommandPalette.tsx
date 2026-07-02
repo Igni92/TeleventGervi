@@ -4,22 +4,23 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Command } from "cmdk";
 import {
-  Home, Radio, ClipboardList, Users, Package, PackagePlus, Factory,
+  Home, Radio, ClipboardList, Users, Package, PackagePlus, Factory, Truck,
   LayoutDashboard, Receipt, Briefcase, Settings, Search, CornerDownLeft,
 } from "lucide-react";
 
 interface NavItem { href: string; label: string; icon: typeof Home; keywords?: string }
 const NAV: NavItem[] = [
   { href: "/accueil", label: "Accueil", icon: Home },
-  { href: "/console", label: "Console", icon: Radio, keywords: "commande bl vente" },
+  { href: "/console", label: "Console d'appels", icon: Radio, keywords: "commande bl vente télévente" },
   { href: "/plan-appel", label: "Plan d'appel", icon: ClipboardList, keywords: "televente appels" },
   { href: "/clients", label: "Clients", icon: Users, keywords: "base contacts" },
+  { href: "/livraisons", label: "Préparation livraisons", icon: Truck, keywords: "détail livraison bons transporteur tournée manquants" },
   { href: "/products", label: "Stock", icon: Package, keywords: "produits articles" },
-  { href: "/entrees", label: "Entrées", icon: PackagePlus, keywords: "réception marchandise" },
+  { href: "/entrees", label: "Entrées marchandises", icon: PackagePlus, keywords: "réception marchandise" },
   { href: "/fabrication", label: "Fabrication", icon: Factory, keywords: "production deco kit" },
-  { href: "/dashboard", label: "Stats · Carte", icon: LayoutDashboard, keywords: "pilotage dashboard géo carte" },
-  { href: "/encours", label: "Encours", icon: Receipt, keywords: "factures impayés" },
-  { href: "/commerciaux", label: "Effectifs", icon: Briefcase, keywords: "commerciaux objectifs slp équipe personnel préparateur rôles" },
+  { href: "/dashboard", label: "Statistiques · Carte", icon: LayoutDashboard, keywords: "pilotage dashboard géo carte stats" },
+  { href: "/encours", label: "Encours clients", icon: Receipt, keywords: "factures impayés" },
+  { href: "/commerciaux", label: "Équipe commerciale", icon: Briefcase, keywords: "commerciaux objectifs slp équipe personnel préparateur rôles effectifs" },
   { href: "/parametres", label: "Paramètres", icon: Settings, keywords: "réglages sap import thème" },
 ];
 
