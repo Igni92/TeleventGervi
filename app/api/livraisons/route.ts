@@ -88,81 +88,79 @@ export async function GET(req: NextRequest) {
 
     const live = orders.filter((o) => o.Cancelled !== "tYES");
 
-    // ── Référentiels locaux : produits (poids/colis) + transporteurs ──
+    // Clés des référentiels (synchrones), calculées une fois.
     const allItemCodes = Array.from(
       new Set(live.flatMap((d) => (d.DocumentLines || []).map((l) => l.ItemCode))),
     );
-    const prods = allItemCodes.length
-      ? await prisma.product.findMany({
-          where: { itemCode: { in: allItemCodes } },
-          select: {
-            itemCode: true,
-            itemName: true,
-            frgnName: true,
-            salesUnit: true,
-            salesUnitWeight: true,
-            salesQtyPerPackUnit: true,
-            uMarque: true,
-            uCondi: true,
-            uPays: true,
-          },
-        })
-      : [];
+    // Le CardCode d'un BL peut être le code principal OU un code d'adresse de
+    // livraison (ClientDeliveryMode.sapCardCode) : on couvre les deux.
+    const cardCodes = Array.from(new Set(live.map((o) => o.CardCode).filter(Boolean)));
+
+    // ── Référentiels : tous INDÉPENDANTS entre eux → chargés EN PARALLÈLE
+    //    (produits, transporteurs, statuts manuels, type client, tournées
+    //    mémorisées, tournées réelles SERG_TRCL). Chaque bloc gère son propre
+    //    repli (best-effort) pour ne jamais faire échouer la livraison. ──
+    const [prods, carrierByCode, statuses, typeByCardCode, savedTourneeByCard, trclByCard] = await Promise.all([
+      // Produits (poids / colis / désignation).
+      allItemCodes.length
+        ? prisma.product.findMany({
+            where: { itemCode: { in: allItemCodes } },
+            select: {
+              itemCode: true, itemName: true, frgnName: true, salesUnit: true,
+              salesUnitWeight: true, salesQtyPerPackUnit: true, uMarque: true, uCondi: true, uPays: true,
+            },
+          })
+        : Promise.resolve([]),
+      // Transporteur : U_TrspCode (SAP) → libellé app (Carrier.sapValue → name).
+      (async () => {
+        const m = new Map<string, string>();
+        try {
+          const carriers = await prisma.carrier.findMany({ select: { name: true, sapValue: true } });
+          for (const c of carriers) if (c.sapValue) m.set(c.sapValue, c.name);
+        } catch { /* table Carrier absente → code brut */ }
+        return m;
+      })(),
+      // Statuts manuels du Détail livraison, par DocEntry (une requête) :
+      //   « faite » + auteur, « départ » + auteur, « avoir / exclu »,
+      //   préparateur affecté, signalement « incomplète (à reprendre) ».
+      getDeliveryStatuses(),
+      // Type client (GMS / CHR / EXPORT) par CardCode — pour le filtre par segment.
+      (async () => {
+        const m = new Map<string, string>();
+        if (!cardCodes.length) return m;
+        try {
+          const clients = await prisma.client.findMany({
+            where: { code: { in: cardCodes } },
+            select: { code: true, type: true },
+          });
+          for (const c of clients) if (c.type) m.set(c.code, c.type);
+          const modes = await prisma.clientDeliveryMode.findMany({
+            where: { sapCardCode: { in: cardCodes } },
+            select: { sapCardCode: true, client: { select: { type: true } } },
+          });
+          for (const mo of modes) {
+            if (mo.client?.type && !m.has(mo.sapCardCode)) m.set(mo.sapCardCode, mo.client.type);
+          }
+        } catch { /* type optionnel → BL rangés en « Autres » */ }
+        return m;
+      })(),
+      // Tournée MÉMORISÉE par client (repli si SERG_TRCL indisponible).
+      getClientTournees(cardCodes).catch(() => new Map<string, ClientTournee>()),
+      // Tournées RÉELLES par client (SERG_TRCL vue v2) — best-effort, caché.
+      (async () => {
+        const m = new Map<string, Awaited<ReturnType<typeof getClientTrclCarriers>>>();
+        await Promise.all(cardCodes.map(async (cc) => {
+          try { m.set(cc, await getClientTrclCarriers(cc)); } catch { /* best-effort */ }
+        }));
+        return m;
+      })(),
+    ]);
     const pMap = new Map(prods.map((p) => [p.itemCode, p]));
-
-    // Transporteur : U_TrspCode (SAP) → libellé app (Carrier.sapValue → name).
-    const carrierByCode = new Map<string, string>();
-    try {
-      const carriers = await prisma.carrier.findMany({ select: { name: true, sapValue: true } });
-      for (const c of carriers) if (c.sapValue) carrierByCode.set(c.sapValue, c.name);
-    } catch {
-      /* table Carrier absente → on affichera le code brut */
-    }
-
-    // Statuts manuels du Détail livraison, par DocEntry, en UNE requête :
-    //   « faite » (coché à la main — aucune déduction auto) + son auteur,
-    //   « départ » (parti en livraison) + son auteur,
-    //   « avoir / exclu » (déduit 100% des totaux, conservé grisé),
-    //   préparateur affecté, signalement « incomplète (à reprendre) ».
     const {
       prepared: faiteByDoc, preparedBy: preparedByDoc,
       departed: departedByDocEntry, departedBy: departedByDoc,
       excluded: avoirByDoc, preparer: prepByDoc, incomplete: incompleteByDoc,
-    } = await getDeliveryStatuses();
-
-    // Type client (GMS / CHR / EXPORT) par CardCode — pour le filtre par segment.
-    // Le CardCode d'un BL peut être le code principal OU un code d'adresse de
-    // livraison (ClientDeliveryMode.sapCardCode) : on couvre les deux.
-    const cardCodes = Array.from(new Set(live.map((o) => o.CardCode).filter(Boolean)));
-    const typeByCardCode = new Map<string, string>();
-    if (cardCodes.length) {
-      try {
-        const clients = await prisma.client.findMany({
-          where: { code: { in: cardCodes } },
-          select: { code: true, type: true },
-        });
-        for (const c of clients) if (c.type) typeByCardCode.set(c.code, c.type);
-        const modes = await prisma.clientDeliveryMode.findMany({
-          where: { sapCardCode: { in: cardCodes } },
-          select: { sapCardCode: true, client: { select: { type: true } } },
-        });
-        for (const m of modes) {
-          if (m.client?.type && !typeByCardCode.has(m.sapCardCode)) typeByCardCode.set(m.sapCardCode, m.client.type);
-        }
-      } catch {
-        /* type optionnel → le filtre rangera ces BL en « Autres » */
-      }
-    }
-
-    // Tournée MÉMORISÉE par client (repli si SERG_TRCL indisponible pour ce client).
-    const savedTourneeByCard = await getClientTournees(cardCodes).catch(() => new Map<string, ClientTournee>());
-
-    // Tournées RÉELLES par client depuis SERG_TRCL (vue v2) — pour afficher/
-    // pré-sélectionner la bonne tournée par BL. Best-effort, en parallèle, caché.
-    const trclByCard = new Map<string, Awaited<ReturnType<typeof getClientTrclCarriers>>>();
-    await Promise.all(cardCodes.map(async (cc) => {
-      try { trclByCard.set(cc, await getClientTrclCarriers(cc)); } catch { /* best-effort */ }
-    }));
+    } = statuses;
 
     const weightOfItem = (code: string) => pMap.get(code)?.salesUnitWeight ?? 0;
     const colisDivOf = (code: string) => {
@@ -245,12 +243,21 @@ export async function GET(req: NextRequest) {
       const cc = Array.from(new Set(docs.map((d) => d.cardCode).filter(Boolean)));
       if (cc.length) {
         const since = new Date(Date.parse(date) - 45 * 86_400_000).toISOString().slice(0, 10);
-        const orCard = cc.map((c) => `CardCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
-        const cnFilter = encodeURIComponent(`(${orCard}) and DocDate ge '${since}' and Cancelled eq 'tNO'`);
-        const notes = await sap.getAll<{ CardCode: string; DocTotal?: number; DocDate?: string }>(
-          `CreditNotes?$select=CardCode,DocTotal,DocDate&$filter=${cnFilter}&$orderby=DocEntry asc`,
-          { pageSize: 100, maxPages: 5 },
-        );
+        // Filtre OR chunké (25 clients/requête) : une seule URL avec tous les
+        // clients du jour pouvait dépasser plusieurs Ko et se faire rejeter par
+        // le Service Layer. Les lots partent en parallèle et sont fusionnés.
+        const CHUNK = 25;
+        const chunks: string[][] = [];
+        for (let i = 0; i < cc.length; i += CHUNK) chunks.push(cc.slice(i, i + CHUNK));
+        const notesByChunk = await Promise.all(chunks.map((group) => {
+          const orCard = group.map((c) => `CardCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
+          const cnFilter = encodeURIComponent(`(${orCard}) and DocDate ge '${since}' and Cancelled eq 'tNO'`);
+          return sap.getAll<{ CardCode: string; DocTotal?: number; DocDate?: string }>(
+            `CreditNotes?$select=CardCode,DocTotal,DocDate&$filter=${cnFilter}&$orderby=DocEntry asc`,
+            { pageSize: 100, maxPages: 5 },
+          );
+        }));
+        const notes = notesByChunk.flat();
         // BL par client, plus ANCIEN (DocEntry) d'abord — l'original avoiré précède
         // le BL recréé.
         const byClient = new Map<string, typeof docs>();

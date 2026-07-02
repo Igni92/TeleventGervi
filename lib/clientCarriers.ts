@@ -208,17 +208,29 @@ async function fetchTrspHistogram(cardCode: string): Promise<Map<string, number>
 
 type CarrierRow = { id: string; name: string; sapValue: string | null; position: number; active: boolean };
 
+// Cache module par CODE (TTL) : /api/livraisons résout la tournée de tous les
+// clients du jour, et de nombreux clients partagent le même transporteur —
+// sans cache, ensureCarrier refaisait un findFirst par (client × code).
+const carrierRowCache = new Map<string, { at: number; row: CarrierRow | null }>();
+
 /**
  * Mappe un code U_TrspCode vers la table Carrier locale.
  * Si le code n'existe pas (ex. ECOLISE absent du seed initial) → création à la
  * volée : name = code capitalisé, position à la suite, kind="field".
  */
 async function ensureCarrier(code: string): Promise<CarrierRow | null> {
+  const cacheKey = code.trim().toUpperCase();
+  const cached = carrierRowCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < TTL_MS && cached.row) return cached.row;
+
   const existing = await prisma.carrier.findFirst({
     where: { sapValue: { equals: code, mode: "insensitive" } },
     select: { id: true, name: true, sapValue: true, position: true, active: true },
   });
-  if (existing) return existing;
+  if (existing) {
+    carrierRowCache.set(cacheKey, { at: Date.now(), row: existing });
+    return existing;
+  }
 
   const max = await prisma.carrier.aggregate({ _max: { position: true } });
   const name = prettyName(code);
@@ -235,14 +247,17 @@ async function ensureCarrier(code: string): Promise<CarrierRow | null> {
       select: { id: true, name: true, sapValue: true, position: true, active: true },
     });
     console.log(`[clientCarriers] Carrier créé à la volée: ${name} (U_TrspCode=${code})`);
+    carrierRowCache.set(cacheKey, { at: Date.now(), row: created });
     return created;
   } catch (e) {
     // Course possible (nom unique déjà pris par un appel concurrent) → re-lecture.
     console.warn(`[clientCarriers] Création Carrier '${name}' en conflit, relecture:`, (e as Error).message);
-    return prisma.carrier.findFirst({
+    const relu = await prisma.carrier.findFirst({
       where: { OR: [{ sapValue: { equals: code, mode: "insensitive" } }, { name }] },
       select: { id: true, name: true, sapValue: true, position: true, active: true },
     });
+    if (relu) carrierRowCache.set(cacheKey, { at: Date.now(), row: relu });
+    return relu;
   }
 }
 
@@ -365,5 +380,6 @@ export async function getTrclDefaultCarrier(cardCode: string): Promise<ClientCar
 export function _resetClientCarriersCache(): void {
   cache.clear();
   trclRowsCache.clear();
+  carrierRowCache.clear();
   allTrclCache = null;
 }
