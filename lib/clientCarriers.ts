@@ -48,6 +48,9 @@ export type ClientCarrierStat = {
   tour?: string | null;
   // Heure de tournée (SERG_TRCL.U_Heure) convertie en "HH:MM:SS" → ORDR.U_TrspHeur.
   heure?: string | null;
+  // TOUTES les tournées de CE transporteur sur la fiche client (SERG_TRCL),
+  // ligne par défaut en tête — la création de bon ne propose QUE celles-ci.
+  tournees?: { nom: string; heure: string | null }[];
 };
 
 export type ClientCarriersResult = {
@@ -315,27 +318,44 @@ async function buildFromTrcl(rows: TrclRow[]): Promise<ClientCarriersResult | nu
   // rowIsDefault — ou à défaut la 1ʳᵉ) est la ligne principale → priorité 2 et
   // tête de liste. La tournée/heure de la ligne 'O' PRIME sur celles des autres
   // lignes du même transporteur (c'est elle que l'utilisateur a désignée).
-  const byCode = new Map<string, { tours: string[]; isDefault: boolean; order: number; heure: string | null; defHeure: string | null; defTour: string | null }>();
+  const byCode = new Map<string, {
+    tours: string[];
+    // Couples (tournée U_DistBy, heure U_Heure) de la fiche — dédoublonnés par nom.
+    pairs: { nom: string; heure: string | null }[];
+    isDefault: boolean; order: number; heure: string | null;
+    defHeure: string | null; defTour: string | null;
+  }>();
   rows.forEach((r, i) => {
     const code = (r.U_TrspCode ?? "").toString().trim().toUpperCase();
     if (!code) return; // lignes « vides » de la vue (slots non affectés) ignorées
     const tour = (r.U_DistBy ?? "").toString().trim();
-    const cur = byCode.get(code) ?? { tours: [], isDefault: false, order: i, heure: null, defHeure: null, defTour: null };
-    if (tour && !cur.tours.includes(tour)) cur.tours.push(tour);
-    if (!cur.heure) cur.heure = heureVueToBL(r.U_Heure);  // 1re heure non vide
+    const heure = heureVueToBL(r.U_Heure);
+    const cur = byCode.get(code) ?? { tours: [], pairs: [], isDefault: false, order: i, heure: null, defHeure: null, defTour: null };
+    if (tour) {
+      if (!cur.tours.includes(tour)) cur.tours.push(tour);
+      const ex = cur.pairs.find((p) => p.nom.toUpperCase() === tour.toUpperCase());
+      if (!ex) cur.pairs.push({ nom: tour, heure });
+      else if (!ex.heure && heure) ex.heure = heure;
+    }
+    if (!cur.heure) cur.heure = heure;  // 1re heure non vide
     if (rowIsDefault(r)) {
       cur.isDefault = true;
-      if (!cur.defHeure) cur.defHeure = heureVueToBL(r.U_Heure);
+      if (!cur.defHeure) cur.defHeure = heure;
       if (!cur.defTour && tour) cur.defTour = tour;
     }
     byCode.set(code, cur);
   });
   if (byCode.size === 0) return null; // client absent de l'UDT → fallback
 
-  // Ligne 'O' → son heure/sa tournée deviennent la référence du transporteur.
+  // Ligne 'O' → son heure/sa tournée deviennent la référence du transporteur
+  // (tournée par défaut en tête des listes).
   for (const v of byCode.values()) {
     if (v.defHeure) v.heure = v.defHeure;
-    if (v.defTour) v.tours = [v.defTour, ...v.tours.filter((t) => t !== v.defTour)];
+    if (v.defTour) {
+      const up = v.defTour.toUpperCase();
+      v.tours = [v.defTour, ...v.tours.filter((t) => t !== v.defTour)];
+      v.pairs = [...v.pairs.filter((p) => p.nom.toUpperCase() === up), ...v.pairs.filter((p) => p.nom.toUpperCase() !== up)];
+    }
   }
 
   // Ligne principale en tête (défaut), puis ordre des lignes de l'UDT.
@@ -371,6 +391,7 @@ async function buildFromTrcl(rows: TrclRow[]): Promise<ClientCarriersResult | nu
       count: info.isDefault ? 2 : 1, // indicateur de priorité (contrat conservé)
       tour: info.tours.length ? info.tours.join(" / ") : null,
       heure: info.heure,
+      tournees: info.pairs.length ? info.pairs : undefined,
     });
   }
   if (carriers.length === 0) return null;
