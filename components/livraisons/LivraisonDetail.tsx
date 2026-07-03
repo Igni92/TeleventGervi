@@ -29,6 +29,7 @@ import {
 } from "@/lib/livraisonView";
 import { printOrderRecap } from "./printRecap";
 import { renderBonTransport } from "@/lib/bonTransport";
+import { BonsPreparationPanel } from "./BonsPreparationPanel";
 
 interface CarrierOption { name: string; sapValue: string }
 
@@ -498,6 +499,9 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
         onReset={() => setDate(auto)}
         onReport={() => setDate(nextWorkingDeliveryDay(date))}
       />
+
+      {/* ── Bons de préparation EXPORT (lots à affecter → créer le BL) ── */}
+      <BonsPreparationPanel refreshKey={gen} onOrderCreated={() => load()} />
 
       {/* ── Filtre segment client : Tout / CHR / Export / GMS ── */}
       {data && data.count > 0 && (

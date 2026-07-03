@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ChevronDown, ChevronRight, ChevronUp, Search, Plus, Trash2,
   ShoppingCart, Check, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock, X,
+  History, BadgeEuro,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
@@ -64,6 +65,9 @@ interface CartLine {
   } | null;
 }
 interface DeliveryMode { id: string; name: string; sapCardCode: string; isDefault: boolean }
+/** Cotation SPÉCIFIQUE client par code article (onglet « Tarif ») — le prix
+ *  négocié est PRIORITAIRE sur le prix conseillé à l'ajout au panier. */
+interface TarifItem { itemCode: string; price: number; note?: string | null }
 
 /* ── C2 — Helpers promo (purs) ─────────────────────────────── */
 
@@ -264,6 +268,46 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   // Panier
   const [cart, setCart] = useState<CartLine[]>([]);
   const [deliveryDate, setDeliveryDate] = useState("");
+  // ── Onglet colonne gauche : Stock (catalogue) / Tarif (cotations client) ──
+  const [stockTab, setStockTab] = useState<"stock" | "tarif">("stock");
+  // Cotations SPÉCIFIQUES du client (par code article) — chargées par client,
+  // sauvegarde AUTO débouncée. Prix prioritaire sur le conseillé au panier.
+  const [tarifs, setTarifs] = useState<TarifItem[] | null>(null);
+  const tarifsDirty = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    setTarifs(null);
+    tarifsDirty.current = false;
+    fetch(`/api/clients/${clientId}/tarif`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled) setTarifs(j?.ok ? (j.items ?? []) : []); })
+      .catch(() => { if (!cancelled) setTarifs([]); });
+    return () => { cancelled = true; };
+  }, [clientId]);
+  useEffect(() => {
+    if (!tarifsDirty.current || tarifs === null) return;
+    const t = setTimeout(() => {
+      tarifsDirty.current = false;
+      fetch(`/api/clients/${clientId}/tarif`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: tarifs }),
+      })
+        .then(async (r) => {
+          const j = await r.json().catch(() => null);
+          if (!r.ok || !j?.ok) toast.error(j?.error || "Échec de l'enregistrement du tarif");
+        })
+        .catch(() => toast.error("Échec de l'enregistrement du tarif"));
+    }, 700);
+    return () => clearTimeout(t);
+  }, [tarifs, clientId]);
+  const mutateTarifs = useCallback((fn: (cur: TarifItem[]) => TarifItem[]) => {
+    tarifsDirty.current = true;
+    setTarifs((prev) => fn(prev ?? []));
+  }, []);
+  const tarifByCode = useMemo(
+    () => new Map((tarifs ?? []).map((t) => [t.itemCode, t.price])),
+    [tarifs],
+  );
   const [numAtCard, setNumAtCard] = useState("");
   const [modes, setModes] = useState<DeliveryMode[]>([]);
   const [modeId, setModeId] = useState("");
@@ -501,43 +545,100 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   }, [loadStock]);
 
   // ── Panier ──
-  const addToCart = (p: Product) => {
+  /** Construit une ligne panier depuis un produit du catalogue. `opts` permet de
+   *  forcer quantité/prix (dupliquer la dernière commande, ajout depuis le tarif)
+   *  — dans ce cas la promo n'est PAS appliquée (le prix vient de l'historique
+   *  ou de la cotation, on ne le remise pas une 2ᵉ fois). */
+  const buildLine = (p: Product, opts?: { quantity?: number; price?: number | null; noPromo?: boolean }): CartLine => {
+    const { packDivisor, displayUnit, priceUnit } = unitInfo(p.salesUnit, p.salesQtyPerPackUnit);
+    const avail: Record<string, number> = {};
+    for (const w of ["000", "01", "R1"]) avail[w] = Math.max(0, Math.floor(((p.stockByWarehouse[w]?.available ?? 0) / packDivisor) * 10) / 10);
+    // Incrément « un colis » : si l'article est vendu au kg, on avance du POIDS
+    // d'un colis (ex. 4 kg → 4, 8, 12…) ; sinon d'un colis entier (1).
+    // colisWeightKg n'est calculé par unitInfo qu'avec salesItemsPerUnit ; à
+    // défaut (absent du /api/products) on le reconstruit : qty/colis × poids unité
+    // (ex. FB4CA3B = 4 × 1 = 4 kg).
+    let colisW = unitInfo(p.salesUnit, p.salesQtyPerPackUnit, p.salesItemsPerUnit ?? null, p.salesUnitWeight).colisWeightKg ?? null;
+    if ((colisW == null || colisW <= 0) && displayUnit === "kg") {
+      const q = p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1 ? p.salesQtyPerPackUnit : 1;
+      const w = p.salesUnitWeight && p.salesUnitWeight > 0 ? p.salesUnitWeight : 1;
+      colisW = Math.round(q * w * 1000) / 1000;
+    }
+    const stepColis = displayUnit === "kg" ? (colisW && colisW > 0 ? Math.round(colisW * 100) / 100 : 1) : 1;
+    // C2 — promo PERCENT : prix prérempli déjà remisé (prix conseillé × (1 − %)),
+    // la remise est mémorisée pour être poussée sur la ligne SAP du bon.
+    // Prix de départ : cotation SPÉCIFIQUE client (onglet Tarif) prioritaire,
+    // sinon prix conseillé.
+    const promo = opts?.noPromo ? null : (promos[p.itemCode] ?? null);
+    let price = opts?.price !== undefined
+      ? opts.price
+      : (tarifByCode.get(p.itemCode) ?? hints[p.itemCode]?.prixConseille ?? null);
+    let discountPercent = 0;
+    if (promo?.kind === "PERCENT" && promo.value > 0 && promo.value < 100) {
+      discountPercent = promo.value;
+      if (price != null) price = Math.round(price * (1 - promo.value / 100) * 100) / 100;
+    }
+    return applyPromoFree({
+      itemCode: p.itemCode, itemName: p.itemName, unit: displayUnit, priceUnit, packDivisor,
+      availByWarehouse: avail, quantity: opts?.quantity ?? stepColis, price,
+      marque: p.uMarque ?? null, condi: p.uCondi ?? p.uUvc ?? null, pays: p.uPays ?? null,
+      variete: p.frgnName ?? null,
+      stepColis,
+      promo, discountPercent, freeUnits: 0, freeManual: false,
+      originalLine: null,   // ajoutée via le stock → nouvelle ligne du BL
+    });
+  };
+
+  const addToCart = (p: Product, opts?: { quantity?: number; price?: number | null; noPromo?: boolean }) => {
     setCart((cur) => {
       if (cur.some((l) => l.itemCode === p.itemCode)) return cur;  // déjà au panier
-      const { packDivisor, displayUnit, priceUnit } = unitInfo(p.salesUnit, p.salesQtyPerPackUnit);
-      const avail: Record<string, number> = {};
-      for (const w of ["000", "01", "R1"]) avail[w] = Math.max(0, Math.floor(((p.stockByWarehouse[w]?.available ?? 0) / packDivisor) * 10) / 10);
-      // Incrément « un colis » : si l'article est vendu au kg, on avance du POIDS
-      // d'un colis (ex. 4 kg → 4, 8, 12…) ; sinon d'un colis entier (1).
-      // colisWeightKg n'est calculé par unitInfo qu'avec salesItemsPerUnit ; à
-      // défaut (absent du /api/products) on le reconstruit : qty/colis × poids unité
-      // (ex. FB4CA3B = 4 × 1 = 4 kg).
-      let colisW = unitInfo(p.salesUnit, p.salesQtyPerPackUnit, p.salesItemsPerUnit ?? null, p.salesUnitWeight).colisWeightKg ?? null;
-      if ((colisW == null || colisW <= 0) && displayUnit === "kg") {
-        const q = p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1 ? p.salesQtyPerPackUnit : 1;
-        const w = p.salesUnitWeight && p.salesUnitWeight > 0 ? p.salesUnitWeight : 1;
-        colisW = Math.round(q * w * 1000) / 1000;
-      }
-      const stepColis = displayUnit === "kg" ? (colisW && colisW > 0 ? Math.round(colisW * 100) / 100 : 1) : 1;
-      // C2 — promo PERCENT : prix prérempli déjà remisé (prix conseillé × (1 − %)),
-      // la remise est mémorisée pour être poussée sur la ligne SAP du bon.
-      const promo = promos[p.itemCode] ?? null;
-      let price = hints[p.itemCode]?.prixConseille ?? null;
-      let discountPercent = 0;
-      if (promo?.kind === "PERCENT" && promo.value > 0 && promo.value < 100) {
-        discountPercent = promo.value;
-        if (price != null) price = Math.round(price * (1 - promo.value / 100) * 100) / 100;
-      }
-      return [...cur, applyPromoFree({
-        itemCode: p.itemCode, itemName: p.itemName, unit: displayUnit, priceUnit, packDivisor,
-        availByWarehouse: avail, quantity: stepColis, price,
-        marque: p.uMarque ?? null, condi: p.uCondi ?? p.uUvc ?? null, pays: p.uPays ?? null,
-        variete: p.frgnName ?? null,
-        stepColis,
-        promo, discountPercent, freeUnits: 0, freeManual: false,
-        originalLine: null,   // ajoutée via le stock → nouvelle ligne du BL
-      })];
+      return [...cur, buildLine(p, opts)];
     });
+  };
+
+  // ── Dupliquer la DERNIÈRE commande du client (pré-remplit le panier) ──
+  // Quantités et prix repris tels quels (sans ré-appliquer les promos) ; les
+  // articles introuvables au catalogue chargé sont signalés.
+  const [replaying, setReplaying] = useState(false);
+  const replayLast = async () => {
+    if (replaying || prefilling || modif) return;
+    setReplaying(true);
+    try {
+      const res = await fetch(`/api/sap/orders/last?clientId=${encodeURIComponent(clientId)}`);
+      const json = await res.json();
+      if (!json.found || !json.lines?.length) { toast.info("Aucune commande précédente pour ce client."); return; }
+      type LastLine = { itemCode: string; itemName?: string; quantity: number; price?: number | null };
+      const all = Object.values(grouped).flat();
+      let added = 0;
+      const missing: string[] = [];
+      setCart((cur) => {
+        const next = [...cur];
+        for (const ln of json.lines as LastLine[]) {
+          if (next.some((l) => l.itemCode === ln.itemCode)) continue;
+          const p = all.find((x) => x.itemCode === ln.itemCode);
+          if (!p) { missing.push(ln.itemName ?? ln.itemCode); continue; }
+          next.push(buildLine(p, { quantity: ln.quantity, price: ln.price ?? null, noPromo: true }));
+          added++;
+        }
+        return next;
+      });
+      if (added > 0) {
+        toast.success(`Dernière commande #${json.docNum} dupliquée — ${added} ligne(s) au panier`, {
+          description: missing.length
+            ? `${missing.length} article(s) hors catalogue chargé : ${missing.slice(0, 3).join(", ")}${missing.length > 3 ? "…" : ""} (active « + Rupture » si besoin).`
+            : "Ajuste les quantités et les prix si besoin.",
+          duration: 8000,
+        });
+      } else {
+        toast.info(missing.length
+          ? "Articles de la dernière commande introuvables au catalogue chargé (active « + Rupture »)."
+          : "Toutes les lignes de la dernière commande sont déjà au panier.");
+      }
+    } catch {
+      toast.error("Échec de la duplication de la dernière commande");
+    } finally {
+      setReplaying(false);
+    }
   };
   /** Raccourci : ajoute un produit au panier par code (catalogue chargé, repli API /products). */
   const addByShortcut = async (codeOrName: string) => {
@@ -658,10 +759,20 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     });
 
   // Traite la réponse finale (succès / blocage / erreur). Renvoie true si succès.
-  const finalizeOrder = (res: Response, json: { ok?: boolean; blocked?: boolean; error?: string; docNum?: number; totalTTC?: number | null }) => {
+  const finalizeOrder = (res: Response, json: { ok?: boolean; blocked?: boolean; error?: string; docNum?: number; totalTTC?: number | null; bonPrep?: boolean }) => {
     if (!res.ok) {
       toast.error(json?.blocked ? "🚫 Client bloqué" : "❌ Échec création", { description: json.error, duration: 10000 });
       return false;
+    }
+    // Client EXPORT → BON DE PRÉPARATION (pas de BL SAP direct) : les lots
+    // seront affectés depuis le Détail livraison, puis le BL créé proprement.
+    if (json.bonPrep) {
+      toast.success("📝 Bon de préparation créé (export)", {
+        description: "Affecte les lots dans « Détail livraison » puis crée le BL.",
+        duration: 10000,
+      });
+      setCart([]); setNumAtCard("");
+      return true;
     }
     const fmt = (n: number | null | undefined) => n != null ? n.toFixed(2) : "—";
     toast.success(`✅ Commande #${json.docNum} créée — ${fmt(json.totalTTC)} € TTC`, { duration: 10000 });
@@ -888,6 +999,37 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     return head.concat(normal);
   }, [grouped, favorites, favGroups]);
 
+  // ── Onglet TARIF : catalogue à plat + ajout d'une cotation ──
+  const allProducts = useMemo(() => Object.values(grouped).flat(), [grouped]);
+  const productByCode = useMemo(() => new Map(allProducts.map((p) => [p.itemCode, p])), [allProducts]);
+  const [tarifQuery, setTarifQuery] = useState("");
+  const [tarifAdding, setTarifAdding] = useState(false);
+  const addTarif = async () => {
+    const q = tarifQuery.trim();
+    if (!q || tarifAdding) return;
+    const lc = q.toLowerCase();
+    let p: Product | undefined =
+      allProducts.find((x) => x.itemCode.toLowerCase() === lc)
+      || allProducts.find((x) => x.itemCode.toLowerCase().includes(lc) || x.itemName.toLowerCase().includes(lc));
+    if (!p) {
+      setTarifAdding(true);
+      try {
+        const res = await fetch(`/api/products?search=${encodeURIComponent(q)}&limit=1`);
+        const json = await res.json();
+        p = (json.products ?? [])[0] as Product | undefined;
+      } catch { /* repli silencieux */ }
+      finally { setTarifAdding(false); }
+    }
+    if (!p) { toast.error(`Aucun produit pour « ${q} »`); return; }
+    const code = p.itemCode;
+    if ((tarifs ?? []).some((t) => t.itemCode === code)) { toast.info(`${p.itemName} est déjà au tarif`); return; }
+    // Prix de départ : le conseillé du client si connu, sinon 0 (à saisir).
+    const start = hints[code]?.prixConseille ?? 0;
+    mutateTarifs((cur) => [...cur, { itemCode: code, price: start }]);
+    setTarifQuery("");
+    toast.success(`${p.itemName} ajouté au tarif — saisis le prix négocié`);
+  };
+
   return (
     <div className="flex flex-col h-full min-h-0 gap-1.5">
       {/* ── C2 — Bandeau promotions (contenu/visibilité gérés par le composant) ── */}
@@ -975,6 +1117,26 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       */}
       <div className="flex-1 min-w-0 flex flex-col panel p-3">
         <div className="flex items-center gap-2 mb-2 shrink-0">
+          {/* Onglets : Stock (catalogue) / Tarif (cotations spécifiques du client) */}
+          <div className="inline-flex items-center gap-0.5 rounded-md border border-border p-0.5 shrink-0">
+            <button
+              type="button" onClick={() => setStockTab("stock")} aria-pressed={stockTab === "stock"}
+              className={`inline-flex items-center h-8 px-3 rounded text-[12.5px] font-semibold transition-colors ${
+                stockTab === "stock" ? "bg-brand-600 text-white" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Stock
+            </button>
+            <button
+              type="button" onClick={() => setStockTab("tarif")} aria-pressed={stockTab === "tarif"}
+              title="Cotations spécifiques du client (prix négociés par article)"
+              className={`inline-flex items-center gap-1 h-8 px-3 rounded text-[12.5px] font-semibold transition-colors ${
+                stockTab === "tarif" ? "bg-violet-600 text-white" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <BadgeEuro className="h-3.5 w-3.5" /> Tarif{tarifs && tarifs.length > 0 ? ` (${tarifs.length})` : ""}
+            </button>
+          </div>
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filtrer un produit…"
@@ -1006,6 +1168,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
           </button>
         </div>
 
+        {stockTab === "stock" ? (<>
         {/* Bandeau persistant : rappel que le mode rupture/découvert est actif */}
         {includeOutOfStock && (
           <div className="shrink-0 mb-1.5 flex items-center gap-1.5 rounded-md border border-rose-400/50 bg-rose-50/70 dark:bg-rose-950/20 px-2.5 py-1.5 text-[12px] font-medium text-rose-700 dark:text-rose-300">
@@ -1139,46 +1302,58 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                                 </>
                               )}
                             </span>
-                            {/* Col 3 — Produit : (logo marque) + nom + chips + code + colis/kg.
-                                Le logo se place entre le stock (col 2) et la désignation. */}
+                            {/* Col 3 — Produit COMPACT (2 lignes) : nom, puis chips + code +
+                                colis/kg sur UNE seule ligne (tronquée) — plus de produits
+                                visibles sans scroller. */}
                             <span className="min-w-0 flex items-center gap-2">
                               <BrandLogo marque={marque} logos={brandLogos} size="xl" />
                               <span className="min-w-0 flex-1">
                               <span className={`block ${ui.name} font-semibold text-foreground truncate leading-tight`}>
                                 {p.itemName}
                               </span>
-                              {(marque || condi || calibre || variete || pays) && (
-                                <span className="mt-1.5 flex items-center gap-1 flex-wrap">
-                                  {marque && <span className={`${chipCls} bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100 dark:ring-1 dark:ring-inset dark:ring-violet-400/50`}>{marque}</span>}
-                                  {condi && <span className={`${chipCls} bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100 dark:ring-1 dark:ring-inset dark:ring-sky-400/50`}>{condi}</span>}
-                                  {calibre && <span className={`${chipCls} bg-teal-100 text-teal-800 dark:bg-teal-500/30 dark:text-teal-100 dark:ring-1 dark:ring-inset dark:ring-teal-400/50`}>{calibre}</span>}
-                                  {variete && <span className={`${chipCls} bg-rose-100 text-rose-800 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-1 dark:ring-inset dark:ring-rose-400/50`}>{variete}</span>}
-                                  {pays && <span className={`${chipCls} bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100 dark:ring-1 dark:ring-inset dark:ring-amber-400/50`}>{pays}</span>}
-                                </span>
-                              )}
-                              <span className={`flex items-baseline gap-2 ${ui.code} leading-tight mt-1 min-w-0`}>
-                                <span className="font-mono text-muted-foreground/60 truncate">{p.itemCode}</span>
+                              <span className="mt-0.5 flex items-center gap-1 overflow-hidden whitespace-nowrap min-w-0">
+                                {marque && <span className={`${chipCls} shrink-0 bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100 dark:ring-1 dark:ring-inset dark:ring-violet-400/50`}>{marque}</span>}
+                                {condi && <span className={`${chipCls} shrink-0 bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100 dark:ring-1 dark:ring-inset dark:ring-sky-400/50`}>{condi}</span>}
+                                {calibre && <span className={`${chipCls} shrink-0 bg-teal-100 text-teal-800 dark:bg-teal-500/30 dark:text-teal-100 dark:ring-1 dark:ring-inset dark:ring-teal-400/50`}>{calibre}</span>}
+                                {variete && <span className={`${chipCls} shrink-0 bg-rose-100 text-rose-800 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-1 dark:ring-inset dark:ring-rose-400/50`}>{variete}</span>}
+                                {pays && <span className={`${chipCls} shrink-0 bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100 dark:ring-1 dark:ring-inset dark:ring-amber-400/50`}>{pays}</span>}
+                                <span className={`font-mono text-muted-foreground/60 ${ui.code} truncate`}>{p.itemCode}</span>
                                 {/* B4 — poids du colis quand calculable (≈ poids unité × pièces/colis) */}
                                 {kgC != null && (
-                                  <span className="text-muted-foreground/80 font-medium shrink-0">
-                                    colis de {fmtKg(kgC)} kg
+                                  <span className={`${ui.code} text-muted-foreground/80 font-medium shrink-0`}>
+                                    · {fmtKg(kgC)} kg/colis
                                   </span>
                                 )}
                               </span>
                               </span>
                             </span>
-                            {/* Col 4 — Prix conseillé (aligné à droite) */}
+                            {/* Col 4 — Prix : cotation TARIF client prioritaire, sinon conseillé */}
                             <span className="text-right tnum">
-                              {h?.prixConseille != null ? (
-                                <>
-                                  <span className={`block ${ui.price} font-bold leading-tight ${h.isDefault ? "text-foreground/70" : "text-brand-600 dark:text-brand-400"}`}>
-                                    {h.prixConseille.toFixed(2)} €
-                                  </span>
-                                  <span className={`block ${ui.priceUnit} font-normal text-muted-foreground leading-tight`}>
-                                    /{priceUnit}
-                                  </span>
-                                </>
-                              ) : <span className="block text-[13px] text-muted-foreground/40">—</span>}
+                              {(() => {
+                                const tarifP = tarifByCode.get(p.itemCode);
+                                if (tarifP != null) {
+                                  return (
+                                    <>
+                                      <span className={`block ${ui.price} font-bold leading-tight text-violet-600 dark:text-violet-400`}>
+                                        {tarifP.toFixed(2)} €
+                                      </span>
+                                      <span className={`block ${ui.priceUnit} font-semibold text-violet-500/80 leading-tight`}>
+                                        tarif /{priceUnit}
+                                      </span>
+                                    </>
+                                  );
+                                }
+                                return h?.prixConseille != null ? (
+                                  <>
+                                    <span className={`block ${ui.price} font-bold leading-tight ${h.isDefault ? "text-foreground/70" : "text-brand-600 dark:text-brand-400"}`}>
+                                      {h.prixConseille.toFixed(2)} €
+                                    </span>
+                                    <span className={`block ${ui.priceUnit} font-normal text-muted-foreground leading-tight`}>
+                                      /{priceUnit}
+                                    </span>
+                                  </>
+                                ) : <span className="block text-[13px] text-muted-foreground/40">—</span>;
+                              })()}
                             </span>
                             {/* Col 5 — C1 : étoile favoris (zone cliquable séparée, stopPropagation) */}
                             <button
@@ -1204,16 +1379,117 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             );
           })}
         </div>
+        </>) : (
+        /* ── Onglet TARIF — cotations spécifiques du client (prix par article) ── */
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="shrink-0 mb-2 flex items-center gap-1.5">
+            <input
+              value={tarifQuery}
+              onChange={(e) => setTarifQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTarif(); } }}
+              placeholder="Ajouter un article au tarif (code ou nom)…"
+              className="flex-1 h-9 rounded-md border border-border bg-background text-[13.5px] px-2.5 focus:outline-none focus:ring-1 focus:ring-violet-500"
+            />
+            <button
+              type="button" onClick={addTarif} disabled={tarifAdding || !tarifQuery.trim()}
+              className="inline-flex items-center gap-1 h-9 px-3 rounded-md bg-violet-600 hover:bg-violet-700 text-white text-[12.5px] font-semibold disabled:opacity-50"
+            >
+              {tarifAdding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} Ajouter
+            </button>
+          </div>
+          <p className="shrink-0 mb-2 text-[11px] text-muted-foreground">
+            Cotations spécifiques de ce client : le prix négocié est <b>prioritaire</b> sur le prix
+            conseillé à l&apos;ajout au panier (sauvegarde automatique).
+          </p>
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+            {tarifs === null ? (
+              <p className="py-4 text-[13px] text-muted-foreground inline-flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" /> Chargement du tarif…
+              </p>
+            ) : tarifs.length === 0 ? (
+              <p className="py-4 text-[13px] text-muted-foreground italic text-center">
+                Aucune cotation pour ce client — ajoute un article ci-dessus.
+              </p>
+            ) : (
+              <ul className="divide-y divide-border/40 border border-border rounded-lg overflow-hidden">
+                {tarifs
+                  .filter((t) => {
+                    if (!q) return true;
+                    const p = productByCode.get(t.itemCode);
+                    return (t.itemCode + (p?.itemName ?? "")).toLowerCase().includes(q);
+                  })
+                  .map((t) => {
+                    const p = productByCode.get(t.itemCode);
+                    const inCart = cart.some((l) => l.itemCode === t.itemCode);
+                    const { priceUnit } = unitInfo(p?.salesUnit ?? null, p?.salesQtyPerPackUnit ?? null);
+                    return (
+                      <li key={t.itemCode} className="flex items-center gap-2 px-2.5 py-1.5">
+                        {/* Ajout direct au panier AU PRIX DU TARIF */}
+                        <button
+                          type="button"
+                          disabled={!p || inCart}
+                          onClick={() => { if (p) { addToCart(p, { price: t.price, noPromo: true }); toast.success(`${p.itemName} ajouté au panier — tarif ${t.price.toFixed(2)} €`); } }}
+                          title={!p ? "Article hors catalogue chargé (active « + Rupture » sur l'onglet Stock)"
+                            : inCart ? "Déjà au panier" : "Ajouter au panier au prix du tarif"}
+                          className={`h-7 w-7 inline-flex items-center justify-center rounded-md shrink-0 disabled:opacity-40 ${
+                            inCart ? "bg-emerald-500 text-white" : "bg-violet-500/10 text-violet-600 dark:text-violet-400 hover:bg-violet-500/20"
+                          }`}
+                        >
+                          {inCart ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                        </button>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[13.5px] font-semibold text-foreground truncate leading-tight">
+                            {p?.itemName ?? t.itemCode}
+                          </span>
+                          <span className="block font-mono text-[10.5px] text-muted-foreground/60 truncate">{t.itemCode}</span>
+                        </span>
+                        <NumberInput
+                          value={t.price}
+                          onValueChange={(n) => mutateTarifs((cur) => cur.map((x) => x.itemCode === t.itemCode ? { ...x, price: n ?? 0 } : x))}
+                          min={0} step={0.1} decimals={2}
+                          aria-label={`Prix tarif ${p?.itemName ?? t.itemCode}`}
+                          className="h-9 w-[88px] text-right text-[14.5px] font-semibold tnum rounded-md border border-violet-300/70 dark:border-violet-500/40 bg-background px-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-violet-500"
+                        />
+                        <span className="text-[11px] text-muted-foreground w-8 shrink-0">€/{priceUnit}</span>
+                        <button
+                          type="button"
+                          onClick={() => mutateTarifs((cur) => cur.filter((x) => x.itemCode !== t.itemCode))}
+                          title="Retirer cet article du tarif"
+                          className="shrink-0 text-muted-foreground/50 hover:text-rose-500"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </li>
+                    );
+                  })}
+              </ul>
+            )}
+          </div>
+        </div>
+        )}
       </div>
 
-      {/* ── Colonne PANIER — dominante (Écran 2 = saisie commande au cœur) ── */}
-      <div className="w-[560px] shrink-0 flex flex-col panel p-3">
+      {/* ── Colonne PANIER — dominante et ÉLARGIE (Écran 2 = saisie commande au cœur) ── */}
+      <div className="w-[640px] shrink-0 flex flex-col panel p-3">
         <div className="flex items-center justify-between gap-2 mb-2 shrink-0">
           <p className="kicker inline-flex items-center gap-1.5">
             <ShoppingCart className="h-3 w-3" /> Commande
           </p>
-          {/* Raccourcis produits personnalisables (ajout direct au panier) */}
-          <OrderShortcuts onPick={addByShortcut} />
+          <div className="flex items-center gap-1.5">
+            {/* Dupliquer la DERNIÈRE commande du client — pré-remplit le panier */}
+            {!modif && (
+              <button
+                type="button" onClick={replayLast} disabled={replaying || prefilling}
+                title="Dupliquer la dernière commande du client dans le panier (quantités + prix)"
+                className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border text-[12px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
+              >
+                {replaying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <History className="h-3.5 w-3.5" />}
+                Dupliquer la dernière cde
+              </button>
+            )}
+            {/* Raccourcis produits personnalisables (ajout direct au panier) */}
+            <OrderShortcuts onPick={addByShortcut} />
+          </div>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
           {cart.length === 0 && (
@@ -1475,8 +1751,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                   </div>
                 );
               })()}
+              {/* Date de livraison SANS heure : l'heure est portée par la TOURNÉE. */}
               <div className="flex gap-1.5">
-                <input type="datetime-local" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)}
+                <input type="date" value={deliveryDate.slice(0, 10)} onChange={(e) => setDeliveryDate(e.target.value)}
+                  aria-label="Date de livraison"
                   className="flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2" />
               </div>
             </>

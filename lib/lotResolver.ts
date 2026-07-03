@@ -27,7 +27,30 @@ export type LotMaps = {
    *  magasin sur le lot lors du repli "item" (vente à découvert : le lot doit
    *  amener la ligne dans le magasin où il a été reçu). */
   byItemWarehouse: Map<string, string>;
+  /** HISTORIQUE des EM récentes (DocNums, plus récent d'abord, plafonné) par
+   *  couple item×entrepôt et par item — permet de choisir un lot selon
+   *  l'AFFECTATION de l'EM (Tous/Export/GMS/CHR, cf. lib/emAffect) au lieu de
+   *  prendre aveuglément la dernière. */
+  byItemWhsList: Map<string, number[]>;
+  byItemList: Map<string, number[]>;
+  /** Magasin de réception d'un article dans UNE EM donnée — `${item}|${docNum}`
+   *  → entrepôt. Sert au repli "item" de resolveLotForSegment. */
+  whsOfItemDoc: Map<string, string>;
 };
+
+/** Profondeur d'historique par clé — assez pour retrouver une EM « stock »
+ *  derrière plusieurs arrivages affectés (export). */
+const LIST_MAX = 12;
+
+/** Insère un DocNum dans une liste triée décroissante (dédupliquée, plafonnée). */
+function pushDoc(map: Map<string, number[]>, key: string, docNum: number): void {
+  const list = map.get(key) ?? [];
+  if (list.includes(docNum)) return;
+  const i = list.findIndex((d) => d < docNum);
+  if (i < 0) list.push(docNum); else list.splice(i, 0, docNum);
+  if (list.length > LIST_MAX) list.length = LIST_MAX;
+  map.set(key, list);
+}
 
 /**
  * Sentinel pour les ventes à découvert : un BL créé sur un article sans stock
@@ -49,7 +72,10 @@ const PAGE_SIZE = 200;
 let cache: { at: number; maps: LotMaps; partial: boolean } | null = null;
 
 function emptyMaps(): LotMaps {
-  return { byItemWhs: new Map(), byItem: new Map(), byItemWarehouse: new Map() };
+  return {
+    byItemWhs: new Map(), byItem: new Map(), byItemWarehouse: new Map(),
+    byItemWhsList: new Map(), byItemList: new Map(), whsOfItemDoc: new Map(),
+  };
 }
 
 /** Renvoie les maps (cache 10 min). Scanne les ~1500 derniers PDN au refresh. */
@@ -82,11 +108,14 @@ export async function getLotMaps(): Promise<LotMaps> {
           if (!maps.byItem.has(l.ItemCode) || d.DocNum > maps.byItem.get(l.ItemCode)!) {
             maps.byItem.set(l.ItemCode, d.DocNum);
           }
+          pushDoc(maps.byItemList, l.ItemCode, d.DocNum);
           if (l.WarehouseCode) {
             const key = `${l.ItemCode}|${l.WarehouseCode}`;
             if (!maps.byItemWhs.has(key) || d.DocNum > maps.byItemWhs.get(key)!) {
               maps.byItemWhs.set(key, d.DocNum);
             }
+            pushDoc(maps.byItemWhsList, key, d.DocNum);
+            maps.whsOfItemDoc.set(`${l.ItemCode}|${d.DocNum}`, l.WarehouseCode);
             // Magasin de la dernière EM (avec magasin) de l'article → repli "item".
             if (d.DocNum > (bestWhsDoc.get(l.ItemCode) ?? -1)) {
               bestWhsDoc.set(l.ItemCode, d.DocNum);
@@ -145,6 +174,51 @@ export function resolveLotDetailed(maps: LotMaps, itemCode: string, warehouseCod
 }
 
 /**
+ * Résolution par SEGMENT CLIENT : choisit, parmi les EM récentes de l'article,
+ * celle dont l'AFFECTATION (lib/emAffect : DocNum → "EXPORT"|"GMS"|"CHR",
+ * absent = « Tous ») correspond au client servi. Règle métier (export) : les
+ * achats de dernière minute affectés à un segment ne se mélangent pas au stock.
+ *
+ * Ordre de choix, par (item×entrepôt) puis repli (item) :
+ *   1. EM la plus récente affectée AU segment du client ;
+ *   2. sinon EM la plus récente NON affectée (« Tous » — le stock commun) ;
+ *   3. sinon (que des EM affectées à d'AUTRES segments) → lot null : on ne vole
+ *      pas leur lot, l'appelant part en LOT_PENDING et la propagation rétro
+ *      posera le bon lot à la prochaine réception compatible.
+ * Client sans segment → seules les EM « Tous » sont éligibles (cas 2).
+ */
+export function resolveLotForSegment(
+  maps: LotMaps,
+  affects: Map<number, string>,
+  itemCode: string,
+  warehouseCode: string | undefined,
+  segment: string | null,
+): ResolvedLot {
+  const seg = (segment ?? "").trim().toUpperCase();
+  const pick = (docs: number[] | undefined): number | null => {
+    if (!docs || docs.length === 0) return null;
+    if (seg) {
+      const own = docs.find((d) => affects.get(d) === seg);
+      if (own != null) return own;
+    }
+    const open = docs.find((d) => !affects.has(d));
+    return open ?? null;
+  };
+  if (warehouseCode) {
+    const n = pick(maps.byItemWhsList.get(`${itemCode}|${warehouseCode}`));
+    if (n != null) return { lot: `EM${n}`, source: "whs", docNum: n, warehouse: warehouseCode };
+  }
+  const g = pick(maps.byItemList.get(itemCode));
+  if (g != null) {
+    return {
+      lot: `EM${g}`, source: "item", docNum: g,
+      warehouse: maps.whsOfItemDoc.get(`${itemCode}|${g}`) ?? maps.byItemWarehouse.get(itemCode) ?? null,
+    };
+  }
+  return { lot: null, source: null, docNum: null, warehouse: null };
+}
+
+/**
  * Résout le n° de lot : EM<DocNum> par (item,entrepôt) → (item) → défaut env.
  * Conservé pour compatibilité (tests lotResolver.test.ts) — les nouvelles
  * écritures passent par resolveLotDetailed() + chooseLot().
@@ -167,11 +241,14 @@ export function bumpLot(itemCode: string, warehouseCode: string | undefined, doc
   if (!maps.byItem.has(itemCode) || docNum > maps.byItem.get(itemCode)!) {
     maps.byItem.set(itemCode, docNum);
   }
+  pushDoc(maps.byItemList, itemCode, docNum);
   if (warehouseCode) {
     const key = `${itemCode}|${warehouseCode}`;
     if (!maps.byItemWhs.has(key) || docNum > maps.byItemWhs.get(key)!) {
       maps.byItemWhs.set(key, docNum);
     }
+    pushDoc(maps.byItemWhsList, key, docNum);
+    maps.whsOfItemDoc.set(`${itemCode}|${docNum}`, warehouseCode);
     // Si ce PDN est désormais le plus récent de l'article, son magasin devient le
     // repli "item" (cohérent avec byItem ci-dessus).
     if (maps.byItem.get(itemCode) === docNum) maps.byItemWarehouse.set(itemCode, warehouseCode);

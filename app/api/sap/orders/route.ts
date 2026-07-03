@@ -10,7 +10,9 @@ import { notifyAll } from "@/lib/push";
 import { sap } from "@/lib/sapb1";
 import { mirrorCreatedOrder } from "@/lib/sapMirror";
 import { decrementLocalStock } from "@/lib/stockSync";
-import { getLotMaps, resolveLotDetailed, LOT_PENDING } from "@/lib/lotResolver";
+import { getLotMaps, resolveLotForSegment, LOT_PENDING } from "@/lib/lotResolver";
+import { getEmAffects } from "@/lib/emAffect";
+import { createBonPrep, markBonPrepTransformed } from "@/lib/bonPrep";
 import { chooseLot } from "@/lib/gervifrais-calc";
 import { colisInfo } from "@/lib/colis";
 
@@ -77,6 +79,9 @@ interface OrderLine {
   price?: number;
   manageBatch?: boolean;        // si true, le serveur tente d'attacher un lot FIFO
   discountPercent?: number;     // remise % (0-100, clampée) → DocumentLines[].DiscountPercent
+  /** Lot AFFECTÉ en amont (bon de préparation export) → U_NoLot posé tel quel,
+   *  sans résolution automatique. */
+  lot?: string;
 }
 interface CreateOrderBody {
   clientId: string;
@@ -86,6 +91,10 @@ interface CreateOrderBody {
   comments?: string;            // prioritaire sur comment → SAP Comments (mention des promos)
   numAtCard?: string;           // N° de commande client → SAP NumAtCard
   confirmEncours?: boolean;     // true = forcer malgré encours dépassé
+  /** Transformation d'un BON DE PRÉPARATION (export) : présent = créer le BL
+   *  pour de vrai (lots posés par ligne) et marquer le bon transformé — le
+   *  divert « client EXPORT → bon de préparation » est alors court-circuité. */
+  bonPrepId?: string;
   // C11 — Transporteur. Soit l'id d'un Carrier en DB (résolu serveur), soit
   // directement la valeur U_TrspCode à pousser (option raccourci). Le champ
   // SAP cible est ORDR.U_TrspCode (confirmé par l'utilisateur).
@@ -173,7 +182,7 @@ export async function POST(req: NextRequest) {
   // ── 1. Resolve client + delivery mode → CardCode SAP ──
   const client = await prisma.client.findUnique({
     where: { id: body.clientId },
-    select: { id: true, code: true, nom: true },
+    select: { id: true, code: true, nom: true, type: true },
   });
   if (!client) return NextResponse.json({ error: "Client introuvable" }, { status: 404 });
 
@@ -192,6 +201,52 @@ export async function POST(req: NextRequest) {
       body.clientId,
     );
     if (def[0]) cardCode = def[0].sapCardCode;
+  }
+
+  // ── CLIENT EXPORT → BON DE PRÉPARATION (hors SAP), pas de BL direct ───
+  // Circuit export : marchandise achetée à la dernière minute, lots connus à la
+  // réception. La saisie enregistre un bon de préparation (lib/bonPrep) ; les
+  // lots y sont affectés à la main (panneau Détail livraison) puis le BL SAP est
+  // créé « proprement » en repostant ici avec bonPrepId + lot par ligne.
+  if ((client.type ?? "").trim().toUpperCase() === "EXPORT" && !body.bonPrepId) {
+    try {
+      // Noms d'articles pour l'affichage du panneau d'affectation (best-effort).
+      const names = new Map<string, string>();
+      try {
+        const prods = await prisma.product.findMany({
+          where: { itemCode: { in: body.lines.map((l) => l.itemCode) } },
+          select: { itemCode: true, itemName: true },
+        });
+        for (const p of prods) names.set(p.itemCode, p.itemName);
+      } catch { /* itemName = itemCode en repli */ }
+      const bon = await createBonPrep({
+        createdBy: session.user?.name?.trim() || session.user?.email || null,
+        clientName: client.nom,
+        cardCode,
+        segment: "EXPORT",
+        orderBody: {
+          clientId: body.clientId,
+          deliveryModeId: body.deliveryModeId,
+          trspCode: body.trspCode,
+          trspHeure: body.trspHeure,
+          tournee: body.tournee,
+          deliveryDate: body.deliveryDate,
+          numAtCard: body.numAtCard,
+          comments: body.comments ?? body.comment,
+          lines: body.lines.map(({ manageBatch: _mb, ...rest }) => ({
+            ...rest,
+            itemName: names.get(rest.itemCode) ?? rest.itemCode,
+          })),
+        },
+      });
+      console.log(`[Order] Client EXPORT ${cardCode} → bon de préparation ${bon.id} (${body.lines.length} ligne(s)) — BL différé.`);
+      return NextResponse.json({ ok: true, bonPrep: true, bonPrepId: bon.id, cardCode });
+    } catch (e) {
+      return NextResponse.json(
+        { ok: false, error: `Échec de la création du bon de préparation : ${e instanceof Error ? e.message : String(e)}` },
+        { status: 500 },
+      );
+    }
   }
 
   // ── 2. Build SAP Order payload — avec enrichissement U_* Gervifrais ───
@@ -271,8 +326,13 @@ export async function POST(req: NextRequest) {
   const ddgMaster   = expensesMasterPreloaded.get(3);    // DROIT DE GARDE → TPF3 DDG
   const TPF_AUTO    = (process.env.GERVIFRAIS_AUTO_TAX ?? "true") !== "false";
 
-  // Cartes des lots (EM<DocNum> du dernier bon de réception par item / item+entrepôt)
+  // Cartes des lots (EM<DocNum> des derniers bons de réception par item /
+  // item+entrepôt) + AFFECTATIONS des EM (Tous/Export/GMS/CHR, cf. lib/emAffect) :
+  // le lot d'une ligne est choisi PARMI les EM du segment du client — un BL GMS
+  // ne prend jamais le lot d'un arrivage dédié export, et inversement.
   const lotMaps = await getLotMaps();
+  const emAffects = await getEmAffects();
+  const clientSegment = (client.type ?? "").trim().toUpperCase() || null;
 
   // Stock dispo agrégé par itemCode (miroir local — peut être en retard).
   // Combiné avec QuantityOnStock SAP (sapStockByItem, cf. 2.1) dans chooseLot() :
@@ -346,24 +406,35 @@ export async function POST(req: NextRequest) {
     // === Numéro de lot (U_NoLot) — SYSTÉMATIQUE sur chaque ligne ===
     // (Bug BL 24011560 : la ligne fraise est partie sans lot exploitable.)
     // Décision pure & testée dans lib/gervifrais-calc.ts (chooseLot) :
-    //   • lot FIFO "EM<DocNum>" (dernier PDN item×entrepôt → item) si du stock
-    //     existe — stock = miroir local OU QuantityOnStock SAP (filet quand le
-    //     miroir est en retard, ex. fraises réceptionnées le matin même) ;
-    //   • sinon sentinel LOT_PENDING ("EM_PENDING") — vente à découvert ou
-    //     article hors fenêtre de scan PDN — réécrit par /api/sap/goods-receipts
-    //     à la prochaine entrée marchandise. Fini le fallback aveugle "EM0000".
+    //   • lot "EM<DocNum>" choisi PAR SEGMENT CLIENT (resolveLotForSegment) :
+    //     EM affectée au segment du client d'abord, sinon EM « Tous » (stock
+    //     commun) — jamais l'EM d'un autre segment (arrivage dédié export ≠
+    //     stock GMS). Nécessite du stock (miroir local OU QuantityOnStock SAP,
+    //     filet quand le miroir est en retard) ;
+    //   • sinon sentinel LOT_PENDING ("EM_PENDING") — vente à découvert, aucune
+    //     EM compatible avec le segment, ou article hors fenêtre de scan PDN —
+    //     réécrit par /api/sap/goods-receipts à la prochaine entrée marchandise
+    //     compatible. Fini le fallback aveugle "EM0000".
+    // Lot AFFECTÉ en amont (bon de préparation export) : posé tel quel, aucune
+    // résolution automatique ni réalignement de magasin — c'est le lot choisi
+    // à la main depuis les arrivages.
+    const forcedLot = typeof l.lot === "string" && l.lot.trim() ? l.lot.trim() : null;
     const availLocal = availableByItem.get(l.itemCode) ?? 0;
     const sapOnHand = sapStockByItem.get(l.itemCode) ?? null;
-    const resolved = resolveLotDetailed(lotMaps, l.itemCode, l.warehouseCode);
-    const choice = chooseLot({
-      resolvedLot: resolved.lot,
-      localAvailable: availLocal,
-      sapOnHand,
-      envDefault: process.env.GERVIFRAIS_LOT_DEFAUT ?? null,
-    });
+    const resolved = forcedLot
+      ? { lot: forcedLot, source: null, docNum: null, warehouse: null }
+      : resolveLotForSegment(lotMaps, emAffects, l.itemCode, l.warehouseCode, clientSegment);
+    const choice = forcedLot
+      ? { lot: forcedLot, reason: "affecté (bon de préparation)" }
+      : chooseLot({
+          resolvedLot: resolved.lot,
+          localAvailable: availLocal,
+          sapOnHand,
+          envDefault: process.env.GERVIFRAIS_LOT_DEFAUT ?? null,
+        });
     line.U_NoLot = choice.lot;
     console.log(
-      `[Order] Lot ${l.itemCode}@${l.warehouseCode ?? "?"} → ${choice.lot} ` +
+      `[Order] Lot ${l.itemCode}@${l.warehouseCode ?? "?"} [seg ${clientSegment ?? "—"}] → ${choice.lot} ` +
       `(${choice.reason}${resolved.source ? `/${resolved.source}` : ""} — dispo locale ${availLocal}, stock SAP ${sapOnHand ?? "?"})`,
     );
 
@@ -718,6 +789,15 @@ export async function POST(req: NextRequest) {
       );
     } catch (e) {
       console.error("[Order] Notif push nouvelle commande échouée (non-fatal):", e);
+    }
+
+    // Transformation d'un bon de préparation → marquer le bon (best-effort).
+    if (body.bonPrepId) {
+      try {
+        await markBonPrepTransformed(body.bonPrepId, { docNum: created.DocNum, docEntry: created.DocEntry });
+      } catch (e) {
+        console.warn("[Order] Marquage du bon de préparation échoué (non-bloquant):", (e as Error).message);
+      }
     }
 
     return NextResponse.json({
