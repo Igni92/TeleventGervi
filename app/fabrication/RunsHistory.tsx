@@ -14,6 +14,7 @@ import { LotBadge, eur, colis } from "./ui";
 type RunLine = {
   family: string; familyLabel: string | null; itemCode: string; itemName: string | null;
   batchNumber: string; colisQty: number; purchasePrice: number | null;
+  warehouseCode: string | null; // magasin SOURCE de la sortie (multi-magasins)
 };
 type Run = {
   id: string; opCode: string | null; parentItemCode: string; parentItemName: string | null;
@@ -72,7 +73,7 @@ export function RunsHistory({ version }: { version: number }) {
                   <span className="text-[14px] font-semibold">
                     {colis(r.parentColis)} colis {r.parentItemName ?? r.parentItemCode}
                   </span>
-                  <span className="font-mono text-[11px] text-muted-foreground">({r.parentItemCode} · {r.warehouseCode})</span>
+                  <span className="font-mono text-[11px] text-muted-foreground">({r.parentItemCode} · entrée {r.warehouseCode})</span>
                 </div>
                 <div className="text-right text-[12.5px] text-muted-foreground">
                   {new Date(r.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
@@ -85,6 +86,9 @@ export function RunsHistory({ version }: { version: number }) {
                     <span className="text-muted-foreground">{l.familyLabel ?? l.family}</span>
                     <span className="font-mono text-[11px]">{l.itemCode}</span>
                     <span className="font-semibold tnum">{colis(l.colisQty)} colis</span>
+                    {l.warehouseCode && l.warehouseCode !== r.warehouseCode && (
+                      <span className="font-mono text-[11px] text-muted-foreground">de {l.warehouseCode}</span>
+                    )}
                     <LotBadge batchNumber={l.batchNumber} pending={l.batchNumber === "EM_PENDING"} />
                   </span>
                 ))}

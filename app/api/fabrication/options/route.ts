@@ -4,25 +4,30 @@ import { getAccessScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import {
   getRecipe, getFamilyItems, resolveLotsForItems, lastSalePricePie, packRatio, LOT_PENDING,
+  type LotResolution,
 } from "@/lib/fabrication";
 import { uniteGestion } from "@/lib/fabrication-optim";
 
 /**
- * GET /api/fabrication/options?parent=DECO16&warehouse=01
+ * GET /api/fabrication/options?parent=DECO16
  *
  * Prépare l'écran « Fabriquer » pour une recette : pour CHAQUE famille de la
- * recette, les articles concrets de cette famille avec :
+ * recette (quantité par tour en unités de base — v3 — ou en colis — legacy),
+ * les articles concrets de cette famille avec :
  *   - chips marque / condi / origine,
- *   - stock dispo en COLIS par entrepôt (000 / 01 / R1),
- *   - lot proposé (FIFO ProductBatch, sinon dernier BR du miroir → EM<DocNum>),
- *   - prix d'achat €/colis (pour le coût estimé),
- *   - drapeau « à découvert » si dispo ≤ 0 dans l'entrepôt choisi
- *     (le run posera alors le sentinel EM_PENDING — lot affecté à réception).
+ *   - stock dispo par MAGASIN (000 / 01 / R1), en colis ET en unités de base,
+ *   - lot proposé PAR MAGASIN (FIFO ProductBatch, sinon dernier BR du miroir
+ *     → EM<DocNum> ; à découvert dans ce magasin → sentinel EM_PENDING),
+ *   - prix d'achat €/colis (pour le coût estimé).
+ *
+ * Multi-magasins : le client choisit librement le magasin SOURCE de chaque
+ * composant et le magasin d'ENTRÉE du produit fini — d'où les lots résolus
+ * pour les 3 magasins d'un coup (pas de rechargement au changement de magasin).
  *
  * Renvoie aussi la valeur estimée du parent (dernier prix de vente €/colis).
  */
 
-const WHITELIST_WHS = new Set(["000", "01", "R1"]);
+const ALL_WHS = ["000", "01", "R1"] as const;
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -33,11 +38,7 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const parent = searchParams.get("parent")?.trim();
-  const warehouse = searchParams.get("warehouse")?.trim() || "01";
   if (!parent) return NextResponse.json({ error: "parent requis" }, { status: 400 });
-  if (!WHITELIST_WHS.has(warehouse)) {
-    return NextResponse.json({ error: `Entrepôt invalide : ${warehouse}` }, { status: 400 });
-  }
 
   const recipe = await getRecipe(parent);
   if (!recipe || recipe.components.length === 0) {
@@ -71,35 +72,43 @@ export async function GET(req: NextRequest) {
   const salePie = await lastSalePricePie(parent);
   const parentSaleColis = salePie != null ? Math.round(salePie * parentRatio * 100) / 100 : null;
 
-  // Articles concrets par famille + lots en batch.
+  // Articles concrets par famille + lots résolus pour CHAQUE magasin.
   const familyKeys = recipe.components.map((c) => c.familyKey);
   const itemsByFamily = await getFamilyItems(familyKeys);
   const allCodes = Array.from(itemsByFamily.values()).flat().map((i) => i.itemCode);
-  const lots = await resolveLotsForItems(allCodes, warehouse);
+  const lotsByWhs = new Map<string, Map<string, LotResolution>>();
+  await Promise.all(ALL_WHS.map(async (whs) => {
+    lotsByWhs.set(whs, await resolveLotsForItems(allCodes, whs));
+  }));
 
   const families = recipe.components.map((c) => {
     const items = (itemsByFamily.get(c.familyKey) ?? []).map((it) => {
-      const lot = lots.get(it.itemCode);
-      const availHere = it.availColis[warehouse] ?? 0;
-      const decouvert = availHere <= 0;
-      const batchNumber = decouvert || !lot?.batchNumber ? LOT_PENDING : lot.batchNumber;
-      const priceColis = lot?.pricePie != null ? Math.round(lot.pricePie * it.ratio * 100) / 100 : null;
-      return {
-        ...it,
-        decouvert,
-        lot: {
+      // Lot proposé par magasin : à découvert DANS CE MAGASIN → EM_PENDING.
+      const lots: Record<string, {
+        batchNumber: string; pending: boolean; priceColis?: number | null;
+        source: string | null; supplierName: string | null;
+      }> = {};
+      for (const whs of ALL_WHS) {
+        const lot = lotsByWhs.get(whs)?.get(it.itemCode);
+        const decouvert = (it.availUnits[whs] ?? 0) <= 0;
+        const batchNumber = decouvert || !lot?.batchNumber ? LOT_PENDING : lot.batchNumber;
+        const priceColis = lot?.pricePie != null ? Math.round(lot.pricePie * it.ratio * 100) / 100 : null;
+        lots[whs] = {
           batchNumber,
           pending: batchNumber === LOT_PENDING,
           priceColis: admin ? priceColis : undefined, // €/colis coût — admins seuls
           source: lot?.source ?? null,
           supplierName: lot?.supplierName ?? null,
-        },
-      };
+        };
+      }
+      return { ...it, lots };
     });
     return {
       familyKey: c.familyKey,
       familyLabel: c.familyLabel,
-      qtyColisPerTour: c.qtyColis,
+      /** Quantité par tour, exprimée selon `mode` ("unite" v3 / "colis" legacy). */
+      qtyPerTour: c.qty,
+      mode: c.mode,
       items,
     };
   });
@@ -114,7 +123,6 @@ export async function GET(req: NextRequest) {
       lastSalePriceColis: parentSaleColis, // €/colis — null si jamais vendu
     },
     recipe: { parentQty: recipe.parentQty, costs: admin ? recipe.costs : [] },
-    warehouse,
     families,
   });
 }
