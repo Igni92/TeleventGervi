@@ -84,8 +84,26 @@ function loadTournees(code: string): Promise<TourneeOption[]> {
   return p;
 }
 
+/** Restreint le catalogue SERGTRS du transporteur aux tournées définies pour
+ *  CE client dans SERG_TRCL (U_DistBy). Un client n'est livré que sur SES
+ *  tournées (ex. Auchan Cambrai : ANTOINE → NORD uniquement) — proposer tout le
+ *  catalogue du transporteur ouvrait la porte aux erreurs. Sans info TRCL, ou
+ *  si aucun nom TRCL ne matche le catalogue (libellés divergents), on garde le
+ *  catalogue complet (sécurité : mieux vaut trop de choix que zéro). */
+export function restrictToClientTournees(
+  list: TourneeOption[],
+  carrier: CarrierOption | null,
+): TourneeOption[] {
+  const noms = (carrier?.tour ?? "").split(" / ").map((s) => s.trim().toUpperCase()).filter(Boolean);
+  if (!noms.length) return list;
+  const kept = list.filter((t) => t.nom && noms.includes(t.nom.trim().toUpperCase()));
+  return kept.length ? kept : list;
+}
+
 /** Tournée par défaut à pré-sélectionner (lineId en string, "" si aucune).
- *  Ordre de fiabilité : TRCL (heure puis nom) → mémoire app (lineId → nom →
+ *  Ordre de fiabilité : TRCL (nom puis heure — le NOM discrimine mieux :
+ *  plusieurs tournées d'un transporteur peuvent partir à la même heure, ex.
+ *  IDF / IDF OUEST / IDF SUD toutes à 04H00) → mémoire app (lineId → nom →
  *  heure) → tournée unique. Exporté pur pour testabilité. */
 export function pickDefaultTournee(
   list: TourneeOption[],
@@ -93,16 +111,18 @@ export function pickDefaultTournee(
   saved: SavedTournee | null,
 ): string {
   const withHeure = list.filter((t) => t.heure);
-  // 1) TRCL — vérité métier (comme /api/livraisons : TRCL d'abord, mémoire en repli)
+  // 1) TRCL — vérité métier (comme /api/livraisons : TRCL d'abord, mémoire en repli).
+  //    Les noms sont essayés DANS L'ORDRE (la tournée de la ligne 'O' arrive en
+  //    tête, cf. lib/clientCarriers) — puis l'heure en repli.
   if (carrier) {
+    const noms = (carrier.tour ?? "").split(" / ").map((s) => s.trim().toUpperCase()).filter(Boolean);
+    for (const nom of noms) {
+      const byNom = withHeure.find((t) => t.nom && t.nom.trim().toUpperCase() === nom);
+      if (byNom) return String(byNom.lineId);
+    }
     if (carrier.heure) {
       const byH = withHeure.find((t) => t.heure === carrier.heure);
       if (byH) return String(byH.lineId);
-    }
-    const noms = (carrier.tour ?? "").split(" / ").map((s) => s.trim().toUpperCase()).filter(Boolean);
-    if (noms.length) {
-      const byNom = withHeure.find((t) => t.nom && noms.includes(t.nom.toUpperCase()));
-      if (byNom) return String(byNom.lineId);
     }
   }
   // 2) Mémoire app — même cascade que « Détail livraison » (lineId → nom → heure)
@@ -190,8 +210,12 @@ export function useTourneeSelection(clientId: string, enabled: boolean = true) {
     setTournees(undefined); setTourneeId("");
     loadTournees(carrierSap).then((list) => {
       if (cancelled) return;
-      setTournees(list);
-      setTourneeId(pickDefaultTournee(list, carrierEntry, savedTournee));
+      // Catalogue SERGTRS restreint aux tournées du CLIENT (SERG_TRCL) : un
+      // client avec une seule ligne (ex. ANTOINE → NORD) n'a qu'UNE tournée
+      // proposée — et elle est pré-sélectionnée d'office (tournée unique).
+      const restricted = restrictToClientTournees(list, carrierEntry);
+      setTournees(restricted);
+      setTourneeId(pickDefaultTournee(restricted, carrierEntry, savedTournee));
     });
     return () => { cancelled = true; };
     // carrierEntry/savedTournee suivent carrierSap (même cycle de chargement).
