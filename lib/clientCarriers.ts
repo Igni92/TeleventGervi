@@ -103,11 +103,43 @@ export function heureVueToBL(v: string | null | undefined): string | null {
   return `${m[1].padStart(2, "0")}:${(m[2] || "0").padStart(2, "0")}:00`;
 }
 
+/**
+ * Drapeau « transporteur par défaut » d'une ligne TRCL — lecture TOLÉRANTE.
+ *
+ * Dans l'UDT SAP la colonne est `U_TrspDef` ('O' = défaut, 'N' sinon), mais la
+ * vue SL (B1SLQuery) peut la renvoyer avec une autre casse (U_TRSPDEF…), un
+ * alias (TrspDef, U_Defaut…) ou une valeur 'Y'. Ne reconnaître QUE
+ * `U_TrspDef === 'O'` faisait retomber silencieusement le défaut sur la 1ʳᵉ
+ * ligne de la vue — d'où des BL créés avec le MAUVAIS transporteur alors que
+ * SAP affiche bien le 'O'.
+ */
+function rowIsDefault(r: TrclRow): boolean {
+  const rec = r as Record<string, unknown>;
+  for (const k of Object.keys(rec)) {
+    const kl = k.toLowerCase();
+    if (kl === "u_trspdef" || kl === "trspdef" || kl === "u_defaut" || kl === "defaut" || kl === "u_def") {
+      const v = String(rec[k] ?? "").trim().toUpperCase();
+      return v === "O" || v === "Y" || v === "OUI" || v === "1" || v === "TRUE";
+    }
+  }
+  return false;
+}
+
+/** Vrai si la ligne porte AU MOINS une colonne « défaut » (peu importe la valeur). */
+function rowHasDefaultColumn(r: TrclRow): boolean {
+  return Object.keys(r as Record<string, unknown>).some((k) => {
+    const kl = k.toLowerCase();
+    return kl === "u_trspdef" || kl === "trspdef" || kl === "u_defaut" || kl === "defaut" || kl === "u_def";
+  });
+}
+
 // Cache des lignes brutes de la vue par client (évite de re-lire la vue pour la
 // prise de commande ET l'écran livraison — même TTL que le résultat).
 const trclRowsCache = new Map<string, { at: number; rows: TrclRow[] }>();
 
-/** Lignes SERG_TRCL d'un client via la vue v2 (null si la lecture échoue). */
+/** Lignes SERG_TRCL d'un client via la vue v2 (null si la lecture échoue).
+ *  Repli : si le filtre exact ne renvoie RIEN (casse/espaces du CardCode côté
+ *  vue), on retente via la vue COMPLÈTE en cache, indexée insensible à la casse. */
 async function fetchTrclRows(cardCode: string): Promise<TrclRow[] | null> {
   const key = cardCode.trim().toUpperCase();
   const hit = trclRowsCache.get(key);
@@ -118,8 +150,21 @@ async function fetchTrclRows(cardCode: string): Promise<TrclRow[] | null> {
       top: 100,
       env: "prod",
     });
-    trclRowsCache.set(key, { at: Date.now(), rows });
-    return rows;
+    if (rows.length > 0) {
+      trclRowsCache.set(key, { at: Date.now(), rows });
+      return rows;
+    }
+    // 0 ligne sur le filtre exact → la vue stocke peut-être le CardCode avec une
+    // autre casse / des espaces : la vue complète (indexée .trim().toUpperCase())
+    // reste la source la plus fiable.
+    const byCard = await getAllTrclRowsByCard();
+    const fromAll = byCard?.get(key) ?? null;
+    if (fromAll && fromAll.length > 0) {
+      trclRowsCache.set(key, { at: Date.now(), rows: fromAll });
+      return fromAll;
+    }
+    trclRowsCache.set(key, { at: Date.now(), rows: [] });
+    return [];
   } catch (e) {
     console.warn(`[clientCarriers] Lecture vue ${TRCL_VIEW} échouée (${cardCode}), fallback histogramme:`, (e as Error).message);
     return null;
@@ -266,27 +311,51 @@ async function ensureCarrier(code: string): Promise<CarrierRow | null> {
 /** Construit la liste depuis les lignes SERG_TRCL du client. */
 async function buildFromTrcl(rows: TrclRow[]): Promise<ClientCarriersResult | null> {
   // Une ligne = un couple (transporteur, tournée). Dédoublonne par TrspCode en
-  // agrégeant les tournées ; la ligne U_TrspDef='O' (ou à défaut la 1ʳᵉ) est
-  // la ligne principale → priorité 2 et tête de liste.
-  const byCode = new Map<string, { tours: string[]; isDefault: boolean; order: number; heure: string | null }>();
+  // agrégeant les tournées ; la ligne U_TrspDef='O' (lecture tolérante, cf.
+  // rowIsDefault — ou à défaut la 1ʳᵉ) est la ligne principale → priorité 2 et
+  // tête de liste. La tournée/heure de la ligne 'O' PRIME sur celles des autres
+  // lignes du même transporteur (c'est elle que l'utilisateur a désignée).
+  const byCode = new Map<string, { tours: string[]; isDefault: boolean; order: number; heure: string | null; defHeure: string | null; defTour: string | null }>();
   rows.forEach((r, i) => {
     const code = (r.U_TrspCode ?? "").toString().trim().toUpperCase();
     if (!code) return; // lignes « vides » de la vue (slots non affectés) ignorées
     const tour = (r.U_DistBy ?? "").toString().trim();
-    const cur = byCode.get(code) ?? { tours: [], isDefault: false, order: i, heure: null };
+    const cur = byCode.get(code) ?? { tours: [], isDefault: false, order: i, heure: null, defHeure: null, defTour: null };
     if (tour && !cur.tours.includes(tour)) cur.tours.push(tour);
     if (!cur.heure) cur.heure = heureVueToBL(r.U_Heure);  // 1re heure non vide
-    if ((r.U_TrspDef ?? "").toString().trim().toUpperCase() === "O") cur.isDefault = true;
+    if (rowIsDefault(r)) {
+      cur.isDefault = true;
+      if (!cur.defHeure) cur.defHeure = heureVueToBL(r.U_Heure);
+      if (!cur.defTour && tour) cur.defTour = tour;
+    }
     byCode.set(code, cur);
   });
   if (byCode.size === 0) return null; // client absent de l'UDT → fallback
+
+  // Ligne 'O' → son heure/sa tournée deviennent la référence du transporteur.
+  for (const v of byCode.values()) {
+    if (v.defHeure) v.heure = v.defHeure;
+    if (v.defTour) v.tours = [v.defTour, ...v.tours.filter((t) => t !== v.defTour)];
+  }
 
   // Ligne principale en tête (défaut), puis ordre des lignes de l'UDT.
   const entries = Array.from(byCode.entries()).sort((a, b) =>
     Number(b[1].isDefault) - Number(a[1].isDefault) || a[1].order - b[1].order,
   );
   // Si aucune ligne U_TrspDef='O', la 1ʳᵉ/unique ligne fait office de défaut.
-  if (!entries.some(([, v]) => v.isDefault)) entries[0][1].isDefault = true;
+  // Si la VUE n'expose aucune colonne « défaut », on le signale : le défaut
+  // affiché ne reflète alors PAS le 'O' de SAP → étendre la vue B1SLQuery
+  // (GERVI_SERG_TRCL) pour inclure U_TrspDef.
+  if (!entries.some(([, v]) => v.isDefault)) {
+    if (rows.length > 0 && !rows.some(rowHasDefaultColumn)) {
+      console.warn(
+        `[clientCarriers] La vue ${TRCL_VIEW} n'expose pas la colonne U_TrspDef — ` +
+        `le transporteur par défaut (colonne 'O' dans SAP) ne peut pas être respecté ; ` +
+        `repli sur la 1ʳᵉ ligne. Ajoutez U_TrspDef au SELECT de la vue SAP.`,
+      );
+    }
+    entries[0][1].isDefault = true;
+  }
 
   const carriers: ClientCarrierStat[] = [];
   for (const [code, info] of entries) {
