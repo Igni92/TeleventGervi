@@ -37,6 +37,8 @@ export interface CarrierOption {
   count?: number;          // nb de cdes (source history) / priorité (trcl)
   tour?: string | null;    // tournée(s) TRCL (U_DistBy), ex. "NORD" ou "NORD / SUD"
   heure?: string | null;   // heure TRCL ("HH:MM:SS")
+  /** Tournées de CE transporteur sur la FICHE CLIENT (SERG_TRCL), défaut en tête. */
+  tournees?: { nom: string; heure: string | null }[];
 }
 
 export interface SavedTournee {
@@ -84,20 +86,31 @@ function loadTournees(code: string): Promise<TourneeOption[]> {
   return p;
 }
 
-/** Restreint le catalogue SERGTRS du transporteur aux tournées définies pour
- *  CE client dans SERG_TRCL (U_DistBy). Un client n'est livré que sur SES
- *  tournées (ex. Auchan Cambrai : ANTOINE → NORD uniquement) — proposer tout le
- *  catalogue du transporteur ouvrait la porte aux erreurs. Sans info TRCL, ou
- *  si aucun nom TRCL ne matche le catalogue (libellés divergents), on garde le
- *  catalogue complet (sécurité : mieux vaut trop de choix que zéro). */
-export function restrictToClientTournees(
-  list: TourneeOption[],
+/** Options de tournée pour un transporteur = les tournées de la FICHE CLIENT
+ *  (SERG_TRCL : couples U_TrspCode × U_DistBy), et RIEN d'autre. Un client
+ *  n'est livré que sur SES tournées : Auchan Cambrai (une seule ligne
+ *  ANTOINE × NORD) → une seule option.
+ *
+ *  Le catalogue SERGTRS ne sert qu'à ENRICHIR chaque tournée de la fiche
+ *  (lineId + désignation + heure de repli) quand le nom matche ; une tournée
+ *  de la fiche absente du catalogue est proposée quand même (option
+ *  « synthétique », lineId négatif — neutralisé au POST). L'heure de la fiche
+ *  (ENLEVT) prime sur celle du catalogue.
+ *
+ *  Repli : client sans tournée sur sa fiche (ou source historique) → catalogue
+ *  complet du transporteur (comportement d'avant). */
+export function clientTourneeOptions(
+  catalog: TourneeOption[],
   carrier: CarrierOption | null,
 ): TourneeOption[] {
-  const noms = (carrier?.tour ?? "").split(" / ").map((s) => s.trim().toUpperCase()).filter(Boolean);
-  if (!noms.length) return list;
-  const kept = list.filter((t) => t.nom && noms.includes(t.nom.trim().toUpperCase()));
-  return kept.length ? kept : list;
+  const fiche = (carrier?.tournees ?? []).filter((t) => t.nom?.trim());
+  if (!fiche.length) return catalog;
+  return fiche.map((tc, i) => {
+    const nom = tc.nom.trim();
+    const match = catalog.find((t) => t.nom && t.nom.trim().toUpperCase() === nom.toUpperCase());
+    if (match) return tc.heure && match.heure !== tc.heure ? { ...match, heure: tc.heure } : match;
+    return { lineId: -(i + 1), nom, des: "", heure: tc.heure };
+  });
 }
 
 /** Tournée par défaut à pré-sélectionner (lineId en string, "" si aucune).
@@ -166,10 +179,17 @@ export function useTourneeSelection(clientId: string, enabled: boolean = true) {
         const r = await fetch(`/api/clients/${clientId}/carriers`);
         if (r.ok) {
           const d = await r.json();
-          type ApiCarrier = { id: string; name: string; sapValue?: string | null; count?: number; tour?: string | null; heure?: string | null };
+          type ApiCarrier = {
+            id: string; name: string; sapValue?: string | null; count?: number;
+            tour?: string | null; heure?: string | null;
+            tournees?: { nom: string; heure: string | null }[];
+          };
           list = ((d?.carriers ?? []) as ApiCarrier[])
             .filter((c) => typeof c.sapValue === "string" && c.sapValue.trim())
-            .map((c) => ({ id: c.id, name: c.name, sapValue: c.sapValue!.trim(), count: c.count, tour: c.tour ?? null, heure: c.heure ?? null }));
+            .map((c) => ({
+              id: c.id, name: c.name, sapValue: c.sapValue!.trim(), count: c.count,
+              tour: c.tour ?? null, heure: c.heure ?? null, tournees: c.tournees,
+            }));
           saved = (d?.savedTournee ?? null) as SavedTournee | null;
           const def = list.find((c) => c.id === d?.defaultId);
           if (def) defaultSap = def.sapValue;
@@ -210,12 +230,13 @@ export function useTourneeSelection(clientId: string, enabled: boolean = true) {
     setTournees(undefined); setTourneeId("");
     loadTournees(carrierSap).then((list) => {
       if (cancelled) return;
-      // Catalogue SERGTRS restreint aux tournées du CLIENT (SERG_TRCL) : un
-      // client avec une seule ligne (ex. ANTOINE → NORD) n'a qu'UNE tournée
-      // proposée — et elle est pré-sélectionnée d'office (tournée unique).
-      const restricted = restrictToClientTournees(list, carrierEntry);
-      setTournees(restricted);
-      setTourneeId(pickDefaultTournee(restricted, carrierEntry, savedTournee));
+      // Options = les tournées de la FICHE CLIENT (SERG_TRCL) uniquement : un
+      // client avec une seule ligne (ex. ANTOINE × NORD) n'a qu'UNE tournée
+      // proposée — pré-sélectionnée d'office. Catalogue complet seulement si
+      // la fiche ne porte aucune tournée.
+      const options = clientTourneeOptions(list, carrierEntry);
+      setTournees(options);
+      setTourneeId(pickDefaultTournee(options, carrierEntry, savedTournee));
     });
     return () => { cancelled = true; };
     // carrierEntry/savedTournee suivent carrierSap (même cycle de chargement).
@@ -254,7 +275,9 @@ export function useTourneeSelection(clientId: string, enabled: boolean = true) {
     return {
       trspCode: carrierSap,
       ...(t?.heure ? { trspHeure: t.heure } : {}),
-      ...(t ? { tournee: { nom: t.nom || null, des: t.des || null, lineId: t.lineId } } : {}),
+      // lineId négatif = option synthétique (tournée de la fiche client absente
+      // du catalogue SERGTRS) → pas de lineId mémorisé, le nom/l'heure suffisent.
+      ...(t ? { tournee: { nom: t.nom || null, des: t.des || null, lineId: t.lineId >= 0 ? t.lineId : null } } : {}),
     };
   }, [carrierSap, selectedTournee]);
 

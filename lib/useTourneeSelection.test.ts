@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickDefaultTournee, restrictToClientTournees, type TourneeOption, type CarrierOption, type SavedTournee } from "./useTourneeSelection";
+import { pickDefaultTournee, clientTourneeOptions, type TourneeOption, type CarrierOption, type SavedTournee } from "./useTourneeSelection";
 
 /** Fabrique une option de tournée SERGTRS. */
 const t = (lineId: number, nom: string, heure: string | null, des = ""): TourneeOption =>
@@ -90,36 +90,51 @@ describe("pickDefaultTournee — pré-sélection de la tournée par défaut", ()
   });
 });
 
-describe("restrictToClientTournees — catalogue restreint aux tournées du client (SERG_TRCL)", () => {
+describe("clientTourneeOptions — les tournées de la FICHE CLIENT (SERG_TRCL), rien d'autre", () => {
   const catalogue = [
-    t(0, "NORD", "05:00:00"),
-    t(1, "IDF", "10:30:00"),
+    t(0, "NORD", "05:00:00", "62"),
+    t(1, "IDF", "10:30:00", "91"),
     t(2, "SUD", "22:00:00"),
   ];
 
-  it("une seule ligne TRCL (ex. Auchan Cambrai : ANTOINE → NORD) → une seule tournée proposée", () => {
-    const kept = restrictToClientTournees(catalogue, carrier({ tour: "NORD" }));
-    expect(kept.map((x) => x.nom)).toEqual(["NORD"]);
+  it("une seule ligne fiche (Auchan Cambrai : ANTOINE × NORD) → une seule option, pré-sélectionnée", () => {
+    const c = carrier({ tour: "NORD", tournees: [{ nom: "NORD", heure: "10:30:00" }] });
+    const opts = clientTourneeOptions(catalogue, c);
+    expect(opts.map((x) => x.nom)).toEqual(["NORD"]);
+    // heure de la FICHE (ENLEVT) prioritaire sur celle du catalogue.
+    expect(opts[0].heure).toBe("10:30:00");
+    // lineId/désignation repris du catalogue quand le nom matche.
+    expect(opts[0].lineId).toBe(0);
+    expect(opts[0].des).toBe("62");
     // …et la tournée unique est pré-sélectionnée d'office.
-    expect(pickDefaultTournee(kept, carrier({ tour: "NORD" }), null)).toBe("0");
+    expect(pickDefaultTournee(opts, c, null)).toBe("0");
   });
 
-  it("plusieurs tournées TRCL → seules celles-ci sont proposées", () => {
-    const kept = restrictToClientTournees(catalogue, carrier({ tour: "NORD / SUD" }));
-    expect(kept.map((x) => x.nom)).toEqual(["NORD", "SUD"]);
+  it("plusieurs tournées fiche → seules celles-ci, dans l'ordre de la fiche (défaut en tête)", () => {
+    const c = carrier({ tournees: [{ nom: "SUD", heure: null }, { nom: "NORD", heure: null }] });
+    const opts = clientTourneeOptions(catalogue, c);
+    expect(opts.map((x) => x.nom)).toEqual(["SUD", "NORD"]);
   });
 
-  it("sans info TRCL (tour vide/absent) → catalogue complet", () => {
-    expect(restrictToClientTournees(catalogue, carrier())).toHaveLength(3);
-    expect(restrictToClientTournees(catalogue, null)).toHaveLength(3);
+  it("tournée fiche ABSENTE du catalogue → proposée quand même (option synthétique)", () => {
+    const c = carrier({ tournees: [{ nom: "TOURNEE SPECIALE", heure: "04:00:00" }] });
+    const opts = clientTourneeOptions(catalogue, c);
+    expect(opts).toHaveLength(1);
+    expect(opts[0].nom).toBe("TOURNEE SPECIALE");
+    expect(opts[0].heure).toBe("04:00:00");
+    expect(opts[0].lineId).toBeLessThan(0);   // synthétique → lineId neutralisé au POST
   });
 
-  it("aucun nom TRCL ne matche le catalogue → catalogue complet (sécurité)", () => {
-    expect(restrictToClientTournees(catalogue, carrier({ tour: "INCONNUE" }))).toHaveLength(3);
+  it("fiche sans tournée (ou source historique) → catalogue complet (repli)", () => {
+    expect(clientTourneeOptions(catalogue, carrier())).toHaveLength(3);
+    expect(clientTourneeOptions(catalogue, carrier({ tournees: [] }))).toHaveLength(3);
+    expect(clientTourneeOptions(catalogue, null)).toHaveLength(3);
   });
 
-  it("insensible à la casse et aux espaces", () => {
-    const kept = restrictToClientTournees(catalogue, carrier({ tour: " nord " }));
-    expect(kept.map((x) => x.nom)).toEqual(["NORD"]);
+  it("match nom insensible à la casse/espaces ; heure du catalogue conservée si la fiche n'en a pas", () => {
+    const c = carrier({ tournees: [{ nom: " nord ", heure: null }] });
+    const opts = clientTourneeOptions(catalogue, c);
+    expect(opts[0].lineId).toBe(0);
+    expect(opts[0].heure).toBe("05:00:00");
   });
 });
