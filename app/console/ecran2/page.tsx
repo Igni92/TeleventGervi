@@ -8,6 +8,7 @@ import {
   ArrowLeft, Truck, MessageSquareText, Search,
 } from "lucide-react";
 import { Ecran2Order } from "@/components/console/Ecran2Order";
+import { PromoBanner } from "@/components/promos/PromoBanner";
 import { rememberConsoleScreen } from "@/components/console/ConsoleScreenGate";
 import { Input } from "@/components/ui/input";
 import {
@@ -94,6 +95,9 @@ export default function Ecran2Page() {
 
   return (
     <div className="h-full flex flex-col gap-3 animate-fade-up min-h-0">
+      {/* ── Bandeau PROMOTIONS — barre tout en haut de l'écran ── */}
+      <PromoBanner context="commande" />
+
       <ClientBanner
         clientId={clientId} clientName={clientName} info={info}
         manual={manual != null} onPick={pickManual} onClearManual={clearManual}
@@ -132,7 +136,7 @@ export default function Ecran2Page() {
 
 /** C3 — Retour volontaire à l'Écran 1 dans CETTE fenêtre : on réécrit la
  *  mémoire d'écran AVANT de naviguer, sinon le Gate de /console nous
- *  renverrait immédiatement ici. */
+ *  renverrait immédiatement ici. Icône seule (plus de libellé texte). */
 function Ecran1Link() {
   const router = useRouter();
   return (
@@ -140,9 +144,10 @@ function Ecran1Link() {
       type="button"
       onClick={() => { rememberConsoleScreen("ecran1"); router.push("/console"); }}
       title="Revenir à l'Écran 1 (file d'appel) dans cette fenêtre"
-      className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-muted-foreground hover:text-brand-600 dark:hover:text-brand-400 hover:underline shrink-0"
+      aria-label="Revenir à l'Écran 1"
+      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-brand-600 dark:hover:text-brand-400 hover:bg-secondary/60 transition-colors shrink-0"
     >
-      <ArrowLeft className="h-3 w-3" /> Écran 1
+      <ArrowLeft className="h-3.5 w-3.5" />
     </button>
   );
 }
@@ -179,19 +184,15 @@ function ClientBanner({
 
   if (!clientName) {
     return (
-      <div className="shrink-0 space-y-2.5">
-        {searchRow}
-        <header className="panel px-4 py-3">
-          <div className="flex items-center justify-between gap-2">
-            <p className="kicker mb-0.5 inline-flex items-center gap-1.5">
-              <MonitorSmartphone className="h-3 w-3" /> Écran 2 · synchronisé
-            </p>
-            <Ecran1Link />
-          </div>
-          <h1 className="text-[19px] font-semibold tracking-tight text-muted-foreground">
+      <div className="shrink-0 flex flex-col-reverse lg:flex-row lg:items-center lg:justify-between gap-2">
+        <header className="panel w-fit max-w-full px-3.5 py-2 flex items-center gap-2.5">
+          <h1 className="text-[15px] font-semibold tracking-tight text-muted-foreground">
             En attente d&apos;un client…
           </h1>
+          <Ecran1Link />
         </header>
+        {/* Recherche d'un compte — en haut à DROITE */}
+        <div className="w-full lg:w-[320px] shrink-0">{searchRow}</div>
       </div>
     );
   }
@@ -208,13 +209,9 @@ function ClientBanner({
   //    informations commerce (interlocuteurs, habitudes, commercial, e-mail…)
   //    vivent sur l'Écran 1. Une seule ligne, largeur au contenu (w-fit).
   return (
-    <div className="shrink-0 flex flex-col lg:flex-row lg:items-start gap-2">
-      <div className="w-full lg:w-[300px] shrink-0">{searchRow}</div>
+    <div className="shrink-0 flex flex-col-reverse lg:flex-row lg:items-start lg:justify-between gap-2">
       <header className="panel w-fit max-w-full px-3.5 py-1.5">
         <div className="flex items-center gap-2.5 flex-wrap min-w-0">
-          <span className="kicker !mb-0 inline-flex items-center gap-1.5 shrink-0">
-            <MonitorSmartphone className="h-3 w-3" /> {manual ? "Recherché" : "Écran 2"}
-          </span>
           {/* Le nom EST le lien vers la fiche complète. */}
           {clientId ? (
             <Link
@@ -269,6 +266,8 @@ function ClientBanner({
         {/* Notes des dernières commandes (vraies remarques) — utile à la saisie */}
         <OrderNotes docs={deliveryDocs} compact />
       </header>
+      {/* Recherche d'un compte — en haut à DROITE */}
+      <div className="w-full lg:w-[320px] shrink-0">{searchRow}</div>
     </div>
   );
 }

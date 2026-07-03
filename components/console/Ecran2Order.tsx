@@ -5,14 +5,13 @@ import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ChevronDown, ChevronRight, ChevronUp, Search, Plus, Trash2,
   ShoppingCart, Check, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock, X,
-  History, BadgeEuro,
+  History, BadgeEuro, ArrowRightLeft,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { PromoBanner } from "@/components/promos/PromoBanner";
 import { BrandLogo } from "@/components/BrandLogo";
 import { useBrandLogos } from "@/lib/useBrandLogos";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
@@ -752,9 +751,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
         ...(tourneePayload() ?? {}),
         deliveryDate: new Date(deliveryDate).toISOString(),
         numAtCard: numAtCard.trim() || undefined, confirmEncours, lines: apiLines,
-        // Texte du BL : la saisie du bandeau haut prime ; sinon récap promo auto
-        // (comportement historique) ; undefined → champ omis.
-        comments: comments.trim() || buildPromoComment(),
+        // Texte du BL : note saisie + mention promo (undefined → champ omis).
+        comments: [comments.trim(), buildPromoComment()].filter(Boolean).join(" · ") || undefined,
       }),
     });
 
@@ -771,7 +769,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
         description: "Affecte les lots dans « Détail livraison » puis crée le BL.",
         duration: 10000,
       });
-      setCart([]); setNumAtCard("");
+      setCart([]); setNumAtCard(""); setComments("");
       return true;
     }
     const fmt = (n: number | null | undefined) => n != null ? n.toFixed(2) : "—";
@@ -1002,6 +1000,39 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   // ── Onglet TARIF : catalogue à plat + ajout d'une cotation ──
   const allProducts = useMemo(() => Object.values(grouped).flat(), [grouped]);
   const productByCode = useMemo(() => new Map(allProducts.map((p) => [p.itemCode, p])), [allProducts]);
+
+  // ── TRANSLATION d'article (clic droit sur une ligne panier) : remplace
+  //    l'article par un autre en CONSERVANT la quantité et le prix. ──
+  const [swapFor, setSwapFor] = useState<number | null>(null);
+  const [swapQuery, setSwapQuery] = useState("");
+  const swapResults = useMemo(() => {
+    const qq = swapQuery.trim().toLowerCase();
+    const base = qq
+      ? allProducts.filter((p) => (p.itemName + p.itemCode).toLowerCase().includes(qq))
+      : allProducts;
+    return base.slice(0, 15);
+  }, [allProducts, swapQuery]);
+  const doSwap = (p: Product) => {
+    if (swapFor === null) return;
+    const old = cart[swapFor];
+    if (!old) { setSwapFor(null); return; }
+    if (cart.some((l, k) => k !== swapFor && l.itemCode === p.itemCode)) {
+      toast.info(`${p.itemName} est déjà au panier`);
+      return;
+    }
+    setCart((cur) => {
+      const cible = cur[swapFor];
+      if (!cible) return cur;
+      const next = cur.slice();
+      // Quantité + prix CONSERVÉS ; promo non ré-appliquée. En modification,
+      // l'ancienne ligne du BL est remplacée (nouvel article = nouvelle ligne).
+      next[swapFor] = buildLine(p, { quantity: cible.quantity, price: cible.price, noPromo: true });
+      return next;
+    });
+    toast.success(`${old.itemName} → ${p.itemName}`, { description: "Quantité et prix conservés." });
+    setSwapFor(null);
+    setSwapQuery("");
+  };
   const [tarifQuery, setTarifQuery] = useState("");
   const [tarifAdding, setTarifAdding] = useState(false);
   const addTarif = async () => {
@@ -1032,21 +1063,12 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
 
   return (
     <div className="flex flex-col h-full min-h-0 gap-1.5">
-      {/* ── C2 — Bandeau promotions (contenu/visibilité gérés par le composant) ── */}
-      <PromoBanner context="commande" />
-
-      {/* ── Bandeau HAUT ultra-compact (une seule ligne, hauteur mini) : contexte
-             de modification + n° de commande (réf. client) + texte sur le BL —
-             création ET modification. Chaque pixel vertical gagné revient à la
-             liste produits. ── */}
-      <div
-        className={`shrink-0 flex items-center gap-x-2 rounded-md border px-2 py-1 ${
-          modif
-            ? "border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15"
-            : "border-border bg-card"
-        }`}
-      >
-        {modif && (
+      {/* (Bandeau promotions déplacé tout en haut de l'écran — cf. page Écran 2.) */}
+      {/* ── Bandeau MODIFICATION ultra-compact (une ligne) : contexte du BL en
+             cours d'édition + Quitter. La réf. client et le texte du BL vivent
+             dans la colonne COMMANDE (côte à côte, comme transporteur/tournée). ── */}
+      {modif && (
+        <div className="shrink-0 flex items-center gap-x-2 rounded-md border px-2 py-1 border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15">
           <span
             className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-amber-800 dark:text-amber-200 shrink-0"
             title={`Modification du BL #${modif.docNum} — modifie, supprime ou ajoute des lignes, enregistré sur ce même BL${
@@ -1061,53 +1083,24 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             )}
             {prefilling && <Loader2 className="h-3 w-3 animate-spin" />}
           </span>
-        )}
-        {modif && modifMeta?.editable === false && (
-          <span className="text-[10.5px] font-medium text-rose-600 dark:text-rose-400 shrink-0" title="Commande clôturée — la modification sera refusée par SAP.">
-            ⚠️ clôturée
-          </span>
-        )}
-        <input
-          value={numAtCard}
-          onChange={(e) => setNumAtCard(e.target.value)}
-          placeholder="N° de commande (réf. client)"
-          aria-label="N° de commande (réf. client)"
-          className="h-[26px] w-[170px] rounded border border-border bg-background text-[12px] px-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
-        />
-        <input
-          value={comments}
-          onChange={(e) => setComments(e.target.value)}
-          maxLength={254}
-          placeholder="Texte sur le BL (note, promo…)"
-          aria-label="Ligne texte sur le BL"
-          title="Ligne texte du BL (colonne « T » dans SAP) — note / promo"
-          className="h-[26px] flex-1 min-w-[120px] rounded border border-border bg-background text-[12px] px-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
-        />
-        {cart.some((l) => l.promo) && (
-          <button
-            type="button"
-            onClick={() => setComments((c) => {
-              const t = buildPromoComment();
-              if (!t) return c;
-              return c.trim() ? `${c.trim()} · ${t}` : t;
-            })}
-            title="Insérer le récap des promos du panier dans le texte du BL"
-            className="inline-flex items-center gap-1 shrink-0 text-[10.5px] font-semibold text-rose-600 dark:text-rose-400 hover:underline"
-          >
-            <Megaphone className="h-3 w-3" /> Promo
-          </button>
-        )}
-        {modif && onExitModif && (
-          <button
-            type="button"
-            onClick={onExitModif}
-            title="Quitter la modification et revenir à la saisie normale (synchro écran 1)"
-            className="inline-flex shrink-0 items-center gap-1 h-[26px] px-2 rounded bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-semibold active:scale-[0.98] transition-colors"
-          >
-            <X className="h-3 w-3" /> Quitter
-          </button>
-        )}
-      </div>
+          {modifMeta?.editable === false && (
+            <span className="text-[10.5px] font-medium text-rose-600 dark:text-rose-400 shrink-0" title="Commande clôturée — la modification sera refusée par SAP.">
+              ⚠️ clôturée
+            </span>
+          )}
+          <span className="flex-1" />
+          {onExitModif && (
+            <button
+              type="button"
+              onClick={onExitModif}
+              title="Quitter la modification et revenir à la saisie normale (synchro écran 1)"
+              className="inline-flex shrink-0 items-center gap-1 h-[26px] px-2 rounded bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-semibold active:scale-[0.98] transition-colors"
+            >
+              <X className="h-3 w-3" /> Quitter
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="flex gap-3 flex-1 min-h-0">
       {/* ── Colonne STOCK (cliquable) — grille alignée, dense ──
@@ -1553,7 +1546,20 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
               });
             };
             return (
-              <div key={i} className={`rounded-lg border p-2 ${sellShort ? "border-rose-400/60 bg-rose-50/40 dark:bg-rose-950/15" : "border-border"}`}>
+              <div
+                key={i}
+                onContextMenu={(e) => {
+                  // Clic droit = TRANSLATION d'article (quantité + prix conservés).
+                  const el = e.target as HTMLElement;
+                  if (el.closest("input, select, textarea")) return;   // menu natif dans les champs
+                  e.preventDefault();
+                  if (locked) return;
+                  setSwapQuery("");
+                  setSwapFor(i);
+                }}
+                title="Clic droit : remplacer l'article (quantité et prix conservés)"
+                className={`rounded-lg border p-2 ${sellShort ? "border-rose-400/60 bg-rose-50/40 dark:bg-rose-950/15" : "border-border"}`}
+              >
                 <div className="flex items-start justify-between gap-1.5">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-x-1.5 gap-y-1 flex-wrap">
@@ -1757,10 +1763,47 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                   aria-label="Date de livraison"
                   className="flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2" />
               </div>
+              {/* Réf. client + TEXTE du BL côte à côte (même rangée que transporteur/tournée). */}
+              <div className="flex gap-1.5">
+                <input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="N° de commande (réf. client)"
+                  aria-label="N° de commande (réf. client)"
+                  className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13.5px] px-2" />
+                <input value={comments} onChange={(e) => setComments(e.target.value)} maxLength={254}
+                  placeholder="Texte sur le BL (note)"
+                  aria-label="Texte sur le BL"
+                  className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13.5px] px-2" />
+              </div>
             </>
           )}
-          {/* N° de commande (réf. client) + ligne texte du BL : déplacés dans le
-              bandeau HAUT (création et modification) — le panier reste dédié aux lignes. */}
+          {/* Modification : N° de commande (réf. client) + ligne TEXTE du BL,
+              CÔTE À CÔTE (même rangée que transporteur/tournée à la création). */}
+          {modif && (
+            <div className="space-y-1">
+              {cart.some((l) => l.promo) && (
+                <div className="flex justify-end">
+                  <button type="button"
+                    onClick={() => setComments((c) => {
+                      const t = buildPromoComment();
+                      if (!t) return c;
+                      return c.trim() ? `${c.trim()} · ${t}` : t;
+                    })}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline">
+                    <Megaphone className="h-3 w-3" /> Insérer le texte promo
+                  </button>
+                </div>
+              )}
+              <div className="flex gap-1.5">
+                <input id="bl-numatcard" value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)}
+                  placeholder="N° de commande (réf. client)"
+                  aria-label="N° de commande (réf. client)"
+                  className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13.5px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                <input id="bl-note" value={comments} onChange={(e) => setComments(e.target.value)}
+                  maxLength={254} placeholder="Texte sur le BL (note/promo)"
+                  aria-label="Ligne texte sur le BL"
+                  className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between text-[14px]">
             <span className="text-muted-foreground">{modif ? "Total HT du BL" : "Total HT estimé"}</span>
             <span className="font-bold tnum text-foreground">{totalHT.toFixed(2)} €</span>
@@ -1777,6 +1820,63 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       </div>
       </div>{/* /flex deux colonnes */}
 
+
+      {/* ── Translation d'article (clic droit sur une ligne panier) ── */}
+      <Dialog open={swapFor !== null} onOpenChange={(o) => { if (!o) { setSwapFor(null); setSwapQuery(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[16px]">
+              <ArrowRightLeft className="h-4 w-4 text-brand-600 dark:text-brand-400" /> Remplacer l&apos;article
+            </DialogTitle>
+            <DialogDescription className="text-[12.5px]">
+              {swapFor !== null && cart[swapFor] ? (
+                <>Remplace <b className="text-foreground">{cart[swapFor].itemName}</b> par un autre article —
+                la quantité ({cart[swapFor].quantity} {cart[swapFor].unit}) et le prix
+                {cart[swapFor].price != null ? ` (${cart[swapFor].price!.toFixed(2)} €/${cart[swapFor].priceUnit})` : ""} sont conservés.</>
+              ) : "Choisis l'article de remplacement."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              autoFocus
+              value={swapQuery}
+              onChange={(e) => setSwapQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && swapResults[0]) { e.preventDefault(); doSwap(swapResults[0]); } }}
+              placeholder="Chercher l'article de remplacement…"
+              className="w-full h-10 pl-9 pr-2 rounded-md border border-border bg-background text-[14px] focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          <ul className="max-h-[320px] overflow-y-auto divide-y divide-border/40 rounded-lg border border-border">
+            {swapResults.map((p) => {
+              const { packDivisor, displayUnit } = unitInfo(p.salesUnit, p.salesQtyPerPackUnit);
+              const total = ["R1", "01", "000"].reduce((s, w) => s + (p.stockByWarehouse[w]?.available ?? 0), 0) / packDivisor;
+              const already = cart.some((l, k) => k !== swapFor && l.itemCode === p.itemCode);
+              return (
+                <li key={p.itemCode}>
+                  <button
+                    type="button"
+                    disabled={already}
+                    onClick={() => doSwap(p)}
+                    className="w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-secondary/40 disabled:opacity-40 transition-colors"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[13.5px] font-medium text-foreground truncate">{p.itemName}</span>
+                      <span className="block font-mono text-[10.5px] text-muted-foreground/70">{p.itemCode}</span>
+                    </span>
+                    <span className={`shrink-0 text-[12px] font-semibold tnum ${total <= 0 ? "text-rose-500" : "text-muted-foreground"}`}>
+                      {total <= 0 ? "à découvert" : `${Math.floor(total)} ${displayUnit}`}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+            {swapResults.length === 0 && (
+              <li><p className="px-3 py-2.5 text-[12.5px] text-muted-foreground italic">Aucun article ne correspond.</p></li>
+            )}
+          </ul>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Modale de confirmation encours (remplace window.confirm) ── */}
       <Dialog open={!!encoursPrompt} onOpenChange={(o) => { if (!o) setEncoursPrompt(null); }}>
