@@ -10,7 +10,8 @@ import { notifyAll } from "@/lib/push";
 import { sap } from "@/lib/sapb1";
 import { mirrorCreatedOrder } from "@/lib/sapMirror";
 import { decrementLocalStock } from "@/lib/stockSync";
-import { getLotMaps, resolveLotDetailed, LOT_PENDING } from "@/lib/lotResolver";
+import { getLotMaps, resolveLotForSegment, LOT_PENDING } from "@/lib/lotResolver";
+import { getEmAffects } from "@/lib/emAffect";
 import { chooseLot } from "@/lib/gervifrais-calc";
 import { colisInfo } from "@/lib/colis";
 
@@ -173,7 +174,7 @@ export async function POST(req: NextRequest) {
   // ── 1. Resolve client + delivery mode → CardCode SAP ──
   const client = await prisma.client.findUnique({
     where: { id: body.clientId },
-    select: { id: true, code: true, nom: true },
+    select: { id: true, code: true, nom: true, type: true },
   });
   if (!client) return NextResponse.json({ error: "Client introuvable" }, { status: 404 });
 
@@ -271,8 +272,13 @@ export async function POST(req: NextRequest) {
   const ddgMaster   = expensesMasterPreloaded.get(3);    // DROIT DE GARDE → TPF3 DDG
   const TPF_AUTO    = (process.env.GERVIFRAIS_AUTO_TAX ?? "true") !== "false";
 
-  // Cartes des lots (EM<DocNum> du dernier bon de réception par item / item+entrepôt)
+  // Cartes des lots (EM<DocNum> des derniers bons de réception par item /
+  // item+entrepôt) + AFFECTATIONS des EM (Tous/Export/GMS/CHR, cf. lib/emAffect) :
+  // le lot d'une ligne est choisi PARMI les EM du segment du client — un BL GMS
+  // ne prend jamais le lot d'un arrivage dédié export, et inversement.
   const lotMaps = await getLotMaps();
+  const emAffects = await getEmAffects();
+  const clientSegment = (client.type ?? "").trim().toUpperCase() || null;
 
   // Stock dispo agrégé par itemCode (miroir local — peut être en retard).
   // Combiné avec QuantityOnStock SAP (sapStockByItem, cf. 2.1) dans chooseLot() :
@@ -346,15 +352,18 @@ export async function POST(req: NextRequest) {
     // === Numéro de lot (U_NoLot) — SYSTÉMATIQUE sur chaque ligne ===
     // (Bug BL 24011560 : la ligne fraise est partie sans lot exploitable.)
     // Décision pure & testée dans lib/gervifrais-calc.ts (chooseLot) :
-    //   • lot FIFO "EM<DocNum>" (dernier PDN item×entrepôt → item) si du stock
-    //     existe — stock = miroir local OU QuantityOnStock SAP (filet quand le
-    //     miroir est en retard, ex. fraises réceptionnées le matin même) ;
-    //   • sinon sentinel LOT_PENDING ("EM_PENDING") — vente à découvert ou
-    //     article hors fenêtre de scan PDN — réécrit par /api/sap/goods-receipts
-    //     à la prochaine entrée marchandise. Fini le fallback aveugle "EM0000".
+    //   • lot "EM<DocNum>" choisi PAR SEGMENT CLIENT (resolveLotForSegment) :
+    //     EM affectée au segment du client d'abord, sinon EM « Tous » (stock
+    //     commun) — jamais l'EM d'un autre segment (arrivage dédié export ≠
+    //     stock GMS). Nécessite du stock (miroir local OU QuantityOnStock SAP,
+    //     filet quand le miroir est en retard) ;
+    //   • sinon sentinel LOT_PENDING ("EM_PENDING") — vente à découvert, aucune
+    //     EM compatible avec le segment, ou article hors fenêtre de scan PDN —
+    //     réécrit par /api/sap/goods-receipts à la prochaine entrée marchandise
+    //     compatible. Fini le fallback aveugle "EM0000".
     const availLocal = availableByItem.get(l.itemCode) ?? 0;
     const sapOnHand = sapStockByItem.get(l.itemCode) ?? null;
-    const resolved = resolveLotDetailed(lotMaps, l.itemCode, l.warehouseCode);
+    const resolved = resolveLotForSegment(lotMaps, emAffects, l.itemCode, l.warehouseCode, clientSegment);
     const choice = chooseLot({
       resolvedLot: resolved.lot,
       localAvailable: availLocal,
@@ -363,7 +372,7 @@ export async function POST(req: NextRequest) {
     });
     line.U_NoLot = choice.lot;
     console.log(
-      `[Order] Lot ${l.itemCode}@${l.warehouseCode ?? "?"} → ${choice.lot} ` +
+      `[Order] Lot ${l.itemCode}@${l.warehouseCode ?? "?"} [seg ${clientSegment ?? "—"}] → ${choice.lot} ` +
       `(${choice.reason}${resolved.source ? `/${resolved.source}` : ""} — dispo locale ${availLocal}, stock SAP ${sapOnHand ?? "?"})`,
     );
 

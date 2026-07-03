@@ -7,6 +7,7 @@ import { isAgreeur, requirePreparateurOrAdmin } from "@/lib/permissions";
 import { incrementLocalStock } from "@/lib/stockSync";
 import { bumpLot, LOT_PENDING } from "@/lib/lotResolver";
 import { buildWhsBudget, remainingForItem, pickReceiptWarehouse, consumeBudget } from "@/lib/receiptRetro";
+import { normalizeEmAffect, setEmAffect } from "@/lib/emAffect";
 
 /**
  * POST /api/sap/goods-receipts
@@ -60,6 +61,11 @@ interface CreateBody {
   docDate?: string;       // date de réception (défaut : aujourd'hui)
   numAtCard?: string;
   comment?: string;
+  /** Affectation de l'EM à un segment client — « TOUS » (défaut), « EXPORT »,
+   *  « GMS » ou « CHR ». Une EM affectée réserve son lot au segment (choix du
+   *  lot à la saisie télévente) et sert ses commandes en PREMIER lors de la
+   *  propagation rétro ci-dessous. Cf. lib/emAffect. */
+  affect?: string;
   lines: InLine[];
 }
 
@@ -235,6 +241,16 @@ export async function POST(req: NextRequest) {
   // ── Cache des lots : injection immédiate pour les Orders qui suivent ──
   for (const l of body.lines) bumpLot(l.itemCode, l.warehouseCode, created.DocNum);
 
+  // ── Affectation de l'EM (Tous/Export/GMS/CHR) — persistée par DocNum. Pilote
+  //    le choix du lot à la saisie télévente (resolveLotForSegment) et la
+  //    priorité de la propagation rétro ci-dessous. Best-effort. ──
+  const affect = normalizeEmAffect(body.affect);
+  try {
+    await setEmAffect(created.DocNum, affect);
+  } catch (e) {
+    console.warn("[GoodsReceipt] Affectation EM non enregistrée (non-bloquant):", (e as Error).message);
+  }
+
   // ── Propagation rétro : patcher les BL ouverts du jour qui portent LOT_PENDING
   //    sur un item présent dans ce PDN. FIFO par DocEntry asc, dans la limite de
   //    la quantité reçue pour cet item.
@@ -263,6 +279,7 @@ export async function POST(req: NextRequest) {
     };
     type SapOrderForRetro = {
       DocEntry: number; DocNum: number; DocDate: string; DocumentStatus: string;
+      CardCode?: string;
       DocumentLines: SapOrderLine[];
     };
 
@@ -271,10 +288,46 @@ export async function POST(req: NextRequest) {
     // (PageSize de b1s.conf) quel que soit $top.
     const orders = await sap.getAll<SapOrderForRetro>(
       `Orders?$orderby=DocEntry asc`
-      + `&$select=DocEntry,DocNum,DocDate,DocumentStatus,DocumentLines`
+      + `&$select=DocEntry,DocNum,DocDate,DocumentStatus,CardCode,DocumentLines`
       + `&$filter=${encodeURIComponent(`DocDate eq '${today}' and DocumentStatus eq 'bost_Open'`)}`,
       { pageSize: 200 },
     );
+
+    // ── EM AFFECTÉE à un segment : ses commandes sont servies EN PREMIER (l'achat
+    //    de dernière minute a été fait pour elles — ex. export), le reste ensuite,
+    //    à chaque fois en FIFO DocEntry. Segment client = Client.type, avec repli
+    //    ClientDeliveryMode.sapCardCode → type du client parent (adresses de
+    //    livraison). Best-effort : en cas d'échec, FIFO historique. ──
+    if (affect !== "TOUS" && orders.length > 0) {
+      try {
+        const cc = [...new Set(orders.map((o) => o.CardCode).filter(Boolean))] as string[];
+        const typeByCard = new Map<string, string>();
+        if (cc.length) {
+          const clients = await prisma.client.findMany({
+            where: { code: { in: cc } },
+            select: { code: true, type: true },
+          });
+          for (const c of clients) if (c.type) typeByCard.set(c.code, c.type.trim().toUpperCase());
+          const modes = await prisma.clientDeliveryMode.findMany({
+            where: { sapCardCode: { in: cc } },
+            select: { sapCardCode: true, client: { select: { type: true } } },
+          });
+          for (const mo of modes) {
+            if (mo.client?.type && !typeByCard.has(mo.sapCardCode)) {
+              typeByCard.set(mo.sapCardCode, mo.client.type.trim().toUpperCase());
+            }
+          }
+        }
+        orders.sort((a, b) => {
+          const pa = typeByCard.get(a.CardCode ?? "") === affect ? 0 : 1;
+          const pb = typeByCard.get(b.CardCode ?? "") === affect ? 0 : 1;
+          return pa - pb || a.DocEntry - b.DocEntry;
+        });
+        console.log(`[GoodsReceipt] EM affectée ${affect} → commandes ${affect} servies en premier.`);
+      } catch (e) {
+        console.warn("[GoodsReceipt] Priorisation segment échouée (non-bloquant):", (e as Error).message);
+      }
+    }
 
     for (const ord of orders) {
       const patchLines: Record<string, unknown>[] = [];

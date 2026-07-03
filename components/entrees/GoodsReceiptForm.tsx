@@ -224,6 +224,10 @@ export function GoodsReceiptForm() {
   const [docDate, setDocDate] = useState(todayISO());
   const [numAtCard, setNumAtCard] = useState("");
   const [comment, setComment] = useState("");
+  // Affectation de l'EM à un segment client — « TOUS » (stock commun, défaut) ou
+  // un segment (achat de dernière minute dédié, ex. EXPORT) : réserve le lot au
+  // segment et sert ses commandes en premier à la propagation.
+  const [affect, setAffect] = useState<"TOUS" | "EXPORT" | "GMS" | "CHR">("TOUS");
   const [lines, setLines] = useState<Line[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [lastReceipt, setLastReceipt] = useState<{ docNum: number; lot: string } | null>(null);
@@ -290,7 +294,7 @@ export function GoodsReceiptForm() {
   }, 0);
 
   const reset = () => {
-    setSupplier(null); setDocDate(todayISO()); setNumAtCard(""); setComment(""); setLines([]);
+    setSupplier(null); setDocDate(todayISO()); setNumAtCard(""); setComment(""); setLines([]); setAffect("TOUS");
   };
 
   const submit = async () => {
@@ -313,6 +317,7 @@ export function GoodsReceiptForm() {
           docDate: docDate || undefined,
           numAtCard: numAtCard.trim() || undefined,
           comment: comment.trim() || undefined,
+          affect,
           lines: lines.map((l) => ({
             itemCode: l.itemCode,
             packageQuantity: l.packageQuantity,
@@ -395,6 +400,41 @@ export function GoodsReceiptForm() {
         <div className="space-y-1.5 sm:col-span-2">
           <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Référence (BL, Cde, F… — optionnel)</label>
           <Input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="ex. BL-2026-0123, F-2026-045…" />
+        </div>
+        {/* Affectation de l'arrivage : « Tous » = stock commun ; un segment =
+            achat dédié (ex. export) — son lot est réservé à ce segment et ses
+            commandes sont servies en premier. */}
+        <div className="space-y-1.5 sm:col-span-2">
+          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Affecté à</label>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {([
+              { key: "TOUS",   label: "Tous",   active: "bg-brand-600 text-white border-brand-600" },
+              { key: "EXPORT", label: "Export", active: "bg-violet-500 text-white border-violet-500" },
+              { key: "GMS",    label: "GMS",    active: "bg-teal-500 text-white border-teal-500" },
+              { key: "CHR",    label: "CHR",    active: "bg-amber-500 text-white border-amber-500" },
+            ] as const).map((s) => (
+              <button
+                key={s.key}
+                type="button"
+                onClick={() => setAffect(s.key)}
+                aria-pressed={affect === s.key}
+                title={s.key === "TOUS"
+                  ? "Stock commun — lot utilisable par tous les clients"
+                  : `Arrivage dédié ${s.label} — lot réservé aux clients ${s.label}, servis en premier`}
+                className={`inline-flex items-center h-9 px-3.5 rounded-lg border text-[12.5px] font-semibold transition-colors ${
+                  affect === s.key ? s.active : "border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+          {affect !== "TOUS" && (
+            <p className="text-[11px] text-muted-foreground">
+              Ce lot sera réservé aux clients <b>{affect}</b> (télévente) et leurs commandes en attente
+              seront reliées à ce lot en premier.
+            </p>
+          )}
         </div>
       </div>
 
