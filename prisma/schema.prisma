@@ -371,8 +371,9 @@ model ProductBom {
 
 // ═══════════════════════════════════════════════════════════════════
 // ORDRE DE PRODUCTION — recette d'un produit fabriqué (remplace le BoM
-// historique pour /fabrication). Tout est exprimé EN COLIS (la pièce ne
-// sert qu'au calcul de marge interne, jamais affichée).
+// historique pour /fabrication). v3 : les composants s'expriment en
+// UNITÉS DE BASE (barquettes/kg) — ex. 6 barquettes groseille + 5 mûre
+// + 5 myrtille = 1 DECO16 ; le parent reste compté en colis.
 //
 // Particularités :
 //   • Composant = FAMILLE (ex. "groseille"), pas un code article précis.
@@ -395,15 +396,19 @@ model ProductionRecipe {
   updatedAt      DateTime                    @updatedAt
 }
 
-// Une ligne de composant de la recette = une famille + une quantité (colis
-// de la famille par colis de parent fabriqué).
+// Une ligne de composant de la recette = une famille + une quantité par tour.
+// v3 : qtyUnits non NULL → quantité en UNITÉS DE BASE (barquette pour les
+// fruits, kg pour les articles au poids). qtyUnits NULL → ligne historique
+// en COLIS (qtyColis fait foi, régime v2). Colonne ajoutée par
+// scripts/ddl-fabrication-v3.mjs — accès raw SQL uniquement.
 model ProductionRecipeComponent {
   id          String           @id @default(cuid())
   recipeId    String
   recipe      ProductionRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
   familyKey   String // ex. "groseille" (cf. lib/familles.familyOf)
   familyLabel String // ex. "Groseille"
-  qtyColis    Float // colis de cette famille par colis de parent
+  qtyColis    Float // legacy v2 : colis par tour (0 si la ligne est en unités)
+  qtyUnits    Float? // v3 : unités de base (barquette/kg) par tour — fait foi si non NULL
   position    Int              @default(0)
 
   @@unique([recipeId, familyKey])
@@ -433,7 +438,7 @@ model FabricationRun {
   parentItemCode String
   parentItemName String?
   parentColis    Float
-  warehouseCode  String   @default("01")
+  warehouseCode  String   @default("01") // magasin d'ENTRÉE du produit fini (les sorties composants portent leur propre magasin sur chaque ligne)
   recipeSnapshot Json // recette figée au moment du run
   totalCost      Float?
   parentValue    Float?
@@ -463,7 +468,7 @@ model FabricationRunLine {
   colisQty      Float
   pieceQty      Float          @default(0)
   purchasePrice Float? // € par COLIS (marge)
-  warehouseCode String?
+  warehouseCode String? // magasin SOURCE de la sortie de ce composant (multi-magasins)
 
   @@index([runId])
   @@index([batchNumber])

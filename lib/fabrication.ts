@@ -5,7 +5,10 @@
  *   - /api/sap/assembly         (run de production : exits + entrée, lots tracés)
  *
  * Conventions métier :
- *   • TOUT s'exprime en COLIS côté UI/API (jamais pie/barquette).
+ *   • v3 : les COMPOSANTS de recette s'expriment en UNITÉS DE BASE (barquette
+ *     fruits, kg au poids) — « 6 barquettes groseille + 5 mûre + 5 myrtille =
+ *     1 DECO16 » ; le PARENT et les stocks affichés restent comptés en colis.
+ *     Les recettes v2 (lignes en colis, qtyUnits NULL) restent supportées.
  *   • Lot = chaîne "EM<DocNum>" (règle Gervifrais, cf. lib/lotResolver) OU le
  *     sentinel EM_PENDING (vente/fabrication à découvert : le lot sera affecté
  *     à la prochaine entrée marchandise).
@@ -21,12 +24,17 @@
  */
 import { prisma } from "@/lib/prisma";
 import { LOT_PENDING } from "@/lib/lotResolver";
-import { uniteGestion, type UniteGestion } from "@/lib/fabrication-optim";
+import { uniteGestion, uniteBase, type UniteGestion, type ModeQuantite } from "@/lib/fabrication-optim";
 
 export { LOT_PENDING };
 
 // ── Types partagés ────────────────────────────────────────────────────
-export type RecipeComponent = { familyKey: string; familyLabel: string; qtyColis: number };
+/**
+ * Composant de recette. v3 : `qty` par tour exprimée selon `mode` —
+ *   • "unite" : unités de BASE (barquettes fruits, kg au poids) — le défaut ;
+ *   • "colis" : colis (lignes historiques v2, qtyUnits NULL en base).
+ */
+export type RecipeComponent = { familyKey: string; familyLabel: string; qty: number; mode: ModeQuantite };
 export type RecipeCost = { label: string; costPerColis: number };
 export type RecipeFull = {
   parentItemCode: string;
@@ -64,9 +72,10 @@ export async function getRecipe(parentItemCode: string): Promise<RecipeFull | nu
   );
   if (heads.length === 0) return null;
   const { id, parentQty } = heads[0];
+  type ComponentRow = { familyKey: string; familyLabel: string; qtyColis: number; qtyUnits: number | null };
   const [components, costs] = await Promise.all([
-    prisma.$queryRawUnsafe<RecipeComponent[]>(
-      `SELECT "familyKey", "familyLabel", "qtyColis" FROM "ProductionRecipeComponent"
+    prisma.$queryRawUnsafe<ComponentRow[]>(
+      `SELECT "familyKey", "familyLabel", "qtyColis", "qtyUnits" FROM "ProductionRecipeComponent"
         WHERE "recipeId" = $1 ORDER BY "position" ASC, "familyLabel" ASC;`,
       id,
     ),
@@ -79,7 +88,10 @@ export async function getRecipe(parentItemCode: string): Promise<RecipeFull | nu
   return {
     parentItemCode,
     parentQty: Number(parentQty) || 1,
-    components: components.map((c) => ({ ...c, qtyColis: Number(c.qtyColis) })),
+    // qtyUnits non NULL → ligne v3 en unités de base ; sinon legacy v2 en colis.
+    components: components.map((c): RecipeComponent => (c.qtyUnits != null
+      ? { familyKey: c.familyKey, familyLabel: c.familyLabel, qty: Number(c.qtyUnits), mode: "unite" }
+      : { familyKey: c.familyKey, familyLabel: c.familyLabel, qty: Number(c.qtyColis), mode: "colis" })),
     costs: costs.map((c) => ({ ...c, costPerColis: Number(c.costPerColis) })),
   };
 }
@@ -188,8 +200,12 @@ export type FamilyItemOption = {
   ratio: number;
   /** unité de gestion réelle (kg / colis / barquette) + quantité physique par colis */
   unite: UniteGestion;
+  /** mot de l'UNITÉ DE BASE (barquette / kg / unité) — recettes v3 en unités */
+  uniteBase: string;
   /** dispo en COLIS par entrepôt (000/01/R1) + total */
   availColis: Record<string, number>;
+  /** dispo en UNITÉS DE BASE (quantité SAP brute) par entrepôt — peut être négatif */
+  availUnits: Record<string, number>;
   availTotal: number;
 };
 
@@ -254,7 +270,9 @@ export async function getFamilyItems(familyKeys: string[]): Promise<Map<string, 
           salesQtyPerPackUnit: r.salesQtyPerPackUnit != null ? Number(r.salesQtyPerPackUnit) : null,
           salesItemsPerUnit: r.salesItemsPerUnit != null ? Number(r.salesItemsPerUnit) : null,
         }),
+        uniteBase: uniteBase({ salesUnit: r.salesUnit, inventoryUnit: r.inventoryUnit, familyKey: r.familyKey }),
         availColis: { "000": 0, "01": 0, R1: 0 },
+        availUnits: { "000": 0, "01": 0, R1: 0 },
         availTotal: 0,
       };
       byItem.set(r.itemCode, it);
@@ -263,6 +281,8 @@ export async function getFamilyItems(familyKeys: string[]): Promise<Map<string, 
       // pie → colis, plancher à 0, arrondi 1 décimale (comme Ecran2Order)
       const colis = Math.max(0, Math.floor((Number(r.available) / it.ratio) * 10) / 10);
       it.availColis[r.warehouse] = colis;
+      // Unités de base brutes (quantité SAP) — signées, pour détecter le découvert.
+      it.availUnits[r.warehouse] = Math.round(Number(r.available) * 1000) / 1000;
     }
   }
 

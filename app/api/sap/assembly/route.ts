@@ -6,32 +6,37 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { incrementLocalStock, decrementLocalStock } from "@/lib/stockSync";
 import { familyOf } from "@/lib/familles";
-import { getRecipe, resolveLotsForItems, packRatio, LOT_PENDING } from "@/lib/fabrication";
+import { getRecipe, resolveLotsForItems, packRatio, LOT_PENDING, type LotResolution } from "@/lib/fabrication";
+import { quantitesComposant } from "@/lib/fabrication-optim";
 
 /**
  * POST /api/sap/assembly
  *
  * Fabrication d'un produit fini. Deux formats de body :
  *
- * ── v2 (recette par FAMILLE + lot tracé — page /fabrication refondue) ──
+ * ── v2/v3 (recette par FAMILLE + lot tracé — page /fabrication) ──
  *   {
  *     parentItemCode: "DECO16",
  *     parentColis:    4,                       // multiple de recette.parentQty
- *     warehouseCode:  "01",
- *     picks: [{ familyKey: "groseille", itemCode: "GRO12H" }, …]  // 1 article par famille
+ *     warehouseCode:  "01",                    // magasin d'ENTRÉE du produit fini
+ *     picks: [{ familyKey: "groseille", itemCode: "GRO12H", warehouseCode: "000" }, …]
  *   }
+ *   1 article par famille ; warehouseCode de pick = magasin SOURCE de la sortie
+ *   (défaut : le magasin d'entrée) — les composants peuvent donc sortir de
+ *   MAGASINS DIFFÉRENTS et le produit fini entrer dans un autre.
  *   Le serveur recalcule TOUT depuis la recette (quantités, lots FIFO, prix) :
- *   le client ne choisit que l'article concret de chaque famille.
+ *   les lignes v3 sont en UNITÉS DE BASE (6 barquettes → 0,5 colis de 12 —
+ *   les colis peuvent être entamés), les lignes v2 en colis.
  *
  *   Étapes :
  *     1. FabricationRun + lignes enregistrés AVANT l'appel SAP (status=pending).
- *     2. SAP InventoryGenExits (sortie composants, en pie). Les articles
- *        manageBatch portent BatchNumbers [{BatchNumber, Quantity}] ; pour les
- *        autres (cas réel Gervifrais), le lot est posé en U_NoLot par un PATCH
- *        ligne à ligne (même mécanique que /api/sap/goods-receipts). Un article
- *        à découvert porte le sentinel EM_PENDING.
- *     3. SAP InventoryGenEntries (entrée parent, U_NoLot = code OP).
- *     4. Stock local : décrément composants + incrément parent.
+ *     2. SAP InventoryGenExits (sortie composants, en pie, magasin PAR LIGNE).
+ *        Les articles manageBatch portent BatchNumbers [{BatchNumber, Quantity}] ;
+ *        pour les autres (cas réel Gervifrais), le lot est posé en U_NoLot par
+ *        un PATCH ligne à ligne (même mécanique que /api/sap/goods-receipts).
+ *        Un article à découvert porte le sentinel EM_PENDING.
+ *     3. SAP InventoryGenEntries (entrée parent dans SON magasin, U_NoLot = code OP).
+ *     4. Stock local : décrément composants (par magasin source) + incrément parent.
  *     5. Run complété : status=done + DocEntry/DocNum SAP.
  *
  * ── v1 (legacy ProductBom par article — conservé pour compat) ──
@@ -85,8 +90,10 @@ function userLabel(session: Session): string {
 interface V2Body {
   parentItemCode: string;
   parentColis: number;
+  /** Magasin d'ENTRÉE du produit fini. */
   warehouseCode: string;
-  picks: { familyKey: string; itemCode: string }[];
+  /** warehouseCode = magasin SOURCE de la sortie (défaut : magasin d'entrée). */
+  picks: { familyKey: string; itemCode: string; warehouseCode?: string }[];
 }
 
 async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
@@ -97,9 +104,14 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     return NextResponse.json({ error: "parentColis > 0 requis" }, { status: 400 });
   }
   if (!body.warehouseCode || !WHITELIST_WHS.has(body.warehouseCode)) {
-    return NextResponse.json({ error: `Entrepôt invalide : ${body.warehouseCode}` }, { status: 400 });
+    return NextResponse.json({ error: `Magasin d'entrée invalide : ${body.warehouseCode}` }, { status: 400 });
   }
-  const warehouse = body.warehouseCode;
+  const entryWarehouse = body.warehouseCode;
+  for (const p of body.picks ?? []) {
+    if (p?.warehouseCode && !WHITELIST_WHS.has(p.warehouseCode)) {
+      return NextResponse.json({ error: `Magasin source invalide : ${p.warehouseCode}` }, { status: 400 });
+    }
+  }
 
   // ── Recette + ratio « tour » ──
   const recipe = await getRecipe(parentCode);
@@ -113,10 +125,15 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     }, { status: 400 });
   }
 
-  // ── Un article choisi pour CHAQUE famille de la recette ──
-  const pickByFamily = new Map<string, string>();
+  // ── Un article (+ magasin source) choisi pour CHAQUE famille de la recette ──
+  const pickByFamily = new Map<string, { itemCode: string; warehouse: string }>();
   for (const p of body.picks ?? []) {
-    if (p?.familyKey && p?.itemCode) pickByFamily.set(p.familyKey, p.itemCode.trim());
+    if (p?.familyKey && p?.itemCode) {
+      pickByFamily.set(p.familyKey, {
+        itemCode: p.itemCode.trim(),
+        warehouse: p.warehouseCode || entryWarehouse,
+      });
+    }
   }
   const missingFams = recipe.components.filter((c) => !pickByFamily.get(c.familyKey));
   if (missingFams.length > 0) {
@@ -126,7 +143,7 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
   }
 
   // ── Méta produits (parent + composants choisis) ──
-  const pickedCodes = recipe.components.map((c) => pickByFamily.get(c.familyKey) as string);
+  const pickedCodes = recipe.components.map((c) => (pickByFamily.get(c.familyKey) as { itemCode: string }).itemCode);
   type Meta = {
     itemCode: string; itemName: string; groupName: string | null;
     salesUnit: string | null; salesQtyPerPackUnit: number | null; manageBatch: boolean;
@@ -148,49 +165,62 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
   }
   // Intégrité : l'article choisi appartient bien à la famille demandée.
   for (const c of recipe.components) {
-    const code = pickByFamily.get(c.familyKey) as string;
-    const m = metaByCode.get(code) as Meta;
+    const pick = pickByFamily.get(c.familyKey) as { itemCode: string; warehouse: string };
+    const m = metaByCode.get(pick.itemCode) as Meta;
     if (familyOf(m.itemName, m.groupName).key !== c.familyKey) {
       return NextResponse.json({
-        error: `"${m.itemName}" (${code}) n'appartient pas à la famille ${c.familyLabel}.`,
+        error: `"${m.itemName}" (${pick.itemCode}) n'appartient pas à la famille ${c.familyLabel}.`,
       }, { status: 400 });
     }
   }
 
-  // ── Lots + prix (serveur = source de vérité) + dispo entrepôt ──
-  const lots = await resolveLotsForItems(pickedCodes, warehouse);
-  const avails = await prisma.$queryRawUnsafe<{ itemCode: string; available: number }[]>(
-    `SELECT p."itemCode", COALESCE(s."available", 0) AS "available"
+  // ── Lots + prix (serveur = source de vérité), résolus PAR MAGASIN SOURCE ──
+  const codesByWhs = new Map<string, string[]>();
+  for (const c of recipe.components) {
+    const pick = pickByFamily.get(c.familyKey) as { itemCode: string; warehouse: string };
+    codesByWhs.set(pick.warehouse, [...(codesByWhs.get(pick.warehouse) ?? []), pick.itemCode]);
+  }
+  const lotsByWhs = new Map<string, Map<string, LotResolution>>();
+  await Promise.all(Array.from(codesByWhs.entries()).map(async ([whs, codes]) => {
+    lotsByWhs.set(whs, await resolveLotsForItems(codes, whs));
+  }));
+
+  // Dispo par (article, magasin source) — quantité SAP en unités de base.
+  const sourceWhs = Array.from(codesByWhs.keys());
+  const avails = await prisma.$queryRawUnsafe<{ itemCode: string; warehouse: string; available: number }[]>(
+    `SELECT p."itemCode", s."warehouse", COALESCE(s."available", 0) AS "available"
        FROM "Product" p
-       LEFT JOIN "ProductStock" s ON s."productId" = p."id" AND s."warehouse" = $2
+       JOIN "ProductStock" s ON s."productId" = p."id" AND s."warehouse" = ANY($2::text[])
       WHERE p."itemCode" = ANY($1::text[]);`,
-    pickedCodes, warehouse,
+    pickedCodes, sourceWhs,
   );
-  const availByCode = new Map(avails.map((a) => [a.itemCode, Number(a.available)]));
+  const availByCodeWhs = new Map(avails.map((a) => [`${a.itemCode}@${a.warehouse}`, Number(a.available)]));
 
   type RunLine = {
     family: string; familyLabel: string; itemCode: string; itemName: string;
-    batchNumber: string; pending: boolean; manageBatch: boolean;
+    warehouse: string; batchNumber: string; pending: boolean; manageBatch: boolean;
     colisQty: number; pieceQty: number; ratio: number;
     priceColis: number | null; lineCost: number | null;
   };
   const runLines: RunLine[] = recipe.components.map((c) => {
-    const code = pickByFamily.get(c.familyKey) as string;
-    const m = metaByCode.get(code) as Meta;
+    const pick = pickByFamily.get(c.familyKey) as { itemCode: string; warehouse: string };
+    const m = metaByCode.get(pick.itemCode) as Meta;
     const ratio = packRatio(m.salesUnit, m.salesQtyPerPackUnit != null ? Number(m.salesQtyPerPackUnit) : null);
-    const colisQty = Math.round(c.qtyColis * tours * 1000) / 1000;
-    const pieceQty = Math.round(colisQty * ratio * 1000) / 1000;
-    const lot = lots.get(code);
-    const availColis = Math.max(0, (availByCode.get(code) ?? 0) / ratio);
-    // À découvert (dispo ≤ 0) ou lot introuvable → sentinel EM_PENDING :
-    // le lot réel sera propagé à la prochaine entrée marchandise.
-    const pending = availColis <= 0 || !lot?.batchNumber;
+    // v3 : qty en unités de base → colis fractionnaires possibles (colis entamés) ;
+    // legacy v2 : qty en colis. Conversion unique via quantitesComposant.
+    const { pieceQty, colisQty } = quantitesComposant(c.qty, c.mode, tours, ratio);
+    const lot = lotsByWhs.get(pick.warehouse)?.get(pick.itemCode);
+    const availUnits = availByCodeWhs.get(`${pick.itemCode}@${pick.warehouse}`) ?? 0;
+    // À découvert (dispo ≤ 0 dans le magasin source) ou lot introuvable →
+    // sentinel EM_PENDING : le lot réel sera propagé à la prochaine entrée marchandise.
+    const pending = availUnits <= 0 || !lot?.batchNumber;
     const priceColis = lot?.pricePie != null ? Math.round(lot.pricePie * ratio * 100) / 100 : null;
     return {
       family: c.familyKey,
       familyLabel: c.familyLabel,
-      itemCode: code,
+      itemCode: pick.itemCode,
       itemName: m.itemName,
+      warehouse: pick.warehouse,
       batchNumber: pending ? LOT_PENDING : (lot?.batchNumber as string),
       pending,
       manageBatch: m.manageBatch,
@@ -228,19 +258,21 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     opCode,
     parentQty: recipe.parentQty,
     tours,
+    entryWarehouse,
     components: recipe.components,
     costs: recipe.costs,
     picks: runLines.map((l) => ({
-      family: l.family, itemCode: l.itemCode, batchNumber: l.batchNumber,
-      colisQty: l.colisQty, priceColis: l.priceColis,
+      family: l.family, itemCode: l.itemCode, warehouse: l.warehouse, batchNumber: l.batchNumber,
+      colisQty: l.colisQty, pieceQty: l.pieceQty, priceColis: l.priceColis,
     })),
   };
+  // Run.warehouseCode = magasin d'ENTRÉE ; chaque ligne porte son magasin SOURCE.
   await prisma.$executeRawUnsafe(
     `INSERT INTO "FabricationRun"
        ("id", "opCode", "parentItemCode", "parentItemName", "parentColis", "warehouseCode",
         "recipeSnapshot", "totalCost", "parentValue", "status", "createdBy")
      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, 'pending', $10);`,
-    runId, opCode, parentCode, parentMeta.itemName, body.parentColis, warehouse,
+    runId, opCode, parentCode, parentMeta.itemName, body.parentColis, entryWarehouse,
     JSON.stringify(snapshot), totalCost, parentValue, userLabel(session),
   );
   for (const l of runLines) {
@@ -250,7 +282,7 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
           "batchNumber", "colisQty", "pieceQty", "purchasePrice", "warehouseCode")
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);`,
       randomUUID(), runId, l.family, l.familyLabel, l.itemCode, l.itemName,
-      l.batchNumber, l.colisQty, l.pieceQty, l.priceColis, warehouse,
+      l.batchNumber, l.colisQty, l.pieceQty, l.priceColis, l.warehouse,
     );
   }
 
@@ -263,7 +295,8 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     } catch { /* le run reste pending — visible dans l'historique */ }
   };
 
-  // ── 1. SAP InventoryGenExits — sortie des composants (avec lots) ──
+  // ── 1. SAP InventoryGenExits — sortie des composants (avec lots),
+  //       chaque ligne depuis SON magasin source ──
   const today = new Date().toISOString().slice(0, 10);
   const exitPayload = {
     DocDate: today,
@@ -271,7 +304,7 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     DocumentLines: runLines.map((l) => ({
       ItemCode: l.itemCode,
       Quantity: l.pieceQty,
-      WarehouseCode: warehouse,
+      WarehouseCode: l.warehouse,
       // Articles batch-managed SAP : collection native (lot réel uniquement).
       ...(l.manageBatch && !l.pending
         ? { BatchNumbers: [{ BatchNumber: l.batchNumber, Quantity: l.pieceQty }] }
@@ -306,14 +339,14 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     console.warn(`[Assembly v2] ${opCode} PATCH U_NoLot exit échoué (non-bloquant):`, (e as Error).message);
   }
 
-  // ── 2. SAP InventoryGenEntries — entrée du parent ──
+  // ── 2. SAP InventoryGenEntries — entrée du parent dans SON magasin ──
   const entryPayload = {
     DocDate: today,
     Comments: `${opCode} — Fabrication ${body.parentColis} colis ${parentCode} (entrée parent, exit#${exitDoc.DocNum})`,
     DocumentLines: [{
       ItemCode: parentCode,
       Quantity: parentPieceQty,
-      WarehouseCode: warehouse,
+      WarehouseCode: entryWarehouse,
       // Parent batch-managed (rare) : le lot du produit fini = code OP.
       ...(parentMeta.manageBatch
         ? { BatchNumbers: [{ BatchNumber: opCode, Quantity: parentPieceQty }] }
@@ -348,12 +381,13 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     console.warn(`[Assembly v2] ${opCode} PATCH U_NoLot entry échoué (non-bloquant):`, (e as Error).message);
   }
 
-  // ── 3. Stock local : décrément composants + incrément parent ──
+  // ── 3. Stock local : décrément composants (magasin source par ligne)
+  //       + incrément parent (magasin d'entrée) ──
   try {
     await decrementLocalStock(runLines.map((l) => ({
-      itemCode: l.itemCode, quantity: l.pieceQty, warehouseCode: warehouse,
+      itemCode: l.itemCode, quantity: l.pieceQty, warehouseCode: l.warehouse,
     })));
-    await incrementLocalStock([{ itemCode: parentCode, quantity: parentPieceQty, warehouseCode: warehouse }]);
+    await incrementLocalStock([{ itemCode: parentCode, quantity: parentPieceQty, warehouseCode: entryWarehouse }]);
   } catch (e) {
     console.warn(`[Assembly v2] ${opCode} stockSync échoué (non-bloquant):`, (e as Error).message);
   }
@@ -381,8 +415,9 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     },
     lines: runLines.map((l) => ({
       family: l.familyLabel, itemCode: l.itemCode, itemName: l.itemName,
+      warehouse: l.warehouse,
       batchNumber: l.batchNumber, pending: l.pending,
-      colisQty: l.colisQty,
+      colisQty: l.colisQty, pieceQty: l.pieceQty,
       priceColis: costField(admin, l.priceColis),
       lineCost: costField(admin, l.lineCost),
     })),
@@ -391,7 +426,7 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     margin: costField(admin, parentValue != null ? Math.round((parentValue - totalCost) * 100) / 100 : null),
     sapExitDocNum: exitDoc.DocNum,
     sapEntryDocNum: entryDoc.DocNum,
-    warehouse,
+    warehouse: entryWarehouse,
   });
 }
 

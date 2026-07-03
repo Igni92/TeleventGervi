@@ -8,22 +8,30 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { colis } from "./ui";
+import { uniteBase, libelleUnite, type ModeQuantite } from "@/lib/fabrication-optim";
 
 /**
- * Recettes de fabrication — par FAMILLE, avec ratio « tour » :
- *   « 2 colis DECO16 = 1 colis Myrtille + 1 colis Groseille + 2 colis Mûre »
- * L'article concret (GRO12H vs GRO12B…) se choisit au moment de FABRIQUER,
- * pas dans la recette.
+ * Recettes de fabrication v3 — par FAMILLE, quantités en UNITÉS DE BASE :
+ *   « 1 colis DECO16 = 6 barquettes Groseille + 5 barquettes Mûre + 5 barquettes Myrtille »
+ * Chaque ligne peut aussi rester en colis (mode legacy v2) via le sélecteur
+ * d'unité. L'article concret (GRO12H vs GRO12B…) et le MAGASIN se choisissent
+ * au moment de FABRIQUER, pas dans la recette.
  */
 
 type ProductHit = { id: string; itemCode: string; itemName: string };
 type Family = { familyKey: string; familyLabel: string; productCount: number };
-type ComponentLine = { familyKey: string; familyLabel: string; qtyColis: number };
+type ComponentLine = { familyKey: string; familyLabel: string; qty: number; mode: ModeQuantite };
 type CostLine = { label: string; costPerColis: number };
 type RecipeListItem = {
   parentItemCode: string; itemName: string; parentQty: number;
   components: ComponentLine[]; costCount: number;
 };
+
+/** Mot d'unité d'une ligne de recette : barquette/kg/unité (mode unité) ou colis. */
+function uniteLigne(l: { familyKey: string; mode: ModeQuantite }, n: number): string {
+  if (l.mode === "colis") return "colis";
+  return libelleUnite(uniteBase({ familyKey: l.familyKey }), n);
+}
 
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
@@ -133,7 +141,8 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
         toast.info(`${f.familyLabel} déjà dans la recette`);
         return cur;
       }
-      return [...cur, { familyKey: f.familyKey, familyLabel: f.familyLabel, qtyColis: 1 }];
+      // v3 : nouvelle ligne en UNITÉS de base (barquettes/kg) par défaut.
+      return [...cur, { familyKey: f.familyKey, familyLabel: f.familyLabel, qty: 1, mode: "unite" }];
     });
   };
 
@@ -142,7 +151,7 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
     if (!parentQty || parentQty <= 0) { toast.error("Colis produits par tour invalide"); return; }
     if (components.length === 0) { toast.error("Ajoute au moins une famille"); return; }
     for (const l of components) {
-      if (!l.qtyColis || l.qtyColis <= 0) { toast.error(`Quantité invalide sur ${l.familyLabel}`); return; }
+      if (!l.qty || l.qty <= 0) { toast.error(`Quantité invalide sur ${l.familyLabel}`); return; }
     }
     for (const c of costs) {
       if (!c.label.trim()) { toast.error("Une ligne de coût n'a pas de libellé"); return; }
@@ -155,7 +164,7 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
         body: JSON.stringify({
           parentItemCode: parent.itemCode,
           parentQty,
-          components: components.map((l) => ({ familyKey: l.familyKey, familyLabel: l.familyLabel, qtyColis: l.qtyColis })),
+          components: components.map((l) => ({ familyKey: l.familyKey, familyLabel: l.familyLabel, qty: l.qty, mode: l.mode })),
           costs: costs.map((c) => ({ label: c.label.trim(), costPerColis: c.costPerColis || 0 })),
         }),
       });
@@ -189,9 +198,9 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
   const otherFamilies = families.filter((f) => f.familyKey.startsWith("g_"));
   const shownFamilies = showAllFamilies ? [...fruitFamilies, ...otherFamilies] : fruitFamilies;
 
-  // Phrase de lecture : « 2 colis DECO16 = 1 colis Myrtille + 2 colis Mûre »
+  // Phrase de lecture : « 1 colis DECO16 = 6 barquettes Groseille + 5 barquettes Mûre »
   const sentence = parent && components.length > 0
-    ? `${colis(parentQty)} colis ${parent.itemCode} = ${components.map((c) => `${colis(c.qtyColis)} colis ${c.familyLabel}`).join(" + ")}`
+    ? `${colis(parentQty)} colis ${parent.itemCode} = ${components.map((c) => `${colis(c.qty)} ${uniteLigne(c, c.qty)} ${c.familyLabel}`).join(" + ")}`
     : null;
 
   return (
@@ -209,7 +218,7 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
                   {r.itemName} <span className="font-mono text-[11px] text-muted-foreground">({r.parentItemCode})</span>
                 </p>
                 <p className="text-[12.5px] text-muted-foreground truncate">
-                  {colis(r.parentQty)} colis = {r.components.map((c) => `${colis(c.qtyColis)} ${c.familyLabel}`).join(" + ") || "—"}
+                  {colis(r.parentQty)} colis = {r.components.map((c) => `${colis(c.qty)} ${uniteLigne(c, c.qty)} ${c.familyLabel}`).join(" + ") || "—"}
                 </p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
@@ -299,7 +308,8 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
                   <thead className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
                     <tr>
                       <th className="text-left px-3 py-2 font-semibold">Famille</th>
-                      <th className="text-right px-3 py-2 font-semibold w-44">Colis par tour</th>
+                      <th className="text-right px-3 py-2 font-semibold w-32">Quantité par tour</th>
+                      <th className="text-left px-3 py-2 font-semibold w-40">Unité</th>
                       <th className="w-10" />
                     </tr>
                   </thead>
@@ -309,10 +319,20 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
                         <td className="px-3 py-2 font-medium">{l.familyLabel}</td>
                         <td className="px-3 py-2">
                           <NumberInput
-                            value={l.qtyColis}
-                            onValueChange={(n) => setComponents((c) => c.map((x, k) => k === i ? { ...x, qtyColis: n ?? 0 } : x))}
-                            min={0} step={1}
+                            value={l.qty}
+                            onValueChange={(n) => setComponents((c) => c.map((x, k) => k === i ? { ...x, qty: n ?? 0 } : x))}
+                            min={0} step={1} decimals={3}
                             className="text-right h-9" />
+                        </td>
+                        <td className="px-3 py-2">
+                          <select
+                            value={l.mode}
+                            onChange={(e) => setComponents((c) => c.map((x, k) => k === i ? { ...x, mode: e.target.value as ModeQuantite } : x))}
+                            aria-label={`Unité pour ${l.familyLabel}`}
+                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-[13px]">
+                            <option value="unite">{libelleUnite(uniteBase({ familyKey: l.familyKey }), 2)} (unité)</option>
+                            <option value="colis">colis</option>
+                          </select>
                         </td>
                         <td className="px-2 py-2 text-right">
                           <Button variant="ghost" size="icon-sm" aria-label="Supprimer"

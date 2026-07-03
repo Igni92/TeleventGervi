@@ -72,6 +72,60 @@ export function quantitePhysique(nbColis: number, u: UniteGestion): number {
   return r3(nbColis * u.physParColis);
 }
 
+// ── Unité de BASE d'un article (recettes v3 en unités) ────────────────
+
+/** Familles fruits rouges (lib/familles) — vendues en barquettes regroupées en colis. */
+export const FRUIT_FAMILY_KEYS = new Set(["myrtille", "groseille", "framboise", "cassis", "mure", "fraise"]);
+
+/**
+ * Mot de comptage de l'UNITÉ DE BASE d'un article — celle des quantités
+ * d'inventaire SAP et des recettes v3 (« 6 barquettes groseille ») :
+ *   • article au poids → "kg" ;
+ *   • SalesUnit/InventoryUnit barquette (barq/bqt) → "barquette" ;
+ *   • famille fruits rouges (SAP dit souvent "pie") → "barquette" aussi ;
+ *   • sinon → "unité" (jamais « pièce », règle Gervifrais).
+ * Différent de `uniteGestion` (qui compte les COLIS) : ici on nomme ce qu'il
+ * y a DANS le colis.
+ */
+export function uniteBase(p: {
+  salesUnit?: string | null;
+  inventoryUnit?: string | null;
+  familyKey?: string | null;
+}): string {
+  const brut = `${p.salesUnit ?? ""} ${p.inventoryUnit ?? ""}`;
+  if (/kg|kilo/i.test(brut)) return "kg";
+  if (/barq|bqt/i.test(brut)) return "barquette";
+  if (p.familyKey && FRUIT_FAMILY_KEYS.has(p.familyKey)) return "barquette";
+  return "unité";
+}
+
+/** Mode d'expression d'une ligne de recette : unités de base (v3) ou colis (legacy v2). */
+export type ModeQuantite = "unite" | "colis";
+
+/**
+ * Quantités d'un composant pour un run — SOURCE UNIQUE de la conversion
+ * unités ↔ colis (serveur /api/sap/assembly ET client FabriquerPanel) :
+ *   • mode "unite" : pieceQty = qty × tours (unités de base = quantité SAP),
+ *     colisQty = pieceQty / ratio — peut être FRACTIONNAIRE (0,5 colis =
+ *     6 barquettes d'un colis de 12) : c'est le but de la v3, entamer des colis.
+ *   • mode "colis" : colisQty = qty × tours, pieceQty = colisQty × ratio (v2).
+ * `ratio` = packRatio de l'article choisi (unités de base par colis, kg → 1).
+ */
+export function quantitesComposant(
+  qty: number,
+  mode: ModeQuantite,
+  tours: number,
+  ratio: number,
+): { pieceQty: number; colisQty: number } {
+  const r = ratio > 0 ? ratio : 1;
+  if (mode === "unite") {
+    const pieceQty = r3(qty * tours);
+    return { pieceQty, colisQty: r3(pieceQty / r) };
+  }
+  const colisQty = r3(qty * tours);
+  return { pieceQty: r3(colisQty * r), colisQty };
+}
+
 /** Libellé d'unité accordé : kg/colis invariables, barquette·s à partir de 2. */
 export function libelleUnite(unite: string, n = 1): string {
   if (unite === "kg" || unite === "colis") return unite;

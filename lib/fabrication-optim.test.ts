@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  uniteGestion, quantitePhysique, libelleUnite, scenariosTransformation,
+  uniteGestion, quantitePhysique, libelleUnite, scenariosTransformation, uniteBase, quantitesComposant,
 } from "./fabrication-optim";
 
 describe("uniteGestion — unité de gestion réelle d'un article", () => {
@@ -180,5 +180,48 @@ describe("scenariosTransformation — cas limites", () => {
     expect(s[0].reste).toBe(1);
     expect(s[1].nbColis).toBe(4);
     expect(s[1].manque).toBe(2);
+  });
+});
+
+describe("uniteBase — unité de base d'un article (recettes v3)", () => {
+  it("article au poids → kg", () => {
+    expect(uniteBase({ salesUnit: "KG" })).toBe("kg");
+    expect(uniteBase({ salesUnit: null, inventoryUnit: "Kilo" })).toBe("kg");
+  });
+  it("SalesUnit/InventoryUnit barquette → barquette", () => {
+    expect(uniteBase({ salesUnit: "BARQ" })).toBe("barquette");
+    expect(uniteBase({ salesUnit: null, inventoryUnit: "bqt" })).toBe("barquette");
+  });
+  it("famille fruits rouges (SAP dit « pie ») → barquette quand même", () => {
+    expect(uniteBase({ salesUnit: "pie", familyKey: "groseille" })).toBe("barquette");
+    expect(uniteBase({ familyKey: "myrtille" })).toBe("barquette");
+  });
+  it("hors fruits, non-kg, non-barq → unité (jamais « pièce »)", () => {
+    expect(uniteBase({ salesUnit: "pie", familyKey: "g_Legumes" })).toBe("unité");
+    expect(uniteBase({})).toBe("unité");
+  });
+  it("le kg gagne sur la famille fruit (fraise vendue au poids)", () => {
+    expect(uniteBase({ salesUnit: "KG", familyKey: "fraise" })).toBe("kg");
+  });
+});
+
+describe("quantitesComposant — conversion unités ↔ colis d'une ligne de recette", () => {
+  it("mode unite : 6 barquettes × 2 tours, colis de 12 → 12 pie = 1 colis", () => {
+    expect(quantitesComposant(6, "unite", 2, 12)).toEqual({ pieceQty: 12, colisQty: 1 });
+  });
+  it("mode unite : colis ENTAMÉ possible (6 barquettes d'un colis de 12 → 0,5 colis)", () => {
+    expect(quantitesComposant(6, "unite", 1, 12)).toEqual({ pieceQty: 6, colisQty: 0.5 });
+  });
+  it("mode unite, article au kg (ratio 1) : 5 kg × 3 tours → 15 kg = 15 « colis-kg »", () => {
+    expect(quantitesComposant(5, "unite", 3, 1)).toEqual({ pieceQty: 15, colisQty: 15 });
+  });
+  it("mode colis (legacy v2) : 2 colis × 2 tours, ratio 12 → 4 colis = 48 pie", () => {
+    expect(quantitesComposant(2, "colis", 2, 12)).toEqual({ pieceQty: 48, colisQty: 4 });
+  });
+  it("ratio invalide (0/négatif) → traité comme 1, jamais de division par zéro", () => {
+    expect(quantitesComposant(6, "unite", 1, 0)).toEqual({ pieceQty: 6, colisQty: 6 });
+  });
+  it("arrondi 3 décimales (5 barquettes d'un colis de 12 → 0,417 colis)", () => {
+    expect(quantitesComposant(5, "unite", 1, 12).colisQty).toBe(0.417);
   });
 });

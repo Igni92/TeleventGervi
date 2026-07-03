@@ -46,11 +46,12 @@ export async function GET(req: NextRequest) {
   type LineRow = {
     runId: string; family: string; familyLabel: string | null;
     itemCode: string; itemName: string | null; batchNumber: string;
-    colisQty: number; purchasePrice: number | null;
+    colisQty: number; pieceQty: number; purchasePrice: number | null;
+    warehouseCode: string | null;
   };
   const lines = await prisma.$queryRawUnsafe<LineRow[]>(
     `SELECT "runId", "family", "familyLabel", "itemCode", "itemName",
-            "batchNumber", "colisQty", "purchasePrice"
+            "batchNumber", "colisQty", "pieceQty", "purchasePrice", "warehouseCode"
        FROM "FabricationRunLine"
       WHERE "runId" = ANY($1::text[])
       ORDER BY "familyLabel" ASC;`,
@@ -104,6 +105,8 @@ export async function GET(req: NextRequest) {
         itemName: l.itemName,
         batchNumber: l.batchNumber,
         colisQty: Number(l.colisQty),
+        pieceQty: Number(l.pieceQty),
+        warehouseCode: l.warehouseCode, // magasin SOURCE de la sortie (multi-magasins)
         uniteColis: uniteColisOf(l.itemCode),
         purchasePrice: admin ? (l.purchasePrice != null ? Number(l.purchasePrice) : null) : undefined,
       })),

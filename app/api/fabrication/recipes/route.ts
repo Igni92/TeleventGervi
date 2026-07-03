@@ -5,19 +5,21 @@ import { prisma } from "@/lib/prisma";
 import { getRecipe } from "@/lib/fabrication";
 
 /**
- * Recettes de fabrication v2 — par FAMILLE, avec ratio « tour » :
- *   parentQty colis de produit fini = Σ composants (qtyColis colis par famille).
- *   Ex. 2 DECO16 = 1 colis myrtille + 1 colis groseille + 2 colis mûre.
+ * Recettes de fabrication v3 — par FAMILLE, quantités en UNITÉS DE BASE :
+ *   parentQty colis de produit fini = Σ composants, chaque ligne portant
+ *   { qty, mode } : mode "unite" (barquettes fruits / kg au poids — défaut)
+ *   ou "colis" (lignes historiques v2).
+ *   Ex. 1 DECO16 = 6 barquettes groseille + 5 barquettes mûre + 5 barquettes myrtille.
  *
  * GET  /api/fabrication/recipes?list=true
- *   → { recipes: [{ parentItemCode, itemName, parentQty, salesQtyPerPackUnit, components: [...], costCount }] }
+ *   → { recipes: [{ parentItemCode, itemName, parentQty, components: [{familyKey,familyLabel,qty,mode}], costCount }] }
  * GET  /api/fabrication/recipes?parentItemCode=DECO16
- *   → { parentQty, components: [{familyKey,familyLabel,qtyColis}], costs: [{label,costPerColis}] }
+ *   → { parentQty, components: [{familyKey,familyLabel,qty,mode}], costs: [{label,costPerColis}] }
  * PUT  /api/fabrication/recipes
  *   body { parentItemCode, parentQty, components, costs } → remplace toute la recette.
  * DELETE /api/fabrication/recipes?parentItemCode=DECO16
  *
- * Raw SQL : parentQty n'est pas connue du client Prisma généré.
+ * Raw SQL : parentQty/qtyUnits ne sont pas connues du client Prisma généré.
  */
 
 export async function GET(req: NextRequest) {
@@ -30,7 +32,7 @@ export async function GET(req: NextRequest) {
     type ListRow = {
       parentItemCode: string; itemName: string; parentQty: number;
       salesQtyPerPackUnit: number | null; salesUnit: string | null;
-      components: { familyKey: string; familyLabel: string; qtyColis: number }[] | null;
+      components: { familyKey: string; familyLabel: string; qtyColis: number; qtyUnits: number | null }[] | null;
       costCount: number;
     };
     const recipes = await prisma.$queryRawUnsafe<ListRow[]>(`
@@ -39,7 +41,8 @@ export async function GET(req: NextRequest) {
              (SELECT json_agg(json_build_object(
                        'familyKey', c."familyKey",
                        'familyLabel', c."familyLabel",
-                       'qtyColis', c."qtyColis") ORDER BY c."position")
+                       'qtyColis', c."qtyColis",
+                       'qtyUnits', c."qtyUnits") ORDER BY c."position")
                 FROM "ProductionRecipeComponent" c WHERE c."recipeId" = r."id") AS "components",
              (SELECT COUNT(*)::int FROM "ProductionRecipeCost" k WHERE k."recipeId" = r."id") AS "costCount"
         FROM "ProductionRecipe" r
@@ -49,9 +52,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       recipes: recipes.map((r) => ({
-        ...r,
+        parentItemCode: r.parentItemCode,
+        itemName: r.itemName,
+        salesQtyPerPackUnit: r.salesQtyPerPackUnit,
+        salesUnit: r.salesUnit,
+        costCount: r.costCount,
         parentQty: Number(r.parentQty) || 1,
-        components: (r.components ?? []).map((c) => ({ ...c, qtyColis: Number(c.qtyColis) })),
+        components: (r.components ?? []).map((c) => (c.qtyUnits != null
+          ? { familyKey: c.familyKey, familyLabel: c.familyLabel, qty: Number(c.qtyUnits), mode: "unite" as const }
+          : { familyKey: c.familyKey, familyLabel: c.familyLabel, qty: Number(c.qtyColis), mode: "colis" as const })),
       })),
     });
   }
@@ -69,12 +78,15 @@ export async function GET(req: NextRequest) {
 
 const PutSchema = z.object({
   parentItemCode: z.string().trim().min(1),
-  /** Colis de parent produits par « tour » de recette (ex. 2 pour 2 DECO16). */
+  /** Colis de parent produits par « tour » de recette (ex. 1 pour 1 DECO16). */
   parentQty: z.number().positive().max(999),
   components: z.array(z.object({
     familyKey: z.string().trim().min(1),
     familyLabel: z.string().trim().min(1),
-    qtyColis: z.number().positive(),
+    /** Quantité par tour, exprimée selon `mode`. */
+    qty: z.number().positive(),
+    /** "unite" = unités de base (barquette/kg — défaut v3) ; "colis" = legacy v2. */
+    mode: z.enum(["unite", "colis"]).default("unite"),
   })).min(1),
   costs: z.array(z.object({
     label: z.string().trim().min(1).max(60),
@@ -119,10 +131,15 @@ export async function PUT(req: NextRequest) {
 
     for (let i = 0; i < components.length; i++) {
       const c = components[i];
+      // mode "unite" → qtyUnits fait foi (qtyColis posé à 0, colonne NOT NULL) ;
+      // mode "colis" → régime v2 (qtyUnits NULL).
       await tx.$executeRawUnsafe(
-        `INSERT INTO "ProductionRecipeComponent" ("id", "recipeId", "familyKey", "familyLabel", "qtyColis", "position")
-         VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5);`,
-        recipeId, c.familyKey, c.familyLabel, c.qtyColis, i,
+        `INSERT INTO "ProductionRecipeComponent" ("id", "recipeId", "familyKey", "familyLabel", "qtyColis", "qtyUnits", "position")
+         VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5, $6);`,
+        recipeId, c.familyKey, c.familyLabel,
+        c.mode === "colis" ? c.qty : 0,
+        c.mode === "unite" ? c.qty : null,
+        i,
       );
     }
     for (let i = 0; i < costs.length; i++) {
