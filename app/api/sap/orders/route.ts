@@ -12,6 +12,7 @@ import { mirrorCreatedOrder } from "@/lib/sapMirror";
 import { decrementLocalStock } from "@/lib/stockSync";
 import { getLotMaps, resolveLotForSegment, LOT_PENDING } from "@/lib/lotResolver";
 import { getEmAffects } from "@/lib/emAffect";
+import { createBonPrep, markBonPrepTransformed } from "@/lib/bonPrep";
 import { chooseLot } from "@/lib/gervifrais-calc";
 import { colisInfo } from "@/lib/colis";
 
@@ -78,6 +79,9 @@ interface OrderLine {
   price?: number;
   manageBatch?: boolean;        // si true, le serveur tente d'attacher un lot FIFO
   discountPercent?: number;     // remise % (0-100, clampée) → DocumentLines[].DiscountPercent
+  /** Lot AFFECTÉ en amont (bon de préparation export) → U_NoLot posé tel quel,
+   *  sans résolution automatique. */
+  lot?: string;
 }
 interface CreateOrderBody {
   clientId: string;
@@ -87,6 +91,10 @@ interface CreateOrderBody {
   comments?: string;            // prioritaire sur comment → SAP Comments (mention des promos)
   numAtCard?: string;           // N° de commande client → SAP NumAtCard
   confirmEncours?: boolean;     // true = forcer malgré encours dépassé
+  /** Transformation d'un BON DE PRÉPARATION (export) : présent = créer le BL
+   *  pour de vrai (lots posés par ligne) et marquer le bon transformé — le
+   *  divert « client EXPORT → bon de préparation » est alors court-circuité. */
+  bonPrepId?: string;
   // C11 — Transporteur. Soit l'id d'un Carrier en DB (résolu serveur), soit
   // directement la valeur U_TrspCode à pousser (option raccourci). Le champ
   // SAP cible est ORDR.U_TrspCode (confirmé par l'utilisateur).
@@ -193,6 +201,52 @@ export async function POST(req: NextRequest) {
       body.clientId,
     );
     if (def[0]) cardCode = def[0].sapCardCode;
+  }
+
+  // ── CLIENT EXPORT → BON DE PRÉPARATION (hors SAP), pas de BL direct ───
+  // Circuit export : marchandise achetée à la dernière minute, lots connus à la
+  // réception. La saisie enregistre un bon de préparation (lib/bonPrep) ; les
+  // lots y sont affectés à la main (panneau Détail livraison) puis le BL SAP est
+  // créé « proprement » en repostant ici avec bonPrepId + lot par ligne.
+  if ((client.type ?? "").trim().toUpperCase() === "EXPORT" && !body.bonPrepId) {
+    try {
+      // Noms d'articles pour l'affichage du panneau d'affectation (best-effort).
+      const names = new Map<string, string>();
+      try {
+        const prods = await prisma.product.findMany({
+          where: { itemCode: { in: body.lines.map((l) => l.itemCode) } },
+          select: { itemCode: true, itemName: true },
+        });
+        for (const p of prods) names.set(p.itemCode, p.itemName);
+      } catch { /* itemName = itemCode en repli */ }
+      const bon = await createBonPrep({
+        createdBy: session.user?.name?.trim() || session.user?.email || null,
+        clientName: client.nom,
+        cardCode,
+        segment: "EXPORT",
+        orderBody: {
+          clientId: body.clientId,
+          deliveryModeId: body.deliveryModeId,
+          trspCode: body.trspCode,
+          trspHeure: body.trspHeure,
+          tournee: body.tournee,
+          deliveryDate: body.deliveryDate,
+          numAtCard: body.numAtCard,
+          comments: body.comments ?? body.comment,
+          lines: body.lines.map(({ manageBatch: _mb, ...rest }) => ({
+            ...rest,
+            itemName: names.get(rest.itemCode) ?? rest.itemCode,
+          })),
+        },
+      });
+      console.log(`[Order] Client EXPORT ${cardCode} → bon de préparation ${bon.id} (${body.lines.length} ligne(s)) — BL différé.`);
+      return NextResponse.json({ ok: true, bonPrep: true, bonPrepId: bon.id, cardCode });
+    } catch (e) {
+      return NextResponse.json(
+        { ok: false, error: `Échec de la création du bon de préparation : ${e instanceof Error ? e.message : String(e)}` },
+        { status: 500 },
+      );
+    }
   }
 
   // ── 2. Build SAP Order payload — avec enrichissement U_* Gervifrais ───
@@ -361,15 +415,23 @@ export async function POST(req: NextRequest) {
     //     EM compatible avec le segment, ou article hors fenêtre de scan PDN —
     //     réécrit par /api/sap/goods-receipts à la prochaine entrée marchandise
     //     compatible. Fini le fallback aveugle "EM0000".
+    // Lot AFFECTÉ en amont (bon de préparation export) : posé tel quel, aucune
+    // résolution automatique ni réalignement de magasin — c'est le lot choisi
+    // à la main depuis les arrivages.
+    const forcedLot = typeof l.lot === "string" && l.lot.trim() ? l.lot.trim() : null;
     const availLocal = availableByItem.get(l.itemCode) ?? 0;
     const sapOnHand = sapStockByItem.get(l.itemCode) ?? null;
-    const resolved = resolveLotForSegment(lotMaps, emAffects, l.itemCode, l.warehouseCode, clientSegment);
-    const choice = chooseLot({
-      resolvedLot: resolved.lot,
-      localAvailable: availLocal,
-      sapOnHand,
-      envDefault: process.env.GERVIFRAIS_LOT_DEFAUT ?? null,
-    });
+    const resolved = forcedLot
+      ? { lot: forcedLot, source: null, docNum: null, warehouse: null }
+      : resolveLotForSegment(lotMaps, emAffects, l.itemCode, l.warehouseCode, clientSegment);
+    const choice = forcedLot
+      ? { lot: forcedLot, reason: "affecté (bon de préparation)" }
+      : chooseLot({
+          resolvedLot: resolved.lot,
+          localAvailable: availLocal,
+          sapOnHand,
+          envDefault: process.env.GERVIFRAIS_LOT_DEFAUT ?? null,
+        });
     line.U_NoLot = choice.lot;
     console.log(
       `[Order] Lot ${l.itemCode}@${l.warehouseCode ?? "?"} [seg ${clientSegment ?? "—"}] → ${choice.lot} ` +
@@ -727,6 +789,15 @@ export async function POST(req: NextRequest) {
       );
     } catch (e) {
       console.error("[Order] Notif push nouvelle commande échouée (non-fatal):", e);
+    }
+
+    // Transformation d'un bon de préparation → marquer le bon (best-effort).
+    if (body.bonPrepId) {
+      try {
+        await markBonPrepTransformed(body.bonPrepId, { docNum: created.DocNum, docEntry: created.DocEntry });
+      } catch (e) {
+        console.warn("[Order] Marquage du bon de préparation échoué (non-bloquant):", (e as Error).message);
+      }
     }
 
     return NextResponse.json({

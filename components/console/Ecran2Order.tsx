@@ -656,10 +656,20 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     });
 
   // Traite la réponse finale (succès / blocage / erreur). Renvoie true si succès.
-  const finalizeOrder = (res: Response, json: { ok?: boolean; blocked?: boolean; error?: string; docNum?: number; totalTTC?: number | null }) => {
+  const finalizeOrder = (res: Response, json: { ok?: boolean; blocked?: boolean; error?: string; docNum?: number; totalTTC?: number | null; bonPrep?: boolean }) => {
     if (!res.ok) {
       toast.error(json?.blocked ? "🚫 Client bloqué" : "❌ Échec création", { description: json.error, duration: 10000 });
       return false;
+    }
+    // Client EXPORT → BON DE PRÉPARATION (pas de BL SAP direct) : les lots
+    // seront affectés depuis le Détail livraison, puis le BL créé proprement.
+    if (json.bonPrep) {
+      toast.success("📝 Bon de préparation créé (export)", {
+        description: "Affecte les lots dans « Détail livraison » puis crée le BL.",
+        duration: 10000,
+      });
+      setCart([]); setNumAtCard("");
+      return true;
     }
     const fmt = (n: number | null | undefined) => n != null ? n.toFixed(2) : "—";
     toast.success(`✅ Commande #${json.docNum} créée — ${fmt(json.totalTTC)} € TTC`, { duration: 10000 });
