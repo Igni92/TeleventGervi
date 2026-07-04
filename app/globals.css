@@ -557,7 +557,8 @@ html[data-reduce-anim="1"] .ambient-aurora-2,
 html[data-reduce-anim="1"] .ambient-rings-spin,
 html[data-reduce-anim="1"] .ambient-rings-spin-r,
 html[data-reduce-anim="1"] .signal-bar,
-html[data-reduce-anim="1"] .animate-soft-pulse { animation: none !important; }
+html[data-reduce-anim="1"] .animate-soft-pulse,
+html[data-reduce-anim="1"] .animate-badge-wobble { animation: none !important; }
 
 /* "on" (data-anim=force) → rallume le fond animé pour qui le souhaite,
    y compris si le système demande prefers-reduced-motion. */
@@ -622,6 +623,19 @@ svg.lucide { zoom: 1.3; }
   50%      { opacity: 0.55; transform: scale(0.92); }
 }
 .animate-soft-pulse { animation: soft-pulse 2.4s ease-in-out infinite; }
+
+/* Vacillement LÉGER des pastilles de notification (sidebar) : la pastille
+   oscille brièvement puis se repose (~3 s de cycle, mouvement < 10°) — attire
+   l'œil sans agiter l'écran. Coupé par prefers-reduced-motion (balai
+   [class*="animate-"]) et par le réglage televente:animations ci-dessus. */
+@keyframes badge-wobble {
+  0%, 68%, 92%, 100% { transform: rotate(0deg) scale(1); }
+  72% { transform: rotate(9deg) scale(1.08); }
+  78% { transform: rotate(-7deg) scale(1.05); }
+  84% { transform: rotate(4deg) scale(1.02); }
+  88% { transform: rotate(-2deg) scale(1); }
+}
+.animate-badge-wobble { animation: badge-wobble 3.2s ease-in-out infinite; transform-origin: 50% 50%; }
 
 /* ═══════════════════════════════════════════════════════════
    COMPONENT OVERRIDES

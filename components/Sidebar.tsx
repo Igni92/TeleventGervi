@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, Package, PackagePlus, Factory, Receipt, AlertTriangle,
-  Home, Settings, PackageCheck, ClipboardCheck, Truck, Eye, Store,
+  Home, Settings, PackageCheck, ClipboardCheck, Truck, Eye, Store, PackageX,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Logo } from "@/components/Logo";
@@ -16,6 +16,7 @@ import { SapEnvSwitch } from "@/components/SapEnvSwitch";
 import { SignalLoader } from "@/components/ui/page-loader";
 import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
 import { navAllowedForPreview, PREVIEW_ROLE_LABELS } from "@/lib/rolePreview";
+import { applyNavOverrides, type NavOverrides } from "@/lib/navOverrides";
 import { SPRING } from "@/lib/motion";
 import {
   DropdownMenu,
@@ -62,7 +63,9 @@ interface NavItem {
   also?: string[];
 }
 
-const GROUPS: { label: string | null; items: NavItem[]; collapsible?: boolean }[] = [
+/** Structure de navigation PAR DÉFAUT — personnalisable (libellés + emplacement)
+ *  via Paramètres › Navigation (lib/navOverrides), exportée pour le panneau. */
+export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?: boolean }[] = [
   {
     // Accueil — hors groupe, toujours en tête (label null = pas d'en-tête)
     label: null,
@@ -85,6 +88,7 @@ const GROUPS: { label: string | null; items: NavItem[]; collapsible?: boolean }[
     label: "Entrepôt",
     items: [
       { href: "/livraisons", label: "Préparation livraisons", icon: Truck },
+      { href: "/manquants", label: "Manquants", icon: PackageX },
       { href: "/products", label: "Stock", icon: Package },
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },
       { href: "/fabrication", label: "Fabrication", icon: Factory },
@@ -203,13 +207,31 @@ export function Sidebar() {
   const badges = useBadges();
   // Voile de navigation : label de la page en cours d'ouverture (null = caché).
   const [pending, setPending] = useState<string | null>(null);
+  // ── Personnalisation (libellés + emplacement) — réglage global admin
+  //    (Paramètres › Navigation). Chargée au montage, best-effort, et mise à
+  //    jour À CHAUD quand le panneau enregistre (événement nav-overrides). ──
+  const [navOverrides, setNavOverrides] = useState<NavOverrides>({});
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/nav-overrides", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!cancelled && j?.ok && j.overrides) setNavOverrides(j.overrides); })
+      .catch(() => { /* réglage optionnel */ });
+    const onChanged = (e: Event) => {
+      const detail = (e as CustomEvent<NavOverrides>).detail;
+      if (detail) setNavOverrides(detail);
+    };
+    window.addEventListener("nav-overrides-changed", onChanged);
+    return () => { cancelled = true; window.removeEventListener("nav-overrides-changed", onChanged); };
+  }, []);
+  const groups = useMemo(() => applyNavOverrides(NAV_GROUPS, navOverrides), [navOverrides]);
   // Groupes repliables (pages moins quotidiennes) — état persistant PAR groupe
   // (clé `televent-sidebar-group:<label>`). Repliés par défaut.
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   useEffect(() => {
     try {
       const next: Record<string, boolean> = {};
-      for (const g of GROUPS) {
+      for (const g of NAV_GROUPS) {
         if (g.collapsible && g.label) next[g.label] = localStorage.getItem(`televent-sidebar-group:${g.label}`) === "open";
       }
       setOpenGroups(next);
@@ -302,7 +324,7 @@ export function Sidebar() {
 
       {/* ── Navigation groupée ─────────────────────────── */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden px-3 pb-2 pt-1 space-y-4">
-        {GROUPS.map((group) => {
+        {groups.map((group) => {
           // Aperçu « voir comme » : on masque les entrées hors périmètre du rôle
           // prévisualisé (préparateur = ses 2 écrans). Sans aperçu : tout visible.
           const items = group.items.filter((it) => navAllowedForPreview(it.href, previewRole));
@@ -363,8 +385,9 @@ export function Sidebar() {
                       )}
                       <span className="relative shrink-0">
                         <Icon className={`h-[21px] w-[21px] ${active ? "text-brand-400" : ""}`} strokeWidth={active ? 2.2 : 1.8} />
+                        {/* Pastille de comptage — vacillement léger (animate-badge-wobble). */}
                         {badge && badgeCount > 0 && (
-                          <span className={`absolute -top-1.5 -right-2 min-w-[15px] h-[15px] px-0.5 rounded-full text-[9px] font-bold flex items-center justify-center ring-2 ring-[#0b1018] ${BADGE_STYLE[badge]}`}>
+                          <span className={`animate-badge-wobble absolute -top-1.5 -right-2 min-w-[15px] h-[15px] px-0.5 rounded-full text-[9px] font-bold flex items-center justify-center ring-2 ring-[#0b1018] ${BADGE_STYLE[badge]}`}>
                             {badgeCount > 9 ? "9+" : badgeCount}
                           </span>
                         )}

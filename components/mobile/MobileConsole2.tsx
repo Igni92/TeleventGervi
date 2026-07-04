@@ -4,10 +4,12 @@
  * CONSOLE 2 MOBILE — saisie de bon de livraison ALLÉGÉE (téléphone / tablette).
  *
  * Reprise de l'Écran 2 de la console (constructeur de commande piloté par le
- * stock) avec BEAUCOUP moins d'informations : pas de favoris, pas de promos,
- * pas de densité, pas de mode modification, pas d'onglet tarif. On GARDE les
- * tags produit (marque · conditionnement · origine — mêmes couleurs partout,
- * cf. DesignationChips) sur la liste stock ET sur les lignes du panier.
+ * stock) avec BEAUCOUP moins d'informations : pas de promos, pas de densité,
+ * pas de mode modification. On GARDE les tags produit (marque · conditionnement
+ * · origine — mêmes couleurs partout, cf. DesignationChips) sur la liste stock
+ * ET sur les lignes du panier, les FAVORIS du commercial (groupe ⭐ épinglé en
+ * tête + étoile par article, /api/favorites) et les TARIFS FIXES du client
+ * (groupe « Tarif client » épinglé, prix négocié en violet, prioritaire au panier).
  *
  * Flux : rechercher un compte → toucher un article pour l'ajouter au panier →
  * ajuster quantités/prix → transporteur + tournée (pré-remplis, obligatoires)
@@ -16,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  ChevronDown, Loader2, Minus, Plus, Search, ShoppingCart, Trash2, Truck, X,
+  BadgeEuro, ChevronDown, Loader2, Minus, Plus, Search, ShoppingCart, Star, Trash2, Truck, X,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, unitInfo } from "@/lib/gervifrais-calc";
 import { nextDeliveryDate } from "@/lib/livraison";
@@ -54,6 +56,11 @@ const TYPE_BADGE: Record<string, string> = {
   GMS: "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300",
   CHR: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
 };
+
+/** Groupes ÉPINGLÉS en tête de liste (mêmes principes que l'Écran 2) :
+ *  ⭐ favoris du commercial et tarifs fixes (cotations) du client. */
+const FAV_KEY = "__fav__";
+const TARIF_KEY = "__tarif__";
 
 /** Unités, dispo par entrepôt (en unité d'affichage), dispo totale et pas « un
  *  colis » d'un produit — même logique que l'Écran 2 (buildLine), calculée UNE
@@ -238,13 +245,44 @@ function OrderBuilder({ client }: { client: SearchClient }) {
         }
         Object.values(byGroup).forEach((a) => a.sort((x, y) => x.itemName.localeCompare(y.itemName)));
         setGrouped(byGroup);
-        // Mobile : groupes FERMÉS par défaut (écran court) — la recherche les ouvre.
-        setOpenGroups({});
+        // Mobile : groupes famille FERMÉS par défaut (écran court) — seuls les
+        // groupes épinglés (⭐ Favoris, Tarif client) s'ouvrent d'office.
+        setOpenGroups({ [FAV_KEY]: true, [TARIF_KEY]: true });
       })
       .catch(() => { if (!cancelled) setGrouped({}); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  // ── Favoris du commercial connecté (⭐) — chargés une fois, toggle optimiste. ──
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    fetch(`/api/favorites`).then((r) => r.json())
+      .then((d) => setFavorites(new Set<string>(d?.itemCodes ?? [])))
+      .catch(() => { /* favoris optionnels */ });
+  }, []);
+  const toggleFavorite = useCallback((itemCode: string) => {
+    const wasFav = favorites.has(itemCode);
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (wasFav) next.delete(itemCode); else next.add(itemCode);
+      return next;
+    });
+    const req = wasFav
+      ? fetch(`/api/favorites?itemCode=${encodeURIComponent(itemCode)}`, { method: "DELETE" })
+      : fetch(`/api/favorites`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ itemCode }),
+        });
+    req.then((r) => { if (!r.ok) throw new Error(); }).catch(() => {
+      setFavorites((prev) => {
+        const next = new Set(prev);
+        if (wasFav) next.add(itemCode); else next.delete(itemCode);
+        return next;
+      });
+      toast.error("Favori non enregistré");
+    });
+  }, [favorites]);
 
   // Cotations spécifiques du client (prix négocié prioritaire au panier).
   useEffect(() => {
@@ -412,16 +450,31 @@ function OrderBuilder({ client }: { client: SearchClient }) {
     }
   };
 
-  /* ── Liste stock filtrée ── */
+  /* ── Liste stock filtrée : groupes ÉPINGLÉS (⭐ Favoris, Tarif client) en
+        tête, puis les familles. Les épinglés sont des COPIES (les originaux
+        restent à leur place dans leur famille). ── */
   const needle = filter.trim().toLowerCase();
-  const groups = useMemo(() => {
-    const entries = Object.entries(grouped);
-    if (!needle) return entries;
-    return entries
-      .map(([g, prods]) => [g, prods.filter((p) =>
-        p.itemName.toLowerCase().includes(needle) || p.itemCode.toLowerCase().includes(needle))] as [string, Product[]])
-      .filter(([, prods]) => prods.length > 0);
-  }, [grouped, needle]);
+  interface GroupEntry { key: string; label: string; prods: Product[]; pinned?: "fav" | "tarif" }
+  const groups = useMemo<GroupEntry[]>(() => {
+    const matches = (p: Product) =>
+      !needle || p.itemName.toLowerCase().includes(needle) || p.itemCode.toLowerCase().includes(needle);
+    const all = Object.values(grouped).flat();
+    const out: GroupEntry[] = [];
+    const favProds = all.filter((p) => favorites.has(p.itemCode) && matches(p));
+    if (favProds.length) out.push({ key: FAV_KEY, label: "⭐ Favoris", prods: favProds, pinned: "fav" });
+    const tarifProds = all.filter((p) => tarifByCode.has(p.itemCode) && matches(p));
+    if (tarifProds.length) out.push({ key: TARIF_KEY, label: "Tarif client (prix fixés)", prods: tarifProds, pinned: "tarif" });
+    for (const [g, prods] of Object.entries(grouped)) {
+      const kept = prods.filter(matches);
+      if (kept.length) out.push({ key: g, label: g, prods: kept });
+    }
+    return out;
+  }, [grouped, needle, favorites, tarifByCode]);
+  // Prix des groupes épinglés (ouverts d'office) — chargés dès qu'ils existent.
+  useEffect(() => {
+    const codes = groups.filter((g) => g.pinned).flatMap((g) => g.prods.map((p) => p.itemCode));
+    if (codes.length) loadHints(codes);
+  }, [groups, loadHints]);
   const inCart = useMemo(() => new Set(cart.map((l) => l.itemCode)), [cart]);
 
   return (
@@ -605,33 +658,50 @@ function OrderBuilder({ client }: { client: SearchClient }) {
         <p className="text-[13px] text-muted-foreground px-1">Aucun article en stock.</p>
       ) : (
         <div className="space-y-2">
-          {groups.map(([g, prods]) => {
-            const isOpen = needle ? true : !!openGroups[g];
+          {groups.map((g) => {
+            const isOpen = needle ? true : !!openGroups[g.key];
             return (
-              <section key={g} className="rounded-2xl border border-border bg-card overflow-hidden">
+              <section key={g.key} className={`rounded-2xl border bg-card overflow-hidden ${
+                g.pinned === "fav" ? "border-amber-400/50" : g.pinned === "tarif" ? "border-violet-400/50" : "border-border"
+              }`}>
                 <button
                   type="button"
-                  onClick={() => toggleGroup(g, prods)}
+                  onClick={() => toggleGroup(g.key, g.prods)}
                   className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-left hover:bg-secondary/30 transition-colors"
                 >
-                  <span className="text-[13px] font-semibold text-foreground truncate">{g}</span>
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    {g.pinned === "tarif" && <BadgeEuro className="h-4 w-4 shrink-0 text-violet-600 dark:text-violet-400" />}
+                    <span className="text-[13px] font-semibold text-foreground truncate">{g.label}</span>
+                  </span>
                   <span className="flex items-center gap-2 shrink-0">
-                    <span className="text-[11px] text-muted-foreground">{prods.length}</span>
+                    <span className="text-[11px] text-muted-foreground">{g.prods.length}</span>
                     <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isOpen ? "" : "-rotate-90"}`} />
                   </span>
                 </button>
                 {isOpen && (
                   <ul className="divide-y divide-border/50 border-t border-border/60">
-                    {prods.map((p) => {
+                    {g.prods.map((p) => {
                       const d = displayByCode.get(p.itemCode) ?? computeDisplay(p);
-                      const price = tarifByCode.get(p.itemCode) ?? hints[p.itemCode]?.prixConseille ?? null;
+                      const tarif = tarifByCode.get(p.itemCode) ?? null;
+                      const price = tarif ?? hints[p.itemCode]?.prixConseille ?? null;
                       const added = inCart.has(p.itemCode);
+                      const isFav = favorites.has(p.itemCode);
                       return (
-                        <li key={p.itemCode}>
+                        <li key={p.itemCode} className={`flex items-stretch ${added ? "bg-brand-50 dark:bg-brand-950/30" : ""}`}>
+                          {/* Étoile FAVORI — bouton séparé (pas de bouton imbriqué). */}
+                          <button
+                            type="button"
+                            onClick={() => toggleFavorite(p.itemCode)}
+                            aria-pressed={isFav}
+                            aria-label={isFav ? `Retirer ${p.itemName} des favoris` : `Ajouter ${p.itemName} aux favoris`}
+                            className="shrink-0 w-10 inline-flex items-center justify-center text-muted-foreground/50 hover:text-amber-500 transition-colors"
+                          >
+                            <Star className={`h-4 w-4 ${isFav ? "fill-amber-400 text-amber-500" : ""}`} />
+                          </button>
                           <button
                             type="button"
                             onClick={() => toggleCart(p)}
-                            className={`w-full text-left px-3.5 py-2.5 flex items-center gap-2.5 transition-colors ${added ? "bg-brand-50 dark:bg-brand-950/30" : "hover:bg-secondary/30"}`}
+                            className={`min-w-0 flex-1 text-left pr-3.5 py-2.5 flex items-center gap-2.5 transition-colors ${added ? "" : "hover:bg-secondary/30"}`}
                           >
                             <span className="min-w-0 flex-1">
                               <span className="block text-[13.5px] font-medium text-foreground leading-tight">{p.itemName}</span>
@@ -646,7 +716,13 @@ function OrderBuilder({ client }: { client: SearchClient }) {
                                 <span className="ml-0.5 text-[9.5px] font-semibold uppercase text-muted-foreground">{d.displayUnit}</span>
                               </span>
                               {price != null && (
-                                <span className="block text-[11px] tnum text-muted-foreground mt-0.5">{eur.format(price)}</span>
+                                // Prix VIOLET = tarif fixé pour ce client (cotation), sinon prix conseillé.
+                                <span
+                                  title={tarif != null ? "Prix fixé pour ce client (tarif)" : "Prix conseillé"}
+                                  className={`block text-[11px] tnum mt-0.5 ${tarif != null ? "font-bold text-violet-600 dark:text-violet-400" : "text-muted-foreground"}`}
+                                >
+                                  {eur.format(price)}
+                                </span>
                               )}
                             </span>
                             <span className={`shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${

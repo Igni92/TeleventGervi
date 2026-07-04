@@ -11,7 +11,9 @@ import {
   type Tournee,
 } from "./livraisonView";
 
-/** Doc minimal — seuls les champs utiles aux calculs sont surchargés. */
+/** Doc minimal — seuls les champs utiles aux calculs sont surchargés.
+ *  `misEnPrep: true` par défaut : le doc de référence est « mis en préparation »
+ *  (le flux Ventes → À préparer est testé explicitement plus bas). */
 function doc(over: Partial<Doc>): Doc {
   return {
     docEntry: 1,
@@ -33,6 +35,7 @@ function doc(over: Partial<Doc>): Doc {
     carrierName: "Antoine",
     clientType: "GMS",
     prepared: false,
+    misEnPrep: true,
     excluded: false,
     lineCount: 1,
     lines: [],
@@ -66,19 +69,19 @@ describe("livraisonView — computeStatusCounts", () => {
         doc({ docEntry: 4, excluded: true }),                        // exclu → non compté
       ]),
     ];
-    expect(computeStatusCounts(carriers)).toEqual({ aPreparer: 1, fait: 1, depart: 1, manquants: 0 });
+    expect(computeStatusCounts(carriers)).toEqual({ ventes: 0, aPreparer: 1, fait: 1, depart: 1 });
   });
 
-  it("compte les commandes avec manquants (tous états, exclus compris)", () => {
+  it("un BL pas encore mis en préparation compte dans « Ventes », pas dans les états", () => {
     const carriers = [
       carrier([
-        doc({ docEntry: 1, missingItems: ["A1"] }),                              // à préparer + manquant
-        doc({ docEntry: 2, prepared: true, missingItems: ["B2", "C3"] }),        // fait + manquant
-        doc({ docEntry: 3, prepared: true }),                                    // fait, sans manquant
-        doc({ docEntry: 4, excluded: true, missingItems: ["D4"] }),              // exclu mais manquant à traiter
+        doc({ docEntry: 1, misEnPrep: false }),                      // vente en attente
+        doc({ docEntry: 2, misEnPrep: undefined }),                  // absent = pas mis en prep
+        doc({ docEntry: 3 }),                                        // mis en prep → à préparer
+        doc({ docEntry: 4, misEnPrep: false, excluded: true }),      // exclu → non compté
       ]),
     ];
-    expect(computeStatusCounts(carriers)).toEqual({ aPreparer: 1, fait: 2, depart: 0, manquants: 3 });
+    expect(computeStatusCounts(carriers)).toEqual({ ventes: 2, aPreparer: 1, fait: 0, depart: 0 });
   });
 });
 
@@ -115,18 +118,21 @@ describe("livraisonView — computeView (exclusion des BL avoirés)", () => {
     expect(v.totals.orders).toBe(0);
   });
 
-  it("onglet MANQUANTS : filtre tous états confondus sur la présence d'un manquant", () => {
-    const carriersM = [
+  it("onglet VENTES : les BL pas mis en préparation, quel que soit leur état", () => {
+    const carriersV = [
       carrier([
-        doc({ docEntry: 1, colis: 10, totalHT: 100, cardCode: "A", missingItems: ["X"] }), // à préparer + manquant
-        doc({ docEntry: 2, colis: 5, totalHT: 50, cardCode: "B", prepared: true, departed: true, missingItems: ["Y"] }), // parti + manquant
-        doc({ docEntry: 3, colis: 2, totalHT: 20, cardCode: "A", prepared: true }),         // sans manquant → exclu de l'onglet
+        doc({ docEntry: 1, colis: 10, totalHT: 100, cardCode: "A", misEnPrep: false }),                 // vente en attente
+        doc({ docEntry: 2, colis: 5, totalHT: 50, cardCode: "B", misEnPrep: false, prepared: true }),   // (état ignoré tant que pas lâché)
+        doc({ docEntry: 3, colis: 2, totalHT: 20, cardCode: "A" }),                                     // mis en prep → hors Ventes
       ]),
     ];
-    const v = computeView({ carriers: carriersM }, "MANQUANTS");
+    const v = computeView({ carriers: carriersV }, "VENTES");
     expect(v.carriers[0].docs.map((d) => d.docEntry)).toEqual([1, 2]);
     // weightKg = 25 + 25 (valeur par défaut du helper doc, non surchargée ici).
     expect(v.totals).toEqual({ orders: 2, clients: 2, colis: 15, weightKg: 50, totalHT: 150 });
+    // …et un BL pas mis en préparation n'apparaît dans AUCUN onglet d'état.
+    const ap = computeView({ carriers: carriersV }, "A_PREPARER");
+    expect(ap.carriers[0].docs.map((d) => d.docEntry)).toEqual([3]);
   });
 
   it("arrondit les sommes (0,1 colis/kg ; 0,01 €)", () => {

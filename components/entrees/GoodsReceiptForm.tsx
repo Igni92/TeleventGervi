@@ -34,11 +34,36 @@ type Line = {
   packageQuantity: number;                     // ⚠️ nb de COLIS saisis
   warehouseCode: "000" | "01" | "R1";
   price: string;                               // prix /pie (HT)
+  // Total HT FORCÉ de la ligne (facture fournisseur) : quand `forceTotal` est
+  // vrai, le PU est DÉRIVÉ (total / pièces) — même mécanique que l'édition
+  // d'une EM existante (GoodsReceiptHistory). Saisir un PU re-bascule en mode PU.
+  lineTotal: string;
+  forceTotal: boolean;
   pays: string | null;                         // désignation : pays
   marque: string | null;                       // désignation : marque
   condt: string | null;                        // désignation : conditionnement
   variete: string | null;                      // désignation : variété (FrgnName)
   dlc: string;                                  // DLC optionnelle (fraîcheur) — "" si non saisie (YYYY-MM-DD)
+};
+
+/** PU /pie effectif d'une ligne — dérivé du total forcé quand présent. */
+const effPU = (l: Line): number | null => {
+  const pieces = l.packageQuantity * l.ratio;
+  if (l.forceTotal) {
+    const t = parseFloat(l.lineTotal);
+    return Number.isFinite(t) && pieces > 0 ? Math.round((t / pieces) * 10000) / 10000 : null;
+  }
+  const p = l.price === "" ? null : parseFloat(l.price);
+  return p != null && Number.isFinite(p) ? p : null;
+};
+/** Total HT effectif d'une ligne — total forcé, sinon PU × pièces. */
+const effTotal = (l: Line): number | null => {
+  if (l.forceTotal) {
+    const t = parseFloat(l.lineTotal);
+    return Number.isFinite(t) ? t : null;
+  }
+  const p = effPU(l);
+  return p != null ? p * l.packageQuantity * l.ratio : null;
 };
 
 const WAREHOUSES: { code: "000" | "01" | "R1"; label: string }[] = [
@@ -274,6 +299,8 @@ export function GoodsReceiptForm() {
         packageQuantity: 1,
         warehouseCode: "01",
         price: "",
+        lineTotal: "",
+        forceTotal: false,
         pays: p.uPays,
         marque: p.uMarque,
         condt: p.uCondi,
@@ -287,11 +314,8 @@ export function GoodsReceiptForm() {
     setLines((c) => c.map((l, k) => k === i ? { ...l, ...patch } : l));
   const removeLine = (i: number) => setLines((c) => c.filter((_, k) => k !== i));
 
-  // Total HT estimé = Σ (colis × ratio pie × prix /pie) des lignes prix saisi.
-  const totalHT = lines.reduce((s, l) => {
-    const price = l.price === "" ? null : parseFloat(l.price);
-    return s + (price != null ? price * l.packageQuantity * l.ratio : 0);
-  }, 0);
+  // Total HT estimé = Σ des totaux effectifs (PU × pièces, ou total forcé).
+  const totalHT = lines.reduce((s, l) => s + (effTotal(l) ?? 0), 0);
 
   const reset = () => {
     setSupplier(null); setDocDate(todayISO()); setNumAtCard(""); setComment(""); setLines([]); setAffect("TOUS");
@@ -318,12 +342,16 @@ export function GoodsReceiptForm() {
           numAtCard: numAtCard.trim() || undefined,
           comment: comment.trim() || undefined,
           affect,
-          lines: lines.map((l) => ({
-            itemCode: l.itemCode,
-            packageQuantity: l.packageQuantity,
-            warehouseCode: l.warehouseCode,
-            price: l.price ? parseFloat(l.price) : undefined,
-          })),
+          lines: lines.map((l) => {
+            // PU effectif : dérivé du TOTAL HT forcé quand saisi (facture), sinon PU tapé.
+            const pu = effPU(l);
+            return {
+              itemCode: l.itemCode,
+              packageQuantity: l.packageQuantity,
+              warehouseCode: l.warehouseCode,
+              price: pu != null && pu > 0 ? pu : undefined,
+            };
+          }),
         }),
       });
       const json = await res.json();
@@ -449,8 +477,8 @@ export function GoodsReceiptForm() {
           {lines.map((l, i) => {
             const pieceQty = l.packageQuantity * l.ratio;
             const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, frgnName: l.variete });
-            const priceNum = l.price === "" ? null : parseFloat(l.price);
-            const lineHT = priceNum != null ? priceNum * pieceQty : null;
+            const priceNum = effPU(l);
+            const lineHT = effTotal(l);
             return (
               <div key={l.itemCode} className="rounded-xl border border-border bg-card/40 p-3 space-y-3">
                 <div className="flex items-start justify-between gap-2">
@@ -478,7 +506,7 @@ export function GoodsReceiptForm() {
                     <label className="block text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">Prix /pie HT</label>
                     <NumberInput
                       value={priceNum}
-                      onValueChange={(n) => updateLine(i, { price: n == null ? "" : String(n) })}
+                      onValueChange={(n) => updateLine(i, { price: n == null ? "" : String(n), forceTotal: false, lineTotal: "" })}
                       min={0} step={0.01} decimals={2} allowEmpty placeholder="—"
                       className="h-11 w-full text-right text-[15px]"
                     />
@@ -507,9 +535,17 @@ export function GoodsReceiptForm() {
                   </div>
                 </div>
                 <div className="flex items-end justify-end gap-3">
-                  <div className="text-right shrink-0">
-                    <span className="block text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Total HT</span>
-                    <span className="text-[18px] font-bold tnum text-foreground">{lineHT != null ? fmtEur(lineHT) : "—"}</span>
+                  <div className="text-right shrink-0 w-full max-w-[180px]">
+                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">
+                      Total HT{l.forceTotal ? " (forcé)" : ""}
+                    </label>
+                    {/* Total HT ÉDITABLE (facture fournisseur) — le PU est dérivé. */}
+                    <NumberInput
+                      value={lineHT}
+                      onValueChange={(n) => updateLine(i, { lineTotal: n == null ? "" : String(n), forceTotal: n != null })}
+                      min={0} step={0.01} decimals={2} allowEmpty placeholder="—"
+                      className={`h-11 w-full text-right text-[16px] font-bold ${l.forceTotal ? "ring-1 ring-amber-400" : ""}`}
+                    />
                   </div>
                 </div>
               </div>
@@ -545,8 +581,8 @@ export function GoodsReceiptForm() {
               {lines.map((l, i) => {
                 const pieceQty = l.packageQuantity * l.ratio;
                 const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, frgnName: l.variete });
-                const priceNum = l.price === "" ? null : parseFloat(l.price);
-                const lineHT = priceNum != null ? priceNum * pieceQty : null;
+                const priceNum = effPU(l);
+                const lineHT = effTotal(l);
                 return (
                   <tr key={l.itemCode} className="border-t border-border">
                     <td className="px-2 py-2">
@@ -587,13 +623,20 @@ export function GoodsReceiptForm() {
                     <td className="px-2 py-2">
                       <NumberInput
                         value={priceNum}
-                        onValueChange={(n) => updateLine(i, { price: n == null ? "" : String(n) })}
+                        onValueChange={(n) => updateLine(i, { price: n == null ? "" : String(n), forceTotal: false, lineTotal: "" })}
                         min={0} step={0.01} decimals={2} allowEmpty placeholder="—"
                         className="text-right h-9 w-24"
                       />
                     </td>
-                    <td className="px-2 py-2 text-right tnum font-medium whitespace-nowrap">
-                      {lineHT != null ? fmtEur(lineHT) : <span className="text-muted-foreground/60">—</span>}
+                    <td className="px-2 py-2">
+                      {/* Total HT ÉDITABLE (facture fournisseur) — le PU est dérivé. */}
+                      <NumberInput
+                        value={lineHT}
+                        onValueChange={(n) => updateLine(i, { lineTotal: n == null ? "" : String(n), forceTotal: n != null })}
+                        min={0} step={0.01} decimals={2} allowEmpty placeholder="—"
+                        title={l.forceTotal ? "Total forcé — le PU est recalculé (total / pièces)" : "Saisis le total HT de la ligne pour forcer le PU"}
+                        className={`text-right h-9 w-24 ${l.forceTotal ? "ring-1 ring-amber-400" : ""}`}
+                      />
                     </td>
                     <td className="px-2 py-2 text-right">
                       <Button variant="ghost" size="icon-sm" tabIndex={-1} onClick={() => removeLine(i)} aria-label="Supprimer">
