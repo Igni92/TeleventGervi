@@ -55,6 +55,29 @@ const TYPE_BADGE: Record<string, string> = {
   CHR: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
 };
 
+/** Unités, dispo par entrepôt (en unité d'affichage), dispo totale et pas « un
+ *  colis » d'un produit — même logique que l'Écran 2 (buildLine), calculée UNE
+ *  fois par produit au chargement : la liste peut porter ~3000 lignes, on ne
+ *  recalcule pas unitInfo/totalAvailable à chaque render. */
+interface ProductDisplay {
+  packDivisor: number; displayUnit: string; priceUnit: string;
+  avail: Record<string, number>; dispo: number; stepColis: number;
+}
+function computeDisplay(p: Product): ProductDisplay {
+  const { packDivisor, displayUnit, priceUnit } = unitInfo(p.salesUnit, p.salesQtyPerPackUnit);
+  const avail: Record<string, number> = {};
+  for (const w of ["000", "01", "R1"]) avail[w] = Math.max(0, Math.floor(((p.stockByWarehouse[w]?.available ?? 0) / packDivisor) * 10) / 10);
+  // Incrément « un colis » : article vendu au kg → pas du POIDS d'un colis.
+  let colisW = unitInfo(p.salesUnit, p.salesQtyPerPackUnit, p.salesItemsPerUnit ?? null, p.salesUnitWeight).colisWeightKg ?? null;
+  if ((colisW == null || colisW <= 0) && displayUnit === "kg") {
+    const q = p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1 ? p.salesQtyPerPackUnit : 1;
+    const w = p.salesUnitWeight && p.salesUnitWeight > 0 ? p.salesUnitWeight : 1;
+    colisW = Math.round(q * w * 1000) / 1000;
+  }
+  const stepColis = displayUnit === "kg" ? (colisW && colisW > 0 ? Math.round(colisW * 100) / 100 : 1) : 1;
+  return { packDivisor, displayUnit, priceUnit, avail, dispo: Math.round(totalAvailable(avail) * 10) / 10, stepColis };
+}
+
 export function MobileConsole2() {
   const [client, setClient] = useState<SearchClient | null>(null);
   return (
@@ -252,20 +275,24 @@ function OrderBuilder({ client }: { client: SearchClient }) {
   }, [client.id]);
 
   /** Prix conseillés d'un lot de codes — chargés PAR GROUPE OUVERT (léger sur
-   *  mobile : pas les ~3000 hints d'un coup comme sur l'Écran 2). */
+   *  mobile : pas les ~3000 hints d'un coup comme sur l'Écran 2). Tranches de
+   *  40 en PARALLÈLE, un seul setHints à l'arrivée (un render, pas un par tranche). */
   const loadHints = useCallback(async (codes: string[]) => {
     const fresh = codes.filter((c) => !hintsRequested.current.has(c));
     if (!fresh.length) return;
     fresh.forEach((c) => hintsRequested.current.add(c));
-    for (let i = 0; i < fresh.length; i += 40) {
-      const slice = fresh.slice(i, i + 40);
+    const slices: string[][] = [];
+    for (let i = 0; i < fresh.length; i += 40) slices.push(fresh.slice(i, i + 40));
+    const parts = await Promise.all(slices.map(async (slice) => {
       try {
         const params = new URLSearchParams({ clientId: client.id, items: slice.join(",") });
         const res = await fetch(`/api/sap/prices?${params}`);
         const json = await res.json();
-        if (json.prices) setHints((cur) => ({ ...cur, ...json.prices }));
-      } catch { /* prix optionnel */ }
-    }
+        return (json.prices ?? {}) as Record<string, Hint>;
+      } catch { return {} as Record<string, Hint>; }   // prix optionnel
+    }));
+    const merged = Object.assign({}, ...parts) as Record<string, Hint>;
+    if (Object.keys(merged).length) setHints((cur) => ({ ...cur, ...merged }));
   }, [client.id]);
 
   const toggleGroup = (g: string, prods: Product[]) => {
@@ -273,27 +300,26 @@ function OrderBuilder({ client }: { client: SearchClient }) {
     if (!openGroups[g]) loadHints(prods.map((p) => p.itemCode));
   };
 
+  // Affichage précalculé PAR PRODUIT (unités, dispo, pas colis) — une fois par
+  // chargement du stock, partagé entre la liste et le panier.
+  const displayByCode = useMemo(() => {
+    const m = new Map<string, ProductDisplay>();
+    for (const prods of Object.values(grouped)) for (const p of prods) m.set(p.itemCode, computeDisplay(p));
+    return m;
+  }, [grouped]);
+
   /* ── Panier ── */
   const buildLine = useCallback((p: Product): CartLine => {
-    const { packDivisor, displayUnit, priceUnit } = unitInfo(p.salesUnit, p.salesQtyPerPackUnit);
-    const avail: Record<string, number> = {};
-    for (const w of ["000", "01", "R1"]) avail[w] = Math.max(0, Math.floor(((p.stockByWarehouse[w]?.available ?? 0) / packDivisor) * 10) / 10);
-    // Incrément « un colis » : article vendu au kg → pas du POIDS d'un colis.
-    let colisW = unitInfo(p.salesUnit, p.salesQtyPerPackUnit, p.salesItemsPerUnit ?? null, p.salesUnitWeight).colisWeightKg ?? null;
-    if ((colisW == null || colisW <= 0) && displayUnit === "kg") {
-      const q = p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1 ? p.salesQtyPerPackUnit : 1;
-      const w = p.salesUnitWeight && p.salesUnitWeight > 0 ? p.salesUnitWeight : 1;
-      colisW = Math.round(q * w * 1000) / 1000;
-    }
-    const stepColis = displayUnit === "kg" ? (colisW && colisW > 0 ? Math.round(colisW * 100) / 100 : 1) : 1;
+    const d = displayByCode.get(p.itemCode) ?? computeDisplay(p);
     return {
-      itemCode: p.itemCode, itemName: p.itemName, unit: displayUnit, priceUnit, packDivisor,
-      availByWarehouse: avail, quantity: stepColis,
+      itemCode: p.itemCode, itemName: p.itemName, unit: d.displayUnit, priceUnit: d.priceUnit,
+      packDivisor: d.packDivisor,
+      availByWarehouse: d.avail, quantity: d.stepColis,
       price: tarifByCode.get(p.itemCode) ?? hints[p.itemCode]?.prixConseille ?? null,
-      stepColis,
+      stepColis: d.stepColis,
       marque: p.uMarque ?? null, condi: p.uCondi ?? p.uUvc ?? null, pays: p.uPays ?? null,
     };
-  }, [hints, tarifByCode]);
+  }, [displayByCode, hints, tarifByCode]);
 
   const toggleCart = (p: Product) => {
     loadHints([p.itemCode]);
@@ -597,10 +623,7 @@ function OrderBuilder({ client }: { client: SearchClient }) {
                 {isOpen && (
                   <ul className="divide-y divide-border/50 border-t border-border/60">
                     {prods.map((p) => {
-                      const { packDivisor, displayUnit } = unitInfo(p.salesUnit, p.salesQtyPerPackUnit);
-                      const avail: Record<string, number> = {};
-                      for (const w of ["000", "01", "R1"]) avail[w] = Math.max(0, Math.floor(((p.stockByWarehouse[w]?.available ?? 0) / packDivisor) * 10) / 10);
-                      const dispo = Math.round(totalAvailable(avail) * 10) / 10;
+                      const d = displayByCode.get(p.itemCode) ?? computeDisplay(p);
                       const price = tarifByCode.get(p.itemCode) ?? hints[p.itemCode]?.prixConseille ?? null;
                       const added = inCart.has(p.itemCode);
                       return (
@@ -619,8 +642,8 @@ function OrderBuilder({ client }: { client: SearchClient }) {
                             </span>
                             <span className="shrink-0 text-right">
                               <span className="block text-[15px] font-bold tnum text-foreground leading-none">
-                                {dispo.toLocaleString("fr-FR")}
-                                <span className="ml-0.5 text-[9.5px] font-semibold uppercase text-muted-foreground">{displayUnit}</span>
+                                {d.dispo.toLocaleString("fr-FR")}
+                                <span className="ml-0.5 text-[9.5px] font-semibold uppercase text-muted-foreground">{d.displayUnit}</span>
                               </span>
                               {price != null && (
                                 <span className="block text-[11px] tnum text-muted-foreground mt-0.5">{eur.format(price)}</span>

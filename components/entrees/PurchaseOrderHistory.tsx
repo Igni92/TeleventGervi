@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
 import { DesignationChips } from "./DesignationChips";
+import { INCIDENT_TYPES } from "./ReceptionIncidents";
 import { ProductPicker, type ProductHit } from "./GoodsReceiptForm";
 
 type PoLine = {
@@ -33,10 +34,9 @@ type PurchaseOrder = {
   comments: string; lineCount: number; lines: PoLine[];
 };
 
-/** Agréage porté par la réception (cf. lib/agreage) : conforme, ou avec réserve. */
+/** Agréage porté par la réception (cf. lib/agreage) : conforme, ou avec réserve.
+ *  Les types de réserve = INCIDENT_TYPES (mêmes types que les incidents de réception). */
 type ReceiveAgreage = { status: "CONFORME" | "RESERVE"; type?: string; note?: string };
-/** Types de réserve = mêmes types que les incidents de réception (INCIDENT_META). */
-const RESERVE_TYPES = ["Qualité", "Manquant", "Casse", "Température", "Prix", "Autre"] as const;
 
 /** Date jj.mm.aa (points, année sur 2 chiffres). */
 const fmtDate = (s?: string | null): string => {
@@ -354,7 +354,7 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
   // Agréage de la réception (contrôle qualité) : conforme par défaut ; « avec
   // réserve » exige un type + une note (la réserve ouvre un incident).
   const [agreeStatus, setAgreeStatus] = useState<"CONFORME" | "RESERVE">("CONFORME");
-  const [reserveType, setReserveType] = useState<string>(RESERVE_TYPES[0]);
+  const [reserveType, setReserveType] = useState<string>(INCIDENT_TYPES[0]);
   const [reserveNote, setReserveNote] = useState("");
   const reserveIncomplete = agreeStatus === "RESERVE" && !reserveNote.trim();
   const [editing, setEditing] = useState(false);
@@ -607,7 +607,7 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
                 {agreeStatus === "RESERVE" && (
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-2 flex-wrap">
-                      {RESERVE_TYPES.map((t) => (
+                      {INCIDENT_TYPES.map((t) => (
                         <button
                           key={t}
                           type="button"

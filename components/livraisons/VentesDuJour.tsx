@@ -42,15 +42,19 @@ const SEGMENT_BADGE: Record<string, string> = {
   GMS: "bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300",
 };
 
-/** Toutes les ventes (BL) d'une réponse /api/livraisons, hors « avoir / exclu ». */
-function flatDocs(data: ApiResp | null): Doc[] {
-  if (!data?.ok) return [];
-  return data.carriers.flatMap((c) => c.docs).filter((d) => !d.excluded);
+/** Un volet de l'état : la date livrée + les ventes À PLAT (hors « avoir / exclu »).
+ *  On aplatit dès la réception — le rendu ne consomme pas l'arbre transporteurs,
+ *  et les mises à jour optimistes deviennent un simple map à un niveau. */
+interface Volet { date: string; docs: Doc[] }
+
+function toVolet(data: ApiResp | null): Volet | null {
+  if (!data?.ok) return null;
+  return { date: data.date, docs: data.carriers.flatMap((c) => c.docs).filter((d) => !d.excluded) };
 }
 
 export function VentesDuJour() {
-  const [prep, setPrep] = useState<ApiResp | null>(null);       // prochaine livraison (défaut API)
-  const [jour, setJour] = useState<ApiResp | null>(null);       // livraison d'AUJOURD'HUI
+  const [prep, setPrep] = useState<Volet | null>(null);         // prochaine livraison (défaut API)
+  const [jour, setJour] = useState<Volet | null>(null);         // livraison d'AUJOURD'HUI
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<Set<number>>(new Set());     // docEntry en cours de bascule
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -67,8 +71,8 @@ export function VentesDuJour() {
         rPrep.json().catch(() => null),
         rJour.json().catch(() => null),
       ]);
-      if (jPrep?.ok) setPrep(jPrep); else toast.error(jPrep?.error || "Ventes en préparation indisponibles");
-      if (jJour?.ok) setJour(jJour);
+      if (jPrep?.ok) setPrep(toVolet(jPrep)); else toast.error(jPrep?.error || "Ventes en préparation indisponibles");
+      if (jJour?.ok) setJour(toVolet(jJour));
     } catch {
       toast.error("SAP injoignable — ventes du jour non chargées");
     } finally {
@@ -78,19 +82,20 @@ export function VentesDuJour() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Bascule « mis en préparation » — optimiste sur les DEUX volets, rollback si échec.
+  // Pose le flag « mis en préparation » sur un jeu de BL, dans les DEUX volets
+  // (un même docEntry peut être affiché des deux côtés un jour férié décalé).
+  const applyFlag = useCallback((entries: number[], on: boolean) => {
+    const set = new Set(entries);
+    const patch = (v: Volet | null): Volet | null =>
+      v && { ...v, docs: v.docs.map((d) => (set.has(d.docEntry) ? { ...d, misEnPrep: on } : d)) };
+    setPrep(patch);
+    setJour(patch);
+  }, []);
+
+  // Bascule « mis en préparation » — optimiste, rollback si échec.
   const toggleMiseEnPrep = useCallback(async (docEntry: number, on: boolean) => {
-    const apply = (resp: ApiResp | null, v: boolean): ApiResp | null =>
-      resp && {
-        ...resp,
-        carriers: resp.carriers.map((c) => ({
-          ...c,
-          docs: c.docs.map((d) => (d.docEntry === docEntry ? { ...d, misEnPrep: v } : d)),
-        })),
-      };
     setBusy((prev) => new Set(prev).add(docEntry));
-    setPrep((p) => apply(p, on));
-    setJour((p) => apply(p, on));
+    applyFlag([docEntry], on);
     try {
       const r = await fetch("/api/livraisons/mise-en-prep", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -99,20 +104,21 @@ export function VentesDuJour() {
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) throw new Error(j?.error || "Échec de la mise en préparation");
     } catch (e) {
-      setPrep((p) => apply(p, !on));
-      setJour((p) => apply(p, !on));
+      applyFlag([docEntry], !on);
       toast.error(e instanceof Error ? e.message : "Échec de la mise en préparation");
     } finally {
       setBusy((prev) => { const next = new Set(prev); next.delete(docEntry); return next; });
     }
-  }, []);
+  }, [applyFlag]);
 
-  // « Tout mettre en préparation » — les BL du volet préparation pas encore lâchés.
+  // « Tout mettre en préparation » — optimiste aussi : le seul changement est un
+  // booléen déjà connu côté client, inutile de rejouer 2 pipelines SAP (load()).
   const releaseAll = useCallback(async (docs: Doc[]) => {
     const entries = docs.filter((d) => !d.misEnPrep).map((d) => d.docEntry);
     if (!entries.length) return;
     if (!window.confirm(`Mettre ${entries.length} magasin${entries.length > 1 ? "s" : ""} en préparation ? Ils deviendront visibles pour l'entrepôt.`)) return;
     setBulkBusy(true);
+    applyFlag(entries, true);
     try {
       const r = await fetch("/api/livraisons/mise-en-prep", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -121,13 +127,13 @@ export function VentesDuJour() {
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) throw new Error(j?.error || "Échec de la mise en préparation groupée");
       toast.success(`${entries.length} magasin${entries.length > 1 ? "s" : ""} mis en préparation`);
-      load();
     } catch (e) {
+      applyFlag(entries, false);
       toast.error(e instanceof Error ? e.message : "Échec de la mise en préparation groupée");
     } finally {
       setBulkBusy(false);
     }
-  }, [load]);
+  }, [applyFlag]);
 
   const needle = q.trim().toLowerCase();
   const match = useCallback((d: Doc) =>
@@ -137,12 +143,12 @@ export function VentesDuJour() {
     String(d.docNum).includes(needle), [needle]);
 
   const prepDocs = useMemo(
-    () => flatDocs(prep).filter(match).sort((a, b) =>
+    () => (prep?.docs ?? []).filter(match).sort((a, b) =>
       Number(a.misEnPrep ?? false) - Number(b.misEnPrep ?? false) || a.cardName.localeCompare(b.cardName, "fr")),
     [prep, match],
   );
   const jourDocs = useMemo(
-    () => flatDocs(jour).filter(match).sort((a, b) => a.cardName.localeCompare(b.cardName, "fr")),
+    () => (jour?.docs ?? []).filter(match).sort((a, b) => a.cardName.localeCompare(b.cardName, "fr")),
     [jour, match],
   );
   const pendingCount = prepDocs.filter((d) => !d.misEnPrep).length;

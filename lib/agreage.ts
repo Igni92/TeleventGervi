@@ -76,9 +76,32 @@ export async function setAgreage(
   return at;
 }
 
+/**
+ * Pose l'agréage d'une EM ET applique l'invariant métier « réserve ⇒ incident
+ * de réception » en un seul point d'entrée (utilisé par la réception CF → EM et
+ * par l'agréage a posteriori). Renvoie l'Agreage normalisé enregistré.
+ */
+export async function applyAgreage(params: {
+  docEntry: number; docNum: number | null; lot?: string | null;
+  cardCode?: string | null; cardName?: string | null;
+  status: AgreageStatus; type?: string | null; note?: string | null; by: string;
+}): Promise<Agreage> {
+  const type = params.status === "RESERVE" ? (params.type?.trim() || "Qualité") : null;
+  const note = params.note?.trim() || null;
+  const at = await setAgreage(params.docEntry, { status: params.status, type, note, by: params.by });
+  if (params.status === "RESERVE") {
+    await openReserveIncident({
+      docEntry: params.docEntry, docNum: params.docNum, lot: params.lot,
+      cardCode: params.cardCode, cardName: params.cardName,
+      type: type ?? "Qualité", note, by: params.by,
+    });
+  }
+  return { status: params.status, type, note, by: params.by, at };
+}
+
 /** Une RÉSERVE d'agréage ouvre un incident de réception (suivi litige fournisseur).
  *  Best-effort : l'échec de l'incident ne doit jamais faire échouer l'agréage. */
-export async function openReserveIncident(params: {
+async function openReserveIncident(params: {
   docEntry: number; docNum: number | null; lot?: string | null;
   cardCode?: string | null; cardName?: string | null;
   type: string; note?: string | null; by: string;

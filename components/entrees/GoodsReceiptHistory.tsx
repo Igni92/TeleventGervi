@@ -16,6 +16,7 @@ import { designationProduit } from "@/lib/produit-designation";
 import { DesignationChips, Chip } from "./DesignationChips";
 import {
   OpenReceptionIncidents, InlineIncidentDeclare, IncidentTypeIcon, useReceptionIncidents,
+  INCIDENT_TYPES,
 } from "./ReceptionIncidents";
 
 type ReceiptLine = {
@@ -67,8 +68,6 @@ function CancelBadge({ d, className = "" }: { d: Receipt; className?: string }) 
    AVEC RÉSERVE (type + note → ouvre un incident de réception).
    ───────────────────────────────────────────────────────────────── */
 type AgreageInfo = { status: "CONFORME" | "RESERVE"; type: string | null; note: string | null; by: string; at: string };
-/** Types de réserve = mêmes types que les incidents de réception. */
-const RESERVE_TYPES = ["Qualité", "Manquant", "Casse", "Température", "Prix", "Autre"] as const;
 
 function AgreageBadge({ a, className = "" }: { a: AgreageInfo | null | undefined; className?: string }) {
   if (!a) {
@@ -241,19 +240,24 @@ export function GoodsReceiptHistory({ canAgree = false }: { canAgree?: boolean }
   const [largeEntry, setLargeEntry] = useState<number | null>(null);
   const { incidents, loading: incLoading, reload: reloadIncidents, byDoc } = useReceptionIncidents();
   // Agréages des EM listées (contrôle qualité) — un fetch groupé par chargement.
+  // Clé = liste des docEntry (stable) : une édition LOCALE de docs (prix, n° BL,
+  // DLC…) remappe le tableau sans changer les entrées → pas de re-fetch inutile.
   const [agreages, setAgreages] = useState<Record<number, AgreageInfo>>({});
+  const agreageKey = useMemo(
+    () => docs.filter((d) => !isVoided(d)).map((d) => d.docEntry).join(","),
+    [docs],
+  );
   useEffect(() => {
-    const entries = docs.filter((d) => !isVoided(d)).map((d) => d.docEntry);
-    if (!entries.length) { setAgreages({}); return; }
+    if (!agreageKey) { setAgreages({}); return; }
     let cancelled = false;
-    fetch(`/api/entrees/agreage?docEntries=${entries.join(",")}`, { cache: "no-store" })
+    fetch(`/api/entrees/agreage?docEntries=${agreageKey}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((j: { ok?: boolean; agreages?: Record<number, AgreageInfo> }) => {
         if (!cancelled && j?.ok) setAgreages(j.agreages ?? {});
       })
       .catch(() => { /* agréage best-effort */ });
     return () => { cancelled = true; };
-  }, [docs]);
+  }, [agreageKey]);
   const onAgreageSaved = useCallback((docEntry: number, a: AgreageInfo) =>
     setAgreages((cur) => ({ ...cur, [docEntry]: a })), []);
 
@@ -567,7 +571,7 @@ function AgreageSection({ receipt, agreage, canAgree, big, onSaved, onIncidentCh
   onIncidentChanged: () => void;
 }) {
   const [reserveOpen, setReserveOpen] = useState(false);
-  const [type, setType] = useState<string>(RESERVE_TYPES[0]);
+  const [type, setType] = useState<string>(INCIDENT_TYPES[0]);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -630,7 +634,7 @@ function AgreageSection({ receipt, agreage, canAgree, big, onSaved, onIncidentCh
       {canAgree && reserveOpen && (
         <div className="space-y-1.5">
           <div className="flex items-center gap-2 flex-wrap">
-            {RESERVE_TYPES.map((t) => (
+            {INCIDENT_TYPES.map((t) => (
               <button
                 key={t}
                 type="button"

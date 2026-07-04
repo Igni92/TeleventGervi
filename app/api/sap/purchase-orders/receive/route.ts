@@ -4,7 +4,7 @@ import { requireCanReceivePurchaseOrder } from "@/lib/permissions";
 import { sap } from "@/lib/sapb1";
 import { incrementLocalStock } from "@/lib/stockSync";
 import { bumpLot } from "@/lib/lotResolver";
-import { setAgreage, openReserveIncident, type AgreageStatus } from "@/lib/agreage";
+import { applyAgreage, type AgreageStatus } from "@/lib/agreage";
 
 /**
  * POST /api/sap/purchase-orders/receive  { docEntry, agreage? }
@@ -109,18 +109,12 @@ export async function POST(req: NextRequest) {
   // ── Agréage (contrôle qualité) posé sur l'EM créée — réserve → incident ──
   let agreage: { status: AgreageStatus; type: string | null; note: string | null } | null = null;
   if (agreageStatus) {
-    const type = agreageStatus === "RESERVE" ? (body.agreage?.type?.trim() || "Qualité") : null;
-    const note = body.agreage?.note?.trim() || null;
     try {
-      await setAgreage(created.DocEntry, { status: agreageStatus, type, note, by: me });
-      agreage = { status: agreageStatus, type, note };
-      if (agreageStatus === "RESERVE") {
-        await openReserveIncident({
-          docEntry: created.DocEntry, docNum: created.DocNum, lot: lotCode,
-          cardCode: po.CardCode, cardName: po.CardName ?? null,
-          type: type ?? "Qualité", note, by: me,
-        });
-      }
+      agreage = await applyAgreage({
+        docEntry: created.DocEntry, docNum: created.DocNum, lot: lotCode,
+        cardCode: po.CardCode, cardName: po.CardName ?? null,
+        status: agreageStatus, type: body.agreage?.type, note: body.agreage?.note, by: me,
+      });
     } catch (e) {
       console.warn("[POReceive] agréage non enregistré (non-bloquant):", (e as Error).message);
     }

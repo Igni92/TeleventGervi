@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireCanReceivePurchaseOrder } from "@/lib/permissions";
-import { getAgreages, setAgreage, openReserveIncident, type AgreageStatus } from "@/lib/agreage";
+import { getAgreages, applyAgreage, type AgreageStatus } from "@/lib/agreage";
 
 export const dynamic = "force-dynamic";
 
@@ -50,19 +50,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "status invalide (CONFORME | RESERVE)" }, { status: 400 });
   }
   const me = session.user.name?.trim() || session.user.email || "?";
-  const type = status === "RESERVE" ? (body.type?.trim() || "Qualité") : null;
-  const note = body.note?.trim() || null;
 
   try {
-    const at = await setAgreage(docEntry, { status, type, note, by: me });
-    if (status === "RESERVE") {
-      await openReserveIncident({
-        docEntry, docNum: body.docNum ?? null, lot: body.lot ?? null,
-        cardCode: body.cardCode ?? null, cardName: body.cardName ?? null,
-        type: type ?? "Qualité", note, by: me,
-      });
-    }
-    return NextResponse.json({ ok: true, agreage: { status, type, note, by: me, at } });
+    const agreage = await applyAgreage({
+      docEntry, docNum: body.docNum ?? null, lot: body.lot ?? null,
+      cardCode: body.cardCode ?? null, cardName: body.cardName ?? null,
+      status, type: body.type, note: body.note, by: me,
+    });
+    return NextResponse.json({ ok: true, agreage });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }

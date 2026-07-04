@@ -35,8 +35,9 @@ export async function POST(req: NextRequest) {
   const me = session.user.name?.trim() || session.user.email || "?";
 
   try {
-    let at = "";
-    for (const docEntry of entries) at = await setDeliveryMiseEnPrep(docEntry, misEnPrep, me);
+    // Upserts indépendants → en PARALLÈLE (l'action groupée peut porter 30-50 BL).
+    const stamps = await Promise.all(entries.map((docEntry) => setDeliveryMiseEnPrep(docEntry, misEnPrep, me)));
+    const at = stamps[stamps.length - 1] ?? "";
     return NextResponse.json({
       ok: true,
       docEntries: entries,
