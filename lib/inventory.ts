@@ -253,6 +253,9 @@ export async function getDeliveryStatuses(): Promise<{
   preparer: Map<number, string>;
   incomplete: Map<number, boolean>;
   excluded: Map<number, boolean>;
+  misEnPrep: Map<number, boolean>;
+  misEnPrepBy: Map<number, string>;
+  misEnPrepAt: Map<number, string>;
 }> {
   const out = {
     prepared: new Map<number, boolean>(),
@@ -264,8 +267,11 @@ export async function getDeliveryStatuses(): Promise<{
     preparer: new Map<number, string>(),
     incomplete: new Map<number, boolean>(),
     excluded: new Map<number, boolean>(),
+    misEnPrep: new Map<number, boolean>(),
+    misEnPrepBy: new Map<number, string>(),
+    misEnPrepAt: new Map<number, string>(),
   };
-  const prefixes = [LIV_FAITE_PREFIX, LIV_DEPART_PREFIX, LIV_PREP_PREFIX, LIV_INCOMPLETE_PREFIX, LIV_AVOIR_PREFIX];
+  const prefixes = [LIV_FAITE_PREFIX, LIV_DEPART_PREFIX, LIV_PREP_PREFIX, LIV_INCOMPLETE_PREFIX, LIV_AVOIR_PREFIX, LIV_MISEPREP_PREFIX];
   try {
     const rows = await prisma.appSetting.findMany({
       where: { OR: prefixes.map((p) => ({ key: { startsWith: p } })) },
@@ -275,7 +281,7 @@ export async function getDeliveryStatuses(): Promise<{
       if (!prefix) continue;
       const docEntry = Number(r.key.slice(prefix.length));
       if (!Number.isFinite(docEntry)) continue;
-      let v: { prepared?: boolean; departed?: boolean; incomplete?: boolean; excluded?: boolean; by?: string; at?: string };
+      let v: { prepared?: boolean; departed?: boolean; incomplete?: boolean; excluded?: boolean; misEnPrep?: boolean; by?: string; at?: string };
       try { v = JSON.parse(r.value); } catch { continue; }
       switch (prefix) {
         case LIV_FAITE_PREFIX:
@@ -298,6 +304,11 @@ export async function getDeliveryStatuses(): Promise<{
           break;
         case LIV_AVOIR_PREFIX:
           out.excluded.set(docEntry, !!v.excluded);
+          break;
+        case LIV_MISEPREP_PREFIX:
+          out.misEnPrep.set(docEntry, !!v.misEnPrep);
+          if (v.misEnPrep && v.by?.trim()) out.misEnPrepBy.set(docEntry, v.by.trim());
+          if (v.misEnPrep && v.at) out.misEnPrepAt.set(docEntry, v.at);
           break;
       }
     }
@@ -412,4 +423,22 @@ export async function setDeliveryExcluded(docEntry: number, excluded: boolean, b
   const key = LIV_AVOIR_PREFIX + docEntry;
   const value = JSON.stringify({ excluded, at: new Date().toISOString(), by });
   await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+}
+
+/* ──────────────── BL « mis en préparation » (lâché par le commercial) ────────────────
+ * Tant que le COMMERCIAL n'a pas « mis en préparation » un magasin (depuis l'état
+ * « Ventes du jour »), sa commande est INVISIBLE dans le Détail livraison pour les
+ * rôles restreints (préparateur verrouillé, livreur). Persisté par DocEntry
+ * (clé `livmiseprep:<docEntry>`, valeur = { misEnPrep, at, by }).
+ * NE PAS confondre avec `livprep:` (préparateur AFFECTÉ à une commande déjà lâchée).
+ */
+const LIV_MISEPREP_PREFIX = "livmiseprep:";
+
+/** Bascule le statut « mis en préparation » d'un BL (persisté). Renvoie l'heure du clic. */
+export async function setDeliveryMiseEnPrep(docEntry: number, misEnPrep: boolean, by: string): Promise<string> {
+  const key = LIV_MISEPREP_PREFIX + docEntry;
+  const at = new Date().toISOString();
+  const value = JSON.stringify({ misEnPrep, at, by });
+  await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+  return at;
 }

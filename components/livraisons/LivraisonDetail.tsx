@@ -2150,6 +2150,15 @@ const OrderRow = memo(function OrderRow({
                 <AlertTriangle className="h-3 w-3" /> À reprendre
               </span>
             )}
+            {/* Pas encore « mis en préparation » par le commercial (état Ventes du
+                jour) → invisible pour les préparateurs. Badge réservé à la vue
+                dispatch : les rôles restreints ne reçoivent jamais ces BL. */}
+            {canDispatch && !doc.misEnPrep && !departed && (
+              <span title="Pas encore mis en préparation (Ventes du jour) — invisible pour l'entrepôt"
+                className="inline-flex items-center gap-1 rounded-full bg-secondary text-muted-foreground px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                <Clock className="h-3 w-3" /> En attente commercial
+              </span>
+            )}
             {missingSet.size > 0 && (
               <span title="Articles en stock SAP négatif (tous entrepôts) sur cette commande — achat à prévoir"
                 className="inline-flex items-center gap-1 rounded-full bg-rose-500 text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">

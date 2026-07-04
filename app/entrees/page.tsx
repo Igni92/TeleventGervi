@@ -13,7 +13,11 @@ export default async function EntreesPage() {
   // L'AGRÉEUR « pur » (sans rôle de gestion) ne peut PAS créer d'entrée marchandise :
   // on masque le formulaire de saisie et on ne lui laisse que l'historique. La
   // création reste possible pour la préparation / l'administration.
-  const agreeurOnly = (await isAgreeur(session)) && !(await requirePreparateurOrAdmin(session));
+  const [agreeur, gestion] = await Promise.all([isAgreeur(session), requirePreparateurOrAdmin(session)]);
+  const agreeurOnly = agreeur && !gestion;
+  // L'AGRÉAGE (conforme / avec réserve) est le geste de l'agréeur — ouvert aussi
+  // à la préparation / l'administration (même règle que la réception CF → EM).
+  const canAgree = agreeur || gestion;
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-up">
       <div>
@@ -31,7 +35,7 @@ export default async function EntreesPage() {
         </p>
       </div>
       {!agreeurOnly && <GoodsReceiptForm />}
-      <GoodsReceiptHistory />
+      <GoodsReceiptHistory canAgree={canAgree} />
     </div>
   );
 }

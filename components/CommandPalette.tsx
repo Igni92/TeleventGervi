@@ -4,19 +4,24 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Command } from "cmdk";
 import {
-  Home, Radio, ClipboardList, Users, Package, PackagePlus, Factory, Truck,
-  LayoutDashboard, Receipt, Briefcase, Settings, Search, CornerDownLeft,
+  Home, Radio, ClipboardList, Users, Package, PackagePlus, PackageCheck, Factory, Truck,
+  LayoutDashboard, Receipt, Briefcase, Settings, Search, CornerDownLeft, Store, ShoppingCart,
+  ClipboardCheck,
 } from "lucide-react";
 
 interface NavItem { href: string; label: string; icon: typeof Home; keywords?: string }
 const NAV: NavItem[] = [
   { href: "/accueil", label: "Accueil", icon: Home },
   { href: "/console", label: "Console d'appels", icon: Radio, keywords: "commande bl vente télévente" },
-  { href: "/plan-appel", label: "Plan d'appel", icon: ClipboardList, keywords: "televente appels" },
+  { href: "/console2", label: "Console 2 · Commande", icon: ShoppingCart, keywords: "bl bon livraison mobile saisie commande" },
   { href: "/clients", label: "Clients", icon: Users, keywords: "base contacts" },
+  { href: "/plan-appel", label: "Plan d'appel", icon: ClipboardList, keywords: "televente appels clients" },
+  { href: "/ventes-du-jour", label: "Ventes du jour", icon: Store, keywords: "ventes préparation livraison magasin mise en prep" },
   { href: "/livraisons", label: "Préparation livraisons", icon: Truck, keywords: "détail livraison bons transporteur tournée manquants" },
   { href: "/products", label: "Stock", icon: Package, keywords: "produits articles" },
-  { href: "/entrees", label: "Entrées marchandises", icon: PackagePlus, keywords: "réception marchandise" },
+  { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, keywords: "comptage stock entrepôt" },
+  { href: "/commandes-fournisseurs", label: "Commandes fournisseurs", icon: PackageCheck, keywords: "achat fournisseur cf réception" },
+  { href: "/entrees", label: "Entrées marchandises", icon: PackagePlus, keywords: "réception marchandise em agréage réserve" },
   { href: "/fabrication", label: "Fabrication", icon: Factory, keywords: "production deco kit" },
   { href: "/dashboard", label: "Statistiques · Carte", icon: LayoutDashboard, keywords: "pilotage dashboard géo carte stats" },
   { href: "/encours", label: "Encours clients", icon: Receipt, keywords: "factures impayés" },

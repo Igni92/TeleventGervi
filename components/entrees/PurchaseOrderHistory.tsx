@@ -33,6 +33,11 @@ type PurchaseOrder = {
   comments: string; lineCount: number; lines: PoLine[];
 };
 
+/** Agréage porté par la réception (cf. lib/agreage) : conforme, ou avec réserve. */
+type ReceiveAgreage = { status: "CONFORME" | "RESERVE"; type?: string; note?: string };
+/** Types de réserve = mêmes types que les incidents de réception (INCIDENT_META). */
+const RESERVE_TYPES = ["Qualité", "Manquant", "Casse", "Température", "Prix", "Autre"] as const;
+
 /** Date jj.mm.aa (points, année sur 2 chiffres). */
 const fmtDate = (s?: string | null): string => {
   if (!s) return "—";
@@ -134,17 +139,26 @@ export function PurchaseOrderHistory() {
   const dueCount = useMemo(() => docs.filter(isDue).length, [docs]);
 
   // Valide la réception d'une commande → crée l'entrée marchandise (PDN) côté SAP.
-  const receive = useCallback(async (docEntry: number) => {
+  // L'AGRÉAGE (conforme / avec réserve) accompagne le geste : posé sur l'EM créée ;
+  // une réserve ouvre un incident de réception (suivi litige fournisseur).
+  const receive = useCallback(async (docEntry: number, agreage: ReceiveAgreage) => {
     setReceiving(true);
     try {
       const res = await fetch("/api/sap/purchase-orders/receive", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docEntry }),
+        body: JSON.stringify({ docEntry, agreage }),
       });
       const j = await res.json();
       if (!res.ok || j.ok === false) throw new Error(j.error || "Échec");
-      toast.success(`Réception validée — entrée marchandise #${j.docNum} créée (lot ${j.lot})`, { duration: 9000 });
+      if (agreage.status === "RESERVE") {
+        toast.warning(
+          `Réception AVEC RÉSERVE (${agreage.type ?? "Qualité"}) — entrée marchandise #${j.docNum} créée (lot ${j.lot}), incident de réception ouvert`,
+          { duration: 10000 },
+        );
+      } else {
+        toast.success(`Réception agréée conforme — entrée marchandise #${j.docNum} créée (lot ${j.lot})`, { duration: 9000 });
+      }
       setLargeEntry(null);
       await load();
     } catch (e) {
@@ -334,9 +348,15 @@ const effPU = (l: EditLine): number | null => {
 };
 
 function PoDetail({ po, onReceive, receiving, onModified }: {
-  po: PurchaseOrder; onReceive: (docEntry: number) => void; receiving: boolean; onModified: () => void | Promise<void>;
+  po: PurchaseOrder; onReceive: (docEntry: number, agreage: ReceiveAgreage) => void; receiving: boolean; onModified: () => void | Promise<void>;
 }) {
   const [confirm, setConfirm] = useState(false);
+  // Agréage de la réception (contrôle qualité) : conforme par défaut ; « avec
+  // réserve » exige un type + une note (la réserve ouvre un incident).
+  const [agreeStatus, setAgreeStatus] = useState<"CONFORME" | "RESERVE">("CONFORME");
+  const [reserveType, setReserveType] = useState<string>(RESERVE_TYPES[0]);
+  const [reserveNote, setReserveNote] = useState("");
+  const reserveIncomplete = agreeStatus === "RESERVE" && !reserveNote.trim();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editLines, setEditLines] = useState<EditLine[]>([]);
@@ -553,15 +573,82 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
                 Créer l&apos;entrée marchandise pour cette commande&nbsp;? La commande sera clôturée
                 et le stock incrémenté.
               </p>
+              {/* ── Agréage de la marchandise reçue (contrôle qualité) ── */}
+              <div className="space-y-2">
+                <p className="text-[10.5px] uppercase tracking-wide font-semibold text-muted-foreground">Agréage de la marchandise</p>
+                <div className="flex items-center gap-2 flex-wrap" role="radiogroup" aria-label="Agréage de la marchandise">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={agreeStatus === "CONFORME"}
+                    onClick={() => setAgreeStatus("CONFORME")}
+                    className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border text-[12.5px] font-semibold transition-colors ${
+                      agreeStatus === "CONFORME"
+                        ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                        : "border-border text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <PackageCheck className="h-3.5 w-3.5" /> Conforme
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={agreeStatus === "RESERVE"}
+                    onClick={() => setAgreeStatus("RESERVE")}
+                    className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border text-[12.5px] font-semibold transition-colors ${
+                      agreeStatus === "RESERVE"
+                        ? "border-amber-500/60 bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                        : "border-border text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <AlertTriangle className="h-3.5 w-3.5" /> Avec réserve
+                  </button>
+                </div>
+                {agreeStatus === "RESERVE" && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {RESERVE_TYPES.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setReserveType(t)}
+                          className={`h-8 px-2.5 rounded-lg border text-[11.5px] font-semibold transition-colors ${
+                            reserveType === t
+                              ? "border-amber-500/60 bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                              : "border-border text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                    <textarea
+                      value={reserveNote}
+                      onChange={(e) => setReserveNote(e.target.value)}
+                      rows={2}
+                      placeholder="Décris la réserve (obligatoire) — ex. 12 colis abîmés, température +9 °C…"
+                      aria-label="Note de réserve"
+                      className="w-full rounded-lg border border-border bg-card px-2.5 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring/40"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      La réserve est enregistrée sur l&apos;entrée marchandise et <b>ouvre un incident de réception</b> (litige fournisseur).
+                    </p>
+                  </div>
+                )}
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => onReceive(po.docEntry)}
-                  disabled={receiving}
+                  onClick={() => onReceive(po.docEntry, {
+                    status: agreeStatus,
+                    ...(agreeStatus === "RESERVE" ? { type: reserveType, note: reserveNote.trim() } : {}),
+                  })}
+                  disabled={receiving || reserveIncomplete}
+                  title={reserveIncomplete ? "Décris la réserve avant de confirmer" : undefined}
                   className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-semibold disabled:opacity-60"
                 >
                   {receiving ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageCheck className="h-4 w-4" />}
-                  Confirmer la réception
+                  {agreeStatus === "RESERVE" ? "Réceptionner avec réserve" : "Confirmer la réception"}
                 </button>
                 <button
                   type="button"

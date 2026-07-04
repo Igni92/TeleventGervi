@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ClipboardList, Search, ChevronRight, ChevronDown,
-  AlertTriangle, Truck, X, Maximize2, Ban, Undo2,
+  AlertTriangle, Truck, X, Maximize2, Ban, Undo2, PackageCheck,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,43 @@ function CancelBadge({ d, className = "" }: { d: Receipt; className?: string }) 
     );
   }
   return null;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   AGRÉAGE (contrôle qualité à la réception — lib/agreage). Chaque EM est
+   agréée par l'agréeur (ou la préparation / l'administration) : CONFORME ou
+   AVEC RÉSERVE (type + note → ouvre un incident de réception).
+   ───────────────────────────────────────────────────────────────── */
+type AgreageInfo = { status: "CONFORME" | "RESERVE"; type: string | null; note: string | null; by: string; at: string };
+/** Types de réserve = mêmes types que les incidents de réception. */
+const RESERVE_TYPES = ["Qualité", "Manquant", "Casse", "Température", "Prix", "Autre"] as const;
+
+function AgreageBadge({ a, className = "" }: { a: AgreageInfo | null | undefined; className?: string }) {
+  if (!a) {
+    return (
+      <span className={`inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground ${className}`}>
+        À agréer
+      </span>
+    );
+  }
+  if (a.status === "RESERVE") {
+    return (
+      <span
+        title={`Agréée AVEC RÉSERVE par ${a.by}${a.note ? ` — ${a.note}` : ""}`}
+        className={`inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10.5px] font-semibold text-amber-700 dark:text-amber-300 ${className}`}
+      >
+        <AlertTriangle className="h-3 w-3" /> Réserve{a.type ? ` · ${a.type}` : ""}
+      </span>
+    );
+  }
+  return (
+    <span
+      title={`Agréée conforme par ${a.by}`}
+      className={`inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-700 dark:text-emerald-300 ${className}`}
+    >
+      <PackageCheck className="h-3 w-3" /> Agréée
+    </span>
+  );
 }
 
 /** Édition du prix d'une ligne d'EM (prix unitaire OU total HT forcé). */
@@ -195,7 +232,7 @@ function useDlcMap(
 }
 
 /** Liste des entrées marchandises (SAP PurchaseDeliveryNotes) — recherche + détail. */
-export function GoodsReceiptHistory() {
+export function GoodsReceiptHistory({ canAgree = false }: { canAgree?: boolean }) {
   const [docs, setDocs] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
@@ -203,6 +240,22 @@ export function GoodsReceiptHistory() {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [largeEntry, setLargeEntry] = useState<number | null>(null);
   const { incidents, loading: incLoading, reload: reloadIncidents, byDoc } = useReceptionIncidents();
+  // Agréages des EM listées (contrôle qualité) — un fetch groupé par chargement.
+  const [agreages, setAgreages] = useState<Record<number, AgreageInfo>>({});
+  useEffect(() => {
+    const entries = docs.filter((d) => !isVoided(d)).map((d) => d.docEntry);
+    if (!entries.length) { setAgreages({}); return; }
+    let cancelled = false;
+    fetch(`/api/entrees/agreage?docEntries=${entries.join(",")}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j: { ok?: boolean; agreages?: Record<number, AgreageInfo> }) => {
+        if (!cancelled && j?.ok) setAgreages(j.agreages ?? {});
+      })
+      .catch(() => { /* agréage best-effort */ });
+    return () => { cancelled = true; };
+  }, [docs]);
+  const onAgreageSaved = useCallback((docEntry: number, a: AgreageInfo) =>
+    setAgreages((cur) => ({ ...cur, [docEntry]: a })), []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -335,6 +388,7 @@ export function GoodsReceiptHistory() {
                     <span className="inline-flex items-center gap-1.5 flex-wrap">
                       <span className={`font-mono font-semibold text-[16px] ${isVoided(d) ? "line-through text-muted-foreground" : "text-foreground"}`}>#{d.docNum}</span>
                       <CancelBadge d={d} />
+                      {!isVoided(d) && <AgreageBadge a={agreages[d.docEntry]} />}
                     </span>
                     <div className="text-[14px] text-foreground/90 mt-0.5 truncate" title={d.cardName}>
                       {d.cardName || d.cardCode}
@@ -374,6 +428,7 @@ export function GoodsReceiptHistory() {
                   <th className="text-left px-3 py-2 font-semibold w-28">Date</th>
                   <th className="text-right px-3 py-2 font-semibold w-16">Lignes</th>
                   <th className="text-right px-3 py-2 font-semibold w-28">Total HT</th>
+                  <th className="text-center px-3 py-2 font-semibold w-28">Agréage</th>
                   <th className="text-center px-3 py-2 font-semibold w-20">Incident</th>
                 </tr>
               </thead>
@@ -404,6 +459,11 @@ export function GoodsReceiptHistory() {
                       <td className="px-3 py-2 text-right tnum">{d.lineCount}</td>
                       <td className="px-3 py-2 text-right tnum font-semibold">{eur(d.totalHT ?? 0)}</td>
                       <td className="px-3 py-2 text-center">
+                        {isVoided(d)
+                          ? <span className="text-muted-foreground/30 text-[11px]">—</span>
+                          : <AgreageBadge a={agreages[d.docEntry]} />}
+                      </td>
+                      <td className="px-3 py-2 text-center">
                         {/* Logo(s) du TYPE d'incident ouvert (thermomètre pour le froid…) — pas de compteur */}
                         {(() => {
                           const open = (byDoc.get(d.docEntry) ?? []).filter((i) => !i.resolved);
@@ -420,7 +480,7 @@ export function GoodsReceiptHistory() {
                   if (isOpen) {
                     rows.push(
                       <tr key={`${d.docEntry}-detail`}>
-                        <td colSpan={8} className="bg-secondary/20 px-4 py-4 border-t border-border/60">
+                        <td colSpan={9} className="bg-secondary/20 px-4 py-4 border-t border-border/60">
                           <ReceiptDetail
                             receipt={d}
                             dlc={dlcMap[d.lot]}
@@ -430,6 +490,9 @@ export function GoodsReceiptHistory() {
                             onNumAtCardChange={updateNumAtCard}
                             onModified={load}
                             onEnlarge={() => setLargeEntry(d.docEntry)}
+                            canAgree={canAgree}
+                            agreage={agreages[d.docEntry] ?? null}
+                            onAgreageSaved={onAgreageSaved}
                           />
                         </td>
                       </tr>,
@@ -468,6 +531,9 @@ export function GoodsReceiptHistory() {
               onIncidentChanged={reloadIncidents}
               onNumAtCardChange={updateNumAtCard}
               onModified={load}
+              canAgree={canAgree}
+              agreage={agreages[largeDoc.docEntry] ?? null}
+              onAgreageSaved={onAgreageSaved}
             />
           )}
         </DialogContent>
@@ -488,12 +554,138 @@ function Stat({ label, value, tone }: { label: string; value: React.ReactNode; t
 }
 
 /* ─────────────────────────────────────────────────────────────────
+   Section AGRÉAGE d'une EM — statut courant + geste d'agréage (conforme /
+   avec réserve). La réserve exige un type + une note et ouvre un incident
+   de réception côté serveur (POST /api/entrees/agreage).
+   ───────────────────────────────────────────────────────────────── */
+function AgreageSection({ receipt, agreage, canAgree, big, onSaved, onIncidentChanged }: {
+  receipt: Receipt;
+  agreage: AgreageInfo | null;
+  canAgree: boolean;
+  big: boolean;
+  onSaved?: (docEntry: number, a: AgreageInfo) => void;
+  onIncidentChanged: () => void;
+}) {
+  const [reserveOpen, setReserveOpen] = useState(false);
+  const [type, setType] = useState<string>(RESERVE_TYPES[0]);
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const save = async (status: "CONFORME" | "RESERVE") => {
+    if (status === "RESERVE" && !note.trim()) { toast.error("Décris la réserve avant de valider."); return; }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/entrees/agreage", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          docEntry: receipt.docEntry, docNum: receipt.docNum, lot: receipt.lot,
+          cardCode: receipt.cardCode, cardName: receipt.cardName,
+          status, ...(status === "RESERVE" ? { type, note: note.trim() } : {}),
+        }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) { toast.error(j?.error || "Échec de l'agréage"); return; }
+      if (status === "RESERVE") {
+        toast.warning(`EM #${receipt.docNum} agréée AVEC RÉSERVE (${type}) — incident de réception ouvert`, { duration: 9000 });
+        onIncidentChanged();
+      } else {
+        toast.success(`EM #${receipt.docNum} agréée conforme`);
+      }
+      onSaved?.(receipt.docEntry, j.agreage as AgreageInfo);
+      setReserveOpen(false); setNote("");
+    } catch (e) {
+      toast.error((e as Error).message || "Échec de l'agréage");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-secondary/20 p-3 space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10.5px] uppercase tracking-wide font-semibold text-muted-foreground">Agréage</span>
+        <AgreageBadge a={agreage} />
+        {agreage && (
+          <span className={`${big ? "text-[12.5px]" : "text-[11px]"} text-muted-foreground`}>
+            par {agreage.by} · {fmtDate(agreage.at)}
+          </span>
+        )}
+      </div>
+      {agreage?.note && (
+        <p className={`${big ? "text-[13px]" : "text-[12px]"} italic text-muted-foreground`}>« {agreage.note} »</p>
+      )}
+      {canAgree && !reserveOpen && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={() => save("CONFORME")} disabled={saving}
+            className="gap-1.5 text-emerald-700 dark:text-emerald-300 border-emerald-300/60 dark:border-emerald-500/30">
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PackageCheck className="h-3.5 w-3.5" />}
+            {agreage ? "Re-agréer conforme" : "Agréer conforme"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setReserveOpen(true)} disabled={saving}
+            className="gap-1.5 text-amber-700 dark:text-amber-300 border-amber-300/60 dark:border-amber-500/30">
+            <AlertTriangle className="h-3.5 w-3.5" /> Agréer avec réserve…
+          </Button>
+        </div>
+      )}
+      {canAgree && reserveOpen && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            {RESERVE_TYPES.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setType(t)}
+                className={`h-8 px-2.5 rounded-lg border text-[11.5px] font-semibold transition-colors ${
+                  type === t
+                    ? "border-amber-500/60 bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={2}
+            placeholder="Décris la réserve (obligatoire) — ex. 12 colis abîmés, température +9 °C…"
+            aria-label="Note de réserve"
+            className="w-full rounded-lg border border-border bg-card px-2.5 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring/40"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => save("RESERVE")}
+              disabled={saving || !note.trim()}
+              className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[12.5px] font-semibold disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+              Valider la réserve
+            </button>
+            <button
+              type="button"
+              onClick={() => { setReserveOpen(false); setNote(""); }}
+              disabled={saving}
+              className="inline-flex items-center h-9 px-3 rounded-lg border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground"
+            >
+              Annuler
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────
    Détail d'une entrée — désignation complète + montants HT/TVA/TTC,
    « idem que sur les bons dans la console ». Déclaration d'incident
    directement depuis cette consultation.
    ───────────────────────────────────────────────────────────────── */
 function ReceiptDetail({
   receipt, dlc, onDlcSaved, incidents, onIncidentChanged, onNumAtCardChange, onModified, large, onEnlarge,
+  canAgree, agreage, onAgreageSaved,
 }: {
   receipt: Receipt;
   /** DLC (ISO) du lot — `undefined` = pas encore chargée, `null` = non saisie. */
@@ -509,6 +701,12 @@ function ReceiptDetail({
   large?: boolean;
   /** Ouvre l'affichage agrandi (visible seulement en mode normal). */
   onEnlarge?: () => void;
+  /** Droit d'agréer (agréeur / préparation / administration). */
+  canAgree?: boolean;
+  /** Agréage courant de l'EM (null = pas encore agréée). */
+  agreage?: AgreageInfo | null;
+  /** Remonte l'agréage enregistré (mise à jour optimiste de la liste). */
+  onAgreageSaved?: (docEntry: number, a: AgreageInfo) => void;
 }) {
   const [declareOpen, setDeclareOpen] = useState(false);
   const [savingBl, setSavingBl] = useState(false);
@@ -879,6 +1077,18 @@ function ReceiptDetail({
           </tfoot>
         </table>
       </div>
+
+      {/* ── Agréage (contrôle qualité de la réception) ── */}
+      {!isVoided(receipt) && (
+        <AgreageSection
+          receipt={receipt}
+          agreage={agreage ?? null}
+          canAgree={!!canAgree}
+          big={!!large}
+          onSaved={onAgreageSaved}
+          onIncidentChanged={onIncidentChanged}
+        />
+      )}
 
       {/* Incidents déjà déclarés sur cette entrée */}
       {incidents.length > 0 && (

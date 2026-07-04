@@ -7,8 +7,8 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
-  Radio, Package, PackagePlus, Factory, ClipboardList, Receipt, AlertTriangle,
-  Home, Settings, PackageCheck, ClipboardCheck, Truck, Eye,
+  Radio, Package, PackagePlus, Factory, Receipt, AlertTriangle,
+  Home, Settings, PackageCheck, ClipboardCheck, Truck, Eye, Store,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Logo } from "@/components/Logo";
@@ -26,15 +26,18 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 /**
- * Sidebar gauche — remplace la Navbar horizontale (9 liens à plat devenus
- * illisibles). Regroupement par domaine métier :
+ * Sidebar gauche — regroupement par MÉTIER, dans l'ordre du flux (vente →
+ * entrepôt → achats → pilotage) :
  *
  *   ACCUEIL     — hub principal (badge notifications non lues, refresh ~60 s)
- *   OPÉRATIONS  — le quotidien télévente : Console, Plan d'appel, Clients
- *   LOGISTIQUE  — Stock, Entrées (badge incidents ouverts), Fabrication
+ *   TÉLÉVENTE   — Console d'appels, Clients & plan d'appel (fusionnés sous une
+ *                 même entrée, onglets in-page), Ventes du jour (mise en prép)
+ *   ENTREPÔT    — Préparation livraisons, Stock, Inventaire, Fabrication
+ *   ACHATS      — Commandes fournisseurs → Entrées marchandises (flux CF → EM,
+ *                 replié par défaut : moins quotidien sur poste télévente)
  *   PILOTAGE    — Statistiques, Encours clients, Équipe commerciale
  *   SYSTÈME     — Paramètres
- *   (footer)    — bascule SAP, colorimétrie, thème, compte
+ *   (footer)    — bascule SAP, thème, compte
  *
  * NB : « Promotions » a quitté la sidebar — la page /promos reste accessible
  * via l'accueil et l'écran de commande (bouton dédié, chantier parallèle).
@@ -54,6 +57,9 @@ interface NavItem {
   icon: typeof Radio;
   /** clé de badge dynamique (cf. useBadges) */
   badge?: "receptionIncidents" | "notifications" | "commandesDue" | "inventairePending";
+  /** Autres préfixes de route couverts par cette entrée (ex. entrée fusionnée
+   *  « Clients & plan d'appel » active aussi sur /plan-appel). */
+  also?: string[];
 }
 
 const GROUPS: { label: string | null; items: NavItem[]; collapsible?: boolean }[] = [
@@ -65,33 +71,40 @@ const GROUPS: { label: string | null; items: NavItem[]; collapsible?: boolean }[
     ],
   },
   {
-    // Cœur télévente — le quotidien, toujours visible (televent first).
+    // Cœur télévente — le quotidien du commercial, toujours visible.
     label: "Télévente",
     items: [
       { href: "/console", label: "Console d'appels", icon: Radio },
-      { href: "/plan-appel", label: "Plan d'appel", icon: ClipboardList },
-      { href: "/clients", label: "Clients", icon: Users },
+      // Clients & plan d'appel FUSIONNÉS : une seule entrée, onglets in-page.
+      { href: "/clients", label: "Clients & plan d'appel", icon: Users, also: ["/plan-appel"] },
+      { href: "/ventes-du-jour", label: "Ventes du jour", icon: Store },
+    ],
+  },
+  {
+    // Entrepôt — la marchandise qui sort (préparation) + ce qu'on a en rayon.
+    label: "Entrepôt",
+    items: [
       { href: "/livraisons", label: "Préparation livraisons", icon: Truck },
-    ],
-  },
-  {
-    // Suivi quotidien — stock dispo + pilotage en un coup d'œil.
-    label: "Stock & stats",
-    items: [
       { href: "/products", label: "Stock", icon: Package },
-      { href: "/dashboard", label: "Statistiques", icon: LayoutDashboard },
-    ],
-  },
-  {
-    // Gestion — pages moins quotidiennes, repliées par défaut (1 clic pour
-    // déplier). Rien n'est masqué : le groupe s'ouvre seul si on est dessus.
-    label: "Gestion",
-    collapsible: true,
-    items: [
-      { href: "/entrees", label: "Entrées marchandises", icon: PackagePlus, badge: "receptionIncidents" },
-      { href: "/commandes-fournisseurs", label: "Commandes fournisseurs", icon: PackageCheck, badge: "commandesDue" },
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },
       { href: "/fabrication", label: "Fabrication", icon: Factory },
+    ],
+  },
+  {
+    // Achats — le flux CF → EM (poste acheteur / agréeur), replié par défaut
+    // (1 clic pour déplier). Rien n'est masqué : s'ouvre seul si on est dessus.
+    label: "Achats",
+    collapsible: true,
+    items: [
+      { href: "/commandes-fournisseurs", label: "Commandes fournisseurs", icon: PackageCheck, badge: "commandesDue" },
+      { href: "/entrees", label: "Entrées marchandises", icon: PackagePlus, badge: "receptionIncidents" },
+    ],
+  },
+  {
+    // Pilotage — chiffres et équipe (direction / compta).
+    label: "Pilotage",
+    items: [
+      { href: "/dashboard", label: "Statistiques", icon: LayoutDashboard },
       { href: "/encours", label: "Encours clients", icon: Receipt },
       { href: "/commerciaux", label: "Équipe commerciale", icon: Briefcase },
     ],
@@ -190,22 +203,33 @@ export function Sidebar() {
   const badges = useBadges();
   // Voile de navigation : label de la page en cours d'ouverture (null = caché).
   const [pending, setPending] = useState<string | null>(null);
-  // Groupe « Gestion » repliable (pages moins quotidiennes) — état persistant.
-  const [gestionOpen, setGestionOpen] = useState(false);
+  // Groupes repliables (pages moins quotidiennes) — état persistant PAR groupe
+  // (clé `televent-sidebar-group:<label>`). Repliés par défaut.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   useEffect(() => {
-    try { setGestionOpen(localStorage.getItem("televent-sidebar-gestion") === "open"); } catch { /* ignore */ }
+    try {
+      const next: Record<string, boolean> = {};
+      for (const g of GROUPS) {
+        if (g.collapsible && g.label) next[g.label] = localStorage.getItem(`televent-sidebar-group:${g.label}`) === "open";
+      }
+      setOpenGroups(next);
+    } catch { /* ignore */ }
   }, []);
-  const toggleGestion = () =>
-    setGestionOpen((o) => {
-      try { localStorage.setItem("televent-sidebar-gestion", o ? "closed" : "open"); } catch { /* ignore */ }
-      return !o;
+  const toggleGroup = (label: string) =>
+    setOpenGroups((cur) => {
+      const open = !cur[label];
+      try { localStorage.setItem(`televent-sidebar-group:${label}`, open ? "open" : "closed"); } catch { /* ignore */ }
+      return { ...cur, [label]: open };
     });
 
-  /** Item actif (même logique qu'avant : exact, accueil≡/, sinon préfixe sauf /dashboard). */
-  const isActive = (href: string) =>
+  /** Préfixe de route actif (exact, accueil≡/, sinon préfixe sauf /dashboard). */
+  const isActiveHref = (href: string) =>
     pathname === href ||
     (href === "/accueil" && pathname === "/") ||
     (href !== "/dashboard" && pathname.startsWith(href));
+  /** Item actif — couvre aussi ses routes secondaires (`also`, entrées fusionnées). */
+  const isActive = (it: Pick<NavItem, "href" | "also">) =>
+    isActiveHref(it.href) || (it.also ?? []).some(isActiveHref);
 
   // Persistance du mode rail (lu après hydratation pour éviter un mismatch SSR).
   useEffect(() => {
@@ -284,9 +308,9 @@ export function Sidebar() {
           const items = group.items.filter((it) => navAllowedForPreview(it.href, previewRole));
           if (items.length === 0) return null;
           const collapsible = !!group.collapsible && !rail;
-          const hasActive = items.some((it) => isActive(it.href));
+          const hasActive = items.some((it) => isActive(it));
           // Replié par défaut ; s'ouvre seul si la page active est dedans.
-          const open = !collapsible || gestionOpen || hasActive;
+          const open = !collapsible || (group.label ? openGroups[group.label] : false) || hasActive;
           return (
           <div key={group.label ?? "accueil"}>
             {group.label !== null && (rail ? (
@@ -294,7 +318,7 @@ export function Sidebar() {
             ) : collapsible ? (
               <button
                 type="button"
-                onClick={toggleGestion}
+                onClick={() => group.label && toggleGroup(group.label)}
                 aria-expanded={open}
                 className="w-full px-2 mb-1.5 flex items-center justify-between text-[9.5px] uppercase tracking-[0.18em] font-bold text-white/55 hover:text-white/75 transition-colors"
               >
@@ -308,8 +332,9 @@ export function Sidebar() {
             ))}
             {open && (
             <ul className="space-y-0.5">
-              {items.map(({ href, label, icon: Icon, badge }) => {
-                const active = isActive(href);
+              {items.map((it) => {
+                const { href, label, icon: Icon, badge } = it;
+                const active = isActive(it);
                 const badgeCount = badge ? badges[badge] ?? 0 : 0;
                 return (
                   <li key={href} className="relative group/item">

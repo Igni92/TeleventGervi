@@ -230,6 +230,7 @@ export async function GET(req: NextRequest) {
       prepared: faiteByDoc, preparedBy: preparedByDoc, preparedAt: preparedAtDoc,
       departed: departedByDocEntry, departedBy: departedByDoc, departedAt: departedAtDoc,
       excluded: avoirByDoc, preparer: prepByDoc, incomplete: incompleteByDoc,
+      misEnPrep: misEnPrepByDocEntry, misEnPrepBy: misEnPrepByDoc, misEnPrepAt: misEnPrepAtDoc,
     } = statuses;
 
     const weightOfItem = (code: string) => pMap.get(code)?.salesUnitWeight ?? 0;
@@ -326,6 +327,11 @@ export async function GET(req: NextRequest) {
         departedAt: departedAtDoc.get(d.DocEntry) ?? null,    // heure du clic « départ »
         preparer: prepByDoc.get(d.DocEntry) ?? null,          // préparateur affecté (qui a ouvert)
         incomplete: incompleteByDoc.get(d.DocEntry) ?? false, // « à reprendre » — remise sur la file
+        // « mis en préparation » — lâché par le commercial (état « Ventes du jour »).
+        // Tant que false, la commande est INVISIBLE pour les rôles restreints (filtre plus bas).
+        misEnPrep: misEnPrepByDocEntry.get(d.DocEntry) ?? false,
+        misEnPrepBy: misEnPrepByDoc.get(d.DocEntry) ?? null,
+        misEnPrepAt: misEnPrepAtDoc.get(d.DocEntry) ?? null,
         // Articles MANQUANTS de ce BL = lignes dont le stock SAP total est négatif.
         missingItems: outLines.filter((l) => negativeStocks[l.itemCode] !== undefined).map((l) => l.itemCode),
         // « avoir/exclu » : surcharge manuelle si présente, sinon détecté auto (ci-dessous).
@@ -395,10 +401,15 @@ export async function GET(req: NextRequest) {
       for (const d of docs) { d.totalHT = 0; d.totalTTC = 0; }
     }
 
+    // Rôles restreints (préparateur verrouillé, livreur) : seules les commandes
+    // « mises en préparation » par un commercial sont renvoyées — un magasin pas
+    // encore lâché n'existe pas pour l'entrepôt (filtre CÔTÉ SERVEUR, pas UI).
+    const visibleDocs = restricted ? docs.filter((d) => d.misEnPrep) : docs;
+
     // ── Regroupement par transporteur ──
     type Doc = (typeof docs)[number];
     const groups = new Map<string, { code: string | null; name: string; docs: Doc[] }>();
-    for (const d of docs) {
+    for (const d of visibleDocs) {
       const key = d.trspCode ?? "__none__";
       const name = d.carrierName ?? "Non affecté";
       const g = groups.get(key) ?? { code: d.trspCode, name, docs: [] };
@@ -427,7 +438,7 @@ export async function GET(req: NextRequest) {
         return b.colis - a.colis;
       });
 
-    const counted = docs.filter((d) => !d.excluded);
+    const counted = visibleDocs.filter((d) => !d.excluded);
     const totals = {
       orders: counted.length,
       clients: new Set(counted.map((d) => d.cardCode)).size,
@@ -440,7 +451,7 @@ export async function GET(req: NextRequest) {
       ok: true,
       date,
       holiday: frenchHolidayLabel(date),
-      count: docs.length,
+      count: visibleDocs.length,
       totals,
       carriers,
       // Stock SAP total (négatif) par article manquant — pilote les achats.

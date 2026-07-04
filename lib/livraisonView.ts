@@ -58,6 +58,9 @@ export interface Doc {
   departedAt?: string | null;  // heure (ISO) du clic « départ »
   preparer?: string | null;    // préparateur affecté (qui a ouvert la commande)
   incomplete?: boolean;        // « à reprendre » — remise sur la file (pas finie)
+  misEnPrep?: boolean;         // « mis en préparation » par le commercial (Ventes du jour)
+  misEnPrepBy?: string | null; // qui a lâché le magasin en préparation
+  misEnPrepAt?: string | null; // heure (ISO) de la mise en préparation
   missingItems?: string[];     // articles MANQUANTS (stock SAP total négatif)
   excluded: boolean;           // « avoir / exclu » — déduit 100 % des totaux
   lineCount: number;

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
-  Users, Briefcase, Truck,
+  Users, Briefcase, Truck, Store, ShoppingCart,
   PackagePlus, PackageCheck, Package, Factory, ClipboardCheck,
   Receipt, LayoutDashboard,
   Settings, Tag,
@@ -47,11 +47,14 @@ const AXES: Axis[] = [
     key: "commercial",
     label: "Commercial",
     desc: "Clients & commandes",
-    // Pas d'outils de télévente (console / plan d'appel) sur mobile : tout passe
-    // par la fiche client (commander, noter, notifier un appel). Le « Détail
-    // livraison » fait exception : utile en mobilité pour préparer la tournée.
+    // Télévente mobile : la fiche client reste le point d'entrée principal
+    // (commander, noter, notifier un appel) — complétée par la « Console 2 »
+    // (saisie de BL allégée, tags conservés) et « Ventes du jour » (mise en
+    // préparation des magasins). La console d'appels (file) reste bureau.
     tiles: [
-      { href: "/clients", label: "Clients", icon: Users },
+      { href: "/clients", label: "Clients & plan d'appel", icon: Users },
+      { href: "/console2", label: "Console 2 · Commande", icon: ShoppingCart },
+      { href: "/ventes-du-jour", label: "Ventes du jour", icon: Store },
       { href: "/livraisons", label: "Préparation livraisons", icon: Truck },
     ],
   },
@@ -59,11 +62,12 @@ const AXES: Axis[] = [
     key: "acheteur",
     label: "Acheteur",
     desc: "Approvisionnement & stock",
+    // Ordre du flux : la commande fournisseur PRÉCÈDE l'entrée marchandise (CF → EM).
     tiles: [
-      { href: "/entrees", label: "Entrées march.", icon: PackagePlus, badge: "receptionIncidents" },
       { href: "/commandes-fournisseurs", label: "Commandes fournisseurs", icon: PackageCheck, badge: "commandesDue" },
-      { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },
+      { href: "/entrees", label: "Entrées march.", icon: PackagePlus, badge: "receptionIncidents" },
       { href: "/products", label: "Stock", icon: Package },
+      { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },
       { href: "/fabrication", label: "Fabrication", icon: Factory },
     ],
   },
