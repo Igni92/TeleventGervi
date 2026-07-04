@@ -117,10 +117,19 @@ const config: Config = {
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up":   "accordion-up 0.2s ease-out",
-        "fade-up":    "fade-up 0.4s ease-out both",
-        "fade-in":    "fade-in 0.3s ease-out both",
-        "scale-in":   "scale-in 0.25s ease-out both",
-        "slide-right":"slide-right 0.3s ease-out both",
+        // `backwards` (≠ both) : le fill « forwards » d'une animation de
+        // transform maintient un CONTEXTE D'EMPILEMENT PERMANENT (même avec
+        // `to { transform: none }`, le computed reste matrix identité — vérifié
+        // Chromium) → les dropdowns z-20 passaient SOUS les cartes suivantes du
+        // DOM (ex. recherche recette de Fabrication sous « Historique »).
+        // L'état final de ces animations = les styles de base (opacity 1, pas
+        // de transform) : une fois finies, plus aucun fill → rendu identique,
+        // contexte d'empilement libéré. `backwards` garde le `from` pendant
+        // l'animation-delay (cascades de cartes).
+        "fade-up":    "fade-up 0.4s ease-out backwards",
+        "fade-in":    "fade-in 0.3s ease-out backwards",
+        "scale-in":   "scale-in 0.25s ease-out backwards",
+        "slide-right":"slide-right 0.3s ease-out backwards",
         shimmer:      "shimmer 1.5s ease-in-out infinite",
       },
       transitionTimingFunction: {
