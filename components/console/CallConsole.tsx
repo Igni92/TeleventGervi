@@ -660,11 +660,14 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
       {/* ── 3-column workspace — fills remaining height, each column scrolls ──
            Mise à jour : queue élargie (col-4) car la file d'appel est le
            point d'ancrage de la Console 1 ; le centre rétrécit car la
-           récup d'info détaillée se fait sur l'Écran 2. */}
-      <div className="grid grid-cols-12 gap-4 flex-1 min-h-0">
+           récup d'info détaillée se fait sur l'Écran 2.
+           TABLETTE (< xl) : les 3 colonnes s'EMPILENT — le layout PC serré se
+           chevauchait. La page scrolle, chaque panneau est plafonné à ~75 vh
+           et scrolle en interne. */}
+      <div className="grid grid-cols-12 gap-4 flex-1 min-h-0 overflow-y-auto xl:overflow-visible">
 
         {/* ── LEFT : Queue rail ─────────────────────────── */}
-        <aside className="col-span-12 lg:col-span-4 panel p-0 overflow-hidden flex flex-col">
+        <aside className="col-span-12 xl:col-span-4 max-h-[75vh] xl:max-h-none panel p-0 overflow-hidden flex flex-col">
           {/* Search */}
           <div className="px-4 pt-4 pb-3 border-b border-border space-y-2.5">
             <div className="relative">
@@ -814,7 +817,7 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
         </aside>
 
         {/* ── CENTER : Active client ──────────────────────── */}
-        <main className="col-span-12 lg:col-span-5 panel p-5 overflow-y-auto relative">
+        <main className="col-span-12 xl:col-span-5 max-h-[75vh] xl:max-h-none panel p-5 overflow-y-auto relative">
           {/* Prefs kebab — top-right of the panel itself, always visible */}
           {active && (
             <div className="absolute top-3 right-3 z-20">
@@ -855,7 +858,7 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
         </main>
 
         {/* ── RIGHT : Actions ─────────────────────────────── */}
-        <aside className="col-span-12 lg:col-span-3 panel p-0 overflow-hidden flex flex-col">
+        <aside className="col-span-12 xl:col-span-3 max-h-[75vh] xl:max-h-none panel p-0 overflow-hidden flex flex-col">
           <ActionPanel
             client={active}
             onDemain={() => logAppel("DEMAIN")}

@@ -1102,13 +1102,16 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
         </div>
       )}
 
-      <div className="flex gap-3 flex-1 min-h-0">
+      {/* Deux colonnes UNIQUEMENT sur vrai desktop (≥ xl) : sur tablette, la
+          colonne commande fixe (640px) écrasait le stock → on EMPILE (stock en
+          haut, commande en bas, chacun scrolle en interne, zéro chevauchement). */}
+      <div className="flex flex-col xl:flex-row gap-3 flex-1 min-h-0">
       {/* ── Colonne STOCK (cliquable) — grille alignée, dense ──
            Colonnes fixes pour que prix & stock s'alignent verticalement
            sur toutes les lignes (lisibilité maximale) :
              [+]  Nom — description           prix €/u    stock u
       */}
-      <div className="flex-1 min-w-0 flex flex-col panel p-3">
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col panel p-3">
         <div className="flex items-center gap-2 mb-2 shrink-0">
           {/* Onglets : Stock (catalogue) / Tarif (cotations spécifiques du client) */}
           <div className="inline-flex items-center gap-0.5 rounded-md border border-border p-0.5 shrink-0">
@@ -1462,8 +1465,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
         )}
       </div>
 
-      {/* ── Colonne PANIER — dominante et ÉLARGIE (Écran 2 = saisie commande au cœur) ── */}
-      <div className="w-[640px] shrink-0 flex flex-col panel p-3">
+      {/* ── Colonne PANIER — dominante et ÉLARGIE (Écran 2 = saisie commande au
+             cœur). Empilée sous le stock en dessous de xl (tablette) : pleine
+             largeur, plafonnée à ~55 % de la hauteur, liste scrollable. ── */}
+      <div className="w-full xl:w-[640px] shrink-0 min-h-0 max-h-[55%] xl:max-h-none flex flex-col panel p-3">
         <div className="flex items-center justify-between gap-2 mb-2 shrink-0">
           <p className="kicker inline-flex items-center gap-1.5">
             <ShoppingCart className="h-3 w-3" /> Commande
