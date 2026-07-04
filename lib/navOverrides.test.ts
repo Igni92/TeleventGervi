@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { applyNavOverrides, sanitizeNavOverrides, type NavOverrides } from "./navOverrides";
+import {
+  applyNavOverrides, sanitizeNavOverrides, toEditState, fromEditState,
+  type NavOverrides,
+} from "./navOverrides";
 
 const GROUPS = [
   { label: null, items: [{ href: "/accueil", label: "Accueil" }] },
@@ -51,6 +54,36 @@ describe("navOverrides — applyNavOverrides", () => {
     const before = JSON.stringify(GROUPS);
     applyNavOverrides(GROUPS, { "/console": { label: "X", group: "Entrepôt", order: 5 } });
     expect(JSON.stringify(GROUPS)).toBe(before);
+  });
+});
+
+describe("navOverrides — état d'édition (toEditState ⇄ fromEditState)", () => {
+  it("toEditState reflète les surcharges (libellé saisi, entrée déplacée), Accueil exclu", () => {
+    const state = toEditState(GROUPS, { "/console": { label: "Téléphone", group: "Entrepôt", order: 0 } });
+    expect(state.map((g) => g.label)).toEqual(["Télévente", "Entrepôt"]);
+    expect(state[0].rows.map((r) => r.href)).toEqual(["/clients"]);
+    const entrepot = state[1];
+    expect(entrepot.rows.map((r) => r.href)).toEqual(["/console", "/livraisons"]);
+    expect(entrepot.rows[0]).toEqual({
+      href: "/console", defaultLabel: "Console d'appels", defaultGroup: "Télévente", label: "Téléphone",
+    });
+  });
+
+  it("fromEditState ne stocke que les vrais écarts (ordre explicite partout)", () => {
+    const state = toEditState(GROUPS, {});
+    state[0].rows[0].label = "Téléphone";                       // renommage
+    const [moved] = state[0].rows.splice(1, 1);                 // /clients → Entrepôt
+    state[1].rows.unshift(moved);
+    const ov = fromEditState(state);
+    expect(ov["/console"]).toEqual({ order: 0, label: "Téléphone" });
+    expect(ov["/clients"]).toEqual({ order: 0, group: "Entrepôt" });
+    expect(ov["/livraisons"]).toEqual({ order: 1 });
+  });
+
+  it("aller-retour : appliquer fromEditState(toEditState(ov)) redonne la même structure", () => {
+    const ov: NavOverrides = { "/console": { label: "Téléphone", group: "Entrepôt", order: 9 } };
+    const roundTripped = fromEditState(toEditState(GROUPS, ov));
+    expect(applyNavOverrides(GROUPS, roundTripped)).toEqual(applyNavOverrides(GROUPS, ov));
   });
 });
 

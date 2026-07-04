@@ -9,14 +9,19 @@ import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, Package, PackagePlus, Factory, Receipt, AlertTriangle,
   Home, Settings, PackageCheck, ClipboardCheck, Truck, Eye, Store, PackageX,
+  Pencil, MoreVertical, ArrowUp, ArrowDown, Loader2, RotateCcw, CornerDownRight,
 } from "lucide-react";
+import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Logo } from "@/components/Logo";
 import { SapEnvSwitch } from "@/components/SapEnvSwitch";
 import { SignalLoader } from "@/components/ui/page-loader";
 import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
 import { navAllowedForPreview, PREVIEW_ROLE_LABELS } from "@/lib/rolePreview";
-import { applyNavOverrides, type NavOverrides } from "@/lib/navOverrides";
+import {
+  applyNavOverrides, toEditState, fromEditState,
+  type NavOverrides, type NavEditGroup,
+} from "@/lib/navOverrides";
 import { SPRING } from "@/lib/motion";
 import {
   DropdownMenu,
@@ -121,6 +126,13 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
   },
 ];
 
+/** Icône d'origine par route — le mode ÉDITION garde l'icône même renommée/déplacée. */
+const ICON_BY_HREF = new Map<string, typeof Radio>(
+  NAV_GROUPS.flatMap((g) => g.items.map((it) => [it.href, it.icon] as [string, typeof Radio])),
+);
+/** Groupes personnalisables (libellés) — cibles du « Déplacer vers ». */
+const GROUP_LABELS = NAV_GROUPS.map((g) => g.label).filter((l): l is string => !!l);
+
 /** Style de la pastille de comptage par type de badge. */
 const BADGE_STYLE: Record<NonNullable<NavItem["badge"]>, string> = {
   receptionIncidents: "bg-amber-500 text-[#0b1018]",
@@ -202,14 +214,14 @@ function useBadges(): Record<string, number> {
 export function Sidebar() {
   const { data: session } = useSession();
   const pathname = usePathname();
-  const { previewRole, setPreviewRole } = useRolePreview();
+  const { previewRole, setPreviewRole, canPreview } = useRolePreview();
   const [rail, setRail] = useState(false);
   const badges = useBadges();
   // Voile de navigation : label de la page en cours d'ouverture (null = caché).
   const [pending, setPending] = useState<string | null>(null);
-  // ── Personnalisation (libellés + emplacement) — réglage global admin
-  //    (Paramètres › Navigation). Chargée au montage, best-effort, et mise à
-  //    jour À CHAUD quand le panneau enregistre (événement nav-overrides). ──
+  // ── Personnalisation (libellés + emplacement) — réglage GLOBAL, chargé au
+  //    montage (best-effort) et édité EN PLACE via le mode modification
+  //    ci-dessous (bouton crayon, admin/direction). ──
   const [navOverrides, setNavOverrides] = useState<NavOverrides>({});
   useEffect(() => {
     let cancelled = false;
@@ -217,14 +229,67 @@ export function Sidebar() {
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (!cancelled && j?.ok && j.overrides) setNavOverrides(j.overrides); })
       .catch(() => { /* réglage optionnel */ });
-    const onChanged = (e: Event) => {
-      const detail = (e as CustomEvent<NavOverrides>).detail;
-      if (detail) setNavOverrides(detail);
-    };
-    window.addEventListener("nav-overrides-changed", onChanged);
-    return () => { cancelled = true; window.removeEventListener("nav-overrides-changed", onChanged); };
+    return () => { cancelled = true; };
   }, []);
   const groups = useMemo(() => applyNavOverrides(NAV_GROUPS, navOverrides), [navOverrides]);
+
+  // ── MODE MODIFICATION de la nav (crayon) : renommer les entrées et changer
+  //    leur zone (groupe + ordre) directement dans la barre. Brouillon local,
+  //    Enregistrer = PUT /api/nav-overrides (réglage global, garde admin). ──
+  const [editingNav, setEditingNav] = useState(false);
+  const [draft, setDraft] = useState<NavEditGroup[]>([]);
+  const [savingNav, setSavingNav] = useState(false);
+  const startEditNav = () => {
+    setDraft(toEditState(NAV_GROUPS, navOverrides));
+    setEditingNav(true);
+    if (rail) toggleRail();   // l'édition a besoin de la largeur complète
+  };
+  const cancelEditNav = () => { setEditingNav(false); setDraft([]); };
+  const renameDraft = (href: string, label: string) =>
+    setDraft((cur) => cur.map((g) => ({ ...g, rows: g.rows.map((r) => (r.href === href ? { ...r, label } : r)) })));
+  const moveDraft = (href: string, dir: -1 | 1) =>
+    setDraft((cur) => cur.map((g) => {
+      const i = g.rows.findIndex((r) => r.href === href);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= g.rows.length) return g;
+      const rows = g.rows.slice();
+      [rows[i], rows[j]] = [rows[j], rows[i]];
+      return { ...g, rows };
+    }));
+  const regroupDraft = (href: string, target: string) =>
+    setDraft((cur) => {
+      let moved: NavEditGroup["rows"][number] | null = null;
+      for (const g of cur) {
+        const row = g.rows.find((r) => r.href === href);
+        if (row && g.label !== target) moved = row;
+      }
+      if (!moved) return cur;
+      return cur.map((g) => ({
+        ...g,
+        rows: g.label === target
+          ? [...g.rows.filter((r) => r.href !== href), moved!]
+          : g.rows.filter((r) => r.href !== href),
+      }));
+    });
+  async function saveNav(overrides: NavOverrides, successMsg: string) {
+    setSavingNav(true);
+    try {
+      const r = await fetch("/api/nav-overrides", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ overrides }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) throw new Error(j?.error || "Échec de l'enregistrement");
+      setNavOverrides(j.overrides ?? {});
+      setEditingNav(false);
+      setDraft([]);
+      toast.success(successMsg, { description: "Réglage global — les autres postes l'auront au prochain chargement." });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Échec de l'enregistrement");
+    } finally {
+      setSavingNav(false);
+    }
+  }
   // Groupes repliables (pages moins quotidiennes) — état persistant PAR groupe
   // (clé `televent-sidebar-group:<label>`). Repliés par défaut.
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
@@ -312,19 +377,95 @@ export function Sidebar() {
           </AnimatePresence>
         </Link>
         {!rail && (
-          <button
-            onClick={toggleRail}
-            title="Réduire le menu"
-            className="h-7 w-7 rounded-lg flex items-center justify-center text-white/35 hover:text-white/75 hover:bg-white/[0.06] transition-colors"
-          >
-            <ChevronsLeft className="h-3.5 w-3.5" />
-          </button>
+          <div className="flex items-center gap-0.5">
+            {/* Mode MODIFICATION de la nav (admin/direction) : renommer + déplacer. */}
+            {canPreview && (
+              <button
+                onClick={editingNav ? cancelEditNav : startEditNav}
+                title={editingNav ? "Quitter le mode modification (sans enregistrer)" : "Modifier la navigation — renommer les entrées, changer leur zone"}
+                aria-pressed={editingNav}
+                className={`h-7 w-7 rounded-lg flex items-center justify-center transition-colors ${
+                  editingNav
+                    ? "bg-brand-500/20 text-brand-300 ring-1 ring-brand-500/40"
+                    : "text-white/35 hover:text-white/75 hover:bg-white/[0.06]"
+                }`}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
+            <button
+              onClick={toggleRail}
+              title="Réduire le menu"
+              className="h-7 w-7 rounded-lg flex items-center justify-center text-white/35 hover:text-white/75 hover:bg-white/[0.06] transition-colors"
+            >
+              <ChevronsLeft className="h-3.5 w-3.5" />
+            </button>
+          </div>
         )}
       </div>
 
       {/* ── Navigation groupée ─────────────────────────── */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden px-3 pb-2 pt-1 space-y-4">
-        {groups.map((group) => {
+        {editingNav ? (
+          /* ── MODE MODIFICATION : renommer + déplacer (zone/ordre) en place ── */
+          draft.map((group) => (
+            <div key={group.label}>
+              <p className="px-2 mb-1.5 text-[9.5px] uppercase tracking-[0.18em] font-bold text-white/55 whitespace-nowrap">
+                {group.label}
+              </p>
+              <ul className="space-y-1">
+                {group.rows.map((row, i) => {
+                  const Icon = ICON_BY_HREF.get(row.href) ?? Radio;
+                  return (
+                    <li key={row.href} className="flex items-center gap-1.5">
+                      <Icon className="h-[18px] w-[18px] shrink-0 text-white/50" strokeWidth={1.8} />
+                      <input
+                        value={row.label}
+                        onChange={(e) => renameDraft(row.href, e.target.value)}
+                        placeholder={row.defaultLabel}
+                        aria-label={`Libellé de ${row.defaultLabel}`}
+                        className="min-w-0 flex-1 h-8 rounded-lg border border-white/15 bg-white/[0.06] px-2 text-[12px] text-white placeholder:text-white/35 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      />
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            title={`Déplacer « ${row.label.trim() || row.defaultLabel} »`}
+                            aria-label={`Déplacer ${row.defaultLabel}`}
+                            className="h-8 w-7 shrink-0 rounded-lg flex items-center justify-center text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
+                          >
+                            <MoreVertical className="h-3.5 w-3.5" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent side="right" align="start" className="w-56 rounded-xl border-white/[0.08] dark:border-white/[0.06] bg-white dark:bg-[#16181f] shadow-modal p-1">
+                          <DropdownMenuItem disabled={i === 0} onClick={() => moveDraft(row.href, -1)}
+                            className="cursor-pointer rounded-lg text-[13px] gap-2">
+                            <ArrowUp className="h-3.5 w-3.5" /> Monter
+                          </DropdownMenuItem>
+                          <DropdownMenuItem disabled={i === group.rows.length - 1} onClick={() => moveDraft(row.href, 1)}
+                            className="cursor-pointer rounded-lg text-[13px] gap-2">
+                            <ArrowDown className="h-3.5 w-3.5" /> Descendre
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator className="my-1 dark:bg-white/[0.06]" />
+                          {GROUP_LABELS.filter((l) => l !== group.label).map((l) => (
+                            <DropdownMenuItem key={l} onClick={() => regroupDraft(row.href, l)}
+                              className="cursor-pointer rounded-lg text-[13px] gap-2">
+                              <CornerDownRight className="h-3.5 w-3.5" /> Déplacer vers {l}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </li>
+                  );
+                })}
+                {group.rows.length === 0 && (
+                  <li className="px-2 py-1 text-[11px] italic text-white/35">Zone vide — elle disparaît de la barre.</li>
+                )}
+              </ul>
+            </div>
+          ))
+        ) : (
+        groups.map((group) => {
           // Aperçu « voir comme » : on masque les entrées hors périmètre du rôle
           // prévisualisé (préparateur = ses 2 écrans). Sans aperçu : tout visible.
           const items = group.items.filter((it) => navAllowedForPreview(it.href, previewRole));
@@ -433,8 +574,41 @@ export function Sidebar() {
             )}
           </div>
           );
-        })}
+        })
+        )}
       </nav>
+
+      {/* ── Actions du mode MODIFICATION (Enregistrer / Annuler / Réinitialiser) ── */}
+      {editingNav && (
+        <div className="shrink-0 border-t border-white/[0.07] px-3 py-2.5 flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => saveNav(fromEditState(draft), "Navigation enregistrée")}
+            disabled={savingNav}
+            className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-[12.5px] font-semibold disabled:opacity-60 transition-colors"
+          >
+            {savingNav ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" />}
+            Enregistrer
+          </button>
+          <button
+            type="button"
+            onClick={cancelEditNav}
+            disabled={savingNav}
+            className="inline-flex items-center justify-center h-9 px-2.5 rounded-lg border border-white/15 text-[12.5px] font-medium text-white/70 hover:text-white hover:bg-white/[0.06] transition-colors disabled:opacity-60"
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            onClick={() => saveNav({}, "Navigation réinitialisée (libellés et zones d'origine)")}
+            disabled={savingNav}
+            title="Revenir aux libellés et emplacements d'origine"
+            className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-white/15 text-white/60 hover:text-white hover:bg-white/[0.06] transition-colors disabled:opacity-60"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* ── Footer système ─────────────────────────────── */}
       <div className="shrink-0 border-t border-white/[0.07] px-3 py-3 space-y-2.5">

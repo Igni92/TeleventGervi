@@ -2,7 +2,6 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/permissions";
 import { ParametresPanel } from "@/components/settings/ParametresPanel";
-import { NavCustomizer } from "@/components/settings/NavCustomizer";
 
 export const metadata = { title: "Paramètres" };
 export const dynamic = "force-dynamic";
@@ -28,10 +27,9 @@ export default async function ParametresPage() {
           reste mémorisé sur ce poste.
         </p>
       </header>
+      {/* NB : la personnalisation de la navigation (libellés + emplacement) se
+          fait EN PLACE dans la sidebar — bouton crayon en haut (admin). */}
       <ParametresPanel admin={admin} userKey={userKey} />
-      {/* Personnalisation de la navigation (libellés + emplacement) — réglage
-          GLOBAL, réservé à l'administration. */}
-      {admin && <NavCustomizer />}
     </div>
   );
 }
