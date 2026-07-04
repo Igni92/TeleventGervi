@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
   RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw, Pencil,
   Maximize2, UserCheck, Undo2, ListChecks, UserCog, ArrowRight, Printer,
-  Send, Phone, Plus, Trash2, Search, X,
+  Send, Phone, Plus, Trash2, Search, X, Store,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -64,10 +64,10 @@ const fmtClock = (iso: string | null | undefined): string | null => {
   return sameDay ? time : `${d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })} ${time}`;
 };
 
-/** Onglets de la vue : les 3 états d'avancement (StatusTab, cf. lib/livraisonView)
- *  + « Manquants » (vue transverse des commandes ayant au moins un article en
- *  stock SAP négatif — achat à prévoir). */
-type ViewTab = StatusTab | "MANQUANTS";
+/** Onglets de la vue : « Ventes » (BL pas encore mis en préparation — réservé au
+ *  dispatch) + les 3 états d'avancement (StatusTab, cf. lib/livraisonView).
+ *  Les manquants ont leur propre état complet : /manquants. */
+type ViewTab = "VENTES" | StatusTab;
 
 /** Badge de ligne par segment client (CHR / EXPORT / GMS) — repère visuel du
  *  segment, en cohérence avec le filtre Tout / CHR / Export / GMS. */
@@ -274,8 +274,8 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
     [load],
   );
 
-  // ── Onglet d'état : « À préparer » (par défaut) / « Fait » / « Départ » /
-  //    « Manquants » (vue transverse des articles en stock SAP négatif) ──
+  // ── Onglet d'état : « Ventes » (dispatch uniquement) / « À préparer »
+  //    (par défaut) / « Fait » / « Départ » ──
   const [statusTab, setStatusTab] = useState<ViewTab>("A_PREPARER");
 
   // ── Filtre par SEGMENT client : Tout / CHR / Export / GMS — recoupe TOUTES
@@ -403,43 +403,41 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   // segment (chaque pastille affiche son volume quel que soit le segment actif).
   const segCounts = useMemo(() => computeSegmentCounts(filteredData?.carriers ?? []), [filteredData]);
 
-  // Comptes par onglet (sur recherche + segment actif) — « Manquants » compte les
-  // commandes ayant au moins un article signalé. Logique pure dans lib/livraisonView.
+  // Comptes par onglet (sur recherche + segment actif) — logique pure dans
+  // lib/livraisonView (« Ventes » = BL pas encore mis en préparation).
   const statusCounts = useMemo(() => computeStatusCounts(segCarriers), [segCarriers]);
 
-  // Vue filtrée par recherche + segment + onglet : par état d'avancement
-  // (À préparer / Fait / Départ) ou par présence de manquants (onglet
-  // « Manquants », tous états confondus). Métriques recalculées (groupes +
-  // bandeau) — les BL « avoir / exclu » restent listés mais sont déduits.
+  // Vue filtrée par recherche + segment + onglet (Ventes / À préparer / Fait /
+  // Départ). Métriques recalculées (groupes + bandeau) — les BL « avoir /
+  // exclu » restent listés mais sont déduits.
   const view = useMemo(
     () => (filteredData ? { ...filteredData, ...computeView({ carriers: segCarriers }, statusTab) } : null),
     [filteredData, segCarriers, statusTab],
   );
 
-  // Synthèse des MANQUANTS par article (commandes du segment actif) :
-  // stock SAP négatif + quantités/colis commandés + nb de commandes touchées.
-  // Alimente l'encart de l'onglet « Manquants » (les achats à faire).
-  const missingSummary = useMemo(() => {
-    if (!data) return [];
-    const byItem = new Map<string, { itemCode: string; itemName: string; stock: number | null; colis: number; quantity: number; docs: number }>();
-    for (const car of segCarriers) for (const d of car.docs) {
-      const codes = new Set(d.missingItems ?? []);
-      if (codes.size === 0) continue;
-      for (const l of d.lines) {
-        if (!codes.has(l.itemCode)) continue;
-        const g = byItem.get(l.itemCode) ?? {
-          itemCode: l.itemCode, itemName: l.itemName,
-          stock: data.negativeStocks?.[l.itemCode] ?? null,
-          colis: 0, quantity: 0, docs: 0,
-        };
-        g.colis += l.colis;
-        g.quantity += l.quantity;
-        g.docs += 1;
-        byItem.set(l.itemCode, g);
-      }
+  // ── « Tout mettre en préparation » (onglet Ventes, dispatch) : lâche d'un
+  //    coup tous les BL affichés (recherche + segment respectés). ──
+  const [releasingAll, setReleasingAll] = useState(false);
+  const releaseAllVentes = useCallback(async () => {
+    const entries = (view?.carriers ?? []).flatMap((c) => c.docs.filter((d) => !d.excluded).map((d) => d.docEntry));
+    if (!entries.length || releasingAll) return;
+    if (!window.confirm(`Mettre ${entries.length} magasin${entries.length > 1 ? "s" : ""} en préparation ? Ils deviendront visibles pour l'entrepôt.`)) return;
+    setReleasingAll(true);
+    try {
+      const r = await fetch("/api/livraisons/mise-en-prep", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntries: entries, misEnPrep: true }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) throw new Error(j?.error || "Échec de la mise en préparation groupée");
+      entries.forEach((de) => patchDoc(de, { misEnPrep: true, misEnPrepBy: j?.by ?? null, misEnPrepAt: j?.at ?? null }));
+      toast.success(`${entries.length} magasin${entries.length > 1 ? "s" : ""} mis en préparation`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Échec de la mise en préparation groupée");
+    } finally {
+      setReleasingAll(false);
     }
-    return [...byItem.values()].sort((a, b) => (a.stock ?? 0) - (b.stock ?? 0) || a.itemName.localeCompare(b.itemName, "fr"));
-  }, [data, segCarriers]);
+  }, [view, releasingAll, patchDoc]);
 
   // Toutes les clés dépliables : transporteurs + sous-groupes tournée.
   const allKeys = useMemo(() => {
@@ -511,17 +509,31 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
       {/* ── Bandeau de synthèse (reflète le segment + l'onglet À préparer / Fait) ── */}
       {view?.totals && <SummaryRow totals={view.totals} loading={loading} showRevenue={canDispatch} />}
 
-      {/* ── Onglets À préparer / Fait + recherche d'un bon + repliage global ── */}
+      {/* ── Onglets Ventes / À préparer / Fait / Départ + recherche + repliage ── */}
       {data && data.count > 0 && (
         <StatusTabs
           tab={statusTab}
           counts={statusCounts}
           onPick={setStatusTab}
+          showVentes={canDispatch}
           query={query}
           onQuery={setQuery}
           allCollapsed={allCollapsed}
           onToggleAll={toggleAll}
         />
+      )}
+
+      {/* ── Onglet Ventes (dispatch) : lâcher d'un coup tous les BL affichés ── */}
+      {canDispatch && statusTab === "VENTES" && (view?.count ?? 0) > 0 && (
+        <button
+          type="button"
+          onClick={releaseAllVentes}
+          disabled={releasingAll}
+          className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[12.5px] font-semibold disabled:opacity-50 active:scale-95 transition-all"
+        >
+          {releasingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          Tout mettre en préparation ({statusCounts.ventes})
+        </button>
       )}
 
       {/* ── Contenu ── */}
@@ -583,15 +595,14 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
                 <button onClick={() => setStatusTab("A_PREPARER")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir à préparer</button>
               </p>
             </>
-          ) : statusTab === "MANQUANTS" ? (
+          ) : statusTab === "VENTES" ? (
             <>
               <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 mb-3">
-                <PackageX className="h-6 w-6" strokeWidth={1.8} />
+                <Store className="h-6 w-6" strokeWidth={1.8} />
               </span>
-              <p className="text-[14px] font-semibold text-foreground">Aucun manquant</p>
+              <p className="text-[14px] font-semibold text-foreground">Aucune vente en attente</p>
               <p className="text-[12.5px] text-muted-foreground mt-1">
-                Aucun article des commandes du jour n&apos;est en stock SAP négatif
-                (tous entrepôts confondus). Rien à racheter.
+                Tous les magasins du jour ont été mis en préparation — l&apos;entrepôt voit tout.
                 <button onClick={() => setStatusTab("A_PREPARER")} className="ml-1 text-brand-600 dark:text-brand-400 hover:underline">Voir à préparer</button>
               </p>
             </>
@@ -610,10 +621,6 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
         </div>
       ) : view ? (
         <div className={`space-y-4 transition-opacity ${loading ? "opacity-60" : ""}`}>
-          {/* Synthèse des manquants par article — uniquement sur l'onglet Manquants */}
-          {statusTab === "MANQUANTS" && missingSummary.length > 0 && (
-            <MissingSummaryPanel items={missingSummary} />
-          )}
           {view.carriers.map((c) => {
             const key = c.code ?? "__none__";
             // Commandes NON filtrées du transporteur (tous onglets) — le bon de
@@ -856,19 +863,19 @@ function CarrierGroup({
   }, [collapsed, carrier.code, onLoadTournees]);
 
   // Bouton d'avancement groupé — CHANGE selon l'onglet : À préparer → Fait →
-  // Départ. (Départ = état terminal ; « Manquants » = vue transverse d'états
-  // mélangés → pas d'action groupée, on agit commande par commande.)
+  // Départ. (Départ = état terminal ; « Ventes » = mise en préparation par BL
+  // ou via le bouton global de l'onglet — pas d'avancement d'état ici.)
   const forward =
     statusTab === "A_PREPARER"
       ? { target: "FAIT" as StatusTab, short: "Fait", long: "Tout marquer fait", Icon: CheckCircle2, cls: "bg-emerald-500 hover:bg-emerald-600 text-white" }
       : statusTab === "FAIT"
       ? { target: "DEPART" as StatusTab, short: "Départ", long: "Tout marquer départ", Icon: Truck, cls: "bg-sky-500 hover:bg-sky-600 text-white" }
       : null;
-  const allowBulk = statusTab !== "MANQUANTS";
+  const allowBulk = statusTab !== "VENTES";
 
   // Menu clic droit (desktop) sur l'en-tête transporteur → change l'état de TOUT
   // le groupe (À préparer / Fait / Départ). Accès mobile = le bouton ci-dessus.
-  // Pas d'action groupée sur « Manquants » (états mélangés) → menu désactivé.
+  // Pas d'action d'état groupée sur « Ventes » (BL pas encore lâchés) → désactivé.
   const { menu, openAt, close: closeMenu } = useContextMenu(224, 196);
   const onHeaderContextMenu = (e: ReactMouseEvent) => { if (allowBulk) openAt(e); };
 
@@ -1393,21 +1400,26 @@ function SegmentTabs({
    Onglets d'état — À préparer / Fait + recherche + repliage global
 ═════════════════════════════════════════════════════════════ */
 function StatusTabs({
-  tab, counts, onPick, query, onQuery, allCollapsed, onToggleAll,
+  tab, counts, onPick, showVentes, query, onQuery, allCollapsed, onToggleAll,
 }: {
   tab: ViewTab;
-  counts: { aPreparer: number; fait: number; depart: number; manquants: number };
+  counts: { ventes: number; aPreparer: number; fait: number; depart: number };
   onPick: (t: ViewTab) => void;
+  /** Onglet « Ventes » (mise en préparation) — réservé au dispatch : les rôles
+   *  restreints ne reçoivent jamais les BL pas encore lâchés (filtre serveur). */
+  showVentes: boolean;
   query: string;
   onQuery: (q: string) => void;
   allCollapsed: boolean;
   onToggleAll: () => void;
 }) {
   const tabs: { key: ViewTab; label: string; count: number; icon: typeof Clock; active: string }[] = [
+    ...(showVentes
+      ? [{ key: "VENTES" as ViewTab, label: "Ventes", count: counts.ventes, icon: Store, active: "bg-brand-600 text-white border-brand-600" }]
+      : []),
     { key: "A_PREPARER", label: "À préparer", count: counts.aPreparer, icon: Clock,        active: "bg-amber-500 text-white border-amber-500" },
     { key: "FAIT",       label: "Fait",       count: counts.fait,      icon: CheckCircle2, active: "bg-emerald-500 text-white border-emerald-500" },
     { key: "DEPART",     label: "Départ",     count: counts.depart,    icon: Truck,        active: "bg-sky-500 text-white border-sky-500" },
-    { key: "MANQUANTS",  label: "Manquants",  count: counts.manquants, icon: PackageX,     active: "bg-rose-500 text-white border-rose-500" },
   ];
   return (
     <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -1468,63 +1480,6 @@ function StatusTabs({
         </button>
       </div>
     </div>
-  );
-}
-
-/* ═════════════════════════════════════════════════════════════
-   Synthèse des manquants — cumul par article (onglet « Manquants »)
-═════════════════════════════════════════════════════════════ */
-function MissingSummaryPanel({
-  items,
-}: {
-  items: { itemCode: string; itemName: string; stock: number | null; colis: number; quantity: number; docs: number }[];
-}) {
-  return (
-    <section className="rounded-2xl border border-rose-300/60 dark:border-rose-500/30 bg-card overflow-hidden">
-      <div className="flex items-center gap-2.5 px-4 sm:px-5 py-3 border-b border-rose-300/40 dark:border-rose-500/20 bg-rose-50 dark:bg-rose-900/15">
-        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-rose-500/15 text-rose-600 dark:text-rose-400">
-          <PackageX className="h-4 w-4" strokeWidth={2} />
-        </span>
-        <div className="min-w-0">
-          <p className="text-[13.5px] font-semibold text-foreground leading-tight">
-            Articles manquants — achats à prévoir
-          </p>
-          <p className="text-[11px] text-muted-foreground">
-            {items.length} article{items.length > 1 ? "s" : ""} en stock SAP négatif (tous entrepôts confondus)
-            sur les commandes du jour.
-          </p>
-        </div>
-      </div>
-      <table className="w-full text-[12.5px]">
-        <thead className="text-[9px] uppercase tracking-wider text-muted-foreground bg-secondary/30">
-          <tr>
-            <th className="text-left font-semibold px-4 sm:px-5 py-1.5">Article</th>
-            <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap">Stock SAP</th>
-            <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Colis cmd.</th>
-            <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Qté cmd.</th>
-            <th className="text-right font-semibold px-4 sm:px-5 py-1.5 whitespace-nowrap">Commandes</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border/50">
-          {items.map((it) => (
-            <tr key={it.itemCode}>
-              <td className="px-4 sm:px-5 py-2 min-w-0">
-                <span className="font-medium text-foreground">{it.itemName}</span>
-                <span className="font-mono text-[10px] text-muted-foreground/70 ml-2 hidden sm:inline">{it.itemCode}</span>
-              </td>
-              <td className="px-3 py-2 text-right">
-                <span className="inline-flex min-w-[28px] items-center justify-center rounded-md bg-rose-500/12 text-rose-700 dark:text-rose-300 px-1.5 py-0.5 text-[13px] font-bold tnum">
-                  {it.stock != null ? fmtNum(it.stock) : "—"}
-                </span>
-              </td>
-              <td className="px-3 py-2 text-right tnum text-muted-foreground hidden sm:table-cell">{fmtNum(it.colis)}</td>
-              <td className="px-3 py-2 text-right tnum text-muted-foreground hidden sm:table-cell">{fmtNum(it.quantity)}</td>
-              <td className="px-4 sm:px-5 py-2 text-right tnum font-semibold text-foreground">{fmtInt(it.docs)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
   );
 }
 
@@ -1825,6 +1780,30 @@ const OrderRow = memo(function OrderRow({
   const [departedAt, setDepartedAt] = useState<string | null>(doc.departedAt ?? null);
   const [savingDepart, setSavingDepart] = useState(false);
 
+  // ── « Mettre en préparation » (onglet Ventes, dispatch) : lâche le BL à
+  //    l'entrepôt — il passe alors dans « À préparer ». Piloté par doc.misEnPrep
+  //    (patchDoc parent) : le BL change d'onglet sans recharger. ──
+  const released = doc.misEnPrep ?? false;
+  const [savingRelease, setSavingRelease] = useState(false);
+  async function releaseToPrep() {
+    if (savingRelease) return;
+    setSavingRelease(true);
+    try {
+      const res = await fetch("/api/livraisons/mise-en-prep", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: doc.docEntry, misEnPrep: true }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || j?.ok === false) throw new Error(j?.error || "Échec de la mise en préparation");
+      onPatchDoc(doc.docEntry, { misEnPrep: true, misEnPrepBy: j?.by ?? null, misEnPrepAt: j?.at ?? null });
+      toast.success(`${doc.cardName} — mis en préparation (visible entrepôt)`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Échec de la mise en préparation");
+    } finally {
+      setSavingRelease(false);
+    }
+  }
+
   async function setDepartedTo(next: boolean) {
     // État antérieur capturé : marquer « départ » force « faite » (partir implique
     // préparé) — en cas d'échec il faut restaurer le `prepared` d'origine, sinon
@@ -2090,7 +2069,20 @@ const OrderRow = memo(function OrderRow({
         className={`flex items-center gap-3 px-4 sm:px-5 py-3 hover:bg-secondary/25 transition-colors ${doc.excluded ? "opacity-50" : ""}`}
       >
         {/* Bouton d'état — toujours en tête, verticalement centré (placement
-            constant). 3 états : À préparer → Fait → Parti. Clic droit = menu complet. */}
+            constant). BL pas encore lâché (onglet Ventes) → le bouton EST la
+            mise en préparation ; sinon 3 états : À préparer → Fait → Parti. */}
+        {canDispatch && !released ? (
+          <button
+            type="button"
+            onClick={releaseToPrep}
+            disabled={savingRelease}
+            title="Mettre ce magasin en préparation — il devient visible pour l'entrepôt (À préparer)"
+            className="inline-flex shrink-0 items-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-[12px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 active:scale-95 bg-amber-600 hover:bg-amber-700 text-white"
+          >
+            {savingRelease ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            <span>Mettre en prép.</span>
+          </button>
+        ) : (
         <button
           type="button"
           onClick={departed ? () => setDepartedTo(false) : togglePrepared}
@@ -2113,6 +2105,7 @@ const OrderRow = memo(function OrderRow({
           {/* Libellé visible aussi sur mobile — bouton de préparation lisible et facile à toucher. */}
           <span>{departed ? "Parti" : prepared ? "Faite" : "À préparer"}</span>
         </button>
+        )}
 
         {/* Identité client */}
         <div className="min-w-0 flex-1">
@@ -2148,15 +2141,6 @@ const OrderRow = memo(function OrderRow({
               <span title="Pas entièrement préparée — remise sur la file"
                 className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
                 <AlertTriangle className="h-3 w-3" /> À reprendre
-              </span>
-            )}
-            {/* Pas encore « mis en préparation » par le commercial (état Ventes du
-                jour) → invisible pour les préparateurs. Badge réservé à la vue
-                dispatch : les rôles restreints ne reçoivent jamais ces BL. */}
-            {canDispatch && !doc.misEnPrep && !departed && (
-              <span title="Pas encore mis en préparation (Ventes du jour) — invisible pour l'entrepôt"
-                className="inline-flex items-center gap-1 rounded-full bg-secondary text-muted-foreground px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
-                <Clock className="h-3 w-3" /> En attente commercial
               </span>
             )}
             {missingSet.size > 0 && (

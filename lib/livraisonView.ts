@@ -101,15 +101,29 @@ export interface ApiResp {
 
 export type StatusTab = "A_PREPARER" | "FAIT" | "DEPART";
 
-/** Onglets de la vue : les 3 états d'avancement + « Manquants » (vue transverse
- *  des commandes du jour ayant au moins un article signalé manquant au picking). */
-export type ViewTab = StatusTab | "MANQUANTS";
+/** Onglets de la vue : « Ventes » (BL pas encore MIS EN PRÉPARATION par le
+ *  commercial — invisibles pour l'entrepôt) puis les 3 états d'avancement.
+ *  Les manquants ont leur propre état complet (/manquants), plus d'onglet ici. */
+export type ViewTab = "VENTES" | StatusTab;
 
 /** État courant d'une commande (mutuellement exclusif) : parti > préparé > à préparer. */
 export function docStatus(d: { prepared: boolean; departed?: boolean }): StatusTab {
   if (d.departed) return "DEPART";
   if (d.prepared) return "FAIT";
   return "A_PREPARER";
+}
+
+/** Vrai si le commercial a « mis en préparation » le BL (visible entrepôt). */
+export function isReleased(d: { misEnPrep?: boolean }): boolean {
+  return d.misEnPrep ?? false;
+}
+
+/** Appartenance d'une commande à un onglet : « Ventes » = pas encore mise en
+ *  préparation ; les 3 états ne portent QUE les commandes mises en préparation
+ *  (le flux : Ventes → À préparer → Fait → Départ). */
+export function docInTab(d: { prepared: boolean; departed?: boolean; misEnPrep?: boolean }, tab: ViewTab): boolean {
+  if (tab === "VENTES") return !isReleased(d);
+  return isReleased(d) && docStatus(d) === tab;
 }
 
 /** Vrai si la commande a au moins un article signalé manquant (rupture picking). */
@@ -124,19 +138,17 @@ export const STATUS_LABEL: Record<StatusTab, string> = {
   DEPART: "Départ",
 };
 
-/** Comptes par onglet — les BL « avoir / exclu » ne comptent pas dans les 3 états
- *  (ils restent visibles, grisés, mais ne représentent aucun travail réel).
- *  « Manquants » compte les COMMANDES ayant au moins un article signalé (tous
- *  états confondus, exclus compris — la rupture reste à traiter). */
-export function computeStatusCounts(carriers: Carrier[]): { aPreparer: number; fait: number; depart: number; manquants: number } {
-  let aPreparer = 0, fait = 0, depart = 0, manquants = 0;
+/** Comptes par onglet — les BL « avoir / exclu » ne comptent pas (ils restent
+ *  visibles, grisés, mais ne représentent aucun travail réel). */
+export function computeStatusCounts(carriers: Carrier[]): { ventes: number; aPreparer: number; fait: number; depart: number } {
+  let ventes = 0, aPreparer = 0, fait = 0, depart = 0;
   for (const car of carriers) for (const d of car.docs) {
-    if (hasMissing(d)) manquants++;
     if (d.excluded) continue;
+    if (!isReleased(d)) { ventes++; continue; }
     const s = docStatus(d);
     if (s === "DEPART") depart++; else if (s === "FAIT") fait++; else aPreparer++;
   }
-  return { aPreparer, fait, depart, manquants };
+  return { ventes, aPreparer, fait, depart };
 }
 
 /* ─────────────────────── Filtre par segment client ────────────────────────── */
@@ -187,16 +199,16 @@ export interface ViewSlice {
 }
 
 /**
- * Recoupe les commandes par onglet (À préparer / Fait / Départ, ou « Manquants »
- * — tous états confondus) et recalcule les métriques (groupes + bandeau de
- * synthèse). Même règle que le serveur : les BL « avoir / exclu » restent dans
- * les listes (affichés grisés) mais sont DÉDUITS à 100 % des totaux, des
- * métriques de groupe et du compte de commandes.
+ * Recoupe les commandes par onglet (Ventes / À préparer / Fait / Départ) et
+ * recalcule les métriques (groupes + bandeau de synthèse). Même règle que le
+ * serveur : les BL « avoir / exclu » restent dans les listes (affichés grisés)
+ * mais sont DÉDUITS à 100 % des totaux, des métriques de groupe et du compte
+ * de commandes.
  */
 export function computeView(data: Pick<ApiResp, "carriers">, tab: ViewTab): ViewSlice {
   const carriers = data.carriers
     .map((c) => {
-      const docs = c.docs.filter((d) => (tab === "MANQUANTS" ? hasMissing(d) : docStatus(d) === tab));
+      const docs = c.docs.filter((d) => docInTab(d, tab));
       const counted = docs.filter((d) => !d.excluded);
       return {
         ...c, docs,

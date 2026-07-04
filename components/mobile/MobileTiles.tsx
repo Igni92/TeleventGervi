@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   Users, Briefcase, Truck, Store, ShoppingCart,
-  PackagePlus, PackageCheck, Package, Factory, ClipboardCheck,
+  PackagePlus, PackageCheck, Package, PackageX, Factory, ClipboardCheck,
   Receipt, LayoutDashboard,
   Settings, Tag,
   type LucideIcon,
@@ -66,6 +66,7 @@ const AXES: Axis[] = [
     tiles: [
       { href: "/commandes-fournisseurs", label: "Commandes fournisseurs", icon: PackageCheck, badge: "commandesDue" },
       { href: "/entrees", label: "Entrées march.", icon: PackagePlus, badge: "receptionIncidents" },
+      { href: "/manquants", label: "Manquants", icon: PackageX },
       { href: "/products", label: "Stock", icon: Package },
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },
       { href: "/fabrication", label: "Fabrication", icon: Factory },
