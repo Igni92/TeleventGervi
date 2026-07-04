@@ -36,7 +36,7 @@ export async function AppLayout({ children }: AppLayoutProps) {
           {/* Interface MOBILE aussi sur TABLETTE : la bascule n'est plus seulement
               la largeur (md) mais le TYPE d'appareil — `pointer: coarse` = écran
               tactile (téléphone/tablette) → barre du haut forcée, sidebar masquée. */}
-          <MobileTopBar className="md:hidden [@media(pointer:coarse)]:!block" />
+          <MobileTopBar className="md:hidden touch:!block" />
           <RolePreviewBanner />
           <EventsBanner />
           {children}
