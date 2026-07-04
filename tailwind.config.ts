@@ -90,7 +90,12 @@ const config: Config = {
         },
         "fade-up": {
           from: { opacity: "0", transform: "translateY(10px)" },
-          to:   { opacity: "1", transform: "translateY(0)" },
+          // `none` (≠ translateY(0)) : une fois l'animation finie (fill-mode
+          // both), un transform résiduel créait un CONTEXTE D'EMPILEMENT
+          // permanent sur chaque carte → les dropdowns (z-20) passaient SOUS
+          // les cartes suivantes du DOM (ex. recherche recette de Fabrication
+          // sous « Historique des fabrications »).
+          to:   { opacity: "1", transform: "none" },
         },
         "fade-in": {
           from: { opacity: "0" },
@@ -98,11 +103,11 @@ const config: Config = {
         },
         "scale-in": {
           from: { opacity: "0", transform: "scale(0.95)" },
-          to:   { opacity: "1", transform: "scale(1)" },
+          to:   { opacity: "1", transform: "none" },
         },
         "slide-right": {
           from: { opacity: "0", transform: "translateX(-12px)" },
-          to:   { opacity: "1", transform: "translateX(0)" },
+          to:   { opacity: "1", transform: "none" },
         },
         shimmer: {
           from: { backgroundPosition: "-200% 0" },
