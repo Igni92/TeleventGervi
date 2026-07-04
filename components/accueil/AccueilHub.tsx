@@ -78,10 +78,10 @@ export function AccueilHub() {
       <PromoBanner context="accueil" />
 
       {/* ── MOBILE : lanceur en tuiles (4 axes) — écran volontairement différent du bureau ── */}
-      <MobileTiles className="md:hidden" />
+      <MobileTiles className="md:hidden [@media(pointer:coarse)]:!block" />
 
       {/* ── BUREAU : KPI + bento ── */}
-      <div className="hidden md:block space-y-4">
+      <div className="hidden md:block [@media(pointer:coarse)]:!hidden space-y-4">
         <KpiStrip />
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
           <div className="lg:col-span-7 space-y-4 min-w-0">
