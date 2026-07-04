@@ -72,7 +72,9 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
   // « Voir comme » ce membre (aperçu chrome) — réservé admin/direction (canPreview).
   const router = useRouter();
   const { canPreview, setPreviewRole } = useRolePreview();
-  const memberRole: PreviewRole = livreur ? "livreur" : prep ? "preparateur" : direction ? "direction" : "commercial";
+  // Rôle « dominant » pour l'aperçu : les rôles restreints d'abord (livreur,
+  // préparateur, agréeur), puis direction, sinon commercial.
+  const memberRole: PreviewRole = livreur ? "livreur" : prep ? "preparateur" : agreeur ? "agreeur" : direction ? "direction" : "commercial";
   function viewAsMember() {
     setPreviewRole(memberRole);
     router.push(previewHome(memberRole));

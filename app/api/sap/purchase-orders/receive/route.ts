@@ -4,14 +4,20 @@ import { requireCanReceivePurchaseOrder } from "@/lib/permissions";
 import { sap } from "@/lib/sapb1";
 import { incrementLocalStock } from "@/lib/stockSync";
 import { bumpLot } from "@/lib/lotResolver";
+import { applyAgreage, type AgreageStatus } from "@/lib/agreage";
 
 /**
- * POST /api/sap/purchase-orders/receive  { docEntry }
+ * POST /api/sap/purchase-orders/receive  { docEntry, agreage? }
  *
  * « Valider la réception » d'une COMMANDE FOURNISSEUR (PurchaseOrder) : crée le
  * bon de réception (PurchaseDeliveryNote) à partir de la commande — chaque ligne
  * référence la ligne de la commande (BaseType=22) → SAP copie quantités/prix et
  * CLÔTURE la commande. La commande « passe » alors en entrée marchandise.
+ *
+ * AGRÉAGE (contrôle qualité à la réception, geste de l'agréeur) : le body porte
+ * `agreage: { status: "CONFORME" | "RESERVE", type?, note? }`. L'agréage est
+ * posé sur l'EM créée (lib/agreage) ; une RÉSERVE ouvre automatiquement un
+ * incident de réception pour le suivi du litige fournisseur.
  *
  * Effets de bord (cohérents avec /api/sap/goods-receipts) :
  *   - lot « EM<DocNum> » posé sur chaque ligne du BR ;
@@ -25,9 +31,17 @@ export async function POST(req: NextRequest) {
   // droit : passer une commande fournisseur en entrée marchandise).
   if (!(await requireCanReceivePurchaseOrder(session))) return NextResponse.json({ error: "Réservé à la préparation / l'administration / l'agréeur" }, { status: 403 });
 
-  let body: { docEntry?: number };
+  let body: { docEntry?: number; agreage?: { status?: string; type?: string; note?: string } };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
+
+  const agreageStatus: AgreageStatus | null =
+    body.agreage?.status === "CONFORME" || body.agreage?.status === "RESERVE"
+      ? body.agreage.status
+      : null;
+  if (body.agreage && !agreageStatus) {
+    return NextResponse.json({ error: "agreage.status invalide (CONFORME | RESERVE)" }, { status: 400 });
+  }
 
   const poEntry = Number(body.docEntry);
   if (!poEntry || Number.isNaN(poEntry)) {
@@ -40,13 +54,13 @@ export async function POST(req: NextRequest) {
     RemainingOpenQuantity?: number; Quantity?: number; LineStatus?: string;
   };
   type Po = {
-    DocEntry: number; DocNum: number; CardCode: string;
+    DocEntry: number; DocNum: number; CardCode: string; CardName?: string;
     DocumentStatus?: string; DocumentLines: PoLine[];
   };
   let po: Po;
   try {
     po = await sap.get<Po>(
-      `PurchaseOrders(${poEntry})?$select=DocEntry,DocNum,CardCode,DocumentStatus,DocumentLines`,
+      `PurchaseOrders(${poEntry})?$select=DocEntry,DocNum,CardCode,CardName,DocumentStatus,DocumentLines`,
     );
   } catch (e) {
     return NextResponse.json(
@@ -90,6 +104,21 @@ export async function POST(req: NextRequest) {
   }
 
   const lotCode = `EM${created.DocNum}`;
+  const me = session.user?.name?.trim() || session.user?.email || "?";
+
+  // ── Agréage (contrôle qualité) posé sur l'EM créée — réserve → incident ──
+  let agreage: { status: AgreageStatus; type: string | null; note: string | null } | null = null;
+  if (agreageStatus) {
+    try {
+      agreage = await applyAgreage({
+        docEntry: created.DocEntry, docNum: created.DocNum, lot: lotCode,
+        cardCode: po.CardCode, cardName: po.CardName ?? null,
+        status: agreageStatus, type: body.agreage?.type, note: body.agreage?.note, by: me,
+      });
+    } catch (e) {
+      console.warn("[POReceive] agréage non enregistré (non-bloquant):", (e as Error).message);
+    }
+  }
 
   // ── 3. Lot EM<DocNum> + refetch des lignes créées (qté/entrepôt pour le stock) ──
   type CreatedLine = { LineNum: number; ItemCode: string; Quantity: number; WarehouseCode?: string };
@@ -127,5 +156,6 @@ export async function POST(req: NextRequest) {
     docEntry: created.DocEntry,
     lot: lotCode,
     fromPoNum: po.DocNum,
+    agreage,
   });
 }

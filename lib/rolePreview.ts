@@ -7,21 +7,22 @@
  * lib/permissions.ts (et la restriction dure du préparateur dans proxy.ts).
  */
 
-export type PreviewRole = "preparateur" | "livreur" | "commercial" | "direction";
+export type PreviewRole = "preparateur" | "livreur" | "agreeur" | "commercial" | "direction";
 
-export const PREVIEW_ROLES: PreviewRole[] = ["preparateur", "livreur", "commercial", "direction"];
+export const PREVIEW_ROLES: PreviewRole[] = ["preparateur", "livreur", "agreeur", "commercial", "direction"];
 
 /** Libellés FR des rôles prévisualisables. */
 export const PREVIEW_ROLE_LABELS: Record<PreviewRole, string> = {
   preparateur: "Préparateur",
   livreur: "Livreur",
+  agreeur: "Agréeur",
   commercial: "Commercial",
   direction: "Direction",
 };
 
 /** Type-guard : la valeur est-elle un rôle prévisualisable connu ? */
 export function isPreviewRole(v: unknown): v is PreviewRole {
-  return v === "preparateur" || v === "livreur" || v === "commercial" || v === "direction";
+  return v === "preparateur" || v === "livreur" || v === "agreeur" || v === "commercial" || v === "direction";
 }
 
 /**
@@ -42,12 +43,20 @@ export function navAllowedForPreview(href: string, role: PreviewRole | null): bo
   if (role === "livreur") {
     return href.startsWith("/livraisons") || href.startsWith("/clients");
   }
+  if (role === "agreeur") {
+    // Périmètre de l'agréeur : le flux CF → EM (réception + agréage). Pas de
+    // restriction middleware à ce jour (il peut naviguer), mais l'aperçu montre
+    // son POSTE DE TRAVAIL réel.
+    return href.startsWith("/commandes-fournisseurs") || href.startsWith("/entrees");
+  }
   return true;
 }
 
 /** Page d'atterrissage d'un rôle (cible du « voir comme »). */
 export function previewHome(role: PreviewRole): string {
-  return role === "preparateur" || role === "livreur" ? "/livraisons" : "/accueil";
+  if (role === "preparateur" || role === "livreur") return "/livraisons";
+  if (role === "agreeur") return "/commandes-fournisseurs";
+  return "/accueil";
 }
 
 /**

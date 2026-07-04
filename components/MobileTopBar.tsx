@@ -25,12 +25,17 @@ import {
 
 const SECTION_LABEL: Record<string, string> = {
   "/accueil": "Accueil",
+  // ⚠️ « /console2 » AVANT « /console » : le match est par préfixe (startsWith).
+  "/console2": "Console 2 · Commande",
   "/console": "Console d'appels",
   "/plan-appel": "Plan d'appel",
   "/clients": "Clients",
+  "/ventes-du-jour": "Ventes du jour",
   "/livraisons": "Préparation livraisons",
   "/commerciaux": "Équipe commerciale",
+  "/commandes-fournisseurs": "Commandes fournisseurs",
   "/entrees": "Entrées marchandises",
+  "/inventaire": "Inventaire",
   "/products": "Stock",
   "/fabrication": "Fabrication",
   "/encours": "Encours clients",
