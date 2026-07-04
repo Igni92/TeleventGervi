@@ -138,7 +138,15 @@ const config: Config = {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [
+    require("tailwindcss-animate"),
+    // Variante `touch:` — active quand <html data-ui="touch"> (appareil tactile
+    // détecté par le script anti-FOUC de app/layout.tsx : téléphone/tablette,
+    // émulateurs compris). Sert à forcer la coquille MOBILE sur tablette.
+    require("tailwindcss/plugin")(({ addVariant }: { addVariant: (n: string, d: string) => void }) => {
+      addVariant("touch", '[data-ui="touch"] &');
+    }),
+  ],
 };
 
 export default config;
