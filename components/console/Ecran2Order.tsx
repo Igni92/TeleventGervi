@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ChevronDown, ChevronRight, ChevronUp, Search, Plus, Trash2,
   ShoppingCart, Check, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock, X,
-  History, BadgeEuro, ArrowRightLeft,
+  History, BadgeEuro, ArrowRightLeft, CopyPlus,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
@@ -1001,8 +1001,45 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   const allProducts = useMemo(() => Object.values(grouped).flat(), [grouped]);
   const productByCode = useMemo(() => new Map(allProducts.map((p) => [p.itemCode, p])), [allProducts]);
 
-  // ── TRANSLATION d'article (clic droit sur une ligne panier) : remplace
-  //    l'article par un autre en CONSERVANT la quantité et le prix. ──
+  // ── MENU CONTEXTUEL d'une ligne du BL (clic droit) : ajouter une 2ᵉ ligne
+  //    du MÊME article (valorisation différente) ou remplacer l'article. ──
+  const [lineMenu, setLineMenu] = useState<{ x: number; y: number; index: number } | null>(null);
+  useEffect(() => {
+    if (!lineMenu) return;
+    const close = () => setLineMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [lineMenu]);
+
+  /** Insère une 2ᵉ ligne du MÊME article sous la ligne source : mêmes tags et
+   *  même prix (à ajuster — c'est le but : 2 valorisations), quantité repartie
+   *  à UN colis, sans promo ni rattachement au BL (nouvelle ligne au POST). */
+  const duplicateLine = (i: number) =>
+    setCart((cur) => {
+      const src = cur[i];
+      if (!src) return cur;
+      const copy: CartLine = {
+        ...src,
+        quantity: src.stepColis,
+        promo: null, discountPercent: 0, freeUnits: 0, freeManual: false,
+        originalLine: null,
+      };
+      const next = cur.slice();
+      next.splice(i + 1, 0, copy);
+      return next;
+    });
+
+  // ── TRANSLATION d'article (menu clic droit) : remplace l'article par un
+  //    autre en CONSERVANT la quantité et le prix. ──
   const [swapFor, setSwapFor] = useState<number | null>(null);
   const [swapQuery, setSwapQuery] = useState("");
   const swapResults = useMemo(() => {
@@ -1554,15 +1591,14 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
               <div
                 key={i}
                 onContextMenu={(e) => {
-                  // Clic droit = TRANSLATION d'article (quantité + prix conservés).
+                  // Clic droit = MENU de ligne : 2ᵉ ligne du même article / remplacer.
                   const el = e.target as HTMLElement;
                   if (el.closest("input, select, textarea")) return;   // menu natif dans les champs
                   e.preventDefault();
                   if (locked) return;
-                  setSwapQuery("");
-                  setSwapFor(i);
+                  setLineMenu({ x: e.clientX, y: e.clientY, index: i });
                 }}
-                title="Clic droit : remplacer l'article (quantité et prix conservés)"
+                title="Clic droit : ajouter une ligne du même article, ou remplacer l'article"
                 className={`rounded-lg border p-2 ${sellShort ? "border-rose-400/60 bg-rose-50/40 dark:bg-rose-950/15" : "border-border"}`}
               >
                 <div className="flex items-start justify-between gap-1.5">
@@ -1826,7 +1862,54 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       </div>{/* /flex deux colonnes */}
 
 
-      {/* ── Translation d'article (clic droit sur une ligne panier) ── */}
+      {/* ── Menu contextuel d'une ligne du BL (clic droit) ── */}
+      {lineMenu && cart[lineMenu.index] && (
+        <div
+          role="menu"
+          aria-label={`Actions sur ${cart[lineMenu.index].itemName}`}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+          style={{
+            left: Math.max(8, Math.min(lineMenu.x, window.innerWidth - 268)),
+            top: Math.max(8, Math.min(lineMenu.y, window.innerHeight - 132)),
+          }}
+          className="fixed z-[95] w-[260px] rounded-xl border border-border bg-card shadow-modal p-1"
+        >
+          <p className="px-2.5 py-1.5 text-[11px] text-muted-foreground truncate border-b border-border/60 mb-1">
+            {cart[lineMenu.index].itemName}
+          </p>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { duplicateLine(lineMenu.index); setLineMenu(null); }}
+            className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-secondary/60 transition-colors"
+          >
+            <span className="flex items-center gap-2 text-[13px] font-medium text-foreground">
+              <CopyPlus className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400 shrink-0" />
+              Ajouter une ligne du même article
+            </span>
+            <span className="block pl-[22px] text-[10.5px] text-muted-foreground">
+              2 lignes du même produit — pour une valorisation différente
+            </span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { setSwapQuery(""); setSwapFor(lineMenu.index); setLineMenu(null); }}
+            className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-secondary/60 transition-colors"
+          >
+            <span className="flex items-center gap-2 text-[13px] font-medium text-foreground">
+              <ArrowRightLeft className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400 shrink-0" />
+              Remplacer l&apos;article…
+            </span>
+            <span className="block pl-[22px] text-[10.5px] text-muted-foreground">
+              Quantité et prix conservés
+            </span>
+          </button>
+        </div>
+      )}
+
+      {/* ── Translation d'article (menu clic droit sur une ligne du BL) ── */}
       <Dialog open={swapFor !== null} onOpenChange={(o) => { if (!o) { setSwapFor(null); setSwapQuery(""); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
