@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseHM, dayMinutes, computeWeek, fmtHM,
   isoWeekId, isWeekId, weekDates, shiftWeek,
+  isMonthId, shiftMonth, monthWeeks, aggregateMonth,
   type DayHours,
 } from "./heuresCalc";
 
@@ -99,5 +100,40 @@ describe("heuresCalc — semaines ISO", () => {
     expect(isWeekId("2026-W07")).toBe(true);
     expect(isWeekId("2026-W54")).toBe(false);
     expect(isWeekId("nawak")).toBe(false);
+  });
+});
+
+describe("heuresCalc — état MENSUEL (semaine rattachée au mois de son dimanche)", () => {
+  it("juillet 2026 : dimanches 5, 12, 19, 26 → W27..W30 (la semaine à cheval juin/juillet part en juillet)", () => {
+    expect(monthWeeks("2026-07")).toEqual(["2026-W27", "2026-W28", "2026-W29", "2026-W30"]);
+  });
+
+  it("juin 2026 : 4 dimanches → W23..W26 ; W27 (29 juin–5 juil) N'EST PAS en juin", () => {
+    const w = monthWeeks("2026-06");
+    expect(w).toEqual(["2026-W23", "2026-W24", "2026-W25", "2026-W26"]);
+    expect(w).not.toContain("2026-W27");
+  });
+
+  it("janvier 2027 : la semaine à cheval 2026-W53 (28 déc–3 janv) est rattachée à janvier", () => {
+    expect(monthWeeks("2027-01")[0]).toBe("2026-W53");
+  });
+
+  it("aggregateMonth : somme des calculs hebdo (majorations DÉJÀ ventilées par semaine)", () => {
+    const day = (h: number): DayHours => ({ m1: "06:00", m2: `${String(6 + h).padStart(2, "0")}:00` });
+    const w39 = computeWeek([day(8), day(8), day(8), day(8), day(7)], 35);   // +4 h → 25 %
+    const w32 = computeWeek([day(7), day(7), day(7), day(7), day(4)], 35);   // −3 h récup
+    const m = aggregateMonth([w39, w32, null]);
+    expect(m.weeksWithData).toBe(2);
+    expect(m.totalMin).toBe((39 + 32) * 60);
+    expect(m.sup25Min).toBe(4 * 60);
+    expect(m.recupMin).toBe(3 * 60);
+    expect(m.majEquivMin).toBe(Math.round(4 * 60 * 1.25));
+  });
+
+  it("isMonthId / shiftMonth", () => {
+    expect(isMonthId("2026-07")).toBe(true);
+    expect(isMonthId("2026-13")).toBe(false);
+    expect(shiftMonth("2026-01", -1)).toBe("2025-12");
+    expect(shiftMonth("2026-12", 1)).toBe("2027-01");
   });
 });

@@ -23,9 +23,10 @@ import { displayPersonName } from "@/lib/userNames";
 import {
   JOURS_SEMAINE, DEFAULT_PROFILE, computeWeek, fmtHM,
   isoWeekId, shiftWeek, weekDates, weekLabel,
-  type DayHours, type HoursProfile,
+  monthIdOf, shiftMonth, monthLabel,
+  type DayHours, type HoursProfile, type WeekCalc, type MonthCalc,
 } from "@/lib/heuresCalc";
-import { printFeuillesHeures, type FeuilleEmploye } from "@/lib/heuresPdf";
+import { printFeuillesHeures, printEtatMensuel, type FeuilleEmploye, type MoisEmploye } from "@/lib/heuresPdf";
 
 const EMPTY_WEEK = (): DayHours[] => Array.from({ length: 7 }, () => ({}));
 
@@ -35,6 +36,16 @@ interface AdminRow {
   entry: { days: DayHours[]; updatedAt: string; updatedBy: string } | null;
   profile: HoursProfile | null;
   calc: ReturnType<typeof computeWeek> | null;
+}
+
+/** État MENSUEL d'un employé : une ligne par semaine rattachée au mois
+ *  (celle dont le dimanche tombe dans le mois) + agrégat. */
+interface MonthRow {
+  email: string;
+  name: string;
+  profile: HoursProfile | null;
+  weeks: { week: string; calc: WeekCalc | null }[];
+  total: MonthCalc;
 }
 
 export function HeuresPanel({ isManager }: { isManager: boolean }) {
@@ -94,6 +105,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
       setDirty(false);
       toast.success(`Heures enregistrées — ${weekLabel(week)}`);
       if (isManager) loadTeam();
+      loadMonth();   // l'état mensuel reflète la semaine tout juste saisie
     } catch {
       toast.error("Échec de l'enregistrement des heures");
     } finally {
@@ -162,6 +174,53 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
     profile: row.profile ?? { ...DEFAULT_PROFILE },
     updatedAt: row.entry?.updatedAt ?? null,
   });
+
+  /* ── ÉTAT MENSUEL (compta) : les heures supp restent calculées PAR SEMAINE,
+        le mois n'est que la totalisation. Semaine à cheval → mois de son
+        dimanche (les supp partent dans le mois suivant — paie au 10). ── */
+  const [month, setMonth] = useState(() => monthIdOf(new Date()));
+  const [myMonth, setMyMonth] = useState<MonthRow | null>(null);
+  const [teamMonth, setTeamMonth] = useState<MonthRow[] | null>(null);
+  const [monthLoading, setMonthLoading] = useState(false);
+  const loadMonth = useCallback(async () => {
+    setMonthLoading(true);
+    try {
+      const ownP = fetch(`/api/effectif/heures?month=${month}`, { cache: "no-store" })
+        .then((r) => r.json()).catch(() => null);
+      const teamP = isManager
+        ? fetch(`/api/effectif/heures?month=${month}&all=1`, { cache: "no-store" })
+            .then((r) => r.json()).catch(() => null)
+        : Promise.resolve(null);
+      const [o, t] = await Promise.all([ownP, teamP]);
+      if (o?.ok) setMyMonth({ email: o.email, name: o.name, profile: o.profile, weeks: o.weeks, total: o.total });
+      if (isManager) setTeamMonth(t?.ok ? (t.rows ?? []) : []);
+    } finally {
+      setMonthLoading(false);
+    }
+  }, [month, isManager]);
+  useEffect(() => { loadMonth(); }, [loadMonth]);
+
+  const printMyMonth = () => {
+    if (!myMonth) return;
+    const ok = printEtatMensuel(month, [{
+      name: "Mon état mensuel", email: myMonth.email,
+      profile: myMonth.profile ?? { ...DEFAULT_PROFILE }, weeks: myMonth.weeks,
+    }]);
+    if (!ok) toast.error("Impression bloquée — autorisez les pop-ups.");
+  };
+  const toMois = (row: MonthRow): MoisEmploye => ({
+    name: displayFullName(row.name), email: row.email,
+    profile: row.profile ?? { ...DEFAULT_PROFILE }, weeks: row.weeks,
+  });
+  const printMonthOne = (row: MonthRow) => {
+    if (row.total.weeksWithData === 0) { toast.info("Aucune saisie ce mois-ci pour cet employé."); return; }
+    if (!printEtatMensuel(month, [toMois(row)])) toast.error("Impression bloquée — autorisez les pop-ups.");
+  };
+  const printMonthAll = () => {
+    const feuilles = (teamMonth ?? []).filter((r) => r.total.weeksWithData > 0).map(toMois);
+    if (feuilles.length === 0) { toast.info("Aucune saisie ce mois-ci."); return; }
+    if (!printEtatMensuel(month, feuilles)) toast.error("Impression bloquée — autorisez les pop-ups.");
+  };
 
   const timeCls = "h-9 w-full min-w-[74px] rounded-md border border-border bg-background px-1.5 text-[13px] tnum text-center focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50";
 
@@ -339,6 +398,154 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           </p>
         </SurfaceCard>
       )}
+
+      {/* ── ÉTAT MENSUEL (compta / paie) ── */}
+      <SurfaceCard accent="amber" title={`État mensuel — ${monthLabel(month)}`} icon={<CalendarDays className="h-3.5 w-3.5" />}
+        action={
+          <div className="flex items-center gap-1.5">
+            <button type="button" onClick={() => setMonth((m) => shiftMonth(m, -1))} aria-label="Mois précédent"
+              className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button type="button" onClick={() => setMonth((m) => shiftMonth(m, 1))} aria-label="Mois suivant"
+              className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+              <ChevronRight className="h-4 w-4" />
+            </button>
+            {month !== monthIdOf(new Date()) && (
+              <button type="button" onClick={() => setMonth(monthIdOf(new Date()))} title="Revenir au mois en cours"
+                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+                <RotateCcw className="h-3.5 w-3.5" />
+              </button>
+            )}
+            {isManager && (
+              <button type="button" onClick={printMonthAll} disabled={monthLoading}
+                title="État mensuel de toute l'équipe (synthèse + un état signable par employé) — le document à envoyer à la compta pour la paie"
+                className="ml-1 inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[12.5px] font-semibold disabled:opacity-50">
+                <Printer className="h-4 w-4" /> PDF compta (tous)
+              </button>
+            )}
+          </div>
+        }>
+        {/* Mon mois : une ligne par semaine rattachée au mois */}
+        {monthLoading && !myMonth ? (
+          <p className="py-3 text-[13px] text-muted-foreground inline-flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" /> Chargement du mois…
+          </p>
+        ) : myMonth && (
+          <>
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full min-w-[680px] border-collapse text-[13px]">
+                <thead>
+                  <tr className="bg-secondary/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <th className="text-left font-semibold px-3 py-2">Semaine</th>
+                    <th className="text-right font-semibold px-2 py-2">Total</th>
+                    <th className="text-right font-semibold px-2 py-2">Écart</th>
+                    <th className="text-right font-semibold px-2 py-2">+25 %</th>
+                    <th className="text-right font-semibold px-2 py-2">+50 %</th>
+                    <th className="text-right font-semibold px-2 py-2">Équiv. payé</th>
+                    <th className="text-right font-semibold px-3 py-2">Récup</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {myMonth.weeks.map(({ week: w, calc: c }) => (
+                    <tr key={w} className={c ? "" : "opacity-55"}>
+                      <td className="px-3 py-1.5 whitespace-nowrap">{weekLabel(w)}</td>
+                      <td className="px-2 py-1.5 text-right tnum font-semibold">{c ? fmtHM(c.totalMin) : <span className="italic text-muted-foreground">non saisi</span>}</td>
+                      <td className={`px-2 py-1.5 text-right tnum ${c && c.deltaMin > 0 ? "text-amber-600 dark:text-amber-400" : c && c.deltaMin < 0 ? "text-sky-600 dark:text-sky-400" : "text-muted-foreground"}`}>{c ? fmtHM(c.deltaMin) : "—"}</td>
+                      <td className="px-2 py-1.5 text-right tnum">{c && c.sup25Min > 0 ? fmtHM(c.sup25Min) : "—"}</td>
+                      <td className="px-2 py-1.5 text-right tnum">{c && c.sup50Min > 0 ? fmtHM(c.sup50Min) : "—"}</td>
+                      <td className="px-2 py-1.5 text-right tnum font-semibold text-emerald-700 dark:text-emerald-300">{c && c.majEquivMin > 0 ? fmtHM(c.majEquivMin) : "—"}</td>
+                      <td className="px-3 py-1.5 text-right tnum">{c && c.recupMin > 0 ? fmtHM(c.recupMin) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-border font-bold">
+                    <td className="px-3 py-2">Total du mois ({myMonth.total.weeksWithData}/{myMonth.weeks.length} sem.)</td>
+                    <td className="px-2 py-2 text-right tnum">{fmtHM(myMonth.total.totalMin)}</td>
+                    <td className="px-2 py-2 text-right tnum">{fmtHM(myMonth.total.deltaMin)}</td>
+                    <td className="px-2 py-2 text-right tnum">{fmtHM(myMonth.total.sup25Min)}</td>
+                    <td className="px-2 py-2 text-right tnum">{fmtHM(myMonth.total.sup50Min)}</td>
+                    <td className="px-2 py-2 text-right tnum text-emerald-700 dark:text-emerald-300">{fmtHM(myMonth.total.majEquivMin)}</td>
+                    <td className="px-3 py-2 text-right tnum">{fmtHM(myMonth.total.recupMin)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
+              <p className="text-[11px] text-muted-foreground">
+                Les heures supp restent calculées <b>par semaine civile</b> ; le mois n&apos;est que la totalisation.
+                Une semaine à cheval sur deux mois est rattachée au mois où elle se termine (dimanche).
+              </p>
+              <button type="button" onClick={printMyMonth}
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+                <Printer className="h-4 w-4" /> Mon état mensuel (PDF)
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Équipe (managers) : totaux mensuels par employé */}
+        {isManager && (
+          <div className="mt-4">
+            <p className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">Équipe — totaux du mois</p>
+            {monthLoading && !teamMonth ? (
+              <p className="py-2 text-[13px] text-muted-foreground inline-flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" /> Chargement…
+              </p>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full min-w-[760px] border-collapse text-[13px]">
+                  <thead>
+                    <tr className="bg-secondary/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+                      <th className="text-left font-semibold px-3 py-2">Employé</th>
+                      <th className="text-right font-semibold px-2 py-2">Sem.</th>
+                      <th className="text-right font-semibold px-2 py-2">Contrat</th>
+                      <th className="text-right font-semibold px-2 py-2">Total</th>
+                      <th className="text-right font-semibold px-2 py-2">Écart</th>
+                      <th className="text-right font-semibold px-2 py-2">+25 %</th>
+                      <th className="text-right font-semibold px-2 py-2">+50 %</th>
+                      <th className="text-right font-semibold px-2 py-2">Équiv. payé</th>
+                      <th className="text-right font-semibold px-2 py-2">Récup</th>
+                      <th className="text-right font-semibold px-3 py-2">PDF</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {(teamMonth ?? []).map((row) => (
+                      <tr key={row.email} className={row.total.weeksWithData > 0 ? "" : "opacity-55"}>
+                        <td className="px-3 py-2 font-semibold whitespace-nowrap">
+                          {displayFullName(row.name)}
+                          {row.total.weeksWithData === 0 && <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400">non saisi</span>}
+                        </td>
+                        <td className="px-2 py-2 text-right tnum text-muted-foreground">{row.total.weeksWithData}/{row.weeks.length}</td>
+                        <td className="px-2 py-2 text-right tnum text-muted-foreground">{fmtHM(row.total.contractMin)}</td>
+                        <td className="px-2 py-2 text-right tnum font-bold">{row.total.weeksWithData > 0 ? fmtHM(row.total.totalMin) : "—"}</td>
+                        <td className={`px-2 py-2 text-right tnum font-semibold ${row.total.deltaMin > 0 ? "text-amber-600 dark:text-amber-400" : row.total.deltaMin < 0 ? "text-sky-600 dark:text-sky-400" : "text-muted-foreground"}`}>
+                          {row.total.weeksWithData > 0 ? fmtHM(row.total.deltaMin) : "—"}
+                        </td>
+                        <td className="px-2 py-2 text-right tnum">{row.total.sup25Min > 0 ? fmtHM(row.total.sup25Min) : "—"}</td>
+                        <td className="px-2 py-2 text-right tnum">{row.total.sup50Min > 0 ? fmtHM(row.total.sup50Min) : "—"}</td>
+                        <td className="px-2 py-2 text-right tnum font-semibold text-emerald-700 dark:text-emerald-300">{row.total.majEquivMin > 0 ? fmtHM(row.total.majEquivMin) : "—"}</td>
+                        <td className="px-2 py-2 text-right tnum">{row.total.recupMin > 0 ? fmtHM(row.total.recupMin) : "—"}</td>
+                        <td className="px-3 py-2 text-right">
+                          <button type="button" onClick={() => printMonthOne(row)} disabled={row.total.weeksWithData === 0}
+                            title="État mensuel PDF de cet employé"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-40">
+                            <Printer className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {(teamMonth ?? []).length === 0 && (
+                      <tr><td colSpan={10} className="px-3 py-4 text-[12.5px] italic text-muted-foreground">Aucun compte.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </SurfaceCard>
     </div>
   );
 }
