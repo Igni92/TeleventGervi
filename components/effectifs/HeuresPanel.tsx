@@ -8,14 +8,14 @@
  * (majorations +25 % / +50 %) et la récupération (lib/heuresCalc, pur/testé).
  * Le profil (contrat hebdo + « journée type ») préremplit la semaine d'un clic.
  *
- * Les MANAGERS (admin/direction) voient toute l'équipe pour la semaine choisie,
- * ouvrent le détail de chacun et sortent les feuilles d'heures en PDF
- * (feuille signable par employé + synthèse) pour la compta / paie.
+ * Le reporting est MENSUEL (carte « État mensuel ») : les managers
+ * (admin/direction) y voient les totaux de toute l'équipe et sortent les
+ * états signables en PDF (synthèse + un état par employé) pour la compta.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Clock3, ChevronLeft, ChevronRight, Loader2, Save, Printer, Wand2,
-  CalendarDays, ChevronDown, RotateCcw,
+  CalendarDays, RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { SurfaceCard } from "@/components/ui/surface-card";
@@ -26,17 +26,9 @@ import {
   monthIdOf, shiftMonth, monthLabel,
   type DayHours, type HoursProfile, type WeekCalc, type MonthCalc,
 } from "@/lib/heuresCalc";
-import { printFeuillesHeures, printEtatMensuel, type FeuilleEmploye, type MoisEmploye } from "@/lib/heuresPdf";
+import { printEtatMensuel, type MoisEmploye } from "@/lib/heuresPdf";
 
 const EMPTY_WEEK = (): DayHours[] => Array.from({ length: 7 }, () => ({}));
-
-interface AdminRow {
-  email: string;
-  name: string;
-  entry: { days: DayHours[]; updatedAt: string; updatedBy: string } | null;
-  profile: HoursProfile | null;
-  calc: ReturnType<typeof computeWeek> | null;
-}
 
 /** État MENSUEL d'un employé : une ligne par semaine rattachée au mois
  *  (celle dont le dimanche tombe dans le mois) + agrégat. */
@@ -104,7 +96,6 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
       if (!r.ok || !j?.ok) { toast.error(j?.error || "Échec de l'enregistrement des heures"); return; }
       setDirty(false);
       toast.success(`Heures enregistrées — ${weekLabel(week)}`);
-      if (isManager) loadTeam();
       loadMonth();   // l'état mensuel reflète la semaine tout juste saisie
     } catch {
       toast.error("Échec de l'enregistrement des heures");
@@ -131,49 +122,6 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
       setSavingProfile(false);
     }
   };
-
-  const printMine = () => {
-    const ok = printFeuillesHeures(week, [{
-      name: "Ma feuille d'heures", email: "", days, profile,
-    }]);
-    if (!ok) toast.error("Impression bloquée — autorisez les pop-ups.");
-  };
-
-  /* ── Équipe (managers) ── */
-  const [team, setTeam] = useState<AdminRow[] | null>(null);
-  const [teamLoading, setTeamLoading] = useState(false);
-  const [openDetail, setOpenDetail] = useState<string | null>(null);
-  const loadTeam = useCallback(async () => {
-    if (!isManager) return;
-    setTeamLoading(true);
-    try {
-      const r = await fetch(`/api/effectif/heures?week=${week}&all=1`, { cache: "no-store" });
-      const j = await r.json().catch(() => null);
-      setTeam(j?.ok ? (j.rows ?? []) : []);
-    } finally {
-      setTeamLoading(false);
-    }
-  }, [isManager, week]);
-  useEffect(() => { loadTeam(); }, [loadTeam]);
-
-  const printOne = (row: AdminRow) => {
-    if (!row.entry) { toast.info("Aucune saisie pour cet employé cette semaine."); return; }
-    const ok = printFeuillesHeures(week, [toFeuille(row)]);
-    if (!ok) toast.error("Impression bloquée — autorisez les pop-ups.");
-  };
-  const printAll = () => {
-    const feuilles = (team ?? []).filter((r) => r.entry).map(toFeuille);
-    if (feuilles.length === 0) { toast.info("Aucune saisie cette semaine."); return; }
-    const ok = printFeuillesHeures(week, feuilles);
-    if (!ok) toast.error("Impression bloquée — autorisez les pop-ups.");
-  };
-  const toFeuille = (row: AdminRow): FeuilleEmploye => ({
-    name: displayFullName(row.name),
-    email: row.email,
-    days: row.entry?.days ?? EMPTY_WEEK(),
-    profile: row.profile ?? { ...DEFAULT_PROFILE },
-    updatedAt: row.entry?.updatedAt ?? null,
-  });
 
   /* ── ÉTAT MENSUEL (compta) : les heures supp restent calculées PAR SEMAINE,
         le mois n'est que la totalisation. Semaine à cheval → mois de son
@@ -335,10 +283,6 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           {calc.majEquivMin > 0 && <Badge label="Équiv. payé" value={fmtHM(calc.majEquivMin)} tone="emerald" />}
           {calc.recupMin > 0 && <Badge label="Récup" value={fmtHM(calc.recupMin)} tone="sky" />}
           <div className="ml-auto flex items-center gap-2">
-            <button type="button" onClick={printMine}
-              className="inline-flex items-center gap-1.5 h-10 px-3 rounded-lg border border-border text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60">
-              <Printer className="h-4 w-4" /> PDF
-            </button>
             <button type="button" onClick={saveWeek} disabled={saving || loading || !dirty}
               className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[13px] font-semibold disabled:opacity-50">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -347,57 +291,6 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           </div>
         </div>
       </SurfaceCard>
-
-      {/* ── Équipe (managers) ── */}
-      {isManager && (
-        <SurfaceCard accent="violet" title={`Heures de l'équipe — ${weekLabel(week)}`} icon={<Clock3 className="h-3.5 w-3.5" />}
-          action={
-            <button type="button" onClick={printAll} disabled={teamLoading}
-              title="Feuilles d'heures de toute l'équipe (synthèse + une feuille signable par employé) — à envoyer à la compta"
-              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[12.5px] font-semibold disabled:opacity-50">
-              <Printer className="h-4 w-4" /> PDF compta (tous)
-            </button>
-          }>
-          {teamLoading && !team ? (
-            <p className="py-3 text-[13px] text-muted-foreground inline-flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" /> Chargement de l&apos;équipe…
-            </p>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full min-w-[760px] border-collapse text-[13px]">
-                <thead>
-                  <tr className="bg-secondary/40 text-[10px] uppercase tracking-wide text-muted-foreground">
-                    <th className="text-left font-semibold px-3 py-2">Employé</th>
-                    <th className="text-right font-semibold px-2 py-2">Contrat</th>
-                    <th className="text-right font-semibold px-2 py-2">Total</th>
-                    <th className="text-right font-semibold px-2 py-2">Écart</th>
-                    <th className="text-right font-semibold px-2 py-2">+25 %</th>
-                    <th className="text-right font-semibold px-2 py-2">+50 %</th>
-                    <th className="text-right font-semibold px-2 py-2">Équiv. payé</th>
-                    <th className="text-right font-semibold px-2 py-2">Récup</th>
-                    <th className="text-right font-semibold px-3 py-2">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/60">
-                  {(team ?? []).map((row) => (
-                    <AdminTeamRow key={row.email} row={row} week={week} dates={dates}
-                      open={openDetail === row.email}
-                      onToggle={() => setOpenDetail((c) => (c === row.email ? null : row.email))}
-                      onPrint={() => printOne(row)} />
-                  ))}
-                  {(team ?? []).length === 0 && (
-                    <tr><td colSpan={9} className="px-3 py-4 text-[12.5px] italic text-muted-foreground">Aucun compte.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            Majorations légales : les 8 premières heures au-delà du contrat à +25 %, les suivantes à +50 %.
-            « Équiv. payé » = heures supp converties en heures payées (×1,25 / ×1,5) — la donnée à transmettre à la paie.
-          </p>
-        </SurfaceCard>
-      )}
 
       {/* ── ÉTAT MENSUEL (compta / paie) ── */}
       <SurfaceCard accent="amber" title={`État mensuel — ${monthLabel(month)}`} icon={<CalendarDays className="h-3.5 w-3.5" />}
@@ -573,68 +466,3 @@ function Badge({ label, value, tone }: { label: string; value: string; tone: "fo
   );
 }
 
-function AdminTeamRow({ row, week, dates, open, onToggle, onPrint }: {
-  row: AdminRow; week: string; dates: string[];
-  open: boolean; onToggle: () => void; onPrint: () => void;
-}) {
-  const c = row.calc;
-  return (
-    <>
-      <tr className={row.entry ? "" : "opacity-55"}>
-        <td className="px-3 py-2 font-semibold whitespace-nowrap">
-          {displayFullName(row.name)}
-          {!row.entry && <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400">non saisi</span>}
-        </td>
-        <td className="px-2 py-2 text-right tnum text-muted-foreground">{fmtHM((row.profile?.weeklyHours ?? 35) * 60)}</td>
-        <td className="px-2 py-2 text-right tnum font-bold">{c ? fmtHM(c.totalMin) : "—"}</td>
-        <td className={`px-2 py-2 text-right tnum font-semibold ${c && c.deltaMin > 0 ? "text-amber-600 dark:text-amber-400" : c && c.deltaMin < 0 ? "text-sky-600 dark:text-sky-400" : "text-muted-foreground"}`}>
-          {c ? fmtHM(c.deltaMin) : "—"}
-        </td>
-        <td className="px-2 py-2 text-right tnum">{c && c.sup25Min > 0 ? fmtHM(c.sup25Min) : "—"}</td>
-        <td className="px-2 py-2 text-right tnum">{c && c.sup50Min > 0 ? fmtHM(c.sup50Min) : "—"}</td>
-        <td className="px-2 py-2 text-right tnum font-semibold text-emerald-700 dark:text-emerald-300">{c && c.majEquivMin > 0 ? fmtHM(c.majEquivMin) : "—"}</td>
-        <td className="px-2 py-2 text-right tnum">{c && c.recupMin > 0 ? fmtHM(c.recupMin) : "—"}</td>
-        <td className="px-3 py-2 text-right whitespace-nowrap">
-          <button type="button" onClick={onToggle} disabled={!row.entry}
-            title={row.entry ? "Voir le détail des jours" : "Aucune saisie"}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-40">
-            <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
-          </button>
-          <button type="button" onClick={onPrint} disabled={!row.entry}
-            title="Feuille d'heures PDF de cet employé"
-            className="ml-1 inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-40">
-            <Printer className="h-4 w-4" />
-          </button>
-        </td>
-      </tr>
-      {open && row.entry && (
-        <tr>
-          <td colSpan={9} className="px-3 pb-3 pt-1 bg-secondary/10">
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-              {JOURS_SEMAINE.map((jour, i) => {
-                const d = row.entry!.days[i] ?? {};
-                const min = row.calc?.dayMin[i] ?? 0;
-                return (
-                  <div key={jour} className="rounded-lg border border-border bg-card px-2.5 py-2">
-                    <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
-                      {jour}{dates[i] ? ` ${new Date(`${dates[i]}T12:00:00Z`).toLocaleDateString("fr-FR", { timeZone: "UTC", day: "2-digit", month: "2-digit" })}` : ""}
-                    </p>
-                    <p className="text-[12px] tnum mt-0.5 text-foreground/85">
-                      {d.m1 && d.m2 ? `${d.m1}–${d.m2}` : "—"}{d.a1 && d.a2 ? ` · ${d.a1}–${d.a2}` : ""}
-                    </p>
-                    <p className="text-[13px] font-bold tnum">{min > 0 ? fmtHM(min) : "—"}</p>
-                    {d.note && <p className="text-[10.5px] italic text-muted-foreground truncate" title={d.note}>{d.note}</p>}
-                  </div>
-                );
-              })}
-            </div>
-            <p className="mt-1.5 text-[10.5px] text-muted-foreground">
-              Dernière saisie {row.entry.updatedAt ? new Date(row.entry.updatedAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "—"}
-              {row.entry.updatedBy ? ` par ${displayPersonName(row.entry.updatedBy)}` : ""} · semaine {week}
-            </p>
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}

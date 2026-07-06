@@ -147,20 +147,3 @@ export async function listEntriesForWeeks(weekIds: string[]): Promise<Map<string
   return out;
 }
 
-/** Toutes les saisies d'UNE semaine, par email (vue admin / PDF compta). */
-export async function listWeekEntries(weekId: string): Promise<Map<string, WeekEntry>> {
-  const out = new Map<string, WeekEntry>();
-  try {
-    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: WEEK_PREFIX } } });
-    const suffix = `:${weekId}`;
-    for (const r of rows) {
-      if (!r.key.endsWith(suffix)) continue;
-      const email = r.key.slice(WEEK_PREFIX.length, r.key.length - suffix.length);
-      try {
-        const v = JSON.parse(r.value) as Partial<WeekEntry>;
-        out.set(email, { days: sanitizeDays(v.days), updatedAt: v.updatedAt ?? "", updatedBy: v.updatedBy ?? "" });
-      } catch { /* ligne corrompue → ignorée */ }
-    }
-  } catch { /* saisies indisponibles */ }
-  return out;
-}
