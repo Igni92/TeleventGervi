@@ -141,6 +141,91 @@ export function shiftWeek(weekId: string, delta: number): string {
   return isoWeekId(new Date(monday.getUTCFullYear(), monday.getUTCMonth(), monday.getUTCDate()));
 }
 
+/* ───────────────────────── Mois (état MENSUEL compta) ─────────────────────────
+ * La saisie et le calcul des heures supp restent HEBDOMADAIRES (règle légale :
+ * les majorations s'apprécient à la semaine civile). L'état transmis à la
+ * compta est MENSUEL : un mois regroupe les semaines ISO dont le DIMANCHE
+ * tombe dans le mois — une semaine à cheval sur deux mois est donc rattachée
+ * au mois où elle se termine (ses heures supp partent dans le mois suivant,
+ * compatible avec une paie au 10). */
+
+/** Identifiant de mois « YYYY-MM » valide ? */
+export function isMonthId(id: string): boolean {
+  const m = /^(\d{4})-(\d{2})$/.exec(id);
+  if (!m) return false;
+  const mm = Number(m[2]);
+  return mm >= 1 && mm <= 12;
+}
+
+/** Mois d'une date → « YYYY-MM ». */
+export function monthIdOf(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Mois décalé de `delta` (±1 = mois précédent/suivant). */
+export function shiftMonth(monthId: string, delta: number): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(monthId);
+  if (!m) return monthId;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Libellé « juillet 2026 ». */
+export function monthLabel(monthId: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(monthId);
+  if (!m) return monthId;
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 15)).toLocaleDateString("fr-FR", {
+    timeZone: "UTC", month: "long", year: "numeric",
+  });
+}
+
+/** Semaines ISO RATTACHÉES au mois = celles dont le DIMANCHE est dans le mois
+ *  (ordre chronologique). */
+export function monthWeeks(monthId: string): string[] {
+  const m = /^(\d{4})-(\d{2})$/.exec(monthId);
+  if (!m) return [];
+  const year = Number(m[1]), month = Number(m[2]);
+  const out: string[] = [];
+  // Tous les dimanches du mois → leur semaine ISO.
+  const d = new Date(Date.UTC(year, month - 1, 1));
+  while (d.getUTCMonth() === month - 1) {
+    if (d.getUTCDay() === 0) {
+      out.push(isoWeekId(new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())));
+    }
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return out;
+}
+
+/** Agrégat MENSUEL : somme des calculs hebdomadaires (les majorations restent
+ *  calculées semaine par semaine — on n'additionne que les résultats). */
+export interface MonthCalc {
+  totalMin: number;
+  contractMin: number;
+  deltaMin: number;
+  sup25Min: number;
+  sup50Min: number;
+  recupMin: number;
+  majEquivMin: number;
+  weeksWithData: number;
+}
+
+export function aggregateMonth(weekCalcs: (WeekCalc | null | undefined)[]): MonthCalc {
+  const agg: MonthCalc = { totalMin: 0, contractMin: 0, deltaMin: 0, sup25Min: 0, sup50Min: 0, recupMin: 0, majEquivMin: 0, weeksWithData: 0 };
+  for (const c of weekCalcs) {
+    if (!c) continue;
+    agg.totalMin += c.totalMin;
+    agg.contractMin += c.contractMin;
+    agg.deltaMin += c.deltaMin;
+    agg.sup25Min += c.sup25Min;
+    agg.sup50Min += c.sup50Min;
+    agg.recupMin += c.recupMin;
+    agg.majEquivMin += c.majEquivMin;
+    agg.weeksWithData += 1;
+  }
+  return agg;
+}
+
 /** Libellé lisible : « Semaine 27 · 29 juin – 5 juillet 2026 ». */
 export function weekLabel(weekId: string): string {
   const dates = weekDates(weekId);

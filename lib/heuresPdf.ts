@@ -8,7 +8,8 @@
  */
 import {
   JOURS_SEMAINE, computeWeek, fmtHM, weekDates, weekLabel,
-  type DayHours, type HoursProfile,
+  aggregateMonth, monthLabel,
+  type DayHours, type HoursProfile, type WeekCalc,
 } from "./heuresCalc";
 
 export interface FeuilleEmploye {
@@ -132,7 +133,130 @@ function synthesePage(feuilles: FeuilleEmploye[], weekId: string): string {
   </section>`;
 }
 
-/** Ouvre la fenêtre d'impression des feuilles d'heures. false = pop-up bloquée. */
+/* ───────────────────────── État MENSUEL (compta / paie) ─────────────────────
+ * Une page par employé : tableau des SEMAINES du mois (les majorations restent
+ * calculées à la semaine — règle légale), totaux mensuels, signatures. Précédée
+ * d'une page de synthèse équipe quand il y a plusieurs employés. */
+
+export interface MoisEmploye {
+  name: string;
+  email: string;
+  profile: HoursProfile;
+  weeks: { week: string; calc: WeekCalc | null }[];
+}
+
+function moisRows(weeks: MoisEmploye["weeks"]): string {
+  return weeks.map(({ week, calc }) => `
+    <tr${calc ? "" : ' class="vide"'}>
+      <td class="jour">${esc(weekLabel(week))}</td>
+      <td class="num">${calc ? fmtHM(calc.contractMin) : "—"}</td>
+      <td class="num">${calc ? fmtHM(calc.totalMin) : "non saisi"}</td>
+      <td class="num">${calc ? fmtHM(calc.deltaMin) : "—"}</td>
+      <td class="num">${calc && calc.sup25Min > 0 ? fmtHM(calc.sup25Min) : "—"}</td>
+      <td class="num">${calc && calc.sup50Min > 0 ? fmtHM(calc.sup50Min) : "—"}</td>
+      <td class="num total">${calc && calc.majEquivMin > 0 ? fmtHM(calc.majEquivMin) : "—"}</td>
+      <td class="num">${calc && calc.recupMin > 0 ? fmtHM(calc.recupMin) : "—"}</td>
+    </tr>`).join("");
+}
+
+function moisEmployePage(f: MoisEmploye, monthId: string): string {
+  const total = aggregateMonth(f.weeks.map((w) => w.calc));
+  return `
+  <section class="page">
+    <header>
+      <div>
+        <p class="kicker">Gervifrais · État mensuel des heures</p>
+        <h1>${esc(f.name)}</h1>
+        <p class="sub">${esc(f.email)} · contrat <b>${fmtHM(Math.round(f.profile.weeklyHours * 60))}</b> / semaine ·
+          ${total.weeksWithData}/${f.weeks.length} semaine(s) saisie(s)</p>
+      </div>
+      <div class="bl"><p class="date-big">${esc(monthLabel(monthId))}</p></div>
+    </header>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Semaine</th><th class="num">Contrat</th><th class="num">Total</th><th class="num">Écart</th>
+          <th class="num">Supp +25 %</th><th class="num">Supp +50 %</th><th class="num">Équiv. payé</th><th class="num">Récup</th>
+        </tr>
+      </thead>
+      <tbody>${moisRows(f.weeks)}</tbody>
+      <tfoot>
+        <tr>
+          <td class="label">Total du mois</td>
+          <td class="num">${fmtHM(total.contractMin)}</td>
+          <td class="num">${fmtHM(total.totalMin)}</td>
+          <td class="num">${fmtHM(total.deltaMin)}</td>
+          <td class="num">${fmtHM(total.sup25Min)}</td>
+          <td class="num">${fmtHM(total.sup50Min)}</td>
+          <td class="num total">${fmtHM(total.majEquivMin)}</td>
+          <td class="num">${fmtHM(total.recupMin)}</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <p class="legende">Les heures supplémentaires sont calculées PAR SEMAINE CIVILE (majorations légales :
+    +25 % les 8 premières heures au-delà du contrat, +50 % ensuite) puis totalisées sur le mois.
+    Une semaine à cheval sur deux mois est rattachée au mois où elle se termine (dimanche).
+    « Équiv. payé » = heures supp converties en heures payées (×1,25 / ×1,5) — donnée paie.</p>
+
+    <div class="signatures">
+      <div><p>Signature de l'employé</p></div>
+      <div><p>Visa du responsable</p></div>
+    </div>
+  </section>`;
+}
+
+function moisSynthesePage(feuilles: MoisEmploye[], monthId: string): string {
+  const rows = feuilles.map((f) => {
+    const t = aggregateMonth(f.weeks.map((w) => w.calc));
+    return `
+      <tr>
+        <td>${esc(f.name)}</td>
+        <td class="num">${t.weeksWithData}/${f.weeks.length}</td>
+        <td class="num">${fmtHM(t.contractMin)}</td>
+        <td class="num">${fmtHM(t.totalMin)}</td>
+        <td class="num">${fmtHM(t.deltaMin)}</td>
+        <td class="num">${fmtHM(t.sup25Min)}</td>
+        <td class="num">${fmtHM(t.sup50Min)}</td>
+        <td class="num total">${fmtHM(t.majEquivMin)}</td>
+        <td class="num">${fmtHM(t.recupMin)}</td>
+      </tr>`;
+  }).join("");
+  return `
+  <section class="page">
+    <header>
+      <div>
+        <p class="kicker">Gervifrais · Compta / paie</p>
+        <h1>État mensuel des heures — équipe</h1>
+      </div>
+      <div class="bl"><p class="date-big">${esc(monthLabel(monthId))}</p></div>
+    </header>
+    <table>
+      <thead>
+        <tr>
+          <th>Employé</th><th class="num">Semaines</th><th class="num">Contrat</th><th class="num">Total</th><th class="num">Écart</th>
+          <th class="num">Supp +25 %</th><th class="num">Supp +50 %</th><th class="num">Équiv. payé</th><th class="num">Récup</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p class="legende">Heures supp calculées par semaine civile puis totalisées ; semaine à cheval rattachée au
+    mois de son dimanche. Un état détaillé par employé suit (à signer).</p>
+  </section>`;
+}
+
+/** Ouvre la fenêtre d'impression de l'ÉTAT MENSUEL. false = pop-up bloquée. */
+export function printEtatMensuel(monthId: string, feuilles: MoisEmploye[]): boolean {
+  if (feuilles.length === 0) return false;
+  const pages = [
+    ...(feuilles.length > 1 ? [moisSynthesePage(feuilles, monthId)] : []),
+    ...feuilles.map((f) => moisEmployePage(f, monthId)),
+  ].join("");
+  return openPrintWindow(`Heures ${monthId} — ${feuilles.length > 1 ? "équipe" : feuilles[0].name}`, pages);
+}
+
+/** Ouvre la fenêtre d'impression des feuilles d'heures HEBDO. false = pop-up bloquée. */
 export function printFeuillesHeures(weekId: string, feuilles: FeuilleEmploye[]): boolean {
   if (feuilles.length === 0) return false;
   const dates = weekDates(weekId);
@@ -140,12 +264,16 @@ export function printFeuillesHeures(weekId: string, feuilles: FeuilleEmploye[]):
     ...(feuilles.length > 1 ? [synthesePage(feuilles, weekId)] : []),
     ...feuilles.map((f) => employePage(f, weekId, dates)),
   ].join("");
+  return openPrintWindow(`Heures ${weekId} — ${feuilles.length > 1 ? "équipe" : feuilles[0].name}`, pages);
+}
 
+/** Document A4 autonome + impression auto (mécanique commune hebdo/mensuel). */
+function openPrintWindow(title: string, pages: string): boolean {
   const html = `<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="utf-8" />
-<title>Heures ${esc(weekId)} — ${feuilles.length > 1 ? "équipe" : esc(feuilles[0].name)}</title>
+<title>${esc(title)}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   @page { size: A4; margin: 12mm; }
@@ -173,6 +301,7 @@ export function printFeuillesHeures(weekId: string, feuilles: FeuilleEmploye[]):
   td.total { font-weight: 800; }
   td.note { font-size: 12px; color: #444; }
   tfoot td { border-top: 2px solid #111; padding: 8px; font-weight: 700; }
+  tr.vide td { color: #999; font-style: italic; }
   tfoot .label { text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
 
   .recap { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0;

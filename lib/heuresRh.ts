@@ -101,6 +101,52 @@ export async function saveWeekEntry(email: string, weekId: string, days: unknown
   return entry;
 }
 
+/** Les saisies d'UN employé pour une LISTE de semaines (état mensuel). */
+export async function getUserWeeks(email: string, weekIds: string[]): Promise<Map<string, WeekEntry>> {
+  const out = new Map<string, WeekEntry>();
+  if (weekIds.length === 0) return out;
+  const e = emailKey(email);
+  try {
+    const rows = await prisma.appSetting.findMany({
+      where: { key: { in: weekIds.map((w) => `${WEEK_PREFIX}${e}:${w}`) } },
+    });
+    for (const r of rows) {
+      const weekId = r.key.slice(r.key.lastIndexOf(":") + 1);
+      try {
+        const v = JSON.parse(r.value) as Partial<WeekEntry>;
+        out.set(weekId, { days: sanitizeDays(v.days), updatedAt: v.updatedAt ?? "", updatedBy: v.updatedBy ?? "" });
+      } catch { /* ligne corrompue → ignorée */ }
+    }
+  } catch { /* saisies indisponibles */ }
+  return out;
+}
+
+/** Toutes les saisies d'un ENSEMBLE de semaines, par email puis par semaine
+ *  (état mensuel équipe) — un seul scan du préfixe. */
+export async function listEntriesForWeeks(weekIds: string[]): Promise<Map<string, Map<string, WeekEntry>>> {
+  const out = new Map<string, Map<string, WeekEntry>>();
+  if (weekIds.length === 0) return out;
+  const wanted = new Set(weekIds);
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: WEEK_PREFIX } } });
+    for (const r of rows) {
+      const rest = r.key.slice(WEEK_PREFIX.length);
+      const i = rest.lastIndexOf(":");
+      if (i <= 0) continue;
+      const email = rest.slice(0, i);
+      const weekId = rest.slice(i + 1);
+      if (!wanted.has(weekId)) continue;
+      try {
+        const v = JSON.parse(r.value) as Partial<WeekEntry>;
+        let byWeek = out.get(email);
+        if (!byWeek) { byWeek = new Map(); out.set(email, byWeek); }
+        byWeek.set(weekId, { days: sanitizeDays(v.days), updatedAt: v.updatedAt ?? "", updatedBy: v.updatedBy ?? "" });
+      } catch { /* ligne corrompue → ignorée */ }
+    }
+  } catch { /* saisies indisponibles */ }
+  return out;
+}
+
 /** Toutes les saisies d'UNE semaine, par email (vue admin / PDF compta). */
 export async function listWeekEntries(weekId: string): Promise<Map<string, WeekEntry>> {
   const out = new Map<string, WeekEntry>();
