@@ -1,0 +1,433 @@
+"use client";
+
+/**
+ * GESTION HORAIRE HEBDOMADAIRE (onglet Effectifs).
+ *
+ * Chaque employé saisit ses heures RÉELLES dans un tableau Lun→Dim (matin +
+ * après-midi) ; l'app calcule en direct l'écart au contrat, les heures supp
+ * (majorations +25 % / +50 %) et la récupération (lib/heuresCalc, pur/testé).
+ * Le profil (contrat hebdo + « journée type ») préremplit la semaine d'un clic.
+ *
+ * Les MANAGERS (admin/direction) voient toute l'équipe pour la semaine choisie,
+ * ouvrent le détail de chacun et sortent les feuilles d'heures en PDF
+ * (feuille signable par employé + synthèse) pour la compta / paie.
+ */
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Clock3, ChevronLeft, ChevronRight, Loader2, Save, Printer, Wand2,
+  CalendarDays, ChevronDown, RotateCcw,
+} from "lucide-react";
+import { toast } from "sonner";
+import { SurfaceCard } from "@/components/ui/surface-card";
+import { displayPersonName } from "@/lib/userNames";
+import {
+  JOURS_SEMAINE, DEFAULT_PROFILE, computeWeek, fmtHM,
+  isoWeekId, shiftWeek, weekDates, weekLabel,
+  type DayHours, type HoursProfile,
+} from "@/lib/heuresCalc";
+import { printFeuillesHeures, type FeuilleEmploye } from "@/lib/heuresPdf";
+
+const EMPTY_WEEK = (): DayHours[] => Array.from({ length: 7 }, () => ({}));
+
+interface AdminRow {
+  email: string;
+  name: string;
+  entry: { days: DayHours[]; updatedAt: string; updatedBy: string } | null;
+  profile: HoursProfile | null;
+  calc: ReturnType<typeof computeWeek> | null;
+}
+
+export function HeuresPanel({ isManager }: { isManager: boolean }) {
+  const [week, setWeek] = useState(() => isoWeekId(new Date()));
+  const dates = useMemo(() => weekDates(week), [week]);
+
+  /* ── Ma semaine ── */
+  const [days, setDays] = useState<DayHours[]>(EMPTY_WEEK());
+  const [profile, setProfile] = useState<HoursProfile>({ ...DEFAULT_PROFILE, typicalDay: { ...DEFAULT_PROFILE.typicalDay } });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/effectif/heures?week=${week}`, { cache: "no-store" });
+      const j = await r.json().catch(() => null);
+      if (j?.ok) {
+        setDays(j.entry?.days ?? EMPTY_WEEK());
+        if (j.profile) setProfile(j.profile);
+        setDirty(false);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [week]);
+  useEffect(() => { load(); }, [load]);
+
+  const calc = useMemo(() => computeWeek(days, profile.weeklyHours), [days, profile.weeklyHours]);
+
+  const setDay = (i: number, patch: Partial<DayHours>) => {
+    setDays((cur) => cur.map((d, k) => (k === i ? { ...d, ...patch } : d)));
+    setDirty(true);
+  };
+
+  // Journée type appliquée sur Lun→Ven aux jours encore VIDES.
+  const applyTypical = () => {
+    const t = profile.typicalDay;
+    setDays((cur) => cur.map((d, i) => {
+      if (i > 4) return d;
+      const empty = !d.m1 && !d.m2 && !d.a1 && !d.a2;
+      return empty ? { ...d, m1: t.m1, m2: t.m2, a1: t.a1, a2: t.a2 } : d;
+    }));
+    setDirty(true);
+  };
+
+  const saveWeek = async () => {
+    setSaving(true);
+    try {
+      const r = await fetch("/api/effectif/heures", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ week, days }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) { toast.error(j?.error || "Échec de l'enregistrement des heures"); return; }
+      setDirty(false);
+      toast.success(`Heures enregistrées — ${weekLabel(week)}`);
+      if (isManager) loadTeam();
+    } catch {
+      toast.error("Échec de l'enregistrement des heures");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Profil (contrat + journée type) — sauvegarde explicite.
+  const [savingProfile, setSavingProfile] = useState(false);
+  const saveProfil = async (next: HoursProfile) => {
+    setProfile(next);
+    setSavingProfile(true);
+    try {
+      const r = await fetch("/api/effectif/heures", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile: next }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) toast.error(j?.error || "Échec de l'enregistrement du profil");
+    } catch {
+      toast.error("Échec de l'enregistrement du profil");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const printMine = () => {
+    const ok = printFeuillesHeures(week, [{
+      name: "Ma feuille d'heures", email: "", days, profile,
+    }]);
+    if (!ok) toast.error("Impression bloquée — autorisez les pop-ups.");
+  };
+
+  /* ── Équipe (managers) ── */
+  const [team, setTeam] = useState<AdminRow[] | null>(null);
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [openDetail, setOpenDetail] = useState<string | null>(null);
+  const loadTeam = useCallback(async () => {
+    if (!isManager) return;
+    setTeamLoading(true);
+    try {
+      const r = await fetch(`/api/effectif/heures?week=${week}&all=1`, { cache: "no-store" });
+      const j = await r.json().catch(() => null);
+      setTeam(j?.ok ? (j.rows ?? []) : []);
+    } finally {
+      setTeamLoading(false);
+    }
+  }, [isManager, week]);
+  useEffect(() => { loadTeam(); }, [loadTeam]);
+
+  const printOne = (row: AdminRow) => {
+    if (!row.entry) { toast.info("Aucune saisie pour cet employé cette semaine."); return; }
+    const ok = printFeuillesHeures(week, [toFeuille(row)]);
+    if (!ok) toast.error("Impression bloquée — autorisez les pop-ups.");
+  };
+  const printAll = () => {
+    const feuilles = (team ?? []).filter((r) => r.entry).map(toFeuille);
+    if (feuilles.length === 0) { toast.info("Aucune saisie cette semaine."); return; }
+    const ok = printFeuillesHeures(week, feuilles);
+    if (!ok) toast.error("Impression bloquée — autorisez les pop-ups.");
+  };
+  const toFeuille = (row: AdminRow): FeuilleEmploye => ({
+    name: displayFullName(row.name),
+    email: row.email,
+    days: row.entry?.days ?? EMPTY_WEEK(),
+    profile: row.profile ?? { ...DEFAULT_PROFILE },
+    updatedAt: row.entry?.updatedAt ?? null,
+  });
+
+  const timeCls = "h-9 w-full min-w-[74px] rounded-md border border-border bg-background px-1.5 text-[13px] tnum text-center focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50";
+
+  return (
+    <div className="space-y-4">
+      {/* ── Ma semaine ── */}
+      <SurfaceCard accent="emerald" title="Mes heures de la semaine" icon={<Clock3 className="h-3.5 w-3.5" />}
+        action={
+          <div className="flex items-center gap-1.5">
+            <button type="button" onClick={() => setWeek((w) => shiftWeek(w, -1))} aria-label="Semaine précédente"
+              className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-foreground px-1 whitespace-nowrap">
+              <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" /> {weekLabel(week)}
+            </span>
+            <button type="button" onClick={() => setWeek((w) => shiftWeek(w, 1))} aria-label="Semaine suivante"
+              className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+              <ChevronRight className="h-4 w-4" />
+            </button>
+            {week !== isoWeekId(new Date()) && (
+              <button type="button" onClick={() => setWeek(isoWeekId(new Date()))} title="Revenir à la semaine en cours"
+                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+                <RotateCcw className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        }>
+        {/* Profil : contrat hebdo + journée type */}
+        <div className="mb-3 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-2.5">
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Contrat hebdo (h)</label>
+            <input
+              type="number" min={1} max={60} step={0.5} value={profile.weeklyHours}
+              onChange={(e) => saveProfil({ ...profile, weeklyHours: Number(e.target.value) || DEFAULT_PROFILE.weeklyHours })}
+              className="h-9 w-[84px] rounded-md border border-border bg-background px-2 text-[13.5px] tnum font-semibold focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Journée type — matin</label>
+            <div className="flex items-center gap-1">
+              <input type="time" value={profile.typicalDay.m1 ?? ""} onChange={(e) => saveProfil({ ...profile, typicalDay: { ...profile.typicalDay, m1: e.target.value } })} className={timeCls} />
+              <span className="text-muted-foreground text-[12px]">→</span>
+              <input type="time" value={profile.typicalDay.m2 ?? ""} onChange={(e) => saveProfil({ ...profile, typicalDay: { ...profile.typicalDay, m2: e.target.value } })} className={timeCls} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Journée type — après-midi</label>
+            <div className="flex items-center gap-1">
+              <input type="time" value={profile.typicalDay.a1 ?? ""} onChange={(e) => saveProfil({ ...profile, typicalDay: { ...profile.typicalDay, a1: e.target.value } })} className={timeCls} />
+              <span className="text-muted-foreground text-[12px]">→</span>
+              <input type="time" value={profile.typicalDay.a2 ?? ""} onChange={(e) => saveProfil({ ...profile, typicalDay: { ...profile.typicalDay, a2: e.target.value } })} className={timeCls} />
+            </div>
+          </div>
+          <button type="button" onClick={applyTypical}
+            title="Préremplit Lundi→Vendredi (jours encore vides) avec la journée type"
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-border text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+            <Wand2 className="h-3.5 w-3.5" /> Appliquer la journée type
+          </button>
+          {savingProfile && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mb-2.5" />}
+        </div>
+
+        {/* Tableau Lun→Dim */}
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full min-w-[720px] border-collapse text-[13px]">
+            <thead>
+              <tr className="bg-secondary/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+                <th className="text-left font-semibold px-3 py-2">Jour</th>
+                <th className="font-semibold px-2 py-2">Matin début</th>
+                <th className="font-semibold px-2 py-2">Matin fin</th>
+                <th className="font-semibold px-2 py-2">A-midi début</th>
+                <th className="font-semibold px-2 py-2">A-midi fin</th>
+                <th className="text-right font-semibold px-3 py-2">Total</th>
+                <th className="text-left font-semibold px-3 py-2">Note (CP, récup…)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/60">
+              {JOURS_SEMAINE.map((jour, i) => (
+                <tr key={jour} className={i > 4 ? "bg-secondary/15" : ""}>
+                  <td className="px-3 py-1.5 font-semibold whitespace-nowrap">
+                    {jour}
+                    {dates[i] && (
+                      <span className="ml-1.5 font-normal text-[11px] text-muted-foreground tnum">
+                        {new Date(`${dates[i]}T12:00:00Z`).toLocaleDateString("fr-FR", { timeZone: "UTC", day: "2-digit", month: "2-digit" })}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.m1 ?? ""} onChange={(e) => setDay(i, { m1: e.target.value })} className={timeCls} aria-label={`${jour} matin début`} /></td>
+                  <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.m2 ?? ""} onChange={(e) => setDay(i, { m2: e.target.value })} className={timeCls} aria-label={`${jour} matin fin`} /></td>
+                  <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.a1 ?? ""} onChange={(e) => setDay(i, { a1: e.target.value })} className={timeCls} aria-label={`${jour} après-midi début`} /></td>
+                  <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.a2 ?? ""} onChange={(e) => setDay(i, { a2: e.target.value })} className={timeCls} aria-label={`${jour} après-midi fin`} /></td>
+                  <td className="px-3 py-1.5 text-right tnum font-bold">{calc.dayMin[i] > 0 ? fmtHM(calc.dayMin[i]) : "—"}</td>
+                  <td className="px-3 py-1.5">
+                    <input value={days[i]?.note ?? ""} disabled={loading} maxLength={80}
+                      onChange={(e) => setDay(i, { note: e.target.value })}
+                      placeholder=""
+                      aria-label={`${jour} note`}
+                      className="h-9 w-full min-w-[120px] rounded-md border border-border bg-background px-2 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50" />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Totaux + actions */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Badge label="Total" value={fmtHM(calc.totalMin)} tone="foreground" />
+          <Badge label="Contrat" value={fmtHM(calc.contractMin)} tone="muted" />
+          {calc.sup25Min > 0 && <Badge label="Supp +25 %" value={fmtHM(calc.sup25Min)} tone="amber" />}
+          {calc.sup50Min > 0 && <Badge label="Supp +50 %" value={fmtHM(calc.sup50Min)} tone="rose" />}
+          {calc.majEquivMin > 0 && <Badge label="Équiv. payé" value={fmtHM(calc.majEquivMin)} tone="emerald" />}
+          {calc.recupMin > 0 && <Badge label="Récup" value={fmtHM(calc.recupMin)} tone="sky" />}
+          <div className="ml-auto flex items-center gap-2">
+            <button type="button" onClick={printMine}
+              className="inline-flex items-center gap-1.5 h-10 px-3 rounded-lg border border-border text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+              <Printer className="h-4 w-4" /> PDF
+            </button>
+            <button type="button" onClick={saveWeek} disabled={saving || loading || !dirty}
+              className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[13px] font-semibold disabled:opacity-50">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Enregistrer mes heures
+            </button>
+          </div>
+        </div>
+      </SurfaceCard>
+
+      {/* ── Équipe (managers) ── */}
+      {isManager && (
+        <SurfaceCard accent="violet" title={`Heures de l'équipe — ${weekLabel(week)}`} icon={<Clock3 className="h-3.5 w-3.5" />}
+          action={
+            <button type="button" onClick={printAll} disabled={teamLoading}
+              title="Feuilles d'heures de toute l'équipe (synthèse + une feuille signable par employé) — à envoyer à la compta"
+              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[12.5px] font-semibold disabled:opacity-50">
+              <Printer className="h-4 w-4" /> PDF compta (tous)
+            </button>
+          }>
+          {teamLoading && !team ? (
+            <p className="py-3 text-[13px] text-muted-foreground inline-flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" /> Chargement de l&apos;équipe…
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full min-w-[760px] border-collapse text-[13px]">
+                <thead>
+                  <tr className="bg-secondary/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <th className="text-left font-semibold px-3 py-2">Employé</th>
+                    <th className="text-right font-semibold px-2 py-2">Contrat</th>
+                    <th className="text-right font-semibold px-2 py-2">Total</th>
+                    <th className="text-right font-semibold px-2 py-2">Écart</th>
+                    <th className="text-right font-semibold px-2 py-2">+25 %</th>
+                    <th className="text-right font-semibold px-2 py-2">+50 %</th>
+                    <th className="text-right font-semibold px-2 py-2">Équiv. payé</th>
+                    <th className="text-right font-semibold px-2 py-2">Récup</th>
+                    <th className="text-right font-semibold px-3 py-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {(team ?? []).map((row) => (
+                    <AdminTeamRow key={row.email} row={row} week={week} dates={dates}
+                      open={openDetail === row.email}
+                      onToggle={() => setOpenDetail((c) => (c === row.email ? null : row.email))}
+                      onPrint={() => printOne(row)} />
+                  ))}
+                  {(team ?? []).length === 0 && (
+                    <tr><td colSpan={9} className="px-3 py-4 text-[12.5px] italic text-muted-foreground">Aucun compte.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Majorations légales : les 8 premières heures au-delà du contrat à +25 %, les suivantes à +50 %.
+            « Équiv. payé » = heures supp converties en heures payées (×1,25 / ×1,5) — la donnée à transmettre à la paie.
+          </p>
+        </SurfaceCard>
+      )}
+    </div>
+  );
+}
+
+/** Nom complet affichable (garde le nom tel quel, repli email lisible). */
+function displayFullName(raw: string): string {
+  if (raw.includes("@")) return displayPersonName(raw);
+  return raw;
+}
+
+function Badge({ label, value, tone }: { label: string; value: string; tone: "foreground" | "muted" | "amber" | "rose" | "emerald" | "sky" }) {
+  const cls: Record<string, string> = {
+    foreground: "bg-foreground/10 text-foreground",
+    muted: "bg-secondary text-muted-foreground",
+    amber: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+    rose: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+    emerald: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+    sky: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
+  };
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 ${cls[tone]}`}>
+      <span className="text-[9.5px] uppercase tracking-[0.12em] font-semibold opacity-80">{label}</span>
+      <span className="text-[14px] font-bold tnum">{value}</span>
+    </span>
+  );
+}
+
+function AdminTeamRow({ row, week, dates, open, onToggle, onPrint }: {
+  row: AdminRow; week: string; dates: string[];
+  open: boolean; onToggle: () => void; onPrint: () => void;
+}) {
+  const c = row.calc;
+  return (
+    <>
+      <tr className={row.entry ? "" : "opacity-55"}>
+        <td className="px-3 py-2 font-semibold whitespace-nowrap">
+          {displayFullName(row.name)}
+          {!row.entry && <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400">non saisi</span>}
+        </td>
+        <td className="px-2 py-2 text-right tnum text-muted-foreground">{fmtHM((row.profile?.weeklyHours ?? 35) * 60)}</td>
+        <td className="px-2 py-2 text-right tnum font-bold">{c ? fmtHM(c.totalMin) : "—"}</td>
+        <td className={`px-2 py-2 text-right tnum font-semibold ${c && c.deltaMin > 0 ? "text-amber-600 dark:text-amber-400" : c && c.deltaMin < 0 ? "text-sky-600 dark:text-sky-400" : "text-muted-foreground"}`}>
+          {c ? fmtHM(c.deltaMin) : "—"}
+        </td>
+        <td className="px-2 py-2 text-right tnum">{c && c.sup25Min > 0 ? fmtHM(c.sup25Min) : "—"}</td>
+        <td className="px-2 py-2 text-right tnum">{c && c.sup50Min > 0 ? fmtHM(c.sup50Min) : "—"}</td>
+        <td className="px-2 py-2 text-right tnum font-semibold text-emerald-700 dark:text-emerald-300">{c && c.majEquivMin > 0 ? fmtHM(c.majEquivMin) : "—"}</td>
+        <td className="px-2 py-2 text-right tnum">{c && c.recupMin > 0 ? fmtHM(c.recupMin) : "—"}</td>
+        <td className="px-3 py-2 text-right whitespace-nowrap">
+          <button type="button" onClick={onToggle} disabled={!row.entry}
+            title={row.entry ? "Voir le détail des jours" : "Aucune saisie"}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-40">
+            <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
+          </button>
+          <button type="button" onClick={onPrint} disabled={!row.entry}
+            title="Feuille d'heures PDF de cet employé"
+            className="ml-1 inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-40">
+            <Printer className="h-4 w-4" />
+          </button>
+        </td>
+      </tr>
+      {open && row.entry && (
+        <tr>
+          <td colSpan={9} className="px-3 pb-3 pt-1 bg-secondary/10">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+              {JOURS_SEMAINE.map((jour, i) => {
+                const d = row.entry!.days[i] ?? {};
+                const min = row.calc?.dayMin[i] ?? 0;
+                return (
+                  <div key={jour} className="rounded-lg border border-border bg-card px-2.5 py-2">
+                    <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
+                      {jour}{dates[i] ? ` ${new Date(`${dates[i]}T12:00:00Z`).toLocaleDateString("fr-FR", { timeZone: "UTC", day: "2-digit", month: "2-digit" })}` : ""}
+                    </p>
+                    <p className="text-[12px] tnum mt-0.5 text-foreground/85">
+                      {d.m1 && d.m2 ? `${d.m1}–${d.m2}` : "—"}{d.a1 && d.a2 ? ` · ${d.a1}–${d.a2}` : ""}
+                    </p>
+                    <p className="text-[13px] font-bold tnum">{min > 0 ? fmtHM(min) : "—"}</p>
+                    {d.note && <p className="text-[10.5px] italic text-muted-foreground truncate" title={d.note}>{d.note}</p>}
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-[10.5px] text-muted-foreground">
+              Dernière saisie {row.entry.updatedAt ? new Date(row.entry.updatedAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "—"}
+              {row.entry.updatedBy ? ` par ${displayPersonName(row.entry.updatedBy)}` : ""} · semaine {week}
+            </p>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}

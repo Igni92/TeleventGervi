@@ -5,6 +5,7 @@ import { getAccessScope, requireStrictAdmin, ADMIN_EMAILS } from "@/lib/permissi
 import { CommercialCard } from "@/components/commerciaux/CommercialCard";
 import { EffectifsPreviewBar } from "@/components/role-preview/EffectifsPreviewBar";
 import { CommerciauxSapList } from "./CommerciauxSapList";
+import { HeuresPanel } from "@/components/effectifs/HeuresPanel";
 
 export const metadata = { title: "Effectifs | Gervi" };
 export const dynamic = "force-dynamic";
@@ -165,6 +166,10 @@ export default async function CommerciauxPage() {
       </header>
 
       <CommerciauxSapList />
+
+      {/* ── Gestion horaire hebdomadaire : chaque employé saisit ses heures ;
+             les managers voient l'équipe et sortent les feuilles PDF (compta). ── */}
+      <HeuresPanel isManager={isManager} />
 
       {teamSection}
     </div>
