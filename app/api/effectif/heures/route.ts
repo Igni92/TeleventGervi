@@ -8,7 +8,7 @@ import {
 } from "@/lib/heuresCalc";
 import {
   getProfile, saveProfile, listProfiles,
-  getWeekEntry, saveWeekEntry, listWeekEntries,
+  getWeekEntry, saveWeekEntry,
   getUserWeeks, listEntriesForWeeks, type WeekEntry,
 } from "@/lib/heuresRh";
 
@@ -19,9 +19,6 @@ export const dynamic = "force-dynamic";
  *
  *   GET  ?week=2026-W28            → sa propre semaine { entry, profile, calc }
  *   GET  ?week=…&user=email        → semaine d'un employé (managers)
- *   GET  ?week=…&all=1             → toute l'équipe (managers) : [{ email, name,
- *                                    entry?, profile, calc? }] — employés sans
- *                                    saisie inclus (entry absente)
  *   POST { week, days[7], user? }  → enregistre la semaine (soi ; manager : autrui)
  *   PUT  { profile, user? }        → enregistre le profil (contrat hebdo +
  *                                    journée type) — soi ; manager : autrui
@@ -91,30 +88,6 @@ export async function GET(req: NextRequest) {
   if (!isWeekId(week)) return NextResponse.json({ error: "Semaine invalide" }, { status: 400 });
 
   try {
-    if (all) {
-      if (!c.isManager) return NextResponse.json({ error: "Réservé aux managers" }, { status: 403 });
-      const [users, entries, profiles] = await Promise.all([
-        prisma.user.findMany({ select: { name: true, email: true }, orderBy: { name: "asc" } }),
-        listWeekEntries(week),
-        listProfiles(),
-      ]);
-      const seen = new Set<string>();
-      const rows = (users as { name: string | null; email: string | null }[])
-        .filter((u) => u.email)
-        .map((u) => {
-          const email = u.email!.trim().toLowerCase();
-          seen.add(email);
-          const entry = entries.get(email) ?? null;
-          const profile = profiles.get(email) ?? null;
-          return buildRow(email, u.name || email, entry, profile);
-        });
-      // Saisies orphelines (compte supprimé / email hors table User) — visibles quand même.
-      for (const [email, entry] of entries) {
-        if (!seen.has(email)) rows.push(buildRow(email, email, entry, profiles.get(email) ?? null));
-      }
-      return NextResponse.json({ ok: true, week, rows });
-    }
-
     const who = target && target !== c.email ? target : c.email;
     if (who !== c.email && !c.isManager) {
       return NextResponse.json({ error: "Réservé aux managers" }, { status: 403 });
@@ -146,22 +119,6 @@ function buildMonthRow(
     profile,
     weeks: weeksOut,
     total: aggregateMonth(weeksOut.map((w) => w.calc)),
-  };
-}
-
-function buildRow(
-  email: string,
-  name: string,
-  entry: { days: import("@/lib/heuresCalc").DayHours[]; updatedAt: string; updatedBy: string } | null,
-  profile: HoursProfile | null,
-) {
-  const prof = profile ?? undefined;
-  return {
-    email,
-    name,
-    entry,
-    profile: prof ?? null,
-    calc: entry ? computeWeek(entry.days, (prof?.weeklyHours ?? 35)) : null,
   };
 }
 
