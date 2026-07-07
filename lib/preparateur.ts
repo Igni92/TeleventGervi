@@ -24,3 +24,16 @@ export function isRestrictedPreparateur(email: string | null | undefined): boole
   const e = (email ?? "").trim().toLowerCase();
   return !!e && preparateurEmails().includes(e);
 }
+
+/**
+ * L'utilisateur est-il un rôle TERRAIN confiné par le middleware (préparateur
+ * restreint OU livreur OU agréeur) ? Sert à décider l'affichage de la nav
+ * focalisée mobile (PreparateurNav). Purement synchrone (email + flags jeton),
+ * sans accès base — utilisable en Edge comme en server component.
+ */
+export function isTerrainConfined(session: {
+  user?: { email?: string | null; isLivreur?: boolean; isAgreeur?: boolean } | null;
+} | null | undefined): boolean {
+  const u = session?.user;
+  return isRestrictedPreparateur(u?.email) || u?.isLivreur === true || u?.isAgreeur === true;
+}

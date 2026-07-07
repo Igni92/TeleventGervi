@@ -63,8 +63,24 @@ export async function GET(req: NextRequest) {
   const restricted = isRestrictedPreparateur(session.user?.email) || (await isLivreur(session));
 
   const { searchParams } = new URL(req.url);
+  const isISO = (s: string | null) => /^\d{4}-\d{2}-\d{2}$/.test(s ?? "");
   const dateParam = searchParams.get("date");
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(dateParam ?? "") ? (dateParam as string) : nextDeliveryDate();
+  // Modes de filtrage SAP :
+  //   • entered=YYYY-MM-DD           → ventes SAISIES ce jour (DocDate) — « Ventes du jour »
+  //   • from=YYYY-MM-DD&to=…         → livraisons d'une PLAGE (DocDueDate) — « Préparations »
+  //   • date=YYYY-MM-DD (défaut)     → livraisons d'UN jour (DocDueDate) — Détail livraison
+  const enteredParam = searchParams.get("entered");
+  const fromParam = searchParams.get("from");
+  const toParam = searchParams.get("to");
+  const mode: "entered" | "range" | "due" =
+    isISO(enteredParam) ? "entered" : (isISO(fromParam) && isISO(toParam)) ? "range" : "due";
+  const date = isISO(dateParam) ? (dateParam as string) : nextDeliveryDate();
+  // Date « principale » (libellé férié + champ de réponse `date`).
+  const primaryDate = mode === "entered" ? (enteredParam as string) : mode === "range" ? (fromParam as string) : date;
+  const filterExpr =
+    mode === "entered" ? `DocDate eq '${enteredParam}'`
+    : mode === "range" ? `DocDueDate ge '${fromParam}' and DocDueDate le '${toParam}'`
+    : `DocDueDate eq '${date}'`;
 
   type ListedLine = {
     ItemCode: string;
@@ -94,7 +110,7 @@ export async function GET(req: NextRequest) {
     DocumentLines?: ListedLine[];
   };
 
-  const filter = encodeURIComponent(`DocDueDate eq '${date}'`);
+  const filter = encodeURIComponent(filterExpr);
   const BASE_SELECT =
     "DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,VatSum,DocumentStatus,Cancelled,Comments,NumAtCard,DocumentLines";
 
@@ -449,8 +465,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      date,
-      holiday: frenchHolidayLabel(date),
+      date: primaryDate,
+      mode,
+      holiday: mode === "due" ? frenchHolidayLabel(date) : null,
       count: visibleDocs.length,
       totals,
       carriers,

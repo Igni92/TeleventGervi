@@ -1,8 +1,10 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { isAgreeur, requirePreparateurOrAdmin } from "@/lib/permissions";
+import { isTerrainConfined } from "@/lib/preparateur";
 import { GoodsReceiptForm } from "@/components/entrees/GoodsReceiptForm";
 import { GoodsReceiptHistory } from "@/components/entrees/GoodsReceiptHistory";
+import { PreparateurNav } from "@/components/PreparateurNav";
 
 export const metadata = { title: "Entrée marchandise" };
 export const dynamic = "force-dynamic";
@@ -18,6 +20,8 @@ export default async function EntreesPage() {
   const agreeurOnly = (await isAgreeur(session)) && !(await requirePreparateurOrAdmin(session));
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-up">
+      {/* Nav terrain (mobile) : l'agréeur confiné navigue entre ses écrans. */}
+      {isTerrainConfined(session) && <PreparateurNav current="entrees" />}
       <div>
         <p className="kicker mb-2 hidden md:block">SAP B1 · PurchaseDeliveryNote</p>
         <h1 className="text-[26px] sm:text-[32px] font-bold text-foreground tracking-tight leading-none">

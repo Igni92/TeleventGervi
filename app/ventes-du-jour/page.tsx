@@ -25,10 +25,9 @@ export default async function VentesDuJourPage() {
           Ventes du jour
         </h1>
         <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
-          Toutes les ventes, par <b>transporteur</b> : <b>en préparation</b> (prochaine livraison)
-          et <b>en livraison</b> (aujourd&apos;hui). La <b>mise en préparation</b> d&apos;un magasin
-          se fait dans <b>Préparation livraisons › onglet Ventes</b> — tant que ce n&apos;est pas
-          fait, les préparateurs ne le voient pas.
+          Les ventes <b>saisies aujourd&apos;hui</b> (jour où la commande est rentrée),
+          groupées par <b>transporteur</b>. Pour chaque BL : sa <b>date de livraison</b> et
+          l&apos;avancement de la préparation (<b>Préparé</b> ✓ / <b>Départ</b> ✓).
         </p>
       </header>
       <VentesDuJour />

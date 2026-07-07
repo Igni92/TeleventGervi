@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { LivraisonDetail } from "@/components/livraisons/LivraisonDetail";
 import { PreparateurNav } from "@/components/PreparateurNav";
-import { isRestrictedPreparateur } from "@/lib/preparateur";
+import { isRestrictedPreparateur, isTerrainConfined } from "@/lib/preparateur";
 import { isLivreur } from "@/lib/permissions";
 
 export const metadata = { title: "Détail livraison" };
@@ -21,7 +21,7 @@ export default async function LivraisonsPage() {
 
   return (
     <>
-      {restricted && <PreparateurNav current="livraisons" />}
+      {isTerrainConfined(session) && <PreparateurNav current="livraisons" />}
       <LivraisonDetail canDispatch={!restricted} />
     </>
   );

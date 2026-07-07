@@ -685,21 +685,21 @@ function DatePanel({
           </div>
         </div>
 
-        {/* Contrôles */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        {/* Contrôles — le champ date absorbe l'espace restant sur petit écran. */}
+        <div className="flex items-center gap-1.5 shrink-0 w-full sm:w-auto">
           <button
             type="button" onClick={() => onShift(-1)} aria-label="Jour précédent"
-            className="h-11 w-11 inline-flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-colors"
+            className="h-11 w-11 shrink-0 inline-flex items-center justify-center rounded-xl border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-colors"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
-          <label className="relative inline-flex items-center">
+          <label className="relative flex-1 min-w-0 sm:flex-none inline-flex items-center">
             <CalendarDays className="pointer-events-none absolute left-3 h-4 w-4 text-muted-foreground" />
             <input
               type="date"
               value={date}
               onChange={(e) => e.target.value && onPick(e.target.value)}
-              className="h-11 rounded-xl border border-border bg-background pl-9 pr-3 text-[13.5px] font-medium text-foreground tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              className="h-11 w-full sm:w-auto rounded-xl border border-border bg-background pl-9 pr-3 text-[13.5px] font-medium text-foreground tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             />
           </label>
           <button
@@ -922,7 +922,7 @@ function CarrierGroup({
               type="button"
               onClick={(e) => { e.stopPropagation(); onBulkStatus(docEntries, forward.target); }}
               title={`Passer les ${docEntries.length} commande(s) de ${carrier.name} à « ${STATUS_LABEL[forward.target]} »`}
-              className={`inline-flex shrink-0 items-center gap-1.5 h-9 px-2.5 sm:px-3 rounded-lg text-[11.5px] font-bold uppercase tracking-wide active:scale-95 transition-colors ${forward.cls}`}
+              className={`inline-flex shrink-0 items-center gap-1.5 h-11 sm:h-9 px-2.5 sm:px-3 rounded-lg text-[11.5px] font-bold uppercase tracking-wide active:scale-95 transition-colors ${forward.cls}`}
             >
               <forward.Icon className="h-4 w-4" />
               <span className="sm:hidden">{forward.short}</span>
@@ -1381,7 +1381,7 @@ function SegmentTabs({
             type="button"
             onClick={() => onPick(t.key)}
             aria-pressed={isActive}
-            className={`inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg border text-[12.5px] font-semibold transition-colors ${
+            className={`inline-flex items-center gap-1.5 h-11 sm:h-8 px-3.5 rounded-lg border text-[12.5px] font-semibold transition-colors ${
               isActive ? t.active : "border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/60"
             }`}
           >
@@ -1433,7 +1433,7 @@ function StatusTabs({
               type="button"
               onClick={() => onPick(t.key)}
               aria-pressed={isActive}
-              className={`inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg border text-[12.5px] font-semibold transition-colors ${
+              className={`inline-flex items-center gap-1.5 h-11 sm:h-8 px-3.5 rounded-lg border text-[12.5px] font-semibold transition-colors ${
                 isActive ? t.active : "border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/60"
               }`}
             >
@@ -1446,9 +1446,9 @@ function StatusTabs({
           );
         })}
       </div>
-      <div className="flex items-center gap-2 flex-wrap">
-        {/* Recherche d'un bon : n° BL, client, code, réf. client */}
-        <div className="relative">
+      <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
+        {/* Recherche d'un bon : n° BL, client, code, réf. client — pleine largeur mobile. */}
+        <div className="relative flex-1 min-w-0 sm:flex-none">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input
             type="search"
@@ -1457,7 +1457,7 @@ function StatusTabs({
             onKeyDown={(e) => { if (e.key === "Escape") onQuery(""); }}
             placeholder="Chercher un bon (client, n° BL…)"
             aria-label="Chercher un bon de livraison (client, n° de BL, code ou réf. client)"
-            className="h-9 w-[220px] sm:w-[250px] rounded-lg border border-border bg-card pl-8 pr-8 text-[12.5px] font-medium text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-brand-500/40 [&::-webkit-search-cancel-button]:hidden"
+            className="h-11 w-full sm:h-9 sm:w-[250px] rounded-lg border border-border bg-card pl-8 pr-8 text-[12.5px] font-medium text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-brand-500/40 [&::-webkit-search-cancel-button]:hidden"
           />
           {query && (
             <button
@@ -1473,7 +1473,7 @@ function StatusTabs({
         <button
           type="button"
           onClick={onToggleAll}
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors shrink-0"
+          className="inline-flex items-center gap-1.5 h-11 sm:h-8 px-3 rounded-lg border border-border bg-card text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors shrink-0"
         >
           <ChevronDown className={`h-3.5 w-3.5 transition-transform ${allCollapsed ? "-rotate-90" : ""}`} />
           {allCollapsed ? "Tout déplier" : "Tout replier"}
@@ -2066,7 +2066,7 @@ const OrderRow = memo(function OrderRow({
     <li>
       <div
         onContextMenu={onRowContextMenu}
-        className={`flex items-center gap-3 px-4 sm:px-5 py-3 hover:bg-secondary/25 transition-colors ${doc.excluded ? "opacity-50" : ""}`}
+        className={`flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-3 hover:bg-secondary/25 transition-colors ${doc.excluded ? "opacity-50" : ""}`}
       >
         {/* Bouton d'état — toujours en tête, verticalement centré (placement
             constant). BL pas encore lâché (onglet Ventes) → le bouton EST la
@@ -2126,15 +2126,15 @@ const OrderRow = memo(function OrderRow({
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setEditByOpen(true); }}
                 title={`Préparée par ${displayPersonName(preparedBy ?? preparer)}${fmtClock(preparedAt) ? ` à ${fmtClock(preparedAt)}` : ""} — cliquer pour changer la personne`}
-                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 text-[10px] font-semibold hover:bg-emerald-500/25 transition-colors">
-                <UserCheck className="h-3 w-3" /> Fait par {displayPersonName(preparedBy ?? preparer)}{fmtClock(preparedAt) ? ` · ${fmtClock(preparedAt)}` : ""}
-                <Pencil className="h-2.5 w-2.5 opacity-70" />
+                className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 text-[10px] font-semibold hover:bg-emerald-500/25 transition-colors">
+                <UserCheck className="h-3 w-3 shrink-0" /> <span className="truncate">Fait par {displayPersonName(preparedBy ?? preparer)}{fmtClock(preparedAt) ? ` · ${fmtClock(preparedAt)}` : ""}</span>
+                <Pencil className="h-2.5 w-2.5 opacity-70 shrink-0" />
               </button>
             )}
             {departed && (
               <span title={departedBy ? `Parti — ${displayPersonName(departedBy)}${fmtClock(departedAt) ? ` à ${fmtClock(departedAt)}` : ""}` : "Partie en livraison"}
-                className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
-                <Truck className="h-3 w-3" /> Parti{departedBy ? ` · ${displayPersonName(departedBy)}` : ""}{fmtClock(departedAt) ? ` · ${fmtClock(departedAt)}` : ""}
+                className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                <Truck className="h-3 w-3 shrink-0" /> <span className="truncate">Parti{departedBy ? ` · ${displayPersonName(departedBy)}` : ""}{fmtClock(departedAt) ? ` · ${fmtClock(departedAt)}` : ""}</span>
               </span>
             )}
             {incomplete && (
@@ -2264,8 +2264,8 @@ const OrderRow = memo(function OrderRow({
         </div>
 
         {/* Colis / poids — repère logistique (poids masqué sur mobile) */}
-        <div className="flex items-center gap-4 sm:gap-8 shrink-0">
-          <div className="text-right min-w-[44px]">
+        <div className="flex items-center gap-2.5 sm:gap-8 shrink-0">
+          <div className="text-right min-w-[40px] sm:min-w-[44px]">
             <p className="text-[17px] sm:text-[15px] font-bold tnum text-foreground leading-none">{fmtNum(doc.colis)}</p>
             <p className="text-[9px] uppercase tracking-wider text-muted-foreground mt-0.5">colis</p>
           </div>

@@ -6,7 +6,7 @@ import { Command } from "cmdk";
 import {
   Home, Radio, ClipboardList, Users, Package, PackagePlus, PackageCheck, Factory, Truck,
   LayoutDashboard, Receipt, Briefcase, Settings, Search, CornerDownLeft, Store, ShoppingCart,
-  ClipboardCheck, PackageX,
+  ClipboardCheck, PackageX, Clock3,
 } from "lucide-react";
 
 interface NavItem { href: string; label: string; icon: typeof Home; keywords?: string }
@@ -18,6 +18,7 @@ const NAV: NavItem[] = [
   { href: "/plan-appel", label: "Plan d'appel", icon: ClipboardList, keywords: "televente appels clients" },
   { href: "/ventes-du-jour", label: "Ventes du jour", icon: Store, keywords: "ventes préparation livraison magasin mise en prep" },
   { href: "/livraisons", label: "Préparation livraisons", icon: Truck, keywords: "détail livraison bons transporteur tournée ventes mise en préparation" },
+  { href: "/preparations", label: "Préparations à faire", icon: ClipboardList, keywords: "préparations à faire charge dates livraison à préparer non préparé" },
   { href: "/manquants", label: "Manquants", icon: PackageX, keywords: "rupture stock négatif achats à prévoir articles manquants" },
   { href: "/products", label: "Stock", icon: Package, keywords: "produits articles" },
   { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, keywords: "comptage stock entrepôt" },
@@ -27,6 +28,7 @@ const NAV: NavItem[] = [
   { href: "/dashboard", label: "Statistiques · Carte", icon: LayoutDashboard, keywords: "pilotage dashboard géo carte stats" },
   { href: "/encours", label: "Encours clients", icon: Receipt, keywords: "factures impayés" },
   { href: "/commerciaux", label: "Équipe commerciale", icon: Briefcase, keywords: "commerciaux objectifs slp équipe personnel préparateur rôles effectifs" },
+  { href: "/heures", label: "Mes heures", icon: Clock3, keywords: "heures temps de travail feuille pointage semaine paie" },
   { href: "/parametres", label: "Paramètres", icon: Settings, keywords: "réglages sap import thème" },
 ];
 
