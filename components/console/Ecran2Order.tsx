@@ -98,6 +98,95 @@ function promoBadge(pr: Promo): string {
   return `${pr.buyQty}+${pr.freeQty}`;
 }
 
+/* ── Envoi du BL en ARRIÈRE-PLAN ────────────────────────────────────────────
+   La création/modification ne bloque plus l'écran : dès le clic, le client
+   quitte la vue (le poste enchaîne sur le suivant) et la réponse SAP arrive
+   en toast — PORTANT LE NOM DU CLIENT, puisque l'écran est passé à autre
+   chose. Vit au niveau MODULE : la requête survit au démontage de l'écran.
+   Garde-fou encours (création) : le 409 needsConfirm revient en toast avec
+   l'action « Créer quand même » (re-post confirmEncours) — la commande n'est
+   PAS créée tant que l'action n'est pas cliquée. */
+type BackgroundOrder =
+  | { kind: "create"; clientName: string; body: Record<string, unknown> }
+  | { kind: "modif"; clientName: string; docEntry: number; docNum: number; body: Record<string, unknown> };
+
+function notifyOrderResult(
+  job: BackgroundOrder,
+  ok: boolean,
+  json: {
+    ok?: boolean; blocked?: boolean; error?: string; docNum?: number;
+    totalTTC?: number | null; totalLines?: number; bonPrep?: boolean;
+  } | null,
+) {
+  const fmt = (n: number | null | undefined) => (n != null ? n.toFixed(2) : "—");
+  if (!ok || !json?.ok) {
+    toast.error(
+      job.kind === "modif"
+        ? `❌ BL #${job.docNum} (${job.clientName}) — modification refusée`
+        : json?.blocked
+          ? `🚫 ${job.clientName} — client bloqué, commande NON créée`
+          : `❌ ${job.clientName} — commande NON créée`,
+      { description: json?.error, duration: 15000 },
+    );
+    return;
+  }
+  if (job.kind === "modif") {
+    toast.success(
+      `✅ BL #${json.docNum ?? job.docNum} (${job.clientName}) enregistré — ${json.totalLines ?? "?"} ligne(s) · total ${fmt(json.totalTTC)} € TTC`,
+      { duration: 10000 },
+    );
+  } else if (json.bonPrep) {
+    toast.success(`📝 ${job.clientName} — bon de préparation créé (export)`, {
+      description: "Affecte les lots dans « Détail livraison » puis crée le BL.",
+      duration: 10000,
+    });
+  } else {
+    toast.success(`✅ ${job.clientName} — commande #${json.docNum} créée · ${fmt(json.totalTTC)} € TTC`, { duration: 10000 });
+  }
+}
+
+function sendOrderInBackground(job: BackgroundOrder) {
+  const url = job.kind === "modif" ? `/api/sap/orders/${job.docEntry}/modif` : "/api/sap/orders";
+  const post = (confirmEncours: boolean) =>
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(confirmEncours ? { ...job.body, confirmEncours: true } : job.body),
+    });
+  const offline = () =>
+    toast.error(
+      job.kind === "modif"
+        ? `❌ BL #${job.docNum} (${job.clientName}) — SAP injoignable, NON enregistré`
+        : `❌ ${job.clientName} — SAP injoignable, commande NON créée`,
+      { duration: 15000 },
+    );
+  (async () => {
+    try {
+      const res = await post(false);
+      const json = await res.json().catch(() => null);
+      if (job.kind === "create" && !res.ok && json?.needsConfirm === "encours") {
+        toast.warning(`Encours dépassé — ${job.clientName}`, {
+          description: `${json?.error ?? "Encours dépassé."} La commande n'est PAS créée.`,
+          duration: 30000,
+          action: {
+            label: "Créer quand même",
+            onClick: () => {
+              post(true)
+                .then(async (r2) => notifyOrderResult(job, r2.ok, await r2.json().catch(() => null)))
+                .catch(offline);
+            },
+          },
+          cancel: { label: "Abandonner", onClick: () => toast.info(`${job.clientName} — commande abandonnée.`) },
+        });
+        return;
+      }
+      notifyOrderResult(job, res.ok, json);
+    } catch {
+      offline();
+    }
+  })();
+}
+
 /* ── B4 — Poids d'un colis (kg), null-safe ─────────────────── */
 function colisKg(p: Product): number | null {
   const w = p.salesUnitWeight, perPack = p.salesQtyPerPackUnit;
@@ -236,13 +325,16 @@ function OrderShortcuts({ onPick }: { onPick: (code: string) => void }) {
   );
 }
 
-export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifier: modifierProp = null, onExitModif }: {
+export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifier: modifierProp = null, onExitModif, onSubmitted }: {
   clientId: string; clientName: string; stockSharePct?: number;
   /** Cible de MODIFICATION (diffusée par « Détail livraison ») : on pré-remplit le
    *  panier avec les lignes du BL et on enregistre sur ce BL. */
   modifier?: { docEntry: number; docNum: number } | null;
   /** Quitter la modification → l'écran 2 reprend la synchro normale. */
   onExitModif?: () => void;
+  /** BL envoyé (création OU modification, en arrière-plan) : le parent retire
+   *  le client de la vue — le poste enchaîne pendant que SAP travaille. */
+  onSubmitted?: () => void;
 }) {
   const [grouped, setGrouped] = useState<Record<string, Product[]>>({});
   const [loading, setLoading] = useState(false);
@@ -318,14 +410,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     tournees, tourneeId, setTourneeId,
     validateTournee, tourneePayload,
   } = useTourneeSelection(clientId);
-  const [submitting, setSubmitting] = useState(false);
   // #12 — quantités déjà confirmées (par itemCode) : évite de re-demander une
   // confirmation à CHAQUE frappe une fois que l'utilisateur a validé le gros volume.
   const confirmedBigQty = useMemo(() => new Set<string>(), []);
-  // Modale de confirmation encours (remplace window.confirm natif)
-  const [encoursPrompt, setEncoursPrompt] = useState<
-    { lines: ApiLine[]; message: string; encours?: { balance: number; creditLimit: number } } | null
-  >(null);
   // Mode MODIFICATION (piloté par « Détail livraison » via l'URL) : on charge le
   // BL existant, on PRÉ-REMPLIT le panier avec ses lignes (éditables), et la
   // validation enregistre sur CE BL (jamais de 2ᵉ bon).
@@ -741,42 +828,15 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     return parts.length > 0 ? `PROMO : ${parts.join(" · ")}` : undefined;
   };
 
-  const postOrder = (apiLines: ApiLine[], confirmEncours: boolean) =>
-    fetch("/api/sap/orders", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clientId, deliveryModeId: modeId || undefined,
-        // Transporteur + tournée EXPLICITES (trspCode/trspHeure/tournee) —
-        // toujours présents (validés avant l'envoi), mémorisés côté serveur.
-        ...(tourneePayload() ?? {}),
-        deliveryDate: new Date(deliveryDate).toISOString(),
-        numAtCard: numAtCard.trim() || undefined, confirmEncours, lines: apiLines,
-        // Texte du BL : note saisie + mention promo (undefined → champ omis).
-        comments: [comments.trim(), buildPromoComment()].filter(Boolean).join(" · ") || undefined,
-      }),
-    });
-
-  // Traite la réponse finale (succès / blocage / erreur). Renvoie true si succès.
-  const finalizeOrder = (res: Response, json: { ok?: boolean; blocked?: boolean; error?: string; docNum?: number; totalTTC?: number | null; bonPrep?: boolean }) => {
-    if (!res.ok) {
-      toast.error(json?.blocked ? "🚫 Client bloqué" : "❌ Échec création", { description: json.error, duration: 10000 });
-      return false;
-    }
-    // Client EXPORT → BON DE PRÉPARATION (pas de BL SAP direct) : les lots
-    // seront affectés depuis le Détail livraison, puis le BL créé proprement.
-    if (json.bonPrep) {
-      toast.success("📝 Bon de préparation créé (export)", {
-        description: "Affecte les lots dans « Détail livraison » puis crée le BL.",
-        duration: 10000,
-      });
-      setCart([]); setNumAtCard(""); setComments("");
-      return true;
-    }
-    const fmt = (n: number | null | undefined) => n != null ? n.toFixed(2) : "—";
-    toast.success(`✅ Commande #${json.docNum} créée — ${fmt(json.totalTTC)} € TTC`, { duration: 10000 });
-    setCart([]); setNumAtCard(""); setComments("");
-    return true;
-  };
+  /** Corps du POST /api/sap/orders — transporteur + tournée EXPLICITES
+   *  (validés avant l'envoi), texte du BL = note saisie + mention promo. */
+  const buildOrderBody = (apiLines: ApiLine[]): Record<string, unknown> => ({
+    clientId, deliveryModeId: modeId || undefined,
+    ...(tourneePayload() ?? {}),
+    deliveryDate: new Date(deliveryDate).toISOString(),
+    numAtCard: numAtCard.trim() || undefined, lines: apiLines,
+    comments: [comments.trim(), buildPromoComment()].filter(Boolean).join(" · ") || undefined,
+  });
 
   const buildApiLines = (lines: CartLine[] = cart): ApiLine[] =>
     lines.flatMap((l) => {
@@ -831,11 +891,12 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       return out;
     });
 
-  const submit = async () => {
-    // #9 — Anti-double-clic : si un envoi est déjà en cours, on IGNORE le re-clic.
-    // (Le bouton est aussi `disabled`, mais ce garde couvre la fenêtre de course
-    //  entre deux clics rapides avant le re-render.) Évite le double-BL.
-    if (submitting) return;
+  /** Envoi NON BLOQUANT : valide, construit le payload, délègue à la tâche de
+   *  fond (sendOrderInBackground) et LIBÈRE la vue immédiatement (onSubmitted
+   *  → le client quitte l'écran, le poste enchaîne sur le suivant). Le
+   *  résultat SAP arrive en toast, au nom du client. Anti-double-clic : le
+   *  clic vide le panier et retire la vue → plus rien à re-cliquer. */
+  const submit = () => {
     // ── Mode MODIFICATION : ré-enregistre le BL en REMPLACEMENT COMPLET ──
     // (même BL/DocNum) — supprimer/modifier/réordonner/ajouter, comme un bon normal.
     if (modif) {
@@ -899,27 +960,13 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
         }
       }
       if (lines.length === 0) { toast.error("Le BL doit garder au moins une ligne."); return; }
-      setSubmitting(true);
-      try {
-        const res = await fetch(`/api/sap/orders/${modif.docEntry}/modif`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lines, comments: comments.trim(), numAtCard: numAtCard.trim() }),
-        });
-        const json = await res.json();
-        if (!res.ok || !json.ok) {
-          toast.error("❌ Modification refusée", { description: json?.error, duration: 10000 });
-          return;
-        }
-        const fmt = (n: number | null | undefined) => n != null ? n.toFixed(2) : "—";
-        toast.success(
-          `✅ BL #${json.docNum} enregistré — ${json.totalLines} ligne(s) · total ${fmt(json.totalTTC)} € TTC`,
-          { duration: 10000 },
-        );
-        // Pas de rechargement : le remplacement complet est idempotent (ré-enregistrer
-        // renvoie le même panier) → on garde l'état affiché, promos comprises.
-      } catch (e) {
-        toast.error(`❌ ${e instanceof Error ? e.message : "Erreur réseau"}`);
-      } finally { setSubmitting(false); }
+      sendOrderInBackground({
+        kind: "modif", clientName, docEntry: modif.docEntry, docNum: modif.docNum,
+        body: { lines, comments: comments.trim(), numAtCard: numAtCard.trim() },
+      });
+      toast.info(`BL #${modif.docNum} (${clientName}) — enregistrement en arrière-plan…`);
+      setCart([]); setNumAtCard(""); setComments("");
+      onSubmitted?.();
       return;
     }
 
@@ -928,35 +975,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     // (pré-remplis avec le défaut client — l'erreur ne sort que par exception).
     const tourneeError = validateTournee();
     if (tourneeError) { toast.error(tourneeError); return; }
-    setSubmitting(true);
-    try {
-      const apiLines = buildApiLines();
-      const res = await postOrder(apiLines, false);
-      const json = await res.json();
-      // Garde-fou encours : on ouvre une vraie modale (pas un window.confirm natif).
-      if (!res.ok && json?.needsConfirm === "encours") {
-        setEncoursPrompt({ lines: apiLines, message: json.error ?? "Encours dépassé.", encours: json.encours });
-        return;
-      }
-      finalizeOrder(res, json);
-    } catch (e) {
-      toast.error(`❌ ${e instanceof Error ? e.message : "Erreur réseau"}`);
-    } finally { setSubmitting(false); }
-  };
-
-  // Confirmation de l'encours via la modale → re-post forcé.
-  const confirmEncours = async () => {
-    if (!encoursPrompt) return;
-    const lines = encoursPrompt.lines;
-    setEncoursPrompt(null);
-    setSubmitting(true);
-    try {
-      const res = await postOrder(lines, true);
-      const json = await res.json();
-      finalizeOrder(res, json);
-    } catch (e) {
-      toast.error(`❌ ${e instanceof Error ? e.message : "Erreur réseau"}`);
-    } finally { setSubmitting(false); }
+    sendOrderInBackground({ kind: "create", clientName, body: buildOrderBody(buildApiLines()) });
+    toast.info(`${clientName} — commande envoyée, création en arrière-plan…`);
+    setCart([]); setNumAtCard(""); setComments("");
+    onSubmitted?.();
   };
 
   const q = filter.trim().toLowerCase();
@@ -1849,12 +1871,15 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             <span className="text-muted-foreground">{modif ? "Total HT du BL" : "Total HT estimé"}</span>
             <span className="font-bold tnum text-foreground">{totalHT.toFixed(2)} €</span>
           </div>
+          {/* Envoi en ARRIÈRE-PLAN : le clic libère la vue (client suivant),
+              le résultat SAP arrive en toast au nom du client. */}
           <button type="button" onClick={submit}
-            disabled={submitting || prefilling || cart.length === 0 || (!!modif && modifMeta?.editable === false)}
+            disabled={prefilling || cart.length === 0 || (!!modif && modifMeta?.editable === false)}
+            title={modif ? "Enregistrer en arrière-plan — l'écran passe au client suivant" : "Créer en arrière-plan — l'écran passe au client suivant"}
             className={`w-full h-11 rounded-xl disabled:opacity-50 text-white text-[15px] font-semibold inline-flex items-center justify-center gap-2 ${
               modif ? "bg-amber-600 hover:bg-amber-700" : "bg-emerald-600 hover:bg-emerald-700"
             }`}>
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShoppingCart className="h-4 w-4" />}
+            <ShoppingCart className="h-4 w-4" />
             {modif ? `Enregistrer le BL #${modif.docNum}` : `Créer la commande (${cart.length})`}
           </button>
         </div>
@@ -1966,40 +1991,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
         </DialogContent>
       </Dialog>
 
-      {/* ── Modale de confirmation encours (remplace window.confirm) ── */}
-      <Dialog open={!!encoursPrompt} onOpenChange={(o) => { if (!o) setEncoursPrompt(null); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
-              <AlertTriangle className="h-4 w-4" /> Encours dépassé
-            </DialogTitle>
-          </DialogHeader>
-          <DialogDescription className="text-[13px]">{encoursPrompt?.message}</DialogDescription>
-          {encoursPrompt?.encours && (
-            <div className="mt-1 grid grid-cols-2 gap-2 text-[12px]">
-              <div className="rounded-lg border border-border px-3 py-2">
-                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Solde</div>
-                <div className="font-semibold tnum">{encoursPrompt.encours.balance.toFixed(2)} €</div>
-              </div>
-              <div className="rounded-lg border border-border px-3 py-2">
-                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Limite crédit</div>
-                <div className="font-semibold tnum">{encoursPrompt.encours.creditLimit.toFixed(2)} €</div>
-              </div>
-            </div>
-          )}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="ghost" onClick={() => {
-              setEncoursPrompt(null);
-              toast("Commande non envoyée", { description: "Encours non confirmé." });
-            }}>
-              Annuler
-            </Button>
-            <Button variant="warning" onClick={confirmEncours}>
-              Forcer la commande
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* (La confirmation d'encours dépassé vit désormais dans le TOAST de la
+          tâche de fond — cf. sendOrderInBackground : action « Créer quand
+          même » — l'écran est déjà passé au client suivant.) */}
     </div>
   );
 }
