@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef, Fragment } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ChevronDown, ChevronRight, ChevronUp, Search, Plus, Trash2,
   ShoppingCart, Check, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock, X,
-  History, BadgeEuro, ArrowRightLeft, CopyPlus,
+  History, BadgeEuro, ArrowRightLeft, CopyPlus, GripVertical,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
@@ -326,6 +326,32 @@ function OrderShortcuts({ onPick }: { onPick: (code: string) => void }) {
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * Interstice de dépôt entre deux lignes du BL (glisser-déposer) — rectangle en
+ * pointillé qui apparaît pendant un glisser et « s'allume » au survol. Déposer
+ * ICI = INSÉRER la ligne à cette position (déposer SUR une ligne = échange).
+ */
+function CartDropGap({
+  show, highlighted, onOver, onDrop,
+}: {
+  show: boolean;
+  highlighted: boolean;
+  onOver: () => void;
+  onDrop: () => void;
+}) {
+  if (!show) return null;
+  return (
+    <div
+      aria-hidden
+      onDragOver={(e) => { e.preventDefault(); onOver(); }}
+      onDrop={(e) => { e.preventDefault(); onDrop(); }}
+      className={`rounded-lg border border-dashed transition-all duration-150 ${
+        highlighted ? "h-11 border-brand-500 bg-brand-500/10" : "h-1.5 border-border"
+      }`}
+    />
   );
 }
 
@@ -787,7 +813,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   const updateLine = (i: number, patch: Partial<CartLine>) =>
     setCart((c) => c.map((l, k) => k === i ? applyPromoFree({ ...l, ...patch }) : l));
   const removeLine = (i: number) => setCart((c) => c.filter((_, k) => k !== i));
-  /** Réordonne une ligne (modif) : échange avec la voisine. dir = -1 (monter) / +1 (descendre). */
+  /** Réordonne une ligne : échange avec la voisine. dir = -1 (monter) / +1 (descendre). */
   const moveLine = (i: number, dir: -1 | 1) =>
     setCart((c) => {
       const j = i + dir;
@@ -796,6 +822,31 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       [next[i], next[j]] = [next[j], next[i]];
       return next;
     });
+  // Glisser-déposer des lignes du BL : échanger deux lignes (dépôt SUR une
+  // ligne) ou insérer avant une ligne / en fin (dépôt dans un interstice).
+  const swapLine = (a: number, b: number) =>
+    setCart((c) => {
+      if (a === b || a < 0 || b < 0 || a >= c.length || b >= c.length) return c;
+      const next = c.slice();
+      [next[a], next[b]] = [next[b], next[a]];
+      return next;
+    });
+  const moveLineBefore = (from: number, before: number | null) =>
+    setCart((c) => {
+      if (from < 0 || from >= c.length || from === before) return c;
+      const item = c[from];
+      const out: CartLine[] = [];
+      c.forEach((l, k) => {
+        if (before !== null && k === before) out.push(item);
+        if (k !== from) out.push(l);
+      });
+      if (before === null) out.push(item);
+      return out;
+    });
+  // href/index tiré + interstice ou ligne survolé(e) (`gap:<i>` | `end` | `row:<i>`).
+  const [dragLine, setDragLine] = useState<number | null>(null);
+  const [overLine, setOverLine] = useState<string | null>(null);
+  const endLineDrag = () => { setDragLine(null); setOverLine(null); };
 
   /** C2 — Bascule la promotion d'une ligne (jamais imposée) : applique la promo
    *  active de l'article si absente, la retire sinon. Marche aussi sur les
@@ -1654,19 +1705,32 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
               });
             };
             return (
-              <div
-                key={i}
-                onContextMenu={(e) => {
-                  // Clic droit = MENU de ligne : 2ᵉ ligne du même article / remplacer.
-                  const el = e.target as HTMLElement;
-                  if (el.closest("input, select, textarea")) return;   // menu natif dans les champs
-                  e.preventDefault();
-                  if (locked) return;
-                  setLineMenu({ x: e.clientX, y: e.clientY, index: i });
-                }}
-                title="Clic droit : ajouter une ligne du même article, ou remplacer l'article"
-                className={`rounded-lg border p-2 ${sellShort ? "border-rose-400/60 bg-rose-50/40 dark:bg-rose-950/15" : "border-border"}`}
-              >
+              <Fragment key={i}>
+                {/* Interstice AVANT cette ligne — déposer ici = insérer à cette place. */}
+                <CartDropGap
+                  show={dragLine !== null && dragLine !== i}
+                  highlighted={overLine === `gap:${i}`}
+                  onOver={() => setOverLine(`gap:${i}`)}
+                  onDrop={() => { if (dragLine !== null) moveLineBefore(dragLine, i); endLineDrag(); }}
+                />
+                <div
+                  onContextMenu={(e) => {
+                    // Clic droit = MENU de ligne : 2ᵉ ligne du même article / remplacer.
+                    const el = e.target as HTMLElement;
+                    if (el.closest("input, select, textarea")) return;   // menu natif dans les champs
+                    e.preventDefault();
+                    if (locked) return;
+                    setLineMenu({ x: e.clientX, y: e.clientY, index: i });
+                  }}
+                  onDragOver={(e) => { if (dragLine !== null && dragLine !== i) { e.preventDefault(); setOverLine(`row:${i}`); } }}
+                  onDrop={(e) => { if (dragLine !== null && dragLine !== i) { e.preventDefault(); swapLine(dragLine, i); } endLineDrag(); }}
+                  title="Clic droit : ajouter une ligne du même article, ou remplacer l'article · glisser la poignée pour réordonner"
+                  className={`rounded-lg border p-2 transition-all duration-150 ${
+                    dragLine === i ? "opacity-40" : ""
+                  } ${
+                    overLine === `row:${i}` ? "ring-2 ring-brand-500 ring-offset-1 ring-offset-background" : ""
+                  } ${sellShort ? "border-rose-400/60 bg-rose-50/40 dark:bg-rose-950/15" : "border-border"}`}
+                >
                 <div className="flex items-start justify-between gap-1.5">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-x-1.5 gap-y-1 flex-wrap">
@@ -1718,24 +1782,32 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                       })()}
                     </div>
                   </div>
-                  {/* Actions de ligne : réordonner (modif) + supprimer (sauf ligne livrée).
-                      En remplacement complet, retirer une ligne du panier la supprime du BL ;
-                      l'ordre du panier = l'ordre des lignes du BL. */}
+                  {/* Actions de ligne : réordonner (poignée glisser + flèches) +
+                      supprimer (sauf ligne livrée). L'ordre du panier = l'ordre
+                      des lignes du BL, à la création comme en modification. */}
                   <div className="flex items-center gap-0.5 shrink-0">
-                    {modif && (
-                      <div className="flex flex-col -my-0.5">
-                        <button type="button" tabIndex={-1} onClick={() => moveLine(i, -1)} disabled={i === 0}
-                          aria-label="Monter la ligne" title="Monter"
-                          className="text-muted-foreground/40 hover:text-foreground disabled:opacity-20 leading-none">
-                          <ChevronUp className="h-3.5 w-3.5" />
-                        </button>
-                        <button type="button" tabIndex={-1} onClick={() => moveLine(i, 1)} disabled={i === cart.length - 1}
-                          aria-label="Descendre la ligne" title="Descendre"
-                          className="text-muted-foreground/40 hover:text-foreground disabled:opacity-20 leading-none">
-                          <ChevronDown className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    )}
+                    <span
+                      draggable
+                      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setDragLine(i); }}
+                      onDragEnd={endLineDrag}
+                      title="Glisser pour réordonner la ligne"
+                      aria-label="Déplacer la ligne"
+                      className="inline-flex h-8 w-4 items-center justify-center text-muted-foreground/40 hover:text-foreground cursor-grab active:cursor-grabbing"
+                    >
+                      <GripVertical className="h-4 w-4" />
+                    </span>
+                    <div className="flex flex-col -my-0.5">
+                      <button type="button" tabIndex={-1} onClick={() => moveLine(i, -1)} disabled={i === 0}
+                        aria-label="Monter la ligne" title="Monter"
+                        className="text-muted-foreground/40 hover:text-foreground disabled:opacity-20 leading-none">
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button type="button" tabIndex={-1} onClick={() => moveLine(i, 1)} disabled={i === cart.length - 1}
+                        aria-label="Descendre la ligne" title="Descendre"
+                        className="text-muted-foreground/40 hover:text-foreground disabled:opacity-20 leading-none">
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                     {!locked && (
                       <button type="button" onClick={() => removeLine(i)} className="text-muted-foreground/50 hover:text-rose-500">
                         <Trash2 className="h-4 w-4" />
@@ -1803,9 +1875,19 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                 ) : partialShort ? (
                   <p className="text-[11px] text-amber-600 mt-1">⚠️ {max} dispo seulement (le surplus sera à découvert)</p>
                 ) : null}
-              </div>
+                </div>
+              </Fragment>
             );
           })}
+          {/* Interstice de FIN — déposer ici = placer la ligne en dernier. */}
+          {dragLine !== null && (
+            <CartDropGap
+              show
+              highlighted={overLine === "end"}
+              onOver={() => setOverLine("end")}
+              onDrop={() => { moveLineBefore(dragLine, null); endLineDrag(); }}
+            />
+          )}
         </div>
 
         {/* Pied : date, mode, n° cmd, total, créer */}
