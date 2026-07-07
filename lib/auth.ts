@@ -79,6 +79,12 @@ export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
       // Expose les rôles livreur + agréeur au middleware (req.auth.user.*) et aux
       // composants. N'altère rien d'autre de la session.
       if (session.user) {
+        // ⚠️ En stratégie JWT, Auth.js ne construit `session.user` qu'avec
+        // { name, email, image } — l'ID N'EST PAS exposé par défaut. Sans cette
+        // ligne, toute route qui vérifie `session.user.id` renvoie 401 :
+        // abonnement push (/api/push/subscribe), prises de clients temporaires
+        // (/api/temp-assignments), claims console… `token.sub` = id User (adapter).
+        if (token.sub) session.user.id = token.sub;
         session.user.isLivreur = token.isLivreur === true;
         session.user.isAgreeur = token.isAgreeur === true;
       }
