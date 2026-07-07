@@ -249,20 +249,27 @@ export function computeView(data: Pick<ApiResp, "carriers">, tab: ViewTab): View
  *  magasin (Fontenay) apparaissait détaché de sa tournée. */
 export function docTourneeKeyLabel(d: Doc, tournees?: Tournee[]): { key: string; label: string } {
   const saved = d.savedTournee;
+  // ⚠️ On ne fait confiance à la tournée MÉMORISÉE que si elle vise le MÊME
+  // transporteur que le BL — exactement comme le sélecteur (selectedTourneeId).
+  // Sinon c'est une affectation PÉRIMÉE d'un autre transporteur (ex. un BL passé
+  // en DIRECT alors que la mémoire pointe encore ANTOINE/IDF OUEST) : la prendre
+  // rangeait le magasin sous la mauvaise tournée alors que le sélecteur affichait
+  // la bonne. Dans ce cas on résout par l'HEURE réelle du BL.
+  const savedOk = !!saved && saved.trspCode === d.trspCode;
 
   // 1) Résolution dans le catalogue du transporteur (comme le sélecteur).
   if (tournees && tournees.length) {
     let t: Tournee | undefined;
-    if (saved?.lineId != null) t = tournees.find((x) => x.lineId === saved.lineId);
-    if (!t && saved?.nom) t = tournees.find((x) => x.nom && x.nom.toUpperCase() === saved.nom!.toUpperCase());
-    if (!t && saved?.heure) t = tournees.find((x) => x.heure === saved.heure);
+    if (savedOk && saved!.lineId != null) t = tournees.find((x) => x.lineId === saved!.lineId);
+    if (!t && savedOk && saved!.nom) t = tournees.find((x) => x.nom && x.nom.toUpperCase() === saved!.nom!.toUpperCase());
+    if (!t && savedOk && saved!.heure) t = tournees.find((x) => x.heure === saved!.heure);
     if (!t && d.trspHeure) t = tournees.find((x) => x.heure === d.trspHeure);
     const nom = (t?.nom ?? "").trim();
     if (nom) return { key: `T:${nom.toUpperCase()}`, label: nom };
   }
 
-  // 2) Aucune tournée réelle correspondante → nom mémorisé brut (SERG_TRCL).
-  const savedNom = (saved?.nom ?? "").trim();
+  // 2) Aucune tournée réelle correspondante → nom mémorisé brut (même transporteur).
+  const savedNom = savedOk ? (saved!.nom ?? "").trim() : "";
   if (savedNom) return { key: `T:${savedNom.toUpperCase()}`, label: savedNom };
 
   // 3) Repli sur l'heure, puis « Sans tournée ».
