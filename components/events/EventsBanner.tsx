@@ -20,9 +20,14 @@ export function EventsBanner() {
   if (!events || events.length === 0) return null;
 
   return (
-    <div className="mb-5 flex flex-wrap items-center gap-2 print:hidden" aria-label="Événements de la semaine">
-      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-        <CalendarDays className="h-3.5 w-3.5" />
+    // Mobile : une SEULE ligne compacte qui défile (plus de gros bloc qui prend
+    // 2-3 lignes) ; desktop : chips confortables qui reviennent à la ligne.
+    <div
+      className="mb-3 sm:mb-5 flex items-center gap-1.5 sm:gap-2 overflow-x-auto sm:flex-wrap pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden print:hidden"
+      aria-label="Événements de la semaine"
+    >
+      <span className="shrink-0 inline-flex items-center gap-1.5 text-[10px] sm:text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+        <CalendarDays className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
         Événements
       </span>
       {events.map((ev) => {
@@ -36,7 +41,7 @@ export function EventsBanner() {
             key={`${ev.key}-${ev.date.getFullYear()}`}
             title={`${ev.label} — ${jourDate} — ${relativeDayLabelLong(ev.daysFromRef)}`}
             className={[
-              "inline-flex items-center gap-1.5 rounded-full border px-2.5 h-7 text-[12px] transition-colors",
+              "shrink-0 inline-flex items-center gap-1.5 rounded-full border px-2 sm:px-2.5 h-6 sm:h-7 text-[11px] sm:text-[12px] transition-colors",
               today
                 ? "border-brand-500/40 bg-brand-500/10 text-brand-700 dark:text-brand-300 font-semibold"
                 : past
@@ -45,8 +50,10 @@ export function EventsBanner() {
             ].join(" ")}
           >
             <span aria-hidden>{ev.emoji}</span>
-            <span className="font-medium">{ev.label} — {jourDate}</span>
-            <span className={today ? "" : "text-muted-foreground"}>· {relativeDayLabelLong(ev.daysFromRef)}</span>
+            {/* La date complète (longue) n'apparaît que sur desktop — c'est elle
+                qui « grossissait » la bannière sur téléphone. */}
+            <span className="font-medium whitespace-nowrap">{ev.label}<span className="hidden sm:inline"> — {jourDate}</span></span>
+            <span className={`whitespace-nowrap ${today ? "" : "text-muted-foreground"}`}>· {relativeDayLabelLong(ev.daysFromRef)}</span>
           </span>
         );
       })}

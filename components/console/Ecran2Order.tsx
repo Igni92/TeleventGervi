@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
+import { nextDeliveryDate, nextWorkingDeliveryDay } from "@/lib/livraison";
 import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -473,7 +474,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   // ── Reset quand le client change ──
   useEffect(() => {
     setCart([]); setNumAtCard(""); setComments("");
-    const t = new Date(); t.setDate(t.getDate() + 1); t.setHours(9, 0, 0, 0);
+    // Défaut = PROCHAINE LIVRAISON POSSIBLE : J+1 (samedi → lundi), puis on saute
+    // dimanches ET jours fériés (avant on posait « demain » en dur, même un
+    // dimanche ou un férié). Heure de tournée par défaut 09:00.
+    const t = new Date(`${nextWorkingDeliveryDay(nextDeliveryDate())}T09:00:00`);
     setDeliveryDate(formatDateInput(t));
     fetch(`/api/clients/${clientId}/delivery-modes`).then((r) => r.json()).then((d) => {
       const ms: DeliveryMode[] = d.modes ?? [];

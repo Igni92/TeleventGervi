@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { formatDateInput } from "@/lib/utils";
 import { parseDeliveryDays, defaultDeliveryDate } from "@/lib/deliveryDays";
+import { nextDeliveryDate, nextWorkingDeliveryDay } from "@/lib/livraison";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
 
@@ -111,10 +112,10 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
   // ── Init when opened ──────────────────────────────────
   useEffect(() => {
     if (!open) return;
-    // Date par défaut PROVISOIRE = demain 9 h (raffinée juste après selon les
-    // jours de livraison du client : prochain jour livré, ou le jour même si le
-    // client ne se fait pas livrer).
-    const t = new Date(); t.setDate(t.getDate() + 1); t.setHours(9, 0, 0, 0);
+    // Date par défaut PROVISOIRE = prochaine livraison POSSIBLE (J+1, samedi →
+    // lundi, en sautant dimanches ET fériés). Raffinée juste après selon les
+    // jours de livraison du client.
+    const t = new Date(`${nextWorkingDeliveryDay(nextDeliveryDate())}T09:00:00`);
     setDeliveryDate(formatDateInput(t));
     setComment("");
     setNumAtCard("");
@@ -130,9 +131,13 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
       const def = ms.find((m) => m.isDefault) ?? ms[0];
       if (def) setModeId(def.id);
     }).catch(() => {});
-    // Date de livraison selon les jours de livraison du client (#logistique).
+    // Date de livraison selon les jours de livraison du client (#logistique),
+    // puis on saute tout dimanche / jour férié résiduel (prochaine livraison
+    // réellement possible).
     fetch(`/api/clients/${clientId}`).then((r) => r.json()).then((c) => {
-      setDeliveryDate(formatDateInput(defaultDeliveryDate(parseDeliveryDays(c?.joursLivraison))));
+      const picked = defaultDeliveryDate(parseDeliveryDays(c?.joursLivraison));
+      const iso = nextWorkingDeliveryDay(formatDateInput(picked).slice(0, 10));
+      setDeliveryDate(formatDateInput(new Date(`${iso}T09:00:00`)));
     }).catch(() => {});
   }, [open, clientId]);
 
