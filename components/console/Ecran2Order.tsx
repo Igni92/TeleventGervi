@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
-import { nextDeliveryDate, nextWorkingDeliveryDay } from "@/lib/livraison";
+import { nextDeliveryDate, nextWorkingDeliveryDay, isPrecommande } from "@/lib/livraison";
 import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -360,6 +360,11 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   // Panier
   const [cart, setCart] = useState<CartLine[]>([]);
   const [deliveryDate, setDeliveryDate] = useState("");
+  // « Bon de commande » : commande créée SANS auto-lot (lots affectés ensuite dans
+  // l'onglet dédié). Coché à la main, ou FORCÉ quand la livraison est une précommande.
+  const [bonCommandeManual, setBonCommandeManual] = useState(false);
+  const precommande = isPrecommande(deliveryDate);
+  const isBonCommande = precommande || bonCommandeManual;
   // ── Onglet colonne gauche : Stock (catalogue) / Tarif (cotations client) ──
   const [stockTab, setStockTab] = useState<"stock" | "tarif">("stock");
   // Cotations SPÉCIFIQUES du client (par code article) — chargées par client,
@@ -473,7 +478,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
 
   // ── Reset quand le client change ──
   useEffect(() => {
-    setCart([]); setNumAtCard(""); setComments("");
+    setCart([]); setNumAtCard(""); setComments(""); setBonCommandeManual(false);
     // Défaut = PROCHAINE LIVRAISON POSSIBLE : J+1 (samedi → lundi), puis on saute
     // dimanches ET jours fériés (avant on posait « demain » en dur, même un
     // dimanche ou un férié). Heure de tournée par défaut 09:00.
@@ -840,6 +845,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     deliveryDate: new Date(deliveryDate).toISOString(),
     numAtCard: numAtCard.trim() || undefined, lines: apiLines,
     comments: [comments.trim(), buildPromoComment()].filter(Boolean).join(" · ") || undefined,
+    // Bon de commande (aucun auto-lot) : coche manuelle ou précommande.
+    docKind: isBonCommande ? "COMMANDE" : "BL",
   });
 
   const buildApiLines = (lines: CartLine[] = cart): ApiLine[] =>
@@ -1830,6 +1837,24 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                   aria-label="Date de livraison"
                   className="flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2" />
               </div>
+              {/* Bon de commande — aucun auto-lot, lots affectés ensuite dans l'onglet
+                  « Bons de commande ». Forcé (coché + verrouillé) si précommande. */}
+              <label
+                title={precommande
+                  ? "Livraison au-delà du prochain jour livrable → précommande : créée en bon de commande (lots affectés plus tard)"
+                  : "Créer en bon de commande : aucun lot automatique, tu affectes les lots ensuite dans l'onglet Bons de commande"}
+                className={`flex items-center gap-2 rounded-md border px-2.5 h-9 text-[12.5px] select-none ${precommande ? "cursor-default" : "cursor-pointer"} ${
+                  isBonCommande ? "border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300" : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <input type="checkbox" checked={isBonCommande} disabled={precommande}
+                  onChange={(e) => setBonCommandeManual(e.target.checked)}
+                  className="h-4 w-4 accent-amber-600" />
+                <span className="font-semibold">Bon de commande</span>
+                <span className="text-[11px] opacity-80 truncate">
+                  {precommande ? "· précommande — lots à affecter" : "· lots affectés plus tard"}
+                </span>
+              </label>
               {/* Réf. client + TEXTE du BL côte à côte (même rangée que transporteur/tournée). */}
               <div className="flex gap-1.5">
                 <input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="N° de commande (réf. client)"

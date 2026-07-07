@@ -256,6 +256,7 @@ export async function getDeliveryStatuses(): Promise<{
   misEnPrep: Map<number, boolean>;
   misEnPrepBy: Map<number, string>;
   misEnPrepAt: Map<number, string>;
+  bonCommande: Map<number, boolean>;
 }> {
   const out = {
     prepared: new Map<number, boolean>(),
@@ -270,8 +271,9 @@ export async function getDeliveryStatuses(): Promise<{
     misEnPrep: new Map<number, boolean>(),
     misEnPrepBy: new Map<number, string>(),
     misEnPrepAt: new Map<number, string>(),
+    bonCommande: new Map<number, boolean>(),
   };
-  const prefixes = [LIV_FAITE_PREFIX, LIV_DEPART_PREFIX, LIV_PREP_PREFIX, LIV_INCOMPLETE_PREFIX, LIV_AVOIR_PREFIX, LIV_MISEPREP_PREFIX];
+  const prefixes = [LIV_FAITE_PREFIX, LIV_DEPART_PREFIX, LIV_PREP_PREFIX, LIV_INCOMPLETE_PREFIX, LIV_AVOIR_PREFIX, LIV_MISEPREP_PREFIX, LIV_COMMANDE_PREFIX];
   try {
     const rows = await prisma.appSetting.findMany({
       where: { OR: prefixes.map((p) => ({ key: { startsWith: p } })) },
@@ -281,7 +283,7 @@ export async function getDeliveryStatuses(): Promise<{
       if (!prefix) continue;
       const docEntry = Number(r.key.slice(prefix.length));
       if (!Number.isFinite(docEntry)) continue;
-      let v: { prepared?: boolean; departed?: boolean; incomplete?: boolean; excluded?: boolean; misEnPrep?: boolean; by?: string; at?: string };
+      let v: { prepared?: boolean; departed?: boolean; incomplete?: boolean; excluded?: boolean; misEnPrep?: boolean; bonCommande?: boolean; by?: string; at?: string };
       try { v = JSON.parse(r.value); } catch { continue; }
       switch (prefix) {
         case LIV_FAITE_PREFIX:
@@ -309,6 +311,9 @@ export async function getDeliveryStatuses(): Promise<{
           out.misEnPrep.set(docEntry, !!v.misEnPrep);
           if (v.misEnPrep && v.by?.trim()) out.misEnPrepBy.set(docEntry, v.by.trim());
           if (v.misEnPrep && v.at) out.misEnPrepAt.set(docEntry, v.at);
+          break;
+        case LIV_COMMANDE_PREFIX:
+          if (v.bonCommande) out.bonCommande.set(docEntry, true);
           break;
       }
     }
@@ -441,4 +446,41 @@ export async function setDeliveryMiseEnPrep(docEntry: number, misEnPrep: boolean
   const value = JSON.stringify({ misEnPrep, at, by });
   await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
   return at;
+}
+
+/* ──────────────── Commande « BON DE COMMANDE » (lots à affecter) ────────────────
+ * Une commande créée en « bon de commande » (choix explicite, précommande, ou
+ * export) part SANS lot auto (chaque ligne en EM_PENDING) : on n'affecte JAMAIS
+ * un lot pas en stock. Elle est marquée ici (clé `livcommande:<docEntry>`) et
+ * remonte dans l'onglet « Bons de commande » où l'on affecte les lots à la main
+ * (PATCH U_NoLot sur la commande SAP). La marque est levée quand plus aucune
+ * ligne n'est en attente de lot.
+ */
+const LIV_COMMANDE_PREFIX = "livcommande:";
+
+/** Marque (true) ou lève (false) le statut « bon de commande » d'une commande. */
+export async function setDeliveryBonCommande(docEntry: number, bonCommande: boolean, by: string): Promise<void> {
+  const key = LIV_COMMANDE_PREFIX + docEntry;
+  if (!bonCommande) {
+    try { await prisma.appSetting.delete({ where: { key } }); } catch { /* déjà absent */ }
+    return;
+  }
+  const value = JSON.stringify({ bonCommande: true, at: new Date().toISOString(), by });
+  await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+}
+
+/** DocEntries des commandes actuellement marquées « bon de commande » (lots à affecter). */
+export async function listBonCommandeDocEntries(): Promise<{ docEntry: number; at: string | null; by: string | null }[]> {
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: LIV_COMMANDE_PREFIX } } });
+    const out: { docEntry: number; at: string | null; by: string | null }[] = [];
+    for (const r of rows) {
+      const docEntry = Number(r.key.slice(LIV_COMMANDE_PREFIX.length));
+      if (!Number.isFinite(docEntry)) continue;
+      let v: { bonCommande?: boolean; at?: string; by?: string };
+      try { v = JSON.parse(r.value); } catch { continue; }
+      if (v.bonCommande) out.push({ docEntry, at: v.at ?? null, by: v.by?.trim() || null });
+    }
+    return out;
+  } catch { return []; }
 }

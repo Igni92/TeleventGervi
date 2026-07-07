@@ -6,7 +6,7 @@ import { Command } from "cmdk";
 import {
   Home, Radio, ClipboardList, Users, Package, PackagePlus, PackageCheck, Factory, Truck,
   LayoutDashboard, Receipt, Briefcase, Settings, Search, CornerDownLeft, Store, ShoppingCart,
-  ClipboardCheck, PackageX, Clock3,
+  ClipboardCheck, PackageX, Clock3, ScrollText,
 } from "lucide-react";
 
 interface NavItem { href: string; label: string; icon: typeof Home; keywords?: string }
@@ -19,6 +19,7 @@ const NAV: NavItem[] = [
   { href: "/ventes-du-jour", label: "Ventes du jour", icon: Store, keywords: "ventes préparation livraison magasin mise en prep" },
   { href: "/livraisons", label: "Préparation livraisons", icon: Truck, keywords: "détail livraison bons transporteur tournée ventes mise en préparation" },
   { href: "/preparations", label: "Préparations à faire", icon: ClipboardList, keywords: "préparations à faire charge dates livraison à préparer non préparé" },
+  { href: "/bons-commande", label: "Bons de commande", icon: ScrollText, keywords: "bon de commande précommande lot affecter em pending export lots à affecter" },
   { href: "/manquants", label: "Manquants", icon: PackageX, keywords: "rupture stock négatif achats à prévoir articles manquants" },
   { href: "/products", label: "Stock", icon: Package, keywords: "produits articles" },
   { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, keywords: "comptage stock entrepôt" },

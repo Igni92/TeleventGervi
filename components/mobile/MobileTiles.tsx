@@ -6,7 +6,7 @@ import {
   Users, Briefcase, Truck, Store, ShoppingCart,
   PackagePlus, PackageCheck, Package, PackageX, Factory, ClipboardCheck, ClipboardList,
   Receipt, LayoutDashboard, Clock3,
-  Settings, Tag,
+  Settings, Tag, ScrollText,
   type LucideIcon,
 } from "lucide-react";
 import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
@@ -67,6 +67,7 @@ const AXES: Axis[] = [
       { href: "/commandes-fournisseurs", label: "Commandes fournisseurs", icon: PackageCheck, badge: "commandesDue" },
       { href: "/entrees", label: "Entrées march.", icon: PackagePlus, badge: "receptionIncidents" },
       { href: "/preparations", label: "Préparations à faire", icon: ClipboardList },
+      { href: "/bons-commande", label: "Bons de commande", icon: ScrollText },
       { href: "/manquants", label: "Manquants", icon: PackageX },
       { href: "/products", label: "Stock", icon: Package },
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },

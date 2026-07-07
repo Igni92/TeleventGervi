@@ -34,6 +34,7 @@ const SECTION_LABEL: Record<string, string> = {
   "/livraisons": "Préparation livraisons",
   "/preparations": "Préparations à faire",
   "/manquants": "Manquants",
+  "/bons-commande": "Bons de commande",
   "/heures": "Mes heures",
   "/commerciaux": "Équipe commerciale",
   "/commandes-fournisseurs": "Commandes fournisseurs",
