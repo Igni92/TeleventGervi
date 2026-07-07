@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   Users, Briefcase, Truck, Store, ShoppingCart,
-  PackagePlus, PackageCheck, Package, PackageX, Factory, ClipboardCheck,
-  Receipt, LayoutDashboard,
+  PackagePlus, PackageCheck, Package, PackageX, Factory, ClipboardCheck, ClipboardList,
+  Receipt, LayoutDashboard, Clock3,
   Settings, Tag,
   type LucideIcon,
 } from "lucide-react";
@@ -60,12 +60,13 @@ const AXES: Axis[] = [
   },
   {
     key: "acheteur",
-    label: "Acheteur",
-    desc: "Approvisionnement & stock",
+    label: "Acheteur & entrepôt",
+    desc: "Approvisionnement, stock & préparation",
     // Ordre du flux : la commande fournisseur PRÉCÈDE l'entrée marchandise (CF → EM).
     tiles: [
       { href: "/commandes-fournisseurs", label: "Commandes fournisseurs", icon: PackageCheck, badge: "commandesDue" },
       { href: "/entrees", label: "Entrées march.", icon: PackagePlus, badge: "receptionIncidents" },
+      { href: "/preparations", label: "Préparations à faire", icon: ClipboardList },
       { href: "/manquants", label: "Manquants", icon: PackageX },
       { href: "/products", label: "Stock", icon: Package },
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },
@@ -87,6 +88,7 @@ const AXES: Axis[] = [
     desc: "Pilotage & réglages",
     tiles: [
       { href: "/commerciaux", label: "Équipe commerciale", icon: Briefcase },
+      { href: "/heures", label: "Mes heures", icon: Clock3 },
       { href: "/promos", label: "Promotions", icon: Tag },
       { href: "/parametres", label: "Paramètres", icon: Settings },
     ],

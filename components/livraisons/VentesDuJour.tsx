@@ -1,40 +1,37 @@
 "use client";
 
 /**
- * VENTES DU JOUR — état COMPLET des ventes (consultation), groupé par TRANSPORTEUR.
+ * VENTES DU JOUR — les ventes SAISIES aujourd'hui (jour où la commande est
+ * RENTRÉE dans le système, = DocDate), quelle que soit leur date de livraison.
+ * Consultation seule, groupée par TRANSPORTEUR.
  *
- * Deux volets, adossés à GET /api/livraisons :
- *   • « En préparation »  : les BL de la PROCHAINE livraison (J+1, sauf samedi → lundi) ;
- *   • « En livraison »    : les BL dont la livraison est AUJOURD'HUI (suivi Fait/Départ).
- *
- * La MISE EN PRÉPARATION (lâcher un magasin à l'entrepôt) ne se fait PAS ici :
- * elle vit dans le Détail livraison, onglet « Ventes » (à gauche de « À préparer »).
- * Ici, chaque BL affiche simplement son état : En préparation / En attente.
+ * Pour chaque BL, on montre l'avancement de la préparation par deux COCHES :
+ *   • « Préparé » (verte cochée quand la commande est faite) ;
+ *   • « Départ »  (bleue cochée quand la commande est partie en livraison).
+ * + la date de livraison prévue (souvent J+1, mais variable).
  *
  * Les BL « avoir / exclu » ne sont pas des ventes → masqués de cet état.
+ * (La mise en préparation / le suivi de picking vivent dans le Détail livraison.)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  CheckCircle2, Clock, Loader2, PackageOpen, RefreshCw,
-  Search, Store, Truck,
-} from "lucide-react";
+import { CalendarDays, Check, Clock, Loader2, RefreshCw, Search, Store, Truck } from "lucide-react";
 import { toast } from "sonner";
-import { displayPersonName } from "@/lib/userNames";
 import { formatDeliveryDate } from "@/lib/livraison";
-import { docStatus, isReleased, STATUS_LABEL, type ApiResp, type Doc, type StatusTab } from "@/lib/livraisonView";
+import type { ApiResp, Doc } from "@/lib/livraisonView";
 
 /** Date murale Europe/Paris (le poste peut être ailleurs) — « aujourd'hui » métier. */
 function parisTodayISO(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(new Date());
 }
+/** « lun. 7 juil. » court, depuis un ISO (date de livraison par BL). */
+function shortDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("fr-FR", {
+    weekday: "short", day: "numeric", month: "short", timeZone: "UTC",
+  });
+}
 
 const eur = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
-
-const STATUS_BADGE: Record<StatusTab, string> = {
-  A_PREPARER: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-  FAIT: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  DEPART: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
-};
 
 /** Même palette de segments que le Détail livraison (SEG_UI de LivraisonDetail). */
 const SEGMENT_BADGE: Record<string, string> = {
@@ -43,186 +40,172 @@ const SEGMENT_BADGE: Record<string, string> = {
   GMS: "bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300",
 };
 
-/** Un volet de l'état : la date livrée + les ventes GROUPÉES PAR TRANSPORTEUR
- *  (ordre de l'API : volume de colis décroissant, « Non affecté » en dernier),
- *  hors « avoir / exclu ». */
-interface VoletGroup { key: string; name: string; docs: Doc[] }
-interface Volet { date: string; groups: VoletGroup[] }
+interface Group { key: string; name: string; docs: Doc[] }
 
-function toVolet(data: ApiResp | null): Volet | null {
-  if (!data?.ok) return null;
-  return {
-    date: data.date,
-    groups: data.carriers
-      .map((c) => ({
-        key: c.code ?? "__none__",
-        name: c.name,
-        docs: c.docs.filter((d) => !d.excluded).sort((a, b) => a.cardName.localeCompare(b.cardName, "fr")),
-      }))
-      .filter((g) => g.docs.length > 0),
-  };
+/** Ventes groupées par transporteur (ordre API : colis desc, « Non affecté » en
+ *  dernier), hors « avoir / exclu », triées par magasin. */
+function toGroups(data: ApiResp | null): Group[] {
+  if (!data?.ok) return [];
+  return data.carriers
+    .map((c) => ({
+      key: c.code ?? "__none__",
+      name: c.name,
+      docs: c.docs.filter((d) => !d.excluded).sort((a, b) => a.cardName.localeCompare(b.cardName, "fr")),
+    }))
+    .filter((g) => g.docs.length > 0);
 }
 
 export function VentesDuJour() {
-  const [prep, setPrep] = useState<Volet | null>(null);         // prochaine livraison (défaut API)
-  const [jour, setJour] = useState<Volet | null>(null);         // livraison d'AUJOURD'HUI
+  const [data, setData] = useState<ApiResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  const today = useMemo(() => parisTodayISO(), []);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [rPrep, rJour] = await Promise.all([
-        fetch("/api/livraisons", { cache: "no-store" }),
-        fetch(`/api/livraisons?date=${parisTodayISO()}`, { cache: "no-store" }),
-      ]);
-      const [jPrep, jJour] = await Promise.all([
-        rPrep.json().catch(() => null),
-        rJour.json().catch(() => null),
-      ]);
-      if (jPrep?.ok) setPrep(toVolet(jPrep)); else toast.error(jPrep?.error || "Ventes en préparation indisponibles");
-      if (jJour?.ok) setJour(toVolet(jJour));
+      // Ventes SAISIES aujourd'hui (DocDate) — mode `entered` de l'API.
+      const r = await fetch(`/api/livraisons?entered=${today}`, { cache: "no-store" });
+      const j = await r.json().catch(() => null);
+      if (j?.ok) setData(j); else toast.error(j?.error || "Ventes du jour indisponibles");
     } catch {
       toast.error("SAP injoignable — ventes du jour non chargées");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [today]);
 
   useEffect(() => { load(); }, [load]);
 
   const needle = q.trim().toLowerCase();
-  const match = useCallback((d: Doc) =>
-    !needle ||
-    d.cardName.toLowerCase().includes(needle) ||
-    (d.cardFullName ?? "").toLowerCase().includes(needle) ||
-    String(d.docNum).includes(needle), [needle]);
+  const groups = useMemo(() => {
+    const base = toGroups(data);
+    if (!needle) return base;
+    return base
+      .map((g) => ({ ...g, docs: g.docs.filter((d) =>
+        d.cardName.toLowerCase().includes(needle) ||
+        (d.cardFullName ?? "").toLowerCase().includes(needle) ||
+        String(d.docNum).includes(needle)) }))
+      .filter((g) => g.docs.length > 0);
+  }, [data, needle]);
 
-  const filterVolet = useCallback((v: Volet | null): VoletGroup[] =>
-    (v?.groups ?? [])
-      .map((g) => ({ ...g, docs: g.docs.filter(match) }))
-      .filter((g) => g.docs.length > 0), [match]);
-
-  const prepGroups = useMemo(() => filterVolet(prep), [prep, filterVolet]);
-  const jourGroups = useMemo(() => filterVolet(jour), [jour, filterVolet]);
-  const prepDocs = useMemo(() => prepGroups.flatMap((g) => g.docs), [prepGroups]);
-  const jourDocs = useMemo(() => jourGroups.flatMap((g) => g.docs), [jourGroups]);
-  const pendingCount = prepDocs.filter((d) => !isReleased(d)).length;
-  const caPrep = prepDocs.reduce((s, d) => s + d.totalHT, 0);
-  const caJour = jourDocs.reduce((s, d) => s + d.totalHT, 0);
+  const docs = useMemo(() => groups.flatMap((g) => g.docs), [groups]);
+  const ca = docs.reduce((s, d) => s + d.totalHT, 0);
+  const prepared = docs.filter((d) => d.prepared || d.departed).length;
+  const departed = docs.filter((d) => d.departed).length;
 
   return (
-    <div className="space-y-5">
-      {/* Bandeau : recherche + rafraîchissement */}
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-sm">
+    <div className="space-y-4">
+      {/* Bandeau : synthèse + recherche + rafraîchissement */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Filtrer par magasin ou n° de BL…"
             aria-label="Filtrer les ventes"
-            className="h-10 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring/40"
+            className="h-11 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring/40"
           />
         </div>
         <button
           type="button"
           onClick={load}
           disabled={loading}
-          className="inline-flex items-center gap-1.5 h-10 px-3 rounded-xl border border-border bg-card text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60 shrink-0"
+          className="inline-flex items-center gap-1.5 h-11 px-3 rounded-xl border border-border bg-card text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60 shrink-0"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           <span className="hidden sm:inline">Actualiser</span>
         </button>
       </div>
 
-      {/* ── Volet 1 : EN PRÉPARATION (prochaine livraison) ── */}
-      <section className="rounded-2xl border border-border bg-card overflow-hidden">
-        <div className="flex items-center gap-2.5 px-4 sm:px-5 py-3 border-b border-border bg-secondary/30">
-          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
-            <PackageOpen className="h-4 w-4" strokeWidth={2} />
-          </span>
-          <div className="min-w-0">
-            <p className="text-[13.5px] font-semibold text-foreground leading-tight">
-              En préparation{prep?.date ? ` — livraison du ${formatDeliveryDate(prep.date)}` : ""}
-            </p>
-            <p className="text-[11px] text-muted-foreground">
-              {loading && !prep ? "Chargement…" : (
-                <>
-                  {prepDocs.length} vente{prepDocs.length > 1 ? "s" : ""} · {eur.format(caPrep)} HT
-                  {pendingCount > 0 && (
-                    <> · <b className="text-amber-600 dark:text-amber-400">
-                      {pendingCount} en attente de mise en préparation (Détail livraison › Ventes)
-                    </b></>
-                  )}
-                </>
-              )}
-            </p>
-          </div>
-        </div>
-        <VenteGroups groups={prepGroups} loading={loading && !prep} emptyLabel="Aucune vente pour la prochaine livraison." />
-      </section>
-
-      {/* ── Volet 2 : EN LIVRAISON (aujourd'hui) ── */}
-      <section className="rounded-2xl border border-border bg-card overflow-hidden">
-        <div className="flex items-center gap-2.5 px-4 sm:px-5 py-3 border-b border-border bg-secondary/30">
-          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
-            <Truck className="h-4 w-4" strokeWidth={2} />
-          </span>
-          <div className="min-w-0">
-            <p className="text-[13.5px] font-semibold text-foreground leading-tight">
-              En livraison{jour?.date ? ` — aujourd'hui, ${formatDeliveryDate(jour.date)}` : " — aujourd'hui"}
-            </p>
-            <p className="text-[11px] text-muted-foreground">
-              {loading && !jour
-                ? "Chargement…"
-                : `${jourDocs.length} vente${jourDocs.length > 1 ? "s" : ""} · ${eur.format(caJour)} HT`}
-            </p>
-          </div>
-        </div>
-        <VenteGroups groups={jourGroups} loading={loading && !jour} emptyLabel="Aucune livraison aujourd'hui." />
-      </section>
-    </div>
-  );
-}
-
-/** Ventes groupées par TRANSPORTEUR — sous-en-tête par groupe, lignes en consultation. */
-function VenteGroups({ groups, loading, emptyLabel }: {
-  groups: VoletGroup[];
-  loading: boolean;
-  emptyLabel: string;
-}) {
-  if (loading) {
-    return (
-      <div className="flex items-center gap-2 px-5 py-4 text-[13px] text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> Chargement des ventes…
+      {/* Synthèse du jour */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <Stat label="Ventes saisies" value={docs.length.toString()} />
+        <Stat label="CA HT" value={eur.format(ca)} />
+        <Stat label="Préparées" value={`${prepared}/${docs.length}`} tone="emerald" />
+        <Stat label="Parties" value={`${departed}/${docs.length}`} tone="sky" />
       </div>
-    );
-  }
-  if (!groups.length) {
-    return <p className="px-5 py-4 text-[13px] text-muted-foreground">{emptyLabel}</p>;
-  }
-  return (
-    <div>
-      {groups.map((g) => (
-        <div key={g.key}>
-          <div className="flex items-center gap-2 px-4 sm:px-5 py-1.5 bg-secondary/20 border-y border-border/60 first:border-t-0">
-            <Truck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{g.name}</span>
-            <span className="text-[11px] tnum text-muted-foreground/70">{g.docs.length}</span>
+
+      <section className="rounded-2xl border border-border bg-card overflow-hidden">
+        <div className="flex items-center gap-2.5 px-4 sm:px-5 py-3 border-b border-border bg-secondary/30">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-500/15 text-brand-600 dark:text-brand-400">
+            <Store className="h-4 w-4" strokeWidth={2} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[13.5px] font-semibold text-foreground leading-tight">
+              Ventes saisies aujourd&apos;hui{data?.date ? ` — ${formatDeliveryDate(data.date)}` : ""}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {loading && !data
+                ? "Chargement…"
+                : `${docs.length} vente${docs.length > 1 ? "s" : ""} · ${eur.format(ca)} HT · groupées par transporteur`}
+            </p>
           </div>
-          <ul className="divide-y divide-border/60">
-            {g.docs.map((d) => <VenteRow key={d.docEntry} d={d} />)}
-          </ul>
         </div>
-      ))}
+
+        {loading && !data ? (
+          <div className="flex items-center gap-2 px-5 py-4 text-[13px] text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Chargement des ventes…
+          </div>
+        ) : groups.length === 0 ? (
+          <p className="px-5 py-6 text-[13px] text-muted-foreground text-center">
+            Aucune vente saisie aujourd&apos;hui{needle ? " pour cette recherche" : ""}.
+          </p>
+        ) : (
+          groups.map((g) => (
+            <div key={g.key}>
+              <div className="flex items-center gap-2 px-4 sm:px-5 py-1.5 bg-secondary/20 border-y border-border/60">
+                <Truck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground truncate">{g.name}</span>
+                <span className="text-[11px] tnum text-muted-foreground/70">{g.docs.length}</span>
+              </div>
+              <ul className="divide-y divide-border/60">
+                {g.docs.map((d) => <VenteRow key={d.docEntry} d={d} />)}
+              </ul>
+            </div>
+          ))
+        )}
+      </section>
     </div>
   );
 }
 
-/** Ligne de vente — un BL (magasin), consultation seule. */
+function Stat({ label, value, tone }: { label: string; value: string; tone?: "emerald" | "sky" }) {
+  const color = tone === "emerald" ? "text-emerald-600 dark:text-emerald-400"
+    : tone === "sky" ? "text-sky-600 dark:text-sky-400" : "text-foreground";
+  return (
+    <div className="rounded-xl border border-border bg-card px-3 py-2">
+      <p className="text-[9.5px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</p>
+      <p className={`text-[18px] font-bold tnum leading-tight ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+/** Coche d'avancement — verte/bleue cochée quand l'étape est atteinte, grise sinon. */
+function Coche({ done, label, tone }: { done: boolean; label: string; tone: "emerald" | "sky" }) {
+  const on = tone === "emerald"
+    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/40"
+    : "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/40";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-lg border px-2 h-7 text-[11px] font-semibold ${
+        done ? on : "border-border text-muted-foreground/60"
+      }`}
+      title={done ? `${label} ✓` : `${label} — pas encore`}
+    >
+      <span className={`inline-flex h-4 w-4 items-center justify-center rounded ${
+        done ? (tone === "emerald" ? "bg-emerald-500 text-white" : "bg-sky-500 text-white") : "border border-border"
+      }`}>
+        {done && <Check className="h-3 w-3" strokeWidth={3} />}
+      </span>
+      {label}
+    </span>
+  );
+}
+
+/** Ligne de vente — un BL (magasin), consultation ; coches préparé + départ. */
 function VenteRow({ d }: { d: Doc }) {
-  const status = docStatus(d);
   const takenTime = d.takenAt ? d.takenAt.slice(11, 16) : null;
   return (
     <li className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 sm:px-5 py-2.5">
@@ -239,31 +222,15 @@ function VenteRow({ d }: { d: Doc }) {
         <p className="text-[11px] text-muted-foreground flex items-center gap-x-2 gap-y-0.5 flex-wrap">
           <span>BL #{d.docNum}</span>
           {takenTime && <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" /> Prise {takenTime}</span>}
+          <span className="inline-flex items-center gap-1"><CalendarDays className="h-3 w-3" /> Livr. {shortDate(d.dueDate)}</span>
           <span>{d.colis.toLocaleString("fr-FR")} colis</span>
           {d.totalHT > 0 && <span>{eur.format(d.totalHT)} HT</span>}
         </p>
       </div>
-      <div className="flex items-center gap-2 shrink-0 flex-wrap">
-        {isReleased(d) ? (
-          <>
-            <span
-              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-              title={d.misEnPrepBy ? `Mis en préparation par ${displayPersonName(d.misEnPrepBy)}` : "Visible pour l'entrepôt"}
-            >
-              <CheckCircle2 className="h-3 w-3" /> En préparation
-            </span>
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${STATUS_BADGE[status]}`}>
-              {STATUS_LABEL[status]}
-            </span>
-          </>
-        ) : (
-          <span
-            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-700 dark:text-amber-300"
-            title="Pas encore visible entrepôt — mise en préparation depuis le Détail livraison, onglet « Ventes »"
-          >
-            <Clock className="h-3 w-3" /> En attente
-          </span>
-        )}
+      {/* Avancement : coches Préparé (fait) puis Départ (parti). */}
+      <div className="flex items-center gap-1.5 shrink-0">
+        <Coche done={d.prepared || !!d.departed} label="Préparé" tone="emerald" />
+        <Coche done={!!d.departed} label="Départ" tone="sky" />
       </div>
     </li>
   );

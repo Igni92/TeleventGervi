@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, Package, PackagePlus, Factory, Receipt, AlertTriangle,
-  Home, Settings, PackageCheck, ClipboardCheck, Truck, Eye, Store, PackageX,
+  Home, Settings, PackageCheck, ClipboardCheck, ClipboardList, Truck, Eye, Store, PackageX,
   Pencil, MoreVertical, ArrowUp, ArrowDown, Loader2, RotateCcw, CornerDownRight,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -93,6 +93,7 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
     label: "Entrepôt",
     items: [
       { href: "/livraisons", label: "Préparation livraisons", icon: Truck },
+      { href: "/preparations", label: "Préparations à faire", icon: ClipboardList },
       { href: "/manquants", label: "Manquants", icon: PackageX },
       { href: "/products", label: "Stock", icon: Package },
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },

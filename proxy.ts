@@ -53,7 +53,7 @@ export default auth((req) => {
     // /heures : saisie PERSONNELLE des heures — ouverte à tout rôle confiné
     // (chacun enregistre SA semaine). /api + /login toujours accessibles.
     const allowedPrefixes = ["/api", "/login", "/heures"];
-    if (isPrep) allowedPrefixes.push("/livraisons", "/inventaire");
+    if (isPrep) allowedPrefixes.push("/livraisons", "/inventaire", "/preparations");
     if (isLivreur) allowedPrefixes.push("/livraisons", "/clients");
     if (isAgreeur) allowedPrefixes.push("/commandes-fournisseurs", "/entrees");
     const allowed = allowedPrefixes.some((p) => pathname.startsWith(p));

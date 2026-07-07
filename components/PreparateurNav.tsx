@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { Truck, ClipboardCheck, PackageCheck, PackagePlus, Clock3, type LucideIcon } from "lucide-react";
+import { Truck, ClipboardCheck, ClipboardList, PackageCheck, PackagePlus, Clock3, type LucideIcon } from "lucide-react";
 import { isRestrictedPreparateur } from "@/lib/preparateur";
 
 /**
@@ -17,11 +17,12 @@ import { isRestrictedPreparateur } from "@/lib/preparateur";
  *   • agréeur    : + Commandes fournisseurs, Entrées marchandises
  * Masqué ≥ md (la sidebar prend le relais).
  */
-type TabKey = "livraisons" | "inventaire" | "commandes-fournisseurs" | "entrees" | "heures";
+type TabKey = "livraisons" | "preparations" | "inventaire" | "commandes-fournisseurs" | "entrees" | "heures";
 interface Tab { href: string; key: TabKey; label: string; icon: LucideIcon }
 
 const BASE_TABS: Tab[] = [
-  { href: "/livraisons", key: "livraisons", label: "Préparation", icon: Truck },
+  { href: "/livraisons", key: "livraisons", label: "Livraison", icon: Truck },
+  { href: "/preparations", key: "preparations", label: "À préparer", icon: ClipboardList },
   { href: "/inventaire", key: "inventaire", label: "Inventaire", icon: ClipboardCheck },
 ];
 const AGREEUR_TABS: Tab[] = [
