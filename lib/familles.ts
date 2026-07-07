@@ -51,6 +51,20 @@ export const FAMILY_CTE_SQL: Prisma.Sql = Prisma.sql`
  * côté Node (ex. drilldown mensuel) qui n'ont pas besoin d'un second aller-retour
  * SQL. DOIT rester synchrone avec le CASE ci-dessus (mêmes règles).
  */
+/**
+ * Familles de fruits ISOLÉES (petits fruits) — celles que `familyOf` distingue
+ * du groupe SAP. Sert de liste de choix pour le TARIF PAR FRUITS (fiche client /
+ * console). L'ordre est celui du CASE ci-dessus. DOIT rester synchrone avec lui.
+ */
+export const FRUIT_FAMILIES: { key: string; label: string }[] = [
+  { key: "fraise", label: "Fraise" },
+  { key: "framboise", label: "Framboise" },
+  { key: "myrtille", label: "Myrtille" },
+  { key: "groseille", label: "Groseille" },
+  { key: "cassis", label: "Cassis" },
+  { key: "mure", label: "Mûre" },
+];
+
 export function familyOf(
   itemName: string | null | undefined,
   groupName: string | null | undefined,

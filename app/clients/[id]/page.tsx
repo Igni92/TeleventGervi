@@ -18,7 +18,8 @@ import { ClientTabs } from "@/components/clients/ClientTabs";
 import { FicheActions } from "@/components/clients/FicheActions";
 import { FicheHeader } from "@/components/clients/FicheHeader";
 import { SectionCard } from "@/components/clients/SectionCard";
-import { Calendar, CalendarClock, CalendarDays, Clock, Sprout, TrendingUp, Receipt, Truck, UserRound, MapPin } from "lucide-react";
+import { TarifFruitsEditor } from "@/components/clients/TarifFruitsEditor";
+import { Calendar, CalendarClock, CalendarDays, Clock, Sprout, TrendingUp, Receipt, Truck, UserRound, MapPin, Grape } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { requireAdmin, isLivreur } from "@/lib/permissions";
@@ -152,6 +153,11 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
         ) },
         { id: "produits", label: "Produits récurrents", wide: true, node: (
           <ProduitsRecurrents clientId={client.id} />
+        ) },
+        { id: "tarif-fruits", label: "Tarif par fruits", wide: true, node: (
+          <SectionCard accent="brand" title="Tarif par fruits" subtitle="Prix négociés par fruit · origine · calibre · variété — appliqués à la commande" icon={<Grape />}>
+            <TarifFruitsEditor clientId={client.id} />
+          </SectionCard>
         ) },
         ...(client.rappels.length > 0 ? [{ id: "rappels", label: `Rappels (${client.rappels.length})`, node: (
           <SectionCard
