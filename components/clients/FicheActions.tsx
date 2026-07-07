@@ -1,21 +1,28 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ShoppingCart, PhoneCall, Loader2, Check, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { BLDialog } from "@/components/console/BLDialog";
 
 /**
  * Actions commerciales depuis la fiche client (mobile-first) : un commercial
  * passe une commande pour ce client, ou notifie un appel (avec note). Pas de
  * console / plan d'appel sur mobile — tout part d'ici.
  */
-export function FicheActions({ clientId, clientName }: { clientId: string; clientName: string }) {
-  const [blOpen, setBlOpen] = useState(false);
+export function FicheActions({ clientId }: { clientId: string; clientName?: string }) {
+  const router = useRouter();
   const [callOpen, setCallOpen] = useState(false);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // « Commander » ouvre la console de commande PRÉ-CHARGÉE sur ce client ; le
+  // paramètre returnTo ramène ici automatiquement une fois la commande passée.
+  const openConsole = () => {
+    const returnTo = encodeURIComponent(`/clients/${clientId}`);
+    router.push(`/console2?client=${clientId}&returnTo=${returnTo}`);
+  };
 
   async function logAppel(type: "COMMANDE" | "DEMAIN") {
     setSaving(true);
@@ -58,7 +65,7 @@ export function FicheActions({ clientId, clientName }: { clientId: string; clien
         </div>
 
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-          <Button onClick={() => setBlOpen(true)} className="h-12 gap-2 text-[15px]">
+          <Button onClick={openConsole} className="h-12 gap-2 text-[15px]">
             <ShoppingCart className="h-4 w-4" /> Commander
           </Button>
           <Button variant="outline" onClick={() => setCallOpen((o) => !o)} className="h-12 gap-2 text-[15px]">
@@ -85,14 +92,6 @@ export function FicheActions({ clientId, clientName }: { clientId: string; clien
           </div>
         )}
       </div>
-
-      <BLDialog
-        open={blOpen}
-        onOpenChange={setBlOpen}
-        clientId={clientId}
-        clientName={clientName}
-        onCreated={() => setBlOpen(false)}
-      />
     </div>
   );
 }
