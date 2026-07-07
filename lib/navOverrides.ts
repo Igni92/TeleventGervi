@@ -105,6 +105,55 @@ export function toEditState<T extends { href: string; label: string }>(
     }));
 }
 
+/* ── Réordonnancement glisser-déposer (pur) ──────────────────────────────
+   Deux gestes : INSÉRER une ligne avant une autre (ou en fin d'un groupe), et
+   ÉCHANGER deux lignes (« remplacer » une zone occupée). Clé = href (stable,
+   robuste au décalage d'indices). */
+
+/** Déplace la ligne `href` DANS le groupe `toGroup`, insérée AVANT `beforeHref`
+ *  (ou en fin de groupe si `beforeHref` est null). Pur ; no-op si href absent,
+ *  si le groupe cible n'existe pas, ou si on la lâche sur elle-même. */
+export function moveNavRowBefore(
+  state: NavEditGroup[], href: string, toGroup: string, beforeHref: string | null,
+): NavEditGroup[] {
+  if (href === beforeHref) return state;
+  let row: NavEditRow | null = null;
+  const without = state.map((g) => {
+    const found = g.rows.find((r) => r.href === href);
+    if (!found) return g;
+    row = found;
+    return { ...g, rows: g.rows.filter((r) => r.href !== href) };
+  });
+  if (!row || !state.some((g) => g.label === toGroup)) return state;
+  return without.map((g) => {
+    if (g.label !== toGroup) return g;
+    const rows = g.rows.slice();
+    const at = beforeHref ? rows.findIndex((r) => r.href === beforeHref) : -1;
+    rows.splice(at < 0 ? rows.length : at, 0, row!);
+    return { ...g, rows };
+  });
+}
+
+/** Échange les positions de deux lignes (même groupe ou groupes différents).
+ *  Pur ; no-op si l'une des deux est introuvable. « Remplace » = échange. */
+export function swapNavRows(state: NavEditGroup[], aHref: string, bHref: string): NavEditGroup[] {
+  if (aHref === bHref) return state;
+  const locate = (href: string) => {
+    for (let gi = 0; gi < state.length; gi++) {
+      const ri = state[gi].rows.findIndex((r) => r.href === href);
+      if (ri >= 0) return { gi, ri };
+    }
+    return null;
+  };
+  const a = locate(aHref), b = locate(bHref);
+  if (!a || !b) return state;
+  const next = state.map((g) => ({ ...g, rows: g.rows.slice() }));
+  const tmp = next[a.gi].rows[a.ri];
+  next[a.gi].rows[a.ri] = next[b.gi].rows[b.ri];
+  next[b.gi].rows[b.ri] = tmp;
+  return next;
+}
+
 /** Reconstruit les surcharges depuis l'état d'édition : ordre EXPLICITE pour
  *  toutes les entrées (déterministe), libellé/groupe seulement s'ils diffèrent. */
 export function fromEditState(state: NavEditGroup[]): NavOverrides {

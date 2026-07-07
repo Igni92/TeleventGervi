@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Fragment } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, Package, PackagePlus, Factory, Receipt, AlertTriangle,
   Home, Settings, PackageCheck, ClipboardCheck, ClipboardList, Truck, Eye, Store, PackageX,
-  Pencil, MoreVertical, ArrowUp, ArrowDown, Loader2, RotateCcw, CornerDownRight, ScrollText,
+  Pencil, MoreVertical, ArrowUp, ArrowDown, Loader2, RotateCcw, CornerDownRight, ScrollText, GripVertical,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -19,7 +19,7 @@ import { SignalLoader } from "@/components/ui/page-loader";
 import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
 import { navAllowedForPreview, PREVIEW_ROLE_LABELS } from "@/lib/rolePreview";
 import {
-  applyNavOverrides, toEditState, fromEditState,
+  applyNavOverrides, toEditState, fromEditState, moveNavRowBefore, swapNavRows,
   type NavOverrides, type NavEditGroup,
 } from "@/lib/navOverrides";
 import { SPRING } from "@/lib/motion";
@@ -213,6 +213,35 @@ function useBadges(): Record<string, number> {
   return badges;
 }
 
+/**
+ * Interstice de dépôt (mode ÉDITION nav) — rectangle en pointillé qui apparaît
+ * pendant un glisser et « s'allume » (grandit + accent brand) quand on le
+ * survole. Déposer ICI = INSÉRER la ligne à cette position. Rendu uniquement
+ * pendant un glisser (`show`) pour ne pas alourdir la barre au repos.
+ */
+function NavDropGap({
+  show, highlighted, onOver, onDrop,
+}: {
+  show: boolean;
+  highlighted: boolean;
+  onOver: () => void;
+  onDrop: () => void;
+}) {
+  if (!show) return null;
+  return (
+    <li
+      aria-hidden
+      onDragOver={(e) => { e.preventDefault(); onOver(); }}
+      onDrop={(e) => { e.preventDefault(); onDrop(); }}
+      className={`rounded-lg border border-dashed transition-all duration-150 ${
+        highlighted
+          ? "my-0.5 h-9 border-brand-400 bg-brand-500/15 shadow-[0_0_16px_hsl(var(--brand-500)/0.18)]"
+          : "h-2 border-white/20"
+      }`}
+    />
+  );
+}
+
 export function Sidebar() {
   const { data: session } = useSession();
   const pathname = usePathname();
@@ -241,6 +270,19 @@ export function Sidebar() {
   const [editingNav, setEditingNav] = useState(false);
   const [draft, setDraft] = useState<NavEditGroup[]>([]);
   const [savingNav, setSavingNav] = useState(false);
+  // Glisser-déposer natif du brouillon : href tiré + zone survolée (clé unique
+  // `gap:<groupe>:<avant>` pour un interstice, `row:<href>` pour une ligne).
+  const [dragHref, setDragHref] = useState<string | null>(null);
+  const [overKey, setOverKey] = useState<string | null>(null);
+  const endDrag = () => { setDragHref(null); setOverKey(null); };
+  const dropBefore = (toGroup: string, beforeHref: string | null) => {
+    if (dragHref) setDraft((cur) => moveNavRowBefore(cur, dragHref, toGroup, beforeHref));
+    endDrag();
+  };
+  const dropOnRow = (targetHref: string) => {
+    if (dragHref && dragHref !== targetHref) setDraft((cur) => swapNavRows(cur, dragHref, targetHref));
+    endDrag();
+  };
   const startEditNav = () => {
     setDraft(toEditState(NAV_GROUPS, navOverrides));
     setEditingNav(true);
@@ -418,50 +460,90 @@ export function Sidebar() {
               <ul className="space-y-1">
                 {group.rows.map((row, i) => {
                   const Icon = ICON_BY_HREF.get(row.href) ?? Radio;
+                  const dragging = dragHref === row.href;
+                  const swapTarget = overKey === `row:${row.href}` && !!dragHref && !dragging;
                   return (
-                    <li key={row.href} className="flex items-center gap-1.5">
-                      <Icon className="h-[18px] w-[18px] shrink-0 text-white/50" strokeWidth={1.8} />
-                      <input
-                        value={row.label}
-                        onChange={(e) => renameDraft(row.href, e.target.value)}
-                        placeholder={row.defaultLabel}
-                        aria-label={`Libellé de ${row.defaultLabel}`}
-                        className="min-w-0 flex-1 h-8 rounded-lg border border-white/15 bg-white/[0.06] px-2 text-[12px] text-white placeholder:text-white/35 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    <Fragment key={row.href}>
+                      {/* Interstice AVANT cette ligne — insérer ici. */}
+                      <NavDropGap
+                        show={!!dragHref}
+                        highlighted={overKey === `gap:${group.label}:${row.href}`}
+                        onOver={() => setOverKey(`gap:${group.label}:${row.href}`)}
+                        onDrop={() => dropBefore(group.label, row.href)}
                       />
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            title={`Déplacer « ${row.label.trim() || row.defaultLabel} »`}
-                            aria-label={`Déplacer ${row.defaultLabel}`}
-                            className="h-8 w-7 shrink-0 rounded-lg flex items-center justify-center text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
-                          >
-                            <MoreVertical className="h-3.5 w-3.5" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent side="right" align="start" className="w-56 rounded-xl border-white/[0.08] dark:border-white/[0.06] bg-white dark:bg-[#16181f] shadow-modal p-1">
-                          <DropdownMenuItem disabled={i === 0} onClick={() => moveDraft(row.href, -1)}
-                            className="cursor-pointer rounded-lg text-[13px] gap-2">
-                            <ArrowUp className="h-3.5 w-3.5" /> Monter
-                          </DropdownMenuItem>
-                          <DropdownMenuItem disabled={i === group.rows.length - 1} onClick={() => moveDraft(row.href, 1)}
-                            className="cursor-pointer rounded-lg text-[13px] gap-2">
-                            <ArrowDown className="h-3.5 w-3.5" /> Descendre
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator className="my-1 dark:bg-white/[0.06]" />
-                          {GROUP_LABELS.filter((l) => l !== group.label).map((l) => (
-                            <DropdownMenuItem key={l} onClick={() => regroupDraft(row.href, l)}
+                      <li
+                        onDragOver={(e) => {
+                          if (dragHref && !dragging) { e.preventDefault(); setOverKey(`row:${row.href}`); }
+                        }}
+                        onDrop={(e) => { e.preventDefault(); dropOnRow(row.href); }}
+                        className={`flex items-center gap-1 rounded-lg transition-all duration-150 ${
+                          dragging ? "opacity-40" : ""
+                        } ${
+                          swapTarget ? "ring-1 ring-brand-400 bg-brand-500/10" : ""
+                        }`}
+                      >
+                        {/* Poignée de glissement — seule source du drag (l'input reste éditable). */}
+                        <span
+                          draggable
+                          onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setDragHref(row.href); }}
+                          onDragEnd={endDrag}
+                          title="Glisser pour déplacer"
+                          aria-label={`Déplacer ${row.defaultLabel}`}
+                          className="shrink-0 h-8 w-4 flex items-center justify-center cursor-grab active:cursor-grabbing text-white/30 hover:text-white/70 transition-colors"
+                        >
+                          <GripVertical className="h-4 w-4" />
+                        </span>
+                        <Icon className="h-[18px] w-[18px] shrink-0 text-white/50" strokeWidth={1.8} />
+                        <input
+                          value={row.label}
+                          onChange={(e) => renameDraft(row.href, e.target.value)}
+                          placeholder={row.defaultLabel}
+                          aria-label={`Libellé de ${row.defaultLabel}`}
+                          className="min-w-0 flex-1 h-8 rounded-lg border border-white/15 bg-white/[0.06] px-2 text-[12px] text-white placeholder:text-white/35 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        />
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              title={`Déplacer « ${row.label.trim() || row.defaultLabel} »`}
+                              aria-label={`Déplacer ${row.defaultLabel}`}
+                              className="h-8 w-7 shrink-0 rounded-lg flex items-center justify-center text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
+                            >
+                              <MoreVertical className="h-3.5 w-3.5" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent side="right" align="start" className="w-56 rounded-xl border-white/[0.08] dark:border-white/[0.06] bg-white dark:bg-[#16181f] shadow-modal p-1">
+                            <DropdownMenuItem disabled={i === 0} onClick={() => moveDraft(row.href, -1)}
                               className="cursor-pointer rounded-lg text-[13px] gap-2">
-                              <CornerDownRight className="h-3.5 w-3.5" /> Déplacer vers {l}
+                              <ArrowUp className="h-3.5 w-3.5" /> Monter
                             </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </li>
+                            <DropdownMenuItem disabled={i === group.rows.length - 1} onClick={() => moveDraft(row.href, 1)}
+                              className="cursor-pointer rounded-lg text-[13px] gap-2">
+                              <ArrowDown className="h-3.5 w-3.5" /> Descendre
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator className="my-1 dark:bg-white/[0.06]" />
+                            {GROUP_LABELS.filter((l) => l !== group.label).map((l) => (
+                              <DropdownMenuItem key={l} onClick={() => regroupDraft(row.href, l)}
+                                className="cursor-pointer rounded-lg text-[13px] gap-2">
+                                <CornerDownRight className="h-3.5 w-3.5" /> Déplacer vers {l}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </li>
+                    </Fragment>
                   );
                 })}
-                {group.rows.length === 0 && (
-                  <li className="px-2 py-1 text-[11px] italic text-white/35">Zone vide — elle disparaît de la barre.</li>
+                {/* Interstice de FIN — déposer ici = ajouter à la fin du groupe
+                    (et seule zone de dépôt d'un groupe vidé). */}
+                <NavDropGap
+                  show={!!dragHref}
+                  highlighted={overKey === `gap:${group.label}:end`}
+                  onOver={() => setOverKey(`gap:${group.label}:end`)}
+                  onDrop={() => dropBefore(group.label, null)}
+                />
+                {group.rows.length === 0 && !dragHref && (
+                  <li className="px-2 py-1 text-[11px] italic text-white/35">Zone vide — dépose une entrée ici.</li>
                 )}
               </ul>
             </div>

@@ -40,6 +40,37 @@ function loadPrefs(key: string): Prefs | null {
   return null;
 }
 
+/**
+ * Zone de dépôt en pointillé (mode ÉDITION fiche) — rectangle qui apparaît
+ * pendant un glisser et « s'allume » (grandit + accent brand) au survol.
+ * Déposer ICI = INSÉRER le bloc à cette position. Verticale (avant un bloc,
+ * dans la mosaïque) ou horizontale (`horizontal`, fin de mosaïque).
+ */
+function FicheDropStrip({
+  show, highlighted, horizontal, onOver, onDrop,
+}: {
+  show: boolean;
+  highlighted: boolean;
+  horizontal?: boolean;
+  onOver: () => void;
+  onDrop: () => void;
+}) {
+  if (!show) return null;
+  const size = horizontal
+    ? (highlighted ? "h-16 border-brand-500 bg-brand-500/10" : "h-6 border-border")
+    : (highlighted ? "w-16 border-brand-500 bg-brand-500/10" : "w-3 border-border");
+  return (
+    <div
+      aria-hidden
+      onDragOver={(e) => { e.preventDefault(); onOver(); }}
+      onDrop={(e) => { e.preventDefault(); onDrop(); }}
+      className={`${horizontal ? "" : "self-stretch"} shrink-0 rounded-xl border-2 border-dashed transition-all duration-150 ${
+        highlighted ? "shadow-[0_0_18px_hsl(var(--brand-500)/0.18)]" : ""
+      } ${size}`}
+    />
+  );
+}
+
 export function ReorderableSections({ storageKey, sections }: { storageKey: string; sections: FicheSection[] }) {
   const defaultOrder = useMemo(() => sections.map((s) => s.id), [sections]);
   const defaultWide = useMemo(() => sections.filter((s) => s.wide).map((s) => s.id), [sections]);
@@ -79,17 +110,28 @@ export function ReorderableSections({ storageKey, sections }: { storageKey: stri
   const byId = useMemo(() => new Map(sections.map((s) => [s.id, s])), [sections]);
   const labelOf = (id: string) => (labels[id] ?? byId.get(id)?.label ?? "");
 
-  const move = (from: string, to: string) => {
-    if (from === to) return;
-    const next = [...order];
-    const fi = next.indexOf(from);
-    const ti = next.indexOf(to);
-    if (fi < 0 || ti < 0) return;
-    next.splice(fi, 1);
-    next.splice(next.indexOf(to) + (fi < ti ? 1 : 0), 0, from);
+  // INSÉRER `from` avant `before` (ou en fin si `before` = null) — geste
+  // « entre deux blocs ». ÉCHANGER deux blocs — geste « déposer sur un bloc ».
+  const moveBefore = (from: string, before: string | null) => {
+    if (from === before) return;
+    const next = order.filter((x) => x !== from);
+    if (next.length === order.length) return; // `from` inconnu
+    const at = before ? next.indexOf(before) : -1;
+    next.splice(at < 0 ? next.length : at, 0, from);
     setOrder(next);
     persist(next, hidden, labels, wide);
   };
+  const swap = (a: string, b: string) => {
+    if (a === b) return;
+    const next = [...order];
+    const ai = next.indexOf(a), bi = next.indexOf(b);
+    if (ai < 0 || bi < 0) return;
+    [next[ai], next[bi]] = [next[bi], next[ai]];
+    setOrder(next);
+    persist(next, hidden, labels, wide);
+  };
+  // Fin d'un glisser : réordonne selon la zone survolée, puis nettoie l'état.
+  const endDrag = () => { setDragId(null); setOverId(null); };
 
   const toggleHide = (id: string) => {
     const next = new Set(hidden);
@@ -178,50 +220,78 @@ export function ReorderableSections({ storageKey, sections }: { storageKey: stri
             );
           }
 
-          // Mode édition : poignée + libellé éditable + largeur + œil.
+          // Mode édition : zone d'insertion (gauche) + bloc (poignée + libellé
+          // éditable + largeur + œil). Déposer SUR le bloc = échange ; déposer
+          // sur la zone en pointillé = insertion à cette place.
+          const dragging = dragId === id;
+          const swapTarget = overId === `swap:${id}` && !!dragId && !dragging;
           return (
-            <div
-              key={id}
-              className={spanClass}
-            >
-              <div
-                draggable
-                onDragStart={() => setDragId(id)}
-                onDragEnd={() => { setDragId(null); setOverId(null); }}
-                onDragOver={(e) => { e.preventDefault(); if (overId !== id) setOverId(id); }}
-                onDrop={(e) => { e.preventDefault(); if (dragId) move(dragId, id); setOverId(null); }}
-                className={`relative rounded-xl transition-all ${dragId === id ? "opacity-40" : ""} ${overId === id && dragId !== id ? "ring-2 ring-brand-500 ring-offset-2 ring-offset-background" : ""}`}
-              >
-                <div className="flex items-center gap-2 mb-2 px-1">
-                  <GripVertical className="h-4 w-4 shrink-0 text-muted-foreground cursor-grab active:cursor-grabbing" />
-                  <input
-                    value={labelOf(id)}
-                    onChange={(e) => rename(id, e.target.value)}
-                    onDragStart={(e) => e.preventDefault()}
-                    draggable={false}
-                    aria-label={`Renommer ${section.label}`}
-                    className="flex-1 min-w-0 h-8 px-2 rounded-md border border-border bg-background text-[13px] font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  />
-                  <button
-                    type="button" onClick={() => toggleWide(id)}
-                    title={isWide ? "Réduire en colonne" : "Pleine largeur"}
-                    className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-                  >
-                    {isWide ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-                  </button>
-                  <button
-                    type="button" onClick={() => toggleHide(id)}
-                    title={isHidden ? "Afficher" : "Masquer"}
-                    className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-                  >
-                    {isHidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
+            <div key={id} className={spanClass}>
+              <div className="flex items-stretch gap-1.5">
+                {/* Zone d'insertion AVANT ce bloc (pas sur le bloc tiré). */}
+                <FicheDropStrip
+                  show={!!dragId && !dragging}
+                  highlighted={overId === `before:${id}`}
+                  onOver={() => setOverId(`before:${id}`)}
+                  onDrop={() => { if (dragId) moveBefore(dragId, id); endDrag(); }}
+                />
+                <div
+                  onDragOver={(e) => { if (dragId && !dragging) { e.preventDefault(); setOverId(`swap:${id}`); } }}
+                  onDrop={(e) => { e.preventDefault(); if (dragId && !dragging) swap(dragId, id); endDrag(); }}
+                  className={`relative min-w-0 flex-1 rounded-xl transition-all duration-150 ${dragging ? "opacity-40" : ""} ${
+                    swapTarget ? "ring-2 ring-brand-500 ring-offset-2 ring-offset-background" : ""
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-2 px-1">
+                    <span
+                      draggable
+                      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setDragId(id); }}
+                      onDragEnd={endDrag}
+                      title="Glisser pour déplacer"
+                      aria-label={`Déplacer ${section.label}`}
+                      className="shrink-0 inline-flex h-8 items-center text-muted-foreground cursor-grab active:cursor-grabbing hover:text-foreground"
+                    >
+                      <GripVertical className="h-4 w-4" />
+                    </span>
+                    <input
+                      value={labelOf(id)}
+                      onChange={(e) => rename(id, e.target.value)}
+                      aria-label={`Renommer ${section.label}`}
+                      className="flex-1 min-w-0 h-8 px-2 rounded-md border border-border bg-background text-[13px] font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    />
+                    <button
+                      type="button" onClick={() => toggleWide(id)}
+                      title={isWide ? "Réduire en colonne" : "Pleine largeur"}
+                      className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                    >
+                      {isWide ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                    </button>
+                    <button
+                      type="button" onClick={() => toggleHide(id)}
+                      title={isHidden ? "Afficher" : "Masquer"}
+                      className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                    >
+                      {isHidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  <div className={isHidden ? "opacity-40 pointer-events-none" : ""}>{section.node}</div>
                 </div>
-                <div className={isHidden ? "opacity-40 pointer-events-none" : ""}>{section.node}</div>
               </div>
             </div>
           );
         })}
+        {/* Zone d'insertion de FIN — déposer ici = placer le bloc en dernier. */}
+        {editing && dragId && (
+          <div className="col-span-full">
+            <FicheDropStrip
+              horizontal
+              show
+              highlighted={overId === "before:end"}
+              onOver={() => setOverId("before:end")}
+              onDrop={() => { moveBefore(dragId, null); endDrag(); }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
