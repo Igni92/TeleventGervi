@@ -273,3 +273,11 @@ livraison, à faire **signer au chauffeur** — et envoyable par mail.
 |---------|--------|
 | Heures d'état conservées | Chaque clic « Fait » / « Départ » garde son **heure** (le `at` AppSetting, désormais exposé par l'API et renvoyé par les POST). Affichée sur le bon : badges de ligne « Fait par X · 14:32 », « Parti · 14:32 » et chips de la vue en grand (préfixe jj/mm si autre jour). Mises à jour optimistes, y compris en action groupée. |
 | Recherche d'un bon | Champ 🔍 à côté des onglets : filtre par **n° de BL, client (nom / nom complet / code) ou réf. client**, insensible aux accents. S'applique avant les onglets (compteurs recalculés), **déplie tout** pendant la recherche, Échap/✕ pour effacer, état vide dédié. |
+
+## 📦 Détail livraison — signaler un manquant en remettant sur la file (NOUVEAU)
+
+| Élément | Détail |
+|---------|--------|
+| Remise sur la file avec signalement | Le bouton **« Pas terminée — remettre sur la file »** (vue en grand) ouvre désormais un dialog où le préparateur **touche les articles manquants** (facultatif) avant de renvoyer la commande « à préparer ». Les codes signalés sont persistés avec l'état « à reprendre » (`livincomplete:` étendu de `missing[]`, exposé par l'API en `reportedMissing`). |
+| Optimisé mobile / tablette | Dialog `max-h-[92vh]` défilant, lignes en **grandes cibles tactiles** (case à cocher 24 px + colisage + article), boutons d'action **empilés pleine largeur** sur petit écran (h-11), toast récapitulatif (« N manquant(s) signalé(s) »). |
+| Restitution | Badge ambre **« N signalé(s) »** sur la ligne commande (à côté de « À reprendre »), articles marqués **« Signalé manquant »** (fond ambre) dans le détail et la vue en grand. Signalement levé automatiquement quand la commande est reprise (claim), marquée « faite » ou « départ ». |

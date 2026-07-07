@@ -13,13 +13,14 @@ export const dynamic = "force-dynamic";
  *               Lève le signalement « incomplète ».
  *   - requeue : commande PAS entièrement préparée → on la remet sur la file
  *               (préparateur retiré, non « faite ») et on la SIGNALE (incomplète).
+ *               `missing` (facultatif) = codes articles signalés manquants.
  *   - release : retire simplement l'affectation.
  */
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  let body: { docEntry?: number; action?: string };
+  let body: { docEntry?: number; action?: string; missing?: unknown };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -33,11 +34,15 @@ export async function POST(req: NextRequest) {
       // Pas entièrement préparée → retour sur la file + notification. On lève
       // aussi le « départ » (une commande remise sur la file n'est plus partie),
       // sinon elle resterait classée « Départ » au prochain rechargement.
+      // `missing` = codes articles signalés manquants par le préparateur (facultatif).
+      const missing = Array.isArray(body.missing)
+        ? [...new Set(body.missing.filter((c): c is string => typeof c === "string" && c.trim() !== "").map((c) => c.trim()))]
+        : [];
       await setDeliveryPreparer(docEntry, null);
       await setDeliveryPrepared(docEntry, false, me);
       await setDeliveryDeparted(docEntry, false, me);
-      await setDeliveryIncomplete(docEntry, true, me);
-      return NextResponse.json({ ok: true, docEntry, preparer: null, incomplete: true, prepared: false, departed: false });
+      await setDeliveryIncomplete(docEntry, true, me, missing);
+      return NextResponse.json({ ok: true, docEntry, preparer: null, incomplete: true, prepared: false, departed: false, reportedMissing: missing });
     }
     if (body.action === "release") {
       await setDeliveryPreparer(docEntry, null);

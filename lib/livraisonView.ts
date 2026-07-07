@@ -58,6 +58,7 @@ export interface Doc {
   departedAt?: string | null;  // heure (ISO) du clic « départ »
   preparer?: string | null;    // préparateur affecté (qui a ouvert la commande)
   incomplete?: boolean;        // « à reprendre » — remise sur la file (pas finie)
+  reportedMissing?: string[];  // articles SIGNALÉS manquants par le préparateur (remise sur la file)
   misEnPrep?: boolean;         // « mis en préparation » par le commercial (Ventes du jour)
   misEnPrepBy?: string | null; // qui a lâché le magasin en préparation
   misEnPrepAt?: string | null; // heure (ISO) de la mise en préparation
