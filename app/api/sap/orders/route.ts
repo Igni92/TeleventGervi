@@ -15,6 +15,8 @@ import { getEmAffects } from "@/lib/emAffect";
 import { createBonPrep, markBonPrepTransformed } from "@/lib/bonPrep";
 import { chooseLot } from "@/lib/gervifrais-calc";
 import { colisInfo } from "@/lib/colis";
+import { isPrecommande } from "@/lib/livraison";
+import { setDeliveryBonCommande } from "@/lib/inventory";
 
 /**
  * Cache module-level du référentiel AdditionalExpenses SAP.
@@ -91,6 +93,10 @@ interface CreateOrderBody {
   comments?: string;            // prioritaire sur comment → SAP Comments (mention des promos)
   numAtCard?: string;           // N° de commande client → SAP NumAtCard
   confirmEncours?: boolean;     // true = forcer malgré encours dépassé
+  /** « BL » (défaut, auto-lot) ou « COMMANDE » (bon de commande : AUCUN auto-lot,
+   *  lots affectés à la main dans l'onglet Bons de commande). Une précommande
+   *  (date au-delà du prochain jour livrable) force « COMMANDE » quel que soit ce champ. */
+  docKind?: "BL" | "COMMANDE";
   /** Transformation d'un BON DE PRÉPARATION (export) : présent = créer le BL
    *  pour de vrai (lots posés par ligne) et marquer le bon transformé — le
    *  divert « client EXPORT → bon de préparation » est alors court-circuité. */
@@ -351,6 +357,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ── BON DE COMMANDE / PRÉCOMMANDE : aucun auto-lot ──
+  // Choix explicite (docKind="COMMANDE") OU précommande (livraison au-delà du
+  // prochain jour livrable). Exclut la transformation d'un bon de préparation
+  // export (bonPrepId) : là, les lots sont déjà affectés à la main. Ces commandes
+  // partent en EM_PENDING sur CHAQUE ligne — on ne colle plus un lot pas en stock —
+  // et sont marquées pour remonter dans l'onglet « Bons de commande ».
+  const isBonCommande = !body.bonPrepId && (body.docKind === "COMMANDE" || isPrecommande(body.deliveryDate));
+
   const documentLines: Record<string, unknown>[] = [];
   let totalNetKgPre = 0;
   let estimatedHTPre = 0;
@@ -401,6 +415,15 @@ export async function POST(req: NextRequest) {
       if (itfelAmt > 0) lineExpenses.push({ GroupCode: 1, ExpenseCode: 2, LineTotal: itfelAmt });
       if (ddgAmt   > 0) lineExpenses.push({ GroupCode: 2, ExpenseCode: 3, LineTotal: ddgAmt });
       if (lineExpenses.length > 0) line.DocumentLineAdditionalExpenses = lineExpenses;
+    }
+
+    // === Bon de commande / précommande : lot EN ATTENTE (affectation manuelle) ===
+    // On NE résout AUCUN lot ici (fini les lots pas en stock) : chaque ligne part
+    // en EM_PENDING et sera affectée depuis l'onglet « Bons de commande ».
+    if (isBonCommande) {
+      line.U_NoLot = LOT_PENDING;
+      documentLines.push(line);
+      continue;
     }
 
     // === Numéro de lot (U_NoLot) — SYSTÉMATIQUE sur chaque ligne ===
@@ -628,6 +651,17 @@ export async function POST(req: NextRequest) {
     const created = await sap.post<SapOrder>("/Orders", payload);
 
     console.log("[Order] ✅ SUCCESS — DocNum:", created.DocNum, "| DocEntry:", created.DocEntry, "| Total:", created.DocTotal);
+
+    // Marque « bon de commande » (lots à affecter dans l'onglet dédié) — non bloquant.
+    if (isBonCommande) {
+      try {
+        const meName = session.user?.name?.trim() || session.user?.email || "?";
+        await setDeliveryBonCommande(created.DocEntry, true, meName);
+        console.log(`[Order] Commande #${created.DocNum} marquée « bon de commande » (lots à affecter)`);
+      } catch (e) {
+        console.warn("[Order] Marquage bon de commande échoué (non-bloquant):", (e as Error).message);
+      }
+    }
 
     // Mémorise (best-effort) la tournée CHOISIE à la création pour ce client —
     // même mécanique que le PATCH « Détail livraison » : ré-appliquée en

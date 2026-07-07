@@ -21,7 +21,7 @@ import {
   BadgeEuro, ChevronDown, Loader2, Minus, Plus, Search, ShoppingCart, Star, Trash2, Truck, X,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, unitInfo } from "@/lib/gervifrais-calc";
-import { nextDeliveryDate, nextWorkingDeliveryDay } from "@/lib/livraison";
+import { nextDeliveryDate, nextWorkingDeliveryDay, isPrecommande } from "@/lib/livraison";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
 
@@ -221,6 +221,11 @@ function OrderBuilder({ client }: { client: SearchClient }) {
   // Défaut = prochaine livraison POSSIBLE (J+1 / samedi → lundi, en sautant les
   // dimanches ET jours fériés).
   const [deliveryDate, setDeliveryDate] = useState(nextWorkingDeliveryDay(nextDeliveryDate()));
+  // « Bon de commande » : aucun auto-lot (lots affectés ensuite). Coché à la main
+  // ou forcé quand la livraison est une précommande.
+  const [bonCommandeManual, setBonCommandeManual] = useState(false);
+  const precommande = isPrecommande(deliveryDate);
+  const isBonCommande = precommande || bonCommandeManual;
   const [numAtCard, setNumAtCard] = useState("");
   const [comments, setComments] = useState("");
   const [modes, setModes] = useState<DeliveryMode[]>([]);
@@ -421,6 +426,7 @@ function OrderBuilder({ client }: { client: SearchClient }) {
             numAtCard: numAtCard.trim() || undefined,
             comments: comments.trim() || undefined,
             confirmEncours,
+            docKind: isBonCommande ? "COMMANDE" : "BL",
             lines: buildApiLines(),
           }),
         });
@@ -590,6 +596,20 @@ function OrderBuilder({ client }: { client: SearchClient }) {
                 </select>
               </label>
             )}
+            {/* Bon de commande — aucun auto-lot ; lots affectés ensuite. Forcé si précommande. */}
+            <label
+              className={`flex items-center gap-2.5 rounded-lg border px-3 h-11 text-[13px] select-none ${precommande ? "cursor-default" : "cursor-pointer"} ${
+                isBonCommande ? "border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300" : "border-border text-muted-foreground"
+              }`}
+            >
+              <input type="checkbox" checked={isBonCommande} disabled={precommande}
+                onChange={(e) => setBonCommandeManual(e.target.checked)}
+                className="h-4 w-4 accent-amber-600" />
+              <span className="font-semibold">Bon de commande</span>
+              <span className="text-[11px] opacity-80 truncate">
+                {precommande ? "· précommande" : "· lots affectés plus tard"}
+              </span>
+            </label>
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
                 <span className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Transporteur</span>

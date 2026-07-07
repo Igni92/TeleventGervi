@@ -1,0 +1,250 @@
+"use client";
+
+/**
+ * ONGLET « BONS DE COMMANDE » — affectation MANUELLE des lots.
+ *
+ * Les commandes créées en « bon de commande » (choix explicite, précommande, ou
+ * export) partent SANS lot auto : chaque ligne est en EM_PENDING. Ici on choisit,
+ * par article, le lot (arrivage EM) réellement en stock → PATCH U_NoLot sur la
+ * commande SAP. Quand toutes les lignes ont un lot, la commande sort de l'onglet.
+ */
+import { useCallback, useEffect, useState } from "react";
+import {
+  PackageCheck, ChevronDown, RefreshCw, Loader2, CheckCircle2, Sparkles,
+  CalendarDays, AlertTriangle,
+} from "lucide-react";
+import { toast } from "sonner";
+import { formatDeliveryDate } from "@/lib/livraison";
+import { displayPersonName } from "@/lib/userNames";
+import { DesignationChips } from "@/components/entrees/DesignationChips";
+
+interface LotCandidate { lot: string; docNum: number; warehouse: string | null; affect: string }
+interface BonLine {
+  itemCode: string; itemName: string; quantity: number; colis: number;
+  warehouse: string | null; marque: string | null; condt: string | null; pays: string | null;
+  lot: string; pending: boolean; candidates: LotCandidate[]; suggested: string | null;
+}
+interface BonDoc {
+  docEntry: number; docNum: number; cardCode: string; cardName: string;
+  clientType: string | null; dueDate: string | null; docDate: string | null; open: boolean;
+  markedBy: string | null; markedAt: string | null; pendingCount: number; lines: BonLine[];
+}
+
+const AFFECT_LABEL: Record<string, string> = { TOUS: "Tous", EXPORT: "Export", GMS: "GMS", CHR: "CHR" };
+const PENDING = "EM_PENDING";
+const SEG_BADGE: Record<string, string> = {
+  CHR: "bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
+  GMS: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+  EXPORT: "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300",
+};
+
+export function BonsCommandePanel() {
+  const [docs, setDocs] = useState<BonDoc[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+  const [busyLine, setBusyLine] = useState<string | null>(null); // `${docEntry}:${itemCode}`
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch("/api/bons-commande", { cache: "no-store" });
+      const j = await r.json().catch(() => null);
+      setDocs(j?.ok ? (j.docs ?? []) : []);
+    } catch {
+      setDocs((prev) => prev ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Affecte un lot à toutes les lignes d'un article d'une commande (PATCH SAP).
+  const assignLot = useCallback(async (doc: BonDoc, itemCode: string, lot: string): Promise<boolean> => {
+    if (!lot) return false;
+    const key = `${doc.docEntry}:${itemCode}`;
+    setBusyLine(key);
+    // Optimiste : la ligne prend le lot ; « pending » si on repose EM_PENDING.
+    setDocs((prev) => prev?.map((d) => {
+      if (d.docEntry !== doc.docEntry) return d;
+      const lines = d.lines.map((l) => l.itemCode === itemCode ? { ...l, lot, pending: lot === PENDING } : l);
+      return { ...d, lines, pendingCount: lines.filter((l) => l.pending).length };
+    }) ?? prev);
+    try {
+      const r = await fetch("/api/bons-commande", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: doc.docEntry, itemCode, lot }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) { toast.error(j?.error || "Échec de l'affectation du lot"); load(); return false; }
+      if (j.cleared) {
+        // Toutes les lignes affectées → la commande quitte l'onglet.
+        setDocs((prev) => prev?.filter((d) => d.docEntry !== doc.docEntry) ?? prev);
+        toast.success(`✅ Commande #${doc.docNum} — tous les lots affectés`);
+      }
+      return true;
+    } catch {
+      toast.error("SAP injoignable — lot non enregistré"); load(); return false;
+    } finally {
+      setBusyLine(null);
+    }
+  }, [load]);
+
+  // Remplit toutes les lignes en attente avec la suggestion (EM du segment, sinon à découvert).
+  const suggestAll = useCallback(async (doc: BonDoc) => {
+    const pend = doc.lines.filter((l) => l.pending);
+    for (const l of pend) {
+      const ok = await assignLot(doc, l.itemCode, l.suggested ?? PENDING);
+      if (!ok) break;
+    }
+  }, [assignLot]);
+
+  const count = docs?.length ?? 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[12.5px] text-muted-foreground">
+          {docs === null ? "Chargement…"
+            : count === 0 ? "Aucune commande en attente de lot."
+            : `${count} commande${count > 1 ? "s" : ""} à traiter : choisis, par article, le lot réellement en stock.`}
+        </p>
+        <button
+          type="button"
+          onClick={load}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border bg-card text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60 shrink-0"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+          Actualiser
+        </button>
+      </div>
+
+      {docs !== null && count === 0 && (
+        <div className="flex flex-col items-center justify-center text-center rounded-2xl border border-dashed border-border bg-card py-14 px-6">
+          <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 mb-3">
+            <CheckCircle2 className="h-6 w-6" strokeWidth={1.8} />
+          </span>
+          <p className="text-[14px] font-semibold text-foreground">Tous les lots sont affectés</p>
+          <p className="text-[12.5px] text-muted-foreground mt-1 max-w-sm">
+            Les bons de commande (précommandes, export, choix manuel) apparaissent ici tant qu&apos;il reste
+            un lot à affecter. Rien en attente pour l&apos;instant.
+          </p>
+        </div>
+      )}
+
+      {(docs ?? []).map((doc) => {
+        const isCollapsed = collapsed.has(doc.docEntry);
+        const missing = doc.pendingCount;
+        const ready = missing === 0;
+        return (
+          <section key={doc.docEntry} className="rounded-2xl border border-border bg-card overflow-hidden">
+            <div
+              role="button" tabIndex={0}
+              onClick={() => setCollapsed((prev) => {
+                const next = new Set(prev);
+                if (next.has(doc.docEntry)) next.delete(doc.docEntry); else next.add(doc.docEntry);
+                return next;
+              })}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); (e.currentTarget as HTMLElement).click(); } }}
+              className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 bg-secondary/20 hover:bg-secondary/40 cursor-pointer select-none transition-colors"
+            >
+              <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                <ChevronDown className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
+                <span className="text-[14.5px] sm:text-[13.5px] font-semibold text-foreground truncate">{doc.cardName}</span>
+                {doc.clientType && SEG_BADGE[doc.clientType] && (
+                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEG_BADGE[doc.clientType]}`}>
+                    {doc.clientType}
+                  </span>
+                )}
+                <span className="text-[11px] text-muted-foreground">BL n°{doc.docNum}</span>
+                {doc.dueDate && (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <CalendarDays className="h-3 w-3" /> {formatDeliveryDate(doc.dueDate)}
+                  </span>
+                )}
+              </div>
+              <span className={`shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                ready ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+              }`}>
+                {ready ? <><CheckCircle2 className="h-3 w-3" /> Lots complets</> : `${missing} lot${missing > 1 ? "s" : ""} à affecter`}
+              </span>
+            </div>
+
+            {!isCollapsed && (
+              <div className="px-4 sm:px-5 py-3 space-y-3">
+                <ul className="divide-y divide-border/50 rounded-xl border border-border overflow-hidden">
+                  {doc.lines.map((l) => {
+                    const key = `${doc.docEntry}:${l.itemCode}`;
+                    const isBusy = busyLine === key;
+                    const current = l.pending ? "" : l.lot;
+                    const opts = l.candidates ?? [];
+                    const hasCurrent = !current || opts.some((c) => c.lot === current);
+                    return (
+                      <li key={l.itemCode} className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-2.5">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline gap-2 flex-wrap">
+                            <span className="text-[14px] sm:text-[13px] font-semibold sm:font-medium text-foreground truncate">{l.itemName}</span>
+                            <span className="text-[11.5px] text-muted-foreground tnum shrink-0">
+                              {l.colis} colis{l.warehouse ? ` · mag. ${l.warehouse}` : ""}
+                            </span>
+                          </div>
+                          <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} size="md" className="mt-1" />
+                        </div>
+                        <div className="shrink-0 sm:w-[320px] flex items-center gap-2">
+                          {l.pending
+                            ? <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+                            : <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />}
+                          <select
+                            value={current}
+                            disabled={isBusy}
+                            onChange={(e) => assignLot(doc, l.itemCode, e.target.value)}
+                            aria-label={`Lot de ${l.itemName}`}
+                            className={`h-11 sm:h-9 w-full rounded-lg border bg-card px-2.5 text-[13px] sm:text-[12.5px] font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60 cursor-pointer ${
+                              l.pending ? "border-amber-400/60 text-amber-700 dark:text-amber-300" : "border-border text-foreground"
+                            }`}
+                          >
+                            <option value="">Choisir le lot…</option>
+                            {l.suggested && <option value={l.suggested}>★ {l.suggested} (suggéré)</option>}
+                            {opts.filter((c) => c.lot !== l.suggested).map((c) => (
+                              <option key={c.lot} value={c.lot}>
+                                {c.lot} · {AFFECT_LABEL[c.affect] ?? c.affect}{c.warehouse ? ` · mag. ${c.warehouse}` : ""}
+                              </option>
+                            ))}
+                            {!hasCurrent && current && <option value={current}>{current}</option>}
+                            <option value={PENDING}>À découvert — arrivage à venir ({PENDING})</option>
+                          </select>
+                          {isBusy && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => suggestAll(doc)}
+                    disabled={ready || busyLine !== null}
+                    title="Affecter la suggestion (arrivage du segment, sinon à découvert) à chaque ligne en attente"
+                    className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
+                  >
+                    <Sparkles className="h-4 w-4" /> Suggérer les lots
+                  </button>
+                  {doc.markedBy && (
+                    <span className="text-[11px] text-muted-foreground ml-auto">Créé par {displayPersonName(doc.markedBy)}</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+        );
+      })}
+
+      {docs === null && (
+        <div className="flex items-center gap-2 px-5 py-4 text-[13px] text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Chargement des bons de commande…
+        </div>
+      )}
+    </div>
+  );
+}

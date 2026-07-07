@@ -9,7 +9,7 @@ import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, Package, PackagePlus, Factory, Receipt, AlertTriangle,
   Home, Settings, PackageCheck, ClipboardCheck, ClipboardList, Truck, Eye, Store, PackageX,
-  Pencil, MoreVertical, ArrowUp, ArrowDown, Loader2, RotateCcw, CornerDownRight,
+  Pencil, MoreVertical, ArrowUp, ArrowDown, Loader2, RotateCcw, CornerDownRight, ScrollText,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -94,6 +94,7 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
     items: [
       { href: "/livraisons", label: "Préparation livraisons", icon: Truck },
       { href: "/preparations", label: "Préparations à faire", icon: ClipboardList },
+      { href: "/bons-commande", label: "Bons de commande", icon: ScrollText },
       { href: "/manquants", label: "Manquants", icon: PackageX },
       { href: "/products", label: "Stock", icon: Package },
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },

@@ -137,6 +137,30 @@ export function nextWorkingDeliveryDay(iso: string): string {
   return cur;
 }
 
+/**
+ * Prochain jour RÉELLEMENT livrable à partir de `ref` : J+1 (samedi → lundi),
+ * puis saut des dimanches ET jours fériés. C'est la date d'une livraison
+ * « normale » (BL) — le cœur de la distinction BL / précommande.
+ */
+export function nextPossibleDeliveryDay(ref: Date = new Date()): string {
+  return nextWorkingDeliveryDay(nextDeliveryDate(ref));
+}
+
+/**
+ * Une livraison est une PRÉCOMMANDE si elle tombe APRÈS le prochain jour
+ * livrable (marchandise pas encore là) : concrètement J+2, ou J+3 si J+2 est un
+ * dimanche/férié, J+4 si deux jours bloqués — c.-à-d. STRICTEMENT au-delà du
+ * prochain jour livrable renvoyé par `nextPossibleDeliveryDay`.
+ *
+ * `deliveryISO` peut être une date « YYYY-MM-DD » ou un datetime ISO (on ne
+ * compare que la partie date, en comparaison lexicographique — valide en ISO).
+ */
+export function isPrecommande(deliveryISO: string, ref: Date = new Date()): boolean {
+  const d = (deliveryISO || "").slice(0, 10);
+  if (d.length !== 10) return false;
+  return d > nextPossibleDeliveryDay(ref);
+}
+
 /** Libellé long lisible, ex. « jeudi 25 juin 2026 » (capitalisable côté UI). */
 export function formatDeliveryDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);

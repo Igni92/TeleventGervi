@@ -6,6 +6,8 @@ import {
   frenchHolidayLabel,
   isNonDeliveryDay,
   nextWorkingDeliveryDay,
+  nextPossibleDeliveryDay,
+  isPrecommande,
 } from "./livraison";
 
 describe("livraison — prochaine date de livraison (J+1, samedi → J+2)", () => {
@@ -92,5 +94,36 @@ describe("livraison — report sur jour ouvré", () => {
 
   it("laisse inchangé un jour déjà ouvré", () => {
     expect(nextWorkingDeliveryDay("2026-06-17")).toBe("2026-06-17");
+  });
+});
+
+describe("livraison — précommande (livraison au-delà du prochain jour livrable)", () => {
+  it("mardi : livraison mercredi (J+1) = NORMAL, jeudi = PRÉCOMMANDE", () => {
+    const ref = new Date("2026-06-16T09:00:00Z"); // mardi
+    expect(nextPossibleDeliveryDay(ref)).toBe("2026-06-17"); // mercredi
+    expect(isPrecommande("2026-06-17", ref)).toBe(false);    // J+1 → BL normal
+    expect(isPrecommande("2026-06-18", ref)).toBe(true);     // J+2 → précommande
+  });
+
+  it("samedi : prochaine livraison lundi = NORMAL, mardi = PRÉCOMMANDE", () => {
+    const ref = new Date("2026-06-20T09:00:00Z"); // samedi
+    expect(nextPossibleDeliveryDay(ref)).toBe("2026-06-22"); // lundi (saute dimanche)
+    expect(isPrecommande("2026-06-22", ref)).toBe(false);
+    expect(isPrecommande("2026-06-23", ref)).toBe(true);
+  });
+
+  it("veille d'un férié : le J+1 férié est sauté → prochaine livraison = jour ouvré suivant", () => {
+    // Lundi 13/07/2026 : J+1 = mardi 14 (Fête nationale, férié) → sauté → mercredi 15.
+    const ref = new Date("2026-07-13T09:00:00Z");
+    expect(nextPossibleDeliveryDay(ref)).toBe("2026-07-15");
+    expect(isPrecommande("2026-07-14", ref)).toBe(false); // le férié n'est pas « au-delà »
+    expect(isPrecommande("2026-07-15", ref)).toBe(false); // prochaine livraison réelle
+    expect(isPrecommande("2026-07-16", ref)).toBe(true);  // au-delà → précommande
+  });
+
+  it("accepte un datetime ISO (compare la partie date seulement)", () => {
+    const ref = new Date("2026-06-16T09:00:00Z");
+    expect(isPrecommande("2026-06-18T09:00:00.000Z", ref)).toBe(true);
+    expect(isPrecommande("", ref)).toBe(false);
   });
 });
