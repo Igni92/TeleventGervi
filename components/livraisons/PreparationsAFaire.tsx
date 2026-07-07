@@ -150,21 +150,24 @@ export function PreparationsAFaire() {
               </div>
               <ul className="divide-y divide-border/60">
                 {g.docs.map((d) => (
-                  <li key={d.docEntry} className="flex items-center gap-2 px-4 sm:px-5 py-2.5">
+                  <li key={d.docEntry} className="flex items-center gap-2 px-4 sm:px-5 py-3">
                     <div className="min-w-0 flex-1">
                       <p className="flex items-center gap-2 min-w-0 text-[13.5px] font-semibold text-foreground">
                         <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                         <span className="truncate">{d.cardFullName ?? d.cardName}</span>
                         {d.clientType && SEGMENT_BADGE[d.clientType] && (
-                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide shrink-0 ${SEGMENT_BADGE[d.clientType]}`}>
+                          <span className={`hidden xs:inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide shrink-0 ${SEGMENT_BADGE[d.clientType]}`}>
                             {d.clientType}
                           </span>
                         )}
                       </p>
-                      <p className="text-[11px] text-muted-foreground flex items-center gap-x-2 gap-y-0.5 flex-wrap">
+                      {/* Ligne méta : sur le plus étroit (iPhone zoomé) on garde
+                          l'essentiel — n° BL, transporteur, alerte manquants. Le
+                          nombre de colis ne réapparaît qu'à partir de `xs`. */}
+                      <p className="text-[11px] text-muted-foreground flex items-center gap-x-2 gap-y-0.5 flex-wrap mt-0.5">
                         <span>BL #{d.docNum}</span>
-                        <span className="inline-flex items-center gap-1"><Truck className="h-3 w-3" /> {d.carrierName ?? "Non affecté"}</span>
-                        <span>{d.colis.toLocaleString("fr-FR")} colis</span>
+                        <span className="inline-flex items-center gap-1 min-w-0"><Truck className="h-3 w-3 shrink-0" /> <span className="truncate">{d.carrierName ?? "Non affecté"}</span></span>
+                        <span className="hidden xs:inline">{d.colis.toLocaleString("fr-FR")} colis</span>
                         {hasMissing(d) && (
                           <span className="inline-flex items-center gap-1 font-semibold text-rose-600 dark:text-rose-400">
                             {(d.missingItems?.length ?? 0)} manquant{(d.missingItems?.length ?? 0) > 1 ? "s" : ""}
@@ -172,7 +175,10 @@ export function PreparationsAFaire() {
                         )}
                       </p>
                     </div>
-                    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-700 dark:text-amber-300 shrink-0">
+                    {/* Pastille de statut : redondante sur mobile (toute la section
+                        est « à préparer » + thème ambre) → réservée à ≥ sm pour
+                        laisser respirer le nom du magasin sur téléphone. */}
+                    <span className="hidden sm:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-700 dark:text-amber-300 shrink-0">
                       À préparer
                     </span>
                   </li>

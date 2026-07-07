@@ -16,6 +16,13 @@ const config: Config = {
       screens: { "2xl": "1400px" },
     },
     extend: {
+      // Palier « petit téléphone » (≈ 380 px) — INTERCALÉ sous `sm` (640 px).
+      // Cible les iPhone en « Affichage zoomé » / gros texte, où le viewport
+      // effectif tombe vers 320-375 px : la base (< xs) reste la plus sobre,
+      // `xs:` réintroduit l'info secondaire dès qu'on a un peu de largeur.
+      screens: {
+        xs: "380px",
+      },
       fontFamily: {
         sans:    ["var(--font-inter)", "Inter", "system-ui", "sans-serif"],
         display: ["var(--font-inter)", "Inter", "system-ui", "sans-serif"],

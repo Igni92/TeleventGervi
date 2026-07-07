@@ -601,6 +601,31 @@ html[data-hover-contrast] [class*="hover:bg-accent"]:hover {
 ═══════════════════════════════════════════════════════════ */
 svg.lucide { zoom: 1.3; }
 
+/* ═══════════════════════════════════════════════════════════
+   CONFORT MOBILE / ÉCRAN ZOOMÉ — s'applique PARTOUT, sur tout
+   appareil dont le viewport est étroit (téléphone, et surtout
+   iPhone en « Affichage zoomé » / gros texte : le viewport effectif
+   tombe vers 320-375 px). Objectif : la mise en page RESPIRE au lieu
+   de se tasser ; le texte reste à la taille lisible voulue.
+═══════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  /* Le téléphone gère DÉJÀ l'agrandissement au niveau de l'OS. Le zoom
+     d'interface applicatif (confort Direction, pensé pour le bureau) se
+     cumulerait et casserait la grille → neutralisé sur mobile. */
+  .app-zoom-root { zoom: 1 !important; }
+
+  /* Icônes : +30 % (confort bureau) ramené à +12 % sur téléphone. Sur un
+     écran étroit/zoomé, des icônes surdimensionnées mangent la largeur des
+     lignes et alourdissent tout. On garde des icônes plus grandes que
+     nominal (lisibilité), mais les lignes retrouvent de l'air. */
+  svg.lucide { zoom: 1.12; }
+}
+
+/* Titres display : équilibre les retours à la ligne (pas de mot orphelin seul
+   sur la dernière ligne) → titres nettement plus propres quand ils passent sur
+   2-3 lignes sur écran étroit. Sans effet sur une seule ligne. */
+.font-display { text-wrap: balance; }
+
 /* Console-specific — soft swap between active clients */
 @keyframes client-swap {
   from { opacity: 0; transform: translateY(6px); filter: blur(4px); }
