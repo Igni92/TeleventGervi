@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   applyNavOverrides, sanitizeNavOverrides, toEditState, fromEditState,
+  moveNavRowBefore, swapNavRows,
   type NavOverrides,
 } from "./navOverrides";
 
@@ -105,5 +106,45 @@ describe("navOverrides — sanitizeNavOverrides", () => {
   it("payload non-objet → aucune surcharge", () => {
     expect(sanitizeNavOverrides(null)).toEqual({});
     expect(sanitizeNavOverrides("x")).toEqual({});
+  });
+});
+
+describe("navOverrides — glisser-déposer (moveNavRowBefore / swapNavRows)", () => {
+  const base = () => toEditState(GROUPS, {});
+  const hrefs = (state: ReturnType<typeof base>, label: string) =>
+    state.find((g) => g.label === label)!.rows.map((r) => r.href);
+
+  it("insère AVANT une autre ligne (réordre dans le même groupe)", () => {
+    const next = moveNavRowBefore(base(), "/clients", "Télévente", "/console");
+    expect(hrefs(next, "Télévente")).toEqual(["/clients", "/console"]);
+  });
+
+  it("déplace vers un AUTRE groupe, en fin (beforeHref = null)", () => {
+    const next = moveNavRowBefore(base(), "/console", "Entrepôt", null);
+    expect(hrefs(next, "Télévente")).toEqual(["/clients"]);
+    expect(hrefs(next, "Entrepôt")).toEqual(["/livraisons", "/console"]);
+  });
+
+  it("déplace vers un autre groupe, AVANT une ligne", () => {
+    const next = moveNavRowBefore(base(), "/livraisons", "Télévente", "/clients");
+    expect(hrefs(next, "Télévente")).toEqual(["/console", "/livraisons", "/clients"]);
+    expect(hrefs(next, "Entrepôt")).toEqual([]);
+  });
+
+  it("no-op si lâchée sur elle-même ou groupe/ligne inconnu", () => {
+    expect(moveNavRowBefore(base(), "/console", "Télévente", "/console")).toEqual(base());
+    expect(moveNavRowBefore(base(), "/console", "Zone inconnue", null)).toEqual(base());
+    expect(moveNavRowBefore(base(), "/inconnu", "Entrepôt", null)).toEqual(base());
+  });
+
+  it("échange deux lignes de groupes différents (« remplace »)", () => {
+    const next = swapNavRows(base(), "/console", "/livraisons");
+    expect(hrefs(next, "Télévente")).toEqual(["/livraisons", "/clients"]);
+    expect(hrefs(next, "Entrepôt")).toEqual(["/console"]);
+  });
+
+  it("échange deux lignes du même groupe", () => {
+    const next = swapNavRows(base(), "/console", "/clients");
+    expect(hrefs(next, "Télévente")).toEqual(["/clients", "/console"]);
   });
 });
