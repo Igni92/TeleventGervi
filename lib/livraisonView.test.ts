@@ -205,17 +205,30 @@ describe("livraisonView — docTourneeKeyLabel", () => {
     expect(docTourneeKeyLabel(d, tournees)).toEqual({ key: "T:IDF", label: "IDF" });
   });
 
-  it("bug Fontenay : nom mémorisé FANTÔME (absent du catalogue) → résolu par heure sur la vraie tournée", () => {
-    // « IDF 1 » n'existe pas dans le catalogue ; l'heure pointe sur la vraie « IDF »
-    // → le magasin se regroupe avec les autres « IDF » (comme l'affiche le sélecteur),
-    // au lieu de créer un sous-groupe fantôme « IDF 1 ».
-    const d = doc({ savedTournee: { trspCode: "DIRECT", heure: "05:00:00", nom: "IDF 1" } });
+  it("nom mémorisé FANTÔME (même transporteur) mais heure connue → résolu par heure", () => {
+    // « IDF 1 » n'est pas dans le catalogue, mais l'heure mémorisée pointe « IDF ».
+    const d = doc({ trspCode: "ANTOINE", savedTournee: { trspCode: "ANTOINE", heure: "05:00:00", nom: "IDF 1" } });
     expect(docTourneeKeyLabel(d, tournees)).toEqual({ key: "T:IDF", label: "IDF" });
   });
 
-  it("nom mémorisé prioritaire s'il matche le catalogue (même à un autre casse)", () => {
-    const d = doc({ savedTournee: { trspCode: "DIRECT", heure: null, nom: "idf" } });
+  it("nom mémorisé matché au catalogue, insensible à la casse", () => {
+    const d = doc({ trspCode: "ANTOINE", savedTournee: { trspCode: "ANTOINE", heure: null, nom: "idf" } });
     expect(docTourneeKeyLabel(d, tournees)).toEqual({ key: "T:IDF", label: "IDF" });
+  });
+
+  it("bug Fontenay : tournée mémorisée d'un AUTRE transporteur ignorée → résolu par l'heure du BL", () => {
+    // Le BL est passé en DIRECT/IDF (heure 00:00), mais la mémoire pointe encore
+    // ANTOINE/IDF OUEST : on IGNORE la mémoire périmée et on résout par l'heure du
+    // BL → « IDF » (comme le sélecteur), plus de faux sous-groupe « IDF OUEST ».
+    const cat: Tournee[] = [
+      { lineId: 10, nom: "IDF", des: "IDF", heure: "00:00:00" },
+      { lineId: 11, nom: "IDF OUEST", des: "", heure: "02:00:00" },
+    ];
+    const d = doc({
+      trspCode: "DIRECT", trspHeure: "00:00:00",
+      savedTournee: { trspCode: "ANTOINE", heure: "14:00:00", nom: "IDF OUEST" },
+    });
+    expect(docTourneeKeyLabel(d, cat)).toEqual({ key: "T:IDF", label: "IDF" });
   });
 
   it("4) repli sur l'heure si catalogue muet", () => {
