@@ -748,23 +748,26 @@ function DatePanel({
    Bandeau de synthèse — chiffres clés de la tournée
 ═════════════════════════════════════════════════════════════ */
 function SummaryRow({ totals, loading, showRevenue }: { totals: Totals; loading: boolean; showRevenue: boolean }) {
+  // `mobile` : présent dans la bande compacte téléphone. Nombre de CLIENTS et
+  // total de COLIS retirés sur mobile (demande) — le préparateur n'en a pas
+  // besoin en synthèse, les colis par commande restent sur chaque ligne.
   const stats = [
-    { icon: FileText, label: "Commandes", short: "Cmd.", value: fmtInt(totals.orders), accent: "text-brand-600 dark:text-brand-400" },
-    { icon: Users, label: "Clients", short: "Clients", value: fmtInt(totals.clients), accent: "text-sky-600 dark:text-sky-400" },
-    { icon: Boxes, label: "Colis", short: "Colis", value: fmtNum(totals.colis), accent: "text-violet-600 dark:text-violet-400", hero: true },
-    { icon: Scale, label: "Poids net", short: "Poids", value: fmtKg(totals.weightKg), accent: "text-emerald-600 dark:text-emerald-400" },
+    { icon: FileText, label: "Commandes", short: "Cmd.", value: fmtInt(totals.orders), accent: "text-brand-600 dark:text-brand-400", mobile: true },
+    { icon: Users, label: "Clients", short: "Clients", value: fmtInt(totals.clients), accent: "text-sky-600 dark:text-sky-400", mobile: false },
+    { icon: Boxes, label: "Colis", short: "Colis", value: fmtNum(totals.colis), accent: "text-violet-600 dark:text-violet-400", hero: true, mobile: false },
+    { icon: Scale, label: "Poids net", short: "Poids", value: fmtKg(totals.weightKg), accent: "text-emerald-600 dark:text-emerald-400", mobile: true },
     // Total HT — chiffre commercial : masqué pour préparateur / livreur.
-    ...(showRevenue ? [{ icon: Receipt, label: "Total HT", short: "HT", value: fmtEur(totals.totalHT), accent: "text-amber-600 dark:text-amber-400" }] : []),
+    ...(showRevenue ? [{ icon: Receipt, label: "Total HT", short: "HT", value: fmtEur(totals.totalHT), accent: "text-amber-600 dark:text-amber-400", mobile: true }] : []),
   ];
   return (
     <>
       {/* MOBILE : une seule BANDE compacte (chiffres en ligne, libellés courts) —
           les 4-5 grosses cartes en 2×2 poussaient les transporteurs sous le pli
-          sur iPhone zoomé. Le détail complet reste à un scroll d'onglet près. */}
-      <div className={`sm:hidden rounded-xl border border-border bg-card px-3 py-2.5 flex items-center justify-between gap-2 transition-opacity ${loading ? "opacity-60" : ""}`}>
-        {stats.map((s) => (
+          sur iPhone zoomé. Le détail complet reste sur bureau (cartes ci-dessous). */}
+      <div className={`sm:hidden rounded-xl border border-border bg-card px-3 py-2.5 flex items-center justify-around gap-2 transition-opacity ${loading ? "opacity-60" : ""}`}>
+        {stats.filter((s) => s.mobile).map((s) => (
           <div key={s.label} className="min-w-0 text-center">
-            <p className={`text-[15px] font-bold tnum leading-none ${s.hero ? "text-foreground" : "text-foreground/90"}`}>{s.value}</p>
+            <p className="text-[15px] font-bold tnum leading-none text-foreground">{s.value}</p>
             <p className="text-[8.5px] uppercase tracking-[0.08em] font-semibold text-muted-foreground mt-1 truncate">{s.short}</p>
           </div>
         ))}

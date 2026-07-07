@@ -308,3 +308,12 @@ chaque étape). Constats et correctifs :
 | Bandeau de synthèse | 4-5 grosses cartes en 2×2 poussant les transporteurs sous le pli. | **Une bande compacte** (chiffres en ligne, libellés courts) sur mobile ; cartes détaillées ≥ sm. |
 | Dialogs (GLOBAL — `ui/dialog.tsx`) | Piste de grille **non bornée** : le min-content du plus large enfant (ex. bouton « Pas terminée — remettre sur la file ») faisait déborder TOUT le contenu du panneau (vue en grand illisible à 320 px). Panneau bord à bord. | `grid-cols-1` (minmax(0,1fr)) borne la piste ; largeur `calc(100%-1.5rem)` (marge 12 px), coins `rounded-2xl` partout, `p-4` mobile. **Tous les dialogs de l'app en profitent.** |
 | Vue en grand — actions | Boutons compressés côte à côte. | **Empilés pleine largeur** sur mobile (« Préparation terminée » dominant, h-12) ; en ligne ≥ sm. |
+| Bande de synthèse mobile — contenu | Cmd. · Clients · Colis · Poids (· HT). | **Clients et Colis retirés** (demande) : le préparateur garde Commandes + Poids (+ HT commercial) ; les colis par commande restent sur chaque ligne (info picking). Bureau inchangé (toutes les cartes). |
+
+---
+
+## 🔑 Rôles livreur / agréeur — rafraîchis sans se reconnecter (NOUVEAU)
+
+| Élément | Avant | Après |
+|---------|-------|-------|
+| Flags `isLivreur` / `isAgreeur` du jeton | Résolus **uniquement à la connexion** : un rôle coché en base après coup (ex. passer un préparateur agréeur) n'apparaissait jamais — les téléphones d'entrepôt gardent leur session des semaines (PWA, cookie 30 j). L'agréeur ne voyait ni « Cdes fourn. » ni « Entrées march. », et le middleware le renvoyait vers /livraisons. | **Re-résolution périodique (TTL 5 min)** dans le callback `jwt` : le rôle coché dans Paramètres se propage tout seul en ≤ 5 minutes, sans déconnexion/reconnexion. Coût borné : ~1 requête SQL par utilisateur / 5 min (proxy.ts Next 16 = runtime Node). |

@@ -58,19 +58,28 @@ export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
         token.refreshToken = account.refresh_token;
         token.expiresAt = account.expires_at;
       }
-      // Rôles LIVREUR + AGRÉEUR portés dans le jeton pour le verrou middleware
-      // (Edge, sans accès base). Résolus à la connexion. DÉFENSIF : toute erreur
-      // est avalée → jamais bloquant pour le login (au pire, pas de verrou).
-      // L'agréeur doit garder l'accès aux Commandes fournisseurs / Entrées
-      // marchandises (réception CF → EM) MÊME s'il est aussi préparateur/livreur.
-      if (user?.email) {
+      // Rôles LIVREUR + AGRÉEUR portés dans le jeton pour le verrou middleware.
+      // Résolus à la connexion PUIS re-résolus périodiquement (TTL) : figés au
+      // seul sign-in, un rôle coché en base APRÈS coup (ex. passer un préparateur
+      // agréeur) n'apparaissait JAMAIS tant que l'utilisateur ne se reconnectait
+      // pas — or les téléphones d'entrepôt gardent leur session des semaines
+      // (PWA, cookie 30 j) : l'agréeur ne voyait pas ses Commandes fournisseurs.
+      // proxy.ts (Next 16) tourne en runtime Node → l'accès Prisma est permis ici ;
+      // le TTL borne le coût à ~1 requête par utilisateur toutes les 5 minutes.
+      // DÉFENSIF : toute erreur est avalée → jamais bloquant pour le login.
+      const ROLES_TTL_MS = 5 * 60_000;
+      const email = user?.email ?? (typeof token.email === "string" ? token.email : null);
+      const rolesStale =
+        typeof token.rolesAt !== "number" || Date.now() - token.rolesAt > ROLES_TTL_MS;
+      if (email && (user?.email || rolesStale)) {
         try {
           const rows = await prisma.$queryRawUnsafe<{ isLivreur: boolean | null; isAgreeur: boolean | null }[]>(
             `SELECT "isLivreur", "isAgreeur" FROM "User" WHERE LOWER("email") = LOWER($1) LIMIT 1`,
-            user.email,
+            email,
           );
           token.isLivreur = !!rows[0]?.isLivreur;
           token.isAgreeur = !!rows[0]?.isAgreeur;
+          token.rolesAt = Date.now();
         } catch { /* colonne absente / base indispo → pas de verrou (login OK) */ }
       }
       return token;
@@ -134,6 +143,8 @@ declare module "next-auth/jwt" {
     expiresAt?: number;
     isLivreur?: boolean;
     isAgreeur?: boolean;
+    /** Dernière résolution des rôles en base (epoch ms) — pilote le TTL. */
+    rolesAt?: number;
   }
 }
 
