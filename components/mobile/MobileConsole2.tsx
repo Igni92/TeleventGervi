@@ -50,6 +50,8 @@ interface SearchClient { id: string; code: string; nom: string; type: string | n
 type ApiLine = {
   itemCode: string; quantity: number; displayQuantity: number;
   displayUnit: string; warehouseCode: string; price?: number;
+  /** Ligne à découvert (sur-vente) : part sans lot EM — affectée à la réception. */
+  decouvert?: boolean;
 };
 
 const eur = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2 });
@@ -456,6 +458,7 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
         displayQuantity: c.qty, displayUnit: l.unit,
         warehouseCode: c.warehouse,
         ...(l.price != null && l.price > 0 ? { price: l.price } : {}),
+        ...(c.decouvert ? { decouvert: true } : {}),
       })));
 
   const submit = async () => {

@@ -84,6 +84,12 @@ interface OrderLine {
   /** Lot AFFECTÉ en amont (bon de préparation export) → U_NoLot posé tel quel,
    *  sans résolution automatique. */
   lot?: string;
+  /** Ligne À DÉCOUVERT (découpe front splitByWarehouse) : quantité SANS stock,
+   *  isolée sur sa propre ligne. Aucun lot EM n'est résolu — U_NoLot part en
+   *  LOT_PENDING et /api/sap/goods-receipts posera le vrai lot + magasin à la
+   *  réception. Sans ce flag, le stock agrégé de l'article (autres magasins)
+   *  ferait poser un vrai lot sur une quantité qui n'existe pas. */
+  decouvert?: boolean;
 }
 interface CreateOrderBody {
   clientId: string;
@@ -442,13 +448,21 @@ export async function POST(req: NextRequest) {
     // résolution automatique ni réalignement de magasin — c'est le lot choisi
     // à la main depuis les arrivages.
     const forcedLot = typeof l.lot === "string" && l.lot.trim() ? l.lot.trim() : null;
+    // Ligne à découvert (découpe front) : la quantité en stock est déjà sur ses
+    // propres lignes (magasin + lot corrects) — celle-ci part SANS lot EM, en
+    // attente de réception. Ne surtout pas résoudre un lot via le stock agrégé
+    // de l'article : c'est ce qui mettait tout le surplus sur un vrai lot et
+    // rendait les magasins négatifs.
+    const isDecouvert = l.decouvert === true && !forcedLot;
     const availLocal = availableByItem.get(l.itemCode) ?? 0;
     const sapOnHand = sapStockByItem.get(l.itemCode) ?? null;
-    const resolved = forcedLot
+    const resolved = forcedLot || isDecouvert
       ? { lot: forcedLot, source: null, docNum: null, warehouse: null }
       : resolveLotForSegment(lotMaps, emAffects, l.itemCode, l.warehouseCode, clientSegment);
     const choice = forcedLot
       ? { lot: forcedLot, reason: "affecté (bon de préparation)" }
+      : isDecouvert
+      ? { lot: LOT_PENDING, reason: "decouvert (ligne séparée)" }
       : chooseLot({
           resolvedLot: resolved.lot,
           localAvailable: availLocal,

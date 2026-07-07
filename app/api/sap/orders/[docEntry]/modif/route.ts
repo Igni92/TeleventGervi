@@ -171,6 +171,9 @@ interface FinalLine {
   discountPercent?: number;
   keep?: boolean;
   lot?: string | null;
+  /** Ligne à découvert (découpe front) : quantité SANS stock, isolée — aucun
+   *  lot résolu, U_NoLot = LOT_PENDING (repris à la prochaine réception). */
+  decouvert?: boolean;
 }
 
 export async function POST(req: NextRequest, props: { params: Promise<{ docEntry: string }> }) {
@@ -282,10 +285,16 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
       if (lineExpenses.length > 0) line.DocumentLineAdditionalExpenses = lineExpenses;
     }
 
-    // Lot : conservé tel quel pour une ligne existante, résolu (FIFO) pour une nouvelle.
+    // Lot : conservé tel quel pour une ligne existante, résolu (FIFO) pour une
+    // nouvelle — sauf ligne à découvert (découpe front) : SANS lot, en attente
+    // de réception (le stock agrégé des autres magasins ne doit pas poser un
+    // vrai lot sur une quantité inexistante).
     if (l.keep && l.lot) {
       keptLines++;
       line.U_NoLot = l.lot;
+    } else if (l.decouvert === true) {
+      newLines++;
+      line.U_NoLot = LOT_PENDING;
     } else {
       newLines++;
       const resolved = lotMaps ? resolveLotDetailed(lotMaps, l.itemCode, l.warehouseCode) : { lot: null };
