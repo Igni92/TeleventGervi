@@ -12,6 +12,7 @@
  */
 import webpush from "web-push";
 import { prisma } from "@/lib/prisma";
+import { preparateurEmails } from "@/lib/preparateur";
 
 let configured = false;
 let configuredOk = false;
@@ -113,6 +114,50 @@ export async function notifyAll(payload: PushPayload, opts: { exceptEmail?: stri
     return results.filter(Boolean).length;
   } catch (e) {
     console.error("[push] notifyAll échec:", e);
+    return 0;
+  }
+}
+
+/**
+ * Envoie une notification aux seuls PRÉPARATEURS / LIVREURS abonnés (ceux qui
+ * préparent la marchandise) : préparateurs restreints (liste email), et comptes
+ * portant le flag DB `isPreparateur` ou `isLivreur`. Best-effort, parallèle,
+ * nettoie les abonnements expirés. Ne throw jamais (fire-and-forget).
+ *
+ * Sert à prévenir l'entrepôt qu'une commande vient d'être mise en préparation.
+ */
+export async function notifyPreparateurs(payload: PushPayload): Promise<number> {
+  if (!ensureConfigured()) return 0;
+  try {
+    // Emails ciblés : préparateurs restreints (liste) + flags DB (defensif si
+    // les colonnes n'existent pas encore → on garde au moins la liste email).
+    const targetEmails = new Set(preparateurEmails());
+    try {
+      const rows = await prisma.$queryRawUnsafe<{ email: string | null }[]>(
+        `SELECT "email" FROM "User" WHERE "isPreparateur" = true OR "isLivreur" = true`,
+      );
+      for (const r of rows) if (r.email) targetEmails.add(r.email.trim().toLowerCase());
+    } catch { /* colonnes absentes → repli sur la liste email seule */ }
+    if (targetEmails.size === 0) return 0;
+
+    const subs = await prisma.pushSubscription.findMany();
+    const targets = subs.filter((s) => s.email && targetEmails.has(s.email.trim().toLowerCase()));
+    if (targets.length === 0) return 0;
+
+    const gone: string[] = [];
+    const results = await Promise.all(
+      targets.map(async (t) => {
+        const r = await sendPush({ endpoint: t.endpoint, p256dh: t.p256dh, auth: t.auth }, payload);
+        if (r === "gone") gone.push(t.endpoint);
+        return r === "ok";
+      }),
+    );
+    if (gone.length) {
+      await prisma.pushSubscription.deleteMany({ where: { endpoint: { in: gone } } }).catch(() => {});
+    }
+    return results.filter(Boolean).length;
+  } catch (e) {
+    console.error("[push] notifyPreparateurs échec:", e);
     return 0;
   }
 }

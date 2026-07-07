@@ -3,19 +3,21 @@ import { auth } from "@/lib/auth";
 import { setDeliveryMiseEnPrep } from "@/lib/inventory";
 import { isRestrictedPreparateur } from "@/lib/preparateur";
 import { isLivreur } from "@/lib/permissions";
+import { notifyPreparateurs } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 
 /**
  * POST /api/livraisons/mise-en-prep
  *
- * Le COMMERCIAL « met en préparation » un magasin depuis l'état « Ventes du
- * jour » : la commande devient alors visible dans le Détail livraison pour les
- * rôles restreints (préparateur verrouillé, livreur). Réservé aux rôles non
- * restreints — un préparateur ne peut pas se lâcher lui-même une commande.
+ * Le COMMERCIAL « met en préparation » un magasin depuis le Détail livraison
+ * (onglet Ventes) : la commande devient alors visible pour les rôles restreints
+ * (préparateur, livreur) ET une NOTIFICATION PUSH est envoyée aux préparateurs
+ * abonnés (« nouvelle commande à préparer »). Réservé aux rôles non restreints.
  *
- * Body : { docEntry: number, misEnPrep: boolean }
- *   ou  { docEntries: number[], misEnPrep: boolean } (action groupée).
+ * Body : { docEntry: number, misEnPrep: boolean, names?: string[] }
+ *   ou  { docEntries: number[], misEnPrep: boolean, names?: string[] }
+ *   `names` = noms des magasins lâchés (pour le libellé de la notification).
  */
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -23,7 +25,7 @@ export async function POST(req: NextRequest) {
   const restricted = isRestrictedPreparateur(session.user.email) || (await isLivreur(session));
   if (restricted) return NextResponse.json({ error: "Réservé aux commerciaux" }, { status: 403 });
 
-  let body: { docEntry?: number; docEntries?: number[]; misEnPrep?: boolean };
+  let body: { docEntry?: number; docEntries?: number[]; misEnPrep?: boolean; names?: unknown };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -33,11 +35,34 @@ export async function POST(req: NextRequest) {
   if (!entries.length) return NextResponse.json({ error: "docEntry invalide" }, { status: 400 });
   const misEnPrep = body.misEnPrep === true;
   const me = session.user.name?.trim() || session.user.email || "?";
+  const names = Array.isArray(body.names)
+    ? body.names.filter((n): n is string => typeof n === "string" && n.trim() !== "").map((n) => n.trim())
+    : [];
 
   try {
     // Upserts indépendants → en PARALLÈLE (l'action groupée peut porter 30-50 BL).
     const stamps = await Promise.all(entries.map((docEntry) => setDeliveryMiseEnPrep(docEntry, misEnPrep, me)));
     const at = stamps[stamps.length - 1] ?? "";
+
+    // ── Notification push aux préparateurs (fire-and-forget, jamais bloquant) ──
+    // On ne notifie QUE la mise EN préparation (pas le retrait). Le service
+    // worker fait vibrer le téléphone (sw.js : vibrate + showNotification).
+    if (misEnPrep) {
+      const n = entries.length;
+      const label =
+        names.length === 1 ? names[0]
+        : names.length > 1 ? `${names[0]} +${names.length - 1} autre${names.length - 1 > 1 ? "s" : ""}`
+        : `${n} commande${n > 1 ? "s" : ""}`;
+      const title = n > 1 ? `🧺 ${n} commandes à préparer` : "🧺 Nouvelle commande à préparer";
+      void notifyPreparateurs({
+        title,
+        body: n > 1 ? `${label} — mises en préparation par ${me}.` : `${label} — mise en préparation par ${me}.`,
+        url: "/livraisons",
+        tag: "mise-en-prep",
+        renotify: true,
+      });
+    }
+
     return NextResponse.json({
       ok: true,
       docEntries: entries,

@@ -5,11 +5,14 @@ import { toast } from "sonner";
 import { usePushNotifications } from "@/lib/usePushNotifications";
 
 /**
- * Bouton d'activation des notifications push (PWA) — dans l'en-tête console.
- * Masqué si le navigateur ne supporte pas le push ou si les clés VAPID ne sont
- * pas configurées côté serveur (dégradation gracieuse).
+ * Bouton d'activation des notifications push (PWA) — en-tête console ET nav
+ * terrain (préparateurs, pour être prévenus des mises en préparation). Masqué
+ * si le navigateur ne supporte pas le push ou si les clés VAPID ne sont pas
+ * configurées côté serveur (dégradation gracieuse).
+ *
+ * `className` permet d'ajuster la hauteur (h-8 par défaut → h-11 en nav terrain).
  */
-export function NotificationsBell() {
+export function NotificationsBell({ className }: { className?: string } = {}) {
   const { supported, permission, subscribed, busy, subscribe, unsubscribe } = usePushNotifications();
 
   if (!supported) return null;
@@ -27,7 +30,7 @@ export function NotificationsBell() {
     } else {
       await subscribe();
       // Le hook met à jour `subscribed` ; on informe selon la permission finale.
-      if (Notification.permission === "granted") toast.success("Notifications activées — tu seras prévenu des rappels dus");
+      if (Notification.permission === "granted") toast.success("Notifications activées sur cet appareil");
       else if (Notification.permission === "denied") toast.error("Permission refusée");
     }
   };
@@ -44,7 +47,7 @@ export function NotificationsBell() {
         : subscribed ? "Notifications actives — cliquer pour désactiver"
         : "Activer les notifications de rappels"
       }
-      className={`shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border text-[12px] font-medium transition-colors ${
+      className={`shrink-0 inline-flex items-center gap-1.5 ${className ?? "h-8"} px-3 rounded-lg border text-[12px] font-medium transition-colors ${
         subscribed
           ? "border-brand-400 bg-brand-50 text-brand-700 dark:bg-brand-950/40 dark:text-brand-300"
           : "border-border bg-card text-foreground/80 hover:text-foreground hover:border-brand-400"

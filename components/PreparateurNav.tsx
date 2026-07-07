@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { Truck, ClipboardCheck, ClipboardList, PackageCheck, PackagePlus, Clock3, type LucideIcon } from "lucide-react";
 import { isRestrictedPreparateur } from "@/lib/preparateur";
+import { NotificationsBell } from "@/components/console/NotificationsBell";
 
 /**
  * Navigation FOCALISÉE des rôles TERRAIN (mobile uniquement) — préparateur
@@ -51,25 +52,30 @@ export function PreparateurNav({ current }: { current: TabKey }) {
   void isLivreur;
 
   return (
-    <nav className="md:hidden mb-4 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="Navigation terrain">
-      {tabs.map(({ href, key, label, icon: Icon }) => {
-        const active = key === current;
-        return (
-          <Link
-            key={href}
-            href={href}
-            aria-current={active ? "page" : undefined}
-            className={`flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border px-3.5 text-[13px] font-semibold transition-colors active:scale-[0.98] ${
-              active
-                ? "border-brand-500 bg-brand-500/10 text-brand-700 dark:text-brand-300"
-                : "border-border bg-card text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={active ? 2.2 : 1.9} />
-            {label}
-          </Link>
-        );
-      })}
-    </nav>
+    <div className="md:hidden mb-4 flex items-center gap-2">
+      <nav className="flex-1 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="Navigation terrain">
+        {tabs.map(({ href, key, label, icon: Icon }) => {
+          const active = key === current;
+          return (
+            <Link
+              key={href}
+              href={href}
+              aria-current={active ? "page" : undefined}
+              className={`flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border px-3.5 text-[13px] font-semibold transition-colors active:scale-[0.98] ${
+                active
+                  ? "border-brand-500 bg-brand-500/10 text-brand-700 dark:text-brand-300"
+                  : "border-border bg-card text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={active ? 2.2 : 1.9} />
+              {label}
+            </Link>
+          );
+        })}
+      </nav>
+      {/* Cloche d'abonnement push : l'entrepôt vibre quand une commande passe en
+          préparation. shrink-0 → reste visible même quand les onglets défilent. */}
+      <NotificationsBell className="h-11" />
+    </div>
   );
 }

@@ -419,14 +419,16 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   //    coup tous les BL affichés (recherche + segment respectés). ──
   const [releasingAll, setReleasingAll] = useState(false);
   const releaseAllVentes = useCallback(async () => {
-    const entries = (view?.carriers ?? []).flatMap((c) => c.docs.filter((d) => !d.excluded).map((d) => d.docEntry));
+    const released = (view?.carriers ?? []).flatMap((c) => c.docs.filter((d) => !d.excluded));
+    const entries = released.map((d) => d.docEntry);
+    const names = released.map((d) => d.cardName).filter(Boolean);
     if (!entries.length || releasingAll) return;
     if (!window.confirm(`Mettre ${entries.length} magasin${entries.length > 1 ? "s" : ""} en préparation ? Ils deviendront visibles pour l'entrepôt.`)) return;
     setReleasingAll(true);
     try {
       const r = await fetch("/api/livraisons/mise-en-prep", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docEntries: entries, misEnPrep: true }),
+        body: JSON.stringify({ docEntries: entries, misEnPrep: true, names }),
       });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) throw new Error(j?.error || "Échec de la mise en préparation groupée");
@@ -1791,7 +1793,7 @@ const OrderRow = memo(function OrderRow({
     try {
       const res = await fetch("/api/livraisons/mise-en-prep", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docEntry: doc.docEntry, misEnPrep: true }),
+        body: JSON.stringify({ docEntry: doc.docEntry, misEnPrep: true, names: [doc.cardName] }),
       });
       const j = await res.json().catch(() => null);
       if (!res.ok || j?.ok === false) throw new Error(j?.error || "Échec de la mise en préparation");
@@ -1845,9 +1847,11 @@ const OrderRow = memo(function OrderRow({
   function markFait()      { if (departed) setDepartedTo(false); if (!prepared) setPreparedTo(true); }
   function markDepart()    { if (!departed) setDepartedTo(true); }
 
-  // Ouvrir la commande en grand → s'affecter comme préparateur (qui clique prépare).
-  async function openBig() {
-    setBigOpen(true);
+  // S'AFFECTER la commande (claim) : celui qui clique la prépare. `open`=true
+  // ouvre en plus la vue en grand. Partagé par le bouton Agrandir et le tap
+  // direct sur la ligne (préparateur). Concurrence gérée côté serveur.
+  async function claim(open: boolean) {
+    if (open) setBigOpen(true);
     try {
       const res = await fetch("/api/livraisons/preparer", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -1864,9 +1868,23 @@ const OrderRow = memo(function OrderRow({
         } else {
           setPreparer(j.preparer ?? null); setIncomplete(false);
           onPatchDoc(doc.docEntry, { preparer: j.preparer ?? null, incomplete: false });
+          if (!open) toast.success(`Commande #${doc.docNum} affectée — à vous`);
         }
       }
     } catch { /* affectation non bloquante */ }
+  }
+  // Ouvrir la commande en grand → s'affecter comme préparateur (qui clique prépare).
+  async function openBig() { await claim(true); }
+
+  // Tap direct sur la ligne (préparateur) → s'affecte la commande. On ignore le
+  // commercial (canDispatch), les commandes déjà faites/parties/déjà prises, et
+  // les clics sur un contrôle (bouton, lien, champ) qui gardent leur action.
+  const claimableByTap = !canDispatch && doc.open && !prepared && !departed && !preparer;
+  function onRowClick(e: ReactMouseEvent) {
+    if (!claimableByTap) return;
+    const el = e.target as HTMLElement;
+    if (el.closest("button, a, input, select, textarea")) return;
+    void claim(false);
   }
 
   // Pas entièrement préparée → remise sur la file + signalement (notification).
@@ -2066,7 +2084,8 @@ const OrderRow = memo(function OrderRow({
     <li>
       <div
         onContextMenu={onRowContextMenu}
-        className={`flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-3 hover:bg-secondary/25 transition-colors ${doc.excluded ? "opacity-50" : ""}`}
+        onClick={onRowClick}
+        className={`flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-3 hover:bg-secondary/25 transition-colors ${doc.excluded ? "opacity-50" : ""} ${claimableByTap ? "cursor-pointer" : ""}`}
       >
         {/* Bouton d'état — toujours en tête, verticalement centré (placement
             constant). BL pas encore lâché (onglet Ventes) → le bouton EST la
