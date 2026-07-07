@@ -205,6 +205,19 @@ describe("livraisonView — docTourneeKeyLabel", () => {
     expect(docTourneeKeyLabel(d, tournees)).toEqual({ key: "T:IDF", label: "IDF" });
   });
 
+  it("bug Fontenay : nom mémorisé FANTÔME (absent du catalogue) → résolu par heure sur la vraie tournée", () => {
+    // « IDF 1 » n'existe pas dans le catalogue ; l'heure pointe sur la vraie « IDF »
+    // → le magasin se regroupe avec les autres « IDF » (comme l'affiche le sélecteur),
+    // au lieu de créer un sous-groupe fantôme « IDF 1 ».
+    const d = doc({ savedTournee: { trspCode: "DIRECT", heure: "05:00:00", nom: "IDF 1" } });
+    expect(docTourneeKeyLabel(d, tournees)).toEqual({ key: "T:IDF", label: "IDF" });
+  });
+
+  it("nom mémorisé prioritaire s'il matche le catalogue (même à un autre casse)", () => {
+    const d = doc({ savedTournee: { trspCode: "DIRECT", heure: null, nom: "idf" } });
+    expect(docTourneeKeyLabel(d, tournees)).toEqual({ key: "T:IDF", label: "IDF" });
+  });
+
   it("4) repli sur l'heure si catalogue muet", () => {
     const d = doc({ trspHeure: "07:15:00" });
     expect(docTourneeKeyLabel(d, tournees)).toEqual({ key: "H:07:15", label: "Tournée 07:15" });
