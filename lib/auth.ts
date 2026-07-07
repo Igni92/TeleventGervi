@@ -2,6 +2,7 @@ import NextAuth, { type DefaultSession } from "next-auth";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
+import { ADMIN_EMAILS } from "@/lib/permissions";
 
 const ALLOWED_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || "gervifrais.com";
 
@@ -67,18 +68,27 @@ export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
       // proxy.ts (Next 16) tourne en runtime Node → l'accès Prisma est permis ici ;
       // le TTL borne le coût à ~1 requête par utilisateur toutes les 5 minutes.
       // DÉFENSIF : toute erreur est avalée → jamais bloquant pour le login.
+      //
+      // ⚠️ Un ADMIN / DIRECTION garde un accès COMPLET : il n'est JAMAIS confiné
+      // par un rôle terrain, même s'il porte aussi le flag livreur/agréeur (sinon
+      // il boucle sur /commandes-fournisseurs). Ces flags ne servent QU'AU verrou
+      // middleware → on les neutralise pour les privilégiés (grâce au TTL, le
+      // correctif s'applique en ≤ 5 min sans reconnexion).
       const ROLES_TTL_MS = 5 * 60_000;
       const email = user?.email ?? (typeof token.email === "string" ? token.email : null);
       const rolesStale =
         typeof token.rolesAt !== "number" || Date.now() - token.rolesAt > ROLES_TTL_MS;
       if (email && (user?.email || rolesStale)) {
         try {
-          const rows = await prisma.$queryRawUnsafe<{ isLivreur: boolean | null; isAgreeur: boolean | null }[]>(
-            `SELECT "isLivreur", "isAgreeur" FROM "User" WHERE LOWER("email") = LOWER($1) LIMIT 1`,
+          const rows = await prisma.$queryRawUnsafe<{ isLivreur: boolean | null; isAgreeur: boolean | null; isAdmin: boolean | null; isDirection: boolean | null }[]>(
+            `SELECT "isLivreur", "isAgreeur", "isAdmin", "isDirection" FROM "User" WHERE LOWER("email") = LOWER($1) LIMIT 1`,
             email,
           );
-          token.isLivreur = !!rows[0]?.isLivreur;
-          token.isAgreeur = !!rows[0]?.isAgreeur;
+          const r = rows[0];
+          const privileged = !!r?.isAdmin || !!r?.isDirection
+            || ADMIN_EMAILS.some((a) => a.toLowerCase() === email.toLowerCase());
+          token.isLivreur = !privileged && !!r?.isLivreur;
+          token.isAgreeur = !privileged && !!r?.isAgreeur;
           token.rolesAt = Date.now();
         } catch { /* colonne absente / base indispo → pas de verrou (login OK) */ }
       }
