@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Users, Briefcase, Truck, Store, ShoppingCart,
   PackagePlus, PackageCheck, Package, PackageX, Factory, ClipboardCheck, ClipboardList,
   Receipt, LayoutDashboard, Clock3,
-  Settings, Tag, ScrollText,
+  Settings, Tag, ScrollText, Star,
   type LucideIcon,
 } from "lucide-react";
 import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
@@ -148,26 +148,79 @@ function useInventaireBadge(): number {
   return n;
 }
 
+const FAV_AXES_KEY = "televent-mobile-fav-axes";
+
+/**
+ * FAVORIS des catégories du lanceur mobile — préférence PAR APPAREIL (localStorage).
+ * Les catégories mises en favori remontent en tête de l'accueil, dans leur ordre
+ * d'origine. Chargé côté client (pas de mismatch SSR : ordre par défaut avant).
+ */
+function useFavAxes() {
+  const [favs, setFavs] = useState<string[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(FAV_AXES_KEY);
+      const a = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(a)) setFavs(a.filter((x) => typeof x === "string"));
+    } catch { /* ignore */ }
+    setLoaded(true);
+  }, []);
+  const toggle = (key: string) =>
+    setFavs((cur) => {
+      const next = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
+      try { localStorage.setItem(FAV_AXES_KEY, JSON.stringify(next)); } catch { /* quota */ }
+      return next;
+    });
+  return { favs, toggle, loaded };
+}
+
 export function MobileTiles({ className }: { className?: string }) {
   const { previewRole } = useRolePreview();
+  const { favs, toggle, loaded } = useFavAxes();
   const badges: Record<BadgeKey, number> = {
     receptionIncidents: useReceptionBadge(),
     commandesDue: useCommandesDueBadge(),
     inventairePending: useInventaireBadge(),
   };
 
+  // Catégories favorites en tête (tri stable → ordre d'origine préservé).
+  const orderedAxes = useMemo(() => {
+    if (!loaded || favs.length === 0) return AXES;
+    const fav = new Set(favs);
+    return [...AXES].sort((a, b) => (fav.has(b.key) ? 1 : 0) - (fav.has(a.key) ? 1 : 0));
+  }, [favs, loaded]);
+
   return (
     <div className={`space-y-6 ${className ?? ""}`}>
-      {AXES.map((axis) => {
+      {orderedAxes.map((axis) => {
         // Aperçu « voir comme » : ne montrer que les tuiles du périmètre du rôle.
         const tiles = axis.tiles.filter((t) => navAllowedForPreview(t.href, previewRole));
         if (tiles.length === 0) return null;
         const accent = ACCENT[axis.key];
+        const isFav = favs.includes(axis.key);
         return (
           <section key={axis.key}>
             <div className="flex items-center gap-2.5 mb-2.5 px-0.5">
               <span className={`h-6 w-1.5 rounded-full ${accent.bar}`} aria-hidden />
               <h2 className="text-[17px] font-semibold text-foreground leading-none">{axis.label}</h2>
+              {isFav && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/12 px-2 py-0.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                  <Star className="h-3 w-3 fill-amber-400 text-amber-400" /> Favori
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => toggle(axis.key)}
+                aria-pressed={isFav}
+                aria-label={isFav ? `Retirer ${axis.label} des favoris` : `Mettre ${axis.label} en favori`}
+                title={isFav ? "Retirer des favoris" : "Mettre en favori (remonte en haut)"}
+                className={`ml-auto inline-flex h-9 w-9 items-center justify-center rounded-xl transition-colors active:scale-90 ${
+                  isFav ? "text-amber-500" : "text-muted-foreground/45 hover:text-foreground hover:bg-secondary/60"
+                }`}
+              >
+                <Star className={`h-5 w-5 ${isFav ? "fill-amber-400" : ""}`} strokeWidth={2} />
+              </button>
             </div>
             <div className="grid grid-cols-2 gap-2.5">
               {tiles.map((t, idx) => {
