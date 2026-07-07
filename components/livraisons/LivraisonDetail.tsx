@@ -2099,7 +2099,9 @@ const OrderRow = memo(function OrderRow({
             className="inline-flex shrink-0 items-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-[12px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 active:scale-95 bg-amber-600 hover:bg-amber-700 text-white"
           >
             {savingRelease ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            <span>Mettre en prép.</span>
+            {/* Libellé court sur mobile → laisse la place au nom du client (sinon tronqué « A. BET… »). */}
+            <span className="sm:hidden">Prép.</span>
+            <span className="hidden sm:inline">Mettre en prép.</span>
           </button>
         ) : (
         <button
@@ -2132,7 +2134,7 @@ const OrderRow = memo(function OrderRow({
             <ClientLink
               code={doc.cardCode}
               name={doc.cardName}
-              className="text-[14.5px] font-semibold text-foreground truncate text-left hover:underline decoration-brand-500/60 underline-offset-2 max-w-full"
+              className="text-[16px] sm:text-[14.5px] font-semibold text-foreground truncate text-left hover:underline decoration-brand-500/60 underline-offset-2 max-w-full"
             />
             {doc.clientType && (SEG_UI[doc.clientType as keyof typeof SEG_UI] ?? null) && (
               <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEG_UI[doc.clientType as keyof typeof SEG_UI].badge}`}>
@@ -2349,7 +2351,7 @@ const OrderRow = memo(function OrderRow({
               {doc.comments}
             </p>
           )}
-          <table className="w-full text-[12px]">
+          <table className="w-full text-[13px] sm:text-[12px]">
             <thead className="text-[9px] uppercase tracking-wider text-muted-foreground bg-card/40">
               <tr>
                 <th className="text-center font-semibold px-2 py-1.5 w-14 whitespace-nowrap">Colis</th>
@@ -2374,7 +2376,7 @@ const OrderRow = memo(function OrderRow({
                       <BrandLogo marque={l.marque} logos={brandLogos} size="md" zoomable />
                       <div className="min-w-0">
                         <div className="flex items-baseline gap-1.5 flex-wrap">
-                          <span className={`font-medium ${isMissing ? "text-muted-foreground line-through decoration-rose-500/60" : "text-foreground/90"}`}>{l.itemName}</span>
+                          <span className={`text-[14.5px] sm:text-[13px] font-semibold sm:font-medium ${isMissing ? "text-muted-foreground line-through decoration-rose-500/60" : "text-foreground/90"}`}>{l.itemName}</span>
                           <span className="font-mono text-[10px] text-muted-foreground/70 hidden sm:inline">{l.itemCode}</span>
                           {isMissing && (
                             <span className="inline-flex items-center gap-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-300 px-1.5 py-px text-[9.5px] font-bold uppercase tracking-wide">
@@ -2382,7 +2384,7 @@ const OrderRow = memo(function OrderRow({
                             </span>
                           )}
                         </div>
-                        <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} className="mt-1" />
+                        <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} size="md" className="mt-1" />
                       </div>
                     </div>
                   </td>

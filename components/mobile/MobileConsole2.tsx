@@ -21,7 +21,7 @@ import {
   BadgeEuro, ChevronDown, Loader2, Minus, Plus, Search, ShoppingCart, Star, Trash2, Truck, X,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, unitInfo } from "@/lib/gervifrais-calc";
-import { nextDeliveryDate } from "@/lib/livraison";
+import { nextDeliveryDate, nextWorkingDeliveryDay } from "@/lib/livraison";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
 
@@ -218,7 +218,9 @@ function OrderBuilder({ client }: { client: SearchClient }) {
   const hintsRequested = useRef<Set<string>>(new Set());
   const [tarifByCode, setTarifByCode] = useState<Map<string, number>>(new Map());
   const [cart, setCart] = useState<CartLine[]>([]);
-  const [deliveryDate, setDeliveryDate] = useState(nextDeliveryDate());
+  // Défaut = prochaine livraison POSSIBLE (J+1 / samedi → lundi, en sautant les
+  // dimanches ET jours fériés).
+  const [deliveryDate, setDeliveryDate] = useState(nextWorkingDeliveryDay(nextDeliveryDate()));
   const [numAtCard, setNumAtCard] = useState("");
   const [comments, setComments] = useState("");
   const [modes, setModes] = useState<DeliveryMode[]>([]);
