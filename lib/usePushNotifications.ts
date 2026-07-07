@@ -67,6 +67,18 @@ export function usePushNotifications(): PushState {
         const reg = await navigator.serviceWorker.getRegistration();
         const sub = reg ? await reg.pushManager.getSubscription() : null;
         if (!cancelled) setSubscribed(!!sub);
+        // Auto-réparation : le navigateur peut détenir un abonnement alors que le
+        // SERVEUR ne l'a jamais enregistré (ex. POST /subscribe qui a renvoyé 401
+        // avant le correctif session.user.id). Sans cela la cloche afficherait
+        // « actives » à tort et aucune notif n'arriverait. On re-pousse donc
+        // silencieusement l'abonnement existant pour garantir la cible serveur.
+        if (sub) {
+          fetch("/api/push/subscribe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(sub.toJSON()),
+          }).catch(() => {});
+        }
       } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
