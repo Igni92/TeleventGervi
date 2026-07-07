@@ -234,24 +234,38 @@ export function computeView(data: Pick<ApiResp, "carriers">, tab: ViewTab): View
 /* ──────────────────────── Sous-groupes par tournée ────────────────────────── */
 
 /** Clé + libellé de la TOURNÉE d'une commande (sous-groupe sous le transporteur).
- *  On veut le NOM de la tournée (IDF, IDF 2, NORD…), pas l'heure :
- *   1) nom mémorisé (SERG_TRCL U_DistBy) s'il est connu ;
- *   2) sinon on le résout dans le catalogue du transporteur (`tournees`) — comme
- *      le sélecteur de ligne — par LineId mémorisé, puis par heure du BL ;
- *   3) repli ultime sur l'heure, puis « Sans tournée ». */
+ *  On veut le NOM de la tournée (IDF, IDF 2, NORD…), pas l'heure.
+ *
+ *  ⚠️ La résolution est ALIGNÉE sur celle du sélecteur de ligne
+ *  (`selectedTourneeId`) : on cherche d'abord une tournée RÉELLE du catalogue du
+ *  transporteur (`tournees`) — par LineId mémorisé, puis par NOM, puis par heure
+ *  (mémorisée ou du BL) — et le groupe prend SON nom. Sinon seulement on retombe
+ *  sur le nom mémorisé brut (SERG_TRCL U_DistBy), puis sur l'heure, puis « Sans
+ *  tournée ».
+ *
+ *  Sans ce catalogue-d'abord, un nom mémorisé fantôme (ex. « IDF 1 » absent du
+ *  catalogue alors que le BL est sur « IDF » à la même heure) créait un
+ *  sous-groupe « IDF 1 » séparé, alors que le sélecteur affichait « IDF » : le
+ *  magasin (Fontenay) apparaissait détaché de sa tournée. */
 export function docTourneeKeyLabel(d: Doc, tournees?: Tournee[]): { key: string; label: string } {
-  const savedNom = (d.savedTournee?.nom ?? "").trim();
-  if (savedNom) return { key: `T:${savedNom.toUpperCase()}`, label: savedNom };
+  const saved = d.savedTournee;
 
+  // 1) Résolution dans le catalogue du transporteur (comme le sélecteur).
   if (tournees && tournees.length) {
-    const saved = d.savedTournee;
     let t: Tournee | undefined;
     if (saved?.lineId != null) t = tournees.find((x) => x.lineId === saved.lineId);
+    if (!t && saved?.nom) t = tournees.find((x) => x.nom && x.nom.toUpperCase() === saved.nom!.toUpperCase());
+    if (!t && saved?.heure) t = tournees.find((x) => x.heure === saved.heure);
     if (!t && d.trspHeure) t = tournees.find((x) => x.heure === d.trspHeure);
     const nom = (t?.nom ?? "").trim();
     if (nom) return { key: `T:${nom.toUpperCase()}`, label: nom };
   }
 
+  // 2) Aucune tournée réelle correspondante → nom mémorisé brut (SERG_TRCL).
+  const savedNom = (saved?.nom ?? "").trim();
+  if (savedNom) return { key: `T:${savedNom.toUpperCase()}`, label: savedNom };
+
+  // 3) Repli sur l'heure, puis « Sans tournée ».
   const h = (d.trspHeure ?? "").slice(0, 5);
   if (h) return { key: `H:${h}`, label: `Tournée ${h}` };
   return { key: "T:__none__", label: "Sans tournée" };
