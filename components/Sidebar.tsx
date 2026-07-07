@@ -9,7 +9,7 @@ import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, Package, PackagePlus, Factory, Receipt, AlertTriangle,
   Home, Settings, PackageCheck, ClipboardCheck, ClipboardList, Truck, Eye, Store, PackageX,
-  Pencil, MoreVertical, ArrowUp, ArrowDown, Loader2, RotateCcw, CornerDownRight, ScrollText, GripVertical,
+  Pencil, Loader2, RotateCcw, ScrollText, GripVertical,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -132,9 +132,6 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
 const ICON_BY_HREF = new Map<string, typeof Radio>(
   NAV_GROUPS.flatMap((g) => g.items.map((it) => [it.href, it.icon] as [string, typeof Radio])),
 );
-/** Groupes personnalisables (libellés) — cibles du « Déplacer vers ». */
-const GROUP_LABELS = NAV_GROUPS.map((g) => g.label).filter((l): l is string => !!l);
-
 /** Style de la pastille de comptage par type de badge. */
 const BADGE_STYLE: Record<NonNullable<NavItem["badge"]>, string> = {
   receptionIncidents: "bg-amber-500 text-[#0b1018]",
@@ -291,30 +288,6 @@ export function Sidebar() {
   const cancelEditNav = () => { setEditingNav(false); setDraft([]); };
   const renameDraft = (href: string, label: string) =>
     setDraft((cur) => cur.map((g) => ({ ...g, rows: g.rows.map((r) => (r.href === href ? { ...r, label } : r)) })));
-  const moveDraft = (href: string, dir: -1 | 1) =>
-    setDraft((cur) => cur.map((g) => {
-      const i = g.rows.findIndex((r) => r.href === href);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= g.rows.length) return g;
-      const rows = g.rows.slice();
-      [rows[i], rows[j]] = [rows[j], rows[i]];
-      return { ...g, rows };
-    }));
-  const regroupDraft = (href: string, target: string) =>
-    setDraft((cur) => {
-      let moved: NavEditGroup["rows"][number] | null = null;
-      for (const g of cur) {
-        const row = g.rows.find((r) => r.href === href);
-        if (row && g.label !== target) moved = row;
-      }
-      if (!moved) return cur;
-      return cur.map((g) => ({
-        ...g,
-        rows: g.label === target
-          ? [...g.rows.filter((r) => r.href !== href), moved!]
-          : g.rows.filter((r) => r.href !== href),
-      }));
-    });
   async function saveNav(overrides: NavOverrides, successMsg: string) {
     setSavingNav(true);
     try {
@@ -458,7 +431,7 @@ export function Sidebar() {
                 {group.label}
               </p>
               <ul className="space-y-1">
-                {group.rows.map((row, i) => {
+                {group.rows.map((row) => {
                   const Icon = ICON_BY_HREF.get(row.href) ?? Radio;
                   const dragging = dragHref === row.href;
                   const swapTarget = overKey === `row:${row.href}` && !!dragHref && !dragging;
@@ -501,35 +474,6 @@ export function Sidebar() {
                           aria-label={`Libellé de ${row.defaultLabel}`}
                           className="min-w-0 flex-1 h-8 rounded-lg border border-white/15 bg-white/[0.06] px-2 text-[12px] text-white placeholder:text-white/35 focus:outline-none focus:ring-1 focus:ring-brand-500"
                         />
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <button
-                              type="button"
-                              title={`Déplacer « ${row.label.trim() || row.defaultLabel} »`}
-                              aria-label={`Déplacer ${row.defaultLabel}`}
-                              className="h-8 w-7 shrink-0 rounded-lg flex items-center justify-center text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
-                            >
-                              <MoreVertical className="h-3.5 w-3.5" />
-                            </button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent side="right" align="start" className="w-56 rounded-xl border-white/[0.08] dark:border-white/[0.06] bg-white dark:bg-[#16181f] shadow-modal p-1">
-                            <DropdownMenuItem disabled={i === 0} onClick={() => moveDraft(row.href, -1)}
-                              className="cursor-pointer rounded-lg text-[13px] gap-2">
-                              <ArrowUp className="h-3.5 w-3.5" /> Monter
-                            </DropdownMenuItem>
-                            <DropdownMenuItem disabled={i === group.rows.length - 1} onClick={() => moveDraft(row.href, 1)}
-                              className="cursor-pointer rounded-lg text-[13px] gap-2">
-                              <ArrowDown className="h-3.5 w-3.5" /> Descendre
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator className="my-1 dark:bg-white/[0.06]" />
-                            {GROUP_LABELS.filter((l) => l !== group.label).map((l) => (
-                              <DropdownMenuItem key={l} onClick={() => regroupDraft(row.href, l)}
-                                className="cursor-pointer rounded-lg text-[13px] gap-2">
-                                <CornerDownRight className="h-3.5 w-3.5" /> Déplacer vers {l}
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
                       </li>
                     </Fragment>
                   );
