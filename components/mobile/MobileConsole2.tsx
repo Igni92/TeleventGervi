@@ -16,6 +16,7 @@
  * → créer le BL (POST /api/sap/orders, mêmes garde-fous encours que l'Écran 2).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   BadgeEuro, ChevronDown, Loader2, Minus, Plus, Search, ShoppingCart, Star, Trash2, Truck, X,
@@ -88,12 +89,28 @@ function computeDisplay(p: Product): ProductDisplay {
 }
 
 export function MobileConsole2() {
+  const searchParams = useSearchParams();
+  const clientParam = searchParams.get("client");
+  const returnTo = searchParams.get("returnTo");
   const [client, setClient] = useState<SearchClient | null>(null);
+
+  // Pré-sélection depuis l'URL (?client=<id>) — arrivée depuis la fiche client
+  // (« Commander »). On récupère le compte pour l'afficher directement.
+  useEffect(() => {
+    if (!clientParam || client) return;
+    let cancelled = false;
+    fetch(`/api/clients/${clientParam}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((c) => { if (!cancelled && c?.id) setClient({ id: c.id, code: c.code, nom: c.nom, type: c.type ?? null }); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [clientParam, client]);
+
   return (
     <div className="space-y-4">
       <ClientPicker client={client} onPick={setClient} onClear={() => setClient(null)} />
       {client ? (
-        <OrderBuilder key={client.id} client={client} />
+        <OrderBuilder key={client.id} client={client} returnTo={returnTo} />
       ) : (
         <p className="text-[13px] text-muted-foreground px-1">
           Recherche un compte ci-dessus pour afficher son stock et saisir un bon de livraison.
@@ -211,7 +228,8 @@ function ClientPicker({ client, onPick, onClear }: {
 }
 
 /* ── Constructeur de commande allégé ────────────────────────────────────── */
-function OrderBuilder({ client }: { client: SearchClient }) {
+function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: string | null }) {
+  const router = useRouter();
   const [grouped, setGrouped] = useState<Record<string, Product[]>>({});
   const [loading, setLoading] = useState(true);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
@@ -473,6 +491,12 @@ function OrderBuilder({ client }: { client: SearchClient }) {
         toast.success(`✅ Commande #${json.docNum} créée${json.totalTTC != null ? ` — ${json.totalTTC.toFixed(2)} € TTC` : ""}`, { duration: 10000 });
       }
       setCart([]); setNumAtCard(""); setComments("");
+      // Arrivé depuis la fiche client (« Commander ») → on y RETOURNE une fois la
+      // commande passée (petit délai pour laisser voir le toast de succès).
+      // Chemin INTERNE seulement (pas d'open-redirect).
+      if (returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//")) {
+        setTimeout(() => router.push(returnTo), 700);
+      }
     } catch (e) {
       toast.error(`❌ ${e instanceof Error ? e.message : "Erreur réseau"}`);
     } finally {
