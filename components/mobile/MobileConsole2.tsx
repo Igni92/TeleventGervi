@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, unitInfo } from "@/lib/gervifrais-calc";
 import { nextDeliveryDate, nextWorkingDeliveryDay, isPrecommande } from "@/lib/livraison";
+import { familyOf } from "@/lib/familles";
+import { priceForArticle, type TarifFruitRow } from "@/lib/tarifFruits";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
 
@@ -303,6 +305,17 @@ function OrderBuilder({ client }: { client: SearchClient }) {
     return () => { cancelled = true; };
   }, [client.id]);
 
+  // Tarif PAR FRUITS du client (famille · origine · calibre · variété) — appliqué au panier.
+  const [tarifFruits, setTarifFruits] = useState<TarifFruitRow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/clients/${client.id}/tarif-fruits`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled && j?.ok) setTarifFruits(j.rows ?? []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [client.id]);
+
   // Adresses de livraison du client (sélecteur seulement s'il y a le choix).
   useEffect(() => {
     let cancelled = false;
@@ -356,15 +369,24 @@ function OrderBuilder({ client }: { client: SearchClient }) {
   /* ── Panier ── */
   const buildLine = useCallback((p: Product): CartLine => {
     const d = displayByCode.get(p.itemCode) ?? computeDisplay(p);
+    // Prix : cotation SKU exacte > tarif PAR FRUITS (désignation) > prix conseillé.
+    const fruitPrice = tarifFruits.length
+      ? priceForArticle(tarifFruits, {
+          family: familyOf(p.itemName, p.groupName ?? null).key,
+          pays: p.uPays ?? null,
+          calibre: hints[p.itemCode]?.calibre ?? null,
+          variete: p.frgnName ?? null,
+        })
+      : null;
     return {
       itemCode: p.itemCode, itemName: p.itemName, unit: d.displayUnit, priceUnit: d.priceUnit,
       packDivisor: d.packDivisor,
       availByWarehouse: d.avail, quantity: d.stepColis,
-      price: tarifByCode.get(p.itemCode) ?? hints[p.itemCode]?.prixConseille ?? null,
+      price: tarifByCode.get(p.itemCode) ?? fruitPrice ?? hints[p.itemCode]?.prixConseille ?? null,
       stepColis: d.stepColis,
       marque: p.uMarque ?? null, condi: p.uCondi ?? p.uUvc ?? null, pays: p.uPays ?? null,
     };
-  }, [displayByCode, hints, tarifByCode]);
+  }, [displayByCode, hints, tarifByCode, tarifFruits]);
 
   const toggleCart = (p: Product) => {
     loadHints([p.itemCode]);

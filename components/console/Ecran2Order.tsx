@@ -10,6 +10,9 @@ import {
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
 import { nextDeliveryDate, nextWorkingDeliveryDay, isPrecommande } from "@/lib/livraison";
+import { familyOf } from "@/lib/familles";
+import { priceForArticle, type TarifFruitRow } from "@/lib/tarifFruits";
+import { TarifFruitsEditor } from "@/components/clients/TarifFruitsEditor";
 import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -405,6 +408,18 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     () => new Map((tarifs ?? []).map((t) => [t.itemCode, t.price])),
     [tarifs],
   );
+  // Tarif PAR FRUITS du client (famille · origine · calibre · variété) — lecture
+  // seule ici (édité dans l'éditeur dédié / la fiche), appliqué au panier.
+  const [tarifFruits, setTarifFruits] = useState<TarifFruitRow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    setTarifFruits([]);
+    fetch(`/api/clients/${clientId}/tarif-fruits`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled && j?.ok) setTarifFruits(j.rows ?? []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [clientId]);
   const [numAtCard, setNumAtCard] = useState("");
   const [modes, setModes] = useState<DeliveryMode[]>([]);
   const [modeId, setModeId] = useState("");
@@ -665,9 +680,20 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     // Prix de départ : cotation SPÉCIFIQUE client (onglet Tarif) prioritaire,
     // sinon prix conseillé.
     const promo = opts?.noPromo ? null : (promos[p.itemCode] ?? null);
+    // Prix : cotation SKU exacte > TARIF PAR FRUITS (désignation : famille ·
+    // origine · calibre · variété) > prix conseillé. Le calibre vient des hints
+    // (U_GER_CALIBRE, live SAP).
+    const fruitPrice = tarifFruits.length
+      ? priceForArticle(tarifFruits, {
+          family: familyOf(p.itemName, p.groupName ?? null).key,
+          pays: p.uPays ?? null,
+          calibre: hints[p.itemCode]?.calibre ?? null,
+          variete: p.frgnName ?? null,
+        })
+      : null;
     let price = opts?.price !== undefined
       ? opts.price
-      : (tarifByCode.get(p.itemCode) ?? hints[p.itemCode]?.prixConseille ?? null);
+      : (tarifByCode.get(p.itemCode) ?? fruitPrice ?? hints[p.itemCode]?.prixConseille ?? null);
     let discountPercent = 0;
     if (promo?.kind === "PERCENT" && promo.value > 0 && promo.value < 100) {
       discountPercent = promo.value;
@@ -1446,8 +1472,15 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
           })}
         </div>
         </>) : (
-        /* ── Onglet TARIF — cotations spécifiques du client (prix par article) ── */
+        /* ── Onglet TARIF — par fruits (désignation) + par article (cotation SKU) ── */
         <div className="flex-1 min-h-0 flex flex-col">
+          {/* Tarif PAR FRUITS (famille · origine · calibre · variété) — édité ici ET
+              dans la fiche client ; appliqué en priorité sur le prix conseillé. */}
+          <div className="shrink-0 mb-3 pb-3 border-b border-border max-h-[46%] overflow-y-auto pr-1">
+            <p className="mb-2 text-[12px] font-semibold text-foreground">Tarif par fruits</p>
+            <TarifFruitsEditor clientId={clientId} compact />
+          </div>
+          <p className="shrink-0 mb-2 text-[12px] font-semibold text-foreground">Tarif par article (SKU)</p>
           <div className="shrink-0 mb-2 flex items-center gap-1.5">
             <input
               value={tarifQuery}
