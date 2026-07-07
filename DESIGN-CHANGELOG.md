@@ -273,3 +273,20 @@ livraison, à faire **signer au chauffeur** — et envoyable par mail.
 |---------|--------|
 | Heures d'état conservées | Chaque clic « Fait » / « Départ » garde son **heure** (le `at` AppSetting, désormais exposé par l'API et renvoyé par les POST). Affichée sur le bon : badges de ligne « Fait par X · 14:32 », « Parti · 14:32 » et chips de la vue en grand (préfixe jj/mm si autre jour). Mises à jour optimistes, y compris en action groupée. |
 | Recherche d'un bon | Champ 🔍 à côté des onglets : filtre par **n° de BL, client (nom / nom complet / code) ou réf. client**, insensible aux accents. S'applique avant les onglets (compteurs recalculés), **déplie tout** pendant la recherche, Échap/✕ pour effacer, état vide dédié. |
+
+---
+
+## 📱 Confort mobile / écran zoomé — respire sur tout appareil (NOUVEAU)
+
+Cible les téléphones dont le viewport effectif est **étroit** — en particulier
+l'**iPhone en « Affichage zoomé » / gros texte** (préparateur de commande) où la
+largeur tombe vers 320-375 px et où l'UI se tassait. Le texte garde la taille
+lisible voulue ; c'est la **densité** et l'agrandissement d'UI cumulé qu'on corrige.
+
+| Élément | Avant | Après |
+|---------|-------|-------|
+| Zoom d'interface applicatif (`--app-zoom`) | S'appliquait aussi sur mobile → se **cumulait** avec le zoom d'affichage iOS et cassait la grille. | **Neutralisé sous 640 px** (`.app-zoom-root { zoom: 1 }`) : sur téléphone c'est l'OS qui gère l'agrandissement, pas un 2ᵉ zoom logiciel. |
+| Icônes (lucide, +30 % partout) | +30 % même sur téléphone → icônes surdimensionnées mangeant la largeur des lignes. | **+12 % sous 640 px** : icônes encore plus grandes que nominal (lisibilité) mais les lignes retrouvent de l'air. Bureau/tablette gardent +30 %. |
+| Titres de section | Retours à la ligne « bancals » (mot orphelin) sur écran étroit. | `text-wrap: balance` sur `.font-display` → répartition propre sur 2-3 lignes. |
+| Palier responsive | Rien entre la base et `sm` (640 px). | Palier **`xs` (380 px)** ajouté : la base reste la plus sobre, `xs:` réintroduit l'info secondaire dès qu'il y a un peu de largeur. |
+| Liste « Préparations à faire » | Ligne dense (nom + BL + transporteur + colis + segment + pastille « À préparer »). | Sur le plus étroit : pastille de statut et **colis** masqués (redondants), segment masqué, lignes **aérées** (`py-3`) — l'essentiel d'abord (client, BL, transporteur, alerte manquants). Tout réapparaît dès `xs`/`sm`. |
