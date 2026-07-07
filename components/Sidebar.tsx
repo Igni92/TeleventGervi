@@ -9,7 +9,7 @@ import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, Package, PackagePlus, Factory, Receipt, AlertTriangle,
   Home, Settings, PackageCheck, ClipboardCheck, ClipboardList, Truck, Eye, Store, PackageX,
-  Pencil, Loader2, RotateCcw, ScrollText, GripVertical,
+  Pencil, Loader2, RotateCcw, ScrollText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -19,8 +19,9 @@ import { SignalLoader } from "@/components/ui/page-loader";
 import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
 import { navAllowedForPreview, PREVIEW_ROLE_LABELS } from "@/lib/rolePreview";
 import {
-  applyNavOverrides, toEditState, fromEditState, moveNavRowBefore, swapNavRows,
-  type NavOverrides, type NavEditGroup,
+  applyNavConfig, toNavEditState, fromNavEditState, moveNavRowBefore, swapNavRows,
+  addNavCategory, addNavSubCategory, renameNavCategory, deleteNavCategory, moveNavCategory,
+  type NavConfig, type NavEditGroup,
 } from "@/lib/navOverrides";
 import { SPRING } from "@/lib/motion";
 import {
@@ -250,16 +251,16 @@ export function Sidebar() {
   // ── Personnalisation (libellés + emplacement) — réglage GLOBAL, chargé au
   //    montage (best-effort) et édité EN PLACE via le mode modification
   //    ci-dessous (bouton crayon, admin/direction). ──
-  const [navOverrides, setNavOverrides] = useState<NavOverrides>({});
+  const [navConfig, setNavConfig] = useState<NavConfig>({ items: {}, categories: [] });
   useEffect(() => {
     let cancelled = false;
     fetch("/api/nav-overrides", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (!cancelled && j?.ok && j.overrides) setNavOverrides(j.overrides); })
+      .then((j) => { if (!cancelled && j?.ok && j.config) setNavConfig(j.config); })
       .catch(() => { /* réglage optionnel */ });
     return () => { cancelled = true; };
   }, []);
-  const groups = useMemo(() => applyNavOverrides(NAV_GROUPS, navOverrides), [navOverrides]);
+  const groups = useMemo(() => applyNavConfig(NAV_GROUPS, navConfig), [navConfig]);
 
   // ── MODE MODIFICATION de la nav (crayon) : renommer les entrées et changer
   //    leur zone (groupe + ordre) directement dans la barre. Brouillon local,
@@ -281,23 +282,29 @@ export function Sidebar() {
     endDrag();
   };
   const startEditNav = () => {
-    setDraft(toEditState(NAV_GROUPS, navOverrides));
+    setDraft(toNavEditState(NAV_GROUPS, navConfig));
     setEditingNav(true);
     if (rail) toggleRail();   // l'édition a besoin de la largeur complète
   };
   const cancelEditNav = () => { setEditingNav(false); setDraft([]); };
   const renameDraft = (href: string, label: string) =>
     setDraft((cur) => cur.map((g) => ({ ...g, rows: g.rows.map((r) => (r.href === href ? { ...r, label } : r)) })));
-  async function saveNav(overrides: NavOverrides, successMsg: string) {
+  // ── Catégories & sous-catégories (création dans la barre) ──
+  const addCategory = () => setDraft((cur) => addNavCategory(cur));
+  const addSubCategory = (parent: string) => setDraft((cur) => addNavSubCategory(cur, parent));
+  const renameCategory = (label: string, next: string) => setDraft((cur) => renameNavCategory(cur, label, next));
+  const removeCategory = (label: string) => setDraft((cur) => deleteNavCategory(cur, label));
+  const shiftCategory = (label: string, dir: -1 | 1) => setDraft((cur) => moveNavCategory(cur, label, dir));
+  async function saveNav(config: NavConfig, successMsg: string) {
     setSavingNav(true);
     try {
       const r = await fetch("/api/nav-overrides", {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ overrides }),
+        body: JSON.stringify({ config }),
       });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) throw new Error(j?.error || "Échec de l'enregistrement");
-      setNavOverrides(j.overrides ?? {});
+      setNavConfig(j.config ?? { items: {}, categories: [] });
       setEditingNav(false);
       setDraft([]);
       toast.success(successMsg, { description: "Réglage global — les autres postes l'auront au prochain chargement." });
@@ -425,11 +432,47 @@ export function Sidebar() {
       <nav className="flex-1 overflow-y-auto overflow-x-hidden px-3 pb-2 pt-1 space-y-4">
         {editingNav ? (
           /* ── MODE MODIFICATION : renommer + déplacer (zone/ordre) en place ── */
-          draft.map((group) => (
-            <div key={group.label}>
-              <p className="px-2 mb-1.5 text-[9.5px] uppercase tracking-[0.18em] font-bold text-white/55 whitespace-nowrap">
-                {group.label}
-              </p>
+          <>
+          {draft.map((group) => {
+            const isSub = !!group.parent;
+            const canDelete = !!group.custom && group.rows.length === 0 && !draft.some((g) => g.parent === group.label);
+            return (
+            <div key={group.label} className={isSub ? "ml-2.5 border-l border-white/10 pl-2 -mt-3" : ""}>
+              {/* En-tête de catégorie : renommer (créées) · réordonner · + sous-catégorie · supprimer */}
+              <div className="px-1 mb-1.5 flex items-center gap-0.5">
+                {isSub && <CornerDownRight className="h-3 w-3 shrink-0 text-white/30" />}
+                {group.custom ? (
+                  <input
+                    value={group.label}
+                    onChange={(e) => renameCategory(group.label, e.target.value)}
+                    aria-label={`Nom de la catégorie ${group.label}`}
+                    className="min-w-0 flex-1 h-6 rounded-md border border-white/15 bg-white/[0.06] px-1.5 text-[10px] uppercase tracking-[0.1em] font-bold text-white/80 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  />
+                ) : (
+                  <span className="min-w-0 flex-1 truncate text-[9.5px] uppercase tracking-[0.18em] font-bold text-white/55">{group.label}</span>
+                )}
+                <button type="button" onClick={() => shiftCategory(group.label, -1)} title="Monter la catégorie"
+                  className="h-6 w-5 shrink-0 rounded flex items-center justify-center text-white/30 hover:text-white/80 hover:bg-white/[0.06] transition-colors">
+                  <ChevronUp className="h-3 w-3" />
+                </button>
+                <button type="button" onClick={() => shiftCategory(group.label, 1)} title="Descendre la catégorie"
+                  className="h-6 w-5 shrink-0 rounded flex items-center justify-center text-white/30 hover:text-white/80 hover:bg-white/[0.06] transition-colors">
+                  <ChevronDown className="h-3 w-3" />
+                </button>
+                {!isSub && (
+                  <button type="button" onClick={() => addSubCategory(group.label)} title="Ajouter une sous-catégorie"
+                    className="h-6 w-5 shrink-0 rounded flex items-center justify-center text-white/30 hover:text-brand-300 hover:bg-white/[0.06] transition-colors">
+                    <Plus className="h-3 w-3" />
+                  </button>
+                )}
+                {group.custom && (
+                  <button type="button" onClick={() => removeCategory(group.label)} disabled={!canDelete}
+                    title={canDelete ? "Supprimer la catégorie" : "Videz la catégorie (et ses sous-catégories) pour la supprimer"}
+                    className="h-6 w-5 shrink-0 rounded flex items-center justify-center text-white/30 hover:text-rose-300 hover:bg-white/[0.06] transition-colors disabled:opacity-25 disabled:hover:text-white/30 disabled:hover:bg-transparent">
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
               <ul className="space-y-1">
                 {group.rows.map((row) => {
                   const Icon = ICON_BY_HREF.get(row.href) ?? Radio;
@@ -491,19 +534,34 @@ export function Sidebar() {
                 )}
               </ul>
             </div>
-          ))
+            );
+          })}
+          {/* ＋ Créer une catégorie de 1er niveau (vide, à remplir par glisser-déposer). */}
+          <button
+            type="button"
+            onClick={addCategory}
+            title="Créer une nouvelle catégorie"
+            className="w-full inline-flex items-center justify-center gap-1.5 h-9 rounded-lg border border-dashed border-white/20 text-[12px] font-semibold text-white/60 hover:text-white hover:border-brand-400/60 hover:bg-white/[0.04] transition-colors"
+          >
+            <FolderPlus className="h-3.5 w-3.5" /> Nouvelle catégorie
+          </button>
+          </>
         ) : (
         groups.map((group) => {
           // Aperçu « voir comme » : on masque les entrées hors périmètre du rôle
           // prévisualisé (préparateur = ses 2 écrans). Sans aperçu : tout visible.
+          // Une catégorie SANS entrée directe mais avec des sous-catégories reste
+          // affichée (en-tête seul) — applyNavConfig ne la garde que dans ce cas.
+          const headerOnly = group.label !== null && group.items.length === 0;
           const items = group.items.filter((it) => navAllowedForPreview(it.href, previewRole));
-          if (items.length === 0) return null;
+          if (items.length === 0 && !headerOnly) return null;
+          const isSub = !!group.parent;
           const collapsible = !!group.collapsible && !rail;
           const hasActive = items.some((it) => isActive(it));
           // Replié par défaut ; s'ouvre seul si la page active est dedans.
           const open = !collapsible || (group.label ? openGroups[group.label] : false) || hasActive;
           return (
-          <div key={group.label ?? "accueil"}>
+          <div key={group.label ?? "accueil"} className={isSub && !rail ? "ml-3 border-l border-white/[0.08] pl-2 -mt-2" : ""}>
             {group.label !== null && (rail ? (
               <div className="mx-2 mb-2 h-px bg-white/[0.07]" />
             ) : collapsible ? (
@@ -516,12 +574,16 @@ export function Sidebar() {
                 <span className="whitespace-nowrap">{group.label}</span>
                 <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${open ? "" : "-rotate-90"}`} />
               </button>
+            ) : isSub ? (
+              <p className="px-2 mb-1 flex items-center gap-1 text-[8.5px] uppercase tracking-[0.14em] font-bold text-white/45 whitespace-nowrap">
+                <CornerDownRight className="h-2.5 w-2.5 shrink-0 text-white/30" /> {group.label}
+              </p>
             ) : (
               <p className="px-2 mb-1.5 text-[9.5px] uppercase tracking-[0.18em] font-bold text-white/55 whitespace-nowrap">
                 {group.label}
               </p>
             ))}
-            {open && (
+            {open && items.length > 0 && (
             <ul className="space-y-0.5">
               {items.map((it) => {
                 const { href, label, icon: Icon, badge } = it;
@@ -611,7 +673,7 @@ export function Sidebar() {
         <div className="shrink-0 border-t border-white/[0.07] px-3 py-2.5 flex items-center gap-1.5">
           <button
             type="button"
-            onClick={() => saveNav(fromEditState(draft), "Navigation enregistrée")}
+            onClick={() => saveNav(fromNavEditState(draft), "Navigation enregistrée")}
             disabled={savingNav}
             className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-[12.5px] font-semibold disabled:opacity-60 transition-colors"
           >
@@ -628,7 +690,7 @@ export function Sidebar() {
           </button>
           <button
             type="button"
-            onClick={() => saveNav({}, "Navigation réinitialisée (libellés et zones d'origine)")}
+            onClick={() => saveNav({ items: {}, categories: [] }, "Navigation réinitialisée (libellés et zones d'origine)")}
             disabled={savingNav}
             title="Revenir aux libellés et emplacements d'origine"
             className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-white/15 text-white/60 hover:text-white hover:bg-white/[0.06] transition-colors disabled:opacity-60"
