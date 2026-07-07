@@ -19,7 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
-  BadgeEuro, ChevronDown, Loader2, Minus, Plus, Search, ShoppingCart, Star, Trash2, Truck, X,
+  BadgeEuro, ChevronDown, ChevronUp, Loader2, Minus, Plus, Search, ShoppingCart, Star, Trash2, Truck, X,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, unitInfo } from "@/lib/gervifrais-calc";
 import { nextDeliveryDate, nextWorkingDeliveryDay, isPrecommande } from "@/lib/livraison";
@@ -415,6 +415,16 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
   const updateLine = (i: number, patch: Partial<CartLine>) =>
     setCart((c) => c.map((l, k) => (k === i ? { ...l, ...patch } : l)));
   const removeLine = (i: number) => setCart((c) => c.filter((_, k) => k !== i));
+  // Réordonner une ligne (tactile : flèches — le glisser-déposer HTML5 ne
+  // fonctionne pas au doigt). L'ordre du panier = l'ordre des lignes du BL.
+  const moveLine = (i: number, dir: -1 | 1) =>
+    setCart((c) => {
+      const j = i + dir;
+      if (j < 0 || j >= c.length) return c;
+      const next = c.slice();
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
 
   // Prix arrivé APRÈS l'ajout au panier (hint chargé en différé) → complète les
   // lignes restées sans prix, sans écraser une saisie manuelle.
@@ -552,6 +562,21 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
                     {/* Tags produit — conservés sur la version allégée. */}
                     <DesignationChips marque={l.marque} condt={l.condi} pays={l.pays} className="mt-1" />
                   </div>
+                  {/* Réordonner (flèches, tactile) — l'ordre du panier = l'ordre du BL. */}
+                  {cart.length > 1 && (
+                    <div className="shrink-0 flex flex-col rounded-lg border border-border overflow-hidden">
+                      <button
+                        type="button" onClick={() => moveLine(i, -1)} disabled={i === 0}
+                        aria-label={`Monter ${l.itemName}`} title="Monter la ligne"
+                        className="inline-flex h-[18px] w-8 items-center justify-center text-muted-foreground hover:bg-secondary/60 active:bg-secondary disabled:opacity-25"
+                      ><ChevronUp className="h-3.5 w-3.5" /></button>
+                      <button
+                        type="button" onClick={() => moveLine(i, 1)} disabled={i === cart.length - 1}
+                        aria-label={`Descendre ${l.itemName}`} title="Descendre la ligne"
+                        className="inline-flex h-[18px] w-8 items-center justify-center text-muted-foreground hover:bg-secondary/60 active:bg-secondary disabled:opacity-25 border-t border-border"
+                      ><ChevronDown className="h-3.5 w-3.5" /></button>
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => removeLine(i)}
