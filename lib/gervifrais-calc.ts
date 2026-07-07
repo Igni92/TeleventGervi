@@ -7,19 +7,35 @@
 // ── Découpe multi-entrepôt ────────────────────────────────────
 export const WAREHOUSE_FILL_ORDER = ["000", "01", "R1"];
 
+/** Magasin d'ATTENTE des quantités vendues à découvert (000 = « A/C - A/D »).
+ *  La ligne y stationne sans lot (EM_PENDING) jusqu'à la réception, qui pose le
+ *  vrai lot ET déplace la ligne vers le magasin de réception (receiptRetro). */
+export const DECOUVERT_WAREHOUSE = "000";
+
+export type WarehouseChunk = {
+  warehouse: string;
+  qty: number;
+  /** true = quantité SANS stock (sur-vente) : part sur sa propre ligne, sans
+   *  lot EM — jamais fusionnée avec une ligne de stock (sinon le magasin de la
+   *  ligne passe en négatif et la réception ne peut plus la corriger). */
+  decouvert?: boolean;
+};
+
 export function totalAvailable(availByWarehouse: Record<string, number>): number {
   return WAREHOUSE_FILL_ORDER.reduce((s, w) => s + Math.max(0, availByWarehouse[w] ?? 0), 0);
 }
 
 /** Répartit une quantité sur les entrepôts par ordre de puisage (000→01→R1).
- *  Surplus (sur-vente) ajouté au 1er entrepôt dispo (ou 000). */
+ *  Le surplus (sur-vente) part sur un chunk SÉPARÉ marqué `decouvert` (magasin
+ *  d'attente 000) : la quantité en stock garde son magasin + son lot, le reste
+ *  attend la réception sans lot. */
 export function splitByWarehouse(
   qty: number,
   availByWarehouse: Record<string, number>,
   fillOrder: string[] = WAREHOUSE_FILL_ORDER,
-): { warehouse: string; qty: number }[] {
+): WarehouseChunk[] {
   let remaining = qty;
-  const chunks: { warehouse: string; qty: number }[] = [];
+  const chunks: WarehouseChunk[] = [];
   for (const w of fillOrder) {
     if (remaining <= 0.0001) break;
     const avail = Math.max(0, availByWarehouse[w] ?? 0);
@@ -29,10 +45,11 @@ export function splitByWarehouse(
     remaining -= take;
   }
   if (remaining > 0.0001) {
-    const w = fillOrder.find((x) => (availByWarehouse[x] ?? 0) > 0) ?? fillOrder[0];
-    const existing = chunks.find((c) => c.warehouse === w);
-    if (existing) existing.qty = Math.round((existing.qty + remaining) * 1000) / 1000;
-    else chunks.push({ warehouse: w, qty: Math.round(remaining * 1000) / 1000 });
+    chunks.push({
+      warehouse: DECOUVERT_WAREHOUSE,
+      qty: Math.round(remaining * 1000) / 1000,
+      decouvert: true,
+    });
   }
   return chunks;
 }

@@ -16,11 +16,24 @@ describe("splitByWarehouse — découpe multi-entrepôt", () => {
       { warehouse: "000", qty: 3 }, { warehouse: "01", qty: 3 }, { warehouse: "R1", qty: 4 },
     ]);
   });
-  it("sur-vente → surplus rattaché au 1er entrepôt dispo", () => {
-    expect(splitByWarehouse(10, { "000": 4, "01": 0, R1: 0 })).toEqual([{ warehouse: "000", qty: 10 }]);
+  it("sur-vente → surplus sur ligne SÉPARÉE à découvert (jamais fusionné)", () => {
+    expect(splitByWarehouse(10, { "000": 4, "01": 0, R1: 0 })).toEqual([
+      { warehouse: "000", qty: 4 },
+      { warehouse: "000", qty: 6, decouvert: true },
+    ]);
   });
-  it("aucun stock → tout sur 000 (fallback)", () => {
-    expect(splitByWarehouse(5, { "000": 0, "01": 0, R1: 0 })).toEqual([{ warehouse: "000", qty: 5 }]);
+  it("sur-vente avec stock en 01 → le stock reste en 01, le surplus part en 000 à découvert", () => {
+    // Régression « magasins négatifs » : le surplus ne doit plus gonfler la
+    // ligne 01 (01 passait à −5), il attend en 000 sans lot.
+    expect(splitByWarehouse(10, { "000": 0, "01": 5, R1: 0 })).toEqual([
+      { warehouse: "01", qty: 5 },
+      { warehouse: "000", qty: 5, decouvert: true },
+    ]);
+  });
+  it("aucun stock → tout à découvert sur 000", () => {
+    expect(splitByWarehouse(5, { "000": 0, "01": 0, R1: 0 })).toEqual([
+      { warehouse: "000", qty: 5, decouvert: true },
+    ]);
   });
   it("ignore les dispos négatives (committed > stock)", () => {
     expect(totalAvailable({ "000": 48, "01": -129, R1: 0 })).toBe(48);

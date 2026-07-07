@@ -894,6 +894,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     displayUnit: string; warehouseCode: string; price?: number;
     /** C2 — remise SAP par ligne (0–100), portée sur le bon. */
     discountPercent?: number;
+    /** Ligne à découvert (sur-vente) : part sans lot EM — affectée à la réception. */
+    decouvert?: boolean;
   };
 
   /** C2 — En-tête du bon : mention des promos appliquées (uniquement si présentes).
@@ -962,6 +964,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             warehouseCode: c.warehouse,
             ...(price != null ? { price } : {}),
             ...(dPercent != null ? { discountPercent: dPercent } : {}),
+            ...(c.decouvert ? { decouvert: true } : {}),
           });
         }
         if (freeHere > 0) {
@@ -973,6 +976,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             // Colis offert : on garde le prix de référence + 100 % de remise → 0 €.
             ...(price != null ? { price } : {}),
             discountPercent: 100,
+            ...(c.decouvert ? { decouvert: true } : {}),
           });
         }
       }
@@ -997,6 +1001,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       type FinalLine = {
         itemCode: string; quantity: number; warehouseCode?: string;
         price?: number; discountPercent?: number; keep?: boolean; lot?: string | null;
+        decouvert?: boolean;
       };
       const lines: FinalLine[] = [];
       for (const l of cart) {
@@ -1042,6 +1047,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
               ...(a.warehouseCode ? { warehouseCode: a.warehouseCode } : {}),
               ...(a.price != null ? { price: a.price } : {}),
               ...(a.discountPercent != null ? { discountPercent: a.discountPercent } : {}),
+              ...(a.decouvert ? { decouvert: true } : {}),
               keep: false,
             });
           }

@@ -56,6 +56,8 @@ interface BLApiLine {
   warehouseCode: string;
   manageBatch: boolean;
   price?: number;
+  /** Ligne à découvert (sur-vente) : part sans lot EM — affectée à la réception. */
+  decouvert?: boolean;
 }
 
 interface Props {
@@ -271,6 +273,7 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
         warehouseCode: c.warehouse,
         manageBatch: l.manageBatch,
         price: l.price != null && l.price > 0 ? l.price : undefined,
+        ...(c.decouvert ? { decouvert: true } : {}),
       })),
     );
 
@@ -800,16 +803,17 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
                             <span className="text-[10.5px] italic text-muted-foreground/70">—</span>
                           ) : chunks.map((c, ci) => {
                             const avail = Math.max(0, l.availByWarehouse[c.warehouse] ?? 0);
-                            const spill = c.qty > avail;
                             return (
                               <span
                                 key={ci}
-                                title={`${WAREHOUSE_LABELS[c.warehouse] ?? c.warehouse} — ${avail} dispo`}
+                                title={c.decouvert
+                                  ? "À découvert — ligne séparée sans lot, magasin et lot affectés à la réception"
+                                  : `${WAREHOUSE_LABELS[c.warehouse] ?? c.warehouse} — ${avail} dispo`}
                                 className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] tnum font-medium ${
-                                  spill ? "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400" : "bg-secondary text-foreground/80"
+                                  c.decouvert ? "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400" : "bg-secondary text-foreground/80"
                                 }`}
                               >
-                                <span className="font-mono">{c.warehouse}</span>
+                                <span className="font-mono">{c.decouvert ? "A/D" : c.warehouse}</span>
                                 <span className="font-semibold">{c.qty}</span>
                                 <span className="text-muted-foreground">{l.displayUnit}</span>
                               </span>
@@ -891,18 +895,19 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
                             ) : (
                               chunks.map((c, ci) => {
                                 const avail = Math.max(0, l.availByWarehouse[c.warehouse] ?? 0);
-                                const spill = c.qty > avail;     // surplus au-delà du dispo
                                 return (
                                   <span
                                     key={ci}
-                                    title={`${WAREHOUSE_LABELS[c.warehouse] ?? c.warehouse} — ${avail} dispo`}
+                                    title={c.decouvert
+                                      ? "À découvert — ligne séparée sans lot, magasin et lot affectés à la réception"
+                                      : `${WAREHOUSE_LABELS[c.warehouse] ?? c.warehouse} — ${avail} dispo`}
                                     className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] tnum font-medium ${
-                                      spill
+                                      c.decouvert
                                         ? "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400"
                                         : "bg-secondary text-foreground/80"
                                     }`}
                                   >
-                                    <span className="font-mono">{c.warehouse}</span>
+                                    <span className="font-mono">{c.decouvert ? "A/D" : c.warehouse}</span>
                                     <span className="font-semibold">{c.qty}</span>
                                     <span className="text-muted-foreground">{l.displayUnit}</span>
                                   </span>
@@ -1028,7 +1033,8 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
           )}
 
           {/* Submit — sur-vente autorisée (commande client peut dépasser le stock),
-              affichée en avertissement non-bloquant. Le surplus est rattaché à 000. */}
+              affichée en avertissement non-bloquant. Le surplus part sur sa propre
+              ligne à découvert (sans lot), reprise à la réception. */}
           {(() => {
             const overLines = lines.filter((l) => l.quantity > totalAvailable(l.availByWarehouse));
             // nb total de lignes SAP générées après découpe multi-entrepôt
@@ -1041,7 +1047,8 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
                 {overLines.length > 0 && (
                   <div className="text-[11.5px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-500/30 rounded-lg px-3 py-2">
                     ⚠️ {overLines.length} ligne{overLines.length > 1 ? "s" : ""} en sur-vente (qté &gt; stock dispo).
-                    Le surplus sera rattaché à l&apos;entrepôt 000. La commande client reste créable.
+                    Le surplus part sur une ligne séparée <strong>sans lot</strong> (à découvert) —
+                    magasin et lot seront affectés à la prochaine réception. La commande client reste créable.
                   </div>
                 )}
                 {splitCount > 0 && (
