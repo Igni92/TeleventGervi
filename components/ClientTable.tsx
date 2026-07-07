@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, type MouseEvent as ReactMouseEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -42,6 +42,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { useContextMenu, ContextMenu, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator } from "@/components/ui/context-menu";
 import {
   Select,
   SelectContent,
@@ -554,79 +555,16 @@ export function ClientTable() {
                 </TableCell>
               </TableRow>
             ) : (
-              sortedClients.map((client) => {
-                const isSelected = selectedIds.has(client.id);
-                return (
-                <TableRow
+              sortedClients.map((client) => (
+                <ClientRow
                   key={client.id}
-                  className={`border-b border-slate-100/80 dark:border-slate-700/40 transition-colors ${
-                    isSelected
-                      ? "bg-brand-50/60 dark:bg-brand-950/30"
-                      : "hover:bg-slate-50/60 dark:hover:bg-white/[0.025]"
-                  }`}
-                >
-                  <TableCell className="w-9 px-3 py-3">
-                    <RowCheckbox checked={isSelected} onChange={() => toggleOne(client.id)} />
-                  </TableCell>
-                  <TableCell className="px-4 py-3 font-mono text-[12.5px] font-semibold text-slate-600 dark:text-slate-300">
-                    {client.code}
-                  </TableCell>
-                  <TableCell className="px-4 py-3 text-[13px] font-semibold text-slate-800 dark:text-slate-100 min-w-[180px]">
-                    <span className="inline-flex items-center gap-1.5 flex-wrap">
-                      {client.nom}
-                      {client.activeTelevente === false && (
-                        <span className="inline-flex h-[17px] items-center px-1.5 rounded text-[9.5px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
-                          à activer
-                        </span>
-                      )}
-                    </span>
-                  </TableCell>
-                  <TableCell className="px-4 py-3">
-                    {client.type ? (
-                      <Badge variant={typeBadgeVariant[client.type] || "outline"}>
-                        {client.type}
-                      </Badge>
-                    ) : (
-                      <span className="text-slate-300 dark:text-slate-600 text-xs">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="px-4 py-3 text-[12.5px] text-slate-600 dark:text-slate-300">
-                    <div>{displayNameFromSlp(client.commercial) || <span className="text-slate-300 dark:text-slate-600">—</span>}</div>
-                    {client.vendeur && client.vendeur !== client.commercial && (
-                      <div className="text-[10.5px] text-muted-foreground">vend. {displayNameFromSlp(client.vendeur)}</div>
-                    )}
-                  </TableCell>
-                  <TableCell className="px-4 py-3 font-mono text-[12px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                    {client.tel1 ? formatPhoneDisplay(client.tel1) : <span className="text-slate-300 dark:text-slate-600">—</span>}
-                  </TableCell>
-                  <TableCell className="px-4 py-3 font-mono text-[12px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                    {client.tel2 ? formatPhoneDisplay(client.tel2) : <span className="text-slate-300 dark:text-slate-600">—</span>}
-                  </TableCell>
-                  <TableCell className="px-4 py-3 whitespace-nowrap">
-                    {client.derniereCommande ? (
-                      <span className="text-[12px] font-semibold text-emerald-700 dark:text-emerald-400">
-                        {formatRelative(client.derniereCommande)}
-                      </span>
-                    ) : (
-                      <span className="text-slate-300 dark:text-slate-600 text-[12px]">—</span>
-                    )}
-                  </TableCell>
-                  {!isAujourdhui && (
-                    <TableCell className="px-4 py-3 whitespace-nowrap">
-                      <JoursBadges joursAppel={client.joursAppel} />
-                    </TableCell>
-                  )}
-                  <TableCell className="text-right whitespace-nowrap px-4 py-3">
-                    <div className="flex items-center justify-end gap-1">
-                      <ClientRowMenu
-                        client={client}
-                        onReminderCreated={fetchClients}
-                      />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              );
-              })
+                  client={client}
+                  isSelected={selectedIds.has(client.id)}
+                  onToggleSelect={() => toggleOne(client.id)}
+                  showJours={!isAujourdhui}
+                  onChanged={fetchClients}
+                />
+              ))
             )}
           </TableBody>
         </Table>
@@ -821,19 +759,31 @@ function BulkActionBar({
   );
 }
 
-/* ── Kebab row menu — Éditer / Rappel / Ouvrir fiche ─────── */
-function ClientRowMenu({
-  client, onReminderCreated,
+/* ── Ligne client — clic = ouvre la fiche · clic DROIT (PC) = menu d'actions.
+ *    Le kebab « … » n'est gardé que sur TACTILE (pas de clic droit au doigt). ── */
+function ClientRow({
+  client, isSelected, onToggleSelect, showJours, onChanged,
 }: {
   client: Client;
-  onReminderCreated: () => void;
+  isSelected: boolean;
+  onToggleSelect: () => void;
+  showJours: boolean;
+  onChanged: () => void;
 }) {
+  const router = useRouter();
+  const { menu, openAt, close } = useContextMenu(220, 230);
   const [reminderOpen, setReminderOpen] = useState(false);
-  // Confirmation avant désactivation (action lourde : le client ne sera plus rappelé).
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
 
-  // Appel réseau d'activation/désactivation — logique inchangée.
+  const openFiche = () => router.push(`/clients/${client.id}`);
+
+  // Clic sur la ligne → fiche, SAUF sur un contrôle (case, menu, lien, bouton, champ).
+  const onRowClick = (e: ReactMouseEvent) => {
+    if ((e.target as HTMLElement).closest('input, button, a, select, [role="menu"], [data-no-nav]')) return;
+    openFiche();
+  };
+
   const setActivation = async (next: boolean) => {
     const res = await fetch(`/api/clients/${client.id}/assign`, {
       method: "POST",
@@ -842,104 +792,148 @@ function ClientRowMenu({
     });
     if (!res.ok) throw new Error();
   };
-
-  // Activation : 1 clic (action sans risque).
   const activate = async () => {
     try {
       await setActivation(true);
       toast.success(`${client.nom} activé en télévente`);
-      onReminderCreated(); // = refresh de la liste
-    } catch {
-      toast.error("Erreur lors du changement d'activation");
-    }
+      onChanged();
+    } catch { toast.error("Erreur lors du changement d'activation"); }
   };
-
-  // Désactivation : exécutée seulement après confirmation explicite (modale).
   const confirmDeactivate = async () => {
     setConfirmLoading(true);
     try {
       await setActivation(false);
       setConfirmOpen(false);
-      onReminderCreated(); // = refresh de la liste
+      onChanged();
       toast.success(`1 client désactivé`, {
         description: client.nom,
         action: {
           label: "Annuler",
           onClick: async () => {
-            try {
-              await setActivation(true);
-              toast.success(`${client.nom} réactivé en télévente`);
-              onReminderCreated();
-            } catch {
-              toast.error("Erreur lors de la réactivation");
-            }
+            try { await setActivation(true); toast.success(`${client.nom} réactivé en télévente`); onChanged(); }
+            catch { toast.error("Erreur lors de la réactivation"); }
           },
         },
       });
-    } catch {
-      toast.error("Erreur lors du changement d'activation");
-    } finally {
-      setConfirmLoading(false);
-    }
+    } catch { toast.error("Erreur lors du changement d'activation"); }
+    finally { setConfirmLoading(false); }
   };
 
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            className="h-8 w-8 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label="Actions"
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52">
-          <DropdownMenuLabel className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">
-            {client.code}
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => (client.activeTelevente ? setConfirmOpen(true) : activate())}
-            className="cursor-pointer text-[13px]"
-          >
-            {client.activeTelevente ? (
-              <><X className="mr-2 h-3.5 w-3.5 text-rose-500" /> Désactiver en télévente</>
-            ) : (
-              <><Check className="mr-2 h-3.5 w-3.5 text-emerald-600" /> Activer en télévente</>
+      <TableRow
+        onClick={onRowClick}
+        onContextMenu={openAt}
+        title="Cliquer pour ouvrir la fiche · clic droit pour les actions"
+        className={`cursor-pointer border-b border-slate-100/80 dark:border-slate-700/40 transition-colors ${
+          isSelected ? "bg-brand-50/60 dark:bg-brand-950/30" : "hover:bg-slate-50/60 dark:hover:bg-white/[0.025]"
+        }`}
+      >
+        <TableCell className="w-9 px-3 py-3" onClick={(e) => e.stopPropagation()}>
+          <RowCheckbox checked={isSelected} onChange={onToggleSelect} />
+        </TableCell>
+        <TableCell className="px-4 py-3 font-mono text-[12.5px] font-semibold text-slate-600 dark:text-slate-300">
+          {client.code}
+        </TableCell>
+        <TableCell className="px-4 py-3 text-[13px] font-semibold text-slate-800 dark:text-slate-100 min-w-[180px]">
+          <span className="inline-flex items-center gap-1.5 flex-wrap">
+            {client.nom}
+            {client.activeTelevente === false && (
+              <span className="inline-flex h-[17px] items-center px-1.5 rounded text-[9.5px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
+                à activer
+              </span>
             )}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem asChild className="cursor-pointer text-[13px]">
-            <Link href={`/clients/${client.id}`}>
-              <Pencil className="mr-2 h-3.5 w-3.5" />
-              Éditer la fiche
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => setReminderOpen(true)}
-            className="cursor-pointer text-[13px]"
-          >
-            <Bell className="mr-2 h-3.5 w-3.5" />
-            Programmer un rappel
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem asChild className="cursor-pointer text-[13px]">
-            <Link href={`/clients/${client.id}`}>
-              <ExternalLink className="mr-2 h-3.5 w-3.5" />
-              Ouvrir la fiche
-            </Link>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </span>
+        </TableCell>
+        <TableCell className="px-4 py-3">
+          {client.type ? (
+            <Badge variant={typeBadgeVariant[client.type] || "outline"}>{client.type}</Badge>
+          ) : (
+            <span className="text-slate-300 dark:text-slate-600 text-xs">—</span>
+          )}
+        </TableCell>
+        <TableCell className="px-4 py-3 text-[12.5px] text-slate-600 dark:text-slate-300">
+          <div>{displayNameFromSlp(client.commercial) || <span className="text-slate-300 dark:text-slate-600">—</span>}</div>
+          {client.vendeur && client.vendeur !== client.commercial && (
+            <div className="text-[10.5px] text-muted-foreground">vend. {displayNameFromSlp(client.vendeur)}</div>
+          )}
+        </TableCell>
+        <TableCell className="px-4 py-3 font-mono text-[12px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
+          {client.tel1 ? formatPhoneDisplay(client.tel1) : <span className="text-slate-300 dark:text-slate-600">—</span>}
+        </TableCell>
+        <TableCell className="px-4 py-3 font-mono text-[12px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
+          {client.tel2 ? formatPhoneDisplay(client.tel2) : <span className="text-slate-300 dark:text-slate-600">—</span>}
+        </TableCell>
+        <TableCell className="px-4 py-3 whitespace-nowrap">
+          {client.derniereCommande ? (
+            <span className="text-[12px] font-semibold text-emerald-700 dark:text-emerald-400">
+              {formatRelative(client.derniereCommande)}
+            </span>
+          ) : (
+            <span className="text-slate-300 dark:text-slate-600 text-[12px]">—</span>
+          )}
+        </TableCell>
+        {showJours && (
+          <TableCell className="px-4 py-3 whitespace-nowrap">
+            <JoursBadges joursAppel={client.joursAppel} />
+          </TableCell>
+        )}
+        <TableCell className="text-right whitespace-nowrap px-4 py-3" onClick={(e) => e.stopPropagation()}>
+          {/* Kebab : TACTILE uniquement (sur PC, c'est le clic droit). */}
+          <div className="hidden touch:!flex items-center justify-end gap-1">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="Actions"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuLabel className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">{client.code}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => (client.activeTelevente ? setConfirmOpen(true) : activate())} className="cursor-pointer text-[13px]">
+                  {client.activeTelevente
+                    ? <><X className="mr-2 h-3.5 w-3.5 text-rose-500" /> Désactiver en télévente</>
+                    : <><Check className="mr-2 h-3.5 w-3.5 text-emerald-600" /> Activer en télévente</>}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild className="cursor-pointer text-[13px]">
+                  <Link href={`/clients/${client.id}`}><Pencil className="mr-2 h-3.5 w-3.5" /> Éditer la fiche</Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setReminderOpen(true)} className="cursor-pointer text-[13px]">
+                  <Bell className="mr-2 h-3.5 w-3.5" /> Programmer un rappel
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild className="cursor-pointer text-[13px]">
+                  <Link href={`/clients/${client.id}`}><ExternalLink className="mr-2 h-3.5 w-3.5" /> Ouvrir la fiche</Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </TableCell>
+      </TableRow>
 
-      {/* Reminder modal — controlled from kebab */}
-      <ReminderModal
-        client={client}
-        open={reminderOpen}
-        onOpenChange={setReminderOpen}
-        onReminderCreated={onReminderCreated}
-      />
+      {/* Menu contextuel (clic droit, PC) — mêmes actions que le kebab tactile. */}
+      <ContextMenu
+        menu={menu}
+        onClose={close}
+        header={<><ContextMenuLabel>{client.code} · {client.nom}</ContextMenuLabel><ContextMenuSeparator /></>}
+      >
+        <ContextMenuItem icon={ExternalLink} onClick={() => { close(); openFiche(); }}>Ouvrir la fiche</ContextMenuItem>
+        <ContextMenuItem icon={Pencil} onClick={() => { close(); openFiche(); }}>Éditer la fiche</ContextMenuItem>
+        <ContextMenuItem icon={Bell} onClick={() => { close(); setReminderOpen(true); }}>Programmer un rappel</ContextMenuItem>
+        <ContextMenuSeparator />
+        {client.activeTelevente ? (
+          <ContextMenuItem icon={X} accent="danger" onClick={() => { close(); setConfirmOpen(true); }}>Désactiver en télévente</ContextMenuItem>
+        ) : (
+          <ContextMenuItem icon={Check} accent="success" onClick={() => { close(); activate(); }}>Activer en télévente</ContextMenuItem>
+        )}
+      </ContextMenu>
+
+      {/* Reminder modal — partagé kebab + clic droit */}
+      <ReminderModal client={client} open={reminderOpen} onOpenChange={setReminderOpen} onReminderCreated={onChanged} />
 
       {/* Confirmation avant désactivation — le client ne sera plus jamais rappelé. */}
       <Dialog open={confirmOpen} onOpenChange={(o) => !confirmLoading && setConfirmOpen(o)}>
@@ -956,18 +950,105 @@ function ClientRowMenu({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setConfirmOpen(false)}
-              disabled={confirmLoading}
-            >
-              Annuler
+            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={confirmLoading}>Annuler</Button>
+            <Button variant="destructive" onClick={confirmDeactivate} disabled={confirmLoading}>
+              {confirmLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Désactiver
             </Button>
-            <Button
-              variant="destructive"
-              onClick={confirmDeactivate}
-              disabled={confirmLoading}
-            >
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+/* ── Kebab d'actions — vue CARTES mobile (le clic droit n'existe pas au doigt). ── */
+function ClientRowMenu({
+  client, onReminderCreated,
+}: {
+  client: Client;
+  onReminderCreated: () => void;
+}) {
+  const [reminderOpen, setReminderOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+
+  const setActivation = async (next: boolean) => {
+    const res = await fetch(`/api/clients/${client.id}/assign`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activeTelevente: next }),
+    });
+    if (!res.ok) throw new Error();
+  };
+  const activate = async () => {
+    try { await setActivation(true); toast.success(`${client.nom} activé en télévente`); onReminderCreated(); }
+    catch { toast.error("Erreur lors du changement d'activation"); }
+  };
+  const confirmDeactivate = async () => {
+    setConfirmLoading(true);
+    try {
+      await setActivation(false); setConfirmOpen(false); onReminderCreated();
+      toast.success(`1 client désactivé`, {
+        description: client.nom,
+        action: { label: "Annuler", onClick: async () => {
+          try { await setActivation(true); toast.success(`${client.nom} réactivé en télévente`); onReminderCreated(); }
+          catch { toast.error("Erreur lors de la réactivation"); }
+        } },
+      });
+    } catch { toast.error("Erreur lors du changement d'activation"); }
+    finally { setConfirmLoading(false); }
+  };
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            className="h-8 w-8 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Actions"
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuLabel className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">{client.code}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => (client.activeTelevente ? setConfirmOpen(true) : activate())} className="cursor-pointer text-[13px]">
+            {client.activeTelevente
+              ? <><X className="mr-2 h-3.5 w-3.5 text-rose-500" /> Désactiver en télévente</>
+              : <><Check className="mr-2 h-3.5 w-3.5 text-emerald-600" /> Activer en télévente</>}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild className="cursor-pointer text-[13px]">
+            <Link href={`/clients/${client.id}`}><Pencil className="mr-2 h-3.5 w-3.5" /> Éditer la fiche</Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setReminderOpen(true)} className="cursor-pointer text-[13px]">
+            <Bell className="mr-2 h-3.5 w-3.5" /> Programmer un rappel
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild className="cursor-pointer text-[13px]">
+            <Link href={`/clients/${client.id}`}><ExternalLink className="mr-2 h-3.5 w-3.5" /> Ouvrir la fiche</Link>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <ReminderModal client={client} open={reminderOpen} onOpenChange={setReminderOpen} onReminderCreated={onReminderCreated} />
+
+      <Dialog open={confirmOpen} onOpenChange={(o) => !confirmLoading && setConfirmOpen(o)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Désactiver ce client en télévente ?
+            </DialogTitle>
+            <DialogDescription className="pt-1">
+              <span className="font-semibold text-foreground">{client.nom}</span> ne sera plus
+              jamais proposé au rappel. Vous pourrez le réactiver à tout moment depuis sa fiche ou cette liste.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={confirmLoading}>Annuler</Button>
+            <Button variant="destructive" onClick={confirmDeactivate} disabled={confirmLoading}>
               {confirmLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Désactiver
             </Button>
