@@ -1,5 +1,3 @@
-import { Prisma } from "@prisma/client";
-
 /**
  * Mapping « famille effective » d'un produit pour les analyses commerciales.
  *
@@ -15,46 +13,18 @@ import { Prisma } from "@prisma/client";
  * Évolutif : ajouter une ligne au CASE si une nouvelle famille à isoler
  * apparaît (cf. backlog A4).
  *
- * À utiliser via une CTE qui pré-mappe les Product → (familyKey, familyLabel).
+ * ⚠️ Ce module est importé par des COMPOSANTS CLIENT (tarif par fruits :
+ * fiche client, console). Il doit donc rester **SANS import Prisma** : la
+ * CTE SQL (`Prisma.sql`, serveur uniquement) vit dans `lib/famillesSql.ts`.
+ * Ne PAS y ré-introduire d'import `@prisma/client`, sinon le bundle client
+ * plante (« sqltag is unable to run in this browser environment »).
+ * Les règles ci-dessous DOIVENT rester synchrones avec FAMILY_CTE_SQL.
  */
-export const FAMILY_CTE_SQL: Prisma.Sql = Prisma.sql`
-  SELECT
-    p."itemCode",
-    p."itemGroup",
-    p."groupName",
-    p."salesUnitWeight",
-    CASE
-      WHEN UPPER(p."itemName") LIKE '%MYRTILLE%'  THEN 'myrtille'
-      WHEN UPPER(p."itemName") LIKE '%GROSEILLE%' THEN 'groseille'
-      WHEN UPPER(p."itemName") LIKE '%FRAMBOISE%' THEN 'framboise'
-      WHEN UPPER(p."itemName") LIKE '%CASSIS%'    THEN 'cassis'
-      WHEN UPPER(p."itemName") LIKE '%MURE%'
-        OR UPPER(p."itemName") LIKE '%MÛRE%'      THEN 'mure'
-      WHEN UPPER(p."itemName") LIKE '%FRAISE%'    THEN 'fraise'
-      ELSE 'g_' || COALESCE(p."itemGroup"::text, 'na')
-    END AS "familyKey",
-    CASE
-      WHEN UPPER(p."itemName") LIKE '%MYRTILLE%'  THEN 'Myrtille'
-      WHEN UPPER(p."itemName") LIKE '%GROSEILLE%' THEN 'Groseille'
-      WHEN UPPER(p."itemName") LIKE '%FRAMBOISE%' THEN 'Framboise'
-      WHEN UPPER(p."itemName") LIKE '%CASSIS%'    THEN 'Cassis'
-      WHEN UPPER(p."itemName") LIKE '%MURE%'
-        OR UPPER(p."itemName") LIKE '%MÛRE%'      THEN 'Mûre'
-      WHEN UPPER(p."itemName") LIKE '%FRAISE%'    THEN 'Fraise'
-      ELSE COALESCE(p."groupName", 'Sans groupe')
-    END AS "familyLabel"
-  FROM "Product" AS p
-`;
 
-/**
- * Version JS du mapping `FAMILY_CTE_SQL` — pour les agrégats déjà calculés
- * côté Node (ex. drilldown mensuel) qui n'ont pas besoin d'un second aller-retour
- * SQL. DOIT rester synchrone avec le CASE ci-dessus (mêmes règles).
- */
 /**
  * Familles de fruits ISOLÉES (petits fruits) — celles que `familyOf` distingue
  * du groupe SAP. Sert de liste de choix pour le TARIF PAR FRUITS (fiche client /
- * console). L'ordre est celui du CASE ci-dessus. DOIT rester synchrone avec lui.
+ * console). L'ordre est celui du CASE de FAMILY_CTE_SQL. DOIT rester synchrone.
  */
 export const FRUIT_FAMILIES: { key: string; label: string }[] = [
   { key: "fraise", label: "Fraise" },
@@ -65,6 +35,11 @@ export const FRUIT_FAMILIES: { key: string; label: string }[] = [
   { key: "mure", label: "Mûre" },
 ];
 
+/**
+ * Version JS du mapping `FAMILY_CTE_SQL` (lib/famillesSql.ts) — pour les agrégats
+ * déjà calculés côté Node (ex. drilldown mensuel) qui n'ont pas besoin d'un second
+ * aller-retour SQL. DOIT rester synchrone avec le CASE de FAMILY_CTE_SQL.
+ */
 export function familyOf(
   itemName: string | null | undefined,
   groupName: string | null | undefined,
