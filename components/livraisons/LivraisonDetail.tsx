@@ -8,7 +8,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
   RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw, Pencil,
   Maximize2, UserCheck, Undo2, ListChecks, UserCog, ArrowRight, Printer,
-  Send, Phone, Plus, Trash2, Search, X, Store, BadgeEuro,
+  Send, Phone, Plus, Trash2, Search, X, Store, BadgeEuro, Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { StarRating } from "@/components/ui/star-rating";
@@ -1803,6 +1803,13 @@ const OrderRow = memo(function OrderRow({
   const [preparedBy, setPreparedBy] = useState<string | null>(doc.preparedBy ?? null);
   const [preparedAt, setPreparedAt] = useState<string | null>(doc.preparedAt ?? null);
   const [incomplete, setIncomplete] = useState<boolean>(!!doc.incomplete);
+  // Articles SIGNALÉS manquants par le préparateur lors d'une remise sur la file.
+  const [reportedMissing, setReportedMissing] = useState<string[]>(doc.reportedMissing ?? []);
+  const reportedMissingSet = useMemo(() => new Set(reportedMissing), [reportedMissing]);
+  const reportedMissingNames = useMemo(
+    () => doc.lines.filter((l) => reportedMissingSet.has(l.itemCode)).map((l) => l.itemName).join(", "),
+    [doc.lines, reportedMissingSet],
+  );
   const [bigOpen, setBigOpen] = useState(false);
   const [requeuing, setRequeuing] = useState(false);
 
@@ -1815,6 +1822,9 @@ const OrderRow = memo(function OrderRow({
     const h = setTimeout(() => rowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
     return () => clearTimeout(h);
   }, [autoOpenNonce]);
+  // Remise sur la file : dialog de signalement des manquants + sélection en cours.
+  const [requeueOpen, setRequeueOpen] = useState(false);
+  const [requeuePicks, setRequeuePicks] = useState<Set<string>>(new Set());
   // Vérification avant de marquer « faite » (évite les validations par erreur).
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -1856,15 +1866,17 @@ const OrderRow = memo(function OrderRow({
     // État antérieur capturé pour un rollback FIDÈLE en cas d'échec (marquer
     // « faite » lève « à reprendre » — il faut le restaurer si le POST échoue,
     // sinon le badge « À reprendre » disparaîtrait définitivement).
-    const prev = { prepared, incomplete };
+    const prev = { prepared, incomplete, reportedMissing };
     const rollback = () => {
-      setPrepared(prev.prepared); setIncomplete(prev.incomplete);
-      onPatchDoc(doc.docEntry, { prepared: prev.prepared, incomplete: prev.incomplete });
+      setPrepared(prev.prepared); setIncomplete(prev.incomplete); setReportedMissing(prev.reportedMissing);
+      onPatchDoc(doc.docEntry, { prepared: prev.prepared, incomplete: prev.incomplete, reportedMissing: prev.reportedMissing });
     };
     setPrepared(next);
-    if (next) setIncomplete(false);
+    // Marquer « faite » lève « à reprendre » ET son signalement de manquants
+    // (le serveur supprime le même enregistrement livincomplete).
+    if (next) { setIncomplete(false); setReportedMissing([]); }
     // Optimiste : la carte change d'onglet (À préparer ↔ Fait) immédiatement.
-    onPatchDoc(doc.docEntry, { prepared: next, ...(next ? { incomplete: false } : {}) });
+    onPatchDoc(doc.docEntry, { prepared: next, ...(next ? { incomplete: false, reportedMissing: [] } : {}) });
     setSavingPrep(true);
     try {
       const res = await fetch("/api/livraisons/prepared", {
@@ -1989,8 +2001,8 @@ const OrderRow = memo(function OrderRow({
           onPatchDoc(doc.docEntry, { preparer: j.preparer ?? null });
           toast.info(`Déjà en préparation par ${displayPersonName(j.preparer)}`);
         } else {
-          setPreparer(j.preparer ?? null); setIncomplete(false);
-          onPatchDoc(doc.docEntry, { preparer: j.preparer ?? null, incomplete: false });
+          setPreparer(j.preparer ?? null); setIncomplete(false); setReportedMissing([]);
+          onPatchDoc(doc.docEntry, { preparer: j.preparer ?? null, incomplete: false, reportedMissing: [] });
           if (!open) toast.success(`Commande #${doc.docNum} affectée — à vous`);
         }
       }
@@ -2011,19 +2023,25 @@ const OrderRow = memo(function OrderRow({
   }
 
   // Pas entièrement préparée → remise sur la file + signalement (notification).
-  async function requeue() {
+  // `missing` = codes articles signalés manquants par le préparateur (facultatif).
+  async function requeue(missing: string[] = []) {
     setRequeuing(true);
     try {
       const res = await fetch("/api/livraisons/preparer", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docEntry: doc.docEntry, action: "requeue" }),
+        body: JSON.stringify({ docEntry: doc.docEntry, action: "requeue", missing }),
       });
       const j = await res.json().catch(() => null);
       if (!res.ok || !j?.ok) { toast.error(j?.error || "Échec"); return; }
+      const reported: string[] = Array.isArray(j.reportedMissing) ? j.reportedMissing : missing;
       setPreparer(null); setIncomplete(true); setPrepared(false); setPreparedBy(null); setPreparedAt(null); setDeparted(false); setDepartedAt(null);
+      setReportedMissing(reported);
+      setRequeueOpen(false);
       setBigOpen(false);
-      onPatchDoc(doc.docEntry, { preparer: null, incomplete: true, prepared: false, preparedBy: null, preparedAt: null, departed: false, departedAt: null });
-      toast.warning(`Commande #${doc.docNum} non terminée — remise sur la file`);
+      onPatchDoc(doc.docEntry, { preparer: null, incomplete: true, prepared: false, preparedBy: null, preparedAt: null, departed: false, departedAt: null, reportedMissing: reported });
+      toast.warning(reported.length
+        ? `Commande #${doc.docNum} remise sur la file — ${reported.length} manquant${reported.length > 1 ? "s" : ""} signalé${reported.length > 1 ? "s" : ""}`
+        : `Commande #${doc.docNum} non terminée — remise sur la file`);
     } catch { toast.error("Échec"); }
     finally { setRequeuing(false); }
   }
@@ -2313,6 +2331,12 @@ const OrderRow = memo(function OrderRow({
                 <AlertTriangle className="h-3 w-3" /> À reprendre
               </span>
             )}
+            {reportedMissing.length > 0 && (
+              <span title={`Signalé(s) manquant(s) par le préparateur : ${reportedMissingNames}`}
+                className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                <PackageX className="h-3 w-3" /> {reportedMissing.length} signalé{reportedMissing.length > 1 ? "s" : ""}
+              </span>
+            )}
             {missingSet.size > 0 && (
               <span title="Articles en stock SAP négatif (tous entrepôts) sur cette commande — achat à prévoir"
                 className="inline-flex items-center gap-1 rounded-full bg-rose-500 text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
@@ -2512,13 +2536,15 @@ const OrderRow = memo(function OrderRow({
             <tbody className="divide-y divide-border/40">
               {displayLines.map((l, i) => {
                 const isMissing = isLineMissing(l.mergedCodes);
+                const isReported = l.mergedCodes.some((c) => reportedMissingSet.has(c));
                 return (
                 <tr
                   key={`${l.itemCode}-${i}`}
                   onContextMenu={(e) => openSwap(e, l.itemCode, l.itemName)}
                   title={doc.open ? "Clic droit : changer le lot ou échanger l'article" : undefined}
-                  className={`${isMissing ? "bg-rose-500/5" : ""} ${doc.open ? "cursor-context-menu" : ""}`}
+                  className={`${isMissing ? "bg-rose-500/5" : isReported ? "bg-amber-500/5" : ""} ${doc.open ? "cursor-context-menu" : ""}`}
                 >
+
                   {/* Colisage en premier (gauche) — repère principal de préparation */}
                   <td className="px-2 py-1.5 text-center align-middle">
                     <span className="inline-flex min-w-[28px] items-center justify-center rounded-md bg-foreground/10 px-1.5 py-0.5 text-[14px] font-bold tnum text-foreground">
@@ -2535,6 +2561,11 @@ const OrderRow = memo(function OrderRow({
                           {isMissing && (
                             <span className="inline-flex items-center gap-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-300 px-1.5 py-px text-[9.5px] font-bold uppercase tracking-wide">
                               Manquant
+                            </span>
+                          )}
+                          {isReported && !isMissing && (
+                            <span className="inline-flex items-center gap-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 px-1.5 py-px text-[9.5px] font-bold uppercase tracking-wide">
+                              Signalé manquant
                             </span>
                           )}
                         </div>
@@ -2627,14 +2658,16 @@ const OrderRow = memo(function OrderRow({
           <ul className="divide-y divide-border/50 rounded-xl border border-border overflow-hidden">
             {displayLines.map((l, i) => {
               const isMissing = isLineMissing(l.mergedCodes);
+              const isReported = l.mergedCodes.some((c) => reportedMissingSet.has(c));
               return (
               <li
                 key={`big-${l.itemCode}-${i}`}
                 onClick={(e) => openSwap(e, l.itemCode, l.itemName)}
                 onContextMenu={(e) => openSwap(e, l.itemCode, l.itemName)}
                 title={doc.open ? "Toucher pour changer le lot ou échanger l'article" : undefined}
-                className={`flex items-center gap-3 px-3 py-2.5 ${isMissing ? "bg-rose-500/5" : ""} ${doc.open ? "cursor-pointer" : ""}`}
+                className={`flex items-center gap-3 px-3 py-2.5 ${isMissing ? "bg-rose-500/5" : isReported ? "bg-amber-500/5" : ""} ${doc.open ? "cursor-pointer" : ""}`}
               >
+
                 <span className="inline-flex min-w-[44px] items-center justify-center rounded-lg bg-foreground/10 px-2 py-1 text-[18px] font-bold tnum text-foreground shrink-0">
                   {fmtNum(l.colis)}
                 </span>
@@ -2644,6 +2677,11 @@ const OrderRow = memo(function OrderRow({
                     {isMissing && (
                       <span className="ml-2 inline-flex items-center rounded bg-rose-500/15 text-rose-600 dark:text-rose-300 px-1.5 py-px text-[10px] font-bold uppercase tracking-wide no-underline align-middle">
                         Manquant
+                      </span>
+                    )}
+                    {isReported && !isMissing && (
+                      <span className="ml-2 inline-flex items-center rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 px-1.5 py-px text-[10px] font-bold uppercase tracking-wide align-middle">
+                        Signalé manquant
                       </span>
                     )}
                   </p>
@@ -2668,7 +2706,7 @@ const OrderRow = memo(function OrderRow({
             </button>
             <button
               type="button"
-              onClick={requeue}
+              onClick={() => { setRequeuePicks(new Set(reportedMissing)); setRequeueOpen(true); }}
               disabled={requeuing}
               className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl border border-rose-300/70 dark:border-rose-500/40 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-[14px] font-semibold disabled:opacity-60"
             >
@@ -2682,6 +2720,83 @@ const OrderRow = memo(function OrderRow({
               className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
             >
               <Printer className="h-4 w-4" /> Imprimer
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remise sur la file — signalement des articles manquants (facultatif).
+          Optimisé mobile / tablette : lignes en grandes cibles tactiles, boutons
+          empilés pleine largeur sur petit écran. */}
+      <Dialog open={requeueOpen} onOpenChange={(o) => { if (!requeuing) setRequeueOpen(o); }}>
+        <DialogContent className="max-w-lg max-h-[92vh] overflow-y-auto">
+          <DialogHeader className="text-left">
+            <DialogTitle className="flex items-center gap-2 pr-8 text-[16px]">
+              <Undo2 className="h-5 w-5 text-rose-600 dark:text-rose-400 shrink-0" />
+              <span className="truncate min-w-0">Remettre sur la file</span>
+              <span className="text-[12px] font-normal text-muted-foreground shrink-0">· BL n°{doc.docNum}</span>
+            </DialogTitle>
+            <DialogDescription className="text-[12.5px] text-muted-foreground">
+              Touchez le ou les articles <b className="text-foreground">manquants</b> (facultatif) — ils
+              seront signalés à l&apos;équipe. La commande repart <b className="text-foreground">« à préparer »</b>.
+            </DialogDescription>
+          </DialogHeader>
+
+          <ul className="divide-y divide-border/50 rounded-xl border border-border overflow-hidden">
+            {doc.lines.map((l, i) => {
+              const picked = requeuePicks.has(l.itemCode);
+              return (
+                <li key={`rq-${l.itemCode}-${i}`}>
+                  <button
+                    type="button"
+                    onClick={() => setRequeuePicks((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(l.itemCode)) next.delete(l.itemCode); else next.add(l.itemCode);
+                      return next;
+                    })}
+                    aria-pressed={picked}
+                    className={`flex w-full items-center gap-3 px-3 py-3 text-left transition-colors ${picked ? "bg-amber-500/10" : "hover:bg-secondary/40"}`}
+                  >
+                    <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition-colors ${picked ? "bg-amber-500 border-amber-500 text-white" : "border-border text-transparent"}`}>
+                      <Check className="h-4 w-4" strokeWidth={3} />
+                    </span>
+                    <span className="inline-flex min-w-[40px] shrink-0 items-center justify-center rounded-md bg-foreground/10 px-1.5 py-0.5 text-[14px] font-bold tnum text-foreground">
+                      {fmtNum(l.colis)}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className={`block text-[14px] sm:text-[13.5px] font-semibold truncate ${picked ? "text-amber-700 dark:text-amber-300" : "text-foreground"}`}>{l.itemName}</span>
+                      <span className="block text-[11px] text-muted-foreground">{fmtNum(l.quantity)} · {fmtNum(l.weightKg)} kg</span>
+                    </span>
+                    {picked && (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                        <PackageX className="h-3 w-3" /> Manquant
+                      </span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setRequeueOpen(false)}
+              disabled={requeuing}
+              className="inline-flex flex-1 items-center justify-center h-11 px-4 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={() => requeue([...requeuePicks])}
+              disabled={requeuing}
+              className="inline-flex flex-1 items-center justify-center gap-2 h-11 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[14px] font-semibold disabled:opacity-60 active:scale-95 transition-all"
+            >
+              {requeuing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
+              {requeuePicks.size > 0
+                ? `Remettre — ${requeuePicks.size} manquant${requeuePicks.size > 1 ? "s" : ""}`
+                : "Remettre sur la file"}
             </button>
           </div>
         </DialogContent>

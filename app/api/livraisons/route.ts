@@ -336,6 +336,7 @@ export async function GET(req: NextRequest) {
       prepared: faiteByDoc, preparedBy: preparedByDoc, preparedAt: preparedAtDoc,
       departed: departedByDocEntry, departedBy: departedByDoc, departedAt: departedAtDoc,
       excluded: avoirByDoc, preparer: prepByDoc, incomplete: incompleteByDoc,
+      incompleteMissing: incompleteMissingByDoc,
       misEnPrep: misEnPrepByDocEntry, misEnPrepBy: misEnPrepByDoc, misEnPrepAt: misEnPrepAtDoc,
     } = statuses;
 
@@ -441,6 +442,9 @@ export async function GET(req: NextRequest) {
         departedAt: departedAtDoc.get(d.DocEntry) ?? null,    // heure du clic « départ »
         preparer: prepByDoc.get(d.DocEntry) ?? null,          // préparateur affecté (qui a ouvert)
         incomplete: incompleteByDoc.get(d.DocEntry) ?? false, // « à reprendre » — remise sur la file
+        // Articles signalés manquants par le préparateur (remise sur la file) —
+        // restreints aux lignes réelles du BL (garde-fou d'affichage).
+        reportedMissing: (incompleteMissingByDoc.get(d.DocEntry) ?? []).filter((code) => outLines.some((l) => l.itemCode === code)),
         // « mis en préparation » — lâché par le commercial (état « Ventes du jour »).
         // Tant que false, la commande est INVISIBLE pour les rôles restreints (filtre plus bas).
         misEnPrep: misEnPrepByDocEntry.get(d.DocEntry) ?? false,

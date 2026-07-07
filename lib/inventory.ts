@@ -252,6 +252,7 @@ export async function getDeliveryStatuses(): Promise<{
   departedAt: Map<number, string>;
   preparer: Map<number, string>;
   incomplete: Map<number, boolean>;
+  incompleteMissing: Map<number, string[]>;
   excluded: Map<number, boolean>;
   misEnPrep: Map<number, boolean>;
   misEnPrepBy: Map<number, string>;
@@ -267,6 +268,7 @@ export async function getDeliveryStatuses(): Promise<{
     departedAt: new Map<number, string>(),
     preparer: new Map<number, string>(),
     incomplete: new Map<number, boolean>(),
+    incompleteMissing: new Map<number, string[]>(),
     excluded: new Map<number, boolean>(),
     misEnPrep: new Map<number, boolean>(),
     misEnPrepBy: new Map<number, string>(),
@@ -283,7 +285,7 @@ export async function getDeliveryStatuses(): Promise<{
       if (!prefix) continue;
       const docEntry = Number(r.key.slice(prefix.length));
       if (!Number.isFinite(docEntry)) continue;
-      let v: { prepared?: boolean; departed?: boolean; incomplete?: boolean; excluded?: boolean; misEnPrep?: boolean; bonCommande?: boolean; by?: string; at?: string };
+      let v: { prepared?: boolean; departed?: boolean; incomplete?: boolean; missing?: string[]; excluded?: boolean; misEnPrep?: boolean; bonCommande?: boolean; by?: string; at?: string };
       try { v = JSON.parse(r.value); } catch { continue; }
       switch (prefix) {
         case LIV_FAITE_PREFIX:
@@ -302,7 +304,13 @@ export async function getDeliveryStatuses(): Promise<{
           if (v.by?.trim()) out.preparer.set(docEntry, v.by.trim());
           break;
         case LIV_INCOMPLETE_PREFIX:
-          if (v.incomplete) out.incomplete.set(docEntry, true);
+          if (v.incomplete) {
+            out.incomplete.set(docEntry, true);
+            // Articles signalés manquants par le préparateur (remise sur la file).
+            if (Array.isArray(v.missing) && v.missing.length) {
+              out.incompleteMissing.set(docEntry, v.missing.filter((c): c is string => typeof c === "string" && c.trim() !== ""));
+            }
+          }
           break;
         case LIV_AVOIR_PREFIX:
           out.excluded.set(docEntry, !!v.excluded);
@@ -425,14 +433,19 @@ export async function setDeliveryPreparer(docEntry: number, by: string | null): 
  */
 const LIV_INCOMPLETE_PREFIX = "livincomplete:";
 
-/** Signale (true) ou lève (false) le statut « incomplète — à reprendre » d'un BL. */
-export async function setDeliveryIncomplete(docEntry: number, incomplete: boolean, by?: string): Promise<void> {
+/** Signale (true) ou lève (false) le statut « incomplète — à reprendre » d'un BL.
+ *  `missing` = codes articles SIGNALÉS manquants par le préparateur (facultatif) —
+ *  dédupliqués, nettoyés et bornés (garde-fou) avant stockage. */
+export async function setDeliveryIncomplete(docEntry: number, incomplete: boolean, by?: string, missing?: string[]): Promise<void> {
   const key = LIV_INCOMPLETE_PREFIX + docEntry;
   if (!incomplete) {
     try { await prisma.appSetting.delete({ where: { key } }); } catch { /* déjà absent */ }
     return;
   }
-  const value = JSON.stringify({ incomplete: true, at: new Date().toISOString(), by: by ?? null });
+  const missingCodes = Array.isArray(missing)
+    ? [...new Set(missing.map((c) => String(c).trim()).filter(Boolean))].slice(0, 200)
+    : [];
+  const value = JSON.stringify({ incomplete: true, at: new Date().toISOString(), by: by ?? null, missing: missingCodes });
   await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
 }
 
