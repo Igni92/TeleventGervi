@@ -38,6 +38,13 @@ export default function Ecran2Page() {
   // passer par la file de télévente). Prioritaire sur le client synchronisé de
   // l'écran 1 ; « collant » jusqu'au clic « Suivre l'écran 1 ».
   const [manual, setManual] = useState<ManualClient | null>(null);
+  // Client ÉCARTÉ de la vue après l'envoi d'un BL (création en arrière-plan) :
+  // le poste enchaîne sur le suivant sans attendre SAP. La rediffusion continue
+  // de l'écran 1 ne le ramène pas ; un AUTRE client, la recherche ou « Suivre
+  // l'écran 1 » lèvent l'écart.
+  const [dismissedId, setDismissedId] = useState<string | null>(null);
+  const dismissedRef = useRef<string | null>(null);
+  dismissedRef.current = dismissedId;
   const [ready, setReady] = useState(false);
   // Réf pour lire l'état « en modif ? » dans le callback de souscription (collant).
   const inModif = useRef(false);
@@ -58,10 +65,14 @@ export default function Ecran2Page() {
         // Nouvelle cible de modif → on bascule l'écran (même fenêtre).
         setModif({ docEntry: s.modif.docEntry, docNum: s.modif.docNum, clientId: s.clientId, clientName: s.clientName });
         setState(s);
+        setDismissedId(null);
       } else if (!inModif.current) {
         // Broadcast normal (client actif). En modif, on l'ignore (collant) pour ne
         // pas se faire éjecter par la rediffusion continue de la console.
         setState(s);
+        // Un AUTRE client arrive → l'écart post-envoi est levé (le précédent
+        // pourra revenir plus tard) ; la rediffusion du MÊME client ne le ramène pas.
+        if (s.clientId && dismissedRef.current && s.clientId !== dismissedRef.current) setDismissedId(null);
       }
     });
     requestActiveClient();
@@ -81,17 +92,31 @@ export default function Ecran2Page() {
   // bascule l'écran 2 sur ce client (mode manuel, hors synchro écran 1).
   const pickManual = useCallback((c: SearchClient) => {
     if (inModif.current) { clearModif(); setModif(null); }
+    setDismissedId(null);
     setManual({ clientId: c.id, clientName: c.nom, info: infoFromSearch(c) });
   }, []);
-  // « Suivre l'écran 1 » → on abandonne le compte recherché et on reprend le
-  // client synchronisé.
-  const clearManual = useCallback(() => setManual(null), []);
+  // « Suivre l'écran 1 » → on abandonne le compte recherché (et tout écart
+  // post-envoi) et on reprend le client synchronisé.
+  const clearManual = useCallback(() => { setManual(null); setDismissedId(null); }, []);
 
-  const clientId = modif ? modif.clientId : (manual?.clientId ?? state?.clientId ?? null);
-  const clientName = modif ? modif.clientName : (manual?.clientName ?? state?.clientName ?? null);
+  const rawClientId = modif ? modif.clientId : (manual?.clientId ?? state?.clientId ?? null);
+  // Client écarté après l'envoi d'un BL → la vue est LIBRE (client suivant).
+  const dismissed = !modif && rawClientId != null && rawClientId === dismissedId;
+  const clientId = dismissed ? null : rawClientId;
+  const clientName = dismissed ? null : (modif ? modif.clientName : (manual?.clientName ?? state?.clientName ?? null));
   const sharePct = state?.stockSharePct ?? 100;
-  const info = modif ? null : (manual ? manual.info : (state?.client ?? null));
+  const info = modif || dismissed ? null : (manual ? manual.info : (state?.client ?? null));
   const modifier = modif ? { docEntry: modif.docEntry, docNum: modif.docNum } : null;
+
+  // BL envoyé (création/modif en ARRIÈRE-PLAN) : le client quitte la vue tout
+  // de suite — le poste enchaîne pendant que SAP travaille (résultat en toast).
+  const displayedIdRef = useRef<string | null>(null);
+  displayedIdRef.current = rawClientId;
+  const handleSubmitted = useCallback(() => {
+    if (inModif.current) { clearModif(); setModif(null); }
+    setManual(null);
+    setDismissedId(displayedIdRef.current);
+  }, []);
 
   return (
     <div className="h-full flex flex-col gap-3 animate-fade-up min-h-0">
@@ -100,7 +125,7 @@ export default function Ecran2Page() {
 
       <ClientBanner
         clientId={clientId} clientName={clientName} info={info}
-        manual={manual != null} onPick={pickManual} onClearManual={clearManual}
+        manual={manual != null || dismissed} onPick={pickManual} onClearManual={clearManual}
       />
 
       {/* Constructeur de commande — prend tout l'espace restant */}
@@ -113,7 +138,7 @@ export default function Ecran2Page() {
           <Ecran2Order
             key={modif ? `m${modif.docEntry}` : clientId}
             clientId={clientId} clientName={clientName} stockSharePct={sharePct}
-            modifier={modifier} onExitModif={exitModif}
+            modifier={modifier} onExitModif={exitModif} onSubmitted={handleSubmitted}
           />
         ) : (
           <div className="h-full flex items-center justify-center panel">

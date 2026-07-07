@@ -63,6 +63,63 @@ export function applyNavOverrides<T extends { href: string; label: string }>(
     .filter((g) => g.items.length > 0);
 }
 
+/* ── État d'ÉDITION (mode modification de la sidebar) ─────────────────────
+   Représentation éditable de la nav : groupes nommés + lignes { libellé
+   saisi, libellé/groupe d'origine }. Pures et symétriques :
+   toEditState(overrides) ⇄ fromEditState(state). */
+
+export interface NavEditRow {
+  href: string;
+  defaultLabel: string;
+  defaultGroup: string;
+  /** Libellé SAISI ("" = libellé d'origine). */
+  label: string;
+}
+export interface NavEditGroup { label: string; rows: NavEditRow[] }
+
+/** Construit l'état d'édition depuis la structure par défaut + surcharges.
+ *  Le groupe sans libellé (Accueil) est exclu (non personnalisable). */
+export function toEditState<T extends { href: string; label: string }>(
+  groups: NavGroupLike<T>[],
+  overrides: NavOverrides,
+): NavEditGroup[] {
+  const defaultGroupByHref = new Map<string, string>();
+  const defaultLabelByHref = new Map<string, string>();
+  for (const g of groups) {
+    if (!g.label) continue;
+    for (const it of g.items) {
+      defaultGroupByHref.set(it.href, g.label);
+      defaultLabelByHref.set(it.href, it.label);
+    }
+  }
+  return applyNavOverrides(groups, overrides)
+    .filter((g): g is NavGroupLike<T> & { label: string } => !!g.label)
+    .map((g) => ({
+      label: g.label,
+      rows: g.items.map((it) => ({
+        href: it.href,
+        defaultLabel: defaultLabelByHref.get(it.href) ?? it.label,
+        defaultGroup: defaultGroupByHref.get(it.href) ?? g.label,
+        label: overrides[it.href]?.label ?? "",
+      })),
+    }));
+}
+
+/** Reconstruit les surcharges depuis l'état d'édition : ordre EXPLICITE pour
+ *  toutes les entrées (déterministe), libellé/groupe seulement s'ils diffèrent. */
+export function fromEditState(state: NavEditGroup[]): NavOverrides {
+  const out: NavOverrides = {};
+  for (const g of state) {
+    g.rows.forEach((row, i) => {
+      const ov: NavItemOverride = { order: i };
+      if (row.label.trim() && row.label.trim() !== row.defaultLabel) ov.label = row.label.trim();
+      if (g.label !== row.defaultGroup) ov.group = g.label;
+      out[row.href] = ov;
+    });
+  }
+  return out;
+}
+
 /** Valide/normalise un payload de surcharges (PUT) — champs inconnus ignorés,
  *  chaînes bornées, entrées vides retirées. Ne jette jamais. */
 export function sanitizeNavOverrides(raw: unknown): NavOverrides {
