@@ -317,3 +317,19 @@ chaque étape). Constats et correctifs :
 | Élément | Avant | Après |
 |---------|-------|-------|
 | Flags `isLivreur` / `isAgreeur` du jeton | Résolus **uniquement à la connexion** : un rôle coché en base après coup (ex. passer un préparateur agréeur) n'apparaissait jamais — les téléphones d'entrepôt gardent leur session des semaines (PWA, cookie 30 j). L'agréeur ne voyait ni « Cdes fourn. » ni « Entrées march. », et le middleware le renvoyait vers /livraisons. | **Re-résolution périodique (TTL 5 min)** dans le callback `jwt` : le rôle coché dans Paramètres se propage tout seul en ≤ 5 minutes, sans déconnexion/reconnexion. Coût borné : ~1 requête SQL par utilisateur / 5 min (proxy.ts Next 16 = runtime Node). |
+
+---
+
+## 🕐 Gestion des heures — mobile responsive + après-midi masquée (NOUVEAU)
+
+« Mes heures » (saisie perso de tous + état mensuel + vue équipe des managers)
+reposait sur 3 tableaux larges (`min-w-[680-760px]`) qui forçaient un scroll
+horizontal sur téléphone. Testé au harnais Playwright (composant réel, 320/1280 px).
+
+| Élément | Avant | Après |
+|---------|-------|-------|
+| Après-midi | 2 plages **toujours affichées** (matin début/fin + a-midi début/fin). | **Masquée par défaut** (on ne travaille que très rarement l'après-midi) : bascule « + Après-midi » pour la révéler. Ré-affichée d'office si une saisie après-midi existe déjà (jamais de donnée cachée). Enlève 2 colonnes → tableau desktop plus lisible aussi. |
+| Saisie de la semaine (tous) | Tableau Lun→Dim à 7 colonnes, scroll horizontal sur mobile. | **Une carte par jour** sous `md` : jour + date + total, ligne « Matin » (2 champs), note en pleine largeur ; grande cible tactile, week-end grisé. Tableau conservé ≥ md. |
+| État mensuel « Mon mois » (tous) | Tableau 7 colonnes. | **Cartes par semaine** sous `md` (total + écart/25 %/50 %/équiv. payé/récup en puces) + carte « Total du mois ». Tableau ≥ md. |
+| Équipe (managers) | Tableau 10 colonnes. | **Cartes par employé** sous `md` (nom + total + bouton PDF, détails en puces). Tableau ≥ md. |
+| En-têtes de carte | Libellé de semaine complet + « PDF compta (tous) » débordaient sur mobile. | Libellé court (« Sem. 28 »), bouton « PDF » compact sur mobile ; bouton « Enregistrer » pleine largeur. |

@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Clock3, ChevronLeft, ChevronRight, Loader2, Save, Printer, Wand2,
-  CalendarDays, RotateCcw,
+  CalendarDays, RotateCcw, Plus, Minus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { SurfaceCard } from "@/components/ui/surface-card";
@@ -84,6 +84,16 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
     }));
     setDirty(true);
   };
+
+  // ── APRÈS-MIDI MASQUÉE PAR DÉFAUT ──────────────────────────────────────────
+  // On ne travaille que très rarement l'après-midi : les 2 plages « après-midi »
+  // n'apparaissent qu'à la demande (toggle), pour alléger la saisie et tenir sur
+  // un écran de téléphone. Elles réapparaissent D'OFFICE si une saisie après-midi
+  // existe déjà (semaine chargée, journée type après-midi) → jamais de donnée cachée.
+  const daysHaveAfternoon = useMemo(() => days.some((d) => !!(d?.a1 || d?.a2)), [days]);
+  const profileHasAfternoon = !!(profile.typicalDay.a1 || profile.typicalDay.a2);
+  const [wantAfternoon, setWantAfternoon] = useState(false);
+  const showAfternoon = wantAfternoon || daysHaveAfternoon || profileHasAfternoon;
 
   const saveWeek = async () => {
     setSaving(true);
@@ -171,6 +181,8 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
   };
 
   const timeCls = "h-9 w-full min-w-[74px] rounded-md border border-border bg-background px-1.5 text-[13px] tnum text-center focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50";
+  // Inputs des cartes MOBILE : plus hauts (cible tactile), s'étirent sur la ligne.
+  const timeCardCls = "h-10 flex-1 min-w-0 rounded-md border border-border bg-background px-1 text-[14px] tnum text-center focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50";
 
   return (
     <div className="space-y-4">
@@ -183,7 +195,10 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
               <ChevronLeft className="h-4 w-4" />
             </button>
             <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-foreground px-1 whitespace-nowrap">
-              <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" /> {weekLabel(week)}
+              <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              {/* Libellé court sur mobile (« Sem. 28 ») → l'en-tête ne déborde pas. */}
+              <span className="hidden sm:inline">{weekLabel(week)}</span>
+              <span className="sm:hidden">Sem. {week.slice(-2)}</span>
             </span>
             <button type="button" onClick={() => setWeek((w) => shiftWeek(w, 1))} aria-label="Semaine suivante"
               className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
@@ -197,7 +212,8 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
             )}
           </div>
         }>
-        {/* Profil : contrat hebdo + journée type */}
+        {/* Profil : contrat hebdo + journée type (responsive : les blocs passent
+            à la ligne sur mobile, le bouton « journée type » prend la largeur). */}
         <div className="mb-3 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-2.5">
           <div>
             <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Contrat hebdo (h)</label>
@@ -215,32 +231,97 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
               <input type="time" value={profile.typicalDay.m2 ?? ""} onChange={(e) => saveProfil({ ...profile, typicalDay: { ...profile.typicalDay, m2: e.target.value } })} className={timeCls} />
             </div>
           </div>
-          <div>
-            <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Journée type — après-midi</label>
-            <div className="flex items-center gap-1">
-              <input type="time" value={profile.typicalDay.a1 ?? ""} onChange={(e) => saveProfil({ ...profile, typicalDay: { ...profile.typicalDay, a1: e.target.value } })} className={timeCls} />
-              <span className="text-muted-foreground text-[12px]">→</span>
-              <input type="time" value={profile.typicalDay.a2 ?? ""} onChange={(e) => saveProfil({ ...profile, typicalDay: { ...profile.typicalDay, a2: e.target.value } })} className={timeCls} />
+          {/* Journée type après-midi : visible seulement quand l'après-midi est affichée. */}
+          {showAfternoon && (
+            <div>
+              <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Journée type — après-midi</label>
+              <div className="flex items-center gap-1">
+                <input type="time" value={profile.typicalDay.a1 ?? ""} onChange={(e) => saveProfil({ ...profile, typicalDay: { ...profile.typicalDay, a1: e.target.value } })} className={timeCls} />
+                <span className="text-muted-foreground text-[12px]">→</span>
+                <input type="time" value={profile.typicalDay.a2 ?? ""} onChange={(e) => saveProfil({ ...profile, typicalDay: { ...profile.typicalDay, a2: e.target.value } })} className={timeCls} />
+              </div>
             </div>
-          </div>
+          )}
           <button type="button" onClick={applyTypical}
             title="Préremplit Lundi→Vendredi (jours encore vides) avec la journée type"
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-border text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+            className="inline-flex items-center justify-center gap-1.5 h-9 px-3 w-full sm:w-auto rounded-md border border-border text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60">
             <Wand2 className="h-3.5 w-3.5" /> Appliquer la journée type
           </button>
           {savingProfile && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mb-2.5" />}
         </div>
 
-        {/* Tableau Lun→Dim */}
-        <div className="overflow-x-auto rounded-lg border border-border">
-          <table className="w-full min-w-[720px] border-collapse text-[13px]">
+        {/* Barre : bascule « après-midi » (masquée par défaut). Désactivée quand une
+            saisie après-midi existe déjà (on ne peut pas cacher des données réelles). */}
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="text-[11px] text-muted-foreground">Saisie <b className="text-foreground">du matin</b> par défaut.</span>
+          <button
+            type="button"
+            onClick={() => setWantAfternoon((v) => !v)}
+            disabled={daysHaveAfternoon || profileHasAfternoon}
+            aria-pressed={showAfternoon}
+            title={daysHaveAfternoon || profileHasAfternoon
+              ? "Des heures d'après-midi sont saisies — l'après-midi reste affichée"
+              : (showAfternoon ? "Masquer l'après-midi" : "Ajouter les heures de l'après-midi")}
+            className={`inline-flex shrink-0 items-center gap-1.5 h-9 px-3 rounded-lg border text-[12px] font-semibold transition-colors disabled:opacity-60 ${
+              showAfternoon
+                ? "border-brand-500/40 bg-brand-500/10 text-brand-700 dark:text-brand-300"
+                : "border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+            }`}
+          >
+            {showAfternoon ? <Minus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+            Après-midi
+          </button>
+        </div>
+
+        {/* MOBILE (< md) : une carte par jour — le tableau à 5-7 colonnes ne tient
+            pas sur un téléphone. Matin toujours affiché, après-midi si activée. */}
+        <div className="md:hidden space-y-2">
+          {JOURS_SEMAINE.map((jour, i) => (
+            <div key={jour} className={`rounded-lg border border-border p-3 ${i > 4 ? "bg-secondary/15" : "bg-background"}`}>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className="text-[13.5px] font-semibold text-foreground">
+                  {jour}
+                  {dates[i] && (
+                    <span className="ml-1.5 font-normal text-[11px] text-muted-foreground tnum">
+                      {new Date(`${dates[i]}T12:00:00Z`).toLocaleDateString("fr-FR", { timeZone: "UTC", day: "2-digit", month: "2-digit" })}
+                    </span>
+                  )}
+                </span>
+                <span className="text-[13.5px] font-bold tnum text-foreground">{calc.dayMin[i] > 0 ? fmtHM(calc.dayMin[i]) : "—"}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-11 shrink-0 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Matin</span>
+                <input type="time" disabled={loading} value={days[i]?.m1 ?? ""} onChange={(e) => setDay(i, { m1: e.target.value })} className={timeCardCls} aria-label={`${jour} matin début`} />
+                <span className="text-muted-foreground text-[11px] shrink-0">→</span>
+                <input type="time" disabled={loading} value={days[i]?.m2 ?? ""} onChange={(e) => setDay(i, { m2: e.target.value })} className={timeCardCls} aria-label={`${jour} matin fin`} />
+              </div>
+              {showAfternoon && (
+                <div className="flex items-center gap-1.5 mt-2">
+                  <span className="w-11 shrink-0 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">A-midi</span>
+                  <input type="time" disabled={loading} value={days[i]?.a1 ?? ""} onChange={(e) => setDay(i, { a1: e.target.value })} className={timeCardCls} aria-label={`${jour} après-midi début`} />
+                  <span className="text-muted-foreground text-[11px] shrink-0">→</span>
+                  <input type="time" disabled={loading} value={days[i]?.a2 ?? ""} onChange={(e) => setDay(i, { a2: e.target.value })} className={timeCardCls} aria-label={`${jour} après-midi fin`} />
+                </div>
+              )}
+              <input value={days[i]?.note ?? ""} disabled={loading} maxLength={80}
+                onChange={(e) => setDay(i, { note: e.target.value })}
+                placeholder="Note (CP, récup, maladie…)"
+                aria-label={`${jour} note`}
+                className="mt-2 h-10 w-full rounded-md border border-border bg-background px-2.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50" />
+            </div>
+          ))}
+        </div>
+
+        {/* DESKTOP (≥ md) : tableau Lun→Dim. Colonnes après-midi conditionnelles. */}
+        <div className="hidden md:block overflow-x-auto rounded-lg border border-border">
+          <table className="w-full border-collapse text-[13px]">
             <thead>
               <tr className="bg-secondary/40 text-[10px] uppercase tracking-wide text-muted-foreground">
                 <th className="text-left font-semibold px-3 py-2">Jour</th>
                 <th className="font-semibold px-2 py-2">Matin début</th>
                 <th className="font-semibold px-2 py-2">Matin fin</th>
-                <th className="font-semibold px-2 py-2">A-midi début</th>
-                <th className="font-semibold px-2 py-2">A-midi fin</th>
+                {showAfternoon && <th className="font-semibold px-2 py-2">A-midi début</th>}
+                {showAfternoon && <th className="font-semibold px-2 py-2">A-midi fin</th>}
                 <th className="text-right font-semibold px-3 py-2">Total</th>
                 <th className="text-left font-semibold px-3 py-2">Note (CP, récup…)</th>
               </tr>
@@ -258,8 +339,8 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                   </td>
                   <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.m1 ?? ""} onChange={(e) => setDay(i, { m1: e.target.value })} className={timeCls} aria-label={`${jour} matin début`} /></td>
                   <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.m2 ?? ""} onChange={(e) => setDay(i, { m2: e.target.value })} className={timeCls} aria-label={`${jour} matin fin`} /></td>
-                  <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.a1 ?? ""} onChange={(e) => setDay(i, { a1: e.target.value })} className={timeCls} aria-label={`${jour} après-midi début`} /></td>
-                  <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.a2 ?? ""} onChange={(e) => setDay(i, { a2: e.target.value })} className={timeCls} aria-label={`${jour} après-midi fin`} /></td>
+                  {showAfternoon && <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.a1 ?? ""} onChange={(e) => setDay(i, { a1: e.target.value })} className={timeCls} aria-label={`${jour} après-midi début`} /></td>}
+                  {showAfternoon && <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.a2 ?? ""} onChange={(e) => setDay(i, { a2: e.target.value })} className={timeCls} aria-label={`${jour} après-midi fin`} /></td>}
                   <td className="px-3 py-1.5 text-right tnum font-bold">{calc.dayMin[i] > 0 ? fmtHM(calc.dayMin[i]) : "—"}</td>
                   <td className="px-3 py-1.5">
                     <input value={days[i]?.note ?? ""} disabled={loading} maxLength={80}
@@ -282,13 +363,12 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           {calc.sup50Min > 0 && <Badge label="Supp +50 %" value={fmtHM(calc.sup50Min)} tone="rose" />}
           {calc.majEquivMin > 0 && <Badge label="Équiv. payé" value={fmtHM(calc.majEquivMin)} tone="emerald" />}
           {calc.recupMin > 0 && <Badge label="Récup" value={fmtHM(calc.recupMin)} tone="sky" />}
-          <div className="ml-auto flex items-center gap-2">
-            <button type="button" onClick={saveWeek} disabled={saving || loading || !dirty}
-              className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[13px] font-semibold disabled:opacity-50">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Enregistrer mes heures
-            </button>
-          </div>
+          {/* Bouton pleine largeur sur mobile (grande cible), aligné à droite ≥ sm. */}
+          <button type="button" onClick={saveWeek} disabled={saving || loading || !dirty}
+            className="w-full sm:w-auto sm:ml-auto inline-flex items-center justify-center gap-1.5 h-11 sm:h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[13px] font-semibold disabled:opacity-50">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Enregistrer mes heures
+          </button>
         </div>
       </SurfaceCard>
 
@@ -313,8 +393,8 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
             {isManager && (
               <button type="button" onClick={printMonthAll} disabled={monthLoading}
                 title="État mensuel de toute l'équipe (synthèse + un état signable par employé) — le document à envoyer à la compta pour la paie"
-                className="ml-1 inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[12.5px] font-semibold disabled:opacity-50">
-                <Printer className="h-4 w-4" /> PDF compta (tous)
+                className="ml-1 inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[12.5px] font-semibold disabled:opacity-50 shrink-0">
+                <Printer className="h-4 w-4 shrink-0" /> PDF <span className="hidden sm:inline">compta (tous)</span>
               </button>
             )}
           </div>
@@ -326,8 +406,45 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           </p>
         ) : myMonth && (
           <>
-            <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full min-w-[680px] border-collapse text-[13px]">
+            {/* MOBILE (< md) : une carte par semaine + carte total. */}
+            <div className="md:hidden space-y-2">
+              {myMonth.weeks.map(({ week: w, calc: c }) => (
+                <div key={w} className={`rounded-lg border border-border p-3 ${c ? "" : "opacity-60"}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[12.5px] font-semibold text-foreground">{weekLabel(w)}</span>
+                    <span className="text-[13.5px] font-bold tnum text-foreground">{c ? fmtHM(c.totalMin) : <span className="text-[11px] font-normal italic text-muted-foreground">non saisi</span>}</span>
+                  </div>
+                  {c && (
+                    <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] tnum">
+                      <span className={c.deltaMin > 0 ? "text-amber-600 dark:text-amber-400" : c.deltaMin < 0 ? "text-sky-600 dark:text-sky-400" : "text-muted-foreground"}>
+                        Écart <b>{fmtHM(c.deltaMin)}</b>
+                      </span>
+                      {c.sup25Min > 0 && <span className="text-muted-foreground">+25 % <b className="text-foreground">{fmtHM(c.sup25Min)}</b></span>}
+                      {c.sup50Min > 0 && <span className="text-muted-foreground">+50 % <b className="text-foreground">{fmtHM(c.sup50Min)}</b></span>}
+                      {c.majEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Équiv. payé <b>{fmtHM(c.majEquivMin)}</b></span>}
+                      {c.recupMin > 0 && <span className="text-sky-600 dark:text-sky-400">Récup <b>{fmtHM(c.recupMin)}</b></span>}
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div className="rounded-lg border-2 border-border bg-secondary/20 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[12.5px] font-bold text-foreground">Total du mois ({myMonth.total.weeksWithData}/{myMonth.weeks.length} sem.)</span>
+                  <span className="text-[15px] font-bold tnum text-foreground">{fmtHM(myMonth.total.totalMin)}</span>
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] tnum">
+                  <span className="text-muted-foreground">Écart <b className="text-foreground">{fmtHM(myMonth.total.deltaMin)}</b></span>
+                  {myMonth.total.sup25Min > 0 && <span className="text-muted-foreground">+25 % <b className="text-foreground">{fmtHM(myMonth.total.sup25Min)}</b></span>}
+                  {myMonth.total.sup50Min > 0 && <span className="text-muted-foreground">+50 % <b className="text-foreground">{fmtHM(myMonth.total.sup50Min)}</b></span>}
+                  {myMonth.total.majEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Équiv. payé <b>{fmtHM(myMonth.total.majEquivMin)}</b></span>}
+                  {myMonth.total.recupMin > 0 && <span className="text-sky-600 dark:text-sky-400">Récup <b>{fmtHM(myMonth.total.recupMin)}</b></span>}
+                </div>
+              </div>
+            </div>
+
+            {/* DESKTOP (≥ md) : tableau. */}
+            <div className="hidden md:block overflow-x-auto rounded-lg border border-border">
+              <table className="w-full border-collapse text-[13px]">
                 <thead>
                   <tr className="bg-secondary/40 text-[10px] uppercase tracking-wide text-muted-foreground">
                     <th className="text-left font-semibold px-3 py-2">Semaine</th>
@@ -387,54 +504,93 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                 <Loader2 className="h-4 w-4 animate-spin" /> Chargement…
               </p>
             ) : (
-              <div className="overflow-x-auto rounded-lg border border-border">
-                <table className="w-full min-w-[760px] border-collapse text-[13px]">
-                  <thead>
-                    <tr className="bg-secondary/40 text-[10px] uppercase tracking-wide text-muted-foreground">
-                      <th className="text-left font-semibold px-3 py-2">Employé</th>
-                      <th className="text-right font-semibold px-2 py-2">Sem.</th>
-                      <th className="text-right font-semibold px-2 py-2">Contrat</th>
-                      <th className="text-right font-semibold px-2 py-2">Total</th>
-                      <th className="text-right font-semibold px-2 py-2">Écart</th>
-                      <th className="text-right font-semibold px-2 py-2">+25 %</th>
-                      <th className="text-right font-semibold px-2 py-2">+50 %</th>
-                      <th className="text-right font-semibold px-2 py-2">Équiv. payé</th>
-                      <th className="text-right font-semibold px-2 py-2">Récup</th>
-                      <th className="text-right font-semibold px-3 py-2">PDF</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/60">
-                    {(teamMonth ?? []).map((row) => (
-                      <tr key={row.email} className={row.total.weeksWithData > 0 ? "" : "opacity-55"}>
-                        <td className="px-3 py-2 font-semibold whitespace-nowrap">
+              <>
+                {/* MOBILE (< md) : une carte par employé. */}
+                <div className="md:hidden space-y-2">
+                  {(teamMonth ?? []).map((row) => (
+                    <div key={row.email} className={`rounded-lg border border-border p-3 ${row.total.weeksWithData > 0 ? "" : "opacity-60"}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 flex-1 text-[13px] font-semibold text-foreground truncate">
                           {displayFullName(row.name)}
-                          {row.total.weeksWithData === 0 && <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400">non saisi</span>}
-                        </td>
-                        <td className="px-2 py-2 text-right tnum text-muted-foreground">{row.total.weeksWithData}/{row.weeks.length}</td>
-                        <td className="px-2 py-2 text-right tnum text-muted-foreground">{fmtHM(row.total.contractMin)}</td>
-                        <td className="px-2 py-2 text-right tnum font-bold">{row.total.weeksWithData > 0 ? fmtHM(row.total.totalMin) : "—"}</td>
-                        <td className={`px-2 py-2 text-right tnum font-semibold ${row.total.deltaMin > 0 ? "text-amber-600 dark:text-amber-400" : row.total.deltaMin < 0 ? "text-sky-600 dark:text-sky-400" : "text-muted-foreground"}`}>
-                          {row.total.weeksWithData > 0 ? fmtHM(row.total.deltaMin) : "—"}
-                        </td>
-                        <td className="px-2 py-2 text-right tnum">{row.total.sup25Min > 0 ? fmtHM(row.total.sup25Min) : "—"}</td>
-                        <td className="px-2 py-2 text-right tnum">{row.total.sup50Min > 0 ? fmtHM(row.total.sup50Min) : "—"}</td>
-                        <td className="px-2 py-2 text-right tnum font-semibold text-emerald-700 dark:text-emerald-300">{row.total.majEquivMin > 0 ? fmtHM(row.total.majEquivMin) : "—"}</td>
-                        <td className="px-2 py-2 text-right tnum">{row.total.recupMin > 0 ? fmtHM(row.total.recupMin) : "—"}</td>
-                        <td className="px-3 py-2 text-right">
-                          <button type="button" onClick={() => printMonthOne(row)} disabled={row.total.weeksWithData === 0}
-                            title="État mensuel PDF de cet employé"
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-40">
-                            <Printer className="h-4 w-4" />
-                          </button>
-                        </td>
+                          {row.total.weeksWithData === 0 && <span className="ml-2 text-[9.5px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400">non saisi</span>}
+                        </span>
+                        <span className="text-[13.5px] font-bold tnum text-foreground shrink-0">{row.total.weeksWithData > 0 ? fmtHM(row.total.totalMin) : "—"}</span>
+                        <button type="button" onClick={() => printMonthOne(row)} disabled={row.total.weeksWithData === 0}
+                          title="État mensuel PDF de cet employé"
+                          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-40">
+                          <Printer className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] tnum">
+                        <span className="text-muted-foreground">{row.total.weeksWithData}/{row.weeks.length} sem.</span>
+                        <span className="text-muted-foreground">Contrat <b className="text-foreground">{fmtHM(row.total.contractMin)}</b></span>
+                        {row.total.weeksWithData > 0 && (
+                          <span className={row.total.deltaMin > 0 ? "text-amber-600 dark:text-amber-400" : row.total.deltaMin < 0 ? "text-sky-600 dark:text-sky-400" : "text-muted-foreground"}>
+                            Écart <b>{fmtHM(row.total.deltaMin)}</b>
+                          </span>
+                        )}
+                        {row.total.sup25Min > 0 && <span className="text-muted-foreground">+25 % <b className="text-foreground">{fmtHM(row.total.sup25Min)}</b></span>}
+                        {row.total.sup50Min > 0 && <span className="text-muted-foreground">+50 % <b className="text-foreground">{fmtHM(row.total.sup50Min)}</b></span>}
+                        {row.total.majEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Équiv. payé <b>{fmtHM(row.total.majEquivMin)}</b></span>}
+                        {row.total.recupMin > 0 && <span className="text-sky-600 dark:text-sky-400">Récup <b>{fmtHM(row.total.recupMin)}</b></span>}
+                      </div>
+                    </div>
+                  ))}
+                  {(teamMonth ?? []).length === 0 && (
+                    <p className="px-1 py-4 text-[12.5px] italic text-muted-foreground">Aucun compte.</p>
+                  )}
+                </div>
+
+                {/* DESKTOP (≥ md) : tableau. */}
+                <div className="hidden md:block overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full border-collapse text-[13px]">
+                    <thead>
+                      <tr className="bg-secondary/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+                        <th className="text-left font-semibold px-3 py-2">Employé</th>
+                        <th className="text-right font-semibold px-2 py-2">Sem.</th>
+                        <th className="text-right font-semibold px-2 py-2">Contrat</th>
+                        <th className="text-right font-semibold px-2 py-2">Total</th>
+                        <th className="text-right font-semibold px-2 py-2">Écart</th>
+                        <th className="text-right font-semibold px-2 py-2">+25 %</th>
+                        <th className="text-right font-semibold px-2 py-2">+50 %</th>
+                        <th className="text-right font-semibold px-2 py-2">Équiv. payé</th>
+                        <th className="text-right font-semibold px-2 py-2">Récup</th>
+                        <th className="text-right font-semibold px-3 py-2">PDF</th>
                       </tr>
-                    ))}
-                    {(teamMonth ?? []).length === 0 && (
-                      <tr><td colSpan={10} className="px-3 py-4 text-[12.5px] italic text-muted-foreground">Aucun compte.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {(teamMonth ?? []).map((row) => (
+                        <tr key={row.email} className={row.total.weeksWithData > 0 ? "" : "opacity-55"}>
+                          <td className="px-3 py-2 font-semibold whitespace-nowrap">
+                            {displayFullName(row.name)}
+                            {row.total.weeksWithData === 0 && <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400">non saisi</span>}
+                          </td>
+                          <td className="px-2 py-2 text-right tnum text-muted-foreground">{row.total.weeksWithData}/{row.weeks.length}</td>
+                          <td className="px-2 py-2 text-right tnum text-muted-foreground">{fmtHM(row.total.contractMin)}</td>
+                          <td className="px-2 py-2 text-right tnum font-bold">{row.total.weeksWithData > 0 ? fmtHM(row.total.totalMin) : "—"}</td>
+                          <td className={`px-2 py-2 text-right tnum font-semibold ${row.total.deltaMin > 0 ? "text-amber-600 dark:text-amber-400" : row.total.deltaMin < 0 ? "text-sky-600 dark:text-sky-400" : "text-muted-foreground"}`}>
+                            {row.total.weeksWithData > 0 ? fmtHM(row.total.deltaMin) : "—"}
+                          </td>
+                          <td className="px-2 py-2 text-right tnum">{row.total.sup25Min > 0 ? fmtHM(row.total.sup25Min) : "—"}</td>
+                          <td className="px-2 py-2 text-right tnum">{row.total.sup50Min > 0 ? fmtHM(row.total.sup50Min) : "—"}</td>
+                          <td className="px-2 py-2 text-right tnum font-semibold text-emerald-700 dark:text-emerald-300">{row.total.majEquivMin > 0 ? fmtHM(row.total.majEquivMin) : "—"}</td>
+                          <td className="px-2 py-2 text-right tnum">{row.total.recupMin > 0 ? fmtHM(row.total.recupMin) : "—"}</td>
+                          <td className="px-3 py-2 text-right">
+                            <button type="button" onClick={() => printMonthOne(row)} disabled={row.total.weeksWithData === 0}
+                              title="État mensuel PDF de cet employé"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-40">
+                              <Printer className="h-4 w-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {(teamMonth ?? []).length === 0 && (
+                        <tr><td colSpan={10} className="px-3 py-4 text-[12.5px] italic text-muted-foreground">Aucun compte.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </div>
         )}
