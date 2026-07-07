@@ -1,8 +1,10 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { isAgreeur, requirePreparateurOrAdmin } from "@/lib/permissions";
+import { isTerrainConfined } from "@/lib/preparateur";
 import { PurchaseOrderHistory } from "@/components/entrees/PurchaseOrderHistory";
 import { PurchaseOrderForm } from "@/components/entrees/PurchaseOrderForm";
+import { PreparateurNav } from "@/components/PreparateurNav";
 
 export const metadata = { title: "Commandes fournisseurs" };
 export const dynamic = "force-dynamic";
@@ -16,6 +18,8 @@ export default async function CommandesFournisseursPage() {
   const agreeurOnly = (await isAgreeur(session)) && !(await requirePreparateurOrAdmin(session));
   return (
     <div className="space-y-6 sm:space-y-8 animate-fade-up">
+      {/* Nav terrain (mobile) : l'agréeur confiné navigue entre ses écrans. */}
+      {isTerrainConfined(session) && <PreparateurNav current="commandes-fournisseurs" />}
       <div>
         <p className="kicker mb-2 hidden md:block">SAP B1 · PurchaseOrder</p>
         <h1 className="text-[26px] sm:text-[32px] font-bold text-foreground tracking-tight leading-none">

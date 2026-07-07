@@ -58,24 +58,30 @@ export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
         token.refreshToken = account.refresh_token;
         token.expiresAt = account.expires_at;
       }
-      // Rôle LIVREUR porté dans le jeton pour le verrou middleware (Edge, sans
-      // accès base). Résolu à la connexion. DÉFENSIF : toute erreur est avalée →
-      // jamais bloquant pour le login (au pire, pas de verrou pour cette session).
+      // Rôles LIVREUR + AGRÉEUR portés dans le jeton pour le verrou middleware
+      // (Edge, sans accès base). Résolus à la connexion. DÉFENSIF : toute erreur
+      // est avalée → jamais bloquant pour le login (au pire, pas de verrou).
+      // L'agréeur doit garder l'accès aux Commandes fournisseurs / Entrées
+      // marchandises (réception CF → EM) MÊME s'il est aussi préparateur/livreur.
       if (user?.email) {
         try {
-          const rows = await prisma.$queryRawUnsafe<{ isLivreur: boolean | null }[]>(
-            `SELECT "isLivreur" FROM "User" WHERE LOWER("email") = LOWER($1) LIMIT 1`,
+          const rows = await prisma.$queryRawUnsafe<{ isLivreur: boolean | null; isAgreeur: boolean | null }[]>(
+            `SELECT "isLivreur", "isAgreeur" FROM "User" WHERE LOWER("email") = LOWER($1) LIMIT 1`,
             user.email,
           );
           token.isLivreur = !!rows[0]?.isLivreur;
+          token.isAgreeur = !!rows[0]?.isAgreeur;
         } catch { /* colonne absente / base indispo → pas de verrou (login OK) */ }
       }
       return token;
     },
     async session({ session, token }) {
-      // Expose le rôle livreur au middleware (req.auth.user.isLivreur) et aux
+      // Expose les rôles livreur + agréeur au middleware (req.auth.user.*) et aux
       // composants. N'altère rien d'autre de la session.
-      if (session.user) session.user.isLivreur = token.isLivreur === true;
+      if (session.user) {
+        session.user.isLivreur = token.isLivreur === true;
+        session.user.isAgreeur = token.isAgreeur === true;
+      }
       return session;
     },
   },
@@ -102,7 +108,7 @@ const TEST_NO_AUTH = process.env.VERCEL_ENV === "preview";
 // Email admin (cf. ADMIN_EMAILS) → la préversion voit les données réelles
 // (sinon périmètre vide = 0 client / 0 encours). Préversion uniquement.
 const FAKE_SESSION = {
-  user: { name: "Test (préversion)", email: "m.mandine@gervifrais.com", isLivreur: false },
+  user: { name: "Test (préversion)", email: "m.mandine@gervifrais.com", isLivreur: false, isAgreeur: false },
   expires: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
 };
 
@@ -121,14 +127,16 @@ declare module "next-auth/jwt" {
     refreshToken?: string;
     expiresAt?: number;
     isLivreur?: boolean;
+    isAgreeur?: boolean;
   }
 }
 
-// Champ de rôle exposé dans la session (lu par le middleware et les composants).
+// Champs de rôle exposés dans la session (lus par le middleware et les composants).
 declare module "next-auth" {
   interface Session {
     user: {
       isLivreur?: boolean;
+      isAgreeur?: boolean;
     } & DefaultSession["user"];
   }
 }

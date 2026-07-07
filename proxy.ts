@@ -36,32 +36,32 @@ export default auth((req) => {
     return NextResponse.redirect(new URL("/clients", origin));
   }
 
-  // RÔLE PRÉPARATEUR : accès restreint à ses écrans de PRÉPARATION — le Détail
-  // livraison (préparation de commande) ET l'Inventaire (comptage du stock).
-  // Tout autre chemin applicatif est renvoyé vers le Détail livraison (écran
-  // principal de préparation). Les routes /api et les assets restent
-  // accessibles pour que les pages fonctionnent.
-  if (isRestrictedPreparateur(req.auth?.user?.email)) {
-    const allowed = pathname.startsWith("/livraisons")
-      || pathname.startsWith("/inventaire")
-      || pathname.startsWith("/api")
-      || pathname.startsWith("/login");
+  // ── RÔLES À ACCÈS RESTREINT (terrain) : préparateur, livreur, agréeur ──
+  // Un compte peut CUMULER ces rôles → son périmètre est l'UNION des écrans de
+  // chacun (un préparateur-agréeur atteint SES écrans de prépa ET les commandes
+  // fournisseurs / entrées pour agréer). Tant qu'il porte AU MOINS un rôle
+  // restreint, tout chemin hors de cette union est renvoyé vers son écran
+  // principal. Aucun rôle restreint → accès complet (admin, direction, commercial).
+  //   • préparateur restreint (email, cf. lib/preparateur) → /livraisons, /inventaire
+  //   • livreur (flag jeton) → /livraisons (marque « départ »), /clients (créneaux/GPS)
+  //   • agréeur (flag jeton) → /commandes-fournisseurs, /entrees (réception CF → EM)
+  // Les routes /api et /login restent toujours ouvertes (pages fonctionnelles).
+  const isPrep = isRestrictedPreparateur(req.auth?.user?.email);
+  const isLivreur = req.auth?.user?.isLivreur === true;
+  const isAgreeur = req.auth?.user?.isAgreeur === true;
+  if (isPrep || isLivreur || isAgreeur) {
+    // /heures : saisie PERSONNELLE des heures — ouverte à tout rôle confiné
+    // (chacun enregistre SA semaine). /api + /login toujours accessibles.
+    const allowedPrefixes = ["/api", "/login", "/heures"];
+    if (isPrep) allowedPrefixes.push("/livraisons", "/inventaire");
+    if (isLivreur) allowedPrefixes.push("/livraisons", "/clients");
+    if (isAgreeur) allowedPrefixes.push("/commandes-fournisseurs", "/entrees");
+    const allowed = allowedPrefixes.some((p) => pathname.startsWith(p));
     if (!allowed) {
-      return NextResponse.redirect(new URL("/livraisons", origin));
-    }
-  }
-
-  // RÔLE LIVREUR (flag en base porté dans le jeton) : accès restreint au Détail
-  // livraison (où il marque « départ ») ET aux fiches clients (créneaux/GPS). Tout
-  // autre chemin est renvoyé vers le Détail livraison. Les /api et assets passent.
-  // NB : le flag vient du jeton → prend effet à la (re)connexion du livreur.
-  else if (req.auth?.user?.isLivreur === true) {
-    const allowed = pathname.startsWith("/livraisons")
-      || pathname.startsWith("/clients")
-      || pathname.startsWith("/api")
-      || pathname.startsWith("/login");
-    if (!allowed) {
-      return NextResponse.redirect(new URL("/livraisons", origin));
+      // Écran d'atterrissage : la prépa/livraison si terrain, sinon les commandes
+      // fournisseurs (poste de l'agréeur « pur »).
+      const home = isPrep || isLivreur ? "/livraisons" : "/commandes-fournisseurs";
+      return NextResponse.redirect(new URL(home, origin));
     }
   }
 
