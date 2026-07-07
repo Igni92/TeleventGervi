@@ -749,33 +749,47 @@ function DatePanel({
 ═════════════════════════════════════════════════════════════ */
 function SummaryRow({ totals, loading, showRevenue }: { totals: Totals; loading: boolean; showRevenue: boolean }) {
   const stats = [
-    { icon: FileText, label: "Commandes", value: fmtInt(totals.orders), accent: "text-brand-600 dark:text-brand-400" },
-    { icon: Users, label: "Clients", value: fmtInt(totals.clients), accent: "text-sky-600 dark:text-sky-400" },
-    { icon: Boxes, label: "Colis", value: fmtNum(totals.colis), accent: "text-violet-600 dark:text-violet-400", hero: true },
-    { icon: Scale, label: "Poids net", value: fmtKg(totals.weightKg), accent: "text-emerald-600 dark:text-emerald-400" },
+    { icon: FileText, label: "Commandes", short: "Cmd.", value: fmtInt(totals.orders), accent: "text-brand-600 dark:text-brand-400" },
+    { icon: Users, label: "Clients", short: "Clients", value: fmtInt(totals.clients), accent: "text-sky-600 dark:text-sky-400" },
+    { icon: Boxes, label: "Colis", short: "Colis", value: fmtNum(totals.colis), accent: "text-violet-600 dark:text-violet-400", hero: true },
+    { icon: Scale, label: "Poids net", short: "Poids", value: fmtKg(totals.weightKg), accent: "text-emerald-600 dark:text-emerald-400" },
     // Total HT — chiffre commercial : masqué pour préparateur / livreur.
-    ...(showRevenue ? [{ icon: Receipt, label: "Total HT", value: fmtEur(totals.totalHT), accent: "text-amber-600 dark:text-amber-400" }] : []),
+    ...(showRevenue ? [{ icon: Receipt, label: "Total HT", short: "HT", value: fmtEur(totals.totalHT), accent: "text-amber-600 dark:text-amber-400" }] : []),
   ];
   return (
-    <div className={`grid grid-cols-2 sm:grid-cols-3 ${showRevenue ? "lg:grid-cols-5" : "lg:grid-cols-4"} gap-2.5 transition-opacity ${loading ? "opacity-60" : ""}`}>
-      {stats.map((s) => {
-        const Icon = s.icon;
-        return (
-          <div
-            key={s.label}
-            className={`rounded-xl border border-border bg-card p-3.5 ${s.hero ? "ring-1 ring-violet-500/20" : ""}`}
-          >
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <Icon className={`h-3.5 w-3.5 ${s.accent}`} strokeWidth={2} />
-              <span className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
-                {s.label}
-              </span>
-            </div>
-            <p className="text-[22px] font-bold tnum text-foreground leading-none">{s.value}</p>
+    <>
+      {/* MOBILE : une seule BANDE compacte (chiffres en ligne, libellés courts) —
+          les 4-5 grosses cartes en 2×2 poussaient les transporteurs sous le pli
+          sur iPhone zoomé. Le détail complet reste à un scroll d'onglet près. */}
+      <div className={`sm:hidden rounded-xl border border-border bg-card px-3 py-2.5 flex items-center justify-between gap-2 transition-opacity ${loading ? "opacity-60" : ""}`}>
+        {stats.map((s) => (
+          <div key={s.label} className="min-w-0 text-center">
+            <p className={`text-[15px] font-bold tnum leading-none ${s.hero ? "text-foreground" : "text-foreground/90"}`}>{s.value}</p>
+            <p className="text-[8.5px] uppercase tracking-[0.08em] font-semibold text-muted-foreground mt-1 truncate">{s.short}</p>
           </div>
-        );
-      })}
-    </div>
+        ))}
+      </div>
+      {/* ≥ sm : cartes détaillées comme avant. */}
+      <div className={`hidden sm:grid grid-cols-2 sm:grid-cols-3 ${showRevenue ? "lg:grid-cols-5" : "lg:grid-cols-4"} gap-2.5 transition-opacity ${loading ? "opacity-60" : ""}`}>
+        {stats.map((s) => {
+          const Icon = s.icon;
+          return (
+            <div
+              key={s.label}
+              className={`rounded-xl border border-border bg-card p-3.5 ${s.hero ? "ring-1 ring-violet-500/20" : ""}`}
+            >
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <Icon className={`h-3.5 w-3.5 ${s.accent}`} strokeWidth={2} />
+                <span className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
+                  {s.label}
+                </span>
+              </div>
+              <p className="text-[22px] font-bold tnum text-foreground leading-none">{s.value}</p>
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }
 
@@ -915,7 +929,7 @@ function CarrierGroup({
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3 sm:gap-8 shrink-0 text-right">
+        <div className="flex items-center gap-2 sm:gap-8 shrink-0 text-right">
           {/* Bon de transport (récap palettes) — imprimer / envoyer / fiche */}
           <BonTransportActions carrier={carrier} date={date} canDispatch={canDispatch} docs={fullDocs} tournees={carrierTournees} />
           {/* Avancement GROUPÉ — bouton qui change selon l'onglet, tactile sur mobile */}
@@ -926,12 +940,16 @@ function CarrierGroup({
               title={`Passer les ${docEntries.length} commande(s) de ${carrier.name} à « ${STATUS_LABEL[forward.target]} »`}
               className={`inline-flex shrink-0 items-center gap-1.5 h-11 sm:h-9 px-2.5 sm:px-3 rounded-lg text-[11.5px] font-bold uppercase tracking-wide active:scale-95 transition-colors ${forward.cls}`}
             >
-              <forward.Icon className="h-4 w-4" />
+              {/* Icône masquée sur mobile : le libellé + la couleur suffisent, et
+                  le nom du transporteur garde la place pour s'afficher en entier. */}
+              <forward.Icon className="hidden sm:block h-4 w-4" />
               <span className="sm:hidden">{forward.short}</span>
               <span className="hidden sm:inline">{forward.long}</span>
             </button>
           )}
-          <Metric label="Cmd." value={fmtInt(carrier.orders)} />
+          {/* Mobile : seul « Colis » (repère métier) reste — « Cmd. » se lit en
+              dépliant ; sans ça le NOM du transporteur était écrasé à une lettre. */}
+          <Metric label="Cmd." value={fmtInt(carrier.orders)} className="hidden sm:block" />
           <Metric label="Colis" value={fmtNum(carrier.colis)} />
           <Metric label="kg" value={fmtNum(carrier.weightKg)} className="hidden sm:block" />
         </div>
@@ -958,7 +976,8 @@ function CarrierGroup({
                 <span className="text-[13px] font-semibold text-foreground truncate">{tg.label}</span>
               </div>
               <div className="flex items-center gap-4 sm:gap-6 shrink-0 text-right">
-                <Metric label="Cmd." value={fmtInt(tg.docs.length)} />
+                {/* Même règle que l'en-tête transporteur : « Cmd. » masqué sur mobile. */}
+                <Metric label="Cmd." value={fmtInt(tg.docs.length)} className="hidden sm:block" />
                 <Metric label="Colis" value={fmtNum(tg.docs.reduce((s, d) => s + d.colis, 0))} />
                 <Metric label="kg" value={fmtNum(tg.docs.reduce((s, d) => s + d.weightKg, 0))} className="hidden sm:block" />
               </div>
@@ -1371,7 +1390,9 @@ function SegmentTabs({
     { key: "GMS",    active: "bg-teal-500 text-white border-teal-500" },
   ];
   return (
-    <div className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card p-1 flex-wrap">
+    // Mobile : rail DÉFILANT (nowrap) — le wrap laissait un onglet orphelin sur
+    // une 2ᵉ ligne à ~320px (iPhone zoomé). ≥ sm : wrap comme avant.
+    <div className="flex w-full sm:w-auto sm:inline-flex items-center gap-1.5 rounded-xl border border-border bg-card p-1 flex-nowrap sm:flex-wrap overflow-x-auto sm:overflow-x-visible [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <span className="hidden sm:inline-flex items-center gap-1 pl-2 pr-1 text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
         <Users className="h-3 w-3" /> Clients
       </span>
@@ -1383,7 +1404,7 @@ function SegmentTabs({
             type="button"
             onClick={() => onPick(t.key)}
             aria-pressed={isActive}
-            className={`inline-flex items-center gap-1.5 h-11 sm:h-8 px-3.5 rounded-lg border text-[12.5px] font-semibold transition-colors ${
+            className={`inline-flex shrink-0 items-center gap-1.5 h-11 sm:h-8 px-3.5 rounded-lg border text-[12.5px] font-semibold transition-colors ${
               isActive ? t.active : "border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/60"
             }`}
           >
@@ -1425,7 +1446,8 @@ function StatusTabs({
   ];
   return (
     <div className="flex items-center justify-between gap-3 flex-wrap">
-      <div className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card p-1 flex-wrap">
+      {/* Mobile : rail DÉFILANT (nowrap) — même règle que SegmentTabs. */}
+      <div className="flex w-full sm:w-auto sm:inline-flex items-center gap-1.5 rounded-xl border border-border bg-card p-1 flex-nowrap sm:flex-wrap overflow-x-auto sm:overflow-x-visible [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {tabs.map((t) => {
           const Icon = t.icon;
           const isActive = tab === t.key;
@@ -1435,7 +1457,7 @@ function StatusTabs({
               type="button"
               onClick={() => onPick(t.key)}
               aria-pressed={isActive}
-              className={`inline-flex items-center gap-1.5 h-11 sm:h-8 px-3.5 rounded-lg border text-[12.5px] font-semibold transition-colors ${
+              className={`inline-flex shrink-0 items-center gap-1.5 h-11 sm:h-8 px-3.5 rounded-lg border text-[12.5px] font-semibold transition-colors ${
                 isActive ? t.active : "border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/60"
               }`}
             >
@@ -2082,10 +2104,14 @@ const OrderRow = memo(function OrderRow({
 
   return (
     <li>
+      {/* MOBILE (< sm) : la ligne passe sur DEUX rangées — identité client pleine
+          largeur (le nom ne se fait plus écraser par les boutons), puis l'action
+          d'état en GRANDE cible tactile + colis + agrandir. ≥ sm : une seule
+          rangée comme avant (flex-nowrap). */}
       <div
         onContextMenu={onRowContextMenu}
         onClick={onRowClick}
-        className={`flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-3 hover:bg-secondary/25 transition-colors ${doc.excluded ? "opacity-50" : ""} ${claimableByTap ? "cursor-pointer" : ""}`}
+        className={`flex flex-wrap sm:flex-nowrap items-center gap-x-2 gap-y-2 sm:gap-3 px-3 sm:px-5 py-3 hover:bg-secondary/25 transition-colors ${doc.excluded ? "opacity-50" : ""} ${claimableByTap ? "cursor-pointer" : ""}`}
       >
         {/* Bouton d'état — toujours en tête, verticalement centré (placement
             constant). BL pas encore lâché (onglet Ventes) → le bouton EST la
@@ -2096,12 +2122,12 @@ const OrderRow = memo(function OrderRow({
             onClick={releaseToPrep}
             disabled={savingRelease}
             title="Mettre ce magasin en préparation — il devient visible pour l'entrepôt (À préparer)"
-            className="inline-flex shrink-0 items-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-[12px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 active:scale-95 bg-amber-600 hover:bg-amber-700 text-white"
+            className="inline-flex shrink-0 flex-1 sm:flex-none items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-[12px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 active:scale-95 bg-amber-600 hover:bg-amber-700 text-white"
           >
             {savingRelease ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            {/* Libellé court sur mobile → laisse la place au nom du client (sinon tronqué « A. BET… »). */}
-            <span className="sm:hidden">Prép.</span>
-            <span className="hidden sm:inline">Mettre en prép.</span>
+            {/* Libellé complet partout : sur mobile le bouton occupe sa propre
+                rangée (flex-1), le nom du client ne se fait plus tronquer. */}
+            Mettre en prép.
           </button>
         ) : (
         <button
@@ -2112,7 +2138,7 @@ const OrderRow = memo(function OrderRow({
             ? "Commande partie en livraison — cliquer pour la ramener à « fait »"
             : prepared ? "Commande préparée (faite) — cliquer pour annuler" : "Marquer la commande comme préparée (faite)"}
           aria-pressed={prepared || departed}
-          className={`inline-flex shrink-0 items-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-[12px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 active:scale-95 ${
+          className={`inline-flex shrink-0 flex-1 sm:flex-none items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-[12px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 active:scale-95 ${
             departed
               ? "bg-sky-500 text-white hover:bg-sky-600"
               : prepared
@@ -2128,8 +2154,8 @@ const OrderRow = memo(function OrderRow({
         </button>
         )}
 
-        {/* Identité client */}
-        <div className="min-w-0 flex-1">
+        {/* Identité client — première rangée pleine largeur sur mobile. */}
+        <div className="order-first w-full min-w-0 sm:order-none sm:w-auto sm:flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <ClientLink
               code={doc.cardCode}
@@ -2476,13 +2502,14 @@ const OrderRow = memo(function OrderRow({
             })}
           </ul>
 
-          {/* Actions de préparation */}
-          <div className="flex items-center gap-2 flex-wrap pt-1">
+          {/* Actions de préparation — EMPILÉES pleine largeur sur mobile (grandes
+              cibles, libellés jamais compressés) ; en ligne à partir de sm. */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:flex-wrap pt-1">
             <button
               type="button"
               onClick={() => { setPreparedTo(true); setBigOpen(false); }}
               disabled={savingPrep}
-              className="inline-flex items-center gap-2 h-11 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[14px] font-semibold disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 h-12 sm:h-11 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[14px] font-semibold disabled:opacity-60"
             >
               <CheckCircle2 className="h-4 w-4" /> Préparation terminée
             </button>
@@ -2490,7 +2517,7 @@ const OrderRow = memo(function OrderRow({
               type="button"
               onClick={requeue}
               disabled={requeuing}
-              className="inline-flex items-center gap-2 h-11 px-5 rounded-xl border border-rose-300/70 dark:border-rose-500/40 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-[14px] font-semibold disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl border border-rose-300/70 dark:border-rose-500/40 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-[14px] font-semibold disabled:opacity-60"
             >
               {requeuing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
               Pas terminée — remettre sur la file
@@ -2499,7 +2526,7 @@ const OrderRow = memo(function OrderRow({
               type="button"
               onClick={handlePrint}
               title={`Imprimer le bon de préparation (BL n°${doc.docNum})`}
-              className="inline-flex items-center gap-2 h-11 px-5 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+              className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
             >
               <Printer className="h-4 w-4" /> Imprimer
             </button>

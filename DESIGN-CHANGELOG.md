@@ -290,3 +290,21 @@ lisible voulue ; c'est la **densité** et l'agrandissement d'UI cumulé qu'on co
 | Titres de section | Retours à la ligne « bancals » (mot orphelin) sur écran étroit. | `text-wrap: balance` sur `.font-display` → répartition propre sur 2-3 lignes. |
 | Palier responsive | Rien entre la base et `sm` (640 px). | Palier **`xs` (380 px)** ajouté : la base reste la plus sobre, `xs:` réintroduit l'info secondaire dès qu'il y a un peu de largeur. |
 | Liste « Préparations à faire » | Ligne dense (nom + BL + transporteur + colis + segment + pastille « À préparer »). | Sur le plus étroit : pastille de statut et **colis** masqués (redondants), segment masqué, lignes **aérées** (`py-3`) — l'essentiel d'abord (client, BL, transporteur, alerte manquants). Tout réapparaît dès `xs`/`sm`. |
+
+---
+
+## 📱 Détail livraison — refonte mobile (testée sur le vrai composant) (NOUVEAU)
+
+Écran principal du préparateur, **testé de bout en bout** (composant réel monté dans
+Chromium à 320/390 px, action « Fait » exercée : POST `prepared:true`, bascule
+d'onglet, vue en grand + « Préparation terminée » — zéro débordement horizontal à
+chaque étape). Constats et correctifs :
+
+| Élément | Avant (320 px — iPhone zoomé) | Après |
+|---------|-------------------------------|-------|
+| Ligne commande (OrderRow) | Nom client écrasé (« G.. »), badge « Manquant » **chevauchant** le compteur colis, méta « BL n° · Prise » empilée mot à mot. | **Deux rangées** sur mobile : identité client pleine largeur, puis l'action d'état (« À préparer / Faite / Parti ») en **grande cible tactile** (`flex-1`) + colis + agrandir. ≥ sm : une rangée, comme avant. |
+| En-tête transporteur | Nom tronqué à une lettre (« A.. ») par le bouton groupé + 2 métriques. | Métrique « Cmd. » masquée sur mobile (se lit en dépliant), icône du bouton groupé masquée (libellé + couleur suffisent), gaps resserrés → **nom complet visible**. Même règle sur le sous-en-tête tournée. |
+| Onglets segment / état | `flex-wrap` → onglet orphelin sur une 2ᵉ ligne (« GMS 2 », « Départ 1 »). | **Rail défilant** (nowrap + overflow-x-auto, scrollbar masquée) sur mobile ; wrap conservé ≥ sm. |
+| Bandeau de synthèse | 4-5 grosses cartes en 2×2 poussant les transporteurs sous le pli. | **Une bande compacte** (chiffres en ligne, libellés courts) sur mobile ; cartes détaillées ≥ sm. |
+| Dialogs (GLOBAL — `ui/dialog.tsx`) | Piste de grille **non bornée** : le min-content du plus large enfant (ex. bouton « Pas terminée — remettre sur la file ») faisait déborder TOUT le contenu du panneau (vue en grand illisible à 320 px). Panneau bord à bord. | `grid-cols-1` (minmax(0,1fr)) borne la piste ; largeur `calc(100%-1.5rem)` (marge 12 px), coins `rounded-2xl` partout, `p-4` mobile. **Tous les dialogs de l'app en profitent.** |
+| Vue en grand — actions | Boutons compressés côte à côte. | **Empilés pleine largeur** sur mobile (« Préparation terminée » dominant, h-12) ; en ligne ≥ sm. |
