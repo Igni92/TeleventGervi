@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/permissions";
 import { isTerrainConfined } from "@/lib/preparateur";
 import { HeuresPanel } from "@/components/effectifs/HeuresPanel";
+import { CongesPanel } from "@/components/effectifs/CongesPanel";
 import { PreparateurNav } from "@/components/PreparateurNav";
 
 export const metadata = { title: "Mes heures" };
@@ -38,6 +39,7 @@ export default async function HeuresPage() {
         </p>
       </header>
       <HeuresPanel isManager={isManager} />
+      <CongesPanel />
     </div>
   );
 }

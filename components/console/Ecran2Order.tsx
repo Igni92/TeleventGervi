@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ChevronDown, ChevronRight, ChevronUp, Search, Plus, Trash2,
   ShoppingCart, Check, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock, X,
-  History, BadgeEuro, ArrowRightLeft, CopyPlus, GripVertical,
+  History, BadgeEuro, ArrowRightLeft, CopyPlus, GripVertical, Boxes, ListPlus,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
@@ -18,6 +18,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { BrandLogo } from "@/components/BrandLogo";
 import { LotDetailsDialog } from "./LotDetailsDialog";
+import { useContextMenu, ContextMenu, ContextMenuItem, ContextMenuLabel } from "@/components/ui/context-menu";
 import { useBrandLogos } from "@/lib/useBrandLogos";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
 
@@ -754,8 +755,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   // Quantités et prix repris tels quels (sans ré-appliquer les promos) ; les
   // articles introuvables au catalogue chargé sont signalés.
   const [replaying, setReplaying] = useState(false);
-  // Clic droit sur une ligne produit → détail des lots (EM récentes + DLC).
-  const [lotDetail, setLotDetail] = useState<{ code: string; name: string } | null>(null);
+  // Clic droit sur une ligne produit → menu (Détails lots · Tout mettre).
+  const [lotDetail, setLotDetail] = useState<{ id: string; code: string; name: string } | null>(null);
+  const { menu: rowMenu, openAt: openRowMenu, close: closeRowMenu } = useContextMenu();
+  const [menuTarget, setMenuTarget] = useState<{ p: Product; fullQty: number } | null>(null);
   const replayLast = async () => {
     if (replaying || prefilling || modif) return;
     setReplaying(true);
@@ -1429,7 +1432,11 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                             onKeyDown={(e) => {
                               if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleCart(); }
                             }}
-                            onContextMenu={(e) => { e.preventDefault(); setLotDetail({ code: p.itemCode, name: p.itemName }); }}
+                            onContextMenu={(e) => {
+                              const fullQty = dispo > 0 ? (packDivisor > 1 ? Math.floor(dispo) : Math.round(dispo * 10) / 10) : 0;
+                              setMenuTarget({ p, fullQty });
+                              openRowMenu(e);
+                            }}
                             title={inCart ? "Retirer du panier"
                                           : noStock ? "À découvert — sera créé en EM_PENDING, lot affecté à réception"
                                           : "Ajouter au panier"}
@@ -2152,7 +2159,24 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
         </DialogContent>
       </Dialog>
 
-      {/* Détail des lots (clic droit sur une ligne produit). */}
+      {/* Menu clic droit d'une ligne produit : Détails (lots) · Tout mettre. */}
+      <ContextMenu menu={rowMenu} onClose={closeRowMenu}
+        header={menuTarget && <ContextMenuLabel>{menuTarget.p.itemName}</ContextMenuLabel>}>
+        <ContextMenuItem icon={Boxes} onClick={() => {
+          if (menuTarget) setLotDetail({ id: menuTarget.p.id, code: menuTarget.p.itemCode, name: menuTarget.p.itemName });
+          closeRowMenu();
+        }}>
+          Détails (lots en stock)
+        </ContextMenuItem>
+        <ContextMenuItem icon={ListPlus} accent="success" onClick={() => {
+          if (menuTarget) addToCart(menuTarget.p, { quantity: menuTarget.fullQty > 0 ? menuTarget.fullQty : undefined });
+          closeRowMenu();
+        }}>
+          Tout mettre{menuTarget && menuTarget.fullQty > 0 ? ` (${menuTarget.fullQty})` : ""}
+        </ContextMenuItem>
+      </ContextMenu>
+
+      {/* Détail des lots (clic droit → « Détails »). */}
       <LotDetailsDialog item={lotDetail} onClose={() => setLotDetail(null)} />
 
       {/* (La confirmation d'encours dépassé vit désormais dans le TOAST de la
