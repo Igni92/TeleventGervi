@@ -3,6 +3,7 @@ import {
   parseHM, dayMinutes, computeWeek, fmtHM,
   isoWeekId, isWeekId, weekDates, shiftWeek,
   isMonthId, shiftMonth, monthWeeks, aggregateMonth,
+  isHeuresOption, HEURES_OPTION_LABEL,
   type DayHours,
 } from "./heuresCalc";
 
@@ -135,5 +136,20 @@ describe("heuresCalc — état MENSUEL (semaine rattachée au mois de son dimanc
     expect(isMonthId("2026-13")).toBe(false);
     expect(shiftMonth("2026-01", -1)).toBe("2025-12");
     expect(shiftMonth("2026-12", 1)).toBe("2027-01");
+  });
+});
+
+describe("heuresCalc — option compta des heures supp", () => {
+  it("isHeuresOption n'accepte que recup / paiement", () => {
+    expect(isHeuresOption("recup")).toBe(true);
+    expect(isHeuresOption("paiement")).toBe(true);
+    expect(isHeuresOption("")).toBe(false);
+    expect(isHeuresOption(null)).toBe(false);
+    expect(isHeuresOption("payé")).toBe(false);
+  });
+
+  it("libellés canoniques présents pour les deux options", () => {
+    expect(HEURES_OPTION_LABEL.recup).toMatch(/récup/i);
+    expect(HEURES_OPTION_LABEL.paiement).toMatch(/paiement/i);
   });
 });

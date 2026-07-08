@@ -9,15 +9,20 @@
  * lib/heuresCalc (pur, testé) — ici uniquement lecture/écriture.
  */
 import { prisma } from "./prisma";
-import { DEFAULT_PROFILE, type DayHours, type HoursProfile } from "./heuresCalc";
+import { DEFAULT_PROFILE, isHeuresOption, type DayHours, type HeuresOption, type HoursProfile } from "./heuresCalc";
 
 const PROFIL_PREFIX = "rhprofil:";
 const WEEK_PREFIX = "rhsem:";
 
 export interface WeekEntry {
-  days: DayHours[];        // 7 entrées (Lun→Dim)
+  days: DayHours[];              // 7 entrées (Lun→Dim)
+  /** Option compta des heures supp de la semaine (récup / paiement), null tant
+   *  qu'aucun choix n'est fait. Reportée sur l'état mensuel (PDF). */
+  option: HeuresOption | null;
+  /** Dates de récup posées (option « recup »), ISO « YYYY-MM-DD » — absent sinon. */
+  recupDates?: string[];
   updatedAt: string;
-  updatedBy: string;       // email de la dernière écriture (soi-même ou admin)
+  updatedBy: string;             // email de la dernière écriture (soi-même ou admin)
 }
 
 const emailKey = (email: string) => email.trim().toLowerCase();
@@ -82,19 +87,67 @@ export function sanitizeDays(v: unknown): DayHours[] {
   return Array.from({ length: 7 }, (_, i) => sanitizeDay(arr[i]) ?? {});
 }
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Date « YYYY-MM-DD » réelle (rejette 2026-02-30, mois/jours hors bornes…). */
+function isIsoDate(s: string): boolean {
+  if (!ISO_DATE_RE.test(s)) return false;
+  const d = new Date(`${s}T12:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
+/** Dates de récup : ISO valides, dédupliquées, triées, plafond 7 (une semaine).
+ *  undefined si aucune → l'entrée reste compacte. */
+function sanitizeRecupDates(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: string[] = [];
+  for (const x of v) {
+    const s = typeof x === "string" ? x.trim() : "";
+    if (isIsoDate(s) && !out.includes(s)) out.push(s);
+    if (out.length >= 7) break;
+  }
+  return out.length ? out.sort() : undefined;
+}
+
+/** Champs bruts (JSON stocké OU payload client) avant nettoyage. */
+type RawEntry = { days?: unknown; option?: unknown; recupDates?: unknown };
+
+/** Reconstruit une WeekEntry propre depuis un JSON stocké OU un payload client
+ *  (les dates de récup ne sont conservées que pour l'option « recup »). */
+function parseEntry(v: RawEntry, updatedAt: string, updatedBy: string): WeekEntry {
+  const option = isHeuresOption(v.option) ? v.option : null;
+  return {
+    days: sanitizeDays(v.days),
+    option,
+    recupDates: option === "recup" ? sanitizeRecupDates(v.recupDates) : undefined,
+    updatedAt,
+    updatedBy,
+  };
+}
+
 export async function getWeekEntry(email: string, weekId: string): Promise<WeekEntry | null> {
   try {
     const row = await prisma.appSetting.findUnique({ where: { key: `${WEEK_PREFIX}${emailKey(email)}:${weekId}` } });
     if (!row) return null;
     const v = JSON.parse(row.value) as Partial<WeekEntry>;
-    return { days: sanitizeDays(v.days), updatedAt: v.updatedAt ?? "", updatedBy: v.updatedBy ?? "" };
+    return parseEntry(v, v.updatedAt ?? "", v.updatedBy ?? "");
   } catch {
     return null;
   }
 }
 
-export async function saveWeekEntry(email: string, weekId: string, days: unknown, by: string): Promise<WeekEntry> {
-  const entry: WeekEntry = { days: sanitizeDays(days), updatedAt: new Date().toISOString(), updatedBy: by };
+export async function saveWeekEntry(
+  email: string,
+  weekId: string,
+  days: unknown,
+  by: string,
+  opts?: { option?: unknown; recupDates?: unknown },
+): Promise<WeekEntry> {
+  const entry = parseEntry(
+    { days, option: opts?.option, recupDates: opts?.recupDates },
+    new Date().toISOString(),
+    by,
+  );
   const key = `${WEEK_PREFIX}${emailKey(email)}:${weekId}`;
   const value = JSON.stringify(entry);
   await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
@@ -114,7 +167,7 @@ export async function getUserWeeks(email: string, weekIds: string[]): Promise<Ma
       const weekId = r.key.slice(r.key.lastIndexOf(":") + 1);
       try {
         const v = JSON.parse(r.value) as Partial<WeekEntry>;
-        out.set(weekId, { days: sanitizeDays(v.days), updatedAt: v.updatedAt ?? "", updatedBy: v.updatedBy ?? "" });
+        out.set(weekId, parseEntry(v, v.updatedAt ?? "", v.updatedBy ?? ""));
       } catch { /* ligne corrompue → ignorée */ }
     }
   } catch { /* saisies indisponibles */ }
@@ -140,7 +193,7 @@ export async function listEntriesForWeeks(weekIds: string[]): Promise<Map<string
         const v = JSON.parse(r.value) as Partial<WeekEntry>;
         let byWeek = out.get(email);
         if (!byWeek) { byWeek = new Map(); out.set(email, byWeek); }
-        byWeek.set(weekId, { days: sanitizeDays(v.days), updatedAt: v.updatedAt ?? "", updatedBy: v.updatedBy ?? "" });
+        byWeek.set(weekId, parseEntry(v, v.updatedAt ?? "", v.updatedBy ?? ""));
       } catch { /* ligne corrompue → ignorée */ }
     }
   } catch { /* saisies indisponibles */ }

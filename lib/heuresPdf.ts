@@ -8,12 +8,28 @@
  */
 import {
   fmtHM, weekLabel, aggregateMonth, monthLabel,
-  type HoursProfile, type WeekCalc,
+  type HoursProfile, type WeekCalc, type HeuresOption,
 } from "./heuresCalc";
 
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/** « 2026-07-08 » → « 08/07 » (état imprimé, compact). */
+const fmtDateShort = (iso: string) =>
+  new Date(`${iso}T12:00:00Z`).toLocaleDateString("fr-FR", { timeZone: "UTC", day: "2-digit", month: "2-digit" });
+
+/** Ligne « option retenue » placée sous le libellé de semaine sur l'état
+ *  (récupération + dates posées, ou paiement des heures supp). */
+function optionLine(option: HeuresOption | null | undefined, recupDates: string[] | undefined): string {
+  if (option === "recup") {
+    const ds = (recupDates ?? []).filter(Boolean);
+    const suffix = ds.length ? ` — ${esc(ds.map(fmtDateShort).join(", "))}` : " (jours à poser)";
+    return `<div class="opt recup">▪ Récupération${suffix}</div>`;
+  }
+  if (option === "paiement") return `<div class="opt paie">▪ Paiement des heures supp.</div>`;
+  return "";
+}
 
 /* ───────────────────────── État MENSUEL (compta / paie) ─────────────────────
  * Une page par employé : tableau des SEMAINES du mois (les majorations restent
@@ -24,13 +40,18 @@ export interface MoisEmploye {
   name: string;
   email: string;
   profile: HoursProfile;
-  weeks: { week: string; calc: WeekCalc | null }[];
+  weeks: {
+    week: string;
+    calc: WeekCalc | null;
+    option?: HeuresOption | null;   // choix compta reporté sur l'état
+    recupDates?: string[];          // dates de récup (option « recup »)
+  }[];
 }
 
 function moisRows(weeks: MoisEmploye["weeks"]): string {
-  return weeks.map(({ week, calc }) => `
+  return weeks.map(({ week, calc, option, recupDates }) => `
     <tr${calc ? "" : ' class="vide"'}>
-      <td class="jour">${esc(weekLabel(week))}</td>
+      <td class="jour">${esc(weekLabel(week))}${optionLine(option, recupDates)}</td>
       <td class="num">${calc ? fmtHM(calc.contractMin) : "—"}</td>
       <td class="num">${calc ? fmtHM(calc.totalMin) : "non saisi"}</td>
       <td class="num">${calc ? fmtHM(calc.deltaMin) : "—"}</td>
@@ -80,7 +101,9 @@ function moisEmployePage(f: MoisEmploye, monthId: string): string {
     <p class="legende">Les heures supplémentaires sont calculées PAR SEMAINE CIVILE (majorations légales :
     +25 % les 8 premières heures au-delà du contrat, +50 % ensuite) puis totalisées sur le mois.
     Une semaine à cheval sur deux mois est rattachée au mois où elle se termine (dimanche).
-    « Équiv. payé » = heures supp converties en heures payées (×1,25 / ×1,5) — donnée paie.</p>
+    « Équiv. payé » = heures supp converties en heures payées (×1,25 / ×1,5) — donnée paie.
+    L'option retenue pour les heures supp (récupération en jours ou paiement) est indiquée sous chaque
+    semaine concernée.</p>
 
     <div class="signatures">
       <div><p>Signature de l'employé</p></div>
@@ -169,6 +192,9 @@ function openPrintWindow(title: string, pages: string): boolean {
   tbody td { border-bottom: 1px solid #ccc; padding: 7px 8px; }
   td.jour { font-weight: 700; }
   td.jour .date { font-weight: 400; color: #555; margin-left: 6px; font-size: 12px; }
+  .opt { font-weight: 600; font-size: 11px; margin-top: 3px; }
+  .opt.recup { color: #0369a1; }
+  .opt.paie { color: #047857; }
   td.total { font-weight: 800; }
   td.note { font-size: 12px; color: #444; }
   tfoot td { border-top: 2px solid #111; padding: 8px; font-weight: 700; }

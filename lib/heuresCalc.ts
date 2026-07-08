@@ -95,6 +95,25 @@ export function fmtHM(min: number): string {
   return `${sign}${h}h${String(m).padStart(2, "0")}`;
 }
 
+/* ───────────────────── Option compta des heures supp ──────────────────────
+ * Quand une semaine dépasse le contrat, l'employeur tranche : soit
+ * RÉCUPÉRATION (repos compensateur, compté en JOURS — dates posées), soit
+ * PAIEMENT des heures supp (majorées). Le choix, fait à la semaine, est reporté
+ * sur l'état mensuel (PDF) transmis à la compta ET au salarié. */
+export type HeuresOption = "recup" | "paiement";
+
+/** Libellés canoniques — réutilisés à l'écran ET sur l'état PDF (une seule
+ *  source de vérité, pas de reformulation divergente). */
+export const HEURES_OPTION_LABEL: Record<HeuresOption, string> = {
+  recup: "Récupération (en jours)",
+  paiement: "Paiement des heures supp.",
+};
+
+/** Garde de type : `v` est-il une option valide ? */
+export function isHeuresOption(v: unknown): v is HeuresOption {
+  return v === "recup" || v === "paiement";
+}
+
 /* ───────────────────────── Semaines ISO (Lun→Dim) ─────────────────────────── */
 
 /** Date → identifiant de semaine ISO « 2026-W27 ». */

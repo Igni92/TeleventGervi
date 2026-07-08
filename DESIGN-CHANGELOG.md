@@ -333,3 +333,20 @@ horizontal sur téléphone. Testé au harnais Playwright (composant réel, 320/1
 | État mensuel « Mon mois » (tous) | Tableau 7 colonnes. | **Cartes par semaine** sous `md` (total + écart/25 %/50 %/équiv. payé/récup en puces) + carte « Total du mois ». Tableau ≥ md. |
 | Équipe (managers) | Tableau 10 colonnes. | **Cartes par employé** sous `md` (nom + total + bouton PDF, détails en puces). Tableau ≥ md. |
 | En-têtes de carte | Libellé de semaine complet + « PDF compta (tous) » débordaient sur mobile. | Libellé court (« Sem. 28 »), bouton « PDF » compact sur mobile ; bouton « Enregistrer » pleine largeur. |
+
+---
+
+## 🕐 Heures supp — option « récupération / paiement » reportée sur l'état (NOUVEAU)
+
+Reprend le **formulaire papier hebdomadaire** (« Options » : *Récupération en nombre
+de jours* — dates concernées — vs *Paiement des heures supp* ; choix à placer sur
+l'état PDF transmis au comptable et au salarié). Une décision **par semaine**,
+enregistrée avec les heures (`WeekEntry.option` / `recupDates`, AppSetting `rhsem:`)
+et reportée sur l'état mensuel. Mobile-first, propre dans tous les états d'affichage.
+
+| Élément | Avant | Après |
+|---------|-------|-------|
+| Choix récup / paiement | Sur papier, hors app. | Bloc **« Heures supp — que faire ? »** sous la saisie, affiché dès qu'il y a des heures supp (ou si un choix existe déjà). Deux cases exclusives façon radio (icône + libellé + puce), re-clic = « à décider ». |
+| Dates de récupération | Cases « …… …… …… » manuscrites. | Champs **date** ajoutables/retirables (amorce d'un champ vide au choix « récup »), validés/dédupliqués/triés côté serveur (ISO, plafond 7). |
+| Report sur l'état (compta + salarié) | — | Ligne **« ▪ Récupération — 08/07, 10/07 »** ou **« ▪ Paiement des heures supp. »** sous chaque semaine concernée du PDF mensuel + mention en légende. Pastille « Récup / Payé » aussi à l'écran (« Mon mois »). |
+| Responsive | — | Cases empilées `< sm`, côte à côte `≥ sm` ; lignes de dates pleine largeur sur téléphone, en ligne qui s'enroule ≥ sm ; libellé de semaine tronqué + pastille qui ne déborde jamais. |

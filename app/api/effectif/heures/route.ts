@@ -111,7 +111,12 @@ function buildMonthRow(
   const weeklyHours = profile?.weeklyHours ?? 35;
   const weeksOut = weekIds.map((w) => {
     const entry = entries?.get(w) ?? null;
-    return { week: w, entry, calc: entry ? computeWeek(entry.days, weeklyHours) : null };
+    return {
+      week: w,
+      calc: entry ? computeWeek(entry.days, weeklyHours) : null,
+      option: entry?.option ?? null,          // choix compta reporté sur l'état
+      recupDates: entry?.recupDates,          // dates de récup (option « recup »)
+    };
   });
   return {
     email,
@@ -125,7 +130,7 @@ function buildMonthRow(
 export async function POST(req: NextRequest) {
   const c = await ctx();
   if (!c) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  let body: { week?: string; days?: unknown; user?: string };
+  let body: { week?: string; days?: unknown; user?: string; option?: unknown; recupDates?: unknown };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -137,7 +142,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const entry = await saveWeekEntry(target, week, body.days, c.email);
+    const entry = await saveWeekEntry(target, week, body.days, c.email, {
+      option: body.option, recupDates: body.recupDates,
+    });
     const profile = await getProfile(target);
     return NextResponse.json({ ok: true, week, user: target, entry, calc: computeWeek(entry.days, profile.weeklyHours) });
   } catch (e) {
