@@ -26,10 +26,10 @@ export function EventsBanner() {
       className="mb-3 sm:mb-5 flex items-center gap-1.5 sm:gap-2 overflow-x-auto sm:flex-wrap pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden print:hidden"
       aria-label="Événements de la semaine"
     >
-      <span className="shrink-0 inline-flex items-center gap-1.5 text-[10px] sm:text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-        <CalendarDays className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-        Événements
-      </span>
+      {/* Libellé « Événements » retiré : les puces portent déjà chacune leur
+          événement (emoji + nom + date) — pas de mot générique répété sur
+          tous les écrans. Un discret repère calendrier ouvre la ligne. */}
+      <CalendarDays className="shrink-0 h-3 w-3 sm:h-3.5 sm:w-3.5 text-muted-foreground" aria-hidden />
       {events.map((ev) => {
         const today = ev.daysFromRef === 0;
         const past = ev.daysFromRef < 0;

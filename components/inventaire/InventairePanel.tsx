@@ -1276,8 +1276,8 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                     {s.adjustment && (sessionLocked(s) || s.adjustment.status === "error") && (
                       <div className={`text-[11px] ${s.adjustment.status === "error" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600/90 dark:text-emerald-400/90"}`}>
                         {s.adjustment.status === "error" ? (sessionLocked(s) ? "⚠ Régularisation partielle en erreur" : "⚠ Régularisation échouée (rien posté — à reprendre)") : "Stock régularisé"} par {displayPersonName(s.adjustment.by)}
-                        {s.adjustment.sapExitDocNum ? ` · sortie #${s.adjustment.sapExitDocNum}` : ""}
-                        {s.adjustment.sapEntryDocNum ? ` · entrée #${s.adjustment.sapEntryDocNum}` : ""}
+                        {s.adjustment.sapExitDocNum ? ` · sortie # ${s.adjustment.sapExitDocNum}` : ""}
+                        {s.adjustment.sapEntryDocNum ? ` · entrée # ${s.adjustment.sapEntryDocNum}` : ""}
                         {` · ${s.adjustment.nbSorties}↓/${s.adjustment.nbEntrees}↑`}
                         {s.adjustment.error ? ` — ${s.adjustment.error}` : ""}
                       </div>

@@ -1230,11 +1230,11 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
         <div className="shrink-0 flex items-center gap-x-2 rounded-md border px-2 py-1 border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15">
           <span
             className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-amber-800 dark:text-amber-200 shrink-0"
-            title={`Modification du BL #${modif.docNum} — modifie, supprime ou ajoute des lignes, enregistré sur ce même BL${
+            title={`Modification du BL # ${modif.docNum} — modifie, supprime ou ajoute des lignes, enregistré sur ce même BL${
               modifMeta?.dueDate ? ` · livraison ${new Date(modifMeta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}` : ""}`}
           >
             <Pencil className="h-3 w-3" strokeWidth={2.2} />
-            BL #{modif.docNum}
+            BL # {modif.docNum}
             {modifMeta?.dueDate && (
               <span className="font-normal text-amber-700/80 dark:text-amber-300/80 hidden xl:inline">
                 · {new Date(modifMeta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}
@@ -2036,7 +2036,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
               modif ? "bg-amber-600 hover:bg-amber-700" : "bg-emerald-600 hover:bg-emerald-700"
             }`}>
             <ShoppingCart className="h-4 w-4" />
-            {modif ? `Enregistrer le BL #${modif.docNum}` : `Créer la commande (${cart.length})`}
+            {modif ? `Enregistrer le BL # ${modif.docNum}` : `Créer la commande (${cart.length})`}
           </button>
         </div>
       </div>

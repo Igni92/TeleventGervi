@@ -102,8 +102,8 @@ export function RunsHistory({ version }: { version: number }) {
                     </b>
                   </span>
                 )}
-                {r.sapExitDocNum != null && <span>Sortie SAP <b className="text-foreground">#{r.sapExitDocNum}</b></span>}
-                {r.sapEntryDocNum != null && <span>Entrée SAP <b className="text-foreground">#{r.sapEntryDocNum}</b></span>}
+                {r.sapExitDocNum != null && <span>Sortie SAP <b className="text-foreground"># {r.sapExitDocNum}</b></span>}
+                {r.sapEntryDocNum != null && <span>Entrée SAP <b className="text-foreground"># {r.sapEntryDocNum}</b></span>}
                 {r.error && <span className="text-rose-500">{r.error}</span>}
               </div>
             </div>

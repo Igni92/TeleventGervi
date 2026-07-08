@@ -46,7 +46,7 @@ function CancelBadge({ d, className = "" }: { d: Receipt; className?: string }) 
     return (
       <span className={`inline-flex items-center gap-1 rounded-full bg-slate-500/15 px-2 py-0.5 text-[10.5px] font-semibold text-slate-600 dark:text-slate-300 ${className}`}>
         <Ban className="h-3 w-3" />
-        Annulation{d.cancelsDocNum ? ` · #${d.cancelsDocNum}` : ""}
+        Annulation{d.cancelsDocNum ? ` · # ${d.cancelsDocNum}` : ""}
       </span>
     );
   }
@@ -54,7 +54,7 @@ function CancelBadge({ d, className = "" }: { d: Receipt; className?: string }) 
     return (
       <span className={`inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10.5px] font-semibold text-rose-600 dark:text-rose-300 ${className}`}>
         <Ban className="h-3 w-3" />
-        Annulée{d.cancelledByDocNum ? ` · #${d.cancelledByDocNum}` : ""}
+        Annulée{d.cancelledByDocNum ? ` · # ${d.cancelledByDocNum}` : ""}
       </span>
     );
   }
@@ -382,7 +382,7 @@ export function GoodsReceiptHistory() {
                 >
                   <div className="min-w-0 flex-1">
                     <span className="inline-flex items-center gap-1.5 flex-wrap">
-                      <span className={`font-mono font-semibold text-[16px] ${isVoided(d) ? "line-through text-muted-foreground" : "text-foreground"}`}>#{d.docNum}</span>
+                      <span className={`font-mono font-semibold text-[16px] ${isVoided(d) ? "line-through text-muted-foreground" : "text-foreground"}`}># {d.docNum}</span>
                       <CancelBadge d={d} />
                       {!isVoided(d) && <AgreageBadge a={agreages[d.docEntry]} />}
                     </span>
@@ -441,7 +441,7 @@ export function GoodsReceiptHistory() {
                         {isOpen ? <ChevronDown className="h-3.5 w-3.5 inline" /> : <ChevronRight className="h-3.5 w-3.5 inline" />}
                       </td>
                       <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">
-                        <span className={isVoided(d) ? "line-through text-muted-foreground" : ""}>#{d.docNum}</span>
+                        <span className={isVoided(d) ? "line-through text-muted-foreground" : ""}># {d.docNum}</span>
                         <CancelBadge d={d} className="ml-1.5 align-middle" />
                       </td>
                       <td className="px-3 py-2 font-mono text-muted-foreground whitespace-nowrap">
@@ -791,7 +791,7 @@ function ReceiptDetail({
           <Ban className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
             <b>Document d&apos;annulation</b>
-            {receipt.cancelsDocNum ? <> de la réception <span className="font-mono">#{receipt.cancelsDocNum}</span></> : null} —
+            {receipt.cancelsDocNum ? <> de la réception <span className="font-mono"># {receipt.cancelsDocNum}</span></> : null} —
             il inverse le stock entré. Ce n&apos;est pas une nouvelle entrée.
           </span>
         </div>
@@ -801,7 +801,7 @@ function ReceiptDetail({
           <Ban className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
             <b>Réception annulée</b>
-            {receipt.cancelledByDocNum ? <> par l&apos;annulation <span className="font-mono">#{receipt.cancelledByDocNum}</span></> : null} —
+            {receipt.cancelledByDocNum ? <> par l&apos;annulation <span className="font-mono"># {receipt.cancelledByDocNum}</span></> : null} —
             le stock entré a été ressorti.
           </span>
         </div>
@@ -1017,7 +1017,7 @@ function ReceiptDetail({
             ) : (
               <span className="inline-flex items-center gap-2">
                 <span className={`${big ? "text-[13.5px]" : "text-[12.5px]"} text-foreground`}>
-                  Annuler l&apos;entrée #{receipt.docNum} ? Le stock entré sera sorti.
+                  Annuler l&apos;entrée # {receipt.docNum} ? Le stock entré sera sorti.
                 </span>
                 <button type="button" onClick={cancelReceipt} disabled={cancelling}
                   className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[12.5px] font-semibold disabled:opacity-60">
@@ -1038,7 +1038,7 @@ function ReceiptDetail({
         <div className="rounded-xl border border-sky-400/50 bg-sky-50/60 dark:bg-sky-950/20 p-3 space-y-2.5">
           <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
             <Undo2 className="h-4 w-4 text-sky-600 dark:text-sky-400" />
-            Retour fournisseur — entrée #{receipt.docNum}
+            Retour fournisseur — entrée # {receipt.docNum}
           </div>
           <p className="text-[11.5px] text-muted-foreground">
             Choisis le nombre de colis à retourner par ligne (0 = ne pas retourner). SAP crée un

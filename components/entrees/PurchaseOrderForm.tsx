@@ -77,7 +77,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
       {last && (
         <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[13px] text-emerald-700 dark:text-emerald-300">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>Dernière commande créée : <b>#{last}</b>.</span>
+          <span>Dernière commande créée : <b># {last}</b>.</span>
         </div>
       )}
 

@@ -210,7 +210,7 @@ export function PromoBanner({
       onFocusCapture={() => setPaused(true)}
       onBlurCapture={() => setPaused(false)}
       className={cn(
-        "relative overflow-hidden rounded-xl border border-border bg-card border-l-4 border-l-rose-500",
+        "relative overflow-hidden rounded-xl border border-border bg-card",
         className,
       )}
     >

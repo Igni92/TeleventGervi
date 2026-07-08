@@ -505,7 +505,7 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
           >
             {replaying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
             Rejouer la dernière commande
-            {lastDocNum && <span className="text-[11px] font-normal opacity-70">(#{lastDocNum} chargée)</span>}
+            {lastDocNum && <span className="text-[11px] font-normal opacity-70">(# {lastDocNum} chargée)</span>}
           </button>
 
           {/* N° de commande client (→ SAP NumAtCard) */}

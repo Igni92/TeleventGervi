@@ -201,7 +201,7 @@ export function Manquants() {
                           {it.docs.map((d) => (
                             <li key={`${it.itemCode}-${d.docEntry}`} className="flex items-center gap-2 text-[12px] flex-wrap">
                               <span className="font-medium text-foreground truncate">{d.cardName}</span>
-                              <span className="text-muted-foreground tnum">BL #{d.docNum}</span>
+                              <span className="text-muted-foreground tnum">BL # {d.docNum}</span>
                               <span className="text-muted-foreground tnum">{fmtNum(d.colis)} colis · {fmtNum(d.quantity)} pie</span>
                               {d.carrierName && (
                                 <span className="inline-flex items-center gap-1 text-muted-foreground">
