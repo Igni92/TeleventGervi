@@ -364,9 +364,12 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
             .join(" · ")
         : null;
       toast.success(
-        `✅ Commande #${json.docNum} créée — Total ${fmt(json.totalTTC)} € TTC`,
+        json.offre
+          ? `📄 Offre client #${json.docNum} créée — Total ${fmt(json.totalTTC)} € TTC`
+          : `✅ Commande #${json.docNum} créée — Total ${fmt(json.totalTTC)} € TTC`,
         {
           description: [
+            json.offre ? "Précommande : à passer en commande au jour de départ (Bons de commande)" : null,
             `${lines.length} ligne(s) · ${clientName} · CardCode ${json.cardCode}`,
             `HT ${fmt(json.totalHT)} € · TVA ${fmt(json.totalTVA)} €`,
             json.totalWeightKg != null && `Poids net ${fmt(json.totalWeightKg)} kg`,

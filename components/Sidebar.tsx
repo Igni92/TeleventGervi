@@ -63,7 +63,7 @@ interface NavItem {
   label: string;
   icon: typeof Radio;
   /** clé de badge dynamique (cf. useBadges) */
-  badge?: "receptionIncidents" | "notifications" | "commandesDue" | "inventairePending";
+  badge?: "receptionIncidents" | "notifications" | "commandesDue" | "inventairePending" | "offresDue";
   /** Autres préfixes de route couverts par cette entrée (ex. entrée fusionnée
    *  « Clients & plan d'appel » active aussi sur /plan-appel). */
   also?: string[];
@@ -95,7 +95,7 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
     items: [
       { href: "/livraisons", label: "Préparation livraisons", icon: Truck },
       { href: "/preparations", label: "Préparations à faire", icon: ClipboardList },
-      { href: "/bons-commande", label: "Bons de commande", icon: ScrollText },
+      { href: "/bons-commande", label: "Bons de commande", icon: ScrollText, badge: "offresDue" },
       { href: "/manquants", label: "Manquants", icon: PackageX },
       { href: "/products", label: "Stock", icon: Package },
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },
@@ -139,6 +139,7 @@ const BADGE_STYLE: Record<NonNullable<NavItem["badge"]>, string> = {
   notifications: "bg-brand-500 text-white",
   commandesDue: "bg-amber-500 text-[#0b1018]",
   inventairePending: "bg-amber-500 text-[#0b1018]",
+  offresDue: "bg-amber-500 text-[#0b1018]",
 };
 
 /**
@@ -187,6 +188,21 @@ function useBadges(): Record<string, number> {
       fetch("/api/sap/purchase-orders/due-count", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => { if (!cancelled && typeof j?.count === "number") setBadges((b) => ({ ...b, commandesDue: j.count })); })
+        .catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 120_000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+
+  // Offres client (précommandes) arrivées au jour de départ (à passer en commande)
+  // — refresh ~2 min.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetch("/api/bons-commande/due-count", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => { if (!cancelled && typeof j?.count === "number") setBadges((b) => ({ ...b, offresDue: j.count })); })
         .catch(() => {});
     };
     load();
