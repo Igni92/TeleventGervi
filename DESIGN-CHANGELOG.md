@@ -375,3 +375,22 @@ sélection des jours de récup en un clic.
 | Régler pour un salarié | Impossible (écran perso uniquement). | Le manager choisit un **salarié dans un sélecteur** en tête de « Mes heures » et pose sa décision (via `?user=` déjà supporté par l'API). |
 | Récup sur semaine pleine | Aucun contrôle. | **Interdit** de poser un jour de récup dans la semaine des heures supp (ex. 36h15 lun→ven ⇒ pas de récup le samedi de cette semaine) : le repos compensateur se prend sur une **autre** semaine (`isDateInWeek`). |
 | Choix des jours de récup | Champs date ajoutés un par un. | **Puces « jour » cliquables** (jours des semaines suivantes, dimanches exclus) + « autre date » bornée après la semaine (`daysAfterWeek`). Un clic = ajout/retrait. |
+
+---
+
+## 🔔 Validation mensuelle des heures — employeur ⇄ salarié (notif + popup)
+
+Nouveau flux d'accord sur les heures du mois, avec **vraies notifications (push
+PWA)** ET **notifications in-app (popup à l'ouverture)**.
+
+- **Au 1er du mois**, l'employeur (direction) reçoit un **push** + un **popup à
+  chaque ouverture** — qui revient tant qu'il n'a pas **envoyé** les heures du mois
+  précédent aux salariés pour validation.
+- Le salarié reçoit à son tour push + popup : **Valider** (entente) ou **Proposer
+  une autre date** (récup + message). L'employeur **Accepte** ou **Renvoie** —
+  la boucle continue **jusqu'à l'entente** (`sent` → `counter` → `agreed`).
+- État par salarié et par mois en `AppSetting` (`rhvalid:<email>:<mois>`), machine
+  à états pure et testée (`lib/heuresValidation`), verrou métier employeur ⇄ salarié
+  côté serveur. Push nominatif via `notifyEmails` (réutilise l'infra Web-Push
+  existante — actif dès que les clés VAPID sont configurées). Popup monté dans
+  `AppLayout` (présent sur tous les écrans), « Plus tard » masque pour la session.

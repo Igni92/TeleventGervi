@@ -119,6 +119,37 @@ export async function notifyAll(payload: PushPayload, opts: { exceptEmail?: stri
 }
 
 /**
+ * Envoie une notification aux abonnés dont l'email figure dans `emails`
+ * (ciblage nominatif : employeur ⇄ salariés pour la validation des heures).
+ * Best-effort, parallèle, nettoie les abonnements expirés. Ne throw jamais.
+ */
+export async function notifyEmails(emails: string[], payload: PushPayload): Promise<number> {
+  if (!ensureConfigured()) return 0;
+  const wanted = new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean));
+  if (wanted.size === 0) return 0;
+  try {
+    const subs = await prisma.pushSubscription.findMany();
+    const targets = subs.filter((s) => s.email && wanted.has(s.email.trim().toLowerCase()));
+    if (targets.length === 0) return 0;
+    const gone: string[] = [];
+    const results = await Promise.all(
+      targets.map(async (t) => {
+        const r = await sendPush({ endpoint: t.endpoint, p256dh: t.p256dh, auth: t.auth }, payload);
+        if (r === "gone") gone.push(t.endpoint);
+        return r === "ok";
+      }),
+    );
+    if (gone.length) {
+      await prisma.pushSubscription.deleteMany({ where: { endpoint: { in: gone } } }).catch(() => {});
+    }
+    return results.filter(Boolean).length;
+  } catch (e) {
+    console.error("[push] notifyEmails échec:", e);
+    return 0;
+  }
+}
+
+/**
  * Envoie une notification aux seuls PRÉPARATEURS / LIVREURS abonnés (ceux qui
  * préparent la marchandise) : préparateurs restreints (liste email), et comptes
  * portant le flag DB `isPreparateur` ou `isLivreur`. Best-effort, parallèle,
