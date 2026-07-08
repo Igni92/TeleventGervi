@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   PackageCheck, ChevronDown, RefreshCw, Loader2, CheckCircle2, Sparkles,
-  CalendarDays, AlertTriangle, Grape, FileText, ArrowRightCircle, Clock,
+  CalendarDays, AlertTriangle, Grape, FileText, ArrowRightCircle, Clock, Trash2, Hash,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDeliveryDate } from "@/lib/livraison";
@@ -41,6 +41,7 @@ interface OffreLine { itemCode: string; itemName: string; colis: number }
 interface OffreDoc {
   docEntry: number; docNum: number; cardCode: string; cardName: string;
   clientType: string | null; dueDate: string | null; docDate: string | null;
+  numAtCard: string | null;
   /** true = jour de départ atteint → à passer en commande maintenant. */
   due: boolean; lineCount: number; colis: number; lines: OffreLine[];
 }
@@ -60,6 +61,7 @@ export function BonsCommandePanel() {
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [busyLine, setBusyLine] = useState<string | null>(null); // `${docEntry}:${itemCode}`
   const [convertingId, setConvertingId] = useState<number | null>(null); // offre en cours de passage
+  const [deletingId, setDeletingId] = useState<number | null>(null); // offre en cours de suppression
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -147,6 +149,44 @@ export function BonsCommandePanel() {
     }
   }, [load]);
 
+  // Modifie une offre (date de livraison et/ou n° de commande) côté SAP.
+  const saveOffre = useCallback(async (offre: OffreDoc, patch: { dueDate?: string; numAtCard?: string }) => {
+    // Optimiste : reflète le changement tout de suite.
+    setOffres((prev) => prev?.map((o) => o.docEntry === offre.docEntry ? { ...o, ...patch } : o) ?? prev);
+    try {
+      const r = await fetch("/api/bons-commande", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update", docEntry: offre.docEntry, ...patch }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) { toast.error(j?.error || "Échec de la mise à jour de l'offre"); load(); return; }
+      // Changer la date peut changer le « jour de départ » (pastille/tri) → recharge.
+      if (patch.dueDate !== undefined) load();
+    } catch {
+      toast.error("SAP injoignable — offre non modifiée"); load();
+    }
+  }, [load]);
+
+  // Supprime une offre (Quotation) dans SAP.
+  const deleteOffre = useCallback(async (offre: OffreDoc) => {
+    if (!window.confirm(`Supprimer l'offre n°${offre.docNum} de ${offre.cardName} ? Cette action est définitive.`)) return;
+    setDeletingId(offre.docEntry);
+    try {
+      const r = await fetch("/api/bons-commande", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", docEntry: offre.docEntry }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) { toast.error(j?.error || "Échec de la suppression de l'offre"); return; }
+      setOffres((prev) => prev?.filter((o) => o.docEntry !== offre.docEntry) ?? prev);
+      toast.success(`Offre n°${offre.docNum} supprimée`);
+    } catch {
+      toast.error("SAP injoignable — offre non supprimée");
+    } finally {
+      setDeletingId(null);
+    }
+  }, []);
+
   const count = docs?.length ?? 0;
   const dueCount = (offres ?? []).filter((o) => o.due).length;
 
@@ -188,14 +228,16 @@ export function BonsCommandePanel() {
           <ul className="space-y-2">
             {offres.map((o) => {
               const converting = convertingId === o.docEntry;
+              const deleting = deletingId === o.docEntry;
+              const busy = converting || deleting;
               return (
                 <li
                   key={o.docEntry}
-                  className={`rounded-xl border px-3 sm:px-4 py-2.5 flex flex-col sm:flex-row sm:items-center gap-2 ${
+                  className={`rounded-xl border px-3 sm:px-4 py-2.5 flex flex-col sm:flex-row sm:items-start gap-2 ${
                     o.due ? "border-amber-400/60 bg-amber-50/40 dark:bg-amber-950/15" : "border-border bg-card"
                   }`}
                 >
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 flex-1 space-y-1.5">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[13.5px] font-semibold text-foreground truncate">{o.cardName}</span>
                       {o.clientType && SEG_BADGE[o.clientType] && (
@@ -204,24 +246,50 @@ export function BonsCommandePanel() {
                         </span>
                       )}
                       <span className="text-[11px] text-muted-foreground">offre n°{o.docNum}</span>
-                      {o.dueDate && (
-                        <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-                          <CalendarDays className="h-3 w-3" /> {formatDeliveryDate(o.dueDate)}
-                        </span>
-                      )}
+                      <span className="text-[11px] text-muted-foreground tnum">· {o.lineCount} ligne{o.lineCount > 1 ? "s" : ""} · {o.colis} colis</span>
                     </div>
-                    <p className="text-[11.5px] text-muted-foreground tnum mt-0.5">
-                      {o.lineCount} ligne{o.lineCount > 1 ? "s" : ""} · {o.colis} colis
-                    </p>
+                    {/* Date de livraison + n° de commande éditables */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <label className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground" title="Date de livraison">
+                        <CalendarDays className="h-3.5 w-3.5 shrink-0" />
+                        <input
+                          type="date"
+                          defaultValue={o.dueDate ?? ""}
+                          disabled={busy}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (/^\d{4}-\d{2}-\d{2}$/.test(v) && v !== o.dueDate) saveOffre(o, { dueDate: v });
+                          }}
+                          aria-label={`Date de livraison de l'offre n°${o.docNum}`}
+                          className="h-8 rounded-lg border border-border bg-card px-2 text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
+                        />
+                      </label>
+                      <label className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground" title="N° de commande client">
+                        <Hash className="h-3.5 w-3.5 shrink-0" />
+                        <input
+                          type="text"
+                          defaultValue={o.numAtCard ?? ""}
+                          disabled={busy}
+                          placeholder="N° commande"
+                          onBlur={(e) => {
+                            const v = e.target.value.trim();
+                            if (v !== (o.numAtCard ?? "")) saveOffre(o, { numAtCard: v });
+                          }}
+                          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                          aria-label={`N° de commande de l'offre n°${o.docNum}`}
+                          className="h-8 w-[130px] rounded-lg border border-border bg-card px-2 text-[12px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
+                        />
+                      </label>
+                    </div>
                   </div>
                   <div className="shrink-0 flex items-center gap-2 self-end sm:self-auto">
                     {o.due
-                      ? <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-amber-700 dark:text-amber-300"><Clock className="h-3.5 w-3.5" /> jour de départ</span>
-                      : <span className="inline-flex items-center gap-1 text-[10.5px] text-muted-foreground"><Clock className="h-3.5 w-3.5" /> en attente du départ</span>}
+                      ? <span className="hidden sm:inline-flex items-center gap-1 text-[10.5px] font-semibold text-amber-700 dark:text-amber-300"><Clock className="h-3.5 w-3.5" /> jour de départ</span>
+                      : <span className="hidden sm:inline-flex items-center gap-1 text-[10.5px] text-muted-foreground"><Clock className="h-3.5 w-3.5" /> en attente</span>}
                     <button
                       type="button"
                       onClick={() => convertOffre(o)}
-                      disabled={converting || convertingId !== null}
+                      disabled={busy}
                       title="Créer la commande client SAP à partir de cette offre (lots à affecter ensuite)"
                       className={`inline-flex items-center gap-1.5 h-10 sm:h-9 px-3.5 rounded-xl text-[12.5px] font-semibold transition-colors disabled:opacity-50 ${
                         o.due ? "bg-brand-600 hover:bg-brand-700 text-white" : "border border-border text-foreground hover:bg-secondary/60"
@@ -229,6 +297,16 @@ export function BonsCommandePanel() {
                     >
                       {converting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightCircle className="h-4 w-4" />}
                       Passer en commande
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteOffre(o)}
+                      disabled={busy}
+                      title="Supprimer l'offre"
+                      aria-label={`Supprimer l'offre n°${o.docNum}`}
+                      className="inline-flex h-10 sm:h-9 w-10 sm:w-9 items-center justify-center rounded-xl border border-border text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors disabled:opacity-50"
+                    >
+                      {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                     </button>
                   </div>
                 </li>
