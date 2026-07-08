@@ -166,14 +166,28 @@ export async function GET() {
     // Produits (tags désignation + colisage) pour toutes les lignes.
     const itemCodes = Array.from(new Set(live.flatMap((d) => (d.DocumentLines ?? []).map((l) => l.ItemCode))));
     const pMap = new Map<string, { itemName: string; salesUnit: string | null; salesUnitWeight: number | null;
-      salesQtyPerPackUnit: number | null; uMarque: string | null; uCondi: string | null; uPays: string | null }>();
+      salesQtyPerPackUnit: number | null; uMarque: string | null; uCondi: string | null; uPays: string | null;
+      uUvc: string | null; frgnName: string | null }>();
     if (itemCodes.length > 0) {
       const prods = await prisma.product.findMany({
         where: { itemCode: { in: itemCodes } },
         select: { itemCode: true, itemName: true, salesUnit: true, salesUnitWeight: true,
-                  salesQtyPerPackUnit: true, uMarque: true, uCondi: true, uPays: true },
+                  salesQtyPerPackUnit: true, uMarque: true, uCondi: true, uPays: true, uUvc: true, frgnName: true },
       });
       for (const p of prods) pMap.set(p.itemCode, p);
+    }
+    // Calibre (U_GER_CALIBRE) — champ SAP LIVE (hors miroir Product), pour le
+    // libellé détaillé au survol. Lots de 20 ; un lot en échec = calibre absent.
+    const calibreByItem = new Map<string, string>();
+    for (let i = 0; i < itemCodes.length; i += 20) {
+      const slice = itemCodes.slice(i, i + 20);
+      const filter = "(" + slice.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ") + ")";
+      try {
+        const r = await sap.get<{ value: { ItemCode: string; U_GER_CALIBRE?: string | null }[] }>(
+          `Items?$select=ItemCode,U_GER_CALIBRE&$filter=${encodeURIComponent(filter)}&$top=50`,
+        );
+        for (const it of r.value || []) if (it.U_GER_CALIBRE) calibreByItem.set(it.ItemCode, it.U_GER_CALIBRE);
+      } catch { /* lot en échec → pas de calibre pour ces articles */ }
     }
     const unitsPerColis = (code: string) => {
       const p = pMap.get(code);
@@ -203,12 +217,17 @@ export async function GET() {
     };
     const candidatesFor = (itemCode: string, segment: string | null) => {
       const docs = maps.byItemList.get(itemCode) ?? [];
-      const candidates = docs.map((dn) => ({
-        lot: `EM${dn}`, docNum: dn,
-        warehouse: maps.whsOfItemDoc.get(`${itemCode}|${dn}`) ?? null,
-        affect: affects.get(dn) ?? "TOUS",
-        label: emLabel(dn),
-      }));
+      const candidates = docs.map((dn) => {
+        const meta = maps.docMeta.get(dn);
+        return {
+          lot: `EM${dn}`, docNum: dn,
+          warehouse: maps.whsOfItemDoc.get(`${itemCode}|${dn}`) ?? null,
+          affect: affects.get(dn) ?? "TOUS",
+          date: meta?.date ?? null,          // "YYYY-MM-DD" — réception EM
+          supplier: meta?.supplier ?? null,  // fournisseur (CardName PDN)
+          label: emLabel(dn),                // repli texte (titre natif)
+        };
+      });
       const suggested = resolveLotForSegment(maps, affects, itemCode, undefined, segment).lot;
       return { candidates, suggested };
     };
@@ -219,6 +238,7 @@ export async function GET() {
       // (elles seront affectées ensemble). « pending » = au moins une ligne EM_PENDING.
       const byItem = new Map<string, { itemCode: string; itemName: string; quantity: number; colisRaw: number;
         warehouse: string | null; marque: string | null; condt: string | null; pays: string | null;
+        variete: string | null; uvc: string | null; calibre: string | null;
         lot: string; pending: boolean; familyKey: string | null }>();
       for (const l of d.DocumentLines ?? []) {
         const p = pMap.get(l.ItemCode);
@@ -237,6 +257,7 @@ export async function GET() {
             colisRaw: qty / (unitsPerColis(l.ItemCode) || 1),
             warehouse: l.WarehouseCode ?? null,
             marque: p?.uMarque ?? null, condt: p?.uCondi ?? null, pays: p?.uPays ?? null,
+            variete: p?.frgnName ?? null, uvc: p?.uUvc ?? null, calibre: calibreByItem.get(l.ItemCode) ?? null,
             // On PRÉSERVE le sentinel famille tel quel (rappel affiché) ; sinon
             // EM_PENDING générique pour une ligne à découvert, ou le vrai lot.
             lot: linePending ? (famValid ? rawLot : LOT_PENDING) : rawLot,
@@ -261,6 +282,7 @@ export async function GET() {
           itemCode: l.itemCode, itemName: l.itemName,
           quantity: l.quantity, colis: Math.round(l.colisRaw * 10) / 10,
           warehouse: l.warehouse, marque: l.marque, condt: l.condt, pays: l.pays,
+          variete: l.variete, uvc: l.uvc, calibre: l.calibre,
           lot: l.lot, pending: l.pending, candidates, suggested,
           // Tag « produit » à préciser : { key, label } ou null.
           familyTarget: l.familyKey ? { key: l.familyKey, label: FAMILY_LABEL.get(l.familyKey)! } : null,
