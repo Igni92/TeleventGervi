@@ -419,3 +419,12 @@ refuse, avec **push** + suivi in-app.
   (`lib/conges` : validation de plage, décompte, chevauchement), persistance
   `lib/congesRh` (séparée pour garder le client sans Prisma). Validation réservée
   à `isDirection` (comme les heures) ; push via `notifyEmails`.
+
+---
+
+## 🛒 Console — clic droit : menu (Détails · Tout mettre) + lots EN STOCK
+
+| Élément | Avant | Après |
+|---------|-------|-------|
+| Clic droit | Ouvrait directement le détail des lots. | **Menu déroulant** : **« Détails (lots en stock) »** et **« Tout mettre »** (ajoute le produit au panier avec sa quantité dispo). |
+| Détail des lots | Lots issus des EM récentes (`/api/lots/candidates`) : **lent** (scan SAP) et incluait des lots **plus en stock**. | Source **table locale `ProductBatch`** (`/api/products/[id]/batches?inStock=1`) : **rapide** (aucun appel SAP), **uniquement les lots encore en stock** (`quantity > 0`), avec **quantité** + **DLC** + entrepôt, triés **FEFO** (DLC la plus proche d'abord). |
