@@ -475,34 +475,60 @@ export function BonsCommandePanel() {
 }
 
 /* ── Cellule d'affectation d'un lot ──────────────────────────────────────────
-   Le SÉLECTEUR reste un <select> natif (fiable, accessible). Au SURVOL, un petit
-   panneau « bien design » (porté en portail pour ne pas être rogné par le
-   overflow de la carte) montre le DÉTAIL de l'article — variété, origine,
-   calibre, marque, conditionnement — et la liste des EM candidates avec leur
-   réception (date · fournisseur · magasin · affectation). ─────────────────── */
+   Menu déroulant PERSONNALISÉ (porté en portail → jamais rogné par la carte). En
+   SURVOLANT une EM dans la liste, le PIED du menu affiche le CODE ARTICLE + tout
+   le détail (marque · conditionnement · calibre · variété · origine) et la
+   réception de cette EM (date · fournisseur · magasin · affectation). Cliquer une
+   entrée l'affecte. ──────────────────────────────────────────────────────── */
 function LotCell({ line, current, isBusy, onPick }: {
   line: BonLine; current: string; isBusy: boolean; onPick: (v: string) => void;
 }) {
   const opts = line.candidates ?? [];
   const showRawCurrent = !line.familyTarget && !line.pending && !!current && !opts.some((c) => c.lot === current);
-  const [hover, setHover] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
-  const CARD_W = 300;
+  const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState<LotCandidate | null>(null);
+  const [pos, setPos] = useState<{ left: number; width: number; top?: number; bottom?: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+
   const place = () => {
-    const el = ref.current; if (!el) return;
+    const el = triggerRef.current; if (!el) return;
     const r = el.getBoundingClientRect();
-    const left = Math.max(8, Math.min(r.right - CARD_W, window.innerWidth - CARD_W - 8));
-    setPos({ top: r.top, left });
+    const width = Math.max(r.width, 288);
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+    const above = (window.innerHeight - r.bottom) < 360 && r.top > 360;   // ouvre vers le haut si peu de place en bas
+    setPos(above ? { left, width, bottom: window.innerHeight - r.top + 6 } : { left, width, top: r.bottom + 6 });
   };
-  const show = () => { place(); setHover(true); };
+  const openMenu = () => { if (isBusy) return; place(); setOpen(true); };
+  const closeMenu = () => { setOpen(false); setHovered(null); };
+  const pick = (v: string) => { onPick(v); closeMenu(); };
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (triggerRef.current?.contains(t) || popRef.current?.contains(t)) return;
+      closeMenu();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeMenu(); };
+    const reflow = () => place();
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", reflow, true);
+    window.addEventListener("resize", reflow);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", reflow, true);
+      window.removeEventListener("resize", reflow);
+    };
+  }, [open]);
 
   const fmtDate = (d?: string | null) => {
     if (!d) return null;
     const [y, m, day] = d.split("-");
     return day && m && y ? `${day}/${m}/${y}` : null;
   };
-  // Chips « désignation » — mêmes couleurs que la console (marque · condi · calibre · variété · origine).
   const chips = ([
     line.marque && ["bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100", line.marque],
     line.condt && ["bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100", line.condt],
@@ -512,93 +538,113 @@ function LotCell({ line, current, isBusy, onPick }: {
     line.pays && ["bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100", line.pays],
   ].filter(Boolean)) as [string, string][];
 
+  const curCand = opts.find((c) => c.lot === current);
+  const triggerLabel = line.familyTarget ? `🍓 ${line.familyTarget.label} — à préciser`
+    : current === PENDING ? "À découvert — arrivage à venir"
+    : curCand ? `${curCand.lot} · ${AFFECT_LABEL[curCand.affect] ?? curCand.affect}`
+    : showRawCurrent ? current
+    : "Choisir le lot…";
+  const borderCls = line.familyTarget ? "border-violet-400/60 text-violet-700 dark:text-violet-300"
+    : line.pending ? "border-amber-400/60 text-amber-700 dark:text-amber-300"
+    : "border-border text-foreground";
+
   const emRows = [
-    ...(line.suggested ? [{ c: opts.find((x) => x.lot === line.suggested) ?? { lot: line.suggested, docNum: 0, warehouse: null, affect: "TOUS" } as LotCandidate, sug: true }] : []),
+    ...(line.suggested ? [{ c: opts.find((x) => x.lot === line.suggested) ?? ({ lot: line.suggested, docNum: 0, warehouse: null, affect: "TOUS" } as LotCandidate), sug: true }] : []),
     ...opts.filter((c) => c.lot !== line.suggested).map((c) => ({ c, sug: false })),
   ];
+  const hd = hovered ? fmtDate(hovered.date) : null;
 
   return (
-    <div
-      ref={ref}
-      onMouseEnter={show}
-      onMouseLeave={() => setHover(false)}
-      className="shrink-0 sm:w-[320px] flex items-center gap-2"
-    >
+    <div className="shrink-0 sm:w-[320px] flex items-center gap-2">
       {line.familyTarget
         ? <Grape className="h-4 w-4 text-violet-500 shrink-0" />
         : line.pending
         ? <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
         : <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />}
-      <select
-        value={current}
+      <button
+        ref={triggerRef}
+        type="button"
         disabled={isBusy}
-        onChange={(e) => onPick(e.target.value)}
+        onClick={() => (open ? closeMenu() : openMenu())}
+        aria-haspopup="listbox"
+        aria-expanded={open}
         aria-label={`Lot de ${line.itemName}`}
-        className={`h-11 sm:h-9 w-full rounded-lg border bg-card px-2.5 text-[13px] sm:text-[12.5px] font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60 cursor-pointer ${
-          line.familyTarget ? "border-violet-400/60 text-violet-700 dark:text-violet-300"
-          : line.pending ? "border-amber-400/60 text-amber-700 dark:text-amber-300"
-          : "border-border text-foreground"
-        }`}
+        className={`h-11 sm:h-9 w-full rounded-lg border bg-card px-2.5 flex items-center justify-between gap-1.5 text-left text-[13px] sm:text-[12.5px] font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60 ${borderCls}`}
       >
-        <option value="">Choisir le lot…</option>
-        {line.suggested && <option value={line.suggested}>★ {line.suggested} (suggéré)</option>}
-        {opts.filter((c) => c.lot !== line.suggested).map((c) => (
-          <option key={c.lot} value={c.lot} title={c.label}>
-            {c.lot} · {AFFECT_LABEL[c.affect] ?? c.affect}{c.warehouse ? ` · mag. ${c.warehouse}` : ""}
-          </option>
-        ))}
-        {showRawCurrent && <option value={current}>{current}</option>}
-        <optgroup label="Attendre un fruit (à préciser)">
-          {FRUIT_FAMILIES.map((f) => (
-            <option key={f.key} value={familyLotSentinel(f.key)}>🍓 {f.label} — à préciser</option>
-          ))}
-        </optgroup>
-        <option value={PENDING}>À découvert — arrivage à venir ({PENDING})</option>
-      </select>
+        <span className="truncate">{triggerLabel}</span>
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 opacity-60 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
       {isBusy && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />}
 
-      {hover && pos && typeof document !== "undefined" && createPortal(
+      {open && pos && typeof document !== "undefined" && createPortal(
         <div
-          style={{ position: "fixed", top: pos.top - 8, left: pos.left, width: CARD_W, transform: "translateY(-100%)" }}
-          className="z-[100] pointer-events-none rounded-xl border border-border bg-card shadow-modal overflow-hidden animate-fade-up"
+          ref={popRef}
+          style={{ position: "fixed", left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom }}
+          className="z-[100] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[70vh] animate-fade-up"
         >
-          {/* En-tête : désignation détaillée de l'article */}
-          <div className="px-3 py-2.5 border-b border-border bg-secondary/25">
-            <p className="text-[12.5px] font-semibold text-foreground leading-tight">{line.itemName}</p>
+          <div className="overflow-y-auto py-1 min-h-0" onMouseLeave={() => setHovered(null)}>
+            <button type="button" onMouseEnter={() => setHovered(null)} onClick={() => pick("")}
+              className={`w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-secondary/60 ${current === "" ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
+              Choisir le lot…
+            </button>
+            {emRows.map(({ c, sug }) => (
+              <button key={c.lot} type="button" onMouseEnter={() => setHovered(c)} onClick={() => pick(c.lot)}
+                className={`w-full text-left px-3 py-1.5 flex items-center gap-1.5 text-[12.5px] hover:bg-secondary/60 ${current === c.lot ? "bg-brand-500/10 font-semibold" : "text-foreground"}`}>
+                {sug && <Star className="h-3 w-3 text-amber-500 fill-amber-400 shrink-0" />}
+                <span className="font-semibold text-foreground">{c.lot}</span>
+                {sug && <span className="text-[10px] text-amber-600 dark:text-amber-400">suggéré</span>}
+                <span className="text-[10px] px-1 py-px rounded bg-secondary text-muted-foreground">{AFFECT_LABEL[c.affect] ?? c.affect}</span>
+                {c.warehouse && <span className="text-[10.5px] text-muted-foreground ml-auto">mag. {c.warehouse}</span>}
+              </button>
+            ))}
+            {showRawCurrent && (
+              <button type="button" onMouseEnter={() => setHovered(null)} onClick={() => pick(current)}
+                className="w-full text-left px-3 py-1.5 text-[12.5px] bg-brand-500/10 font-semibold text-foreground">
+                {current}
+              </button>
+            )}
+            <div className="my-1 border-t border-border/60" />
+            <p className="px-3 pb-0.5 text-[9.5px] uppercase tracking-wider text-muted-foreground font-semibold">Attendre un fruit</p>
+            {FRUIT_FAMILIES.map((f) => {
+              const v = familyLotSentinel(f.key);
+              return (
+                <button key={f.key} type="button" onMouseEnter={() => setHovered(null)} onClick={() => pick(v)}
+                  className={`w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-secondary/60 ${current === v ? "bg-violet-500/10 font-semibold text-violet-700 dark:text-violet-300" : "text-foreground"}`}>
+                  🍓 {f.label} — à préciser
+                </button>
+              );
+            })}
+            <div className="my-1 border-t border-border/60" />
+            <button type="button" onMouseEnter={() => setHovered(null)} onClick={() => pick(PENDING)}
+              className={`w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-secondary/60 ${current === PENDING ? "bg-amber-500/10 font-semibold text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}>
+              À découvert — arrivage à venir
+            </button>
+          </div>
+
+          {/* Pied : CODE ARTICLE + détail (mis à jour au SURVOL d'une EM) */}
+          <div className="shrink-0 border-t border-border bg-secondary/25 px-3 py-2">
+            <div className="flex items-baseline gap-1.5 min-w-0">
+              <span className="font-mono text-[11px] font-bold text-brand-700 dark:text-brand-300 shrink-0">{line.itemCode}</span>
+              <span className="text-[11.5px] font-medium text-foreground truncate">{line.itemName}</span>
+            </div>
             {chips.length > 0 ? (
-              <div className="mt-1.5 flex flex-wrap gap-1">
+              <div className="mt-1 flex flex-wrap gap-1">
                 {chips.map(([cls, txt], i) => (
                   <span key={i} className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-semibold ${cls}`}>{txt}</span>
                 ))}
               </div>
             ) : (
-              <p className="mt-1 text-[11px] text-muted-foreground italic">Pas de détail article (variété / origine / calibre).</p>
+              <p className="mt-0.5 text-[10.5px] text-muted-foreground italic">Pas de détail (variété / origine / calibre).</p>
             )}
-          </div>
-          {/* Lots (EM) disponibles + réception */}
-          <div className="max-h-[260px] overflow-y-auto py-1">
-            <p className="px-3 pt-1 pb-0.5 text-[9.5px] uppercase tracking-wider text-muted-foreground font-semibold">
-              {emRows.length > 0 ? "Lots disponibles" : "Aucun lot en stock"}
-            </p>
-            {emRows.map(({ c, sug }) => {
-              const d = fmtDate(c.date);
-              return (
-                <div key={c.lot} className={`px-3 py-1.5 ${current === c.lot ? "bg-brand-500/10" : ""}`}>
-                  <div className="flex items-center gap-1.5">
-                    {sug && <Star className="h-3 w-3 text-amber-500 fill-amber-400 shrink-0" />}
-                    <span className="text-[12px] font-semibold text-foreground">{c.lot}</span>
-                    <span className="text-[10px] px-1 py-px rounded bg-secondary text-muted-foreground">{AFFECT_LABEL[c.affect] ?? c.affect}</span>
-                    {c.warehouse && <span className="text-[10.5px] text-muted-foreground">mag. {c.warehouse}</span>}
-                  </div>
-                  {(d || c.supplier) && (
-                    <div className="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
-                      {d && <span className="inline-flex items-center gap-0.5"><CalendarDays className="h-2.5 w-2.5" /> reçu le {d}</span>}
-                      {c.supplier && <span className="inline-flex items-center gap-0.5 truncate"><Truck className="h-2.5 w-2.5 shrink-0" /> {c.supplier}</span>}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {hovered && (hd || hovered.supplier || hovered.warehouse) && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10.5px] text-muted-foreground border-t border-border/50 pt-1.5">
+                <span className="font-semibold text-foreground">{hovered.lot}</span>
+                {hd && <span className="inline-flex items-center gap-0.5"><CalendarDays className="h-2.5 w-2.5" /> reçu le {hd}</span>}
+                {hovered.supplier && <span className="inline-flex items-center gap-0.5"><Truck className="h-2.5 w-2.5" /> {hovered.supplier}</span>}
+                {hovered.warehouse && <span>mag. {hovered.warehouse}</span>}
+                <span>· {AFFECT_LABEL[hovered.affect] ?? hovered.affect}</span>
+              </div>
+            )}
           </div>
         </div>,
         document.body,
