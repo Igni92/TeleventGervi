@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { periodBounds, previousYearBounds } from "./pilotage-time";
+import {
+  periodBounds,
+  previousYearBounds,
+  annualWindowStart,
+  ANNUAL_MATRIX_YEARS_BACK,
+} from "./pilotage-time";
 
 describe("periodBounds", () => {
   it("day = jour entier 00:00 → 24:00", () => {
@@ -100,5 +105,29 @@ describe("previousYearBounds — YoY aligné à la granularité", () => {
     const prev = previousYearBounds(curr);                         // pas de g
     expect(prev.start.getFullYear()).toBe(2025);
     expect(prev.start.getMonth()).toBe(5);
+  });
+});
+
+describe("annualWindowStart — borne basse synchro = borne basse rapport annuel", () => {
+  it("défaut = 1er janvier de N-2 (matrice 3 ans : N-2, N-1, N)", () => {
+    const ref = new Date(2026, 6, 8); // 8 juillet 2026 (milieu d'année)
+    const s = annualWindowStart(ANNUAL_MATRIX_YEARS_BACK, ref);
+    expect(s.getFullYear()).toBe(2024);   // 2026 - 2
+    expect(s.getMonth()).toBe(0);         // janvier
+    expect(s.getDate()).toBe(1);
+  });
+
+  it("couvre TOUTE l'année N-2 même en fin d'année N (pas de fenêtre glissante 365j)", () => {
+    // Le 31 déc 2026, une fenêtre « today − 1 an » démarrerait fin 2025 et
+    // laisserait 2024 + le début 2025 hors miroir → colonnes vides. La borne
+    // calendaire, elle, reste au 1er janvier 2024.
+    const ref = new Date(2026, 11, 31);
+    const s = annualWindowStart(ANNUAL_MATRIX_YEARS_BACK, ref);
+    expect(s.getTime()).toBe(new Date(2024, 0, 1).getTime());
+  });
+
+  it("respecte un yearsBack explicite", () => {
+    const ref = new Date(2026, 0, 15);
+    expect(annualWindowStart(4, ref).getFullYear()).toBe(2022);
   });
 });

@@ -7,6 +7,7 @@ import {
   invoiceWeightByCard, pdnWeightByCard, invoiceWeightBySlp,
 } from "@/lib/pilotage";
 import { groupCodesForSegment, parseSegment } from "@/lib/segments";
+import { ANNUAL_MATRIX_YEARS_BACK } from "@/lib/pilotage-time";
 import { cached, invalidate } from "@/lib/ttlCache";
 
 // Évite le timeout serverless sur les agrégations (cold start Vercel).
@@ -45,8 +46,8 @@ export async function GET(req: Request) {
   const scope = await getAccessScope(session);
   const { slp, showTransverse: admin } = resolvePilotageView(scope, url.searchParams.get("as"));
 
-  const yearsBack = Number.parseInt(url.searchParams.get("years") ?? "2", 10);
-  const years = Number.isFinite(yearsBack) ? yearsBack : 2;
+  const yearsBack = Number.parseInt(url.searchParams.get("years") ?? String(ANNUAL_MATRIX_YEARS_BACK), 10);
+  const years = Number.isFinite(yearsBack) ? yearsBack : ANNUAL_MATRIX_YEARS_BACK;
   const segment = parseSegment(url.searchParams.get("segment"));
 
   // ⚠️ La clé de cache DOIT inclure le périmètre (slp) — sinon le rapport
