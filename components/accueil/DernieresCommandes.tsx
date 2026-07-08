@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { Boxes, Scale, History, FileText, Loader2, ChevronRight } from "lucide-react";
+import { Boxes, Scale, History, FileText, Loader2, ChevronRight, Search, X } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ClientLink } from "@/components/ClientLink";
@@ -51,8 +51,17 @@ const fmtDateLong = (d?: string) => (d ? new Date(d.slice(0, 10) + "T12:00:00").
 const TAG = "inline-flex items-center justify-center whitespace-nowrap rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 px-2 h-5 min-w-[2.25rem] text-[11px] font-semibold tnum";
 
 export function DernieresCommandes() {
-  const { data, state } = useJson<OrdersResponse>("/api/sap/orders?last=8", 60_000);
-  const docs = (data?.docs ?? []).slice(0, 8);
+  // Recherche par CODE client (CardCode SAP) : vide = les 8 dernières globales ;
+  // sinon les dernières commandes de ce compte. Enter/loupe valide, croix réinit.
+  const [term, setTerm] = useState("");
+  const [query, setQuery] = useState("");
+  const url = query
+    ? `/api/sap/orders?cardCode=${encodeURIComponent(query)}&last=12`
+    : "/api/sap/orders?last=8";
+  const { data, state } = useJson<OrdersResponse>(url, 60_000);
+  const docs = (data?.docs ?? []).slice(0, query ? 12 : 8);
+  const submit = (e: React.FormEvent) => { e.preventDefault(); setQuery(term.trim().toUpperCase()); };
+  const clear = () => { setTerm(""); setQuery(""); };
 
   // BL ouvert (dialogue) + ses lignes (chargées à la demande).
   const [open, setOpen] = useState<OrderDoc | null>(null);
@@ -71,6 +80,35 @@ export function DernieresCommandes() {
 
   return (
     <SurfaceCard title="Dernières commandes" icon={<History className="h-3.5 w-3.5" />} accent="sky" delay={140}>
+      {/* Recherche par CODE client (CardCode SAP) — vide = 8 dernières globales. */}
+      <form onSubmit={submit} className="mb-3 flex items-center gap-2">
+        <div className="relative flex-1 min-w-0">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <input
+            value={term}
+            onChange={(e) => setTerm(e.target.value)}
+            placeholder="Code client (ex. APLAI)…"
+            aria-label="Rechercher les commandes d'un code client"
+            className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-8 text-[13px] uppercase placeholder:normal-case placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+          />
+          {(term || query) && (
+            <button type="button" onClick={clear} aria-label="Effacer" title="Effacer"
+              className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 hover:text-foreground">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        <button type="submit"
+          className="shrink-0 inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-[12.5px] font-semibold transition-colors">
+          <Search className="h-3.5 w-3.5" /> Chercher
+        </button>
+      </form>
+      {query && (
+        <p className="-mt-1 mb-2 text-[11.5px] text-muted-foreground">
+          Commandes du client <span className="font-mono font-semibold text-foreground">{query}</span>
+        </p>
+      )}
+
       {state === "loading" && (
         <ul className="space-y-1.5">
           {[0, 1, 2, 3].map((i) => <li key={i} className="h-8 rounded-lg bg-secondary/60 animate-pulse" />)}
@@ -82,7 +120,9 @@ export function DernieresCommandes() {
       )}
 
       {state === "ok" && docs.length === 0 && (
-        <p className="text-[12px] text-muted-foreground py-3 text-center">Aucune commande récente.</p>
+        <p className="text-[12px] text-muted-foreground py-3 text-center">
+          {query ? `Aucune commande pour le code « ${query} ».` : "Aucune commande récente."}
+        </p>
       )}
 
       {state === "ok" && docs.length > 0 && (
