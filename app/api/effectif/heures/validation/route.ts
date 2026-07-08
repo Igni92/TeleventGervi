@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getAccessScope, ADMIN_EMAILS } from "@/lib/permissions";
+import { isDirection, directionEmails, ADMIN_EMAILS } from "@/lib/permissions";
 import { isMonthId, monthLabel } from "@/lib/heuresCalc";
 import { notifyEmails } from "@/lib/push";
 import {
@@ -21,8 +21,9 @@ import {
  *     • accept  (manager)  : accepte la proposition d'un salarié       → push salarié
  *     • resend  (manager)  : renvoie au salarié                        → push salarié
  *
- * Manager = direction/admin (getAccessScope().all). Le salarié n'agit que quand
- * la balle est dans son camp (verrou `canAct`). Push best-effort (fire-and-forget).
+ * Employeur = DIRECTION SEULE (`isDirection`, PAS admin) : elle seule voit le
+ * rappel/popup et envoie/tranche. Le salarié n'agit que quand la balle est dans
+ * son camp (verrou `canAct`). Push best-effort (fire-and-forget).
  */
 export const dynamic = "force-dynamic";
 
@@ -31,12 +32,14 @@ async function ctx() {
   if (!session?.user) return null;
   const email = (session.user.email ?? "").trim().toLowerCase();
   if (!email) return null;
-  const scope = await getAccessScope(session);
-  return { email, name: session.user.name?.trim() || email, isManager: !!scope.all };
+  // L'EMPLOYEUR (qui envoie / tranche / reçoit le rappel) = DIRECTION SEULE,
+  // PAS admin (un admin n'est pas concerné par la validation des heures).
+  return { email, name: session.user.name?.trim() || email, isDir: await isDirection(session) };
 }
 
-/** Emails employeurs (direction/admin) — destinataires des notifs côté employeur. */
-async function managerEmails(): Promise<Set<string>> {
+/** Comptes qui NE sont PAS des salariés horaires (admins + direction) — exclus
+ *  de la liste « à faire valider ». */
+async function nonEmployeeEmails(): Promise<Set<string>> {
   const set = new Set(ADMIN_EMAILS.map((e) => e.trim().toLowerCase()));
   try {
     const rows = await prisma.$queryRawUnsafe<{ email: string | null }[]>(
@@ -47,13 +50,13 @@ async function managerEmails(): Promise<Set<string>> {
   return set;
 }
 
-/** Salariés (comptes avec email) HORS employeurs — cible « à faire valider ». */
-async function employees(mgr: Set<string>): Promise<{ email: string; name: string }[]> {
+/** Salariés (comptes avec email) HORS admins/direction — cible « à faire valider ». */
+async function employees(excluded: Set<string>): Promise<{ email: string; name: string }[]> {
   const users = await prisma.user.findMany({ select: { email: true, name: true } });
   return users
     .filter((u) => u.email)
     .map((u) => ({ email: u.email!.trim().toLowerCase(), name: u.name || u.email! }))
-    .filter((u) => !mgr.has(u.email));
+    .filter((u) => !excluded.has(u.email));
 }
 
 export async function GET(req: NextRequest) {
@@ -65,13 +68,13 @@ export async function GET(req: NextRequest) {
 
   const mine = await getValidation(c.email, month);
   const out: Record<string, unknown> = {
-    ok: true, month, monthLabel: monthLabel(month), isManager: c.isManager,
+    ok: true, month, monthLabel: monthLabel(month), isManager: c.isDir,
     mine, mustValidate: whoMustAct(mine) === "employee",
   };
 
-  if (c.isManager) {
-    const mgr = await managerEmails();
-    const [emps, vals] = await Promise.all([employees(mgr), listValidations(month)]);
+  if (c.isDir) {
+    const excluded = await nonEmployeeEmails();
+    const [emps, vals] = await Promise.all([employees(excluded), listValidations(month)]);
     const team = emps.map((e) => {
       const v = vals.get(e.email) ?? null;
       return { email: e.email, name: e.name, status: v?.status ?? null, proposal: v?.proposal ?? [], note: v?.note ?? "", mustAct: whoMustAct(v) };
@@ -117,11 +120,11 @@ export async function POST(req: NextRequest) {
 
   // ── Employeur : envoyer à tous (ou à une liste) ──
   if (action === "send") {
-    if (!c.isManager) return NextResponse.json({ error: "Réservé à l'employeur" }, { status: 403 });
-    const mgr = await managerEmails();
+    if (!c.isDir) return NextResponse.json({ error: "Réservé à la direction" }, { status: 403 });
+    const excluded = await nonEmployeeEmails();
     const requested = Array.isArray(body.users) ? body.users.map((x) => String(x).trim().toLowerCase()) : null;
-    const all = (await employees(mgr)).map((e) => e.email);
-    const targets = [...new Set((requested ?? all).filter((e) => e && !mgr.has(e)))];
+    const all = (await employees(excluded)).map((e) => e.email);
+    const targets = [...new Set((requested ?? all).filter((e) => e && !excluded.has(e)))];
     let sent = 0;
     for (const email of targets) {
       const cur = await getValidation(email, month);
@@ -150,7 +153,7 @@ export async function POST(req: NextRequest) {
     });
     await saveValidation(next);
     const verb = action === "validate" ? "a validé ses heures" : "propose une autre date";
-    notifyEmails([...await managerEmails()], {
+    notifyEmails(await directionEmails(), {
       title: "🕐 Heures — réponse salarié", body: `${c.name} ${verb} pour ${mName}.`,
       url: "/heures", tag: `heures-valid-${month}-${c.email}`, renotify: true,
     }).catch(() => {});
@@ -159,7 +162,7 @@ export async function POST(req: NextRequest) {
 
   // ── Employeur : accepter la proposition / renvoyer ──
   if (action === "accept" || action === "resend") {
-    if (!c.isManager) return NextResponse.json({ error: "Réservé à l'employeur" }, { status: 403 });
+    if (!c.isDir) return NextResponse.json({ error: "Réservé à la direction" }, { status: 403 });
     const email = String(body.user ?? "").trim().toLowerCase();
     if (!email) return NextResponse.json({ error: "Salarié manquant" }, { status: 400 });
     const cur = await getValidation(email, month);

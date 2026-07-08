@@ -9,7 +9,7 @@ import { Loader2, ShieldAlert, Users, ArrowRight, ChevronLeft, ChevronRight, Eye
 import { Sparkline } from "@/components/charts/Sparkline";
 import { displayNameFromSlp } from "@/lib/salespeople";
 import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
-import { isLogisticsPreviewRole, PREVIEW_ROLE_LABELS } from "@/lib/rolePreview";
+import { isLogisticsRoles } from "@/lib/rolePreview";
 import { DUR, EASE } from "@/lib/motion";
 
 /**
@@ -66,10 +66,10 @@ const avatarOf = (email: string) => {
 };
 
 export function CommerciauxSapList() {
-  const { previewRole } = useRolePreview();
+  const { previewRoles, previewLabel } = useRolePreview();
   // Aperçu « terrain logistique » (préparateur / livreur) : les chiffres des
   // commerciaux (CA / marge / prime) ne les concernent pas → on les masque.
-  const hideFigures = isLogisticsPreviewRole(previewRole);
+  const hideFigures = isLogisticsRoles(previewRoles);
 
   const [data, setData] = useState<CommercialSap[] | null>(null);
   const [restricted, setRestricted] = useState<string | null>(null);
@@ -122,7 +122,7 @@ export function CommerciauxSapList() {
       <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
         <EyeOff className="h-4 w-4 text-muted-foreground shrink-0" />
         <p className="text-[13px] text-muted-foreground">
-          Chiffres des commerciaux masqués{previewRole ? ` en aperçu ${PREVIEW_ROLE_LABELS[previewRole]}` : ""}.
+          Chiffres des commerciaux masqués{previewLabel ? ` en aperçu ${previewLabel}` : ""}.
         </p>
       </div>
     );
