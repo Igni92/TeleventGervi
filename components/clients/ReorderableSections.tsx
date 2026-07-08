@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { GripVertical, Eye, EyeOff, SlidersHorizontal, RotateCcw, Check, Maximize2, Minimize2, Pencil } from "lucide-react";
+import { GripVertical, Eye, EyeOff, SlidersHorizontal, RotateCcw, Check, Maximize2, Minimize2, Pencil, ArrowDownToLine } from "lucide-react";
 
 /**
  * Fiche RÉORGANISABLE & pleine largeur.
@@ -38,37 +38,6 @@ function loadPrefs(key: string): Prefs | null {
     if (Array.isArray(p.order) && Array.isArray(p.hidden)) return p;
   } catch { /* ignore */ }
   return null;
-}
-
-/**
- * Zone de dépôt en pointillé (mode ÉDITION fiche) — rectangle qui apparaît
- * pendant un glisser et « s'allume » (grandit + accent brand) au survol.
- * Déposer ICI = INSÉRER le bloc à cette position. Verticale (avant un bloc,
- * dans la mosaïque) ou horizontale (`horizontal`, fin de mosaïque).
- */
-function FicheDropStrip({
-  show, highlighted, horizontal, onOver, onDrop,
-}: {
-  show: boolean;
-  highlighted: boolean;
-  horizontal?: boolean;
-  onOver: () => void;
-  onDrop: () => void;
-}) {
-  if (!show) return null;
-  const size = horizontal
-    ? (highlighted ? "h-16 border-brand-500 bg-brand-500/10" : "h-6 border-border")
-    : (highlighted ? "w-16 border-brand-500 bg-brand-500/10" : "w-3 border-border");
-  return (
-    <div
-      aria-hidden
-      onDragOver={(e) => { e.preventDefault(); onOver(); }}
-      onDrop={(e) => { e.preventDefault(); onDrop(); }}
-      className={`${horizontal ? "" : "self-stretch"} shrink-0 rounded-xl border-2 border-dashed transition-all duration-150 ${
-        highlighted ? "shadow-[0_0_18px_hsl(var(--brand-500)/0.18)]" : ""
-      } ${size}`}
-    />
-  );
 }
 
 export function ReorderableSections({ storageKey, sections }: { storageKey: string; sections: FicheSection[] }) {
@@ -223,94 +192,92 @@ export function ReorderableSections({ storageKey, sections }: { storageKey: stri
             );
           }
 
-          // Mode édition : zone d'insertion (gauche) + bloc. Toute la CARTE est
-          // glissable (« prendre toute la case ») ; le libellé ne devient éditable
-          // qu'après un clic sur le crayon (sinon rester appuyé déplacerait la
-          // tuile au lieu d'éditer). Déposer SUR le bloc = échange ; sur la zone
-          // en pointillé = insertion. En édition, le contenu est non-cliquable
-          // (on réorganise, on n'interagit pas) → le glisser part de partout.
+          // Mode édition : ÉCHANGE uniquement. Toute la CARTE est glissable
+          // (« prendre toute la case ») ; au pick-up, TOUS les autres blocs
+          // s'allument (surbrillance simple = échangeables) et celui survolé
+          // s'allume plus fort (surbrillance double). Déposer sur un bloc =
+          // échange ; pour mettre en bas, la zone dédiée en fin de grille. Le
+          // libellé n'est éditable qu'après le crayon ; contenu non-cliquable.
           const dragging = dragId === id;
           const cardEditing = editId === id;
-          const swapTarget = overId === `swap:${id}` && !!dragId && !dragging;
+          const dragActive = !!dragId;
+          const isHovered = overId === `swap:${id}` && dragActive && !dragging;
+          const isCandidate = dragActive && !dragging && !cardEditing;
           return (
-            <div key={id} className={spanClass}>
-              <div className="flex items-stretch gap-1.5">
-                {/* Zone d'insertion AVANT ce bloc (pas sur le bloc tiré). */}
-                <FicheDropStrip
-                  show={!!dragId && !dragging}
-                  highlighted={overId === `before:${id}`}
-                  onOver={() => setOverId(`before:${id}`)}
-                  onDrop={() => { if (dragId) moveBefore(dragId, id); endDrag(); }}
-                />
-                <div
-                  draggable={!cardEditing}
-                  onDragStart={cardEditing ? undefined : (e) => { e.dataTransfer.effectAllowed = "move"; setDragId(id); }}
-                  onDragEnd={endDrag}
-                  onDragOver={(e) => { if (dragId && !dragging) { e.preventDefault(); setOverId(`swap:${id}`); } }}
-                  onDrop={(e) => { e.preventDefault(); if (dragId && !dragging) swap(dragId, id); endDrag(); }}
-                  title={cardEditing ? undefined : "Glisser pour déplacer"}
-                  className={`relative min-w-0 flex-1 rounded-xl transition-all duration-150 ${cardEditing ? "" : "cursor-grab active:cursor-grabbing"} ${dragging ? "opacity-40" : ""} ${
-                    swapTarget ? "ring-2 ring-brand-500 ring-offset-2 ring-offset-background" : ""
-                  }`}
+            <div
+              key={id}
+              draggable={!cardEditing}
+              onDragStart={cardEditing ? undefined : (e) => { e.dataTransfer.effectAllowed = "move"; setDragId(id); }}
+              onDragEnd={endDrag}
+              onDragOver={(e) => { if (dragId && !dragging) { e.preventDefault(); setOverId(`swap:${id}`); } }}
+              onDrop={(e) => { e.preventDefault(); if (dragId && !dragging) swap(dragId, id); endDrag(); }}
+              title={cardEditing ? undefined : "Glisser · déposer sur un autre bloc pour les échanger"}
+              className={`relative rounded-xl transition-all duration-150 ${spanClass} ${cardEditing ? "" : "cursor-grab active:cursor-grabbing"} ${
+                dragging ? "opacity-40 ring-2 ring-brand-500/50" : ""
+              } ${
+                isHovered
+                  ? "ring-2 ring-brand-500 ring-offset-2 ring-offset-background bg-brand-500/[0.06] scale-[1.01] shadow-lg shadow-brand-500/10"
+                  : isCandidate ? "ring-1 ring-brand-500/40 ring-offset-2 ring-offset-background" : ""
+              }`}
+            >
+              <div className="flex items-center gap-2 mb-2 px-1">
+                <span className="shrink-0 inline-flex h-8 items-center text-muted-foreground/50" aria-hidden>
+                  <GripVertical className="h-4 w-4" />
+                </span>
+                {cardEditing ? (
+                  <input
+                    autoFocus
+                    value={labelOf(id)}
+                    onChange={(e) => rename(id, e.target.value)}
+                    onBlur={() => setEditId(null)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") setEditId(null); }}
+                    aria-label={`Renommer ${section.label}`}
+                    className="flex-1 min-w-0 h-8 px-2 rounded-md border border-border bg-background text-[13px] font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                ) : (
+                  <span className="flex-1 min-w-0 truncate py-1.5 text-[13px] font-semibold text-foreground">{labelOf(id)}</span>
+                )}
+                <button
+                  type="button" draggable={false} onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => setEditId(cardEditing ? null : id)}
+                  title={cardEditing ? "Valider le nom" : "Renommer le bloc"}
+                  className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60"
                 >
-                  <div className="flex items-center gap-2 mb-2 px-1">
-                    <span className="shrink-0 inline-flex h-8 items-center text-muted-foreground/50" aria-hidden>
-                      <GripVertical className="h-4 w-4" />
-                    </span>
-                    {cardEditing ? (
-                      <input
-                        autoFocus
-                        value={labelOf(id)}
-                        onChange={(e) => rename(id, e.target.value)}
-                        onBlur={() => setEditId(null)}
-                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") setEditId(null); }}
-                        aria-label={`Renommer ${section.label}`}
-                        className="flex-1 min-w-0 h-8 px-2 rounded-md border border-border bg-background text-[13px] font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      />
-                    ) : (
-                      <span className="flex-1 min-w-0 truncate py-1.5 text-[13px] font-semibold text-foreground">{labelOf(id)}</span>
-                    )}
-                    <button
-                      type="button" draggable={false} onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => setEditId(cardEditing ? null : id)}
-                      title={cardEditing ? "Valider le nom" : "Renommer le bloc"}
-                      className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-                    >
-                      {cardEditing ? <Check className="h-4 w-4 text-emerald-500" /> : <Pencil className="h-4 w-4" />}
-                    </button>
-                    <button
-                      type="button" draggable={false} onClick={() => toggleWide(id)}
-                      title={isWide ? "Réduire en colonne" : "Pleine largeur"}
-                      className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-                    >
-                      {isWide ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-                    </button>
-                    <button
-                      type="button" draggable={false} onClick={() => toggleHide(id)}
-                      title={isHidden ? "Afficher" : "Masquer"}
-                      className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-                    >
-                      {isHidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                  {/* Contenu NON interactif en édition (réorganisation) → le glisser
-                      démarre depuis toute la carte, aperçu visuel conservé. */}
-                  <div className={`pointer-events-none ${isHidden ? "opacity-40" : ""}`}>{section.node}</div>
-                </div>
+                  {cardEditing ? <Check className="h-4 w-4 text-emerald-500" /> : <Pencil className="h-4 w-4" />}
+                </button>
+                <button
+                  type="button" draggable={false} onClick={() => toggleWide(id)}
+                  title={isWide ? "Réduire en colonne" : "Pleine largeur"}
+                  className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                >
+                  {isWide ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                </button>
+                <button
+                  type="button" draggable={false} onClick={() => toggleHide(id)}
+                  title={isHidden ? "Afficher" : "Masquer"}
+                  className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                >
+                  {isHidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
+              {/* Contenu NON interactif en édition (réorganisation) → le glisser
+                  démarre depuis toute la carte, aperçu visuel conservé. */}
+              <div className={`pointer-events-none ${isHidden ? "opacity-40" : ""}`}>{section.node}</div>
             </div>
           );
         })}
-        {/* Zone d'insertion de FIN — déposer ici = placer le bloc en dernier. */}
+        {/* Zone « mettre en bas » — grande, en fin de grille, seule action hors échange. */}
         {editing && dragId && (
-          <div className="col-span-full">
-            <FicheDropStrip
-              horizontal
-              show
-              highlighted={overId === "before:end"}
-              onOver={() => setOverId("before:end")}
-              onDrop={() => { moveBefore(dragId, null); endDrag(); }}
-            />
+          <div
+            onDragOver={(e) => { e.preventDefault(); setOverId("bottom"); }}
+            onDrop={(e) => { e.preventDefault(); moveBefore(dragId, null); endDrag(); }}
+            className={`col-span-full flex items-center justify-center gap-2 h-16 rounded-xl border-2 border-dashed text-[13px] font-semibold transition-all duration-150 ${
+              overId === "bottom"
+                ? "border-brand-500 bg-brand-500/10 text-brand-600 dark:text-brand-400 scale-[1.005]"
+                : "border-border text-muted-foreground"
+            }`}
+          >
+            <ArrowDownToLine className="h-4 w-4" /> Déposer ici pour placer le bloc en bas
           </div>
         )}
       </div>

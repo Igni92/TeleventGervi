@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
-import { useEffect, useMemo, useState, Fragment } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, Package, PackagePlus, Factory, Receipt, AlertTriangle,
   Home, Settings, PackageCheck, ClipboardCheck, ClipboardList, Truck, Eye, Store, PackageX,
-  Pencil, Loader2, RotateCcw, ScrollText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight, Check,
+  Pencil, Loader2, RotateCcw, ScrollText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight, Check, ArrowDownToLine,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -20,7 +20,7 @@ import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
 import { navAllowedForPreview, PREVIEW_ROLE_LABELS } from "@/lib/rolePreview";
 import {
   applyNavConfig, toNavEditState, fromNavEditState, moveNavRowBefore, swapNavRows,
-  addNavCategory, addNavSubCategory, renameNavCategory, deleteNavCategory, moveNavCategory, moveNavCategoryBefore,
+  addNavCategory, addNavSubCategory, renameNavCategory, deleteNavCategory, moveNavCategory, moveNavCategoryBefore, swapNavCategory,
   type NavConfig, type NavEditGroup,
 } from "@/lib/navOverrides";
 import { SPRING } from "@/lib/motion";
@@ -211,35 +211,6 @@ function useBadges(): Record<string, number> {
   return badges;
 }
 
-/**
- * Interstice de dépôt (mode ÉDITION nav) — rectangle en pointillé qui apparaît
- * pendant un glisser et « s'allume » (grandit + accent brand) quand on le
- * survole. Déposer ICI = INSÉRER la ligne à cette position. Rendu uniquement
- * pendant un glisser (`show`) pour ne pas alourdir la barre au repos.
- */
-function NavDropGap({
-  show, highlighted, onOver, onDrop,
-}: {
-  show: boolean;
-  highlighted: boolean;
-  onOver: () => void;
-  onDrop: () => void;
-}) {
-  if (!show) return null;
-  return (
-    <li
-      aria-hidden
-      onDragOver={(e) => { e.preventDefault(); onOver(); }}
-      onDrop={(e) => { e.preventDefault(); onDrop(); }}
-      className={`rounded-lg border border-dashed transition-all duration-150 ${
-        highlighted
-          ? "my-0.5 h-9 border-brand-400 bg-brand-500/15 shadow-[0_0_16px_hsl(var(--brand-500)/0.18)]"
-          : "h-2 border-white/20"
-      }`}
-    />
-  );
-}
-
 export function Sidebar() {
   const { data: session } = useSession();
   const pathname = usePathname();
@@ -312,6 +283,10 @@ export function Sidebar() {
   const shiftCategory = (label: string, dir: -1 | 1) => setDraft((cur) => moveNavCategory(cur, label, dir));
   const dropCatBefore = (beforeLabel: string | null) => {
     if (dragCat) setDraft((cur) => moveNavCategoryBefore(cur, dragCat, beforeLabel));
+    endCatDrag();
+  };
+  const swapCat = (target: string) => {
+    if (dragCat && dragCat !== target) setDraft((cur) => swapNavCategory(cur, dragCat, target));
     endCatDrag();
   };
   async function saveNav(config: NavConfig, successMsg: string) {
@@ -469,11 +444,13 @@ export function Sidebar() {
                 onDragStart={catDraggable ? (e) => { e.dataTransfer.effectAllowed = "move"; setDragCat(group.label); } : undefined}
                 onDragEnd={endCatDrag}
                 onDragOver={!isSub ? (e) => { if (dragCat && dragCat !== group.label) { e.preventDefault(); setOverCat(group.label); } } : undefined}
-                onDrop={!isSub ? (e) => { if (dragCat && dragCat !== group.label) { e.preventDefault(); dropCatBefore(group.label); } else endCatDrag(); } : undefined}
-                className={`group/cat px-1 mb-1.5 flex items-center gap-0.5 rounded-md transition-all duration-150 ${
+                onDrop={!isSub ? (e) => { if (dragCat && dragCat !== group.label) { e.preventDefault(); swapCat(group.label); } else endCatDrag(); } : undefined}
+                className={`group/cat px-1 py-0.5 mb-1.5 flex items-center gap-0.5 rounded-md transition-all duration-150 ${
                   catDraggable ? "cursor-grab active:cursor-grabbing" : ""
-                } ${dragCat === group.label ? "opacity-40" : ""} ${
-                  overCat === group.label && dragCat && dragCat !== group.label ? "ring-1 ring-brand-400 bg-brand-500/10" : ""
+                } ${dragCat === group.label ? "opacity-40 ring-1 ring-brand-400/50" : ""} ${
+                  !isSub && dragCat && dragCat !== group.label
+                    ? (overCat === group.label ? "ring-2 ring-brand-400 bg-brand-500/15" : "ring-1 ring-brand-400/40")
+                    : ""
                 }`}
               >
                 {isSub
@@ -531,17 +508,13 @@ export function Sidebar() {
                   const Icon = ICON_BY_HREF.get(row.href) ?? Radio;
                   const dragging = dragHref === row.href;
                   const rowEditing = editKey === `row:${row.href}`;
-                  const swapTarget = overKey === `row:${row.href}` && !!dragHref && !dragging;
+                  // Échange : au pick-up, toutes les autres entrées s'allument
+                  // (simple) ; celle survolée s'allume plus fort (double).
+                  const rowHovered = overKey === `row:${row.href}` && !!dragHref && !dragging;
+                  const rowCandidate = !!dragHref && !dragging && !rowEditing;
                   return (
-                    <Fragment key={row.href}>
-                      {/* Interstice AVANT cette ligne — insérer ici. */}
-                      <NavDropGap
-                        show={!!dragHref}
-                        highlighted={overKey === `gap:${group.label}:${row.href}`}
-                        onOver={() => setOverKey(`gap:${group.label}:${row.href}`)}
-                        onDrop={() => dropBefore(group.label, row.href)}
-                      />
                       <li
+                        key={row.href}
                         draggable={!rowEditing}
                         onDragStart={rowEditing ? undefined : (e) => { e.dataTransfer.effectAllowed = "move"; setDragHref(row.href); }}
                         onDragEnd={endDrag}
@@ -549,11 +522,12 @@ export function Sidebar() {
                           if (dragHref && !dragging) { e.preventDefault(); setOverKey(`row:${row.href}`); }
                         }}
                         onDrop={(e) => { e.preventDefault(); dropOnRow(row.href); }}
-                        title={rowEditing ? undefined : "Glisser pour déplacer"}
-                        className={`group/row flex items-center gap-1.5 rounded-lg pr-1 transition-all duration-150 ${
+                        title={rowEditing ? undefined : "Glisser · déposer sur une autre entrée pour les échanger"}
+                        className={`group/row flex items-center gap-1.5 rounded-lg pr-1 min-h-[38px] transition-all duration-150 ${
                           rowEditing ? "" : "cursor-grab active:cursor-grabbing"
-                        } ${dragging ? "opacity-40" : ""} ${
-                          swapTarget ? "ring-1 ring-brand-400 bg-brand-500/10" : "hover:bg-white/[0.05]"
+                        } ${dragging ? "opacity-40 ring-1 ring-brand-400/50" : ""} ${
+                          rowHovered ? "ring-2 ring-brand-400 bg-brand-500/15"
+                          : rowCandidate ? "ring-1 ring-brand-400/40" : "hover:bg-white/[0.05]"
                         }`}
                       >
                         {/* Poignée VISUELLE — toute la ligne glisse (« prendre toute la case »). */}
@@ -585,19 +559,25 @@ export function Sidebar() {
                           {rowEditing ? <Check className="h-3 w-3 text-emerald-400" /> : <Pencil className="h-3 w-3" />}
                         </button>
                       </li>
-                    </Fragment>
                   );
                 })}
-                {/* Interstice de FIN — déposer ici = ajouter à la fin du groupe
-                    (et seule zone de dépôt d'un groupe vidé). */}
-                <NavDropGap
-                  show={!!dragHref}
-                  highlighted={overKey === `gap:${group.label}:end`}
-                  onOver={() => setOverKey(`gap:${group.label}:end`)}
-                  onDrop={() => dropBefore(group.label, null)}
-                />
+                {/* Zone « mettre en bas » de la catégorie — grande, apparaît au
+                    glisser d'une entrée (et seule cible d'une catégorie vide). */}
+                {dragHref && (
+                  <li
+                    onDragOver={(e) => { e.preventDefault(); setOverKey(`bottom:${group.label}`); }}
+                    onDrop={(e) => { e.preventDefault(); dropBefore(group.label, null); }}
+                    className={`flex items-center justify-center gap-1.5 h-9 rounded-lg border border-dashed text-[11px] font-semibold transition-all duration-150 ${
+                      overKey === `bottom:${group.label}`
+                        ? "border-brand-400 bg-brand-500/15 text-white"
+                        : "border-white/20 text-white/45"
+                    }`}
+                  >
+                    <ArrowDownToLine className="h-3.5 w-3.5" /> Mettre en bas
+                  </li>
+                )}
                 {group.rows.length === 0 && !dragHref && (
-                  <li className="px-2 py-1 text-[11px] italic text-white/35">Zone vide — dépose une entrée ici.</li>
+                  <li className="px-2 py-1 text-[11px] italic text-white/35">Zone vide — glisse une entrée sur « Mettre en bas ».</li>
                 )}
               </ul>
             </div>
