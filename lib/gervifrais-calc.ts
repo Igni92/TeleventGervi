@@ -122,6 +122,41 @@ export function computeSuggestedPrice(achat: number, coef: number): number {
  */
 export const LOT_PENDING = "EM_PENDING";
 
+/**
+ * Sentinel « produit / famille » d'un bon de commande : la ligne attend un lot
+ * d'un FRUIT donné (fraise, framboise…), à préciser À LA MAIN quand la
+ * marchandise arrive. Parallèle de LOT_PENDING (à découvert générique) mais
+ * porte l'INTENTION — quel fruit servira la ligne.
+ *
+ * ⚠️ Différence clé avec LOT_PENDING : /api/sap/goods-receipts ne réécrit QUE
+ * les lignes strictement égales à LOT_PENDING. Un sentinel famille n'est donc
+ * JAMAIS résolu automatiquement — c'est un RAPPEL, l'utilisateur choisit le vrai
+ * lot dans l'onglet « Bons de commande ». Format : `EM_FAM:<cléFamille>`
+ * (ASCII court, cf. FRUIT_FAMILIES de lib/familles). Ex. `EM_FAM:fraise`.
+ */
+export const LOT_FAMILY_PREFIX = "EM_FAM:";
+
+/** Construit le sentinel famille à poser dans U_NoLot (clé cf. FRUIT_FAMILIES). */
+export function familyLotSentinel(familyKey: string): string {
+  return LOT_FAMILY_PREFIX + (familyKey ?? "").trim().toLowerCase();
+}
+
+/** Extrait la clé de famille d'un U_NoLot, ou null si ce n'est pas un sentinel
+ *  famille (vrai EM<DocNum>, EM_PENDING, vide…). */
+export function familyOfLot(lot: string | null | undefined): string | null {
+  const s = (lot ?? "").trim();
+  if (!s.startsWith(LOT_FAMILY_PREFIX)) return null;
+  const key = s.slice(LOT_FAMILY_PREFIX.length).trim().toLowerCase();
+  return key || null;
+}
+
+/** Une ligne est-elle EN ATTENTE de lot ? Vide, EM_PENDING (à découvert) ou
+ *  sentinel famille (produit à préciser). Un vrai `EM<DocNum>` = résolu. */
+export function isLotPending(lot: string | null | undefined): boolean {
+  const s = (lot ?? "").trim();
+  return s === "" || s === LOT_PENDING || s.startsWith(LOT_FAMILY_PREFIX);
+}
+
 export type LotChoice = {
   lot: string;                                       // JAMAIS vide — EM<DocNum> ou EM_PENDING
   reason: "fifo" | "decouvert" | "aucun-pdn" | "env-defaut";

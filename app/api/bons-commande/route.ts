@@ -6,6 +6,8 @@ import { colisInfo } from "@/lib/colis";
 import { getLotMaps, resolveLotForSegment, LOT_PENDING } from "@/lib/lotResolver";
 import { getEmAffects } from "@/lib/emAffect";
 import { listBonCommandeDocEntries, setDeliveryBonCommande } from "@/lib/inventory";
+import { isLotPending, familyOfLot, LOT_FAMILY_PREFIX } from "@/lib/gervifrais-calc";
+import { FRUIT_FAMILIES } from "@/lib/familles";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +44,13 @@ type SapOrderDoc = {
   DocumentLines?: SapLine[];
 };
 
-const isPending = (lot: string | undefined | null) => !lot || lot.trim() === "" || lot.trim() === LOT_PENDING;
+// Une ligne « en attente » = vide, EM_PENDING (à découvert générique) OU un
+// sentinel famille EM_FAM:<fruit> (produit à préciser). Toutes gardent la
+// commande dans l'onglet — cf. lib/gervifrais-calc.isLotPending.
+const isPending = (lot: string | undefined | null) => isLotPending(lot);
+
+// Familles de fruits connues (clé → libellé) pour valider/afficher un tag « produit ».
+const FAMILY_LABEL = new Map(FRUIT_FAMILIES.map((f) => [f.key, f.label]));
 
 export async function GET() {
   const session = await auth();
@@ -114,12 +122,16 @@ export async function GET() {
       // (elles seront affectées ensemble). « pending » = au moins une ligne EM_PENDING.
       const byItem = new Map<string, { itemCode: string; itemName: string; quantity: number; colisRaw: number;
         warehouse: string | null; marque: string | null; condt: string | null; pays: string | null;
-        lot: string; pending: boolean }>();
+        lot: string; pending: boolean; familyKey: string | null }>();
       for (const l of d.DocumentLines ?? []) {
         const p = pMap.get(l.ItemCode);
         const qty = l.Quantity ?? 0;
         const g = byItem.get(l.ItemCode);
+        const rawLot = (l.U_NoLot ?? "").trim();
         const linePending = isPending(l.U_NoLot);
+        // Tag « produit / famille » (EM_FAM:<fruit>) porté par la ligne, si connu.
+        const famKey = familyOfLot(rawLot);
+        const famValid = famKey && FAMILY_LABEL.has(famKey) ? famKey : null;
         if (!g) {
           byItem.set(l.ItemCode, {
             itemCode: l.ItemCode,
@@ -128,13 +140,22 @@ export async function GET() {
             colisRaw: qty / (unitsPerColis(l.ItemCode) || 1),
             warehouse: l.WarehouseCode ?? null,
             marque: p?.uMarque ?? null, condt: p?.uCondi ?? null, pays: p?.uPays ?? null,
-            lot: linePending ? LOT_PENDING : (l.U_NoLot ?? "").trim(),
+            // On PRÉSERVE le sentinel famille tel quel (rappel affiché) ; sinon
+            // EM_PENDING générique pour une ligne à découvert, ou le vrai lot.
+            lot: linePending ? (famValid ? rawLot : LOT_PENDING) : rawLot,
             pending: linePending,
+            familyKey: famValid,
           });
         } else {
           g.quantity += qty;
           g.colisRaw += qty / (unitsPerColis(l.ItemCode) || 1);
-          if (linePending) { g.pending = true; g.lot = LOT_PENDING; }
+          if (linePending) {
+            g.pending = true;
+            // Une famille portée par n'importe quelle ligne de l'article prime sur
+            // le « à découvert » générique (elle porte l'intention à afficher).
+            if (famValid && !g.familyKey) { g.familyKey = famValid; g.lot = rawLot; }
+            else if (!g.familyKey) { g.lot = LOT_PENDING; }
+          }
         }
       }
       const lines = [...byItem.values()].map((l) => {
@@ -144,6 +165,8 @@ export async function GET() {
           quantity: l.quantity, colis: Math.round(l.colisRaw * 10) / 10,
           warehouse: l.warehouse, marque: l.marque, condt: l.condt, pays: l.pays,
           lot: l.lot, pending: l.pending, candidates, suggested,
+          // Tag « produit » à préciser : { key, label } ou null.
+          familyTarget: l.familyKey ? { key: l.familyKey, label: FAMILY_LABEL.get(l.familyKey)! } : null,
         };
       });
       const mark = markInfo.get(d.DocEntry);
@@ -173,7 +196,12 @@ export async function GET() {
 /**
  * PATCH — affecte un lot à TOUTES les lignes d'un article d'une commande.
  * Body : { docEntry: number, itemCode: string, lot: string }
- * `lot` = "EM<DocNum>" (arrivage choisi) ou "EM_PENDING" (laisser à découvert).
+ * `lot` vaut :
+ *   • "EM<DocNum>"        → arrivage choisi (résolu) ;
+ *   • "EM_PENDING"        → à découvert générique (réécrit auto à la réception) ;
+ *   • "EM_FAM:<fruit>"    → produit à préciser (rappel — PAS d'auto-affectation),
+ *                           la clé de fruit doit être connue (cf. FRUIT_FAMILIES).
+ * Les deux derniers laissent la ligne « en attente » → la commande reste dans l'onglet.
  */
 export async function PATCH(req: NextRequest) {
   const session = await auth();
@@ -189,6 +217,14 @@ export async function PATCH(req: NextRequest) {
   if (!Number.isInteger(docEntry) || docEntry <= 0) return NextResponse.json({ error: "docEntry invalide" }, { status: 400 });
   if (!itemCode) return NextResponse.json({ error: "itemCode requis" }, { status: 400 });
   if (!lot) return NextResponse.json({ error: "lot requis" }, { status: 400 });
+  // Tag « produit » : la clé de fruit doit exister (garde-fou anti-sentinel bidon
+  // écrit dans SAP). Les vrais lots EM<DocNum> et EM_PENDING passent tels quels.
+  if (lot.startsWith(LOT_FAMILY_PREFIX)) {
+    const key = familyOfLot(lot);
+    if (!key || !FAMILY_LABEL.has(key)) {
+      return NextResponse.json({ error: `Fruit inconnu pour le tag « ${lot} »` }, { status: 400 });
+    }
+  }
 
   try {
     const order = await sap.get<SapOrderDoc>(
