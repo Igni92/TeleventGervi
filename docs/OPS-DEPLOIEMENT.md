@@ -9,25 +9,33 @@ créent des **previews**. Le build local de référence : `npm run build`
 > Si les pushes ne déclenchent plus de build : **Vercel → Settings → Git →
 > Disconnect/Reconnect** le dépôt (le webhook GitHub→Vercel peut se désactiver).
 
-## Variable d'environnement à définir : `CRON_SECRET`
-Les routes de synchro SAP acceptent un **déclenchement machine** (cron Vercel) en
-plus du déclenchement manuel admin. L'authentification machine se fait par un
-secret partagé :
+## Synchronisation SAP : **manuelle** (état actuel)
 
-- **`CRON_SECRET`** : chaîne aléatoire (ex. `openssl rand -base64 32`).
-  - À définir dans **Vercel → Settings → Environment Variables** (Production).
-  - Vercel ajoute automatiquement l'en-tête `Authorization: Bearer <CRON_SECRET>`
-    aux invocations de cron déclarées dans `vercel.json`.
-  - Si la variable est **absente**, les crons restent **inactifs** (aucun bypass
-    possible — `isCronAuthorized` renvoie `false`), sans aucun risque : le
-    déclenchement manuel admin continue de fonctionner normalement.
+⚠️ **`vercel.json` ne déclare AUCUN cron** (uniquement `{"regions":["cdg1"]}`).
+La synchro du miroir SAP est donc **entièrement manuelle** : elle ne se fait que
+lorsqu'un admin lance une resynchronisation depuis **Paramètres › Données · SAP**
+(bouton « Resynchroniser (PROD) » = reconstruction complète sur ~3 ans, profondeur
+du rapport annuel). Le stock « live » de la console se rafraîchit à part, à la
+demande (pull delta déclenché par les consoles ouvertes).
 
-### Crons déclarés (`vercel.json`)
-| Route | Rôle | Fréquence indicative |
+> Conséquence : entre deux resynchros manuelles, le miroir (KPI, marge, rapport
+> annuel) n'évolue pas. Relancer la resynchro « de temps en temps », et après tout
+> import massif de factures côté SAP.
+
+### Optionnel — activer une synchro automatique (crons Vercel)
+Les routes de synchro SAP **acceptent déjà** un déclenchement machine (elles ne
+sont simplement pas planifiées). Pour automatiser, il faudrait **les deux** :
+
+1. Définir **`CRON_SECRET`** (chaîne aléatoire, ex. `openssl rand -base64 32`)
+   dans **Vercel → Settings → Environment Variables** (Production). Sans cette
+   variable, tout déclenchement machine est refusé (`isCronAuthorized` → `false`) ;
+   le déclenchement manuel admin continue de fonctionner.
+2. Déclarer un bloc **`crons`** dans `vercel.json` pointant les routes ci‑dessous.
+   ⚠️ Le plan **Hobby limite les crons à 1/jour** ; une cadence ~10 min impose
+   **Vercel Pro**.
+
+| Route (déclenchement machine `GET`) | Rôle | Cadence si activé |
 |-------|------|----------------------|
-| `/api/sap/sync/mirror` | Miroir documentaire (factures, commandes, EM, avoirs…) | ~10 min |
-| `/api/sap/sync/delta` | Synchro incrémentale | ~10 min (décalé) |
-| `/api/inventaire/refresh-stock` | Rafraîchissement du stock | ~15 min |
-
-> Objectif métier : garder le miroir SAP **frais en continu** (KPI, encours,
-> marge, stock) même le soir et le week-end, sans dépendre d'un clic humain.
+| `/api/sap/sync/mirror` | Miroir documentaire (factures, commandes, EM, avoirs…) | ~10 min (Pro) |
+| `/api/sap/sync/delta` | Synchro incrémentale stock | ~10 min décalé (Pro) |
+| `/api/inventaire/refresh-stock` | Rafraîchissement du stock | ~15 min (Pro) |
