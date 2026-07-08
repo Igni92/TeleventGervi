@@ -16,6 +16,8 @@ import { createBonPrep, markBonPrepTransformed } from "@/lib/bonPrep";
 import { chooseLot } from "@/lib/gervifrais-calc";
 import { colisInfo } from "@/lib/colis";
 import { isPrecommande } from "@/lib/livraison";
+import { isComptoirClient } from "@/lib/segments";
+import { markComptoirDelivered } from "@/lib/inventory";
 
 /**
  * Cache module-level du référentiel AdditionalExpenses SAP.
@@ -793,6 +795,33 @@ export async function POST(req: NextRequest) {
         await mirrorCreatedOrder(enriched);
       } catch (e) {
         console.warn("[Order] Miroir optimiste échoué (non-bloquant, rattrapé à la synchro):", (e as Error).message);
+      }
+    }
+
+    // ── 3.7. VENTE COMPTOIR : préparée + livrée dès la création ──
+    // Une commande d'un client HORS des 3 segments livrés (GMS/CHR/EXPORT) est une
+    // vente comptoir : la marchandise part à la vente, elle n'a rien à faire dans la
+    // file « à préparer ». On la marque « faite » + « départ » d'office (idempotent)
+    // pour qu'elle ne traîne pas comme non préparée et ne pollue pas l'inventaire.
+    // Jamais pour une offre client (Quotation) : elle n'a pas encore d'existence BL.
+    // Segment du client déduit du groupe SAP (raw SQL, colonnes non typées côté
+    // Prisma — cf. /api/inventaire/prep-orders) avec repli sur le type client.
+    if (!isBonCommande) {
+      try {
+        let groupCode: number | null = null;
+        let groupName: string | null = null;
+        try {
+          const g = await prisma.$queryRawUnsafe<{ sapGroupCode: number | null; sapGroupName: string | null }[]>(
+            `SELECT "sapGroupCode","sapGroupName" FROM "Client" WHERE id = $1 LIMIT 1`, client.id,
+          );
+          if (g[0]) { groupCode = g[0].sapGroupCode; groupName = g[0].sapGroupName; }
+        } catch { /* colonnes absentes → décision sur le seul type client */ }
+        if (isComptoirClient({ type: client.type, groupName, groupCode })) {
+          await markComptoirDelivered(created.DocEntry, session.user?.name?.trim() || session.user?.email || "Comptoir");
+          console.log(`[Order] Vente comptoir ${cardCode} — commande ${created.DocEntry} préparée + livrée d'office.`);
+        }
+      } catch (e) {
+        console.warn("[Order] Marquage vente comptoir échoué (non-bloquant):", (e as Error).message);
       }
     }
 
