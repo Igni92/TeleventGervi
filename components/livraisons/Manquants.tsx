@@ -137,8 +137,8 @@ export function Manquants() {
           </span>
           <p className="text-[14px] font-semibold text-foreground">Aucun manquant</p>
           <p className="text-[12.5px] text-muted-foreground mt-1 max-w-sm">
-            Aucun article des commandes de ce jour n&apos;est en stock SAP négatif
-            (tous entrepôts confondus). Rien à racheter.
+            Aucun article des commandes de ce jour n&apos;a un disponible SAP négatif
+            (stock − engagé clients, tous entrepôts confondus). Rien à racheter.
           </p>
         </div>
       ) : (
@@ -152,7 +152,7 @@ export function Manquants() {
                 Articles manquants — achats à prévoir
               </p>
               <p className="text-[11px] text-muted-foreground">
-                {items.length} article{items.length > 1 ? "s" : ""} en stock SAP négatif (tous entrepôts confondus)
+                {items.length} article{items.length > 1 ? "s" : ""} au disponible SAP négatif (stock − engagé clients)
                 sur les commandes du jour · un clic déplie les BL touchés.
               </p>
             </div>
@@ -161,7 +161,7 @@ export function Manquants() {
             <thead className="text-[9px] uppercase tracking-wider text-muted-foreground bg-secondary/30">
               <tr>
                 <th className="text-left font-semibold px-4 sm:px-5 py-1.5">Article</th>
-                <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap">Stock SAP</th>
+                <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap" title="Disponible = stock détenu − engagé clients">Dispo SAP</th>
                 <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Colis cmd.</th>
                 <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Qté cmd.</th>
                 <th className="text-right font-semibold px-4 sm:px-5 py-1.5 whitespace-nowrap">Commandes</th>
