@@ -3,7 +3,7 @@ import {
   applyNavOverrides, sanitizeNavOverrides, toEditState, fromEditState,
   moveNavRowBefore, swapNavRows,
   applyNavConfig, toNavConfig, toNavEditState, fromNavEditState, sanitizeNavCategories,
-  addNavCategory, addNavSubCategory, renameNavCategory, deleteNavCategory, moveNavCategory, moveNavCategoryBefore,
+  addNavCategory, addNavSubCategory, renameNavCategory, deleteNavCategory, moveNavCategory, moveNavCategoryBefore, swapNavCategory,
   type NavOverrides, type NavConfig,
 } from "./navOverrides";
 
@@ -275,6 +275,16 @@ describe("navOverrides — opérations de catégorie", () => {
     expect(labels(end)).toEqual([...labels(base()), "B", "A", "A1"]);
     // Sous-catégorie ou cible inconnue → no-op
     expect(moveNavCategoryBefore(s, "A1", "B")).toEqual(s);
+  });
+
+  it("swapNavCategory échange deux blocs de 1er niveau (sous-cats comprises)", () => {
+    let s = addNavCategory(base(), "A");
+    s = addNavSubCategory(s, "A", "A1");
+    s = addNavCategory(s, "B");
+    const swapped = swapNavCategory(s, "A", "B");
+    expect(labels(swapped)).toEqual([...labels(base()), "B", "A", "A1"]);
+    // Sous-catégorie → no-op
+    expect(swapNavCategory(s, "A1", "B")).toEqual(s);
   });
 });
 

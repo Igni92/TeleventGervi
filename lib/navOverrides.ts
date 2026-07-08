@@ -455,3 +455,16 @@ export function moveNavCategoryBefore(state: NavEditGroup[], label: string, befo
   tree.splice(at < 0 ? tree.length : at, 0, block);
   return tree.flatMap((n) => [n.cat, ...n.subs]);
 }
+
+/** Échange la position de deux catégories de 1er niveau (blocs entiers, sous-
+ *  catégories comprises). No-op pour une sous-catégorie ou une cible inconnue. */
+export function swapNavCategory(state: NavEditGroup[], a: string, b: string): NavEditGroup[] {
+  if (a === b) return state;
+  const tops = state.filter((g) => !g.parent);
+  const tree = tops.map((cat) => ({ cat, subs: state.filter((g) => g.parent === cat.label) }));
+  const ia = tree.findIndex((n) => n.cat.label === a);
+  const ib = tree.findIndex((n) => n.cat.label === b);
+  if (ia < 0 || ib < 0) return state;
+  [tree[ia], tree[ib]] = [tree[ib], tree[ia]];
+  return tree.flatMap((n) => [n.cat, ...n.subs]);
+}
