@@ -5,6 +5,30 @@
 
 export type Granularity = "day" | "week" | "month" | "year";
 
+/**
+ * Nombre d'années d'historique affichées par le rapport annuel (Écran 2) EN PLUS
+ * de l'année courante. `2` ⇒ matrice N-2, N-1, N (3 colonnes). Source unique de
+ * vérité partagée entre l'agrégat (`annualMatrix`) et la fenêtre de synchro du
+ * miroir (`full-reset` / `backfill`) : les deux DOIVENT couvrir la même
+ * profondeur, sinon la matrice affiche des colonnes vides faute de docs importés.
+ */
+export const ANNUAL_MATRIX_YEARS_BACK = 2;
+
+/**
+ * 1er janvier de la 1ʳᵉ année affichée par le rapport annuel = borne basse que la
+ * synchro du miroir doit atteindre pour que la matrice soit complète.
+ *
+ * ⚠️ Bug historique : le miroir n'était (re)synchronisé que sur ~1 an (défaut
+ * `today − 365 j`) alors que la matrice remonte 3 ans → 2024 et le début 2025
+ * restaient vides. On aligne désormais la fenêtre de synchro sur CETTE borne.
+ */
+export function annualWindowStart(
+  yearsBack: number = ANNUAL_MATRIX_YEARS_BACK,
+  ref: Date = new Date(),
+): Date {
+  return new Date(ref.getFullYear() - yearsBack, 0, 1);
+}
+
 /** Bornes [start, end[ pour la granularité demandée, ancrée sur `ref` (today par défaut). */
 export function periodBounds(g: Granularity, ref = new Date()): { start: Date; end: Date } {
   const d = new Date(ref);

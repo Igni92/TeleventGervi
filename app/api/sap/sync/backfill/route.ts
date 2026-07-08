@@ -7,7 +7,7 @@ import {
   pullAllSalesSliced,
   syncClientGroupsFromMirror,
 } from "@/lib/sapMirror";
-import { periodBounds } from "@/lib/pilotage-time";
+import { periodBounds, annualWindowStart } from "@/lib/pilotage-time";
 import { invalidate } from "@/lib/ttlCache";
 
 // Backfill historique long (plusieurs années × 5 entités, pagination SAP) →
@@ -25,7 +25,8 @@ export const maxDuration = 300;
  * Les avoirs sont indispensables au CA NET (factures − avoirs) et aux Achats
  * NET (EM − retours), donc à la marge réelle (cf. lib/cogs).
  *
- * `from` (optionnel, défaut = today - 365j) borne par DocDate côté SAP.
+ * `from` (optionnel, défaut = 1er janvier de N-2 = borne basse du rapport
+ * annuel, cf. annualWindowStart) borne par DocDate côté SAP.
  *
  * Idempotent : upsert par DocEntry / CardCode. Sûr à relancer.
  *
@@ -43,9 +44,9 @@ export async function POST(req: Request) {
   const url = new URL(req.url);
   const fromParam = url.searchParams.get("from");
   const toParam = url.searchParams.get("to");
-  const from = fromParam
-    ? new Date(fromParam)
-    : (() => { const d = new Date(); d.setFullYear(d.getFullYear() - 1); return d; })();
+  // Défaut = 1er janvier de N-2 (borne basse du rapport annuel, cf.
+  // annualWindowStart) et NON plus « today − 1 an » : couvre la matrice 3 ans.
+  const from = fromParam ? new Date(fromParam) : annualWindowStart();
   const to = toParam ? new Date(toParam) : undefined;
 
   if (Number.isNaN(from.getTime())) {

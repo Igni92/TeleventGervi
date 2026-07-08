@@ -24,6 +24,7 @@ import {
 
 export type { Granularity } from "@/lib/pilotage-time";
 export { periodBounds, previousYearBounds } from "@/lib/pilotage-time";
+import { ANNUAL_MATRIX_YEARS_BACK } from "@/lib/pilotage-time";
 
 /* ─────────────────────────────────────────────────────────────────
    Filtre segment — restreint un agrégat aux clients dont le groupe SAP
@@ -379,7 +380,7 @@ export interface YearMonthlyData {
  * La marge n'est plus le grossProfit SAP mais le coût EM réel (lib/cogs),
  * agrégée à la ligne et regroupée par mois en deux requêtes dédiées.
  */
-export async function annualMatrix(yearsBack = 2, groupCodes?: number[] | null, slpName?: string | null): Promise<YearMonthlyData[]> {
+export async function annualMatrix(yearsBack = ANNUAL_MATRIX_YEARS_BACK, groupCodes?: number[] | null, slpName?: string | null): Promise<YearMonthlyData[]> {
   const currentYear = new Date().getFullYear();
   const firstYear = currentYear - yearsBack;
   const start = new Date(firstYear, 0, 1);

@@ -7,6 +7,7 @@ import {
   pullAllSalesSliced,
   syncClientGroupsFromMirror,
 } from "@/lib/sapMirror";
+import { annualWindowStart } from "@/lib/pilotage-time";
 import { invalidate } from "@/lib/ttlCache";
 
 /**
@@ -15,12 +16,15 @@ import { invalidate } from "@/lib/ttlCache";
  * Actualisation GLOBALE et PROPRE depuis la base réelle (PROD) :
  *   1. VIDE les tables miroir docs (BP, factures, avoirs, commandes, PDN + lignes).
  *   2. Re-pull intégral depuis SAP PROD : BP → groupes → factures + avoirs +
- *      commandes + PDN (sur `from`, défaut 1 an).
+ *      commandes + PDN (sur `from`, défaut = 1er janvier de N-2 = borne basse du
+ *      rapport annuel 3 ans, cf. annualWindowStart ; `?from=` reste prioritaire).
  *
  * Élimine les données périmées/aberrantes (ex. factures test datées dans le futur).
  * Le stock/catalogue est rafraîchi à part via /api/sap/sync/products.
  *
- * ⚠️ Long (peut dépasser 1-2 min sur ~1 an) — à lancer plutôt en local. Sur
+ * ⚠️ Long (le défaut couvre ~3 ans → plusieurs dizaines de tranches mensuelles).
+ * Le pull est découpé par mois, plus récent d'abord (pullAllSalesSliced) : un
+ * éventuel timeout laisse au moins l'année courante et N-1 en base. Sur
  * Vercel, le plan Hobby plafonne maxDuration à 300 s (au-delà → échec de build).
  * Les lectures sont épinglées PROD (cf. split sapb1), quel que soit le badge.
  */
@@ -35,9 +39,12 @@ export async function POST(req: Request) {
 
   const url = new URL(req.url);
   const fromParam = url.searchParams.get("from");
-  const from = fromParam
-    ? new Date(fromParam)
-    : (() => { const d = new Date(); d.setFullYear(d.getFullYear() - 1); return d; })();
+  // Défaut = 1er janvier de N-2 (borne basse du rapport annuel, cf.
+  // annualWindowStart) et NON plus « today − 1 an » : sinon la matrice 3 ans
+  // (N-2, N-1, N) affiche des colonnes vides faute de docs importés (2024 et
+  // début 2025 manquaient). `?from=YYYY-MM-DD` reste prioritaire pour un
+  // historique plus profond.
+  const from = fromParam ? new Date(fromParam) : annualWindowStart();
   if (Number.isNaN(from.getTime())) {
     return NextResponse.json({ error: "Paramètre `from` invalide (YYYY-MM-DD)" }, { status: 400 });
   }

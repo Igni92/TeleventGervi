@@ -10,6 +10,10 @@ import { Button } from "@/components/ui/button";
  * Resynchronisation GLOBALE et propre du miroir depuis la base réelle (PROD).
  * Vide + reconstruit les docs (factures/avoirs/commandes/PDN/clients) puis
  * rafraîchit le stock. Lectures épinglées PROD quel que soit le badge test/prod.
+ *
+ * Fenêtre = défaut serveur = 1er janvier de N-2 (≈ 3 ans), soit la profondeur du
+ * rapport annuel (matrice N-2 / N-1 / N). Auparavant limitée à 1 an, ce qui
+ * laissait 2024 et le début 2025 vides dans la matrice comptable.
  */
 export function ResyncButton() {
   const [busy, setBusy] = useState(false);
@@ -19,12 +23,13 @@ export function ResyncButton() {
     const ok = window.confirm(
       "Resynchroniser TOUTES les données depuis la base réelle (PROD) ?\n\n" +
       "Cela VIDE le miroir (factures, avoirs, commandes, fournisseurs, clients SAP) " +
-      "et le reconstruit entièrement, puis rafraîchit le stock.\n\n" +
-      "⚠️ Peut prendre 1 à 2 minutes — ne ferme pas l'onglet.",
+      "et le reconstruit sur ~3 ans (depuis janvier " + (new Date().getFullYear() - 2) + "), " +
+      "profondeur du rapport annuel, puis rafraîchit le stock.\n\n" +
+      "⚠️ Peut prendre plusieurs minutes (historique 3 ans) — ne ferme pas l'onglet.",
     );
     if (!ok) return;
     setBusy(true);
-    const t = toast.loading("Resynchronisation depuis PROD… (1-2 min)");
+    const t = toast.loading("Resynchronisation depuis PROD… (historique 3 ans, quelques minutes)");
     try {
       const r1 = await fetch("/api/sap/sync/full-reset", { method: "POST" });
       const j1 = await r1.json();
