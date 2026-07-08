@@ -24,7 +24,7 @@ import {
 // Types (miroir de /api/livraisons) + logique de vue pure (testée à part).
 import {
   docStatus, computeStatusCounts, computeView, docTourneeKeyLabel, STATUS_LABEL,
-  filterBySegment, computeSegmentCounts, SEGMENT_LABEL,
+  filterBySegment, computeSegmentCounts, keepDeliverableClients, SEGMENT_LABEL,
   type StatusTab, type SegmentTab, type Tournee, type Doc, type Carrier, type Totals, type ApiResp,
 } from "@/lib/livraisonView";
 import { printOrderRecap } from "./printRecap";
@@ -377,21 +377,32 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   //    s'applique AVANT les onglets (compteurs recalculés sur le résultat). ──
   const [query, setQuery] = useState("");
   const searching = query.trim().length > 0;
-  const filteredData = useMemo(() => {
+
+  // ── Le détail livraison ne concerne QUE les clients livrés par tournée :
+  //    GMS, CHR, EXPORT. Les clients sans segment (retrait comptoir, MIN,
+  //    divers…) sont exclus D'ENTRÉE — jamais listés, comptés ni totalisés.
+  //    `count` est recalculé pour que les gardes d'affichage collent. ──
+  const deliverableData = useMemo(() => {
     if (!data) return null;
+    const carriers = keepDeliverableClients(data.carriers);
+    return { ...data, carriers, count: carriers.reduce((n, c) => n + c.docs.length, 0) };
+  }, [data]);
+
+  const filteredData = useMemo(() => {
+    if (!deliverableData) return null;
     const q = normalize(query.trim());
-    if (!q) return data;
+    if (!q) return deliverableData;
     const match = (d: Doc) =>
       String(d.docNum).includes(q) ||
       normalize(d.cardCode).includes(q) ||
       normalize(d.cardName).includes(q) ||
       normalize(d.cardFullName ?? "").includes(q) ||
       normalize(d.numAtCard ?? "").includes(q);
-    const carriers = data.carriers
+    const carriers = deliverableData.carriers
       .map((c) => ({ ...c, docs: c.docs.filter(match) }))
       .filter((c) => c.docs.length > 0);
-    return { ...data, carriers };
-  }, [data, query]);
+    return { ...deliverableData, carriers };
+  }, [deliverableData, query]);
 
   // Commandes recoupées par le filtre SEGMENT (appliqué APRÈS la recherche) —
   // base de TOUT ce qui suit (compteurs d'état, vue, synthèse des manquants).
@@ -504,7 +515,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
       <BonsPreparationPanel refreshKey={gen} onOrderCreated={() => load()} />
 
       {/* ── Filtre segment client : Tout / CHR / Export / GMS ── */}
-      {data && data.count > 0 && (
+      {deliverableData && deliverableData.count > 0 && (
         <SegmentTabs segment={segment} counts={segCounts} onPick={setSegment} />
       )}
 
@@ -512,7 +523,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
       {view?.totals && <SummaryRow totals={view.totals} loading={loading} showRevenue={canDispatch} />}
 
       {/* ── Onglets Ventes / À préparer / Fait / Départ + recherche + repliage ── */}
-      {data && data.count > 0 && (
+      {deliverableData && deliverableData.count > 0 && (
         <StatusTabs
           tab={statusTab}
           counts={statusCounts}
@@ -551,7 +562,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
         </div>
       ) : loading && !data ? (
         <LoadingState />
-      ) : data && data.count === 0 ? (
+      ) : deliverableData && deliverableData.count === 0 ? (
         <EmptyState date={date} />
       ) : data && !searching && segment !== "TOUT" && segCarriers.length === 0 ? (
         <div className="flex flex-col items-center justify-center text-center rounded-2xl border border-dashed border-border bg-card py-12 px-6">
@@ -627,7 +638,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
             const key = c.code ?? "__none__";
             // Commandes NON filtrées du transporteur (tous onglets) — le bon de
             // transport couvre toute la tournée, pas seulement l'onglet affiché.
-            const fullDocs = data?.carriers.find((x) => (x.code ?? "__none__") === key)?.docs ?? c.docs;
+            const fullDocs = deliverableData?.carriers.find((x) => (x.code ?? "__none__") === key)?.docs ?? c.docs;
             return (
               <CarrierGroup
                 key={key} carrier={c} carrierKey={key} date={date} fullDocs={fullDocs} carriers={carriers} onCarrierChange={changeCarrier} onDateChange={changeDate}

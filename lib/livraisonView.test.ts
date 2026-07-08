@@ -6,6 +6,8 @@ import {
   docTourneeKeyLabel,
   filterBySegment,
   computeSegmentCounts,
+  keepDeliverableClients,
+  isDeliverableSegment,
   type Doc,
   type Carrier,
   type Tournee,
@@ -181,6 +183,34 @@ describe("livraisonView — filtre segment (Tout / CHR / Export / GMS)", () => {
 
   it("compte par segment sans les BL exclus — TOUT inclut les sans-segment", () => {
     expect(computeSegmentCounts(carriers)).toEqual({ TOUT: 4, CHR: 1, EXPORT: 1, GMS: 1 });
+  });
+});
+
+describe("livraisonView — keepDeliverableClients (GMS / CHR / EXPORT uniquement)", () => {
+  it("isDeliverableSegment ne reconnaît que les 3 segments livrés", () => {
+    expect(isDeliverableSegment("GMS")).toBe(true);
+    expect(isDeliverableSegment("CHR")).toBe(true);
+    expect(isDeliverableSegment("EXPORT")).toBe(true);
+    expect(isDeliverableSegment(null)).toBe(false);
+    expect(isDeliverableSegment("RUNGIS")).toBe(false);
+    expect(isDeliverableSegment("")).toBe(false);
+  });
+
+  it("retire les clients sans segment et les transporteurs qui en deviennent vides", () => {
+    const carriers = [
+      carrier([
+        doc({ docEntry: 1, clientType: "GMS" }),
+        doc({ docEntry: 2, clientType: null }),     // retrait / MIN / divers → exclu
+        doc({ docEntry: 3, clientType: "CHR", excluded: true }), // exclu (avoir) mais livrable → gardé
+      ]),
+      carrier(
+        [doc({ docEntry: 4, clientType: null }), doc({ docEntry: 5, clientType: "RUNGIS" })],
+        { code: "DIRECT", name: "Direct" },         // aucun client livrable → transporteur retiré
+      ),
+    ];
+    const kept = keepDeliverableClients(carriers);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].docs.map((d) => d.docEntry)).toEqual([1, 3]);
   });
 });
 
