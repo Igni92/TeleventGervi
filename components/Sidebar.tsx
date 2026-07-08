@@ -9,7 +9,7 @@ import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, Package, PackagePlus, Factory, Receipt, AlertTriangle,
   Home, Settings, PackageCheck, ClipboardCheck, ClipboardList, Truck, Eye, Store, PackageX,
-  Pencil, Loader2, RotateCcw, ScrollText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight, Check, ArrowDownToLine,
+  Pencil, Loader2, RotateCcw, ScrollText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight, Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -243,7 +243,7 @@ export function Sidebar() {
   // `gap:<groupe>:<avant>` pour un interstice, `row:<href>` pour une ligne).
   const [dragHref, setDragHref] = useState<string | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
-  const endDrag = () => { setDragHref(null); setOverKey(null); };
+  const endDrag = () => { setDragHref(null); setOverKey(null); setOverCat(null); };
   const dropBefore = (toGroup: string, beforeHref: string | null) => {
     if (dragHref) setDraft((cur) => moveNavRowBefore(cur, dragHref, toGroup, beforeHref));
     endDrag();
@@ -438,19 +438,35 @@ export function Sidebar() {
               {(() => {
                 const catEditing = editKey === `cat:${group.label}`;
                 const catDraggable = !isSub && !catEditing;
+                // Une ENTRÉE glissée peut être déposée sur n'importe quel en-tête
+                // (y compris sous-catégorie) → elle est ajoutée EN BAS de cette
+                // catégorie. Une CATÉGORIE glissée s'échange avec un autre en-tête
+                // de 1er niveau. Surbrillance simple (cible possible) / double (survol).
+                const catSwapping = !isSub && !!dragCat && dragCat !== group.label;
+                const catRowTarget = !!dragHref;   // une entrée cherche une catégorie d'accueil
+                const rowIntoHover = overCat === `into:${group.label}`;
                 return (
               <div
                 draggable={catDraggable}
                 onDragStart={catDraggable ? (e) => { e.dataTransfer.effectAllowed = "move"; setDragCat(group.label); } : undefined}
                 onDragEnd={endCatDrag}
-                onDragOver={!isSub ? (e) => { if (dragCat && dragCat !== group.label) { e.preventDefault(); setOverCat(group.label); } } : undefined}
-                onDrop={!isSub ? (e) => { if (dragCat && dragCat !== group.label) { e.preventDefault(); swapCat(group.label); } else endCatDrag(); } : undefined}
+                onDragOver={(e) => {
+                  if (catSwapping) { e.preventDefault(); setOverCat(group.label); }
+                  else if (dragHref) { e.preventDefault(); setOverCat(`into:${group.label}`); }
+                }}
+                onDrop={(e) => {
+                  if (catSwapping) { e.preventDefault(); swapCat(group.label); }
+                  else if (dragHref) { e.preventDefault(); dropBefore(group.label, null); setOverCat(null); }
+                  else endCatDrag();
+                }}
                 className={`group/cat px-1 py-0.5 mb-1.5 flex items-center gap-0.5 rounded-md transition-all duration-150 ${
                   catDraggable ? "cursor-grab active:cursor-grabbing" : ""
                 } ${dragCat === group.label ? "opacity-40 ring-1 ring-brand-400/50" : ""} ${
-                  !isSub && dragCat && dragCat !== group.label
+                  catSwapping
                     ? (overCat === group.label ? "ring-2 ring-brand-400 bg-brand-500/15" : "ring-1 ring-brand-400/40")
-                    : ""
+                    : catRowTarget
+                      ? (rowIntoHover ? "ring-2 ring-emerald-400 bg-emerald-500/15" : "ring-1 ring-emerald-400/40")
+                      : ""
                 }`}
               >
                 {isSub
@@ -561,23 +577,10 @@ export function Sidebar() {
                       </li>
                   );
                 })}
-                {/* Zone « mettre en bas » de la catégorie — grande, apparaît au
-                    glisser d'une entrée (et seule cible d'une catégorie vide). */}
-                {dragHref && (
-                  <li
-                    onDragOver={(e) => { e.preventDefault(); setOverKey(`bottom:${group.label}`); }}
-                    onDrop={(e) => { e.preventDefault(); dropBefore(group.label, null); }}
-                    className={`flex items-center justify-center gap-1.5 h-9 rounded-lg border border-dashed text-[11px] font-semibold transition-all duration-150 ${
-                      overKey === `bottom:${group.label}`
-                        ? "border-brand-400 bg-brand-500/15 text-white"
-                        : "border-white/20 text-white/45"
-                    }`}
-                  >
-                    <ArrowDownToLine className="h-3.5 w-3.5" /> Mettre en bas
+                {group.rows.length === 0 && (
+                  <li className={`px-2 py-1 text-[11px] italic transition-colors ${dragHref ? "text-brand-300" : "text-white/35"}`}>
+                    {dragHref ? "Dépose sur l'en-tête pour ajouter ici." : "Zone vide — glisse une entrée sur l'en-tête de cette catégorie."}
                   </li>
-                )}
-                {group.rows.length === 0 && !dragHref && (
-                  <li className="px-2 py-1 text-[11px] italic text-white/35">Zone vide — glisse une entrée sur « Mettre en bas ».</li>
                 )}
               </ul>
             </div>
