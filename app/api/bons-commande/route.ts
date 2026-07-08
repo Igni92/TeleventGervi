@@ -40,6 +40,7 @@ type SapOrderDoc = {
   DocDueDate?: string;
   CardCode: string;
   CardName?: string;
+  NumAtCard?: string;
   DocumentStatus?: string;
   Cancelled?: string;
   DocumentLines?: SapLine[];
@@ -64,6 +65,7 @@ type OffreLine = { itemCode: string; itemName: string; colis: number };
 type OffreDoc = {
   docEntry: number; docNum: number; cardCode: string; cardName: string;
   clientType: string | null; dueDate: string | null; docDate: string | null;
+  numAtCard: string | null;
   /** true = jour de départ atteint → à passer en commande (pastille). */
   due: boolean; lineCount: number; colis: number; lines: OffreLine[];
 };
@@ -78,7 +80,7 @@ async function loadOffres(): Promise<OffreDoc[]> {
   try {
     const res = await sap.get<{ value: SapOrderDoc[] }>(
       `Quotations?$orderby=DocDueDate asc&$top=100`
-      + `&$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocumentStatus,Cancelled,DocumentLines`
+      + `&$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,NumAtCard,DocumentStatus,Cancelled,DocumentLines`
       + `&$filter=${encodeURIComponent("DocumentStatus eq 'bost_Open' and Cancelled eq 'tNO'")}`,
     );
     quotes = res.value ?? [];
@@ -122,6 +124,7 @@ async function loadOffres(): Promise<OffreDoc[]> {
         cardCode: d.CardCode, cardName: d.CardName ?? d.CardCode,
         clientType: (typeByCard.get(d.CardCode) ?? "").trim().toUpperCase() || null,
         dueDate, docDate: d.DocDate ?? null,
+        numAtCard: (d.NumAtCard ?? "").trim() || null,
         due: dueDate ? isDepartureReached(dueDate) : false,
         lineCount: lines.length,
         colis: Math.round(lines.reduce((s, l) => s + l.colis, 0) * 10) / 10,
@@ -339,29 +342,70 @@ export async function PATCH(req: NextRequest) {
 }
 
 /**
- * POST — « Passer en commande » : convertit une OFFRE CLIENT (Quotation) en
- * COMMANDE CLIENT (Order) SAP au jour de départ. La commande reprend les lignes
- * de l'offre via la référence base→cible (BaseType 23) — SAP recopie
- * article/qté/prix/UDF, dont U_NoLot=EM_PENDING → la commande rejoint la file
- * d'affectation des lots. L'offre est clôturée par SAP (entièrement copiée).
- * Body : { action: "convert", docEntry: number }  (docEntry = celui de l'offre)
+ * POST — actions sur une OFFRE CLIENT (Quotation SAP). `docEntry` = celui de l'offre.
+ *   • action:"convert" → « Passer en commande » : crée la Commande client (Order)
+ *     à partir de l'offre (référence base→cible BaseType 23 — SAP recopie
+ *     article/qté/prix/UDF dont U_NoLot=EM_PENDING) et clôture l'offre. La
+ *     commande créée est marquée « lots à affecter » et rejoint la file.
+ *   • action:"update" → modifie la date de livraison (dueDate) et/ou le n° de
+ *     commande client (numAtCard) de l'offre.
+ *   • action:"delete" → supprime l'offre (Quotation) dans SAP.
  */
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  let body: { action?: string; docEntry?: number };
+  let body: { action?: string; docEntry?: number; dueDate?: string; numAtCard?: string };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
-  if (body.action !== "convert") return NextResponse.json({ error: "Action inconnue" }, { status: 400 });
   const docEntry = Number(body.docEntry);
   if (!Number.isInteger(docEntry) || docEntry <= 0) return NextResponse.json({ error: "docEntry invalide" }, { status: 400 });
+
+  // ── Supprimer une offre ──────────────────────────────────────
+  if (body.action === "delete") {
+    try {
+      await sap.delete(`Quotations(${docEntry})`);
+      console.log(`[BonCommande] Offre docEntry ${docEntry} supprimée.`);
+      return NextResponse.json({ ok: true, deleted: true, docEntry });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error(`[BonCommande] Suppression offre ${docEntry} échouée:`, message);
+      return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    }
+  }
+
+  // ── Modifier date de livraison et/ou n° de commande ──────────
+  if (body.action === "update") {
+    const patch: Record<string, unknown> = {};
+    if (body.dueDate !== undefined) {
+      const d = (body.dueDate ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return NextResponse.json({ error: "Date de livraison invalide (YYYY-MM-DD attendu)." }, { status: 400 });
+      patch.DocDueDate = d;
+    }
+    if (body.numAtCard !== undefined) {
+      // Chaîne vide autorisée = effacer le n° de commande.
+      patch.NumAtCard = String(body.numAtCard).trim().slice(0, 100);
+    }
+    if (Object.keys(patch).length === 0) return NextResponse.json({ error: "Rien à modifier (dueDate ou numAtCard requis)." }, { status: 400 });
+    try {
+      await sap.patch(`Quotations(${docEntry})`, patch);
+      console.log(`[BonCommande] Offre docEntry ${docEntry} mise à jour:`, Object.keys(patch).join(", "));
+      return NextResponse.json({ ok: true, docEntry, ...patch });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error(`[BonCommande] Mise à jour offre ${docEntry} échouée:`, message);
+      return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    }
+  }
+
+  // ── Passer en commande (conversion offre → commande) ─────────
+  if (body.action !== "convert") return NextResponse.json({ error: "Action inconnue" }, { status: 400 });
 
   try {
     // Charge l'offre (statut + lignes) pour bâtir la conversion base→cible.
     const quote = await sap.get<SapOrderDoc>(
-      `Quotations(${docEntry})?$select=DocEntry,DocNum,CardCode,DocDueDate,DocumentStatus,Cancelled,DocumentLines`,
+      `Quotations(${docEntry})?$select=DocEntry,DocNum,CardCode,DocDueDate,NumAtCard,DocumentStatus,Cancelled,DocumentLines`,
     );
     if (quote.Cancelled === "tYES") return NextResponse.json({ error: "Offre annulée — conversion impossible." }, { status: 409 });
     if (quote.DocumentStatus === "bost_Close") return NextResponse.json({ error: "Offre déjà passée en commande." }, { status: 409 });
@@ -370,7 +414,7 @@ export async function POST(req: NextRequest) {
 
     // Conversion : chaque ligne de la commande référence la ligne d'offre
     // (BaseType 23). SAP recopie article/qté/prix/UDF (dont U_NoLot=EM_PENDING).
-    const orderPayload = {
+    const orderPayload: Record<string, unknown> = {
       CardCode: quote.CardCode,
       DocDueDate: quote.DocDueDate,
       DocumentLines: lines.map((l) => ({
@@ -379,6 +423,7 @@ export async function POST(req: NextRequest) {
         BaseLine: l.LineNum,
       })),
     };
+    if ((quote.NumAtCard ?? "").trim()) orderPayload.NumAtCard = quote.NumAtCard;
     type SapOrder = { DocEntry: number; DocNum: number };
     const order = await sap.post<SapOrder>("/Orders", orderPayload);
 
