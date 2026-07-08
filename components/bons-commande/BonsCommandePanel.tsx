@@ -9,13 +9,15 @@
  * commande SAP. Quand toutes les lignes ont un lot, la commande sort de l'onglet.
  */
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   PackageCheck, ChevronDown, RefreshCw, Loader2, CheckCircle2, Sparkles,
-  CalendarDays, AlertTriangle, Grape, FileText, ArrowRightCircle, Clock, Trash2, Hash,
+  CalendarDays, AlertTriangle, Grape, FileText, ArrowRightCircle, Clock, Trash2, Hash, Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDeliveryDate } from "@/lib/livraison";
 import { displayPersonName } from "@/lib/userNames";
+import { broadcastActiveClient } from "@/lib/consoleSync";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { FRUIT_FAMILIES } from "@/lib/familles";
 import { familyLotSentinel, familyOfLot } from "@/lib/gervifrais-calc";
@@ -55,6 +57,7 @@ const SEG_BADGE: Record<string, string> = {
 };
 
 export function BonsCommandePanel() {
+  const router = useRouter();
   const [docs, setDocs] = useState<BonDoc[] | null>(null);
   const [offres, setOffres] = useState<OffreDoc[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -62,6 +65,33 @@ export function BonsCommandePanel() {
   const [busyLine, setBusyLine] = useState<string | null>(null); // `${docEntry}:${itemCode}`
   const [convertingId, setConvertingId] = useState<number | null>(null); // offre en cours de passage
   const [deletingId, setDeletingId] = useState<number | null>(null); // offre en cours de suppression
+  const [modifBusy, setModifBusy] = useState<number | null>(null); // docEntry en cours d'ouverture
+
+  // « Modifier la commande » : ouvre le bon dans la console (Écran 2), pilotée par
+  // le STOCK — on peut y changer les articles/quantités pour garantir des lots
+  // réellement disponibles, puis réenregistrer sur ce même bon. On résout le
+  // client (CardCode → id télévente) puis on diffuse la cible de modif (miroir
+  // localStorage, lu au chargement de l'Écran 2) avant de naviguer.
+  const startModif = useCallback(async (doc: BonDoc) => {
+    setModifBusy(doc.docEntry);
+    try {
+      const r = await fetch(`/api/clients/resolve?code=${encodeURIComponent(doc.cardCode)}`);
+      const j = await r.json().catch(() => null);
+      if (!j?.id) {
+        toast.error("Client introuvable en télévente — modification impossible depuis ici.");
+        return;
+      }
+      broadcastActiveClient({
+        clientId: j.id, clientName: doc.cardName, stockSharePct: 100, client: null,
+        modif: { docEntry: doc.docEntry, docNum: doc.docNum },
+      });
+      router.push("/console/ecran2");
+    } catch {
+      toast.error("Échec du chargement de la modification.");
+    } finally {
+      setModifBusy(null);
+    }
+  }, [router]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -447,6 +477,17 @@ export function BonsCommandePanel() {
                     className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
                   >
                     <Sparkles className="h-4 w-4" /> Suggérer les lots
+                  </button>
+                  {/* Ouvre le bon dans la console (pilotée par le stock) pour
+                      changer les articles/quantités et garantir des lots dispo. */}
+                  <button
+                    type="button"
+                    onClick={() => startModif(doc)}
+                    disabled={modifBusy === doc.docEntry}
+                    title="Modifier la commande dans la console (stock en direct) : changer les articles/quantités pour garantir les lots disponibles"
+                    className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-brand-500/40 text-brand-600 dark:text-brand-400 text-[12.5px] font-semibold hover:bg-brand-500/10 transition-colors disabled:opacity-50"
+                  >
+                    {modifBusy === doc.docEntry ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />} Modifier la commande
                   </button>
                   {doc.markedBy && (
                     <span className="text-[11px] text-muted-foreground ml-auto">Créé par {displayPersonName(doc.markedBy)}</span>
