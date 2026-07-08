@@ -213,12 +213,14 @@ export async function GET(req: NextRequest) {
         }));
         return m;
       })(),
-      // ── Articles MANQUANTS = stock SAP total NÉGATIF (somme tous entrepôts) ──
-      // Interrogé EN DIRECT dans SAP (le miroir local ne conserve pas les stocks
-      // négatifs) sur les seuls articles des commandes du jour, par lots de 20.
-      // Stock total < 0 = on a vendu plus qu'on ne détient → achat à faire.
-      // Filtre « < 0 » côté app : QuantityOnStock est un champ calculé que
-      // certains Service Layer refusent en $filter. Lot en échec → ignoré.
+      // ── Articles MANQUANTS = stock DISPONIBLE négatif (tous entrepôts) ──
+      // Interrogé EN DIRECT dans SAP sur les seuls articles des commandes du jour.
+      // ⚠️ On crée des COMMANDES CLIENT (Sales Orders) : elles n'ENTAMENT PAS le
+      // stock physique (QuantityOnStock reste ≥ 0), elles n'augmentent que le
+      // COMMITTED (QuantityOrderedByCustomers). Se baser sur QuantityOnStock < 0
+      // ratait donc les articles VENDUS AU-DELÀ du stock (necta, abricot…). On
+      // calcule le DISPONIBLE = en stock − engagé clients ; < 0 = vendu plus
+      // qu'on ne détient → achat à faire. Filtre côté app (champs calculés).
       (async () => {
         const neg: Record<string, number> = {};
         const chunks: string[][] = [];
@@ -226,13 +228,13 @@ export async function GET(req: NextRequest) {
         await Promise.all(chunks.map(async (chunk) => {
           try {
             const or = chunk.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
-            const items = await sap.getAll<{ ItemCode: string; QuantityOnStock?: number }>(
-              `Items?$select=ItemCode,QuantityOnStock&$filter=${encodeURIComponent(`(${or})`)}`,
+            const items = await sap.getAll<{ ItemCode: string; QuantityOnStock?: number; QuantityOrderedByCustomers?: number }>(
+              `Items?$select=ItemCode,QuantityOnStock,QuantityOrderedByCustomers&$filter=${encodeURIComponent(`(${or})`)}`,
               { pageSize: 50, maxPages: 2 },
             );
             for (const it of items) {
-              const q = it.QuantityOnStock ?? 0;
-              if (q < 0) neg[it.ItemCode] = q;
+              const available = (it.QuantityOnStock ?? 0) - (it.QuantityOrderedByCustomers ?? 0);
+              if (available < 0) neg[it.ItemCode] = available;
             }
           } catch { /* lot en échec → pas de manquants pour ces articles */ }
         }));
@@ -348,7 +350,8 @@ export async function GET(req: NextRequest) {
         misEnPrep: misEnPrepByDocEntry.get(d.DocEntry) ?? false,
         misEnPrepBy: misEnPrepByDoc.get(d.DocEntry) ?? null,
         misEnPrepAt: misEnPrepAtDoc.get(d.DocEntry) ?? null,
-        // Articles MANQUANTS de ce BL = lignes dont le stock SAP total est négatif.
+        // Articles MANQUANTS de ce BL = lignes dont le DISPONIBLE SAP est négatif
+        // (en stock − engagé clients) → vendu au-delà du stock détenu.
         missingItems: outLines.filter((l) => negativeStocks[l.itemCode] !== undefined).map((l) => l.itemCode),
         // « avoir/exclu » : surcharge manuelle si présente, sinon détecté auto (ci-dessous).
         excluded: avoirByDoc.has(d.DocEntry) ? !!avoirByDoc.get(d.DocEntry) : false,

@@ -17,9 +17,9 @@ export default async function ManquantsPage() {
           Manquants
         </h1>
         <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
-          Les articles des commandes du jour en <b>stock SAP négatif</b> (tous entrepôts
-          confondus) : on a vendu plus qu&apos;on ne détient — <b>achat à prévoir</b>. Chaque
-          article se déplie sur les BL touchés.
+          Les articles des commandes du jour dont le <b>disponible SAP est négatif</b> (stock
+          détenu − engagé clients, tous entrepôts confondus) : on a <b>vendu plus qu&apos;on ne
+          détient</b> — <b>achat à prévoir</b>. Chaque article se déplie sur les BL touchés.
         </p>
       </header>
       <Manquants />
