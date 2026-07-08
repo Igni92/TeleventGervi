@@ -5,6 +5,7 @@ import { MobileTopBar } from "@/components/MobileTopBar";
 import { EventsBanner } from "@/components/events/EventsBanner";
 import { RolePreviewProvider } from "@/components/role-preview/RolePreviewProvider";
 import { RolePreviewBanner } from "@/components/role-preview/RolePreviewBanner";
+import { HoursValidationGate } from "@/components/effectifs/HoursValidationGate";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -39,6 +40,7 @@ export async function AppLayout({ children }: AppLayoutProps) {
           <MobileTopBar className="md:hidden touch:!block" />
           <RolePreviewBanner />
           <EventsBanner />
+          <HoursValidationGate />
           {children}
         </main>
       </div>
