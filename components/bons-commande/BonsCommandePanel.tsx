@@ -24,7 +24,7 @@ import { familyLotSentinel, familyOfLot } from "@/lib/gervifrais-calc";
 
 const FAMILY_LABEL = new Map(FRUIT_FAMILIES.map((f) => [f.key, f.label]));
 
-interface LotCandidate { lot: string; docNum: number; warehouse: string | null; affect: string }
+interface LotCandidate { lot: string; docNum: number; warehouse: string | null; affect: string; label?: string }
 interface FamilyTarget { key: string; label: string }
 interface BonLine {
   itemCode: string; itemName: string; quantity: number; colis: number;
@@ -439,6 +439,7 @@ export function BonsCommandePanel() {
                             disabled={isBusy}
                             onChange={(e) => assignLot(doc, l.itemCode, e.target.value)}
                             aria-label={`Lot de ${l.itemName}`}
+                            title={opts.find((c) => c.lot === current)?.label || undefined}
                             className={`h-11 sm:h-9 w-full rounded-lg border bg-card px-2.5 text-[13px] sm:text-[12.5px] font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60 cursor-pointer ${
                               l.familyTarget ? "border-violet-400/60 text-violet-700 dark:text-violet-300"
                               : l.pending ? "border-amber-400/60 text-amber-700 dark:text-amber-300"
@@ -446,9 +447,14 @@ export function BonsCommandePanel() {
                             }`}
                           >
                             <option value="">Choisir le lot…</option>
-                            {l.suggested && <option value={l.suggested}>★ {l.suggested} (suggéré)</option>}
+                            {l.suggested && (
+                              <option value={l.suggested} title={opts.find((c) => c.lot === l.suggested)?.label}>
+                                ★ {l.suggested} (suggéré)
+                              </option>
+                            )}
                             {opts.filter((c) => c.lot !== l.suggested).map((c) => (
-                              <option key={c.lot} value={c.lot}>
+                              // `title` = libellé lisible de l'EM au survol (date de réception · fournisseur).
+                              <option key={c.lot} value={c.lot} title={c.label}>
                                 {c.lot} · {AFFECT_LABEL[c.affect] ?? c.affect}{c.warehouse ? ` · mag. ${c.warehouse}` : ""}
                               </option>
                             ))}

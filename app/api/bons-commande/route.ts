@@ -190,12 +190,24 @@ export async function GET() {
 
     // Cartes de lots + affectations EM (une fois).
     const [maps, affects] = await Promise.all([getLotMaps(), getEmAffects()]);
+    // Libellé lisible d'une EM (au survol) : « Reçu le jj/mm/aaaa · Fournisseur ».
+    const emLabel = (dn: number): string => {
+      const meta = maps.docMeta.get(dn);
+      const parts: string[] = [`EM ${dn}`];
+      if (meta?.date) {
+        const [y, m, day] = meta.date.split("-");
+        if (day && m && y) parts.push(`reçu le ${day}/${m}/${y}`);
+      }
+      if (meta?.supplier) parts.push(meta.supplier);
+      return parts.join(" · ");
+    };
     const candidatesFor = (itemCode: string, segment: string | null) => {
       const docs = maps.byItemList.get(itemCode) ?? [];
       const candidates = docs.map((dn) => ({
         lot: `EM${dn}`, docNum: dn,
         warehouse: maps.whsOfItemDoc.get(`${itemCode}|${dn}`) ?? null,
         affect: affects.get(dn) ?? "TOUS",
+        label: emLabel(dn),
       }));
       const suggested = resolveLotForSegment(maps, affects, itemCode, undefined, segment).lot;
       return { candidates, suggested };
