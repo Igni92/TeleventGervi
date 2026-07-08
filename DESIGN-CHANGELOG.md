@@ -394,3 +394,12 @@ PWA)** ET **notifications in-app (popup à l'ouverture)**.
   côté serveur. Push nominatif via `notifyEmails` (réutilise l'infra Web-Push
   existante — actif dès que les clés VAPID sont configurées). Popup monté dans
   `AppLayout` (présent sur tous les écrans), « Plus tard » masque pour la session.
+
+---
+
+## 🛒 Console — ligne produit épurée + détail des lots au clic droit
+
+| Élément | Avant | Après |
+|---------|-------|-------|
+| Ligne produit | Le **code article** figurait sur la ligne ; tags collés (`gap-1`). | Code article **retiré** de la ligne ; tags **légèrement espacés** (`gap-1.5`). |
+| Détail des lots | Aucun accès rapide. | **Clic droit** sur une ligne → popup **« Lots »** (`LotDetailsDialog`) : lots connus (EM récentes · `/api/lots/candidates`), **DLC** (`/api/lots/dlc`), entrepôt et affectation. *(La quantité par lot en direct nécessite une requête stock-par-lot SAP dédiée — à ajouter ensuite.)* |

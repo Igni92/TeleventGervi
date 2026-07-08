@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { BrandLogo } from "@/components/BrandLogo";
+import { LotDetailsDialog } from "./LotDetailsDialog";
 import { useBrandLogos } from "@/lib/useBrandLogos";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
 
@@ -753,6 +754,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   // Quantités et prix repris tels quels (sans ré-appliquer les promos) ; les
   // articles introuvables au catalogue chargé sont signalés.
   const [replaying, setReplaying] = useState(false);
+  // Clic droit sur une ligne produit → détail des lots (EM récentes + DLC).
+  const [lotDetail, setLotDetail] = useState<{ code: string; name: string } | null>(null);
   const replayLast = async () => {
     if (replaying || prefilling || modif) return;
     setReplaying(true);
@@ -1426,6 +1429,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                             onKeyDown={(e) => {
                               if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleCart(); }
                             }}
+                            onContextMenu={(e) => { e.preventDefault(); setLotDetail({ code: p.itemCode, name: p.itemName }); }}
                             title={inCart ? "Retirer du panier"
                                           : noStock ? "À découvert — sera créé en EM_PENDING, lot affecté à réception"
                                           : "Ajouter au panier"}
@@ -1466,17 +1470,18 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                               <span className={`block ${ui.name} font-semibold text-foreground truncate leading-tight`}>
                                 {p.itemName}
                               </span>
-                              <span className="mt-0.5 flex items-center gap-1 overflow-hidden whitespace-nowrap min-w-0">
+                              {/* Tags espacés (gap-1.5) ; le CODE ARTICLE n'apparaît plus
+                                  sur la ligne (clic droit « Détails » pour le lot/DLC). */}
+                              <span className="mt-0.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap min-w-0">
                                 {marque && <span className={`${chipCls} shrink-0 bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100 dark:ring-1 dark:ring-inset dark:ring-violet-400/50`}>{marque}</span>}
                                 {condi && <span className={`${chipCls} shrink-0 bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100 dark:ring-1 dark:ring-inset dark:ring-sky-400/50`}>{condi}</span>}
                                 {calibre && <span className={`${chipCls} shrink-0 bg-teal-100 text-teal-800 dark:bg-teal-500/30 dark:text-teal-100 dark:ring-1 dark:ring-inset dark:ring-teal-400/50`}>{calibre}</span>}
                                 {variete && <span className={`${chipCls} shrink-0 bg-rose-100 text-rose-800 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-1 dark:ring-inset dark:ring-rose-400/50`}>{variete}</span>}
                                 {pays && <span className={`${chipCls} shrink-0 bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100 dark:ring-1 dark:ring-inset dark:ring-amber-400/50`}>{pays}</span>}
-                                <span className={`font-mono text-muted-foreground/60 ${ui.code} truncate`}>{p.itemCode}</span>
                                 {/* B4 — poids du colis quand calculable (≈ poids unité × pièces/colis) */}
                                 {kgC != null && (
                                   <span className={`${ui.code} text-muted-foreground/80 font-medium shrink-0`}>
-                                    · {fmtKg(kgC)} kg/colis
+                                    {fmtKg(kgC)} kg/colis
                                   </span>
                                 )}
                               </span>
@@ -2146,6 +2151,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
           </ul>
         </DialogContent>
       </Dialog>
+
+      {/* Détail des lots (clic droit sur une ligne produit). */}
+      <LotDetailsDialog item={lotDetail} onClose={() => setLotDetail(null)} />
 
       {/* (La confirmation d'encours dépassé vit désormais dans le TOAST de la
           tâche de fond — cf. sendOrderInBackground : action « Créer quand
