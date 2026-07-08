@@ -403,3 +403,19 @@ PWA)** ET **notifications in-app (popup à l'ouverture)**.
 |---------|-------|-------|
 | Ligne produit | Le **code article** figurait sur la ligne ; tags collés (`gap-1`). | Code article **retiré** de la ligne ; tags **légèrement espacés** (`gap-1.5`). |
 | Détail des lots | Aucun accès rapide. | **Clic droit** sur une ligne → popup **« Lots »** (`LotDetailsDialog`) : lots connus (EM récentes · `/api/lots/candidates`), **DLC** (`/api/lots/dlc`), entrepôt et affectation. *(La quantité par lot en direct nécessite une requête stock-par-lot SAP dédiée — à ajouter ensuite.)* |
+
+---
+
+## 🌴 Congés — demande salarié → validation direction (notif + suivi)
+
+Sur « Mes heures » : le salarié pose une demande de congés (type CP / RTT / récup /
+sans solde / maladie / autre + plage de dates + motif) ; la **direction** valide ou
+refuse, avec **push** + suivi in-app.
+
+- Salarié : formulaire (type + du/au + décompte de jours) et suivi de ses demandes
+  (statut, annulation tant qu'en attente).
+- Direction : liste **« à valider »** (Valider / Refuser) — push au salarié à la décision.
+- État par demande en `AppSetting` (`rhconge:<email>:<id>`) ; logique pure testée
+  (`lib/conges` : validation de plage, décompte, chevauchement), persistance
+  `lib/congesRh` (séparée pour garder le client sans Prisma). Validation réservée
+  à `isDirection` (comme les heures) ; push via `notifyEmails`.
