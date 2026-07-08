@@ -6,7 +6,7 @@ import { Briefcase, Receipt, Truck } from "lucide-react";
 import { DUR, EASE } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
-import { isLogisticsPreviewRole } from "@/lib/rolePreview";
+import { isLogisticsRoles } from "@/lib/rolePreview";
 
 /**
  * Onglets de la fiche client : Commercial / Comptabilité / Logistique.
@@ -29,8 +29,8 @@ interface ClientTabsProps {
 }
 
 export function ClientTabs({ commercial, compta, logistique, defaultTab = "commercial" }: ClientTabsProps) {
-  const { previewRole } = useRolePreview();
-  const logisticsOnly = isLogisticsPreviewRole(previewRole);
+  const { previewRoles } = useRolePreview();
+  const logisticsOnly = isLogisticsRoles(previewRoles);
 
   const [tab, setTab] = useState<Tab>(defaultTab);
   const reduce = useReducedMotion();

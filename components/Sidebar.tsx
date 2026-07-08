@@ -17,7 +17,7 @@ import { Logo } from "@/components/Logo";
 import { SapEnvSwitch } from "@/components/SapEnvSwitch";
 import { SignalLoader } from "@/components/ui/page-loader";
 import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
-import { navAllowedForPreview, PREVIEW_ROLE_LABELS } from "@/lib/rolePreview";
+import { navAllowedForRoles } from "@/lib/rolePreview";
 import {
   applyNavConfig, toNavEditState, fromNavEditState, moveNavRowBefore, swapNavRows,
   addNavCategory, addNavSubCategory, renameNavCategory, deleteNavCategory, moveNavCategory, moveNavCategoryBefore, swapNavCategory,
@@ -230,7 +230,7 @@ function useBadges(): Record<string, number> {
 export function Sidebar() {
   const { data: session } = useSession();
   const pathname = usePathname();
-  const { previewRole, setPreviewRole, canPreview } = useRolePreview();
+  const { previewRoles, previewLabel, clearPreview, canPreview } = useRolePreview();
   const [rail, setRail] = useState(false);
   const badges = useBadges();
   // Voile de navigation : label de la page en cours d'ouverture (null = caché).
@@ -626,7 +626,7 @@ export function Sidebar() {
           // Une catégorie SANS entrée directe mais avec des sous-catégories reste
           // affichée (en-tête seul) — applyNavConfig ne la garde que dans ce cas.
           const headerOnly = group.label !== null && group.items.length === 0;
-          const items = group.items.filter((it) => navAllowedForPreview(it.href, previewRole));
+          const items = group.items.filter((it) => navAllowedForRoles(it.href, previewRoles));
           if (items.length === 0 && !headerOnly) return null;
           const isSub = !!group.parent;
           const collapsible = !!group.collapsible && !rail;
@@ -778,15 +778,15 @@ export function Sidebar() {
         {/* « Voir comme » a été déplacé dans Effectifs (par membre + vue réelle).
             En aperçu actif, un retour rapide « Vue réelle » reste ici pour ne
             jamais rester bloqué dans un aperçu restreint. */}
-        {!rail && previewRole && (
+        {!rail && previewLabel && (
           <button
             type="button"
-            onClick={() => setPreviewRole(null)}
+            onClick={clearPreview}
             title="Quitter l'aperçu et revenir à la vue réelle"
             className="flex w-full items-center gap-2 rounded-lg px-2.5 h-9 text-[12.5px] font-medium bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30 hover:bg-amber-500/25 transition-colors"
           >
             <Eye className="h-[18px] w-[18px] shrink-0" />
-            <span className="truncate">Aperçu : {PREVIEW_ROLE_LABELS[previewRole]}</span>
+            <span className="truncate">Aperçu : {previewLabel}</span>
             <span className="ml-auto text-[11px] font-semibold underline underline-offset-2">Vue réelle</span>
           </button>
         )}

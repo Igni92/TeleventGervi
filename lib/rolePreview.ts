@@ -59,6 +59,30 @@ export function previewHome(role: PreviewRole): string {
   return "/accueil";
 }
 
+/* ─── « Voir comme {personne} » : aperçu avec TOUS ses rôles (union) ─────────── */
+
+/** Navigation autorisée pour un ENSEMBLE de rôles (union). [] / null = vue
+ *  réelle (tout visible). Sert au « voir comme {personne} » qui montre la vue
+ *  GLOBALE de quelqu'un cumulant plusieurs rôles (ex. livreur + agréeur). */
+export function navAllowedForRoles(href: string, roles: PreviewRole[] | null): boolean {
+  if (!roles || roles.length === 0) return true;
+  return roles.some((r) => navAllowedForPreview(href, r));
+}
+
+/** Logistique PURE : la personne n'a QUE des rôles terrain (prépa / livreur) →
+ *  on masque les chiffres commerciaux, comme pour un rôle logistique seul. */
+export function isLogisticsRoles(roles: PreviewRole[] | null): boolean {
+  return !!roles && roles.length > 0 && roles.every(isLogisticsPreviewRole);
+}
+
+/** Home de l'aperçu « personne » : /accueil dès qu'un rôle « bureau »
+ *  (commercial / direction) est présent, sinon le poste du 1er rôle terrain. */
+export function previewHomeForRoles(roles: PreviewRole[]): string {
+  if (roles.some((r) => r === "commercial" || r === "direction")) return "/accueil";
+  const first = roles.find((r) => r === "preparateur" || r === "livreur" || r === "agreeur");
+  return first ? previewHome(first) : "/accueil";
+}
+
 /**
  * Rôles « terrain logistique » (préparateur, livreur) : leur périmètre se borne
  * à la logistique. Dans l'aperçu on masque donc, pour eux :

@@ -10,7 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
-import { navAllowedForPreview } from "@/lib/rolePreview";
+import { navAllowedForRoles } from "@/lib/rolePreview";
 
 /**
  * Écran d'accueil MOBILE — un lanceur en tuiles « façon application », volontairement
@@ -176,7 +176,7 @@ function useFavAxes() {
 }
 
 export function MobileTiles({ className }: { className?: string }) {
-  const { previewRole } = useRolePreview();
+  const { previewRoles } = useRolePreview();
   const { favs, toggle, loaded } = useFavAxes();
   const badges: Record<BadgeKey, number> = {
     receptionIncidents: useReceptionBadge(),
@@ -195,7 +195,7 @@ export function MobileTiles({ className }: { className?: string }) {
     <div className={`space-y-6 ${className ?? ""}`}>
       {orderedAxes.map((axis) => {
         // Aperçu « voir comme » : ne montrer que les tuiles du périmètre du rôle.
-        const tiles = axis.tiles.filter((t) => navAllowedForPreview(t.href, previewRole));
+        const tiles = axis.tiles.filter((t) => navAllowedForRoles(t.href, previewRoles));
         if (tiles.length === 0) return null;
         const accent = ACCENT[axis.key];
         const isFav = favs.includes(axis.key);

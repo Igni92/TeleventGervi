@@ -21,7 +21,7 @@ import { PREVIEW_ROLES, PREVIEW_ROLE_LABELS, previewHome, type PreviewRole } fro
  */
 export function RolePreviewControl({ compact = false }: { compact?: boolean }) {
   const router = useRouter();
-  const { canPreview, previewRole, setPreviewRole } = useRolePreview();
+  const { canPreview, previewRole, previewLabel, setPreviewRole } = useRolePreview();
   if (!canPreview) return null;
 
   const pick = (role: PreviewRole | null) => {
@@ -29,7 +29,8 @@ export function RolePreviewControl({ compact = false }: { compact?: boolean }) {
     if (role) router.push(previewHome(role));
   };
 
-  const activeLabel = previewRole ? PREVIEW_ROLE_LABELS[previewRole] : "Vue réelle";
+  const active = previewLabel != null;
+  const activeLabel = previewLabel ?? "Vue réelle";
 
   return (
     <DropdownMenu>
@@ -40,12 +41,12 @@ export function RolePreviewControl({ compact = false }: { compact?: boolean }) {
           className={
             compact
               ? `inline-flex h-10 w-10 items-center justify-center rounded-xl transition-colors shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
-                  previewRole
+                  active
                     ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 ring-1 ring-amber-500/30"
                     : "text-foreground/55 hover:text-foreground hover:bg-secondary/70"
                 }`
               : `flex w-full items-center gap-2 rounded-lg px-2.5 h-9 text-[12.5px] font-medium transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-500 ${
-                  previewRole
+                  active
                     ? "bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30"
                     : "text-white/70 hover:text-white/90 hover:bg-white/[0.05]"
                 }`
@@ -66,7 +67,7 @@ export function RolePreviewControl({ compact = false }: { compact?: boolean }) {
           onClick={() => pick(null)}
           className="cursor-pointer rounded-lg text-[13px] gap-2"
         >
-          <Check className={`h-3.5 w-3.5 ${previewRole ? "opacity-0" : "opacity-100"}`} />
+          <Check className={`h-3.5 w-3.5 ${active ? "opacity-0" : "opacity-100"}`} />
           Vue réelle (moi)
         </DropdownMenuItem>
         <DropdownMenuSeparator className="my-1" />

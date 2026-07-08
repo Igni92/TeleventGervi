@@ -112,6 +112,37 @@ export async function requireAdmin(session: Session | null): Promise<boolean> {
   return (await getAccessScope(session)).all;
 }
 
+/** True UNIQUEMENT si l'utilisateur est DIRECTION (flag DB `isDirection`) —
+ *  DISTINCT d'admin. Sert à réserver à la seule direction certaines actions/
+ *  notifications (ex. validation mensuelle des heures) sans les ouvrir aux admins.
+ *  Un admin « bootstrap » (ADMIN_EMAILS) n'est PAS direction. */
+export async function isDirection(session: Session | null): Promise<boolean> {
+  const email = session?.user?.email?.trim().toLowerCase();
+  if (!email) return false;
+  try {
+    const rows = await prisma.$queryRawUnsafe<{ isDirection: boolean | null }[]>(
+      `SELECT "isDirection" FROM "User" WHERE LOWER("email") = $1 LIMIT 1`,
+      email,
+    );
+    return !!rows[0]?.isDirection;
+  } catch {
+    return false;
+  }
+}
+
+/** Emails de la DIRECTION (flag DB `isDirection`) — cible « employeur » des
+ *  notifications de validation des heures. */
+export async function directionEmails(): Promise<string[]> {
+  try {
+    const rows = await prisma.$queryRawUnsafe<{ email: string | null }[]>(
+      `SELECT "email" FROM "User" WHERE "isDirection" = true`,
+    );
+    return rows.map((r) => r.email?.trim().toLowerCase()).filter((e): e is string => !!e);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * True si la session est admin/direction (cf. requireAdmin) OU si l'utilisateur
  * est PRÉPARATEUR (User.isPreparateur = true). Palier dédié aux écritures de la
