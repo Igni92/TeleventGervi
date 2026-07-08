@@ -5,8 +5,8 @@ import { useSession } from "next-auth/react";
 import { PromoBanner } from "@/components/promos/PromoBanner";
 import { MobileTiles } from "@/components/mobile/MobileTiles";
 import { KpiStrip } from "./KpiStrip";
+import { PoidsFamilles } from "./PoidsFamilles";
 import { DernieresCommandes } from "./DernieresCommandes";
-import { AlertesEncours } from "./AlertesEncours";
 import { PromosAccueil } from "./PromosAccueil";
 
 /**
@@ -80,15 +80,15 @@ export function AccueilHub() {
       {/* ── MOBILE : lanceur en tuiles (4 axes) — écran volontairement différent du bureau ── */}
       <MobileTiles className="md:hidden touch:!block" />
 
-      {/* ── BUREAU : KPI + bento ── */}
+      {/* ── BUREAU : KPI + poids par fruit + bento ── */}
       <div className="hidden md:block touch:!hidden space-y-4">
         <KpiStrip />
+        <PoidsFamilles />
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
           <div className="lg:col-span-7 space-y-4 min-w-0">
             <DernieresCommandes />
           </div>
           <div className="lg:col-span-5 space-y-4 min-w-0">
-            <AlertesEncours />
             <PromosAccueil />
           </div>
         </div>
