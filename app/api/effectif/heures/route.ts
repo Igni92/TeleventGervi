@@ -142,9 +142,15 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const entry = await saveWeekEntry(target, week, body.days, c.email, {
-      option: body.option, recupDates: body.recupDates,
-    });
+    // Le choix récup / paiement est une décision de l'EMPLOYEUR : un non-manager
+    // ne peut pas le poser ni le modifier. On conserve alors la décision déjà
+    // enregistrée, quelle que soit la charge utile envoyée.
+    let opt: { option?: unknown; recupDates?: unknown } = { option: body.option, recupDates: body.recupDates };
+    if (!c.isManager) {
+      const existing = await getWeekEntry(target, week);
+      opt = { option: existing?.option ?? null, recupDates: existing?.recupDates };
+    }
+    const entry = await saveWeekEntry(target, week, body.days, c.email, opt);
     const profile = await getProfile(target);
     return NextResponse.json({ ok: true, week, user: target, entry, calc: computeWeek(entry.days, profile.weeklyHours) });
   } catch (e) {

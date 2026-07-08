@@ -15,14 +15,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Clock3, ChevronLeft, ChevronRight, Loader2, Save, Printer, Wand2,
-  CalendarDays, RotateCcw, Plus, Minus, Coins, CalendarCheck, SlidersHorizontal, X,
+  CalendarDays, RotateCcw, Plus, Minus, Coins, CalendarCheck, SlidersHorizontal,
+  Lock, Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { displayPersonName } from "@/lib/userNames";
 import {
   JOURS_SEMAINE, DEFAULT_PROFILE, computeWeek, fmtHM,
-  isoWeekId, shiftWeek, weekDates, weekLabel,
+  isoWeekId, shiftWeek, weekDates, weekLabel, isDateInWeek, daysAfterWeek,
   monthIdOf, shiftMonth, monthLabel,
   type DayHours, type HoursProfile, type WeekCalc, type MonthCalc, type HeuresOption,
 } from "@/lib/heuresCalc";
@@ -44,6 +45,13 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
   const [week, setWeek] = useState(() => isoWeekId(new Date()));
   const dates = useMemo(() => weekDates(week), [week]);
 
+  // ── Le choix récup / paiement est une décision de l'EMPLOYEUR : verrouillé
+  //    pour le salarié, modifiable seulement par un manager. Un manager peut en
+  //    plus ouvrir la semaine d'un salarié (`who` = son e-mail ; "" = soi). ──
+  const canEditOption = isManager;
+  const [who, setWho] = useState("");
+  const userQS = who ? `&user=${encodeURIComponent(who)}` : "";
+
   /* ── Ma semaine ── */
   const [days, setDays] = useState<DayHours[]>(EMPTY_WEEK());
   const [profile, setProfile] = useState<HoursProfile>({ ...DEFAULT_PROFILE, typicalDay: { ...DEFAULT_PROFILE.typicalDay } });
@@ -58,19 +66,19 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch(`/api/effectif/heures?week=${week}`, { cache: "no-store" });
+      const r = await fetch(`/api/effectif/heures?week=${week}${userQS}`, { cache: "no-store" });
       const j = await r.json().catch(() => null);
       if (j?.ok) {
         setDays(j.entry?.days ?? EMPTY_WEEK());
         setOption(j.entry?.option ?? null);
-        setRecupDates(Array.isArray(j.entry?.recupDates) ? j.entry.recupDates : []);
+        setRecupDates(Array.isArray(j.entry?.recupDates) ? j.entry.recupDates.filter(Boolean) : []);
         if (j.profile) setProfile(j.profile);
         setDirty(false);
       }
     } finally {
       setLoading(false);
     }
-  }, [week]);
+  }, [week, userQS]);
   useEffect(() => { load(); }, [load]);
 
   const calc = useMemo(() => computeWeek(days, profile.weeklyHours), [days, profile.weeklyHours]);
@@ -85,21 +93,26 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
   const hasSupp = calc.sup25Min + calc.sup50Min > 0;
   const showOptions = hasSupp || option != null;
 
-  // Un clic sur l'option déjà active la désélectionne (retour à « à décider »).
-  // En passant sur « récup », on amorce un champ date vide (comme le formulaire papier).
+  // Semaine déjà AU CONTRAT (≥ 35 h faites) → on n'y pose pas de récup : elle se
+  // prend sur une autre semaine. Un clic sur l'option active la désélectionne.
+  const weekIsFull = calc.totalMin >= calc.contractMin && calc.contractMin > 0;
+
   const chooseOption = (opt: HeuresOption) => {
-    const next = option === opt ? null : opt;
-    setOption(next);
-    if (next === "recup" && recupDates.length === 0) setRecupDates([""]);
+    if (!canEditOption) return;
+    setOption((cur) => (cur === opt ? null : opt));
     setDirty(true);
   };
-  const setRecupDate = (i: number, val: string) => {
-    setRecupDates((cur) => cur.map((d, k) => (k === i ? val : d)));
-    setDirty(true);
-  };
-  const addRecupDate = () => { setRecupDates((cur) => [...cur, ""]); setDirty(true); };
-  const removeRecupDate = (i: number) => {
-    setRecupDates((cur) => cur.filter((_, k) => k !== i));
+
+  // Ajout/retrait d'un jour de récup. INTERDIT dans la semaine des heures supp
+  // (36h15 lun→ven ⇒ pas de récup le samedi de CETTE semaine) : la récup se pose
+  // sur une autre semaine.
+  const toggleRecupDay = (dateISO: string) => {
+    if (!canEditOption || !dateISO) return;
+    if (weekIsFull && isDateInWeek(dateISO, week)) {
+      toast.error("Récup impossible cette semaine — le contrat y est déjà atteint. À poser sur une autre semaine.");
+      return;
+    }
+    setRecupDates((cur) => (cur.includes(dateISO) ? cur.filter((d) => d !== dateISO) : [...cur, dateISO].sort()));
     setDirty(true);
   };
 
@@ -130,7 +143,10 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
       const r = await fetch("/api/effectif/heures", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          week, days, option,
+          week, days, user: who || undefined,
+          // Le choix est renvoyé tel quel ; le SERVEUR ignore toute modif venant
+          // d'un non-manager (la décision employeur déjà enregistrée est conservée).
+          option,
           recupDates: option === "recup" ? recupDates.filter(Boolean) : [],
         }),
       });
@@ -154,7 +170,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
     try {
       const r = await fetch("/api/effectif/heures", {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile: next }),
+        body: JSON.stringify({ profile: next, user: who || undefined }),
       });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) toast.error(j?.error || "Échec de l'enregistrement du profil");
@@ -175,7 +191,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
   const loadMonth = useCallback(async () => {
     setMonthLoading(true);
     try {
-      const ownP = fetch(`/api/effectif/heures?month=${month}`, { cache: "no-store" })
+      const ownP = fetch(`/api/effectif/heures?month=${month}${userQS}`, { cache: "no-store" })
         .then((r) => r.json()).catch(() => null);
       const teamP = isManager
         ? fetch(`/api/effectif/heures?month=${month}&all=1`, { cache: "no-store" })
@@ -187,7 +203,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
     } finally {
       setMonthLoading(false);
     }
-  }, [month, isManager]);
+  }, [month, isManager, userQS]);
   useEffect(() => { loadMonth(); }, [loadMonth]);
 
   const printMyMonth = () => {
@@ -244,6 +260,23 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
             )}
           </div>
         }>
+        {/* Manager : ouvrir la semaine d'un salarié pour saisir/corriger ses
+            heures et POSER la décision récup/paiement (réservée à l'employeur). */}
+        {isManager && (teamMonth?.length ?? 0) > 0 && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg border border-border bg-secondary/20 px-3 py-2">
+            <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <label htmlFor="rh-who" className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground shrink-0">Salarié</label>
+            <select id="rh-who" value={who} onChange={(e) => setWho(e.target.value)}
+              className="h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-brand-500">
+              <option value="">Mes heures</option>
+              {(teamMonth ?? []).map((r) => (
+                <option key={r.email} value={r.email}>{displayFullName(r.name)}</option>
+              ))}
+            </select>
+            {who && <span className="hidden sm:inline text-[10.5px] font-semibold text-brand-700 dark:text-brand-300 whitespace-nowrap">édition employeur</span>}
+          </div>
+        )}
+
         {/* Profil : contrat hebdo + journée type (responsive : les blocs passent
             à la ligne sur mobile, le bouton « journée type » prend la largeur). */}
         <div className="mb-3 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-2.5">
@@ -388,17 +421,17 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
         </div>
 
         {/* ── OPTIONS « heures supp » (récupération vs paiement) ──
-            Reprend le formulaire papier : deux cases exclusives ; en récup, les
-            dates concernées. Le choix part sur l'état mensuel (PDF compta + salarié).
-            Mobile-first : cases empilées < sm, côte à côte ≥ sm ; dates en lignes
-            pleine largeur sur téléphone. */}
+            DÉCISION DE L'EMPLOYEUR : un manager choisit ; le salarié la voit en
+            LECTURE SEULE. La récup se pose sur une AUTRE semaine (jamais sur la
+            semaine des supp, déjà ≥ contrat). Mobile-first. */}
         {showOptions && (
           <div className="mt-3 rounded-lg border border-border bg-secondary/20 p-3">
             <div className="mb-2 flex items-center gap-1.5">
               <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <span className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
-                Heures supp — que faire&nbsp;?
+                Heures supp — {canEditOption ? "que faire ?" : "décision de l'employeur"}
               </span>
+              {!canEditOption && <Lock className="h-3 w-3 text-muted-foreground shrink-0" aria-label="Réservé à l'employeur" />}
               {hasSupp && (
                 <span className="ml-auto text-[11px] tnum font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">
                   {fmtHM(calc.sup25Min + calc.sup50Min)} supp
@@ -406,44 +439,48 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <OptionChoice active={option === "recup"} onClick={() => chooseOption("recup")}
-                icon={<CalendarCheck className="h-4 w-4" />} label="Récupération" hint="en nombre de jours" />
-              <OptionChoice active={option === "paiement"} onClick={() => chooseOption("paiement")}
-                icon={<Coins className="h-4 w-4" />} label="Paiement" hint="des heures supp." />
-            </div>
-
-            {/* Dates concernées — uniquement pour la récupération. */}
-            {option === "recup" && (
-              <div className="mt-3">
-                <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1.5">
-                  Dates concernées
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {recupDates.map((d, i) => (
-                    <div key={i} className="flex w-full sm:w-auto items-center gap-1">
-                      <input type="date" value={d} disabled={loading}
-                        onChange={(e) => setRecupDate(i, e.target.value)}
-                        aria-label={`Date de récupération ${i + 1}`}
-                        className="h-9 flex-1 sm:flex-none min-w-0 rounded-md border border-border bg-background px-2 text-[13px] tnum focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50" />
-                      <button type="button" onClick={() => removeRecupDate(i)} aria-label="Retirer cette date"
-                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                  <button type="button" onClick={addRecupDate}
-                    className="inline-flex w-full sm:w-auto items-center justify-center gap-1.5 h-9 px-3 rounded-md border border-dashed border-border text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60">
-                    <Plus className="h-3.5 w-3.5" /> Ajouter une date
-                  </button>
+            {canEditOption ? (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <OptionChoice active={option === "recup"} onClick={() => chooseOption("recup")}
+                    icon={<CalendarCheck className="h-4 w-4" />} label="Récupération" hint="en jours, autre semaine" />
+                  <OptionChoice active={option === "paiement"} onClick={() => chooseOption("paiement")}
+                    icon={<Coins className="h-4 w-4" />} label="Paiement" hint="des heures supp." />
                 </div>
-                <p className="mt-1.5 text-[11px] text-muted-foreground">Jours de repos posés en récupération des heures supp.</p>
+
+                {option === "recup" && (
+                  <RecupDayPicker week={week} recupDates={recupDates} onToggle={toggleRecupDay} />
+                )}
+
+                <p className="mt-2.5 text-[11px] text-muted-foreground">
+                  Le choix est reporté sur l&apos;état mensuel (PDF) transmis à la compta et au salarié.
+                </p>
+              </>
+            ) : (
+              /* Salarié : lecture seule — il voit la décision, il ne la pose pas. */
+              <div className="text-[12.5px]">
+                {option === "recup" ? (
+                  <div>
+                    <span className="inline-flex items-center gap-1.5 font-semibold text-sky-700 dark:text-sky-300">
+                      <CalendarCheck className="h-3.5 w-3.5" /> Récupération{recupDates.length ? ` · ${recupDates.length} j` : ""}
+                    </span>
+                    {recupDates.length > 0 && (
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {recupDates.map((d) => (
+                          <span key={d} className="inline-flex items-center rounded-md bg-secondary px-1.5 py-0.5 text-[11px] tnum text-foreground">{fmtDayShort(d)}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : option === "paiement" ? (
+                  <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-300">
+                    <Coins className="h-3.5 w-3.5" /> Paiement des heures supp.
+                  </span>
+                ) : (
+                  <span className="italic text-muted-foreground">En attente de la décision de l&apos;employeur.</span>
+                )}
               </div>
             )}
-
-            <p className="mt-2.5 text-[11px] text-muted-foreground">
-              Le choix est reporté sur l&apos;état mensuel (PDF) transmis à la compta et au salarié.
-            </p>
           </div>
         )}
 
@@ -703,6 +740,67 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
 function displayFullName(raw: string): string {
   if (raw.includes("@")) return displayPersonName(raw);
   return raw;
+}
+
+/** « 2026-07-13 » → « lun. 13/07 » (jour de récup). */
+function fmtDayShort(iso: string): string {
+  return new Date(`${iso}T12:00:00Z`).toLocaleDateString("fr-FR", { timeZone: "UTC", weekday: "short", day: "2-digit", month: "2-digit" });
+}
+
+/** Sélecteur de jours de récup FACILE : jours cliquables des semaines suivantes
+ *  (jamais la semaine des supp — déjà au contrat) + saisie d'une autre date.
+ *  Un clic ajoute/retire le jour. */
+function RecupDayPicker({ week, recupDates, onToggle }: {
+  week: string; recupDates: string[]; onToggle: (d: string) => void;
+}) {
+  // Propositions = jours après la semaine (dimanches retirés), coupés à 8.
+  const suggestions = daysAfterWeek(week, 12)
+    .filter((d) => new Date(`${d}T12:00:00Z`).getUTCDay() !== 0)
+    .slice(0, 8);
+  const firstAllowed = daysAfterWeek(week, 1)[0];   // 1er jour hors semaine (min saisie)
+  // Dates déjà retenues mais hors des propositions (dates plus lointaines).
+  const extra = recupDates.filter((d) => !suggestions.includes(d)).sort();
+
+  return (
+    <div className="mt-3">
+      <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1.5">
+        Jours de récupération <span className="normal-case font-normal text-muted-foreground/80">— cliquez pour sélectionner</span>
+      </label>
+      <div className="flex flex-wrap gap-1.5">
+        {suggestions.map((d) => (
+          <DayChip key={d} date={d} active={recupDates.includes(d)} onClick={() => onToggle(d)} />
+        ))}
+        {extra.map((d) => (
+          <DayChip key={d} date={d} active onClick={() => onToggle(d)} />
+        ))}
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <span className="shrink-0 text-[11px] text-muted-foreground">Autre date&nbsp;:</span>
+        <input type="date" min={firstAllowed}
+          onChange={(e) => { const v = e.target.value; if (v) onToggle(v); e.target.value = ""; }}
+          aria-label="Ajouter une autre date de récupération"
+          className="h-8 rounded-md border border-border bg-background px-2 text-[12.5px] tnum focus:outline-none focus:ring-1 focus:ring-brand-500" />
+      </div>
+      <p className="mt-1.5 text-[11px] text-muted-foreground">
+        Repos compensateur posé <b className="font-semibold">en dehors</b> de la semaine des heures supp.
+      </p>
+    </div>
+  );
+}
+
+/** Puce « jour » toggle (récup) — cible tactile confortable, état sélectionné. */
+function DayChip({ date, active, onClick }: { date: string; active: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={active}
+      className={`inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border text-[12px] font-semibold tnum transition-colors ${
+        active
+          ? "border-sky-500/50 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+          : "border-border bg-background text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+      }`}>
+      {active && <CalendarCheck className="h-3 w-3 shrink-0" />}
+      {fmtDayShort(date)}
+    </button>
+  );
 }
 
 /** Case d'option « heures supp » façon radio (icône + libellé + puce active).

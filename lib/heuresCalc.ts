@@ -160,6 +160,28 @@ export function shiftWeek(weekId: string, delta: number): string {
   return isoWeekId(new Date(monday.getUTCFullYear(), monday.getUTCMonth(), monday.getUTCDate()));
 }
 
+/** La date ISO « YYYY-MM-DD » tombe-t-elle dans la semaine ISO (Lun→Dim) ?
+ *  Sert à INTERDIRE une récup posée dans la semaine même des heures supp :
+ *  on ne récupère pas une semaine déjà à/au-delà du contrat. */
+export function isDateInWeek(dateISO: string, weekId: string): boolean {
+  const d = weekDates(weekId);
+  return d.length === 7 && dateISO >= d[0] && dateISO <= d[6];
+}
+
+/** Les `count` jours calendaires qui SUIVENT la semaine (à partir du lendemain
+ *  du dimanche) — propositions de jours de récup HORS de la semaine des supp.
+ *  ISO « YYYY-MM-DD ». */
+export function daysAfterWeek(weekId: string, count: number): string[] {
+  const dates = weekDates(weekId);
+  if (dates.length !== 7 || count <= 0) return [];
+  const sunday = new Date(`${dates[6]}T12:00:00Z`);
+  return Array.from({ length: count }, (_, i) => {
+    const d = new Date(sunday);
+    d.setUTCDate(sunday.getUTCDate() + i + 1);
+    return d.toISOString().slice(0, 10);
+  });
+}
+
 /* ───────────────────────── Mois (état MENSUEL compta) ─────────────────────────
  * La saisie et le calcul des heures supp restent HEBDOMADAIRES (règle légale :
  * les majorations s'apprécient à la semaine civile). L'état transmis à la

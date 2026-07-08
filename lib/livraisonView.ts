@@ -153,8 +153,9 @@ export function computeStatusCounts(carriers: Carrier[]): { ventes: number; aPre
 
 /* ─────────────────────── Filtre par segment client ────────────────────────── */
 
-/** Filtres de segment client : « TOUT » (y compris les clients sans segment)
- *  ou un segment précis (CHR / EXPORT / GMS). */
+/** Filtres de segment client : « TOUT » (les 3 segments livrés) ou un segment
+ *  précis (CHR / EXPORT / GMS). Le détail livraison est déjà restreint à ces
+ *  segments en amont (keepDeliverableClients) — pas de clients hors-segment. */
 export type SegmentTab = "TOUT" | "CHR" | "EXPORT" | "GMS";
 
 export const SEGMENT_LABEL: Record<SegmentTab, string> = {
@@ -164,9 +165,10 @@ export const SEGMENT_LABEL: Record<SegmentTab, string> = {
   GMS: "GMS",
 };
 
-/** Recoupe les groupes transporteur par segment client. « TOUT » = aucune
- *  restriction (les clients sans segment restent visibles). Les métriques des
- *  groupes ne sont PAS recalculées ici — computeView s'en charge en aval. */
+/** Recoupe les groupes transporteur par segment client. « TOUT » = pas de
+ *  restriction supplémentaire (les données sont déjà limitées aux 3 segments
+ *  livrés). Les métriques des groupes ne sont PAS recalculées ici —
+ *  computeView s'en charge en aval. */
 export function filterBySegment(carriers: Carrier[], seg: SegmentTab): Carrier[] {
   if (seg === "TOUT") return carriers;
   return carriers
@@ -175,7 +177,7 @@ export function filterBySegment(carriers: Carrier[], seg: SegmentTab): Carrier[]
 }
 
 /** Comptes par segment — même règle que computeStatusCounts : les BL
- *  « avoir / exclu » ne comptent pas. « TOUT » inclut les clients sans segment. */
+ *  « avoir / exclu » ne comptent pas. « TOUT » = les 3 segments livrés. */
 export function computeSegmentCounts(carriers: Carrier[]): Record<SegmentTab, number> {
   const counts: Record<SegmentTab, number> = { TOUT: 0, CHR: 0, EXPORT: 0, GMS: 0 };
   for (const car of carriers) for (const d of car.docs) {
@@ -185,6 +187,27 @@ export function computeSegmentCounts(carriers: Carrier[]): Record<SegmentTab, nu
     if (t === "CHR" || t === "EXPORT" || t === "GMS") counts[t]++;
   }
   return counts;
+}
+
+/* ────────────────── Restriction aux clients livrés en propre ─────────────────
+ * Le détail livraison ne concerne QUE les clients d'un des 3 segments livrés :
+ * GMS, CHR, EXPORT. Les clients sans segment (retrait comptoir, MIN, divers…)
+ * ne doivent jamais apparaître — ni listés, ni comptés, ni dans les totaux. */
+
+/** Les seuls segments qui apparaissent dans le détail livraison. */
+export const DELIVERABLE_SEGMENTS = ["GMS", "CHR", "EXPORT"] as const;
+
+/** Le client (par son segment) est-il livré depuis le détail livraison ? */
+export function isDeliverableSegment(clientType: string | null | undefined): boolean {
+  return clientType === "GMS" || clientType === "CHR" || clientType === "EXPORT";
+}
+
+/** Ne garde que les commandes des clients GMS / CHR / EXPORT ; les groupes
+ *  transporteur vidés de tout client livrable disparaissent. */
+export function keepDeliverableClients(carriers: Carrier[]): Carrier[] {
+  return carriers
+    .map((c) => ({ ...c, docs: c.docs.filter((d) => isDeliverableSegment(d.clientType)) }))
+    .filter((c) => c.docs.length > 0);
 }
 
 /* ───────────────────────── Vue filtrée par onglet ─────────────────────────── */
