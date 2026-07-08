@@ -3,7 +3,7 @@ import {
   parseHM, dayMinutes, computeWeek, fmtHM,
   isoWeekId, isWeekId, weekDates, shiftWeek,
   isMonthId, shiftMonth, monthWeeks, aggregateMonth,
-  isHeuresOption, HEURES_OPTION_LABEL,
+  isHeuresOption, HEURES_OPTION_LABEL, isDateInWeek, daysAfterWeek,
   type DayHours,
 } from "./heuresCalc";
 
@@ -151,5 +151,19 @@ describe("heuresCalc — option compta des heures supp", () => {
   it("libellés canoniques présents pour les deux options", () => {
     expect(HEURES_OPTION_LABEL.recup).toMatch(/récup/i);
     expect(HEURES_OPTION_LABEL.paiement).toMatch(/paiement/i);
+  });
+
+  it("isDateInWeek : la récup ne peut pas tomber dans la semaine des supp (S28 = 6→12 juil.)", () => {
+    expect(isDateInWeek("2026-07-06", "2026-W28")).toBe(true);   // lundi
+    expect(isDateInWeek("2026-07-11", "2026-W28")).toBe(true);   // samedi → interdit
+    expect(isDateInWeek("2026-07-12", "2026-W28")).toBe(true);   // dimanche
+    expect(isDateInWeek("2026-07-13", "2026-W28")).toBe(false);  // lundi S29 → autorisé
+    expect(isDateInWeek("2026-07-05", "2026-W28")).toBe(false);  // dimanche S27
+  });
+
+  it("daysAfterWeek : propose les jours HORS de la semaine (à partir du lendemain du dimanche)", () => {
+    const next = daysAfterWeek("2026-W28", 3);
+    expect(next).toEqual(["2026-07-13", "2026-07-14", "2026-07-15"]);
+    next.forEach((d) => expect(isDateInWeek(d, "2026-W28")).toBe(false));
   });
 });

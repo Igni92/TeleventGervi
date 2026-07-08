@@ -360,3 +360,18 @@ et reportée sur l'état mensuel. Mobile-first, propre dans tous les états d'af
 | Bandeau événements (tous les écrans, `EventsBanner`) | Libellé générique **« Événements »** répété en tête du bandeau. | Mot retiré : chaque puce porte déjà son événement (emoji + nom + date) ; un discret repère calendrier ouvre la ligne. |
 | Module Promo (`PromoBanner`) | **Accolade rose** à gauche (`border-l-4 border-l-rose-500`). | Retirée — contour neutre ; l'identité promo reste portée par le label rouge « PROMOS ». |
 | N° de documents (BL, commandes, entrées, EM, sorties/entrées SAP…) | **`#2700`** collé — lecture contrainte, confusion. | **`# 2700`** (espace après `#`) dans tous les affichages de documents : listes, cartes, tableaux, détails, dialogues, confirmations d'ajout et infobulles. |
+
+---
+
+## 🕐 Heures supp — décision EMPLOYEUR + garde-fou récup + sélection facilitée
+
+Le choix récup / paiement des heures supp est désormais une **décision de l'employeur**,
+avec un garde-fou légal (pas de récup sur une semaine déjà au contrat) et une
+sélection des jours de récup en un clic.
+
+| Élément | Avant | Après |
+|---------|-------|-------|
+| Qui décide | Chaque salarié réglait récup/paiement dans « Mes heures ». | **Réservé au manager.** Le salarié voit la décision en **lecture seule** (cadenas, « en attente de la décision de l'employeur »). Le serveur ignore toute modif du choix venant d'un non-manager (la décision enregistrée est conservée). |
+| Régler pour un salarié | Impossible (écran perso uniquement). | Le manager choisit un **salarié dans un sélecteur** en tête de « Mes heures » et pose sa décision (via `?user=` déjà supporté par l'API). |
+| Récup sur semaine pleine | Aucun contrôle. | **Interdit** de poser un jour de récup dans la semaine des heures supp (ex. 36h15 lun→ven ⇒ pas de récup le samedi de cette semaine) : le repos compensateur se prend sur une **autre** semaine (`isDateInWeek`). |
+| Choix des jours de récup | Champs date ajoutés un par un. | **Puces « jour » cliquables** (jours des semaines suivantes, dimanches exclus) + « autre date » bornée après la semaine (`daysAfterWeek`). Un clic = ajout/retrait. |
