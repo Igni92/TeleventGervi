@@ -80,6 +80,33 @@ export async function POST(req: Request) {
     //    troncature et fait remonter le récent en premier (cf. pullAllSalesSliced).
     const docs = await pullAllSalesSliced(from, new Date());
 
+    // 4) Repose les watermarks (max UpdateDate vu) — SINON le curseur reste NEUF
+    //    (tous nuls, cf. étape 1) et le prochain tick /sync/mirror le prendrait
+    //    pour un miroir jamais seedé → il relancerait un bootstrap 3 ans complet
+    //    à chaque passage au lieu de basculer en incrémental. On reseed donc le
+    //    curseur comme le fait /sync/backfill.
+    await prisma.sapMirrorCursor.upsert({
+      where: { id: 1 },
+      update: {
+        lastInvoiceUpdate: docs.maxUpdate.invoice ?? undefined,
+        lastOrderUpdate: docs.maxUpdate.order ?? undefined,
+        lastPdnUpdate: docs.maxUpdate.pdn ?? undefined,
+        lastCreditNoteUpdate: docs.maxUpdate.creditNote ?? undefined,
+        lastPurchaseReturnUpdate: docs.maxUpdate.purchaseReturn ?? undefined,
+        lastBpUpdate: new Date(),
+        lastTickAt: new Date(),
+      },
+      create: {
+        id: 1,
+        lastInvoiceUpdate: docs.maxUpdate.invoice,
+        lastOrderUpdate: docs.maxUpdate.order,
+        lastPdnUpdate: docs.maxUpdate.pdn,
+        lastCreditNoteUpdate: docs.maxUpdate.creditNote,
+        lastPurchaseReturnUpdate: docs.maxUpdate.purchaseReturn,
+        lastBpUpdate: new Date(),
+      },
+    });
+
     // Purge les agrégats pilotage en cache (TTL 5 min) pour que le cockpit
     // reflète la resync immédiatement, sans attendre l'expiration.
     invalidate("pilotage:");
