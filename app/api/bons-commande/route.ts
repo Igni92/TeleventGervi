@@ -363,15 +363,28 @@ export async function POST(req: NextRequest) {
   if (!Number.isInteger(docEntry) || docEntry <= 0) return NextResponse.json({ error: "docEntry invalide" }, { status: 400 });
 
   // ── Supprimer une offre ──────────────────────────────────────
+  // ⚠️ SAP n'autorise pas DELETE sur un devis (« action not supported for this
+  // object »). On l'ANNULE via l'action Service Layer `Cancel` ; à défaut on la
+  // CLÔTURE (`Close`). Dans les deux cas l'offre quitte l'onglet (le GET ne liste
+  // que les devis ouverts ET non annulés).
   if (body.action === "delete") {
+    // Les actions SL (Cancel/Close) sont des POST sans corps sur Quotations(id)/Action.
+    const runAction = (action: "Cancel" | "Close") => sap.post(`Quotations(${docEntry})/${action}`, null);
     try {
-      await sap.delete(`Quotations(${docEntry})`);
-      console.log(`[BonCommande] Offre docEntry ${docEntry} supprimée.`);
-      return NextResponse.json({ ok: true, deleted: true, docEntry });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      console.error(`[BonCommande] Suppression offre ${docEntry} échouée:`, message);
-      return NextResponse.json({ ok: false, error: message }, { status: 500 });
+      await runAction("Cancel");
+      console.log(`[BonCommande] Offre docEntry ${docEntry} annulée (Cancel).`);
+      return NextResponse.json({ ok: true, deleted: true, method: "cancel", docEntry });
+    } catch (eCancel) {
+      console.warn(`[BonCommande] Cancel offre ${docEntry} échoué, repli Close:`, (eCancel as Error).message);
+      try {
+        await runAction("Close");
+        console.log(`[BonCommande] Offre docEntry ${docEntry} clôturée (Close).`);
+        return NextResponse.json({ ok: true, deleted: true, method: "close", docEntry });
+      } catch (eClose) {
+        const message = eClose instanceof Error ? eClose.message : String(eClose);
+        console.error(`[BonCommande] Annulation offre ${docEntry} échouée (Cancel+Close):`, message);
+        return NextResponse.json({ ok: false, error: message }, { status: 500 });
+      }
     }
   }
 
