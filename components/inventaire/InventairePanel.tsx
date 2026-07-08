@@ -138,6 +138,12 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   const [prepOpen, setPrepOpen] = useState(false);
   const [prepared, setPrepared] = useState<Set<number>>(new Set());
 
+  // Régularisation des VENTES COMPTOIR (clients hors GMS/CHR/Export) : marque les
+  // commandes ouvertes existantes comme préparées + livrées (elles partent à la
+  // vente, jamais en préparation). Réservée aux responsables (canManage).
+  const [comptoirRunning, setComptoirRunning] = useState(false);
+  const [comptoirResult, setComptoirResult] = useState<{ scanned: number; marked: number } | null>(null);
+
   // Régularisation de stock SAP (aperçu + confirmation) — réservée admin/direction.
   const [adjustFor, setAdjustFor] = useState<SessionDTO | null>(null);
   const [adjustPlan, setAdjustPlan] = useState<AdjustPreview | "loading" | null>(null);
@@ -204,6 +210,32 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
       return next;
     });
   }, []);
+
+  // Régularise l'EXISTANT : passe les commandes comptoir ouvertes en préparées +
+  // livrées (les nouvelles le sont déjà d'office à la création).
+  const runBackfillComptoir = useCallback(async () => {
+    setComptoirRunning(true);
+    try {
+      const res = await fetch("/api/inventaire/backfill-comptoir", { method: "POST" });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.ok) {
+        setComptoirResult({ scanned: json.scanned, marked: json.marked });
+        toast.success(
+          json.marked > 0
+            ? `${json.marked} vente(s) comptoir passée(s) en préparée + livrée.`
+            : "Aucune vente comptoir à régulariser — tout est déjà à jour.",
+          { duration: 7000 },
+        );
+        loadPrepOrders({ open: false });   // les commandes marquées sortent de la pré-étape
+      } else {
+        toast.error(json?.error ?? "Échec de la régularisation des ventes comptoir.");
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setComptoirRunning(false);
+    }
+  }, [loadPrepOrders]);
 
   // Pré-étape chargée d'office (repliée) : la réintégration des commandes non
   // « faites » s'applique sans aucune saisie manuelle.
@@ -1136,6 +1168,28 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                   a été préparée sans être pointée « faite ». +{fmt(addedColis)} colis.
                 </p>
               </>
+            )}
+          </div>
+        )}
+
+        {/* Ventes comptoir : régularisation de l'existant (responsables). Les
+            nouvelles commandes hors GMS/CHR/Export sont préparées + livrées
+            d'office à la création — ce bouton rattrape les commandes déjà en base. */}
+        {canManage && (
+          <div className="border-t border-border/60 pt-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="min-w-0 text-[11.5px] text-muted-foreground">
+                <b className="text-foreground">Ventes comptoir</b> — les commandes hors GMS/CHR/Export partent à la vente : passe l&apos;existant en <b>préparé + livré</b> pour ne plus les compter comme non préparées.
+              </p>
+              <Button variant="outline" size="sm" className="h-8 shrink-0" onClick={runBackfillComptoir} disabled={comptoirRunning}>
+                {comptoirRunning ? <Loader2 className="!size-3.5 animate-spin" /> : <PackageCheck className="!size-3.5" />}
+                Régulariser
+              </Button>
+            </div>
+            {comptoirResult && (
+              <p className="mt-1.5 text-[10.5px] text-muted-foreground">
+                {comptoirResult.scanned} commande(s) ouverte(s) scannée(s) · {comptoirResult.marked} vente(s) comptoir régularisée(s).
+              </p>
             )}
           </div>
         )}

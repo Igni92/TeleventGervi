@@ -156,3 +156,29 @@ export function groupCodesForSegment(segment: Segment): number[] | null {
   if (segment === "ALL") return null;
   return SEGMENT_CODES[segment];
 }
+
+/** Les 3 segments LIVRÉS (préparation + tournée) — les seuls du Détail livraison. */
+const DELIVERED_SEGMENTS = new Set<ClientSegment>(["GMS", "CHR", "EXPORT"]);
+
+/**
+ * Vente « comptoir » = client HORS des 3 segments livrés (GMS / CHR / EXPORT).
+ *
+ * Ces commandes (retrait comptoir, MIN, Rungis, divers) ne passent pas par la
+ * file de préparation/livraison : leur marchandise part à la vente. On les
+ * considère donc préparées + livrées dès la création du bon — sinon elles
+ * traînent indéfiniment en « pas préparé » et faussent l'inventaire.
+ *
+ * Segment déduit du groupe SAP (fiable), avec repli sur le `type` client : si
+ * l'un des deux signale un segment livré, ce N'EST PAS une vente comptoir.
+ */
+export function isComptoirClient(opts: {
+  type?: string | null;
+  groupName?: string | null;
+  groupCode?: number | null;
+}): boolean {
+  const seg = segmentOfGroup(opts.groupName ?? null, opts.groupCode ?? null);
+  if (seg && DELIVERED_SEGMENTS.has(seg)) return false;
+  const t = (opts.type ?? "").trim().toUpperCase();
+  if (t === "GMS" || t === "CHR" || t === "EXPORT") return false;
+  return true;
+}

@@ -429,3 +429,23 @@ refuse, avec **push** + suivi in-app.
 |---------|-------|-------|
 | Clic droit | Ouvrait directement le détail des lots. | **Menu déroulant** : **« Détails (lots en stock) »** et **« Tout mettre »** (ajoute le produit au panier avec sa quantité dispo). |
 | Détail des lots | Lots issus des EM récentes (`/api/lots/candidates`) : **lent** (scan SAP) et incluait des lots **plus en stock**. | Source **table locale `ProductBatch`** (`/api/products/[id]/batches?inStock=1`) : **rapide** (aucun appel SAP), **uniquement les lots encore en stock** (`quantity > 0`), avec **quantité** + **DLC** + entrepôt, triés **FEFO** (DLC la plus proche d'abord). |
+
+---
+
+## 📦 Inventaire — ventes comptoir « préparées + livrées » d'office
+
+Les commandes de clients **hors des 3 segments livrés** (GMS / CHR / Export) sont
+des **ventes comptoir** : la marchandise part à la vente, elles n'ont rien à faire
+dans la file « à préparer ». Elles restaient pourtant marquées **non préparées /
+non parties**, faussant le suivi et l'inventaire.
+
+| Élément | Avant | Après |
+|---------|-------|-------|
+| Nouvelle vente comptoir | Créée comme une commande à préparer (« pas préparé »). | Marquée **« faite » + « départ »** dès la création du bon (`/api/sap/orders`), uniquement pour une vraie commande (jamais une offre client). Segment déduit du **groupe SAP** (repli type client) via `isComptoirClient`. |
+| Existant | Des dizaines de commandes comptoir ouvertes traînaient en « non préparé ». | Bouton **« Régulariser »** (pré-étape inventaire, responsables) → `POST /api/inventaire/backfill-comptoir` : scanne les commandes ouvertes, marque **préparé + livré** celles hors GMS/CHR/Export. **Idempotent** ; ne touche **jamais** un CardCode non résolu (prudence : pourrait être une adresse GMS). |
+
+- Persistance : `markComptoirDelivered(docEntry, by)` écrit d'un coup `livfaite:` +
+  `livdepart:` (AppSetting) — aucun appel ni écriture SAP.
+- Décision de segment **pure et testée** (`lib/segments` : `isComptoirClient`) —
+  le groupe SAP prime, repli sur le `type` client ; par défaut (aucun signal) =
+  comptoir.

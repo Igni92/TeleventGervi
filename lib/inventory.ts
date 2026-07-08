@@ -371,6 +371,26 @@ export async function setDeliveryDeparted(docEntry: number, departed: boolean, b
   return at;
 }
 
+/**
+ * VENTE COMPTOIR — marque une commande à la fois PRÉPARÉE (« faite ») et PARTIE
+ * (« départ ») en une passe : sa marchandise quitte le magasin dès la vente, elle
+ * n'a rien à faire dans la file « à préparer ». Idempotent (upsert), un même
+ * horodatage pour les deux marques. Utilisé à la création d'une commande hors
+ * segments livrés et par la régularisation en masse de l'existant.
+ */
+export async function markComptoirDelivered(docEntry: number, by: string): Promise<void> {
+  const at = new Date().toISOString();
+  const write = (prefix: string, payload: Record<string, unknown>) => {
+    const key = prefix + docEntry;
+    const value = JSON.stringify(payload);
+    return prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+  };
+  await Promise.all([
+    write(LIV_FAITE_PREFIX, { prepared: true, at, by }),
+    write(LIV_DEPART_PREFIX, { departed: true, at, by }),
+  ]);
+}
+
 /* ──────────────────── BL « préparateur affecté » ────────────────────
  * Le préparateur qui ouvre une commande en grand se l'affecte. Persisté par
  * DocEntry (clé `livprep:<docEntry>`, valeur = { by, at }).
