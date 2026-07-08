@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { GripVertical, Eye, EyeOff, SlidersHorizontal, RotateCcw, Check, Maximize2, Minimize2 } from "lucide-react";
+import { GripVertical, Eye, EyeOff, SlidersHorizontal, RotateCcw, Check, Maximize2, Minimize2, Pencil } from "lucide-react";
 
 /**
  * Fiche RÉORGANISABLE & pleine largeur.
@@ -82,6 +82,9 @@ export function ReorderableSections({ storageKey, sections }: { storageKey: stri
   const [editing, setEditing] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  // Libellé en cours d'édition (crayon) — sinon la carte entière glisse au lieu
+  // d'éditer le texte ; on ne rend le champ modifiable qu'après un clic crayon.
+  const [editId, setEditId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   // Charge les préférences au montage (client only → pas de mismatch SSR).
@@ -220,10 +223,14 @@ export function ReorderableSections({ storageKey, sections }: { storageKey: stri
             );
           }
 
-          // Mode édition : zone d'insertion (gauche) + bloc (poignée + libellé
-          // éditable + largeur + œil). Déposer SUR le bloc = échange ; déposer
-          // sur la zone en pointillé = insertion à cette place.
+          // Mode édition : zone d'insertion (gauche) + bloc. Toute la CARTE est
+          // glissable (« prendre toute la case ») ; le libellé ne devient éditable
+          // qu'après un clic sur le crayon (sinon rester appuyé déplacerait la
+          // tuile au lieu d'éditer). Déposer SUR le bloc = échange ; sur la zone
+          // en pointillé = insertion. En édition, le contenu est non-cliquable
+          // (on réorganise, on n'interagit pas) → le glisser part de partout.
           const dragging = dragId === id;
+          const cardEditing = editId === id;
           const swapTarget = overId === `swap:${id}` && !!dragId && !dragging;
           return (
             <div key={id} className={spanClass}>
@@ -236,45 +243,59 @@ export function ReorderableSections({ storageKey, sections }: { storageKey: stri
                   onDrop={() => { if (dragId) moveBefore(dragId, id); endDrag(); }}
                 />
                 <div
+                  draggable={!cardEditing}
+                  onDragStart={cardEditing ? undefined : (e) => { e.dataTransfer.effectAllowed = "move"; setDragId(id); }}
+                  onDragEnd={endDrag}
                   onDragOver={(e) => { if (dragId && !dragging) { e.preventDefault(); setOverId(`swap:${id}`); } }}
                   onDrop={(e) => { e.preventDefault(); if (dragId && !dragging) swap(dragId, id); endDrag(); }}
-                  className={`relative min-w-0 flex-1 rounded-xl transition-all duration-150 ${dragging ? "opacity-40" : ""} ${
+                  title={cardEditing ? undefined : "Glisser pour déplacer"}
+                  className={`relative min-w-0 flex-1 rounded-xl transition-all duration-150 ${cardEditing ? "" : "cursor-grab active:cursor-grabbing"} ${dragging ? "opacity-40" : ""} ${
                     swapTarget ? "ring-2 ring-brand-500 ring-offset-2 ring-offset-background" : ""
                   }`}
                 >
                   <div className="flex items-center gap-2 mb-2 px-1">
-                    <span
-                      draggable
-                      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setDragId(id); }}
-                      onDragEnd={endDrag}
-                      title="Glisser pour déplacer"
-                      aria-label={`Déplacer ${section.label}`}
-                      className="shrink-0 inline-flex h-8 items-center text-muted-foreground cursor-grab active:cursor-grabbing hover:text-foreground"
-                    >
+                    <span className="shrink-0 inline-flex h-8 items-center text-muted-foreground/50" aria-hidden>
                       <GripVertical className="h-4 w-4" />
                     </span>
-                    <input
-                      value={labelOf(id)}
-                      onChange={(e) => rename(id, e.target.value)}
-                      aria-label={`Renommer ${section.label}`}
-                      className="flex-1 min-w-0 h-8 px-2 rounded-md border border-border bg-background text-[13px] font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    />
+                    {cardEditing ? (
+                      <input
+                        autoFocus
+                        value={labelOf(id)}
+                        onChange={(e) => rename(id, e.target.value)}
+                        onBlur={() => setEditId(null)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") setEditId(null); }}
+                        aria-label={`Renommer ${section.label}`}
+                        className="flex-1 min-w-0 h-8 px-2 rounded-md border border-border bg-background text-[13px] font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      />
+                    ) : (
+                      <span className="flex-1 min-w-0 truncate py-1.5 text-[13px] font-semibold text-foreground">{labelOf(id)}</span>
+                    )}
                     <button
-                      type="button" onClick={() => toggleWide(id)}
+                      type="button" draggable={false} onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => setEditId(cardEditing ? null : id)}
+                      title={cardEditing ? "Valider le nom" : "Renommer le bloc"}
+                      className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                    >
+                      {cardEditing ? <Check className="h-4 w-4 text-emerald-500" /> : <Pencil className="h-4 w-4" />}
+                    </button>
+                    <button
+                      type="button" draggable={false} onClick={() => toggleWide(id)}
                       title={isWide ? "Réduire en colonne" : "Pleine largeur"}
                       className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60"
                     >
                       {isWide ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
                     </button>
                     <button
-                      type="button" onClick={() => toggleHide(id)}
+                      type="button" draggable={false} onClick={() => toggleHide(id)}
                       title={isHidden ? "Afficher" : "Masquer"}
                       className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60"
                     >
                       {isHidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
-                  <div className={isHidden ? "opacity-40 pointer-events-none" : ""}>{section.node}</div>
+                  {/* Contenu NON interactif en édition (réorganisation) → le glisser
+                      démarre depuis toute la carte, aperçu visuel conservé. */}
+                  <div className={`pointer-events-none ${isHidden ? "opacity-40" : ""}`}>{section.node}</div>
                 </div>
               </div>
             </div>

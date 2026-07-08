@@ -3,7 +3,7 @@ import {
   applyNavOverrides, sanitizeNavOverrides, toEditState, fromEditState,
   moveNavRowBefore, swapNavRows,
   applyNavConfig, toNavConfig, toNavEditState, fromNavEditState, sanitizeNavCategories,
-  addNavCategory, addNavSubCategory, renameNavCategory, deleteNavCategory, moveNavCategory,
+  addNavCategory, addNavSubCategory, renameNavCategory, deleteNavCategory, moveNavCategory, moveNavCategoryBefore,
   type NavOverrides, type NavConfig,
 } from "./navOverrides";
 
@@ -261,6 +261,20 @@ describe("navOverrides — opérations de catégorie", () => {
     expect(iB).toBe(iA + 2);               // A, A1, B
     const moved = moveNavCategory(s, "B", -1);
     expect(labels(moved)).toEqual([...labels(base()), "B", "A", "A1"]);
+  });
+
+  it("moveNavCategoryBefore glisse un bloc de 1er niveau (cat + sous-cats) avant une autre", () => {
+    let s = addNavCategory(base(), "A");
+    s = addNavSubCategory(s, "A", "A1");
+    s = addNavCategory(s, "B");
+    // Glisser B avant A → B, A, A1
+    const moved = moveNavCategoryBefore(s, "B", "A");
+    expect(labels(moved)).toEqual([...labels(base()), "B", "A", "A1"]);
+    // En fin (beforeLabel null) : A revient après B
+    const end = moveNavCategoryBefore(moved, "A", null);
+    expect(labels(end)).toEqual([...labels(base()), "B", "A", "A1"]);
+    // Sous-catégorie ou cible inconnue → no-op
+    expect(moveNavCategoryBefore(s, "A1", "B")).toEqual(s);
   });
 });
 
