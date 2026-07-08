@@ -8,11 +8,12 @@
  * par article, le lot (arrivage EM) réellement en stock → PATCH U_NoLot sur la
  * commande SAP. Quand toutes les lignes ont un lot, la commande sort de l'onglet.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   PackageCheck, ChevronDown, RefreshCw, Loader2, CheckCircle2, Sparkles,
-  CalendarDays, AlertTriangle, Grape, FileText, ArrowRightCircle, Clock, Trash2, Hash, Pencil,
+  CalendarDays, AlertTriangle, Grape, FileText, ArrowRightCircle, Clock, Trash2, Hash, Pencil, Star, Truck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDeliveryDate } from "@/lib/livraison";
@@ -24,11 +25,15 @@ import { familyLotSentinel, familyOfLot } from "@/lib/gervifrais-calc";
 
 const FAMILY_LABEL = new Map(FRUIT_FAMILIES.map((f) => [f.key, f.label]));
 
-interface LotCandidate { lot: string; docNum: number; warehouse: string | null; affect: string; label?: string }
+interface LotCandidate {
+  lot: string; docNum: number; warehouse: string | null; affect: string;
+  date?: string | null; supplier?: string | null; label?: string;
+}
 interface FamilyTarget { key: string; label: string }
 interface BonLine {
   itemCode: string; itemName: string; quantity: number; colis: number;
   warehouse: string | null; marque: string | null; condt: string | null; pays: string | null;
+  variete: string | null; uvc: string | null; calibre: string | null;
   lot: string; pending: boolean; candidates: LotCandidate[]; suggested: string | null;
   /** Tag « produit » à préciser plus tard (fruit) — rappel, pas d'auto-affectation. */
   familyTarget: FamilyTarget | null;
@@ -408,10 +413,6 @@ export function BonsCommandePanel() {
                     const current = l.familyTarget
                       ? familyLotSentinel(l.familyTarget.key)
                       : l.pending ? "" : l.lot;
-                    const opts = l.candidates ?? [];
-                    // Ligne de repli pour un VRAI lot absent des candidats (jamais pour
-                    // un tag famille : il vit dans son propre optgroup).
-                    const showRawCurrent = !l.familyTarget && !l.pending && !!current && !opts.some((c) => c.lot === current);
                     return (
                       <li key={l.itemCode} className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-2.5">
                         <div className="min-w-0 flex-1">
@@ -428,48 +429,7 @@ export function BonsCommandePanel() {
                           </div>
                           <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} size="md" className="mt-1" />
                         </div>
-                        <div className="shrink-0 sm:w-[320px] flex items-center gap-2">
-                          {l.familyTarget
-                            ? <Grape className="h-4 w-4 text-violet-500 shrink-0" />
-                            : l.pending
-                            ? <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
-                            : <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />}
-                          <select
-                            value={current}
-                            disabled={isBusy}
-                            onChange={(e) => assignLot(doc, l.itemCode, e.target.value)}
-                            aria-label={`Lot de ${l.itemName}`}
-                            title={opts.find((c) => c.lot === current)?.label || undefined}
-                            className={`h-11 sm:h-9 w-full rounded-lg border bg-card px-2.5 text-[13px] sm:text-[12.5px] font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60 cursor-pointer ${
-                              l.familyTarget ? "border-violet-400/60 text-violet-700 dark:text-violet-300"
-                              : l.pending ? "border-amber-400/60 text-amber-700 dark:text-amber-300"
-                              : "border-border text-foreground"
-                            }`}
-                          >
-                            <option value="">Choisir le lot…</option>
-                            {l.suggested && (
-                              <option value={l.suggested} title={opts.find((c) => c.lot === l.suggested)?.label}>
-                                ★ {l.suggested} (suggéré)
-                              </option>
-                            )}
-                            {opts.filter((c) => c.lot !== l.suggested).map((c) => (
-                              // `title` = libellé lisible de l'EM au survol (date de réception · fournisseur).
-                              <option key={c.lot} value={c.lot} title={c.label}>
-                                {c.lot} · {AFFECT_LABEL[c.affect] ?? c.affect}{c.warehouse ? ` · mag. ${c.warehouse}` : ""}
-                              </option>
-                            ))}
-                            {showRawCurrent && <option value={current}>{current}</option>}
-                            {/* Affecter un PRODUIT (fruit) à préciser plus tard — rappel,
-                                pas d'affectation auto à la réception. */}
-                            <optgroup label="Attendre un fruit (à préciser)">
-                              {FRUIT_FAMILIES.map((f) => (
-                                <option key={f.key} value={familyLotSentinel(f.key)}>🍓 {f.label} — à préciser</option>
-                              ))}
-                            </optgroup>
-                            <option value={PENDING}>À découvert — arrivage à venir ({PENDING})</option>
-                          </select>
-                          {isBusy && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />}
-                        </div>
+                        <LotCell line={l} current={current} isBusy={isBusy} onPick={(v) => assignLot(doc, l.itemCode, v)} />
                       </li>
                     );
                   })}
@@ -509,6 +469,139 @@ export function BonsCommandePanel() {
         <div className="flex items-center gap-2 px-5 py-4 text-[13px] text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Chargement des bons de commande…
         </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Cellule d'affectation d'un lot ──────────────────────────────────────────
+   Le SÉLECTEUR reste un <select> natif (fiable, accessible). Au SURVOL, un petit
+   panneau « bien design » (porté en portail pour ne pas être rogné par le
+   overflow de la carte) montre le DÉTAIL de l'article — variété, origine,
+   calibre, marque, conditionnement — et la liste des EM candidates avec leur
+   réception (date · fournisseur · magasin · affectation). ─────────────────── */
+function LotCell({ line, current, isBusy, onPick }: {
+  line: BonLine; current: string; isBusy: boolean; onPick: (v: string) => void;
+}) {
+  const opts = line.candidates ?? [];
+  const showRawCurrent = !line.familyTarget && !line.pending && !!current && !opts.some((c) => c.lot === current);
+  const [hover, setHover] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const CARD_W = 300;
+  const place = () => {
+    const el = ref.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    const left = Math.max(8, Math.min(r.right - CARD_W, window.innerWidth - CARD_W - 8));
+    setPos({ top: r.top, left });
+  };
+  const show = () => { place(); setHover(true); };
+
+  const fmtDate = (d?: string | null) => {
+    if (!d) return null;
+    const [y, m, day] = d.split("-");
+    return day && m && y ? `${day}/${m}/${y}` : null;
+  };
+  // Chips « désignation » — mêmes couleurs que la console (marque · condi · calibre · variété · origine).
+  const chips = ([
+    line.marque && ["bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100", line.marque],
+    line.condt && ["bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100", line.condt],
+    line.uvc && !line.condt && ["bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100", line.uvc],
+    line.calibre && ["bg-teal-100 text-teal-800 dark:bg-teal-500/30 dark:text-teal-100", `cal. ${line.calibre}`],
+    line.variete && ["bg-rose-100 text-rose-800 dark:bg-rose-500/30 dark:text-rose-100", line.variete],
+    line.pays && ["bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100", line.pays],
+  ].filter(Boolean)) as [string, string][];
+
+  const emRows = [
+    ...(line.suggested ? [{ c: opts.find((x) => x.lot === line.suggested) ?? { lot: line.suggested, docNum: 0, warehouse: null, affect: "TOUS" } as LotCandidate, sug: true }] : []),
+    ...opts.filter((c) => c.lot !== line.suggested).map((c) => ({ c, sug: false })),
+  ];
+
+  return (
+    <div
+      ref={ref}
+      onMouseEnter={show}
+      onMouseLeave={() => setHover(false)}
+      className="shrink-0 sm:w-[320px] flex items-center gap-2"
+    >
+      {line.familyTarget
+        ? <Grape className="h-4 w-4 text-violet-500 shrink-0" />
+        : line.pending
+        ? <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+        : <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />}
+      <select
+        value={current}
+        disabled={isBusy}
+        onChange={(e) => onPick(e.target.value)}
+        aria-label={`Lot de ${line.itemName}`}
+        className={`h-11 sm:h-9 w-full rounded-lg border bg-card px-2.5 text-[13px] sm:text-[12.5px] font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60 cursor-pointer ${
+          line.familyTarget ? "border-violet-400/60 text-violet-700 dark:text-violet-300"
+          : line.pending ? "border-amber-400/60 text-amber-700 dark:text-amber-300"
+          : "border-border text-foreground"
+        }`}
+      >
+        <option value="">Choisir le lot…</option>
+        {line.suggested && <option value={line.suggested}>★ {line.suggested} (suggéré)</option>}
+        {opts.filter((c) => c.lot !== line.suggested).map((c) => (
+          <option key={c.lot} value={c.lot} title={c.label}>
+            {c.lot} · {AFFECT_LABEL[c.affect] ?? c.affect}{c.warehouse ? ` · mag. ${c.warehouse}` : ""}
+          </option>
+        ))}
+        {showRawCurrent && <option value={current}>{current}</option>}
+        <optgroup label="Attendre un fruit (à préciser)">
+          {FRUIT_FAMILIES.map((f) => (
+            <option key={f.key} value={familyLotSentinel(f.key)}>🍓 {f.label} — à préciser</option>
+          ))}
+        </optgroup>
+        <option value={PENDING}>À découvert — arrivage à venir ({PENDING})</option>
+      </select>
+      {isBusy && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />}
+
+      {hover && pos && typeof document !== "undefined" && createPortal(
+        <div
+          style={{ position: "fixed", top: pos.top - 8, left: pos.left, width: CARD_W, transform: "translateY(-100%)" }}
+          className="z-[100] pointer-events-none rounded-xl border border-border bg-card shadow-modal overflow-hidden animate-fade-up"
+        >
+          {/* En-tête : désignation détaillée de l'article */}
+          <div className="px-3 py-2.5 border-b border-border bg-secondary/25">
+            <p className="text-[12.5px] font-semibold text-foreground leading-tight">{line.itemName}</p>
+            {chips.length > 0 ? (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {chips.map(([cls, txt], i) => (
+                  <span key={i} className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-semibold ${cls}`}>{txt}</span>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-1 text-[11px] text-muted-foreground italic">Pas de détail article (variété / origine / calibre).</p>
+            )}
+          </div>
+          {/* Lots (EM) disponibles + réception */}
+          <div className="max-h-[260px] overflow-y-auto py-1">
+            <p className="px-3 pt-1 pb-0.5 text-[9.5px] uppercase tracking-wider text-muted-foreground font-semibold">
+              {emRows.length > 0 ? "Lots disponibles" : "Aucun lot en stock"}
+            </p>
+            {emRows.map(({ c, sug }) => {
+              const d = fmtDate(c.date);
+              return (
+                <div key={c.lot} className={`px-3 py-1.5 ${current === c.lot ? "bg-brand-500/10" : ""}`}>
+                  <div className="flex items-center gap-1.5">
+                    {sug && <Star className="h-3 w-3 text-amber-500 fill-amber-400 shrink-0" />}
+                    <span className="text-[12px] font-semibold text-foreground">{c.lot}</span>
+                    <span className="text-[10px] px-1 py-px rounded bg-secondary text-muted-foreground">{AFFECT_LABEL[c.affect] ?? c.affect}</span>
+                    {c.warehouse && <span className="text-[10.5px] text-muted-foreground">mag. {c.warehouse}</span>}
+                  </div>
+                  {(d || c.supplier) && (
+                    <div className="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
+                      {d && <span className="inline-flex items-center gap-0.5"><CalendarDays className="h-2.5 w-2.5" /> reçu le {d}</span>}
+                      {c.supplier && <span className="inline-flex items-center gap-0.5 truncate"><Truck className="h-2.5 w-2.5 shrink-0" /> {c.supplier}</span>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
