@@ -232,14 +232,14 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
                   <button
                     type="button"
                     onClick={() => openDetail(o)}
-                    title={`Ouvrir le BL #${o.docNum}`}
+                    title={`Ouvrir le BL # ${o.docNum}`}
                     className="w-full flex items-center gap-2 py-1.5 -mx-1 px-1 rounded-md hover:bg-secondary/50 transition-colors text-left group"
                   >
                     <span className={`shrink-0 inline-flex items-center justify-center h-5 w-10 rounded text-[10px] font-semibold tnum ${closed ? "bg-muted text-muted-foreground" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"}`} title={closed ? "Clôturé/annulé" : "Ouvert"}>
                       {closed ? <PackageCheck className="h-3 w-3" /> : <PackageOpen className="h-3 w-3" />}
                     </span>
                     <span className="min-w-0 flex-1 flex items-baseline gap-1.5">
-                      <span className="text-[12.5px] font-semibold text-foreground shrink-0">#{o.docNum}</span>
+                      <span className="text-[12.5px] font-semibold text-foreground shrink-0"># {o.docNum}</span>
                       <span className="text-[11px] text-muted-foreground tnum shrink-0">{fmtDate(o.docDate)}</span>
                       {nbInc > 0 && (
                         <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] px-1 py-px rounded bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300" title={`${nbInc} incident(s)`}>
@@ -321,7 +321,7 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
               {/* Facture liée (lecture) */}
               {showInvoice && detail.invoiceEntry && (
                 <div className="rounded-lg border border-blue-400/30 bg-blue-500/[0.04] p-3">
-                  <p className="text-[11px] uppercase tracking-wider text-blue-600 dark:text-blue-400 font-semibold mb-1.5">Facture #{detail.invoiceNum}</p>
+                  <p className="text-[11px] uppercase tracking-wider text-blue-600 dark:text-blue-400 font-semibold mb-1.5">Facture # {detail.invoiceNum}</p>
                   {!invLines[detail.invoiceEntry] ? (
                     <p className="text-[12px] text-muted-foreground inline-flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" /> Chargement…</p>
                   ) : (
@@ -449,7 +449,7 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
             </DialogTitle>
           </DialogHeader>
           <DialogDescription className="text-[13px]">
-            Annuler définitivement le BL <b>#{cancelTarget?.docNum}</b> dans SAP ? Cette action est irréversible.
+            Annuler définitivement le BL <b># {cancelTarget?.docNum}</b> dans SAP ? Cette action est irréversible.
           </DialogDescription>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" onClick={() => setCancelTarget(null)}>Retour</Button>

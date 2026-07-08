@@ -213,7 +213,7 @@ export function OpenReceptionIncidents({
                   <IncidentTypeIcon type={i.type} className="h-3.5 w-3.5 self-center" />
                   {i.type ?? "Incident"}
                 </span>
-                {i.docNum != null && <span className="font-mono text-muted-foreground">EM #{i.docNum}</span>}
+                {i.docNum != null && <span className="font-mono text-muted-foreground">EM # {i.docNum}</span>}
                 {i.lot && <span className="font-mono text-muted-foreground">{i.lot}</span>}
                 {i.cardCode && <span className="font-mono text-foreground/80 truncate">{i.cardCode}</span>}
               </div>

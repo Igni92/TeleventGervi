@@ -246,7 +246,7 @@ export function PurchaseOrderHistory() {
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono font-semibold text-[16px] text-foreground">#{d.docNum}</span>
+                    <span className="font-mono font-semibold text-[16px] text-foreground"># {d.docNum}</span>
                     {isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}
                   </div>
                   <div className="text-[14px] text-foreground/90 mt-0.5 truncate" title={d.cardName}>
@@ -290,7 +290,7 @@ export function PurchaseOrderHistory() {
                     onClick={() => setLargeEntry(d.docEntry)}
                     className="border-t border-border/60 hover:bg-secondary/30 cursor-pointer transition-colors"
                   >
-                    <td className="px-3 py-2 font-mono font-semibold">#{d.docNum}</td>
+                    <td className="px-3 py-2 font-mono font-semibold"># {d.docNum}</td>
                     <td className="px-3 py-2">
                       <span className="font-medium text-foreground">{d.cardName || d.cardCode}</span>
                       <span className="text-muted-foreground ml-1.5 font-mono text-[11px]">{d.cardCode}</span>
@@ -543,7 +543,7 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
             </Button>
           ) : (
             <div className="inline-flex items-center gap-2">
-              <span className="text-[12.5px] text-foreground">Annuler la commande #{po.docNum} ?</span>
+              <span className="text-[12.5px] text-foreground">Annuler la commande # {po.docNum} ?</span>
               <button type="button" onClick={cancelOrder} disabled={cancelling}
                 className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[12.5px] font-semibold disabled:opacity-60">
                 {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Confirmer

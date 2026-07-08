@@ -220,7 +220,7 @@ function VenteRow({ d }: { d: Doc }) {
           )}
         </p>
         <p className="text-[11px] text-muted-foreground flex items-center gap-x-2 gap-y-0.5 flex-wrap">
-          <span>BL #{d.docNum}</span>
+          <span>BL # {d.docNum}</span>
           {takenTime && <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" /> Prise {takenTime}</span>}
           <span className="inline-flex items-center gap-1"><CalendarDays className="h-3 w-3" /> Livr. {shortDate(d.dueDate)}</span>
           <span>{d.colis.toLocaleString("fr-FR")} colis</span>

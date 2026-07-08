@@ -165,7 +165,7 @@ export function PreparationsAFaire() {
                           l'essentiel — n° BL, transporteur, alerte manquants. Le
                           nombre de colis ne réapparaît qu'à partir de `xs`. */}
                       <p className="text-[11px] text-muted-foreground flex items-center gap-x-2 gap-y-0.5 flex-wrap mt-0.5">
-                        <span>BL #{d.docNum}</span>
+                        <span>BL # {d.docNum}</span>
                         <span className="inline-flex items-center gap-1 min-w-0"><Truck className="h-3 w-3 shrink-0" /> <span className="truncate">{d.carrierName ?? "Non affecté"}</span></span>
                         <span className="hidden xs:inline">{d.colis.toLocaleString("fr-FR")} colis</span>
                         {hasMissing(d) && (

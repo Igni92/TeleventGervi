@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Clock3, ChevronLeft, ChevronRight, Loader2, Save, Printer, Wand2,
-  CalendarDays, RotateCcw, Plus, Minus,
+  CalendarDays, RotateCcw, Plus, Minus, Coins, CalendarCheck, SlidersHorizontal, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { SurfaceCard } from "@/components/ui/surface-card";
@@ -24,7 +24,7 @@ import {
   JOURS_SEMAINE, DEFAULT_PROFILE, computeWeek, fmtHM,
   isoWeekId, shiftWeek, weekDates, weekLabel,
   monthIdOf, shiftMonth, monthLabel,
-  type DayHours, type HoursProfile, type WeekCalc, type MonthCalc,
+  type DayHours, type HoursProfile, type WeekCalc, type MonthCalc, type HeuresOption,
 } from "@/lib/heuresCalc";
 import { printEtatMensuel, type MoisEmploye } from "@/lib/heuresPdf";
 
@@ -36,7 +36,7 @@ interface MonthRow {
   email: string;
   name: string;
   profile: HoursProfile | null;
-  weeks: { week: string; calc: WeekCalc | null }[];
+  weeks: { week: string; calc: WeekCalc | null; option?: HeuresOption | null; recupDates?: string[] }[];
   total: MonthCalc;
 }
 
@@ -51,6 +51,10 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
+  // ── Option compta des heures supp de la semaine (récup / paiement) ──
+  const [option, setOption] = useState<HeuresOption | null>(null);
+  const [recupDates, setRecupDates] = useState<string[]>([]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -58,6 +62,8 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
       const j = await r.json().catch(() => null);
       if (j?.ok) {
         setDays(j.entry?.days ?? EMPTY_WEEK());
+        setOption(j.entry?.option ?? null);
+        setRecupDates(Array.isArray(j.entry?.recupDates) ? j.entry.recupDates : []);
         if (j.profile) setProfile(j.profile);
         setDirty(false);
       }
@@ -71,6 +77,29 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
 
   const setDay = (i: number, patch: Partial<DayHours>) => {
     setDays((cur) => cur.map((d, k) => (k === i ? { ...d, ...patch } : d)));
+    setDirty(true);
+  };
+
+  // ── Options « heures supp » : à décider dès qu'il y a des supp (ou si un choix
+  //    a déjà été saisi — on n'escamote jamais une donnée existante). ──
+  const hasSupp = calc.sup25Min + calc.sup50Min > 0;
+  const showOptions = hasSupp || option != null;
+
+  // Un clic sur l'option déjà active la désélectionne (retour à « à décider »).
+  // En passant sur « récup », on amorce un champ date vide (comme le formulaire papier).
+  const chooseOption = (opt: HeuresOption) => {
+    const next = option === opt ? null : opt;
+    setOption(next);
+    if (next === "recup" && recupDates.length === 0) setRecupDates([""]);
+    setDirty(true);
+  };
+  const setRecupDate = (i: number, val: string) => {
+    setRecupDates((cur) => cur.map((d, k) => (k === i ? val : d)));
+    setDirty(true);
+  };
+  const addRecupDate = () => { setRecupDates((cur) => [...cur, ""]); setDirty(true); };
+  const removeRecupDate = (i: number) => {
+    setRecupDates((cur) => cur.filter((_, k) => k !== i));
     setDirty(true);
   };
 
@@ -100,7 +129,10 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
     try {
       const r = await fetch("/api/effectif/heures", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ week, days }),
+        body: JSON.stringify({
+          week, days, option,
+          recupDates: option === "recup" ? recupDates.filter(Boolean) : [],
+        }),
       });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) { toast.error(j?.error || "Échec de l'enregistrement des heures"); return; }
@@ -355,6 +387,66 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           </table>
         </div>
 
+        {/* ── OPTIONS « heures supp » (récupération vs paiement) ──
+            Reprend le formulaire papier : deux cases exclusives ; en récup, les
+            dates concernées. Le choix part sur l'état mensuel (PDF compta + salarié).
+            Mobile-first : cases empilées < sm, côte à côte ≥ sm ; dates en lignes
+            pleine largeur sur téléphone. */}
+        {showOptions && (
+          <div className="mt-3 rounded-lg border border-border bg-secondary/20 p-3">
+            <div className="mb-2 flex items-center gap-1.5">
+              <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <span className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
+                Heures supp — que faire&nbsp;?
+              </span>
+              {hasSupp && (
+                <span className="ml-auto text-[11px] tnum font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">
+                  {fmtHM(calc.sup25Min + calc.sup50Min)} supp
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <OptionChoice active={option === "recup"} onClick={() => chooseOption("recup")}
+                icon={<CalendarCheck className="h-4 w-4" />} label="Récupération" hint="en nombre de jours" />
+              <OptionChoice active={option === "paiement"} onClick={() => chooseOption("paiement")}
+                icon={<Coins className="h-4 w-4" />} label="Paiement" hint="des heures supp." />
+            </div>
+
+            {/* Dates concernées — uniquement pour la récupération. */}
+            {option === "recup" && (
+              <div className="mt-3">
+                <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1.5">
+                  Dates concernées
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {recupDates.map((d, i) => (
+                    <div key={i} className="flex w-full sm:w-auto items-center gap-1">
+                      <input type="date" value={d} disabled={loading}
+                        onChange={(e) => setRecupDate(i, e.target.value)}
+                        aria-label={`Date de récupération ${i + 1}`}
+                        className="h-9 flex-1 sm:flex-none min-w-0 rounded-md border border-border bg-background px-2 text-[13px] tnum focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50" />
+                      <button type="button" onClick={() => removeRecupDate(i)} aria-label="Retirer cette date"
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={addRecupDate}
+                    className="inline-flex w-full sm:w-auto items-center justify-center gap-1.5 h-9 px-3 rounded-md border border-dashed border-border text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+                    <Plus className="h-3.5 w-3.5" /> Ajouter une date
+                  </button>
+                </div>
+                <p className="mt-1.5 text-[11px] text-muted-foreground">Jours de repos posés en récupération des heures supp.</p>
+              </div>
+            )}
+
+            <p className="mt-2.5 text-[11px] text-muted-foreground">
+              Le choix est reporté sur l&apos;état mensuel (PDF) transmis à la compta et au salarié.
+            </p>
+          </div>
+        )}
+
         {/* Totaux + actions */}
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Badge label="Total" value={fmtHM(calc.totalMin)} tone="foreground" />
@@ -408,11 +500,14 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           <>
             {/* MOBILE (< md) : une carte par semaine + carte total. */}
             <div className="md:hidden space-y-2">
-              {myMonth.weeks.map(({ week: w, calc: c }) => (
+              {myMonth.weeks.map(({ week: w, calc: c, option: o, recupDates: rd }) => (
                 <div key={w} className={`rounded-lg border border-border p-3 ${c ? "" : "opacity-60"}`}>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[12.5px] font-semibold text-foreground">{weekLabel(w)}</span>
-                    <span className="text-[13.5px] font-bold tnum text-foreground">{c ? fmtHM(c.totalMin) : <span className="text-[11px] font-normal italic text-muted-foreground">non saisi</span>}</span>
+                    <span className="min-w-0 flex-1 inline-flex items-center gap-1.5">
+                      <span className="min-w-0 truncate text-[12.5px] font-semibold text-foreground">{weekLabel(w)}</span>
+                      {o && <OptionChip option={o} recupDates={rd} />}
+                    </span>
+                    <span className="text-[13.5px] font-bold tnum text-foreground shrink-0">{c ? fmtHM(c.totalMin) : <span className="text-[11px] font-normal italic text-muted-foreground">non saisi</span>}</span>
                   </div>
                   {c && (
                     <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] tnum">
@@ -457,9 +552,14 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
-                  {myMonth.weeks.map(({ week: w, calc: c }) => (
+                  {myMonth.weeks.map(({ week: w, calc: c, option: o, recupDates: rd }) => (
                     <tr key={w} className={c ? "" : "opacity-55"}>
-                      <td className="px-3 py-1.5 whitespace-nowrap">{weekLabel(w)}</td>
+                      <td className="px-3 py-1.5 whitespace-nowrap">
+                        <span className="inline-flex items-center gap-2">
+                          {weekLabel(w)}
+                          {o && <OptionChip option={o} recupDates={rd} />}
+                        </span>
+                      </td>
                       <td className="px-2 py-1.5 text-right tnum font-semibold">{c ? fmtHM(c.totalMin) : <span className="italic text-muted-foreground">non saisi</span>}</td>
                       <td className={`px-2 py-1.5 text-right tnum ${c && c.deltaMin > 0 ? "text-amber-600 dark:text-amber-400" : c && c.deltaMin < 0 ? "text-sky-600 dark:text-sky-400" : "text-muted-foreground"}`}>{c ? fmtHM(c.deltaMin) : "—"}</td>
                       <td className="px-2 py-1.5 text-right tnum">{c && c.sup25Min > 0 ? fmtHM(c.sup25Min) : "—"}</td>
@@ -603,6 +703,51 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
 function displayFullName(raw: string): string {
   if (raw.includes("@")) return displayPersonName(raw);
   return raw;
+}
+
+/** Case d'option « heures supp » façon radio (icône + libellé + puce active).
+ *  Grande cible tactile, pleine largeur sur mobile via le parent en grille. */
+function OptionChoice({ active, onClick, icon, label, hint }: {
+  active: boolean; onClick: () => void; icon: React.ReactNode; label: string; hint: string;
+}) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={active}
+      className={`flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors ${
+        active
+          ? "border-brand-500/50 bg-brand-500/10"
+          : "border-border bg-background hover:bg-secondary/50"
+      }`}>
+      <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
+        active ? "bg-brand-500/15 text-brand-700 dark:text-brand-300" : "bg-secondary text-muted-foreground"
+      }`}>
+        {icon}
+      </span>
+      <span className="min-w-0">
+        <span className={`block text-[13px] font-semibold leading-tight ${active ? "text-foreground" : "text-muted-foreground"}`}>{label}</span>
+        <span className="block text-[11px] text-muted-foreground leading-tight">{hint}</span>
+      </span>
+      <span className={`ml-auto inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
+        active ? "border-brand-500 bg-brand-500" : "border-border"
+      }`}>
+        {active && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+      </span>
+    </button>
+  );
+}
+
+/** Pastille compacte de l'option retenue (état mensuel à l'écran). */
+function OptionChip({ option, recupDates }: { option: HeuresOption; recupDates?: string[] }) {
+  const isRecup = option === "recup";
+  const n = recupDates?.filter(Boolean).length ?? 0;
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-semibold ${
+      isRecup ? "bg-sky-500/15 text-sky-700 dark:text-sky-300" : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+    }`}>
+      {isRecup ? <CalendarCheck className="h-3 w-3" /> : <Coins className="h-3 w-3" />}
+      {isRecup ? "Récup" : "Payé"}
+      {isRecup && n > 0 && <span className="font-normal opacity-80">· {n} j</span>}
+    </span>
+  );
 }
 
 function Badge({ label, value, tone }: { label: string; value: string; tone: "foreground" | "muted" | "amber" | "rose" | "emerald" | "sky" }) {

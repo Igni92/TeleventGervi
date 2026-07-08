@@ -141,7 +141,7 @@ export function DernieresCommandes() {
                 <button
                   type="button"
                   onClick={() => openBL(d)}
-                  title={`Ouvrir le bon de livraison${d.docNum ? ` #${d.docNum}` : ""}`}
+                  title={`Ouvrir le bon de livraison${d.docNum ? ` # ${d.docNum}` : ""}`}
                   className="w-full flex items-center gap-3 py-1.5 -mx-1 px-1 rounded-md hover:bg-secondary/50 transition-colors text-left group"
                 >
                   <span className="tnum shrink-0 w-[44px] text-[11px] font-medium text-muted-foreground">{dateOf(d)}</span>
