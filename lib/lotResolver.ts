@@ -36,6 +36,9 @@ export type LotMaps = {
   /** Magasin de réception d'un article dans UNE EM donnée — `${item}|${docNum}`
    *  → entrepôt. Sert au repli "item" de resolveLotForSegment. */
   whsOfItemDoc: Map<string, string>;
+  /** Métadonnées d'une EM (DocNum → date de réception + fournisseur) — pour
+   *  afficher un libellé lisible au survol d'un lot candidat. */
+  docMeta: Map<number, { date: string | null; supplier: string | null }>;
 };
 
 /** Profondeur d'historique par clé — assez pour retrouver une EM « stock »
@@ -75,6 +78,7 @@ function emptyMaps(): LotMaps {
   return {
     byItemWhs: new Map(), byItem: new Map(), byItemWarehouse: new Map(),
     byItemWhsList: new Map(), byItemList: new Map(), whsOfItemDoc: new Map(),
+    docMeta: new Map(),
   };
 }
 
@@ -84,7 +88,7 @@ export async function getLotMaps(): Promise<LotMaps> {
 
   const maps = emptyMaps();
   type PdnLine = { ItemCode: string; WarehouseCode?: string };
-  type Pdn = { DocNum: number; DocumentLines?: PdnLine[] };
+  type Pdn = { DocNum: number; DocDate?: string; CardName?: string; DocumentLines?: PdnLine[] };
 
   let scanned = 0;
   let partial = false;
@@ -97,12 +101,16 @@ export async function getLotMaps(): Promise<LotMaps> {
       // ⚠️ Header Prefer obligatoire : sans lui le SL renvoie 20 docs max par page
       // (l'ancien $top=50 faisait 25 allers-retours pour 500 docs).
       const r = await sap.get<{ value: Pdn[] }>(
-        `PurchaseDeliveryNotes?$top=${PAGE_SIZE}&$skip=${skip}&$orderby=DocNum desc&$select=DocNum,DocumentLines`,
+        `PurchaseDeliveryNotes?$top=${PAGE_SIZE}&$skip=${skip}&$orderby=DocNum desc&$select=DocNum,DocDate,CardName,DocumentLines`,
         { headers: { Prefer: `odata.maxpagesize=${PAGE_SIZE}` } },
       );
       const docs = r.value || [];
       if (docs.length === 0) break;
       for (const d of docs) {
+        // Métadonnées EM (date de réception + fournisseur) pour le libellé au survol.
+        if (!maps.docMeta.has(d.DocNum)) {
+          maps.docMeta.set(d.DocNum, { date: d.DocDate ? d.DocDate.slice(0, 10) : null, supplier: d.CardName ?? null });
+        }
         for (const l of (d.DocumentLines || [])) {
           if (!l.ItemCode) continue;
           if (!maps.byItem.has(l.ItemCode) || d.DocNum > maps.byItem.get(l.ItemCode)!) {

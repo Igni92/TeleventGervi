@@ -5,6 +5,7 @@ function maps(): LotMaps {
   return {
     byItemWhs: new Map(), byItem: new Map(), byItemWarehouse: new Map(),
     byItemWhsList: new Map(), byItemList: new Map(), whsOfItemDoc: new Map(),
+    docMeta: new Map(),
   };
 }
 
