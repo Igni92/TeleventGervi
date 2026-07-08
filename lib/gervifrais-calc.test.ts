@@ -3,6 +3,7 @@ import {
   splitByWarehouse, totalAvailable, computeItfel, computeDdg,
   categoryFromGroupName, resolveCoef, computeSuggestedPrice, personalStock, unitInfo,
   chooseLot, LOT_PENDING,
+  LOT_FAMILY_PREFIX, familyLotSentinel, familyOfLot, isLotPending,
 } from "./gervifrais-calc";
 
 describe("splitByWarehouse — découpe multi-entrepôt", () => {
@@ -169,6 +170,33 @@ describe("chooseLot — affectation SYSTÉMATIQUE du lot (bug BL 24011560)", () 
   });
   it("le lot n'est JAMAIS vide", () => {
     expect(chooseLot({ resolvedLot: null, localAvailable: 0, envDefault: "  " }).lot).toBe(LOT_PENDING);
+  });
+});
+
+describe("Sentinel famille — « affecter un produit (fraise) » sur un bon de commande", () => {
+  it("familyLotSentinel construit EM_FAM:<clé> normalisée", () => {
+    expect(familyLotSentinel("fraise")).toBe(`${LOT_FAMILY_PREFIX}fraise`);
+    expect(familyLotSentinel("  Framboise ")).toBe(`${LOT_FAMILY_PREFIX}framboise`);
+  });
+  it("familyOfLot extrait la clé d'un sentinel famille, null sinon", () => {
+    expect(familyOfLot("EM_FAM:fraise")).toBe("fraise");
+    expect(familyOfLot(" EM_FAM:MYRTILLE ")).toBe("myrtille");
+    expect(familyOfLot("EM22948")).toBeNull();
+    expect(familyOfLot(LOT_PENDING)).toBeNull();
+    expect(familyOfLot("")).toBeNull();
+    expect(familyOfLot(null)).toBeNull();
+    expect(familyOfLot("EM_FAM:")).toBeNull();   // préfixe sans clé = pas un tag valide
+  });
+  it("isLotPending : vide, EM_PENDING et sentinel famille sont EN ATTENTE ; un vrai EM ne l'est pas", () => {
+    expect(isLotPending("")).toBe(true);
+    expect(isLotPending(null)).toBe(true);
+    expect(isLotPending(LOT_PENDING)).toBe(true);
+    expect(isLotPending("EM_FAM:fraise")).toBe(true);
+    expect(isLotPending("EM22948")).toBe(false);
+  });
+  it("un sentinel famille N'EST PAS le sentinel à découvert (goods-receipts ne l'auto-résout pas)", () => {
+    // Garantie « rappel manuel » : la propagation rétro filtre sur `=== LOT_PENDING`.
+    expect(familyLotSentinel("fraise")).not.toBe(LOT_PENDING);
   });
 });
 

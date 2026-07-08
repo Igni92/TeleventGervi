@@ -11,18 +11,25 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   PackageCheck, ChevronDown, RefreshCw, Loader2, CheckCircle2, Sparkles,
-  CalendarDays, AlertTriangle,
+  CalendarDays, AlertTriangle, Grape,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDeliveryDate } from "@/lib/livraison";
 import { displayPersonName } from "@/lib/userNames";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
+import { FRUIT_FAMILIES } from "@/lib/familles";
+import { familyLotSentinel, familyOfLot } from "@/lib/gervifrais-calc";
+
+const FAMILY_LABEL = new Map(FRUIT_FAMILIES.map((f) => [f.key, f.label]));
 
 interface LotCandidate { lot: string; docNum: number; warehouse: string | null; affect: string }
+interface FamilyTarget { key: string; label: string }
 interface BonLine {
   itemCode: string; itemName: string; quantity: number; colis: number;
   warehouse: string | null; marque: string | null; condt: string | null; pays: string | null;
   lot: string; pending: boolean; candidates: LotCandidate[]; suggested: string | null;
+  /** Tag « produit » à préciser plus tard (fruit) — rappel, pas d'auto-affectation. */
+  familyTarget: FamilyTarget | null;
 }
 interface BonDoc {
   docEntry: number; docNum: number; cardCode: string; cardName: string;
@@ -64,10 +71,16 @@ export function BonsCommandePanel() {
     if (!lot) return false;
     const key = `${doc.docEntry}:${itemCode}`;
     setBusyLine(key);
-    // Optimiste : la ligne prend le lot ; « pending » si on repose EM_PENDING.
+    // Optimiste : la ligne prend le lot. « pending » si on repose EM_PENDING (à
+    // découvert) OU un tag famille EM_FAM:<fruit> (produit à préciser plus tard).
+    const famKey = familyOfLot(lot);
+    const famTarget = famKey && FAMILY_LABEL.has(famKey) ? { key: famKey, label: FAMILY_LABEL.get(famKey)! } : null;
+    const nowPending = lot === PENDING || famTarget !== null;
     setDocs((prev) => prev?.map((d) => {
       if (d.docEntry !== doc.docEntry) return d;
-      const lines = d.lines.map((l) => l.itemCode === itemCode ? { ...l, lot, pending: lot === PENDING } : l);
+      const lines = d.lines.map((l) => l.itemCode === itemCode
+        ? { ...l, lot, pending: nowPending, familyTarget: famTarget }
+        : l);
       return { ...d, lines, pendingCount: lines.filter((l) => l.pending).length };
     }) ?? prev);
     try {
@@ -90,9 +103,11 @@ export function BonsCommandePanel() {
     }
   }, [load]);
 
-  // Remplit toutes les lignes en attente avec la suggestion (EM du segment, sinon à découvert).
+  // Remplit les lignes en attente avec la suggestion (EM du segment, sinon à
+  // découvert). On NE touche PAS aux lignes taguées « produit » (fruit) : ce tag
+  // est un rappel manuel explicite, à résoudre à la main.
   const suggestAll = useCallback(async (doc: BonDoc) => {
-    const pend = doc.lines.filter((l) => l.pending);
+    const pend = doc.lines.filter((l) => l.pending && !l.familyTarget);
     for (const l of pend) {
       const ok = await assignLot(doc, l.itemCode, l.suggested ?? PENDING);
       if (!ok) break;
@@ -177,9 +192,15 @@ export function BonsCommandePanel() {
                   {doc.lines.map((l) => {
                     const key = `${doc.docEntry}:${l.itemCode}`;
                     const isBusy = busyLine === key;
-                    const current = l.pending ? "" : l.lot;
+                    // Valeur sélectionnée : tag famille (EM_FAM:…) prioritaire, sinon
+                    // vrai lot, sinon vide (à découvert générique).
+                    const current = l.familyTarget
+                      ? familyLotSentinel(l.familyTarget.key)
+                      : l.pending ? "" : l.lot;
                     const opts = l.candidates ?? [];
-                    const hasCurrent = !current || opts.some((c) => c.lot === current);
+                    // Ligne de repli pour un VRAI lot absent des candidats (jamais pour
+                    // un tag famille : il vit dans son propre optgroup).
+                    const showRawCurrent = !l.familyTarget && !l.pending && !!current && !opts.some((c) => c.lot === current);
                     return (
                       <li key={l.itemCode} className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-2.5">
                         <div className="min-w-0 flex-1">
@@ -188,11 +209,18 @@ export function BonsCommandePanel() {
                             <span className="text-[11.5px] text-muted-foreground tnum shrink-0">
                               {l.colis} colis{l.warehouse ? ` · mag. ${l.warehouse}` : ""}
                             </span>
+                            {l.familyTarget && (
+                              <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 shrink-0">
+                                <Grape className="h-3 w-3" /> {l.familyTarget.label} — à préciser
+                              </span>
+                            )}
                           </div>
                           <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} size="md" className="mt-1" />
                         </div>
                         <div className="shrink-0 sm:w-[320px] flex items-center gap-2">
-                          {l.pending
+                          {l.familyTarget
+                            ? <Grape className="h-4 w-4 text-violet-500 shrink-0" />
+                            : l.pending
                             ? <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
                             : <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />}
                           <select
@@ -201,7 +229,9 @@ export function BonsCommandePanel() {
                             onChange={(e) => assignLot(doc, l.itemCode, e.target.value)}
                             aria-label={`Lot de ${l.itemName}`}
                             className={`h-11 sm:h-9 w-full rounded-lg border bg-card px-2.5 text-[13px] sm:text-[12.5px] font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60 cursor-pointer ${
-                              l.pending ? "border-amber-400/60 text-amber-700 dark:text-amber-300" : "border-border text-foreground"
+                              l.familyTarget ? "border-violet-400/60 text-violet-700 dark:text-violet-300"
+                              : l.pending ? "border-amber-400/60 text-amber-700 dark:text-amber-300"
+                              : "border-border text-foreground"
                             }`}
                           >
                             <option value="">Choisir le lot…</option>
@@ -211,7 +241,14 @@ export function BonsCommandePanel() {
                                 {c.lot} · {AFFECT_LABEL[c.affect] ?? c.affect}{c.warehouse ? ` · mag. ${c.warehouse}` : ""}
                               </option>
                             ))}
-                            {!hasCurrent && current && <option value={current}>{current}</option>}
+                            {showRawCurrent && <option value={current}>{current}</option>}
+                            {/* Affecter un PRODUIT (fruit) à préciser plus tard — rappel,
+                                pas d'affectation auto à la réception. */}
+                            <optgroup label="Attendre un fruit (à préciser)">
+                              {FRUIT_FAMILIES.map((f) => (
+                                <option key={f.key} value={familyLotSentinel(f.key)}>🍓 {f.label} — à préciser</option>
+                              ))}
+                            </optgroup>
                             <option value={PENDING}>À découvert — arrivage à venir ({PENDING})</option>
                           </select>
                           {isBusy && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />}
