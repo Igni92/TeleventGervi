@@ -9,7 +9,7 @@ import {
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { ShelfLifePanel } from "@/components/settings/ShelfLifePanel";
 import { ClientImportButton } from "@/components/clients/ClientImportButton";
-import { ResyncButton } from "@/components/admin/ResyncButton";
+import { MirrorBackfillPanel } from "@/components/admin/MirrorBackfillPanel";
 import { ProductsSyncButton } from "@/components/admin/ProductsSyncButton";
 import { useTheme } from "@/components/ThemeProvider";
 import { cn } from "@/lib/utils";
@@ -447,15 +447,15 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
               <div className="shrink-0"><ClientImportButton /></div>
             </div>
 
-            <div className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+            <div className="flex flex-col gap-3 py-3">
               <div className="min-w-0">
                 <p className="text-[13.5px] font-semibold text-foreground">Données stats (miroir comptable)</p>
-                <p className="text-[12px] text-muted-foreground mt-0.5 max-w-md">
+                <p className="text-[12px] text-muted-foreground mt-0.5 max-w-xl">
                   Factures, avoirs, commandes et fournisseurs — alimente le pilotage et les marges.
-                  Reconstruction complète : à relancer de temps en temps.
+                  Reconstruis l&apos;historique mois par mois (3 ans, profondeur du rapport annuel).
                 </p>
               </div>
-              <div className="shrink-0"><ResyncButton /></div>
+              <MirrorBackfillPanel />
             </div>
 
             <div className="flex flex-col gap-2 py-3 last:pb-1 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
