@@ -9,7 +9,7 @@ import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, Package, PackagePlus, Factory, Receipt, AlertTriangle,
   Home, Settings, PackageCheck, ClipboardCheck, ClipboardList, Truck, Eye, Store, PackageX,
-  Pencil, Loader2, RotateCcw, ScrollText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight,
+  Pencil, Loader2, RotateCcw, ScrollText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight, Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -20,7 +20,7 @@ import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
 import { navAllowedForPreview, PREVIEW_ROLE_LABELS } from "@/lib/rolePreview";
 import {
   applyNavConfig, toNavEditState, fromNavEditState, moveNavRowBefore, swapNavRows,
-  addNavCategory, addNavSubCategory, renameNavCategory, deleteNavCategory, moveNavCategory,
+  addNavCategory, addNavSubCategory, renameNavCategory, deleteNavCategory, moveNavCategory, moveNavCategoryBefore,
   type NavConfig, type NavEditGroup,
 } from "@/lib/navOverrides";
 import { SPRING } from "@/lib/motion";
@@ -281,6 +281,21 @@ export function Sidebar() {
     if (dragHref && dragHref !== targetHref) setDraft((cur) => swapNavRows(cur, dragHref, targetHref));
     endDrag();
   };
+  // Glisser-déposer des CATÉGORIES de 1er niveau (bloc entier). État séparé du
+  // drag des entrées : on ne mélange jamais les deux gestes.
+  const [dragCat, setDragCat] = useState<string | null>(null);
+  const [overCat, setOverCat] = useState<string | null>(null);
+  const endCatDrag = () => { setDragCat(null); setOverCat(null); };
+  // Édition du LIBELLÉ (crayon) — une seule entrée/catégorie à la fois. Pour les
+  // catégories, la clé = le libellé (donc renommer changerait la clé) : on bufferise
+  // la saisie et on ne renomme qu'à la validation (garde le focus, pas de remontage).
+  const [editKey, setEditKey] = useState<string | null>(null);   // `row:<href>` | `cat:<label>`
+  const [catDraftLabel, setCatDraftLabel] = useState("");
+  const startEditCat = (label: string) => { setCatDraftLabel(label); setEditKey(`cat:${label}`); };
+  const commitEditCat = (label: string) => {
+    if (catDraftLabel.trim() && catDraftLabel.trim() !== label) renameCategory(label, catDraftLabel);
+    setEditKey(null);
+  };
   const startEditNav = () => {
     setDraft(toNavEditState(NAV_GROUPS, navConfig));
     setEditingNav(true);
@@ -295,6 +310,10 @@ export function Sidebar() {
   const renameCategory = (label: string, next: string) => setDraft((cur) => renameNavCategory(cur, label, next));
   const removeCategory = (label: string) => setDraft((cur) => deleteNavCategory(cur, label));
   const shiftCategory = (label: string, dir: -1 | 1) => setDraft((cur) => moveNavCategory(cur, label, dir));
+  const dropCatBefore = (beforeLabel: string | null) => {
+    if (dragCat) setDraft((cur) => moveNavCategoryBefore(cur, dragCat, beforeLabel));
+    endCatDrag();
+  };
   async function saveNav(config: NavConfig, successMsg: string) {
     setSavingNav(true);
     try {
@@ -438,18 +457,50 @@ export function Sidebar() {
             const canDelete = !!group.custom && group.rows.length === 0 && !draft.some((g) => g.parent === group.label);
             return (
             <div key={group.label} className={isSub ? "ml-2.5 border-l border-white/10 pl-2 -mt-3" : ""}>
-              {/* En-tête de catégorie : renommer (créées) · réordonner · + sous-catégorie · supprimer */}
-              <div className="px-1 mb-1.5 flex items-center gap-0.5">
-                {isSub && <CornerDownRight className="h-3 w-3 shrink-0 text-white/30" />}
-                {group.custom ? (
+              {/* En-tête de catégorie — GLISSABLE en entier (1er niveau) pour la
+                  réordonner. Renommer (créées) passe par le crayon (sinon glisser
+                  = bouger le bloc, pas éditer). Réordonner (secours) · + sous-cat · suppr. */}
+              {(() => {
+                const catEditing = editKey === `cat:${group.label}`;
+                const catDraggable = !isSub && !catEditing;
+                return (
+              <div
+                draggable={catDraggable}
+                onDragStart={catDraggable ? (e) => { e.dataTransfer.effectAllowed = "move"; setDragCat(group.label); } : undefined}
+                onDragEnd={endCatDrag}
+                onDragOver={!isSub ? (e) => { if (dragCat && dragCat !== group.label) { e.preventDefault(); setOverCat(group.label); } } : undefined}
+                onDrop={!isSub ? (e) => { if (dragCat && dragCat !== group.label) { e.preventDefault(); dropCatBefore(group.label); } else endCatDrag(); } : undefined}
+                className={`group/cat px-1 mb-1.5 flex items-center gap-0.5 rounded-md transition-all duration-150 ${
+                  catDraggable ? "cursor-grab active:cursor-grabbing" : ""
+                } ${dragCat === group.label ? "opacity-40" : ""} ${
+                  overCat === group.label && dragCat && dragCat !== group.label ? "ring-1 ring-brand-400 bg-brand-500/10" : ""
+                }`}
+              >
+                {isSub
+                  ? <CornerDownRight className="h-3 w-3 shrink-0 text-white/30" />
+                  : <GripVertical className="h-3.5 w-3.5 shrink-0 text-white/25 group-hover/cat:text-white/50 transition-colors" />}
+                {group.custom && catEditing ? (
                   <input
-                    value={group.label}
-                    onChange={(e) => renameCategory(group.label, e.target.value)}
+                    autoFocus
+                    value={catDraftLabel}
+                    onChange={(e) => setCatDraftLabel(e.target.value)}
+                    onBlur={() => commitEditCat(group.label)}
+                    onKeyDown={(e) => { if (e.key === "Enter") commitEditCat(group.label); else if (e.key === "Escape") setEditKey(null); }}
                     aria-label={`Nom de la catégorie ${group.label}`}
                     className="min-w-0 flex-1 h-6 rounded-md border border-white/15 bg-white/[0.06] px-1.5 text-[10px] uppercase tracking-[0.1em] font-bold text-white/80 focus:outline-none focus:ring-1 focus:ring-brand-500"
                   />
                 ) : (
-                  <span className="min-w-0 flex-1 truncate text-[9.5px] uppercase tracking-[0.18em] font-bold text-white/55">{group.label}</span>
+                  <span className={`min-w-0 flex-1 truncate uppercase font-bold ${isSub ? "text-[9px] tracking-[0.14em] text-white/50" : "text-[9.5px] tracking-[0.18em] text-white/55"}`}>
+                    {group.label}
+                  </span>
+                )}
+                {group.custom && (
+                  <button type="button" draggable={false} onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => (catEditing ? commitEditCat(group.label) : startEditCat(group.label))}
+                    title={catEditing ? "Valider le nom" : "Renommer la catégorie"}
+                    className="h-6 w-5 shrink-0 rounded flex items-center justify-center text-white/30 hover:text-white/80 hover:bg-white/[0.06] transition-colors">
+                    {catEditing ? <Check className="h-3 w-3 text-emerald-400" /> : <Pencil className="h-3 w-3" />}
+                  </button>
                 )}
                 <button type="button" onClick={() => shiftCategory(group.label, -1)} title="Monter la catégorie"
                   className="h-6 w-5 shrink-0 rounded flex items-center justify-center text-white/30 hover:text-white/80 hover:bg-white/[0.06] transition-colors">
@@ -473,10 +524,13 @@ export function Sidebar() {
                   </button>
                 )}
               </div>
+                );
+              })()}
               <ul className="space-y-1">
                 {group.rows.map((row) => {
                   const Icon = ICON_BY_HREF.get(row.href) ?? Radio;
                   const dragging = dragHref === row.href;
+                  const rowEditing = editKey === `row:${row.href}`;
                   const swapTarget = overKey === `row:${row.href}` && !!dragHref && !dragging;
                   return (
                     <Fragment key={row.href}>
@@ -488,35 +542,48 @@ export function Sidebar() {
                         onDrop={() => dropBefore(group.label, row.href)}
                       />
                       <li
+                        draggable={!rowEditing}
+                        onDragStart={rowEditing ? undefined : (e) => { e.dataTransfer.effectAllowed = "move"; setDragHref(row.href); }}
+                        onDragEnd={endDrag}
                         onDragOver={(e) => {
                           if (dragHref && !dragging) { e.preventDefault(); setOverKey(`row:${row.href}`); }
                         }}
                         onDrop={(e) => { e.preventDefault(); dropOnRow(row.href); }}
-                        className={`flex items-center gap-1 rounded-lg transition-all duration-150 ${
-                          dragging ? "opacity-40" : ""
-                        } ${
-                          swapTarget ? "ring-1 ring-brand-400 bg-brand-500/10" : ""
+                        title={rowEditing ? undefined : "Glisser pour déplacer"}
+                        className={`group/row flex items-center gap-1.5 rounded-lg pr-1 transition-all duration-150 ${
+                          rowEditing ? "" : "cursor-grab active:cursor-grabbing"
+                        } ${dragging ? "opacity-40" : ""} ${
+                          swapTarget ? "ring-1 ring-brand-400 bg-brand-500/10" : "hover:bg-white/[0.05]"
                         }`}
                       >
-                        {/* Poignée de glissement — seule source du drag (l'input reste éditable). */}
-                        <span
-                          draggable
-                          onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setDragHref(row.href); }}
-                          onDragEnd={endDrag}
-                          title="Glisser pour déplacer"
-                          aria-label={`Déplacer ${row.defaultLabel}`}
-                          className="shrink-0 h-8 w-4 flex items-center justify-center cursor-grab active:cursor-grabbing text-white/30 hover:text-white/70 transition-colors"
-                        >
+                        {/* Poignée VISUELLE — toute la ligne glisse (« prendre toute la case »). */}
+                        <span className="shrink-0 h-8 w-3.5 flex items-center justify-center text-white/25 group-hover/row:text-white/50 transition-colors">
                           <GripVertical className="h-4 w-4" />
                         </span>
                         <Icon className="h-[18px] w-[18px] shrink-0 text-white/50" strokeWidth={1.8} />
-                        <input
-                          value={row.label}
-                          onChange={(e) => renameDraft(row.href, e.target.value)}
-                          placeholder={row.defaultLabel}
-                          aria-label={`Libellé de ${row.defaultLabel}`}
-                          className="min-w-0 flex-1 h-8 rounded-lg border border-white/15 bg-white/[0.06] px-2 text-[12px] text-white placeholder:text-white/35 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                        />
+                        {rowEditing ? (
+                          <input
+                            autoFocus
+                            value={row.label}
+                            onChange={(e) => renameDraft(row.href, e.target.value)}
+                            onBlur={() => setEditKey(null)}
+                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") setEditKey(null); }}
+                            placeholder={row.defaultLabel}
+                            aria-label={`Libellé de ${row.defaultLabel}`}
+                            className="min-w-0 flex-1 h-8 rounded-lg border border-white/15 bg-white/[0.06] px-2 text-[12px] text-white placeholder:text-white/35 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                          />
+                        ) : (
+                          <span className="min-w-0 flex-1 truncate py-1.5 text-[12px] text-white/85">
+                            {row.label.trim() || row.defaultLabel}
+                          </span>
+                        )}
+                        <button type="button" draggable={false} onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => setEditKey(rowEditing ? null : `row:${row.href}`)}
+                          title={rowEditing ? "Valider" : "Renommer"}
+                          aria-label={`Renommer ${row.defaultLabel}`}
+                          className="shrink-0 h-7 w-7 rounded flex items-center justify-center text-white/30 hover:text-white/80 hover:bg-white/[0.06] transition-colors">
+                          {rowEditing ? <Check className="h-3 w-3 text-emerald-400" /> : <Pencil className="h-3 w-3" />}
+                        </button>
                       </li>
                     </Fragment>
                   );
@@ -536,12 +603,19 @@ export function Sidebar() {
             </div>
             );
           })}
-          {/* ＋ Créer une catégorie de 1er niveau (vide, à remplir par glisser-déposer). */}
+          {/* ＋ Créer une catégorie de 1er niveau — sert AUSSI de zone de dépôt
+              « fin de liste » quand on glisse une catégorie. */}
           <button
             type="button"
             onClick={addCategory}
+            onDragOver={(e) => { if (dragCat) { e.preventDefault(); setOverCat("__end__"); } }}
+            onDrop={(e) => { if (dragCat) { e.preventDefault(); dropCatBefore(null); } }}
             title="Créer une nouvelle catégorie"
-            className="w-full inline-flex items-center justify-center gap-1.5 h-9 rounded-lg border border-dashed border-white/20 text-[12px] font-semibold text-white/60 hover:text-white hover:border-brand-400/60 hover:bg-white/[0.04] transition-colors"
+            className={`w-full inline-flex items-center justify-center gap-1.5 h-9 rounded-lg border border-dashed text-[12px] font-semibold transition-colors ${
+              overCat === "__end__" && dragCat
+                ? "border-brand-400 bg-brand-500/10 text-white"
+                : "border-white/20 text-white/60 hover:text-white hover:border-brand-400/60 hover:bg-white/[0.04]"
+            }`}
           >
             <FolderPlus className="h-3.5 w-3.5" /> Nouvelle catégorie
           </button>

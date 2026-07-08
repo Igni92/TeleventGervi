@@ -438,3 +438,20 @@ export function moveNavCategory(state: NavEditGroup[], label: string, dir: -1 | 
   }
   return state;
 }
+
+/** Glisser-déposer d'une catégorie de 1er niveau : déplace tout le bloc
+ *  (catégorie + ses sous-catégories) AVANT `beforeLabel` (une autre catégorie de
+ *  1er niveau) ou en fin (`beforeLabel` null). No-op pour une sous-catégorie ou
+ *  une cible inconnue. */
+export function moveNavCategoryBefore(state: NavEditGroup[], label: string, beforeLabel: string | null): NavEditGroup[] {
+  if (label === beforeLabel) return state;
+  const tops = state.filter((g) => !g.parent);
+  const tree = tops.map((cat) => ({ cat, subs: state.filter((g) => g.parent === cat.label) }));
+  const from = tree.findIndex((n) => n.cat.label === label);
+  if (from < 0) return state;                       // 1er niveau uniquement
+  if (beforeLabel && !tree.some((n) => n.cat.label === beforeLabel)) return state;
+  const [block] = tree.splice(from, 1);
+  const at = beforeLabel ? tree.findIndex((n) => n.cat.label === beforeLabel) : tree.length;
+  tree.splice(at < 0 ? tree.length : at, 0, block);
+  return tree.flatMap((n) => [n.cat, ...n.subs]);
+}
