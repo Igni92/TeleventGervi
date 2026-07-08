@@ -8,6 +8,7 @@ import { getEmAffects } from "@/lib/emAffect";
 import { listBonCommandeDocEntries, setDeliveryBonCommande } from "@/lib/inventory";
 import { isLotPending, familyOfLot, LOT_FAMILY_PREFIX } from "@/lib/gervifrais-calc";
 import { FRUIT_FAMILIES } from "@/lib/familles";
+import { isDepartureReached } from "@/lib/livraison";
 
 export const dynamic = "force-dynamic";
 
@@ -52,17 +53,98 @@ const isPending = (lot: string | undefined | null) => isLotPending(lot);
 // Familles de fruits connues (clé → libellé) pour valider/afficher un tag « produit ».
 const FAMILY_LABEL = new Map(FRUIT_FAMILIES.map((f) => [f.key, f.label]));
 
+// ── OFFRES CLIENT (Quotations SAP) ──────────────────────────────
+// Une précommande crée une OFFRE CLIENT SAP (Quotation), pas une commande
+// engagée. Elle s'affiche ici en attente d'être « passée en commande » au jour
+// de départ (POST action=convert → crée la Commande client + marque « lots à
+// affecter »). Objet SAP oQuotations = 23 (pour la conversion base→cible).
+const QUOTATION_OBJTYPE = 23;
+
+type OffreLine = { itemCode: string; itemName: string; colis: number };
+type OffreDoc = {
+  docEntry: number; docNum: number; cardCode: string; cardName: string;
+  clientType: string | null; dueDate: string | null; docDate: string | null;
+  /** true = jour de départ atteint → à passer en commande (pastille). */
+  due: boolean; lineCount: number; colis: number; lines: OffreLine[];
+};
+
+/**
+ * Liste les OFFRES CLIENT (Quotations SAP ouvertes, non annulées) = « bons de
+ * commande » TeleVent en attente. Best-effort : échec SAP → [] (l'onglet reste
+ * utilisable pour l'affectation des lots).
+ */
+async function loadOffres(): Promise<OffreDoc[]> {
+  let quotes: SapOrderDoc[] = [];
+  try {
+    const res = await sap.get<{ value: SapOrderDoc[] }>(
+      `Quotations?$orderby=DocDueDate asc&$top=100`
+      + `&$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocumentStatus,Cancelled,DocumentLines`
+      + `&$filter=${encodeURIComponent("DocumentStatus eq 'bost_Open' and Cancelled eq 'tNO'")}`,
+    );
+    quotes = res.value ?? [];
+  } catch (e) {
+    console.warn("[BonCommande] Lecture des offres (Quotations) échouée:", (e as Error).message);
+    return [];
+  }
+  if (quotes.length === 0) return [];
+
+  const itemCodes = Array.from(new Set(quotes.flatMap((d) => (d.DocumentLines ?? []).map((l) => l.ItemCode))));
+  const pMap = new Map<string, { itemName: string; salesUnit: string | null; salesUnitWeight: number | null; salesQtyPerPackUnit: number | null }>();
+  if (itemCodes.length > 0) {
+    const prods = await prisma.product.findMany({
+      where: { itemCode: { in: itemCodes } },
+      select: { itemCode: true, itemName: true, salesUnit: true, salesUnitWeight: true, salesQtyPerPackUnit: true },
+    });
+    for (const p of prods) pMap.set(p.itemCode, p);
+  }
+  const unitsPerColis = (code: string) => {
+    const p = pMap.get(code);
+    return p ? (colisInfo(p).unitsPerColis || 1) : 1;
+  };
+
+  const cardCodes = Array.from(new Set(quotes.map((d) => d.CardCode)));
+  const typeByCard = new Map<string, string | null>();
+  if (cardCodes.length > 0) {
+    const clients = await prisma.client.findMany({ where: { code: { in: cardCodes } }, select: { code: true, type: true } });
+    for (const c of clients) typeByCard.set(c.code, c.type);
+  }
+
+  return quotes
+    .map((d) => {
+      const dueDate = d.DocDueDate ? d.DocDueDate.slice(0, 10) : null;
+      const lines: OffreLine[] = (d.DocumentLines ?? []).map((l) => {
+        const p = pMap.get(l.ItemCode);
+        const colis = (l.Quantity ?? 0) / (unitsPerColis(l.ItemCode) || 1);
+        return { itemCode: l.ItemCode, itemName: l.ItemDescription || p?.itemName || l.ItemCode, colis: Math.round(colis * 10) / 10 };
+      });
+      return {
+        docEntry: d.DocEntry, docNum: d.DocNum,
+        cardCode: d.CardCode, cardName: d.CardName ?? d.CardCode,
+        clientType: (typeByCard.get(d.CardCode) ?? "").trim().toUpperCase() || null,
+        dueDate, docDate: d.DocDate ?? null,
+        due: dueDate ? isDepartureReached(dueDate) : false,
+        lineCount: lines.length,
+        colis: Math.round(lines.reduce((s, l) => s + l.colis, 0) * 10) / 10,
+        lines,
+      };
+    })
+    // À passer (jour de départ atteint) en tête, puis par date de livraison.
+    .sort((a, b) => Number(b.due) - Number(a.due) || (a.dueDate ?? "").localeCompare(b.dueDate ?? ""));
+}
+
 export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
   const marks = await listBonCommandeDocEntries();
-  if (marks.length === 0) return NextResponse.json({ ok: true, docs: [] });
-
   const markInfo = new Map(marks.map((m) => [m.docEntry, m]));
   const docEntries = marks.map((m) => m.docEntry);
 
   try {
+    // Offres client (Quotations) en attente d'être passées en commande — toujours,
+    // même sans commande marquée « lots à affecter ».
+    const offres = await loadOffres();
+
     // Récupère les commandes marquées (par lots de 20 → filtre OData raisonnable).
     const CHUNK = 20;
     const fetched: SapOrderDoc[] = [];
@@ -187,7 +269,7 @@ export async function GET() {
     // Précommandes d'abord (livraison la plus proche en tête).
     .sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? ""));
 
-    return NextResponse.json({ ok: true, docs, pending: LOT_PENDING });
+    return NextResponse.json({ ok: true, offres, docs, pending: LOT_PENDING });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
@@ -252,6 +334,65 @@ export async function PATCH(req: NextRequest) {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     console.error(`[BonCommande] PATCH lot ${itemCode}@${docEntry} échoué:`, message);
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  }
+}
+
+/**
+ * POST — « Passer en commande » : convertit une OFFRE CLIENT (Quotation) en
+ * COMMANDE CLIENT (Order) SAP au jour de départ. La commande reprend les lignes
+ * de l'offre via la référence base→cible (BaseType 23) — SAP recopie
+ * article/qté/prix/UDF, dont U_NoLot=EM_PENDING → la commande rejoint la file
+ * d'affectation des lots. L'offre est clôturée par SAP (entièrement copiée).
+ * Body : { action: "convert", docEntry: number }  (docEntry = celui de l'offre)
+ */
+export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+
+  let body: { action?: string; docEntry?: number };
+  try { body = await req.json(); }
+  catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
+
+  if (body.action !== "convert") return NextResponse.json({ error: "Action inconnue" }, { status: 400 });
+  const docEntry = Number(body.docEntry);
+  if (!Number.isInteger(docEntry) || docEntry <= 0) return NextResponse.json({ error: "docEntry invalide" }, { status: 400 });
+
+  try {
+    // Charge l'offre (statut + lignes) pour bâtir la conversion base→cible.
+    const quote = await sap.get<SapOrderDoc>(
+      `Quotations(${docEntry})?$select=DocEntry,DocNum,CardCode,DocDueDate,DocumentStatus,Cancelled,DocumentLines`,
+    );
+    if (quote.Cancelled === "tYES") return NextResponse.json({ error: "Offre annulée — conversion impossible." }, { status: 409 });
+    if (quote.DocumentStatus === "bost_Close") return NextResponse.json({ error: "Offre déjà passée en commande." }, { status: 409 });
+    const lines = (quote.DocumentLines ?? []).filter((l) => l.LineNum != null);
+    if (lines.length === 0) return NextResponse.json({ error: "Offre sans ligne." }, { status: 400 });
+
+    // Conversion : chaque ligne de la commande référence la ligne d'offre
+    // (BaseType 23). SAP recopie article/qté/prix/UDF (dont U_NoLot=EM_PENDING).
+    const orderPayload = {
+      CardCode: quote.CardCode,
+      DocDueDate: quote.DocDueDate,
+      DocumentLines: lines.map((l) => ({
+        BaseType: QUOTATION_OBJTYPE,
+        BaseEntry: docEntry,
+        BaseLine: l.LineNum,
+      })),
+    };
+    type SapOrder = { DocEntry: number; DocNum: number };
+    const order = await sap.post<SapOrder>("/Orders", orderPayload);
+
+    // La commande issue de l'offre porte des lignes EM_PENDING → à affecter :
+    // on la marque « bon de commande » pour qu'elle rejoigne la file des lots.
+    const by = session.user?.name?.trim() || session.user?.email || "?";
+    await setDeliveryBonCommande(order.DocEntry, true, by).catch((e) =>
+      console.warn("[BonCommande] Marquage commande convertie échoué (non-bloquant):", (e as Error).message));
+
+    console.log(`[BonCommande] Offre #${quote.DocNum} → Commande #${order.DocNum} (passée par ${by})`);
+    return NextResponse.json({ ok: true, offreDocNum: quote.DocNum, docNum: order.DocNum, docEntry: order.DocEntry });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error(`[BonCommande] Conversion offre ${docEntry} échouée:`, message);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }

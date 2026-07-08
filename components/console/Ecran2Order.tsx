@@ -119,7 +119,7 @@ function notifyOrderResult(
   ok: boolean,
   json: {
     ok?: boolean; blocked?: boolean; error?: string; docNum?: number;
-    totalTTC?: number | null; totalLines?: number; bonPrep?: boolean;
+    totalTTC?: number | null; totalLines?: number; bonPrep?: boolean; offre?: boolean;
   } | null,
 ) {
   const fmt = (n: number | null | undefined) => (n != null ? n.toFixed(2) : "—");
@@ -142,6 +142,12 @@ function notifyOrderResult(
   } else if (json.bonPrep) {
     toast.success(`📝 ${job.clientName} — bon de préparation créé (export)`, {
       description: "Affecte les lots dans « Détail livraison » puis crée le BL.",
+      duration: 10000,
+    });
+  } else if (json.offre) {
+    // Précommande → OFFRE CLIENT (devis SAP), à passer en commande au jour de départ.
+    toast.success(`📄 ${job.clientName} — offre client #${json.docNum} créée · ${fmt(json.totalTTC)} € TTC`, {
+      description: "Précommande : à passer en commande au jour de départ (onglet Bons de commande).",
       duration: 10000,
     });
   } else {

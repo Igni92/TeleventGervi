@@ -8,6 +8,7 @@ import {
   nextWorkingDeliveryDay,
   nextPossibleDeliveryDay,
   isPrecommande,
+  isDepartureReached,
 } from "./livraison";
 
 describe("livraison — prochaine date de livraison (J+1, samedi → J+2)", () => {
@@ -125,5 +126,24 @@ describe("livraison — précommande (livraison au-delà du prochain jour livrab
     const ref = new Date("2026-06-16T09:00:00Z");
     expect(isPrecommande("2026-06-18T09:00:00.000Z", ref)).toBe(true);
     expect(isPrecommande("", ref)).toBe(false);
+  });
+});
+
+describe("livraison — jour de départ atteint (offre client à passer en commande)", () => {
+  it("est l'exact complément d'isPrecommande pour une date lisible", () => {
+    const ref = new Date("2026-06-16T09:00:00Z"); // mardi
+    // Précommande (jeudi) → PAS encore à passer.
+    expect(isDepartureReached("2026-06-18", ref)).toBe(false);
+    // Entrée dans la fenêtre livrable (mercredi J+1) → à passer.
+    expect(isDepartureReached("2026-06-17", ref)).toBe(true);
+  });
+  it("une date passée est « départ atteint » (offre en retard à traiter)", () => {
+    const ref = new Date("2026-06-16T09:00:00Z");
+    expect(isDepartureReached("2026-06-10", ref)).toBe(true);
+  });
+  it("une date illisible n'alerte pas (false)", () => {
+    const ref = new Date("2026-06-16T09:00:00Z");
+    expect(isDepartureReached("", ref)).toBe(false);
+    expect(isDepartureReached("nope", ref)).toBe(false);
   });
 });

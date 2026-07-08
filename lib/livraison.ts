@@ -161,6 +161,19 @@ export function isPrecommande(deliveryISO: string, ref: Date = new Date()): bool
   return d > nextPossibleDeliveryDay(ref);
 }
 
+/**
+ * « Jour de départ atteint » pour une OFFRE CLIENT (précommande) : la date de
+ * livraison est ENTRÉE dans la fenêtre normalement livrable — ce n'est plus une
+ * précommande. C'est le moment où l'offre doit être « passée en commande »
+ * (pastille sur l'onglet Bons de commande). Vrai aussi si la date est déjà
+ * passée (offre en retard à traiter). Une date illisible → false (on n'alerte pas).
+ */
+export function isDepartureReached(deliveryISO: string, ref: Date = new Date()): boolean {
+  const d = (deliveryISO || "").slice(0, 10);
+  if (d.length !== 10) return false;
+  return !isPrecommande(d, ref);
+}
+
 /** Libellé long lisible, ex. « jeudi 25 juin 2026 » (capitalisable côté UI). */
 export function formatDeliveryDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);

@@ -17,9 +17,10 @@ export default async function BonsCommandePage() {
           Bons de commande
         </h1>
         <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
-          Les commandes créées en <b>bon de commande</b> (précommandes, export, ou choix manuel) partent
-          <b> sans lot automatique</b> : ici, affecte à chaque article le lot <b>réellement en stock</b>.
-          Une fois tous les lots posés, la commande quitte cet onglet.
+          Les <b>précommandes</b> créent une <b>offre client</b> (devis SAP) : au jour de départ, passe-la
+          en commande depuis cet onglet. Les commandes en <b>bon de commande</b> partent <b>sans lot
+          automatique</b> : affecte à chaque article le lot <b>réellement en stock</b>. Une fois tous les
+          lots posés, la commande quitte cet onglet.
         </p>
       </header>
       <BonsCommandePanel />

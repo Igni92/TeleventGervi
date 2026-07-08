@@ -16,7 +16,6 @@ import { createBonPrep, markBonPrepTransformed } from "@/lib/bonPrep";
 import { chooseLot } from "@/lib/gervifrais-calc";
 import { colisInfo } from "@/lib/colis";
 import { isPrecommande } from "@/lib/livraison";
-import { setDeliveryBonCommande } from "@/lib/inventory";
 
 /**
  * Cache module-level du référentiel AdditionalExpenses SAP.
@@ -656,26 +655,25 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── 3. POST to SAP /Orders ─────────────────────────────
-  console.log("[Order] → POST SAP/Orders — DB:", process.env.SAP_B1_COMPANY_DB);
+  // ── 3. POST to SAP ─────────────────────────────────────
+  // Un BON DE COMMANDE (précommande ou choix explicite) = une OFFRE CLIENT SAP
+  // (Quotation), PAS une commande engagée : elle ne réserve pas de stock et
+  // n'entre pas dans les KPI. Elle sera « passée en commande » (convertie en
+  // Order) au jour de départ depuis l'onglet Bons de commande. Une vraie
+  // livraison (BL) reste une Commande client (Order). Cf. lib/livraison.
+  const targetEntity = isBonCommande ? "Quotations" : "Orders";
+  console.log(`[Order] → POST SAP/${targetEntity} — DB:`, process.env.SAP_B1_COMPANY_DB);
   console.log("[Order]   CardCode:", cardCode, "| Date:", dueDate, "| Lignes:", body.lines.length);
 
   try {
     type SapOrder = { DocEntry: number; DocNum: number; DocTotal?: number; VatSum?: number };
-    const created = await sap.post<SapOrder>("/Orders", payload);
+    const created = await sap.post<SapOrder>(`/${targetEntity}`, payload);
 
-    console.log("[Order] ✅ SUCCESS — DocNum:", created.DocNum, "| DocEntry:", created.DocEntry, "| Total:", created.DocTotal);
-
-    // Marque « bon de commande » (lots à affecter dans l'onglet dédié) — non bloquant.
-    if (isBonCommande) {
-      try {
-        const meName = session.user?.name?.trim() || session.user?.email || "?";
-        await setDeliveryBonCommande(created.DocEntry, true, meName);
-        console.log(`[Order] Commande #${created.DocNum} marquée « bon de commande » (lots à affecter)`);
-      } catch (e) {
-        console.warn("[Order] Marquage bon de commande échoué (non-bloquant):", (e as Error).message);
-      }
-    }
+    console.log(`[Order] ✅ SUCCESS (${targetEntity}) — DocNum:`, created.DocNum, "| DocEntry:", created.DocEntry, "| Total:", created.DocTotal);
+    // NB : on ne marque plus l'offre via setDeliveryBonCommande — les offres sont
+    // découvertes en interrogeant les Quotations ouvertes (cf. /api/bons-commande).
+    // Le marquage « lots à affecter » est posé sur la COMMANDE issue de la
+    // conversion (offre → commande), pas sur l'offre.
 
     // Mémorise (best-effort) la tournée CHOISIE à la création pour ce client —
     // même mécanique que le PATCH « Détail livraison » : ré-appliquée en
@@ -701,14 +699,18 @@ export async function POST(req: NextRequest) {
 
     // Décrément optimiste local — latence 0 pour le commercial. La sync delta
     // corrigera au tick suivant si besoin (SAP est source de vérité).
-    try {
-      await decrementLocalStock(body.lines.map((l) => ({
-        itemCode: l.itemCode,
-        quantity: l.quantity,
-        warehouseCode: l.warehouseCode,
-      })));
-    } catch (e) {
-      console.warn("[Order] decrementLocalStock échoué (non-bloquant):", (e as Error).message);
+    // ⚠️ PAS pour une offre client : elle n'engage pas de stock (Committed) tant
+    // qu'elle n'est pas passée en commande.
+    if (!isBonCommande) {
+      try {
+        await decrementLocalStock(body.lines.map((l) => ({
+          itemCode: l.itemCode,
+          quantity: l.quantity,
+          warehouseCode: l.warehouseCode,
+        })));
+      } catch (e) {
+        console.warn("[Order] decrementLocalStock échoué (non-bloquant):", (e as Error).message);
+      }
     }
 
     // Refetch la commande créée pour récupérer les U_NoLot / prix / taxes appliqués par SAP
@@ -737,7 +739,7 @@ export async function POST(req: NextRequest) {
     };
     let enriched: EnrichedOrder | null = null;
     try {
-      enriched = await sap.get<EnrichedOrder>(`/Orders(${created.DocEntry})`);
+      enriched = await sap.get<EnrichedOrder>(`/${targetEntity}(${created.DocEntry})`);
     } catch (e) {
       console.warn("[Order] Refetch failed (non-blocking):", (e as Error).message);
     }
@@ -770,9 +772,9 @@ export async function POST(req: NextRequest) {
       }
       if (patchLines.length > 0) {
         try {
-          await sap.patch(`Orders(${created.DocEntry})`, { DocumentLines: patchLines });
+          await sap.patch(`${targetEntity}(${created.DocEntry})`, { DocumentLines: patchLines });
           console.log(`[Order] TPF réconcilié sur ${patchLines.length} ligne(s) (tarif SAP) → re-fetch`);
-          enriched = await sap.get<EnrichedOrder>(`/Orders(${created.DocEntry})`);
+          enriched = await sap.get<EnrichedOrder>(`/${targetEntity}(${created.DocEntry})`);
         } catch (e) {
           console.warn("[Order] PATCH réconciliation TPF échoué (non-bloquant):", (e as Error).message);
         }
@@ -784,7 +786,9 @@ export async function POST(req: NextRequest) {
     // agrégats pilotage (accueil / Écran 1) SANS attendre la prochaine synchro
     // SAP. Réutilise `enriched` déjà ramené — aucun appel SAP supplémentaire.
     // Idempotent : la synchro suivante réécrira proprement la ligne.
-    if (enriched) {
+    // ⚠️ PAS pour une offre client : elle n'est pas une commande engagée → ne doit
+    // pas remonter dans les agrégats pilotage tant qu'elle n'est pas passée en commande.
+    if (enriched && !isBonCommande) {
       try {
         await mirrorCreatedOrder(enriched);
       } catch (e) {
@@ -800,7 +804,7 @@ export async function POST(req: NextRequest) {
         .map((l) => `${l.ItemCode}→lot ${l.U_NoLot}`)
         .join(", ");
       const noteParts = [
-        `Commande #${created.DocNum} créée dans SAP`,
+        `${isBonCommande ? "Offre client" : "Commande"} #${created.DocNum} créée dans SAP`,
         cardCode !== client.code ? `(via ${cardCode})` : null,
         enriched ? `Total ${enriched.DocTotal.toFixed(2)} € TTC` : null,
         lotsList ? `Lots: ${lotsList}` : null,
@@ -827,12 +831,19 @@ export async function POST(req: NextRequest) {
       const nbLignes = body.lines.length;
       const ttc = enriched?.DocTotal ?? created.DocTotal ?? 0;
       await notifyAll(
-        {
-          title: "🆕 Nouvelle commande",
-          body: `${clientNom} — ${nbLignes} ligne${nbLignes > 1 ? "s" : ""}${ttc ? ` · ${Math.round(ttc)} € TTC` : ""} (BL n°${created.DocNum})`,
-          url: "/livraisons",
-          tag: `order-${created.DocEntry}`,
-        },
+        isBonCommande
+          ? {
+              title: "🆕 Nouvelle offre client",
+              body: `${clientNom} — ${nbLignes} ligne${nbLignes > 1 ? "s" : ""}${ttc ? ` · ${Math.round(ttc)} € TTC` : ""} (offre n°${created.DocNum}) — à passer en commande au départ`,
+              url: "/bons-commande",
+              tag: `offre-${created.DocEntry}`,
+            }
+          : {
+              title: "🆕 Nouvelle commande",
+              body: `${clientNom} — ${nbLignes} ligne${nbLignes > 1 ? "s" : ""}${ttc ? ` · ${Math.round(ttc)} € TTC` : ""} (BL n°${created.DocNum})`,
+              url: "/livraisons",
+              tag: `order-${created.DocEntry}`,
+            },
         { exceptEmail: session.user?.email ?? null },
       );
     } catch (e) {
@@ -850,6 +861,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      // true = OFFRE CLIENT (Quotation) créée : à passer en commande au jour de
+      // départ depuis l'onglet Bons de commande. false = Commande client (BL).
+      offre: isBonCommande,
       docNum: created.DocNum,
       docEntry: created.DocEntry,
       cardCode,

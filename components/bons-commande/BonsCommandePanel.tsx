@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   PackageCheck, ChevronDown, RefreshCw, Loader2, CheckCircle2, Sparkles,
-  CalendarDays, AlertTriangle, Grape,
+  CalendarDays, AlertTriangle, Grape, FileText, ArrowRightCircle, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDeliveryDate } from "@/lib/livraison";
@@ -36,6 +36,14 @@ interface BonDoc {
   clientType: string | null; dueDate: string | null; docDate: string | null; open: boolean;
   markedBy: string | null; markedAt: string | null; pendingCount: number; lines: BonLine[];
 }
+interface OffreLine { itemCode: string; itemName: string; colis: number }
+/** OFFRE CLIENT (Quotation SAP) = précommande en attente d'être passée en commande. */
+interface OffreDoc {
+  docEntry: number; docNum: number; cardCode: string; cardName: string;
+  clientType: string | null; dueDate: string | null; docDate: string | null;
+  /** true = jour de départ atteint → à passer en commande maintenant. */
+  due: boolean; lineCount: number; colis: number; lines: OffreLine[];
+}
 
 const AFFECT_LABEL: Record<string, string> = { TOUS: "Tous", EXPORT: "Export", GMS: "GMS", CHR: "CHR" };
 const PENDING = "EM_PENDING";
@@ -47,9 +55,11 @@ const SEG_BADGE: Record<string, string> = {
 
 export function BonsCommandePanel() {
   const [docs, setDocs] = useState<BonDoc[] | null>(null);
+  const [offres, setOffres] = useState<OffreDoc[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [busyLine, setBusyLine] = useState<string | null>(null); // `${docEntry}:${itemCode}`
+  const [convertingId, setConvertingId] = useState<number | null>(null); // offre en cours de passage
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -57,8 +67,10 @@ export function BonsCommandePanel() {
       const r = await fetch("/api/bons-commande", { cache: "no-store" });
       const j = await r.json().catch(() => null);
       setDocs(j?.ok ? (j.docs ?? []) : []);
+      setOffres(j?.ok ? (j.offres ?? []) : []);
     } catch {
       setDocs((prev) => prev ?? []);
+      setOffres((prev) => prev ?? []);
     } finally {
       setLoading(false);
     }
@@ -114,7 +126,29 @@ export function BonsCommandePanel() {
     }
   }, [assignLot]);
 
+  // « Passer en commande » : convertit une OFFRE CLIENT (Quotation) en COMMANDE
+  // (Order) SAP. La commande créée rejoint la file d'affectation des lots.
+  const convertOffre = useCallback(async (offre: OffreDoc) => {
+    setConvertingId(offre.docEntry);
+    try {
+      const r = await fetch("/api/bons-commande", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "convert", docEntry: offre.docEntry }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) { toast.error(j?.error || "Échec du passage en commande"); return; }
+      setOffres((prev) => prev?.filter((o) => o.docEntry !== offre.docEntry) ?? prev);
+      toast.success(`✅ Offre #${offre.docNum} passée en commande #${j.docNum} — lots à affecter`);
+      load();  // la nouvelle commande apparaît dans la file des lots ci-dessous
+    } catch {
+      toast.error("SAP injoignable — offre non convertie");
+    } finally {
+      setConvertingId(null);
+    }
+  }, [load]);
+
   const count = docs?.length ?? 0;
+  const dueCount = (offres ?? []).filter((o) => o.due).length;
 
   return (
     <div className="space-y-4">
@@ -135,7 +169,76 @@ export function BonsCommandePanel() {
         </button>
       </div>
 
-      {docs !== null && count === 0 && (
+      {/* ── OFFRES CLIENT (précommandes) à passer en commande ────────── */}
+      {offres !== null && offres.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <FileText className="h-4 w-4 text-brand-500 shrink-0" />
+            <h2 className="text-[13px] font-semibold text-foreground">Offres client — à passer en commande</h2>
+            {dueCount > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-700 dark:text-amber-300">
+                {dueCount} à passer
+              </span>
+            )}
+          </div>
+          <p className="text-[11.5px] text-muted-foreground">
+            Une précommande crée une <b>offre client</b> (devis SAP), pas une commande engagée. Au <b>jour de départ</b>,
+            passe-la en commande : elle rejoint alors la file d&apos;affectation des lots ci-dessous.
+          </p>
+          <ul className="space-y-2">
+            {offres.map((o) => {
+              const converting = convertingId === o.docEntry;
+              return (
+                <li
+                  key={o.docEntry}
+                  className={`rounded-xl border px-3 sm:px-4 py-2.5 flex flex-col sm:flex-row sm:items-center gap-2 ${
+                    o.due ? "border-amber-400/60 bg-amber-50/40 dark:bg-amber-950/15" : "border-border bg-card"
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[13.5px] font-semibold text-foreground truncate">{o.cardName}</span>
+                      {o.clientType && SEG_BADGE[o.clientType] && (
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEG_BADGE[o.clientType]}`}>
+                          {o.clientType}
+                        </span>
+                      )}
+                      <span className="text-[11px] text-muted-foreground">offre n°{o.docNum}</span>
+                      {o.dueDate && (
+                        <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <CalendarDays className="h-3 w-3" /> {formatDeliveryDate(o.dueDate)}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11.5px] text-muted-foreground tnum mt-0.5">
+                      {o.lineCount} ligne{o.lineCount > 1 ? "s" : ""} · {o.colis} colis
+                    </p>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-2 self-end sm:self-auto">
+                    {o.due
+                      ? <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-amber-700 dark:text-amber-300"><Clock className="h-3.5 w-3.5" /> jour de départ</span>
+                      : <span className="inline-flex items-center gap-1 text-[10.5px] text-muted-foreground"><Clock className="h-3.5 w-3.5" /> en attente du départ</span>}
+                    <button
+                      type="button"
+                      onClick={() => convertOffre(o)}
+                      disabled={converting || convertingId !== null}
+                      title="Créer la commande client SAP à partir de cette offre (lots à affecter ensuite)"
+                      className={`inline-flex items-center gap-1.5 h-10 sm:h-9 px-3.5 rounded-xl text-[12.5px] font-semibold transition-colors disabled:opacity-50 ${
+                        o.due ? "bg-brand-600 hover:bg-brand-700 text-white" : "border border-border text-foreground hover:bg-secondary/60"
+                      }`}
+                    >
+                      {converting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightCircle className="h-4 w-4" />}
+                      Passer en commande
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {docs !== null && count === 0 && (offres?.length ?? 0) === 0 && (
         <div className="flex flex-col items-center justify-center text-center rounded-2xl border border-dashed border-border bg-card py-14 px-6">
           <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 mb-3">
             <CheckCircle2 className="h-6 w-6" strokeWidth={1.8} />
