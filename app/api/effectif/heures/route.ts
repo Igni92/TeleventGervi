@@ -8,7 +8,7 @@ import {
 } from "@/lib/heuresCalc";
 import {
   getProfile, saveProfile, listProfiles,
-  getWeekEntry, saveWeekEntry,
+  getWeekEntry, saveWeekEntry, sanitizeDays,
   getUserWeeks, listEntriesForWeeks, type WeekEntry,
 } from "@/lib/heuresRh";
 
@@ -150,8 +150,17 @@ export async function POST(req: NextRequest) {
       const existing = await getWeekEntry(target, week);
       opt = { option: existing?.option ?? null, recupDates: existing?.recupDates };
     }
-    const entry = await saveWeekEntry(target, week, body.days, c.email, opt);
+
+    // RECALCUL anti-« récup fantôme » : la récup ne concerne QUE des heures supp.
+    // Si, au final, la semaine n'a PAS d'heures supp (total ≤ contrat, les 35 h
+    // sont faites sans dépassement), il n'y a plus rien à récupérer/payer → on
+    // ANNULE l'option, quoi qu'il ait été enregistré avant (évite d'accorder une
+    // récup pour des heures en réalité travaillées).
     const profile = await getProfile(target);
+    const calc = computeWeek(sanitizeDays(body.days), profile.weeklyHours);
+    if (calc.sup25Min + calc.sup50Min === 0) opt = { option: null, recupDates: undefined };
+
+    const entry = await saveWeekEntry(target, week, body.days, c.email, opt);
     return NextResponse.json({ ok: true, week, user: target, entry, calc: computeWeek(entry.days, profile.weeklyHours) });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });

@@ -88,10 +88,11 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
     setDirty(true);
   };
 
-  // ── Options « heures supp » : à décider dès qu'il y a des supp (ou si un choix
-  //    a déjà été saisi — on n'escamote jamais une donnée existante). ──
+  // ── Options « heures supp » : la récup/paiement ne concerne QUE des heures
+  //    supp. Sans supp (les 35 h faites sans dépassement) → RIEN à récupérer :
+  //    on masque le bloc et le serveur annule toute récup au recalcul. ──
   const hasSupp = calc.sup25Min + calc.sup50Min > 0;
-  const showOptions = hasSupp || option != null;
+  const showOptions = hasSupp;
 
   // Semaine déjà AU CONTRAT (≥ 35 h faites) → on n'y pose pas de récup : elle se
   // prend sur une autre semaine. Un clic sur l'option active la désélectionne.
@@ -144,10 +145,11 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           week, days, user: who || undefined,
-          // Le choix est renvoyé tel quel ; le SERVEUR ignore toute modif venant
-          // d'un non-manager (la décision employeur déjà enregistrée est conservée).
-          option,
-          recupDates: option === "recup" ? recupDates.filter(Boolean) : [],
+          // Sans heures supp, aucune récup possible → on n'envoie rien (le serveur
+          // annule de toute façon). Sinon le choix est renvoyé tel quel (le serveur
+          // ignore une modif venant d'un non-manager).
+          option: hasSupp ? option : null,
+          recupDates: hasSupp && option === "recup" ? recupDates.filter(Boolean) : [],
         }),
       });
       const j = await r.json().catch(() => null);
@@ -542,7 +544,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                   <div className="flex items-center justify-between gap-2">
                     <span className="min-w-0 flex-1 inline-flex items-center gap-1.5">
                       <span className="min-w-0 truncate text-[12.5px] font-semibold text-foreground">{weekLabel(w)}</span>
-                      {o && <OptionChip option={o} recupDates={rd} />}
+                      {o && c && c.sup25Min + c.sup50Min > 0 && <OptionChip option={o} recupDates={rd} />}
                     </span>
                     <span className="text-[13.5px] font-bold tnum text-foreground shrink-0">{c ? fmtHM(c.totalMin) : <span className="text-[11px] font-normal italic text-muted-foreground">non saisi</span>}</span>
                   </div>
@@ -594,7 +596,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                       <td className="px-3 py-1.5 whitespace-nowrap">
                         <span className="inline-flex items-center gap-2">
                           {weekLabel(w)}
-                          {o && <OptionChip option={o} recupDates={rd} />}
+                          {o && c && c.sup25Min + c.sup50Min > 0 && <OptionChip option={o} recupDates={rd} />}
                         </span>
                       </td>
                       <td className="px-2 py-1.5 text-right tnum font-semibold">{c ? fmtHM(c.totalMin) : <span className="italic text-muted-foreground">non saisi</span>}</td>

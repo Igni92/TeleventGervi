@@ -51,7 +51,7 @@ export interface MoisEmploye {
 function moisRows(weeks: MoisEmploye["weeks"]): string {
   return weeks.map(({ week, calc, option, recupDates }) => `
     <tr${calc ? "" : ' class="vide"'}>
-      <td class="jour">${esc(weekLabel(week))}${optionLine(option, recupDates)}</td>
+      <td class="jour">${esc(weekLabel(week))}${calc && calc.sup25Min + calc.sup50Min > 0 ? optionLine(option, recupDates) : ""}</td>
       <td class="num">${calc ? fmtHM(calc.contractMin) : "—"}</td>
       <td class="num">${calc ? fmtHM(calc.totalMin) : "non saisi"}</td>
       <td class="num">${calc ? fmtHM(calc.deltaMin) : "—"}</td>

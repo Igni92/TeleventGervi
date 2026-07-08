@@ -375,6 +375,7 @@ sélection des jours de récup en un clic.
 | Régler pour un salarié | Impossible (écran perso uniquement). | Le manager choisit un **salarié dans un sélecteur** en tête de « Mes heures » et pose sa décision (via `?user=` déjà supporté par l'API). |
 | Récup sur semaine pleine | Aucun contrôle. | **Interdit** de poser un jour de récup dans la semaine des heures supp (ex. 36h15 lun→ven ⇒ pas de récup le samedi de cette semaine) : le repos compensateur se prend sur une **autre** semaine (`isDateInWeek`). |
 | Choix des jours de récup | Champs date ajoutés un par un. | **Puces « jour » cliquables** (jours des semaines suivantes, dimanches exclus) + « autre date » bornée après la semaine (`daysAfterWeek`). Un clic = ajout/retrait. |
+| Récup fantôme | Une récup pouvait rester posée même si la semaine repassait à ≤ 35 h. | **Recalcul serveur à chaque enregistrement** : sans heures supp (les 35 h faites sans dépassement), l'option récup/paiement est **annulée** (rien à récupérer). Bloc masqué à l'écran, chip/PDF n'affichent la récup que pour une semaine réellement en supp. |
 
 ---
 
