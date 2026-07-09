@@ -5,6 +5,7 @@ import { sap } from "@/lib/sapb1";
 import { incrementLocalStock } from "@/lib/stockSync";
 import { bumpLot } from "@/lib/lotResolver";
 import { applyAgreage, type AgreageStatus } from "@/lib/agreage";
+import { setMarchandiseNote, sanitizeRating } from "@/lib/marchandiseNote";
 
 /**
  * POST /api/sap/purchase-orders/receive  { docEntry, agreage? }
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
   // droit : passer une commande fournisseur en entrée marchandise).
   if (!(await requireCanReceivePurchaseOrder(session))) return NextResponse.json({ error: "Réservé à la préparation / l'administration / l'agréeur" }, { status: 403 });
 
-  let body: { docEntry?: number; agreage?: { status?: string; type?: string; note?: string } };
+  let body: { docEntry?: number; agreage?: { status?: string; type?: string; note?: string; rating?: number } };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -134,6 +135,13 @@ export async function POST(req: NextRequest) {
     }
   } catch (e) {
     console.warn("[POReceive] PATCH U_NoLot échoué (non-bloquant):", (e as Error).message);
+  }
+
+  // ── Note qualité (étoiles) de l'agréeur — posée sur chaque article reçu + le lot ──
+  const rating = sanitizeRating(body.agreage?.rating);
+  if (rating != null) {
+    const codes = [...new Set(createdLines.map((l) => l.ItemCode).filter((c): c is string => !!c))];
+    await Promise.all(codes.map((code) => setMarchandiseNote(code, lotCode, rating, me).catch(() => {})));
   }
 
   // ── 4. Cache lots + incrément stock local (latence 0) ──
