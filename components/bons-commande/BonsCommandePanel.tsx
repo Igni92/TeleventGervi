@@ -28,6 +28,7 @@ const FAMILY_LABEL = new Map(FRUIT_FAMILIES.map((f) => [f.key, f.label]));
 interface LotCandidate {
   lot: string; docNum: number; warehouse: string | null; affect: string;
   date?: string | null; supplier?: string | null; label?: string;
+  qty?: number | null;   // stock physique TeleVent (article×entrepôt) — indicatif
 }
 interface FamilyTarget { key: string; label: string }
 interface BonLine {
@@ -594,6 +595,9 @@ function LotCell({ line, current, isBusy, onPick }: {
                 <span className="font-semibold text-foreground">{c.lot}</span>
                 {sug && <span className="text-[10px] text-amber-600 dark:text-amber-400">suggéré</span>}
                 <span className="text-[10px] px-1 py-px rounded bg-secondary text-muted-foreground">{AFFECT_LABEL[c.affect] ?? c.affect}</span>
+                {c.qty != null && c.qty > 0 && (
+                  <span className="text-[10px] px-1 py-px rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 tnum">{Math.round(c.qty)} en stock</span>
+                )}
                 {c.warehouse && <span className="text-[10.5px] text-muted-foreground ml-auto">mag. {c.warehouse}</span>}
               </button>
             ))}

@@ -5,6 +5,7 @@ import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { getLotMaps, resolveLotForSegment, LOT_PENDING } from "@/lib/lotResolver";
 import { getEmAffects } from "@/lib/emAffect";
+import { getItemStock, lotInStock, lotStockQty } from "@/lib/lotStock";
 import { listBonCommandeDocEntries, setDeliveryBonCommande } from "@/lib/inventory";
 import { debitLots, isRealLot } from "@/lib/lotLedger";
 import { isLotPending, familyOfLot, LOT_FAMILY_PREFIX } from "@/lib/gervifrais-calc";
@@ -203,8 +204,8 @@ export async function GET() {
       for (const c of clients) typeByCard.set(c.code, c.type);
     }
 
-    // Cartes de lots + affectations EM (une fois).
-    const [maps, affects] = await Promise.all([getLotMaps(), getEmAffects()]);
+    // Cartes de lots + affectations EM + stock physique par article (une fois).
+    const [maps, affects, stock] = await Promise.all([getLotMaps(), getEmAffects(), getItemStock(itemCodes)]);
     // Libellé lisible d'une EM (au survol) : « Reçu le jj/mm/aaaa · Fournisseur ».
     const emLabel = (dn: number): string => {
       const meta = maps.docMeta.get(dn);
@@ -218,18 +219,26 @@ export async function GET() {
     };
     const candidatesFor = (itemCode: string, segment: string | null) => {
       const docs = maps.byItemList.get(itemCode) ?? [];
-      const candidates = docs.map((dn) => {
-        const meta = maps.docMeta.get(dn);
-        return {
-          lot: `EM${dn}`, docNum: dn,
-          warehouse: maps.whsOfItemDoc.get(`${itemCode}|${dn}`) ?? null,
-          affect: affects.get(dn) ?? "TOUS",
-          date: meta?.date ?? null,          // "YYYY-MM-DD" — réception EM
-          supplier: meta?.supplier ?? null,  // fournisseur (CardName PDN)
-          label: emLabel(dn),                // repli texte (titre natif)
-        };
-      });
-      const suggested = resolveLotForSegment(maps, affects, itemCode, undefined, segment).lot;
+      // On ne propose QUE les lots avec du stock physique dans TeleVent
+      // (article×entrepôt) — le stock par lot n'existe pas dans ce SAP.
+      const candidates = docs
+        .map((dn) => {
+          const meta = maps.docMeta.get(dn);
+          const warehouse = maps.whsOfItemDoc.get(`${itemCode}|${dn}`) ?? null;
+          return {
+            lot: `EM${dn}`, docNum: dn,
+            warehouse,
+            affect: affects.get(dn) ?? "TOUS",
+            date: meta?.date ?? null,          // "YYYY-MM-DD" — réception EM
+            supplier: meta?.supplier ?? null,  // fournisseur (CardName PDN)
+            label: emLabel(dn),                // repli texte (titre natif)
+            qty: lotStockQty(stock, itemCode, warehouse),  // stock physique (affichage)
+          };
+        })
+        .filter((c) => lotInStock(stock, itemCode, c.warehouse));
+      const sug = resolveLotForSegment(maps, affects, itemCode, undefined, segment).lot;
+      // Suggestion seulement si elle a du stock (fait partie des candidats retenus).
+      const suggested = sug && candidates.some((c) => c.lot === sug) ? sug : null;
       return { candidates, suggested };
     };
 

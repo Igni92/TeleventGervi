@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getLotMaps, resolveLotForSegment, LOT_PENDING } from "@/lib/lotResolver";
 import { getEmAffects } from "@/lib/emAffect";
+import { getItemStock, lotInStock, lotStockQty } from "@/lib/lotStock";
 
 export const dynamic = "force-dynamic";
 
@@ -33,20 +34,27 @@ export async function GET(req: NextRequest) {
   if (items.length === 0) return NextResponse.json({ error: "items requis" }, { status: 400 });
 
   try {
-    const [maps, affects] = await Promise.all([getLotMaps(), getEmAffects()]);
+    const [maps, affects, stock] = await Promise.all([getLotMaps(), getEmAffects(), getItemStock(items)]);
     const out: Record<string, {
-      candidates: { lot: string; docNum: number; warehouse: string | null; affect: string }[];
+      candidates: { lot: string; docNum: number; warehouse: string | null; affect: string; qty: number }[];
       suggested: string | null;
     }> = {};
     for (const code of items) {
       const docs = maps.byItemList.get(code) ?? [];
-      const candidates = docs.map((d) => ({
-        lot: `EM${d}`,
-        docNum: d,
-        warehouse: maps.whsOfItemDoc.get(`${code}|${d}`) ?? null,
-        affect: affects.get(d) ?? "TOUS",
-      }));
-      const suggested = resolveLotForSegment(maps, affects, code, undefined, segment).lot;
+      // On ne propose QUE les lots avec du stock physique dans TeleVent
+      // (article×entrepôt) — le stock par lot n'existe pas dans ce SAP.
+      const candidates = docs
+        .map((d) => ({
+          lot: `EM${d}`,
+          docNum: d,
+          warehouse: maps.whsOfItemDoc.get(`${code}|${d}`) ?? null,
+          affect: affects.get(d) ?? "TOUS",
+        }))
+        .filter((c) => lotInStock(stock, code, c.warehouse))
+        .map((c) => ({ ...c, qty: lotStockQty(stock, code, c.warehouse) }));
+      // Suggestion seulement si elle fait partie des lots réellement en stock.
+      const sug = resolveLotForSegment(maps, affects, code, undefined, segment).lot;
+      const suggested = sug && candidates.some((c) => c.lot === sug) ? sug : null;
       out[code] = { candidates, suggested };
     }
     return NextResponse.json({ ok: true, items: out, pending: LOT_PENDING });
