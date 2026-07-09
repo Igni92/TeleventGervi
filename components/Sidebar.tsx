@@ -118,7 +118,8 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
     items: [
       { href: "/dashboard", label: "Statistiques", icon: LayoutDashboard },
       { href: "/encours", label: "Encours clients", icon: Receipt },
-      { href: "/commerciaux", label: "Équipe commerciale", icon: Briefcase },
+      { href: "/commerciaux", label: "Effectif", icon: Briefcase },
+      { href: "/transport", label: "Coût de transport", icon: Truck },
     ],
   },
   {
