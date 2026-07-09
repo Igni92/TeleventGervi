@@ -480,6 +480,27 @@ export async function POST(req: NextRequest) {
     await setDeliveryBonCommande(order.DocEntry, true, by).catch((e) =>
       console.warn("[BonCommande] Marquage commande convertie échoué (non-bloquant):", (e as Error).message));
 
+    // ── L'offre est passée en livraison → elle doit DISPARAÎTRE de la liste ──
+    // Une fois la commande créée, le bon de commande (l'offre) n'a plus lieu
+    // d'être. SAP clôture normalement le devis à la conversion complète, mais pas
+    // toujours sur cette base : on force la CLÔTURE (best-effort). « Déjà clôturée »
+    // est un succès de fait (le GET ne liste que les devis ouverts). On tente
+    // Close puis, à défaut, Cancel — dans les deux cas l'offre quitte l'onglet.
+    try {
+      await sap.post(`Quotations(${docEntry})/Close`, null);
+      console.log(`[BonCommande] Offre #${quote.DocNum} clôturée après conversion.`);
+    } catch (eClose) {
+      console.warn(`[BonCommande] Clôture de l'offre ${docEntry} après conversion échouée, repli Cancel:`, (eClose as Error).message);
+      try {
+        await sap.post(`Quotations(${docEntry})/Cancel`, null);
+        console.log(`[BonCommande] Offre #${quote.DocNum} annulée après conversion.`);
+      } catch (eCancel) {
+        // Ni Close ni Cancel : l'offre est probablement DÉJÀ clôturée par SAP à la
+        // conversion (elle ne remontera plus). On ne bloque pas la réussite.
+        console.warn(`[BonCommande] Offre ${docEntry} non clôturée (probablement déjà fermée par SAP):`, (eCancel as Error).message);
+      }
+    }
+
     console.log(`[BonCommande] Offre #${quote.DocNum} → Commande #${order.DocNum} (passée par ${by})`);
     return NextResponse.json({ ok: true, offreDocNum: quote.DocNum, docNum: order.DocNum, docEntry: order.DocEntry });
   } catch (e) {

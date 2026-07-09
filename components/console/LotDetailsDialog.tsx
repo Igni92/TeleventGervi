@@ -9,8 +9,10 @@ import {
 /**
  * Détail des LOTS EN STOCK d'un article — ouvert au clic droit sur une ligne de
  * la console. Source : table locale ProductBatch (rapide, aucun appel SAP) via
- * /api/products/[id]/batches?inStock=1 → seulement les lots encore en stock
- * (quantity > 0), triés FEFO (DLC la plus proche d'abord).
+ * /api/products/[id]/batches?inStock=1 → lots dont la DLC n'est pas dépassée
+ * (le stock par lot n'existe pas dans SAP : on ne filtre PAS sur la quantité),
+ * triés FEFO (DLC la plus proche d'abord). La quantité en stock affichée en tête
+ * vient du dispo de la ligne (colis), la vraie donnée « en stock ».
  */
 
 interface Batch {
@@ -20,11 +22,16 @@ interface Batch {
   status: string | null;
   expirationDate: string | null;
 }
-interface Props { item: { id: string; code: string; name: string } | null; onClose: () => void }
+interface Props {
+  item: { id: string; code: string; name: string; dispo?: number; unit?: string } | null;
+  onClose: () => void;
+}
 
 const fmtDlc = (iso: string | null): string | null =>
   iso ? new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : null;
 const fmtQty = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+/** Lot verrouillé côté SAP (bdsStatus_Locked) — non vendable, signalé. */
+const isLocked = (status: string | null): boolean => /lock/i.test(status ?? "");
 
 export function LotDetailsDialog({ item, onClose }: Props) {
   const [loading, setLoading] = useState(false);
@@ -46,6 +53,10 @@ export function LotDetailsDialog({ item, onClose }: Props) {
     return () => { cancelled = true; };
   }, [item]);
 
+  const dispo = item?.dispo;
+  const unit = item?.unit || "colis";
+  const hasStock = dispo == null || dispo > 0;   // dispo inconnu → on n'exclut rien
+
   return (
     <Dialog open={!!item} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-w-md">
@@ -55,7 +66,9 @@ export function LotDetailsDialog({ item, onClose }: Props) {
             Lots en stock — {item?.name}
           </DialogTitle>
           <DialogDescription>
-            Code article <span className="font-mono text-foreground">{item?.code}</span> · lots encore en stock (quantité &gt; 0), DLC la plus proche d&apos;abord.
+            Code article <span className="font-mono text-foreground">{item?.code}</span>
+            {dispo != null && <> · en stock <span className="font-semibold text-foreground tnum">{fmtQty(dispo)} {unit}</span></>}
+            {" "}· lots valables (DLC non dépassée), la plus proche d&apos;abord.
           </DialogDescription>
         </DialogHeader>
 
@@ -64,11 +77,16 @@ export function LotDetailsDialog({ item, onClose }: Props) {
             <Loader2 className="h-4 w-4 animate-spin" /> Chargement des lots…
           </p>
         ) : batches.length === 0 ? (
-          <p className="py-4 text-[13px] italic text-muted-foreground">Aucun lot en stock pour cet article.</p>
+          <p className="py-4 text-[13px] italic text-muted-foreground">
+            {hasStock
+              ? "Article en stock, mais aucun lot suivi en base pour cet article (non géré par lot)."
+              : "Aucun lot — article épuisé."}
+          </p>
         ) : (
           <ul className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-1">
             {batches.map((b, i) => {
               const d = fmtDlc(b.expirationDate);
+              const locked = isLocked(b.status);
               return (
                 <li key={`${b.batchNumber}-${i}`} className="rounded-lg border border-border bg-secondary/20 px-3 py-2">
                   <div className="flex items-center justify-between gap-2">
@@ -76,9 +94,15 @@ export function LotDetailsDialog({ item, onClose }: Props) {
                       <span className="text-[10.5px] uppercase tracking-wide text-muted-foreground">Lot {i + 1}</span>
                       <span className="font-mono">{b.batchNumber}</span>
                     </span>
-                    <span className="rounded-md bg-brand-500/10 px-2 py-0.5 text-[12px] font-bold tnum text-brand-700 dark:text-brand-300">
-                      Qté {fmtQty(b.quantity)}
-                    </span>
+                    {/* Le stock PAR LOT n'existe pas dans cette base : on n'affiche
+                        « Qté » que si la valeur est réellement renseignée (> 0). */}
+                    {b.quantity > 0 ? (
+                      <span className="rounded-md bg-brand-500/10 px-2 py-0.5 text-[12px] font-bold tnum text-brand-700 dark:text-brand-300">
+                        Qté {fmtQty(b.quantity)}
+                      </span>
+                    ) : locked ? (
+                      <span className="rounded-md bg-rose-500/10 px-2 py-0.5 text-[11px] font-semibold text-rose-600 dark:text-rose-300">Bloqué</span>
+                    ) : null}
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11.5px] text-muted-foreground tnum">
                     {d

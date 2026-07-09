@@ -449,3 +449,26 @@ non parties**, faussant le suivi et l'inventaire.
 - Décision de segment **pure et testée** (`lib/segments` : `isComptoirClient`) —
   le groupe SAP prime, repli sur le `type` client ; par défaut (aucun signal) =
   comptoir.
+
+---
+
+## 🛒 Console — lots au clic droit : plus de « aucun lot » sur un article en stock
+
+Le détail des lots (clic droit → **Détails**) affichait « aucun lot en stock »
+même pour un article manifestement en stock.
+
+| Élément | Avant | Après |
+|---------|-------|-------|
+| Filtre lots | `/api/products/[id]/batches?inStock=1` filtrait sur `quantity > 0`. Or **cette colonne n'est jamais alimentée** par la synchro (défaut 0) : le filtre masquait donc **tous** les lots. | Filtre sur la **DLC** (`expirationDate` non dépassée, ou absente) — le seul signal fiable « encore en stock » pour du frais. Tri **FEFO** conservé. |
+| Quantité | « Qté 0 » trompeur (donnée inexistante). | **Quantité en stock réelle** en tête (le dispo de la ligne, en colis) ; la « Qté » par lot n'apparaît **que si** elle est vraiment renseignée. Lot verrouillé SAP → tag **« Bloqué »**. |
+| Article épuisé vs non suivi | Message unique. | « Épuisé » si dispo = 0 ; « article non géré par lot » si en stock sans lot en base. |
+
+## 🧾 Bons de commande — l'offre disparaît une fois passée en livraison
+
+Une **offre client** (bon de commande) « passée en commande » restait affichée
+dans la liste des offres à passer.
+
+- Après la conversion offre → commande (`/api/bons-commande` action `convert`), on
+  **clôture l'offre** (Quotation) côté SAP (repli `Cancel` si besoin, best-effort :
+  « déjà clôturée » = OK). Le GET ne listant que les devis ouverts, l'offre quitte
+  aussitôt l'onglet — plus de doublon fantôme après le passage en livraison.
