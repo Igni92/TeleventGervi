@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
-  Radio, Package, PackagePlus, Factory, Receipt, AlertTriangle,
+  Radio, ShoppingCart, Package, PackagePlus, Factory, Receipt, AlertTriangle,
   Home, Settings, PackageCheck, ClipboardCheck, ClipboardList, Truck, Eye, Store, PackageX,
   Pencil, Loader2, RotateCcw, ScrollText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight, Check,
 } from "lucide-react";
@@ -84,6 +84,10 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
     label: "Télévente",
     items: [
       { href: "/console", label: "Console d'appels", icon: Radio },
+      // Console de commande (Écran 2) : accessible en direct, sans passer par la
+      // console d'appels. Les deux restent synchronisées (consoleSync) quand elles
+      // sont ouvertes ensemble.
+      { href: "/console/ecran2", label: "Console de commande", icon: ShoppingCart },
       // Clients & plan d'appel FUSIONNÉS : une seule entrée, onglets in-page.
       { href: "/clients", label: "Clients & plan d'appel", icon: Users, also: ["/plan-appel"] },
       { href: "/ventes-du-jour", label: "Ventes du jour", icon: Store },
@@ -351,11 +355,13 @@ export function Sidebar() {
       return { ...cur, [label]: open };
     });
 
-  /** Préfixe de route actif (exact, accueil≡/, sinon préfixe sauf /dashboard). */
+  /** Préfixe de route actif (exact, accueil≡/, sinon préfixe sauf /dashboard).
+   *  « /console » est exact-only : sinon il resterait actif sur « /console/ecran2 »
+   *  (la Console de commande), qui a désormais sa propre entrée. */
   const isActiveHref = (href: string) =>
     pathname === href ||
     (href === "/accueil" && pathname === "/") ||
-    (href !== "/dashboard" && pathname.startsWith(href));
+    (href !== "/dashboard" && href !== "/console" && pathname.startsWith(href));
   /** Item actif — couvre aussi ses routes secondaires (`also`, entrées fusionnées). */
   const isActive = (it: Pick<NavItem, "href" | "also">) =>
     isActiveHref(it.href) || (it.also ?? []).some(isActiveHref);

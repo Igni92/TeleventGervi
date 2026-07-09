@@ -616,15 +616,6 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
         <ConsoleHeader stats={stats} />
         <div className="shrink-0 flex items-center gap-2">
           <NotificationsBell />
-          <button
-            type="button"
-            onClick={() => window.open("/console/ecran2", "televent-ecran2", "width=720,height=900")}
-            title="Ouvre une 2e fenêtre (stock perso + saisie BL) synchronisée — à glisser sur ton 2e écran"
-            className="hidden md:inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border bg-card text-[12px] font-medium text-foreground/80 hover:text-foreground hover:border-brand-400 transition-colors"
-          >
-            <MonitorSmartphone className="h-3.5 w-3.5" />
-            2ᵉ écran
-          </button>
         </div>
       </div>
 

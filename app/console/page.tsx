@@ -1,7 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { CallConsole } from "@/components/console/CallConsole";
-import { ConsoleScreenGate } from "@/components/console/ConsoleScreenGate";
 import { requireAdmin } from "@/lib/permissions";
 import { initialsFromEmail } from "@/lib/salespeople";
 
@@ -18,11 +17,8 @@ export default async function ConsolePage() {
   const isAdmin = await requireAdmin(session);
   const meInitials = initialsFromEmail(session.user?.email) ?? null;
 
-  // C3 — si le dernier écran Console consulté (dans cette fenêtre) est
-  // l'Écran 2, le Gate redirige côté client vers /console/ecran2 sans flash.
-  return (
-    <ConsoleScreenGate>
-      <CallConsole isAdmin={isAdmin} meInitials={meInitials} />
-    </ConsoleScreenGate>
-  );
+  // « Console d'appels » = toujours l'Écran 1 (file d'appel). La Console de
+  // commande (Écran 2) a désormais sa propre entrée de navigation ; les deux
+  // écrans restent synchronisés via consoleSync quand ils sont ouverts ensemble.
+  return <CallConsole isAdmin={isAdmin} meInitials={meInitials} />;
 }
