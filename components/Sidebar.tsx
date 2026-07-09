@@ -153,17 +153,23 @@ const BADGE_STYLE: Record<NonNullable<NavItem["badge"]>, string> = {
 function useBadges(): Record<string, number> {
   const [badges, setBadges] = useState<Record<string, number>>({});
 
+  // Réserves / incidents de réception — refresh ~60 s : le badge doit DISPARAÎTRE
+  // peu après leur résolution (avant : chargé au seul montage → restait « collé »).
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/entrees/incidents", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => {
-        if (cancelled || !j?.incidents) return;
-        const open = (j.incidents as { resolved: boolean }[]).filter((i) => !i.resolved).length;
-        setBadges((b) => ({ ...b, receptionIncidents: open }));
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
+    const load = () => {
+      fetch("/api/entrees/incidents", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (cancelled || !j?.incidents) return;
+          const open = (j.incidents as { resolved: boolean }[]).filter((i) => !i.resolved).length;
+          setBadges((b) => ({ ...b, receptionIncidents: open }));
+        })
+        .catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 60_000);
+    return () => { cancelled = true; clearInterval(t); };
   }, []);
 
   useEffect(() => {

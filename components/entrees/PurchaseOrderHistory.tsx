@@ -16,6 +16,7 @@ import { designationProduit } from "@/lib/produit-designation";
 import { DesignationChips } from "./DesignationChips";
 import { INCIDENT_TYPES } from "./ReceptionIncidents";
 import { ProductPicker, type ProductHit } from "./GoodsReceiptForm";
+import { StarRating } from "@/components/ui/star-rating";
 
 type PoLine = {
   itemCode: string; itemName?: string;
@@ -36,7 +37,7 @@ type PurchaseOrder = {
 
 /** Agréage porté par la réception (cf. lib/agreage) : conforme, ou avec réserve.
  *  Les types de réserve = INCIDENT_TYPES (mêmes types que les incidents de réception). */
-type ReceiveAgreage = { status: "CONFORME" | "RESERVE"; type?: string; note?: string };
+type ReceiveAgreage = { status: "CONFORME" | "RESERVE"; type?: string; note?: string; rating?: number | null };
 
 /** Date jj.mm.aa (points, année sur 2 chiffres). */
 const fmtDate = (s?: string | null): string => {
@@ -365,6 +366,8 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
   const [agreeStatus, setAgreeStatus] = useState<"CONFORME" | "RESERVE">("CONFORME");
   const [reserveType, setReserveType] = useState<string>(INCIDENT_TYPES[0]);
   const [reserveNote, setReserveNote] = useState("");
+  // Note qualité (étoiles) de la marchandise reçue — posée par l'agréeur.
+  const [qualityRating, setQualityRating] = useState<number | null>(null);
   const reserveIncomplete = agreeStatus === "RESERVE" && !reserveNote.trim();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -586,6 +589,11 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
               {/* ── Agréage de la marchandise reçue (contrôle qualité) ── */}
               <div className="space-y-2">
                 <p className="text-[10.5px] uppercase tracking-wide font-semibold text-muted-foreground">Agréage de la marchandise</p>
+                {/* Note qualité (étoiles) — posée par l'agréeur, appliquée aux articles reçus. */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] text-muted-foreground">Note qualité</span>
+                  <StarRating value={qualityRating} onChange={setQualityRating} size="md" ariaLabel="Note qualité de la marchandise reçue" />
+                </div>
                 <div className="flex items-center gap-2 flex-wrap" role="radiogroup" aria-label="Agréage de la marchandise">
                   <button
                     type="button"
@@ -652,6 +660,7 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
                   onClick={() => onReceive(po.docEntry, {
                     status: agreeStatus,
                     ...(agreeStatus === "RESERVE" ? { type: reserveType, note: reserveNote.trim() } : {}),
+                    ...(qualityRating ? { rating: qualityRating } : {}),
                   })}
                   disabled={receiving || reserveIncomplete}
                   title={reserveIncomplete ? "Décris la réserve avant de confirmer" : undefined}
