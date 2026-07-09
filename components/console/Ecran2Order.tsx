@@ -22,7 +22,7 @@ import { LotDetailsDialog } from "./LotDetailsDialog";
 import { useContextMenu, ContextMenu, ContextMenuItem, ContextMenuLabel } from "@/components/ui/context-menu";
 import { useBrandLogos } from "@/lib/useBrandLogos";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
-import { transportCostForSale, transportPerKgForCarrier, isDirectCarrier, type TransportCostModel, type ClientCarrierPricing } from "@/lib/transportCost";
+import { transportPerKgForCarrier, isDirectCarrier, type TransportCostModel, type ClientCarrierPricing } from "@/lib/transportCost";
 
 interface StockEntry { available: number }
 interface Product {
@@ -950,8 +950,24 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   };
   const totalKg = useMemo(() => cart.reduce((s, l) => s + lineWeightKg(l), 0), [cart]);
   const transportPerKgClient = transportPerKgForCarrier(transportModel, transportPerKg, carrierSap, clientPricing);
-  const transportCost = transportCostForSale(transportModel, transportPerKg, totalKg, carrierSap, clientPricing);
   const carrierIsDirect = isDirectCarrier(transportModel, carrierSap) || (transportModel?.directCarriers.length ?? 0) === 0;
+
+  // Marge BRUTE de la commande (depuis le prix d'achat des hints) + marge/kg
+  // MOYENNE PONDÉRÉE PAR LE POIDS : Σ marge ligne ÷ Σ kg (des lignes costées).
+  const marginAgg = useMemo(() => {
+    let margin = 0, kg = 0;
+    for (const l of cart) {
+      const pa = hints[l.itemCode]?.prixAchat;
+      if (l.price == null || pa == null) continue;         // prix d'achat inconnu → hors calcul
+      const w = l.unit === "kg" ? l.quantity : l.quantity * (l.colisWeightKg ?? 0);
+      margin += (l.price - pa) * l.quantity * l.packDivisor;
+      kg += Number.isFinite(w) && w > 0 ? w : 0;
+    }
+    return { margin, kg };
+  }, [cart, hints]);
+  const hasCostData = marginAgg.kg > 0;
+  const margeBruteKg = hasCostData ? marginAgg.margin / marginAgg.kg : 0;   // €/kg pondéré
+  const margeNetteKg = margeBruteKg - transportPerKgClient;                  // − coût transport /kg
 
   // ── Création BL ──
   type ApiLine = {
@@ -2096,19 +2112,34 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             <span className="text-muted-foreground">{modif ? "Total HT du BL" : "Total HT estimé"}</span>
             <span className="font-bold tnum text-foreground">{totalHT.toFixed(2)} €</span>
           </div>
-          {/* Coût transport ESTIMÉ (temps réel) — selon le TRANSPORTEUR sélectionné :
-              livraison directe → prix position × kg ; sinon valeur manuelle. */}
-          {transportModel && (transportPerKg > 0 || transportPerKgClient > 0) && (
-            <div className="flex items-center justify-between text-[12px] -mt-1" title="Coût de transport imputé à la marge nette. Livraison directe (flotte propre) valorisée au prix position ; transporteur externe à la valeur saisie à la main.">
-              <span className="text-muted-foreground inline-flex items-center gap-1">
-                <Truck className="h-3.5 w-3.5" />
-                {transportPerKgClient > 0
-                  ? `Transport ${carrierIsDirect ? "direct " : ""}${transportPerKgClient.toFixed(3)} €/kg × ${Math.round(totalKg)} kg`
-                  : "Transport externe — tarif client non saisi"}
-              </span>
-              <span className={`tnum font-semibold ${transportCost > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
-                {transportCost > 0 ? `− ${transportCost.toFixed(2)} €` : "0,00 €"}
-              </span>
+          {/* Indicateurs /kg (moyenne pondérée par le poids des articles) :
+              coût transport, marge brute, marge nette transport. */}
+          {totalKg > 0 && (transportPerKg > 0 || hasCostData) && (
+            <div className="mt-1 rounded-lg border border-border/60 bg-secondary/20 px-2.5 py-1.5 space-y-1 text-[12px]" title="Valeurs au kilo, moyenne pondérée par le poids des articles de la commande.">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground inline-flex items-center gap-1">
+                  <Truck className="h-3.5 w-3.5" /> Coût transport /kg{carrierIsDirect ? " (direct)" : ""}
+                </span>
+                <span className="tnum font-semibold text-amber-600 dark:text-amber-400">
+                  {transportPerKgClient > 0 ? `${transportPerKgClient.toFixed(3)} €/kg` : (carrierIsDirect ? "0,000 €/kg" : "externe — non tarifé")}
+                </span>
+              </div>
+              {hasCostData ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Marge brute /kg</span>
+                    <span className="tnum font-semibold text-foreground">{margeBruteKg.toFixed(3)} €/kg</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-border/50 pt-1">
+                    <span className="font-medium text-foreground">Marge nette transport /kg</span>
+                    <span className={`tnum font-bold ${margeNetteKg >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                      {margeNetteKg.toFixed(3)} €/kg
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <p className="text-[10.5px] text-muted-foreground/70">Marge /kg indisponible (prix d&apos;achat manquant).</p>
+              )}
             </div>
           )}
           {/* Envoi en ARRIÈRE-PLAN : le clic libère la vue (client suivant),
