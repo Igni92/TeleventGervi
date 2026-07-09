@@ -516,3 +516,21 @@ par lot dans le détail au clic droit).
 - Composant `StarRating` réutilisable (interactif à la saisie, lecture seule à
   l'affichage). Les quantités restent exprimées dans l'unité de chaque article
   (colis, ou kg pour les articles au poids) — cohérent avec la console.
+
+---
+
+## 📈 Accueil — tuile « Marge brute % » (estimation qui s'affine avec le temps)
+
+Nouvelle 4ᵉ tuile KPI sur l'accueil : le **taux de marge brut %** sur une fenêtre
+glissante de **30 jours**, avec un indicateur de **fiabilité**.
+
+- Calcul depuis le **coût RÉEL d'entrée marchandise** (`lib/cogs`, jamais la marge
+  SAP) : chaque vente (BL) est costée au prix de la dernière **réception** de
+  l'article. Réutilise l'agrégat éprouvé `aggregateActivity` (source SapOrder).
+- **S'affine avec le temps** : les ventes à découvert (avant réception) et les
+  articles jamais reçus ne faussent pas le taux — ils sont exclus et comptés dans
+  la **couverture**. Plus les réceptions rentrent et plus le stock est « propre »,
+  plus la couverture monte → tuile « fiabilité X% » (vert ≥ 80 %, ambre ≥ 50 %,
+  « estimation » en dessous de 60 %).
+- Endpoint dédié `GET /api/pilotage/marge` (fenêtre 30 j, scope commercial respecté,
+  cache 5 min). La grille KPI passe à 4 tuiles (2×2 en medium, 1×4 en large).
