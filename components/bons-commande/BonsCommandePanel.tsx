@@ -13,10 +13,11 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   PackageCheck, ChevronDown, RefreshCw, Loader2, CheckCircle2, Sparkles,
-  CalendarDays, AlertTriangle, Grape, FileText, ArrowRightCircle, Clock, Trash2, Hash, Pencil, Star, Truck,
+  CalendarDays, AlertTriangle, Grape, FileText, ArrowRightCircle, Clock, Trash2, Hash, Pencil, Star, Truck, Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDeliveryDate } from "@/lib/livraison";
+import { printOrderRecap, type PrintLine, type PrintDoc } from "@/components/livraisons/printRecap";
 import { displayPersonName } from "@/lib/userNames";
 import { broadcastActiveClient } from "@/lib/consoleSync";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
@@ -163,6 +164,26 @@ export function BonsCommandePanel() {
       if (!ok) break;
     }
   }, [assignLot]);
+
+  // Impression du bon de commande POUR LA PRÉPARATION : feuille A4 sobre
+  // (article, colis, lot à préparer, tags). Réutilise le bon de préparation BL.
+  const printPrep = useCallback((doc: BonDoc) => {
+    const lines: PrintLine[] = doc.lines.map((l) => ({
+      itemCode: l.itemCode, itemName: l.itemName,
+      quantity: l.quantity, unit: null, colis: l.colis, weightKg: 0,
+      marque: l.marque, condt: l.condt, pays: l.pays,
+      lot: l.pending ? PENDING : l.lot,
+    }));
+    const pdoc: PrintDoc = {
+      docNum: doc.docNum, cardCode: doc.cardCode, cardName: doc.cardName,
+      clientType: doc.clientType,
+      colis: doc.lines.reduce((s, l) => s + l.colis, 0), weightKg: 0, lines,
+    };
+    const ok = printOrderRecap(pdoc, {
+      dateLabel: doc.dueDate ? formatDeliveryDate(doc.dueDate) : doc.docDate ? formatDeliveryDate(doc.docDate) : "—",
+    });
+    if (!ok) toast.error("Fenêtre d'impression bloquée (autorise les pop-ups).");
+  }, []);
 
   // « Passer en commande » : convertit une OFFRE CLIENT (Quotation) en COMMANDE
   // (Order) SAP. La commande créée rejoint la file d'affectation des lots.
@@ -455,6 +476,15 @@ export function BonsCommandePanel() {
                     className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-brand-500/40 text-brand-600 dark:text-brand-400 text-[12.5px] font-semibold hover:bg-brand-500/10 transition-colors disabled:opacity-50"
                   >
                     {modifBusy === doc.docEntry ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />} Modifier la commande
+                  </button>
+                  {/* Impression pour la préparation (articles, colis, lots). */}
+                  <button
+                    type="button"
+                    onClick={() => printPrep(doc)}
+                    title="Imprimer le bon de commande pour la préparation (articles, colis, lots)"
+                    className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+                  >
+                    <Printer className="h-4 w-4" /> Imprimer
                   </button>
                   {doc.markedBy && (
                     <span className="text-[11px] text-muted-foreground ml-auto">Créé par {displayPersonName(doc.markedBy)}</span>

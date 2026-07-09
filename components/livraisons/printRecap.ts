@@ -17,6 +17,8 @@ export interface PrintLine {
   marque?: string | null;
   condt?: string | null;
   pays?: string | null;
+  /** Lot à préparer (bon de commande) — « EM<n> » affiché, sinon « lot à affecter ». */
+  lot?: string | null;
 }
 
 export interface PrintDoc {
@@ -65,6 +67,7 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
         <td class="art">
           <span class="name">${esc(l.itemName)}</span>
           ${details(l).length ? `<span class="det">— ${details(l).map(esc).join(" · ")}</span>` : ""}
+          ${l.lot != null ? (/^EM\d+$/.test(l.lot) ? `<span class="lot">${esc(l.lot)}</span>` : `<span class="lot pending">lot à affecter</span>`) : ""}
           ${isMissing ? `<span class="flag">MANQUANT</span>` : ""}
         </td>
         <td class="num">${num(l.quantity)}${l.unit?.trim() ? ` <span class="unit">${esc(l.unit.trim().toLowerCase())}</span>` : ""}</td>
@@ -128,6 +131,10 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   td.art .flag { display: inline-block; margin-left: 8px; border: 1.5px solid #111;
                  border-radius: 3px; padding: 0 5px; font-size: 11px; font-weight: 800;
                  letter-spacing: 0.8px; color: #111; }
+  td.art .lot { display: inline-block; margin-left: 8px; border: 1.5px solid #111;
+                border-radius: 3px; padding: 0 5px; font-size: 12px; font-weight: 800;
+                font-variant-numeric: tabular-nums; color: #111; }
+  td.art .lot.pending { border-style: dashed; font-weight: 700; color: #555; }
   .unit { font-size: 11px; font-weight: 600; color: #555; }
   tfoot td { border-top: 2px solid #111; padding: 8px; font-weight: 700; font-size: 14px; }
   tfoot .label { text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
