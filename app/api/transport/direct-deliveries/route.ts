@@ -11,18 +11,22 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Livraisons EN DIRECT d'une année, calculées depuis les BL SAP.
+ * Livraisons EN DIRECT, calculées depuis les BL SAP et ANNUALISÉES.
  *
- * POST /api/transport/direct-deliveries { year?, apply?, carriers? }
- *   - Compte les commandes (BL) dont la date de LIVRAISON (DocDueDate) tombe
- *     dans l'année et dont le transporteur (U_TrspCode) est « direct » ;
- *   - somme le POIDS (Σ ligne.Quantity × Product.salesUnitWeight) ;
- *   - si `apply` (défaut true) : écrit deliveriesPerYear / kgPerYear dans le
- *     modèle de coût de transport.
+ * POST /api/transport/direct-deliveries { apply?, carriers?, since? }
+ *   - Prend les BL (DocDueDate) chez un transporteur « direct », DEPUIS LE
+ *     PREMIER BL en direct (auto-détecté) — surtout PAS les mois d'avant où
+ *     l'on ne livrait pas en direct, sinon le €/kg est faussé ;
+ *   - somme livraisons + POIDS (Σ ligne.Quantity × Product.salesUnitWeight)
+ *     sur cette période réelle, puis ANNUALISE (× 365,25 / nb jours) pour
+ *     obtenir un volume annuel comparable au coût annuel ;
+ *   - si `apply` (défaut true) : écrit deliveriesPerYear / kgPerYear (annualisés)
+ *     dans le modèle.
+ *   - `since` (YYYY-MM-DD, optionnel) force la date de départ ; sinon on part du
+ *     1er BL direct trouvé sur les 36 derniers mois.
  *
- * Les transporteurs « directs » viennent du modèle (directCarriers) — on y
- * inclut aussi bien le NOUVEAU code (« DIRECT IDF ») que l'ANCIEN
- * (« GERVIFRAIS IDF ») : le calcul additionne les deux. Réservé direction/admin.
+ * Les transporteurs « directs » viennent du modèle (directCarriers). Réservé
+ * direction / admin.
  */
 
 type ListedLine = { ItemCode?: string; Quantity?: number };
@@ -44,17 +48,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Réservé à la direction / aux administrateurs" }, { status: 403 });
   }
 
-  let body: { apply?: unknown; carriers?: unknown } = {};
+  let body: { apply?: unknown; carriers?: unknown; since?: unknown } = {};
   try { body = await req.json(); } catch { /* corps optionnel */ }
 
   const apply = body.apply !== false; // défaut : on écrit dans le modèle
 
-  // ── Fenêtre : ANNÉE GLISSANTE (12 derniers mois, DocDueDate) ──
+  // ── Fenêtre de RECHERCHE : `since` fourni, sinon 36 mois de recul (on
+  //    trouvera dedans le 1er BL direct réel). On borne juste la requête SAP. ──
   const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
   const now = new Date();
+  const sinceStr = typeof body.since === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.since) ? body.since : null;
   const from = new Date(now);
-  from.setFullYear(from.getFullYear() - 1);
-  from.setDate(from.getDate() + 1);
+  if (sinceStr) { from.setTime(new Date(`${sinceStr}T00:00:00Z`).getTime()); }
+  else { from.setFullYear(from.getFullYear() - 3); }
   const fromStr = fmtDate(from);
   const toStr = fmtDate(now);
 
@@ -70,7 +76,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Filtre SAP : livraisons des 12 derniers mois (DocDueDate) chez un transporteur direct.
+  // Filtre SAP : BL de la fenêtre de recherche (DocDueDate) chez un transporteur direct.
   const carrierClause = directCodes.map((c) => `U_TrspCode eq ${odataStr(c)}`).join(" or ");
   const filterExpr =
     `DocDueDate ge '${fromStr}' and DocDueDate le '${toStr}' and (${carrierClause})`;
@@ -108,23 +114,37 @@ export async function POST(req: NextRequest) {
   }
 
   let kg = 0;
+  let firstMs = Number.POSITIVE_INFINITY;
   const byCarrier: Record<string, { deliveries: number; kg: number }> = {};
   for (const o of live) {
     const code = normCarrier(o.U_TrspCode);
     const w = (o.DocumentLines ?? []).reduce((s, l) => s + (l.Quantity || 0) * (weightByCode.get(l.ItemCode ?? "") ?? 0), 0);
     kg += w;
+    const t = o.DocDueDate ? new Date(o.DocDueDate).getTime() : NaN;
+    if (Number.isFinite(t) && t < firstMs) firstMs = t;
     const b = byCarrier[code] ?? { deliveries: 0, kg: 0 };
     b.deliveries += 1;
     b.kg += w;
     byCarrier[code] = b;
   }
-  const deliveries = live.length;
-  const kgRounded = Math.round(kg * 100) / 100;
+  const rawDeliveries = live.length;
+  const rawKg = Math.round(kg * 100) / 100;
+
+  // ── Période réelle = du 1er BL direct à aujourd'hui ; ANNUALISATION ──
+  const firstBl = Number.isFinite(firstMs) ? fmtDate(new Date(firstMs)) : null;
+  const spanDays = firstBl
+    ? Math.max(1, Math.round((now.getTime() - firstMs) / 86_400_000) + 1)
+    : 0;
+  const factor = spanDays > 0 ? 365.25 / spanDays : 0;
+  const deliveries = Math.round(rawDeliveries * factor);
+  const kgAnnual = Math.round(rawKg * factor * 100) / 100;
+  // Fiabilité : au moins ~6 semaines d'historique direct pour annualiser sereinement.
+  const reliable = spanDays >= 45;
 
   let saved = false;
-  if (apply) {
+  if (apply && rawDeliveries > 0) {
     model.deliveriesPerYear = deliveries;
-    model.kgPerYear = kgRounded;
+    model.kgPerYear = kgAnnual;
     model.updatedAt = new Date().toISOString();
     model.updatedBy = session.user.email ?? session.user.name ?? null;
     try { await setTransportModel(model); saved = true; } catch { /* on renvoie quand même les totaux */ }
@@ -132,11 +152,18 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    from: fromStr,
+    since: firstBl,
     to: toStr,
-    window: "12 mois glissants",
+    searchedFrom: fromStr,
+    spanDays,
+    annualizationFactor: Math.round(factor * 100) / 100,
+    reliable,
+    // Sur la période réelle (depuis le 1er BL direct) :
+    rawDeliveries,
+    rawKg,
+    // Annualisés (ce qui est stocké) :
     deliveries,
-    kg: kgRounded,
+    kg: kgAnnual,
     carriers: directCodes,
     byCarrier: Object.fromEntries(Object.entries(byCarrier).map(([k, v]) => [k, { deliveries: v.deliveries, kg: Math.round(v.kg * 100) / 100 }])),
     truncated,
