@@ -278,6 +278,42 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
   };
 }
 
+/**
+ * FIABILITÉ « stock propre » — part du CA vendu dont la marchandise a été
+ * effectivement REÇUE sur la fenêtre. Modèle négoce frais (achat & vente le même
+ * jour) : par article, couverture = min(1, reçu / vendu). Une VENTE À DÉCOUVERT
+ * (vendue avant d'avoir reçu) tire la fiabilité sous 100 % ; elle remonte à mesure
+ * que les réceptions rentrent — d'où « ça s'affine dans la journée ».
+ *
+ * ⚠️ Volontairement GLOBAL (les réceptions sont à l'échelle de l'entreprise, pas
+ * d'un commercial) : c'est un indicateur de QUALITÉ de la donnée, pas un KPI
+ * commercial. Renvoie 0..100 (0 si aucune vente sur la fenêtre).
+ */
+export async function salesReceptionCoverage(start: Date, end: Date): Promise<number> {
+  const rows = await prisma.$queryRaw<{ ca_total: number; ca_covered: number }[]>(Prisma.sql`
+    WITH sold AS (
+      SELECT l."itemCode" AS code, SUM(l."quantity")::float AS qty, SUM(l."lineTotal")::float AS ca
+      FROM "SapOrderLine" l JOIN "SapOrder" i ON i."docEntry" = l."docEntry"
+      WHERE i."cancelled" = false AND l."isService" = false AND l."itemCode" IS NOT NULL
+        AND i."docDate" >= ${start} AND i."docDate" < ${end}
+      GROUP BY l."itemCode"
+    ),
+    recv AS (
+      SELECT em."itemCode" AS code, SUM(em."quantity")::float AS qty
+      FROM "SapPdnLine" em JOIN "SapPurchaseDeliveryNote" emh ON emh."docEntry" = em."docEntry"
+      WHERE emh."cancelled" = false AND em."itemCode" IS NOT NULL
+        AND emh."docDate" >= ${start} AND emh."docDate" < ${end}
+      GROUP BY em."itemCode"
+    )
+    SELECT COALESCE(SUM(sold.ca), 0)::float AS ca_total,
+           COALESCE(SUM(sold.ca * LEAST(1, COALESCE(recv.qty, 0) / NULLIF(sold.qty, 0))), 0)::float AS ca_covered
+    FROM sold LEFT JOIN recv ON recv.code = sold.code`);
+  const r = rows[0];
+  const total = Number(r?.ca_total ?? 0);
+  const covered = Number(r?.ca_covered ?? 0);
+  return total > 0 ? Math.max(0, Math.min(100, (covered / total) * 100)) : 0;
+}
+
 export interface TopClientOrder {
   cardCode: string;
   cardName: string | null;
