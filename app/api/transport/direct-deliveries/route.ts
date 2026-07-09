@@ -44,13 +44,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Réservé à la direction / aux administrateurs" }, { status: 403 });
   }
 
-  let body: { year?: unknown; apply?: unknown; carriers?: unknown } = {};
+  let body: { apply?: unknown; carriers?: unknown } = {};
   try { body = await req.json(); } catch { /* corps optionnel */ }
 
-  const now = new Date();
-  const yearNum = Number(body.year);
-  const year = Number.isInteger(yearNum) && yearNum >= 2000 && yearNum <= 2100 ? yearNum : now.getFullYear();
   const apply = body.apply !== false; // défaut : on écrit dans le modèle
+
+  // ── Fenêtre : ANNÉE GLISSANTE (12 derniers mois, DocDueDate) ──
+  const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
+  const now = new Date();
+  const from = new Date(now);
+  from.setFullYear(from.getFullYear() - 1);
+  from.setDate(from.getDate() + 1);
+  const fromStr = fmtDate(from);
+  const toStr = fmtDate(now);
 
   const model = await getTransportModel();
   const carriersRaw = Array.isArray(body.carriers) && body.carriers.length
@@ -59,15 +65,15 @@ export async function POST(req: NextRequest) {
   const directCodes = [...new Set(carriersRaw.filter(Boolean))];
   if (directCodes.length === 0) {
     return NextResponse.json(
-      { error: "Aucun transporteur « direct » n'est paramétré. Marque d'abord tes transporteurs directs (DIRECT IDF, GERVIFRAIS IDF)." },
+      { error: "Aucun transporteur « direct » n'est paramétré. Marque d'abord tes transporteurs directs (page Coût de transport)." },
       { status: 400 },
     );
   }
 
-  // Filtre SAP : livraisons de l'année (DocDueDate) chez un transporteur direct.
+  // Filtre SAP : livraisons des 12 derniers mois (DocDueDate) chez un transporteur direct.
   const carrierClause = directCodes.map((c) => `U_TrspCode eq ${odataStr(c)}`).join(" or ");
   const filterExpr =
-    `DocDueDate ge '${year}-01-01' and DocDueDate le '${year}-12-31' and (${carrierClause})`;
+    `DocDueDate ge '${fromStr}' and DocDueDate le '${toStr}' and (${carrierClause})`;
   const select = "DocEntry,DocDueDate,Cancelled,U_TrspCode,DocumentLines";
   const MAX_PAGES = 200; // 200 × 200 = 40 000 BL max
 
@@ -126,7 +132,9 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    year,
+    from: fromStr,
+    to: toStr,
+    window: "12 mois glissants",
     deliveries,
     kg: kgRounded,
     carriers: directCodes,
