@@ -121,6 +121,15 @@ const fmtDate = (s?: string): string => {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${p(d.getFullYear() % 100)}`;
 };
+/** Date + heure « jeu. 08.07.26 · 6h45 » (jour court FR + heure locale). */
+const fmtDateHeure = (s?: string): string => {
+  if (!s) return "—";
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return "—";
+  const jour = d.toLocaleDateString("fr-FR", { weekday: "short" }).replace(/\.$/, "");
+  const heure = `${d.getHours()}h${String(d.getMinutes()).padStart(2, "0")}`;
+  return `${jour} ${fmtDate(s)} · ${heure}`;
+};
 /** Vrai si la date tombe AUJOURD'HUI — l'annulation d'une EM n'est acceptée par
  *  SAP que le jour de sa création (contrairement à un BL de vente). */
 const isToday = (s?: string): boolean => {
@@ -972,14 +981,13 @@ function ReceiptDetail({
       {!isVoided(receipt) && agreage && (
         <div className="rounded-xl border border-border bg-secondary/20 p-3 space-y-1.5">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[10.5px] uppercase tracking-wide font-semibold text-muted-foreground">Agréage</span>
             <AgreageBadge a={agreage} />
             <span className={`${large ? "text-[12.5px]" : "text-[11px]"} text-muted-foreground`}>
-              par {agreage.by} · {fmtDate(agreage.at)}
+              Par {agreage.by} · {fmtDateHeure(agreage.at)}
             </span>
           </div>
           {agreage.note && (
-            <p className={`${large ? "text-[13px]" : "text-[12px]"} italic text-muted-foreground`}>« {agreage.note} »</p>
+            <p className={`${large ? "text-[13px]" : "text-[12px]"} text-foreground`}>« {agreage.note} »</p>
           )}
         </div>
       )}
