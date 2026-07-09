@@ -83,6 +83,17 @@ export const INCIDENT_META: Record<string, IncidentMeta> = {
 
 export const INCIDENT_TYPES = Object.keys(INCIDENT_META) as (keyof typeof INCIDENT_META)[];
 
+/* ─────────────────────────────────────────────────────────────────
+   Synchronisation du badge « réserves » (sidebar) — INSTANTANÉE.
+   Le badge se rafraîchit toutes les 60 s, mais on veut qu'il DISPARAISSE
+   (ou apparaisse) DÈS qu'un incident est déclaré / résolu, sans attendre
+   le prochain tick. On émet un évènement global écouté par la sidebar.
+   ───────────────────────────────────────────────────────────────── */
+export const RECEPTION_INCIDENTS_CHANGED = "reception-incidents:changed";
+export function notifyReceptionIncidentsChanged() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(RECEPTION_INCIDENTS_CHANGED));
+}
+
 /** Petit logo coloré d'un type d'incident (repli sur « Autre » si inconnu). */
 export function IncidentTypeIcon({ type, className }: { type: string | null; className?: string }) {
   const meta = INCIDENT_META[type ?? ""] ?? INCIDENT_META["Autre"];
@@ -122,6 +133,7 @@ export function InlineIncidentDeclare({
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? res.statusText);
       toast.success(`Incident « ${type} » déclaré sur l'entrée #${receipt.docNum}`);
       setNote("");
+      notifyReceptionIncidentsChanged();   // badge sidebar → apparaît tout de suite
       onCreated();
     } catch (e) {
       toast.error(`Échec de la déclaration : ${e instanceof Error ? e.message : e}`);
@@ -191,7 +203,7 @@ export function OpenReceptionIncidents({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, resolved: true }),
     });
-    if (res.ok) { toast.success("Incident résolu"); onChanged(); }
+    if (res.ok) { toast.success("Incident résolu"); notifyReceptionIncidentsChanged(); onChanged(); }
     else toast.error("Échec de la résolution");
   }
 

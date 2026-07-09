@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
 import { DesignationChips } from "./DesignationChips";
-import { INCIDENT_TYPES } from "./ReceptionIncidents";
+import { INCIDENT_TYPES, notifyReceptionIncidentsChanged } from "./ReceptionIncidents";
 import { ProductPicker, type ProductHit } from "./GoodsReceiptForm";
 import { StarRating } from "@/components/ui/star-rating";
 
@@ -156,6 +156,7 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
       const j = await res.json();
       if (!res.ok || j.ok === false) throw new Error(j.error || "Échec");
       if (agreage.status === "RESERVE") {
+        notifyReceptionIncidentsChanged();   // badge sidebar → apparaît tout de suite
         toast.warning(
           `Réception AVEC RÉSERVE (${agreage.type ?? "Qualité"}) — entrée marchandise #${j.docNum} créée (lot ${j.lot}), incident de réception ouvert`,
           { duration: 10000 },

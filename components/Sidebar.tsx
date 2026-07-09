@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { RECEPTION_INCIDENTS_CHANGED } from "@/components/entrees/ReceptionIncidents";
 import { Logo } from "@/components/Logo";
 import { SapEnvSwitch } from "@/components/SapEnvSwitch";
 import { SignalLoader } from "@/components/ui/page-loader";
@@ -169,7 +170,10 @@ function useBadges(): Record<string, number> {
     };
     load();
     const t = setInterval(load, 60_000);
-    return () => { cancelled = true; clearInterval(t); };
+    // Rafraîchissement INSTANTANÉ : dès qu'une réserve/incident est déclarée ou
+    // résolue ailleurs dans l'app, le badge se met à jour sans attendre le tick.
+    window.addEventListener(RECEPTION_INCIDENTS_CHANGED, load);
+    return () => { cancelled = true; clearInterval(t); window.removeEventListener(RECEPTION_INCIDENTS_CHANGED, load); };
   }, []);
 
   useEffect(() => {
