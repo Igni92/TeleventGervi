@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { PhotoStep } from "@/components/inventaire/PhotoStep";
 import type { DraftPhoto } from "@/components/inventaire/inv-utils";
+import { TransportBreakdown } from "@/components/transport/TransportBreakdown";
 import {
   computeTransportMetrics,
   COST_KIND_LABELS,
@@ -191,6 +192,9 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
     <div className="space-y-8">
       {/* ── États / prix position (résultat) ─────────────────────────────── */}
       <MetricsBoard metrics={metrics} />
+
+      {/* ── États détaillés (par poste / transporteur / client) ──────────── */}
+      <TransportBreakdown metrics={metrics} isManager={isManager} />
 
       {/* ── Structure de coûts (direction) ───────────────────────────────── */}
       <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
