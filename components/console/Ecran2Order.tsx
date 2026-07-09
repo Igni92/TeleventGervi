@@ -955,19 +955,26 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   // Marge BRUTE de la commande (depuis le prix d'achat des hints) + marge/kg
   // MOYENNE PONDÉRÉE PAR LE POIDS : Σ marge ligne ÷ Σ kg (des lignes costées).
   const marginAgg = useMemo(() => {
-    let margin = 0, kg = 0;
+    let margin = 0, kg = 0, ca = 0;
     for (const l of cart) {
       const pa = hints[l.itemCode]?.prixAchat;
       if (l.price == null || pa == null) continue;         // prix d'achat inconnu → hors calcul
       const w = l.unit === "kg" ? l.quantity : l.quantity * (l.colisWeightKg ?? 0);
+      ca += l.price * l.quantity * l.packDivisor;
       margin += (l.price - pa) * l.quantity * l.packDivisor;
       kg += Number.isFinite(w) && w > 0 ? w : 0;
     }
-    return { margin, kg };
+    return { margin, kg, ca };
   }, [cart, hints]);
   const hasCostData = marginAgg.kg > 0;
   const margeBruteKg = hasCostData ? marginAgg.margin / marginAgg.kg : 0;   // €/kg pondéré
   const margeNetteKg = margeBruteKg - transportPerKgClient;                  // − coût transport /kg
+  // Marge nette % (du CA des lignes costées) — pour le feu tricolore.
+  const margeNetteTotal = marginAgg.margin - transportPerKgClient * marginAgg.kg;
+  const margeNettePct = marginAgg.ca > 0 ? (margeNetteTotal / marginAgg.ca) * 100 : 0;
+  // Feu : rouge = marge nette négative (transport > marge brute) ; orange = nette
+  // positive mais < 10 % ; vert = ≥ 10 %.
+  const netTone = margeNetteTotal < 0 ? "rose" : margeNettePct < 10 ? "amber" : "emerald";
 
   // ── Création BL ──
   type ApiLine = {
@@ -2112,36 +2119,49 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             <span className="text-muted-foreground">{modif ? "Total HT du BL" : "Total HT estimé"}</span>
             <span className="font-bold tnum text-foreground">{totalHT.toFixed(2)} €</span>
           </div>
-          {/* Indicateurs /kg (moyenne pondérée par le poids des articles) :
-              coût transport, marge brute, marge nette transport. */}
-          {totalKg > 0 && (transportPerKg > 0 || hasCostData) && (
-            <div className="mt-1 rounded-lg border border-border/60 bg-secondary/20 px-2.5 py-1.5 space-y-1 text-[12px]" title="Valeurs au kilo, moyenne pondérée par le poids des articles de la commande.">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground inline-flex items-center gap-1">
-                  <Truck className="h-3.5 w-3.5" /> Coût transport /kg{carrierIsDirect ? " (direct)" : ""}
-                </span>
-                <span className="tnum font-semibold text-amber-600 dark:text-amber-400">
-                  {transportPerKgClient > 0 ? `${transportPerKgClient.toFixed(3)} €/kg` : (carrierIsDirect ? "0,000 €/kg" : "externe — non tarifé")}
+          {/* Indicateur de marge (moyenne pondérée par le poids) — prix transport
+              /kg en haut à droite, MARGE NETTE TRANSPORT en gros en bas (feu
+              tricolore : rouge = à perte, orange < 10 % net, vert ≥ 10 %). */}
+          {totalKg > 0 && (transportPerKg > 0 || hasCostData) && (() => {
+            const TONE = {
+              rose: "text-rose-600 dark:text-rose-400",
+              amber: "text-amber-600 dark:text-amber-400",
+              emerald: "text-emerald-600 dark:text-emerald-400",
+            } as const;
+            const RING = {
+              rose: "border-rose-300/60 bg-rose-50/60 dark:border-rose-500/40 dark:bg-rose-950/20",
+              amber: "border-amber-300/60 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-950/20",
+              emerald: "border-emerald-300/60 bg-emerald-50/60 dark:border-emerald-500/40 dark:bg-emerald-950/20",
+            } as const;
+            return (
+            <div className={`mt-1 rounded-lg border px-2.5 py-2 ${hasCostData ? RING[netTone] : "border-border/60 bg-secondary/20"}`} title="Moyenne pondérée par le poids des articles. Feu : rouge = à perte, orange < 10 % de marge nette, vert ≥ 10 %.">
+              {/* Haut : libellé + prix transport /kg à droite */}
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="uppercase tracking-wide font-semibold text-muted-foreground">Marge nette transport</span>
+                <span className="inline-flex items-center gap-1 text-muted-foreground">
+                  <Truck className="h-3 w-3" /> Transport{" "}
+                  <b className="tnum text-foreground">
+                    {transportPerKgClient > 0 ? `${transportPerKgClient.toFixed(3)} €/kg` : (carrierIsDirect ? "0 €/kg" : "externe n.c.")}
+                  </b>
                 </span>
               </div>
+              {/* Bas : marge nette en GROS, colorée */}
               {hasCostData ? (
-                <>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Marge brute /kg</span>
-                    <span className="tnum font-semibold text-foreground">{margeBruteKg.toFixed(3)} €/kg</span>
-                  </div>
-                  <div className="flex items-center justify-between border-t border-border/50 pt-1">
-                    <span className="font-medium text-foreground">Marge nette transport /kg</span>
-                    <span className={`tnum font-bold ${margeNetteKg >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                      {margeNetteKg.toFixed(3)} €/kg
-                    </span>
-                  </div>
-                </>
+                <div className="mt-1 flex items-baseline justify-between gap-2">
+                  <span className={`tnum font-extrabold text-[21px] leading-none ${TONE[netTone]}`}>
+                    {margeNetteKg.toFixed(3)} <span className="text-[13px] font-bold">€/kg</span>
+                  </span>
+                  <span className={`tnum font-bold text-[15px] ${TONE[netTone]}`}>{margeNettePct.toFixed(1)} %</span>
+                </div>
               ) : (
-                <p className="text-[10.5px] text-muted-foreground/70">Marge /kg indisponible (prix d&apos;achat manquant).</p>
+                <p className="text-[10.5px] text-muted-foreground/70 mt-1">Marge indisponible (prix d&apos;achat manquant).</p>
+              )}
+              {hasCostData && (
+                <p className="text-[10px] text-muted-foreground/70 mt-0.5">Marge brute {margeBruteKg.toFixed(3)} €/kg</p>
               )}
             </div>
-          )}
+            );
+          })()}
           {/* Envoi en ARRIÈRE-PLAN : le clic libère la vue (client suivant),
               le résultat SAP arrive en toast au nom du client. */}
           <button type="button" onClick={submit}
