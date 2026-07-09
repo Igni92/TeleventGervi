@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Loader2, Plus, Trash2, Save, Truck, Calculator, Camera, Receipt, X,
-  TrendingDown, ChevronDown, ChevronRight,
+  TrendingDown, ChevronDown, ChevronRight, RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PhotoStep } from "@/components/inventaire/PhotoStep";
@@ -47,7 +47,7 @@ const uid = () =>
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
 
-const EMPTY: TransportCostModel = { costs: [], deliveriesPerYear: 0, kgPerYear: 0, directCarriers: [], carrierManualPerKg: {} };
+const EMPTY: TransportCostModel = { costs: [], deliveriesPerYear: 0, kgPerYear: 0, directCarriers: [] };
 
 /** Un transporteur du catalogue (SAP SERGTRS ou table Carrier locale). */
 interface CarrierOpt { code: string; name: string }
@@ -121,27 +121,41 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
   };
   const removeLine = (id: string) => { setModel((m) => ({ ...m, costs: m.costs.filter((l) => l.id !== id) })); setDirty(true); };
 
-  // ── Transporteurs : « direct » (prix position) vs valeur €/kg saisie à la main ──
+  // ── Transporteurs : marquer « direct » (flotte propre → prix position). Le
+  //    tarif des transporteurs externes se saisit PAR CLIENT (fiche client). ──
   const norm = (c: string) => c.trim().toUpperCase();
   const setDirect = (code: string, direct: boolean) => {
     const k = norm(code);
     setModel((m) => {
       const set = new Set((m.directCarriers ?? []).map(norm));
-      const manual = { ...(m.carrierManualPerKg ?? {}) };
-      if (direct) { set.add(k); delete manual[k]; } else { set.delete(k); }
-      return { ...m, directCarriers: [...set], carrierManualPerKg: manual };
+      if (direct) set.add(k); else set.delete(k);
+      return { ...m, directCarriers: [...set] };
     });
     setDirty(true);
   };
-  const setManual = (code: string, val: number) => {
-    const k = norm(code);
-    setModel((m) => {
-      const manual = { ...(m.carrierManualPerKg ?? {}) };
-      if (val > 0) manual[k] = val; else delete manual[k];
-      return { ...m, carrierManualPerKg: manual };
-    });
-    setDirty(true);
-  };
+
+  // ── Récupération des volumes DIRECTS depuis les BL SAP (année en cours) ──
+  const [fetchingBL, setFetchingBL] = useState(false);
+  async function fetchFromBL() {
+    setFetchingBL(true);
+    try {
+      const r = await fetch("/api/transport/direct-deliveries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apply: true }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) throw new Error(j?.error || "Échec de la récupération");
+      if (j.model) { setModel({ ...EMPTY, ...j.model }); setDirty(false); }
+      toast.success(`${j.deliveries} livraison(s) directe(s) · ${Math.round(j.kg).toLocaleString("fr-FR")} kg (${j.year})`, {
+        description: j.truncated ? "Résultat plafonné — affine la période si besoin." : "Volumes renseignés depuis les BL.",
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur de récupération");
+    } finally {
+      setFetchingBL(false);
+    }
+  }
 
   async function saveModel() {
     setSaving(true);
@@ -216,8 +230,19 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
           </div>
         )}
 
-        {/* Volumes de référence + total */}
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 border-t border-border/60 pt-4">
+        {/* Volumes de référence — récupérables depuis les BL SAP */}
+        <div className="mt-4 flex items-center justify-between gap-2 border-t border-border/60 pt-4">
+          <p className="text-[11px] text-muted-foreground">
+            Volumes de référence <span className="text-muted-foreground/70">(livraisons en direct)</span>
+          </p>
+          {isManager && (
+            <Button size="sm" variant="outline" onClick={fetchFromBL} disabled={fetchingBL} title="Compter les BL de l'année et sommer le poids pour les transporteurs marqués « direct »">
+              {fetchingBL ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Récupérer depuis les BL
+            </Button>
+          )}
+        </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <VolumeField
             label="Livraisons directes / an"
             hint="Nombre de livraisons EN DIRECT (flotte propre) sur l'année"
@@ -256,14 +281,13 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
         )}
       </section>
 
-      {/* ── Transporteurs : direct (prix position) vs valeur manuelle ────── */}
+      {/* ── Transporteurs : marquer ceux « en direct » (flotte propre) ────── */}
       <CarriersSection
         carriers={carriers}
         model={model}
         prixPositionPerKg={metrics.prixPositionPerKg}
         isManager={isManager}
         onSetDirect={setDirect}
-        onSetManual={setManual}
       />
 
       {/* ── Dépenses transporteur (photo à l'appui) ──────────────────────── */}
@@ -472,26 +496,22 @@ function VolumeField({
   );
 }
 
-/* ── Section transporteurs (direct vs valeur manuelle) ─────────────────────── */
+/* ── Section transporteurs : marquer ceux « en direct » (flotte propre) ─────── */
 function CarriersSection({
-  carriers, model, prixPositionPerKg, isManager, onSetDirect, onSetManual,
+  carriers, model, prixPositionPerKg, isManager, onSetDirect,
 }: {
   carriers: CarrierOpt[];
   model: TransportCostModel;
   prixPositionPerKg: number;
   isManager: boolean;
   onSetDirect: (code: string, direct: boolean) => void;
-  onSetManual: (code: string, val: number) => void;
 }) {
   const norm = (c: string) => c.trim().toUpperCase();
   const directSet = new Set((model.directCarriers ?? []).map(norm));
-  const manual = model.carrierManualPerKg ?? {};
   // Transporteurs marqués « direct » mais absents du catalogue (SAP indispo) :
   // on les liste quand même pour pouvoir les décocher.
   const known = new Set(carriers.map((c) => norm(c.code)));
-  const extras = [...directSet, ...Object.keys(manual)]
-    .filter((k) => !known.has(k))
-    .map((code) => ({ code, name: code }));
+  const extras = [...directSet].filter((k) => !known.has(k)).map((code) => ({ code, name: code }));
   const rows = [...carriers, ...extras];
   const fmtPerKg = (v: number) =>
     `${new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(v)} €/kg`;
@@ -500,13 +520,13 @@ function CarriersSection({
     <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
       <div className="mb-4">
         <p className="text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1.5">
-          <Truck className="h-3.5 w-3.5" /> Transporteurs · direct vs manuel
+          <Truck className="h-3.5 w-3.5" /> Transporteurs · livraison en direct
         </p>
         <p className="text-[12px] text-muted-foreground mt-1 max-w-xl">
-          Marque « direct » les transporteurs de la flotte propre (valorisés au prix position
-          {prixPositionPerKg > 0 ? <> · <span className="tnum font-medium text-foreground">{fmtPerKg(prixPositionPerKg)}</span></> : null}).
-          Pour les autres, saisis la valeur €/kg à la main. Tant qu&apos;aucun transporteur n&apos;est marqué
-          direct, toutes les livraisons sont considérées directes.
+          Marque « direct » les transporteurs de la flotte propre (ex. <span className="font-medium text-foreground">DIRECT IDF</span>, <span className="font-medium text-foreground">GERVIFRAIS IDF</span>) — valorisés au prix position
+          {prixPositionPerKg > 0 ? <> · <span className="tnum font-medium text-foreground">{fmtPerKg(prixPositionPerKg)}</span></> : null}.
+          Le tarif des transporteurs externes se saisit <span className="font-medium text-foreground">par client</span> (fiche client › Logistique).
+          Tant qu&apos;aucun transporteur n&apos;est marqué direct, toutes les livraisons sont considérées directes.
         </p>
       </div>
 
@@ -525,22 +545,6 @@ function CarriersSection({
                   <p className="text-[13.5px] font-medium text-foreground truncate">{c.name}</p>
                   <p className="text-[11px] text-muted-foreground truncate">Code {c.code}</p>
                 </div>
-                {/* Valeur €/kg manuelle (seulement si non direct) */}
-                {!direct && (
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number" min={0} step={0.01}
-                      className="h-8 w-24 rounded-md border border-input bg-background px-2 text-right text-[13px] tnum text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-                      placeholder="0.000"
-                      value={manual[k] ?? ""}
-                      disabled={!isManager}
-                      onChange={(e) => onSetManual(c.code, parseFloat(e.target.value) || 0)}
-                      aria-label={`Valeur €/kg pour ${c.name}`}
-                    />
-                    <span className="text-[11px] text-muted-foreground whitespace-nowrap">€/kg</span>
-                  </div>
-                )}
-                {/* Bascule « direct » */}
                 <button
                   type="button"
                   onClick={() => isManager && onSetDirect(c.code, !direct)}

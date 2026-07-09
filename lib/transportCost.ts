@@ -74,9 +74,6 @@ export interface TransportCostModel {
   /** Codes transporteurs (U_TrspCode) considérés « en direct » (flotte propre)
    *  → valorisés au prix position. Normalisés en MAJUSCULES. */
   directCarriers: string[];
-  /** Valeur transport SAISIE À LA MAIN (€/kg) par transporteur NON direct
-   *  (clé = code U_TrspCode en MAJUSCULES). */
-  carrierManualPerKg: Record<string, number>;
   updatedAt?: string | null;
   updatedBy?: string | null;
 }
@@ -86,10 +83,15 @@ export const EMPTY_TRANSPORT_MODEL: TransportCostModel = {
   deliveriesPerYear: 0,
   kgPerYear: 0,
   directCarriers: [],
-  carrierManualPerKg: {},
   updatedAt: null,
   updatedBy: null,
 };
+
+/** Tarif transport SAISI À LA MAIN (€/kg) par transporteur NON direct, PROPRE À
+ *  UN CLIENT (clé = code U_TrspCode en MAJUSCULES). Un client peut avoir
+ *  plusieurs transporteurs possibles, chacun avec son propre prix. Stocké par
+ *  client (AppSetting `transportcli:<clientId>`, cf. lib/transportCostStore). */
+export type ClientCarrierPricing = Record<string, number>;
 
 /* ─────────────────────────── Calcul (pur) ───────────────────────────────── */
 
@@ -157,7 +159,8 @@ export function computeTransportMetrics(model: TransportCostModel | null | undef
 /* ───────────────────── Application aux ventes (marge nette) ───────────────
  * On se base sur le TRANSPORTEUR de la livraison (U_TrspCode) :
  *   • transporteur « direct » (flotte propre)  → prix position calculé ;
- *   • transporteur non direct                  → valeur €/kg saisie à la main ;
+ *   • transporteur non direct                  → tarif €/kg saisi à la main
+ *     POUR CE CLIENT et ce transporteur (un client peut en avoir plusieurs) ;
  *   • transporteur inconnu / non renseigné      → prix position SI aucun
  *     transporteur direct n'a encore été paramétré (repli « tout direct »),
  *     sinon 0 (on ne devine pas).
@@ -175,11 +178,16 @@ export function isDirectCarrier(model: TransportCostModel | null | undefined, ca
   return (model?.directCarriers ?? []).some((d) => normCarrier(d) === c);
 }
 
-/** Prix de transport €/kg applicable à une livraison, selon son transporteur. */
+/**
+ * Prix de transport €/kg applicable à une livraison, selon son transporteur.
+ * `clientPricing` = tarifs €/kg du CLIENT par transporteur (transportcli:<id>) ;
+ * il ne sert QUE pour les transporteurs non directs.
+ */
 export function transportPerKgForCarrier(
   model: TransportCostModel | null | undefined,
   prixPositionPerKg: number,
   carrierCode: string | null | undefined,
+  clientPricing?: ClientCarrierPricing | null,
 ): number {
   const pp = Math.max(0, n(prixPositionPerKg));
   const directs = model?.directCarriers ?? [];
@@ -187,18 +195,19 @@ export function transportPerKgForCarrier(
   // Aucun transporteur direct paramétré → on considère la livraison directe
   // (repli pratique tant que la direction n'a pas classé ses transporteurs).
   if (directs.length === 0) return pp;
-  const manual = model?.carrierManualPerKg?.[normCarrier(carrierCode)];
-  return Math.max(0, n(manual));
+  const tarif = clientPricing?.[normCarrier(carrierCode)];
+  return Math.max(0, n(tarif));
 }
 
-/** Coût de transport d'une vente = prix €/kg (selon transporteur) × kg. */
+/** Coût de transport d'une vente = prix €/kg (selon transporteur & client) × kg. */
 export function transportCostForSale(
   model: TransportCostModel | null | undefined,
   prixPositionPerKg: number,
   kg: number,
   carrierCode: string | null | undefined,
+  clientPricing?: ClientCarrierPricing | null,
 ): number {
-  return transportPerKgForCarrier(model, prixPositionPerKg, carrierCode) * Math.max(0, n(kg));
+  return transportPerKgForCarrier(model, prixPositionPerKg, carrierCode, clientPricing) * Math.max(0, n(kg));
 }
 
 /** Marge NETTE TRANSPORT d'une vente = marge brute − coût de transport. */
@@ -208,8 +217,21 @@ export function netTransportMargin(
   kg: number,
   carrierCode: string | null | undefined,
   prixPositionPerKg: number,
+  clientPricing?: ClientCarrierPricing | null,
 ): number {
-  return n(grossMargin) - transportCostForSale(model, prixPositionPerKg, kg, carrierCode);
+  return n(grossMargin) - transportCostForSale(model, prixPositionPerKg, kg, carrierCode, clientPricing);
+}
+
+/** Normalise un tarif client par transporteur (clé MAJUSCULES, valeur ≥ 0). */
+export function sanitizeClientPricing(raw: unknown): ClientCarrierPricing {
+  const out: ClientCarrierPricing = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>).slice(0, 200)) {
+    const code = normCarrier(k).slice(0, 60);
+    const val = Math.max(0, Math.round(n(v) * 1000) / 1000);
+    if (code && val > 0) out[code] = val;
+  }
+  return out;
 }
 
 /* ─────────────────── Dépenses transporteur (justificatifs) ────────────────
@@ -315,21 +337,11 @@ export function sanitizeTransportModel(raw: unknown): TransportCostModel {
       if (code && !seenDirect.has(code)) { seenDirect.add(code); directCarriers.push(code); }
     }
   }
-  // Valeur manuelle €/kg par transporteur non direct — clé MAJUSCULES, ≥ 0.
-  const carrierManualPerKg: Record<string, number> = {};
-  if (o.carrierManualPerKg && typeof o.carrierManualPerKg === "object") {
-    for (const [k, v] of Object.entries(o.carrierManualPerKg as Record<string, unknown>).slice(0, 200)) {
-      const code = normCarrier(k).slice(0, 60);
-      const val = Math.max(0, Math.round(n(v) * 1000) / 1000);
-      if (code && val > 0) carrierManualPerKg[code] = val;
-    }
-  }
   return {
     costs,
     deliveriesPerYear: Math.max(0, Math.round(n(o.deliveriesPerYear))),
     kgPerYear: Math.max(0, Math.round(n(o.kgPerYear) * 100) / 100),
     directCarriers,
-    carrierManualPerKg,
     updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : null,
     updatedBy: typeof o.updatedBy === "string" ? o.updatedBy.slice(0, 120) : null,
   };

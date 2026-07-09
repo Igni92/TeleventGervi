@@ -25,6 +25,7 @@ import { formatDate } from "@/lib/utils";
 import { requireAdmin, isLivreur } from "@/lib/permissions";
 import { ReceptionSlots } from "@/components/clients/ReceptionSlots";
 import { TransportCostCard } from "@/components/clients/TransportCostCard";
+import { ClientTransportPricing } from "@/components/clients/ClientTransportPricing";
 import { getTransportModel } from "@/lib/transportCostStore";
 import { computeTransportMetrics } from "@/lib/transportCost";
 import { computeInsights } from "@/lib/insights";
@@ -228,11 +229,12 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
       storageKey="fiche:logistique"
       sections={[
         { id: "cout-transport", label: "Coût transport", node: (
-          <SectionCard accent="brand" title="Coût transport" subtitle="Prix position €/kg (annuel) — livraison en direct" icon={<Coins />}>
+          <SectionCard accent="brand" title="Coût transport" subtitle="Prix position €/kg (direct) + tarif par transporteur externe" icon={<Coins />}>
             <TransportCostCard
               perKg={transportMetrics.prixPositionPerKg}
               configured={transportConfigured}
             />
+            <ClientTransportPricing clientId={client.id} canEdit={admin} />
           </SectionCard>
         ) },
         { id: "jours-livraison", label: "Jours de livraison", node: (
