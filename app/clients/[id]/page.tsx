@@ -19,11 +19,14 @@ import { FicheActions } from "@/components/clients/FicheActions";
 import { FicheHeader } from "@/components/clients/FicheHeader";
 import { SectionCard } from "@/components/clients/SectionCard";
 import { TarifFruitsEditor } from "@/components/clients/TarifFruitsEditor";
-import { Calendar, CalendarClock, CalendarDays, Clock, Sprout, TrendingUp, Receipt, Truck, UserRound, MapPin, Grape } from "lucide-react";
+import { Calendar, CalendarClock, CalendarDays, Clock, Sprout, TrendingUp, Receipt, Truck, UserRound, MapPin, Grape, Coins } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { requireAdmin, isLivreur } from "@/lib/permissions";
 import { ReceptionSlots } from "@/components/clients/ReceptionSlots";
+import { TransportCostCard } from "@/components/clients/TransportCostCard";
+import { getTransportModel } from "@/lib/transportCostStore";
+import { computeTransportMetrics, transportPerKgForType, typeSupportsTransport } from "@/lib/transportCost";
 import { computeInsights } from "@/lib/insights";
 import { computePriority } from "@/lib/priority";
 import { caByClientCode } from "@/lib/clientRevenue";
@@ -213,10 +216,26 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
     />
   );
 
+  // Coût transport (prix position €/kg) applicable à ce client — valeur ANNUELLE
+  // reportée depuis la structure de coûts (Pilotage › Coût de transport). Export
+  // = 0 (transport payé par le client) ; CHR / GMS / IDF au prix position.
+  const transportMetrics = computeTransportMetrics(await getTransportModel());
+  const clientPerKg = transportPerKgForType(transportMetrics.prixPositionPerKg, client.type);
+  const transportConfigured = transportMetrics.prixPositionPerKg > 0;
+
   const logistiquePane = (
     <ReorderableSections
       storageKey="fiche:logistique"
       sections={[
+        { id: "cout-transport", label: "Coût transport", node: (
+          <SectionCard accent="brand" title="Coût transport" subtitle="Prix position €/kg (annuel) appliqué à la marge nette transport" icon={<Coins />}>
+            <TransportCostCard
+              perKg={clientPerKg}
+              isExport={!typeSupportsTransport(client.type)}
+              configured={transportConfigured}
+            />
+          </SectionCard>
+        ) },
         { id: "jours-livraison", label: "Jours de livraison", node: (
           <SectionCard accent="emerald" title="Jours de livraison" subtitle="Décochez tout si le client n'est pas livré" icon={<CalendarDays />}>
             <DeliveryDaysEditor clientId={client.id} />

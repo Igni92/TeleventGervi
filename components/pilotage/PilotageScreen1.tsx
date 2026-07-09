@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Truck } from "lucide-react";
+import { netTransportMargin } from "@/lib/transportCost";
 import {
   Tile, BigKpi, MiniKpi, TopList, MixedTopList, RefreshButton,
   formatEuro, formatNum, formatPct,
@@ -111,6 +112,22 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
   const [refreshNonce, setRefreshNonce] = useState(0);
   const { data, err } = useActivityData(safeG, viewAs, refreshNonce);
   const { data: weekly } = useActivityWeekly(viewAs, refreshNonce);
+  // Prix position (coût transport €/kg) — pour la marge NETTE TRANSPORT estimée.
+  const [transportPerKg, setTransportPerKg] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/transport/model", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!cancelled && typeof j?.metrics?.prixPositionPerKg === "number") setTransportPerKg(j.metrics.prixPositionPerKg); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  // Marge nette transport (est.) = marge brute − prix position × kg. Estimation
+  // globale : le volume export (transport payé par le client) n'est pas distingué
+  // ici — indicatif, la valeur qui fait foi vit dans la fiche client / la console.
+  const netTransport = data && transportPerKg > 0
+    ? netTransportMargin(data.curr.margin, data.curr.weightKg, null, transportPerKg)
+    : null;
   // 1er chargement : data pas encore arrivée et pas d'erreur → on montre un état
   // de chargement léger plutôt que des « — » qui ressemblent à des zéros.
   const loading = data === null && err === null;
@@ -186,6 +203,16 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
               format={data ? (n) => formatEuro(n, true) : undefined}
             animateOnMount
             />
+            {netTransport !== null && (
+              <p
+                className="text-[10.5px] text-muted-foreground mt-1 inline-flex items-center gap-1"
+                title="Marge nette transport estimée = marge brute − prix position (€/kg) × volume. Estimation globale (l'export, transport payé par le client, n'est pas distingué)."
+              >
+                <Truck className="h-3 w-3 shrink-0" />
+                Nette transport (est.){" "}
+                <span className="font-semibold text-foreground tnum">{formatEuro(netTransport, true)}</span>
+              </p>
+            )}
             {data && data.curr.marginCoverage < 95 && (
               <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 inline-flex items-center gap-1">
                 <AlertCircle className="h-3 w-3 shrink-0" />
