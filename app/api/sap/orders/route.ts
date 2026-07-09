@@ -13,7 +13,7 @@ import { decrementLocalStock } from "@/lib/stockSync";
 import { getLotMaps, resolveLotForSegment, LOT_PENDING } from "@/lib/lotResolver";
 import { getEmAffects } from "@/lib/emAffect";
 import { createBonPrep, markBonPrepTransformed } from "@/lib/bonPrep";
-import { chooseLot } from "@/lib/gervifrais-calc";
+import { chooseLot, isRealLot } from "@/lib/gervifrais-calc";
 import { colisInfo } from "@/lib/colis";
 import { isPrecommande } from "@/lib/livraison";
 import { isComptoirClient } from "@/lib/segments";
@@ -425,11 +425,14 @@ export async function POST(req: NextRequest) {
       if (lineExpenses.length > 0) line.DocumentLineAdditionalExpenses = lineExpenses;
     }
 
-    // === Bon de commande / précommande : lot EN ATTENTE (affectation manuelle) ===
-    // On NE résout AUCUN lot ici (fini les lots pas en stock) : chaque ligne part
-    // en EM_PENDING et sera affectée depuis l'onglet « Bons de commande ».
+    // === Bon de commande / précommande : lot CHOISI ou EN ATTENTE ===
+    // On ne résout AUCUN lot automatiquement ici. Deux cas :
+    //   • lot CHOISI À LA MAIN dans la console (sélecteur bon de commande, ne
+    //     propose que des lots en stock) → honoré tel quel (« valider propre ») ;
+    //   • sinon EM_PENDING → affectation reportée à l'onglet « Bons de commande ».
     if (isBonCommande) {
-      line.U_NoLot = LOT_PENDING;
+      const chosen = typeof l.lot === "string" && isRealLot(l.lot.trim()) ? l.lot.trim() : null;
+      line.U_NoLot = chosen ?? LOT_PENDING;
       documentLines.push(line);
       continue;
     }

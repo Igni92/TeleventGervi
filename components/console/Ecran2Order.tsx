@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { BrandLogo } from "@/components/BrandLogo";
 import { StarRating } from "@/components/ui/star-rating";
 import { LotDetailsDialog } from "./LotDetailsDialog";
+import { ConsoleLotPicker, type ConsoleLotCandidate } from "./ConsoleLotPicker";
 import { useContextMenu, ContextMenu, ContextMenuItem, ContextMenuLabel } from "@/components/ui/context-menu";
 import { useBrandLogos } from "@/lib/useBrandLogos";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
@@ -56,6 +57,10 @@ interface CartLine {
   stepColis: number;
   // Poids d'UN colis en kg (pour le coût transport estimé) — null si inconnu.
   colisWeightKg?: number | null;
+  // Lot choisi À LA MAIN dans la console pour un BON DE COMMANDE (avant SAP).
+  // null/absent = « à affecter » (EM_PENDING) — choix reporté à l'onglet Bons de
+  // commande. Ignoré pour un BL normal (auto-lot serveur).
+  lot?: string | null;
   // C2 — promo appliquée à la ligne (remise SAP envoyée à la création du bon)
   promo: Promo | null; discountPercent: number; freeUnits: number;
   // freeUnits saisi À LA MAIN (sélecteur « offert ») → ne pas recalculer depuis la
@@ -437,6 +442,28 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   const [bonCommandeManual, setBonCommandeManual] = useState(false);
   const precommande = isPrecommande(deliveryDate);
   const isBonCommande = precommande || bonCommandeManual;
+  // Lots candidats (EN STOCK TeleVent) par article — chargés pour choisir le lot
+  // d'une ligne AVANT l'envoi, UNIQUEMENT sur un bon de commande.
+  const [lotCands, setLotCands] = useState<Record<string, { candidates: ConsoleLotCandidate[]; suggested: string | null }>>({});
+  const cartItemCodesKey = cart.map((l) => l.itemCode).join(",");
+  useEffect(() => {
+    if (!isBonCommande) { setLotCands({}); return; }
+    const codes = [...new Set(cart.map((l) => l.itemCode).filter(Boolean))];
+    if (codes.length === 0) { setLotCands({}); return; }
+    let cancelled = false;
+    fetch(`/api/lots/candidates?items=${encodeURIComponent(codes.join(","))}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j?.items) return;
+        const out: Record<string, { candidates: ConsoleLotCandidate[]; suggested: string | null }> = {};
+        for (const [code, v] of Object.entries(j.items as Record<string, { candidates: ConsoleLotCandidate[]; suggested: string | null }>)) {
+          out[code] = { candidates: v.candidates ?? [], suggested: v.suggested ?? null };
+        }
+        setLotCands(out);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isBonCommande, cartItemCodesKey]);   // eslint-disable-line react-hooks/exhaustive-deps
   // ── Onglet colonne gauche : Stock (catalogue) / Tarif (cotations client) ──
   const [stockTab, setStockTab] = useState<"stock" | "tarif">("stock");
   // Cotations SPÉCIFIQUES du client (par code article) — chargées par client,
@@ -990,6 +1017,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     discountPercent?: number;
     /** Ligne à découvert (sur-vente) : part sans lot EM — affectée à la réception. */
     decouvert?: boolean;
+    /** Lot choisi à la main (bon de commande) — honoré côté serveur (U_NoLot). */
+    lot?: string | null;
   };
 
   /** C2 — En-tête du bon : mention des promos appliquées (uniquement si présentes).
@@ -1059,6 +1088,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             ...(price != null ? { price } : {}),
             ...(dPercent != null ? { discountPercent: dPercent } : {}),
             ...(c.decouvert ? { decouvert: true } : {}),
+            ...(l.lot ? { lot: l.lot } : {}),
           });
         }
         if (freeHere > 0) {
@@ -1071,6 +1101,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             ...(price != null ? { price } : {}),
             discountPercent: 100,
             ...(c.decouvert ? { decouvert: true } : {}),
+            ...(l.lot ? { lot: l.lot } : {}),
           });
         }
       }
@@ -1988,6 +2019,21 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                 ) : partialShort ? (
                   <p className="text-[11px] text-amber-600 mt-1">⚠️ {max} dispo seulement (le surplus sera à découvert)</p>
                 ) : null}
+                {/* Bon de commande : CHOIX DU LOT avant l'envoi (« valider propre »).
+                    Seuls les lots avec du stock physique TeleVent sont proposés ;
+                    « à affecter » = EM_PENDING, réglé plus tard dans l'onglet dédié. */}
+                {isBonCommande && !locked && (
+                  <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-dashed border-border/60">
+                    <span className="text-[11px] text-muted-foreground shrink-0">Lot :</span>
+                    <ConsoleLotPicker
+                      itemName={l.itemName}
+                      current={l.lot ?? null}
+                      candidates={lotCands[l.itemCode]?.candidates ?? []}
+                      suggested={lotCands[l.itemCode]?.suggested ?? null}
+                      onPick={(lot) => updateLine(i, { lot })}
+                    />
+                  </div>
+                )}
                 </div>
               </Fragment>
             );
