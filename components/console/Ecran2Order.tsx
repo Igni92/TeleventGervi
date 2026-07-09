@@ -404,6 +404,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   // de la commande en temps réel. On se base sur le TRANSPORTEUR sélectionné.
   const [transportModel, setTransportModel] = useState<TransportCostModel | null>(null);
   const [transportPerKg, setTransportPerKg] = useState(0);
+  // Unité de l'indicateur de marge : par LIVRAISON (€ total de la commande) ou par KILO.
+  const [marginUnit, setMarginUnit] = useState<"position" | "kg">("position");
   useEffect(() => {
     let cancelled = false;
     fetch("/api/transport/model", { cache: "no-store" })
@@ -967,10 +969,14 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     return { margin, kg, ca };
   }, [cart, hints]);
   const hasCostData = marginAgg.kg > 0;
-  const margeBruteKg = hasCostData ? marginAgg.margin / marginAgg.kg : 0;   // €/kg pondéré
-  const margeNetteKg = margeBruteKg - transportPerKgClient;                  // − coût transport /kg
+  // ── Par KILO (moyenne pondérée) ──
+  const margeBruteKg = hasCostData ? marginAgg.margin / marginAgg.kg : 0;
+  const margeNetteKg = margeBruteKg - transportPerKgClient;
+  // ── Par LIVRAISON (€ total de la commande) ── coût transport sur TOUT le poids.
+  const coutTransportTotal = transportPerKgClient * totalKg;                 // € (ce que la livraison me coûte)
+  const margeBruteTotal = marginAgg.margin;                                  // € marge brute
+  const margeNetteTotal = margeBruteTotal - coutTransportTotal;              // € marge nette
   // Marge nette % (du CA des lignes costées) — pour le feu tricolore.
-  const margeNetteTotal = marginAgg.margin - transportPerKgClient * marginAgg.kg;
   const margeNettePct = marginAgg.ca > 0 ? (margeNetteTotal / marginAgg.ca) * 100 : 0;
   // Feu : rouge = marge nette négative (transport > marge brute) ; orange = nette
   // positive mais < 10 % ; vert = ≥ 10 %.
@@ -2119,10 +2125,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             <span className="text-muted-foreground">{modif ? "Total HT du BL" : "Total HT estimé"}</span>
             <span className="font-bold tnum text-foreground">{totalHT.toFixed(2)} €</span>
           </div>
-          {/* Indicateur de marge (moyenne pondérée par le poids) — prix transport
-              /kg en haut à droite, MARGE NETTE TRANSPORT en gros en bas (feu
-              tricolore : rouge = à perte, orange < 10 % net, vert ≥ 10 %). */}
-          {totalKg > 0 && (transportPerKg > 0 || hasCostData) && (() => {
+          {/* Indicateur de marge — prix transport /kg en haut à droite + bascule
+              /livraison ↔ /kg. MARGE NETTE en gros en bas (feu tricolore : rouge
+              = à perte, orange < 10 % net, vert ≥ 10 %). */}
+          {cart.length > 0 && (transportPerKg > 0 || hasCostData) && (() => {
             const TONE = {
               rose: "text-rose-600 dark:text-rose-400",
               amber: "text-amber-600 dark:text-amber-400",
@@ -2133,31 +2139,48 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
               amber: "border-amber-300/60 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-950/20",
               emerald: "border-emerald-300/60 bg-emerald-50/60 dark:border-emerald-500/40 dark:bg-emerald-950/20",
             } as const;
+            const isPos = marginUnit === "position";
+            const fmtE = (v: number) => `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(v)} €`;
+            const fmtK = (v: number) => `${v.toFixed(3)} €/kg`;
+            const transpTxt = transportPerKgClient > 0 || carrierIsDirect
+              ? (isPos ? fmtE(coutTransportTotal) : fmtK(transportPerKgClient))
+              : "externe n.c.";
             return (
-            <div className={`mt-1 rounded-lg border px-2.5 py-2 ${hasCostData ? RING[netTone] : "border-border/60 bg-secondary/20"}`} title="Moyenne pondérée par le poids des articles. Feu : rouge = à perte, orange < 10 % de marge nette, vert ≥ 10 %.">
-              {/* Haut : libellé + prix transport /kg à droite */}
-              <div className="flex items-center justify-between text-[11px]">
+            <div className={`mt-1 rounded-lg border px-2.5 py-2 ${hasCostData ? RING[netTone] : "border-border/60 bg-secondary/20"}`} title="Feu : rouge = à perte, orange < 10 % de marge nette, vert ≥ 10 %.">
+              {/* Haut : libellé + bascule /livraison ↔ /kg + prix transport /kg à droite */}
+              <div className="flex items-center justify-between gap-2 text-[11px]">
                 <span className="uppercase tracking-wide font-semibold text-muted-foreground">Marge nette transport</span>
-                <span className="inline-flex items-center gap-1 text-muted-foreground">
-                  <Truck className="h-3 w-3" /> Transport{" "}
-                  <b className="tnum text-foreground">
-                    {transportPerKgClient > 0 ? `${transportPerKgClient.toFixed(3)} €/kg` : (carrierIsDirect ? "0 €/kg" : "externe n.c.")}
-                  </b>
-                </span>
-              </div>
-              {/* Bas : marge nette en GROS, colorée */}
-              {hasCostData ? (
-                <div className="mt-1 flex items-baseline justify-between gap-2">
-                  <span className={`tnum font-extrabold text-[21px] leading-none ${TONE[netTone]}`}>
-                    {margeNetteKg.toFixed(3)} <span className="text-[13px] font-bold">€/kg</span>
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex rounded-md border border-border/60 overflow-hidden text-[10.5px] font-semibold">
+                    <button type="button" onClick={() => setMarginUnit("position")} className={`px-1.5 h-5 ${isPos ? "bg-brand-500/20 text-brand-700 dark:text-brand-300" : "text-muted-foreground hover:text-foreground"}`}>/livr.</button>
+                    <button type="button" onClick={() => setMarginUnit("kg")} className={`px-1.5 h-5 ${!isPos ? "bg-brand-500/20 text-brand-700 dark:text-brand-300" : "text-muted-foreground hover:text-foreground"}`}>/kg</button>
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-muted-foreground whitespace-nowrap">
+                    <Truck className="h-3 w-3" />
+                    <b className="tnum text-foreground">{transportPerKgClient > 0 ? `${transportPerKgClient.toFixed(3)} €/kg` : (carrierIsDirect ? "0 €/kg" : "n.c.")}</b>
                   </span>
-                  <span className={`tnum font-bold text-[15px] ${TONE[netTone]}`}>{margeNettePct.toFixed(1)} %</span>
                 </div>
+              </div>
+              {hasCostData ? (
+                <>
+                  {/* Détail : coût transport + marge brute (unité choisie) */}
+                  <div className="mt-1.5 flex items-center justify-between gap-2 text-[11.5px] text-muted-foreground">
+                    <span>Transport <b className="tnum text-foreground">{transpTxt}</b></span>
+                    <span>Marge brute <b className="tnum text-foreground">{isPos ? fmtE(margeBruteTotal) : fmtK(margeBruteKg)}</b></span>
+                  </div>
+                  {/* Bas : marge nette en GROS, colorée */}
+                  <div className="mt-1 flex items-baseline justify-between gap-2 border-t border-border/40 pt-1">
+                    <span className="text-[11px] font-medium text-foreground">{isPos ? "Marge nette livraison" : "Marge nette /kg"}</span>
+                    <span className="inline-flex items-baseline gap-1.5">
+                      <span className={`tnum font-extrabold text-[21px] leading-none ${TONE[netTone]}`}>{isPos ? fmtE(margeNetteTotal) : fmtK(margeNetteKg)}</span>
+                      <span className={`tnum font-bold text-[13px] ${TONE[netTone]}`}>{margeNettePct.toFixed(1)} %</span>
+                    </span>
+                  </div>
+                </>
               ) : (
-                <p className="text-[10.5px] text-muted-foreground/70 mt-1">Marge indisponible (prix d&apos;achat manquant).</p>
-              )}
-              {hasCostData && (
-                <p className="text-[10px] text-muted-foreground/70 mt-0.5">Marge brute {margeBruteKg.toFixed(3)} €/kg</p>
+                <p className="text-[10.5px] text-muted-foreground/70 mt-1">
+                  {isPos ? `Transport ${transpTxt}` : `Transport ${transpTxt}`} · marge indisponible (prix d&apos;achat manquant).
+                </p>
               )}
             </div>
             );
