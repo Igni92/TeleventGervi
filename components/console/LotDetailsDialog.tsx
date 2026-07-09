@@ -1,29 +1,33 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Boxes, Loader2, CalendarClock, Warehouse } from "lucide-react";
+import { Boxes, Loader2, CalendarClock, Warehouse, Truck, BadgeEuro } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 
 /**
- * Détail des LOTS EN STOCK d'un article — ouvert au clic droit sur une ligne de
- * la console. Source : table locale ProductBatch (rapide, aucun appel SAP) via
- * /api/products/[id]/batches?inStock=1 → lots dont la DLC n'est pas dépassée
- * (le stock par lot n'existe pas dans SAP : on ne filtre PAS sur la quantité),
- * triés FEFO (DLC la plus proche d'abord). La quantité en stock affichée en tête
- * vient du dispo de la ligne (colis), la vraie donnée « en stock ».
+ * Détail des LOTS d'un article — ouvert au clic droit sur une ligne de la console.
+ * Source : table locale ProductBatch (rapide, aucun appel SAP) via
+ * /api/products/[id]/batches?inStock=1 (lots dont la DLC n'est pas dépassée),
+ * triés FEFO. Le stock PAR LOT est tenu par TeleVent (registre lib/lotLedger) :
+ * crédité à la réception (quantité + fournisseur + prix d'achat), décrémenté à la
+ * vente — quand la valeur est là, on affiche la quantité restante, le fournisseur
+ * et le prix d'achat du lot. Les lots avec du stock (quantité > 0) sont en tête.
  */
 
 interface Batch {
   batchNumber: string;
-  quantity: number;
+  quantity: number;               // registre TeleVent : quantité restante (unité SAP)
   warehouseCode: string | null;
   status: string | null;
   expirationDate: string | null;
+  supplierName?: string | null;   // fournisseur (crédité à la réception)
+  purchasePrice?: number | null;  // prix d'achat €/unité SAP
+  currency?: string | null;
 }
 interface Props {
-  item: { id: string; code: string; name: string; dispo?: number; unit?: string } | null;
+  item: { id: string; code: string; name: string; dispo?: number; unit?: string; packDivisor?: number } | null;
   onClose: () => void;
 }
 
@@ -31,7 +35,7 @@ const fmtDlc = (iso: string | null): string | null =>
   iso ? new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : null;
 const fmtQty = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 /** Lot verrouillé côté SAP (bdsStatus_Locked) — non vendable, signalé. */
-const isLocked = (status: string | null): boolean => /lock/i.test(status ?? "");
+const isLocked = (status: string | null | undefined): boolean => /lock/i.test(status ?? "");
 
 export function LotDetailsDialog({ item, onClose }: Props) {
   const [loading, setLoading] = useState(false);
@@ -55,7 +59,13 @@ export function LotDetailsDialog({ item, onClose }: Props) {
 
   const dispo = item?.dispo;
   const unit = item?.unit || "colis";
+  const packDivisor = item?.packDivisor && item.packDivisor > 0 ? item.packDivisor : 1;
   const hasStock = dispo == null || dispo > 0;   // dispo inconnu → on n'exclut rien
+
+  // Lots AVEC stock (registre) en tête, puis l'ordre FEFO renvoyé par l'API.
+  const sorted = [...batches].sort((a, b) => (b.quantity > 0 ? 1 : 0) - (a.quantity > 0 ? 1 : 0));
+  // Quantité d'un lot en unité d'affichage (colis) — le registre stocke en pie/kg.
+  const lotColis = (q: number) => Math.round((q / packDivisor) * 10) / 10;
 
   return (
     <Dialog open={!!item} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -63,12 +73,12 @@ export function LotDetailsDialog({ item, onClose }: Props) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Boxes className="h-5 w-5 text-brand-600 dark:text-brand-400" />
-            Lots en stock — {item?.name}
+            Lots — {item?.name}
           </DialogTitle>
           <DialogDescription>
             Code article <span className="font-mono text-foreground">{item?.code}</span>
             {dispo != null && <> · en stock <span className="font-semibold text-foreground tnum">{fmtQty(dispo)} {unit}</span></>}
-            {" "}· lots valables (DLC non dépassée), la plus proche d&apos;abord.
+            {" "}· quantité par lot, fournisseur &amp; prix d&apos;achat (décrémentés à la vente).
           </DialogDescription>
         </DialogHeader>
 
@@ -76,7 +86,7 @@ export function LotDetailsDialog({ item, onClose }: Props) {
           <p className="py-4 text-[13px] text-muted-foreground inline-flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" /> Chargement des lots…
           </p>
-        ) : batches.length === 0 ? (
+        ) : sorted.length === 0 ? (
           <p className="py-4 text-[13px] italic text-muted-foreground">
             {hasStock
               ? "Article en stock, mais aucun lot suivi en base pour cet article (non géré par lot)."
@@ -84,9 +94,10 @@ export function LotDetailsDialog({ item, onClose }: Props) {
           </p>
         ) : (
           <ul className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-1">
-            {batches.map((b, i) => {
+            {sorted.map((b, i) => {
               const d = fmtDlc(b.expirationDate);
               const locked = isLocked(b.status);
+              const hasQty = b.quantity > 0;
               return (
                 <li key={`${b.batchNumber}-${i}`} className="rounded-lg border border-border bg-secondary/20 px-3 py-2">
                   <div className="flex items-center justify-between gap-2">
@@ -94,11 +105,12 @@ export function LotDetailsDialog({ item, onClose }: Props) {
                       <span className="text-[10.5px] uppercase tracking-wide text-muted-foreground">Lot {i + 1}</span>
                       <span className="font-mono">{b.batchNumber}</span>
                     </span>
-                    {/* Le stock PAR LOT n'existe pas dans cette base : on n'affiche
-                        « Qté » que si la valeur est réellement renseignée (> 0). */}
-                    {b.quantity > 0 ? (
+                    {/* Quantité restante du registre (en colis). Le stock par lot
+                        n'existe pas dans SAP : on ne l'affiche que si le registre
+                        TeleVent l'a alimentée (> 0). */}
+                    {hasQty ? (
                       <span className="rounded-md bg-brand-500/10 px-2 py-0.5 text-[12px] font-bold tnum text-brand-700 dark:text-brand-300">
-                        Qté {fmtQty(b.quantity)}
+                        {fmtQty(lotColis(b.quantity))} {unit}
                       </span>
                     ) : locked ? (
                       <span className="rounded-md bg-rose-500/10 px-2 py-0.5 text-[11px] font-semibold text-rose-600 dark:text-rose-300">Bloqué</span>
@@ -108,6 +120,10 @@ export function LotDetailsDialog({ item, onClose }: Props) {
                     {d
                       ? <span className="inline-flex items-center gap-1"><CalendarClock className="h-3 w-3" /> DLC {d}</span>
                       : <span className="italic">DLC non renseignée</span>}
+                    {b.supplierName && <span className="inline-flex items-center gap-1 min-w-0"><Truck className="h-3 w-3 shrink-0" /> <span className="truncate">{b.supplierName}</span></span>}
+                    {b.purchasePrice != null && b.purchasePrice > 0 && (
+                      <span className="inline-flex items-center gap-1"><BadgeEuro className="h-3 w-3" /> {b.purchasePrice.toFixed(2)} €{b.currency && b.currency !== "EUR" ? ` ${b.currency}` : ""}</span>
+                    )}
                     {b.warehouseCode && <span className="inline-flex items-center gap-1"><Warehouse className="h-3 w-3" /> {b.warehouseCode}</span>}
                   </div>
                 </li>
