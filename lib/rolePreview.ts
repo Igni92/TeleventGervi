@@ -38,10 +38,10 @@ export function navAllowedForPreview(href: string, role: PreviewRole | null): bo
   if (!role) return true;
   if (href.startsWith("/commerciaux")) return true;   // porte de sortie de l'aperçu
   if (role === "preparateur") {
-    return href.startsWith("/livraisons") || href.startsWith("/inventaire");
+    return href.startsWith("/livraisons") || href.startsWith("/details-livraison") || href.startsWith("/inventaire");
   }
   if (role === "livreur") {
-    return href.startsWith("/livraisons") || href.startsWith("/clients");
+    return href.startsWith("/livraisons") || href.startsWith("/details-livraison") || href.startsWith("/clients");
   }
   if (role === "agreeur") {
     // Périmètre de l'agréeur : le flux CF → EM (réception + agréage). Pas de

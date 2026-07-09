@@ -277,10 +277,11 @@ export async function GET(req: NextRequest) {
           colis: Math.round(colisRaw * 10) / 10,
           weightKg: Math.round(weightRaw * 10) / 10,
           warehouse: l.WarehouseCode ?? null,
-          // Tags désignation (préparation) — marque · conditionnement · origine.
+          // Tags désignation (préparation) — marque · conditionnement · origine · variété.
           marque: p?.uMarque ?? null,
           condt: p?.uCondi ?? null,
           pays: p?.uPays ?? null,
+          variete: p?.frgnName ?? null,
         };
       });
       // Fusion des lignes d'un MÊME article (ex. ligne gratuite en plus de la

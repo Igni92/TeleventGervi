@@ -27,6 +27,7 @@ export interface Line {
   marque?: string | null;
   condt?: string | null;
   pays?: string | null;
+  variete?: string | null;     // frgnName SAP (variété) — précision produit
 }
 
 export interface Doc {
