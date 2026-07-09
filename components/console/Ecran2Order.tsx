@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ChevronDown, ChevronRight, ChevronUp, Search, Plus, Trash2,
   ShoppingCart, Check, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock, X,
-  History, BadgeEuro, ArrowRightLeft, CopyPlus, GripVertical, Boxes, ListPlus, Truck,
+  History, BadgeEuro, ArrowRightLeft, CopyPlus, Boxes, ListPlus, Truck,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
@@ -1824,6 +1824,19 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                   onDrop={() => { if (dragLine !== null) moveLineBefore(dragLine, i); endLineDrag(); }}
                 />
                 <div
+                  draggable={!locked}
+                  onDragStart={(e) => {
+                    // Toute la tuile est saisissable — SAUF les champs/boutons, qui
+                    // gardent leur comportement natif (focus, sélection, clic).
+                    const el = e.target as HTMLElement;
+                    if (locked || el.closest("input, select, textarea, button, a")) {
+                      e.preventDefault();
+                      return;
+                    }
+                    e.dataTransfer.effectAllowed = "move";
+                    setDragLine(i);
+                  }}
+                  onDragEnd={endLineDrag}
                   onContextMenu={(e) => {
                     // Clic droit = MENU de ligne : 2ᵉ ligne du même article / remplacer.
                     const el = e.target as HTMLElement;
@@ -1834,8 +1847,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                   }}
                   onDragOver={(e) => { if (dragLine !== null && dragLine !== i) { e.preventDefault(); setOverLine(`row:${i}`); } }}
                   onDrop={(e) => { if (dragLine !== null && dragLine !== i) { e.preventDefault(); swapLine(dragLine, i); } endLineDrag(); }}
-                  title="Clic droit : ajouter une ligne du même article, ou remplacer l'article · glisser la poignée pour réordonner"
-                  className={`rounded-lg border p-2 transition-all duration-150 ${
+                  title="Glisser la tuile pour réordonner · clic droit : ajouter une ligne du même article, ou remplacer l'article"
+                  className={`rounded-lg border p-2 transition-all duration-150 ${!locked ? "cursor-grab active:cursor-grabbing" : ""} ${
                     dragLine === i ? "opacity-40" : ""
                   } ${
                     overLine === `row:${i}` ? "ring-2 ring-brand-500 ring-offset-1 ring-offset-background" : ""
@@ -1892,20 +1905,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                       })()}
                     </div>
                   </div>
-                  {/* Actions de ligne : réordonner (poignée glisser + flèches) +
-                      supprimer (sauf ligne livrée). L'ordre du panier = l'ordre
-                      des lignes du BL, à la création comme en modification. */}
+                  {/* Actions de ligne : réordonner (flèches ; la tuile entière est
+                      glissable) + supprimer (sauf ligne livrée). L'ordre du panier =
+                      l'ordre des lignes du BL, à la création comme en modification. */}
                   <div className="flex items-center gap-0.5 shrink-0">
-                    <span
-                      draggable
-                      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setDragLine(i); }}
-                      onDragEnd={endLineDrag}
-                      title="Glisser pour réordonner la ligne"
-                      aria-label="Déplacer la ligne"
-                      className="inline-flex h-8 w-4 items-center justify-center text-muted-foreground/40 hover:text-foreground cursor-grab active:cursor-grabbing"
-                    >
-                      <GripVertical className="h-4 w-4" />
-                    </span>
                     <div className="flex flex-col -my-0.5">
                       <button type="button" tabIndex={-1} onClick={() => moveLine(i, -1)} disabled={i === 0}
                         aria-label="Monter la ligne" title="Monter"
