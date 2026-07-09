@@ -12,12 +12,15 @@ import { prisma } from "@/lib/prisma";
 import {
   EMPTY_TRANSPORT_MODEL,
   sanitizeTransportModel,
+  sanitizeClientPricing,
   type TransportCostModel,
   type TransportExpense,
+  type ClientCarrierPricing,
 } from "@/lib/transportCost";
 
 const MODEL_KEY = "transport:model";
 const EXP_PREFIX = "transportexp:";
+const CLIENT_PRICING_PREFIX = "transportcli:";
 
 /* ── Modèle de coûts (singleton direction) ─────────────────────────────────── */
 
@@ -73,4 +76,29 @@ export async function saveTransportExpense(e: TransportExpense): Promise<void> {
 /** Supprime une dépense (no-op si absente). */
 export async function deleteTransportExpense(id: string): Promise<void> {
   try { await prisma.appSetting.delete({ where: { key: EXP_PREFIX + id } }); } catch { /* déjà absente */ }
+}
+
+/* ── Tarif transport par CLIENT × transporteur (transporteurs non directs) ──── */
+
+/** Tarifs €/kg d'un client par transporteur (repli {} si absent/corrompu). */
+export async function getClientTransportPricing(clientId: string): Promise<ClientCarrierPricing> {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: CLIENT_PRICING_PREFIX + clientId } });
+    if (!row) return {};
+    return sanitizeClientPricing(JSON.parse(row.value));
+  } catch {
+    return {};
+  }
+}
+
+/** Enregistre (ou vide) les tarifs transport d'un client. */
+export async function setClientTransportPricing(clientId: string, pricing: ClientCarrierPricing): Promise<void> {
+  const key = CLIENT_PRICING_PREFIX + clientId;
+  const clean = sanitizeClientPricing(pricing);
+  if (Object.keys(clean).length === 0) {
+    try { await prisma.appSetting.delete({ where: { key } }); } catch { /* déjà absente */ }
+    return;
+  }
+  const value = JSON.stringify(clean);
+  await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
 }

@@ -22,7 +22,7 @@ import { LotDetailsDialog } from "./LotDetailsDialog";
 import { useContextMenu, ContextMenu, ContextMenuItem, ContextMenuLabel } from "@/components/ui/context-menu";
 import { useBrandLogos } from "@/lib/useBrandLogos";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
-import { transportCostForSale, transportPerKgForCarrier, isDirectCarrier, type TransportCostModel } from "@/lib/transportCost";
+import { transportCostForSale, transportPerKgForCarrier, isDirectCarrier, type TransportCostModel, type ClientCarrierPricing } from "@/lib/transportCost";
 
 interface StockEntry { available: number }
 interface Product {
@@ -416,6 +416,17 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
+  // Tarifs transport DU CLIENT par transporteur (transporteurs non directs).
+  const [clientPricing, setClientPricing] = useState<ClientCarrierPricing>({});
+  useEffect(() => {
+    if (!clientId) { setClientPricing({}); return; }
+    let cancelled = false;
+    fetch(`/api/clients/${clientId}/transport-pricing`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!cancelled && j?.pricing) setClientPricing(j.pricing as ClientCarrierPricing); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [clientId]);
   // Panier
   const [cart, setCart] = useState<CartLine[]>([]);
   const [deliveryDate, setDeliveryDate] = useState("");
@@ -938,8 +949,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     return Number.isFinite(w) && w > 0 ? w : 0;
   };
   const totalKg = useMemo(() => cart.reduce((s, l) => s + lineWeightKg(l), 0), [cart]);
-  const transportPerKgClient = transportPerKgForCarrier(transportModel, transportPerKg, carrierSap);
-  const transportCost = transportCostForSale(transportModel, transportPerKg, totalKg, carrierSap);
+  const transportPerKgClient = transportPerKgForCarrier(transportModel, transportPerKg, carrierSap, clientPricing);
+  const transportCost = transportCostForSale(transportModel, transportPerKg, totalKg, carrierSap, clientPricing);
   const carrierIsDirect = isDirectCarrier(transportModel, carrierSap) || (transportModel?.directCarriers.length ?? 0) === 0;
 
   // ── Création BL ──
@@ -2093,7 +2104,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                 <Truck className="h-3.5 w-3.5" />
                 {transportPerKgClient > 0
                   ? `Transport ${carrierIsDirect ? "direct " : ""}${transportPerKgClient.toFixed(3)} €/kg × ${Math.round(totalKg)} kg`
-                  : "Transport externe non valorisé"}
+                  : "Transport externe — tarif client non saisi"}
               </span>
               <span className={`tnum font-semibold ${transportCost > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
                 {transportCost > 0 ? `− ${transportCost.toFixed(2)} €` : "0,00 €"}

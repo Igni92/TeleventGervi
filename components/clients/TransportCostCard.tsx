@@ -49,8 +49,8 @@ export function TransportCostCard({
       )}
 
       <p className="text-[11px] text-muted-foreground/80">
-        Livraison via transporteur externe : valeur €/kg saisie par transporteur. Valeur annuelle
-        évolutive — Pilotage ›{" "}
+        Livraison via transporteur externe : tarif €/kg saisi ci-dessous, par transporteur.
+        Valeur du direct évolutive — Pilotage ›{" "}
         <Link href="/transport" className="hover:underline">Coût de transport</Link>.
       </p>
     </div>
