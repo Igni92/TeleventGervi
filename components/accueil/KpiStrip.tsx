@@ -4,31 +4,30 @@ import { Euro, Package, ShoppingCart, Percent } from "lucide-react";
 import { SurfaceCard, type Accent } from "@/components/ui/surface-card";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { Delta } from "@/components/ui/delta";
-import { useJson } from "./use-json";
+import { useJson, type FetchState } from "./use-json";
 
 /**
- * Bandeau KPI du jour — tuiles « gros chiffre ».
- *   • CA HT (BL), volume kg, nb commandes → GET /api/pilotage/activity?g=day
- *     (source SapOrder, vue commerciale), chacun avec pastille N vs N-1.
- *   • Marge brute % → GET /api/pilotage/marge (fenêtre glissante 30 j, coût RÉEL
- *     d'entrée marchandise — cf. lib/cogs). Affiche la FIABILITÉ (couverture) :
- *     plus les réceptions rentrent, plus le taux est fiable (il s'affine).
+ * Bandeau KPI DU JOUR — tuiles « gros chiffre » alimentées par une seule requête
+ * GET /api/pilotage/activity?g=day (source SapOrder, vue commerciale).
+ *
+ * CA HT (BL), volume kg, nb commandes, + MARGE BRUTE % du jour — chacun avec sa
+ * pastille N vs N-1 (même jour, année précédente). La marge est calculée sur le
+ * coût RÉEL d'entrée marchandise (lib/cogs) ; sa FIABILITÉ (couverture du coût)
+ * est affichée sous la tuile — elle s'affine dans la journée à mesure que les
+ * réceptions rentrent.
  */
 
 interface ActivityBucket {
   volume?: number;
   weightKg?: number;
   ordersCount?: number;
+  marginPct?: number;       // marge brute / CA produit net × 100
+  marginCoverage?: number;  // % du CA produit dont le coût d'entrée est résolu
+  caProductNet?: number;    // base marge — 0 = pas encore de vente costable
 }
 interface ActivityResponse {
   curr?: ActivityBucket;
   prev?: ActivityBucket;
-}
-interface MargeResponse {
-  days?: number;
-  marginPct?: number;
-  coverage?: number;       // % du CA produit dont le coût d'entrée est résolu
-  caProductNet?: number;
 }
 
 interface TileDef {
@@ -110,18 +109,17 @@ export function KpiStrip() {
         );
       })}
 
-      <MargeTile delay={TILES.length * 50} />
+      <MargeTile curr={curr} state={state} delay={TILES.length * 50} />
     </div>
   );
 }
 
-/** Taux de marge brut (%) sur 30 j glissants + fiabilité (couverture du coût réel). */
-function MargeTile({ delay }: { delay: number }) {
-  const { data, state } = useJson<MargeResponse>("/api/pilotage/marge", 5 * 60_000);
-  const pct = data?.marginPct ?? 0;
-  const coverage = Math.round(data?.coverage ?? 0);
-  const hasData = (data?.caProductNet ?? 0) > 0;
-  // Fiabilité : le taux se fiabilise à mesure que les réceptions couvrent le CA.
+/** Marge brute % DU JOUR (coût réel d'entrée marchandise) + fiabilité (couverture). */
+function MargeTile({ curr, state, delay }: { curr: ActivityBucket; state: FetchState; delay: number }) {
+  const pct = curr.marginPct ?? 0;
+  const coverage = Math.round(curr.marginCoverage ?? 0);
+  const hasData = (curr.caProductNet ?? 0) > 0;
+  // Fiabilité : le taux se fiabilise dans la journée à mesure que les réceptions couvrent le CA.
   const covTone = coverage >= 80 ? "text-emerald-600 dark:text-emerald-400"
     : coverage >= 50 ? "text-amber-600 dark:text-amber-400"
     : "text-muted-foreground";
@@ -130,7 +128,7 @@ function MargeTile({ delay }: { delay: number }) {
     <SurfaceCard accent="violet" delay={delay} className="py-3.5">
       <div className="flex items-center gap-1.5 text-muted-foreground">
         <span className="shrink-0 text-muted-foreground/70"><Percent className="h-3.5 w-3.5" /></span>
-        <span className="text-[11.5px] font-semibold uppercase tracking-[0.08em] leading-none">Marge brute · 30 j</span>
+        <span className="text-[11.5px] font-semibold uppercase tracking-[0.08em] leading-none">Marge du jour</span>
       </div>
 
       {state === "loading" ? (
@@ -147,13 +145,13 @@ function MargeTile({ delay }: { delay: number }) {
 
       <div className="mt-2 flex items-center gap-1.5 min-h-[18px] whitespace-nowrap">
         {state === "ok" && hasData ? (
-          <span className="text-[10.5px] text-muted-foreground" title="Part du chiffre d'affaires dont le coût d'entrée marchandise est connu — le taux se fiabilise à mesure que les réceptions rentrent.">
+          <span className="text-[10.5px] text-muted-foreground" title="Marge brute du jour sur le coût réel d'entrée marchandise. « Fiabilité » = part du CA du jour dont le coût est déjà connu — elle monte à mesure que les réceptions rentrent.">
             fiabilité <b className={covTone}>{coverage}%</b>{coverage < 60 ? " · estimation" : ""}
           </span>
         ) : state === "error" ? (
           <span className="text-[10.5px] text-muted-foreground">Indisponible</span>
-        ) : !hasData && state === "ok" ? (
-          <span className="text-[10.5px] text-muted-foreground">en attente de ventes</span>
+        ) : state === "ok" && !hasData ? (
+          <span className="text-[10.5px] text-muted-foreground">pas encore de vente</span>
         ) : null}
       </div>
     </SurfaceCard>
