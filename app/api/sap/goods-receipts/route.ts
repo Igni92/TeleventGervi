@@ -8,6 +8,7 @@ import { incrementLocalStock } from "@/lib/stockSync";
 import { bumpLot, LOT_PENDING } from "@/lib/lotResolver";
 import { buildWhsBudget, remainingForItem, pickReceiptWarehouse, consumeBudget } from "@/lib/receiptRetro";
 import { normalizeEmAffect, setEmAffect } from "@/lib/emAffect";
+import { creditLots } from "@/lib/lotLedger";
 
 /**
  * POST /api/sap/goods-receipts
@@ -114,11 +115,11 @@ export async function POST(req: NextRequest) {
   const productMap = new Map(products.map((p) => [p.itemCode, p]));
 
   // ── Pré-validation : fournisseur existe (et n'est pas gelé) ──
-  type SapBp = { CardCode: string; CardType?: string; Frozen?: string; Valid?: string };
+  type SapBp = { CardCode: string; CardName?: string; CardType?: string; Frozen?: string; Valid?: string };
   let bp: SapBp;
   try {
     bp = await sap.get<SapBp>(
-      `BusinessPartners('${encodeURIComponent(cardCode)}')?$select=CardCode,CardType,Frozen,Valid`,
+      `BusinessPartners('${encodeURIComponent(cardCode)}')?$select=CardCode,CardName,CardType,Frozen,Valid`,
     );
   } catch {
     return NextResponse.json({
@@ -240,6 +241,27 @@ export async function POST(req: NextRequest) {
 
   // ── Cache des lots : injection immédiate pour les Orders qui suivent ──
   for (const l of body.lines) bumpLot(l.itemCode, l.warehouseCode, created.DocNum);
+
+  // ── REGISTRE DES LOTS : CRÉDIT (réception) ──────────────────────────
+  // Le lot EM<DocNum> naît ici : on mémorise la quantité reçue (pie), le
+  // fournisseur et le prix d'achat. Le stock par lot est ensuite décrémenté à la
+  // vente (cf. /api/sap/orders). Agrégé tous entrepôts (warehouseCode=""), en
+  // unité SAP (pie) — cohérent avec la décrémentation. Best-effort.
+  try {
+    const admission = new Date(`${docDate}T12:00:00Z`);
+    await creditLots(resolvedLines.map((l) => ({
+      itemCode: l.itemCode,
+      lot: lotCode,
+      qty: l.pieceQty,
+      supplierName: bp.CardName?.trim() || cardCode,
+      purchasePrice: l.price ?? null,
+      currency: "EUR",
+      sourceDocNum: String(created.DocNum),
+      admissionDate: admission,
+    })));
+  } catch (e) {
+    console.warn("[GoodsReceipt] Crédit registre lots échoué (non-bloquant):", (e as Error).message);
+  }
 
   // ── Affectation de l'EM (Tous/Export/GMS/CHR) — persistée par DocNum. Pilote
   //    le choix du lot à la saisie télévente (resolveLotForSegment) et la

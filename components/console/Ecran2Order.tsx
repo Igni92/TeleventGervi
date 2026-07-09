@@ -756,9 +756,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   // articles introuvables au catalogue chargé sont signalés.
   const [replaying, setReplaying] = useState(false);
   // Clic droit sur une ligne produit → menu (Détails lots · Tout mettre).
-  const [lotDetail, setLotDetail] = useState<{ id: string; code: string; name: string; dispo: number; unit: string } | null>(null);
+  const [lotDetail, setLotDetail] = useState<{ id: string; code: string; name: string; dispo: number; unit: string; packDivisor: number } | null>(null);
   const { menu: rowMenu, openAt: openRowMenu, close: closeRowMenu } = useContextMenu();
-  const [menuTarget, setMenuTarget] = useState<{ p: Product; fullQty: number; dispo: number; unit: string } | null>(null);
+  const [menuTarget, setMenuTarget] = useState<{ p: Product; fullQty: number; dispo: number; unit: string; packDivisor: number } | null>(null);
   const replayLast = async () => {
     if (replaying || prefilling || modif) return;
     setReplaying(true);
@@ -1434,7 +1434,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                             }}
                             onContextMenu={(e) => {
                               const fullQty = dispo > 0 ? (packDivisor > 1 ? Math.floor(dispo) : Math.round(dispo * 10) / 10) : 0;
-                              setMenuTarget({ p, fullQty, dispo: Math.round(dispo * 10) / 10, unit });
+                              setMenuTarget({ p, fullQty, dispo: Math.round(dispo * 10) / 10, unit, packDivisor });
                               openRowMenu(e);
                             }}
                             title={inCart ? "Retirer du panier"
@@ -2163,7 +2163,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       <ContextMenu menu={rowMenu} onClose={closeRowMenu}
         header={menuTarget && <ContextMenuLabel>{menuTarget.p.itemName}</ContextMenuLabel>}>
         <ContextMenuItem icon={Boxes} onClick={() => {
-          if (menuTarget) setLotDetail({ id: menuTarget.p.id, code: menuTarget.p.itemCode, name: menuTarget.p.itemName, dispo: menuTarget.dispo, unit: menuTarget.unit });
+          if (menuTarget) setLotDetail({ id: menuTarget.p.id, code: menuTarget.p.itemCode, name: menuTarget.p.itemName, dispo: menuTarget.dispo, unit: menuTarget.unit, packDivisor: menuTarget.packDivisor });
           closeRowMenu();
         }}>
           Détails (lots en stock)

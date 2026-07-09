@@ -157,6 +157,15 @@ export function isLotPending(lot: string | null | undefined): boolean {
   return s === "" || s === LOT_PENDING || s.startsWith(LOT_FAMILY_PREFIX);
 }
 
+/** Un VRAI lot de réception `EM<DocNum>` (chiffres) — exclut les sentinels
+ *  d'attente (EM_PENDING, EM_FAM:<fruit>) et tout ce qui n'est pas « EM » + un
+ *  numéro. Sert au registre des lots (crédit/débit ne visent que les vrais lots). */
+export function isRealLot(lot: string | null | undefined): boolean {
+  const s = (lot ?? "").trim();
+  if (!s || isLotPending(s)) return false;
+  return /^EM\d+$/i.test(s);
+}
+
 export type LotChoice = {
   lot: string;                                       // JAMAIS vide — EM<DocNum> ou EM_PENDING
   reason: "fifo" | "decouvert" | "aucun-pdn" | "env-defaut";

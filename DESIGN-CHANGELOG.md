@@ -472,3 +472,26 @@ dans la liste des offres à passer.
   **clôture l'offre** (Quotation) côté SAP (repli `Cancel` si besoin, best-effort :
   « déjà clôturée » = OK). Le GET ne listant que les devis ouverts, l'offre quitte
   aussitôt l'onglet — plus de doublon fantôme après le passage en livraison.
+
+---
+
+## 📒 Registre des lots TeleVent — quantité / fournisseur / prix, décrémentés à la vente
+
+Le stock **par lot** n'existe pas dans le Service Layer SAP de cette base (seul le
+stock par article est exposé). TeleVent le tient désormais **lui-même** (registre
+`lib/lotLedger`, dans `ProductBatch.quantity`, repère `EM<DocNum>` — aucune
+migration : la synchro n'écrit jamais cette colonne).
+
+| Moment | Effet |
+|--------|-------|
+| **Réception** (`/api/sap/goods-receipts`) | Le lot `EM<DocNum>` est **crédité** : quantité reçue + **fournisseur** + **prix d'achat** mémorisés. |
+| **Vente** (`/api/sap/orders`) | La quantité vendue est **décrémentée** du lot affecté (U_NoLot). Idem à l'affectation d'un lot sur un bon de commande (`/api/bons-commande` PATCH). |
+| **Clic droit → Détails** | Chaque lot affiche sa **quantité restante** (en colis), son **fournisseur** et son **prix d'achat** ; les lots avec stock en tête. |
+
+- `creditLots` / `debitLots` : résolution des `productId` en une requête, cumul par
+  lot, plancher à 0, **best-effort** (une erreur de registre ne bloque JAMAIS une
+  vente ni une réception). Ne visent que les **vrais lots** `EM<DocNum>`
+  (`isRealLot`, pur & testé) — les lignes `EM_PENDING` / `EM_FAM` sont ignorées.
+- Démarrage à froid honnête : les lots reçus **après** activation portent la
+  quantité/fournisseur/prix ; les lots antérieurs restent affichés (DLC) et se
+  garnissent au fil des réceptions.

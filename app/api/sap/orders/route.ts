@@ -18,6 +18,7 @@ import { colisInfo } from "@/lib/colis";
 import { isPrecommande } from "@/lib/livraison";
 import { isComptoirClient } from "@/lib/segments";
 import { markComptoirDelivered } from "@/lib/inventory";
+import { debitLots } from "@/lib/lotLedger";
 
 /**
  * Cache module-level du référentiel AdditionalExpenses SAP.
@@ -795,6 +796,24 @@ export async function POST(req: NextRequest) {
         await mirrorCreatedOrder(enriched);
       } catch (e) {
         console.warn("[Order] Miroir optimiste échoué (non-bloquant, rattrapé à la synchro):", (e as Error).message);
+      }
+    }
+
+    // ── 3.65. REGISTRE DES LOTS : DÉBIT (vente) ─────────────────────────
+    // La marchandise vendue est retirée du lot affecté (U_NoLot = EM<DocNum>).
+    // Uniquement les VRAIES commandes (un bon de commande / précommande part en
+    // EM_PENDING → aucun lot réel encore, rien à débiter ; le débit se fera à
+    // l'affectation du lot, cf. /api/bons-commande PATCH). Best-effort. Les
+    // quantités sont en unité SAP (pie), cohérentes avec le crédit à la réception.
+    if (!isBonCommande) {
+      try {
+        await debitLots(documentLines.map((dl) => ({
+          itemCode: String(dl.ItemCode ?? ""),
+          lot: typeof dl.U_NoLot === "string" ? dl.U_NoLot : "",
+          qty: typeof dl.Quantity === "number" ? dl.Quantity : Number(dl.Quantity) || 0,
+        })));
+      } catch (e) {
+        console.warn("[Order] Débit registre lots échoué (non-bloquant):", (e as Error).message);
       }
     }
 

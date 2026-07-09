@@ -6,6 +6,7 @@ import { colisInfo } from "@/lib/colis";
 import { getLotMaps, resolveLotForSegment, LOT_PENDING } from "@/lib/lotResolver";
 import { getEmAffects } from "@/lib/emAffect";
 import { listBonCommandeDocEntries, setDeliveryBonCommande } from "@/lib/inventory";
+import { debitLots, isRealLot } from "@/lib/lotLedger";
 import { isLotPending, familyOfLot, LOT_FAMILY_PREFIX } from "@/lib/gervifrais-calc";
 import { FRUIT_FAMILIES } from "@/lib/familles";
 import { isDepartureReached } from "@/lib/livraison";
@@ -356,7 +357,23 @@ export async function PATCH(req: NextRequest) {
     if (patchLines.length === 0) {
       return NextResponse.json({ error: `Aucune ligne « ${itemCode} » sur la commande` }, { status: 404 });
     }
+    // Registre des lots — DÉBIT à la PREMIÈRE affectation d'un vrai lot : si les
+    // lignes de cet article étaient toutes « en attente » avant ce PATCH et qu'on
+    // pose un vrai EM<DocNum>, la marchandise est consommée sur ce lot. Une simple
+    // RÉaffectation (lignes déjà résolues) ne re-débite pas. Calculé AVANT le PATCH.
+    const itemLines = allLines.filter((l) => l.ItemCode === itemCode);
+    const wasAllPending = itemLines.every((l) => isPending(l.U_NoLot));
+    const soldQty = itemLines.reduce((s, l) => s + (l.Quantity ?? 0), 0);
+
     await sap.patch(`Orders(${docEntry})`, { DocumentLines: patchLines });
+
+    if (wasAllPending && isRealLot(lot) && soldQty > 0) {
+      try {
+        await debitLots([{ itemCode, lot, qty: soldQty }]);
+      } catch (e) {
+        console.warn(`[BonCommande] Débit registre lot ${lot} échoué (non-bloquant):`, (e as Error).message);
+      }
+    }
 
     // Reste-t-il des lignes en attente après cette affectation ?
     const stillPending = allLines.some((l) => {
