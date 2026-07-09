@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { requirePreparateurOrAdmin } from "@/lib/permissions";
 import { sap } from "@/lib/sapb1";
 
 /**
@@ -21,6 +22,11 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
   const docEntry = Number(docEntryStr);
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  // Modifier le PRIX d'une entrée marchandise est réservé à la préparation /
+  // l'administration : l'agréeur ne voit ni ne touche aux prix.
+  if (!(await requirePreparateurOrAdmin(session))) {
+    return NextResponse.json({ error: "Réservé à la préparation / l'administration" }, { status: 403 });
+  }
   if (!Number.isFinite(docEntry)) return NextResponse.json({ error: "docEntry invalide" }, { status: 400 });
 
   let body: { lines?: { lineNum: number; price?: number; lineTotal?: number }[] };

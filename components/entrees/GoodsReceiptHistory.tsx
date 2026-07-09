@@ -224,8 +224,11 @@ function useDlcMap(
   return [dlc, merge];
 }
 
-/** Liste des entrées marchandises (SAP PurchaseDeliveryNotes) — recherche + détail. */
-export function GoodsReceiptHistory() {
+/** Liste des entrées marchandises (SAP PurchaseDeliveryNotes) — recherche + détail.
+ *  `restricted` = agréeur « pur » : aucun prix visible ni éditable, pas de retour
+ *  fournisseur ni d'annulation — consultation seule (l'agréage se fait à la
+ *  réception d'une commande fournisseur). */
+export function GoodsReceiptHistory({ restricted = false }: { restricted?: boolean }) {
   const [docs, setDocs] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
@@ -351,16 +354,18 @@ export function GoodsReceiptHistory() {
           return (
             <div className="flex flex-wrap gap-6 pb-1">
               <Stat label="Entrées" value={<AnimatedNumber value={live.length} />} />
-              <Stat
-                label="Valeur cumulée (HT)"
-                tone="emerald"
-                value={
-                  <AnimatedNumber
-                    value={live.reduce((s, d) => s + (d.totalHT ?? 0), 0)}
-                    format={(n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n)}
-                  />
-                }
-              />
+              {!restricted && (
+                <Stat
+                  label="Valeur cumulée (HT)"
+                  tone="emerald"
+                  value={
+                    <AnimatedNumber
+                      value={live.reduce((s, d) => s + (d.totalHT ?? 0), 0)}
+                      format={(n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n)}
+                    />
+                  }
+                />
+              )}
               <Stat label="Lignes" value={<AnimatedNumber value={live.reduce((s, d) => s + (d.lineCount ?? 0), 0)} />} />
               {voided > 0 && <Stat label="Annulées" value={<AnimatedNumber value={voided} />} />}
             </div>
@@ -394,10 +399,12 @@ export function GoodsReceiptHistory() {
                     </div>
                   </div>
                   <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
-                    <div>
-                      <span className="text-[17px] font-bold tnum text-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
-                      <span className="ml-1 text-[11px] text-muted-foreground">HT</span>
-                    </div>
+                    {!restricted && (
+                      <div>
+                        <span className="text-[17px] font-bold tnum text-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
+                        <span className="ml-1 text-[11px] text-muted-foreground">HT</span>
+                      </div>
+                    )}
                     {/* Logo(s) du type d'incident à droite (pas de compteur) */}
                     {openIncidents.length > 0 && (
                       <span className="inline-flex items-center gap-1">
@@ -423,7 +430,7 @@ export function GoodsReceiptHistory() {
                   <th className="text-left px-3 py-2 font-semibold">Fournisseur</th>
                   <th className="text-left px-3 py-2 font-semibold w-28">Date</th>
                   <th className="text-right px-3 py-2 font-semibold w-16">Lignes</th>
-                  <th className="text-right px-3 py-2 font-semibold w-28">Total HT</th>
+                  {!restricted && <th className="text-right px-3 py-2 font-semibold w-28">Total HT</th>}
                   <th className="text-center px-3 py-2 font-semibold w-28">Agréage</th>
                   <th className="text-center px-3 py-2 font-semibold w-20">Incident</th>
                 </tr>
@@ -453,7 +460,7 @@ export function GoodsReceiptHistory() {
                       </td>
                       <td className="px-3 py-2 text-muted-foreground tnum">{fmtDate(d.docDate)}</td>
                       <td className="px-3 py-2 text-right tnum">{d.lineCount}</td>
-                      <td className="px-3 py-2 text-right tnum font-semibold">{eur(d.totalHT ?? 0)}</td>
+                      {!restricted && <td className="px-3 py-2 text-right tnum font-semibold">{eur(d.totalHT ?? 0)}</td>}
                       <td className="px-3 py-2 text-center">
                         {/* Agréage posé à la réception CF → EM ; EM directe = pas d'agréage. */}
                         {!isVoided(d) && agreages[d.docEntry]
@@ -477,7 +484,7 @@ export function GoodsReceiptHistory() {
                   if (isOpen) {
                     rows.push(
                       <tr key={`${d.docEntry}-detail`}>
-                        <td colSpan={9} className="bg-secondary/20 px-4 py-4 border-t border-border/60">
+                        <td colSpan={restricted ? 8 : 9} className="bg-secondary/20 px-4 py-4 border-t border-border/60">
                           <ReceiptDetail
                             receipt={d}
                             dlc={dlcMap[d.lot]}
@@ -488,6 +495,7 @@ export function GoodsReceiptHistory() {
                             onModified={load}
                             onEnlarge={() => setLargeEntry(d.docEntry)}
                             agreage={agreages[d.docEntry] ?? null}
+                            restricted={restricted}
                           />
                         </td>
                       </tr>,
@@ -527,6 +535,7 @@ export function GoodsReceiptHistory() {
               onNumAtCardChange={updateNumAtCard}
               onModified={load}
               agreage={agreages[largeDoc.docEntry] ?? null}
+              restricted={restricted}
             />
           )}
         </DialogContent>
@@ -554,7 +563,7 @@ function Stat({ label, value, tone }: { label: string; value: React.ReactNode; t
    ───────────────────────────────────────────────────────────────── */
 function ReceiptDetail({
   receipt, dlc, onDlcSaved, incidents, onIncidentChanged, onNumAtCardChange, onModified, large, onEnlarge,
-  agreage,
+  agreage, restricted = false,
 }: {
   receipt: Receipt;
   /** DLC (ISO) du lot — `undefined` = pas encore chargée, `null` = non saisie. */
@@ -572,6 +581,8 @@ function ReceiptDetail({
   onEnlarge?: () => void;
   /** Agréage posé à la réception CF → EM (null = EM directe, jamais agréée). */
   agreage?: AgreageInfo | null;
+  /** Agréeur « pur » : aucun prix visible/éditable, ni retour ni annulation. */
+  restricted?: boolean;
 }) {
   const [declareOpen, setDeclareOpen] = useState(false);
   const [savingBl, setSavingBl] = useState(false);
@@ -625,7 +636,9 @@ function ReceiptDetail({
   // Édition des PRIX (prix unitaire / total HT forcé) — la marchandise est entrée,
   // donc ni quantité ni article ne changent. ACTIVE PAR DÉFAUT, et chaque case
   // s'ENREGISTRE TOUTE SEULE quand on la quitte (blur) — pas de bouton.
-  const canEditPrices = receipt.editable !== false;
+  // L'agréeur « pur » ne voit ni ne modifie les prix (le serveur renvoie déjà
+  // editable=false et des montants nuls — double garde ici).
+  const canEditPrices = !restricted && receipt.editable !== false;
   const [priceEdits, setPriceEdits] = useState<PriceEdit[]>(() => toPriceEdits(receipt.lines));
   const [savingLines, setSavingLines] = useState<Set<number>>(new Set());
   const lastSaved = useRef<Map<number, string>>(new Map());
@@ -821,25 +834,27 @@ function ReceiptDetail({
                   <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
                   <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
                 </div>
-                <div className="text-right shrink-0">
-                  {canEditPrices && priceEdits[i] ? (
-                    <NumberInput value={emEffTotal(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { lineTotal: n == null ? "" : String(n), forceTotal: n != null })} onBlur={() => saveLine(i)} min={0} step={0.01} decimals={2} allowEmpty placeholder="Total HT" className={`h-9 w-28 text-right ${priceEdits[i].forceTotal ? "ring-1 ring-amber-400" : ""}`} />
-                  ) : (
-                    <>
-                      <div className="text-[15px] font-bold tnum text-foreground">{lineHT != null ? eur(lineHT) : "—"}</div>
-                      <div className="text-[11px] text-muted-foreground">HT</div>
-                    </>
-                  )}
-                </div>
+                {!restricted && (
+                  <div className="text-right shrink-0">
+                    {canEditPrices && priceEdits[i] ? (
+                      <NumberInput value={emEffTotal(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { lineTotal: n == null ? "" : String(n), forceTotal: n != null })} onBlur={() => saveLine(i)} min={0} step={0.01} decimals={2} allowEmpty placeholder="Total HT" className={`h-9 w-28 text-right ${priceEdits[i].forceTotal ? "ring-1 ring-amber-400" : ""}`} />
+                    ) : (
+                      <>
+                        <div className="text-[15px] font-bold tnum text-foreground">{lineHT != null ? eur(lineHT) : "—"}</div>
+                        <div className="text-[11px] text-muted-foreground">HT</div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2 mt-2 text-[13px] text-muted-foreground tnum">
                 <span className="text-foreground font-medium">{fmtColis(l.packageQuantity)} colis</span>
-                <span>·</span>
-                {canEditPrices && priceEdits[i] ? (
+                {!restricted && <span>·</span>}
+                {!restricted && (canEditPrices && priceEdits[i] ? (
                   <span className="inline-flex items-center gap-1">PU <NumberInput value={emEffPU(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { price: n == null ? "" : String(n), forceTotal: false, lineTotal: "" })} onBlur={() => saveLine(i)} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className="h-8 w-20 text-right" /></span>
                 ) : (
                   <span>PU {l.price != null ? eur(l.price) : "—"}</span>
-                )}
+                ))}
               </div>
               {/* DLC (fraîcheur) du lot — sur la ligne, éditable */}
               <div className="flex items-center gap-2 mt-2 text-[13px]">
@@ -857,11 +872,13 @@ function ReceiptDetail({
             </div>
           );
         })}
-        <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1.5">
-          <div className="flex justify-between text-[14px]"><span className="text-muted-foreground">Total HT</span><span className="font-semibold tnum">{eur(totHT)}</span></div>
-          <div className="flex justify-between text-[14px]"><span className="text-muted-foreground">TVA</span><span className="tnum text-muted-foreground">{eur(totTVA)}</span></div>
-          <div className="flex justify-between text-[16px] border-t border-border pt-1.5"><span className="font-semibold text-foreground">Total TTC</span><span className="font-bold tnum text-foreground">{eur(totTTC)}</span></div>
-        </div>
+        {!restricted && (
+          <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1.5">
+            <div className="flex justify-between text-[14px]"><span className="text-muted-foreground">Total HT</span><span className="font-semibold tnum">{eur(totHT)}</span></div>
+            <div className="flex justify-between text-[14px]"><span className="text-muted-foreground">TVA</span><span className="tnum text-muted-foreground">{eur(totTVA)}</span></div>
+            <div className="flex justify-between text-[16px] border-t border-border pt-1.5"><span className="font-semibold text-foreground">Total TTC</span><span className="font-bold tnum text-foreground">{eur(totTTC)}</span></div>
+          </div>
+        )}
       </div>
 
       {/* Desktop : tableau large — désignation décomposée + HT par ligne */}
@@ -877,8 +894,8 @@ function ReceiptDetail({
               <th className={`text-left font-semibold ${th}`}>Variété</th>
               <th className={`text-left font-semibold ${th}`}>Condt</th>
               <th className={`text-left font-semibold w-40 ${th}`}>DLC</th>
-              <th className={`text-right font-semibold w-24 ${th}`}>PU HT</th>
-              <th className={`text-right font-semibold w-24 ${th}`}>Total HT</th>
+              {!restricted && <th className={`text-right font-semibold w-24 ${th}`}>PU HT</th>}
+              {!restricted && <th className={`text-right font-semibold w-24 ${th}`}>Total HT</th>}
             </tr>
           </thead>
           <tbody>
@@ -909,37 +926,43 @@ function ReceiptDetail({
                         : <FreshnessBadge dlc={dlcISO} className="shrink-0" />}
                     </div>
                   </td>
-                  <td className={`text-right tnum ${td}`}>
-                    {canEditPrices && priceEdits[i] ? (
-                      <NumberInput value={emEffPU(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { price: n == null ? "" : String(n), forceTotal: false, lineTotal: "" })} onBlur={() => saveLine(i)} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className="h-8 w-24 text-right" />
-                    ) : (l.price != null ? eur(l.price) : "—")}
-                  </td>
-                  <td className={`text-right tnum font-medium ${td}`}>
-                    {canEditPrices && priceEdits[i] ? (
-                      <span className="inline-flex items-center justify-end gap-1">
-                        {savingLines.has(priceEdits[i].lineNum) && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
-                        <NumberInput value={emEffTotal(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { lineTotal: n == null ? "" : String(n), forceTotal: n != null })} onBlur={() => saveLine(i)} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className={`h-8 w-24 text-right ${priceEdits[i].forceTotal ? "ring-1 ring-amber-400" : ""}`} />
-                      </span>
-                    ) : (lineHT != null ? eur(lineHT) : "—")}
-                  </td>
+                  {!restricted && (
+                    <td className={`text-right tnum ${td}`}>
+                      {canEditPrices && priceEdits[i] ? (
+                        <NumberInput value={emEffPU(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { price: n == null ? "" : String(n), forceTotal: false, lineTotal: "" })} onBlur={() => saveLine(i)} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className="h-8 w-24 text-right" />
+                      ) : (l.price != null ? eur(l.price) : "—")}
+                    </td>
+                  )}
+                  {!restricted && (
+                    <td className={`text-right tnum font-medium ${td}`}>
+                      {canEditPrices && priceEdits[i] ? (
+                        <span className="inline-flex items-center justify-end gap-1">
+                          {savingLines.has(priceEdits[i].lineNum) && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+                          <NumberInput value={emEffTotal(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { lineTotal: n == null ? "" : String(n), forceTotal: n != null })} onBlur={() => saveLine(i)} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className={`h-8 w-24 text-right ${priceEdits[i].forceTotal ? "ring-1 ring-amber-400" : ""}`} />
+                        </span>
+                      ) : (lineHT != null ? eur(lineHT) : "—")}
+                    </td>
+                  )}
                 </tr>
               );
             })}
           </tbody>
-          <tfoot>
-            <tr className="border-t border-border bg-secondary/30">
-              <td colSpan={8} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total HT</td>
-              <td colSpan={2} className={`text-right tnum font-semibold text-foreground ${td} ${totVal}`}>{eur(totHT)}</td>
-            </tr>
-            <tr className="bg-secondary/20">
-              <td colSpan={8} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>TVA</td>
-              <td colSpan={2} className={`text-right tnum text-muted-foreground ${td}`}>{eur(totTVA)}</td>
-            </tr>
-            <tr className="bg-secondary/30 border-t border-border">
-              <td colSpan={8} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total TTC</td>
-              <td colSpan={2} className={`text-right tnum font-bold text-foreground ${td} ${totVal}`}>{eur(totTTC)}</td>
-            </tr>
-          </tfoot>
+          {!restricted && (
+            <tfoot>
+              <tr className="border-t border-border bg-secondary/30">
+                <td colSpan={8} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total HT</td>
+                <td colSpan={2} className={`text-right tnum font-semibold text-foreground ${td} ${totVal}`}>{eur(totHT)}</td>
+              </tr>
+              <tr className="bg-secondary/20">
+                <td colSpan={8} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>TVA</td>
+                <td colSpan={2} className={`text-right tnum text-muted-foreground ${td}`}>{eur(totTVA)}</td>
+              </tr>
+              <tr className="bg-secondary/30 border-t border-border">
+                <td colSpan={8} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total TTC</td>
+                <td colSpan={2} className={`text-right tnum font-bold text-foreground ${td} ${totVal}`}>{eur(totTTC)}</td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 
@@ -994,8 +1017,9 @@ function ReceiptDetail({
             <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
             Déclarer un incident
           </Button>
-          {/* Retour fournisseur (partiel/total) — pas sur une EM annulée. */}
-          {!isVoided(receipt) && (
+          {/* Retour fournisseur (partiel/total) — geste de gestion (sortie de stock,
+              base d'avoir) : masqué pour l'agréeur, et pas sur une EM annulée. */}
+          {!restricted && !isVoided(receipt) && (
             <Button variant="outline" size="sm" onClick={openReturn} className="gap-1.5">
               <Undo2 className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" /> Retour fournisseur
             </Button>

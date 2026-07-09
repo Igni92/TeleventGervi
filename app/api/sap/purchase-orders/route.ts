@@ -104,6 +104,13 @@ export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
+  // L'AGRÉEUR « pur » (sans rôle de gestion) ne doit PAS voir les PRIX des
+  // commandes fournisseurs : il ne fait que passer la commande en entrée
+  // marchandise. On masque donc les montants côté serveur (défense en
+  // profondeur — l'UI les cache aussi) : prix de ligne, total ligne et totaux
+  // document renvoyés à 0/null. La préparation / l'administration voit tout.
+  const priceBlind = (await isAgreeur(session)) && !(await requirePreparateurOrAdmin(session));
+
   const { searchParams } = new URL(req.url);
   const last = Math.min(50, parseInt(searchParams.get("last") || "30"));
 
@@ -168,10 +175,10 @@ export async function GET(req: NextRequest) {
           // été réceptionnée : on ne la considère pas « ouverte » (pas d'actions).
           open: d.DocumentStatus !== "bost_Close",   // Ouverte tant que non clôturée
           cancelled,                                 // Annulée (≠ réceptionnée)
-          total: totalTTC,
-          totalTTC,
-          totalHT,
-          totalTVA,
+          total: priceBlind ? 0 : totalTTC,
+          totalTTC: priceBlind ? 0 : totalTTC,
+          totalHT: priceBlind ? 0 : totalHT,
+          totalTVA: priceBlind ? 0 : totalTVA,
           comments: d.Comments ?? "",
           lineCount: lines.length,
           lines: lines.map((l) => {
@@ -183,9 +190,9 @@ export async function GET(req: NextRequest) {
               pieceQuantity: l.Quantity,
               packageQuantity: l.PackageQuantity ?? (ratio > 1 ? l.Quantity / ratio : l.Quantity),
               warehouse: l.WarehouseCode,
-              price: l.Price ?? null,
-              lineTotal: l.LineTotal ?? null,
-              taxPercent: l.TaxPercentagePerRow ?? null,
+              price: priceBlind ? null : (l.Price ?? null),
+              lineTotal: priceBlind ? null : (l.LineTotal ?? null),
+              taxPercent: priceBlind ? null : (l.TaxPercentagePerRow ?? null),
               open: l.LineStatus !== "bost_Close",
               uPays: p?.uPays ?? null,
               uMarque: p?.uMarque ?? null,

@@ -32,7 +32,7 @@ export default async function CommandesFournisseursPage() {
         </p>
       </div>
       {!agreeurOnly && <PurchaseOrderForm />}
-      <PurchaseOrderHistory />
+      <PurchaseOrderHistory restricted={agreeurOnly} />
     </div>
   );
 }
