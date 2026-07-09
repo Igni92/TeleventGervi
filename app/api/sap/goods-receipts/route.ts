@@ -9,6 +9,7 @@ import { bumpLot, LOT_PENDING } from "@/lib/lotResolver";
 import { buildWhsBudget, remainingForItem, pickReceiptWarehouse, consumeBudget } from "@/lib/receiptRetro";
 import { normalizeEmAffect, setEmAffect } from "@/lib/emAffect";
 import { creditLots } from "@/lib/lotLedger";
+import { setMarchandiseNote, sanitizeRating } from "@/lib/marchandiseNote";
 
 /**
  * POST /api/sap/goods-receipts
@@ -56,6 +57,7 @@ interface InLine {
   packageQuantity: number;     // nb de colis (= unité physique reçue)
   warehouseCode: string;
   price?: number;
+  rating?: number;             // note qualité 1..5 (étoiles) — optionnelle
 }
 interface CreateBody {
   cardCode: string;
@@ -261,6 +263,18 @@ export async function POST(req: NextRequest) {
     })));
   } catch (e) {
     console.warn("[GoodsReceipt] Crédit registre lots échoué (non-bloquant):", (e as Error).message);
+  }
+
+  // ── NOTE QUALITÉ (étoiles) de la marchandise reçue — best-effort ──
+  // Saisie 1..5 par ligne : note du lot + note courante de l'article (console).
+  try {
+    const by = session.user?.name?.trim() || session.user?.email || null;
+    await Promise.all(body.lines.map((l) => {
+      const r = sanitizeRating(l.rating);
+      return r != null ? setMarchandiseNote(l.itemCode, lotCode, r, by) : Promise.resolve();
+    }));
+  } catch (e) {
+    console.warn("[GoodsReceipt] Note qualité non enregistrée (non-bloquant):", (e as Error).message);
   }
 
   // ── Affectation de l'EM (Tous/Export/GMS/CHR) — persistée par DocNum. Pilote
