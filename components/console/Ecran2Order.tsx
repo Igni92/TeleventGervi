@@ -22,7 +22,7 @@ import { LotDetailsDialog } from "./LotDetailsDialog";
 import { useContextMenu, ContextMenu, ContextMenuItem, ContextMenuLabel } from "@/components/ui/context-menu";
 import { useBrandLogos } from "@/lib/useBrandLogos";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
-import { transportCostForSale, transportPerKgForType } from "@/lib/transportCost";
+import { transportCostForSale, transportPerKgForCarrier, isDirectCarrier, type TransportCostModel } from "@/lib/transportCost";
 
 interface StockEntry { available: number }
 interface Product {
@@ -367,11 +367,8 @@ function CartDropGap({
   );
 }
 
-export function Ecran2Order({ clientId, clientName, clientType = null, stockSharePct = 100, modifier: modifierProp = null, onExitModif, onSubmitted }: {
+export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifier: modifierProp = null, onExitModif, onSubmitted }: {
   clientId: string; clientName: string; stockSharePct?: number;
-  /** Segment du client (EXPORT | GMS | CHR | null) — pilote le coût de transport
-   *  estimé de la commande (export = 0, le transport est payé par le client). */
-  clientType?: string | null;
   /** Cible de MODIFICATION (diffusée par « Détail livraison ») : on pré-remplit le
    *  panier avec les lignes du BL et on enregistre sur ce BL. */
   modifier?: { docEntry: number; docNum: number } | null;
@@ -403,14 +400,19 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   const brandLogos = useBrandLogos("console");
   // C4 — densité d'affichage de la liste stock (réglée sur /parametres, lue ici)
   const [density, setDensity] = useState<Density>("normal");
-  // Prix position (coût transport €/kg) — pour le coût transport estimé de la
-  // commande en temps réel. 1 fetch au montage ; 0 si non paramétré.
+  // Coût transport (modèle + prix position €/kg) — pour le coût transport estimé
+  // de la commande en temps réel. On se base sur le TRANSPORTEUR sélectionné.
+  const [transportModel, setTransportModel] = useState<TransportCostModel | null>(null);
   const [transportPerKg, setTransportPerKg] = useState(0);
   useEffect(() => {
     let cancelled = false;
     fetch("/api/transport/model", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (!cancelled && typeof j?.metrics?.prixPositionPerKg === "number") setTransportPerKg(j.metrics.prixPositionPerKg); })
+      .then((j) => {
+        if (cancelled || !j) return;
+        if (j.model) setTransportModel(j.model as TransportCostModel);
+        if (typeof j?.metrics?.prixPositionPerKg === "number") setTransportPerKg(j.metrics.prixPositionPerKg);
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
@@ -927,16 +929,18 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   };
   const totalHT = useMemo(() => cart.reduce((s, l) => s + lineHT(l), 0), [cart]);
 
-  // Coût transport ESTIMÉ de la commande (temps réel) : prix position × kg.
+  // Coût transport ESTIMÉ de la commande (temps réel) — selon le TRANSPORTEUR
+  // sélectionné : livraison directe → prix position × kg ; sinon valeur manuelle.
   // Poids d'une ligne : quantité déjà en kg pour les articles au kg, sinon
-  // quantité (colis) × poids d'un colis. Export = 0 (transport payé par le client).
+  // quantité (colis) × poids d'un colis.
   const lineWeightKg = (l: CartLine): number => {
     const w = l.unit === "kg" ? l.quantity : l.quantity * (l.colisWeightKg ?? 0);
     return Number.isFinite(w) && w > 0 ? w : 0;
   };
   const totalKg = useMemo(() => cart.reduce((s, l) => s + lineWeightKg(l), 0), [cart]);
-  const transportPerKgClient = transportPerKgForType(transportPerKg, clientType);
-  const transportCost = transportCostForSale(transportPerKg, totalKg, clientType);
+  const transportPerKgClient = transportPerKgForCarrier(transportModel, transportPerKg, carrierSap);
+  const transportCost = transportCostForSale(transportModel, transportPerKg, totalKg, carrierSap);
+  const carrierIsDirect = isDirectCarrier(transportModel, carrierSap) || (transportModel?.directCarriers.length ?? 0) === 0;
 
   // ── Création BL ──
   type ApiLine = {
@@ -2081,14 +2085,15 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
             <span className="text-muted-foreground">{modif ? "Total HT du BL" : "Total HT estimé"}</span>
             <span className="font-bold tnum text-foreground">{totalHT.toFixed(2)} €</span>
           </div>
-          {/* Coût transport ESTIMÉ (temps réel) — prix position × kg. Export = 0. */}
-          {transportPerKg > 0 && (
-            <div className="flex items-center justify-between text-[12px] -mt-1" title="Coût de transport imputé à la marge nette (prix position × kg livrés). Île-de-France ; export payé par le client.">
+          {/* Coût transport ESTIMÉ (temps réel) — selon le TRANSPORTEUR sélectionné :
+              livraison directe → prix position × kg ; sinon valeur manuelle. */}
+          {transportModel && (transportPerKg > 0 || transportPerKgClient > 0) && (
+            <div className="flex items-center justify-between text-[12px] -mt-1" title="Coût de transport imputé à la marge nette. Livraison directe (flotte propre) valorisée au prix position ; transporteur externe à la valeur saisie à la main.">
               <span className="text-muted-foreground inline-flex items-center gap-1">
                 <Truck className="h-3.5 w-3.5" />
                 {transportPerKgClient > 0
-                  ? `Transport ${transportPerKgClient.toFixed(3)} €/kg × ${Math.round(totalKg)} kg`
-                  : "Transport export (payé par le client)"}
+                  ? `Transport ${carrierIsDirect ? "direct " : ""}${transportPerKgClient.toFixed(3)} €/kg × ${Math.round(totalKg)} kg`
+                  : "Transport externe non valorisé"}
               </span>
               <span className={`tnum font-semibold ${transportCost > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
                 {transportCost > 0 ? `− ${transportCost.toFixed(2)} €` : "0,00 €"}

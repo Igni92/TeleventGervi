@@ -26,7 +26,7 @@ import { requireAdmin, isLivreur } from "@/lib/permissions";
 import { ReceptionSlots } from "@/components/clients/ReceptionSlots";
 import { TransportCostCard } from "@/components/clients/TransportCostCard";
 import { getTransportModel } from "@/lib/transportCostStore";
-import { computeTransportMetrics, transportPerKgForType, typeSupportsTransport } from "@/lib/transportCost";
+import { computeTransportMetrics } from "@/lib/transportCost";
 import { computeInsights } from "@/lib/insights";
 import { computePriority } from "@/lib/priority";
 import { caByClientCode } from "@/lib/clientRevenue";
@@ -216,11 +216,11 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
     />
   );
 
-  // Coût transport (prix position €/kg) applicable à ce client — valeur ANNUELLE
-  // reportée depuis la structure de coûts (Pilotage › Coût de transport). Export
-  // = 0 (transport payé par le client) ; CHR / GMS / IDF au prix position.
+  // Coût transport (prix position €/kg) de la livraison EN DIRECT — valeur
+  // ANNUELLE reportée depuis la structure de coûts (Pilotage › Coût de transport).
+  // On se base sur le transporteur : les livraisons externes utilisent une valeur
+  // €/kg saisie à la main (par transporteur), pas ce prix position.
   const transportMetrics = computeTransportMetrics(await getTransportModel());
-  const clientPerKg = transportPerKgForType(transportMetrics.prixPositionPerKg, client.type);
   const transportConfigured = transportMetrics.prixPositionPerKg > 0;
 
   const logistiquePane = (
@@ -228,10 +228,9 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
       storageKey="fiche:logistique"
       sections={[
         { id: "cout-transport", label: "Coût transport", node: (
-          <SectionCard accent="brand" title="Coût transport" subtitle="Prix position €/kg (annuel) appliqué à la marge nette transport" icon={<Coins />}>
+          <SectionCard accent="brand" title="Coût transport" subtitle="Prix position €/kg (annuel) — livraison en direct" icon={<Coins />}>
             <TransportCostCard
-              perKg={clientPerKg}
-              isExport={!typeSupportsTransport(client.type)}
+              perKg={transportMetrics.prixPositionPerKg}
               configured={transportConfigured}
             />
           </SectionCard>

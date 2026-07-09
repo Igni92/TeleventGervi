@@ -2,13 +2,14 @@ import { describe, it, expect } from "vitest";
 import {
   annualizeLine,
   computeTransportMetrics,
-  transportPerKgForType,
+  transportPerKgForCarrier,
   transportCostForSale,
   netTransportMargin,
-  typeSupportsTransport,
+  isDirectCarrier,
   sanitizeTransportModel,
   sanitizeExpensePhotos,
   MAX_EXPENSE_PHOTOS,
+  EMPTY_TRANSPORT_MODEL,
   type TransportCostModel,
 } from "./transportCost";
 
@@ -32,6 +33,7 @@ describe("annualizeLine — annualisation d'une ligne de coût", () => {
 
 describe("computeTransportMetrics — prix position €/kg", () => {
   const model: TransportCostModel = {
+    ...EMPTY_TRANSPORT_MODEL,
     costs: [
       { id: "1", label: "Camion", kind: "amortissement", amount: 30000, period: "annual", amortYears: 5 }, // 6000/an
       { id: "2", label: "Salaire", kind: "salaire", amount: 2000, period: "monthly", amortYears: null },   // 24000/an
@@ -74,26 +76,40 @@ describe("computeTransportMetrics — prix position €/kg", () => {
   });
 });
 
-describe("règle IDF : EXPORT = 0, CHR / GMS = prix position", () => {
-  it("EXPORT ne supporte pas le transport (payé par le client)", () => {
-    expect(typeSupportsTransport("EXPORT")).toBe(false);
-    expect(transportPerKgForType(0.1, "EXPORT")).toBe(0);
-    expect(transportCostForSale(0.1, 500, "EXPORT")).toBe(0);
+describe("règle TRANSPORTEUR : direct = prix position, autres = valeur manuelle", () => {
+  const model: TransportCostModel = {
+    ...EMPTY_TRANSPORT_MODEL,
+    directCarriers: ["DIRECT"],
+    carrierManualPerKg: { SCACHAP: 0.05 },
+  };
+
+  it("transporteur direct → prix position", () => {
+    expect(isDirectCarrier(model, "direct")).toBe(true); // insensible à la casse
+    expect(transportPerKgForCarrier(model, 0.1, "DIRECT")).toBe(0.1);
+    expect(transportCostForSale(model, 0.1, 500, "DIRECT")).toBeCloseTo(50, 6);
   });
 
-  it("CHR est calculé comme les autres IDF", () => {
-    expect(transportPerKgForType(0.1, "CHR")).toBe(0.1);
-    expect(transportCostForSale(0.1, 500, "CHR")).toBeCloseTo(50, 6);
+  it("transporteur non direct → valeur SAISIE À LA MAIN", () => {
+    expect(isDirectCarrier(model, "SCACHAP")).toBe(false);
+    expect(transportPerKgForCarrier(model, 0.1, "SCACHAP")).toBe(0.05);
+    expect(transportCostForSale(model, 0.1, 500, "SCACHAP")).toBeCloseTo(25, 6);
   });
 
-  it("GMS et segment inconnu (IDF livré en propre) → prix position appliqué", () => {
-    expect(transportPerKgForType(0.1, "GMS")).toBe(0.1);
-    expect(transportPerKgForType(0.1, null)).toBe(0.1);
+  it("transporteur non direct SANS valeur manuelle → 0", () => {
+    expect(transportPerKgForCarrier(model, 0.1, "ANTOINE")).toBe(0);
+    expect(transportCostForSale(model, 0.1, 500, "ANTOINE")).toBe(0);
   });
 
-  it("marge nette transport = marge brute − prix position × kg (0 pour export)", () => {
-    expect(netTransportMargin(100, 200, "CHR", 0.1)).toBeCloseTo(80, 6); // 100 − 20
-    expect(netTransportMargin(100, 200, "EXPORT", 0.1)).toBe(100);       // export : rien déduit
+  it("aucun transporteur direct paramétré → repli « tout direct »", () => {
+    const unclassified = { ...EMPTY_TRANSPORT_MODEL };
+    expect(transportPerKgForCarrier(unclassified, 0.1, "ANTOINE")).toBe(0.1);
+    expect(transportPerKgForCarrier(unclassified, 0.1, null)).toBe(0.1);
+  });
+
+  it("marge nette transport = marge brute − coût de transport (selon transporteur)", () => {
+    expect(netTransportMargin(model, 100, 200, "DIRECT", 0.1)).toBeCloseTo(80, 6);   // 100 − 20
+    expect(netTransportMargin(model, 100, 200, "SCACHAP", 0.1)).toBeCloseTo(90, 6);  // 100 − 10
+    expect(netTransportMargin(model, 100, 200, "ANTOINE", 0.1)).toBe(100);           // 100 − 0
   });
 });
 
@@ -121,6 +137,15 @@ describe("sanitizeTransportModel — normalisation défensive", () => {
     });
     expect(m.costs[0].amortYears).toBe(4);
     expect(m.costs[1].amortYears).toBeNull();
+  });
+
+  it("transporteurs directs en MAJUSCULES et dédoublonnés ; valeurs manuelles ≥ 0", () => {
+    const m = sanitizeTransportModel({
+      directCarriers: [" direct ", "DIRECT", "antoine"],
+      carrierManualPerKg: { scachap: 0.05, delanchy: -1, "": 0.2 },
+    });
+    expect(m.directCarriers).toEqual(["DIRECT", "ANTOINE"]);
+    expect(m.carrierManualPerKg).toEqual({ SCACHAP: 0.05 }); // négatif et clé vide écartés
   });
 });
 
