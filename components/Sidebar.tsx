@@ -94,6 +94,7 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
     label: "Entrepôt",
     items: [
       { href: "/livraisons", label: "Préparation livraisons", icon: Truck },
+      { href: "/details-livraison", label: "Détails livraison", icon: PackageCheck },
       { href: "/preparations", label: "Préparations à faire", icon: ClipboardList },
       { href: "/bons-commande", label: "Bons de commande", icon: ScrollText, badge: "offresDue" },
       { href: "/manquants", label: "Manquants", icon: PackageX },

@@ -278,18 +278,27 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
   };
 }
 
+/** Recul (jours) des RÉCEPTIONS prises en compte pour la fiabilité. En négoce
+ *  frais on VEND aujourd'hui ce qu'on a REÇU les jours précédents (souvent la
+ *  veille) : compter les réceptions du seul jour de vente donnait 0 % à tort.
+ *  On regarde donc les EM sur une courte fenêtre glissante avant la vente. */
+const RECEPTION_LOOKBACK_DAYS = 8;
+
 /**
  * FIABILITÉ « stock propre » — part du CA vendu dont la marchandise a été
- * effectivement REÇUE sur la fenêtre. Modèle négoce frais (achat & vente le même
- * jour) : par article, couverture = min(1, reçu / vendu). Une VENTE À DÉCOUVERT
- * (vendue avant d'avoir reçu) tire la fiabilité sous 100 % ; elle remonte à mesure
- * que les réceptions rentrent — d'où « ça s'affine dans la journée ».
+ * effectivement REÇUE. Par article, couverture = min(1, reçu / vendu), où
+ * « reçu » = EM des `RECEPTION_LOOKBACK_DAYS` derniers jours (jusqu'à `end`) :
+ * la marchandise vendue ce jour a généralement été reçue la veille. Une VENTE
+ * À DÉCOUVERT (article jamais reçu récemment) tire la fiabilité sous 100 % ;
+ * elle remonte à mesure que les réceptions rentrent.
  *
  * ⚠️ Volontairement GLOBAL (les réceptions sont à l'échelle de l'entreprise, pas
  * d'un commercial) : c'est un indicateur de QUALITÉ de la donnée, pas un KPI
  * commercial. Renvoie 0..100 (0 si aucune vente sur la fenêtre).
  */
 export async function salesReceptionCoverage(start: Date, end: Date): Promise<number> {
+  const recvStart = new Date(start);
+  recvStart.setDate(recvStart.getDate() - RECEPTION_LOOKBACK_DAYS);
   const rows = await prisma.$queryRaw<{ ca_total: number; ca_covered: number }[]>(Prisma.sql`
     WITH sold AS (
       SELECT l."itemCode" AS code, SUM(l."quantity")::float AS qty, SUM(l."lineTotal")::float AS ca
@@ -302,7 +311,7 @@ export async function salesReceptionCoverage(start: Date, end: Date): Promise<nu
       SELECT em."itemCode" AS code, SUM(em."quantity")::float AS qty
       FROM "SapPdnLine" em JOIN "SapPurchaseDeliveryNote" emh ON emh."docEntry" = em."docEntry"
       WHERE emh."cancelled" = false AND em."itemCode" IS NOT NULL
-        AND emh."docDate" >= ${start} AND emh."docDate" < ${end}
+        AND emh."docDate" >= ${recvStart} AND emh."docDate" < ${end}
       GROUP BY em."itemCode"
     )
     SELECT COALESCE(SUM(sold.ca), 0)::float AS ca_total,
