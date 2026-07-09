@@ -296,6 +296,8 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
   const hasFilters = query.trim() !== "" || dateFilter !== "";
   // Entrée affichée en grand (dérivée de docs → reflète les éditions).
   const largeDoc = largeEntry != null ? docs.find((d) => d.docEntry === largeEntry) ?? null : null;
+  // Incident ouvert sur l'entrée agrandie → titre en rouge (alerte immédiate).
+  const largeHasIncident = largeDoc ? (byDoc.get(largeDoc.docEntry) ?? []).some((i) => !i.resolved) : false;
 
   return (
     <div className="space-y-6">
@@ -516,8 +518,8 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
         <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
           <DialogHeader className="text-left">
             <DialogTitle className="flex items-center gap-2 justify-start pr-8 text-[16px] sm:text-[18px] whitespace-nowrap">
-              <ClipboardList className="h-5 w-5 shrink-0 text-sky-600 dark:text-sky-400" />
-              <span className="truncate min-w-0">Entrée marchandise N° {largeDoc?.docNum}</span>
+              <ClipboardList className={`h-5 w-5 shrink-0 ${largeHasIncident ? "text-rose-600 dark:text-rose-400" : "text-sky-600 dark:text-sky-400"}`} />
+              <span className={`truncate min-w-0 font-mono ${largeHasIncident ? "text-rose-600 dark:text-rose-400" : ""}`}>EM. {largeDoc?.docNum}</span>
               {/* Lot = « EM{docNum} » → redondant avec le N° ci-dessus : masqué sur mobile pour tenir sur UNE ligne. */}
               {largeDoc?.lot && <span className="hidden sm:inline text-[13px] font-normal font-mono text-muted-foreground shrink-0">· {largeDoc.lot}</span>}
               {largeDoc?.lot && <FreshnessBadge dlc={dlcMap[largeDoc.lot]} className="shrink-0" />}
@@ -1012,47 +1014,64 @@ function ReceiptDetail({
           onCreated={() => { setDeclareOpen(false); onIncidentChanged(); }}
         />
       ) : (
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="outline" size="sm" onClick={() => setDeclareOpen(true)}>
-            <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-            Déclarer un incident
-          </Button>
-          {/* Retour fournisseur (partiel/total) — geste de gestion (sortie de stock,
-              base d'avoir) : masqué pour l'agréeur, et pas sur une EM annulée. */}
-          {!restricted && !isVoided(receipt) && (
-            <Button variant="outline" size="sm" onClick={openReturn} className="gap-1.5">
-              <Undo2 className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" /> Retour fournisseur
+        <div className="space-y-1.5">
+          {/* Actions rapides : 3 icônes sur une seule ligne (sans libellé) —
+              incident · retour fournisseur · annulation. Compact pour le mobile. */}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline" size="icon"
+              title="Déclarer un incident" aria-label="Déclarer un incident"
+              onClick={() => setDeclareOpen(true)}
+            >
+              <AlertTriangle className="text-amber-500" />
             </Button>
-          )}
-          {/* Annuler la réception (sort le stock entré) — uniquement le JOUR de la
-              réception (limite SAP), si l'EM n'est pas clôturée (facturée) ni déjà
-              annulée. Sinon, c'est le « Retour fournisseur » qui s'applique. */}
-          {canEditPrices && !isVoided(receipt) && !isToday(receipt.docDate) && (
-            <span className="text-[11px] text-muted-foreground/70 italic">
-              Annulation possible le jour de la réception uniquement — sinon, utilise le retour fournisseur.
-            </span>
-          )}
-          {canEditPrices && !isVoided(receipt) && isToday(receipt.docDate) && (
-            !cancelConfirm ? (
-              <Button variant="outline" size="sm" onClick={() => setCancelConfirm(true)}
-                className="gap-1.5 text-rose-600 dark:text-rose-400 hover:text-rose-700 border-rose-300/60 dark:border-rose-500/30">
-                <Ban className="h-3.5 w-3.5" /> Annuler la réception
+            {/* Retour fournisseur (partiel/total) — geste de gestion (sortie de stock,
+                base d'avoir) : masqué pour l'agréeur, et pas sur une EM annulée. */}
+            {!restricted && !isVoided(receipt) && (
+              <Button
+                variant="outline" size="icon"
+                title="Retour fournisseur" aria-label="Retour fournisseur"
+                onClick={openReturn}
+              >
+                <Undo2 className="text-sky-600 dark:text-sky-400" />
               </Button>
-            ) : (
-              <span className="inline-flex items-center gap-2">
-                <span className={`${big ? "text-[13.5px]" : "text-[12.5px]"} text-foreground`}>
-                  Annuler l&apos;entrée # {receipt.docNum} ? Le stock entré sera sorti.
+            )}
+            {/* Annuler la réception (sort le stock entré) — uniquement le JOUR de la
+                réception (limite SAP), si l'EM n'est pas clôturée (facturée) ni déjà
+                annulée. Sinon, c'est le « Retour fournisseur » qui s'applique. */}
+            {canEditPrices && !isVoided(receipt) && isToday(receipt.docDate) && (
+              !cancelConfirm ? (
+                <Button
+                  variant="outline" size="icon"
+                  title="Annuler la réception" aria-label="Annuler la réception"
+                  onClick={() => setCancelConfirm(true)}
+                  className="text-rose-600 dark:text-rose-400 hover:text-rose-700 border-rose-300/60 dark:border-rose-500/30"
+                >
+                  <Ban />
+                </Button>
+              ) : (
+                <span className="inline-flex items-center gap-2">
+                  <span className={`${big ? "text-[13.5px]" : "text-[12.5px]"} text-foreground`}>
+                    Annuler l&apos;entrée # {receipt.docNum} ? Le stock entré sera sorti.
+                  </span>
+                  <button type="button" onClick={cancelReceipt} disabled={cancelling}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[12.5px] font-semibold disabled:opacity-60">
+                    {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Confirmer
+                  </button>
+                  <button type="button" onClick={() => setCancelConfirm(false)} disabled={cancelling}
+                    className="inline-flex items-center h-8 px-3 rounded-lg border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground">
+                    Non
+                  </button>
                 </span>
-                <button type="button" onClick={cancelReceipt} disabled={cancelling}
-                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[12.5px] font-semibold disabled:opacity-60">
-                  {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Confirmer
-                </button>
-                <button type="button" onClick={() => setCancelConfirm(false)} disabled={cancelling}
-                  className="inline-flex items-center h-8 px-3 rounded-lg border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground">
-                  Non
-                </button>
-              </span>
-            )
+              )
+            )}
+          </div>
+          {/* Hors jour de réception : l'annulation SAP n'est plus possible → on
+              l'explique sous les icônes (le retour fournisseur prend le relais). */}
+          {canEditPrices && !isVoided(receipt) && !isToday(receipt.docDate) && (
+            <p className="text-[11px] text-muted-foreground/70 italic">
+              Annulation possible le jour de la réception uniquement — sinon, utilise le retour fournisseur.
+            </p>
           )}
         </div>
       )}
@@ -1068,20 +1087,27 @@ function ReceiptDetail({
             Choisis le nombre de colis à retourner par ligne (0 = ne pas retourner). SAP crée un
             retour qui <b>sort le stock</b> et sert de base à un avoir fournisseur.
           </p>
-          <ul className="space-y-1.5">
+          <ul className="space-y-2.5">
             {receipt.lines.map((l) => {
               const maxQ = l.packageQuantity ?? l.pieceQuantity ?? 0;
-              const unit = l.packageQuantity != null ? "colis" : "pie";
+              const unit = l.packageQuantity != null ? "colis" : "pièces";
+              // Désignation décomposée (fruit + tags) — même lecture que le détail.
+              const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi, frgnName: l.frgnName });
               return (
-                <li key={l.lineNum} className="flex items-center gap-2 text-[12.5px]">
-                  <span className="min-w-0 flex-1 truncate text-foreground">{l.itemName ?? l.itemCode}</span>
-                  <span className="text-[11px] text-muted-foreground shrink-0">reçu {maxQ} {unit}</span>
-                  <NumberInput
-                    value={returnQty[l.lineNum] === "" || returnQty[l.lineNum] == null ? null : parseFloat(returnQty[l.lineNum])}
-                    onValueChange={(n) => setReturnQty((c) => ({ ...c, [l.lineNum]: n == null ? "" : String(n) }))}
-                    min={0} max={maxQ} step={1} decimals={2} allowEmpty placeholder="0"
-                    className="h-8 w-20 text-right shrink-0"
-                  />
+                <li key={l.lineNum} className="flex items-start justify-between gap-2.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[14px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
+                    <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1" />
+                  </div>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <NumberInput
+                      value={returnQty[l.lineNum] === "" || returnQty[l.lineNum] == null ? null : parseFloat(returnQty[l.lineNum])}
+                      onValueChange={(n) => setReturnQty((c) => ({ ...c, [l.lineNum]: n == null ? "" : String(n) }))}
+                      min={0} max={maxQ} step={1} decimals={2} allowEmpty placeholder="0"
+                      className="h-9 w-20 text-right"
+                    />
+                    <span className="text-[11px] text-muted-foreground whitespace-nowrap">reçu {fmtColis(maxQ)} {unit}</span>
+                  </div>
                 </li>
               );
             })}
