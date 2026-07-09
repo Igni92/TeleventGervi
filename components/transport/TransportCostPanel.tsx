@@ -147,8 +147,8 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) throw new Error(j?.error || "Échec de la récupération");
       if (j.model) { setModel({ ...EMPTY, ...j.model }); setDirty(false); }
-      toast.success(`${j.deliveries} livraison(s) directe(s) · ${Math.round(j.kg).toLocaleString("fr-FR")} kg (${j.year})`, {
-        description: j.truncated ? "Résultat plafonné — affine la période si besoin." : "Volumes renseignés depuis les BL.",
+      toast.success(`${j.deliveries} livraison(s) directe(s) · ${Math.round(j.kg).toLocaleString("fr-FR")} kg (${j.window ?? "12 mois"})`, {
+        description: j.truncated ? "Résultat plafonné — affine la période si besoin." : "Volumes renseignés depuis les BL (12 mois glissants).",
       });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erreur de récupération");
@@ -236,9 +236,9 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
             Volumes de référence <span className="text-muted-foreground/70">(livraisons en direct)</span>
           </p>
           {isManager && (
-            <Button size="sm" variant="outline" onClick={fetchFromBL} disabled={fetchingBL} title="Compter les BL de l'année et sommer le poids pour les transporteurs marqués « direct »">
+            <Button size="sm" variant="outline" onClick={fetchFromBL} disabled={fetchingBL} title="Compter les BL des 12 derniers mois et sommer le poids pour les transporteurs marqués « direct »">
               {fetchingBL ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              Récupérer depuis les BL
+              Récupérer depuis les BL (12 mois)
             </Button>
           )}
         </div>
@@ -346,7 +346,7 @@ function MetricsBoard({ metrics }: { metrics: ReturnType<typeof computeTransport
         </div>
       </div>
 
-      {/* États hebdo / mensuel / annuel (hebdo & mensuel indicatifs) */}
+      {/* États : annuel (12 mois glissants, référence) + mensuel (indicatif) */}
       <div className="px-4 sm:px-5 py-3 border-t border-border/60">
         <p className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2">États du coût</p>
         <div className="overflow-x-auto">
@@ -359,9 +359,8 @@ function MetricsBoard({ metrics }: { metrics: ReturnType<typeof computeTransport
               </tr>
             </thead>
             <tbody className="tnum">
-              <PeriodRow label="Hebdomadaire" indicatif value={fmtEur2(metrics.weeklyCost)} note="indicatif (annuel ÷ 52)" />
+              <PeriodRow label="Annuel · 12 mois glissants" value={fmtEur(metrics.annualCost)} note="valeur de référence" strong />
               <PeriodRow label="Mensuel" indicatif value={fmtEur2(metrics.monthlyCost)} note="indicatif (annuel ÷ 12)" />
-              <PeriodRow label="Annuel" value={fmtEur(metrics.annualCost)} note="valeur de référence" strong />
             </tbody>
           </table>
         </div>

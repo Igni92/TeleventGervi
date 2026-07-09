@@ -115,12 +115,10 @@ export function annualizeLine(line: Pick<TransportCostLine, "kind" | "amount" | 
 }
 
 export interface TransportCostMetrics {
-  /** Coût total ANNUEL (fait foi). */
+  /** Coût total ANNUEL — 12 mois glissants (fait foi). */
   annualCost: number;
   /** Indicatif (annuel ÷ 12). */
   monthlyCost: number;
-  /** Indicatif (annuel ÷ 52). */
-  weeklyCost: number;
   deliveriesPerYear: number;
   kgPerYear: number;
   /** Coût par livraison = annuel ÷ nb livraisons. */
@@ -147,7 +145,6 @@ export function computeTransportMetrics(model: TransportCostModel | null | undef
   return {
     annualCost,
     monthlyCost: annualCost / 12,
-    weeklyCost: annualCost / 52,
     deliveriesPerYear,
     kgPerYear,
     costPerDelivery: deliveriesPerYear > 0 ? annualCost / deliveriesPerYear : 0,

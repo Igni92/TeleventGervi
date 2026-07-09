@@ -44,11 +44,10 @@ describe("computeTransportMetrics — prix position €/kg", () => {
     kgPerYear: 300000,
   };
 
-  it("annuel = somme des lignes annualisées ; hebdo/mensuel indicatifs", () => {
+  it("annuel = somme des lignes annualisées ; mensuel indicatif", () => {
     const m = computeTransportMetrics(model);
     expect(m.annualCost).toBe(30000); // 6000 + 24000
     expect(m.monthlyCost).toBeCloseTo(2500, 6);
-    expect(m.weeklyCost).toBeCloseTo(30000 / 52, 6);
   });
 
   it("coût/livraison = annuel ÷ nb livraisons ; prix position = annuel ÷ kg", () => {
