@@ -11,10 +11,11 @@
  * Source : /api/livraisons?date=J (mode « due »). Consultation seule.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCw, Search, Package, Boxes, Truck } from "lucide-react";
+import { Loader2, RefreshCw, Search, Package, Boxes, Truck, Printer } from "lucide-react";
 import { toast } from "sonner";
 import { formatDeliveryDate, nextDeliveryDate } from "@/lib/livraison";
 import { DateStepper } from "@/components/ui/date-stepper";
+import { printArticlesRecap } from "@/components/livraisons/printRecap";
 import type { ApiResp } from "@/lib/livraisonView";
 
 const SEGMENTS = ["GMS", "CHR", "EXPORT"] as const;
@@ -122,6 +123,25 @@ export function DetailsLivraisonArticles() {
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           <span className="hidden sm:inline">Actualiser</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (rows.length === 0) { toast.info("Rien à imprimer pour ce jour."); return; }
+            const ok = printArticlesRecap({
+              dateLabel: formatDeliveryDate(data?.date ?? date),
+              unit,
+              rows: rows.map((a) => ({ itemName: a.itemName, tags: a.tags, gms: val(a.seg.GMS), chr: val(a.seg.CHR), exp: val(a.seg.EXPORT), total: rowTotal(a) })),
+              totals: { gms: colTotals.GMS, chr: colTotals.CHR, exp: colTotals.EXPORT, all: colTotals.all },
+            });
+            if (!ok) toast.error("Impression bloquée — autorise les fenêtres pop-up.");
+          }}
+          disabled={loading || rows.length === 0}
+          className="inline-flex items-center gap-1.5 h-11 px-3 rounded-xl border border-border bg-card text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60 shrink-0"
+          title="Imprimer le récap par article (unité affichée)"
+        >
+          <Printer className="h-4 w-4" />
+          <span className="hidden sm:inline">Imprimer</span>
         </button>
       </div>
 

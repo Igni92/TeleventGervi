@@ -204,3 +204,126 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   w.document.close();
   return true;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Récap PAR ARTICLE imprimable (« Détails livraison ») — tout ce qui part le
+   jour J, ventilé GMS / CHR / Export, dans l'unité choisie (colis ou kg).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+export interface PrintArticleRow {
+  itemName: string;
+  tags: string[];
+  gms: number;
+  chr: number;
+  exp: number;
+  total: number;
+}
+
+/** Ouvre la fenêtre d'impression du récap articles (Détails livraison). */
+export function printArticlesRecap(opts: {
+  dateLabel: string;
+  unit: "colis" | "kg";
+  rows: PrintArticleRow[];
+  totals: { gms: number; chr: number; exp: number; all: number };
+}): boolean {
+  const fmt = (v: number) =>
+    v <= 0 ? "—" : new Intl.NumberFormat("fr-FR", { maximumFractionDigits: opts.unit === "kg" ? 0 : 1 }).format(v);
+  const detailsOf = (tags: string[]) => tags.map((t) => (t ?? "").trim()).filter(Boolean);
+
+  const rows = opts.rows
+    .map((r) => `
+      <tr>
+        <td class="art">
+          <span class="name">${esc(r.itemName)}</span>
+          ${detailsOf(r.tags).length ? `<span class="det">— ${detailsOf(r.tags).map(esc).join(" · ")}</span>` : ""}
+        </td>
+        <td class="num">${fmt(r.gms)}</td>
+        <td class="num">${fmt(r.chr)}</td>
+        <td class="num">${fmt(r.exp)}</td>
+        <td class="num tot">${fmt(r.total)}</td>
+      </tr>`)
+    .join("");
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>Détails livraison — ${esc(opts.dateLabel)}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  @page { size: A4; margin: 12mm; }
+  body { font: 13px/1.45 "Segoe UI", Arial, sans-serif; color: #111; padding: 16px; }
+  @media print { body { padding: 0; } .noprint { display: none !important; } }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+           border-bottom: 2.5px solid #111; padding-bottom: 10px; margin-bottom: 12px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand img.logo { height: 46px; width: auto; object-fit: contain; }
+  header .title p { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #555; }
+  header .title h1 { font-size: 21px; letter-spacing: -0.3px; }
+  header .date { text-align: right; font-size: 18px; }
+  header .date b { font-weight: 900; }
+  header .date .unit { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #555; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #333;
+             border-bottom: 2px solid #111; padding: 6px 8px; text-align: right; }
+  thead th.art { text-align: left; }
+  tbody td { border-bottom: 1px solid #ccc; padding: 6px 8px; vertical-align: baseline; }
+  td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.art .name { font-weight: 800; font-size: 14px; }
+  td.art .det { font-size: 12px; color: #333; margin-left: 6px; }
+  td.tot { font-weight: 800; }
+  tfoot td { border-top: 2px solid #111; padding: 8px; font-weight: 800; font-size: 14px;
+             text-align: right; font-variant-numeric: tabular-nums; }
+  tfoot td.label { text-align: left; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
+  .noprint { margin-bottom: 14px; }
+  .noprint button { font: 600 13px "Segoe UI", Arial, sans-serif; padding: 8px 18px;
+                    border: 1.5px solid #111; border-radius: 6px; background: #111; color: #fff; cursor: pointer; }
+</style>
+</head>
+<body>
+  <div class="noprint"><button onclick="window.print()">🖨 Imprimer</button></div>
+  <header>
+    <div class="brand">
+      <img class="logo" src="${esc(`${window.location.origin}/logo-mark.png`)}" alt="Gervifrais" />
+      <div class="title">
+        <p>Gervifrais · Détails livraison</p>
+        <h1>Livraison par article</h1>
+      </div>
+    </div>
+    <div class="date">
+      Livraison du <b>${esc(opts.dateLabel)}</b>
+      <span class="unit">Quantités en ${esc(opts.unit)} · ${opts.rows.length} article${opts.rows.length > 1 ? "s" : ""}</span>
+    </div>
+  </header>
+  <table>
+    <thead>
+      <tr>
+        <th class="art">Article</th>
+        <th>GMS</th>
+        <th>CHR</th>
+        <th>Export</th>
+        <th>Total</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+    <tfoot>
+      <tr>
+        <td class="label">Total (${esc(opts.unit)})</td>
+        <td>${fmt(opts.totals.gms)}</td>
+        <td>${fmt(opts.totals.chr)}</td>
+        <td>${fmt(opts.totals.exp)}</td>
+        <td>${fmt(opts.totals.all)}</td>
+      </tr>
+    </tfoot>
+  </table>
+  <script>window.addEventListener("load", function () { setTimeout(function () { window.print(); }, 150); });</script>
+</body>
+</html>`;
+
+  const w = window.open("", "_blank", "width=900,height=1000");
+  if (!w) return false;
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  return true;
+}
