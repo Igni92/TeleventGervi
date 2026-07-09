@@ -4,7 +4,7 @@ import { getAccessScope, resolvePilotageView, scopePayload } from "@/lib/permiss
 import {
   aggregateActivity, periodBounds, previousYearBounds,
   topClientsOrder, topSalespersonsOrder, orderWeightMaps,
-  crmActivity, crmCallsByCardCode,
+  crmActivity, crmCallsByCardCode, salesReceptionCoverage,
   type Granularity,
 } from "@/lib/pilotage";
 import { cached, invalidate } from "@/lib/ttlCache";
@@ -53,7 +53,7 @@ export async function GET(req: Request) {
     const curr = periodBounds(g);
     const prev = previousYearBounds(curr, g);
 
-    const [currAct, prevAct, currCrm, prevCrm, tcs, sps, weightMaps] = await Promise.all([
+    const [currAct, prevAct, currCrm, prevCrm, tcs, sps, weightMaps, reliability] = await Promise.all([
       aggregateActivity(curr.start, curr.end, slp),
       aggregateActivity(prev.start, prev.end, slp),
       crmActivity(curr.start, curr.end, slp),
@@ -61,6 +61,9 @@ export async function GET(req: Request) {
       topClientsOrder(curr.start, curr.end, 6, slp),
       showTransverse ? topSalespersonsOrder(curr.start, curr.end, 6) : Promise.resolve([]),
       orderWeightMaps(curr.start, curr.end, slp),
+      // Fiabilité « stock propre » de la fenêtre (global : réceptions = entreprise).
+      // Best-effort : un échec ne casse PAS les autres KPI (null → sous-ligne masquée).
+      salesReceptionCoverage(curr.start, curr.end).catch(() => null),
     ]);
 
     // Enrichit top clients avec # appels CRM + poids BL (kg) sur la même fenêtre
@@ -82,6 +85,9 @@ export async function GET(req: Request) {
       crmPrev: prevCrm,
       clients,
       salespersons,
+      // Fiabilité « stock propre » : part du CA de la fenêtre dont la marchandise
+      // a été reçue (les ventes à découvert la tirent sous 100 %).
+      reliability,
     };
   });
 

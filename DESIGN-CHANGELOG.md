@@ -529,8 +529,12 @@ le **taux de marge brut % DU JOUR** (valeur de la journée), avec un indicateur 
   champ `marginPct`) — aucun appel supplémentaire.
 - Calcul depuis le **coût RÉEL d'entrée marchandise** (`lib/cogs`, jamais la marge
   SAP) : chaque vente (BL) est costée au prix de la dernière **réception** de l'article.
-- **Fiabilité** : les ventes à découvert (avant réception) et les articles jamais
-  reçus ne faussent pas le taux — ils sont exclus et comptés dans la **couverture**.
-  Elle monte dans la journée à mesure que les réceptions rentrent → « fiabilité X% »
-  (vert ≥ 80 %, ambre ≥ 50 %, « estimation » sous 60 %).
+- **Fiabilité = « stock propre »** : part du CA du jour dont la marchandise a
+  effectivement été **REÇUE** (`salesReceptionCoverage`). Modèle négoce frais
+  (achat & vente le même jour) : par article, couverture = min(1, reçu / vendu).
+  Une **vente à découvert** (vendue avant d'avoir reçu) tire la fiabilité **sous
+  100 %** ; elle remonte à mesure que les réceptions rentrent → « fiabilité X%,
+  à découvert » (vert ≥ 80 %, ambre ≥ 50 %). Calcul global (les réceptions sont à
+  l'échelle de l'entreprise), best-effort (un échec masque la sous-ligne sans
+  casser les autres KPI).
 - La grille KPI passe à 4 tuiles (2×2 en medium, 1×4 en large).

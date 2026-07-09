@@ -22,12 +22,14 @@ interface ActivityBucket {
   weightKg?: number;
   ordersCount?: number;
   marginPct?: number;       // marge brute / CA produit net × 100
-  marginCoverage?: number;  // % du CA produit dont le coût d'entrée est résolu
   caProductNet?: number;    // base marge — 0 = pas encore de vente costable
 }
 interface ActivityResponse {
   curr?: ActivityBucket;
   prev?: ActivityBucket;
+  /** Fiabilité « stock propre » : part du CA du jour dont la marchandise a été
+   *  reçue (les ventes à découvert la tirent sous 100 %). */
+  reliability?: number;
 }
 
 interface TileDef {
@@ -109,17 +111,19 @@ export function KpiStrip() {
         );
       })}
 
-      <MargeTile curr={curr} state={state} delay={TILES.length * 50} />
+      <MargeTile curr={curr} reliability={data?.reliability} state={state} delay={TILES.length * 50} />
     </div>
   );
 }
 
-/** Marge brute % DU JOUR (coût réel d'entrée marchandise) + fiabilité (couverture). */
-function MargeTile({ curr, state, delay }: { curr: ActivityBucket; state: FetchState; delay: number }) {
+/** Marge brute % DU JOUR (coût réel d'entrée marchandise) + fiabilité (marchandise reçue). */
+function MargeTile({ curr, reliability, state, delay }: { curr: ActivityBucket; reliability?: number | null; state: FetchState; delay: number }) {
   const pct = curr.marginPct ?? 0;
-  const coverage = Math.round(curr.marginCoverage ?? 0);
+  const hasReliability = typeof reliability === "number";
+  const coverage = Math.round(reliability ?? 0);
   const hasData = (curr.caProductNet ?? 0) > 0;
-  // Fiabilité : le taux se fiabilise dans la journée à mesure que les réceptions couvrent le CA.
+  // Fiabilité = part du CA du jour dont la marchandise a été REÇUE. Les ventes à
+  // découvert la tirent sous 100 % ; elle remonte à mesure que les réceptions rentrent.
   const covTone = coverage >= 80 ? "text-emerald-600 dark:text-emerald-400"
     : coverage >= 50 ? "text-amber-600 dark:text-amber-400"
     : "text-muted-foreground";
@@ -144,9 +148,9 @@ function MargeTile({ curr, state, delay }: { curr: ActivityBucket; state: FetchS
       )}
 
       <div className="mt-2 flex items-center gap-1.5 min-h-[18px] whitespace-nowrap">
-        {state === "ok" && hasData ? (
-          <span className="text-[10.5px] text-muted-foreground" title="Marge brute du jour sur le coût réel d'entrée marchandise. « Fiabilité » = part du CA du jour dont le coût est déjà connu — elle monte à mesure que les réceptions rentrent.">
-            fiabilité <b className={covTone}>{coverage}%</b>{coverage < 60 ? " · estimation" : ""}
+        {state === "ok" && hasData && hasReliability ? (
+          <span className="text-[10.5px] text-muted-foreground" title="Marge brute du jour sur le coût réel d'entrée marchandise. « Fiabilité » = part du CA du jour dont la marchandise a déjà été REÇUE — les ventes à découvert la font baisser, elle remonte à mesure que les réceptions rentrent.">
+            fiabilité <b className={covTone}>{coverage}%</b>{coverage < 60 ? " · à découvert" : ""}
           </span>
         ) : state === "error" ? (
           <span className="text-[10.5px] text-muted-foreground">Indisponible</span>
