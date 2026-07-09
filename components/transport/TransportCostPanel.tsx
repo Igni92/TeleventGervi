@@ -147,9 +147,18 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
       });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) throw new Error(j?.error || "Échec de la récupération");
+      if (!j.rawDeliveries) {
+        toast.info("Aucun BL en direct trouvé", { description: "Vérifie les transporteurs marqués « direct » (codes exacts)." });
+        return;
+      }
       if (j.model) { setModel({ ...EMPTY, ...j.model }); setDirty(false); }
-      toast.success(`${j.deliveries} livraison(s) directe(s) · ${Math.round(j.kg).toLocaleString("fr-FR")} kg (${j.window ?? "12 mois"})`, {
-        description: j.truncated ? "Résultat plafonné — affine la période si besoin." : "Volumes renseignés depuis les BL (12 mois glissants).",
+      const nf = (v: number) => Math.round(v).toLocaleString("fr-FR");
+      const months = j.spanDays ? Math.max(1, Math.round(j.spanDays / 30.4)) : 0;
+      toast.success(`${nf(j.deliveries)} livr./an · ${nf(j.kg)} kg/an (annualisé)`, {
+        description:
+          `${nf(j.rawDeliveries)} livr. / ${nf(j.rawKg)} kg depuis le 1er BL direct (${j.since ?? "?"}, ~${months} mois)` +
+          (j.reliable === false ? " — période courte, à confirmer" : "") +
+          (j.truncated ? " — résultat plafonné" : ""),
       });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Erreur de récupération");
@@ -240,9 +249,9 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
             Volumes de référence <span className="text-muted-foreground/70">(livraisons en direct)</span>
           </p>
           {isManager && (
-            <Button size="sm" variant="outline" onClick={fetchFromBL} disabled={fetchingBL} title="Compter les BL des 12 derniers mois et sommer le poids pour les transporteurs marqués « direct »">
+            <Button size="sm" variant="outline" onClick={fetchFromBL} disabled={fetchingBL} title="Compter les BL depuis le 1er BL en direct (transporteurs marqués « direct ») et annualiser le volume">
               {fetchingBL ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              Récupérer depuis les BL (12 mois)
+              Récupérer depuis les BL (annualisé)
             </Button>
           )}
         </div>
