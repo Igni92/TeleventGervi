@@ -37,7 +37,7 @@ export default async function EntreesPage() {
         </p>
       </div>
       {!agreeurOnly && <GoodsReceiptForm />}
-      <GoodsReceiptHistory />
+      <GoodsReceiptHistory restricted={agreeurOnly} />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { requirePreparateurOrAdmin } from "@/lib/permissions";
 import { sap } from "@/lib/sapb1";
 
 /**
@@ -23,6 +24,11 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
   const docEntry = Number(docEntryStr);
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  // Un retour fournisseur (sortie de stock, base d'avoir A/P) est un geste de
+  // gestion : réservé à la préparation / l'administration, pas à l'agréeur.
+  if (!(await requirePreparateurOrAdmin(session))) {
+    return NextResponse.json({ error: "Réservé à la préparation / l'administration" }, { status: 403 });
+  }
   if (!Number.isFinite(docEntry)) return NextResponse.json({ error: "docEntry invalide" }, { status: 400 });
 
   let body: { lines?: { lineNum: number; packageQuantity: number }[] };

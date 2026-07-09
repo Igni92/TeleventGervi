@@ -97,8 +97,11 @@ function Stat({ label, value, tone }: { label: string; value: React.ReactNode; t
   );
 }
 
-/** Liste des COMMANDES FOURNISSEURS (SAP PurchaseOrders) — lecture seule. */
-export function PurchaseOrderHistory() {
+/** Liste des COMMANDES FOURNISSEURS (SAP PurchaseOrders) — lecture seule.
+ *  `restricted` = agréeur « pur » : ne voit AUCUN prix, ne peut ni modifier ni
+ *  annuler la commande — seulement la consulter et la passer en entrée
+ *  marchandise (« Réceptionner → EM »). */
+export function PurchaseOrderHistory({ restricted = false }: { restricted?: boolean }) {
   const [docs, setDocs] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
@@ -219,16 +222,18 @@ export function PurchaseOrderHistory() {
         {filtered.length > 0 && (
           <div className="flex flex-wrap gap-6 pb-1">
             <Stat label="Commandes" value={<AnimatedNumber value={filtered.length} />} />
-            <Stat
-              label="Engagé (HT)"
-              tone="emerald"
-              value={
-                <AnimatedNumber
-                  value={filtered.reduce((s, d) => s + (d.totalHT ?? 0), 0)}
-                  format={(n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n)}
-                />
-              }
-            />
+            {!restricted && (
+              <Stat
+                label="Engagé (HT)"
+                tone="emerald"
+                value={
+                  <AnimatedNumber
+                    value={filtered.reduce((s, d) => s + (d.totalHT ?? 0), 0)}
+                    format={(n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n)}
+                  />
+                }
+              />
+            )}
             <Stat label="Ouvertes" value={<AnimatedNumber value={filtered.filter((d) => d.open).length} />} />
             {dueCount > 0 && <Stat label="À réceptionner" value={<span className="text-amber-600 dark:text-amber-400">{dueCount}</span>} />}
           </div>
@@ -257,10 +262,12 @@ export function PurchaseOrderHistory() {
                   </div>
                 </div>
                 <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
-                  <div>
-                    <span className="text-[17px] font-bold tnum text-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
-                    <span className="ml-1 text-[11px] text-muted-foreground">HT</span>
-                  </div>
+                  {!restricted && (
+                    <div>
+                      <span className="text-[17px] font-bold tnum text-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
+                      <span className="ml-1 text-[11px] text-muted-foreground">HT</span>
+                    </div>
+                  )}
                   <ChevronRight className="h-5 w-5 text-muted-foreground/50" />
                 </div>
               </button>
@@ -279,7 +286,7 @@ export function PurchaseOrderHistory() {
                   <th className="text-left px-3 py-2 font-semibold w-24">Commande</th>
                   <th className="text-left px-3 py-2 font-semibold w-24">Livraison</th>
                   <th className="text-left px-3 py-2 font-semibold w-36">Statut</th>
-                  <th className="text-right px-3 py-2 font-semibold w-28">Total HT</th>
+                  {!restricted && <th className="text-right px-3 py-2 font-semibold w-28">Total HT</th>}
                   <th className="w-10" />
                 </tr>
               </thead>
@@ -298,7 +305,7 @@ export function PurchaseOrderHistory() {
                     <td className="px-3 py-2 tnum text-muted-foreground">{fmtDate(d.docDate)}</td>
                     <td className="px-3 py-2 tnum text-muted-foreground">{fmtDate(d.dueDate)}</td>
                     <td className="px-3 py-2">{isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}</td>
-                    <td className="px-3 py-2 text-right tnum font-semibold">{eur(d.totalHT ?? 0)}</td>
+                    {!restricted && <td className="px-3 py-2 text-right tnum font-semibold">{eur(d.totalHT ?? 0)}</td>}
                     <td className="px-2 py-2 text-right"><ChevronRight className="h-4 w-4 text-muted-foreground/50 inline" /></td>
                   </tr>
                 ))}
@@ -318,7 +325,7 @@ export function PurchaseOrderHistory() {
             </DialogTitle>
             <DialogDescription className="sr-only">Détail de la commande fournisseur : lignes commandées et réception.</DialogDescription>
           </DialogHeader>
-          {largeDoc && <PoDetail po={largeDoc} onReceive={receive} receiving={receiving} onModified={load} />}
+          {largeDoc && <PoDetail po={largeDoc} onReceive={receive} receiving={receiving} onModified={load} restricted={restricted} />}
         </DialogContent>
       </Dialog>
     </div>
@@ -347,8 +354,10 @@ const effPU = (l: EditLine): number | null => {
   return Number.isFinite(t) && denom > 0 ? Math.round((t / denom) * 10000) / 10000 : null;
 };
 
-function PoDetail({ po, onReceive, receiving, onModified }: {
+function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: {
   po: PurchaseOrder; onReceive: (docEntry: number, agreage: ReceiveAgreage) => void; receiving: boolean; onModified: () => void | Promise<void>;
+  /** Agréeur « pur » : aucun prix visible, ni modif ni annulation de commande. */
+  restricted?: boolean;
 }) {
   const [confirm, setConfirm] = useState(false);
   // Agréage de la réception (contrôle qualité) : conforme par défaut ; « avec
@@ -530,8 +539,9 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
 
   return (
     <div className="space-y-5">
-      {/* Modifier / annuler la commande (tant qu'elle n'est pas réceptionnée) */}
-      {po.open && (
+      {/* Modifier / annuler la commande (tant qu'elle n'est pas réceptionnée) —
+          gestion réservée : masqué pour l'agréeur (il ne fait que réceptionner). */}
+      {po.open && !restricted && (
         <div className="flex items-center gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={beginEdit} className="gap-1.5">
             <Pencil className="h-3.5 w-3.5" /> Modifier la commande
@@ -690,15 +700,17 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
                   <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
                   <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
                 </div>
-                <div className="text-right shrink-0">
-                  <div className="text-[15px] font-bold tnum text-foreground">{lineHT != null ? eur(lineHT) : "—"}</div>
-                  <div className="text-[11px] text-muted-foreground">HT</div>
-                </div>
+                {!restricted && (
+                  <div className="text-right shrink-0">
+                    <div className="text-[15px] font-bold tnum text-foreground">{lineHT != null ? eur(lineHT) : "—"}</div>
+                    <div className="text-[11px] text-muted-foreground">HT</div>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2 mt-2 text-[13px] text-muted-foreground tnum">
                 <span className="text-foreground font-medium">{fmtColis(l.packageQuantity)} colis</span>
-                <span>·</span>
-                <span>PU {l.price != null ? eur(l.price) : "—"}</span>
+                {!restricted && <span>·</span>}
+                {!restricted && <span>PU {l.price != null ? eur(l.price) : "—"}</span>}
                 {po.cancelled
                   ? <span className="text-rose-600 dark:text-rose-400">· annulée</span>
                   : !l.open && <span className="text-emerald-600 dark:text-emerald-400">· reçue</span>}
@@ -706,11 +718,13 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
             </div>
           );
         })}
-        <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1.5">
-          <div className="flex justify-between text-[14px]"><span className="text-muted-foreground">Total HT</span><span className="font-semibold tnum">{eur(po.totalHT ?? 0)}</span></div>
-          <div className="flex justify-between text-[14px]"><span className="text-muted-foreground">TVA</span><span className="tnum text-muted-foreground">{eur(po.totalTVA ?? 0)}</span></div>
-          <div className="flex justify-between text-[16px] border-t border-border pt-1.5"><span className="font-semibold text-foreground">Total TTC</span><span className="font-bold tnum text-foreground">{eur(po.totalTTC ?? po.total ?? 0)}</span></div>
-        </div>
+        {!restricted && (
+          <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-1.5">
+            <div className="flex justify-between text-[14px]"><span className="text-muted-foreground">Total HT</span><span className="font-semibold tnum">{eur(po.totalHT ?? 0)}</span></div>
+            <div className="flex justify-between text-[14px]"><span className="text-muted-foreground">TVA</span><span className="tnum text-muted-foreground">{eur(po.totalTVA ?? 0)}</span></div>
+            <div className="flex justify-between text-[16px] border-t border-border pt-1.5"><span className="font-semibold text-foreground">Total TTC</span><span className="font-bold tnum text-foreground">{eur(po.totalTTC ?? po.total ?? 0)}</span></div>
+          </div>
+        )}
       </div>
 
       {/* Desktop : tableau */}
@@ -721,8 +735,8 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
               <th className="text-left px-3 py-2.5 font-semibold">Article</th>
               <th className="text-left px-3 py-2.5 font-semibold">Désignation</th>
               <th className="text-right px-3 py-2.5 font-semibold">Colis</th>
-              <th className="text-right px-3 py-2.5 font-semibold">PU HT</th>
-              <th className="text-right px-3 py-2.5 font-semibold">Total HT</th>
+              {!restricted && <th className="text-right px-3 py-2.5 font-semibold">PU HT</th>}
+              {!restricted && <th className="text-right px-3 py-2.5 font-semibold">Total HT</th>}
               <th className="text-left px-3 py-2.5 font-semibold">Statut</th>
             </tr>
           </thead>
@@ -738,8 +752,8 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
                   </td>
                   <td className="px-3 py-2.5"><DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} /></td>
                   <td className="px-3 py-2.5 text-right tnum">{fmtColis(l.packageQuantity)}</td>
-                  <td className="px-3 py-2.5 text-right tnum">{l.price != null ? eur(l.price) : "—"}</td>
-                  <td className="px-3 py-2.5 text-right tnum font-semibold">{lineHT != null ? eur(lineHT) : "—"}</td>
+                  {!restricted && <td className="px-3 py-2.5 text-right tnum">{l.price != null ? eur(l.price) : "—"}</td>}
+                  {!restricted && <td className="px-3 py-2.5 text-right tnum font-semibold">{lineHT != null ? eur(lineHT) : "—"}</td>}
                   <td className="px-3 py-2.5">
                     <span className={
                       po.cancelled
@@ -755,23 +769,25 @@ function PoDetail({ po, onReceive, receiving, onModified }: {
               );
             })}
           </tbody>
-          <tfoot>
-            <tr className="border-t border-border bg-secondary/30 text-[14px]">
-              <td colSpan={4} className="px-3 py-2.5 text-right font-semibold text-muted-foreground">Total HT</td>
-              <td className="px-3 py-2.5 text-right tnum font-bold text-foreground">{eur(po.totalHT ?? 0)}</td>
-              <td />
-            </tr>
-            <tr className="bg-secondary/20 text-[13px]">
-              <td colSpan={4} className="px-3 py-1.5 text-right text-muted-foreground">TVA</td>
-              <td className="px-3 py-1.5 text-right tnum text-muted-foreground">{eur(po.totalTVA ?? 0)}</td>
-              <td />
-            </tr>
-            <tr className="bg-secondary/30 text-[15px] border-t border-border">
-              <td colSpan={4} className="px-3 py-2.5 text-right font-semibold text-foreground">Total TTC</td>
-              <td className="px-3 py-2.5 text-right tnum font-bold text-foreground">{eur(po.totalTTC ?? po.total ?? 0)}</td>
-              <td />
-            </tr>
-          </tfoot>
+          {!restricted && (
+            <tfoot>
+              <tr className="border-t border-border bg-secondary/30 text-[14px]">
+                <td colSpan={4} className="px-3 py-2.5 text-right font-semibold text-muted-foreground">Total HT</td>
+                <td className="px-3 py-2.5 text-right tnum font-bold text-foreground">{eur(po.totalHT ?? 0)}</td>
+                <td />
+              </tr>
+              <tr className="bg-secondary/20 text-[13px]">
+                <td colSpan={4} className="px-3 py-1.5 text-right text-muted-foreground">TVA</td>
+                <td className="px-3 py-1.5 text-right tnum text-muted-foreground">{eur(po.totalTVA ?? 0)}</td>
+                <td />
+              </tr>
+              <tr className="bg-secondary/30 text-[15px] border-t border-border">
+                <td colSpan={4} className="px-3 py-2.5 text-right font-semibold text-foreground">Total TTC</td>
+                <td className="px-3 py-2.5 text-right tnum font-bold text-foreground">{eur(po.totalTTC ?? po.total ?? 0)}</td>
+                <td />
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
     </div>
