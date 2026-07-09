@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { BrandLogo } from "@/components/BrandLogo";
+import { StarRating } from "@/components/ui/star-rating";
 import { LotDetailsDialog } from "./LotDetailsDialog";
 import { useContextMenu, ContextMenu, ContextMenuItem, ContextMenuLabel } from "@/components/ui/context-menu";
 import { useBrandLogos } from "@/lib/useBrandLogos";
@@ -388,6 +389,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   const [favGroups, setFavGroups] = useState<Set<string>>(new Set());
   // C2 — promos actives, indexées par itemCode (1 promo max appliquée par article)
   const [promos, setPromos] = useState<Record<string, Promo>>({});
+  // Note QUALITÉ (1..5 étoiles) par article, saisie à la réception — affichée en étoiles.
+  const [notes, setNotes] = useState<Record<string, number>>({});
   // Logos de marques (réglés sur /parametres/marques) → affichés dans la liste
   // stock, entre le stock et la désignation. Hook partagé : 1 seul fetch pour
   // toute l'app + respect du réglage « Afficher les logos » (paramètres).
@@ -614,6 +617,13 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
         setPromos(map);
       })
       .catch(() => { /* promos optionnelles */ });
+  }, []);
+
+  // ── Notes qualité (étoiles) par article — saisies à la réception ──
+  useEffect(() => {
+    fetch(`/api/marchandise-notes`).then((r) => r.json())
+      .then((d) => setNotes(d?.notes ?? {}))
+      .catch(() => { /* notes optionnelles */ });
   }, []);
 
   // ── C4 — Densité : réglage déplacé sur /parametres. Ici on LIT seulement
@@ -1474,8 +1484,12 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                             <span className="min-w-0 flex items-center gap-2">
                               <BrandLogo marque={marque} logos={brandLogos} size="xl" />
                               <span className="min-w-0 flex-1">
-                              <span className={`block ${ui.name} font-semibold text-foreground truncate leading-tight`}>
-                                {p.itemName}
+                              <span className="flex items-center gap-1.5 min-w-0">
+                                <span className={`${ui.name} font-semibold text-foreground truncate leading-tight`}>
+                                  {p.itemName}
+                                </span>
+                                {/* Note qualité (étoiles) saisie à la réception. */}
+                                {notes[p.itemCode] ? <StarRating value={notes[p.itemCode]} size="sm" className="shrink-0" /> : null}
                               </span>
                               {/* Tags espacés (gap-1.5) ; le CODE ARTICLE n'apparaît plus
                                   sur la ligne (clic droit « Détails » pour le lot/DLC). */}

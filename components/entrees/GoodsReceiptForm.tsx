@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { DateStepper, todayISO } from "@/components/ui/date-stepper";
 import { designationProduit } from "@/lib/produit-designation";
+import { StarRating } from "@/components/ui/star-rating";
 import { DesignationChips } from "./DesignationChips";
 
 /** Montant € à 2 décimales (séparateur FR). */
@@ -44,6 +45,7 @@ type Line = {
   condt: string | null;                        // désignation : conditionnement
   variete: string | null;                      // désignation : variété (FrgnName)
   dlc: string;                                  // DLC optionnelle (fraîcheur) — "" si non saisie (YYYY-MM-DD)
+  note: number | null;                          // note qualité 1..5 (étoiles) — null si non notée
 };
 
 /** PU /pie effectif d'une ligne — dérivé du total forcé quand présent. */
@@ -306,6 +308,7 @@ export function GoodsReceiptForm() {
         condt: p.uCondi,
         variete: p.frgnName,
         dlc: sl && sl > 0 ? plusDaysISO(sl) : "",
+        note: null,
       }];
     });
   }, [shelfLife, groupDays]);
@@ -350,6 +353,7 @@ export function GoodsReceiptForm() {
               packageQuantity: l.packageQuantity,
               warehouseCode: l.warehouseCode,
               price: pu != null && pu > 0 ? pu : undefined,
+              rating: l.note ?? undefined,
             };
           }),
         }),
@@ -491,6 +495,10 @@ export function GoodsReceiptForm() {
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Note qualité</span>
+                  <StarRating value={l.note} onChange={(v) => updateLine(i, { note: v })} size="md" ariaLabel={`Note qualité ${dz.fruit}`} />
+                </div>
                 <div className="grid grid-cols-2 gap-2.5">
                   <div>
                     <label className="block text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">Qté (colis)</label>
@@ -597,7 +605,10 @@ export function GoodsReceiptForm() {
                       </div>
                     </td>
                     <td className="px-2 py-2 font-mono">{l.itemCode}</td>
-                    <td className="px-2 py-2 text-foreground">{dz.fruit}</td>
+                    <td className="px-2 py-2 text-foreground">
+                      <div>{dz.fruit}</div>
+                      <StarRating value={l.note} onChange={(v) => updateLine(i, { note: v })} size="sm" className="mt-0.5" ariaLabel={`Note qualité ${dz.fruit}`} />
+                    </td>
                     <td className="px-2 py-2 text-muted-foreground">{dz.pays}</td>
                     <td className="px-2 py-2 text-muted-foreground">{dz.marque}</td>
                     <td className="px-2 py-2 text-muted-foreground">{dz.variete}</td>

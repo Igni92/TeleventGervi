@@ -5,6 +5,7 @@ import { Boxes, Loader2, CalendarClock, Warehouse, Truck, BadgeEuro } from "luci
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
+import { StarRating } from "@/components/ui/star-rating";
 
 /**
  * Détail des LOTS d'un article — ouvert au clic droit sur une ligne de la console.
@@ -25,6 +26,7 @@ interface Batch {
   supplierName?: string | null;   // fournisseur (crédité à la réception)
   purchasePrice?: number | null;  // prix d'achat €/unité SAP
   currency?: string | null;
+  rating?: number | null;         // note qualité 1..5 (étoiles) du lot
 }
 interface Props {
   item: { id: string; code: string; name: string; dispo?: number; unit?: string; packDivisor?: number } | null;
@@ -104,6 +106,7 @@ export function LotDetailsDialog({ item, onClose }: Props) {
                     <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
                       <span className="text-[10.5px] uppercase tracking-wide text-muted-foreground">Lot {i + 1}</span>
                       <span className="font-mono">{b.batchNumber}</span>
+                      {b.rating ? <StarRating value={b.rating} size="sm" /> : null}
                     </span>
                     {/* Quantité restante du registre (en colis). Le stock par lot
                         n'existe pas dans SAP : on ne l'affiche que si le registre

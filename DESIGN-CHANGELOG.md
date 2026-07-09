@@ -495,3 +495,24 @@ migration : la synchro n'écrit jamais cette colonne).
 - Démarrage à froid honnête : les lots reçus **après** activation portent la
   quantité/fournisseur/prix ; les lots antérieurs restent affichés (DLC) et se
   garnissent au fil des réceptions.
+
+---
+
+## ⭐ Note qualité de la marchandise (1–5 étoiles) — saisie à la réception, visible en console
+
+À la réception, chaque article reçu peut recevoir une **note qualité 1★–5★**. La
+note remonte ensuite **en étoiles** sur la ligne de l'article dans la console (et
+par lot dans le détail au clic droit).
+
+| Où | Quoi |
+|----|------|
+| **Réception** (`GoodsReceiptForm`) | Sélecteur **étoiles** par ligne (mobile + desktop). Envoyé dans le corps de l'entrée (`lines[].rating`). |
+| **Serveur** (`/api/sap/goods-receipts`) | Enregistre la note du **lot** (`EM<DocNum>`) et la note **courante de l'article** — best-effort, ne bloque jamais la réception. |
+| **Console** (`Ecran2Order`) | Étoiles **lecture seule** à côté du nom de l'article (fetch `/api/marchandise-notes`). |
+| **Détail des lots** (clic droit) | Étoiles du **lot** précis à côté de son numéro. |
+
+- Stockage `AppSetting` (`artnote:<itemCode>`, `lotnote:<itemCode>:<lot>`) — clé/valeur
+  JSON, **aucune migration**. Note bornée 1..5 (`sanitizeRating`).
+- Composant `StarRating` réutilisable (interactif à la saisie, lecture seule à
+  l'affichage). Les quantités restent exprimées dans l'unité de chaque article
+  (colis, ou kg pour les articles au poids) — cohérent avec la console.

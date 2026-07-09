@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getLotNotes } from "@/lib/marchandiseNote";
 
 /**
  * GET /api/products/[id]/batches[?inStock=1]
@@ -25,18 +26,27 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const batches = await prisma.productBatch.findMany({
-    where: {
-      productId: params.id,
-      ...(inStock ? { OR: [{ expirationDate: null }, { expirationDate: { gte: today } }] } : {}),
-    },
-    orderBy: [
-      { expirationDate: { sort: "asc", nulls: "last" } },
-      { admissionDate: "desc" },
-      { batchNumber: "asc" },
-    ],
-    take: 50,
-  });
+  const [batches, product] = await Promise.all([
+    prisma.productBatch.findMany({
+      where: {
+        productId: params.id,
+        ...(inStock ? { OR: [{ expirationDate: null }, { expirationDate: { gte: today } }] } : {}),
+      },
+      orderBy: [
+        { expirationDate: { sort: "asc", nulls: "last" } },
+        { admissionDate: "desc" },
+        { batchNumber: "asc" },
+      ],
+      take: 50,
+    }),
+    prisma.product.findUnique({ where: { id: params.id }, select: { itemCode: true } }),
+  ]);
 
-  return NextResponse.json({ batches });
+  // Note qualité (étoiles) par lot, saisie à la réception (clé par itemCode+lot).
+  const lotNotes = product
+    ? await getLotNotes(product.itemCode, batches.map((b) => b.batchNumber))
+    : new Map<string, number>();
+  const withNotes = batches.map((b) => ({ ...b, rating: lotNotes.get(b.batchNumber) ?? null }));
+
+  return NextResponse.json({ batches: withNotes });
 }
