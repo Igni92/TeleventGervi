@@ -121,12 +121,12 @@ const fmtDate = (s?: string): string => {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${p(d.getFullYear() % 100)}`;
 };
-/** Date + heure « jeu. 08.07.26 · 6h45 » (jour court FR + heure locale). */
+/** Date + heure « JEU 08.07.26 · 6h45 » (jour court FR en majuscules + heure locale). */
 const fmtDateHeure = (s?: string): string => {
   if (!s) return "—";
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return "—";
-  const jour = d.toLocaleDateString("fr-FR", { weekday: "short" }).replace(/\.$/, "");
+  const jour = d.toLocaleDateString("fr-FR", { weekday: "short" }).replace(/\.$/, "").toUpperCase();
   const heure = `${d.getHours()}h${String(d.getMinutes()).padStart(2, "0")}`;
   return `${jour} ${fmtDate(s)} · ${heure}`;
 };
