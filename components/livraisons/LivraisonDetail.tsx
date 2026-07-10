@@ -2460,7 +2460,18 @@ const OrderRow = memo(function OrderRow({
 
       {/* Vue en GRAND — préparation focalisée + affectation au préparateur */}
       <Dialog open={bigOpen} onOpenChange={setBigOpen}>
-        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
+        <DialogContent
+          className="max-w-2xl max-h-[92vh] overflow-y-auto"
+          // Le menu de ligne « Changer le lot / Échanger l'article » est porté
+          // dans <body> (hors de la modale). Sans ça, l'ouverture de l'onglet
+          // « Échanger l'article » (focus sur le champ de recherche = focus HORS
+          // modale) déclenchait la fermeture Radix. On ignore donc les
+          // interactions/focus issus de ce menu.
+          onInteractOutside={(e) => {
+            const t = e.detail.originalEvent.target as HTMLElement | null;
+            if (t?.closest("[data-linetool]")) e.preventDefault();
+          }}
+        >
           <DialogHeader className="text-left">
             <DialogTitle className="flex items-center gap-2 pr-8 text-[17px]">
               <Boxes className="h-5 w-5 text-brand-600 dark:text-brand-400 shrink-0" />
@@ -2918,6 +2929,7 @@ function LineToolMenu({ docEntry, docNum, pos, onClose, onDone }: {
   return createPortal(
     <div
       ref={boxRef}
+      data-linetool=""
       style={{ position: "fixed", left: pos.x, top: pos.y, width: 300 }}
       onContextMenu={(e) => e.preventDefault()}
       // Le popup est rendu dans un portail MAIS reste enfant React de la carte :
