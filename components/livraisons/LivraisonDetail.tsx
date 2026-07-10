@@ -2845,6 +2845,11 @@ function ArticleSwapMenu({ docEntry, docNum, pos, onClose, onDone }: {
       ref={boxRef}
       style={{ position: "fixed", left: pos.x, top: pos.y, width: 288 }}
       onContextMenu={(e) => e.preventDefault()}
+      // Le popup est rendu dans un portail MAIS reste enfant React de la carte :
+      // sans ça, un clic dedans REMONTE (arbre React) jusqu'au onClick de la
+      // carte, qui refermait la fenêtre. On coupe la propagation ici.
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
       className="z-[130] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[336px] animate-fade-up"
     >
       <div className="shrink-0 px-3 py-2 border-b border-border bg-secondary/30">
