@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, useRef, Fragment } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ChevronDown, ChevronRight, ChevronUp, Search, Plus, Trash2,
   ShoppingCart, Check, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock, X,
-  History, BadgeEuro, ArrowRightLeft, CopyPlus, Boxes, ListPlus, Truck, Maximize2, Minimize2,
+  History, BadgeEuro, ArrowRightLeft, CopyPlus, Boxes, ListPlus, Truck,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
@@ -1772,33 +1773,21 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       {/* ── Colonne PANIER — dominante et ÉLARGIE (Écran 2 = saisie commande au
              cœur). Empilée sous le stock en dessous de xl (tablette) : pleine
              largeur, plafonnée à ~55 % de la hauteur, liste scrollable. ── */}
-      <div className={`flex flex-col panel p-3 ${
-        orderFullscreen
-          ? "fixed inset-0 z-[60] max-h-none rounded-none"
-          : "w-full xl:w-[640px] shrink-0 min-h-0 max-h-[55%] xl:max-h-none"
-      }`}>
+      <div className="w-full xl:w-[640px] shrink-0 min-h-0 max-h-[55%] xl:max-h-none flex flex-col panel p-3">
         <div
           onDoubleClick={(e) => {
-            // Double-clic sur l'EN-TÊTE (pas les boutons) → bascule plein écran.
+            // Double-clic sur l'EN-TÊTE (pas les boutons) → ouvre le RÉCAP en grand
+            // (popup par-dessus tout). Fermeture : fond, croix ou Échap.
             if ((e.target as HTMLElement).closest("button, input, select, a")) return;
-            setOrderFullscreen((v) => !v);
+            if (cart.length > 0) setOrderFullscreen(true);
           }}
-          title="Double-cliquez pour afficher la commande en plein écran"
+          title="Double-cliquez pour afficher le récapitulatif de la commande en grand"
           className="flex items-center justify-between gap-2 mb-2 shrink-0 cursor-pointer select-none"
         >
           <p className="kicker inline-flex items-center gap-1.5">
             <ShoppingCart className="h-3 w-3" /> Commande
           </p>
           <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setOrderFullscreen((v) => !v)}
-              title={orderFullscreen ? "Quitter le plein écran (Échap)" : "Afficher en plein écran"}
-              aria-label={orderFullscreen ? "Quitter le plein écran" : "Afficher en plein écran"}
-              className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
-            >
-              {orderFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-            </button>
             {/* Dupliquer la DERNIÈRE commande du client — pré-remplit le panier */}
             {!modif && (
               <button
@@ -2403,6 +2392,92 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
 
       {/* Détail des lots (clic droit → « Détails »). */}
       <LotDetailsDialog item={lotDetail} onClose={() => setLotDetail(null)} />
+
+      {/* RÉCAP EN GRAND — popup par-dessus TOUT (double-clic sur l'en-tête
+          « Commande »). Lecture seule : article · quantité · prix · total, gros
+          caractères pour relire la commande d'un coup d'œil. Fond, croix ou
+          Échap pour fermer. */}
+      {orderFullscreen && typeof document !== "undefined" && createPortal(
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-6"
+          role="dialog" aria-modal="true" aria-label="Récapitulatif de la commande"
+          onClick={() => setOrderFullscreen(false)}
+        >
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative z-10 w-full max-w-3xl max-h-[92vh] flex flex-col rounded-2xl border border-border bg-card shadow-modal overflow-hidden animate-fade-up"
+          >
+            <div className="flex items-start justify-between gap-3 px-5 sm:px-7 py-4 border-b border-border shrink-0">
+              <div className="min-w-0">
+                <p className="kicker inline-flex items-center gap-1.5"><ShoppingCart className="h-3 w-3" /> Récapitulatif commande</p>
+                <h2 className="font-display text-[22px] sm:text-[26px] font-semibold text-foreground truncate">{clientName}</h2>
+                {deliveryDate && (
+                  <p className="text-[12.5px] text-muted-foreground mt-0.5">
+                    Livraison du {new Date(deliveryDate).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                  </p>
+                )}
+              </div>
+              <button
+                type="button" onClick={() => setOrderFullscreen(false)} aria-label="Fermer le récapitulatif"
+                className="shrink-0 inline-flex items-center justify-center h-9 w-9 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 sm:px-7 py-2 divide-y divide-border/60">
+              {cart.map((l, i) => {
+                const div = l.packDivisor > 0 ? l.packDivisor : 1;
+                const baseUnitsPerColis = Math.round(l.stepColis * div * 1000) / 1000;
+                const hasColis = baseUnitsPerColis > 1;
+                const baseQty = Math.round(l.quantity * div * 100) / 100;
+                const colisCount = hasColis ? Math.round((l.quantity / l.stepColis) * 100) / 100 : baseQty;
+                const tags = [cleanTag(l.marque), cleanTag(l.condi), cleanTag(l.variete), cleanTag(l.pays)].filter(Boolean);
+                const freeColis = l.freeUnits > 0
+                  ? (hasColis ? Math.round((l.freeUnits / l.stepColis) * 100) / 100 : Math.round(l.freeUnits * div * 100) / 100)
+                  : 0;
+                return (
+                  <div key={i} className="flex items-center gap-3 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[16px] sm:text-[17px] font-semibold text-foreground leading-tight">{l.itemName}</p>
+                      {tags.length > 0 && <p className="text-[12px] text-muted-foreground mt-0.5 truncate">{tags.join(" · ")}</p>}
+                    </div>
+                    <div className="shrink-0 text-right tnum">
+                      <p className="text-[16px] sm:text-[17px] font-bold text-foreground">
+                        {hasColis ? `${colisCount} colis` : `${baseQty} ${l.priceUnit}`}
+                        {freeColis > 0 && <span className="text-rose-600 dark:text-rose-400"> +{freeColis} off.</span>}
+                      </p>
+                      <p className="text-[12px] text-muted-foreground">
+                        {hasColis ? `${baseQty} ${l.priceUnit} · ` : ""}{l.price != null ? `${l.price.toFixed(2)} €/${l.priceUnit}` : "— €"}
+                      </p>
+                    </div>
+                    <div className="shrink-0 w-[92px] text-right text-[17px] sm:text-[19px] font-bold tnum text-foreground">
+                      {l.price ? `${lineHT(l).toFixed(2)} €` : "—"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="shrink-0 border-t border-border px-5 sm:px-7 py-4 flex items-end justify-between gap-4">
+              <div className="text-[12.5px] text-muted-foreground">
+                {cart.length} article{cart.length > 1 ? "s" : ""} · {fmtKg(totalKg)}
+                {hasCostData && (
+                  <span className={`ml-2 font-semibold ${margeNetteTotal < 0 ? "text-rose-600 dark:text-rose-400" : margeNettePct < 10 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                    · marge nette {margeNetteTotal.toFixed(2)} € ({Math.round(margeNettePct)} %)
+                  </span>
+                )}
+              </div>
+              <div className="text-right">
+                <p className="kicker">{modif ? "Total HT du BL" : "Total HT"}</p>
+                <p className="font-display text-[28px] sm:text-[34px] font-bold tnum text-foreground leading-none">{totalHT.toFixed(2)} €</p>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
 
       {/* (La confirmation d'encours dépassé vit désormais dans le TOAST de la
           tâche de fond — cf. sendOrderInBackground : action « Créer quand
