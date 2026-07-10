@@ -10,8 +10,9 @@
  * raisonne sur la date de LIVRAISON — ce qui quitte l'entrepôt ce jour-là.
  * Source : /api/livraisons?date=J (mode « due »). Consultation seule.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCw, Search, Package, Boxes, Truck, Printer } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { createPortal } from "react-dom";
+import { Loader2, RefreshCw, Search, Package, Boxes, Truck, Printer, ArrowRight, Replace, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { formatDeliveryDate, nextDeliveryDate } from "@/lib/livraison";
 import { DateStepper } from "@/components/ui/date-stepper";
@@ -34,6 +35,8 @@ interface Row {
   itemName: string;
   tags: string[];
   seg: Record<Segment, SegQty>;
+  /** BL OUVERTS du jour contenant cet article — cibles de l'échange en masse. */
+  openDocs: number[];
 }
 
 const nfKg = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
@@ -46,6 +49,18 @@ export function DetailsLivraisonArticles() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [metric, setMetric] = useState<Metric>("colis");
+  // Échange d'article EN MASSE (clic droit sur une ligne article) : remplace le
+  // code sur TOUS les BL ouverts du jour qui le portent (modif SAP par bon).
+  const [bulk, setBulk] = useState<{ x: number; y: number; oldCode: string; oldName: string; docEntries: number[] } | null>(null);
+  const openBulk = useCallback((e: ReactMouseEvent, a: Row) => {
+    if (a.openDocs.length === 0) return;                 // aucun BL ouvert → rien à échanger
+    e.preventDefault();
+    setBulk({
+      x: Math.min(e.clientX, window.innerWidth - 312),
+      y: Math.min(e.clientY, window.innerHeight - 360),
+      oldCode: a.itemCode, oldName: a.itemName, docEntries: a.openDocs,
+    });
+  }, []);
 
   const load = useCallback(async (d: string) => {
     setLoading(true);
@@ -65,6 +80,7 @@ export function DetailsLivraisonArticles() {
   const needle = q.trim().toLowerCase();
   const { rows, docCount } = useMemo(() => {
     const map = new Map<string, Row>();
+    const openDocsByItem = new Map<string, Set<number>>();
     let docs = 0;
     if (data?.ok) {
       for (const c of data.carriers) for (const d of c.docs) {
@@ -77,14 +93,21 @@ export function DetailsLivraisonArticles() {
             const tags = [cleanTag(l.marque), cleanTag(l.condt), cleanTag(l.pays), cleanTag(l.variete)]
               .filter((t) => t && t.toUpperCase() !== l.itemName.toUpperCase());
             a = { itemCode: l.itemCode, itemName: l.itemName, tags: [...new Set(tags)],
-              seg: { GMS: { colis: 0, kg: 0 }, CHR: { colis: 0, kg: 0 }, EXPORT: { colis: 0, kg: 0 } } };
+              seg: { GMS: { colis: 0, kg: 0 }, CHR: { colis: 0, kg: 0 }, EXPORT: { colis: 0, kg: 0 } }, openDocs: [] };
             map.set(l.itemCode, a);
           }
           a.seg[seg].colis += l.colis || 0;
           a.seg[seg].kg += l.weightKg || 0;
+          // BL ouverts uniquement (les clôturés/livrés ne sont pas modifiables).
+          if (d.open) {
+            let set = openDocsByItem.get(l.itemCode);
+            if (!set) { set = new Set(); openDocsByItem.set(l.itemCode, set); }
+            set.add(d.docEntry);
+          }
         }
       }
     }
+    for (const [code, set] of openDocsByItem) { const a = map.get(code); if (a) a.openDocs = [...set]; }
     let list = [...map.values()];
     if (needle) list = list.filter((a) =>
       a.itemName.toLowerCase().includes(needle) || a.itemCode.toLowerCase().includes(needle) ||
@@ -189,7 +212,12 @@ export function DetailsLivraisonArticles() {
               </thead>
               <tbody className="tnum">
                 {rows.map((a) => (
-                  <tr key={a.itemCode} className="border-b border-border/40 last:border-0 hover:bg-secondary/30 align-top">
+                  <tr
+                    key={a.itemCode}
+                    onContextMenu={(e) => openBulk(e, a)}
+                    title={a.openDocs.length > 0 ? `Clic droit : échanger cet article sur ${a.openDocs.length} bon(s) du jour` : undefined}
+                    className={`border-b border-border/40 last:border-0 hover:bg-secondary/30 align-top ${a.openDocs.length > 0 ? "cursor-context-menu" : ""}`}
+                  >
                     <td className="py-2 pl-4 sm:pl-5 pr-3">
                       <p className="text-foreground font-medium leading-tight">{a.itemName}</p>
                       {a.tags.length > 0 && (
@@ -218,7 +246,179 @@ export function DetailsLivraisonArticles() {
           </div>
         )}
       </section>
+
+      {/* Échange d'article en masse (clic droit sur une ligne article). */}
+      {bulk && (
+        <BulkSwapMenu
+          pos={bulk}
+          onClose={() => setBulk(null)}
+          onDone={() => load(date)}
+        />
+      )}
     </div>
+  );
+}
+
+/* ═════════════════════════════════════════════════════════════
+   Échange d'article EN MASSE — remplace un code article par un autre sur TOUS
+   les BL ouverts du jour qui le portent. Un appel de modif SAP par bon
+   (/api/sap/orders/[docEntry]/modif), quantité et prix conservés, nouveau lot
+   FIFO résolu côté serveur. Confirmation obligatoire (action irréversible et
+   multi-bons). Les lignes déjà livrées / bons contenant déjà le nouvel article
+   sont ignorés (comptés « ignorés »).
+═════════════════════════════════════════════════════════════ */
+interface BulkProduct { itemCode: string; itemName: string }
+interface BulkSrcLine {
+  itemCode: string; qtyPieces: number;
+  price: number | null; warehouse: string | null; lot: string | null; closed: boolean;
+}
+
+async function swapArticleOnBL(docEntry: number, oldCode: string, newCode: string): Promise<"ok" | "skip" | "error"> {
+  try {
+    const g = await fetch(`/api/sap/orders/${docEntry}/modif`, { cache: "no-store" }).then((r) => r.json());
+    if (!g?.ok || !Array.isArray(g.lines)) return "error";
+    const src = g.lines as BulkSrcLine[];
+    const targets = src.filter((l) => l.itemCode === oldCode);
+    if (targets.length === 0) return "skip";                          // article absent (déjà échangé ?)
+    if (targets.some((l) => l.closed)) return "skip";                 // déjà livré → non modifiable
+    if (src.some((l) => l.itemCode === newCode)) return "skip";       // éviter un doublon d'article
+    const lines = src.map((l) => l.itemCode === oldCode
+      ? { itemCode: newCode, quantity: l.qtyPieces, warehouseCode: l.warehouse ?? undefined, price: l.price ?? undefined, keep: false }
+      : { itemCode: l.itemCode, quantity: l.qtyPieces, warehouseCode: l.warehouse ?? undefined, price: l.price ?? undefined, keep: true, lot: l.lot ?? undefined });
+    const res = await fetch(`/api/sap/orders/${docEntry}/modif`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines }),
+    }).then((r) => r.json());
+    return res?.ok ? "ok" : "error";
+  } catch {
+    return "error";
+  }
+}
+
+function BulkSwapMenu({ pos, onClose, onDone }: {
+  pos: { x: number; y: number; oldCode: string; oldName: string; docEntries: number[] };
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<BulkProduct[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [pending, setPending] = useState<BulkProduct | null>(null);   // produit choisi, en attente de confirmation
+  const [running, setRunning] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const seq = useRef(0);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setResults([]); setLoading(false); return; }
+    const my = ++seq.current;
+    setLoading(true);
+    const h = setTimeout(() => {
+      fetch(`/api/products?search=${encodeURIComponent(q)}&limit=12`, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((j: { products?: BulkProduct[] }) => { if (my === seq.current) setResults(j.products ?? []); })
+        .catch(() => { if (my === seq.current) setResults([]); })
+        .finally(() => { if (my === seq.current) setLoading(false); });
+    }, 220);
+    return () => clearTimeout(h);
+  }, [query]);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => { if (!running && boxRef.current && !boxRef.current.contains(e.target as Node)) onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !running) onClose(); };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
+  }, [onClose, running]);
+
+  async function run(p: BulkProduct) {
+    if (running) return;
+    if (p.itemCode === pos.oldCode) { onClose(); return; }
+    setRunning(true);
+    let ok = 0, skip = 0, err = 0;
+    for (const de of pos.docEntries) {
+      const r = await swapArticleOnBL(de, pos.oldCode, p.itemCode);
+      if (r === "ok") ok++; else if (r === "skip") skip++; else err++;
+    }
+    const desc = `${ok} bon(s) modifié(s)${skip ? `, ${skip} ignoré(s)` : ""}${err ? `, ${err} échec(s)` : ""}.`;
+    if (err > 0) toast.error(`Échange « ${pos.oldName} » → « ${p.itemName} »`, { description: desc });
+    else toast.success(`Échange « ${pos.oldName} » → « ${p.itemName} »`, { description: desc });
+    onDone();
+    onClose();
+  }
+
+  return createPortal(
+    <div
+      ref={boxRef}
+      style={{ position: "fixed", left: pos.x, top: pos.y, width: 300 }}
+      onContextMenu={(e) => e.preventDefault()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      className="z-[130] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[360px] animate-fade-up"
+    >
+      <div className="shrink-0 px-3 py-2 border-b border-border bg-secondary/30">
+        <p className="text-[11px] font-semibold text-foreground inline-flex items-center gap-1.5">
+          <Replace className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" /> Échanger en masse
+        </p>
+        <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+          <span className="font-semibold text-foreground">{pos.oldName}</span> · {pos.docEntries.length} bon(s) du jour
+        </p>
+      </div>
+
+      {pending ? (
+        <div className="p-3 space-y-2.5">
+          <p className="text-[12.5px] text-foreground inline-flex items-start gap-1.5">
+            <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+            Remplacer <b>{pos.oldName}</b> par <b>{pending.itemName}</b> sur <b>{pos.docEntries.length} bon(s)</b> ? Quantité et prix conservés. Action irréversible.
+          </p>
+          <div className="flex items-center gap-2">
+            <button type="button" disabled={running} onClick={() => run(pending)}
+              className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-[12.5px] font-semibold disabled:opacity-60 transition-colors">
+              {running ? <><Loader2 className="h-4 w-4 animate-spin" /> Échange…</> : <>Confirmer</>}
+            </button>
+            <button type="button" disabled={running} onClick={() => setPending(null)}
+              className="inline-flex items-center justify-center h-9 px-3 rounded-lg border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-60 transition-colors">
+              Retour
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="shrink-0 relative px-2 pt-2">
+            <Search className="pointer-events-none absolute left-4 top-[calc(50%+4px)] -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Nouveau produit (nom ou code)…"
+              aria-label="Rechercher l'article de remplacement"
+              className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-8 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            />
+            {loading && <Loader2 className="absolute right-4 top-[calc(50%+4px)] -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+          </div>
+          <div className="overflow-y-auto py-1 min-h-0">
+            {query.trim().length < 2 ? (
+              <p className="px-3 py-2 text-[11.5px] italic text-muted-foreground">Tape au moins 2 caractères…</p>
+            ) : results.length === 0 && !loading ? (
+              <p className="px-3 py-2 text-[11.5px] italic text-muted-foreground">Aucun produit trouvé.</p>
+            ) : results.map((p) => (
+              <button
+                key={p.itemCode}
+                type="button"
+                onClick={() => setPending(p)}
+                className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-secondary/60 transition-colors"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[12.5px] font-medium text-foreground truncate">{p.itemName}</span>
+                  <span className="block text-[10px] font-mono text-muted-foreground">{p.itemCode}</span>
+                </span>
+                <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>,
+    document.body,
   );
 }
 
