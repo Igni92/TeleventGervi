@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ChevronDown, ChevronRight, ChevronUp, Search, Plus, Trash2,
   ShoppingCart, Check, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock, X,
-  History, BadgeEuro, ArrowRightLeft, CopyPlus, Boxes, ListPlus, Truck,
+  History, BadgeEuro, ArrowRightLeft, CopyPlus, Boxes, ListPlus, Truck, Maximize2, Minimize2,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
@@ -436,6 +436,15 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   }, [clientId]);
   // Panier
   const [cart, setCart] = useState<CartLine[]>([]);
+  // Vue PLEIN ÉCRAN de la colonne « Commande » (double-clic sur son en-tête) —
+  // pour relire/valider la commande en grand. Échap ou re-double-clic pour sortir.
+  const [orderFullscreen, setOrderFullscreen] = useState(false);
+  useEffect(() => {
+    if (!orderFullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOrderFullscreen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [orderFullscreen]);
   const [deliveryDate, setDeliveryDate] = useState("");
   // « Bon de commande » : commande créée SANS auto-lot (lots affectés ensuite dans
   // l'onglet dédié). Coché à la main, ou FORCÉ quand la livraison est une précommande.
@@ -1763,12 +1772,33 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       {/* ── Colonne PANIER — dominante et ÉLARGIE (Écran 2 = saisie commande au
              cœur). Empilée sous le stock en dessous de xl (tablette) : pleine
              largeur, plafonnée à ~55 % de la hauteur, liste scrollable. ── */}
-      <div className="w-full xl:w-[640px] shrink-0 min-h-0 max-h-[55%] xl:max-h-none flex flex-col panel p-3">
-        <div className="flex items-center justify-between gap-2 mb-2 shrink-0">
+      <div className={`flex flex-col panel p-3 ${
+        orderFullscreen
+          ? "fixed inset-0 z-[60] max-h-none rounded-none"
+          : "w-full xl:w-[640px] shrink-0 min-h-0 max-h-[55%] xl:max-h-none"
+      }`}>
+        <div
+          onDoubleClick={(e) => {
+            // Double-clic sur l'EN-TÊTE (pas les boutons) → bascule plein écran.
+            if ((e.target as HTMLElement).closest("button, input, select, a")) return;
+            setOrderFullscreen((v) => !v);
+          }}
+          title="Double-cliquez pour afficher la commande en plein écran"
+          className="flex items-center justify-between gap-2 mb-2 shrink-0 cursor-pointer select-none"
+        >
           <p className="kicker inline-flex items-center gap-1.5">
             <ShoppingCart className="h-3 w-3" /> Commande
           </p>
           <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setOrderFullscreen((v) => !v)}
+              title={orderFullscreen ? "Quitter le plein écran (Échap)" : "Afficher en plein écran"}
+              aria-label={orderFullscreen ? "Quitter le plein écran" : "Afficher en plein écran"}
+              className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+            >
+              {orderFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+            </button>
             {/* Dupliquer la DERNIÈRE commande du client — pré-remplit le panier */}
             {!modif && (
               <button
