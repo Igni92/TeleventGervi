@@ -64,4 +64,14 @@ describe("colisInfo — nb colis exact + poids colis", () => {
     const c = colisInfo({ salesUnit: "pie", salesQtyPerPackUnit: 12, salesUnitWeight: null });
     expect(c).toEqual({ unitsPerColis: 12, colisWeightKg: null, unitLabel: "colis" });
   });
+
+  it("fabrication : fraise au KG en colis de 4 kg (FB4KA2D : KG, SalPackUn 4, wt 1) → 4 kg/colis", () => {
+    // Régression OP00001/OP00002 : packRatio (lib/fabrication) délègue ici —
+    // « 5 colis » de FB4KA2D doivent sortir 20 kg dans SAP, pas 5 kg
+    // (BL réels : Quantity=28 KG / PackageQuantity=7 pour 7 colis).
+    const c = colisInfo({ salesUnit: "KG", salesQtyPerPackUnit: 4, salesUnitWeight: 1 });
+    expect(c.unitsPerColis).toBe(4);
+    expect(c.colisWeightKg).toBe(4);
+    expect(5 * c.unitsPerColis).toBe(20); // 5 colis → Quantity SAP = 20 kg
+  });
 });

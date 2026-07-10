@@ -16,13 +16,15 @@
  *     est alimentée, sinon le MIROIR des bons de réception (SapPdnLine — c'est
  *     le cas réel sur cette base : aucun article n'est batch-managed dans SAP,
  *     les lots vivent en U_NoLot).
- *   • prix d'achat : les sources SAP sont PAR PIE → on convertit en €/COLIS
- *     via le ratio salesQtyPerPackUnit (kg → ratio 1).
+ *   • prix d'achat : les sources SAP sont PAR UNITÉ DE BASE (pie, ou kg pour
+ *     un article au poids) → on convertit en €/COLIS via `packRatio` (article
+ *     au kg → kg par colis, sinon salesQtyPerPackUnit).
  *
  * ⚠️ Tables FabricationRun/FabricationRunLine et colonne ProductionRecipe.parentQty
  *    accédées en RAW SQL uniquement (client Prisma non régénéré).
  */
 import { prisma } from "@/lib/prisma";
+import { colisInfo } from "@/lib/colis";
 import { LOT_PENDING } from "@/lib/lotResolver";
 import { uniteGestion, uniteBase, type UniteGestion, type ModeQuantite } from "@/lib/fabrication-optim";
 
@@ -53,10 +55,20 @@ export type LotResolution = {
   supplierName: string | null;
 };
 
-/** Ratio colis→pie d'un produit (kg → 1, comme unitInfo de gervifrais-calc). */
-export function packRatio(salesUnit: string | null | undefined, salesQtyPerPackUnit: number | null | undefined): number {
-  if (/kg|kilo/i.test((salesUnit ?? "").trim())) return 1;
-  return salesQtyPerPackUnit && salesQtyPerPackUnit > 1 ? salesQtyPerPackUnit : 1;
+/**
+ * Ratio colis→unités de base SAP d'un produit — délègue à `colisInfo` (source
+ * unique du conditionnement) : article au KG → kg PAR COLIS (SalPackUn, sinon
+ * poids du sac), sinon SalPackUn. Un article au poids géré en colis de 4 kg
+ * (fraise FB4KA2D : SalesUnit "KG", SalPackUn 4) sort donc 4 kg par colis dans
+ * SAP — même règle que les EM (goods-receipts) et les BL réels — et plus
+ * jamais « 1 colis = 1 kg ».
+ */
+export function packRatio(
+  salesUnit: string | null | undefined,
+  salesQtyPerPackUnit: number | null | undefined,
+  salesUnitWeight?: number | null,
+): number {
+  return colisInfo({ salesUnit, salesQtyPerPackUnit, salesUnitWeight }).unitsPerColis;
 }
 
 // ── Conditionnement COLIS : nb colis EXACT + poids d'un colis ──────────
@@ -196,7 +208,7 @@ export type FamilyItemOption = {
   uCondi: string | null;
   uPays: string | null;
   manageBatch: boolean;
-  /** ratio colis→pie */
+  /** ratio colis→unités de base SAP (article au poids → kg par colis) */
   ratio: number;
   /** unité de gestion réelle (kg / colis / barquette) + quantité physique par colis */
   unite: UniteGestion;
@@ -262,7 +274,11 @@ export async function getFamilyItems(familyKeys: string[]): Promise<Map<string, 
         uCondi: r.uCondi,
         uPays: r.uPays,
         manageBatch: r.manageBatch,
-        ratio: packRatio(r.salesUnit, r.salesQtyPerPackUnit != null ? Number(r.salesQtyPerPackUnit) : null),
+        ratio: packRatio(
+          r.salesUnit,
+          r.salesQtyPerPackUnit != null ? Number(r.salesQtyPerPackUnit) : null,
+          r.salesUnitWeight != null ? Number(r.salesUnitWeight) : null,
+        ),
         unite: uniteGestion({
           salesUnit: r.salesUnit,
           inventoryUnit: r.inventoryUnit,

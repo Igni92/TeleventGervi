@@ -30,7 +30,9 @@ import { quantitesComposant } from "@/lib/fabrication-optim";
  *
  *   Étapes :
  *     1. FabricationRun + lignes enregistrés AVANT l'appel SAP (status=pending).
- *     2. SAP InventoryGenExits (sortie composants, en pie, magasin PAR LIGNE).
+ *     2. SAP InventoryGenExits (sortie composants, Quantity en UNITÉS DE BASE
+ *        SAP — kg pour un article au poids — + PackageQuantity en colis,
+ *        magasin PAR LIGNE).
  *        Les articles manageBatch portent BatchNumbers [{BatchNumber, Quantity}] ;
  *        pour les autres (cas réel Gervifrais), le lot est posé en U_NoLot par
  *        un PATCH ligne à ligne (même mécanique que /api/sap/goods-receipts).
@@ -146,10 +148,11 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
   const pickedCodes = recipe.components.map((c) => (pickByFamily.get(c.familyKey) as { itemCode: string }).itemCode);
   type Meta = {
     itemCode: string; itemName: string; groupName: string | null;
-    salesUnit: string | null; salesQtyPerPackUnit: number | null; manageBatch: boolean;
+    salesUnit: string | null; salesQtyPerPackUnit: number | null;
+    salesUnitWeight: number | null; manageBatch: boolean;
   };
   const metas = await prisma.$queryRawUnsafe<Meta[]>(
-    `SELECT "itemCode", "itemName", "groupName", "salesUnit", "salesQtyPerPackUnit", "manageBatch"
+    `SELECT "itemCode", "itemName", "groupName", "salesUnit", "salesQtyPerPackUnit", "salesUnitWeight", "manageBatch"
        FROM "Product" WHERE "itemCode" = ANY($1::text[]);`,
     [parentCode, ...pickedCodes],
   );
@@ -205,7 +208,14 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
   const runLines: RunLine[] = recipe.components.map((c) => {
     const pick = pickByFamily.get(c.familyKey) as { itemCode: string; warehouse: string };
     const m = metaByCode.get(pick.itemCode) as Meta;
-    const ratio = packRatio(m.salesUnit, m.salesQtyPerPackUnit != null ? Number(m.salesQtyPerPackUnit) : null);
+    // Ratio colis→unités de base SAP : article au poids → kg PAR COLIS
+    // (packRatio/colisInfo) — un run de « 5 colis » de fraise en colis de 4 kg
+    // sort 20 kg dans SAP, plus jamais 5 kg.
+    const ratio = packRatio(
+      m.salesUnit,
+      m.salesQtyPerPackUnit != null ? Number(m.salesQtyPerPackUnit) : null,
+      m.salesUnitWeight != null ? Number(m.salesUnitWeight) : null,
+    );
     // v3 : qty en unités de base → colis fractionnaires possibles (colis entamés) ;
     // legacy v2 : qty en colis. Conversion unique via quantitesComposant.
     const { pieceQty, colisQty } = quantitesComposant(c.qty, c.mode, tours, ratio);
@@ -238,7 +248,11 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
   const totalCost = Math.round((componentsCost + recipeCosts) * 100) / 100;
 
   // Valeur estimée du parent (dernier prix vendu, miroir) — pour la marge.
-  const parentRatio = packRatio(parentMeta.salesUnit, parentMeta.salesQtyPerPackUnit != null ? Number(parentMeta.salesQtyPerPackUnit) : null);
+  const parentRatio = packRatio(
+    parentMeta.salesUnit,
+    parentMeta.salesQtyPerPackUnit != null ? Number(parentMeta.salesQtyPerPackUnit) : null,
+    parentMeta.salesUnitWeight != null ? Number(parentMeta.salesUnitWeight) : null,
+  );
   const parentPieceQty = Math.round(body.parentColis * parentRatio * 1000) / 1000;
   const saleRows = await prisma.$queryRawUnsafe<{ lineTotal: number; quantity: number }[]>(
     `SELECT l."lineTotal", l."quantity"
@@ -303,7 +317,8 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     Comments: `${opCode} — Fabrication ${body.parentColis} colis ${parentCode} via TeleVent — ${userLabel(session)}`,
     DocumentLines: runLines.map((l) => ({
       ItemCode: l.itemCode,
-      Quantity: l.pieceQty,
+      Quantity: l.pieceQty,               // unités de base SAP (kg pour un article au poids)
+      PackageQuantity: l.colisQty,        // SAP « Nb colis » — visible sur la sortie
       WarehouseCode: l.warehouse,
       // Articles batch-managed SAP : collection native (lot réel uniquement).
       ...(l.manageBatch && !l.pending
@@ -345,7 +360,8 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     Comments: `${opCode} — Fabrication ${body.parentColis} colis ${parentCode} (entrée parent, exit#${exitDoc.DocNum})`,
     DocumentLines: [{
       ItemCode: parentCode,
-      Quantity: parentPieceQty,
+      Quantity: parentPieceQty,           // unités de base SAP (kg pour un article au poids)
+      PackageQuantity: body.parentColis,  // SAP « Nb colis » — visible sur l'entrée
       WarehouseCode: entryWarehouse,
       // Parent batch-managed (rare) : le lot du produit fini = code OP.
       ...(parentMeta.manageBatch

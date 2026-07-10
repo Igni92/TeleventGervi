@@ -109,7 +109,8 @@ export type ModeQuantite = "unite" | "colis";
  *     colisQty = pieceQty / ratio — peut être FRACTIONNAIRE (0,5 colis =
  *     6 barquettes d'un colis de 12) : c'est le but de la v3, entamer des colis.
  *   • mode "colis" : colisQty = qty × tours, pieceQty = colisQty × ratio (v2).
- * `ratio` = packRatio de l'article choisi (unités de base par colis, kg → 1).
+ * `ratio` = packRatio de l'article choisi (unités de base par colis ; article
+ * au poids → kg PAR COLIS, cf. colisInfo).
  */
 export function quantitesComposant(
   qty: number,

@@ -61,7 +61,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: `Produit "${parent}" introuvable.` }, { status: 404 });
   }
   const parentMeta = parentRows[0];
-  const parentRatio = packRatio(parentMeta.salesUnit, parentMeta.salesQtyPerPackUnit != null ? Number(parentMeta.salesQtyPerPackUnit) : null);
+  const parentRatio = packRatio(
+    parentMeta.salesUnit,
+    parentMeta.salesQtyPerPackUnit != null ? Number(parentMeta.salesQtyPerPackUnit) : null,
+    parentMeta.salesUnitWeight != null ? Number(parentMeta.salesUnitWeight) : null,
+  );
   const parentUnite = uniteGestion({
     salesUnit: parentMeta.salesUnit,
     inventoryUnit: parentMeta.inventoryUnit,
