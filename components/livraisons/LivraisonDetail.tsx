@@ -2794,6 +2794,7 @@ function LineToolMenu({ docEntry, docNum, pos, onClose, onDone }: {
   // Mode LOT : candidats FIFO enrichis pour cet article.
   const [cands, setCands] = useState<LotCand[] | null>(null);
   const [lotBusy, setLotBusy] = useState<string | null>(null);
+  const [manual, setManual] = useState("");   // saisie manuelle d'un n° d'EM
   // Mode ARTICLE : recherche produit (échange).
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SwapProduct[]>([]);
@@ -2850,22 +2851,23 @@ function LineToolMenu({ docEntry, docNum, pos, onClose, onDone }: {
 
   // CHANGER LE LOT : pose le lot choisi sur la/les ligne(s) de l'article et aligne
   // le magasin sur celui du lot (les autres lignes conservées à l'identique).
-  async function runLotChange(c: LotCand) {
+  // `warehouse` null (saisie manuelle) → on garde le magasin de la ligne.
+  async function runLotChange(lot: string, warehouse: string | null) {
     if (lotBusy || busy) return;
-    setLotBusy(c.lot);
+    setLotBusy(lot);
     try {
       const src = await loadSrc();
       const targets = src.filter((l) => l.itemCode === pos.oldCode);
       if (targets.length === 0) throw new Error("Article introuvable sur ce bon");
       if (targets.some((l) => l.closed)) throw new Error("Article déjà livré — lot verrouillé");
       const lines = src.map((l) => l.itemCode === pos.oldCode
-        ? { itemCode: l.itemCode, quantity: l.qtyPieces, warehouseCode: (c.warehouse ?? l.warehouse) ?? undefined, price: l.price ?? undefined, keep: true, lot: c.lot }
+        ? { itemCode: l.itemCode, quantity: l.qtyPieces, warehouseCode: (warehouse ?? l.warehouse) ?? undefined, price: l.price ?? undefined, keep: true, lot }
         : { itemCode: l.itemCode, quantity: l.qtyPieces, warehouseCode: l.warehouse ?? undefined, price: l.price ?? undefined, keep: true, lot: l.lot ?? undefined });
       const res = await fetch(`/api/sap/orders/${docEntry}/modif`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines }),
       }).then((r) => r.json());
       if (!res?.ok) throw new Error(res?.error || "Échec du changement de lot");
-      toast.success(`Lot → ${c.lot}`, { description: `BL n°${docNum} · ${pos.oldName}` });
+      toast.success(`Lot → ${lot}`, { description: `BL n°${docNum} · ${pos.oldName}` });
       onDone();
       onClose();
     } catch (e) {
@@ -2936,6 +2938,7 @@ function LineToolMenu({ docEntry, docNum, pos, onClose, onDone }: {
       </div>
 
       {mode === "lot" ? (
+        <>
         <div className="overflow-y-auto py-1 min-h-0">
           <p className="px-3 pt-1 pb-0.5 text-[9.5px] uppercase tracking-wider text-muted-foreground font-semibold">Lots — ordre FIFO</p>
           {cands === null ? (
@@ -2943,7 +2946,7 @@ function LineToolMenu({ docEntry, docNum, pos, onClose, onDone }: {
           ) : cands.length === 0 ? (
             <p className="px-3 py-2 text-[11.5px] italic text-muted-foreground">Aucun lot en stock pour cet article.</p>
           ) : cands.map((c) => (
-            <button key={c.lot} type="button" disabled={lotBusy != null} onClick={() => runLotChange(c)}
+            <button key={c.lot} type="button" disabled={lotBusy != null} onClick={() => runLotChange(c.lot, c.warehouse)}
               className="w-full text-left px-3 py-1.5 hover:bg-secondary/60 disabled:opacity-60 transition-colors">
               <div className="flex items-center gap-1.5 text-[12.5px]">
                 <span className="font-semibold text-foreground">{c.lot}</span>
@@ -2969,6 +2972,31 @@ function LineToolMenu({ docEntry, docNum, pos, onClose, onDone }: {
             </button>
           ))}
         </div>
+        {/* Saisie manuelle : je tape les chiffres, ça pose « EM<chiffres> ». */}
+        <div className="shrink-0 border-t border-border/60 bg-secondary/30 px-2.5 py-2">
+          <label className="block text-[9.5px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Ou saisir le n° d&apos;entrée</label>
+          <div className="flex items-center gap-1.5">
+            <span className="inline-flex items-center h-7 pl-2 pr-1 rounded-l-md border border-r-0 border-border bg-card text-[12px] font-semibold text-muted-foreground select-none">EM</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={manual}
+              onChange={(e) => setManual(e.target.value.replace(/\D/g, ""))}
+              onKeyDown={(e) => { if (e.key === "Enter" && manual && lotBusy == null) { e.preventDefault(); runLotChange(`EM${manual}`, null); } }}
+              placeholder="23568"
+              className="h-7 flex-1 min-w-0 rounded-none border border-border bg-background px-2 text-[12.5px] tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            />
+            <button
+              type="button"
+              disabled={!manual || lotBusy != null}
+              onClick={() => manual && runLotChange(`EM${manual}`, null)}
+              className="h-7 shrink-0 rounded-r-md border border-l-0 border-brand-500 bg-brand-500 px-2.5 text-[12px] font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand-600"
+            >
+              {lotBusy === `EM${manual}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "OK"}
+            </button>
+          </div>
+        </div>
+        </>
       ) : (
         <>
           <div className="shrink-0 relative px-2 pt-2">

@@ -139,12 +139,27 @@ export async function GET(req: NextRequest) {
         });
       }
 
-      // 2) Lots du RÉSOLVEUR en stock physique, absents du registre (repli).
+      // Entrepôts déjà couverts par le REGISTRE (per-EM fiable) — on ne leur ajoute
+      // pas de lot de repli.
+      const ledgerWhs = new Set<string>();
+      for (const c of byLot.values()) ledgerWhs.add(c.warehouse ?? "?");
+
+      // 2) Repli (registre absent pour cet entrepôt) : SEULEMENT la PLUS RÉCENTE
+      //    EM par entrepôt-avec-stock. Le stock physique vient de la DERNIÈRE
+      //    arrivée, pas des vieux lots déjà épuisés — sinon on proposait tout
+      //    l'historique des EM tant que l'entrepôt avait du stock (bug signalé).
+      //    byItemList est trié DESC par DocNum → la 1re EM vue d'un entrepôt est
+      //    la plus récente.
+      const fallbackWhsSeen = new Set<string>();
       for (const d of maps.byItemList.get(code) ?? []) {
         const lot = `EM${d}`;
         if (byLot.has(lot)) continue;
         const warehouse = maps.whsOfItemDoc.get(`${code}|${d}`) ?? null;
+        const whsKey = warehouse ?? "?";
+        if (ledgerWhs.has(whsKey)) continue;          // registre fiable pour cet entrepôt
+        if (fallbackWhsSeen.has(whsKey)) continue;    // déjà la plus récente EM de cet entrepôt
         if (!lotInStock(stock, code, warehouse)) continue;
+        fallbackWhsSeen.add(whsKey);
         byLot.set(lot, {
           lot, docNum: d, warehouse,
           affect: affects.get(d) ?? "TOUS",
