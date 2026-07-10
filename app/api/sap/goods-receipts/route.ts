@@ -170,6 +170,13 @@ export async function POST(req: NextRequest) {
   // On envoie PackageQuantity (colis) ET Quantity (pie) — sans le calcul côté
   // serveur, SAP laisse Qty Totale = colis et le stock physique est faux.
   const today = new Date().toISOString().slice(0, 10);
+  // Fenêtre de RATTRAPAGE rétro (propagation d'EM sur les découverts) : on ne se
+  // limite pas au jour même. Un article vendu à découvert il y a quelques jours
+  // (BL ouvert en magasin d'attente 000, LOT_PENDING) doit lui AUSSI passer au
+  // magasin de réception (01) quand la marchandise arrive — sinon 000 reste
+  // négatif et le stock s'accumule en 01 (décalage SAP constaté).
+  const RETRO_WINDOW_DAYS = 60;
+  const retroSince = new Date(Date.now() - RETRO_WINDOW_DAYS * 86_400_000).toISOString().slice(0, 10);
   // Date du DOCUMENT (réception) : saisie au formulaire ou aujourd'hui. Distincte
   // de `today` (jour réel) qui sert aux scans de propagation rétro ci-dessous.
   const docDate = (body.docDate && /^\d{4}-\d{2}-\d{2}$/.test(body.docDate)) ? body.docDate : today;
@@ -287,9 +294,11 @@ export async function POST(req: NextRequest) {
     console.warn("[GoodsReceipt] Affectation EM non enregistrée (non-bloquant):", (e as Error).message);
   }
 
-  // ── Propagation rétro : patcher les BL ouverts du jour qui portent LOT_PENDING
-  //    sur un item présent dans ce PDN. FIFO par DocEntry asc, dans la limite de
-  //    la quantité reçue pour cet item.
+  // ── Propagation rétro : patcher les BL ouverts RÉCENTS (fenêtre glissante,
+  //    RETRO_WINDOW_DAYS) qui portent LOT_PENDING sur un item présent dans ce PDN.
+  //    FIFO par DocEntry asc, dans la limite de la quantité reçue pour cet item.
+  //    (Avant : uniquement le jour même → un découvert d'un autre jour restait
+  //    bloqué en magasin 000, jamais relocalisé vers le magasin de réception.)
   //    ⚠️ Pas de lambda OData (`DocumentLines/any(l: ...)`) : ce Service Layer le
   //    rejette en HTTP 400 « Invalid symbol in the filter condition » (vérifié
   //    sonde 6a de scripts/diag-carriers.mjs, base GERVIFRAIS). On scanne donc
@@ -325,7 +334,7 @@ export async function POST(req: NextRequest) {
     const orders = await sap.getAll<SapOrderForRetro>(
       `Orders?$orderby=DocEntry asc`
       + `&$select=DocEntry,DocNum,DocDate,DocumentStatus,CardCode,DocumentLines`
-      + `&$filter=${encodeURIComponent(`DocDate eq '${today}' and DocumentStatus eq 'bost_Open'`)}`,
+      + `&$filter=${encodeURIComponent(`DocDate ge '${retroSince}' and DocumentStatus eq 'bost_Open'`)}`,
       { pageSize: 200 },
     );
 
@@ -392,7 +401,7 @@ export async function POST(req: NextRequest) {
       }
     }
     console.log(
-      `[GoodsReceipt] Propagation rétro : ${orders.length} commande(s) ouverte(s) du ${today} scannée(s), `
+      `[GoodsReceipt] Propagation rétro : ${orders.length} commande(s) ouverte(s) depuis le ${retroSince} scannée(s), `
       + `${retroPatchCount} ligne(s) ${LOT_PENDING} → ${lotCode}`,
     );
   } catch (e) {
