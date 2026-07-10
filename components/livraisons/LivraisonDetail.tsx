@@ -1726,7 +1726,10 @@ const OrderRow = memo(function OrderRow({
         return;
       }
       setSavedRef(val);
-      toast.success(val ? `N° de commande enregistré (#${doc.docNum})` : `N° de commande retiré (#${doc.docNum})`);
+      // BL clôturé (déjà facturé) : le serveur reporte aussi le n° sur la facture.
+      const inv: number[] = Array.isArray(j?.invoiceNums) ? j.invoiceNums : [];
+      const suffix = inv.length > 0 ? ` + facture #${inv.join(", #")}` : "";
+      toast.success(val ? `N° de commande enregistré (#${doc.docNum})${suffix}` : `N° de commande retiré (#${doc.docNum})${suffix}`);
     } catch {
       toast.error("SAP injoignable — n° de commande non enregistré");
       setRefDraft(savedRef);

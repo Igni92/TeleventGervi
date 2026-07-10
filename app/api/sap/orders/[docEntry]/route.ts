@@ -10,6 +10,9 @@ import { setClientTournee } from "@/lib/clientTournee";
  * GET   /api/sap/orders/[docEntry]   → détail d'une commande (lignes) pour affichage/édition
  * PATCH /api/sap/orders/[docEntry]   → modifie les lignes d'une commande OUVERTE
  *   body: { lines: [{ lineNum, quantity?, price? }], numAtCard?, comments? }
+ *   numAtCard : accepté aussi sur un BL CLÔTURÉ (SAP autorise la réf. client
+ *   sur document clôturé) — le n° est alors REPORTÉ automatiquement sur la/les
+ *   facture(s) créée(s) depuis ce BL (réponse : invoiceNums).
  */
 type Line = {
   LineNum: number; ItemCode: string; ItemDescription?: string; Quantity: number;
@@ -126,7 +129,35 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ docEntr
       }
     }
     const o = await sap.get<Order>(`Orders(${params.docEntry})`);
-    return NextResponse.json({ ok: true, total: o.DocTotal ?? 0, totalHT: (o.DocTotal ?? 0) - (o.VatSum ?? 0) });
+
+    // ── Report du n° de commande sur la/les FACTURE(S) liée(s) (BL clôturé) ──
+    // Un BL clôturé a en général déjà été copié en facture : le n° client saisi
+    // après coup (portail Auchan…) doit suivre sur la facture — c'est elle qui
+    // porte la réf. chez le client. Une facture référence la commande par ses
+    // lignes BaseType=17 (oOrders) + BaseEntry (même mécanique que la liste des
+    // dernières commandes de la console). Best-effort : le n° est de toute
+    // façon posé sur le BL ; les n° de factures mises à jour partent dans la
+    // réponse pour enrichir le toast.
+    const invoiceNums: number[] = [];
+    if (body.numAtCard !== undefined && o.DocumentStatus === "bost_Close" && o.CardCode) {
+      try {
+        type Inv = { DocEntry: number; DocNum: number; DocumentLines?: { BaseType?: number; BaseEntry?: number }[] };
+        const filter = encodeURIComponent(`CardCode eq '${o.CardCode.replace(/'/g, "''")}'`);
+        const inv = await sap.get<{ value: Inv[] }>(
+          `Invoices?$top=60&$orderby=DocEntry desc&$select=DocEntry,DocNum,DocumentLines&$filter=${filter}`,
+        );
+        const orderEntry = Number(params.docEntry);
+        for (const f of inv.value || []) {
+          if (!(f.DocumentLines || []).some((l) => l.BaseType === 17 && l.BaseEntry === orderEntry)) continue;
+          await sap.patch(`Invoices(${f.DocEntry})`, { NumAtCard: patch.NumAtCard });
+          invoiceNums.push(f.DocNum);
+        }
+      } catch (e) {
+        console.warn(`[orders PATCH] Report NumAtCard sur facture (BL ${params.docEntry}) échoué (non-bloquant):`, (e as Error).message);
+      }
+    }
+
+    return NextResponse.json({ ok: true, total: o.DocTotal ?? 0, totalHT: (o.DocTotal ?? 0) - (o.VatSum ?? 0), invoiceNums });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }

@@ -224,7 +224,9 @@ function VenteRow({ d }: { d: Doc }) {
       const j = await r.json().catch(() => null);
       if (!r.ok || j?.ok === false) throw new Error(j?.error || "Échec");
       savedRef.current = v;
-      toast.success(`N° commande enregistré — BL #${d.docNum}`);
+      // BL clôturé (déjà facturé) : le serveur reporte aussi le n° sur la facture.
+      const inv: number[] = Array.isArray(j?.invoiceNums) ? j.invoiceNums : [];
+      toast.success(`N° commande enregistré — BL #${d.docNum}${inv.length > 0 ? ` + facture #${inv.join(", #")}` : ""}`);
     } catch (e) {
       toast.error(`N° commande non enregistré : ${e instanceof Error ? e.message : ""}`);
       setNum(savedRef.current);
