@@ -6,11 +6,14 @@ import { useRouter } from "next/navigation";
 import {
   MonitorSmartphone, Loader2, Phone, AlertTriangle,
   ArrowLeft, Truck, MessageSquareText, Search,
+  Plus, Pencil, FileText, PackageOpen, PackageCheck, ChevronRight,
 } from "lucide-react";
 import { Ecran2Order } from "@/components/console/Ecran2Order";
 import { PromoBanner } from "@/components/promos/PromoBanner";
-import { rememberConsoleScreen } from "@/components/console/ConsoleScreenGate";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
 import {
   subscribeActiveClient, readActiveClient, requestActiveClient, clearModif,
   type ActiveClientState, type ActiveClientInfo,
@@ -20,6 +23,8 @@ import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
 type ModifTarget = { docEntry: number; docNum: number; clientId: string | null; clientName: string | null };
 /** Compte chargé MANUELLEMENT via la recherche (hors file de télévente). */
 type ManualClient = { clientId: string; clientName: string; info: ActiveClientInfo | null };
+/** Mode de la recherche de compte : créer un nouveau bon, ou en modifier un existant. */
+type SearchMode = "create" | "modify";
 
 /**
  * Écran 2 (fenêtre détachée) — optimisé **marge + relation client + incident**.
@@ -50,9 +55,11 @@ export default function Ecran2Page() {
   const inModif = useRef(false);
   inModif.current = modif != null;
 
-  // C3 — mémorise « dernier écran Console = Écran 2 » : le lien Console de la
-  // sidebar ramènera ici (cf. ConsoleScreenGate sur /console).
-  useEffect(() => { rememberConsoleScreen("ecran2"); }, []);
+  // Mode de la recherche de compte : « create » = créer un nouveau bon (défaut),
+  // « modify » = ouvrir la liste des BL du compte pour en consulter/modifier un.
+  const [searchMode, setSearchMode] = useState<SearchMode>("create");
+  // Compte dont on parcourt les BL existants (dialog de sélection, mode « modify »).
+  const [browseClient, setBrowseClient] = useState<{ id: string; nom: string } | null>(null);
 
   useEffect(() => {
     const initial = readActiveClient();
@@ -99,6 +106,26 @@ export default function Ecran2Page() {
   // post-envoi) et on reprend le client synchronisé.
   const clearManual = useCallback(() => { setManual(null); setDismissedId(null); }, []);
 
+  // Recherche → clic sur un compte : selon le mode, on CRÉE un nouveau bon
+  // (« create » → pickManual) ou on ouvre la liste de ses BL à modifier
+  // (« modify » → dialog de sélection).
+  const pickClient = useCallback((c: SearchClient) => {
+    if (searchMode === "modify") { setBrowseClient({ id: c.id, nom: c.nom }); return; }
+    pickManual(c);
+  }, [searchMode, pickManual]);
+
+  // Sélection d'un BL existant → bascule l'écran 2 en MODIFICATION sur ce bon
+  // (même fenêtre), exactement comme la modif diffusée par « Détail livraison ».
+  const pickModifDoc = useCallback((doc: { docEntry: number; docNum: number }) => {
+    const c = browseClient;
+    if (!c) return;
+    if (inModif.current) clearModif();
+    setManual(null);
+    setDismissedId(null);
+    setModif({ docEntry: doc.docEntry, docNum: doc.docNum, clientId: c.id, clientName: c.nom });
+    setBrowseClient(null);
+  }, [browseClient]);
+
   const rawClientId = modif ? modif.clientId : (manual?.clientId ?? state?.clientId ?? null);
   // Client écarté après l'envoi d'un BL → la vue est LIBRE (client suivant).
   const dismissed = !modif && rawClientId != null && rawClientId === dismissedId;
@@ -125,8 +152,13 @@ export default function Ecran2Page() {
 
       <ClientBanner
         clientId={clientId} clientName={clientName} info={info}
-        manual={manual != null || dismissed} onPick={pickManual} onClearManual={clearManual}
+        manual={manual != null || dismissed}
+        searchMode={searchMode} onSearchModeChange={setSearchMode}
+        onPick={pickClient} onClearManual={clearManual}
       />
+
+      {/* Sélecteur de BL (mode « Modifier un bon ») — liste des bons du compte choisi. */}
+      <BLPickerDialog client={browseClient} onClose={() => setBrowseClient(null)} onPick={pickModifDoc} />
 
       {/* Constructeur de commande — prend tout l'espace restant */}
       <div className="flex-1 min-h-0">
@@ -159,17 +191,16 @@ export default function Ecran2Page() {
    commercial, e-mail) vivent sur l'Écran 1.
 ───────────────────────────────────────────────────────────── */
 
-/** C3 — Retour volontaire à l'Écran 1 dans CETTE fenêtre : on réécrit la
- *  mémoire d'écran AVANT de naviguer, sinon le Gate de /console nous
- *  renverrait immédiatement ici. Icône seule (plus de libellé texte). */
+/** Retour à la Console d'appels (Écran 1) dans CETTE fenêtre. Icône seule.
+ *  Les deux écrans restent synchronisés via consoleSync. */
 function Ecran1Link() {
   const router = useRouter();
   return (
     <button
       type="button"
-      onClick={() => { rememberConsoleScreen("ecran1"); router.push("/console"); }}
-      title="Revenir à l'Écran 1 (file d'appel) dans cette fenêtre"
-      aria-label="Revenir à l'Écran 1"
+      onClick={() => router.push("/console")}
+      title="Revenir à la Console d'appels (file d'appel)"
+      aria-label="Revenir à la Console d'appels"
       className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-brand-600 dark:hover:text-brand-400 hover:bg-secondary/60 transition-colors shrink-0"
     >
       <ArrowLeft className="h-3.5 w-3.5" />
@@ -178,32 +209,38 @@ function Ecran1Link() {
 }
 
 function ClientBanner({
-  clientId, clientName, info, manual, onPick, onClearManual,
+  clientId, clientName, info, manual, searchMode, onSearchModeChange, onPick, onClearManual,
 }: {
   clientId: string | null; clientName: string | null; info: ActiveClientInfo | null;
-  manual: boolean; onPick: (c: SearchClient) => void; onClearManual: () => void;
+  manual: boolean; searchMode: SearchMode; onSearchModeChange: (m: SearchMode) => void;
+  onPick: (c: SearchClient) => void; onClearManual: () => void;
 }) {
   // Fetch unique des dernières livraisons (mini-frise à droite du nom + notes).
   // Appelé AVANT tout return conditionnel (règle des hooks) ; no-op si pas de client.
   const { docs: deliveryDocs } = useClientDeliveries(clientId);
 
-  // Recherche d'un compte (créer un BL hors file de télévente) — toujours
-  // accessible, quel que soit l'état de synchronisation.
+  // Recherche d'un compte — toujours accessible, quel que soit l'état de synchro.
+  // Un sélecteur de mode (au-dessus) décide de l'action au clic sur un compte :
+  //   • « Créer un bon »   → charge le compte pour saisir un nouveau BL ;
+  //   • « Modifier un bon » → ouvre la liste de ses BL pour en consulter/modifier un.
   const searchRow = (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 min-w-0">
-        <ClientSearch onPick={onPick} placeholder="Rechercher un compte (nom ou code)…" />
+    <div className="space-y-1.5">
+      <SearchModeToggle mode={searchMode} onChange={onSearchModeChange} />
+      <div className="flex items-center gap-2">
+        <div className="flex-1 min-w-0">
+          <ClientSearch mode={searchMode} onPick={onPick} />
+        </div>
+        {manual && (
+          <button
+            type="button"
+            onClick={onClearManual}
+            title="Abandonner ce compte et revenir au client synchronisé depuis l'écran 1"
+            className="shrink-0 inline-flex items-center gap-1 h-9 px-2.5 rounded-md border border-border bg-card text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-brand-400 transition-colors"
+          >
+            <MonitorSmartphone className="h-3.5 w-3.5" /> Suivre l&apos;écran 1
+          </button>
+        )}
       </div>
-      {manual && (
-        <button
-          type="button"
-          onClick={onClearManual}
-          title="Abandonner ce compte et revenir au client synchronisé depuis l'écran 1"
-          className="shrink-0 inline-flex items-center gap-1 h-9 px-2.5 rounded-md border border-border bg-card text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-brand-400 transition-colors"
-        >
-          <MonitorSmartphone className="h-3.5 w-3.5" /> Suivre l&apos;écran 1
-        </button>
-      )}
     </div>
   );
 
@@ -327,9 +364,12 @@ function infoFromSearch(c: SearchClient): ActiveClientInfo {
   };
 }
 
-function ClientSearch({ onPick, placeholder }: {
-  onPick: (c: SearchClient) => void; placeholder?: string;
+function ClientSearch({ mode, onPick }: {
+  mode: SearchMode; onPick: (c: SearchClient) => void;
 }) {
+  const placeholder = mode === "modify"
+    ? "Compte — modifier un bon (nom ou code)…"
+    : "Compte — nouveau bon (nom ou code)…";
   const [term, setTerm] = useState("");
   const [results, setResults] = useState<SearchClient[]>([]);
   const [loading, setLoading] = useState(false);
@@ -390,7 +430,7 @@ function ClientSearch({ onPick, placeholder }: {
         onChange={(e) => setTerm(e.target.value)}
         onKeyDown={onKeyDown}
         onFocus={() => { if (results.length > 0) setOpen(true); }}
-        placeholder={placeholder ?? "Rechercher un compte…"}
+        placeholder={placeholder}
         className="pl-9 h-9 text-[13px]"
         aria-label="Rechercher un compte client"
       />
@@ -434,6 +474,147 @@ function ClientSearch({ onPick, placeholder }: {
         </div>
       )}
     </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Bascule du mode de recherche — « Créer un bon » (défaut) vs
+   « Modifier un bon ». Le mode décide de l'action au clic sur un
+   compte trouvé (nouveau BL, ou liste des BL existants à modifier).
+───────────────────────────────────────────────────────────── */
+function SearchModeToggle({ mode, onChange }: {
+  mode: SearchMode; onChange: (m: SearchMode) => void;
+}) {
+  const base = "inline-flex items-center justify-center gap-1 flex-1 h-7 rounded-md text-[11px] font-semibold transition-colors";
+  const on = "bg-card text-foreground shadow-sm ring-1 ring-border";
+  const off = "text-muted-foreground hover:text-foreground";
+  return (
+    <div
+      className="flex items-center gap-0.5 rounded-lg border border-border bg-secondary/40 p-0.5"
+      role="tablist"
+      aria-label="Mode de la recherche de compte"
+    >
+      <button
+        type="button" role="tab" aria-selected={mode === "create"}
+        onClick={() => onChange("create")}
+        title="Chercher un compte pour créer un nouveau bon de livraison"
+        className={`${base} ${mode === "create" ? on : off}`}
+      >
+        <Plus className="h-3.5 w-3.5" /> Créer un bon
+      </button>
+      <button
+        type="button" role="tab" aria-selected={mode === "modify"}
+        onClick={() => onChange("modify")}
+        title="Chercher un compte pour consulter/modifier un de ses bons de livraison"
+        className={`${base} ${mode === "modify" ? on : off}`}
+      >
+        <Pencil className="h-3.5 w-3.5" /> Modifier un bon
+      </button>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Sélecteur de BL — mode « Modifier un bon » : liste les derniers
+   bons de livraison du compte choisi. Cliquer un bon le charge sur
+   l'Écran 2 en MODIFICATION (même fenêtre), comme la modif diffusée
+   par « Détail livraison ». Source : /api/sap/orders.
+───────────────────────────────────────────────────────────── */
+interface PickDoc {
+  docEntry: number; docNum: number; docDate: string; dueDate: string;
+  total: number; status?: string; weightKg?: number | null; colis?: number | null;
+  invoiceNum?: number | null;
+}
+
+function BLPickerDialog({ client, onClose, onPick }: {
+  client: { id: string; nom: string } | null;
+  onClose: () => void;
+  onPick: (doc: { docEntry: number; docNum: number }) => void;
+}) {
+  const [docs, setDocs] = useState<PickDoc[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!client) { setDocs(null); setError(null); return; }
+    let cancelled = false;
+    setDocs(null); setError(null);
+    fetch(`/api/sap/orders?clientId=${encodeURIComponent(client.id)}&last=15`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j: { docs?: PickDoc[] }) => { if (!cancelled) setDocs(j.docs ?? []); })
+      .catch(() => { if (!cancelled) setError("Chargement des bons impossible."); });
+    return () => { cancelled = true; };
+  }, [client?.id]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fmt = (n: number) => n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = (d: string) => new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  const fmtColis = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1).replace(".", ","));
+
+  return (
+    <Dialog open={!!client} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-brand-600 dark:text-brand-400" />
+            Modifier un bon{client ? ` — ${client.nom}` : ""}
+          </DialogTitle>
+          <DialogDescription>
+            Choisis le bon de livraison à consulter et modifier — il s&apos;ouvre sur cet écran en mode modification.
+          </DialogDescription>
+        </DialogHeader>
+
+        {docs === null && !error && (
+          <p className="text-[13px] text-muted-foreground inline-flex items-center gap-2 py-4">
+            <Loader2 className="h-4 w-4 animate-spin" /> Chargement des bons…
+          </p>
+        )}
+        {error && <p className="text-[13px] text-rose-600 dark:text-rose-400 py-3">⚠️ {error}</p>}
+        {docs !== null && docs.length === 0 && !error && (
+          <p className="text-[13px] text-muted-foreground italic py-3">Aucun bon de livraison pour ce compte.</p>
+        )}
+
+        {docs && docs.length > 0 && (
+          <ul className="divide-y divide-border/60">
+            {docs.map((o) => {
+              const closed = o.status === "bost_Close";
+              return (
+                <li key={o.docEntry}>
+                  <button
+                    type="button"
+                    onClick={() => onPick({ docEntry: o.docEntry, docNum: o.docNum })}
+                    title={`Ouvrir le BL n° ${o.docNum} en modification`}
+                    className="w-full flex items-center gap-2 py-2 -mx-1 px-1 rounded-md hover:bg-secondary/50 transition-colors text-left group"
+                  >
+                    <span className={`shrink-0 inline-flex items-center justify-center h-5 w-9 rounded text-[10px] font-semibold tnum ${
+                      closed ? "bg-muted text-muted-foreground" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
+                    }`} title={closed ? "Clôturé / annulé" : "Ouvert"}>
+                      {closed ? <PackageCheck className="h-3 w-3" /> : <PackageOpen className="h-3 w-3" />}
+                    </span>
+                    <span className="min-w-0 flex-1 flex items-baseline gap-1.5">
+                      <span className="text-[13px] font-semibold text-foreground shrink-0"># {o.docNum}</span>
+                      <span className="text-[11px] text-muted-foreground tnum shrink-0">{fmtDate(o.docDate)}</span>
+                      {closed && <span className="text-[10px] text-muted-foreground italic shrink-0">· clôturé</span>}
+                      {o.invoiceNum ? (
+                        <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] px-1 py-px rounded bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300" title="Facture liée">
+                          <FileText className="h-2.5 w-2.5" />{o.invoiceNum}
+                        </span>
+                      ) : null}
+                    </span>
+                    {o.colis != null && o.colis > 0 && (
+                      <span className="shrink-0 text-[11px] text-muted-foreground tnum">{fmtColis(o.colis)} colis</span>
+                    )}
+                    {o.weightKg != null && o.weightKg > 0 && (
+                      <span className="shrink-0 text-[11px] text-muted-foreground tnum">{o.weightKg} kg</span>
+                    )}
+                    <span className="w-[68px] shrink-0 text-right font-bold tnum text-[12px] text-foreground">{fmt(o.total)} €</span>
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40 group-hover:text-foreground transition-colors" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
