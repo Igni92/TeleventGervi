@@ -13,8 +13,8 @@
  * Les BL « avoir / exclu » ne sont pas des ventes → masqués de cet état.
  * (La mise en préparation / le suivi de picking vivent dans le Détail livraison.)
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, Check, Clock, Loader2, RefreshCw, Search, Store, Truck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CalendarDays, Check, Clock, Hash, Loader2, RefreshCw, Search, Store, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { formatDeliveryDate } from "@/lib/livraison";
 import type { ApiResp, Doc } from "@/lib/livraisonView";
@@ -207,6 +207,30 @@ function Coche({ done, label, tone }: { done: boolean; label: string; tone: "eme
 /** Ligne de vente — un BL (magasin), consultation ; coches préparé + départ. */
 function VenteRow({ d }: { d: Doc }) {
   const takenTime = d.takenAt ? d.takenAt.slice(11, 16) : null;
+  // N° de commande client (réf. NumAtCard) — éditable ici, enregistré sur le BL SAP.
+  const [num, setNum] = useState(d.numAtCard ?? "");
+  const [saving, setSaving] = useState(false);
+  const savedRef = useRef(d.numAtCard ?? "");
+
+  const saveNum = useCallback(async () => {
+    const v = num.trim();
+    if (v === savedRef.current) return;
+    setSaving(true);
+    try {
+      const r = await fetch(`/api/sap/orders/${d.docEntry}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ numAtCard: v }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || j?.ok === false) throw new Error(j?.error || "Échec");
+      savedRef.current = v;
+      toast.success(`N° commande enregistré — BL #${d.docNum}`);
+    } catch (e) {
+      toast.error(`N° commande non enregistré : ${e instanceof Error ? e.message : ""}`);
+      setNum(savedRef.current);
+    } finally { setSaving(false); }
+  }, [num, d.docEntry, d.docNum]);
+
   return (
     <li className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 sm:px-5 py-2.5">
       <div className="min-w-0 flex-1">
@@ -227,6 +251,21 @@ function VenteRow({ d }: { d: Doc }) {
           {d.totalHT > 0 && <span>{eur.format(d.totalHT)} HT</span>}
         </p>
       </div>
+      {/* N° de commande client (réf.) — saisissable/modifiable, écrit sur le BL. */}
+      <label className="inline-flex items-center gap-1.5 shrink-0" title="N° de commande client (référence)">
+        <Hash className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        <input
+          value={num}
+          onChange={(e) => setNum(e.target.value)}
+          onBlur={saveNum}
+          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+          disabled={saving || !d.open}
+          placeholder="N° cmd"
+          aria-label={`N° de commande du BL ${d.docNum}`}
+          className="h-8 w-[110px] rounded-md border border-border bg-card px-2 text-[12px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
+        />
+        {saving && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />}
+      </label>
       {/* Avancement : coches Préparé (fait) puis Départ (parti). */}
       <div className="flex items-center gap-1.5 shrink-0">
         <Coche done={d.prepared || !!d.departed} label="Préparé" tone="emerald" />
