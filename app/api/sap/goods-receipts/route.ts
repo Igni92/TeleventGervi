@@ -10,6 +10,8 @@ import { buildWhsBudget, remainingForItem, pickReceiptWarehouse, consumeBudget }
 import { normalizeEmAffect, setEmAffect } from "@/lib/emAffect";
 import { creditLots } from "@/lib/lotLedger";
 import { setMarchandiseNote, sanitizeRating } from "@/lib/marchandiseNote";
+import { convertQuotationToOrder } from "@/lib/quotationConvert";
+import { isDepartureReached } from "@/lib/livraison";
 
 /**
  * POST /api/sap/goods-receipts
@@ -479,6 +481,75 @@ export async function POST(req: NextRequest) {
     console.warn("[GoodsReceipt] Propagation rétro fabrication échouée (non-bloquant):", (e as Error).message);
   }
 
+  // ── VALIDATION AUTO des bons de commande (offres) désormais couverts ──
+  // Un bon de commande = Quotation SAP : il ne réserve pas de stock. Quand la
+  // marchandise reçue rend TOUS ses articles disponibles, on le passe
+  // automatiquement en commande ferme (comme le bouton « Passer en commande »).
+  // Garde-fous : jour de départ atteint (on ne convertit pas une précommande
+  // future), offre 100 % couverte par le DISPONIBLE SAP (stock − engagements),
+  // budget décrémenté en FIFO pour ne pas sur-promettre entre offres, et
+  // best-effort (jamais bloquant pour la réception).
+  let autoConvertCount = 0;
+  try {
+    const receivedItems = new Set(resolvedLines.map((l) => l.itemCode));
+    type QLine = { ItemCode?: string; Quantity?: number };
+    type QDoc = { DocEntry: number; DocNum: number; DocDueDate: string; Cancelled?: string; DocumentStatus: string; DocumentLines?: QLine[] };
+    const quotes = await sap.getAll<QDoc>(
+      `Quotations?$orderby=DocEntry asc`
+      + `&$select=DocEntry,DocNum,DocDueDate,Cancelled,DocumentStatus,DocumentLines`
+      + `&$filter=${encodeURIComponent(`DocDate ge '${retroSince}' and DocumentStatus eq 'bost_Open'`)}`,
+      { pageSize: 200 },
+    );
+    // Offres candidates : ouvertes, non annulées, jour de départ atteint, et
+    // touchées par au moins un article reçu (une réception ne valide que ce
+    // qu'elle peut plausiblement débloquer).
+    const candidates = quotes.filter((q) =>
+      q.Cancelled !== "tYES"
+      && isDepartureReached(q.DocDueDate)
+      && (q.DocumentLines ?? []).some((l) => l.ItemCode && receivedItems.has(l.ItemCode)));
+
+    if (candidates.length > 0) {
+      // Disponible SAP (stock − engagements) par article, snapshot après le PDN.
+      const codes = [...new Set(candidates.flatMap((q) => (q.DocumentLines ?? []).map((l) => l.ItemCode).filter(Boolean)))] as string[];
+      const availByItem = new Map<string, number>();
+      for (let i = 0; i < codes.length; i += 20) {
+        const chunk = codes.slice(i, i + 20);
+        try {
+          const or = chunk.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
+          const items = await sap.getAll<{ ItemCode: string; QuantityOnStock?: number; QuantityOrderedByCustomers?: number }>(
+            `Items?$select=ItemCode,QuantityOnStock,QuantityOrderedByCustomers&$filter=${encodeURIComponent(`(${or})`)}`,
+            { pageSize: 50, maxPages: 2 },
+          );
+          for (const it of items) availByItem.set(it.ItemCode, (it.QuantityOnStock ?? 0) - (it.QuantityOrderedByCustomers ?? 0));
+        } catch { /* lot d'articles en échec → offres de ces articles non converties */ }
+      }
+      for (const q of candidates) {
+        // Besoin par article (une offre peut porter plusieurs lignes d'un article).
+        const need = new Map<string, number>();
+        for (const l of (q.DocumentLines ?? [])) {
+          if (l.ItemCode && l.Quantity && l.Quantity > 0) need.set(l.ItemCode, (need.get(l.ItemCode) ?? 0) + l.Quantity);
+        }
+        if (need.size === 0) continue;
+        // Couverte SEULEMENT si CHAQUE article a assez de disponible restant.
+        let covered = true;
+        for (const [code, qty] of need) { if ((availByItem.get(code) ?? 0) < qty - 1e-6) { covered = false; break; } }
+        if (!covered) continue;
+        try {
+          const r = await convertQuotationToOrder(q.DocEntry, "auto (réception)");
+          // Réserve le disponible pour ne pas sur-promettre une autre offre.
+          for (const [code, qty] of need) availByItem.set(code, (availByItem.get(code) ?? 0) - qty);
+          autoConvertCount++;
+          console.log(`[GoodsReceipt] Bon de commande #${q.DocNum} couvert → Commande #${r.docNum} (validation auto)`);
+        } catch (e) {
+          console.warn(`[GoodsReceipt] Conversion auto de l'offre #${q.DocNum} échouée (non-bloquant):`, (e as Error).message);
+        }
+      }
+    }
+    if (autoConvertCount > 0) console.log(`[GoodsReceipt] Validation auto : ${autoConvertCount} bon(s) de commande → commande(s).`);
+  } catch (e) {
+    console.warn("[GoodsReceipt] Validation auto des bons de commande échouée (non-bloquant):", (e as Error).message);
+  }
+
   // ── Incrément optimiste local — latence 0 pour le commercial ──
   // ProductStock est en unité d'inventaire (pie), donc on incrémente pieceQty
   // (= colis × ratio), pas packageQuantity.
@@ -499,6 +570,7 @@ export async function POST(req: NextRequest) {
     lot: lotCode,
     retroPatchedLines: retroPatchCount,        // BL ouverts du jour repris en EM<DocNum>
     retroFabricationLines: retroFabricationCount, // sorties fabrication du jour reprises en EM<DocNum>
+    autoConvertedBonsCommande: autoConvertCount,  // bons de commande couverts → commandes fermes (auto)
     cardCode,
     db: process.env.SAP_B1_COMPANY_DB,
     lines: resolvedLines.map((l) => ({
