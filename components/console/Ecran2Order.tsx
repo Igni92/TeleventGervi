@@ -791,10 +791,19 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     // défaut (absent du /api/products) on le reconstruit : qty/colis × poids unité
     // (ex. FB4CA3B = 4 × 1 = 4 kg).
     let colisW = unitInfo(p.salesUnit, p.salesQtyPerPackUnit, p.salesItemsPerUnit ?? null, p.salesUnitWeight).colisWeightKg ?? null;
-    if ((colisW == null || colisW <= 0) && displayUnit === "kg") {
+    // Repli quand /api/products ne renvoie pas salesItemsPerUnit : poids d'un colis
+    // = (unités par colis) × (poids d'une unité, kg). Vaut AUSSI pour les articles
+    // À LA PIÈCE (framboise, barquettes…) — sans ce repli leur poids restait 0 et
+    // la marge /kg (Σ marge ÷ Σ kg) était surévaluée (dénominateur amputé).
+    if (colisW == null || colisW <= 0) {
       const q = p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1 ? p.salesQtyPerPackUnit : 1;
-      const w = p.salesUnitWeight && p.salesUnitWeight > 0 ? p.salesUnitWeight : 1;
-      colisW = Math.round(q * w * 1000) / 1000;
+      // Au POIDS : l'unité de base pèse 1 kg (SAP UnitWgt=1). À la PIÈCE : il faut
+      // le poids relevé d'une pièce — sinon on NE DEVINE PAS (poids inconnu → null,
+      // la ligne sortira du ratio /kg au lieu de le fausser).
+      const w = displayUnit === "kg"
+        ? (p.salesUnitWeight && p.salesUnitWeight > 0 ? p.salesUnitWeight : 1)
+        : (p.salesUnitWeight && p.salesUnitWeight > 0 ? p.salesUnitWeight : null);
+      if (w != null) colisW = Math.round(q * w * 1000) / 1000;
     }
     const stepColis = displayUnit === "kg" ? (colisW && colisW > 0 ? Math.round(colisW * 100) / 100 : 1) : 1;
     // C2 — promo PERCENT : prix prérempli déjà remisé (prix conseillé × (1 − %)),
@@ -1003,20 +1012,25 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   // Marge BRUTE de la commande (depuis le prix d'achat des hints) + marge/kg
   // MOYENNE PONDÉRÉE PAR LE POIDS : Σ marge ligne ÷ Σ kg (des lignes costées).
   const marginAgg = useMemo(() => {
-    let margin = 0, kg = 0, ca = 0;
+    let margin = 0, ca = 0;          // € — TOUTES les lignes costées
+    let marginKg = 0, kg = 0;        // /kg — SEULEMENT les lignes au poids connu (> 0)
     for (const l of cart) {
       const pa = hints[l.itemCode]?.prixAchat;
       if (l.price == null || pa == null) continue;         // prix d'achat inconnu → hors calcul
-      const w = l.unit === "kg" ? l.quantity : l.quantity * (l.colisWeightKg ?? 0);
+      const lineMargin = (l.price - pa) * l.quantity * l.packDivisor;
+      margin += lineMargin;
       ca += l.price * l.quantity * l.packDivisor;
-      margin += (l.price - pa) * l.quantity * l.packDivisor;
-      kg += Number.isFinite(w) && w > 0 ? w : 0;
+      // Marge /kg pondérée par le POIDS RÉEL : une ligne sans poids connu (pièce
+      // sans poids relevé) est EXCLUE du ratio — marge ET kg — pour ne pas le gonfler.
+      const w = l.unit === "kg" ? l.quantity : l.quantity * (l.colisWeightKg ?? 0);
+      if (Number.isFinite(w) && w > 0) { marginKg += lineMargin; kg += w; }
     }
-    return { margin, kg, ca };
+    return { margin, marginKg, kg, ca };
   }, [cart, hints]);
-  const hasCostData = marginAgg.kg > 0;
-  // ── Par KILO (moyenne pondérée) ──
-  const margeBruteKg = hasCostData ? marginAgg.margin / marginAgg.kg : 0;
+  const hasCostData = marginAgg.ca > 0;   // au moins une ligne costée (vue € par livraison)
+  const hasKgData = marginAgg.kg > 0;     // au moins une ligne au poids connu (vue /kg)
+  // ── Par KILO (moyenne pondérée par le poids) ──
+  const margeBruteKg = hasKgData ? marginAgg.marginKg / marginAgg.kg : 0;
   // Coût transport /kg = la MOYENNE du modèle « Coût de transport » (prix
   // position, ou tarif du transporteur non direct) — JAMAIS recalculé sur la
   // commande. Marge nette /kg = marge brute/kg − ce coût /kg moyen.
@@ -2232,6 +2246,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             const isPos = marginUnit === "position";
             const fmtE = (v: number) => `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(v)} €`;
             const fmtK = (v: number) => `${v.toFixed(3)} €/kg`;
+            // Vue /kg : « n.c. » si aucune ligne n'a de poids connu (sinon 0,000 €/kg trompeur).
+            const kgTxt = (v: number) => (hasKgData ? fmtK(v) : "n.c.");
             const transpTxt = transportPerKgClient > 0 || carrierIsDirect
               ? (isPos ? fmtE(coutTransportTotal) : fmtK(transportPerKgClient))
               : "externe n.c.";
@@ -2256,14 +2272,14 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                   {/* Détail : coût transport + marge brute (unité choisie) */}
                   <div className="mt-1.5 flex items-center justify-between gap-2 text-[11.5px] text-muted-foreground">
                     <span>Transport <b className="tnum text-foreground">{transpTxt}</b></span>
-                    <span>Marge brute <b className="tnum text-foreground">{isPos ? fmtE(margeBruteTotal) : fmtK(margeBruteKg)}</b></span>
+                    <span>Marge brute <b className="tnum text-foreground">{isPos ? fmtE(margeBruteTotal) : kgTxt(margeBruteKg)}</b></span>
                   </div>
                   {/* Bas : marge nette en GROS, colorée */}
                   <div className="mt-1 flex items-baseline justify-between gap-2 border-t border-border/40 pt-1">
                     <span className="text-[11px] font-medium text-foreground">{isPos ? "Marge nette livraison" : "Marge nette /kg"}</span>
                     <span className="inline-flex items-baseline gap-1.5">
-                      <span className={`tnum font-extrabold text-[21px] leading-none ${TONE[netTone]}`}>{isPos ? fmtE(margeNetteTotal) : fmtK(margeNetteKg)}</span>
-                      <span className={`tnum font-bold text-[13px] ${TONE[netTone]}`}>{margeNettePct.toFixed(1)} %</span>
+                      <span className={`tnum font-extrabold text-[21px] leading-none ${TONE[netTone]}`}>{isPos ? fmtE(margeNetteTotal) : kgTxt(margeNetteKg)}</span>
+                      {(isPos || hasKgData) && <span className={`tnum font-bold text-[13px] ${TONE[netTone]}`}>{margeNettePct.toFixed(1)} %</span>}
                     </span>
                   </div>
                 </>
