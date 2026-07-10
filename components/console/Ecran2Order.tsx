@@ -1008,11 +1008,21 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   const hasCostData = marginAgg.kg > 0;
   // ── Par KILO (moyenne pondérée) ──
   const margeBruteKg = hasCostData ? marginAgg.margin / marginAgg.kg : 0;
+  // Coût transport /kg = la MOYENNE du modèle « Coût de transport » (prix
+  // position, ou tarif du transporteur non direct) — JAMAIS recalculé sur la
+  // commande. Marge nette /kg = marge brute/kg − ce coût /kg moyen.
   const margeNetteKg = margeBruteKg - transportPerKgClient;
-  // ── Par LIVRAISON (€ total de la commande) ── coût transport sur TOUT le poids.
-  const coutTransportTotal = transportPerKgClient * totalKg;                 // € (ce que la livraison me coûte)
-  const margeBruteTotal = marginAgg.margin;                                  // € marge brute
-  const margeNetteTotal = margeBruteTotal - coutTransportTotal;              // € marge nette
+  // ── Par LIVRAISON (position) ── Le coût transport d'une position est le coût
+  // MOYEN d'une livraison — il NE DOIT PAS varier avec le poids de CETTE commande.
+  // On prend donc le coût /kg moyen × le poids MOYEN d'une livraison directe
+  // (kg/an ÷ nb livraisons/an). Pour un transporteur direct cela redonne
+  // exactement `costPerDelivery` de la page Coût de transport (annuel ÷ livraisons).
+  const avgKgPerDelivery = (transportModel?.deliveriesPerYear ?? 0) > 0
+    ? (transportModel!.kgPerYear || 0) / transportModel!.deliveriesPerYear
+    : 0;
+  const coutTransportTotal = transportPerKgClient * avgKgPerDelivery;        // € — coût MOYEN d'une livraison (fixe)
+  const margeBruteTotal = marginAgg.margin;                                  // € marge brute de CETTE commande
+  const margeNetteTotal = margeBruteTotal - coutTransportTotal;              // € marge nette = marge brute − coût moyen livraison
   // Marge nette % (du CA des lignes costées) — pour le feu tricolore.
   const margeNettePct = marginAgg.ca > 0 ? (margeNetteTotal / marginAgg.ca) * 100 : 0;
   // Feu : rouge = marge nette négative (transport > marge brute) ; orange = nette
