@@ -17,9 +17,11 @@ export default async function ManquantsPage() {
           Manquants
         </h1>
         <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
-          Les articles des commandes du jour dont le <b>disponible SAP est négatif</b> (stock
-          détenu − engagé clients, tous entrepôts confondus) : on a <b>vendu plus qu&apos;on ne
-          détient</b> — <b>achat à prévoir</b>. Chaque article se déplie sur les BL touchés.
+          On <b>sert d&apos;abord avec le stock détenu</b>, puis on <b>achète le reliquat</b>.
+          Un article apparaît quand la <b>demande du jour dépasse le stock physique</b> (tous
+          entrepôts) : seul le <b>déficit réel</b> est « à acheter ». Chaque article se déplie
+          pour répartir le stock entre les commandes — les <b>flèches</b> choisissent qui est
+          prioritaire (servi en premier).
         </p>
       </header>
       <Manquants />

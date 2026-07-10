@@ -1,59 +1,42 @@
 "use client";
 
 /**
- * MANQUANTS — état COMPLET des articles en rupture (stock SAP total négatif,
- * tous entrepôts confondus) sur les commandes d'un jour de livraison.
- * Remplace l'ancien onglet « Manquants » du Détail livraison : c'est le
- * pilotage des ACHATS À PRÉVOIR, avec le détail des BL touchés par article.
+ * MANQUANTS — « faire d'abord avec ce que l'on a, puis acheter le reliquat ».
+ *
+ * Un article est manquant quand la DEMANDE du jour dépasse le STOCK PHYSIQUE
+ * détenu (Items.QuantityOnStock, tous entrepôts). On alloue le stock aux
+ * commandes selon un ordre de PRIORITÉ réglable (flèches) : les premières
+ * servies sont « complètes » avec le stock, le reliquat de chaque commande =
+ * « à acheter ». Total à acheter d'un article = max(0, demande − stock détenu).
+ *
+ * Avant : le calcul se basait sur le « disponible SAP » global (stock − TOUS les
+ * engagements clients), qui incluait les engagements des AUTRES jours et
+ * sur-comptait (« 6 abricots » affichés en beaucoup plus).
  *
  * Source : GET /api/livraisons?date=YYYY-MM-DD (défaut = prochaine livraison).
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, PackageX, RefreshCw, Truck,
+  ArrowDown, ArrowUp, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight,
+  Loader2, PackageX, RefreshCw, ShoppingCart, Truck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { addDaysISO, formatDeliveryDate, frenchHolidayLabel, nextDeliveryDate } from "@/lib/livraison";
-import type { ApiResp, Doc } from "@/lib/livraisonView";
+import type { ApiResp } from "@/lib/livraisonView";
+import { buildShortages, reorderPriority, type ItemShortage } from "@/lib/manquants";
 
 const NF_NUM = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
 const fmtNum = (v: number) => NF_NUM.format(v);
 const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
-interface MissingDocRef {
-  docEntry: number; docNum: number; cardName: string;
-  carrierName: string | null; colis: number; quantity: number;
-}
-interface MissingItem {
-  itemCode: string; itemName: string; stock: number | null;
-  colis: number; quantity: number; docs: MissingDocRef[];
-}
+/** Ordre de priorité par article — mémorisé PAR JOUR (poste partagé, localStorage). */
+const PRIO_KEY = (date: string) => `televent-manquants-prio:${date}`;
 
-/** Cumul des manquants PAR ARTICLE + les BL touchés (avec leur volume). */
-function buildSummary(data: ApiResp | null): MissingItem[] {
-  if (!data?.ok) return [];
-  const byItem = new Map<string, MissingItem>();
-  for (const car of data.carriers) for (const d of car.docs as Doc[]) {
-    const codes = new Set(d.missingItems ?? []);
-    if (codes.size === 0) continue;
-    for (const l of d.lines) {
-      if (!codes.has(l.itemCode)) continue;
-      const g = byItem.get(l.itemCode) ?? {
-        itemCode: l.itemCode, itemName: l.itemName,
-        stock: data.negativeStocks?.[l.itemCode] ?? null,
-        colis: 0, quantity: 0, docs: [],
-      };
-      g.colis += l.colis;
-      g.quantity += l.quantity;
-      g.docs.push({
-        docEntry: d.docEntry, docNum: d.docNum, cardName: d.cardFullName ?? d.cardName,
-        carrierName: d.carrierName, colis: l.colis, quantity: l.quantity,
-      });
-      byItem.set(l.itemCode, g);
-    }
-  }
-  return [...byItem.values()].sort((a, b) => (a.stock ?? 0) - (b.stock ?? 0) || a.itemName.localeCompare(b.itemName, "fr"));
-}
+const SEG_BADGE: Record<string, string> = {
+  CHR: "bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
+  GMS: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+  EXPORT: "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300",
+};
 
 export function Manquants() {
   const auto = useMemo(() => nextDeliveryDate(), []);
@@ -61,6 +44,8 @@ export function Manquants() {
   const [data, setData] = useState<ApiResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  // Priorité (ordre des commandes) réglée à la main, par article. Chargée par jour.
+  const [priorityByItem, setPriorityByItem] = useState<Record<string, number[]>>({});
 
   const load = useCallback(async (d: string) => {
     setLoading(true);
@@ -79,10 +64,34 @@ export function Manquants() {
 
   useEffect(() => { load(date); }, [date, load]);
 
-  const items = useMemo(() => buildSummary(data), [data]);
+  // Recharge l'ordre de priorité mémorisé pour ce jour.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PRIO_KEY(date));
+      setPriorityByItem(raw ? JSON.parse(raw) : {});
+    } catch { setPriorityByItem({}); }
+  }, [date]);
+
+  const items = useMemo(
+    () => buildShortages(data?.carriers ?? [], data?.onHandStocks, priorityByItem),
+    [data, priorityByItem],
+  );
   const holiday = date ? frenchHolidayLabel(date) : null;
+  const toBuyTotal = items.length;
+
   const toggle = (code: string) =>
     setOpen((cur) => { const next = new Set(cur); if (next.has(code)) next.delete(code); else next.add(code); return next; });
+
+  // Réordonne une commande dans la priorité de SON article (flèches), puis mémorise.
+  const move = useCallback((item: ItemShortage, docEntry: number, dir: -1 | 1) => {
+    const current = item.orders.map((o) => o.docEntry);
+    const next = reorderPriority(current, docEntry, dir);
+    setPriorityByItem((prev) => {
+      const merged = { ...prev, [item.itemCode]: next };
+      try { localStorage.setItem(PRIO_KEY(date), JSON.stringify(merged)); } catch { /* quota */ }
+      return merged;
+    });
+  }, [date]);
 
   return (
     <div className="space-y-5">
@@ -137,8 +146,7 @@ export function Manquants() {
           </span>
           <p className="text-[14px] font-semibold text-foreground">Aucun manquant</p>
           <p className="text-[12.5px] text-muted-foreground mt-1 max-w-sm">
-            Aucun article des commandes de ce jour n&apos;a un disponible SAP négatif
-            (stock − engagé clients, tous entrepôts confondus). Rien à racheter.
+            Le stock détenu couvre toutes les commandes de ce jour. Rien à racheter.
           </p>
         </div>
       ) : (
@@ -149,11 +157,11 @@ export function Manquants() {
             </span>
             <div className="min-w-0">
               <p className="text-[13.5px] font-semibold text-foreground leading-tight">
-                Articles manquants — achats à prévoir
+                Articles à acheter — après avoir servi avec le stock
               </p>
               <p className="text-[11px] text-muted-foreground">
-                {items.length} article{items.length > 1 ? "s" : ""} au disponible SAP négatif (stock − engagé clients)
-                sur les commandes du jour · un clic déplie les BL touchés.
+                {toBuyTotal} article{toBuyTotal > 1 ? "s" : ""} où la demande du jour dépasse le stock détenu ·
+                déplie un article pour répartir le stock entre les commandes (flèches = priorité).
               </p>
             </div>
           </div>
@@ -161,15 +169,16 @@ export function Manquants() {
             <thead className="text-[9px] uppercase tracking-wider text-muted-foreground bg-secondary/30">
               <tr>
                 <th className="text-left font-semibold px-4 sm:px-5 py-1.5">Article</th>
-                <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap" title="Disponible = stock détenu − engagé clients">Dispo SAP</th>
-                <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Colis cmd.</th>
-                <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Qté cmd.</th>
+                <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap" title="Stock physique détenu, tous entrepôts">En stock</th>
+                <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell" title="Total demandé le jour (commandes ouvertes)">Demandé</th>
+                <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap" title="Reliquat à acheter = demande − stock détenu">À acheter</th>
                 <th className="text-right font-semibold px-4 sm:px-5 py-1.5 whitespace-nowrap">Commandes</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
               {items.flatMap((it) => {
                 const isOpen = open.has(it.itemCode);
+                const servedOrders = it.orders.filter((o) => o.toBuy <= 0).length;
                 const rows = [
                   <tr
                     key={it.itemCode}
@@ -183,33 +192,92 @@ export function Manquants() {
                         <span className="font-mono text-[10px] text-muted-foreground/70 hidden sm:inline">{it.itemCode}</span>
                       </span>
                     </td>
+                    <td className="px-3 py-2 text-right tnum text-muted-foreground">{fmtNum(it.onHand)}</td>
+                    <td className="px-3 py-2 text-right tnum text-muted-foreground hidden sm:table-cell">{fmtNum(it.demand)}</td>
                     <td className="px-3 py-2 text-right">
-                      <span className="inline-flex min-w-[28px] items-center justify-center rounded-md bg-rose-500/12 text-rose-700 dark:text-rose-300 px-1.5 py-0.5 text-[13px] font-bold tnum">
-                        {it.stock != null ? fmtNum(it.stock) : "—"}
+                      <span className="inline-flex min-w-[32px] items-center justify-center gap-1 rounded-md bg-rose-500/12 text-rose-700 dark:text-rose-300 px-1.5 py-0.5 text-[13px] font-bold tnum">
+                        <ShoppingCart className="h-3 w-3" /> {fmtNum(it.toBuy)}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-right tnum text-muted-foreground hidden sm:table-cell">{fmtNum(it.colis)}</td>
-                    <td className="px-3 py-2 text-right tnum text-muted-foreground hidden sm:table-cell">{fmtNum(it.quantity)}</td>
-                    <td className="px-4 sm:px-5 py-2 text-right tnum font-semibold text-foreground">{it.docs.length}</td>
+                    <td className="px-4 sm:px-5 py-2 text-right tnum font-semibold text-foreground">
+                      {it.orders.length}
+                      {servedOrders > 0 && (
+                        <span className="ml-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">· {servedOrders} servie{servedOrders > 1 ? "s" : ""}</span>
+                      )}
+                    </td>
                   </tr>,
                 ];
                 if (isOpen) {
                   rows.push(
                     <tr key={`${it.itemCode}-docs`}>
                       <td colSpan={5} className="bg-secondary/20 px-4 sm:px-5 py-2.5">
+                        <p className="text-[11px] text-muted-foreground mb-2">
+                          Stock détenu <b className="text-foreground tnum">{fmtNum(it.onHand)}</b> réparti sur {it.orders.length} commande{it.orders.length > 1 ? "s" : ""}
+                          {" "}dans l&apos;ordre de priorité — les flèches réordonnent (le stock sert d&apos;abord les commandes du haut).
+                        </p>
                         <ul className="space-y-1">
-                          {it.docs.map((d) => (
-                            <li key={`${it.itemCode}-${d.docEntry}`} className="flex items-center gap-2 text-[12px] flex-wrap">
-                              <span className="font-medium text-foreground truncate">{d.cardName}</span>
-                              <span className="text-muted-foreground tnum">BL # {d.docNum}</span>
-                              <span className="text-muted-foreground tnum">{fmtNum(d.colis)} colis · {fmtNum(d.quantity)} pie</span>
-                              {d.carrierName && (
-                                <span className="inline-flex items-center gap-1 text-muted-foreground">
-                                  <Truck className="h-3 w-3" /> {d.carrierName}
+                          {it.orders.map((o, idx) => {
+                            const complete = o.toBuy <= 0;
+                            return (
+                              <li
+                                key={`${it.itemCode}-${o.docEntry}`}
+                                className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[12px] ${
+                                  complete
+                                    ? "border-emerald-300/50 dark:border-emerald-500/25 bg-emerald-50/40 dark:bg-emerald-950/15"
+                                    : "border-rose-300/50 dark:border-rose-500/25 bg-rose-50/40 dark:bg-rose-950/15"
+                                }`}
+                              >
+                                {/* Flèches de priorité */}
+                                <span className="flex flex-col shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => move(it, o.docEntry, -1)}
+                                    disabled={idx === 0}
+                                    aria-label="Monter la priorité"
+                                    title="Prioriser (servir plus tôt)"
+                                    className="h-4 w-5 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-25 disabled:hover:bg-transparent transition-colors"
+                                  ><ArrowUp className="h-3 w-3" /></button>
+                                  <button
+                                    type="button"
+                                    onClick={() => move(it, o.docEntry, 1)}
+                                    disabled={idx === it.orders.length - 1}
+                                    aria-label="Descendre la priorité"
+                                    title="Déprioriser (servir plus tard)"
+                                    className="h-4 w-5 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-25 disabled:hover:bg-transparent transition-colors"
+                                  ><ArrowDown className="h-3 w-3" /></button>
                                 </span>
-                              )}
-                            </li>
-                          ))}
+                                <span className="w-5 shrink-0 text-right tnum text-[11px] font-semibold text-muted-foreground">{idx + 1}.</span>
+                                <span className="min-w-0 flex-1 flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-medium text-foreground truncate">{o.cardName}</span>
+                                  {o.clientType && SEG_BADGE[o.clientType] && (
+                                    <span className={`shrink-0 inline-flex items-center px-1 py-px rounded text-[8.5px] font-bold uppercase tracking-wide ${SEG_BADGE[o.clientType]}`}>
+                                      {o.clientType}
+                                    </span>
+                                  )}
+                                  <span className="text-muted-foreground tnum">BL # {o.docNum}</span>
+                                  {o.carrierName && (
+                                    <span className="inline-flex items-center gap-1 text-muted-foreground">
+                                      <Truck className="h-3 w-3" /> {o.carrierName}
+                                    </span>
+                                  )}
+                                </span>
+                                {/* Demandé / servi / à acheter */}
+                                <span className="shrink-0 flex items-center gap-2.5 tnum">
+                                  <span className="text-muted-foreground" title="Quantité demandée">{fmtNum(o.qty)}</span>
+                                  <span className="text-emerald-700 dark:text-emerald-400 font-semibold" title="Servi avec le stock détenu">
+                                    ✓ {fmtNum(o.served)}
+                                  </span>
+                                  {complete ? (
+                                    <span className="text-emerald-600 dark:text-emerald-400 text-[10.5px] font-semibold">complète</span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-rose-700 dark:text-rose-300 font-bold" title="Reliquat à acheter">
+                                      <ShoppingCart className="h-3 w-3" /> {fmtNum(o.toBuy)}
+                                    </span>
+                                  )}
+                                </span>
+                              </li>
+                            );
+                          })}
                         </ul>
                       </td>
                     </tr>,
