@@ -10,6 +10,7 @@ import {
   Radio, ShoppingCart, Package, PackagePlus, Factory, Receipt, AlertTriangle,
   Home, Settings, PackageCheck, ClipboardCheck, ClipboardList, Truck, Eye, Store, PackageX,
   Pencil, Loader2, RotateCcw, ScrollText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight, Check,
+  FileText,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -92,6 +93,8 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
       // Clients & plan d'appel FUSIONNÉS : une seule entrée, onglets in-page.
       { href: "/clients", label: "Clients & plan d'appel", icon: Users, also: ["/plan-appel"] },
       { href: "/ventes-du-jour", label: "Ventes du jour", icon: Store },
+      // Édition BL : impression des bons de livraison SAP au format officiel.
+      { href: "/edition-bl", label: "Édition BL", icon: FileText },
     ],
   },
   {
