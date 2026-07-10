@@ -119,7 +119,12 @@ async function upsertClientBp(
     VALUES (gen_random_uuid()::text, ${bp.CardCode}, ${bp.CardName || bp.CardCode}, ${type}, 'JMG', ${vendeur}, ${tel1}, '1,2,3,4,5,6', ${grpCode}, ${grpName}, ${city}, ${zip}, ${country}, ${active}, NOW(), NOW())
     ON CONFLICT ("code") DO UPDATE SET
       "nom" = EXCLUDED."nom",
-      "type" = EXCLUDED."type",
+      -- Segment (tag GMS/CHR/EXPORT) : NE JAMAIS écraser une valeur déjà posée.
+      -- clientTypeFromGroup ne sait déduire que « GMS » (null sinon) → sans ce
+      -- COALESCE, chaque ré-import remettait à null les tags CHR/EXPORT saisis à
+      -- la main (clients qui disparaissaient alors du Détail livraison). On ne
+      -- REMPLIT que si le tag est absent ; sinon on garde le tag manuel.
+      "type" = COALESCE("Client"."type", EXCLUDED."type"),
       -- préserve les assignations manuelles (commercial / vendeur / jours) au ré-import
       "commercial" = COALESCE("Client"."commercial", EXCLUDED."commercial"),
       "vendeur" = COALESCE("Client"."vendeur", EXCLUDED."vendeur"),
