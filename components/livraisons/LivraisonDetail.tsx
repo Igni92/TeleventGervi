@@ -7,7 +7,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
   RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw, Pencil,
   Maximize2, UserCheck, Undo2, ListChecks, UserCog, ArrowRight, Printer,
-  Send, Phone, Plus, Trash2, Search, X, Store,
+  Send, Phone, Plus, Trash2, Search, X, Store, Replace,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -1636,6 +1636,20 @@ const OrderRow = memo(function OrderRow({
   const [savingTournee, setSavingTournee] = useState(false);
   const brandLogos = useBrandLogos("livraison");
 
+  // ── ÉCHANGE D'ARTICLE (clic droit sur une ligne produit) : remplace l'article
+  //    de CE bon par un autre code, en conservant quantité et prix — sans passer
+  //    par la console (modif SAP directe, même endpoint que la console → rapide). ──
+  const [swapTarget, setSwapTarget] = useState<{ x: number; y: number; oldCode: string; oldName: string } | null>(null);
+  const openSwap = useCallback((e: ReactMouseEvent, itemCode: string, itemName: string) => {
+    if (!doc.open) return;                        // BL livré / annulé → pas d'échange
+    e.preventDefault(); e.stopPropagation();      // n'ouvre PAS le menu de la carte
+    setSwapTarget({
+      x: Math.min(e.clientX, window.innerWidth - 300),
+      y: Math.min(e.clientY, window.innerHeight - 340),
+      oldCode: itemCode, oldName: itemName,
+    });
+  }, [doc.open]);
+
   // ── Articles MANQUANTS = stock SAP total négatif (détecté par l'API). ──
   const missingSet = useMemo(() => new Set(doc.missingItems ?? []), [doc.missingItems]);
 
@@ -2404,7 +2418,12 @@ const OrderRow = memo(function OrderRow({
               {doc.lines.map((l, i) => {
                 const isMissing = missingSet.has(l.itemCode);
                 return (
-                <tr key={`${l.itemCode}-${i}`} className={isMissing ? "bg-rose-500/5" : ""}>
+                <tr
+                  key={`${l.itemCode}-${i}`}
+                  onContextMenu={(e) => openSwap(e, l.itemCode, l.itemName)}
+                  title={doc.open ? "Clic droit : échanger cet article contre un autre code" : undefined}
+                  className={`${isMissing ? "bg-rose-500/5" : ""} ${doc.open ? "cursor-context-menu" : ""}`}
+                >
                   {/* Colisage en premier (gauche) — repère principal de préparation */}
                   <td className="px-2 py-1.5 text-center align-middle">
                     <span className="inline-flex min-w-[28px] items-center justify-center rounded-md bg-foreground/10 px-1.5 py-0.5 text-[14px] font-bold tnum text-foreground">
@@ -2495,7 +2514,12 @@ const OrderRow = memo(function OrderRow({
             {doc.lines.map((l, i) => {
               const isMissing = missingSet.has(l.itemCode);
               return (
-              <li key={`big-${l.itemCode}-${i}`} className={`flex items-center gap-3 px-3 py-2.5 ${isMissing ? "bg-rose-500/5" : ""}`}>
+              <li
+                key={`big-${l.itemCode}-${i}`}
+                onContextMenu={(e) => openSwap(e, l.itemCode, l.itemName)}
+                title={doc.open ? "Clic droit : échanger cet article contre un autre code" : undefined}
+                className={`flex items-center gap-3 px-3 py-2.5 ${isMissing ? "bg-rose-500/5" : ""} ${doc.open ? "cursor-context-menu" : ""}`}
+              >
                 <span className="inline-flex min-w-[44px] items-center justify-center rounded-lg bg-foreground/10 px-2 py-1 text-[18px] font-bold tnum text-foreground shrink-0">
                   {fmtNum(l.colis)}
                 </span>
@@ -2717,9 +2741,159 @@ const OrderRow = memo(function OrderRow({
           </>
         )}
       </ContextMenu>
+
+      {/* Échange d'article (clic droit sur une ligne produit) — modif SAP directe. */}
+      {swapTarget && (
+        <ArticleSwapMenu
+          docEntry={doc.docEntry}
+          docNum={doc.docNum}
+          pos={swapTarget}
+          onClose={() => setSwapTarget(null)}
+          onDone={onReload}
+        />
+      )}
     </li>
   );
 });
+
+/* ═════════════════════════════════════════════════════════════
+   Échange d'article (clic droit sur une ligne produit) — remplace l'article de
+   CE bon par un autre code, en conservant quantité et prix. Modif SAP DIRECTE
+   via /api/sap/orders/[docEntry]/modif (même endpoint que la console, mais sans
+   passer par elle → rapide). On recharge le bon complet, on remplace la/les
+   ligne(s) de l'ancien article par le nouveau (nouveau lot FIFO résolu côté
+   serveur), et on renvoie TOUTES les lignes (l'endpoint reconstruit le BL).
+═════════════════════════════════════════════════════════════ */
+interface SwapProduct { itemCode: string; itemName: string }
+interface SwapSrcLine {
+  lineNum: number; itemCode: string; qtyPieces: number;
+  price: number | null; warehouse: string | null; lot: string | null; closed: boolean;
+}
+
+function ArticleSwapMenu({ docEntry, docNum, pos, onClose, onDone }: {
+  docEntry: number;
+  docNum: number;
+  pos: { x: number; y: number; oldCode: string; oldName: string };
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SwapProduct[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const seq = useRef(0);
+
+  // Recherche débouncée (≥ 2 caractères) — compteur de séquence anti-périmé.
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setResults([]); setLoading(false); return; }
+    const my = ++seq.current;
+    setLoading(true);
+    const h = setTimeout(() => {
+      fetch(`/api/products?search=${encodeURIComponent(q)}&limit=12`, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((j: { products?: SwapProduct[] }) => { if (my === seq.current) setResults(j.products ?? []); })
+        .catch(() => { if (my === seq.current) setResults([]); })
+        .finally(() => { if (my === seq.current) setLoading(false); });
+    }, 220);
+    return () => clearTimeout(h);
+  }, [query]);
+
+  // Fermeture : clic hors zone / Escape.
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
+  }, [onClose]);
+
+  async function runSwap(p: SwapProduct) {
+    if (busy) return;
+    if (p.itemCode === pos.oldCode) { onClose(); return; }
+    setBusy(p.itemCode);
+    try {
+      const g = await fetch(`/api/sap/orders/${docEntry}/modif`, { cache: "no-store" }).then((r) => r.json());
+      if (!g?.ok || !Array.isArray(g.lines)) throw new Error("Chargement du bon impossible");
+      const src = g.lines as SwapSrcLine[];
+      const targets = src.filter((l) => l.itemCode === pos.oldCode);
+      if (targets.length === 0) throw new Error("Article introuvable sur ce bon");
+      if (targets.some((l) => l.closed)) throw new Error("Article déjà livré — échange impossible");
+      if (src.some((l) => l.itemCode === p.itemCode)) { toast.info(`${p.itemName} est déjà sur ce bon`); return; }
+      // Reconstruit TOUTES les lignes : l'ancien article → le nouveau (nouveau lot
+      // résolu, keep:false) ; les autres conservées telles quelles (lot d'origine).
+      const lines = src.map((l) => l.itemCode === pos.oldCode
+        ? { itemCode: p.itemCode, quantity: l.qtyPieces, warehouseCode: l.warehouse ?? undefined, price: l.price ?? undefined, keep: false }
+        : { itemCode: l.itemCode, quantity: l.qtyPieces, warehouseCode: l.warehouse ?? undefined, price: l.price ?? undefined, keep: true, lot: l.lot ?? undefined });
+      const res = await fetch(`/api/sap/orders/${docEntry}/modif`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines }),
+      }).then((r) => r.json());
+      if (!res?.ok) throw new Error(res?.error || "Échec de l'échange");
+      toast.success(`${pos.oldName} → ${p.itemName}`, { description: `BL n°${docNum} mis à jour · quantité et prix conservés.` });
+      onDone();
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Échec de l'échange");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return createPortal(
+    <div
+      ref={boxRef}
+      style={{ position: "fixed", left: pos.x, top: pos.y, width: 288 }}
+      onContextMenu={(e) => e.preventDefault()}
+      className="z-[130] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[336px] animate-fade-up"
+    >
+      <div className="shrink-0 px-3 py-2 border-b border-border bg-secondary/30">
+        <p className="text-[11px] font-semibold text-foreground inline-flex items-center gap-1.5">
+          <Replace className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" /> Échanger l&apos;article
+        </p>
+        <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+          {pos.oldName} <span className="font-mono text-[10px]">{pos.oldCode}</span>
+        </p>
+      </div>
+      <div className="shrink-0 relative px-2 pt-2">
+        <Search className="pointer-events-none absolute left-4 top-[calc(50%+4px)] -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Nouveau produit (nom ou code)…"
+          aria-label="Rechercher l'article de remplacement"
+          className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-8 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+        />
+        {loading && <Loader2 className="absolute right-4 top-[calc(50%+4px)] -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+      </div>
+      <div className="overflow-y-auto py-1 min-h-0">
+        {query.trim().length < 2 ? (
+          <p className="px-3 py-2 text-[11.5px] italic text-muted-foreground">Tape au moins 2 caractères…</p>
+        ) : results.length === 0 && !loading ? (
+          <p className="px-3 py-2 text-[11.5px] italic text-muted-foreground">Aucun produit trouvé.</p>
+        ) : results.map((p) => (
+          <button
+            key={p.itemCode}
+            type="button"
+            disabled={busy != null}
+            onClick={() => runSwap(p)}
+            className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-secondary/60 disabled:opacity-60 transition-colors"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block text-[12.5px] font-medium text-foreground truncate">{p.itemName}</span>
+              <span className="block text-[10px] font-mono text-muted-foreground">{p.itemCode}</span>
+            </span>
+            {busy === p.itemCode
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
+              : <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />}
+          </button>
+        ))}
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 /* ═════════════════════════════════════════════════════════════
    Menu contextuel (clic droit) — scaffolding partagé transporteur / ligne :
