@@ -451,7 +451,16 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   // l'onglet dédié). Coché à la main, ou FORCÉ quand la livraison est une précommande.
   const [bonCommandeManual, setBonCommandeManual] = useState(false);
   const precommande = isPrecommande(deliveryDate);
-  const isBonCommande = precommande || bonCommandeManual;
+  // À DÉCOUVERT : au moins un article du panier dépasse le stock détenu. On force
+  // alors le BON DE COMMANDE (offre/devis SAP) — il NE RÉSERVE PAS de stock, donc
+  // ne creuse pas le magasin d'attente 000 ; il se validera en commande ferme
+  // quand la marchandise arrivera (validation auto à la réception). Évite le
+  // décalage magasin 000/01 à la source.
+  const hasDecouvert = useMemo(
+    () => cart.some((l) => (l.quantity + Math.max(0, Math.floor(l.freeUnits ?? 0))) > totalAvailable(l.availByWarehouse ?? {})),
+    [cart],
+  );
+  const isBonCommande = precommande || bonCommandeManual || hasDecouvert;
   // Lots candidats (EN STOCK TeleVent) par article — chargés pour choisir le lot
   // d'une ligne AVANT l'envoi, UNIQUEMENT sur un bon de commande.
   const [lotCands, setLotCands] = useState<Record<string, { candidates: ConsoleLotCandidate[]; suggested: string | null }>>({});
@@ -2141,21 +2150,24 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                   className="flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2" />
               </div>
               {/* Bon de commande — aucun auto-lot, lots affectés ensuite dans l'onglet
-                  « Bons de commande ». Forcé (coché + verrouillé) si précommande. */}
+                  « Bons de commande ». Forcé (coché + verrouillé) si précommande OU
+                  si un article est à découvert (stock insuffisant). */}
               <label
-                title={precommande
+                title={hasDecouvert
+                  ? "Article à découvert (stock insuffisant) → forcé en bon de commande : il ne réserve pas de stock et se validera automatiquement en commande à la réception"
+                  : precommande
                   ? "Livraison au-delà du prochain jour livrable → précommande : créée en bon de commande (lots affectés plus tard)"
                   : "Créer en bon de commande : aucun lot automatique, tu affectes les lots ensuite dans l'onglet Bons de commande"}
-                className={`flex items-center gap-2 rounded-md border px-2.5 h-9 text-[12.5px] select-none ${precommande ? "cursor-default" : "cursor-pointer"} ${
+                className={`flex items-center gap-2 rounded-md border px-2.5 h-9 text-[12.5px] select-none ${precommande || hasDecouvert ? "cursor-default" : "cursor-pointer"} ${
                   isBonCommande ? "border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300" : "border-border text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <input type="checkbox" checked={isBonCommande} disabled={precommande}
+                <input type="checkbox" checked={isBonCommande} disabled={precommande || hasDecouvert}
                   onChange={(e) => setBonCommandeManual(e.target.checked)}
                   className="h-4 w-4 accent-amber-600" />
                 <span className="font-semibold">Bon de commande</span>
                 <span className="text-[11px] opacity-80 truncate">
-                  {precommande ? "· précommande — lots à affecter" : "· lots affectés plus tard"}
+                  {hasDecouvert ? "· article à découvert → validé à la réception" : precommande ? "· précommande — lots à affecter" : "· lots affectés plus tard"}
                 </span>
               </label>
               {/* Réf. client + TEXTE du BL côte à côte (même rangée que transporteur/tournée). */}
@@ -2272,7 +2284,11 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
               modif ? "bg-amber-600 hover:bg-amber-700" : "bg-emerald-600 hover:bg-emerald-700"
             }`}>
             <ShoppingCart className="h-4 w-4" />
-            {modif ? `Enregistrer le BL # ${modif.docNum}` : `Créer la commande (${cart.length})`}
+            {modif
+              ? `Enregistrer le BL # ${modif.docNum}`
+              : isBonCommande
+              ? `Créer le bon de commande (${cart.length})`
+              : `Créer la commande (${cart.length})`}
           </button>
         </div>
       </div>
