@@ -93,8 +93,11 @@ export interface ApiResp {
   count: number;
   totals: Totals;
   carriers: Carrier[];
-  /** Stock SAP total (négatif) par article manquant — pilote les achats. */
+  /** Disponible SAP global (négatif) par article — compat (badges de préparation). */
   negativeStocks?: Record<string, number>;
+  /** Stock PHYSIQUE détenu (QuantityOnStock, tous entrepôts) par article du jour
+   *  — base de l'écran Manquants (« faire d'abord avec ce qu'on a »). */
+  onHandStocks?: Record<string, number>;
   error?: string;
 }
 

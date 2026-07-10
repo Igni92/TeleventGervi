@@ -152,7 +152,7 @@ export async function GET(req: NextRequest) {
     //    (produits, transporteurs, statuts manuels, type + nom client, tournées
     //    mémorisées, tournées réelles SERG_TRCL, stocks SAP négatifs). Chaque bloc
     //    gère son propre repli (best-effort) pour ne jamais faire échouer la livraison. ──
-    const [prods, carrierByCode, statuses, clientMeta, savedTourneeByCard, trclByCard, negativeStocks] = await Promise.all([
+    const [prods, carrierByCode, statuses, clientMeta, savedTourneeByCard, trclByCard, stockInfo] = await Promise.all([
       // Produits (poids / colis / désignation).
       allItemCodes.length
         ? prisma.product.findMany({
@@ -223,6 +223,7 @@ export async function GET(req: NextRequest) {
       // qu'on ne détient → achat à faire. Filtre côté app (champs calculés).
       (async () => {
         const neg: Record<string, number> = {};
+        const onHand: Record<string, number> = {};
         const chunks: string[][] = [];
         for (let i = 0; i < allItemCodes.length; i += 20) chunks.push(allItemCodes.slice(i, i + 20));
         await Promise.all(chunks.map(async (chunk) => {
@@ -233,14 +234,23 @@ export async function GET(req: NextRequest) {
               { pageSize: 50, maxPages: 2 },
             );
             for (const it of items) {
+              // Stock PHYSIQUE détenu (tous entrepôts) — base « faire d'abord avec
+              // ce qu'on a » de l'écran Manquants (allocation par commande).
+              onHand[it.ItemCode] = it.QuantityOnStock ?? 0;
+              // Disponible SAP global (stock − TOUS les engagements clients) < 0 :
+              // conservé pour compat (badges de préparation), mais NE pilote plus
+              // l'écran Manquants — il sur-compte car il inclut les engagements des
+              // AUTRES jours / reliquats.
               const available = (it.QuantityOnStock ?? 0) - (it.QuantityOrderedByCustomers ?? 0);
               if (available < 0) neg[it.ItemCode] = available;
             }
-          } catch { /* lot en échec → pas de manquants pour ces articles */ }
+          } catch { /* lot en échec → pas de stock pour ces articles */ }
         }));
-        return neg;
+        return { neg, onHand };
       })(),
     ]);
+    const negativeStocks = stockInfo.neg;
+    const onHandStocks = stockInfo.onHand;
     const typeByCardCode = clientMeta.types;
     const nameByCardCode = clientMeta.names;
     const pMap = new Map(prods.map((p) => [p.itemCode, p]));
@@ -475,8 +485,11 @@ export async function GET(req: NextRequest) {
       count: visibleDocs.length,
       totals,
       carriers,
-      // Stock SAP total (négatif) par article manquant — pilote les achats.
+      // Disponible SAP global (négatif) par article — conservé pour compat (badges).
       negativeStocks,
+      // Stock PHYSIQUE détenu (QuantityOnStock, tous entrepôts) par article du jour
+      // — base de l'écran Manquants : « faire d'abord avec ce qu'on a, acheter le reste ».
+      onHandStocks,
     });
   } catch (e) {
     return NextResponse.json(
