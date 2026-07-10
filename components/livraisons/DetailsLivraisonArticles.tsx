@@ -273,24 +273,26 @@ interface BulkSrcLine {
   price: number | null; warehouse: string | null; lot: string | null; closed: boolean;
 }
 
-async function swapArticleOnBL(docEntry: number, oldCode: string, newCode: string): Promise<"ok" | "skip" | "error"> {
+async function swapArticleOnBL(docEntry: number, oldCode: string, newCode: string): Promise<{ status: "ok" | "skip" | "error"; error?: string }> {
   try {
     const g = await fetch(`/api/sap/orders/${docEntry}/modif`, { cache: "no-store" }).then((r) => r.json());
-    if (!g?.ok || !Array.isArray(g.lines)) return "error";
-    const src = g.lines as BulkSrcLine[];
+    // ⚠️ L'endpoint renvoie `cartLines` (et non `lines`) : lire `g.lines` faisait
+    // échouer TOUS les échanges avant même l'appel SAP (« 0 modifié, N échecs »).
+    if (!g?.ok || !Array.isArray(g.cartLines)) return { status: "error", error: g?.error || "Bon illisible" };
+    const src = g.cartLines as BulkSrcLine[];
     const targets = src.filter((l) => l.itemCode === oldCode);
-    if (targets.length === 0) return "skip";                          // article absent (déjà échangé ?)
-    if (targets.some((l) => l.closed)) return "skip";                 // déjà livré → non modifiable
-    if (src.some((l) => l.itemCode === newCode)) return "skip";       // éviter un doublon d'article
+    if (targets.length === 0) return { status: "skip" };                    // article absent (déjà échangé ?)
+    if (targets.some((l) => l.closed)) return { status: "skip" };           // déjà livré → non modifiable
+    if (src.some((l) => l.itemCode === newCode)) return { status: "skip" }; // éviter un doublon d'article
     const lines = src.map((l) => l.itemCode === oldCode
       ? { itemCode: newCode, quantity: l.qtyPieces, warehouseCode: l.warehouse ?? undefined, price: l.price ?? undefined, keep: false }
       : { itemCode: l.itemCode, quantity: l.qtyPieces, warehouseCode: l.warehouse ?? undefined, price: l.price ?? undefined, keep: true, lot: l.lot ?? undefined });
     const res = await fetch(`/api/sap/orders/${docEntry}/modif`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines }),
     }).then((r) => r.json());
-    return res?.ok ? "ok" : "error";
-  } catch {
-    return "error";
+    return res?.ok ? { status: "ok" } : { status: "error", error: res?.error };
+  } catch (e) {
+    return { status: "error", error: e instanceof Error ? e.message : String(e) };
   }
 }
 
@@ -334,12 +336,14 @@ function BulkSwapMenu({ pos, onClose, onDone }: {
     if (running) return;
     if (p.itemCode === pos.oldCode) { onClose(); return; }
     setRunning(true);
-    let ok = 0, skip = 0, err = 0;
+    let ok = 0, skip = 0, err = 0, firstErr = "";
     for (const de of pos.docEntries) {
       const r = await swapArticleOnBL(de, pos.oldCode, p.itemCode);
-      if (r === "ok") ok++; else if (r === "skip") skip++; else err++;
+      if (r.status === "ok") ok++;
+      else if (r.status === "skip") skip++;
+      else { err++; if (!firstErr && r.error) firstErr = r.error; }
     }
-    const desc = `${ok} bon(s) modifié(s)${skip ? `, ${skip} ignoré(s)` : ""}${err ? `, ${err} échec(s)` : ""}.`;
+    const desc = `${ok} bon(s) modifié(s)${skip ? `, ${skip} ignoré(s)` : ""}${err ? `, ${err} échec(s)` : ""}.${err && firstErr ? ` — ${firstErr}` : ""}`;
     if (err > 0) toast.error(`Échange « ${pos.oldName} » → « ${p.itemName} »`, { description: desc });
     else toast.success(`Échange « ${pos.oldName} » → « ${p.itemName} »`, { description: desc });
     onDone();
