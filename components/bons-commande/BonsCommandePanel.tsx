@@ -519,6 +519,7 @@ function LotCell({ line, current, isBusy, onPick }: {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState<LotCandidate | null>(null);
   const [pos, setPos] = useState<{ left: number; width: number; top?: number; bottom?: number } | null>(null);
+  const [manual, setManual] = useState("");   // saisie manuelle d'un n° d'EM (articles sans lot proposé)
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
 
@@ -531,7 +532,7 @@ function LotCell({ line, current, isBusy, onPick }: {
     setPos(above ? { left, width, bottom: window.innerHeight - r.top + 6 } : { left, width, top: r.bottom + 6 });
   };
   const openMenu = () => { if (isBusy) return; place(); setOpen(true); };
-  const closeMenu = () => { setOpen(false); setHovered(null); };
+  const closeMenu = () => { setOpen(false); setHovered(null); setManual(""); };
   const pick = (v: string) => { onPick(v); closeMenu(); };
 
   useEffect(() => {
@@ -653,6 +654,36 @@ function LotCell({ line, current, isBusy, onPick }: {
               className={`w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-secondary/60 ${current === PENDING ? "bg-amber-500/10 font-semibold text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}>
               À découvert — arrivage à venir
             </button>
+          </div>
+
+          {/* Saisie manuelle d'un n° d'entrée — pour un article SANS lot proposé
+              (déco / fabrication maison, pas d'EM en base) : je tape les chiffres,
+              ça affecte « EM<chiffres> » directement. */}
+          <div className="shrink-0 border-t border-border/60 bg-secondary/30 px-3 py-2">
+            <label className="block text-[9.5px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+              Ou saisir le n° d&apos;entrée
+            </label>
+            <div className="flex items-center gap-1.5">
+              <span className="inline-flex items-center h-7 pl-2 pr-1 rounded-l-md border border-r-0 border-border bg-card text-[12px] font-semibold text-muted-foreground select-none">EM</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={manual}
+                onChange={(e) => setManual(e.target.value.replace(/\D/g, ""))}
+                onKeyDown={(e) => { if (e.key === "Enter" && manual) { e.preventDefault(); pick(`EM${manual}`); } }}
+                placeholder="23568"
+                aria-label="Saisir un numéro d'entrée marchandise"
+                className="h-7 flex-1 min-w-0 rounded-none border border-border bg-card px-2 text-[12.5px] tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              />
+              <button
+                type="button"
+                disabled={!manual}
+                onClick={() => manual && pick(`EM${manual}`)}
+                className="h-7 shrink-0 rounded-r-md border border-l-0 border-brand-500 bg-brand-500 px-2.5 text-[12px] font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand-600"
+              >
+                OK
+              </button>
+            </div>
           </div>
 
           {/* Pied : CODE ARTICLE + détail (mis à jour au SURVOL d'une EM) */}
