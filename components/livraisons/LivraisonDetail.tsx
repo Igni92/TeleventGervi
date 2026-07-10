@@ -2856,8 +2856,10 @@ function LineToolMenu({ docEntry, docNum, pos, onClose, onDone }: {
   // Charge les lignes du bon (via l'endpoint de modif) pour reconstruction.
   async function loadSrc(): Promise<SwapSrcLine[]> {
     const g = await fetch(`/api/sap/orders/${docEntry}/modif`, { cache: "no-store" }).then((r) => r.json());
-    if (!g?.ok || !Array.isArray(g.lines)) throw new Error("Chargement du bon impossible");
-    return g.lines as SwapSrcLine[];
+    // L'endpoint renvoie `cartLines` (pas `lines`) — sinon changement de lot et
+    // échange d'article échouaient toujours (« Chargement du bon impossible »).
+    if (!g?.ok || !Array.isArray(g.cartLines)) throw new Error(g?.error || "Chargement du bon impossible");
+    return g.cartLines as SwapSrcLine[];
   }
 
   // CHANGER LE LOT : pose le lot choisi sur la/les ligne(s) de l'article et aligne
