@@ -251,7 +251,11 @@ function VenteRow({ d }: { d: Doc }) {
           {d.totalHT > 0 && <span>{eur.format(d.totalHT)} HT</span>}
         </p>
       </div>
-      {/* N° de commande client (réf.) — saisissable/modifiable, écrit sur le BL. */}
+      {/* N° de commande client (réf.) — saisissable/modifiable, écrit sur le BL.
+          TOUJOURS actif, même BL parti ou clôturé (facturé) : le n° arrive
+          souvent APRÈS le départ (portail Auchan…) et SAP B1 accepte la modif
+          du n° de réf. client sur un document clôturé. En cas de refus SAP,
+          l'erreur remonte dans le toast. */}
       <label className="inline-flex items-center gap-1.5 shrink-0" title="N° de commande client (référence)">
         <Hash className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
         <input
@@ -259,7 +263,7 @@ function VenteRow({ d }: { d: Doc }) {
           onChange={(e) => setNum(e.target.value)}
           onBlur={saveNum}
           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-          disabled={saving || !d.open}
+          disabled={saving}
           placeholder="N° cmd"
           aria-label={`N° de commande du BL ${d.docNum}`}
           className="h-8 w-[110px] rounded-md border border-border bg-card px-2 text-[12px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
