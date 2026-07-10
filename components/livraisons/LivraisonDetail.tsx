@@ -2937,7 +2937,12 @@ function LineToolMenu({ docEntry, docNum, pos, onClose, onDone }: {
       // carte, qui refermait la fenêtre. On coupe la propagation ici.
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
-      className="z-[130] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[360px] animate-fade-up"
+      // `pointer-events-auto` OBLIGATOIRE : quand ce menu est ouvert AU-DESSUS de
+      // la modale de préparation (Radix Dialog), Radix pose `pointer-events:none`
+      // sur <body> — dont ce popup hérite (porté dans <body>). Sans ça, les clics
+      // gauche TRAVERSENT le popup jusqu'à l'overlay derrière, et son propre
+      // détecteur de « clic dehors » le refermait à chaque clic intérieur.
+      className="pointer-events-auto z-[130] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[360px] animate-fade-up"
     >
       <div className="shrink-0 px-3 py-2 border-b border-border bg-secondary/30">
         <p className="text-[11px] text-muted-foreground truncate">
