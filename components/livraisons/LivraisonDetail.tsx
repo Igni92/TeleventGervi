@@ -7,9 +7,10 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
   RefreshCw, Loader2, PackageX, CheckCircle2, Clock, RotateCcw, Pencil,
   Maximize2, UserCheck, Undo2, ListChecks, UserCog, ArrowRight, Printer,
-  Send, Phone, Plus, Trash2, Search, X, Store, Replace,
+  Send, Phone, Plus, Trash2, Search, X, Store, BadgeEuro,
 } from "lucide-react";
 import { toast } from "sonner";
+import { StarRating } from "@/components/ui/star-rating";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ClientLink } from "@/components/ClientLink";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
@@ -2421,7 +2422,7 @@ const OrderRow = memo(function OrderRow({
                 <tr
                   key={`${l.itemCode}-${i}`}
                   onContextMenu={(e) => openSwap(e, l.itemCode, l.itemName)}
-                  title={doc.open ? "Clic droit : échanger cet article contre un autre code" : undefined}
+                  title={doc.open ? "Clic droit : changer le lot ou échanger l'article" : undefined}
                   className={`${isMissing ? "bg-rose-500/5" : ""} ${doc.open ? "cursor-context-menu" : ""}`}
                 >
                   {/* Colisage en premier (gauche) — repère principal de préparation */}
@@ -2742,9 +2743,10 @@ const OrderRow = memo(function OrderRow({
         )}
       </ContextMenu>
 
-      {/* Échange d'article (clic droit sur une ligne produit) — modif SAP directe. */}
+      {/* Clic droit sur une ligne produit : changer le lot OU échanger l'article
+          — modif SAP directe (même endpoint que la console). */}
       {swapTarget && (
-        <ArticleSwapMenu
+        <LineToolMenu
           docEntry={doc.docEntry}
           docNum={doc.docNum}
           pos={swapTarget}
@@ -2757,26 +2759,42 @@ const OrderRow = memo(function OrderRow({
 });
 
 /* ═════════════════════════════════════════════════════════════
-   Échange d'article (clic droit sur une ligne produit) — remplace l'article de
-   CE bon par un autre code, en conservant quantité et prix. Modif SAP DIRECTE
-   via /api/sap/orders/[docEntry]/modif (même endpoint que la console, mais sans
-   passer par elle → rapide). On recharge le bon complet, on remplace la/les
-   ligne(s) de l'ancien article par le nouveau (nouveau lot FIFO résolu côté
-   serveur), et on renvoie TOUTES les lignes (l'endpoint reconstruit le BL).
+   Outil de ligne (clic droit sur une ligne produit) — deux actions, modif SAP
+   DIRECTE via /api/sap/orders/[docEntry]/modif (même endpoint que la console,
+   sans passer par elle → rapide) :
+     • CHANGER LE LOT   : liste FIFO enrichie (fournisseur · prix · colis restant
+       · étoiles) ; le lot choisi est posé sur la/les ligne(s) de l'article et le
+       magasin est aligné sur celui du lot ;
+     • ÉCHANGER L'ARTICLE : remplace le code par un autre (nouveau lot FIFO résolu
+       côté serveur), quantité et prix conservés.
+   On recharge le bon complet et on renvoie TOUTES les lignes (reconstruction).
 ═════════════════════════════════════════════════════════════ */
 interface SwapProduct { itemCode: string; itemName: string }
 interface SwapSrcLine {
   lineNum: number; itemCode: string; qtyPieces: number;
   price: number | null; warehouse: string | null; lot: string | null; closed: boolean;
 }
+interface LotCand {
+  lot: string; docNum: number; warehouse: string | null; affect: string;
+  qty?: number | null; colis?: number | null; fromLedger?: boolean;
+  supplierName?: string | null; purchasePrice?: number | null; currency?: string | null;
+  rating?: number | null;
+}
+const LOT_AFFECT_LABEL: Record<string, string> = { TOUS: "Tous", EXPORT: "Export", GMS: "GMS", CHR: "CHR" };
+const fmtColisLot = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1).replace(".", ","));
 
-function ArticleSwapMenu({ docEntry, docNum, pos, onClose, onDone }: {
+function LineToolMenu({ docEntry, docNum, pos, onClose, onDone }: {
   docEntry: number;
   docNum: number;
   pos: { x: number; y: number; oldCode: string; oldName: string };
   onClose: () => void;
   onDone: () => void;
 }) {
+  const [mode, setMode] = useState<"lot" | "article">("lot");
+  // Mode LOT : candidats FIFO enrichis pour cet article.
+  const [cands, setCands] = useState<LotCand[] | null>(null);
+  const [lotBusy, setLotBusy] = useState<string | null>(null);
+  // Mode ARTICLE : recherche produit (échange).
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SwapProduct[]>([]);
   const [loading, setLoading] = useState(false);
@@ -2784,8 +2802,22 @@ function ArticleSwapMenu({ docEntry, docNum, pos, onClose, onDone }: {
   const boxRef = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
 
-  // Recherche débouncée (≥ 2 caractères) — compteur de séquence anti-périmé.
+  // Candidats de lot (FIFO, fournisseur/prix/colis/étoiles) — chargés une fois.
   useEffect(() => {
+    let cancelled = false;
+    setCands(null);
+    fetch(`/api/lots/candidates?items=${encodeURIComponent(pos.oldCode)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j: { items?: Record<string, { candidates?: LotCand[] }> }) => {
+        if (!cancelled) setCands(j?.items?.[pos.oldCode]?.candidates ?? []);
+      })
+      .catch(() => { if (!cancelled) setCands([]); });
+    return () => { cancelled = true; };
+  }, [pos.oldCode]);
+
+  // Recherche produit débouncée (≥ 2 car.) — uniquement en mode article.
+  useEffect(() => {
+    if (mode !== "article") return;
     const q = query.trim();
     if (q.length < 2) { setResults([]); setLoading(false); return; }
     const my = ++seq.current;
@@ -2798,7 +2830,7 @@ function ArticleSwapMenu({ docEntry, docNum, pos, onClose, onDone }: {
         .finally(() => { if (my === seq.current) setLoading(false); });
     }, 220);
     return () => clearTimeout(h);
-  }, [query]);
+  }, [query, mode]);
 
   // Fermeture : clic hors zone / Escape.
   useEffect(() => {
@@ -2809,20 +2841,52 @@ function ArticleSwapMenu({ docEntry, docNum, pos, onClose, onDone }: {
     return () => { document.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
   }, [onClose]);
 
+  // Charge les lignes du bon (via l'endpoint de modif) pour reconstruction.
+  async function loadSrc(): Promise<SwapSrcLine[]> {
+    const g = await fetch(`/api/sap/orders/${docEntry}/modif`, { cache: "no-store" }).then((r) => r.json());
+    if (!g?.ok || !Array.isArray(g.lines)) throw new Error("Chargement du bon impossible");
+    return g.lines as SwapSrcLine[];
+  }
+
+  // CHANGER LE LOT : pose le lot choisi sur la/les ligne(s) de l'article et aligne
+  // le magasin sur celui du lot (les autres lignes conservées à l'identique).
+  async function runLotChange(c: LotCand) {
+    if (lotBusy || busy) return;
+    setLotBusy(c.lot);
+    try {
+      const src = await loadSrc();
+      const targets = src.filter((l) => l.itemCode === pos.oldCode);
+      if (targets.length === 0) throw new Error("Article introuvable sur ce bon");
+      if (targets.some((l) => l.closed)) throw new Error("Article déjà livré — lot verrouillé");
+      const lines = src.map((l) => l.itemCode === pos.oldCode
+        ? { itemCode: l.itemCode, quantity: l.qtyPieces, warehouseCode: (c.warehouse ?? l.warehouse) ?? undefined, price: l.price ?? undefined, keep: true, lot: c.lot }
+        : { itemCode: l.itemCode, quantity: l.qtyPieces, warehouseCode: l.warehouse ?? undefined, price: l.price ?? undefined, keep: true, lot: l.lot ?? undefined });
+      const res = await fetch(`/api/sap/orders/${docEntry}/modif`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines }),
+      }).then((r) => r.json());
+      if (!res?.ok) throw new Error(res?.error || "Échec du changement de lot");
+      toast.success(`Lot → ${c.lot}`, { description: `BL n°${docNum} · ${pos.oldName}` });
+      onDone();
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Échec du changement de lot");
+    } finally {
+      setLotBusy(null);
+    }
+  }
+
+  // ÉCHANGER L'ARTICLE : l'ancien article → le nouveau (nouveau lot résolu,
+  // keep:false) ; les autres lignes conservées telles quelles (lot d'origine).
   async function runSwap(p: SwapProduct) {
-    if (busy) return;
+    if (busy || lotBusy) return;
     if (p.itemCode === pos.oldCode) { onClose(); return; }
     setBusy(p.itemCode);
     try {
-      const g = await fetch(`/api/sap/orders/${docEntry}/modif`, { cache: "no-store" }).then((r) => r.json());
-      if (!g?.ok || !Array.isArray(g.lines)) throw new Error("Chargement du bon impossible");
-      const src = g.lines as SwapSrcLine[];
+      const src = await loadSrc();
       const targets = src.filter((l) => l.itemCode === pos.oldCode);
       if (targets.length === 0) throw new Error("Article introuvable sur ce bon");
       if (targets.some((l) => l.closed)) throw new Error("Article déjà livré — échange impossible");
       if (src.some((l) => l.itemCode === p.itemCode)) { toast.info(`${p.itemName} est déjà sur ce bon`); return; }
-      // Reconstruit TOUTES les lignes : l'ancien article → le nouveau (nouveau lot
-      // résolu, keep:false) ; les autres conservées telles quelles (lot d'origine).
       const lines = src.map((l) => l.itemCode === pos.oldCode
         ? { itemCode: p.itemCode, quantity: l.qtyPieces, warehouseCode: l.warehouse ?? undefined, price: l.price ?? undefined, keep: false }
         : { itemCode: l.itemCode, quantity: l.qtyPieces, warehouseCode: l.warehouse ?? undefined, price: l.price ?? undefined, keep: true, lot: l.lot ?? undefined });
@@ -2830,7 +2894,7 @@ function ArticleSwapMenu({ docEntry, docNum, pos, onClose, onDone }: {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines }),
       }).then((r) => r.json());
       if (!res?.ok) throw new Error(res?.error || "Échec de l'échange");
-      toast.success(`${pos.oldName} → ${p.itemName}`, { description: `BL n°${docNum} mis à jour · quantité et prix conservés.` });
+      toast.success(`${pos.oldName} → ${p.itemName}`, { description: `BL n°${docNum} · quantité et prix conservés.` });
       onDone();
       onClose();
     } catch (e) {
@@ -2840,61 +2904,110 @@ function ArticleSwapMenu({ docEntry, docNum, pos, onClose, onDone }: {
     }
   }
 
+  const tabBtn = (m: "lot" | "article", label: string) => (
+    <button type="button" onClick={() => setMode(m)}
+      className={`flex-1 h-6 rounded-md text-[11px] font-semibold transition-colors ${
+        mode === m ? "bg-card text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:text-foreground"
+      }`}>
+      {label}
+    </button>
+  );
+
   return createPortal(
     <div
       ref={boxRef}
-      style={{ position: "fixed", left: pos.x, top: pos.y, width: 288 }}
+      style={{ position: "fixed", left: pos.x, top: pos.y, width: 300 }}
       onContextMenu={(e) => e.preventDefault()}
       // Le popup est rendu dans un portail MAIS reste enfant React de la carte :
       // sans ça, un clic dedans REMONTE (arbre React) jusqu'au onClick de la
       // carte, qui refermait la fenêtre. On coupe la propagation ici.
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
-      className="z-[130] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[336px] animate-fade-up"
+      className="z-[130] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[360px] animate-fade-up"
     >
       <div className="shrink-0 px-3 py-2 border-b border-border bg-secondary/30">
-        <p className="text-[11px] font-semibold text-foreground inline-flex items-center gap-1.5">
-          <Replace className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" /> Échanger l&apos;article
+        <p className="text-[11px] text-muted-foreground truncate">
+          <span className="font-semibold text-foreground">{pos.oldName}</span> <span className="font-mono text-[10px]">{pos.oldCode}</span>
         </p>
-        <p className="text-[11px] text-muted-foreground truncate mt-0.5">
-          {pos.oldName} <span className="font-mono text-[10px]">{pos.oldCode}</span>
-        </p>
+        <div className="mt-1.5 flex items-center gap-0.5 rounded-lg border border-border bg-secondary/40 p-0.5">
+          {tabBtn("lot", "Changer le lot")}
+          {tabBtn("article", "Échanger l'article")}
+        </div>
       </div>
-      <div className="shrink-0 relative px-2 pt-2">
-        <Search className="pointer-events-none absolute left-4 top-[calc(50%+4px)] -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-        <input
-          autoFocus
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Nouveau produit (nom ou code)…"
-          aria-label="Rechercher l'article de remplacement"
-          className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-8 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-        />
-        {loading && <Loader2 className="absolute right-4 top-[calc(50%+4px)] -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-      </div>
-      <div className="overflow-y-auto py-1 min-h-0">
-        {query.trim().length < 2 ? (
-          <p className="px-3 py-2 text-[11.5px] italic text-muted-foreground">Tape au moins 2 caractères…</p>
-        ) : results.length === 0 && !loading ? (
-          <p className="px-3 py-2 text-[11.5px] italic text-muted-foreground">Aucun produit trouvé.</p>
-        ) : results.map((p) => (
-          <button
-            key={p.itemCode}
-            type="button"
-            disabled={busy != null}
-            onClick={() => runSwap(p)}
-            className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-secondary/60 disabled:opacity-60 transition-colors"
-          >
-            <span className="min-w-0 flex-1">
-              <span className="block text-[12.5px] font-medium text-foreground truncate">{p.itemName}</span>
-              <span className="block text-[10px] font-mono text-muted-foreground">{p.itemCode}</span>
-            </span>
-            {busy === p.itemCode
-              ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
-              : <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />}
-          </button>
-        ))}
-      </div>
+
+      {mode === "lot" ? (
+        <div className="overflow-y-auto py-1 min-h-0">
+          <p className="px-3 pt-1 pb-0.5 text-[9.5px] uppercase tracking-wider text-muted-foreground font-semibold">Lots — ordre FIFO</p>
+          {cands === null ? (
+            <p className="px-3 py-2 text-[11.5px] text-muted-foreground inline-flex items-center gap-1.5"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Chargement des lots…</p>
+          ) : cands.length === 0 ? (
+            <p className="px-3 py-2 text-[11.5px] italic text-muted-foreground">Aucun lot en stock pour cet article.</p>
+          ) : cands.map((c) => (
+            <button key={c.lot} type="button" disabled={lotBusy != null} onClick={() => runLotChange(c)}
+              className="w-full text-left px-3 py-1.5 hover:bg-secondary/60 disabled:opacity-60 transition-colors">
+              <div className="flex items-center gap-1.5 text-[12.5px]">
+                <span className="font-semibold text-foreground">{c.lot}</span>
+                <span className="text-[10px] px-1 py-px rounded bg-secondary text-muted-foreground">{LOT_AFFECT_LABEL[c.affect] ?? c.affect}</span>
+                {c.rating ? <StarRating value={c.rating} size="sm" /> : null}
+                <span className="ml-auto shrink-0">
+                  {lotBusy === c.lot ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                  ) : c.fromLedger && c.colis != null && c.colis > 0 ? (
+                    <span className="text-[10.5px] px-1.5 py-px rounded bg-brand-500/12 text-brand-700 dark:text-brand-300 font-bold tnum" title="Colis restants sur cette entrée">{fmtColisLot(c.colis)} colis</span>
+                  ) : c.qty != null && c.qty > 0 ? (
+                    <span className="text-[10px] px-1 py-px rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 tnum" title="Stock physique de l'article dans cet entrepôt">{Math.round(c.qty)} en stock</span>
+                  ) : null}
+                </span>
+              </div>
+              {(c.supplierName || (c.purchasePrice != null && c.purchasePrice > 0) || c.warehouse) && (
+                <div className="mt-0.5 flex items-center gap-x-2.5 flex-wrap text-[10.5px] text-muted-foreground tnum">
+                  {c.supplierName && <span className="inline-flex items-center gap-1 min-w-0"><Truck className="h-3 w-3 shrink-0" /> <span className="truncate">{c.supplierName}</span></span>}
+                  {c.purchasePrice != null && c.purchasePrice > 0 && <span className="inline-flex items-center gap-1"><BadgeEuro className="h-3 w-3" /> {c.purchasePrice.toFixed(2)} €</span>}
+                  {c.warehouse && <span className="ml-auto">mag. {c.warehouse}</span>}
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <>
+          <div className="shrink-0 relative px-2 pt-2">
+            <Search className="pointer-events-none absolute left-4 top-[calc(50%+4px)] -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Nouveau produit (nom ou code)…"
+              aria-label="Rechercher l'article de remplacement"
+              className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-8 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            />
+            {loading && <Loader2 className="absolute right-4 top-[calc(50%+4px)] -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+          </div>
+          <div className="overflow-y-auto py-1 min-h-0">
+            {query.trim().length < 2 ? (
+              <p className="px-3 py-2 text-[11.5px] italic text-muted-foreground">Tape au moins 2 caractères…</p>
+            ) : results.length === 0 && !loading ? (
+              <p className="px-3 py-2 text-[11.5px] italic text-muted-foreground">Aucun produit trouvé.</p>
+            ) : results.map((p) => (
+              <button
+                key={p.itemCode}
+                type="button"
+                disabled={busy != null}
+                onClick={() => runSwap(p)}
+                className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-secondary/60 disabled:opacity-60 transition-colors"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[12.5px] font-medium text-foreground truncate">{p.itemName}</span>
+                  <span className="block text-[10px] font-mono text-muted-foreground">{p.itemCode}</span>
+                </span>
+                {busy === p.itemCode
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />
+                  : <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>,
     document.body,
   );
