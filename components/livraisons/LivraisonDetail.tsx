@@ -157,7 +157,10 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
       const fresh = () => !signal?.aborted && seq === loadSeq.current;
       setLoading(true);
       setError(null);
-      fetch(`/api/livraisons?date=${date}`, { cache: "no-store", signal })
+      // carryover=1 : le Détail livraison REPORTE la file de préparation — une
+      // commande mise en prépa mais pas encore faite reste dans la vue du jour
+      // (en retard comme en avance), tant qu'elle n'est pas marquée « faite ».
+      fetch(`/api/livraisons?date=${date}&carryover=1`, { cache: "no-store", signal })
         .then(async (r) => {
           const j: ApiResp = await r.json();
           if (!fresh()) return;
@@ -1002,7 +1005,7 @@ function CarrierGroup({
               <ul className="divide-y divide-border/60">
                 {tg.docs.map((d) => (
                   <OrderRow
-                    key={`${d.docEntry}:${gen}`} doc={d} carriers={carriers}
+                    key={`${d.docEntry}:${gen}`} doc={d} viewDate={date} carriers={carriers}
                     onCarrierChange={onCarrierChange} onDateChange={onDateChange}
                     tournees={d.trspCode ? tourneesByCode[d.trspCode.toUpperCase()] : undefined}
                     onLoadTournees={onLoadTournees} onTourneeChange={onTourneeChange}
@@ -1619,9 +1622,10 @@ function PreparedByDialog({
    réellement modifiées re-rendent (le reste garde son identité de props).
 ═════════════════════════════════════════════════════════════ */
 const OrderRow = memo(function OrderRow({
-  doc, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange, onPatchDoc, onReload, canDispatch,
+  doc, viewDate, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange, onPatchDoc, onReload, canDispatch,
 }: {
   doc: Doc;
+  viewDate: string;
   carriers: CarrierOption[];
   onCarrierChange: (docEntry: number, sapValue: string) => Promise<boolean>;
   onDateChange: (docEntry: number, dueDate: string) => Promise<boolean>;
@@ -1696,6 +1700,12 @@ const OrderRow = memo(function OrderRow({
   // Date de livraison (DocDueDate) — modifiable directement sur la ligne. Au
   // changement → PATCH + rechargement (la commande quitte la vue si elle bouge).
   const dueISO = (doc.dueDate ?? "").slice(0, 10);
+  // « Reportée » dans la file : la commande est affichée dans la vue d'un AUTRE
+  // jour que sa date de livraison (report des prépas non faites). En RETARD si
+  // sa livraison était prévue AVANT le jour affiché, ANTICIPÉE si elle l'est APRÈS.
+  const carriedOver = !!viewDate && dueISO.length === 10 && dueISO !== viewDate;
+  const carriedOverdue = carriedOver && dueISO < viewDate;
+  const dueShort = dueISO.length === 10 ? `${dueISO.slice(8, 10)}/${dueISO.slice(5, 7)}` : "";
   const [savingDate, setSavingDate] = useState(false);
   async function handleDate(value: string) {
     if (!value || value === dueISO) return;
@@ -2194,6 +2204,23 @@ const OrderRow = memo(function OrderRow({
             {doc.clientType && (SEG_UI[doc.clientType as keyof typeof SEG_UI] ?? null) && (
               <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEG_UI[doc.clientType as keyof typeof SEG_UI].badge}`}>
                 {SEG_UI[doc.clientType as keyof typeof SEG_UI].label}
+              </span>
+            )}
+            {carriedOver && (
+              <span
+                title={
+                  carriedOverdue
+                    ? `Livraison prévue le ${capitalize(formatDeliveryDate(dueISO))} — pas encore faite, reportée dans la file du jour`
+                    : `Livraison prévue le ${capitalize(formatDeliveryDate(dueISO))} — mise en préparation en avance, dans la file jusqu'à ce qu'elle soit faite`
+                }
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                  carriedOverdue
+                    ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                    : "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300"
+                }`}
+              >
+                <CalendarDays className="h-3 w-3 shrink-0" />
+                {carriedOverdue ? "Reportée" : "Anticipée"} · Livr. {dueShort}
               </span>
             )}
             {prepared && !departed && (preparedBy ?? preparer) && (
