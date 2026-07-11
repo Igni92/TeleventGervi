@@ -10,6 +10,7 @@ import {
   fmtHM, weekLabel, aggregateMonth, monthLabel,
   type HoursProfile, type WeekCalc, type HeuresOption,
 } from "./heuresCalc";
+import type { MonthRecap } from "./planning";
 
 
 const esc = (s: string) =>
@@ -46,6 +47,31 @@ export interface MoisEmploye {
     option?: HeuresOption | null;   // choix compta reporté sur l'état
     recupDates?: string[];          // dates de récup (option « recup »)
   }[];
+  /** Compteurs à la FIN du mois (solde récup, plafond employeur, excédent « à
+   *  payer sur le bulletin du mois suivant », solde CP) — reporté à la compta. */
+  recap?: MonthRecap | null;
+}
+
+/** Bloc « compteurs » sous le tableau : la donnée que la compta attend pour le
+ *  bulletin du mois SUIVANT (heures supp au-delà du plafond de récup → payées). */
+function recapBlock(recap: MonthRecap | null | undefined): string {
+  if (!recap) return "";
+  const cap = recap.recupCapMin == null ? "—" : fmtHM(recap.recupCapMin);
+  const cp = recap.cpBalanceDays == null
+    ? "—"
+    : `${recap.cpBalanceDays} j`;
+  const excess = recap.excessMin > 0
+    ? `<div class="pay"><span class="k">À PAYER sur le bulletin du mois suivant</span><span class="v">${fmtHM(recap.excessMin)}</span></div>`
+    : "";
+  return `
+    <div class="recap recap5">
+      <div><p class="k">Solde récup (fin de mois)</p><p class="v">${fmtHM(recap.recupBalanceMin)}</p></div>
+      <div><p class="k">Plafond récup</p><p class="v">${cap}</p></div>
+      <div><p class="k">Au-delà du plafond → payé M+1</p><p class="v${recap.excessMin > 0 ? " alert" : ""}">${fmtHM(recap.excessMin)}</p></div>
+      <div><p class="k">CP pris (période)</p><p class="v">${recap.cpTakenDays} j</p></div>
+      <div><p class="k">Solde CP</p><p class="v">${cp}</p></div>
+    </div>
+    ${excess}`;
 }
 
 function moisRows(weeks: MoisEmploye["weeks"]): string {
@@ -98,10 +124,16 @@ function moisEmployePage(f: MoisEmploye, monthId: string): string {
       </tfoot>
     </table>
 
+    ${recapBlock(f.recap)}
+
     <p class="legende">Les heures supplémentaires sont calculées PAR SEMAINE CIVILE (majorations légales :
     +25 % les 8 premières heures au-delà du contrat, +50 % ensuite) puis totalisées sur le mois.
     Une semaine à cheval sur deux mois est rattachée au mois où elle se termine (dimanche).
     « Équiv. payé » = heures supp converties en heures payées (×1,25 / ×1,5) — donnée paie.
+    Un jour de CONGÉS validé est compté comme TRAVAILLÉ (journée type créditée — il ne crée jamais de
+    déficit). La récup posée n'est déduite du compteur qu'au passage de la semaine, et seulement si le
+    contrat n'y est pas atteint. Les heures de récup AU-DELÀ du plafond fixé par l'employeur partent au
+    PAIEMENT sur le bulletin du mois suivant (ligne « payé M+1 » ci-dessus).
     L'option retenue pour les heures supp (récupération en jours ou paiement) est indiquée sous chaque
     semaine concernée.</p>
 
@@ -115,6 +147,7 @@ function moisEmployePage(f: MoisEmploye, monthId: string): string {
 function moisSynthesePage(feuilles: MoisEmploye[], monthId: string): string {
   const rows = feuilles.map((f) => {
     const t = aggregateMonth(f.weeks.map((w) => w.calc));
+    const excess = f.recap?.excessMin ?? 0;
     return `
       <tr>
         <td>${esc(f.name)}</td>
@@ -126,6 +159,8 @@ function moisSynthesePage(feuilles: MoisEmploye[], monthId: string): string {
         <td class="num">${fmtHM(t.sup50Min)}</td>
         <td class="num total">${fmtHM(t.majEquivMin)}</td>
         <td class="num">${fmtHM(t.recupMin)}</td>
+        <td class="num">${f.recap ? fmtHM(f.recap.recupBalanceMin) : "—"}</td>
+        <td class="num${excess > 0 ? " alert" : ""}">${excess > 0 ? fmtHM(excess) : "—"}</td>
       </tr>`;
   }).join("");
   return `
@@ -142,12 +177,14 @@ function moisSynthesePage(feuilles: MoisEmploye[], monthId: string): string {
         <tr>
           <th>Employé</th><th class="num">Semaines</th><th class="num">Contrat</th><th class="num">Total</th><th class="num">Écart</th>
           <th class="num">Supp +25 %</th><th class="num">Supp +50 %</th><th class="num">Équiv. payé</th><th class="num">Récup</th>
+          <th class="num">Solde récup</th><th class="num">Payé M+1</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
     <p class="legende">Heures supp calculées par semaine civile puis totalisées ; semaine à cheval rattachée au
-    mois de son dimanche. Un état détaillé par employé suit (à signer).</p>
+    mois de son dimanche. « Payé M+1 » = heures de récup AU-DELÀ du plafond fixé par l'employeur, à payer
+    sur le bulletin du mois suivant. Un état détaillé par employé suit (à signer).</p>
   </section>`;
 }
 
@@ -203,10 +240,17 @@ function openPrintWindow(title: string, pages: string): boolean {
 
   .recap { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0;
            border: 1.5px solid #111; border-radius: 6px; overflow: hidden; margin-bottom: 8px; }
+  .recap.recap5 { grid-template-columns: repeat(5, 1fr); }
   .recap > div { padding: 7px 10px; border-left: 1px solid #bbb; }
   .recap > div:first-child { border-left: none; }
   .recap .k { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.8px; color: #555; }
   .recap .v { font-size: 15px; font-weight: 800; margin-top: 1px; }
+  .v.alert, td.alert { color: #b91c1c; font-weight: 800; }
+  .pay { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+         border: 2px solid #b91c1c; border-radius: 6px; padding: 7px 12px; margin-bottom: 8px;
+         background: #fef2f2; }
+  .pay .k { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #991b1b; font-weight: 700; }
+  .pay .v { font-size: 16px; font-weight: 800; color: #b91c1c; }
   .legende { font-size: 10.5px; color: #555; margin-bottom: 18px; }
 
   .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 26px; }

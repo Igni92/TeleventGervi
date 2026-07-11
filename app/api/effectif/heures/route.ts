@@ -4,13 +4,17 @@ import { prisma } from "@/lib/prisma";
 import { getAccessScope } from "@/lib/permissions";
 import {
   computeWeek, isWeekId, isoWeekId, isMonthId, monthWeeks, aggregateMonth,
+  typicalDayMinutes,
   type HoursProfile,
 } from "@/lib/heuresCalc";
 import {
   getProfile, saveProfile, listProfiles,
   getWeekEntry, saveWeekEntry, sanitizeDays,
-  getUserWeeks, listEntriesForWeeks, type WeekEntry,
+  listUserWeekEntries, listAllWeekEntries, type WeekEntry,
 } from "@/lib/heuresRh";
+import { listUserConges, listAllConges } from "@/lib/congesRh";
+import { expandOuvrables, computeMonthRecap, type CounterWeekInput } from "@/lib/planning";
+import type { CongeRequest } from "@/lib/conges";
 
 export const dynamic = "force-dynamic";
 
@@ -54,21 +58,29 @@ export async function GET(req: NextRequest) {
     try {
       if (all) {
         if (!c.isManager) return NextResponse.json({ error: "Réservé aux managers" }, { status: 403 });
-        const [users, byUser, profiles] = await Promise.all([
+        // Toutes les semaines (pas seulement le mois) : le RÉCAP (solde récup,
+        // plafond → « à payer M+1 ») porte sur l'HISTORIQUE complet.
+        const [users, byUser, profiles, allConges] = await Promise.all([
           prisma.user.findMany({ select: { name: true, email: true }, orderBy: { name: "asc" } }),
-          listEntriesForWeeks(weeks),
+          listAllWeekEntries(),
           listProfiles(),
+          listAllConges(),
         ]);
+        const congesByUser = new Map<string, CongeRequest[]>();
+        for (const g of allConges) {
+          const list = congesByUser.get(g.email);
+          if (list) list.push(g); else congesByUser.set(g.email, [g]);
+        }
         const seen = new Set<string>();
         const rows = (users as { name: string | null; email: string | null }[])
           .filter((u) => u.email)
           .map((u) => {
             const email = u.email!.trim().toLowerCase();
             seen.add(email);
-            return buildMonthRow(email, u.name || email, weeks, byUser.get(email), profiles.get(email) ?? null);
+            return buildMonthRow(email, u.name || email, weeks, byUser.get(email), profiles.get(email) ?? null, congesByUser.get(email) ?? [], month);
           });
         for (const [email, entries] of byUser) {
-          if (!seen.has(email)) rows.push(buildMonthRow(email, email, weeks, entries, profiles.get(email) ?? null));
+          if (!seen.has(email)) rows.push(buildMonthRow(email, email, weeks, entries, profiles.get(email) ?? null, congesByUser.get(email) ?? [], month));
         }
         return NextResponse.json({ ok: true, month, weeks, rows });
       }
@@ -76,8 +88,10 @@ export async function GET(req: NextRequest) {
       if (who !== c.email && !c.isManager) {
         return NextResponse.json({ error: "Réservé aux managers" }, { status: 403 });
       }
-      const [entries, profile] = await Promise.all([getUserWeeks(who, weeks), getProfile(who)]);
-      const row = buildMonthRow(who, who, weeks, entries, profile);
+      const [entries, profile, conges] = await Promise.all([
+        listUserWeekEntries(who), getProfile(who), listUserConges(who),
+      ]);
+      const row = buildMonthRow(who, who, weeks, entries, profile, conges, month);
       return NextResponse.json({ ok: true, month, user: who, ...row });
     } catch (e) {
       return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
@@ -93,37 +107,48 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Réservé aux managers" }, { status: 403 });
     }
     const [entry, profile] = await Promise.all([getWeekEntry(who, week), getProfile(who)]);
-    const calc = entry ? computeWeek(entry.days, profile.weeklyHours) : null;
+    const calc = entry ? computeWeek(entry.days, profile.weeklyHours, typicalDayMinutes(profile)) : null;
     return NextResponse.json({ ok: true, week, user: who, entry, profile, calc });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
 }
 
-/** Ligne d'état MENSUEL d'un employé : détail par semaine + agrégat du mois. */
+/** Ligne d'état MENSUEL d'un employé : détail par semaine + agrégat du mois +
+ *  RÉCAP compteurs (solde récup fin de mois, plafond employeur, excédent « à
+ *  payer sur le bulletin M+1 », solde CP) — reporté sur le PDF compta. */
 function buildMonthRow(
   email: string,
   name: string,
   weekIds: string[],
   entries: Map<string, WeekEntry> | undefined,
   profile: HoursProfile | null,
+  conges: CongeRequest[],
+  monthId: string,
 ) {
-  const weeklyHours = profile?.weeklyHours ?? 35;
+  const prof: HoursProfile = profile ?? { weeklyHours: 35, typicalDay: { m1: "06:00", m2: "13:00" } };
+  const typDay = typicalDayMinutes(prof);
   const weeksOut = weekIds.map((w) => {
     const entry = entries?.get(w) ?? null;
     return {
       week: w,
-      calc: entry ? computeWeek(entry.days, weeklyHours) : null,
+      calc: entry ? computeWeek(entry.days, prof.weeklyHours, typDay) : null,
       option: entry?.option ?? null,          // choix compta reporté sur l'état
       recupDates: entry?.recupDates,          // dates de récup (option « recup »)
     };
   });
+  const allWeeks: CounterWeekInput[] = [...(entries ?? new Map<string, WeekEntry>()).entries()]
+    .map(([week, e]) => ({ week, days: e.days, option: e.option, recupDates: e.recupDates }));
+  const extraRecup = conges
+    .filter((g) => g.type === "recup" && g.status === "approved")
+    .flatMap((g) => expandOuvrables(g.start, g.end));
   return {
     email,
     name,
     profile,
     weeks: weeksOut,
     total: aggregateMonth(weeksOut.map((w) => w.calc)),
+    recap: computeMonthRecap(allWeeks, extraRecup, conges, prof, monthId),
   };
 }
 
@@ -157,11 +182,12 @@ export async function POST(req: NextRequest) {
     // ANNULE l'option, quoi qu'il ait été enregistré avant (évite d'accorder une
     // récup pour des heures en réalité travaillées).
     const profile = await getProfile(target);
-    const calc = computeWeek(sanitizeDays(body.days), profile.weeklyHours);
+    const typDay = typicalDayMinutes(profile);
+    const calc = computeWeek(sanitizeDays(body.days), profile.weeklyHours, typDay);
     if (calc.sup25Min + calc.sup50Min === 0) opt = { option: null, recupDates: undefined };
 
     const entry = await saveWeekEntry(target, week, body.days, c.email, opt);
-    return NextResponse.json({ ok: true, week, user: target, entry, calc: computeWeek(entry.days, profile.weeklyHours) });
+    return NextResponse.json({ ok: true, week, user: target, entry, calc: computeWeek(entry.days, profile.weeklyHours, typDay) });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }

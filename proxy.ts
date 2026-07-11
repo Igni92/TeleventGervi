@@ -51,8 +51,10 @@ export default auth((req) => {
   const isAgreeur = req.auth?.user?.isAgreeur === true;
   if (isPrep || isLivreur || isAgreeur) {
     // /heures : saisie PERSONNELLE des heures — ouverte à tout rôle confiné
-    // (chacun enregistre SA semaine). /api + /login toujours accessibles.
-    const allowedPrefixes = ["/api", "/login", "/heures"];
+    // (chacun enregistre SA semaine). /planning : congés & récup (demandes +
+    // réponses aux propositions de la direction) — même ouverture. /api +
+    // /login toujours accessibles.
+    const allowedPrefixes = ["/api", "/login", "/heures", "/planning"];
     if (isPrep) allowedPrefixes.push("/livraisons", "/inventaire", "/preparations");
     if (isLivreur) allowedPrefixes.push("/livraisons", "/clients");
     if (isAgreeur) allowedPrefixes.push("/commandes-fournisseurs", "/entrees");

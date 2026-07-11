@@ -10,6 +10,7 @@ import {
   Radio, ShoppingCart, Package, PackagePlus, Factory, Receipt, AlertTriangle,
   Home, Settings, PackageCheck, ClipboardCheck, ClipboardList, Truck, Eye, Store, PackageX,
   Pencil, Loader2, RotateCcw, ScrollText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight, Check,
+  CalendarDays,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -125,6 +126,9 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
       { href: "/dashboard", label: "Statistiques", icon: LayoutDashboard },
       { href: "/encours", label: "Encours clients", icon: Receipt },
       { href: "/commerciaux", label: "Effectif", icon: Briefcase },
+      // Planning congés & récup : calendriers par personne + équipe, compteurs
+      // CP/récup, propositions boomerang (direction ⇄ salarié).
+      { href: "/planning", label: "Planning", icon: CalendarDays },
       { href: "/transport", label: "Coût de transport", icon: Truck },
     ],
   },

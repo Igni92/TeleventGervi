@@ -6,7 +6,7 @@ import { Command } from "cmdk";
 import {
   Home, Radio, ClipboardList, Users, Package, PackagePlus, PackageCheck, Factory, Truck,
   LayoutDashboard, Receipt, Briefcase, Settings, Search, CornerDownLeft, Store, ShoppingCart,
-  ClipboardCheck, PackageX, Clock3, ScrollText,
+  ClipboardCheck, PackageX, Clock3, ScrollText, CalendarDays,
 } from "lucide-react";
 
 interface NavItem { href: string; label: string; icon: typeof Home; keywords?: string }
@@ -30,6 +30,7 @@ const NAV: NavItem[] = [
   { href: "/encours", label: "Encours clients", icon: Receipt, keywords: "factures impayés" },
   { href: "/commerciaux", label: "Équipe commerciale", icon: Briefcase, keywords: "commerciaux objectifs slp équipe personnel préparateur rôles effectifs" },
   { href: "/heures", label: "Mes heures", icon: Clock3, keywords: "heures temps de travail feuille pointage semaine paie" },
+  { href: "/planning", label: "Planning", icon: CalendarDays, keywords: "planning congés cp récup calendrier équipe vacances absences plafond" },
   { href: "/parametres", label: "Paramètres", icon: Settings, keywords: "réglages sap import thème" },
 ];
 
