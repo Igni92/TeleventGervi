@@ -663,3 +663,12 @@ et du **format de date** sur les états SAP.
 - `DesignationChips` : nouveau tag `variete` (rose) distinct du `calibre` (teal, préfixe `cal.` auto). `Chip` unitaire aligné sur la même palette.
 - `DateStepper` : rappel `VEN 10.07.26` sous le sélecteur (CDE FOURNS, EM, détails livraison).
 - Écrans redéfinis : `PurchaseOrderForm` / `PurchaseOrderHistory` (CDE FOURNS), `GoodsReceiptForm` / `GoodsReceiptHistory` (EM), `ProductsTable` (Stock — variété `frgnName` désormais câblée).
+
+---
+
+## 📱 Planning — calendrier mobile repensé
+
+- **Cellules façon appli** sur mobile : numéro du jour dans une pastille ronde plus grande, cellule **teintée par le type du congé validé** (lecture immédiate), statuts en **points ronds** (validé plein, en attente creux, récup, tag feuille d'heures ; max 4 + « … »). Sur desktop, barres pleines conservées.
+- **En-têtes d'une seule lettre** (L M M J V S D) sous `sm` → plus de largeur par colonne.
+- **Liste « Ce mois-ci »** sous le calendrier (mobile) : chaque congé/récup du mois avec type, plage et statut ; un tap sélectionne la plage. Les pastilles disent « quoi », la liste dit « quand & quel statut ».
+- Sélection liée (bandeau continu) et choix clic début/clic fin inchangés.
