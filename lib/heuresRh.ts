@@ -9,7 +9,7 @@
  * lib/heuresCalc (pur, testé) — ici uniquement lecture/écriture.
  */
 import { prisma } from "./prisma";
-import { DEFAULT_PROFILE, isHeuresOption, type DayHours, type HeuresOption, type HoursProfile } from "./heuresCalc";
+import { DEFAULT_PROFILE, isDayTag, isHeuresOption, type DayHours, type HeuresOption, type HoursProfile } from "./heuresCalc";
 
 const PROFIL_PREFIX = "rhprofil:";
 const WEEK_PREFIX = "rhsem:";
@@ -29,12 +29,22 @@ const emailKey = (email: string) => email.trim().toLowerCase();
 
 /* ─────────────────────────────── Profils ──────────────────────────────────── */
 
+/** Nombre borné [0..max] arrondi au 1/100, ou null si absent/invalide —
+ *  réglages EMPLOYEUR (solde CP en jours, plafond récup en heures). */
+function boundedOrNull(v: unknown, max: number): number | null {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || n > max) return null;
+  return Math.round(n * 100) / 100;
+}
+
 function normalizeProfile(v: unknown): HoursProfile {
   const p = (v ?? {}) as Partial<HoursProfile>;
   const weekly = Number(p.weeklyHours);
   return {
     weeklyHours: Number.isFinite(weekly) && weekly > 0 && weekly <= 80 ? Math.round(weekly * 100) / 100 : DEFAULT_PROFILE.weeklyHours,
     typicalDay: sanitizeDay(p.typicalDay) ?? { ...DEFAULT_PROFILE.typicalDay },
+    cpAllowanceDays: boundedOrNull(p.cpAllowanceDays, 365),
+    recupCapHours: boundedOrNull(p.recupCapHours, 1000),
   };
 }
 
@@ -76,6 +86,7 @@ function sanitizeDay(v: unknown): DayHours | null {
   const hm = (s: unknown) => (typeof s === "string" && HM_RE.test(s.trim()) ? s.trim() : undefined);
   const out: DayHours = {
     m1: hm(d.m1), m2: hm(d.m2), a1: hm(d.a1), a2: hm(d.a2),
+    tag: isDayTag(d.tag) ? d.tag : undefined,
     note: typeof d.note === "string" && d.note.trim() ? d.note.trim().slice(0, 80) : undefined,
   };
   return out;
@@ -172,6 +183,82 @@ export async function getUserWeeks(email: string, weekIds: string[]): Promise<Ma
     }
   } catch { /* saisies indisponibles */ }
   return out;
+}
+
+/** TOUTES les saisies d'UN employé (tous ses `rhsem:<email>:*`) — base des
+ *  COMPTEURS (récup/CP) qui portent sur l'historique complet, pas un seul mois. */
+export async function listUserWeekEntries(email: string): Promise<Map<string, WeekEntry>> {
+  const out = new Map<string, WeekEntry>();
+  const prefix = `${WEEK_PREFIX}${emailKey(email)}:`;
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: prefix } } });
+    for (const r of rows) {
+      const weekId = r.key.slice(prefix.length);
+      try {
+        const v = JSON.parse(r.value) as Partial<WeekEntry>;
+        out.set(weekId, parseEntry(v, v.updatedAt ?? "", v.updatedBy ?? ""));
+      } catch { /* ligne corrompue → ignorée */ }
+    }
+  } catch { /* saisies indisponibles */ }
+  return out;
+}
+
+/** TOUTES les saisies de TOUT LE MONDE, par email puis par semaine — compteurs
+ *  de l'équipe (planning direction) en un seul scan du préfixe. */
+export async function listAllWeekEntries(): Promise<Map<string, Map<string, WeekEntry>>> {
+  const out = new Map<string, Map<string, WeekEntry>>();
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: WEEK_PREFIX } } });
+    for (const r of rows) {
+      const rest = r.key.slice(WEEK_PREFIX.length);
+      const i = rest.lastIndexOf(":");
+      if (i <= 0) continue;
+      const email = rest.slice(0, i);
+      const weekId = rest.slice(i + 1);
+      try {
+        const v = JSON.parse(r.value) as Partial<WeekEntry>;
+        let byWeek = out.get(email);
+        if (!byWeek) { byWeek = new Map(); out.set(email, byWeek); }
+        byWeek.set(weekId, parseEntry(v, v.updatedAt ?? "", v.updatedBy ?? ""));
+      } catch { /* ligne corrompue → ignorée */ }
+    }
+  } catch { /* saisies indisponibles */ }
+  return out;
+}
+
+/** Pose un TAG sur des jours donnés (dates ISO) dans les semaines d'un employé —
+ *  utilisé quand un congé/récup est VALIDÉ (boomerang) : le calendrier retombe
+ *  automatiquement dans la feuille d'heures (un jour « congés » y est crédité
+ *  d'une journée type). Les heures déjà saisies ne sont JAMAIS écrasées, seul
+ *  le tag est posé. Regroupe par semaine → une écriture par semaine. */
+export async function tagDaysInWeeks(
+  email: string,
+  dates: string[],
+  tag: DayHours["tag"],
+  by: string,
+  weekIdOf: (dateISO: string) => string,
+  weekDatesOf: (weekId: string) => string[],
+): Promise<void> {
+  const byWeek = new Map<string, string[]>();
+  for (const d of dates) {
+    if (!isIsoDate(d)) continue;
+    const w = weekIdOf(d);
+    const list = byWeek.get(w);
+    if (list) list.push(d); else byWeek.set(w, [d]);
+  }
+  for (const [weekId, ds] of byWeek) {
+    const cur = await getWeekEntry(email, weekId);
+    const days = cur ? [...cur.days] : Array.from({ length: 7 }, () => ({} as DayHours));
+    const weekDays = weekDatesOf(weekId);
+    let changed = false;
+    for (const d of ds) {
+      const idx = weekDays.indexOf(d);
+      if (idx < 0) continue;
+      if (days[idx]?.tag !== tag) { days[idx] = { ...days[idx], tag }; changed = true; }
+    }
+    if (!changed) continue;
+    await saveWeekEntry(email, weekId, days, by, { option: cur?.option ?? null, recupDates: cur?.recupDates });
+  }
 }
 
 /** Toutes les saisies d'un ENSEMBLE de semaines, par email puis par semaine

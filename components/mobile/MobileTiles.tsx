@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Users, Briefcase, Truck, Store, ShoppingCart,
   PackagePlus, PackageCheck, Package, PackageX, Factory, ClipboardCheck, ClipboardList,
-  Receipt, LayoutDashboard, Clock3,
+  Receipt, LayoutDashboard, Clock3, CalendarDays,
   Settings, Tag, ScrollText, Star,
   type LucideIcon,
 } from "lucide-react";
@@ -90,6 +90,7 @@ const AXES: Axis[] = [
     tiles: [
       { href: "/commerciaux", label: "Équipe commerciale", icon: Briefcase },
       { href: "/heures", label: "Mes heures", icon: Clock3 },
+      { href: "/planning", label: "Planning", icon: CalendarDays },
       { href: "/promos", label: "Promotions", icon: Tag },
       { href: "/parametres", label: "Paramètres", icon: Settings },
     ],

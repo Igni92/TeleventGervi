@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSession } from "next-auth/react";
-import { Truck, ClipboardCheck, ClipboardList, PackageCheck, PackagePlus, Clock3, type LucideIcon } from "lucide-react";
+import { Truck, ClipboardCheck, ClipboardList, PackageCheck, PackagePlus, Clock3, CalendarDays, type LucideIcon } from "lucide-react";
 import { isRestrictedPreparateur } from "@/lib/preparateur";
 import { NotificationsBell } from "@/components/console/NotificationsBell";
 
@@ -18,7 +18,7 @@ import { NotificationsBell } from "@/components/console/NotificationsBell";
  *   • agréeur    : + Commandes fournisseurs, Entrées marchandises
  * Masqué ≥ md (la sidebar prend le relais).
  */
-type TabKey = "livraisons" | "preparations" | "inventaire" | "commandes-fournisseurs" | "entrees" | "heures";
+type TabKey = "livraisons" | "preparations" | "inventaire" | "commandes-fournisseurs" | "entrees" | "heures" | "planning";
 interface Tab { href: string; key: TabKey; label: string; icon: LucideIcon }
 
 const BASE_TABS: Tab[] = [
@@ -31,6 +31,7 @@ const AGREEUR_TABS: Tab[] = [
   { href: "/entrees", key: "entrees", label: "Entrées march.", icon: PackagePlus },
 ];
 const HEURES_TAB: Tab = { href: "/heures", key: "heures", label: "Mes heures", icon: Clock3 };
+const PLANNING_TAB: Tab = { href: "/planning", key: "planning", label: "Planning", icon: CalendarDays };
 
 export function PreparateurNav({ current }: { current: TabKey }) {
   const { data: session } = useSession();
@@ -46,6 +47,9 @@ export function PreparateurNav({ current }: { current: TabKey }) {
     ...(restricted ? BASE_TABS : BASE_TABS.filter((t) => t.key === "livraisons")),
     ...(isAgreeur ? AGREEUR_TABS : []),
     HEURES_TAB,
+    // Planning congés/récup : chaque salarié demande ses congés et répond aux
+    // propositions de la direction — accessible aussi aux rôles confinés.
+    PLANNING_TAB,
   ];
   // Livreur non préparateur : garde aussi l'accès Clients ? Non — géré par la
   // sidebar/tuiles ; ici on reste sur les écrans de la nav focalisée.
