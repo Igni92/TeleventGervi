@@ -150,6 +150,19 @@ const ONOFF: SegOption<"on" | "off">[] = [
   { id: "off", label: "Désactivé" },
 ];
 
+/** Effet au clic — choix de l'animation (ou aucune). */
+type ClickFx = "sparks" | "ripple" | "rain" | "off";
+const CLICK_FX: SegOption<ClickFx>[] = [
+  { id: "sparks", label: "Étincelles", hint: "Éclat de particules or" },
+  { id: "ripple", label: "Onde d'eau", hint: "Anneaux concentriques" },
+  { id: "rain",   label: "Cascade",    hint: "Gouttes qui tombent jusqu'en bas" },
+  { id: "off",    label: "Aucun" },
+];
+/** Normalise la valeur stockée (« on » historique → « sparks »). */
+function readClickFx(v: string): ClickFx {
+  return v === "off" ? "off" : v === "ripple" ? "ripple" : v === "rain" ? "rain" : "sparks";
+}
+
 type DensityId = (typeof DENSITES)[number]["id"];
 
 /** Applique la densité GLOBALE → attribut data-density sur <html> (cf. globals.css). */
@@ -225,7 +238,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
   const [zoom, setZoom] = useState<UiZoomValue>(UI_ZOOM_DEFAULT);
   const [densite, setDensite] = useState<DensityId>("normal");
   const [animations, setAnimations] = useState<"auto" | "on" | "off">("auto");
-  const [sparks, setSparks] = useState<"on" | "off">("on");
+  const [clickFx, setClickFx] = useState<ClickFx>("sparks");
   const [promoAnim, setPromoAnim] = useState<"on" | "off">("on");
   const [promoNotifs, setPromoNotifs] = useState<"on" | "off">("on");
   // Logos de marque — réglables indépendamment par zone.
@@ -252,7 +265,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
     const a = readSetting(SETTING_KEYS.animations, "auto");
     setAnimations((["auto", "on", "off"].includes(a) ? a : "auto") as typeof animations);
 
-    setSparks(readSetting(SETTING_KEYS.clickSparks, "on") === "off" ? "off" : "on");
+    setClickFx(readClickFx(readSetting(SETTING_KEYS.clickSparks, "sparks")));
     setPromoAnim(readSetting(SETTING_KEYS.promoBannerAnim, "on") === "off" ? "off" : "on");
     setPromoNotifs(readSetting(SETTING_KEYS.promoNotifs, "on") === "off" ? "off" : "on");
     setLogoConsole(readSetting(SETTING_KEYS.brandLogosConsole, "on") === "off" ? "off" : "on");
@@ -272,7 +285,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
       if (key === SETTING_KEYS.uiZoom && value) { setZoom(value as UiZoomValue); applyUiZoom(value as UiZoomValue); }
       if (key === SETTING_KEYS.density && value) { setDensite(value as DensityId); applyDensity(value as DensityId); }
       if (key === SETTING_KEYS.animations && value) setAnimations(value as typeof animations);
-      if (key === SETTING_KEYS.clickSparks) setSparks(value === "off" ? "off" : "on");
+      if (key === SETTING_KEYS.clickSparks) setClickFx(readClickFx(value ?? "sparks"));
       if (key === SETTING_KEYS.promoBannerAnim) setPromoAnim(value === "off" ? "off" : "on");
       if (key === SETTING_KEYS.promoNotifs) setPromoNotifs(value === "off" ? "off" : "on");
       if (key === SETTING_KEYS.brandLogosConsole) setLogoConsole(value === "off" ? "off" : "on");
@@ -341,14 +354,14 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
                 />
               </SettingRow>
               <SettingRow
-                title="Étincelles au clic"
-                desc="Petit éclat de particules sur les zones vides (jamais sur les boutons ou champs). Coupé d'office quand les animations sont désactivées."
+                title="Effet au clic"
+                desc="Animation au clic sur une zone vide (jamais sur les boutons ou champs), sur PC uniquement. Coupé d'office quand les animations sont désactivées."
               >
                 <SegmentToggle
-                  ariaLabel="Étincelles au clic"
-                  value={sparks}
-                  onChange={(v) => { setSparks(v); writeSetting(SETTING_KEYS.clickSparks, v); }}
-                  options={ONOFF}
+                  ariaLabel="Effet au clic"
+                  value={clickFx}
+                  onChange={(v) => { setClickFx(v); writeSetting(SETTING_KEYS.clickSparks, v); }}
+                  options={CLICK_FX}
                 />
               </SettingRow>
             </div>

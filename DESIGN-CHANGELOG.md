@@ -632,3 +632,16 @@ salarié, validé par l'employeur** — chaque camp valide ce que l'autre pose
 
 - Nouveaux réglages `.env` documentés : `CONGES_FROM_ADDRESS`, `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_DIRECTION_TO` / `WHATSAPP_TEMPLATE_NAME`, `APP_PUBLIC_URL`.
 - `lib/congesNotify.ts` : constructeurs de contenu PURS (email HTML échappé, texte WhatsApp, évènement Outlook all-day fin-exclusive) couverts par 5 tests.
+
+---
+
+## 🖱️ Effet au clic — 3 effets au choix + spam-clic
+
+| Avant | Après |
+|-------|-------|
+| Étincelles or, on/off, sur `click`. | **3 effets au choix** dans Paramètres › Apparence : **Étincelles** (or), **Onde d'eau** (anneaux concentriques bleutés), **Cascade** (gouttes qui giclent puis tombent jusqu'en bas de l'écran) — ou **Aucun**. |
+| `click` → délai (attend le relâchement), spam-clic mou. | Déclenché sur **`pointerdown`** : zéro délai, spam-clic fluide. |
+| Double-clic → sélection de texte → étincelles bloquées. | Double/triple-clic en zone morte : **sélection de texte annulée** (`preventDefault` sur mousedown multi-clic) → on peut spammer. |
+| Tactile déclenchait aussi (tap). | **PC uniquement** (`pointerType === "mouse"`) — tablette/téléphone jamais. |
+
+- Clé `televente:clickSparks` élargie : `sparks` (défaut, ex-« on ») · `ripple` · `rain` · `off`. Rétro-compatible (« on » → étincelles). Toujours coupé par animations=off et `prefers-reduced-motion`.
