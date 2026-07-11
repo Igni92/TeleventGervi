@@ -22,23 +22,30 @@ import { toast } from "sonner";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { displayPersonName } from "@/lib/userNames";
 import {
-  JOURS_SEMAINE, DEFAULT_PROFILE, computeWeek, fmtHM,
+  JOURS_SEMAINE, DEFAULT_PROFILE, computeWeek, fmtHM, typicalDayMinutes,
   isoWeekId, shiftWeek, weekDates, weekLabel, isDateInWeek, daysAfterWeek,
-  monthIdOf, shiftMonth, monthLabel,
-  type DayHours, type HoursProfile, type WeekCalc, type MonthCalc, type HeuresOption,
+  monthIdOf, shiftMonth, monthLabel, DAY_TAGS, DAY_TAG_LABEL,
+  type DayHours, type DayTag, type HoursProfile, type WeekCalc, type MonthCalc, type HeuresOption,
 } from "@/lib/heuresCalc";
+import type { MonthRecap } from "@/lib/planning";
 import { printEtatMensuel, type MoisEmploye } from "@/lib/heuresPdf";
 
 const EMPTY_WEEK = (): DayHours[] => Array.from({ length: 7 }, () => ({}));
 
+/** Des heures réelles sont-elles saisies ce jour ? (plage complète matin OU
+ *  après-midi) — sinon un tag « Congés » crédite la journée type. */
+const dayHasHours = (d?: DayHours) => !!((d?.m1 && d?.m2) || (d?.a1 && d?.a2));
+
 /** État MENSUEL d'un employé : une ligne par semaine rattachée au mois
- *  (celle dont le dimanche tombe dans le mois) + agrégat. */
+ *  (celle dont le dimanche tombe dans le mois) + agrégat + récap compteurs
+ *  (solde récup fin de mois, plafond, « à payer M+1 », CP). */
 interface MonthRow {
   email: string;
   name: string;
   profile: HoursProfile | null;
   weeks: { week: string; calc: WeekCalc | null; option?: HeuresOption | null; recupDates?: string[] }[];
   total: MonthCalc;
+  recap?: MonthRecap | null;
 }
 
 export function HeuresPanel({ isManager }: { isManager: boolean }) {
@@ -81,10 +88,20 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
   }, [week, userQS]);
   useEffect(() => { load(); }, [load]);
 
-  const calc = useMemo(() => computeWeek(days, profile.weeklyHours), [days, profile.weeklyHours]);
+  // Journée type (minutes) : la valeur CRÉDITÉE pour un jour taggé « Congés »
+  // (un CP validé compte comme travaillé — il ne crée jamais de déficit).
+  const typDayMin = useMemo(() => typicalDayMinutes(profile), [profile]);
+  const calc = useMemo(() => computeWeek(days, profile.weeklyHours, typDayMin), [days, profile.weeklyHours, typDayMin]);
 
   const setDay = (i: number, patch: Partial<DayHours>) => {
     setDays((cur) => cur.map((d, k) => (k === i ? { ...d, ...patch } : d)));
+    setDirty(true);
+  };
+
+  // Tag du jour (Présent / Absent / Congés / Récup / Maladie) — un seul par
+  // jour, re-cliquer le tag actif le retire.
+  const setTag = (i: number, tag: DayTag) => {
+    setDays((cur) => cur.map((d, k) => (k === i ? { ...d, tag: d?.tag === tag ? undefined : tag } : d)));
     setDirty(true);
   };
 
@@ -200,7 +217,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
             .then((r) => r.json()).catch(() => null)
         : Promise.resolve(null);
       const [o, t] = await Promise.all([ownP, teamP]);
-      if (o?.ok) setMyMonth({ email: o.email, name: o.name, profile: o.profile, weeks: o.weeks, total: o.total });
+      if (o?.ok) setMyMonth({ email: o.email, name: o.name, profile: o.profile, weeks: o.weeks, total: o.total, recap: o.recap });
       if (isManager) setTeamMonth(t?.ok ? (t.rows ?? []) : []);
     } finally {
       setMonthLoading(false);
@@ -213,12 +230,14 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
     const ok = printEtatMensuel(month, [{
       name: "Mon état mensuel", email: myMonth.email,
       profile: myMonth.profile ?? { ...DEFAULT_PROFILE }, weeks: myMonth.weeks,
+      recap: myMonth.recap ?? null,
     }]);
     if (!ok) toast.error("Impression bloquée — autorisez les pop-ups.");
   };
   const toMois = (row: MonthRow): MoisEmploye => ({
     name: displayFullName(row.name), email: row.email,
     profile: row.profile ?? { ...DEFAULT_PROFILE }, weeks: row.weeks,
+    recap: row.recap ?? null,
   });
   const printMonthOne = (row: MonthRow) => {
     if (row.total.weeksWithData === 0) { toast.info("Aucune saisie ce mois-ci pour cet employé."); return; }
@@ -370,11 +389,19 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                   <input type="time" disabled={loading} value={days[i]?.a2 ?? ""} onChange={(e) => setDay(i, { a2: e.target.value })} className={timeCardCls} aria-label={`${jour} après-midi fin`} />
                 </div>
               )}
-              <input value={days[i]?.note ?? ""} disabled={loading} maxLength={80}
-                onChange={(e) => setDay(i, { note: e.target.value })}
-                placeholder="Note (CP, récup, maladie…)"
-                aria-label={`${jour} note`}
-                className="mt-2 h-10 w-full rounded-md border border-border bg-background px-2.5 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50" />
+              {/* Tags du jour (remplacent la note libre sur mobile) : Présent /
+                  Absent / Congés / Récup / Maladie. « Congés » CRÉDITE une
+                  journée type (le CP compte comme travaillé). */}
+              <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label={`${jour} tag`}>
+                {DAY_TAGS.map((t) => (
+                  <TagChip key={t} tag={t} active={days[i]?.tag === t} disabled={loading} onClick={() => setTag(i, t)} />
+                ))}
+              </div>
+              {days[i]?.tag === "conges" && !dayHasHours(days[i]) && typDayMin > 0 && (
+                <p className="mt-1.5 text-[11px] text-sky-700 dark:text-sky-300">
+                  Journée type créditée : <b className="tnum">{fmtHM(typDayMin)}</b> — le congé compte comme travaillé.
+                </p>
+              )}
             </div>
           ))}
         </div>
@@ -390,7 +417,8 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                 {showAfternoon && <th className="font-semibold px-2 py-2">A-midi début</th>}
                 {showAfternoon && <th className="font-semibold px-2 py-2">A-midi fin</th>}
                 <th className="text-right font-semibold px-3 py-2">Total</th>
-                <th className="text-left font-semibold px-3 py-2">Note (CP, récup…)</th>
+                <th className="text-left font-semibold px-2 py-2">Tag</th>
+                <th className="text-left font-semibold px-3 py-2">Note</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
@@ -408,13 +436,26 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                   <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.m2 ?? ""} onChange={(e) => setDay(i, { m2: e.target.value })} className={timeCls} aria-label={`${jour} matin fin`} /></td>
                   {showAfternoon && <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.a1 ?? ""} onChange={(e) => setDay(i, { a1: e.target.value })} className={timeCls} aria-label={`${jour} après-midi début`} /></td>}
                   {showAfternoon && <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.a2 ?? ""} onChange={(e) => setDay(i, { a2: e.target.value })} className={timeCls} aria-label={`${jour} après-midi fin`} /></td>}
-                  <td className="px-3 py-1.5 text-right tnum font-bold">{calc.dayMin[i] > 0 ? fmtHM(calc.dayMin[i]) : "—"}</td>
+                  <td className="px-3 py-1.5 text-right tnum font-bold">
+                    {calc.dayMin[i] > 0 ? fmtHM(calc.dayMin[i]) : "—"}
+                    {days[i]?.tag === "conges" && !dayHasHours(days[i]) && typDayMin > 0 && (
+                      <span className="ml-1 align-middle text-[9px] font-bold uppercase tracking-wide text-sky-600 dark:text-sky-400" title="Journée type créditée — le congé compte comme travaillé">CP</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <select value={days[i]?.tag ?? ""} disabled={loading} aria-label={`${jour} tag`}
+                      onChange={(e) => setDay(i, { tag: (e.target.value || undefined) as DayTag | undefined })}
+                      className="h-9 w-[110px] rounded-md border border-border bg-background px-1.5 text-[12px] focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">
+                      <option value="">—</option>
+                      {DAY_TAGS.map((t) => <option key={t} value={t}>{DAY_TAG_LABEL[t]}</option>)}
+                    </select>
+                  </td>
                   <td className="px-3 py-1.5">
                     <input value={days[i]?.note ?? ""} disabled={loading} maxLength={80}
                       onChange={(e) => setDay(i, { note: e.target.value })}
                       placeholder=""
                       aria-label={`${jour} note`}
-                      className="h-9 w-full min-w-[120px] rounded-md border border-border bg-background px-2 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50" />
+                      className="h-9 w-full min-w-[110px] rounded-md border border-border bg-background px-2 text-[12.5px] focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50" />
                   </td>
                 </tr>
               ))}
@@ -494,6 +535,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           {calc.sup50Min > 0 && <Badge label="Supp +50 %" value={fmtHM(calc.sup50Min)} tone="rose" />}
           {calc.majEquivMin > 0 && <Badge label="Équiv. payé" value={fmtHM(calc.majEquivMin)} tone="emerald" />}
           {calc.recupMin > 0 && <Badge label="Récup" value={fmtHM(calc.recupMin)} tone="sky" />}
+          {calc.congesMin > 0 && <Badge label="Congés crédités" value={fmtHM(calc.congesMin)} tone="violet" />}
           {/* Bouton pleine largeur sur mobile (grande cible), aligné à droite ≥ sm. */}
           <button type="button" onClick={saveWeek} disabled={saving || loading || !dirty}
             className="w-full sm:w-auto sm:ml-auto inline-flex items-center justify-center gap-1.5 h-11 sm:h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[13px] font-semibold disabled:opacity-50">
@@ -672,6 +714,12 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                         {row.total.sup50Min > 0 && <span className="text-muted-foreground">+50 % <b className="text-foreground">{fmtHM(row.total.sup50Min)}</b></span>}
                         {row.total.majEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Équiv. payé <b>{fmtHM(row.total.majEquivMin)}</b></span>}
                         {row.total.recupMin > 0 && <span className="text-sky-600 dark:text-sky-400">Récup <b>{fmtHM(row.total.recupMin)}</b></span>}
+                        {row.recap && <span className="text-muted-foreground">Solde récup <b className="text-foreground">{fmtHM(row.recap.recupBalanceMin)}</b></span>}
+                        {(row.recap?.excessMin ?? 0) > 0 && (
+                          <span className="text-rose-600 dark:text-rose-400 font-semibold" title="Heures de récup au-delà du plafond — payées sur le bulletin du mois suivant">
+                            Payé M+1 <b>{fmtHM(row.recap!.excessMin)}</b>
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -694,6 +742,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                         <th className="text-right font-semibold px-2 py-2">+50 %</th>
                         <th className="text-right font-semibold px-2 py-2">Équiv. payé</th>
                         <th className="text-right font-semibold px-2 py-2">Récup</th>
+                        <th className="text-right font-semibold px-2 py-2" title="Heures de récup au-delà du plafond employeur — payées sur le bulletin du mois suivant">Payé M+1</th>
                         <th className="text-right font-semibold px-3 py-2">PDF</th>
                       </tr>
                     </thead>
@@ -714,6 +763,9 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                           <td className="px-2 py-2 text-right tnum">{row.total.sup50Min > 0 ? fmtHM(row.total.sup50Min) : "—"}</td>
                           <td className="px-2 py-2 text-right tnum font-semibold text-emerald-700 dark:text-emerald-300">{row.total.majEquivMin > 0 ? fmtHM(row.total.majEquivMin) : "—"}</td>
                           <td className="px-2 py-2 text-right tnum">{row.total.recupMin > 0 ? fmtHM(row.total.recupMin) : "—"}</td>
+                          <td className={`px-2 py-2 text-right tnum font-semibold ${(row.recap?.excessMin ?? 0) > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>
+                            {(row.recap?.excessMin ?? 0) > 0 ? fmtHM(row.recap!.excessMin) : "—"}
+                          </td>
                           <td className="px-3 py-2 text-right">
                             <button type="button" onClick={() => printMonthOne(row)} disabled={row.total.weeksWithData === 0}
                               title="État mensuel PDF de cet employé"
@@ -724,7 +776,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                         </tr>
                       ))}
                       {(teamMonth ?? []).length === 0 && (
-                        <tr><td colSpan={10} className="px-3 py-4 text-[12.5px] italic text-muted-foreground">Aucun compte.</td></tr>
+                        <tr><td colSpan={11} className="px-3 py-4 text-[12.5px] italic text-muted-foreground">Aucun compte.</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -790,6 +842,27 @@ function RecupDayPicker({ week, recupDates, onToggle }: {
   );
 }
 
+/** Puce TAG de journée (mobile) — Présent / Absent / Congés / Récup / Maladie.
+ *  Un seul tag par jour ; re-cliquer le tag actif le retire. */
+const TAG_TONE: Record<DayTag, string> = {
+  present: "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  absent: "border-rose-500/50 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+  conges: "border-violet-500/50 bg-violet-500/10 text-violet-700 dark:text-violet-300",
+  recup: "border-sky-500/50 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+  maladie: "border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+};
+
+function TagChip({ tag, active, disabled, onClick }: { tag: DayTag; active: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} aria-pressed={active}
+      className={`inline-flex items-center h-9 px-2.5 rounded-lg border text-[12px] font-semibold transition-colors disabled:opacity-50 ${
+        active ? TAG_TONE[tag] : "border-border bg-background text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+      }`}>
+      {DAY_TAG_LABEL[tag]}
+    </button>
+  );
+}
+
 /** Puce « jour » toggle (récup) — cible tactile confortable, état sélectionné. */
 function DayChip({ date, active, onClick }: { date: string; active: boolean; onClick: () => void }) {
   return (
@@ -850,7 +923,7 @@ function OptionChip({ option, recupDates }: { option: HeuresOption; recupDates?:
   );
 }
 
-function Badge({ label, value, tone }: { label: string; value: string; tone: "foreground" | "muted" | "amber" | "rose" | "emerald" | "sky" }) {
+function Badge({ label, value, tone }: { label: string; value: string; tone: "foreground" | "muted" | "amber" | "rose" | "emerald" | "sky" | "violet" }) {
   const cls: Record<string, string> = {
     foreground: "bg-foreground/10 text-foreground",
     muted: "bg-secondary text-muted-foreground",
@@ -858,6 +931,7 @@ function Badge({ label, value, tone }: { label: string; value: string; tone: "fo
     rose: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
     emerald: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
     sky: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
+    violet: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
   };
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 ${cls[tone]}`}>

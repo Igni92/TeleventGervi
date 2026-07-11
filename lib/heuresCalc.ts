@@ -12,13 +12,38 @@
  * la donnée qu'attend la compta pour la paie.
  */
 
+/* ─────────────────────────── Tags de journée ────────────────────────────────
+ * Qualification RAPIDE d'un jour (remplace la note libre sur mobile) : Présent,
+ * Absent, Congés, Récup, Maladie. Le tag « Congés » COMPTE COMME TRAVAILLÉ :
+ * une journée type est créditée dans les heures de la semaine (un CP validé ne
+ * crée jamais de déficit — décision employeur, à l'avantage du salarié). Les
+ * autres tags n'ajoutent pas d'heures (la récup se décompte du compteur au
+ * passage de la semaine, cf. lib/planning). */
+export type DayTag = "present" | "absent" | "conges" | "recup" | "maladie";
+
+export const DAY_TAGS: DayTag[] = ["present", "absent", "conges", "recup", "maladie"];
+
+export const DAY_TAG_LABEL: Record<DayTag, string> = {
+  present: "Présent",
+  absent: "Absent",
+  conges: "Congés",
+  recup: "Récup",
+  maladie: "Maladie",
+};
+
+export function isDayTag(v: unknown): v is DayTag {
+  return v === "present" || v === "absent" || v === "conges" || v === "recup" || v === "maladie";
+}
+
 /** Une journée saisie — plages matin (m1→m2) et après-midi (a1→a2), "HH:MM". */
 export interface DayHours {
   m1?: string;
   m2?: string;
   a1?: string;
   a2?: string;
-  /** Note du jour : CP, maladie, férié, récup… (information compta) */
+  /** Tag du jour (Présent / Absent / Congés / Récup / Maladie). */
+  tag?: DayTag;
+  /** Note du jour : précision libre (information compta) */
   note?: string;
 }
 
@@ -26,6 +51,13 @@ export interface DayHours {
 export interface HoursProfile {
   weeklyHours: number;    // heures contractuelles / semaine (ex. 35, 39)
   typicalDay: DayHours;   // « journée type » appliquée d'un clic sur Lun→Ven
+  /** Solde annuel de congés payés (jours) attribué par l'employeur — période
+   *  de référence 1er juin → 31 mai. null/absent = non défini. */
+  cpAllowanceDays?: number | null;
+  /** Plafond du compteur de récup (heures) fixé par l'employeur : les heures
+   *  supp AU-DELÀ partent au PAIEMENT sur le bulletin du mois suivant (reporté
+   *  sur l'état compta). null/absent = pas de plafond. */
+  recupCapHours?: number | null;
 }
 
 export const DEFAULT_PROFILE: HoursProfile = {
@@ -62,19 +94,44 @@ export function dayMinutes(d: DayHours | undefined | null): number {
 }
 
 export interface WeekCalc {
-  dayMin: number[];       // minutes par jour (Lun→Dim)
-  totalMin: number;       // total travaillé
+  dayMin: number[];       // minutes par jour (Lun→Dim), crédit congés inclus
+  totalMin: number;       // total travaillé (crédit congés inclus)
   contractMin: number;    // contrat hebdo
   deltaMin: number;       // total − contrat (négatif = récup)
   sup25Min: number;       // heures supp à +25 % (8 premières)
   sup50Min: number;       // heures supp à +50 % (au-delà)
   recupMin: number;       // heures de récupération (si total < contrat)
   majEquivMin: number;    // équivalent PAYÉ des heures supp (×1,25 / ×1,5)
+  congesMin: number;      // minutes CRÉDITÉES par les jours de congés (journée type)
 }
 
-/** Calcule la semaine : total, écart au contrat, ventilation 25/50, récup. */
-export function computeWeek(days: (DayHours | undefined)[], weeklyHours: number): WeekCalc {
-  const dayMin = Array.from({ length: 7 }, (_, i) => dayMinutes(days[i]));
+/** Minutes de la « journée type » du profil ; repli = contrat / 5 jours.
+ *  C'est la valeur créditée pour un jour de CONGÉS (compté comme travaillé). */
+export function typicalDayMinutes(profile: Pick<HoursProfile, "weeklyHours" | "typicalDay">): number {
+  const t = dayMinutes(profile.typicalDay);
+  if (t > 0) return t;
+  return Math.max(0, Math.round(((profile.weeklyHours || 0) * 60) / 5));
+}
+
+/** Calcule la semaine : total, écart au contrat, ventilation 25/50, récup.
+ *  `typicalDayMin` > 0 → chaque jour taggé « congés » SANS heures saisies est
+ *  crédité d'une journée type (le CP compte comme travaillé — jamais de déficit
+ *  créé par un congé validé). */
+export function computeWeek(
+  days: (DayHours | undefined)[],
+  weeklyHours: number,
+  typicalDayMin = 0,
+): WeekCalc {
+  let congesMin = 0;
+  const dayMin = Array.from({ length: 7 }, (_, i) => {
+    const d = days[i];
+    const worked = dayMinutes(d);
+    if (worked === 0 && d?.tag === "conges" && typicalDayMin > 0) {
+      congesMin += typicalDayMin;
+      return typicalDayMin;
+    }
+    return worked;
+  });
   const totalMin = dayMin.reduce((s, m) => s + m, 0);
   const contractMin = Math.max(0, Math.round((weeklyHours || 0) * 60));
   const deltaMin = totalMin - contractMin;
@@ -83,7 +140,7 @@ export function computeWeek(days: (DayHours | undefined)[], weeklyHours: number)
   const sup50Min = Math.max(0, supMin - SUP25_BAND_MIN);
   const recupMin = Math.max(0, -deltaMin);
   const majEquivMin = Math.round(sup25Min * 1.25 + sup50Min * 1.5);
-  return { dayMin, totalMin, contractMin, deltaMin, sup25Min, sup50Min, recupMin, majEquivMin };
+  return { dayMin, totalMin, contractMin, deltaMin, sup25Min, sup50Min, recupMin, majEquivMin, congesMin };
 }
 
 /** Minutes → « 38h30 » (signe conservé : −150 → « −2h30 »). */
@@ -248,11 +305,12 @@ export interface MonthCalc {
   sup50Min: number;
   recupMin: number;
   majEquivMin: number;
+  congesMin: number;
   weeksWithData: number;
 }
 
 export function aggregateMonth(weekCalcs: (WeekCalc | null | undefined)[]): MonthCalc {
-  const agg: MonthCalc = { totalMin: 0, contractMin: 0, deltaMin: 0, sup25Min: 0, sup50Min: 0, recupMin: 0, majEquivMin: 0, weeksWithData: 0 };
+  const agg: MonthCalc = { totalMin: 0, contractMin: 0, deltaMin: 0, sup25Min: 0, sup50Min: 0, recupMin: 0, majEquivMin: 0, congesMin: 0, weeksWithData: 0 };
   for (const c of weekCalcs) {
     if (!c) continue;
     agg.totalMin += c.totalMin;
@@ -262,6 +320,7 @@ export function aggregateMonth(weekCalcs: (WeekCalc | null | undefined)[]): Mont
     agg.sup50Min += c.sup50Min;
     agg.recupMin += c.recupMin;
     agg.majEquivMin += c.majEquivMin;
+    agg.congesMin += c.congesMin ?? 0;
     agg.weeksWithData += 1;
   }
   return agg;

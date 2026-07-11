@@ -27,15 +27,24 @@ export const CONGE_STATUS_LABEL: Record<CongeStatus, string> = {
   cancelled: "Annulé",
 };
 
+/** Qui a INITIÉ la demande — le circuit fait BOOMERANG :
+ *   • « salarie »  : le salarié demande → la DIRECTION valide/refuse ;
+ *   • « direction »: l'employeur PROPOSE (congés/récup, au vu des compteurs)
+ *     → le SALARIÉ accepte/refuse → une fois accepté, le jour s'inscrit dans
+ *     son calendrier ET dans le calendrier d'équipe. */
+export type CongeOrigin = "salarie" | "direction";
+
 export interface CongeRequest {
   id: string;
-  email: string;                 // salarié demandeur
+  email: string;                 // salarié concerné
   name: string;
   type: CongeType;
   start: string;                 // YYYY-MM-DD
   end: string;                   // YYYY-MM-DD (inclus)
   note: string;
   status: CongeStatus;
+  /** Initiateur (absent sur l'historique → « salarie »). */
+  origin?: CongeOrigin;
   createdAt: string;
   decidedAt?: string;
   decidedBy?: string;
@@ -86,6 +95,18 @@ export function canDecide(c: CongeRequest | null): boolean {
   return !!c && c.status === "pending";
 }
 
+/** Origine effective (l'historique sans champ = demande salarié). */
+export function congeOrigin(c: Pick<CongeRequest, "origin">): CongeOrigin {
+  return c.origin === "direction" ? "direction" : "salarie";
+}
+
+/** Le SALARIÉ peut-il répondre (boomerang) ? — uniquement une proposition de la
+ *  DIRECTION, encore en attente, qui le concerne. */
+export function canRespond(c: CongeRequest | null, email: string): boolean {
+  return !!c && c.status === "pending" && congeOrigin(c) === "direction"
+    && c.email === email.trim().toLowerCase();
+}
+
 /* ───────── Nettoyage/normalisation (utilisé par la persistance, cf. congesRh) ── */
 
 export function parseConge(v: Partial<CongeRequest>, email: string, id: string): CongeRequest {
@@ -100,6 +121,7 @@ export function parseConge(v: Partial<CongeRequest>, email: string, id: string):
     end: isIsoDate(v.end) ? v.end : "",
     note: typeof v.note === "string" ? v.note.slice(0, 500) : "",
     status,
+    origin: v.origin === "direction" ? "direction" : "salarie",
     createdAt: typeof v.createdAt === "string" ? v.createdAt : "",
     decidedAt: typeof v.decidedAt === "string" ? v.decidedAt : undefined,
     decidedBy: typeof v.decidedBy === "string" ? v.decidedBy : undefined,

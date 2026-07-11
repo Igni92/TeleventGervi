@@ -578,3 +578,57 @@ le **taux de marge brut % DU JOUR** (valeur de la journée), avec un indicateur 
 | 3 lignes de réglages pour les logos de marque. | **Puces à bascule** compactes (Console · Livraisons · Inventaire) sur une seule ligne. |
 | Aperçu du contraste de survol sur 3 lignes + bouton reset détaché. | Slider + % + « Réinit. » inline, aperçu 2 lignes. |
 | Clé morte `televent-theme` (colorimétrie retirée) encore déclarée. | Purgée de `SETTING_KEYS`. |
+
+---
+
+## 🗓️ Planning congés & récup + tags de journée (heures)
+
+Refonte de la gestion des horaires autour d'un principe : **à l'avantage du
+salarié, validé par l'employeur** — chaque camp valide ce que l'autre pose
+(circuit **boomerang**).
+
+### Nouvel onglet « Planning » (`/planning` — Sidebar › Pilotage, tuiles mobiles, palette ⌘K)
+
+| Élément | Comportement |
+|---------|--------------|
+| **Calendrier mensuel** (1 par personne) | Grille lun→dim, jours cliquables (plage), congés VALIDÉS en aplat coloré par type, EN ATTENTE en pointillé, récup posée + tags de la feuille d'heures en pastilles. |
+| **Compteurs au-dessus de CHAQUE calendrier** | **CP restants** (solde annuel employeur − jours ouvrables pris, période 1/6→31/5) + **récup disponible** (heures) + plafond & « à payer M+1 ». |
+| **Boomerang** | Salarié **demande** → direction valide. Direction **propose** (congés/récup au vu des compteurs) → le salarié **accepte/refuse**. Push web dans les deux sens, carte « À traiter » en tête d'écran. |
+| **Calendrier d'ÉQUIPE** (managers) | Une ligne par salarié × jours du mois, compteurs (récup/CP/payé M+1) sous chaque nom, clic sur un nom → son calendrier. S'incrémente automatiquement des jours acceptés. |
+| **Réglages employeur** (direction) | Solde CP annuel (jours) + **plafond récup (heures)** par salarié. |
+
+### Règles métier (lib/planning — pur, 24 tests vitest)
+
+- **Un CP validé compte comme TRAVAILLÉ** : le jour est taggé « Congés » dans la
+  feuille d'heures et **crédité d'une journée type** (jamais de déficit créé).
+- **Récup décomptée AU PASSAGE DE LA SEMAINE seulement** : si la semaine atteint
+  quand même le contrat (les 35 h sont faites), le déficit est nul → **rien n'est
+  déduit**. Débit borné par min(déficit réel, jours posés × journée type).
+- **Plafond de récup** : les heures au-delà partent au **paiement des heures supp
+  sur le bulletin du mois suivant** — ligne dédiée (rouge) sur l'état mensuel PDF
+  envoyé à la compta (page employé + colonne « Payé M+1 » en synthèse équipe).
+
+### Heures (« Mes heures »)
+
+| Avant | Après |
+|------|-------|
+| Note libre par jour sur mobile (« CP, récup, maladie… »). | **Tags** une-touche par jour : Présent / Absent / **Congés** / Récup / Maladie (chips colorées, 1 seul tag, re-clic = retrait). Desktop : sélecteur de tag + note conservée. |
+| Le CP saisi ne comptait pas dans les heures. | Jour taggé « Congés » sans heures ⇒ **journée type créditée** (badge « Congés crédités », hint « le congé compte comme travaillé »). |
+| État mensuel sans compteurs. | Récap fin de mois : solde récup, plafond, **« à payer M+1 »**, CP — à l'écran (équipe) et sur le **PDF compta**. |
+
+- Stockage inchangé (`AppSetting` : `rhsem:`, `rhprofil:` enrichis, `rhconge:` + champ `origin`) — **aucune migration**.
+- Un congé validé est reporté automatiquement dans les semaines concernées (tags), le calendrier d'équipe se met à jour tout seul.
+
+---
+
+## 📣 Planning — notifications employeur multi-canal + sélection au glisser
+
+| Élément | Comportement |
+|---------|--------------|
+| **Demande salarié** (congés / récup / sans solde — types déjà tous ouverts au salarié) | Part vers le patron sur TOUS les canaux configurés : **push in-app** (existant), **email** (Graph applicatif, boîte `CONGES_FROM_ADDRESS`, repli relances) avec bouton « Valider / refuser dans TeleVent », **WhatsApp** (Meta Cloud API, si `WHATSAPP_*` configurés) avec lien vers l'app. Chaque canal est best-effort : jamais bloquant. |
+| **Validation** | L'évènement (journée entière, « libre », rappel J-1) est **poussé dans le calendrier Outlook** de chaque membre de la direction — Graph applicatif, permission d'application `Calendars.ReadWrite`. |
+| **Calendrier du planning** | **Sélection au glisser** (souris + tactile) : on pose le doigt sur un jour et on glisse jusqu'au dernier ; `pan-y` préserve le scroll vertical, un geste repris par le navigateur (scroll) **restaure** la sélection précédente (pointercancel). Clic droit ignoré. |
+| **Mobile** | Libellé de mois court (« 07/2026 ») dans les en-têtes, titre du calendrier tronqué, bouton Demander/Proposer pleine largeur (h-11). |
+
+- Nouveaux réglages `.env` documentés : `CONGES_FROM_ADDRESS`, `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_DIRECTION_TO` / `WHATSAPP_TEMPLATE_NAME`, `APP_PUBLIC_URL`.
+- `lib/congesNotify.ts` : constructeurs de contenu PURS (email HTML échappé, texte WhatsApp, évènement Outlook all-day fin-exclusive) couverts par 5 tests.
