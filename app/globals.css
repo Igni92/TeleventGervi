@@ -7,24 +7,28 @@
 ═══════════════════════════════════════════════════════════ */
 @layer base {
   :root {
-    --background:        220 20% 97%;
+    /* MODE JOUR « papier chaud » — fini le blanc clinique : canvas ivoire-greige
+       teinté marque (Or), CARTES blanc cassé qui se détachent nettement, bordures
+       et gris textuels assombris (contraste ↑). Même ADN que le mode sombre :
+       le fond a une matière, les données vivent sur des surfaces claires. */
+    --background:        42 24% 92%;
     --foreground:        222 47% 7%;
-    --card:              0 0% 100%;
+    --card:              40 33% 98.5%;
     --card-foreground:   222 47% 7%;
-    --popover:           0 0% 100%;
+    --popover:           40 33% 99%;
     --popover-foreground:222 47% 7%;
-    --primary:           42 95% 44%;          /* or profond — lisible sur blanc */
+    --primary:           42 95% 44%;          /* or profond — lisible sur clair */
     --primary-foreground: 222 45% 9%;          /* texte SOMBRE sur l'or clair (AA ≥ 4,5:1, cf. agrume/fraise) */
-    --secondary:         220 14% 96%;
+    --secondary:         42 16% 88%;
     --secondary-foreground: 222 47% 7%;
-    --muted:             220 14% 96%;
-    --muted-foreground:  220 9% 46%;
-    --accent:            220 14% 96%;
+    --muted:             42 16% 88.5%;
+    --muted-foreground:  222 12% 38%;
+    --accent:            42 16% 88%;
     --accent-foreground: 222 47% 7%;
-    --destructive:       0 72% 51%;
+    --destructive:       0 72% 48%;
     --destructive-foreground: 0 0% 100%;
-    --border:            220 13% 90%;
-    --input:             220 13% 90%;
+    --border:            42 14% 81%;
+    --input:             42 14% 79%;
     --ring:              42 95% 44%;
     --radius:            0.9rem;
 
@@ -43,22 +47,22 @@
     --brand-900: 44 72% 14%;
     --brand-950: 43 70% 8%;
 
-    /* Shadows */
+    /* Shadows — teintées « sépia » (ombre chaude sur papier chaud, jamais grise) */
     --shadow-card:
-      0 0 0 1px rgba(0,0,0,0.04),
-      0 1px 3px rgba(0,0,0,0.04),
-      0 2px 8px rgba(0,0,0,0.04);
+      0 0 0 1px rgba(72,58,26,0.05),
+      0 1px 3px rgba(72,58,26,0.06),
+      0 2px 10px rgba(72,58,26,0.06);
     --shadow-card-hover:
-      0 0 0 1px rgba(0,0,0,0.06),
-      0 4px 12px rgba(0,0,0,0.07),
-      0 8px 24px rgba(0,0,0,0.06);
+      0 0 0 1px rgba(72,58,26,0.08),
+      0 4px 14px rgba(72,58,26,0.10),
+      0 10px 28px rgba(72,58,26,0.08);
     --shadow-nav:
-      0 1px 0 rgba(255,255,255,0.05),
-      0 4px 24px rgba(0,0,0,0.22);
+      0 1px 0 rgba(255,255,255,0.55),
+      0 4px 24px rgba(72,58,26,0.14);
     --shadow-modal:
-      0 0 0 1px rgba(0,0,0,0.08),
-      0 8px 40px rgba(0,0,0,0.14),
-      0 20px 60px rgba(0,0,0,0.1);
+      0 0 0 1px rgba(72,58,26,0.08),
+      0 8px 40px rgba(72,58,26,0.16),
+      0 20px 60px rgba(72,58,26,0.12);
   }
 
 /* ═══════════════════════════════════════════════════════════
@@ -270,12 +274,12 @@
   ::-webkit-scrollbar { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: #d1d5db;
+    background: #c8c1b0; /* gris chaud — assorti au papier du mode jour */
     border-radius: 99px;
   }
   .dark ::-webkit-scrollbar-thumb { background: #374151; }
-  ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
-  * { scrollbar-width: thin; scrollbar-color: #d1d5db transparent; }
+  ::-webkit-scrollbar-thumb:hover { background: #a89f89; }
+  * { scrollbar-width: thin; scrollbar-color: #c8c1b0 transparent; }
   .dark * { scrollbar-color: #374151 transparent; }
 }
 
@@ -469,18 +473,20 @@
   inset: -30%;
   filter: blur(40px) saturate(125%);
 }
+/* Mode JOUR : alphas nettement plus hauts qu'avant — sur le papier chaud
+   l'aurora doit se VOIR (avant, noyée dans le blanc 97 %). */
 .ambient-aurora {
   background:
-    radial-gradient(28% 32% at 16% 14%, hsl(var(--brand-500) / 0.24), transparent 68%),
-    radial-gradient(32% 36% at 90% 90%, hsl(var(--brand-400) / 0.20), transparent 70%);
+    radial-gradient(30% 34% at 16% 14%, hsl(var(--brand-500) / 0.34), transparent 70%),
+    radial-gradient(34% 38% at 90% 90%, hsl(var(--brand-400) / 0.28), transparent 72%);
   /* Animation = opt-in (réglage /parametres « animations: on ») — statique par
      défaut pour un scroll fluide. Voir html[data-anim="force"] plus bas. */
 }
 .ambient-aurora-2 {
   background:
-    radial-gradient(26% 30% at 84% 8%,  hsl(212 90% 58% / 0.16), transparent 70%),
-    radial-gradient(30% 34% at 8% 90%,  hsl(268 78% 62% / 0.15), transparent 72%),
-    radial-gradient(22% 26% at 58% 50%, hsl(var(--brand-400) / 0.10), transparent 68%);
+    radial-gradient(28% 32% at 84% 8%,  hsl(212 85% 52% / 0.20), transparent 72%),
+    radial-gradient(32% 36% at 8% 90%,  hsl(268 70% 56% / 0.17), transparent 74%),
+    radial-gradient(24% 28% at 58% 50%, hsl(var(--brand-400) / 0.14), transparent 70%);
   filter: blur(52px) saturate(120%);
 }
 .dark .ambient-aurora {
@@ -497,14 +503,23 @@
 .ambient-grid {
   position: absolute;
   inset: 0;
+  /* Alpha par thème : la grille « télémétrie » doit exister aussi en jour */
+  --ambient-grid-alpha: 0.07;
   background-image:
-    linear-gradient(hsl(var(--foreground) / 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, hsl(var(--foreground) / 0.045) 1px, transparent 1px);
+    linear-gradient(hsl(var(--foreground) / var(--ambient-grid-alpha)) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--foreground) / var(--ambient-grid-alpha)) 1px, transparent 1px);
   background-size: 56px 56px;
   -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 38%, #000 0%, transparent 82%);
           mask-image: radial-gradient(ellipse 75% 65% at 50% 38%, #000 0%, transparent 82%);
 }
+.dark .ambient-grid { --ambient-grid-alpha: 0.045; }
 .ambient-rings { color: hsl(var(--brand-400)); transform-origin: center; }
+/* Opacité des anneaux par thème (posée ici plutôt qu'en classe Tailwind
+   inline : en jour ils doivent ressortir davantage sur le papier). */
+.ambient-rings-a { opacity: 0.16; }
+.ambient-rings-b { opacity: 0.10; }
+.dark .ambient-rings-a { opacity: 0.10; }
+.dark .ambient-rings-b { opacity: 0.06; }
 /* Balayage radar très lent (organique, clin d'œil au métier "signal") */
 /* Rotation des anneaux = opt-in : statique par défaut (sinon le compositeur
    tourne en continu → scroll qui rame). Rallumée sous html[data-anim="force"]. */

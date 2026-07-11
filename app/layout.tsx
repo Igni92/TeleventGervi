@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { AppToaster } from "@/components/ui/toaster";
+import { ClickSparks } from "@/components/ClickSparks";
 import { Providers } from "./providers";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
@@ -53,6 +54,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               contenu applicatif sans toucher au fond d'ambiance fixe. */}
           <div className="app-zoom-root">{children}</div>
           <AppToaster />
+          <ClickSparks />
         </Providers>
         <ServiceWorkerRegister />
       </body>
