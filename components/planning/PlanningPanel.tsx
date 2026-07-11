@@ -30,9 +30,9 @@ import { displayPersonName } from "@/lib/userNames";
 import {
   fmtHM, monthIdOf, shiftMonth, monthLabel, type DayTag, DAY_TAG_LABEL,
 } from "@/lib/heuresCalc";
-import { monthGridDays, expandOuvrables } from "@/lib/planning";
+import { monthGridDays, expandOuvrables, monthEndISO } from "@/lib/planning";
 import {
-  CONGE_TYPE_LABEL, congeDayCount, congeOrigin,
+  CONGE_TYPE_LABEL, CONGE_STATUS_LABEL, congeDayCount, congeOrigin, rangesOverlap,
   type CongeType, type CongeStatus,
 } from "@/lib/conges";
 
@@ -76,6 +76,12 @@ const TYPE_TONE: Record<CongeType, { solid: string; soft: string; text: string }
 const TAG_DOT: Record<DayTag, string> = {
   present: "bg-emerald-500", absent: "bg-rose-500", conges: "bg-violet-500",
   recup: "bg-sky-500", maladie: "bg-amber-500",
+};
+const STATUS_TONE: Record<CongeStatus, string> = {
+  pending: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  approved: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  refused: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
+  cancelled: "bg-secondary text-muted-foreground",
 };
 
 const TYPES: CongeType[] = ["cp", "rtt", "recup", "sans_solde", "maladie", "autre"];
@@ -461,6 +467,16 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
 
   const ouvrables = sel.start ? expandOuvrables(sel.start, sel.end).length : 0;
 
+  // Congés/récup du MOIS affiché (validés + en attente) — liste détaillée sous
+  // le calendrier sur mobile (les pastilles disent « quoi », la liste dit
+  // « quand & quel statut » sans avoir à ouvrir chaque jour).
+  const monthEvents = useMemo(() => {
+    const a = `${month}-01`, b = monthEndISO(month);
+    return person.conges
+      .filter((c) => (c.status === "approved" || c.status === "pending") && rangesOverlap(c.start, c.end, a, b))
+      .sort((x, y) => (x.start < y.start ? -1 : x.start > y.start ? 1 : 0));
+  }, [person.conges, month]);
+
   const submit = async () => {
     if (!sel.start) return;
     const base = { type, start: sel.start, end: sel.end, note };
@@ -472,10 +488,17 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
 
   return (
     <div>
-      {/* Grille mensuelle */}
+      {/* Grille mensuelle — responsive : cellules centrées façon appli mobile
+          (numéro + pastilles), barres pleines sur desktop. */}
       <div className="rounded-lg border border-border overflow-hidden">
         <div className="grid grid-cols-7 bg-secondary/40 text-[10px] uppercase tracking-wide text-muted-foreground">
-          {JOURS_COURTS.map((j) => <div key={j} className="px-1 py-1.5 text-center font-semibold">{j}</div>)}
+          {JOURS_COURTS.map((j, i) => (
+            <div key={j} className="px-0.5 py-1.5 text-center font-semibold">
+              {/* Une seule lettre sur mobile (largeur), 3 lettres ≥ sm. */}
+              <span className="sm:hidden">{["L", "M", "M", "J", "V", "S", "D"][i]}</span>
+              <span className="hidden sm:inline">{j}</span>
+            </div>
+          ))}
         </div>
         {/* Le glisser (souris) est géré par pointer events ; sur mobile aucun
             handler tactile n'est posé → le doigt scrolle la page normalement,
@@ -493,6 +516,11 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             const tag = person.tags[date];
             const isToday = date === todayISO;
             const dow = new Date(`${date}T12:00:00Z`).getUTCDay();
+            const weekend = dow === 0 || dow === 6;
+            const hasRecupDot = recupSet.has(date) && !approved.some((c) => c.type === "recup");
+            // Teinte mobile : la cellule prend la couleur du congé validé
+            // dominant (lecture immédiate sans ouvrir le jour).
+            const dominant = approved[0]?.type;
             // Sélection LIÉE : un seul bandeau continu (pas de bordure entre 2
             // jours). Un calque `-inset-px` déborde d'1 px et masque les traits
             // de grille entre cellules sélectionnées ; arrondi UNIQUEMENT aux
@@ -500,6 +528,14 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             const selected = inSel(date);
             const capL = selected && (date === sel.start || dow === 1);
             const capR = selected && (date === sel.end || dow === 0);
+            // Pastilles mobiles (points) : validés pleins, en attente creux,
+            // récup + tag feuille d'heures.
+            const dots = [
+              ...approved.map((c) => ({ key: c.id, cls: TYPE_TONE[c.type].solid, hollow: false, text: "" })),
+              ...pending.map((c) => ({ key: `p${c.id}`, cls: "", hollow: true, text: TYPE_TONE[c.type].text })),
+              ...(hasRecupDot ? [{ key: "r", cls: "bg-sky-500", hollow: false, text: "" }] : []),
+              ...(tag ? [{ key: "t", cls: TAG_DOT[tag], hollow: false, text: "" }] : []),
+            ];
             return (
               <button
                 key={date} type="button" data-date={date}
@@ -517,12 +553,17 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
                   ...(recupSet.has(date) ? ["Récup posée"] : []),
                   ...(tag ? [`Feuille d'heures : ${DAY_TAG_LABEL[tag]}`] : []),
                 ].join(" · ") || undefined}
-                className={`relative min-h-[52px] sm:min-h-[64px] p-1 text-left align-top transition-colors focus:outline-none focus:ring-1 focus:ring-brand-500 focus:z-20
+                className={`relative flex flex-col items-center md:items-start gap-0.5 md:gap-1 min-h-[54px] sm:min-h-[64px] p-1 md:text-left transition-colors focus:outline-none focus:ring-1 focus:ring-brand-500 focus:z-20
                   ${inMonth ? "bg-background" : "bg-secondary/20 opacity-50"}
-                  ${dow === 0 || dow === 6 ? "bg-secondary/10" : ""}
+                  ${weekend ? "bg-secondary/10" : ""}
                   ${!selected && canAct ? "hover:bg-secondary/40" : ""}
                   ${!selected && !canAct ? "cursor-default" : ""}`}
               >
+                {/* Teinte mobile du type de congé validé (sous le contenu, jamais
+                    quand la cellule est sélectionnée — le bandeau prend le relais). */}
+                {dominant && !selected && (
+                  <span aria-hidden className={`md:hidden pointer-events-none absolute inset-0 z-0 ${TYPE_TONE[dominant].soft}`} />
+                )}
                 {/* Bandeau de sélection continu : fond unique qui déborde d'1 px
                     pour masquer les traits de grille entre jours sélectionnés
                     (aucune bordure interne). Liseré haut+bas pour définir la
@@ -533,20 +574,31 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
                     className={`pointer-events-none absolute -inset-px z-0 bg-brand-500/25 border-y border-brand-500/60
                       ${capL ? "rounded-l-lg border-l" : ""} ${capR ? "rounded-r-lg border-r" : ""}`} />
                 )}
-                <span className={`relative z-10 inline-flex items-center justify-center h-5 w-5 rounded-full text-[11px] tnum font-semibold
-                  ${isToday ? "bg-brand-500 text-white" : "text-foreground"}`}>
+                <span className={`relative z-10 inline-flex items-center justify-center rounded-full font-semibold tnum h-6 w-6 text-[12.5px] md:h-5 md:w-5 md:text-[11px]
+                  ${isToday ? "bg-brand-500 text-white shadow-sm" : dominant && !selected ? TYPE_TONE[dominant].text + " md:text-foreground" : "text-foreground"}`}>
                   {dayNum}
                 </span>
-                <span className="relative z-10 mt-1 flex flex-wrap items-center gap-1">
+
+                {/* MOBILE (< md) : points centrés (max 4 + « … »). */}
+                <span className="md:hidden relative z-10 flex items-center justify-center gap-1 h-3">
+                  {dots.slice(0, 4).map((d) => (
+                    <span key={d.key}
+                      className={d.hollow
+                        ? `h-2.5 w-2.5 rounded-full border-2 border-current ${d.text}`
+                        : `h-2.5 w-2.5 rounded-full ${d.cls}`} />
+                  ))}
+                  {dots.length > 4 && <span className="text-[9px] font-bold text-muted-foreground leading-none">…</span>}
+                </span>
+
+                {/* DESKTOP (≥ md) : barres pleines/hachurées + points récup/tag. */}
+                <span className="hidden md:flex relative z-10 mt-1 flex-wrap items-center gap-1">
                   {approved.map((c) => (
                     <span key={c.id} className={`h-2.5 w-full max-w-[46px] rounded ${TYPE_TONE[c.type].solid}`} />
                   ))}
                   {pending.map((c) => (
                     <span key={c.id} className={`h-2.5 w-full max-w-[46px] rounded border border-dashed ${TYPE_TONE[c.type].soft} border-current ${TYPE_TONE[c.type].text}`} />
                   ))}
-                  {recupSet.has(date) && !approved.some((c) => c.type === "recup") && (
-                    <span className="h-3 w-3 rounded-full bg-sky-500 ring-2 ring-background" />
-                  )}
+                  {hasRecupDot && <span className="h-3 w-3 rounded-full bg-sky-500 ring-2 ring-background" />}
                   {tag && <span className={`h-3 w-3 rounded-full ring-2 ring-background ${TAG_DOT[tag]}`} />}
                 </span>
               </button>
@@ -554,6 +606,24 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
           })}
         </div>
       </div>
+
+      {/* MOBILE : détail des congés du mois (les pastilles disent « quoi », cette
+          liste dit « quand & quel statut »). Tap → sélectionne la plage. */}
+      {monthEvents.length > 0 && (
+        <div className="md:hidden mt-2 space-y-1.5">
+          <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Ce mois-ci</p>
+          {monthEvents.map((c) => (
+            <button key={c.id} type="button"
+              onClick={() => { if (canAct) setSel({ start: c.start, end: c.end }); }}
+              className={`w-full flex items-center gap-2 rounded-lg border border-border px-2.5 py-2 text-left ${canAct ? "active:bg-secondary/40" : "cursor-default"}`}>
+              <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${c.status === "approved" ? TYPE_TONE[c.type].solid : `border-2 border-current ${TYPE_TONE[c.type].text}`}`} />
+              <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${TYPE_TONE[c.type].soft} ${TYPE_TONE[c.type].text}`}>{CONGE_TYPE_LABEL[c.type]}</span>
+              <span className="min-w-0 flex-1 truncate text-[12.5px] tnum text-foreground">{rangeLabel(c)}</span>
+              <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${STATUS_TONE[c.status]}`}>{CONGE_STATUS_LABEL[c.status]}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Demande / proposition sur la sélection */}
       {canAct && (
