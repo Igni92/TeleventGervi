@@ -138,32 +138,35 @@ function notifyOrderResult(
   if (!ok || !json?.ok) {
     toast.error(
       job.kind === "modif"
-        ? `❌ BL #${job.docNum} (${job.clientName}) — modification refusée`
+        ? `Modification refusée — BL #${job.docNum}`
         : json?.blocked
-          ? `🚫 ${job.clientName} — client bloqué, commande NON créée`
-          : `❌ ${job.clientName} — commande NON créée`,
+          ? `Client bloqué — ${job.clientName}`
+          : `Commande non créée — ${job.clientName}`,
       { description: json?.error, duration: 15000 },
     );
     return;
   }
   if (job.kind === "modif") {
-    toast.success(
-      `✅ BL #${json.docNum ?? job.docNum} (${job.clientName}) enregistré — ${json.totalLines ?? "?"} ligne(s) · total ${fmt(json.totalTTC)} € TTC`,
-      { duration: 10000 },
-    );
+    toast.success(`BL #${json.docNum ?? job.docNum} enregistré`, {
+      description: `${job.clientName} — ${json.totalLines ?? "?"} ligne(s) · ${fmt(json.totalTTC)} € TTC`,
+      duration: 10000,
+    });
   } else if (json.bonPrep) {
-    toast.success(`📝 ${job.clientName} — bon de préparation créé (export)`, {
+    toast.success(`Bon de préparation créé — ${job.clientName}`, {
       description: "Affecte les lots dans « Détail livraison » puis crée le BL.",
       duration: 10000,
     });
   } else if (json.offre) {
     // Précommande → OFFRE CLIENT (devis SAP), à passer en commande au jour de départ.
-    toast.success(`📄 ${job.clientName} — offre client #${json.docNum} créée · ${fmt(json.totalTTC)} € TTC`, {
-      description: "Précommande : à passer en commande au jour de départ (onglet Bons de commande).",
+    toast.success(`Offre client #${json.docNum} créée — ${job.clientName}`, {
+      description: `${fmt(json.totalTTC)} € TTC · à passer en commande au jour de départ.`,
       duration: 10000,
     });
   } else {
-    toast.success(`✅ ${job.clientName} — commande #${json.docNum} créée · ${fmt(json.totalTTC)} € TTC`, { duration: 10000 });
+    toast.success(`Commande #${json.docNum} créée — ${job.clientName}`, {
+      description: `${fmt(json.totalTTC)} € TTC`,
+      duration: 10000,
+    });
   }
 }
 
@@ -178,17 +181,23 @@ function sendOrderInBackground(job: BackgroundOrder) {
   const offline = () =>
     toast.error(
       job.kind === "modif"
-        ? `❌ BL #${job.docNum} (${job.clientName}) — SAP injoignable, NON enregistré`
-        : `❌ ${job.clientName} — SAP injoignable, commande NON créée`,
-      { duration: 15000 },
+        ? `BL #${job.docNum} non enregistré — ${job.clientName}`
+        : `Commande non créée — ${job.clientName}`,
+      { description: "SAP injoignable — réessaie.", duration: 15000 },
     );
   (async () => {
     try {
       const res = await post(false);
       const json = await res.json().catch(() => null);
       if (job.kind === "create" && !res.ok && json?.needsConfirm === "encours") {
+        // Confirmation en ligne : titre court, chiffres seuls — les boutons disent le reste.
+        const enc = json?.encours as { balance?: number; creditLimit?: number } | undefined;
+        const eur = (n: number) => `${n.toFixed(2)} €`;
         toast.warning(`Encours dépassé — ${job.clientName}`, {
-          description: `${json?.error ?? "Encours dépassé."} La commande n'est PAS créée.`,
+          description:
+            enc?.balance != null && enc?.creditLimit != null
+              ? `Solde ${eur(enc.balance)} · limite ${eur(enc.creditLimit)}.`
+              : (json?.error ?? "Limite de crédit atteinte."),
           duration: 30000,
           action: {
             label: "Créer quand même",
@@ -198,7 +207,7 @@ function sendOrderInBackground(job: BackgroundOrder) {
                 .catch(offline);
             },
           },
-          cancel: { label: "Abandonner", onClick: () => toast.info(`${job.clientName} — commande abandonnée.`) },
+          cancel: { label: "Abandonner", onClick: () => toast.info(`Commande abandonnée — ${job.clientName}`) },
         });
         return;
       }

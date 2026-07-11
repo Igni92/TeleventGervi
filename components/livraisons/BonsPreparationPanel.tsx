@@ -146,10 +146,10 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
         json = await res.json().catch(() => null);
       }
       if (!res.ok || !json?.ok) {
-        toast.error(json?.blocked ? "🚫 Client bloqué" : "Échec de la création du BL", { description: json?.error, duration: 10000 });
+        toast.error(json?.blocked ? "Client bloqué" : "Échec de la création du BL", { description: json?.error, duration: 10000 });
         return;
       }
-      toast.success(`✅ BL #${json.docNum} créé pour ${bon.clientName} — lots affectés`, { duration: 8000 });
+      toast.success(`BL #${json.docNum} créé — ${bon.clientName}`, { description: "Lots affectés.", duration: 8000 });
       setBons((prev) => prev?.filter((b) => b.id !== bon.id) ?? prev);
       onOrderCreated();
     } catch {

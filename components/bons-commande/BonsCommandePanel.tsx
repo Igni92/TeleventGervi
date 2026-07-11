@@ -144,7 +144,7 @@ export function BonsCommandePanel() {
       if (j.cleared) {
         // Toutes les lignes affectées → la commande quitte l'onglet.
         setDocs((prev) => prev?.filter((d) => d.docEntry !== doc.docEntry) ?? prev);
-        toast.success(`✅ Commande #${doc.docNum} — tous les lots affectés`);
+        toast.success(`Commande #${doc.docNum} — tous les lots affectés`);
       }
       return true;
     } catch {
@@ -197,7 +197,7 @@ export function BonsCommandePanel() {
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) { toast.error(j?.error || "Échec du passage en commande"); return; }
       setOffres((prev) => prev?.filter((o) => o.docEntry !== offre.docEntry) ?? prev);
-      toast.success(`✅ Offre #${offre.docNum} passée en commande #${j.docNum} — lots à affecter`);
+      toast.success(`Offre #${offre.docNum} passée en commande #${j.docNum}`, { description: "Lots à affecter." });
       load();  // la nouvelle commande apparaît dans la file des lots ci-dessous
     } catch {
       toast.error("SAP injoignable — offre non convertie");

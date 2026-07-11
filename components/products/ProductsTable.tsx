@@ -212,7 +212,7 @@ export function ProductsTable() {
       const res = await fetch("/api/sap/sync/products", { method: "POST" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
-      toast.success(`✅ ${json.synced} produits synchronisés en ${(json.durationMs / 1000).toFixed(1)}s`);
+      toast.success(`${json.synced} produits synchronisés en ${(json.durationMs / 1000).toFixed(1)}s`);
       await Promise.all([fetchProducts(), fetchLastSync()]);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erreur SAP";

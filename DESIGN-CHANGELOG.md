@@ -538,3 +538,18 @@ le **taux de marge brut % DU JOUR** (valeur de la journée), avec un indicateur 
   l'échelle de l'entreprise), best-effort (un échec masque la sous-ligne sans
   casser les autres KPI).
 - La grille KPI passe à 4 tuiles (2×2 en medium, 1×4 en large).
+
+---
+
+## 🔔 Notifications (toasts) — refonte visuelle globale
+
+| Avant | Après |
+|-------|-------|
+| Sonner `richColors` quasi brut : carte plate, couleur criarde sur toute la surface, emojis (✅ ❌ 🚫 📄) en début de message. | **Carte « verre »** sur les tokens `popover` (translucide + blur), ombre douce, rayon 14 px. La couleur du type (succès / erreur / avertissement / info) ne teinte plus que la **pastille d'icône** (Lucide) — plus calme, lisible dans les deux thèmes. Emojis purgés : l'icône porte le sens. |
+| Toast à boutons (« Encours dépassé ») : titre + description + `Abandonner` + `Créer quand même` **sur une seule ligne** → colonne de texte écrasée, phrase dupliquée, mention « La commande n'est PAS créée ». | **Grille 2 lignes** : icône + contenu en haut, **boutons sur leur propre ligne** alignés à droite (action = pilule or pleine, abandon = fantôme, press `scale(0.97)`). Message réduit à l'essentiel : titre `Encours dépassé — client`, description `Solde X € · limite Y €.` (chiffres lus depuis `json.encours`) — les boutons disent le reste. |
+| Toast succès BLDialog : 7 lignes (HT, TVA, poids, frais, lots, DB…). | 1–2 lignes : `Commande #N créée` + `client — n ligne(s) · total TTC`. Le détail reste dans SAP / l'historique. |
+| Croix de fermeture absente. | Croix en haut-droit, révélée au survol (toujours visible sur tactile `data-ui="touch"`). |
+
+- Composant : `components/ui/toaster.tsx` (`AppToaster`) ; styles : section « Sonner toast » de `globals.css` (pilotés par les tokens → thèmes clair/sombre/colorimétries suivent d'office).
+- Messages retravaillés (titre court, chiffres en description) : Écran 2, BLDialog, console mobile, bons de commande, bons de préparation, sync produits.
+- Descriptions multi-lignes : `white-space: pre-line` (les `\n` composés restent des retours).
