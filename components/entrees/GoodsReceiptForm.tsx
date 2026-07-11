@@ -11,7 +11,7 @@ import { SurfaceCard } from "@/components/ui/surface-card";
 import { DateStepper, todayISO } from "@/components/ui/date-stepper";
 import { designationProduit } from "@/lib/produit-designation";
 import { StarRating } from "@/components/ui/star-rating";
-import { DesignationChips } from "./DesignationChips";
+import { DesignationChips, Chip } from "./DesignationChips";
 
 /** Montant € à 2 décimales (séparateur FR). */
 const fmtEur = (n: number): string =>
@@ -489,7 +489,7 @@ export function GoodsReceiptForm() {
                   <div className="min-w-0">
                     <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
                     <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-                    <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
+                    <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1.5" />
                   </div>
                   <Button variant="ghost" size="icon-sm" tabIndex={-1} onClick={() => removeLine(i)} aria-label="Supprimer">
                     <Trash2 className="h-4 w-4" />
@@ -609,10 +609,10 @@ export function GoodsReceiptForm() {
                       <div>{dz.fruit}</div>
                       <StarRating value={l.note} onChange={(v) => updateLine(i, { note: v })} size="sm" className="mt-0.5" ariaLabel={`Note qualité ${dz.fruit}`} />
                     </td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.pays}</td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.marque}</td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.variete}</td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.condt}</td>
+                    <td className="px-2 py-2"><Chip kind="pays">{dz.pays}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="marque">{dz.marque}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="variete">{dz.variete}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="condt">{dz.condt}</Chip></td>
                     <td className="px-2 py-2">
                       <select
                         value={l.warehouseCode}

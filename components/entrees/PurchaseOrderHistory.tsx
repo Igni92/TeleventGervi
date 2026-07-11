@@ -13,6 +13,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
+import { fmtJourDate } from "@/lib/date-fr";
 import { DesignationChips } from "./DesignationChips";
 import { INCIDENT_TYPES, notifyReceptionIncidentsChanged } from "./ReceptionIncidents";
 import { ProductPicker, type ProductHit } from "./GoodsReceiptForm";
@@ -39,14 +40,8 @@ type PurchaseOrder = {
  *  Les types de réserve = INCIDENT_TYPES (mêmes types que les incidents de réception). */
 type ReceiveAgreage = { status: "CONFORME" | "RESERVE"; type?: string; note?: string; rating?: number | null };
 
-/** Date jj.mm.aa (points, année sur 2 chiffres). */
-const fmtDate = (s?: string | null): string => {
-  if (!s) return "—";
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return "—";
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${p(d.getFullYear() % 100)}`;
-};
+/** Date « jour + date » unifiée des états SAP : « VEN 10.07.26 ». */
+const fmtDate = fmtJourDate;
 const eur = (n: number): string =>
   n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 const fmtColis = (n: number | null | undefined): string => {
@@ -502,7 +497,7 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
                       <button type="button" onClick={() => setSwapIdx(swapIdx === i ? null : i)} className="group inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground hover:text-violet-600 dark:hover:text-violet-400" title="Changer l'article">
                         {l.itemCode} <Pencil className="h-3 w-3 opacity-50 group-hover:opacity-100" />
                       </button>
-                      <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-0.5" />
+                      <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-0.5" />
                     </td>
                     <td className="px-2 py-2"><NumberInput value={l.packageQuantity} onValueChange={(n) => updateEditLine(i, { packageQuantity: n ?? 0 })} min={0} step={1} className="text-right h-9 w-20" /></td>
                     <td className="px-2 py-2">
@@ -708,7 +703,7 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
                 <div className="min-w-0">
                   <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
                   <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-                  <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
+                  <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1.5" />
                 </div>
                 {!restricted && (
                   <div className="text-right shrink-0">
@@ -760,7 +755,7 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
                     <div className="font-semibold text-foreground">{dz.fruit}</div>
                     <div className="font-mono text-[12px] text-muted-foreground">{l.itemCode}</div>
                   </td>
-                  <td className="px-3 py-2.5"><DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} /></td>
+                  <td className="px-3 py-2.5"><DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} /></td>
                   <td className="px-3 py-2.5 text-right tnum">{fmtColis(l.packageQuantity)}</td>
                   {!restricted && <td className="px-3 py-2.5 text-right tnum">{l.price != null ? eur(l.price) : "—"}</td>}
                   {!restricted && <td className="px-3 py-2.5 text-right tnum font-semibold">{lineHT != null ? eur(lineHT) : "—"}</td>}
