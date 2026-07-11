@@ -149,6 +149,11 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   const [adjustPlan, setAdjustPlan] = useState<AdjustPreview | "loading" | null>(null);
   const [adjusting, setAdjusting] = useState(false);
 
+  // Popup de confirmation pour « Marquer revu » / « Rouvrir » (actions qui, sinon,
+  // s'exécutaient au premier clic sans filet). Réservée admin/direction.
+  const [confirmPatch, setConfirmPatch] = useState<{ session: SessionDTO; action: "review" | "reopen" } | null>(null);
+  const [confirmingPatch, setConfirmingPatch] = useState(false);
+
   // Navigation
   const [mode, setMode] = useState<Mode>("home");
   const [scope, setScope] = useState<Scope | null>(null);
@@ -497,6 +502,23 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     } else toast.error("Erreur");
   }
 
+  /** Ouvre la popup de confirmation avant de valider (revu) ou rouvrir un inventaire. */
+  function askPatch(session: SessionDTO, action: "review" | "reopen") {
+    setConfirmPatch({ session, action });
+  }
+
+  /** Confirme l'action de la popup puis l'exécute. */
+  async function runConfirmPatch() {
+    if (!confirmPatch) return;
+    setConfirmingPatch(true);
+    try {
+      await patchSession(confirmPatch.session.id, confirmPatch.action);
+      setConfirmPatch(null);
+    } finally {
+      setConfirmingPatch(false);
+    }
+  }
+
   /** Charge un inventaire existant dans l'éditeur pour le corriger / recompter. */
   async function startEdit(id: string) {
     setLoadingEdit(id);
@@ -689,6 +711,9 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
 
       {/* Aperçu + confirmation de régularisation SAP */}
       <AnimatePresence>{adjustFor && renderAdjustModal()}</AnimatePresence>
+
+      {/* Confirmation « Marquer revu » / « Rouvrir » */}
+      <AnimatePresence>{confirmPatch && renderConfirmPatchModal()}</AnimatePresence>
     </div>
   );
 
@@ -795,6 +820,59 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
             >
               {adjusting ? <Loader2 className="!size-4 animate-spin" /> : <Boxes className="!size-4" />}
               Confirmer l&apos;ajustement SAP
+            </Button>
+          </div>
+        </motion.div>
+      </motion.div>
+    );
+  }
+
+  /* ---------------- Modale : confirmation « revu » / « rouvrir » ---------------- */
+  function renderConfirmPatchModal() {
+    if (!confirmPatch) return null;
+    const isReview = confirmPatch.action === "review";
+    return (
+      <motion.div
+        className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={() => !confirmingPatch && setConfirmPatch(null)}
+      >
+        <motion.div
+          className="w-full max-w-sm overflow-hidden rounded-t-2xl bg-card shadow-xl sm:rounded-2xl"
+          initial={{ y: 24, opacity: 0.6 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 24, opacity: 0 }}
+          transition={{ duration: 0.18 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-start gap-3 p-5">
+            <div
+              className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[20px] ${isReview ? "bg-emerald-500/15" : "bg-amber-500/15"}`}
+              aria-hidden
+            >
+              {isReview ? "✅" : "🔄"}
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-[15px] font-bold text-foreground">
+                {isReview ? "Marquer l’inventaire comme revu ?" : "Rouvrir l’inventaire ?"}
+              </h3>
+              <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">
+                {isReview
+                  ? `L’inventaire du ${fmtDate(confirmPatch.session.createdAt)} sera validé par la direction. Tu pourras encore le rouvrir ensuite si besoin.`
+                  : `L’inventaire du ${fmtDate(confirmPatch.session.createdAt)} repassera en « à revoir » et pourra être recorrigé.`}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 border-t border-border p-3">
+            <Button variant="ghost" className="flex-1" onClick={() => setConfirmPatch(null)} disabled={confirmingPatch}>
+              Annuler
+            </Button>
+            <Button
+              variant={isReview ? "success" : "default"}
+              className="flex-1"
+              onClick={runConfirmPatch}
+              disabled={confirmingPatch}
+            >
+              {confirmingPatch ? <Loader2 className="!size-4 animate-spin" /> : <span aria-hidden>{isReview ? "✅" : "🔄"}</span>}
+              {isReview ? "Oui, marquer revu" : "Oui, rouvrir"}
             </Button>
           </div>
         </motion.div>
@@ -1337,7 +1415,10 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                       </div>
                     )}
                   </div>
-                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  {/* Actions : empilées pleine largeur sur mobile (le `overflow-x-clip`
+                      de la page tronquait sinon les 2e/3e boutons de la rangée), puis
+                      en ligne alignées à droite dès `sm`. */}
+                  <div className="flex w-full shrink-0 flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
                     {sessionLocked(s) ? (
                       <span className={`inline-flex items-center gap-1 text-[12px] ${s.adjustment?.status === "error" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>
                         {s.adjustment?.status === "error" ? <AlertCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />} régularisé
@@ -1350,25 +1431,27 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                       <span className="text-[12px] font-semibold text-amber-600 dark:text-amber-400">à revoir</span>
                     )}
                     {canManage && !sessionLocked(s) && (
-                      <>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
                         {s.nbEcarts > 0 && (
-                          <Button size="sm" onClick={() => openAdjust(s)}>
-                            <Boxes className="!size-3.5" /> Valider &amp; ajuster le stock
+                          <Button size="sm" className="w-full sm:w-auto" onClick={() => openAdjust(s)}>
+                            📦 Valider &amp; ajuster le stock
                           </Button>
                         )}
-                        {s.status === "submitted" ? (
-                          <Button size="sm" variant="outline" onClick={() => patchSession(s.id, "review")}>
-                            <CheckCircle2 className="!size-3.5" /> Marquer revu
+                        <div className="flex gap-2">
+                          {s.status === "submitted" ? (
+                            <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => askPatch(s, "review")}>
+                              ✅ Marquer revu
+                            </Button>
+                          ) : (
+                            <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => askPatch(s, "reopen")}>
+                              🔄 Rouvrir
+                            </Button>
+                          )}
+                          <Button size="sm" variant="ghost" className="flex-1 sm:flex-none" disabled={loadingEdit === s.id} onClick={() => startEdit(s.id)}>
+                            {loadingEdit === s.id ? <Loader2 className="!size-3.5 animate-spin" /> : "✏️"} Corriger
                           </Button>
-                        ) : (
-                          <Button size="sm" variant="outline" onClick={() => patchSession(s.id, "reopen")}>
-                            <RotateCcw className="!size-3.5" /> Rouvrir
-                          </Button>
-                        )}
-                        <Button size="sm" variant="ghost" disabled={loadingEdit === s.id} onClick={() => startEdit(s.id)}>
-                          {loadingEdit === s.id ? <Loader2 className="!size-3.5 animate-spin" /> : <Pencil className="!size-3.5" />} Corriger
-                        </Button>
-                      </>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>
