@@ -94,7 +94,14 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
   const [lines, setLines] = useState<BLLine[]>([]);
   const [submitting, setSubmitting] = useState(false);
   // Confirmation encours en ligne (dans la modale — pas de window.confirm ni modale imbriquée)
-  const [encoursPrompt, setEncoursPrompt] = useState<{ lines: BLApiLine[]; message: string } | null>(null);
+  // Confirmation EN LIGNE (remplace window.confirm) — encours dépassé OU
+  // garde-fous de vente (Paramètres) en mode « Avertir ». `flags` = les
+  // confirmations ACCUMULÉES à renvoyer au POST suivant (le serveur peut
+  // demander les deux, l'une après l'autre).
+  const [confirmPrompt, setConfirmPrompt] = useState<{
+    lines: BLApiLine[]; message: string; kind: "encours" | "safeguards";
+    flags: { confirmEncours?: boolean; confirmSafeguards?: boolean };
+  } | null>(null);
   // Product search
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ProductHit[]>([]);
@@ -277,7 +284,7 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
       })),
     );
 
-  const postOrder = (apiLines: BLApiLine[], confirmEncours: boolean) =>
+  const postOrder = (apiLines: BLApiLine[], flags: { confirmEncours?: boolean; confirmSafeguards?: boolean }) =>
     fetch("/api/sap/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -290,10 +297,28 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
         deliveryDate: new Date(deliveryDate).toISOString(),
         comment: comment.trim() || undefined,
         numAtCard: numAtCard.trim() || undefined,
-        confirmEncours,
+        ...flags,
         lines: apiLines,
       }),
     });
+
+  /** Réponse 409 « à confirmer » (encours OU garde-fous) → prompt en ligne avec
+   *  les flags ACCUMULÉS pour le re-post. true = un prompt a été posé. */
+  const handleNeedsConfirm = (
+    res: Response, json: { needsConfirm?: string; error?: string } | null,
+    apiLines: BLApiLine[], prevFlags: { confirmEncours?: boolean; confirmSafeguards?: boolean },
+  ): boolean => {
+    if (res.ok || !json?.needsConfirm) return false;
+    if (json.needsConfirm === "encours") {
+      setConfirmPrompt({ lines: apiLines, kind: "encours", message: json.error ?? "Encours dépassé.", flags: { ...prevFlags, confirmEncours: true } });
+      return true;
+    }
+    if (json.needsConfirm === "safeguards") {
+      setConfirmPrompt({ lines: apiLines, kind: "safeguards", message: json.error ?? "Garde-fous déclenchés.", flags: { ...prevFlags, confirmSafeguards: true } });
+      return true;
+    }
+    return false;
+  };
 
   const submit = async () => {
     if (lines.length === 0) { toast.error("Au moins 1 ligne"); return; }
@@ -305,13 +330,10 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
     setSubmitting(true);
     try {
       const apiLines = buildApiLines();
-      const res = await postOrder(apiLines, false);
+      const res = await postOrder(apiLines, {});
       const json = await res.json();
-      // Garde-fou encours : 409 + needsConfirm → confirmation EN LIGNE (pas de window.confirm).
-      if (!res.ok && json?.needsConfirm === "encours") {
-        setEncoursPrompt({ lines: apiLines, message: json.error ?? "Encours dépassé." });
-        return;
-      }
+      // Encours dépassé / garde-fous « Avertir » : confirmation EN LIGNE.
+      if (handleNeedsConfirm(res, json, apiLines, {})) return;
       await finalizeOrder(res, json);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erreur réseau";
@@ -322,15 +344,18 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
     }
   };
 
-  // Confirme l'encours → re-post forcé avec les lignes mémorisées.
-  const forceEncours = async () => {
-    if (!encoursPrompt) return;
-    const apiLines = encoursPrompt.lines;
-    setEncoursPrompt(null);
+  // Confirme le prompt courant → re-post forcé avec les flags accumulés.
+  // Le serveur peut alors demander l'AUTRE confirmation (encours puis
+  // garde-fous) : handleNeedsConfirm enchaîne proprement.
+  const forceConfirm = async () => {
+    if (!confirmPrompt) return;
+    const { lines: apiLines, flags } = confirmPrompt;
+    setConfirmPrompt(null);
     setSubmitting(true);
     try {
-      const res = await postOrder(apiLines, true);
+      const res = await postOrder(apiLines, flags);
       const json = await res.json();
+      if (handleNeedsConfirm(res, json, apiLines, flags)) return;
       await finalizeOrder(res, json);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erreur réseau";
@@ -1043,17 +1068,21 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
                     → {sapLineCount} ligne{sapLineCount > 1 ? "s" : ""} dans SAP (chacune avec son n° de lot).
                   </div>
                 )}
-                {/* Confirmation encours EN LIGNE (remplace window.confirm) */}
-                {encoursPrompt && (
+                {/* Confirmation EN LIGNE (remplace window.confirm) — encours
+                    dépassé OU garde-fous de vente en mode « Avertir ». */}
+                {confirmPrompt && (
                   <div className="rounded-lg border border-amber-400/60 bg-amber-50 dark:bg-amber-950/25 px-3 py-2.5 flex items-start gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-[12.5px] text-amber-800 dark:text-amber-300">{encoursPrompt.message}</p>
+                      <p className="text-[11px] uppercase tracking-wide font-bold text-amber-700 dark:text-amber-300">
+                        {confirmPrompt.kind === "encours" ? "Encours dépassé" : "Garde-fous de vente"}
+                      </p>
+                      <p className="text-[12.5px] text-amber-800 dark:text-amber-300 whitespace-pre-line mt-0.5">{confirmPrompt.message}</p>
                       <div className="flex items-center gap-2 mt-2">
-                        <Button size="sm" variant="warning" onClick={forceEncours} disabled={submitting}>
-                          Forcer la commande
+                        <Button size="sm" variant="warning" onClick={forceConfirm} disabled={submitting}>
+                          {confirmPrompt.kind === "encours" ? "Forcer la commande" : "Valider quand même"}
                         </Button>
-                        <Button size="sm" variant="ghost" onClick={() => { setEncoursPrompt(null); toast("Commande non envoyée"); }} disabled={submitting}>
+                        <Button size="sm" variant="ghost" onClick={() => { setConfirmPrompt(null); toast("Commande non envoyée"); }} disabled={submitting}>
                           Annuler
                         </Button>
                       </div>
@@ -1063,7 +1092,7 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
                 <div className="flex items-center gap-2 pt-2 border-t border-border">
                   <Button
                     onClick={submit}
-                    disabled={submitting || lines.length === 0 || !!encoursPrompt}
+                    disabled={submitting || lines.length === 0 || !!confirmPrompt}
                     className="flex-1"
                   >
                     {submitting

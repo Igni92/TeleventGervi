@@ -468,7 +468,7 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
     if (tourneeError) { toast.error(tourneeError); return; }
     setSubmitting(true);
     try {
-      const post = (confirmEncours: boolean) =>
+      const post = (flags: { confirmEncours?: boolean; confirmSafeguards?: boolean }) =>
         fetch("/api/sap/orders", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -478,17 +478,23 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
             deliveryDate: new Date(`${deliveryDate}T09:00:00`).toISOString(),
             numAtCard: numAtCard.trim() || undefined,
             comments: comments.trim() || undefined,
-            confirmEncours,
+            ...flags,
             docKind: isBonCommande ? "COMMANDE" : "BL",
             lines: buildApiLines(),
           }),
         });
-      let res = await post(false);
+      let flags: { confirmEncours?: boolean; confirmSafeguards?: boolean } = {};
+      let res = await post(flags);
       let json = await res.json().catch(() => null);
-      if (res.status === 409 && json?.needsConfirm === "encours") {
+      // Confirmations serveur en chaîne : encours dépassé PUIS garde-fous de
+      // vente (Paramètres) — chaque « oui » re-poste avec le flag en plus.
+      while (res.status === 409 && (json?.needsConfirm === "encours" || json?.needsConfirm === "safeguards")) {
         const ok = window.confirm(`${json.error}\n\nCréer le BL quand même ?`);
         if (!ok) return;
-        res = await post(true);
+        flags = json.needsConfirm === "encours"
+          ? { ...flags, confirmEncours: true }
+          : { ...flags, confirmSafeguards: true };
+        res = await post(flags);
         json = await res.json().catch(() => null);
       }
       if (!res.ok || !json?.ok) {
