@@ -169,6 +169,64 @@ model Client {
   updatedAt       DateTime             @updatedAt
 }
 
+// ════════════════════════════════════════════════════════════════
+//   FOURNISSEURS — fiche locale (distincte du CLIENT)
+//   Le CLIENT est le tiers de VENTE (télévente, portefeuille commercial) ;
+//   le FOURNISSEUR est le tiers d'ACHAT (marchandise entrante). SAP reste la
+//   source de vérité des tiers (BusinessPartner cardType=V) ; cette fiche est
+//   le miroir humain « achats » : on y renseigne les INTERLOCUTEURS (commercial
+//   fournisseur, qualité, compta…) et les notes qui n'ont pas leur place dans SAP.
+//   `sapCardCode` relie (facultativement) la fiche au fournisseur SAP.
+// ════════════════════════════════════════════════════════════════
+model Supplier {
+  id          String            @id @default(cuid())
+  // Code interne de la fiche (unique). Rempli avec le CardCode SAP quand la
+  // fiche est créée depuis un fournisseur SAP, sinon saisi à la main.
+  code        String            @unique
+  nom         String
+  // Famille d'achat libre & réutilisable (TypeOption kind="supplier-type") :
+  // ex. « Fruits rouges », « Emballage », « Transport », « Services ».
+  type        String?
+  // Lien vers le BusinessPartner SAP fournisseur (CardType=V) si rattaché.
+  // Non unique : une fiche peut exister sans SAP, et on ne verrouille pas (une
+  // resynchro SAP ne casse jamais la fiche locale).
+  sapCardCode String?
+  email       String?
+  tel1        String?
+  tel2        String?
+  tel3        String?
+  // Adresse libre (multi-ligne accepté) — siège / dépôt fournisseur.
+  adresse     String?
+  notes       String?
+  // Fiche active (masquable sans supprimer l'historique). Défaut actif.
+  active      Boolean           @default(true)
+  contacts    SupplierContact[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([sapCardCode])
+  @@index([active])
+}
+
+// Interlocuteurs d'un fournisseur (plusieurs par fiche : commercial, qualité,
+// comptabilité…). Miroir de Contact côté client (role = TypeOption
+// kind="supplier-contact").
+model SupplierContact {
+  id         String   @id @default(cuid())
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  name       String
+  role       String? // type/poste (libellé issu de TypeOption kind=supplier-contact)
+  phone      String?
+  email      String?
+  note       String?
+  position   Int      @default(0) // ordre d'affichage (contact 1, 2, 3…)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([supplierId])
+}
+
 // Incident rattaché à un BL (commande SAP) d'un client.
 // type = libellé réutilisable (TypeOption kind=incident).
 model Incident {

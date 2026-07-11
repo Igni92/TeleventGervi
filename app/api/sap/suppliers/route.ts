@@ -22,16 +22,23 @@ export async function GET(req: NextRequest) {
   const filter = `CardType eq 'cSupplier' and Frozen eq 'tNO' and Valid eq 'tYES'${search}`;
 
   try {
-    type SapBp = { CardCode: string; CardName?: string; Frozen?: string; Valid?: string };
+    type SapBp = {
+      CardCode: string; CardName?: string; Frozen?: string; Valid?: string;
+      EmailAddress?: string; Phone1?: string;
+    };
     const r = await sap.get<{ value: SapBp[] }>(
-      `BusinessPartners?$top=20&$orderby=CardName&$select=CardCode,CardName,Frozen,Valid`
+      `BusinessPartners?$top=20&$orderby=CardName&$select=CardCode,CardName,Frozen,Valid,EmailAddress,Phone1`
       + `&$filter=${encodeURIComponent(filter)}`,
     );
     return NextResponse.json({
       count: r.value?.length || 0,
+      // email / phone : enrichissement pour PRÉ-REMPLIR une fiche fournisseur
+      // (facultatif — le GoodsReceiptForm ne lit que cardCode/cardName).
       suppliers: (r.value || []).map((bp) => ({
         cardCode: bp.CardCode,
         cardName: bp.CardName ?? bp.CardCode,
+        email: bp.EmailAddress ?? null,
+        phone: bp.Phone1 ?? null,
       })),
     });
   } catch (e) {

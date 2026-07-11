@@ -44,10 +44,9 @@ export function navAllowedForPreview(href: string, role: PreviewRole | null): bo
     return href.startsWith("/livraisons") || href.startsWith("/details-livraison") || href.startsWith("/clients");
   }
   if (role === "agreeur") {
-    // Périmètre de l'agréeur : le flux CF → EM (réception + agréage). Pas de
-    // restriction middleware à ce jour (il peut naviguer), mais l'aperçu montre
-    // son POSTE DE TRAVAIL réel.
-    return href.startsWith("/commandes-fournisseurs") || href.startsWith("/entrees");
+    // Périmètre de l'agréeur : les fournisseurs + le flux CF → EM (réception +
+    // agréage). L'aperçu montre son POSTE DE TRAVAIL réel (cf. proxy.ts).
+    return href.startsWith("/fournisseurs") || href.startsWith("/commandes-fournisseurs") || href.startsWith("/entrees");
   }
   return true;
 }
