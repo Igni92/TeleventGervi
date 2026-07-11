@@ -19,6 +19,25 @@ import { isPrecommande } from "@/lib/livraison";
 import { isComptoirClient } from "@/lib/segments";
 import { markComptoirDelivered } from "@/lib/inventory";
 import { debitLots } from "@/lib/lotLedger";
+import { getSafeguardsConfig } from "@/lib/safeguardsStore";
+import {
+  evaluateLineSafeguards, evaluateOrderSafeguards, splitViolations,
+  type SafeguardLineCtx, type SafeguardRuleId, type SafeguardsConfig, type SafeguardViolation,
+} from "@/lib/safeguards";
+import { getClientOrderStats, hasOrderOnDay, resolveClientCardCodes } from "@/lib/clientOrderStats";
+import { getSuggestedPrices, type SuggestedPrice } from "@/lib/gerviPricing";
+
+/** Copie de config avec certaines règles FORCÉES à off — permet d'évaluer les
+ *  règles de PRIX par ligne saisie et les règles de VOLUME par ARTICLE agrégé
+ *  (le front découpe une même quantité en plusieurs lignes par entrepôt : un
+ *  contrôle de volume ligne à ligne raterait le dépassement). */
+function maskRules(cfg: SafeguardsConfig, ids: SafeguardRuleId[]): SafeguardsConfig {
+  const out = { ...cfg };
+  for (const id of ids) out[id] = { ...out[id], mode: "off" };
+  return out;
+}
+const VOLUME_RULES: SafeguardRuleId[] = ["volumeVsHabitude", "volumeMaxLigne", "poidsMaxLigne", "surVenteStock"];
+const PRICE_RULES: SafeguardRuleId[] = ["prixSousAchat", "prixLoinSousConseille", "prixLoinSurConseille", "prixMax", "prixManquant"];
 
 /**
  * Cache module-level du référentiel AdditionalExpenses SAP.
@@ -101,6 +120,9 @@ interface CreateOrderBody {
   comments?: string;            // prioritaire sur comment → SAP Comments (mention des promos)
   numAtCard?: string;           // N° de commande client → SAP NumAtCard
   confirmEncours?: boolean;     // true = forcer malgré encours dépassé
+  /** true = forcer malgré les GARDE-FOUS en mode « Avertir » (jamais les
+   *  bloquants). Renvoyé par l'UI après confirmation explicite du commercial. */
+  confirmSafeguards?: boolean;
   /** « BL » (défaut, auto-lot) ou « COMMANDE » (bon de commande : AUCUN auto-lot,
    *  lots affectés à la main dans l'onglet Bons de commande). Une précommande
    *  (date au-delà du prochain jour livrable) force « COMMANDE » quel que soit ce champ. */
@@ -270,6 +292,7 @@ export async function POST(req: NextRequest) {
   // Pré-fetch tous les Products correspondants pour les U_* + poids + emballage
   const itemCodes = body.lines.map((l) => l.itemCode);
   const productMap = new Map<string, {
+    itemName: string | null;
     uPays: string | null; uMarque: string | null; uCondi: string | null;
     manageBatch: boolean; salesUnitWeight: number | null; itemGroup: number | null;
     salesQtyPerPackUnit: number | null;
@@ -277,7 +300,7 @@ export async function POST(req: NextRequest) {
   if (itemCodes.length > 0) {
     const prods = await prisma.product.findMany({
       where: { itemCode: { in: itemCodes } },
-      select: { itemCode: true, uPays: true, uMarque: true, uCondi: true, manageBatch: true,
+      select: { itemCode: true, itemName: true, uPays: true, uMarque: true, uCondi: true, manageBatch: true,
                salesUnitWeight: true, itemGroup: true, salesQtyPerPackUnit: true },
     });
     prods.forEach((p) => productMap.set(p.itemCode, p));
@@ -616,13 +639,14 @@ export async function POST(req: NextRequest) {
   // (Pré-validation items : remontée en 2.1, avant la construction des lignes —
   //  le même appel SAP fournit QuantityOnStock pour la décision de lot.)
 
-  // CardCode + garde-fou encours / blocage
+  // CardCode + garde-fou encours / blocage (GroupCode : coefficient des prix
+  // conseillés → prix d'achat pour les garde-fous de prix)
   type SapBp = { CardCode: string; Frozen?: string; Valid?: string;
-    CreditLimit?: number; CurrentAccountBalance?: number };
+    CreditLimit?: number; CurrentAccountBalance?: number; GroupCode?: number };
   let bp: SapBp | null = null;
   try {
     bp = await sap.get<SapBp>(
-      `BusinessPartners('${encodeURIComponent(cardCode)}')?$select=CardCode,Frozen,Valid,CreditLimit,CurrentAccountBalance`,
+      `BusinessPartners('${encodeURIComponent(cardCode)}')?$select=CardCode,Frozen,Valid,CreditLimit,CurrentAccountBalance,GroupCode`,
     );
   } catch {
     return NextResponse.json({
@@ -638,16 +662,170 @@ export async function POST(req: NextRequest) {
       error: `Client "${cardCode}" ${bp.Frozen === "tYES" ? "GELÉ" : "invalide"} dans SAP. Commande impossible — contacte la compta.`,
     }, { status: 409 });
   }
-  // Avertissement encours : solde ≥ limite de crédit (limite > 0). Override possible
-  // côté UI en renvoyant confirmEncours=true.
+  // ── GARDE-FOUS DE VENTE (Paramètres → « Garde-fous ») ─────────────────
+  // Config GLOBALE serveur (AppSetting) — mêmes règles que les alertes de la
+  // console. Ici c'est le FILET : quel que soit le poste/l'écran qui poste.
+  const sgConfig = await getSafeguardsConfig();
+
+  // Avertissement encours — désormais PARAMÉTRABLE (règle `encoursDepasse`) :
+  // seuil en % de la limite de crédit + mode Off / Avertir / Bloquer.
+  // « Avertir » (défaut, seuil 100 %) = comportement historique : 409
+  // needsConfirm, override par confirmEncours=true. « Bloquer » = pas d'override.
   const creditLimit = bp.CreditLimit ?? 0;
   const balance = bp.CurrentAccountBalance ?? 0;
-  if (creditLimit > 0 && balance >= creditLimit && !(body as { confirmEncours?: boolean }).confirmEncours) {
-    return NextResponse.json({
-      ok: false, needsConfirm: "encours",
-      encours: { balance, creditLimit },
-      error: `Encours dépassé : solde ${balance.toFixed(2)} € ≥ limite ${creditLimit.toFixed(2)} €. Confirme pour forcer la commande.`,
-    }, { status: 409 });
+  const encRule = sgConfig.encoursDepasse;
+  if (encRule.mode !== "off" && creditLimit > 0) {
+    const encSeuil = creditLimit * ((encRule.params.pctLimite ?? 100) / 100);
+    if (balance >= encSeuil) {
+      const encMsg = `Encours : solde ${balance.toFixed(2)} € ≥ ${(encRule.params.pctLimite ?? 100).toFixed(0)} % de la limite de crédit (${creditLimit.toFixed(2)} €).`;
+      if (encRule.mode === "block") {
+        return NextResponse.json({
+          ok: false, blocked: true,
+          encours: { balance, creditLimit },
+          error: `${encMsg} Garde-fou BLOQUANT — commande refusée (seuil réglable dans Paramètres).`,
+        }, { status: 409 });
+      }
+      if (!body.confirmEncours) {
+        return NextResponse.json({
+          ok: false, needsConfirm: "encours",
+          encours: { balance, creditLimit },
+          error: `${encMsg} Confirme pour forcer la commande.`,
+        }, { status: 409 });
+      }
+    }
+  }
+
+  // ── 2.8. Autres garde-fous (prix, volumes, commande, livraison) ────────
+  // Sauté pour la transformation d'un bon de préparation EXPORT (bonPrepId) :
+  // la marchandise est déjà achetée/affectée — bloquer ici serait contre-
+  // productif (la saisie d'origine a eu ses alertes console).
+  if (!body.bonPrepId) {
+    const needPrice = PRICE_RULES.some((id) => sgConfig[id].mode !== "off");
+    const needStats = sgConfig.volumeVsHabitude.mode !== "off" || sgConfig.totalVsPanierMoyen.mode !== "off";
+    const needDoublon = sgConfig.doublonJour.mode !== "off";
+
+    // Prix d'achat / conseillé (même moteur que les hints console) — best-effort.
+    let sgHints: Record<string, SuggestedPrice> = {};
+    if (needPrice) {
+      try { sgHints = await getSuggestedPrices(Array.from(new Set(itemCodes)), bp.GroupCode ?? null); }
+      catch (e) { console.warn("[Order] Garde-fous : prix d'achat non résolus (règles prix désarmées):", (e as Error).message); }
+    }
+    // Habitudes du client (miroir local) + doublon du jour — best-effort.
+    let sgStats: Awaited<ReturnType<typeof getClientOrderStats>> = { nbCommandes: 0, panierMoyen: null, parArticle: {} };
+    let dejaCommandeAujourdhui = false;
+    if (needStats || needDoublon) {
+      try {
+        const codes = await resolveClientCardCodes(body.clientId);
+        if (needStats) sgStats = await getClientOrderStats(codes);
+        if (needDoublon) {
+          const todayParis = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(new Date());
+          dejaCommandeAujourdhui = await hasOrderOnDay(codes, todayParis);
+        }
+      } catch (e) {
+        console.warn("[Order] Garde-fous : habitudes client non résolues (règles habitude désarmées):", (e as Error).message);
+      }
+    }
+
+    const violations: SafeguardViolation[] = [];
+    const itemNameOf = (code: string) => productMap.get(code)?.itemName || code;
+    // Prix NET d'une ligne (remise % déduite) — les lignes 100 % offertes sont
+    // exclues des règles de prix (elles partent à 0 € voulu).
+    const netPriceOf = (l: OrderLine): { price: number | null; offerte: boolean } => {
+      const d = Math.min(100, Math.max(0, l.discountPercent ?? 0));
+      if (d >= 100) return { price: null, offerte: true };
+      if (l.price == null || !(l.price > 0)) return { price: null, offerte: false };
+      return { price: Math.round(l.price * (1 - d / 100) * 10000) / 10000, offerte: false };
+    };
+    // Diviseur colis d'une ligne : ratio pièces/affichage transmis par le front,
+    // sinon SalPackUn du produit (fallback saisies hors console).
+    const packDivOf = (l: OrderLine): number => {
+      if (l.displayQuantity && l.displayQuantity > 0 && l.quantity > 0) return l.quantity / l.displayQuantity;
+      const meta = productMap.get(l.itemCode);
+      return meta?.salesQtyPerPackUnit && meta.salesQtyPerPackUnit > 1 ? meta.salesQtyPerPackUnit : 1;
+    };
+
+    // 1) Règles de PRIX — par ligne saisie.
+    const priceCfg = maskRules(sgConfig, VOLUME_RULES);
+    for (const l of body.lines) {
+      const { price, offerte } = netPriceOf(l);
+      const h = sgHints[l.itemCode];
+      violations.push(...evaluateLineSafeguards(priceCfg, {
+        itemCode: l.itemCode, itemName: itemNameOf(l.itemCode),
+        unit: l.displayUnit || "u.",
+        quantity: l.displayQuantity && l.displayQuantity > 0 ? l.displayQuantity : l.quantity,
+        price, offerte,
+        prixAchat: h?.prixAchat ?? null,
+        prixConseille: h?.prixConseille ?? null,
+        stockDisponible: null, poidsKg: null, habitude: null,
+      }));
+    }
+
+    // 2) Règles de VOLUME — par ARTICLE agrégé (les lignes d'un même article
+    // sont découpées par entrepôt/offerts : on somme avant de comparer).
+    const volumeCfg = maskRules(sgConfig, PRICE_RULES);
+    const byItem = new Map<string, { qtyDisplay: number; qtyPieces: number; unit: string; packDiv: number }>();
+    for (const l of body.lines) {
+      const packDiv = packDivOf(l);
+      const cur = byItem.get(l.itemCode) ?? { qtyDisplay: 0, qtyPieces: 0, unit: l.displayUnit || "u.", packDiv };
+      cur.qtyDisplay += l.displayQuantity && l.displayQuantity > 0 ? l.displayQuantity : l.quantity / packDiv;
+      cur.qtyPieces += l.quantity;
+      byItem.set(l.itemCode, cur);
+    }
+    for (const [code, agg] of byItem) {
+      const meta = productMap.get(code);
+      const availPieces = Math.max(availableByItem.get(code) ?? 0, sapStockByItem.get(code) ?? 0);
+      const hab = sgStats.parArticle[code];
+      violations.push(...evaluateLineSafeguards(volumeCfg, {
+        itemCode: code, itemName: itemNameOf(code),
+        unit: agg.unit,
+        quantity: agg.qtyDisplay,
+        // prix hors sujet ici (règles masquées) — offerte:true les neutralise par construction
+        price: null, offerte: true, prixAchat: null, prixConseille: null,
+        // stock connu (miroir OU SAP) converti dans l'unité d'affichage
+        stockDisponible: sgConfig.surVenteStock.mode !== "off" ? availPieces / (agg.packDiv || 1) : null,
+        poidsKg: meta?.salesUnitWeight && meta.salesUnitWeight > 0 ? meta.salesUnitWeight * agg.qtyPieces : null,
+        habitude: hab ? { moyenne: hab.moyenne / (agg.packDiv || 1), nbCommandes: hab.nbCommandes } : null,
+      }));
+    }
+
+    // 3) Règles GLOBALES de la commande (l'encours est traité au-dessus).
+    let sgTotalHT = 0, sgKg = 0, sgMarge = 0, sgCa = 0;
+    for (const l of body.lines) {
+      const { price, offerte } = netPriceOf(l);
+      const meta = productMap.get(l.itemCode);
+      if (price != null) sgTotalHT += price * l.quantity;
+      if (meta?.salesUnitWeight && meta.salesUnitWeight > 0) sgKg += meta.salesUnitWeight * l.quantity;
+      const pa = sgHints[l.itemCode]?.prixAchat;
+      if (!offerte && price != null && pa != null) {
+        sgMarge += (price - pa) * l.quantity;
+        sgCa += price * l.quantity;
+      }
+    }
+    violations.push(...evaluateOrderSafeguards(sgConfig, {
+      totalHT: sgTotalHT,
+      poidsKg: sgKg > 0 ? sgKg : null,
+      marge: sgCa > 0 ? { margeEur: sgMarge, caEur: sgCa } : null,
+      panierMoyen: sgStats.panierMoyen,
+      deliveryDate: body.deliveryDate,
+      dejaCommandeAujourdhui,
+      encours: null, // déjà traité (flux confirmEncours historique)
+    }));
+
+    const { warns, blocks } = splitViolations(violations);
+    if (blocks.length > 0) {
+      console.log(`[Order] 🚫 Garde-fous BLOQUANTS ${cardCode} : ${blocks.map((v) => v.ruleId).join(", ")}`);
+      return NextResponse.json({
+        ok: false, safeguards: blocks,
+        error: `Garde-fous bloquants — commande refusée :\n• ${blocks.map((v) => v.message).join("\n• ")}\n(Seuils réglables dans Paramètres → Garde-fous.)`,
+      }, { status: 409 });
+    }
+    if (warns.length > 0 && !body.confirmSafeguards) {
+      console.log(`[Order] ⚠️ Garde-fous à confirmer ${cardCode} : ${warns.map((v) => v.ruleId).join(", ")}`);
+      return NextResponse.json({
+        ok: false, needsConfirm: "safeguards", safeguards: warns,
+        error: `Garde-fous :\n• ${warns.map((v) => v.message).join("\n• ")}`,
+      }, { status: 409 });
+    }
   }
 
   // ── 2.9. Garde-fou ABSOLU : aucune ligne ne part sans U_NoLot ──

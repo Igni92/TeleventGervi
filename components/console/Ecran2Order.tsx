@@ -6,8 +6,12 @@ import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ChevronDown, ChevronRight, ChevronUp, Search, Plus, Trash2,
   ShoppingCart, Check, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock, X,
-  History, BadgeEuro, ArrowRightLeft, CopyPlus, Boxes, ListPlus, Truck,
+  History, BadgeEuro, ArrowRightLeft, CopyPlus, Boxes, ListPlus, Truck, ShieldAlert,
 } from "lucide-react";
+import {
+  evaluateLineSafeguards, evaluateOrderSafeguards, normalizeSafeguardsConfig, splitViolations,
+  type SafeguardsConfig, type SafeguardViolation,
+} from "@/lib/safeguards";
 import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
 import { nextDeliveryDate, nextWorkingDeliveryDay, isPrecommande } from "@/lib/livraison";
@@ -172,11 +176,11 @@ function notifyOrderResult(
 
 function sendOrderInBackground(job: BackgroundOrder) {
   const url = job.kind === "modif" ? `/api/sap/orders/${job.docEntry}/modif` : "/api/sap/orders";
-  const post = (confirmEncours: boolean) =>
+  const post = (extra: { confirmEncours?: boolean; confirmSafeguards?: boolean }) =>
     fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(confirmEncours ? { ...job.body, confirmEncours: true } : job.body),
+      body: JSON.stringify({ ...job.body, ...extra }),
     });
   const offline = () =>
     toast.error(
@@ -185,37 +189,44 @@ function sendOrderInBackground(job: BackgroundOrder) {
         : `Commande non créée — ${job.clientName}`,
       { description: "SAP injoignable — réessaie.", duration: 15000 },
     );
-  (async () => {
-    try {
-      const res = await post(false);
-      const json = await res.json().catch(() => null);
-      if (job.kind === "create" && !res.ok && json?.needsConfirm === "encours") {
-        // Confirmation en ligne : titre court, chiffres seuls — les boutons disent le reste.
-        const enc = json?.encours as { balance?: number; creditLimit?: number } | undefined;
-        const eur = (n: number) => `${n.toFixed(2)} €`;
-        toast.warning(`Encours dépassé — ${job.clientName}`, {
-          description:
-            enc?.balance != null && enc?.creditLimit != null
-              ? `Solde ${eur(enc.balance)} · limite ${eur(enc.creditLimit)}.`
-              : (json?.error ?? "Limite de crédit atteinte."),
-          duration: 30000,
-          action: {
-            label: "Créer quand même",
-            onClick: () => {
-              post(true)
-                .then(async (r2) => notifyOrderResult(job, r2.ok, await r2.json().catch(() => null)))
-                .catch(offline);
-            },
-          },
-          cancel: { label: "Abandonner", onClick: () => toast.info(`Commande abandonnée — ${job.clientName}`) },
-        });
-        return;
-      }
-      notifyOrderResult(job, res.ok, json);
-    } catch {
-      offline();
-    }
-  })();
+  // Boucle de confirmation : le serveur peut demander DEUX confirmations
+  // successives (encours PUIS garde-fous) — chaque « Créer quand même »
+  // re-poste avec le flag correspondant en PLUS des précédents.
+  const attempt = (extra: { confirmEncours?: boolean; confirmSafeguards?: boolean }) => {
+    post(extra)
+      .then(async (res) => {
+        const json = await res.json().catch(() => null);
+        if (job.kind === "create" && !res.ok && json?.needsConfirm === "encours") {
+          // Confirmation en ligne : titre court, chiffres seuls — les boutons disent le reste.
+          const enc = json?.encours as { balance?: number; creditLimit?: number } | undefined;
+          const eur = (n: number) => `${n.toFixed(2)} €`;
+          toast.warning(`Encours dépassé — ${job.clientName}`, {
+            description:
+              enc?.balance != null && enc?.creditLimit != null
+                ? `Solde ${eur(enc.balance)} · limite ${eur(enc.creditLimit)}.`
+                : (json?.error ?? "Limite de crédit atteinte."),
+            duration: 30000,
+            action: { label: "Créer quand même", onClick: () => attempt({ ...extra, confirmEncours: true }) },
+            cancel: { label: "Abandonner", onClick: () => toast.info(`Commande abandonnée — ${job.clientName}`) },
+          });
+          return;
+        }
+        // Garde-fous serveur (Paramètres) en mode « Avertir » : confirmables.
+        // (Les BLOQUANTS arrivent en erreur ferme via notifyOrderResult.)
+        if (job.kind === "create" && !res.ok && json?.needsConfirm === "safeguards") {
+          toast.warning(`Garde-fous — ${job.clientName}`, {
+            description: json?.error ?? "Garde-fous déclenchés — la commande n'est pas créée.",
+            duration: 30000,
+            action: { label: "Créer quand même", onClick: () => attempt({ ...extra, confirmSafeguards: true }) },
+            cancel: { label: "Abandonner", onClick: () => toast.info(`Commande abandonnée — ${job.clientName}`) },
+          });
+          return;
+        }
+        notifyOrderResult(job, res.ok, json);
+      })
+      .catch(offline);
+  };
+  attempt({});
 }
 
 /* ── B4 — Poids d'un colis (kg), null-safe ─────────────────── */
@@ -433,6 +444,33 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
+  // ── GARDE-FOUS (Paramètres → « Garde-fous de vente », config GLOBALE serveur) ──
+  // Config + habitudes du client (volumes moyens par article, panier moyen) :
+  // les MÊMES évaluateurs que le filet serveur, ici pour alerter EN DIRECT.
+  const [sgConfig, setSgConfig] = useState<SafeguardsConfig | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/safeguards", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!cancelled && j?.config) setSgConfig(normalizeSafeguardsConfig(j.config)); })
+      .catch(() => { /* pas de config → pas d'alerte console (le serveur reste le filet) */ });
+    return () => { cancelled = true; };
+  }, []);
+  interface OrderStats {
+    panierMoyen: { moyenneHT: number; nbCommandes: number } | null;
+    parArticle: Record<string, { moyenne: number; nbCommandes: number }>;
+  }
+  const [orderStats, setOrderStats] = useState<OrderStats | null>(null);
+  useEffect(() => {
+    if (!clientId) { setOrderStats(null); return; }
+    let cancelled = false;
+    setOrderStats(null);
+    fetch(`/api/sap/clients/${clientId}/order-stats`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!cancelled && j?.ok) setOrderStats({ panierMoyen: j.panierMoyen ?? null, parArticle: j.parArticle ?? {} }); })
+      .catch(() => { /* habitudes indisponibles → règles « habitude » désarmées */ });
+    return () => { cancelled = true; };
+  }, [clientId]);
   // Tarifs transport DU CLIENT par transporteur (transporteurs non directs).
   const [clientPricing, setClientPricing] = useState<ClientCarrierPricing>({});
   useEffect(() => {
@@ -1061,6 +1099,49 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   // positive mais < 10 % ; vert = ≥ 10 %.
   const netTone = margeNetteTotal < 0 ? "rose" : margeNettePct < 10 ? "amber" : "emerald";
 
+  // ── GARDE-FOUS : évaluation EN DIRECT du panier (mêmes règles que le serveur).
+  // byLine = violations par index de ligne (badge sous la ligne) ; order =
+  // violations globales ; all = tout (récap près du bouton Valider + dialogue).
+  const safeguards = useMemo(() => {
+    const empty = { byLine: new Map<number, SafeguardViolation[]>(), order: [] as SafeguardViolation[], all: [] as SafeguardViolation[] };
+    if (!sgConfig || cart.length === 0) return empty;
+    const byLine = new Map<number, SafeguardViolation[]>();
+    const all: SafeguardViolation[] = [];
+    cart.forEach((l, i) => {
+      const h = hints[l.itemCode];
+      const hab = orderStats?.parArticle?.[l.itemCode];
+      const poids = lineWeightKg(l);
+      const v = evaluateLineSafeguards(sgConfig, {
+        itemCode: l.itemCode, itemName: l.itemName, unit: l.unit,
+        // Volume TOTAL expédié = quantité saisie + colis offerts (promo).
+        quantity: l.quantity + Math.max(0, Math.floor(l.freeUnits ?? 0)),
+        price: l.price ?? null,
+        prixAchat: h?.prixAchat ?? null,
+        prixConseille: h?.prixConseille ?? null,
+        stockDisponible: totalAvailable(l.availByWarehouse ?? {}),
+        poidsKg: poids > 0 ? poids : null,
+        habitude: hab && l.packDivisor > 0
+          ? { moyenne: hab.moyenne / l.packDivisor, nbCommandes: hab.nbCommandes }
+          : null,
+      });
+      if (v.length > 0) { byLine.set(i, v); all.push(...v); }
+    });
+    const order = evaluateOrderSafeguards(sgConfig, {
+      totalHT,
+      poidsKg: totalKg > 0 ? totalKg : null,
+      marge: marginAgg.ca > 0 ? { margeEur: marginAgg.margin, caEur: marginAgg.ca } : null,
+      panierMoyen: orderStats?.panierMoyen ?? null,
+      deliveryDate: deliveryDate || null,
+      // encours + doublon du jour : résolus côté serveur à la création.
+    });
+    all.push(...order);
+    return { byLine, order, all };
+  }, [sgConfig, cart, hints, orderStats, totalHT, totalKg, marginAgg, deliveryDate]);
+  const sgSplit = useMemo(() => splitViolations(safeguards.all), [safeguards]);
+  // Dialogue « Valider quand même ? » (violations en mode Avertir) — le panier
+  // reste intact tant que le commercial n'a pas tranché.
+  const [sgConfirmOpen, setSgConfirmOpen] = useState(false);
+
   // ── Création BL ──
   type ApiLine = {
     itemCode: string; quantity: number; displayQuantity: number;
@@ -1093,7 +1174,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
 
   /** Corps du POST /api/sap/orders — transporteur + tournée EXPLICITES
    *  (validés avant l'envoi), texte du BL = note saisie + mention promo. */
-  const buildOrderBody = (apiLines: ApiLine[]): Record<string, unknown> => ({
+  const buildOrderBody = (apiLines: ApiLine[], safeguardsConfirmed = false): Record<string, unknown> => ({
     clientId, deliveryModeId: modeId || undefined,
     ...(tourneePayload() ?? {}),
     deliveryDate: new Date(deliveryDate).toISOString(),
@@ -1101,6 +1182,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     comments: [comments.trim(), buildPromoComment()].filter(Boolean).join(" · ") || undefined,
     // Bon de commande (aucun auto-lot) : coche manuelle ou précommande.
     docKind: isBonCommande ? "COMMANDE" : "BL",
+    // Garde-fous « Avertir » DÉJÀ confirmés dans le dialogue console → le filet
+    // serveur ne redemande pas (les BLOQUANTS, eux, restent infranchissables).
+    ...(safeguardsConfirmed ? { confirmSafeguards: true } : {}),
   });
 
   const buildApiLines = (lines: CartLine[] = cart): ApiLine[] =>
@@ -1165,7 +1249,24 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
    *  → le client quitte l'écran, le poste enchaîne sur le suivant). Le
    *  résultat SAP arrive en toast, au nom du client. Anti-double-clic : le
    *  clic vide le panier et retire la vue → plus rien à re-cliquer. */
-  const submit = () => {
+  const submit = (opts?: { safeguardsConfirmed?: boolean }) => {
+    // ── GARDE-FOUS (Paramètres) : bloquants → refus ferme ; « Avertir » →
+    // dialogue « Valider quand même ? ». Évalués AVANT tout envoi, création
+    // comme modification — le serveur re-vérifie de toute façon à la création.
+    if (cart.length > 0) {
+      if (sgSplit.blocks.length > 0) {
+        toast.error("Garde-fous bloquants — envoi refusé", {
+          description: `${sgSplit.blocks.map((v) => v.message).join("\n")}\n(Seuils réglables dans Paramètres → Garde-fous.)`,
+          duration: 15000,
+        });
+        return;
+      }
+      if (sgSplit.warns.length > 0 && !opts?.safeguardsConfirmed) {
+        setSgConfirmOpen(true);
+        return;
+      }
+    }
+
     // ── Mode MODIFICATION : ré-enregistre le BL en REMPLACEMENT COMPLET ──
     // (même BL/DocNum) — supprimer/modifier/réordonner/ajouter, comme un bon normal.
     if (modif) {
@@ -1246,7 +1347,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     // (pré-remplis avec le défaut client — l'erreur ne sort que par exception).
     const tourneeError = validateTournee();
     if (tourneeError) { toast.error(tourneeError); return; }
-    sendOrderInBackground({ kind: "create", clientName, body: buildOrderBody(buildApiLines()) });
+    sendOrderInBackground({ kind: "create", clientName, body: buildOrderBody(buildApiLines(), opts?.safeguardsConfirmed === true) });
     toast.info(`${clientName} — commande envoyée, création en arrière-plan…`);
     setCart([]); setNumAtCard(""); setComments("");
     onSubmitted?.();
@@ -2080,6 +2181,18 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                 ) : partialShort ? (
                   <p className="text-[11px] text-amber-600 mt-1">⚠️ {max} dispo seulement (le surplus sera à découvert)</p>
                 ) : null}
+                {/* GARDE-FOUS — anomalies de CETTE ligne (prix / volume), en direct.
+                    Ambre = « Avertir » (confirmable) · rouge = BLOQUANT. */}
+                {(safeguards.byLine.get(i) ?? []).map((v, vi) => (
+                  <p key={`sg-${vi}`} className={`flex items-start gap-1 text-[11px] mt-1 ${
+                    v.severity === "block"
+                      ? "text-rose-600 dark:text-rose-400 font-semibold"
+                      : "text-amber-600 dark:text-amber-400"
+                  }`}>
+                    <ShieldAlert className="h-3 w-3 shrink-0 mt-0.5" />
+                    <span>{v.message}{v.severity === "block" ? " — bloquant" : ""}</span>
+                  </p>
+                ))}
                 {/* Bon de commande : CHOIX DU LOT avant l'envoi (« valider propre »).
                     Seuls les lots avec du stock physique TeleVent sont proposés ;
                     « à affecter » = EM_PENDING, réglé plus tard dans l'onglet dédié. */}
@@ -2300,9 +2413,37 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
             </div>
             );
           })()}
+          {/* GARDE-FOUS — récap des anomalies (lignes + commande) avant validation.
+              Ambre = « Avertir » (confirmable) · rouge = BLOQUANT (envoi refusé). */}
+          {safeguards.all.length > 0 && (
+            <div className={`mt-1 rounded-lg border px-2.5 py-2 ${
+              sgSplit.blocks.length > 0
+                ? "border-rose-300/60 bg-rose-50/60 dark:border-rose-500/40 dark:bg-rose-950/20"
+                : "border-amber-300/60 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-950/20"
+            }`}>
+              <p className={`flex items-center gap-1.5 text-[11px] uppercase tracking-wide font-semibold ${
+                sgSplit.blocks.length > 0 ? "text-rose-700 dark:text-rose-300" : "text-amber-700 dark:text-amber-300"
+              }`}>
+                <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+                Garde-fous · {safeguards.all.length} alerte{safeguards.all.length > 1 ? "s" : ""}
+                {sgSplit.blocks.length > 0 && <span className="font-bold">dont {sgSplit.blocks.length} bloquante{sgSplit.blocks.length > 1 ? "s" : ""}</span>}
+              </p>
+              <ul className="mt-1 space-y-0.5">
+                {safeguards.all.map((v, vi) => (
+                  <li key={vi} className={`text-[11.5px] leading-snug ${
+                    v.severity === "block"
+                      ? "text-rose-700 dark:text-rose-300 font-semibold"
+                      : "text-amber-800/90 dark:text-amber-200/90"
+                  }`}>
+                    • {v.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {/* Envoi en ARRIÈRE-PLAN : le clic libère la vue (client suivant),
               le résultat SAP arrive en toast au nom du client. */}
-          <button type="button" onClick={submit}
+          <button type="button" onClick={() => submit()}
             disabled={prefilling || cart.length === 0 || (!!modif && modifMeta?.editable === false)}
             title={modif ? "Enregistrer en arrière-plan — l'écran passe au client suivant" : "Créer en arrière-plan — l'écran passe au client suivant"}
             className={`w-full h-11 rounded-xl disabled:opacity-50 text-white text-[15px] font-semibold inline-flex items-center justify-center gap-2 ${
@@ -2443,6 +2584,43 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
 
       {/* Détail des lots (clic droit → « Détails »). */}
       <LotDetailsDialog item={lotDetail} onClose={() => setLotDetail(null)} />
+
+      {/* GARDE-FOUS — dialogue de confirmation (règles en mode « Avertir ») :
+          liste des anomalies + « Valider quand même » (renvoie confirmSafeguards
+          au serveur) ou « Corriger » (retour au panier, rien n'est envoyé). */}
+      <Dialog open={sgConfirmOpen} onOpenChange={setSgConfirmOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[16px]">
+              <ShieldAlert className="h-4.5 w-4.5 text-amber-500" />
+              Garde-fous — vérifie avant d&apos;envoyer
+            </DialogTitle>
+            <DialogDescription className="text-[12.5px]">
+              {sgSplit.warns.length} anomalie{sgSplit.warns.length > 1 ? "s" : ""} détectée{sgSplit.warns.length > 1 ? "s" : ""} sur
+              cette commande ({clientName}). Tu peux corriger, ou valider en connaissance de cause.
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="max-h-[45vh] overflow-y-auto space-y-1.5 rounded-lg border border-amber-300/60 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-950/20 px-3 py-2.5">
+            {sgSplit.warns.map((v, vi) => (
+              <li key={vi} className="flex items-start gap-1.5 text-[12.5px] leading-snug text-amber-900 dark:text-amber-100">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-500" />
+                <span>{v.message}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <Button variant="outline" onClick={() => setSgConfirmOpen(false)}>
+              Corriger
+            </Button>
+            <Button
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={() => { setSgConfirmOpen(false); submit({ safeguardsConfirmed: true }); }}
+            >
+              Valider quand même
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* RÉCAP EN GRAND — popup par-dessus TOUT (double-clic sur l'en-tête
           « Commande »). Lecture seule : article · quantité · prix · total, gros

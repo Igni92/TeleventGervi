@@ -6,9 +6,11 @@ import Link from "next/link";
 import {
   Moon, Sun, ZoomIn, Check, Database, Contrast, Tags, ChevronRight, CalendarClock,
   Palette, Glasses, MonitorCog, MousePointerClick, Wand2, BadgePercent, Rows3,
+  ShieldAlert,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { ShelfLifePanel } from "@/components/settings/ShelfLifePanel";
+import { SafeguardsPanel } from "@/components/settings/SafeguardsPanel";
 import { ClientImportButton } from "@/components/clients/ClientImportButton";
 import { MirrorBackfillPanel } from "@/components/admin/MirrorBackfillPanel";
 import { ProductsSyncButton } from "@/components/admin/ProductsSyncButton";
@@ -548,6 +550,13 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
                   <div className="shrink-0"><ProductsSyncButton /></div>
                 </div>
               </div>
+            </SurfaceCard>
+
+            {/* Garde-fous de vente — règles métier GLOBALES (serveur), admin/direction.
+                Prix < prix d'achat, volume > N × la moyenne du client, plafonds de
+                commande… chaque règle est réglable Off / Avertir / Bloquer + seuils. */}
+            <SurfaceCard accent="rose" title="Garde-fous de vente" icon={<ShieldAlert className="h-3.5 w-3.5" />}>
+              <SafeguardsPanel />
             </SurfaceCard>
 
             <SurfaceCard accent="amber" title="Fraîcheur · DLC par défaut" icon={<CalendarClock className="h-3.5 w-3.5" />}>

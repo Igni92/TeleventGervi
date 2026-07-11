@@ -14,10 +14,11 @@
  * (La mise en préparation / le suivi de picking vivent dans le Détail livraison.)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Check, Clock, Hash, Loader2, RefreshCw, Search, Store, Truck } from "lucide-react";
+import { CalendarDays, Check, Clock, Hash, Loader2, RefreshCw, Search, ShieldAlert, Store, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { formatDeliveryDate } from "@/lib/livraison";
 import type { ApiResp, Doc } from "@/lib/livraisonView";
+import type { SafeguardViolation } from "@/lib/safeguards";
 
 /** Date murale Europe/Paris (le poste peut être ailleurs) — « aujourd'hui » métier. */
 function parisTodayISO(): string {
@@ -59,15 +60,24 @@ export function VentesDuJour() {
   const [data, setData] = useState<ApiResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  // GARDE-FOUS (Paramètres) — anomalies détectées a posteriori sur les ventes
+  // du jour (vente à perte, volume inhabituel, doublon…), par docEntry.
+  const [alerts, setAlerts] = useState<Record<number, SafeguardViolation[]>>({});
   const today = useMemo(() => parisTodayISO(), []);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      // Ventes SAISIES aujourd'hui (DocDate) — mode `entered` de l'API.
-      const r = await fetch(`/api/livraisons?entered=${today}`, { cache: "no-store" });
+      // Ventes SAISIES aujourd'hui (DocDate) — mode `entered` de l'API — et,
+      // en parallèle, le scan garde-fous du même jour (miroir local, best-effort).
+      const [r, rScan] = await Promise.all([
+        fetch(`/api/livraisons?entered=${today}`, { cache: "no-store" }),
+        fetch(`/api/safeguards/scan-ventes?date=${today}`, { cache: "no-store" }).catch(() => null),
+      ]);
       const j = await r.json().catch(() => null);
       if (j?.ok) setData(j); else toast.error(j?.error || "Ventes du jour indisponibles");
+      const jScan = rScan ? await rScan.json().catch(() => null) : null;
+      setAlerts(jScan?.ok ? (jScan.violations ?? {}) : {});
     } catch {
       toast.error("SAP injoignable — ventes du jour non chargées");
     } finally {
@@ -93,6 +103,7 @@ export function VentesDuJour() {
   const ca = docs.reduce((s, d) => s + d.totalHT, 0);
   const prepared = docs.filter((d) => d.prepared || d.departed).length;
   const departed = docs.filter((d) => d.departed).length;
+  const alerted = docs.filter((d) => (alerts[d.docEntry]?.length ?? 0) > 0).length;
 
   return (
     <div className="space-y-4">
@@ -120,11 +131,13 @@ export function VentesDuJour() {
       </div>
 
       {/* Synthèse du jour */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         <Stat label="Ventes saisies" value={docs.length.toString()} />
         <Stat label="CA HT" value={eur.format(ca)} />
         <Stat label="Préparées" value={`${prepared}/${docs.length}`} tone="emerald" />
         <Stat label="Parties" value={`${departed}/${docs.length}`} tone="sky" />
+        {/* Garde-fous (Paramètres) : ventes du jour présentant ≥ 1 anomalie. */}
+        <Stat label="Alertes garde-fous" value={alerted.toString()} tone={alerted > 0 ? "amber" : undefined} />
       </div>
 
       <section className="rounded-2xl border border-border bg-card overflow-hidden">
@@ -161,7 +174,7 @@ export function VentesDuJour() {
                 <span className="text-[11px] tnum text-muted-foreground/70">{g.docs.length}</span>
               </div>
               <ul className="divide-y divide-border/60">
-                {g.docs.map((d) => <VenteRow key={d.docEntry} d={d} />)}
+                {g.docs.map((d) => <VenteRow key={d.docEntry} d={d} alerts={alerts[d.docEntry]} />)}
               </ul>
             </div>
           ))
@@ -171,9 +184,10 @@ export function VentesDuJour() {
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: "emerald" | "sky" }) {
+function Stat({ label, value, tone }: { label: string; value: string; tone?: "emerald" | "sky" | "amber" }) {
   const color = tone === "emerald" ? "text-emerald-600 dark:text-emerald-400"
-    : tone === "sky" ? "text-sky-600 dark:text-sky-400" : "text-foreground";
+    : tone === "sky" ? "text-sky-600 dark:text-sky-400"
+    : tone === "amber" ? "text-amber-600 dark:text-amber-400" : "text-foreground";
   return (
     <div className="rounded-xl border border-border bg-card px-3 py-2">
       <p className="text-[9.5px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</p>
@@ -204,9 +218,11 @@ function Coche({ done, label, tone }: { done: boolean; label: string; tone: "eme
   );
 }
 
-/** Ligne de vente — un BL (magasin), consultation ; coches préparé + départ. */
-function VenteRow({ d }: { d: Doc }) {
+/** Ligne de vente — un BL (magasin), consultation ; coches préparé + départ.
+ *  `alerts` = anomalies garde-fous détectées a posteriori (badge + détail dépliable). */
+function VenteRow({ d, alerts }: { d: Doc; alerts?: SafeguardViolation[] }) {
   const takenTime = d.takenAt ? d.takenAt.slice(11, 16) : null;
+  const [showAlerts, setShowAlerts] = useState(false);
   // N° de commande client (réf. NumAtCard) — éditable ici, enregistré sur le BL SAP.
   const [num, setNum] = useState(d.numAtCard ?? "");
   const [saving, setSaving] = useState(false);
@@ -231,8 +247,11 @@ function VenteRow({ d }: { d: Doc }) {
     } finally { setSaving(false); }
   }, [num, d.docEntry, d.docNum]);
 
+  const hasBlock = (alerts ?? []).some((a) => a.severity === "block");
+
   return (
-    <li className="flex flex-col sm:flex-row sm:items-center gap-2 px-4 sm:px-5 py-2.5">
+    <li className="flex flex-col gap-1.5 px-4 sm:px-5 py-2.5">
+    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-2 min-w-0 text-[13.5px] font-semibold text-foreground">
           <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -241,6 +260,21 @@ function VenteRow({ d }: { d: Doc }) {
             <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide shrink-0 ${SEGMENT_BADGE[d.clientType]}`}>
               {d.clientType}
             </span>
+          )}
+          {/* GARDE-FOUS — badge d'anomalie (clic : détail sous la ligne). */}
+          {(alerts?.length ?? 0) > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAlerts((v) => !v)}
+              title="Anomalies garde-fous — cliquer pour le détail"
+              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide shrink-0 ${
+                hasBlock
+                  ? "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
+                  : "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
+              }`}
+            >
+              <ShieldAlert className="h-3 w-3" /> {alerts!.length}
+            </button>
           )}
         </p>
         <p className="text-[11px] text-muted-foreground flex items-center gap-x-2 gap-y-0.5 flex-wrap">
@@ -271,6 +305,21 @@ function VenteRow({ d }: { d: Doc }) {
         <Coche done={d.prepared || !!d.departed} label="Préparé" tone="emerald" />
         <Coche done={!!d.departed} label="Départ" tone="sky" />
       </div>
+    </div>
+    {/* Détail des anomalies garde-fous (déplié au clic sur le badge). */}
+    {showAlerts && (alerts?.length ?? 0) > 0 && (
+      <ul className="rounded-lg border border-amber-300/60 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-950/20 px-3 py-2 space-y-0.5">
+        {alerts!.map((a, i) => (
+          <li key={i} className={`text-[11.5px] leading-snug ${
+            a.severity === "block"
+              ? "text-rose-700 dark:text-rose-300 font-semibold"
+              : "text-amber-800/90 dark:text-amber-200/90"
+          }`}>
+            • {a.message}
+          </li>
+        ))}
+      </ul>
+    )}
     </li>
   );
 }
