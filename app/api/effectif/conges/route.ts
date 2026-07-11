@@ -10,6 +10,7 @@ import { saveConge, getConge, listUserConges, listAllConges } from "@/lib/conges
 import { tagDaysInWeeks } from "@/lib/heuresRh";
 import { weekDates, type DayTag } from "@/lib/heuresCalc";
 import { expandOuvrables, expandSemaine, isoWeekOfDate } from "@/lib/planning";
+import { emailDirectionConge, whatsappDirectionConge, addCongeToOutlook } from "@/lib/congesNotify";
 
 /**
  * CONGÉS & RÉCUP — circuit BOOMERANG (chaque camp valide ce que l'autre pose) :
@@ -100,11 +101,16 @@ export async function POST(req: NextRequest) {
     };
     await saveConge(conge);
     const days = congeDayCount(conge.start, conge.end);
-    notifyEmails(await directionEmails(), {
+    // La demande part vers l'employeur sur TOUS les canaux configurés :
+    // push in-app + email + WhatsApp (chacun best-effort, aucun ne bloque).
+    const dirEmails = await directionEmails();
+    notifyEmails(dirEmails, {
       title: "🌴 Demande de congés",
       body: `${c.name} — ${CONGE_TYPE_LABEL[conge.type]}, ${rangeLabel(conge)}${days ? ` (${days} j)` : ""} à valider.`,
       url: "/planning", tag: `conge-${conge.id}`, renotify: true,
     }).catch(() => {});
+    emailDirectionConge(conge, dirEmails).catch((e) => console.error("[conges] email direction:", e));
+    whatsappDirectionConge(conge).catch((e) => console.error("[conges] WhatsApp direction:", e));
     return NextResponse.json({ ok: true, conge });
   }
 
@@ -144,8 +150,12 @@ export async function POST(req: NextRequest) {
     };
     await saveConge(next);
     // Accepté → les jours s'inscrivent dans le calendrier (perso + équipe) VIA
-    // la feuille d'heures : le calendrier d'équipe s'incrémente tout seul.
-    if (accept) await applyApprovedConge(next, c.email);
+    // la feuille d'heures : le calendrier d'équipe s'incrémente tout seul —
+    // et l'évènement est poussé dans le calendrier OUTLOOK de la direction.
+    if (accept) {
+      await applyApprovedConge(next, c.email);
+      addCongeToOutlook(next, await directionEmails()).catch((e) => console.error("[conges] Outlook direction:", e));
+    }
     notifyEmails(await directionEmails(), {
       title: accept ? "✅ Proposition acceptée" : "❌ Proposition refusée",
       body: `${c.name} a ${accept ? "accepté" : "refusé"} ${CONGE_TYPE_LABEL[next.type].toLowerCase()} ${rangeLabel(next)}.`,
@@ -165,7 +175,11 @@ export async function POST(req: NextRequest) {
     if (!canDecide(cur)) return NextResponse.json({ error: "Demande déjà traitée." }, { status: 409 });
     const next: CongeRequest = { ...cur!, status: decision, decidedAt: now, decidedBy: c.email, decisionNote: note || undefined };
     await saveConge(next);
-    if (decision === "approved") await applyApprovedConge(next, c.email);
+    if (decision === "approved") {
+      await applyApprovedConge(next, c.email);
+      // Validé → l'évènement arrive dans le calendrier Outlook de la direction.
+      addCongeToOutlook(next, await directionEmails()).catch((e) => console.error("[conges] Outlook direction:", e));
+    }
     notifyEmails([email], {
       title: decision === "approved" ? "🌴 Congés validés" : "🌴 Congés refusés",
       body: `${CONGE_TYPE_LABEL[next.type]} ${rangeLabel(next)} — ${decision === "approved" ? "validé" : "refusé"} par la direction.`,

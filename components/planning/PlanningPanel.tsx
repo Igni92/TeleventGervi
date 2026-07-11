@@ -19,7 +19,7 @@
  * comme travaillé), la récup se décompte du compteur AU PASSAGE DE LA SEMAINE
  * uniquement si le contrat n'y est pas atteint.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   CalendarDays, ChevronLeft, ChevronRight, RotateCcw, Loader2, Send, Check, X,
@@ -168,7 +168,9 @@ export function PlanningPanel({ isManager, isDirection }: { isManager: boolean; 
       </button>
       <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-foreground px-1 whitespace-nowrap capitalize">
         <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        {monthLabel(month)}
+        {/* Libellé court sur mobile (« 07/2026 ») → l'en-tête ne déborde pas. */}
+        <span className="hidden sm:inline">{monthLabel(month)}</span>
+        <span className="sm:hidden tnum">{month.slice(5)}/{month.slice(0, 4)}</span>
       </span>
       <button type="button" onClick={() => setMonth((m) => shiftMonth(m, 1))} aria-label="Mois suivant"
         className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
@@ -251,7 +253,9 @@ export function PlanningPanel({ isManager, isDirection }: { isManager: boolean; 
 
       {/* ── CALENDRIER (le mien / celui d'un salarié pour les managers) ── */}
       <SurfaceCard accent="sky"
-        title={isSelf ? "Mon calendrier" : `Calendrier — ${fullName(person.name)}`}
+        title={isSelf
+          ? "Mon calendrier"
+          : <span className="truncate max-w-[130px] sm:max-w-none">Calendrier — {fullName(person.name)}</span>}
         icon={<CalendarDays className="h-3.5 w-3.5" />} action={monthNav}>
         {isManager && team.length > 0 && (
           <div className="mb-3 flex items-center gap-2 rounded-lg border border-border bg-secondary/20 px-3 py-2">
@@ -375,8 +379,51 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
   const [type, setType] = useState<CongeType>(isDirection && !isSelf ? "recup" : "cp");
   const [note, setNote] = useState("");
 
+  // ── Sélection au GLISSER (souris + tactile) : on pose le doigt/clic sur un
+  //    jour (ancre) et on glisse jusqu'au dernier jour de la plage. `pan-y`
+  //    laisse le défilement vertical de la page au navigateur : un glissé
+  //    horizontal/diagonal sélectionne, un glissé vertical franc scrolle. ──
+  const [dragging, setDragging] = useState(false);
+  const anchorRef = useRef("");
+  // Sélection AVANT le geste : restaurée si le navigateur reprend la main
+  // (pointercancel = le doigt scrollait la page, pas une sélection).
+  const prevSelRef = useRef({ start: "", end: "" });
+
+  const beginDrag = (date: string) => {
+    if (!canAct) return;
+    prevSelRef.current = { start: selStart, end: selEnd };
+    anchorRef.current = date;
+    setDragging(true);
+    setSelStart(date);
+    setSelEnd(date);
+  };
+  const dragOver = (clientX: number, clientY: number) => {
+    const el = document.elementFromPoint(clientX, clientY)?.closest?.("[data-date]");
+    const date = el?.getAttribute("data-date");
+    if (!date) return;
+    const anchor = anchorRef.current || date;
+    setSelStart(date < anchor ? date : anchor);
+    setSelEnd(date > anchor ? date : anchor);
+  };
+  const endDrag = useCallback(() => setDragging(false), []);
+  const cancelDrag = useCallback(() => {
+    setSelStart(prevSelRef.current.start);
+    setSelEnd(prevSelRef.current.end);
+    setDragging(false);
+  }, []);
+  // Relâchement HORS de la grille (souris sortie, geste annulé) → fin propre.
+  useEffect(() => {
+    if (!dragging) return;
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", cancelDrag);
+    return () => {
+      window.removeEventListener("pointerup", endDrag);
+      window.removeEventListener("pointercancel", cancelDrag);
+    };
+  }, [dragging, endDrag, cancelDrag]);
+
   // Le mois change → la sélection ne pointe plus sur ce qu'on voit : reset.
-  useEffect(() => { setSelStart(""); setSelEnd(""); }, [month, person.email]);
+  useEffect(() => { setSelStart(""); setSelEnd(""); setDragging(false); }, [month, person.email]);
 
   // Congés par date (validé prioritaire sur en-attente pour la couleur).
   const byDate = useMemo(() => {
@@ -391,14 +438,6 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
     return map;
   }, [person.conges]);
   const recupSet = useMemo(() => new Set(person.recupDates), [person.recupDates]);
-
-  const clickDay = (date: string) => {
-    if (!selStart || (selStart && selEnd !== selStart) || date < selStart) {
-      setSelStart(date); setSelEnd(date);
-    } else {
-      setSelEnd(date);
-    }
-  };
   const inSel = (d: string) => selStart && d >= selStart && d <= selEnd;
 
   const ouvrables = selStart ? expandOuvrables(selStart, selEnd).length : 0;
@@ -420,7 +459,13 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
         <div className="grid grid-cols-7 bg-secondary/40 text-[10px] uppercase tracking-wide text-muted-foreground">
           {JOURS_COURTS.map((j) => <div key={j} className="px-1 py-1.5 text-center font-semibold">{j}</div>)}
         </div>
-        <div className="grid grid-cols-7 divide-x divide-y divide-border/60 border-t border-border/60">
+        <div
+          className="grid grid-cols-7 divide-x divide-y divide-border/60 border-t border-border/60 select-none"
+          style={{ touchAction: "pan-y" }}
+          onPointerMove={(e) => { if (dragging) dragOver(e.clientX, e.clientY); }}
+          onPointerUp={endDrag}
+          onPointerCancel={cancelDrag}
+        >
           {grid.map(({ date, inMonth }) => {
             const dayNum = Number(date.slice(-2));
             const conges = byDate.get(date) ?? [];
@@ -431,8 +476,9 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             const dow = new Date(`${date}T12:00:00Z`).getUTCDay();
             return (
               <button
-                key={date} type="button"
-                onClick={() => canAct && clickDay(date)}
+                key={date} type="button" data-date={date}
+                onPointerDown={(e) => { if (e.button === 0) beginDrag(date); }}
+                onClick={() => { if (canAct && !selStart) { setSelStart(date); setSelEnd(date); } }}
                 title={[
                   ...approved.map((c) => `${CONGE_TYPE_LABEL[c.type]} (validé)`),
                   ...pending.map((c) => `${CONGE_TYPE_LABEL[c.type]} (en attente)`),
@@ -471,7 +517,7 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
         <div className="mt-3 rounded-lg border border-border bg-secondary/20 p-3">
           <p className="mb-2 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
             {isSelf ? "Demander (validé par la direction)" : "Proposer à ce salarié (il accepte ou refuse)"}
-            <span className="normal-case font-normal text-muted-foreground/80"> — cliquez un jour, puis le dernier jour de la plage</span>
+            <span className="normal-case font-normal text-muted-foreground/80"> — glissez sur les jours du calendrier pour sélectionner la plage</span>
           </p>
           <div className="flex flex-wrap items-end gap-2.5">
             <div>
@@ -493,8 +539,9 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             </div>
             <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="Précision (facultatif)"
               className="h-9 flex-1 min-w-[140px] rounded-md border border-border bg-background px-2.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-brand-500" />
+            {/* Pleine largeur sur mobile (grande cible tactile), inline ≥ sm. */}
             <button type="button" onClick={submit} disabled={busy || !selStart}
-              className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[13px] font-semibold disabled:opacity-50">
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 h-11 sm:h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[13px] font-semibold disabled:opacity-50">
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               {isSelf ? "Demander" : "Proposer"}
             </button>

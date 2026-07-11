@@ -578,3 +578,17 @@ salarié, validé par l'employeur** — chaque camp valide ce que l'autre pose
 
 - Stockage inchangé (`AppSetting` : `rhsem:`, `rhprofil:` enrichis, `rhconge:` + champ `origin`) — **aucune migration**.
 - Un congé validé est reporté automatiquement dans les semaines concernées (tags), le calendrier d'équipe se met à jour tout seul.
+
+---
+
+## 📣 Planning — notifications employeur multi-canal + sélection au glisser
+
+| Élément | Comportement |
+|---------|--------------|
+| **Demande salarié** (congés / récup / sans solde — types déjà tous ouverts au salarié) | Part vers le patron sur TOUS les canaux configurés : **push in-app** (existant), **email** (Graph applicatif, boîte `CONGES_FROM_ADDRESS`, repli relances) avec bouton « Valider / refuser dans TeleVent », **WhatsApp** (Meta Cloud API, si `WHATSAPP_*` configurés) avec lien vers l'app. Chaque canal est best-effort : jamais bloquant. |
+| **Validation** | L'évènement (journée entière, « libre », rappel J-1) est **poussé dans le calendrier Outlook** de chaque membre de la direction — Graph applicatif, permission d'application `Calendars.ReadWrite`. |
+| **Calendrier du planning** | **Sélection au glisser** (souris + tactile) : on pose le doigt sur un jour et on glisse jusqu'au dernier ; `pan-y` préserve le scroll vertical, un geste repris par le navigateur (scroll) **restaure** la sélection précédente (pointercancel). Clic droit ignoré. |
+| **Mobile** | Libellé de mois court (« 07/2026 ») dans les en-têtes, titre du calendrier tronqué, bouton Demander/Proposer pleine largeur (h-11). |
+
+- Nouveaux réglages `.env` documentés : `CONGES_FROM_ADDRESS`, `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_DIRECTION_TO` / `WHATSAPP_TEMPLATE_NAME`, `APP_PUBLIC_URL`.
+- `lib/congesNotify.ts` : constructeurs de contenu PURS (email HTML échappé, texte WhatsApp, évènement Outlook all-day fin-exclusive) couverts par 5 tests.

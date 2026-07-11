@@ -192,6 +192,35 @@ function buildMessage(input: SendMailInput): Record<string, unknown> {
 }
 
 /**
+ * Crée un évènement dans le calendrier Outlook d'UN UTILISATEUR via l'identité
+ * APPLICATIVE (client credentials) — permission d'APPLICATION Microsoft Graph
+ * `Calendars.ReadWrite` + consentement admin requis. Sert au planning congés :
+ * un congé VALIDÉ est poussé dans le calendrier Outlook de la direction.
+ *
+ * Erreurs explicites : 403 = permission Calendars.ReadWrite non accordée.
+ */
+export async function createCalendarEventAsApp(
+  userEmail: string,
+  event: Record<string, unknown>,
+): Promise<CalendarEventResult> {
+  const token = await getAppGraphToken();
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(userEmail)}/events`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(event),
+    },
+  );
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(`Graph createEvent (${userEmail}) error: ${res.status} - ${JSON.stringify(error)}`);
+  }
+  const data = (await res.json()) as { id: string };
+  return { id: data.id };
+}
+
+/**
  * Envoie un email DEPUIS une boîte partagée (ex. compta@gervifrais.com) via
  * l'identité applicative — permission d'APPLICATION Microsoft Graph `Mail.Send`
  * (consentement admin requis ; idéalement restreinte à cette boîte par une
