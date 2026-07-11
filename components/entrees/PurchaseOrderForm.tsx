@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { DateStepper, todayISO } from "@/components/ui/date-stepper";
 import { designationProduit } from "@/lib/produit-designation";
-import { DesignationChips } from "./DesignationChips";
+import { DesignationChips, Chip } from "./DesignationChips";
 import { SupplierPicker, ProductPicker, type Supplier, type ProductHit } from "./GoodsReceiptForm";
 
 const fmtEur = (n: number) => n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
@@ -116,7 +116,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
                   <div className="min-w-0">
                     <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
                     <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-                    <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
+                    <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1.5" />
                   </div>
                   <Button variant="ghost" size="icon-sm" tabIndex={-1} onClick={() => removeLine(i)} aria-label="Supprimer"><Trash2 className="h-4 w-4" /></Button>
                 </div>
@@ -182,10 +182,10 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
                     <td className="px-2 py-2"><NumberInput value={l.packageQuantity} onValueChange={(n) => updateLine(i, { packageQuantity: n ?? 0 })} min={0} step={1} className="text-right h-9 w-20" /></td>
                     <td className="px-2 py-2 font-mono">{l.itemCode}</td>
                     <td className="px-2 py-2 text-foreground">{dz.fruit}</td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.pays}</td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.marque}</td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.variete}</td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.condt}</td>
+                    <td className="px-2 py-2"><Chip kind="pays">{dz.pays}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="marque">{dz.marque}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="variete">{dz.variete}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="condt">{dz.condt}</Chip></td>
                     <td className="px-2 py-2">
                       <select value={l.warehouseCode} onChange={(e) => updateLine(i, { warehouseCode: e.target.value as Line["warehouseCode"] })} tabIndex={-1} className="h-9 w-full rounded-md border border-input bg-background px-2 text-[12.5px]">
                         {WAREHOUSES.map((w) => <option key={w.code} value={w.code}>{w.label}</option>)}

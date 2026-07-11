@@ -645,3 +645,21 @@ salarié, validé par l'employeur** — chaque camp valide ce que l'autre pose
 | Tactile déclenchait aussi (tap). | **PC uniquement** (`pointerType === "mouse"`) — tablette/téléphone jamais. |
 
 - Clé `televente:clickSparks` élargie : `sparks` (défaut, ex-« on ») · `ripple` · `rain` · `off`. Rétro-compatible (« on » → étincelles). Toujours coupé par animations=off et `prefers-reduced-motion`.
+
+---
+
+## 🏷️ Charte codes article + format date — CF · EM · Stock
+
+Uniformisation de la **charte graphique des codes article** (cartouches couleur)
+et du **format de date** sur les états SAP.
+
+| Avant | Après |
+|-------|-------|
+| Codes article en **texte gris** dans les tableaux Commandes fournisseurs (CDE FOURNS), Entrée marchandise (EM) et Stock. | **Cartouches couleur** partout, même charte que l'Écran 2 : marque = **violet** · condt = **bleu** · calibre = **teal** · variété = **rose** · origine = **ambre**. |
+| Variété affichée dans le créneau **teal** (couleur du calibre). | Variété dans son propre créneau **rose** (`variete`), le teal redevient réservé au calibre (`cal. …`). |
+| Dates au format `10.07.26` (ou `10/07/2026` sur les sélecteurs). | **`VEN 10.07.26`** (jour court + date) sur tous les états — CF, EM, sélecteurs de date. |
+
+- `lib/date-fr.ts` (NOUVEAU) : `fmtJourDate` / `fmtDateCourte` / `fmtJourDateHeure` — source unique du format « jour + date », plus de `fmtDate` local dupliqué par fichier.
+- `DesignationChips` : nouveau tag `variete` (rose) distinct du `calibre` (teal, préfixe `cal.` auto). `Chip` unitaire aligné sur la même palette.
+- `DateStepper` : rappel `VEN 10.07.26` sous le sélecteur (CDE FOURNS, EM, détails livraison).
+- Écrans redéfinis : `PurchaseOrderForm` / `PurchaseOrderHistory` (CDE FOURNS), `GoodsReceiptForm` / `GoodsReceiptHistory` (EM), `ProductsTable` (Stock — variété `frgnName` désormais câblée).

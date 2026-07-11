@@ -13,6 +13,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
+import { fmtJourDate } from "@/lib/date-fr";
 import { DesignationChips, Chip } from "./DesignationChips";
 import {
   OpenReceptionIncidents, InlineIncidentDeclare, IncidentTypeIcon, useReceptionIncidents,
@@ -406,7 +407,7 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                       {d.cardName || d.cardCode}
                     </div>
                     <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
-                      {fmtDate(d.docDate)} · {d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}
+                      {fmtJourDate(d.docDate)} · {d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}
                     </div>
                   </div>
                   <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
@@ -469,7 +470,7 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                         <div className="font-mono font-medium truncate" title={d.cardName}>{d.cardCode}</div>
                         {d.numAtCard && <div className="text-[11px] text-muted-foreground tnum">{d.numAtCard}</div>}
                       </td>
-                      <td className="px-3 py-2 text-muted-foreground tnum">{fmtDate(d.docDate)}</td>
+                      <td className="px-3 py-2 text-muted-foreground tnum">{fmtJourDate(d.docDate)}</td>
                       <td className="px-3 py-2 text-right tnum">{d.lineCount}</td>
                       {!restricted && <td className="px-3 py-2 text-right tnum font-semibold">{eur(d.totalHT ?? 0)}</td>}
                       <td className="px-3 py-2 text-center">
@@ -787,7 +788,7 @@ function ReceiptDetail({
           <span className="font-mono font-semibold">{receipt.cardCode}</span>
           {receipt.cardName && <span className="text-muted-foreground">· {receipt.cardName}</span>}
         </span>
-        <span className={`text-muted-foreground tnum ${big ? "text-[14px]" : "text-[12px]"}`}>Entrée le {fmtDate(receipt.docDate)}</span>
+        <span className={`text-muted-foreground tnum ${big ? "text-[14px]" : "text-[12px]"}`}>Entrée le {fmtJourDate(receipt.docDate)}</span>
         {/* Référence fournisseur — éditable, valeur libre (BL, Cde, F…), aucun préfixe imposé */}
         <span className="inline-flex items-center gap-1.5">
           <input
@@ -843,7 +844,7 @@ function ReceiptDetail({
                 <div className="min-w-0">
                   <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
                   <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-                  <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
+                  <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1.5" />
                 </div>
                 {!restricted && (
                   <div className="text-right shrink-0">
@@ -920,7 +921,7 @@ function ReceiptDetail({
                   <td className={`text-foreground ${td}`}>{dz.fruit}</td>
                   <td className={td}><Chip kind="pays">{dz.pays}</Chip></td>
                   <td className={td}><Chip kind="marque">{dz.marque}</Chip></td>
-                  <td className={td}><Chip kind="calibre">{dz.variete}</Chip></td>
+                  <td className={td}><Chip kind="variete">{dz.variete}</Chip></td>
                   <td className={td}><Chip kind="condt">{dz.condt}</Chip></td>
                   <td className={td}>
                     {/* DLC (fraîcheur) du lot — sur la ligne, éditable */}
@@ -1105,7 +1106,7 @@ function ReceiptDetail({
                 <li key={l.lineNum} className="flex items-start justify-between gap-2.5">
                   <div className="min-w-0 flex-1">
                     <div className="text-[14px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
-                    <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1" />
+                    <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1" />
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <NumberInput
