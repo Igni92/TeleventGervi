@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
-  BadgePercent, Gift, Loader2, PackagePlus, Plus, Power, RefreshCw, Search, Trash2,
+  BadgePercent, Gift, Loader2, PackagePlus, Plus, Power, RefreshCw, Search, Store, Tag, Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
+import { composePriceLabel, fmtPrix, promoTags, storeTypeLabel } from "@/components/promos/promo-utils";
 
 /**
  * Gestion des promos articles (C2) — liste + création + désactivation/suppression.
@@ -22,28 +23,49 @@ import {
  *   DELETE /api/promos/[id].
  */
 
+type PromoKind = "PERCENT" | "X_PLUS_Y" | "FREE" | "PRICE";
+
 interface Promo {
   id: string;
   itemCode: string;
-  kind: "PERCENT" | "X_PLUS_Y" | "FREE";
+  kind: PromoKind;
   value: number | null;
   buyQty: number | null;
   freeQty: number | null;
   label: string | null;
   /** argumentaire commercial court — affiché dans le bandeau PromoBanner */
   pitch?: string | null;
+  /** type de magasin ciblé (EXPORT | GMS | CHR) — null = tous les magasins */
+  storeType?: string | null;
   // Champs optionnels (selon implémentation serveur) — tolérés, jamais requis
   active?: boolean;
   startsAt?: string | null;
   endsAt?: string | null;
   itemName?: string | null;
+  // Tags produit résolus par l'API (LEFT JOIN "Product")
+  marque?: string | null;
+  pays?: string | null;
+  condi?: string | null;
+  variete?: string | null;
 }
 
-interface ProductHit { itemCode: string; itemName: string; groupName: string | null }
+interface ProductHit {
+  itemCode: string; itemName: string; groupName: string | null;
+  marque: string | null; pays: string | null; condi: string | null; variete: string | null;
+}
 
-/** Libellé court du type : « −10 % », « 5+1 » ou « +1 offert ». */
+/** Types de magasin ciblables + « Tous ». */
+const STORE_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "Tous" },
+  { value: "EXPORT", label: "Export" },
+  { value: "GMS", label: "GMS" },
+  { value: "CHR", label: "CHR" },
+];
+
+/** Libellé court du type : « −10 % », « 5+1 », « +1 offert » ou « 2,80 € ». */
 function promoBadge(p: Promo): string {
   if (p.kind === "PERCENT") return `−${String(Math.round((p.value ?? 0) * 100) / 100)} %`;
+  if (p.kind === "PRICE") return fmtPrix(p.value);
   if (p.kind === "FREE") { const n = p.freeQty ?? 1; return `+${n} offert${n > 1 ? "s" : ""}`; }
   return `${p.buyQty ?? "?"}+${p.freeQty ?? "?"}`;
 }
@@ -142,12 +164,37 @@ export function PromosManager() {
                 {/* Type — chip vif assorti au badge de l'Écran 2 */}
                 <span className="inline-flex h-[24px] min-w-[64px] justify-center items-center px-2 rounded-[5px] text-[13px] font-bold shrink-0 bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-400/70 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/60">
                   {(p.kind === "X_PLUS_Y" || p.kind === "FREE") && <Gift className="h-3 w-3 mr-1" />}
+                  {p.kind === "PRICE" && <Tag className="h-3 w-3 mr-1" />}
                   {promoBadge(p)}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[14.5px] font-semibold text-foreground truncate leading-tight">
-                    {p.label?.trim() || p.itemName || p.itemCode}
-                  </p>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <p className="text-[14.5px] font-semibold text-foreground truncate leading-tight">
+                      {p.label?.trim() || p.itemName || p.itemCode}
+                    </p>
+                    {/* Cible : type de magasin (Export / GMS / CHR) ou tous */}
+                    <span
+                      title={`S'applique aux magasins : ${storeTypeLabel(p.storeType)}`}
+                      className={`inline-flex items-center gap-1 h-[19px] px-1.5 rounded-[4px] text-[10.5px] font-bold uppercase tracking-wide shrink-0 ring-1 ring-inset ${
+                        p.storeType === "EXPORT" ? "bg-violet-100 text-violet-700 ring-violet-300/70 dark:bg-violet-950/50 dark:text-violet-300 dark:ring-violet-400/40"
+                        : p.storeType === "GMS" ? "bg-blue-100 text-blue-700 ring-blue-300/70 dark:bg-blue-950/50 dark:text-blue-300 dark:ring-blue-400/40"
+                        : p.storeType === "CHR" ? "bg-emerald-100 text-emerald-700 ring-emerald-300/70 dark:bg-emerald-950/50 dark:text-emerald-300 dark:ring-emerald-400/40"
+                        : "bg-secondary text-muted-foreground ring-border"
+                      }`}>
+                      <Store className="h-2.5 w-2.5" />
+                      {storeTypeLabel(p.storeType)}
+                    </span>
+                  </div>
+                  {/* Tags produit (conditionnement · pays · marque · variété) */}
+                  {promoTags(p).length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1 mt-1">
+                      {promoTags(p).map((t) => (
+                        <span key={t} className="inline-flex items-center h-[17px] px-1.5 rounded-[4px] bg-secondary/70 text-[10.5px] font-medium text-muted-foreground">
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <p className="text-[11px] font-mono text-muted-foreground/70 truncate mt-0.5">
                     {p.itemCode}
                     {(debut || fin) ? (
@@ -207,11 +254,16 @@ export function PromosManager() {
 function CreatePromoDialog({
   open, onOpenChange, onCreated,
 }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: () => void }) {
-  const [kind, setKind] = useState<"PERCENT" | "X_PLUS_Y" | "FREE">("PERCENT");
+  const [kind, setKind] = useState<PromoKind>("PERCENT");
   const [value, setValue] = useState<number | null>(10);
+  const [price, setPrice] = useState<number | null>(null);   // PRICE : prix unitaire imposé
   const [buyQty, setBuyQty] = useState<number | null>(5);
   const [freeQty, setFreeQty] = useState<number | null>(1);
   const [label, setLabel] = useState("");
+  // Libellé « touché » à la main → on cesse de le recomposer automatiquement.
+  const [labelTouched, setLabelTouched] = useState(false);
+  // Type de magasin ciblé ("" = tous). EXPORT | GMS | CHR.
+  const [storeType, setStoreType] = useState("");
   // Promo permanente (sans dates) par défaut — décocher pour fixer une période.
   const [permanent, setPermanent] = useState(true);
   const [startsAt, setStartsAt] = useState("");
@@ -227,12 +279,14 @@ function CreatePromoDialog({
   // Reset complet à l'ouverture
   useEffect(() => {
     if (!open) return;
-    setKind("PERCENT"); setValue(10); setBuyQty(5); setFreeQty(1);
-    setLabel(""); setPermanent(true); setStartsAt(""); setEndsAt("");
+    setKind("PERCENT"); setValue(10); setPrice(null); setBuyQty(5); setFreeQty(1);
+    setLabel(""); setLabelTouched(false); setStoreType("");
+    setPermanent(true); setStartsAt(""); setEndsAt("");
     setQuery(""); setHits([]); setPicked(null);
   }, [open]);
 
-  // Recherche produits (debounce 250 ms)
+  // Recherche produits (debounce 250 ms) — on capture aussi les tags produit
+  // (conditionnement / pays / marque / variété) pour composer le libellé riche.
   useEffect(() => {
     const q = query.trim();
     if (picked || q.length < 2) { setHits([]); return; }
@@ -241,8 +295,15 @@ function CreatePromoDialog({
       try {
         const res = await fetch(`/api/products?search=${encodeURIComponent(q)}&limit=15`);
         const json = await res.json().catch(() => ({}));
-        setHits(((json?.products ?? []) as ProductHit[]).map((p) => ({
+        type ApiProduct = {
+          itemCode: string; itemName: string; groupName?: string | null;
+          uMarque?: string | null; uPays?: string | null;
+          uCondi?: string | null; uUvc?: string | null; frgnName?: string | null;
+        };
+        setHits(((json?.products ?? []) as ApiProduct[]).map((p) => ({
           itemCode: p.itemCode, itemName: p.itemName, groupName: p.groupName ?? null,
+          marque: p.uMarque ?? null, pays: p.uPays ?? null,
+          condi: p.uCondi ?? p.uUvc ?? null, variete: p.frgnName ?? null,
         })));
       } catch { setHits([]); }
       finally { setSearching(false); }
@@ -250,20 +311,32 @@ function CreatePromoDialog({
     return () => clearTimeout(t);
   }, [query, picked]);
 
+  // Libellé auto : pour un TARIF, on compose le libellé riche à tags
+  // (« Nom  conditionnement  pays  marque   Prix Unitaire  X.XX EUR ») ; pour les
+  // autres types, le nom d'article. Recomposé tant que l'admin n'a pas édité.
+  useEffect(() => {
+    if (labelTouched || !picked) return;
+    setLabel(
+      kind === "PRICE"
+        ? composePriceLabel({ ...picked, value: price })
+        : picked.itemName,
+    );
+  }, [kind, price, picked, labelTouched]);
+
   const pick = (h: ProductHit) => {
     setPicked(h);
     setQuery(`${h.itemName} (${h.itemCode})`);
     setHits([]);
-    // Le libellé sert à la mention « PROMO : … » sur le bon — prérempli avec le nom.
-    setLabel((cur) => cur.trim() ? cur : h.itemName);
   };
 
   const valid = picked != null && (
     kind === "PERCENT"
       ? value != null && value > 0 && value < 100
-      : kind === "X_PLUS_Y"
-        ? buyQty != null && buyQty >= 1 && freeQty != null && freeQty >= 1
-        : /* FREE */ freeQty != null && freeQty >= 1
+      : kind === "PRICE"
+        ? price != null && price > 0
+        : kind === "X_PLUS_Y"
+          ? buyQty != null && buyQty >= 1 && freeQty != null && freeQty >= 1
+          : /* FREE */ freeQty != null && freeQty >= 1
   );
 
   const submit = async () => {
@@ -275,10 +348,13 @@ function CreatePromoDialog({
         body: JSON.stringify({
           itemCode: picked.itemCode,
           kind,
-          value: kind === "PERCENT" ? value : 0,
+          // PERCENT → %, PRICE → prix unitaire fixe (tous deux portés par `value`).
+          value: kind === "PERCENT" ? value : kind === "PRICE" ? price : 0,
           buyQty: kind === "X_PLUS_Y" ? buyQty : 0,
           freeQty: (kind === "X_PLUS_Y" || kind === "FREE") ? freeQty : 0,
           label: label.trim() || null,
+          // Cible : type de magasin ("" = tous → non envoyé).
+          ...(storeType ? { storeType } : {}),
           // Promo permanente → aucune date envoyée (sinon période fixée).
           ...(!permanent && startsAt ? { startsAt: new Date(startsAt).toISOString() } : {}),
           ...(!permanent && endsAt ? { endsAt: new Date(endsAt).toISOString() } : {}),
@@ -345,12 +421,18 @@ function CreatePromoDialog({
             <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
               Type de promo
             </label>
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-2 gap-1.5">
               <button type="button" aria-pressed={kind === "PERCENT"} onClick={() => setKind("PERCENT")}
                 className={`h-10 rounded-md border text-[12.5px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
                   kind === "PERCENT" ? "border-rose-400/70 bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" : "border-border text-muted-foreground hover:text-foreground"
                 }`}>
                 <BadgePercent className="h-4 w-4" /> Remise %
+              </button>
+              <button type="button" aria-pressed={kind === "PRICE"} onClick={() => setKind("PRICE")}
+                className={`h-10 rounded-md border text-[12.5px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
+                  kind === "PRICE" ? "border-rose-400/70 bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" : "border-border text-muted-foreground hover:text-foreground"
+                }`}>
+                <Tag className="h-4 w-4" /> Tarif imposé
               </button>
               <button type="button" aria-pressed={kind === "X_PLUS_Y"} onClick={() => setKind("X_PLUS_Y")}
                 className={`h-10 rounded-md border text-[12.5px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
@@ -378,6 +460,18 @@ function CreatePromoDialog({
                   aria-label="Remise en pourcentage"
                   className="h-10 w-24 text-right text-[15px] tnum rounded-md border border-border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
                 <span className="text-[14px] text-muted-foreground">% sur le prix conseillé</span>
+              </div>
+            </div>
+          ) : kind === "PRICE" ? (
+            <div>
+              <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+                Prix unitaire imposé
+              </label>
+              <div className="flex items-center gap-2">
+                <NumberInput value={price} onValueChange={setPrice} min={0} step={0.01}
+                  aria-label="Prix unitaire imposé (€)"
+                  className="h-10 w-28 text-right text-[15px] tnum rounded-md border border-border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                <span className="text-[14px] text-muted-foreground">€ / unité — remplace le prix conseillé</span>
               </div>
             </div>
           ) : kind === "FREE" ? (
@@ -417,14 +511,43 @@ function CreatePromoDialog({
             </div>
           )}
 
+          {/* Type de magasin ciblé — applique la promo à TOUS les magasins de ce type */}
+          <div>
+            <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+              <span className="inline-flex items-center gap-1"><Store className="h-3 w-3" /> Magasins concernés</span>
+            </label>
+            <div className="grid grid-cols-4 gap-1.5">
+              {STORE_OPTIONS.map((o) => (
+                <button key={o.value || "all"} type="button" aria-pressed={storeType === o.value}
+                  onClick={() => setStoreType(o.value)}
+                  className={`h-9 rounded-md border text-[12.5px] font-semibold transition-colors ${
+                    storeType === o.value ? "border-brand-400/70 bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-300" : "border-border text-muted-foreground hover:text-foreground"
+                  }`}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11.5px] text-muted-foreground mt-1">
+              {storeType
+                ? `S'applique à tous les magasins de type ${storeTypeLabel(storeType)}.`
+                : "S'applique à tous les magasins, quel que soit leur type."}
+            </p>
+          </div>
+
           {/* Libellé */}
           <div>
             <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
               Libellé (mention sur le bon)
             </label>
-            <input value={label} onChange={(e) => setLabel(e.target.value)}
-              placeholder="ex. Fraise Hoogstraten — promo semaine"
+            <input value={label}
+              onChange={(e) => { setLabel(e.target.value); setLabelTouched(true); }}
+              placeholder="ex. Groseille Mixte  12x125g  Belgique  Belorta   Prix Unitaire  2.80 EUR"
               className="w-full h-10 rounded-md border border-border bg-background text-[14px] px-2.5 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+            {kind === "PRICE" && !labelTouched && picked && (
+              <p className="text-[11.5px] text-muted-foreground mt-1">
+                Libellé composé automatiquement depuis les tags de l&apos;article — modifiable.
+              </p>
+            )}
           </div>
 
           {/* Durée : permanente (sans dates) ou période fixée */}

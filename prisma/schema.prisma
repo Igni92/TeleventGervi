@@ -897,16 +897,24 @@ model FavoriteItem {
 }
 
 // ── Promotions saisies dans l'app (Console 2 + notation sur le BL) ──
-// kind: 'PERCENT' (value=10 → -10%) | 'X_PLUS_Y' (buyQty=5, freeQty=1 → 5+1).
-// Appliquées à la saisie (DiscountPercent SAP par ligne) + mention Comments.
+// kind: 'PERCENT' (value=10 → -10%) | 'X_PLUS_Y' (buyQty=5, freeQty=1 → 5+1)
+//     | 'FREE' (freeQty colis offerts, sans seuil)
+//     | 'PRICE' (value = PRIX UNITAIRE fixe imposé, ex. 2.80 €/pièce — remplace
+//                le prix conseillé ; « change le tarif » d'un article).
+// storeType : cible facultative — la promo ne s'applique qu'aux MAGASINS de ce
+//   type (Client.type = EXPORT | GMS | CHR). NULL = tous les magasins.
+// Appliquées à la saisie (prix / DiscountPercent SAP par ligne) + mention Comments.
+// ⚠️ Colonnes `pitch` et `storeType` ajoutées par DDL manuel (scripts/ddl-promos-*.mjs)
+//    et lues/écrites en raw SQL (le client Prisma généré ne les connaît pas).
 model Promo {
   id        String    @id @default(cuid())
   itemCode  String // SAP ItemCode
-  kind      String // 'PERCENT' | 'X_PLUS_Y' | 'FREE' (N colis offerts, sans seuil)
-  value     Float? // % de remise (PERCENT)
+  kind      String // 'PERCENT' | 'X_PLUS_Y' | 'FREE' | 'PRICE'
+  value     Float? // % de remise (PERCENT) OU prix unitaire fixe (PRICE)
   buyQty    Float? // X achetés (X_PLUS_Y)
   freeQty   Float? // colis offerts (X_PLUS_Y et FREE)
   label     String? // libellé libre affiché sur le BL
+  storeType String? // EXPORT | GMS | CHR ciblé (NULL = tous les magasins)
   startsAt  DateTime?
   endsAt    DateTime?
   active    Boolean   @default(true)

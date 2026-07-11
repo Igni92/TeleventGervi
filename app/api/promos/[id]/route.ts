@@ -22,10 +22,14 @@ type PromoRow = {
   buyQty: number | null;
   freeQty: number | null;
   label: string | null;
+  storeType: string | null;
   startsAt: Date | null;
   endsAt: Date | null;
   active: boolean;
 };
+
+/** Types de magasin ciblables (Client.type). */
+const STORE_TYPES = ["EXPORT", "GMS", "CHR"] as const;
 
 /** Coercition numérique tolérante (nombre ou chaîne numérique). */
 function toNum(v: unknown): number | null {
@@ -57,7 +61,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
   // 404 si la promo n'existe pas — on lit aussi l'existant pour valider l'état résultant.
   const existingRows = await prisma.$queryRawUnsafe<PromoRow[]>(
     `SELECT "id", "itemCode", "kind", "value", "buyQty", "freeQty",
-            "label", "startsAt", "endsAt", "active"
+            "label", "storeType", "startsAt", "endsAt", "active"
      FROM "Promo" WHERE "id" = $1;`,
     params.id,
   );
@@ -82,22 +86,27 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
   // kind — restreint à l'énumération.
   let kind = existing.kind;
   if (body.kind !== undefined) {
-    if (body.kind !== "PERCENT" && body.kind !== "X_PLUS_Y" && body.kind !== "FREE") {
-      return bad("kind invalide (PERCENT, X_PLUS_Y ou FREE attendu)");
+    if (body.kind !== "PERCENT" && body.kind !== "X_PLUS_Y" && body.kind !== "FREE" && body.kind !== "PRICE") {
+      return bad("kind invalide (PERCENT, X_PLUS_Y, FREE ou PRICE attendu)");
     }
     kind = body.kind;
     sets.push(`"kind" = $${i++}`);
     values.push(kind);
   }
 
-  // value / buyQty / freeQty — null autorisé pour effacer, sinon mêmes bornes qu'au POST.
+  // value / buyQty / freeQty — null autorisé pour effacer. Les bornes dépendent
+  // du kind résultant : PERCENT = 1..90 (%), PRICE = prix > 0 (plafond de garde).
   let value = existing.value;
   if (body.value !== undefined) {
     if (body.value === null) value = null;
     else {
       const n = toNum(body.value);
       if (n === null) return bad("value doit être un nombre");
-      if (n < 1 || n > 90) return bad("value doit être comprise entre 1 et 90");
+      if (kind === "PRICE") {
+        if (n <= 0 || n > 100000) return bad("value doit être un prix > 0");
+      } else if (n < 1 || n > 90) {
+        return bad("value doit être comprise entre 1 et 90");
+      }
       value = n;
     }
     sets.push(`"value" = $${i++}::double precision`);
@@ -136,6 +145,8 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
   if (kindFieldsTouched) {
     if (kind === "PERCENT") {
       if (value === null) return bad("value requise pour une promo PERCENT");
+    } else if (kind === "PRICE") {
+      if (value === null || value <= 0) return bad("value (prix) requise pour une promo PRICE");
     } else if (kind === "X_PLUS_Y") {
       if (buyQty === null || buyQty < 1) return bad("buyQty doit être ≥ 1 pour une promo X_PLUS_Y");
       if (freeQty === null || freeQty < 1) return bad("freeQty doit être ≥ 1 pour une promo X_PLUS_Y");
@@ -150,6 +161,20 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
     const label = body.label === null ? null : String(body.label).trim() || null;
     sets.push(`"label" = $${i++}`);
     values.push(label);
+  }
+
+  // storeType — null pour effacer (= tous les magasins), sinon EXPORT | GMS | CHR.
+  if (body.storeType !== undefined) {
+    let storeType: string | null = null;
+    if (body.storeType !== null && body.storeType !== "") {
+      const st = String(body.storeType).trim().toUpperCase();
+      if (!STORE_TYPES.includes(st as (typeof STORE_TYPES)[number])) {
+        return bad("storeType invalide (EXPORT, GMS ou CHR attendu)");
+      }
+      storeType = st;
+    }
+    sets.push(`"storeType" = $${i++}`);
+    values.push(storeType);
   }
 
   // pitch — argumentaire commercial court, null ou chaîne (vide → null).

@@ -41,9 +41,10 @@ interface NotificationsResponse {
   notifications?: Notification[];
 }
 
-/** Mécanique lisible : « −15 % » ou « 5+1 ». */
+/** Mécanique lisible : « −15 % », « 2,80 € » (tarif) ou « 5+1 ». */
 function mecanique(p: Promo): string | null {
   if (p.kind === "PERCENT" && p.value != null) return `−${p.value} %`;
+  if (p.kind === "PRICE" && p.value != null) return `${p.value.toFixed(2).replace(".", ",")} €`;
   if (p.kind === "X_PLUS_Y" && p.buyQty != null && p.freeQty != null) return `${p.buyQty}+${p.freeQty}`;
   return null;
 }
