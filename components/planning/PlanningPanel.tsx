@@ -493,6 +493,13 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             const tag = person.tags[date];
             const isToday = date === todayISO;
             const dow = new Date(`${date}T12:00:00Z`).getUTCDay();
+            // Sélection LIÉE : un seul bandeau continu (pas de bordure entre 2
+            // jours). Un calque `-inset-px` déborde d'1 px et masque les traits
+            // de grille entre cellules sélectionnées ; arrondi UNIQUEMENT aux
+            // extrémités de la plage et en début/fin de ligne (lun / dim).
+            const selected = inSel(date);
+            const capL = selected && (date === sel.start || dow === 1);
+            const capR = selected && (date === sel.end || dow === 0);
             return (
               <button
                 key={date} type="button" data-date={date}
@@ -510,26 +517,37 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
                   ...(recupSet.has(date) ? ["Récup posée"] : []),
                   ...(tag ? [`Feuille d'heures : ${DAY_TAG_LABEL[tag]}`] : []),
                 ].join(" · ") || undefined}
-                className={`relative min-h-[52px] sm:min-h-[64px] p-1 text-left align-top transition-colors focus:outline-none focus:ring-1 focus:ring-brand-500
+                className={`relative min-h-[52px] sm:min-h-[64px] p-1 text-left align-top transition-colors focus:outline-none focus:ring-1 focus:ring-brand-500 focus:z-20
                   ${inMonth ? "bg-background" : "bg-secondary/20 opacity-50"}
                   ${dow === 0 || dow === 6 ? "bg-secondary/10" : ""}
-                  ${inSel(date) ? "ring-2 ring-inset ring-brand-500 bg-brand-500/10" : canAct ? "hover:bg-secondary/40" : "cursor-default"}`}
+                  ${!selected && canAct ? "hover:bg-secondary/40" : ""}
+                  ${!selected && !canAct ? "cursor-default" : ""}`}
               >
-                <span className={`inline-flex items-center justify-center h-5 w-5 rounded-full text-[11px] tnum font-semibold
+                {/* Bandeau de sélection continu : fond unique qui déborde d'1 px
+                    pour masquer les traits de grille entre jours sélectionnés
+                    (aucune bordure interne). Liseré haut+bas pour définir la
+                    bande sans jamais séparer deux jours voisins ; arrondi + bord
+                    latéral seulement aux extrémités (début/fin, lundi/dimanche). */}
+                {selected && (
+                  <span aria-hidden
+                    className={`pointer-events-none absolute -inset-px z-0 bg-brand-500/25 border-y border-brand-500/60
+                      ${capL ? "rounded-l-lg border-l" : ""} ${capR ? "rounded-r-lg border-r" : ""}`} />
+                )}
+                <span className={`relative z-10 inline-flex items-center justify-center h-5 w-5 rounded-full text-[11px] tnum font-semibold
                   ${isToday ? "bg-brand-500 text-white" : "text-foreground"}`}>
                   {dayNum}
                 </span>
-                <span className="mt-0.5 flex flex-wrap gap-0.5">
+                <span className="relative z-10 mt-1 flex flex-wrap items-center gap-1">
                   {approved.map((c) => (
-                    <span key={c.id} className={`h-2 w-full max-w-[46px] rounded-sm ${TYPE_TONE[c.type].solid}`} />
+                    <span key={c.id} className={`h-2.5 w-full max-w-[46px] rounded ${TYPE_TONE[c.type].solid}`} />
                   ))}
                   {pending.map((c) => (
-                    <span key={c.id} className={`h-2 w-full max-w-[46px] rounded-sm border border-dashed ${TYPE_TONE[c.type].soft} border-current ${TYPE_TONE[c.type].text}`} />
+                    <span key={c.id} className={`h-2.5 w-full max-w-[46px] rounded border border-dashed ${TYPE_TONE[c.type].soft} border-current ${TYPE_TONE[c.type].text}`} />
                   ))}
                   {recupSet.has(date) && !approved.some((c) => c.type === "recup") && (
-                    <span className="h-2 w-2 rounded-full bg-sky-500" />
+                    <span className="h-3 w-3 rounded-full bg-sky-500 ring-2 ring-background" />
                   )}
-                  {tag && <span className={`h-2 w-2 rounded-full ${TAG_DOT[tag]}`} />}
+                  {tag && <span className={`h-3 w-3 rounded-full ring-2 ring-background ${TAG_DOT[tag]}`} />}
                 </span>
               </button>
             );
