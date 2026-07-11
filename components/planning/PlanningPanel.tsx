@@ -374,56 +374,75 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
   onSubmit: (payload: Record<string, unknown>) => Promise<boolean>;
 }) {
   const grid = useMemo(() => monthGridDays(month), [month]);
-  const [selStart, setSelStart] = useState("");
-  const [selEnd, setSelEnd] = useState("");
+  const [sel, setSel] = useState({ start: "", end: "" });
   const [type, setType] = useState<CongeType>(isDirection && !isSelf ? "recup" : "cp");
   const [note, setNote] = useState("");
 
-  // ── Sélection au GLISSER (souris + tactile) : on pose le doigt/clic sur un
-  //    jour (ancre) et on glisse jusqu'au dernier jour de la plage. `pan-y`
-  //    laisse le défilement vertical de la page au navigateur : un glissé
-  //    horizontal/diagonal sélectionne, un glissé vertical franc scrolle. ──
+  // ── Sélection de la plage — DEUX gestes qui cohabitent :
+  //    • CLIC début / CLIC fin (souris, doigt, clavier) : 1ʳᵉ touche = jour
+  //      seul ; touche sur un jour POSTÉRIEUR = fin de plage ; sinon on repart.
+  //    • GLISSER — SOURIS UNIQUEMENT (PC) : on maintient et on étire. Au doigt
+  //      il n'y a PAS de glisser : le geste reste réservé au scroll de la page.
+  const canAct = isSelf || isDirection;   // un admin non-direction consulte
   const [dragging, setDragging] = useState(false);
-  const anchorRef = useRef("");
-  // Sélection AVANT le geste : restaurée si le navigateur reprend la main
-  // (pointercancel = le doigt scrollait la page, pas une sélection).
-  const prevSelRef = useRef({ start: "", end: "" });
+  const anchorRef = useRef("");     // jour du mousedown souris ("" = pas de geste)
+  const draggedRef = useRef(false); // vrai dès que la souris a couvert un autre jour
+  // Vrai le temps d'un geste SOURIS : le « click » natif qui suit est alors
+  // ignoré (déjà traité au relâchement) — évite une double sélection, sans
+  // dépendre de `pointerType` sur l'évènement click (peu fiable, vieux Safari).
+  const mouseGestureRef = useRef(false);
 
+  const tapDay = (date: string) => {
+    if (!canAct) return;
+    setSel((cur) =>
+      !cur.start || cur.end !== cur.start || date < cur.start
+        ? { start: date, end: date }
+        : { start: cur.start, end: date });
+  };
+  const tapDayRef = useRef(tapDay);
+  tapDayRef.current = tapDay;
+
+  // Glisser SOURIS UNIQUEMENT : on démarre au mousedown, on étire au survol,
+  // on conclut au relâchement. Le clic simple (sans glisser) retombe sur tapDay.
   const beginDrag = (date: string) => {
     if (!canAct) return;
-    prevSelRef.current = { start: selStart, end: selEnd };
     anchorRef.current = date;
+    draggedRef.current = false;
+    mouseGestureRef.current = true;
     setDragging(true);
-    setSelStart(date);
-    setSelEnd(date);
   };
   const dragOver = (clientX: number, clientY: number) => {
-    const el = document.elementFromPoint(clientX, clientY)?.closest?.("[data-date]");
-    const date = el?.getAttribute("data-date");
-    if (!date) return;
-    const anchor = anchorRef.current || date;
-    setSelStart(date < anchor ? date : anchor);
-    setSelEnd(date > anchor ? date : anchor);
+    const date = document.elementFromPoint(clientX, clientY)
+      ?.closest?.("[data-date]")?.getAttribute("data-date");
+    if (!date || !anchorRef.current) return;
+    if (date !== anchorRef.current) draggedRef.current = true;
+    if (!draggedRef.current) return;   // pas encore un vrai glisser
+    const a = anchorRef.current;
+    setSel({ start: date < a ? date : a, end: date > a ? date : a });
   };
-  const endDrag = useCallback(() => setDragging(false), []);
-  const cancelDrag = useCallback(() => {
-    setSelStart(prevSelRef.current.start);
-    setSelEnd(prevSelRef.current.end);
+  const endDrag = useCallback(() => {
+    // Souris relâchée SANS avoir couvert d'autre jour = simple CLIC → la
+    // logique « clic début / clic fin » s'applique.
+    if (anchorRef.current && !draggedRef.current) tapDayRef.current(anchorRef.current);
+    anchorRef.current = "";
+    draggedRef.current = false;
     setDragging(false);
   }, []);
-  // Relâchement HORS de la grille (souris sortie, geste annulé) → fin propre.
+  // Relâchement HORS de la grille (souris sortie du calendrier) → fin propre.
   useEffect(() => {
     if (!dragging) return;
     window.addEventListener("pointerup", endDrag);
-    window.addEventListener("pointercancel", cancelDrag);
-    return () => {
-      window.removeEventListener("pointerup", endDrag);
-      window.removeEventListener("pointercancel", cancelDrag);
-    };
-  }, [dragging, endDrag, cancelDrag]);
+    return () => window.removeEventListener("pointerup", endDrag);
+  }, [dragging, endDrag]);
 
   // Le mois change → la sélection ne pointe plus sur ce qu'on voit : reset.
-  useEffect(() => { setSelStart(""); setSelEnd(""); setDragging(false); }, [month, person.email]);
+  useEffect(() => {
+    setSel({ start: "", end: "" });
+    setDragging(false);
+    anchorRef.current = "";
+    draggedRef.current = false;
+    mouseGestureRef.current = false;
+  }, [month, person.email]);
 
   // Congés par date (validé prioritaire sur en-attente pour la couleur).
   const byDate = useMemo(() => {
@@ -438,18 +457,17 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
     return map;
   }, [person.conges]);
   const recupSet = useMemo(() => new Set(person.recupDates), [person.recupDates]);
-  const inSel = (d: string) => selStart && d >= selStart && d <= selEnd;
+  const inSel = (d: string) => sel.start && d >= sel.start && d <= sel.end;
 
-  const ouvrables = selStart ? expandOuvrables(selStart, selEnd).length : 0;
-  const canAct = isSelf || isDirection;   // un admin non-direction consulte
+  const ouvrables = sel.start ? expandOuvrables(sel.start, sel.end).length : 0;
 
   const submit = async () => {
-    if (!selStart) return;
-    const base = { type, start: selStart, end: selEnd, note };
+    if (!sel.start) return;
+    const base = { type, start: sel.start, end: sel.end, note };
     const ok = isSelf
       ? await onSubmit({ action: "request", ...base })
       : await onSubmit({ action: "propose", email: person.email, name: person.name, ...base });
-    if (ok) { setSelStart(""); setSelEnd(""); setNote(""); }
+    if (ok) { setSel({ start: "", end: "" }); setNote(""); }
   };
 
   return (
@@ -459,12 +477,13 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
         <div className="grid grid-cols-7 bg-secondary/40 text-[10px] uppercase tracking-wide text-muted-foreground">
           {JOURS_COURTS.map((j) => <div key={j} className="px-1 py-1.5 text-center font-semibold">{j}</div>)}
         </div>
+        {/* Le glisser (souris) est géré par pointer events ; sur mobile aucun
+            handler tactile n'est posé → le doigt scrolle la page normalement,
+            la sélection se fait au clic début / clic fin (onClick). */}
         <div
-          className="grid grid-cols-7 divide-x divide-y divide-border/60 border-t border-border/60 select-none"
-          style={{ touchAction: "pan-y" }}
-          onPointerMove={(e) => { if (dragging) dragOver(e.clientX, e.clientY); }}
+          className="grid grid-cols-7 divide-x divide-y divide-border/60 border-t border-border/60 md:select-none"
+          onPointerMove={(e) => { if (dragging && e.pointerType === "mouse") dragOver(e.clientX, e.clientY); }}
           onPointerUp={endDrag}
-          onPointerCancel={cancelDrag}
         >
           {grid.map(({ date, inMonth }) => {
             const dayNum = Number(date.slice(-2));
@@ -477,8 +496,14 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             return (
               <button
                 key={date} type="button" data-date={date}
-                onPointerDown={(e) => { if (e.button === 0) beginDrag(date); }}
-                onClick={() => { if (canAct && !selStart) { setSelStart(date); setSelEnd(date); } }}
+                // Souris : démarre un éventuel glisser (le clic simple retombe
+                // sur tapDay au relâchement). Tactile/clavier : onClick → tapDay,
+                // sauf juste après un geste souris (déjà traité au relâchement).
+                onPointerDown={(e) => { if (e.pointerType === "mouse" && e.button === 0) beginDrag(date); }}
+                onClick={() => {
+                  if (mouseGestureRef.current) { mouseGestureRef.current = false; return; }
+                  tapDay(date);
+                }}
                 title={[
                   ...approved.map((c) => `${CONGE_TYPE_LABEL[c.type]} (validé)`),
                   ...pending.map((c) => `${CONGE_TYPE_LABEL[c.type]} (en attente)`),
@@ -517,7 +542,11 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
         <div className="mt-3 rounded-lg border border-border bg-secondary/20 p-3">
           <p className="mb-2 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
             {isSelf ? "Demander (validé par la direction)" : "Proposer à ce salarié (il accepte ou refuse)"}
-            <span className="normal-case font-normal text-muted-foreground/80"> — glissez sur les jours du calendrier pour sélectionner la plage</span>
+            {/* PC : glisser OU clic début/clic fin. Mobile : clic début/clic fin. */}
+            <span className="normal-case font-normal text-muted-foreground/80">
+              <span className="hidden md:inline"> — glissez sur les jours, ou cliquez le 1ᵉʳ puis le dernier</span>
+              <span className="md:hidden"> — touchez le 1ᵉʳ jour puis le dernier</span>
+            </span>
           </p>
           <div className="flex flex-wrap items-end gap-2.5">
             <div>
@@ -529,26 +558,26 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             </div>
             <div>
               <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Du</label>
-              <input type="date" value={selStart} onChange={(e) => { setSelStart(e.target.value); if (!selEnd || selEnd < e.target.value) setSelEnd(e.target.value); }}
+              <input type="date" value={sel.start} onChange={(e) => setSel((c) => ({ start: e.target.value, end: !c.end || c.end < e.target.value ? e.target.value : c.end }))}
                 className="h-9 rounded-md border border-border bg-background px-2 text-[13px] tnum focus:outline-none focus:ring-1 focus:ring-brand-500" />
             </div>
             <div>
               <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Au</label>
-              <input type="date" value={selEnd} min={selStart || undefined} onChange={(e) => setSelEnd(e.target.value)}
+              <input type="date" value={sel.end} min={sel.start || undefined} onChange={(e) => setSel((c) => ({ ...c, end: e.target.value }))}
                 className="h-9 rounded-md border border-border bg-background px-2 text-[13px] tnum focus:outline-none focus:ring-1 focus:ring-brand-500" />
             </div>
             <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="Précision (facultatif)"
               className="h-9 flex-1 min-w-[140px] rounded-md border border-border bg-background px-2.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-brand-500" />
             {/* Pleine largeur sur mobile (grande cible tactile), inline ≥ sm. */}
-            <button type="button" onClick={submit} disabled={busy || !selStart}
+            <button type="button" onClick={submit} disabled={busy || !sel.start}
               className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 h-11 sm:h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[13px] font-semibold disabled:opacity-50">
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               {isSelf ? "Demander" : "Proposer"}
             </button>
           </div>
-          {selStart && (
+          {sel.start && (
             <p className="mt-2 text-[11.5px] text-muted-foreground tnum">
-              {rangeLabel({ start: selStart, end: selEnd })} · {ouvrables} jour{ouvrables > 1 ? "s" : ""} ouvrable{ouvrables > 1 ? "s" : ""}
+              {rangeLabel({ start: sel.start, end: sel.end })} · {ouvrables} jour{ouvrables > 1 ? "s" : ""} ouvrable{ouvrables > 1 ? "s" : ""}
               {type === "cp" && " — les jours de CP validés comptent comme travaillés (journée type créditée)"}
               {type === "recup" && " — décomptée du compteur seulement si la semaine finit sous le contrat"}
             </p>
