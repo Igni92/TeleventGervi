@@ -5,6 +5,7 @@ import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
 import { getDeliveryStatuses } from "@/lib/inventory";
+import { selectCarryoverEntries } from "@/lib/livraisonCarryover";
 import { getClientTournees, type ClientTournee } from "@/lib/clientTournee";
 import { getClientTrclCarriers } from "@/lib/clientCarriers";
 import { isRestrictedPreparateur } from "@/lib/preparateur";
@@ -69,6 +70,7 @@ export async function GET(req: NextRequest) {
   //   • entered=YYYY-MM-DD           → ventes SAISIES ce jour (DocDate) — « Ventes du jour »
   //   • from=YYYY-MM-DD&to=…         → livraisons d'une PLAGE (DocDueDate) — « Préparations »
   //   • date=YYYY-MM-DD (défaut)     → livraisons d'UN jour (DocDueDate) — Détail livraison
+  //   • &carryover=1 (avec date=…)   → + report des prépas non faites (cf. wantCarryover)
   const enteredParam = searchParams.get("entered");
   const fromParam = searchParams.get("from");
   const toParam = searchParams.get("to");
@@ -81,6 +83,13 @@ export async function GET(req: NextRequest) {
     mode === "entered" ? `DocDate eq '${enteredParam}'`
     : mode === "range" ? `DocDueDate ge '${fromParam}' and DocDueDate le '${toParam}'`
     : `DocDueDate eq '${date}'`;
+  // « Détail livraison » (mode due) UNIQUEMENT : reporter la file de préparation
+  // — les commandes MISES EN PRÉPARATION mais PAS ENCORE FAITES — dans la vue du
+  // jour, même si leur date de livraison (DocDueDate) ne tombe pas ce jour-là.
+  // Piloté par le front (carryover=1) pour NE PAS polluer les autres écrans « du
+  // jour » qui, eux, s'en tiennent à la stricte date de livraison (récap articles,
+  // manquants, Ventes du jour).
+  const wantCarryover = mode === "due" && searchParams.get("carryover") === "1";
 
   type ListedLine = {
     ItemCode: string;
@@ -110,7 +119,6 @@ export async function GET(req: NextRequest) {
     DocumentLines?: ListedLine[];
   };
 
-  const filter = encodeURIComponent(filterExpr);
   const BASE_SELECT =
     "DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,VatSum,DocumentStatus,Cancelled,Comments,NumAtCard,DocumentLines";
 
@@ -125,16 +133,59 @@ export async function GET(req: NextRequest) {
       ",U_TrspCode,U_TrspHeur",
       "",
     ];
-    let orders: SapOrderListed[] = [];
-    for (let i = 0; i < EXTRA_SELECTS.length; i++) {
-      try {
-        orders = await sap.getAll<SapOrderListed>(
-          `Orders?$select=${BASE_SELECT}${EXTRA_SELECTS[i]}&$filter=${filter}&$orderby=CardName asc`,
-          { pageSize: 200, maxPages: 20 },
+    // Dès qu'un niveau de $select marche on le MÉMORISE (`selIdx`) : les requêtes
+    // de report (mêmes champs, d'autres DocEntry) ne re-sondent plus les champs
+    // custom absents.
+    let selIdx = 0;
+    const fetchOrders = async (expr: string): Promise<SapOrderListed[]> => {
+      const f = encodeURIComponent(expr);
+      for (let i = selIdx; i < EXTRA_SELECTS.length; i++) {
+        try {
+          const r = await sap.getAll<SapOrderListed>(
+            `Orders?$select=${BASE_SELECT}${EXTRA_SELECTS[i]}&$filter=${f}&$orderby=CardName asc`,
+            { pageSize: 200, maxPages: 20 },
+          );
+          selIdx = i;                                   // ce niveau marche → on le garde
+          return r;
+        } catch (e) {
+          if (i === EXTRA_SELECTS.length - 1) throw e;   // plus aucun repli → vraie erreur
+        }
+      }
+      return [];
+    };
+
+    // Commandes du jour ciblé (DocDueDate) + statuts manuels (misEnPrep, faite,
+    // départ, avoir…) — indépendants l'un de l'autre → chargés EN PARALLÈLE.
+    const [dayOrders, statuses] = await Promise.all([
+      fetchOrders(filterExpr),
+      getDeliveryStatuses(),
+    ]);
+    const orders: SapOrderListed[] = dayOrders;
+
+    // ── REPORT DE LA FILE DE PRÉPARATION (Détail livraison, mode « due ») ──
+    // Une commande MISE EN PRÉPARATION par le commercial reste dans la file du
+    // préparateur TANT QU'ELLE N'EST PAS FAITE : on la reporte dans la vue du jour
+    // même quand sa date de livraison (DocDueDate) n'y tombe pas — en RETARD (due
+    // un jour déjà passé, pas encore faite → reportée au lendemain) comme en
+    // AVANCE (mise en prépa le 10 pour une livraison le 15 → visible chaque jour
+    // d'ici là). Les commandes DÉJÀ dans la vue du jour sont ignorées (dédup).
+    if (wantCarryover) {
+      const present = new Set(orders.map((o) => o.DocEntry));
+      const pending = selectCarryoverEntries(statuses, date, present);
+      if (pending.length) {
+        // Garde-fou : la file en cours est petite, mais on plafonne le nombre de
+        // reports pour ne jamais inonder le Service Layer d'un filtre géant.
+        const list = pending.slice(0, 300);
+        const chunks: number[][] = [];
+        for (let i = 0; i < list.length; i += 20) chunks.push(list.slice(i, i + 20));
+        const extra = await Promise.all(
+          chunks.map((g) =>
+            fetchOrders(g.map((de) => `DocEntry eq ${de}`).join(" or ")).catch(() => [] as SapOrderListed[]),
+          ),
         );
-        break;
-      } catch (e) {
-        if (i === EXTRA_SELECTS.length - 1) throw e;   // plus aucun repli → vraie erreur
+        for (const o of extra.flat()) {
+          if (!present.has(o.DocEntry)) { orders.push(o); present.add(o.DocEntry); }
+        }
       }
     }
 
@@ -152,7 +203,7 @@ export async function GET(req: NextRequest) {
     //    (produits, transporteurs, statuts manuels, type + nom client, tournées
     //    mémorisées, tournées réelles SERG_TRCL, stocks SAP négatifs). Chaque bloc
     //    gère son propre repli (best-effort) pour ne jamais faire échouer la livraison. ──
-    const [prods, carrierByCode, statuses, clientMeta, savedTourneeByCard, trclByCard, stockInfo] = await Promise.all([
+    const [prods, carrierByCode, clientMeta, savedTourneeByCard, trclByCard, stockInfo] = await Promise.all([
       // Produits (poids / colis / désignation).
       allItemCodes.length
         ? prisma.product.findMany({
@@ -172,10 +223,8 @@ export async function GET(req: NextRequest) {
         } catch { /* table Carrier absente → code brut */ }
         return m;
       })(),
-      // Statuts manuels du Détail livraison, par DocEntry (une requête) :
-      //   « faite » + auteur, « départ » + auteur, « avoir / exclu »,
-      //   préparateur affecté, signalement « incomplète (à reprendre) ».
-      getDeliveryStatuses(),
+      // (Statuts manuels du Détail livraison déjà chargés plus haut — `statuses` —
+      //  car nécessaires au report de la file de préparation avant ce bloc.)
       // Type client (GMS / CHR / EXPORT) + NOM COMPLET (fiche télévente) par
       // CardCode — filtre par segment + nom complet sur les documents imprimés
       // (le CardName SAP est parfois tronqué/abrégé).
