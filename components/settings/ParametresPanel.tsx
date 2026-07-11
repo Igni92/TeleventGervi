@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "framer-motion";
 import Link from "next/link";
 import {
-  Moon, Sun, ZoomIn, Sparkles, BadgePercent, Check, Wand2, Database, Contrast, Tags, ChevronRight, CalendarClock,
+  Moon, Sun, ZoomIn, Check, Database, Contrast, Tags, ChevronRight, CalendarClock,
+  Palette, Glasses, MonitorCog, MousePointerClick, Wand2, BadgePercent, Rows3,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { ShelfLifePanel } from "@/components/settings/ShelfLifePanel";
@@ -20,24 +21,24 @@ import {
 } from "@/components/settings/app-settings";
 
 /**
- * Panneau « Paramètres » — CONSOLIDE les réglages d'affichage : thème, CONFORT
- * D'AFFICHAGE (zoom d'interface + densité), contraste de survol, animations,
- * bandeau promo. La colorimétrie a été retirée (marque = Or unique).
+ * Panneau « Paramètres » — refonte : QUATRE sections nettes au lieu d'une pile
+ * de cartes, avec sommaire ancré (scroll-spy) sur desktop.
  *
- * Persistance : 100 % via le mécanisme localStorage existant —
- *   - thème clair/sombre  → ThemeProvider (clé `tv-theme`)
- *   - zoom / densité / animations / promos → writeSetting (SETTING_KEYS)
- * Tous les consommateurs (Console Écran 2, PromoBanner, AmbientBackground)
- * réagissent à chaud via onSettingChange / les attributs posés sur <html>.
+ *   1. Apparence          — thème, animations, étincelles au clic
+ *   2. Confort de lecture — zoom, densité, contraste de survol
+ *   3. Console & catalogue — logos de marque, bandeau promotions
+ *   4. Administration     — DLC par défaut, synchronisations SAP (admin)
+ *
+ * Persistance inchangée : localStorage via writeSetting (SETTING_KEYS) +
+ * ThemeProvider (`tv-theme`). Tous les consommateurs réagissent à chaud.
  */
 
-/* ── Brique réutilisable : groupe de boutons segmentés (DA PilotageScreen2) ── */
+/* ── Brique : groupe de boutons segmentés (DA PilotageScreen2) ── */
 
 interface SegOption<T extends string> {
   id: T;
   label: string;
   hint?: string;
-  swatch?: string;
   icon?: React.ReactNode;
 }
 
@@ -72,15 +73,8 @@ function SegmentToggle<T extends string>({
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {o.swatch && (
-              <span
-                className="h-3 w-3 rounded-full ring-1 ring-black/10 dark:ring-white/15 shrink-0"
-                style={{ background: o.swatch }}
-              />
-            )}
             {o.icon}
             {o.label}
-            {active && <Check className="h-3 w-3 ml-0.5 text-brand-500" />}
           </button>
         );
       })}
@@ -97,7 +91,7 @@ function SettingRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+    <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-6 py-3.5 first:pt-0 last:pb-0">
       <div className="min-w-0">
         <p className="text-[13.5px] font-semibold text-foreground">{title}</p>
         {desc && <p className="text-[12px] text-muted-foreground mt-0.5 max-w-md">{desc}</p>}
@@ -107,25 +101,46 @@ function SettingRow({
   );
 }
 
-/* ── Constantes (alignées sur les composants d'origine) ─────────────────── */
+/** Puce on/off compacte (zones de logos) — un clic bascule. */
+function ZoneChip({ label, on, onToggle }: { label: string; on: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={onToggle}
+      className={cn(
+        "inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-[12.5px] font-semibold transition-colors",
+        on
+          ? "bg-brand-500/15 text-brand-700 dark:text-brand-300 ring-1 ring-inset ring-brand-500/40"
+          : "bg-secondary/60 text-muted-foreground ring-1 ring-inset ring-border hover:text-foreground",
+      )}
+    >
+      <Check className={cn("h-3.5 w-3.5 transition-opacity", on ? "opacity-100" : "opacity-25")} />
+      {label}
+    </button>
+  );
+}
+
+/* ── Constantes ─────────────────────────────────────────────── */
 
 const ZOOMS: SegOption<UiZoomValue>[] = [
   { id: "100", label: "Normale",     hint: "Taille standard (défaut)" },
   { id: "110", label: "Grande",      hint: "+10 %" },
-  { id: "125", label: "Très grande", hint: "+25 % — confort de lecture" },
-  { id: "140", label: "Maximale",    hint: "+40 % — vue très agrandie" },
+  { id: "125", label: "Très grande", hint: "+25 %" },
+  { id: "140", label: "Maximale",    hint: "+40 %" },
 ];
 
 const DENSITES: SegOption<"compact" | "normal" | "aere">[] = [
   { id: "compact", label: "Compact", hint: "Plus de lignes visibles" },
   { id: "normal",  label: "Normal",  hint: "Équilibré (défaut)" },
-  { id: "aere",    label: "Aéré",    hint: "Plus d'espace, lecture confort" },
+  { id: "aere",    label: "Aéré",    hint: "Plus d'espace" },
 ];
 
 const ANIMATIONS: SegOption<"auto" | "on" | "off">[] = [
   { id: "auto", label: "Auto", hint: "Suit le réglage système (accessibilité)" },
-  { id: "on",   label: "Activées", hint: "Toujours animer" },
-  { id: "off",  label: "Désactivées", hint: "Fond et transitions figés" },
+  { id: "on",   label: "Activées" },
+  { id: "off",  label: "Désactivées" },
 ];
 
 const ONOFF: SegOption<"on" | "off">[] = [
@@ -141,6 +156,66 @@ function applyDensity(id: DensityId) {
   else document.documentElement.setAttribute("data-density", id);
 }
 
+/* ── Sommaire ancré (desktop) avec scroll-spy ──────────────── */
+
+interface SectionDef { id: string; label: string; icon: React.ReactNode; adminOnly?: boolean }
+
+const SECTIONS: SectionDef[] = [
+  { id: "apparence", label: "Apparence",           icon: <Palette className="h-3.5 w-3.5" /> },
+  { id: "lecture",   label: "Confort de lecture",  icon: <Glasses className="h-3.5 w-3.5" /> },
+  { id: "console",   label: "Console & catalogue", icon: <MonitorCog className="h-3.5 w-3.5" /> },
+  { id: "admin",     label: "Administration",      icon: <Database className="h-3.5 w-3.5" />, adminOnly: true },
+];
+
+function SectionNav({ sections }: { sections: SectionDef[] }) {
+  const [active, setActive] = useState(sections[0]?.id);
+  useEffect(() => {
+    const obs = new IntersectionObserver(
+      (entries) => {
+        // La section la plus haute actuellement visible gagne.
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible[0]) setActive(visible[0].target.id);
+      },
+      { rootMargin: "-15% 0px -70% 0px" },
+    );
+    sections.forEach((s) => {
+      const el = document.getElementById(s.id);
+      if (el) obs.observe(el);
+    });
+    return () => obs.disconnect();
+  }, [sections]);
+
+  return (
+    <nav aria-label="Sections des paramètres" className="hidden lg:block sticky top-6 self-start w-48 shrink-0">
+      <ul className="space-y-0.5">
+        {sections.map((s) => (
+          <li key={s.id}>
+            <a
+              href={`#${s.id}`}
+              className={cn(
+                "flex items-center gap-2 rounded-lg px-2.5 py-2 text-[12.5px] font-semibold transition-colors",
+                active === s.id
+                  ? "bg-brand-500/12 text-brand-700 dark:text-brand-300 shadow-[inset_2px_0_0_0_hsl(var(--brand-500))]"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary/50",
+              )}
+            >
+              {s.icon}
+              {s.label}
+            </a>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-4 px-2.5 text-[11px] leading-relaxed text-muted-foreground/70">
+        Réglages propres à ce poste, appliqués immédiatement sur tous les onglets.
+      </p>
+    </nav>
+  );
+}
+
+/* ── Panneau ────────────────────────────────────────────────── */
+
 export function ParametresPanel({ admin = false, userKey = null }: { admin?: boolean; userKey?: string | null }) {
   const { theme, toggleTheme } = useTheme();
   const systemReduce = useReducedMotion();
@@ -148,6 +223,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
   const [zoom, setZoom] = useState<UiZoomValue>(UI_ZOOM_DEFAULT);
   const [densite, setDensite] = useState<DensityId>("normal");
   const [animations, setAnimations] = useState<"auto" | "on" | "off">("auto");
+  const [sparks, setSparks] = useState<"on" | "off">("on");
   const [promoAnim, setPromoAnim] = useState<"on" | "off">("on");
   const [promoNotifs, setPromoNotifs] = useState<"on" | "off">("on");
   // Logos de marque — réglables indépendamment par zone.
@@ -174,6 +250,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
     const a = readSetting(SETTING_KEYS.animations, "auto");
     setAnimations((["auto", "on", "off"].includes(a) ? a : "auto") as typeof animations);
 
+    setSparks(readSetting(SETTING_KEYS.clickSparks, "on") === "off" ? "off" : "on");
     setPromoAnim(readSetting(SETTING_KEYS.promoBannerAnim, "on") === "off" ? "off" : "on");
     setPromoNotifs(readSetting(SETTING_KEYS.promoNotifs, "on") === "off" ? "off" : "on");
     setLogoConsole(readSetting(SETTING_KEYS.brandLogosConsole, "on") === "off" ? "off" : "on");
@@ -193,6 +270,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
       if (key === SETTING_KEYS.uiZoom && value) { setZoom(value as UiZoomValue); applyUiZoom(value as UiZoomValue); }
       if (key === SETTING_KEYS.density && value) { setDensite(value as DensityId); applyDensity(value as DensityId); }
       if (key === SETTING_KEYS.animations && value) setAnimations(value as typeof animations);
+      if (key === SETTING_KEYS.clickSparks) setSparks(value === "off" ? "off" : "on");
       if (key === SETTING_KEYS.promoBannerAnim) setPromoAnim(value === "off" ? "off" : "on");
       if (key === SETTING_KEYS.promoNotifs) setPromoNotifs(value === "off" ? "off" : "on");
       if (key === SETTING_KEYS.brandLogosConsole) setLogoConsole(value === "off" ? "off" : "on");
@@ -208,7 +286,6 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
   const onZoom = (v: UiZoomValue) => {
     setZoom(v);
     applyUiZoom(v);
-    // Notifie l'onglet courant (le storage natif couvre les autres onglets).
     writeSetting(SETTING_KEYS.uiZoom, v);
   };
 
@@ -221,262 +298,264 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
   };
 
   const effectiveAnim =
-    animations === "off" ? "Figées"
-    : animations === "on" ? "Animées"
-    : systemReduce ? "Réduites (système)" : "Animées (système)";
+    animations === "off" ? "figées"
+    : animations === "on" ? "animées"
+    : systemReduce ? "réduites (système)" : "animées (système)";
+
+  const sections = SECTIONS.filter((s) => admin || !s.adminOnly);
 
   return (
-    <div className="space-y-5 max-w-3xl">
-      {/* 1 ── Thème clair / sombre ─────────────────────────────────── */}
-      <SurfaceCard accent="brand" title="Thème" icon={<Moon className="h-3.5 w-3.5" />}>
-        <SettingRow
-          title="Apparence"
-          desc="Mode sombre (anthracite + accent) recommandé pour l'usage deux écrans en télévente."
-        >
-          <SegmentToggle
-            ariaLabel="Thème clair ou sombre"
-            value={theme}
-            onChange={(v) => { if (v !== theme) toggleTheme(); }}
-            options={[
-              { id: "light", label: "Clair", icon: <Sun className="h-3.5 w-3.5" /> },
-              { id: "dark",  label: "Sombre", icon: <Moon className="h-3.5 w-3.5" /> },
-            ]}
-          />
-        </SettingRow>
-      </SurfaceCard>
+    <div className="flex gap-8 items-start">
+      <SectionNav sections={sections} />
 
-      {/* 2 ── Confort d'affichage : ZOOM + DENSITÉ (accessibilité Direction) ── */}
-      <SurfaceCard accent="amber" title="Confort d'affichage" icon={<ZoomIn className="h-3.5 w-3.5" />}>
-        <div className="space-y-4">
-          <SettingRow
-            title="Taille de l'interface"
-            desc="Agrandit TOUT l'affichage — texte, boutons, espacements — comme un zoom navigateur. À monter si l'écran est difficile à lire."
-          >
-            <SegmentToggle
-              ariaLabel="Taille (zoom) de l'interface"
-              value={zoom}
-              onChange={onZoom}
-              options={ZOOMS}
-            />
-          </SettingRow>
-          <div className="h-px bg-border/60" />
-          <SettingRow
-            title="Densité (espacements)"
-            desc="Air autour des éléments (listes, cartes, tableaux), indépendamment du zoom. Compact = plus d'informations à l'écran, Aéré = lecture plus reposante."
-          >
-            <SegmentToggle
-              ariaLabel="Densité d'affichage de l'application"
-              value={densite}
-              onChange={(v) => { setDensite(v); applyDensity(v); writeSetting(SETTING_KEYS.density, v); }}
-              options={DENSITES}
-            />
-          </SettingRow>
-        </div>
-      </SurfaceCard>
-
-      {/* 3 bis ── Contraste de survol (propre à l'utilisateur) ──────── */}
-      <SurfaceCard accent="sky" title="Contraste de survol" icon={<Contrast className="h-3.5 w-3.5" />}>
-        <div className="space-y-4">
-          <SettingRow
-            title="Surbrillance au survol"
-            desc="Intensité de la surbrillance (teintée or) quand le curseur passe d'une ligne à l'autre, partout dans l'application. Poussez au-delà de 100 % pour une ligne active bien plus visible. Réglage propre à votre session — il vous suit, même sur un poste partagé."
-          >
-            <div className="flex items-center gap-3 min-w-[210px]">
-              <input
-                type="range"
-                min={0}
-                max={HOVER_CONTRAST_MAX}
-                step={5}
-                value={contrast}
-                onChange={(e) => onContrast(Number(e.target.value))}
-                aria-label="Contraste de la surbrillance au survol"
-                className="w-40 h-1.5 rounded-full appearance-none cursor-pointer bg-secondary accent-brand-500"
-              />
-              <span className="tnum text-[13px] font-semibold text-foreground w-10 text-right">
-                {contrast}%
-              </span>
-            </div>
-          </SettingRow>
-          {/* Aperçu : 3 lignes qui réagissent au survol comme le reste de l'app. */}
-          <div className="rounded-lg border border-border/60 overflow-hidden">
-            {["Survolez-moi pour voir l'effet", "Ligne d'exemple", "Ligne d'exemple"].map((t, i) => (
-              <div
-                key={i}
-                className="px-3 py-2 text-[12.5px] text-foreground/80 hover:bg-secondary transition-colors cursor-default border-b border-border/40 last:border-0"
+      <div className="min-w-0 flex-1 max-w-3xl space-y-8">
+        {/* 1 ── APPARENCE ─────────────────────────────────────── */}
+        <section id="apparence" className="scroll-mt-6">
+          <SurfaceCard accent="brand" title="Apparence" icon={<Palette className="h-3.5 w-3.5" />}>
+            <div className="divide-y divide-border/50">
+              <SettingRow
+                title="Thème"
+                desc="Sombre recommandé pour l'usage deux écrans en télévente."
               >
-                {t}
-              </div>
-            ))}
-          </div>
-          {contrastSet && (
-            <button
-              type="button"
-              onClick={() => {
-                setContrastSet(false);
-                setContrast(HOVER_CONTRAST_DEFAULT);
-                applyHoverContrast(null);
-                writeSetting(hoverContrastKey(userKey), "");
-              }}
-              className="text-[11.5px] font-medium text-muted-foreground hover:text-foreground hover:underline"
-            >
-              Réinitialiser (rendu par défaut)
-            </button>
-          )}
-        </div>
-      </SurfaceCard>
+                <SegmentToggle
+                  ariaLabel="Thème clair ou sombre"
+                  value={theme}
+                  onChange={(v) => { if (v !== theme) toggleTheme(); }}
+                  options={[
+                    { id: "light", label: "Jour", icon: <Sun className="h-3.5 w-3.5" /> },
+                    { id: "dark",  label: "Nuit", icon: <Moon className="h-3.5 w-3.5" /> },
+                  ]}
+                />
+              </SettingRow>
+              <SettingRow
+                title="Animations d'ambiance"
+                desc={`Fond animé (aurora, anneaux radar) et transitions — actuellement : ${effectiveAnim}.`}
+              >
+                <SegmentToggle
+                  ariaLabel="Niveau d'animation"
+                  value={animations}
+                  onChange={(v) => { setAnimations(v); writeSetting(SETTING_KEYS.animations, v); }}
+                  options={ANIMATIONS}
+                />
+              </SettingRow>
+              <SettingRow
+                title="Étincelles au clic"
+                desc="Petit éclat de particules sur les zones vides (jamais sur les boutons ou champs). Coupé d'office quand les animations sont désactivées."
+              >
+                <SegmentToggle
+                  ariaLabel="Étincelles au clic"
+                  value={sparks}
+                  onChange={(v) => { setSparks(v); writeSetting(SETTING_KEYS.clickSparks, v); }}
+                  options={ONOFF}
+                />
+              </SettingRow>
+            </div>
+          </SurfaceCard>
+        </section>
 
-      {/* 3 ter ── Marques & logos (réglage + page dédiée) ─────────── */}
-      <SurfaceCard accent="violet" title="Marques & logos" icon={<Tags className="h-3.5 w-3.5" />}>
-        <div className="space-y-4">
-          <p className="text-[12px] text-muted-foreground -mt-1 max-w-md">
-            Affiche les logos à côté des produits — activable indépendamment par zone.
-            Désactivé : aucun logo dans la zone (les logos enregistrés sont conservés).
-          </p>
-          <SettingRow title="Logos dans la console">
-            <SegmentToggle
-              ariaLabel="Logos de marque dans la console"
-              value={logoConsole}
-              onChange={(v) => { setLogoConsole(v); writeSetting(SETTING_KEYS.brandLogosConsole, v); }}
-              options={ONOFF}
-            />
-          </SettingRow>
-          <SettingRow title="Logos en préparation (livraisons)">
-            <SegmentToggle
-              ariaLabel="Logos de marque dans le détail des livraisons"
-              value={logoLivraison}
-              onChange={(v) => { setLogoLivraison(v); writeSetting(SETTING_KEYS.brandLogosLivraison, v); }}
-              options={ONOFF}
-            />
-          </SettingRow>
-          <SettingRow title="Logos dans l'inventaire">
-            <SegmentToggle
-              ariaLabel="Logos de marque dans l'inventaire du stock"
-              value={logoInventaire}
-              onChange={(v) => { setLogoInventaire(v); writeSetting(SETTING_KEYS.brandLogosInventaire, v); }}
-              options={ONOFF}
-            />
-          </SettingRow>
-          <div className="h-px bg-border/60" />
-          <Link
-            href="/parametres/marques"
-            className="flex items-center justify-between gap-4 -m-1 p-1 rounded-lg hover:bg-secondary/40 transition-colors group"
-          >
-            <div className="min-w-0">
-              <p className="text-[13.5px] font-semibold text-foreground">Gérer les logos</p>
-              <p className="text-[12px] text-muted-foreground mt-0.5 max-w-md">
-                Associe (ou remplace) un logo pour chaque marque du catalogue.
+        {/* 2 ── CONFORT DE LECTURE ────────────────────────────── */}
+        <section id="lecture" className="scroll-mt-6">
+          <SurfaceCard accent="amber" title="Confort de lecture" icon={<Glasses className="h-3.5 w-3.5" />}>
+            <div className="divide-y divide-border/50">
+              <SettingRow
+                title="Taille de l'interface"
+                desc="Agrandit tout l'affichage, comme un zoom navigateur."
+              >
+                <SegmentToggle
+                  ariaLabel="Taille (zoom) de l'interface"
+                  value={zoom}
+                  onChange={onZoom}
+                  options={ZOOMS}
+                />
+              </SettingRow>
+              <SettingRow
+                title="Densité"
+                desc="Air autour des listes et tableaux, indépendamment du zoom."
+              >
+                <SegmentToggle
+                  ariaLabel="Densité d'affichage de l'application"
+                  value={densite}
+                  onChange={(v) => { setDensite(v); applyDensity(v); writeSetting(SETTING_KEYS.density, v); }}
+                  options={DENSITES}
+                />
+              </SettingRow>
+              <SettingRow
+                title="Contraste de survol"
+                desc="Intensité de la surbrillance quand le curseur passe sur une ligne. Réglage personnel — il vous suit même sur un poste partagé."
+              >
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={0}
+                    max={HOVER_CONTRAST_MAX}
+                    step={5}
+                    value={contrast}
+                    onChange={(e) => onContrast(Number(e.target.value))}
+                    aria-label="Contraste de la surbrillance au survol"
+                    className="w-40 h-1.5 rounded-full appearance-none cursor-pointer bg-secondary accent-brand-500"
+                  />
+                  <span className="tnum text-[13px] font-semibold text-foreground w-12 text-right">
+                    {contrast}%
+                  </span>
+                  {contrastSet && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setContrastSet(false);
+                        setContrast(HOVER_CONTRAST_DEFAULT);
+                        applyHoverContrast(null);
+                        writeSetting(hoverContrastKey(userKey), "");
+                      }}
+                      title="Revenir au rendu par défaut"
+                      className="text-[11.5px] font-medium text-muted-foreground hover:text-foreground hover:underline"
+                    >
+                      Réinit.
+                    </button>
+                  )}
+                </div>
+              </SettingRow>
+              {/* Aperçu : 2 lignes qui réagissent au survol comme le reste de l'app. */}
+              <div className="pt-3">
+                <div className="rounded-lg border border-border/60 overflow-hidden">
+                  {["Survolez-moi pour tester le réglage", "Ligne d'exemple"].map((t, i) => (
+                    <div
+                      key={i}
+                      className="px-3 py-2 text-[12.5px] text-foreground/80 hover:bg-secondary transition-colors cursor-default border-b border-border/40 last:border-0"
+                    >
+                      {t}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </SurfaceCard>
+        </section>
+
+        {/* 3 ── CONSOLE & CATALOGUE ───────────────────────────── */}
+        <section id="console" className="scroll-mt-6">
+          <SurfaceCard accent="violet" title="Console & catalogue" icon={<MonitorCog className="h-3.5 w-3.5" />}>
+            <div className="divide-y divide-border/50">
+              <SettingRow
+                title="Logos de marque"
+                desc="Affiche les logos à côté des produits, zone par zone."
+              >
+                <div className="flex flex-wrap gap-1.5 items-center">
+                  <ZoneChip
+                    label="Console"
+                    on={logoConsole === "on"}
+                    onToggle={() => {
+                      const v = logoConsole === "on" ? "off" : "on";
+                      setLogoConsole(v); writeSetting(SETTING_KEYS.brandLogosConsole, v);
+                    }}
+                  />
+                  <ZoneChip
+                    label="Livraisons"
+                    on={logoLivraison === "on"}
+                    onToggle={() => {
+                      const v = logoLivraison === "on" ? "off" : "on";
+                      setLogoLivraison(v); writeSetting(SETTING_KEYS.brandLogosLivraison, v);
+                    }}
+                  />
+                  <ZoneChip
+                    label="Inventaire"
+                    on={logoInventaire === "on"}
+                    onToggle={() => {
+                      const v = logoInventaire === "on" ? "off" : "on";
+                      setLogoInventaire(v); writeSetting(SETTING_KEYS.brandLogosInventaire, v);
+                    }}
+                  />
+                </div>
+              </SettingRow>
+              <SettingRow
+                title="Bandeau promotions — rotation"
+                desc="Fait défiler les promotions toutes les ~6 s. Désactivé : navigation manuelle."
+              >
+                <SegmentToggle
+                  ariaLabel="Animation du bandeau promotions"
+                  value={promoAnim}
+                  onChange={(v) => { setPromoAnim(v); writeSetting(SETTING_KEYS.promoBannerAnim, v); }}
+                  options={ONOFF}
+                />
+              </SettingRow>
+              <SettingRow
+                title="Modale « Nouvelles promotions »"
+                desc="À l'ouverture, présente les promotions lancées depuis votre dernière visite."
+              >
+                <SegmentToggle
+                  ariaLabel="Notifications des nouvelles promotions"
+                  value={promoNotifs}
+                  onChange={(v) => { setPromoNotifs(v); writeSetting(SETTING_KEYS.promoNotifs, v); }}
+                  options={ONOFF}
+                />
+              </SettingRow>
+              <div className="pt-3">
+                <Link
+                  href="/parametres/marques"
+                  className="flex items-center justify-between gap-4 rounded-lg px-2 py-1.5 -mx-2 hover:bg-secondary/40 transition-colors group"
+                >
+                  <div className="min-w-0 flex items-center gap-2">
+                    <Tags className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <p className="text-[13.5px] font-semibold text-foreground">Gérer les logos de marque</p>
+                      <p className="text-[12px] text-muted-foreground">Associer ou remplacer un logo par marque.</p>
+                    </div>
+                  </div>
+                  <span className="shrink-0 inline-flex items-center gap-1 text-[12.5px] font-semibold text-brand-600 dark:text-brand-400">
+                    Ouvrir <ChevronRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
+                  </span>
+                </Link>
+              </div>
+            </div>
+          </SurfaceCard>
+        </section>
+
+        {/* 4 ── ADMINISTRATION (admin) ────────────────────────── */}
+        {admin && (
+          <section id="admin" className="scroll-mt-6 space-y-5">
+            <SurfaceCard accent="sky" title="Administration · Données SAP" icon={<Database className="h-3.5 w-3.5" />}>
+              <p className="text-[12px] text-muted-foreground -mt-1 mb-1 max-w-xl">
+                Centre de synchronisation — à lancer ponctuellement, pas en continu.
               </p>
-            </div>
-            <span className="shrink-0 inline-flex items-center gap-1 text-[12.5px] font-semibold text-brand-600 dark:text-brand-400">
-              Gérer <ChevronRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
-            </span>
-          </Link>
-        </div>
-      </SurfaceCard>
+              <div className="flex flex-col divide-y divide-border/50">
+                <div className="flex flex-col gap-2 py-3 first:pt-1 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+                  <div className="min-w-0">
+                    <p className="text-[13.5px] font-semibold text-foreground">Clients SAP</p>
+                    <p className="text-[12px] text-muted-foreground mt-0.5 max-w-md">
+                      Base clients + localisation. « Actualiser » n&apos;efface rien ;
+                      « Réimport complet » repart de zéro.
+                    </p>
+                  </div>
+                  <div className="shrink-0"><ClientImportButton /></div>
+                </div>
 
-      {/* Fraîcheur · DLC par défaut — durée de vie (jours) par article. */}
-      {admin && (
-        <SurfaceCard accent="amber" title="Fraîcheur · DLC par défaut" icon={<CalendarClock className="h-3.5 w-3.5" />}>
-          <ShelfLifePanel />
-        </SurfaceCard>
-      )}
+                <div className="flex flex-col gap-3 py-3">
+                  <div className="min-w-0">
+                    <p className="text-[13.5px] font-semibold text-foreground">Données stats (miroir comptable)</p>
+                    <p className="text-[12px] text-muted-foreground mt-0.5 max-w-xl">
+                      Factures, avoirs, commandes, fournisseurs — alimente pilotage et marges.
+                    </p>
+                  </div>
+                  <MirrorBackfillPanel />
+                </div>
 
-      {/* 4 ── Animations ───────────────────────────────────────────── */}
-      <SurfaceCard accent="violet" title="Animations" icon={<Wand2 className="h-3.5 w-3.5" />}>
-        <SettingRow
-          title="Animations d'ambiance"
-          desc={`Fond animé (aurora, anneaux radar) et transitions. « Auto » respecte le réglage d'accessibilité du système — actuellement : ${effectiveAnim}.`}
-        >
-          <SegmentToggle
-            ariaLabel="Niveau d'animation"
-            value={animations}
-            onChange={(v) => { setAnimations(v); writeSetting(SETTING_KEYS.animations, v); }}
-            options={ANIMATIONS}
-          />
-        </SettingRow>
-      </SurfaceCard>
-
-      {/* 5 ── Bandeau promo ────────────────────────────────────────── */}
-      <SurfaceCard accent="rose" title="Bandeau promotions" icon={<BadgePercent className="h-3.5 w-3.5" />}>
-        <div className="space-y-4">
-          <SettingRow
-            title="Rotation automatique"
-            desc="Fait défiler les promotions du bandeau toutes les ~6 s. Désactivé : navigation manuelle uniquement (le bandeau reste visible)."
-          >
-            <SegmentToggle
-              ariaLabel="Animation du bandeau promotions"
-              value={promoAnim}
-              onChange={(v) => { setPromoAnim(v); writeSetting(SETTING_KEYS.promoBannerAnim, v); }}
-              options={ONOFF}
-            />
-          </SettingRow>
-          <div className="h-px bg-border/60" />
-          <SettingRow
-            title="Modale « Nouvelles promotions »"
-            desc="Affiche au démarrage les promotions lancées depuis ta dernière visite. Désactivé : aucune fenêtre, le bandeau reste actif."
-          >
-            <SegmentToggle
-              ariaLabel="Notifications des nouvelles promotions"
-              value={promoNotifs}
-              onChange={(v) => { setPromoNotifs(v); writeSetting(SETTING_KEYS.promoNotifs, v); }}
-              options={ONOFF}
-            />
-          </SettingRow>
-        </div>
-      </SurfaceCard>
-
-      {/* 6 ── Données · SAP (admin) — HUB unique de synchronisation ──
-            Regroupe ici TOUTES les actions données (avant dispersées sur les
-            pages Clients / Plan d'appel) : clients, miroir stats, produits/stock.
-            Réservé aux administrateurs ; à lancer ponctuellement. */}
-      {admin && (
-        <SurfaceCard accent="sky" title="Données · SAP" icon={<Database className="h-3.5 w-3.5" />}>
-          <p className="text-[12px] text-muted-foreground -mt-1 mb-1 max-w-xl">
-            Centre de synchronisation (administrateurs). Lectures épinglées sur la base réelle —
-            à lancer ponctuellement, pas en continu.
-          </p>
-          <div className="flex flex-col divide-y divide-border/50">
-            <div className="flex flex-col gap-2 py-3 first:pt-1 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-              <div className="min-w-0">
-                <p className="text-[13.5px] font-semibold text-foreground">Clients SAP</p>
-                <p className="text-[12px] text-muted-foreground mt-0.5 max-w-md">
-                  Base clients + localisation (ville / CP / pays, pour la carte). « Actualiser »
-                  n&apos;efface rien ; « Réimport complet » repart de zéro.
-                </p>
+                <div className="flex flex-col gap-2 py-3 last:pb-1 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+                  <div className="min-w-0">
+                    <p className="text-[13.5px] font-semibold text-foreground">Stock &amp; catalogue produits</p>
+                    <p className="text-[12px] text-muted-foreground mt-0.5 max-w-md">
+                      Resynchronise le catalogue complet (le stock console se rafraîchit déjà seul).
+                    </p>
+                  </div>
+                  <div className="shrink-0"><ProductsSyncButton /></div>
+                </div>
               </div>
-              <div className="shrink-0"><ClientImportButton /></div>
-            </div>
+            </SurfaceCard>
 
-            <div className="flex flex-col gap-3 py-3">
-              <div className="min-w-0">
-                <p className="text-[13.5px] font-semibold text-foreground">Données stats (miroir comptable)</p>
-                <p className="text-[12px] text-muted-foreground mt-0.5 max-w-xl">
-                  Factures, avoirs, commandes et fournisseurs — alimente le pilotage et les marges.
-                  Reconstruis l&apos;historique mois par mois (3 ans, profondeur du rapport annuel).
-                </p>
-              </div>
-              <MirrorBackfillPanel />
-            </div>
-
-            <div className="flex flex-col gap-2 py-3 last:pb-1 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-              <div className="min-w-0">
-                <p className="text-[13.5px] font-semibold text-foreground">Stock &amp; catalogue produits</p>
-                <p className="text-[12px] text-muted-foreground mt-0.5 max-w-md">
-                  Quantités et infos articles depuis SAP. Le stock « live » de la console se
-                  rafraîchit déjà tout seul ; ceci resynchronise le catalogue complet.
-                </p>
-              </div>
-              <div className="shrink-0"><ProductsSyncButton /></div>
-            </div>
-          </div>
-        </SurfaceCard>
-      )}
-
-      <p className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground/80 pt-1">
-        <Sparkles className="h-3.5 w-3.5 shrink-0" />
-        Ces réglages d&apos;affichage sont propres à ce poste (navigateur) et s&apos;appliquent
-        immédiatement, sur tous les onglets ouverts.
-      </p>
+            <SurfaceCard accent="amber" title="Fraîcheur · DLC par défaut" icon={<CalendarClock className="h-3.5 w-3.5" />}>
+              <ShelfLifePanel />
+            </SurfaceCard>
+          </section>
+        )}
+      </div>
     </div>
   );
 }

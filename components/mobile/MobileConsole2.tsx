@@ -492,16 +492,19 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
         json = await res.json().catch(() => null);
       }
       if (!res.ok || !json?.ok) {
-        toast.error(json?.blocked ? "🚫 Client bloqué" : "❌ Échec de la création", { description: json?.error, duration: 10000 });
+        toast.error(json?.blocked ? "Client bloqué" : "Échec de la création", { description: json?.error, duration: 10000 });
         return;
       }
       if (json.bonPrep) {
-        toast.success("📝 Bon de préparation créé (export)", {
+        toast.success("Bon de préparation créé (export)", {
           description: "Affecte les lots dans « Détail livraison » puis crée le BL.",
           duration: 10000,
         });
       } else {
-        toast.success(`✅ Commande #${json.docNum} créée${json.totalTTC != null ? ` — ${json.totalTTC.toFixed(2)} € TTC` : ""}`, { duration: 10000 });
+        toast.success(`Commande #${json.docNum} créée`, {
+          description: json.totalTTC != null ? `${json.totalTTC.toFixed(2)} € TTC` : undefined,
+          duration: 10000,
+        });
       }
       setCart([]); setNumAtCard(""); setComments("");
       // Arrivé depuis la fiche client (« Commander ») → on y RETOURNE une fois la
@@ -511,7 +514,7 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
         setTimeout(() => router.push(returnTo), 700);
       }
     } catch (e) {
-      toast.error(`❌ ${e instanceof Error ? e.message : "Erreur réseau"}`);
+      toast.error(e instanceof Error ? e.message : "Erreur réseau");
     } finally {
       setSubmitting(false);
     }

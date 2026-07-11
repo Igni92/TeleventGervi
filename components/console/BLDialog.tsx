@@ -315,7 +315,7 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
       await finalizeOrder(res, json);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erreur réseau";
-      toast.error(`❌ Échec (réseau) : ${msg}`, { duration: 10_000 });
+      toast.error("Échec réseau — commande non créée", { description: msg, duration: 10_000 });
       console.error("[Order] Erreur réseau :", e);
     } finally {
       setSubmitting(false);
@@ -334,50 +334,33 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
       await finalizeOrder(res, json);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erreur réseau";
-      toast.error(`❌ Échec (réseau) : ${msg}`, { duration: 10_000 });
+      toast.error("Échec réseau — commande non créée", { description: msg, duration: 10_000 });
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Traite la réponse finale (toast riche + fermeture).
+  // Traite la réponse finale (toast court + fermeture).
+  // Le détail complet (HT/TVA, frais, lots, DB) reste dans SAP et l'historique —
+  // le toast ne garde que l'essentiel : n° de pièce, client, total TTC.
   const finalizeOrder = async (res: Response, json: any) => {
       if (!res.ok) {
-        toast.error(json?.blocked ? `🚫 Client bloqué` : `❌ Échec création Commande`, {
+        toast.error(json?.blocked ? "Client bloqué" : "Échec de la création", {
           description: json.error || "Erreur inconnue",
           duration: 12_000,
         });
         console.error("[Order] Échec création :", json);
         return;
       }
-      // Toast riche avec totaux SAP réels + lots assignés
-      const lotsAssigned = (json.lines || [])
-        .filter((l: { lot?: string | null }) => l.lot)
-        .map((l: { itemCode: string; lot: string }) => `${l.itemCode}: lot ${l.lot}`)
-        .join(" · ");
       const fmt = (n: number | null | undefined) => n != null ? n.toFixed(2) : "—";
-      // Détail des frais (CTIFL / INTERFEL / DDG / transport…) — labels SAP réels
-      const expensesLine = Array.isArray(json.expenses) && json.expenses.length > 0
-        ? json.expenses
-            .map((e: { label: string; amount: number; taxPercent: number | null }) =>
-              `${e.label} ${fmt(e.amount)}€${e.taxPercent ? ` (+${e.taxPercent}% TVA)` : ""}`)
-            .join(" · ")
-        : null;
       toast.success(
-        json.offre
-          ? `📄 Offre client #${json.docNum} créée — Total ${fmt(json.totalTTC)} € TTC`
-          : `✅ Commande #${json.docNum} créée — Total ${fmt(json.totalTTC)} € TTC`,
+        json.offre ? `Offre client #${json.docNum} créée` : `Commande #${json.docNum} créée`,
         {
           description: [
-            json.offre ? "Précommande : à passer en commande au jour de départ (Bons de commande)" : null,
-            `${lines.length} ligne(s) · ${clientName} · CardCode ${json.cardCode}`,
-            `HT ${fmt(json.totalHT)} € · TVA ${fmt(json.totalTVA)} €`,
-            json.totalWeightKg != null && `Poids net ${fmt(json.totalWeightKg)} kg`,
-            expensesLine && `Frais : ${expensesLine}`,
-            lotsAssigned && `Lot: ${lotsAssigned}`,
-            `DB: ${json.db}`,
+            `${clientName} — ${lines.length} ligne(s) · ${fmt(json.totalTTC)} € TTC`,
+            json.offre ? "À passer en commande au jour de départ (Bons de commande)." : null,
           ].filter(Boolean).join("\n"),
-          duration: 14_000,
+          duration: 10_000,
         },
       );
       onCreated?.(json.docNum);

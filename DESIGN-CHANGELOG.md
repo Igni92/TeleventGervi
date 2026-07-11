@@ -541,6 +541,46 @@ le **taux de marge brut % DU JOUR** (valeur de la journée), avec un indicateur 
 
 ---
 
+## 🔔 Notifications (toasts) — refonte visuelle globale
+
+| Avant | Après |
+|-------|-------|
+| Sonner `richColors` quasi brut : carte plate, couleur criarde sur toute la surface, emojis (✅ ❌ 🚫 📄) en début de message. | **Carte « verre »** sur les tokens `popover` (translucide + blur), ombre douce, rayon 14 px. La couleur du type (succès / erreur / avertissement / info) ne teinte plus que la **pastille d'icône** (Lucide) — plus calme, lisible dans les deux thèmes. Emojis purgés : l'icône porte le sens. |
+| Toast à boutons (« Encours dépassé ») : titre + description + `Abandonner` + `Créer quand même` **sur une seule ligne** → colonne de texte écrasée, phrase dupliquée, mention « La commande n'est PAS créée ». | **Grille 2 lignes** : icône + contenu en haut, **boutons sur leur propre ligne** alignés à droite (action = pilule or pleine, abandon = fantôme, press `scale(0.97)`). Message réduit à l'essentiel : titre `Encours dépassé — client`, description `Solde X € · limite Y €.` (chiffres lus depuis `json.encours`) — les boutons disent le reste. |
+| Toast succès BLDialog : 7 lignes (HT, TVA, poids, frais, lots, DB…). | 1–2 lignes : `Commande #N créée` + `client — n ligne(s) · total TTC`. Le détail reste dans SAP / l'historique. |
+| Croix de fermeture absente. | Croix en haut-droit, révélée au survol (toujours visible sur tactile `data-ui="touch"`). |
+
+- Composant : `components/ui/toaster.tsx` (`AppToaster`) ; styles : section « Sonner toast » de `globals.css` (pilotés par les tokens → thèmes clair/sombre/colorimétries suivent d'office).
+- Messages retravaillés (titre court, chiffres en description) : Écran 2, BLDialog, console mobile, bons de commande, bons de préparation, sync produits.
+- Descriptions multi-lignes : `white-space: pre-line` (les `\n` composés restent des retours).
+
+---
+
+## ☀️ Mode jour « papier chaud » — refonte complète
+
+| Avant | Après |
+|-------|-------|
+| Fond quasi blanc (`220 20% 97%`), cartes blanc pur, bordures à 90 % : tout se confond, « ça pique les yeux ». | **Canvas ivoire-greige teinté marque** (`42 24% 92%`), cartes **blanc cassé chaud** qui se détachent nettement, bordures/gris textuels assombris (muted-foreground 46 % → 38 %), ombres **teintées sépia** (jamais grises). |
+| Ambiance (aurora, grille, anneaux radar) réglée pour le sombre — invisible en clair. | Alphas d'aurora relevés (+40 %), grille télémétrie et anneaux **visibles par thème** (`.ambient-rings-a/-b`, `--ambient-grid-alpha`). Le jour a la même « matière » que la nuit. |
+| Scrollbar et sélection gris froid. | Scrollbar gris chaud assortie au papier. |
+
+## ✨ Étincelles au clic (NOUVEAU) — `components/ClickSparks.tsx`
+
+- Éclat de 12–16 particules or + anneau de choc au **clic sur une zone vide** — jamais sur un élément interactif (détection par ancêtre interactif **et** par curseur calculé).
+- Canvas plein écran unique, rAF actif **seulement** pendant l'animation (coût nul au repos), ~600 ms, gravité + friction, palette marque adaptée jour/nuit.
+- Désactivable : réglage « Étincelles au clic » (`televente:clickSparks`), coupé d'office par animations=off et `prefers-reduced-motion`.
+
+## ⚙️ Paramètres — refonte UX complète
+
+| Avant | Après |
+|-------|-------|
+| 8 cartes empilées sans ordre (thème, confort, contraste, logos, DLC, animations, promos, SAP), descriptions verbeuses, copie périmée (« colorimétrie »). | **4 sections nettes** : Apparence / Confort de lecture / Console & catalogue / Administration (admin), avec **sommaire ancré + scroll-spy** sur desktop. Descriptions raccourcies, copie à jour. |
+| 3 lignes de réglages pour les logos de marque. | **Puces à bascule** compactes (Console · Livraisons · Inventaire) sur une seule ligne. |
+| Aperçu du contraste de survol sur 3 lignes + bouton reset détaché. | Slider + % + « Réinit. » inline, aperçu 2 lignes. |
+| Clé morte `televent-theme` (colorimétrie retirée) encore déclarée. | Purgée de `SETTING_KEYS`. |
+
+---
+
 ## 🗓️ Planning congés & récup + tags de journée (heures)
 
 Refonte de la gestion des horaires autour d'un principe : **à l'avantage du

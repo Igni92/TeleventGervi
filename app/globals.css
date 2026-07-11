@@ -7,24 +7,28 @@
 ═══════════════════════════════════════════════════════════ */
 @layer base {
   :root {
-    --background:        220 20% 97%;
+    /* MODE JOUR « papier chaud » — fini le blanc clinique : canvas ivoire-greige
+       teinté marque (Or), CARTES blanc cassé qui se détachent nettement, bordures
+       et gris textuels assombris (contraste ↑). Même ADN que le mode sombre :
+       le fond a une matière, les données vivent sur des surfaces claires. */
+    --background:        42 24% 92%;
     --foreground:        222 47% 7%;
-    --card:              0 0% 100%;
+    --card:              40 33% 98.5%;
     --card-foreground:   222 47% 7%;
-    --popover:           0 0% 100%;
+    --popover:           40 33% 99%;
     --popover-foreground:222 47% 7%;
-    --primary:           42 95% 44%;          /* or profond — lisible sur blanc */
+    --primary:           42 95% 44%;          /* or profond — lisible sur clair */
     --primary-foreground: 222 45% 9%;          /* texte SOMBRE sur l'or clair (AA ≥ 4,5:1, cf. agrume/fraise) */
-    --secondary:         220 14% 96%;
+    --secondary:         42 16% 88%;
     --secondary-foreground: 222 47% 7%;
-    --muted:             220 14% 96%;
-    --muted-foreground:  220 9% 46%;
-    --accent:            220 14% 96%;
+    --muted:             42 16% 88.5%;
+    --muted-foreground:  222 12% 38%;
+    --accent:            42 16% 88%;
     --accent-foreground: 222 47% 7%;
-    --destructive:       0 72% 51%;
+    --destructive:       0 72% 48%;
     --destructive-foreground: 0 0% 100%;
-    --border:            220 13% 90%;
-    --input:             220 13% 90%;
+    --border:            42 14% 81%;
+    --input:             42 14% 79%;
     --ring:              42 95% 44%;
     --radius:            0.9rem;
 
@@ -43,22 +47,22 @@
     --brand-900: 44 72% 14%;
     --brand-950: 43 70% 8%;
 
-    /* Shadows */
+    /* Shadows — teintées « sépia » (ombre chaude sur papier chaud, jamais grise) */
     --shadow-card:
-      0 0 0 1px rgba(0,0,0,0.04),
-      0 1px 3px rgba(0,0,0,0.04),
-      0 2px 8px rgba(0,0,0,0.04);
+      0 0 0 1px rgba(72,58,26,0.05),
+      0 1px 3px rgba(72,58,26,0.06),
+      0 2px 10px rgba(72,58,26,0.06);
     --shadow-card-hover:
-      0 0 0 1px rgba(0,0,0,0.06),
-      0 4px 12px rgba(0,0,0,0.07),
-      0 8px 24px rgba(0,0,0,0.06);
+      0 0 0 1px rgba(72,58,26,0.08),
+      0 4px 14px rgba(72,58,26,0.10),
+      0 10px 28px rgba(72,58,26,0.08);
     --shadow-nav:
-      0 1px 0 rgba(255,255,255,0.05),
-      0 4px 24px rgba(0,0,0,0.22);
+      0 1px 0 rgba(255,255,255,0.55),
+      0 4px 24px rgba(72,58,26,0.14);
     --shadow-modal:
-      0 0 0 1px rgba(0,0,0,0.08),
-      0 8px 40px rgba(0,0,0,0.14),
-      0 20px 60px rgba(0,0,0,0.1);
+      0 0 0 1px rgba(72,58,26,0.08),
+      0 8px 40px rgba(72,58,26,0.16),
+      0 20px 60px rgba(72,58,26,0.12);
   }
 
 /* ═══════════════════════════════════════════════════════════
@@ -270,12 +274,12 @@
   ::-webkit-scrollbar { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: #d1d5db;
+    background: #c8c1b0; /* gris chaud — assorti au papier du mode jour */
     border-radius: 99px;
   }
   .dark ::-webkit-scrollbar-thumb { background: #374151; }
-  ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
-  * { scrollbar-width: thin; scrollbar-color: #d1d5db transparent; }
+  ::-webkit-scrollbar-thumb:hover { background: #a89f89; }
+  * { scrollbar-width: thin; scrollbar-color: #c8c1b0 transparent; }
   .dark * { scrollbar-color: #374151 transparent; }
 }
 
@@ -469,18 +473,20 @@
   inset: -30%;
   filter: blur(40px) saturate(125%);
 }
+/* Mode JOUR : alphas nettement plus hauts qu'avant — sur le papier chaud
+   l'aurora doit se VOIR (avant, noyée dans le blanc 97 %). */
 .ambient-aurora {
   background:
-    radial-gradient(28% 32% at 16% 14%, hsl(var(--brand-500) / 0.24), transparent 68%),
-    radial-gradient(32% 36% at 90% 90%, hsl(var(--brand-400) / 0.20), transparent 70%);
+    radial-gradient(30% 34% at 16% 14%, hsl(var(--brand-500) / 0.34), transparent 70%),
+    radial-gradient(34% 38% at 90% 90%, hsl(var(--brand-400) / 0.28), transparent 72%);
   /* Animation = opt-in (réglage /parametres « animations: on ») — statique par
      défaut pour un scroll fluide. Voir html[data-anim="force"] plus bas. */
 }
 .ambient-aurora-2 {
   background:
-    radial-gradient(26% 30% at 84% 8%,  hsl(212 90% 58% / 0.16), transparent 70%),
-    radial-gradient(30% 34% at 8% 90%,  hsl(268 78% 62% / 0.15), transparent 72%),
-    radial-gradient(22% 26% at 58% 50%, hsl(var(--brand-400) / 0.10), transparent 68%);
+    radial-gradient(28% 32% at 84% 8%,  hsl(212 85% 52% / 0.20), transparent 72%),
+    radial-gradient(32% 36% at 8% 90%,  hsl(268 70% 56% / 0.17), transparent 74%),
+    radial-gradient(24% 28% at 58% 50%, hsl(var(--brand-400) / 0.14), transparent 70%);
   filter: blur(52px) saturate(120%);
 }
 .dark .ambient-aurora {
@@ -497,14 +503,23 @@
 .ambient-grid {
   position: absolute;
   inset: 0;
+  /* Alpha par thème : la grille « télémétrie » doit exister aussi en jour */
+  --ambient-grid-alpha: 0.07;
   background-image:
-    linear-gradient(hsl(var(--foreground) / 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, hsl(var(--foreground) / 0.045) 1px, transparent 1px);
+    linear-gradient(hsl(var(--foreground) / var(--ambient-grid-alpha)) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--foreground) / var(--ambient-grid-alpha)) 1px, transparent 1px);
   background-size: 56px 56px;
   -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 38%, #000 0%, transparent 82%);
           mask-image: radial-gradient(ellipse 75% 65% at 50% 38%, #000 0%, transparent 82%);
 }
+.dark .ambient-grid { --ambient-grid-alpha: 0.045; }
 .ambient-rings { color: hsl(var(--brand-400)); transform-origin: center; }
+/* Opacité des anneaux par thème (posée ici plutôt qu'en classe Tailwind
+   inline : en jour ils doivent ressortir davantage sur le papier). */
+.ambient-rings-a { opacity: 0.16; }
+.ambient-rings-b { opacity: 0.10; }
+.dark .ambient-rings-a { opacity: 0.10; }
+.dark .ambient-rings-b { opacity: 0.06; }
 /* Balayage radar très lent (organique, clin d'œil au métier "signal") */
 /* Rotation des anneaux = opt-in : statique par défaut (sinon le compositeur
    tourne en continu → scroll qui rame). Rallumée sous html[data-anim="force"]. */
@@ -665,16 +680,131 @@ svg.lucide { zoom: 1.3; }
 /* ═══════════════════════════════════════════════════════════
    COMPONENT OVERRIDES
 ═══════════════════════════════════════════════════════════ */
-/* Sonner toast — premium */
-[data-sonner-toast] {
+/* ── Sonner toast — refonte « carte verre » ──────────────────────────
+   Design : carte translucide (blur) sur les tokens popover, pastille
+   d'icône teintée par type (la couleur ne déborde plus sur toute la
+   carte), titre net + description discrète, et surtout GRILLE 2 lignes :
+   icône | contenu en haut, boutons (Abandonner / Créer quand même…) sur
+   leur propre ligne en bas — le texte ne se fait plus écraser.
+   Le composant React vit dans components/ui/toaster.tsx. */
+
+/* Accent par type (triplets HSL — consommés via hsl(var(--toast-accent))) */
+[data-sonner-toast] { --toast-accent: var(--muted-foreground); }
+[data-sonner-toast][data-type="success"] { --toast-accent: 158 64% 34%; }
+[data-sonner-toast][data-type="error"]   { --toast-accent: 0 72% 46%; }
+[data-sonner-toast][data-type="warning"] { --toast-accent: 32 95% 38%; }
+[data-sonner-toast][data-type="info"]    { --toast-accent: 217 85% 50%; }
+.dark [data-sonner-toast][data-type="success"] { --toast-accent: 158 64% 52%; }
+.dark [data-sonner-toast][data-type="error"]   { --toast-accent: 0 88% 68%; }
+.dark [data-sonner-toast][data-type="warning"] { --toast-accent: 43 96% 58%; }
+.dark [data-sonner-toast][data-type="info"]    { --toast-accent: 213 92% 68%; }
+
+/* Ombre de la carte (posée ici pour basculer avec .dark) */
+:root { --toast-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 6px 20px rgba(0,0,0,0.08), 0 14px 36px rgba(0,0,0,0.06); }
+.dark { --toast-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 6px 20px rgba(0,0,0,0.45), 0 16px 44px rgba(0,0,0,0.35); }
+
+/* Carte */
+[data-sonner-toast][data-styled="true"] {
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: 10px;
+  row-gap: 12px;
+  align-items: center;
+  padding: 13px 15px !important;
+  border-radius: 14px !important;
+  background: hsl(var(--popover) / 0.9) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  backdrop-filter: blur(14px) saturate(150%);
+  border: 1px solid hsl(var(--border) / 0.85) !important;
+  box-shadow: var(--toast-shadow) !important;
+  color: hsl(var(--popover-foreground)) !important;
   font-size: 13.5px !important;
-  border-radius: 12px !important;
 }
-.dark [data-sonner-toast] {
-  background: #1a1d27 !important;
-  border-color: rgba(255,255,255,0.08) !important;
-  color: #f1f5f9 !important;
+/* Avec description : la pastille d'icône s'aligne sur la ligne du titre */
+[data-sonner-toast]:has([data-description]) { align-items: start; }
+[data-sonner-toast]:has([data-description]) [data-icon] { margin-top: 1px; }
+
+/* Pastille d'icône teintée */
+[data-sonner-toast] [data-icon] {
+  grid-row: 1; grid-column: 1;
+  width: 26px; height: 26px;
+  margin: 0 !important;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 9px;
+  background: hsl(var(--toast-accent) / 0.13);
+  box-shadow: inset 0 0 0 1px hsl(var(--toast-accent) / 0.2);
+  color: hsl(var(--toast-accent));
+  flex: none;
 }
+/* Toast sans icône (toast() brut) : le contenu prend toute la largeur */
+[data-sonner-toast]:not(:has([data-icon])) [data-content] { grid-column: 1 / -1; }
+
+/* Contenu */
+[data-sonner-toast] [data-content] {
+  grid-row: 1; grid-column: 2 / -1;
+  min-width: 0;
+  gap: 3px;
+}
+[data-sonner-toast] [data-title] {
+  font-size: 13.5px;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  color: hsl(var(--popover-foreground));
+}
+[data-sonner-toast] [data-description] {
+  font-size: 12.5px !important;
+  line-height: 1.5;
+  color: hsl(var(--muted-foreground)) !important;
+  white-space: pre-line; /* les descriptions composées avec \n gardent leurs retours */
+}
+
+/* Boutons d'action — sur LEUR ligne, alignés à droite.
+   Action = plein (or marque) · Abandon = fantôme. */
+[data-sonner-toast] [data-button] {
+  grid-row: 2;
+  height: 30px !important;
+  padding: 0 14px !important;
+  border-radius: 9999px !important;
+  font-size: 12.5px !important;
+  font-weight: 600 !important;
+  margin: 0 !important;
+  flex: none;
+  cursor: pointer;
+  background: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), filter 160ms ease, background-color 160ms ease;
+}
+[data-sonner-toast] [data-button]:hover { filter: brightness(1.07); }
+[data-sonner-toast] [data-button]:active { transform: scale(0.97); }
+[data-sonner-toast] [data-button][data-action] { grid-column: 3; justify-self: end; }
+[data-sonner-toast] [data-button][data-cancel] {
+  grid-column: 2; justify-self: end;
+  background: transparent !important;
+  color: hsl(var(--muted-foreground)) !important;
+  box-shadow: inset 0 0 0 1px hsl(var(--border));
+}
+[data-sonner-toast] [data-button][data-cancel]:hover {
+  filter: none;
+  color: hsl(var(--popover-foreground)) !important;
+  background: hsl(var(--secondary) / 0.7) !important;
+}
+
+/* Croix de fermeture — coin haut-droit, révélée au survol
+   (toujours visible sur tactile : pas de hover là-bas) */
+[data-sonner-toast] [data-close-button] {
+  left: auto !important; right: 0 !important;
+  transform: translate(35%, -35%);
+  background: hsl(var(--popover)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  color: hsl(var(--muted-foreground)) !important;
+  opacity: 0;
+  transition: opacity 150ms ease, color 150ms ease;
+}
+[data-sonner-toast]:hover [data-close-button],
+[data-sonner-toast] [data-close-button]:focus-visible { opacity: 1; }
+[data-sonner-toast] [data-close-button]:hover { color: hsl(var(--popover-foreground)) !important; }
+html[data-ui="touch"] [data-sonner-toast] [data-close-button] { opacity: 1; }
 
 /* Radix Select — dark */
 .dark [data-radix-select-viewport] {

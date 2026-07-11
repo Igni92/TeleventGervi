@@ -22,9 +22,8 @@ export default async function ParametresPage() {
           Paramètres
         </h1>
         <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
-          Réglages d&apos;affichage de l&apos;application — thème, colorimétrie, densité,
-          animations et bandeau promotions. Chaque choix s&apos;applique <b>immédiatement</b> et
-          reste mémorisé sur ce poste.
+          Apparence, confort de lecture, console et administration. Chaque choix
+          s&apos;applique <b>immédiatement</b> et reste mémorisé sur ce poste.
         </p>
       </header>
       {/* NB : la personnalisation de la navigation (libellés + emplacement) se

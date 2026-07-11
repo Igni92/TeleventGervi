@@ -14,8 +14,6 @@
  */
 
 export const SETTING_KEYS = {
-  /** colorimétrie Or/Agrume/Fraise — clé historique de ColorimetrieSwitcher */
-  colorimetrie: "televent-theme",
   /**
    * Densité d'affichage GLOBALE de l'app : "compact" | "normal" | "aere".
    * Pilote l'attribut `data-density` sur <html> (échelle rem racine, cf.
@@ -53,6 +51,13 @@ export const SETTING_KEYS = {
    * Honoré par AmbientBackground (attribut `data-reduce-anim` sur <html>).
    */
   animations: "televente:animations",
+  /**
+   * Étincelles au clic : petit éclat de particules (teinté marque) quand on
+   * clique une zone NON interactive — feedback ludique, purement décoratif.
+   * "on" (défaut) | "off". Honoré par ClickSparks ; coupé d'office par le
+   * réglage animations=off (data-reduce-anim) et prefers-reduced-motion.
+   */
+  clickSparks: "televente:clickSparks",
   /**
    * Contraste de la surbrillance au survol des lignes (0–100). PROPRE À CHAQUE
    * UTILISATEUR : la clé réelle est suffixée par l'identité de session

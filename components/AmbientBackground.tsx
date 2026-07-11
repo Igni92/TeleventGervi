@@ -27,7 +27,7 @@ export function AmbientBackground() {
 
       {/* Anneaux radar — haut-droite (balayage lent) */}
       <svg
-        className="ambient-rings ambient-rings-spin absolute -right-44 -top-44 h-[660px] w-[660px] opacity-[0.10]"
+        className="ambient-rings ambient-rings-a ambient-rings-spin absolute -right-44 -top-44 h-[660px] w-[660px]"
         viewBox="0 0 600 600" fill="none"
       >
         {[70, 150, 230, 300].map((r) => (
@@ -40,7 +40,7 @@ export function AmbientBackground() {
 
       {/* Anneaux radar — bas-gauche, plus discret (balayage inverse) */}
       <svg
-        className="ambient-rings ambient-rings-spin-r absolute -left-56 -bottom-56 h-[720px] w-[720px] opacity-[0.06]"
+        className="ambient-rings ambient-rings-b ambient-rings-spin-r absolute -left-56 -bottom-56 h-[720px] w-[720px]"
         viewBox="0 0 600 600" fill="none"
       >
         {[110, 210, 300].map((r) => (

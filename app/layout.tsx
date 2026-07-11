@@ -1,7 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import { Toaster } from "sonner";
+import { AppToaster } from "@/components/ui/toaster";
+import { ClickSparks } from "@/components/ClickSparks";
 import { Providers } from "./providers";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
@@ -52,13 +53,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {/* Wrapper de ZOOM d'interface (confort visuel Direction) : agrandit le
               contenu applicatif sans toucher au fond d'ambiance fixe. */}
           <div className="app-zoom-root">{children}</div>
-          <Toaster
-            richColors
-            position="top-right"
-            toastOptions={{
-              style: { fontFamily: "var(--font-inter, Inter, sans-serif)" },
-            }}
-          />
+          <AppToaster />
+          <ClickSparks />
         </Providers>
         <ServiceWorkerRegister />
       </body>
