@@ -479,8 +479,8 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
           <table className="w-full text-[12.5px]">
             <thead className="bg-secondary/40 text-[10.5px] uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th className="text-left px-2 py-2 font-semibold">Article</th>
                 <th className="text-left px-2 py-2 font-semibold w-24">Qté colis</th>
+                <th className="text-left px-2 py-2 font-semibold">Article</th>
                 <th className="text-left px-2 py-2 font-semibold w-32">Entrepôt</th>
                 <th className="text-right px-2 py-2 font-semibold w-24">PU /pie HT</th>
                 <th className="text-right px-2 py-2 font-semibold w-28">Total HT</th>
@@ -492,6 +492,7 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
                 const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, frgnName: l.variete });
                 return (
                   <tr key={`${l.itemCode}-${i}`} className={`border-t border-border align-top ${swapIdx === i ? "bg-violet-50 dark:bg-violet-500/10" : ""}`}>
+                    <td className="px-2 py-2"><NumberInput value={l.packageQuantity} onValueChange={(n) => updateEditLine(i, { packageQuantity: n ?? 0 })} min={0} step={1} className="text-right h-9 w-20" /></td>
                     <td className="px-2 py-2">
                       <div className="font-semibold text-foreground">{dz.fruit}</div>
                       <button type="button" onClick={() => setSwapIdx(swapIdx === i ? null : i)} className="group inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground hover:text-violet-600 dark:hover:text-violet-400" title="Changer l'article">
@@ -499,7 +500,6 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
                       </button>
                       <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-0.5" />
                     </td>
-                    <td className="px-2 py-2"><NumberInput value={l.packageQuantity} onValueChange={(n) => updateEditLine(i, { packageQuantity: n ?? 0 })} min={0} step={1} className="text-right h-9 w-20" /></td>
                     <td className="px-2 py-2">
                       <select value={l.warehouseCode} onChange={(e) => updateEditLine(i, { warehouseCode: e.target.value as EditLine["warehouseCode"] })} className="h-9 w-full rounded-md border border-input bg-background px-2 text-[12.5px]">
                         {PO_WAREHOUSES.map((w) => <option key={w.code} value={w.code}>{w.label}</option>)}
@@ -737,9 +737,9 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
         <table className="w-full text-[15px]">
           <thead className="bg-secondary/40 uppercase tracking-wide text-muted-foreground text-[11.5px]">
             <tr>
+              <th className="text-left px-3 py-2.5 font-semibold w-20">Colis</th>
               <th className="text-left px-3 py-2.5 font-semibold">Article</th>
               <th className="text-left px-3 py-2.5 font-semibold">Désignation</th>
-              <th className="text-right px-3 py-2.5 font-semibold">Colis</th>
               {!restricted && <th className="text-right px-3 py-2.5 font-semibold">PU HT</th>}
               {!restricted && <th className="text-right px-3 py-2.5 font-semibold">Total HT</th>}
               <th className="text-left px-3 py-2.5 font-semibold">Statut</th>
@@ -751,12 +751,12 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
               const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
               return (
                 <tr key={`${l.itemCode}-${i}`} className="border-t border-border/60">
+                  <td className="px-3 py-2.5 tnum font-semibold text-foreground whitespace-nowrap">{fmtColis(l.packageQuantity)}</td>
                   <td className="px-3 py-2.5">
                     <div className="font-semibold text-foreground">{dz.fruit}</div>
                     <div className="font-mono text-[12px] text-muted-foreground">{l.itemCode}</div>
                   </td>
                   <td className="px-3 py-2.5"><DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} /></td>
-                  <td className="px-3 py-2.5 text-right tnum">{fmtColis(l.packageQuantity)}</td>
                   {!restricted && <td className="px-3 py-2.5 text-right tnum">{l.price != null ? eur(l.price) : "—"}</td>}
                   {!restricted && <td className="px-3 py-2.5 text-right tnum font-semibold">{lineHT != null ? eur(lineHT) : "—"}</td>}
                   <td className="px-3 py-2.5">
