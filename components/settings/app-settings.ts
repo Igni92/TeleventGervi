@@ -52,10 +52,15 @@ export const SETTING_KEYS = {
    */
   animations: "televente:animations",
   /**
-   * Étincelles au clic : petit éclat de particules (teinté marque) quand on
-   * clique une zone NON interactive — feedback ludique, purement décoratif.
-   * "on" (défaut) | "off". Honoré par ClickSparks ; coupé d'office par le
-   * réglage animations=off (data-reduce-anim) et prefers-reduced-motion.
+   * Effet au clic sur une zone NON interactive (PC uniquement) — feedback
+   * ludique, purement décoratif. Valeurs :
+   *   "sparks" (défaut) → éclat de particules or ;
+   *   "ripple"          → onde d'eau (anneaux concentriques) ;
+   *   "rain"            → cascade (gouttes qui tombent jusqu'en bas) ;
+   *   "off"             → aucun effet.
+   * (La valeur historique "on" est traitée comme "sparks".) Honoré par
+   * ClickSparks ; coupé d'office par animations=off (data-reduce-anim) et
+   * prefers-reduced-motion.
    */
   clickSparks: "televente:clickSparks",
   /**
