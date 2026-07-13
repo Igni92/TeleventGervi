@@ -21,6 +21,7 @@ import {
   hoverContrastKey, applyHoverContrast, HOVER_CONTRAST_DEFAULT, HOVER_CONTRAST_MAX,
   UI_ZOOM_VALUES, UI_ZOOM_DEFAULT, applyUiZoom, type UiZoomValue,
   CELEBRATION_MARGIN_DEFAULT, readCelebrationStyle, type CelebrationStyle, CELEBRATION_EVENT,
+  applyAccentPos, ACCENT_POS_DEFAULT, ACCENT_POSITIONS, type AccentPos,
 } from "@/components/settings/app-settings";
 
 /**
@@ -184,6 +185,17 @@ function readClickDelay(v: string): string {
   return ["0", "200", "400", "800"].includes(v) ? v : "0";
 }
 
+/** Position de la barre d'accent colorée des cartes. */
+const ACCENT_POS_OPTS: SegOption<AccentPos>[] = [
+  { id: "left",   label: "Gauche", hint: "Barre verticale à gauche (défaut)" },
+  { id: "top",    label: "Haut",   hint: "Barre horizontale en haut" },
+  { id: "bottom", label: "Bas",    hint: "Barre horizontale en bas" },
+  { id: "off",    label: "Aucune", hint: "Pas de barre d'accent" },
+];
+function readAccentPos(v: string | null | undefined): AccentPos {
+  return ACCENT_POSITIONS.includes(v as AccentPos) ? (v as AccentPos) : ACCENT_POS_DEFAULT;
+}
+
 /** Style de la célébration « grosse marge ». */
 const CELEB_STYLES: SegOption<CelebrationStyle>[] = [
   { id: "bills",    label: "Billets",  hint: "Pluie de billets + pièces d'or" },
@@ -268,6 +280,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
   const [animations, setAnimations] = useState<"auto" | "on" | "off">("auto");
   const [clickFx, setClickFx] = useState<ClickFx>("sparks");
   const [clickDelay, setClickDelay] = useState<string>("0");
+  const [accentPos, setAccentPos] = useState<AccentPos>(ACCENT_POS_DEFAULT);
   const [promoAnim, setPromoAnim] = useState<"on" | "off">("on");
   const [promoNotifs, setPromoNotifs] = useState<"on" | "off">("on");
   // Célébration « grosse marge »
@@ -300,6 +313,9 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
 
     setClickFx(readClickFx(readSetting(SETTING_KEYS.clickSparks, "sparks")));
     setClickDelay(readClickDelay(readSetting(SETTING_KEYS.clickSparksDelay, "0")));
+    const ap = readAccentPos(readSetting(SETTING_KEYS.accentPos, ACCENT_POS_DEFAULT));
+    setAccentPos(ap); applyAccentPos(ap); // resync idempotent
+
     setCelebOn(readSetting(SETTING_KEYS.celebration, "on") === "off" ? "off" : "on");
     setCelebMargin(readSetting(SETTING_KEYS.celebrationMargin, String(CELEBRATION_MARGIN_DEFAULT)));
     setCelebStyle(readCelebrationStyle(readSetting(SETTING_KEYS.celebrationStyle, "both")));
@@ -324,6 +340,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
       if (key === SETTING_KEYS.animations && value) setAnimations(value as typeof animations);
       if (key === SETTING_KEYS.clickSparks) setClickFx(readClickFx(value ?? "sparks"));
       if (key === SETTING_KEYS.clickSparksDelay) setClickDelay(readClickDelay(value ?? "0"));
+      if (key === SETTING_KEYS.accentPos) { const p = readAccentPos(value); setAccentPos(p); applyAccentPos(p); }
       if (key === SETTING_KEYS.celebration) setCelebOn(value === "off" ? "off" : "on");
       if (key === SETTING_KEYS.celebrationMargin && value != null) setCelebMargin(value);
       if (key === SETTING_KEYS.celebrationStyle) setCelebStyle(readCelebrationStyle(value));
@@ -418,6 +435,17 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
                   />
                 </SettingRow>
               )}
+              <SettingRow
+                title="Barre d'accent des cartes"
+                desc="Position du liseré coloré des cartes (comme celui à gauche de ce bloc)."
+              >
+                <SegmentToggle
+                  ariaLabel="Position de la barre d'accent des cartes"
+                  value={accentPos}
+                  onChange={(v) => { setAccentPos(v); applyAccentPos(v); writeSetting(SETTING_KEYS.accentPos, v); }}
+                  options={ACCENT_POS_OPTS}
+                />
+              </SettingRow>
             </div>
           </SurfaceCard>
         </section>
