@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useSearchParams } from "next/navigation";
 import {
   Truck, Boxes, Scale, Users, FileText, Receipt,
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
@@ -82,7 +83,22 @@ const SEG_UI: Record<"CHR" | "EXPORT" | "GMS", { label: string; badge: string }>
    Composant principal
 ═════════════════════════════════════════════════════════════ */
 export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
-  const [date, setDate] = useState<string>(() => nextDeliveryDate());
+  // Deep-link depuis « Préparations à faire » (et ailleurs) : ?date=…&open=<docEntry>&t=<nonce>
+  //  · date  → jour de livraison affiché
+  //  · open  → commande à OUVRIR directement (vue en grand → console de lot)
+  //  · t     → nonce (change à chaque clic) pour ROUVRIR la même commande.
+  const searchParams = useSearchParams();
+  const [date, setDate] = useState<string>(() => searchParams.get("date") || nextDeliveryDate());
+  const [autoOpen, setAutoOpen] = useState<{ docEntry: number; nonce: string } | null>(() => {
+    const o = searchParams.get("open");
+    return o ? { docEntry: Number(o), nonce: searchParams.get("t") || o } : null;
+  });
+  useEffect(() => {
+    const d = searchParams.get("date");
+    const o = searchParams.get("open");
+    if (d) setDate(d);
+    if (o) setAutoOpen({ docEntry: Number(o), nonce: searchParams.get("t") || o });
+  }, [searchParams]);
   const [data, setData] = useState<ApiResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -472,11 +488,25 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   const allCollapsed = allKeys.length > 0 && !allKeys.some((k) => expanded.has(k));
   const toggleAll = () => setExpanded(allCollapsed ? new Set(allKeys) : new Set());
   // Pendant une recherche, TOUT est déplié : on veut voir le bon trouvé
-  // immédiatement, sans cliquer sur les groupes.
-  const effectiveExpanded = useMemo(
-    () => (searching ? new Set(allKeys) : expanded),
-    [searching, allKeys, expanded],
-  );
+  // immédiatement, sans cliquer sur les groupes. En deep-link (?open=…), on force
+  // l'ouverture du transporteur ET du sous-groupe tournée qui portent la commande
+  // cible — sinon elle resterait masquée (tout est replié par défaut) et
+  // l'ouverture directe ne trouverait pas la ligne.
+  const effectiveExpanded = useMemo(() => {
+    if (searching) return new Set(allKeys);
+    if (!autoOpen) return expanded;
+    const extra: string[] = [];
+    for (const c of view?.carriers ?? []) {
+      const target = c.docs.find((d) => d.docEntry === autoOpen.docEntry);
+      if (!target) continue;
+      const ck = c.code ?? "__none__";
+      extra.push(ck);
+      const trn = tourneesByCode[(c.code ?? "").toUpperCase()];
+      extra.push(`${ck}::${docTourneeKeyLabel(target, trn).key}`);
+      break;
+    }
+    return extra.length ? new Set([...expanded, ...extra]) : expanded;
+  }, [searching, allKeys, expanded, autoOpen, view, tourneesByCode]);
 
   return (
     <div className="space-y-5 animate-fade-up">
@@ -650,6 +680,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
                 expanded={effectiveExpanded} onToggle={toggleKey}
                 onPatchDoc={patchDoc} onReload={load} canDispatch={canDispatch}
                 statusTab={statusTab} onBulkStatus={bulkSetStatus} gen={gen}
+                autoOpen={autoOpen}
               />
             );
           })}
@@ -818,7 +849,7 @@ function CarrierGroup({
   carrier, carrierKey, date, fullDocs, carriers, onCarrierChange, onDateChange,
   tourneesByCode, onLoadTournees, onTourneeChange,
   expanded, onToggle, onPatchDoc, onReload, canDispatch,
-  statusTab, onBulkStatus, gen,
+  statusTab, onBulkStatus, gen, autoOpen,
 }: {
   carrier: Carrier;
   carrierKey: string;
@@ -838,6 +869,7 @@ function CarrierGroup({
   statusTab: ViewTab;
   onBulkStatus: (docEntries: number[], target: StatusTab) => void;
   gen: number;
+  autoOpen: { docEntry: number; nonce: string } | null;
 }) {
   const unassigned = !carrier.code;
   const collapsed = !expanded.has(carrierKey);
@@ -1010,6 +1042,7 @@ function CarrierGroup({
                     tournees={d.trspCode ? tourneesByCode[d.trspCode.toUpperCase()] : undefined}
                     onLoadTournees={onLoadTournees} onTourneeChange={onTourneeChange}
                     onPatchDoc={onPatchDoc} onReload={onReload} canDispatch={canDispatch}
+                    autoOpenNonce={autoOpen && autoOpen.docEntry === d.docEntry ? autoOpen.nonce : null}
                   />
                 ))}
               </ul>
@@ -1622,7 +1655,7 @@ function PreparedByDialog({
    réellement modifiées re-rendent (le reste garde son identité de props).
 ═════════════════════════════════════════════════════════════ */
 const OrderRow = memo(function OrderRow({
-  doc, viewDate, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange, onPatchDoc, onReload, canDispatch,
+  doc, viewDate, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange, onPatchDoc, onReload, canDispatch, autoOpenNonce,
 }: {
   doc: Doc;
   viewDate: string;
@@ -1635,7 +1668,11 @@ const OrderRow = memo(function OrderRow({
   onPatchDoc: (docEntry: number, patch: Partial<Doc>) => void;
   onReload: () => void;
   canDispatch: boolean;
+  /** Deep-link : nonce non nul → ouvre cette commande en grand + défile jusqu'à
+   *  elle (change à chaque clic pour rouvrir la même commande). */
+  autoOpenNonce?: string | null;
 }) {
+  const rowRef = useRef<HTMLLIElement>(null);
   const [open, setOpen] = useState(false);
   const [savingCarrier, setSavingCarrier] = useState(false);
   const [savingTournee, setSavingTournee] = useState(false);
@@ -1756,6 +1793,16 @@ const OrderRow = memo(function OrderRow({
   const [incomplete, setIncomplete] = useState<boolean>(!!doc.incomplete);
   const [bigOpen, setBigOpen] = useState(false);
   const [requeuing, setRequeuing] = useState(false);
+
+  // Deep-link (« rentrer dans la commande ») : ouvre la vue en grand — la console
+  // de lot — et défile jusqu'à la ligne. Le nonce change à chaque clic depuis la
+  // liste → rouvre la même commande (« si je rentre encore dedans, rouvrir »).
+  useEffect(() => {
+    if (!autoOpenNonce) return;
+    setBigOpen(true);
+    const h = setTimeout(() => rowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+    return () => clearTimeout(h);
+  }, [autoOpenNonce]);
   // Vérification avant de marquer « faite » (évite les validations par erreur).
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -2146,7 +2193,7 @@ const OrderRow = memo(function OrderRow({
   }
 
   return (
-    <li>
+    <li ref={rowRef}>
       {/* MOBILE (< sm) : la ligne passe sur DEUX rangées — identité client pleine
           largeur (le nom ne se fait plus écraser par les boutons), puis l'action
           d'état en GRANDE cible tactile + colis + agrandir. ≥ sm : une seule
@@ -2552,6 +2599,14 @@ const OrderRow = memo(function OrderRow({
           </div>
           {doc.comments && <p className="text-[12.5px] italic text-muted-foreground">« {doc.comments} »</p>}
 
+          {/* Astuce : sur BL ouvert, toucher une ligne ouvre la console de lot. */}
+          {doc.open && (
+            <p className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+              <Pencil className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+              Touchez un article pour <b className="text-foreground font-semibold">changer son lot</b> ou l&apos;échanger.
+            </p>
+          )}
+
           {/* Lignes en grand : colisage à gauche + tags + signalement manquant */}
           <ul className="divide-y divide-border/50 rounded-xl border border-border overflow-hidden">
             {doc.lines.map((l, i) => {
@@ -2559,9 +2614,10 @@ const OrderRow = memo(function OrderRow({
               return (
               <li
                 key={`big-${l.itemCode}-${i}`}
+                onClick={(e) => openSwap(e, l.itemCode, l.itemName)}
                 onContextMenu={(e) => openSwap(e, l.itemCode, l.itemName)}
-                title={doc.open ? "Clic droit : échanger cet article contre un autre code" : undefined}
-                className={`flex items-center gap-3 px-3 py-2.5 ${isMissing ? "bg-rose-500/5" : ""} ${doc.open ? "cursor-context-menu" : ""}`}
+                title={doc.open ? "Toucher pour changer le lot ou échanger l'article" : undefined}
+                className={`flex items-center gap-3 px-3 py-2.5 ${isMissing ? "bg-rose-500/5" : ""} ${doc.open ? "cursor-pointer" : ""}`}
               >
                 <span className="inline-flex min-w-[44px] items-center justify-center rounded-lg bg-foreground/10 px-2 py-1 text-[18px] font-bold tnum text-foreground shrink-0">
                   {fmtNum(l.colis)}
