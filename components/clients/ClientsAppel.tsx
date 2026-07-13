@@ -7,17 +7,24 @@
  * filtrable, qui sert les deux besoins :
  *
  *   • Annuaire  — chercher, ouvrir la fiche, créer, importer, programmer un rappel.
- *   • Plan d'appel — assigner vendeur/commercial (en ligne ou en série), repérer
- *     les clients en retard de commande et les incidents ouverts, activer/désactiver.
+ *   • Plan d'appel — assigner vendeur/commercial (en ligne, en série ou par
+ *     ligne), activer/désactiver, repérer les clients sans commande et les
+ *     incidents ouverts.
  *
  * Source unique : `/api/plan-appel` (raw SQL) — porte la VRAIE dernière commande
  * SAP (`MAX(docDate)`, pas le proxy « dernier appel COMMANDE » de l'ancien
  * /api/clients), les incidents ouverts et le dernier appel. Base ~340 clients :
- * on charge tout (tri/stat/filtre instantanés côté client, pas de pagination).
+ * on charge TOUT une fois et on filtre/trie/compte EN MÉMOIRE (instantané,
+ * cohérent — les cartes-stats reflètent toujours le portefeuille complet, pas le
+ * sous-ensemble filtré).
+ *
+ * ⚠️ Ceci n'est PAS la file d'appel : la vraie file priorisée (qui exclut le
+ * déjà-appelé / snoozé et trie par valeur×urgence) vit dans la Console. « Programmés
+ * aujourd'hui » est un filtre de PLANNING (jour d'appel = aujourd'hui), et un CTA
+ * renvoie vers la Console pour passer les appels.
  *
  * `canManage` (faux pour le livreur) masque les leviers d'assignation et les
- * outils d'admin (import CSV, déduction vendeurs) ; les écritures restent de
- * toute façon gardées côté API.
+ * outils d'admin ; les écritures restent de toute façon gardées côté API.
  */
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
@@ -25,7 +32,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import {
   Search, Loader2, Phone, AlertTriangle, PackageX, UserCheck, Users, ExternalLink,
-  Check, Columns3, X, UserPlus, Plus, Bell, CalendarClock, MoreHorizontal,
+  Check, Columns3, X, UserPlus, Plus, Bell, CalendarClock, MoreHorizontal, Radio, Power,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -39,6 +46,7 @@ import {
 import { SALESPEOPLE, displayNameFromSlp, normalizeSlp } from "@/lib/salespeople";
 import { SortArrow, nextSort, type SortDir } from "@/components/ui/sort";
 import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
+import { parisDayOfWeek } from "@/lib/paris-time";
 import { ReminderModal } from "@/components/ReminderModal";
 import { ImportModal } from "@/components/ImportModal";
 
@@ -68,16 +76,18 @@ const COLS: { id: string; label: string; manage?: boolean }[] = [
   { id: "tel", label: "Tél" },
   { id: "jours", label: "Jours d'appel" },
   { id: "lastOrder", label: "Dernière cde" },
+  { id: "lastCall", label: "Dernier appel" },
   { id: "incidents", label: "Incidents" },
   { id: "vendeur", label: "Vendeur", manage: true },
   { id: "commercial", label: "Commercial", manage: true },
 ];
+// « Dernier appel » masqué par défaut (colonne d'appoint) : évite la surcharge.
+const HIDDEN_DEFAULT = ["lastCall"];
 
-function useDebounced<T>(v: T, ms: number): T {
-  const [d, setD] = useState(v);
-  useEffect(() => { const t = setTimeout(() => setD(v), ms); return () => clearTimeout(t); }, [v, ms]);
-  return d;
-}
+/** Premier numéro appelable (standard puis ligne directe). */
+const firstTel = (c: PlanClient) => c.tel1 || c.tel2 || null;
+const joursOf = (c: PlanClient) => (c.joursAppel ? c.joursAppel.split(",").map(Number) : []);
+const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
 
 function Checkbox({ checked, onChange, indeterminate }: { checked: boolean; onChange: () => void; indeterminate?: boolean }) {
   return (
@@ -117,22 +127,22 @@ function LastOrder({ days }: { days: number | null }) {
   return <span className={`text-[12px] font-semibold ${color} tnum`}>{days === 0 ? "auj." : `${days} j`}</span>;
 }
 
-function AssignSelect({ value, options, placeholder, onChange }: {
-  value: string | null; options: readonly string[]; placeholder: string; onChange: (v: string | null) => void;
+function AssignSelect({ value, options, onChange }: {
+  value: string | null; options: readonly string[]; onChange: (v: string | null) => void;
 }) {
-  const norm = value ? normalizeSlp(value) : null;
+  const n = value ? normalizeSlp(value) : null;
   const opts = useMemo(() => {
     const set = new Set(options);
-    if (norm) set.add(norm);
+    if (n) set.add(n);
     return Array.from(set);
-  }, [options, norm]);
+  }, [options, n]);
   return (
     <select
-      value={norm ?? ""}
+      value={n ?? ""}
       onChange={(e) => onChange(e.target.value || null)}
       className="h-7 w-full max-w-[130px] rounded-md border border-border bg-background text-[11.5px] px-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
     >
-      <option value="">{placeholder}</option>
+      <option value="">— aucun —</option>
       {opts.map((o) => <option key={o} value={o}>{displayNameFromSlp(o) ?? o}</option>)}
     </select>
   );
@@ -142,16 +152,18 @@ type AssignPatch = Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTe
 
 /** Ligne mémoïsée : cocher / changer un select ne re-rend QUE la ligne concernée. */
 const PlanRow = memo(function PlanRow({
-  c, sel, today, canManage, showTel, showJours, showLastOrder, showIncidents, showVendeur, showCommercial,
-  onToggle, onAssign, onReminder,
+  c, sel, today, canManage, showTel, showJours, showLastOrder, showLastCall, showIncidents, showVendeur, showCommercial,
+  onToggle, onAssign, onReminder, onToggleActive,
 }: {
   c: PlanClient; sel: boolean; today: number; canManage: boolean;
-  showTel: boolean; showJours: boolean; showLastOrder: boolean;
+  showTel: boolean; showJours: boolean; showLastOrder: boolean; showLastCall: boolean;
   showIncidents: boolean; showVendeur: boolean; showCommercial: boolean;
   onToggle: (id: string) => void;
   onAssign: (id: string, patch: AssignPatch) => void;
   onReminder: (c: PlanClient) => void;
+  onToggleActive: (c: PlanClient) => void;
 }) {
+  const tel = firstTel(c);
   return (
     <tr className={`transition-colors ${sel ? "bg-brand-50/60 dark:bg-brand-950/30" : "hover:bg-secondary/30"} ${!c.activeTelevente ? "opacity-60" : ""}`}>
       {canManage && <td className="w-9 px-3 py-2"><Checkbox checked={sel} onChange={() => onToggle(c.id)} /></td>}
@@ -165,11 +177,12 @@ const PlanRow = memo(function PlanRow({
       </td>
       {showTel && (
         <td className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground whitespace-nowrap">
-          {c.tel1 ? <a href={`tel:${standardizePhone(c.tel1)}`} className="inline-flex items-center gap-1 hover:text-brand-600"><Phone className="h-3 w-3" />{formatPhoneDisplay(c.tel1)}</a> : "—"}
+          {tel ? <a href={`tel:${standardizePhone(tel)}`} className="inline-flex items-center gap-1 hover:text-brand-600"><Phone className="h-3 w-3" />{formatPhoneDisplay(tel)}</a> : "—"}
         </td>
       )}
       {showJours && <td className="px-3 py-2"><JoursBadges joursAppel={c.joursAppel} today={today} /></td>}
       {showLastOrder && <td className="px-3 py-2 text-right whitespace-nowrap"><LastOrder days={c.lastOrderDays} /></td>}
+      {showLastCall && <td className="px-3 py-2 text-right whitespace-nowrap text-[12px] text-muted-foreground tnum">{c.lastCallDays == null ? "—" : c.lastCallDays === 0 ? "auj." : `${c.lastCallDays} j`}</td>}
       {showIncidents && (
         <td className="px-3 py-2 text-center">
           {c.openIncidents > 0
@@ -177,13 +190,19 @@ const PlanRow = memo(function PlanRow({
             : <span className="text-muted-foreground/40">—</span>}
         </td>
       )}
-      {showVendeur && <td className="px-3 py-2">{canManage ? <AssignSelect value={c.vendeur} options={VENDEURS} placeholder="" onChange={(v) => onAssign(c.id, { vendeur: v })} /> : <span className="text-[12px]">{c.vendeur ? displayNameFromSlp(c.vendeur) ?? c.vendeur : "—"}</span>}</td>}
-      {showCommercial && <td className="px-3 py-2">{canManage ? <AssignSelect value={c.commercial} options={VENDEURS} placeholder="" onChange={(v) => onAssign(c.id, { commercial: v })} /> : <span className="text-[12px]">{c.commercial ? displayNameFromSlp(c.commercial) ?? c.commercial : "—"}</span>}</td>}
+      {showVendeur && <td className="px-3 py-2"><AssignSelect value={c.vendeur} options={VENDEURS} onChange={(v) => onAssign(c.id, { vendeur: v })} /></td>}
+      {showCommercial && <td className="px-3 py-2"><AssignSelect value={c.commercial} options={VENDEURS} onChange={(v) => onAssign(c.id, { commercial: v })} /></td>}
       <td className="px-2 py-2 text-right whitespace-nowrap">
         <button type="button" onClick={() => onReminder(c)} title="Programmer un rappel"
           className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-brand-600 hover:bg-secondary/60">
           <Bell className="h-3.5 w-3.5" />
         </button>
+        {canManage && (
+          <button type="button" onClick={() => onToggleActive(c)} title={c.activeTelevente ? "Désactiver en télévente" : "Activer en télévente"}
+            className={`inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-secondary/60 ${c.activeTelevente ? "text-muted-foreground hover:text-rose-600" : "text-amber-500 hover:text-emerald-600"}`}>
+            <Power className="h-3.5 w-3.5" />
+          </button>
+        )}
         <Link href={`/clients/${c.id}`} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/60" title="Ouvrir la fiche">
           <ExternalLink className="h-3.5 w-3.5" />
         </Link>
@@ -195,7 +214,6 @@ PlanRow.displayName = "PlanRow";
 
 export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
   const [search, setSearch] = useState("");
-  const debSearch = useDebounced(search, 250);
   const [vendeur, setVendeur] = useState("");
   const [commercial, setCommercial] = useState("");
   const [type, setType] = useState("");
@@ -206,8 +224,8 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
   const [data, setData] = useState<PlanClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
-  const [confirmDeactivate, setConfirmDeactivate] = useState<{ ids: string[] } | null>(null);
+  const [hidden, setHidden] = useState<Set<string>>(new Set(HIDDEN_DEFAULT));
+  const [confirmDeactivate, setConfirmDeactivate] = useState<{ ids: string[]; nom?: string } | null>(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [syncingVendeurs, setSyncingVendeurs] = useState(false);
   const [reminderClient, setReminderClient] = useState<PlanClient | null>(null);
@@ -215,35 +233,36 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
   const [sort, setSort] = useState<{ key: string | null; dir: SortDir }>({ key: null, dir: "asc" });
   const toggleSort = (key: string) => setSort((cur) => nextSort(cur, key));
 
-  // Jour de la semaine courant (0=Dim … 6=Sam) — pour le filtre « À appeler
-  // aujourd'hui » et la mise en évidence du jour dans les badges. Résolu après
-  // montage (composant client) : pas de mismatch SSR.
+  // Jour de la semaine EN FUSEAU PARIS (0=Dim … 6=Sam) — cohérent avec la Console
+  // et le reste de l'app (le poste peut être hors TZ Paris). Résolu après montage
+  // (pas de mismatch d'hydratation).
   const [today, setToday] = useState(-1);
-  useEffect(() => { setToday(new Date().getDay()); }, []);
+  useEffect(() => { setToday(parisDayOfWeek()); }, []);
 
+  // UNE seule requête (tout le portefeuille en périmètre) — filtres/tri/stats en
+  // mémoire ensuite. La portée (commercial ne voit que ses clients) reste gardée
+  // côté serveur.
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const p = new URLSearchParams();
-      if (debSearch) p.set("search", debSearch);
-      if (vendeur) p.set("vendeur", vendeur);
-      if (commercial) p.set("commercial", commercial);
-      if (type) p.set("type", type);
-      if (active) p.set("active", active);
-      if (incidents) p.set("incidents", "1");
-      if (stale) p.set("stale", stale);
-      const r = await fetch(`/api/plan-appel?${p}`, { cache: "no-store" });
+      const r = await fetch("/api/plan-appel", { cache: "no-store" });
       const j = await r.json();
       setData(j.clients ?? []);
     } catch { toast.error("Erreur de chargement des clients"); }
     finally { setLoading(false); }
-  }, [debSearch, vendeur, commercial, type, active, incidents, stale]);
+  }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  useEffect(() => { setSelected(new Set()); }, [debSearch, vendeur, commercial, type, active, incidents, stale, todayOnly]);
+  useEffect(() => { setSelected(new Set()); }, [search, vendeur, commercial, type, active, incidents, stale, todayOnly]);
+
+  // Mise à jour optimiste locale (pas de refetch : les données sont en mémoire).
+  const patchLocal = (ids: Set<string> | string[], patch: AssignPatch) => {
+    const set = Array.isArray(ids) ? new Set(ids) : ids;
+    setData((cur) => cur.map((c) => set.has(c.id) ? { ...c, ...patch } : c));
+  };
 
   const assign = useCallback(async (id: string, patch: AssignPatch) => {
-    setData((cur) => cur.map((c) => c.id === id ? { ...c, ...patch } : c));
+    patchLocal([id], patch);
     try {
       const r = await fetch(`/api/clients/${id}/assign`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch),
@@ -256,8 +275,7 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
     ids: string[],
     patch: { vendeur?: string | null; commercial?: string | null; activeTelevente?: boolean },
   ): Promise<number> => {
-    const idSet = new Set(ids);
-    setData((cur) => cur.map((c) => idSet.has(c.id) ? { ...c, ...patch } : c));
+    patchLocal(ids, patch);
     const r = await fetch("/api/clients/assign-bulk", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, ...patch }),
     });
@@ -277,6 +295,20 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
       toast.success(`${updated} client(s) → ${what}`);
       setSelected(new Set());
     } catch { toast.error("Échec de l'action en série"); fetchData(); }
+  };
+
+  // Activation d'un client (immédiate) ou d'une série (barre bulk). La
+  // DÉSACTIVATION passe toujours par la confirmation (le client ne sera plus rappelé).
+  const activate = async (ids: string[]) => {
+    try {
+      const updated = await postBulk(ids, { activeTelevente: true });
+      toast.success(`${updated} client(s) réactivé(s)`);
+      setSelected(new Set());
+    } catch { toast.error("Échec de l'activation"); fetchData(); }
+  };
+  const toggleActive = (c: PlanClient) => {
+    if (c.activeTelevente) setConfirmDeactivate({ ids: [c.id], nom: c.nom });
+    else activate([c.id]);
   };
 
   const runBulkDeactivate = async (ids: string[]) => {
@@ -319,42 +351,59 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
     const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n;
   });
 
-  // Filtre client « à appeler aujourd'hui » : joursAppel contient le jour courant.
-  const withToday = useMemo(
-    () => todayOnly && today >= 0
-      ? data.filter((c) => (c.joursAppel?.split(",").map(Number) ?? []).includes(today))
-      : data,
-    [data, todayOnly, today],
-  );
+  // ── Filtrage / recherche / stats : tout EN MÉMOIRE sur le portefeuille chargé ──
+  const staleNum = Number.parseInt(stale, 10);
+  const filtered = useMemo(() => {
+    const q = norm(search.trim());
+    return data.filter((c) => {
+      if (q) {
+        const hay = norm(`${c.nom} ${c.code} ${c.commercial ?? ""} ${c.vendeur ?? ""}`);
+        if (!hay.includes(q)) return false;
+      }
+      if (vendeur && normalizeSlp(c.vendeur ?? "") !== vendeur) return false;
+      if (commercial === "__none__") { if (c.commercial) return false; }
+      else if (commercial && normalizeSlp(c.commercial ?? "") !== commercial) return false;
+      if (type && c.type !== type) return false;
+      if (active === "actifs" && !c.activeTelevente) return false;
+      if (active === "inactifs" && c.activeTelevente) return false;
+      if (incidents && c.openIncidents <= 0) return false;
+      if (Number.isFinite(staleNum) && staleNum > 0 && !(c.lastOrderDays == null || c.lastOrderDays >= staleNum)) return false;
+      if (todayOnly && today >= 0 && !joursOf(c).includes(today)) return false;
+      return true;
+    });
+  }, [data, search, vendeur, commercial, type, active, incidents, staleNum, todayOnly, today]);
 
+  // Stats = portefeuille COMPLET (stables quels que soient les filtres) → la
+  // Direction lit toujours le vrai total.
   const stats = useMemo(() => ({
     total: data.length,
-    today: today >= 0 ? data.filter((c) => (c.joursAppel?.split(",").map(Number) ?? []).includes(today)).length : 0,
+    today: today >= 0 ? data.filter((c) => joursOf(c).includes(today)).length : 0,
     stale30: data.filter((c) => c.lastOrderDays == null || c.lastOrderDays >= 30).length,
     withIncidents: data.filter((c) => c.openIncidents > 0).length,
     noVendeur: data.filter((c) => !c.vendeur).length,
   }), [data, today]);
 
   const sortedData = useMemo(() => {
-    if (!sort.key) return withToday;
+    if (!sort.key) return filtered;
     const dir = sort.dir === "asc" ? 1 : -1;
     const val = (c: PlanClient): string | number => {
       switch (sort.key) {
         case "nom": return c.nom?.toLowerCase() ?? "";
-        case "tel": return c.tel1 || c.tel2 || "";
+        case "tel": return firstTel(c) ?? "";
         case "lastOrder": return c.lastOrderDays == null ? Number.POSITIVE_INFINITY : c.lastOrderDays;
+        case "lastCall": return c.lastCallDays == null ? Number.POSITIVE_INFINITY : c.lastCallDays;
         case "incidents": return c.openIncidents ?? 0;
-        case "vendeur": return (c.vendeur ? normalizeSlp(c.vendeur) : "") ?? "";
-        case "commercial": return (c.commercial ? normalizeSlp(c.commercial) : "") ?? "";
+        case "vendeur": return normalizeSlp(c.vendeur ?? "") ?? "";
+        case "commercial": return normalizeSlp(c.commercial ?? "") ?? "";
         default: return "";
       }
     };
-    return [...withToday].sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       const va = val(a), vb = val(b);
       if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
       return String(va).localeCompare(String(vb), "fr") * dir;
     });
-  }, [withToday, sort]);
+  }, [filtered, sort]);
 
   const allVisibleSelected = sortedData.length > 0 && sortedData.every((c) => selected.has(c.id));
   const someSelected = !allVisibleSelected && sortedData.some((c) => selected.has(c.id));
@@ -368,10 +417,11 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
 
   return (
     <div className="space-y-4">
-      {/* Cartes synthèse — cliquables = filtres rapides */}
+      {/* Cartes synthèse — cliquables = filtres rapides (calculées sur le
+          portefeuille complet, elles ne bougent pas quand on filtre). */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <StatCard icon={Users} label="Clients" value={stats.total} tone="brand" />
-        <StatCard icon={CalendarClock} label="À appeler auj." value={stats.today} tone="sky"
+        <StatCard icon={CalendarClock} label="Programmés auj." value={stats.today} tone="sky"
           onClick={() => setTodayOnly((v) => !v)} active={todayOnly} />
         <StatCard icon={PackageX} label="Sans cde ≥ 30 j" value={stats.stale30} tone="rose"
           onClick={() => setStale(stale === "30" ? "" : "30")} active={stale === "30"} />
@@ -384,14 +434,14 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher (code, nom)…" className="pl-9" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher (nom, code, commercial…)" className="pl-9" />
         </div>
         {canManage && <FilterSelect value={vendeur} onChange={setVendeur} placeholder="Vendeur" options={[["", "Tous vendeurs"], ...VENDEURS.map((v) => [v, displayNameFromSlp(v) ?? v] as [string, string])]} />}
         <FilterSelect value={commercial} onChange={setCommercial} placeholder="Commercial"
           options={[["", "Tous commerciaux"], ["__none__", "Non assigné"], ...VENDEURS.map((v) => [v, displayNameFromSlp(v) ?? v] as [string, string])]} />
         <FilterSelect value={type} onChange={setType} placeholder="Type" options={[["", "Tous types"], ["GMS", "GMS"], ["EXPORT", "EXPORT"], ["CHR", "CHR"]]} />
         <FilterSelect value={active} onChange={setActive} placeholder="Activation" options={[["", "Actif + inactif"], ["actifs", "Actifs"], ["inactifs", "À activer"]]} />
-        <FilterSelect value={stale} onChange={setStale} placeholder="Retard cde" options={[["", "Toute ancienneté"], ["14", "≥ 14 j"], ["30", "≥ 30 j"], ["60", "≥ 60 j"]]} />
+        <FilterSelect value={stale} onChange={setStale} placeholder="Sans cde depuis" options={[["", "Toute ancienneté"], ["14", "Sans cde ≥ 14 j"], ["30", "Sans cde ≥ 30 j"], ["60", "Sans cde ≥ 60 j"]]} />
 
         {/* Masquer / afficher des colonnes */}
         <DropdownMenu>
@@ -415,15 +465,21 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Actions annuaire (à droite) */}
+        {/* Actions (à droite) */}
         <div className="ml-auto flex items-center gap-2">
+          {/* CTA « prochaine action » : la vraie file d'appel priorisée = la Console. */}
+          {canManage && (
+            <Button asChild variant="outline" size="sm" className="gap-1.5">
+              <Link href="/console"><Radio className="h-4 w-4 text-brand-500" /> Console d&apos;appels</Link>
+            </Button>
+          )}
           {canManage && (
             <>
-              <Button variant="outline" size="sm" onClick={syncVendeurs} disabled={syncingVendeurs} className="hidden sm:inline-flex gap-1">
+              <Button variant="outline" size="sm" onClick={syncVendeurs} disabled={syncingVendeurs} className="hidden lg:inline-flex gap-1">
                 {syncingVendeurs ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
                 Déduire vendeurs
               </Button>
-              <span className="hidden sm:block"><ImportModal onImported={fetchData} /></span>
+              <span className="hidden lg:block"><ImportModal onImported={fetchData} /></span>
             </>
           )}
           <Button asChild size="sm" className="gap-1">
@@ -434,7 +490,7 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
 
       {/* Barre d'assignation en série */}
       {canManage && selected.size > 0 && (
-        <div className="bg-brand-50 dark:bg-brand-950/40 border border-brand-300/60 dark:border-brand-500/40 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap">
+        <div className="bg-brand-50 dark:bg-brand-950/40 border border-brand-300/60 dark:border-brand-500/40 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap sticky bottom-2 z-20 shadow-lg md:static md:shadow-none">
           <span className="text-[13px] font-semibold text-brand-900 dark:text-brand-200 inline-flex items-center gap-1.5">
             <UserPlus className="h-4 w-4" /> {selected.size} client{selected.size > 1 ? "s" : ""} coché{selected.size > 1 ? "s" : ""}
           </span>
@@ -442,7 +498,7 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
           <BulkActionSelect label="Assigner au vendeur" options={VENDEURS} onPick={(v) => bulkAssign({ vendeur: v })} />
           <BulkActionSelect label="Assigner au commercial" options={VENDEURS} onPick={(v) => bulkAssign({ commercial: v })} />
           <span className="text-brand-400/60">·</span>
-          <button type="button" onClick={() => bulkAssign({ activeTelevente: true })}
+          <button type="button" onClick={() => activate(Array.from(selected))}
             className="h-8 px-2.5 rounded-md text-[12px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-1">
             <Check className="h-3.5 w-3.5" /> Activer
           </button>
@@ -463,7 +519,7 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
         ) : sortedData.length === 0 ? (
           <p className="text-center text-muted-foreground py-10 text-[15px]">Aucun client pour ces filtres.</p>
         ) : sortedData.map((c) => {
-          const tel = c.tel1 || c.tel2 || null;
+          const tel = firstTel(c);
           const telHref = tel ? standardizePhone(tel) || null : null;
           const tv = c.type === "GMS" ? "gms" : c.type === "EXPORT" ? "export" : c.type === "CHR" ? "chr" : "outline";
           return (
@@ -492,8 +548,12 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
                       <MoreHorizontal className="h-5 w-5" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-44">
+                  <DropdownMenuContent align="end" className="w-52">
                     <DropdownMenuItem onClick={() => setReminderClient(c)} className="cursor-pointer text-[13px] gap-2"><Bell className="h-3.5 w-3.5" /> Programmer un rappel</DropdownMenuItem>
+                    {canManage && <DropdownMenuItem onClick={() => toggleActive(c)} className="cursor-pointer text-[13px] gap-2">
+                      <Power className="h-3.5 w-3.5" /> {c.activeTelevente ? "Désactiver en télévente" : "Activer en télévente"}
+                    </DropdownMenuItem>}
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem asChild className="cursor-pointer text-[13px] gap-2"><Link href={`/clients/${c.id}`}><ExternalLink className="h-3.5 w-3.5" /> Ouvrir la fiche</Link></DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -526,10 +586,11 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
                 {show("tel") && <PlanTh sortKey="tel" sort={sort} onSort={toggleSort}>Tél</PlanTh>}
                 {show("jours") && <th className="text-left px-3 py-2.5 font-semibold bg-card">Jours d&apos;appel</th>}
                 {show("lastOrder") && <PlanTh sortKey="lastOrder" sort={sort} onSort={toggleSort} align="right">Dernière cde</PlanTh>}
+                {show("lastCall") && <PlanTh sortKey="lastCall" sort={sort} onSort={toggleSort} align="right">Dernier appel</PlanTh>}
                 {show("incidents") && <PlanTh sortKey="incidents" sort={sort} onSort={toggleSort} align="center">Incidents</PlanTh>}
                 {canManage && show("vendeur") && <PlanTh sortKey="vendeur" sort={sort} onSort={toggleSort}>Vendeur</PlanTh>}
                 {canManage && show("commercial") && <PlanTh sortKey="commercial" sort={sort} onSort={toggleSort}>Commercial</PlanTh>}
-                <th className="w-20 bg-card text-right px-3 py-2.5 font-semibold">Actions</th>
+                <th className="w-24 bg-card text-right px-3 py-2.5 font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
@@ -547,12 +608,14 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
                   showTel={show("tel")}
                   showJours={show("jours")}
                   showLastOrder={show("lastOrder")}
+                  showLastCall={show("lastCall")}
                   showIncidents={show("incidents")}
                   showVendeur={canManage && show("vendeur")}
                   showCommercial={canManage && show("commercial")}
                   onToggle={toggleOne}
                   onAssign={assign}
                   onReminder={setReminderClient}
+                  onToggleActive={toggleActive}
                 />
               ))}
             </tbody>
@@ -561,8 +624,11 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
       </div>
       {!loading && (
         <p className="text-[12px] text-muted-foreground">
-          {sortedData.length} client(s){todayOnly ? " à appeler aujourd'hui" : ""}
-          {sort.key ? " · tri personnalisé (clic sur les colonnes)" : " · triés par commande la plus ancienne"}.
+          {sortedData.length === data.length
+            ? `${data.length} client(s)`
+            : `${sortedData.length} / ${data.length} client(s)`}
+          {todayOnly ? " · programmés aujourd'hui" : ""}
+          {sort.key ? " · tri personnalisé" : " · triés par commande la plus ancienne"}.
         </p>
       )}
 
@@ -570,12 +636,13 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
       {reminderClient && (
         <ReminderModal
           client={reminderClient}
+          onReminderCreated={fetchData}
           open={reminderClient !== null}
           onOpenChange={(o) => { if (!o) setReminderClient(null); }}
         />
       )}
 
-      {/* Confirmation avant désactivation en série. */}
+      {/* Confirmation avant désactivation (1 client ou en série). */}
       <Dialog
         open={confirmDeactivate !== null}
         onOpenChange={(o) => { if (!o && !confirmLoading) setConfirmDeactivate(null); }}
@@ -584,12 +651,11 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-amber-500" />
-              Désactiver {confirmDeactivate?.ids.length ?? 0} client{(confirmDeactivate?.ids.length ?? 0) > 1 ? "s" : ""} en télévente ?
+              Désactiver {confirmDeactivate?.nom ? <>«&nbsp;{confirmDeactivate.nom}&nbsp;»</> : `${confirmDeactivate?.ids.length ?? 0} client${(confirmDeactivate?.ids.length ?? 0) > 1 ? "s" : ""}`} en télévente ?
             </DialogTitle>
             <DialogDescription className="pt-1">
-              {confirmDeactivate?.ids.length ?? 0} client{(confirmDeactivate?.ids.length ?? 0) > 1 ? "s ne seront plus" : " ne sera plus"} jamais
-              proposé{(confirmDeactivate?.ids.length ?? 0) > 1 ? "s" : ""} au rappel. Vous pourrez
-              {(confirmDeactivate?.ids.length ?? 0) > 1 ? " les" : " le"} réactiver à tout moment.
+              {(confirmDeactivate?.ids.length ?? 0) > 1 ? "Ces clients ne seront plus" : "Ce client ne sera plus"} jamais
+              proposé{(confirmDeactivate?.ids.length ?? 0) > 1 ? "s" : ""} au rappel. Réactivable à tout moment.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
