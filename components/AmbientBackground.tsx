@@ -19,7 +19,7 @@ import { AmbientMotionGate } from "@/components/settings/AmbientMotionGate";
  */
 export function AmbientBackground() {
   return (
-    <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+    <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden max-sm:hidden touch:hidden">
       <AmbientMotionGate />
       <div className="ambient-aurora" />
       <div className="ambient-aurora-2" />

@@ -33,7 +33,10 @@ export async function AppLayout({ children }: AppLayoutProps) {
             densité « Aéré » où l'échelle rem racine augmente). Les tableaux larges
             scrollent dans leurs propres conteneurs `overflow-x-auto`, donc rien
             d'utile n'est rogné ; `clip` (≠ `hidden`) préserve la barre sticky. */}
-        <main className="flex-1 min-w-0 max-w-[1440px] mx-auto px-4 sm:px-10 lg:px-14 py-4 sm:py-8 lg:py-10 overflow-x-clip">
+        {/* Mobile = PLEIN ÉCRAN PUR : padding latéral retiré (contenu bord à bord)
+            et fond d'ambiance masqué (cf. AmbientBackground). `max-sm:` cible les
+            petits écrans, `touch:` les appareils tactiles (téléphone/tablette). */}
+        <main className="flex-1 min-w-0 max-w-[1440px] mx-auto px-4 sm:px-10 lg:px-14 py-4 sm:py-8 lg:py-10 overflow-x-clip max-sm:!px-0 touch:!px-0">
           {/* Interface MOBILE aussi sur TABLETTE : la bascule n'est plus seulement
               la largeur (md) mais le TYPE d'appareil — `pointer: coarse` = écran
               tactile (téléphone/tablette) → barre du haut forcée, sidebar masquée. */}

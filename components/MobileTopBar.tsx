@@ -65,7 +65,7 @@ export function MobileTopBar({ className }: { className?: string }) {
 
   return (
     <div
-      className={`sticky top-0 z-40 -mx-4 sm:-mx-10 lg:-mx-14 mb-4 overflow-hidden border-b border-border/70 bg-background/80 backdrop-blur-xl ${className ?? ""}`}
+      className={`sticky top-0 z-40 -mx-4 sm:-mx-10 lg:-mx-14 max-sm:!mx-0 touch:!mx-0 mb-4 overflow-hidden border-b border-border/70 bg-background/80 backdrop-blur-xl ${className ?? ""}`}
     >
       <div className="flex items-center gap-2 px-3 sm:px-5 h-14">
         {/* Retour accueil — bouton plein (marque) sur l'accueil, sobre ailleurs */}
