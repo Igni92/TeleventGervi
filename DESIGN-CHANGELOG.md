@@ -738,3 +738,38 @@ Apparence → Effet au clic**.
 - Garde-fous inchangés : coupé par `animations=off` (data-reduce-anim) et
   `prefers-reduced-motion` (sauf « forcé »), tactile exclu, plafond de particules
   (anti-spam), jamais déclenché sur un élément interactif.
+
+---
+
+## 💸 Célébration « grosse marge » + effets au clic affinés
+
+Volet « dynamiser les ventes » + finitions des micro-interactions.
+
+### Célébration des grosses marges (NOUVEAU) — `components/SaleCelebration.tsx`
+
+Quand une commande est validée dans la Console avec une **marge nette ≥ seuil**
+(défaut **200 €**, éditable), une **pluie de billets** (billets euros stylisés qui
+culbutent en 3D + pièces d'or) s'abat sur l'écran, avec un **éclat doré central** et
+un **badge « +X € »** animé (framer-motion). L'intensité et la mention montent avec le
+ratio marge/seuil (« 🎉 Belle marge » → « 🔥 Grosse marge »).
+
+- Déclenché par un évènement global `televente:celebration` émis par
+  `celebrateSale(margeNette)` (`app-settings.ts`) — n'émet QUE si la fonction est
+  activée, la marge atteint le seuil, et les animations ne sont pas coupées
+  (data-reduce-anim / prefers-reduced-motion). Overlay canvas unique, rAF actif
+  seulement tant que des particules vivent.
+- Accroché dans `Ecran2Order.tsx` : la marge nette de la commande (`margeNetteTotal`,
+  quand elle est costée) est transportée dans le job d'envoi puis passée à
+  `celebrateSale` au succès de création (jamais sur une offre / un BL / une modif).
+- **Réglages** (Paramètres → Console & catalogue) : interrupteur ON/OFF, **seuil en €**
+  éditable, **style** (Billets · Confettis · Les deux), + bouton **Tester**.
+  Entièrement désactivable.
+
+### Effets au clic — affinages
+
+| Sujet | Avant | Après |
+|-------|-------|-------|
+| **Étincelles** | Points or plats, teinte figée. | Teintées **marque** (suivent Or/Agrume/Fraise), **halo additif** + cœur blanc-chaud, **double anneau de choc**, braises scintillantes qui s'attardent. |
+| **Onde d'eau** | 3 anneaux nus. | + **point d'impact** lumineux, **corps d'eau** translucide qui monte sous les anneaux, **gouttelettes de couronne** 3D qui giclent puis retombent. |
+| **Délai entre effets** (NOUVEAU) | Toujours instantané. | **Cooldown réglable** (Instantané · 0,2 · 0,4 · 0,8 s) — réglage `clickSparksDelay`. |
+| **Rester appuyé pour sélectionner** | L'effet partait dès l'appui → il se déclenchait au début d'une sélection de texte. | L'effet ne se déclenche qu'au **relâché d'un VRAI clic** (pointeur quasi immobile ET aucune sélection) : un press-drag n'active plus jamais l'effet. Le spam-clic reste possible. |

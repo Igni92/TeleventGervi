@@ -29,6 +29,7 @@ import { useContextMenu, ContextMenu, ContextMenuItem, ContextMenuLabel } from "
 import { useBrandLogos } from "@/lib/useBrandLogos";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
 import { transportPerKgForCarrier, isDirectCarrier, type TransportCostModel, type ClientCarrierPricing } from "@/lib/transportCost";
+import { celebrateSale } from "@/components/settings/app-settings";
 
 interface StockEntry { available: number }
 interface Product {
@@ -127,7 +128,7 @@ function promoBadge(pr: Promo): string {
    l'action « Créer quand même » (re-post confirmEncours) — la commande n'est
    PAS créée tant que l'action n'est pas cliquée. */
 type BackgroundOrder =
-  | { kind: "create"; clientName: string; body: Record<string, unknown> }
+  | { kind: "create"; clientName: string; body: Record<string, unknown>; margeNette?: number }
   | { kind: "modif"; clientName: string; docEntry: number; docNum: number; body: Record<string, unknown> };
 
 function notifyOrderResult(
@@ -171,6 +172,10 @@ function notifyOrderResult(
       description: `${fmt(json.totalTTC)} € TTC`,
       duration: 10000,
     });
+    // Célébration « grosse marge » — no-op si désactivée ou marge < seuil.
+    if (job.kind === "create" && typeof job.margeNette === "number") {
+      celebrateSale(job.margeNette);
+    }
   }
 }
 
@@ -1347,7 +1352,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     // (pré-remplis avec le défaut client — l'erreur ne sort que par exception).
     const tourneeError = validateTournee();
     if (tourneeError) { toast.error(tourneeError); return; }
-    sendOrderInBackground({ kind: "create", clientName, body: buildOrderBody(buildApiLines(), opts?.safeguardsConfirmed === true) });
+    sendOrderInBackground({ kind: "create", clientName, body: buildOrderBody(buildApiLines(), opts?.safeguardsConfirmed === true), margeNette: hasCostData ? margeNetteTotal : undefined });
     toast.info(`${clientName} — commande envoyée, création en arrière-plan…`);
     setCart([]); setNumAtCard(""); setComments("");
     onSubmitted?.();
