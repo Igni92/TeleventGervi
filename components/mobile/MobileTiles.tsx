@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   Users, Briefcase, Truck, Store, ShoppingCart,
-  PackagePlus, PackageCheck, Package, PackageX, Factory, ClipboardCheck, ClipboardList,
+  PackagePlus, PackageCheck, Package, Factory, ClipboardCheck,
   Receipt, LayoutDashboard, Clock3, CalendarDays,
   Settings, Tag, ScrollText, Star,
   type LucideIcon,
@@ -55,7 +55,7 @@ const AXES: Axis[] = [
       { href: "/clients", label: "Clients & plan d'appel", icon: Users },
       { href: "/console2", label: "Console 2 · Commande", icon: ShoppingCart },
       { href: "/ventes-du-jour", label: "Ventes du jour", icon: Store },
-      { href: "/livraisons", label: "Préparation livraisons", icon: Truck },
+      { href: "/livraisons", label: "Livraisons du jour", icon: Truck },
     ],
   },
   {
@@ -63,12 +63,12 @@ const AXES: Axis[] = [
     label: "Acheteur & entrepôt",
     desc: "Approvisionnement, stock & préparation",
     // Ordre du flux : la commande fournisseur PRÉCÈDE l'entrée marchandise (CF → EM).
+    // « Préparations à faire » et « Manquants » ne sont plus des tuiles distinctes :
+    // ce sont des onglets du hub « Livraisons du jour » (axe Commercial ci-dessus).
     tiles: [
       { href: "/commandes-fournisseurs", label: "Commandes fournisseurs", icon: PackageCheck, badge: "commandesDue" },
       { href: "/entrees", label: "Entrées march.", icon: PackagePlus, badge: "receptionIncidents" },
-      { href: "/preparations", label: "Préparations à faire", icon: ClipboardList },
       { href: "/bons-commande", label: "Bons de commande", icon: ScrollText },
-      { href: "/manquants", label: "Manquants", icon: PackageX },
       { href: "/products", label: "Stock", icon: Package },
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },
       { href: "/fabrication", label: "Fabrication", icon: Factory },

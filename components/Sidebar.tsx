@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, ShoppingCart, Package, PackagePlus, Factory, Receipt, AlertTriangle,
-  Home, Settings, PackageCheck, ClipboardCheck, ClipboardList, Truck, Eye, Store, PackageX,
+  Home, Settings, PackageCheck, ClipboardCheck, Truck, Eye, Store,
   Pencil, Loader2, RotateCcw, ScrollText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight, Check,
   CalendarDays,
 } from "lucide-react";
@@ -41,7 +41,9 @@ import {
  *   ACCUEIL     — hub principal (badge notifications non lues, refresh ~60 s)
  *   TÉLÉVENTE   — Console d'appels, Clients & plan d'appel (fusionnés sous une
  *                 même entrée, onglets in-page), Ventes du jour (mise en prép)
- *   ENTREPÔT    — Préparation livraisons, Stock, Inventaire, Fabrication
+ *   ENTREPÔT    — Livraisons du jour (hub à onglets : Préparation · Par article ·
+ *                 À préparer · Manquants — une seule entrée pour 4 vues d'une même
+ *                 donnée), Bons de commande, Stock, Inventaire, Fabrication
  *   ACHATS      — Commandes fournisseurs → Entrées marchandises (flux CF → EM,
  *                 replié par défaut : moins quotidien sur poste télévente)
  *   PILOTAGE    — Statistiques, Encours clients, Équipe commerciale
@@ -99,11 +101,12 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
     // Entrepôt — la marchandise qui sort (préparation) + ce qu'on a en rayon.
     label: "Entrepôt",
     items: [
-      { href: "/livraisons", label: "Préparation livraisons", icon: Truck },
-      { href: "/details-livraison", label: "Détails livraison", icon: PackageCheck },
-      { href: "/preparations", label: "Préparations à faire", icon: ClipboardList },
+      // « Livraisons du jour » — HUB à onglets in-page (Préparation · Par article ·
+      // À préparer · Manquants). Les 4 vues lisaient déjà la même donnée
+      // (/api/livraisons) : fusionnées sous une entrée, routes secondaires en
+      // `also` (l'entrée reste active sur /details-livraison, /preparations, /manquants).
+      { href: "/livraisons", label: "Livraisons du jour", icon: Truck, also: ["/details-livraison", "/preparations", "/manquants"] },
       { href: "/bons-commande", label: "Bons de commande", icon: ScrollText, badge: "offresDue" },
-      { href: "/manquants", label: "Manquants", icon: PackageX },
       { href: "/products", label: "Stock", icon: Package },
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },
       { href: "/fabrication", label: "Fabrication", icon: Factory },

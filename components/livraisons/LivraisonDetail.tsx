@@ -485,7 +485,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
         <div>
           <p className="kicker mb-1.5">Télévente · logistique</p>
           <h1 className="font-display text-[28px] sm:text-[34px] font-semibold text-foreground tracking-tight leading-none">
-            Détail livraison
+            Livraisons du jour
           </h1>
           <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
             Toutes les commandes à préparer pour la prochaine tournée
