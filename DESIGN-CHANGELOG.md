@@ -738,3 +738,18 @@ Apparence → Effet au clic**.
 - Garde-fous inchangés : coupé par `animations=off` (data-reduce-anim) et
   `prefers-reduced-motion` (sauf « forcé »), tactile exclu, plafond de particules
   (anti-spam), jamais déclenché sur un élément interactif.
+
+---
+
+## 📄 « Bons de commande » — icône plus lisible
+
+L'icône `ScrollText` (parchemin) se lisait comme une **accolade `{`** au format
+sidebar, surtout à l'état actif en `brand-400` : forme ambiguë, peu reconnaissable.
+
+| Avant | Après |
+|-------|-------|
+| `ScrollText` — parchemin dont la boucle supérieure évoque une accolade, peu lisible en petit. | **`FileText`** — document à lignes, silhouette nette de « bon / formulaire », plus visible et immédiatement reconnaissable. |
+
+- Aligné partout : `Sidebar`, `MobileTiles`, `CommandPalette` (⌘K).
+- Distincte des voisines : `ClipboardCheck` (Inventaire) et `Receipt` (Encours) restent identifiables.
+- Aucune autre modification — simple échange d'icône.
