@@ -232,16 +232,22 @@ Bilan : le registre `ProductBatch.quantity` est maintenant crédité/débité à
 **chaque** mouvement — réception, PO-receive, vente (BL/découvert/modif/annulation),
 fabrication (composants + parent), régularisation d'inventaire, retour fournisseur.
 
-### 🟠 Reste (chantier / décision)
-- **Idempotence de la réception** (clé `NumAtCard`/hash) contre un double-crédit sur
-  retry réseau — non fait (SAP-side).
+### ✅ Lot 4 — Idempotence, legacy, réconciliation (finitions)
+- 🟠→✅ **Idempotence de la réception** : le client envoie une **clé d'idempotence**
+  (UUID stable sur les retries d'une soumission) ; le serveur fait un **claim
+  atomique** (`INSERT … ON CONFLICT DO NOTHING`) juste avant le POST SAP et **rejoue**
+  le résultat si la clé existe → plus de **double BR / double crédit** sur double-clic
+  ou retry réseau. Sans clé, comportement inchangé.
+- 🟠→✅ **Assemblage v1 legacy** (`assemblyLegacy`) : registre branché comme v2 (débit
+  composants FIFO + crédit parent `OP<NNNNN>`).
+- 🟠→✅ **Script de réconciliation** `scripts/reconcile-lot-ledger.mjs` : remet à 0 les
+  reliquats registre là où l'article n'a **aucun stock physique** (purge de la dérive
+  historique). **Dry-run par défaut**, `--apply` pour écrire.
+
+### 🟠 Reste
 - **Retro sur `purchase-orders/receive`** : crédit registre branché, propagation
   rétro (réécrire les découverts) toujours inline dans `goods-receipts` (à extraire).
-  Filet : garde-fou de départ + repli registre couvrent le cas.
-- **Assemblage v1 legacy** (`assemblyLegacy`, BOM) : sans lots composants — parent non
-  crédité (le flux réel est v2/v3, couvert). À traiter si v1 encore utilisé.
-- **Réconciliation registre ↔ stock physique** : purge des reliquats historiques là où
-  l'article×entrepôt est physiquement à 0 (petit script one-shot).
+  Filet : garde-fou de départ + repli registre couvrent déjà le cas.
 
 ### Note
 - **DLC hors périmètre** : décision client — la DLC ne pilote pas la sélection du

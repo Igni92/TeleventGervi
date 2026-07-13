@@ -587,6 +587,23 @@ async function assemblyLegacy(body: LegacyBody, session: Session, admin: boolean
     console.warn("[Assembly] stockSync échoué (non-bloquant):", (e as Error).message);
   }
 
+  // ── REGISTRE DES LOTS (comme v2) : débit des lots composants (résolus FIFO au
+  //    registre/PDN) + crédit du lot PARENT produit sous son code OP<NNNNN>. ──
+  try {
+    const lotByComp = await resolveLotsForItems(resolvedComponents.map((c) => c.componentItemCode), warehouse);
+    await debitLots(resolvedComponents.map((c) => ({
+      itemCode: c.componentItemCode,
+      lot: lotByComp.get(c.componentItemCode)?.batchNumber ?? LOT_PENDING,
+      qty: c.qty,
+    })));
+    await creditLots([{
+      itemCode: parentCode, lot: opCode, qty: parentPieceQty,
+      sourceDocNum: String(entryDoc.DocNum), admissionDate: new Date(`${today}T12:00:00Z`),
+    }]);
+  } catch (e) {
+    console.warn("[Assembly] registre lots échoué (non-bloquant):", (e as Error).message);
+  }
+
   return NextResponse.json({
     ok: true,
     opCode,

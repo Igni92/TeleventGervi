@@ -72,6 +72,10 @@ interface CreateBody {
    *  lot à la saisie télévente) et sert ses commandes en PREMIER lors de la
    *  propagation rétro ci-dessous. Cf. lib/emAffect. */
   affect?: string;
+  /** Clé d'idempotence (UUID généré par le client, stable sur les retries d'UNE
+   *  soumission) — évite le double BR / double crédit sur double-clic ou retry
+   *  réseau. Optionnelle : sans clé, comportement inchangé. */
+  idempotencyKey?: string;
   lines: InLine[];
 }
 
@@ -108,6 +112,15 @@ export async function POST(req: NextRequest) {
     }
   }
   const cardCode = body.cardCode.trim();
+
+  // Idempotence (anti double-BR / double-crédit) : clé optionnelle du client, stable
+  // sur les retries d'UNE soumission. Le CLAIM atomique se fait juste avant le POST
+  // SAP (après les pré-validations, pour ne pas laisser de clé bloquée sur erreur).
+  const idemKey = (body.idempotencyKey ?? "").trim().slice(0, 100);
+  const idemSettingKey = idemKey ? `gr:idem:${idemKey}` : null;
+  const releaseIdem = async () => {
+    if (idemSettingKey) await prisma.appSetting.deleteMany({ where: { key: idemSettingKey } }).catch(() => {});
+  };
 
   // ── Récupère le ratio colis→pie depuis le catalogue local ──
   // Pour FRAMB12PD (barquettes de 125g, 12 par colis) : salesQtyPerPackUnit=12
@@ -219,6 +232,27 @@ export async function POST(req: NextRequest) {
   };
   if (body.numAtCard?.trim()) payload.NumAtCard = body.numAtCard.trim();
 
+  // ── Idempotence : CLAIM atomique juste avant le POST (fenêtre minimale) ──
+  if (idemSettingKey) {
+    const claimed = await prisma.$queryRawUnsafe<{ key: string }[]>(
+      `INSERT INTO "AppSetting" ("key", "value", "updatedAt") VALUES ($1, 'pending', NOW())
+       ON CONFLICT ("key") DO NOTHING RETURNING "key";`,
+      idemSettingKey,
+    );
+    if (!Array.isArray(claimed) || claimed.length === 0) {
+      // Clé déjà présente = doublon : on rejoue le résultat produit, ou 409 si en cours.
+      const existing = await prisma.appSetting.findUnique({ where: { key: idemSettingKey } });
+      if (existing?.value && existing.value !== "pending") {
+        try { return NextResponse.json({ ...JSON.parse(existing.value), idempotent: true }); }
+        catch { /* valeur illisible → 409 ci-dessous */ }
+      }
+      return NextResponse.json(
+        { ok: false, error: "Réception déjà en cours (double envoi ignoré)." },
+        { status: 409 },
+      );
+    }
+  }
+
   // ── POST SAP /PurchaseDeliveryNotes ──
   console.log("[GoodsReceipt] → POST SAP/PurchaseDeliveryNotes — DB:", process.env.SAP_B1_COMPANY_DB);
   console.log("[GoodsReceipt]   Fournisseur:", cardCode, "| Lignes:", body.lines.length);
@@ -230,6 +264,7 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     console.error("[GoodsReceipt] ❌ SAP CREATE FAILED:", message);
+    await releaseIdem();   // échec → on libère la clé pour permettre une vraie relance
     return NextResponse.json(
       { ok: false, error: message, payload: process.env.NODE_ENV === "development" ? payload : undefined },
       { status: 500 },
@@ -237,6 +272,14 @@ export async function POST(req: NextRequest) {
   }
 
   const lotCode = `EM${created.DocNum}`;
+  // Mémorise le résultat sur la clé d'idempotence — un retry rejouera CE BR au lieu
+  // d'en créer un second (double crédit évité).
+  if (idemSettingKey) {
+    await prisma.appSetting.update({
+      where: { key: idemSettingKey },
+      data: { value: JSON.stringify({ ok: true, docNum: created.DocNum, docEntry: created.DocEntry, lot: lotCode, cardCode }) },
+    }).catch(() => { /* best-effort */ });
+  }
   console.log("[GoodsReceipt] ✅ SUCCESS — DocNum:", created.DocNum, "| Lot:", lotCode);
 
   // ── PATCH U_NoLot=EM<DocNum> sur chaque ligne ──

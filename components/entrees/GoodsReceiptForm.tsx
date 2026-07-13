@@ -325,6 +325,11 @@ export function GoodsReceiptForm() {
     setSupplier(null); setDocDate(todayISO()); setDocTime(nowHM()); setNumAtCard(""); setComment(""); setLines([]); setAffect("TOUS");
   };
 
+  // Clé d'idempotence : STABLE tant que la réception n'a pas abouti (un retry après
+  // échec réseau rejoue la MÊME clé → le serveur ne crée pas un 2ᵉ BR). Régénérée
+  // seulement après un succès (nouvelle réception = nouvelle clé).
+  const idemKeyRef = useRef<string | null>(null);
+
   const submit = async () => {
     if (!supplier) { toast.error("Sélectionne un fournisseur"); return; }
     if (lines.length === 0) { toast.error("Ajoute au moins 1 ligne"); return; }
@@ -334,6 +339,9 @@ export function GoodsReceiptForm() {
         return;
       }
     }
+    if (!idemKeyRef.current) {
+      idemKeyRef.current = (globalThis.crypto?.randomUUID?.() ?? `gr-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    }
     setSubmitting(true);
     setLastReceipt(null);
     try {
@@ -342,6 +350,7 @@ export function GoodsReceiptForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cardCode: supplier.cardCode,
+          idempotencyKey: idemKeyRef.current,
           docDate: docDate || undefined,
           docTime: docTime || undefined,
           numAtCard: numAtCard.trim() || undefined,
@@ -405,6 +414,7 @@ export function GoodsReceiptForm() {
       }
 
       setLastReceipt({ docNum: json.docNum, lot: json.lot });
+      idemKeyRef.current = null;   // succès → la prochaine réception aura une nouvelle clé
       reset();
     } catch (e) {
       toast.error((e as Error).message);
