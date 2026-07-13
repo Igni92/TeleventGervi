@@ -7,6 +7,8 @@ import { sap } from "@/lib/sapb1";
 import { mirrorCreatedOrder, type CreatedOrderForMirror } from "@/lib/sapMirror";
 import { getLotMaps, resolveLotDetailed, LOT_PENDING } from "@/lib/lotResolver";
 import { chooseLot, unitInfo } from "@/lib/gervifrais-calc";
+import { getDeliveryPreparerOne, getDeliveryMiseEnPrepOne } from "@/lib/inventory";
+import { notifyPreparateursPresents } from "@/lib/push";
 
 /**
  * Modification d'une commande SAP EXISTANTE et OUVERTE (même BL, jamais de
@@ -350,6 +352,31 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
         console.warn(`[Modif] Miroir échoué (non-bloquant):`, (e as Error).message);
       }
     }
+
+    // ── Notification : si la commande est DÉJÀ EN PRÉPARATION (lâchée à
+    //    l'entrepôt ou prise par un préparateur), prévenir les préparateurs
+    //    PRÉSENTS aujourd'hui qu'elle vient d'être modifiée (lots / lignes) — ils
+    //    doivent revérifier leur préparation. Fire-and-forget, jamais bloquant.
+    try {
+      const [preparer, misEnPrep] = await Promise.all([
+        getDeliveryPreparerOne(docEntry),
+        getDeliveryMiseEnPrepOne(docEntry),
+      ]);
+      if (preparer || misEnPrep) {
+        const me = session.user?.name?.trim() || session.user?.email || "?";
+        const store = (refetched?.CardName ?? order.CardCode ?? "").toString().trim();
+        void notifyPreparateursPresents(
+          {
+            title: "✏️ Commande en préparation modifiée",
+            body: `BL n°${order.DocNum}${store ? ` · ${store}` : ""} — lots/lignes mis à jour par ${me}. Revérifie la préparation.`,
+            url: "/livraisons",
+            tag: `modif-prep:${docEntry}`,
+            renotify: true,
+          },
+          { exceptEmail: session.user?.email ?? null },
+        );
+      }
+    } catch { /* notification best-effort */ }
 
     return NextResponse.json({
       ok: true,

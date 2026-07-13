@@ -13,6 +13,8 @@
 import webpush from "web-push";
 import { prisma } from "@/lib/prisma";
 import { preparateurEmails } from "@/lib/preparateur";
+import { listAllConges } from "@/lib/congesRh";
+import { rangesOverlap } from "@/lib/conges";
 
 let configured = false;
 let configuredOk = false;
@@ -150,6 +152,22 @@ export async function notifyEmails(emails: string[], payload: PushPayload): Prom
 }
 
 /**
+ * Emails ciblés « entrepôt » : préparateurs restreints (liste env) + comptes DB
+ * portant le flag `isPreparateur` ou `isLivreur`. Défensif : si les colonnes
+ * n'existent pas encore, on garde au moins la liste email.
+ */
+async function preparateurTargetEmails(): Promise<Set<string>> {
+  const targetEmails = new Set(preparateurEmails());
+  try {
+    const rows = await prisma.$queryRawUnsafe<{ email: string | null }[]>(
+      `SELECT "email" FROM "User" WHERE "isPreparateur" = true OR "isLivreur" = true`,
+    );
+    for (const r of rows) if (r.email) targetEmails.add(r.email.trim().toLowerCase());
+  } catch { /* colonnes absentes → repli sur la liste email seule */ }
+  return targetEmails;
+}
+
+/**
  * Envoie une notification aux seuls PRÉPARATEURS / LIVREURS abonnés (ceux qui
  * préparent la marchandise) : préparateurs restreints (liste email), et comptes
  * portant le flag DB `isPreparateur` ou `isLivreur`. Best-effort, parallèle,
@@ -160,15 +178,7 @@ export async function notifyEmails(emails: string[], payload: PushPayload): Prom
 export async function notifyPreparateurs(payload: PushPayload): Promise<number> {
   if (!ensureConfigured()) return 0;
   try {
-    // Emails ciblés : préparateurs restreints (liste) + flags DB (defensif si
-    // les colonnes n'existent pas encore → on garde au moins la liste email).
-    const targetEmails = new Set(preparateurEmails());
-    try {
-      const rows = await prisma.$queryRawUnsafe<{ email: string | null }[]>(
-        `SELECT "email" FROM "User" WHERE "isPreparateur" = true OR "isLivreur" = true`,
-      );
-      for (const r of rows) if (r.email) targetEmails.add(r.email.trim().toLowerCase());
-    } catch { /* colonnes absentes → repli sur la liste email seule */ }
+    const targetEmails = await preparateurTargetEmails();
     if (targetEmails.size === 0) return 0;
 
     const subs = await prisma.pushSubscription.findMany();
@@ -189,6 +199,61 @@ export async function notifyPreparateurs(payload: PushPayload): Promise<number> 
     return results.filter(Boolean).length;
   } catch (e) {
     console.error("[push] notifyPreparateurs échec:", e);
+    return 0;
+  }
+}
+
+/**
+ * Comme `notifyPreparateurs`, mais RESTREINT aux préparateurs PRÉSENTS AUJOURD'HUI :
+ * on retire ceux dont un congé / une absence APPROUVÉ(E) couvre la date du jour
+ * (Europe/Paris), et `exceptEmail` exclut l'auteur de l'action. Sert à prévenir
+ * l'entrepôt qu'une commande DÉJÀ EN PRÉPARATION vient d'être modifiée (lots /
+ * lignes) — inutile de réveiller un préparateur en congé. Best-effort, parallèle,
+ * nettoie les abonnements expirés. Ne throw jamais (fire-and-forget).
+ */
+export async function notifyPreparateursPresents(
+  payload: PushPayload,
+  opts: { exceptEmail?: string | null } = {},
+): Promise<number> {
+  if (!ensureConfigured()) return 0;
+  try {
+    const targetEmails = await preparateurTargetEmails();
+
+    // Retire les absents du jour (congé/maladie/récup… approuvé couvrant la date
+    // du jour). Faute de pointage entrepôt, le congé validé est le seul signal
+    // fiable d'absence — s'il est indisponible, on notifie tout le monde.
+    try {
+      const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(new Date());
+      const conges = await listAllConges();
+      for (const c of conges) {
+        if (c.status === "approved" && rangesOverlap(c.start, c.end, today, today)) {
+          targetEmails.delete(c.email.trim().toLowerCase());
+        }
+      }
+    } catch { /* congés indisponibles → on garde l'ensemble des préparateurs */ }
+
+    const except = opts.exceptEmail?.trim().toLowerCase() || null;
+    if (except) targetEmails.delete(except);
+    if (targetEmails.size === 0) return 0;
+
+    const subs = await prisma.pushSubscription.findMany();
+    const targets = subs.filter((s) => s.email && targetEmails.has(s.email.trim().toLowerCase()));
+    if (targets.length === 0) return 0;
+
+    const gone: string[] = [];
+    const results = await Promise.all(
+      targets.map(async (t) => {
+        const r = await sendPush({ endpoint: t.endpoint, p256dh: t.p256dh, auth: t.auth }, payload);
+        if (r === "gone") gone.push(t.endpoint);
+        return r === "ok";
+      }),
+    );
+    if (gone.length) {
+      await prisma.pushSubscription.deleteMany({ where: { endpoint: { in: gone } } }).catch(() => {});
+    }
+    return results.filter(Boolean).length;
+  } catch (e) {
+    console.error("[push] notifyPreparateursPresents échec:", e);
     return 0;
   }
 }

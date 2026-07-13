@@ -468,6 +468,17 @@ export async function setDeliveryMiseEnPrep(docEntry: number, misEnPrep: boolean
   return at;
 }
 
+/** BL « mis en préparation » ? (lecture ciblée) — true si lâché à l'entrepôt. */
+export async function getDeliveryMiseEnPrepOne(docEntry: number): Promise<boolean> {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: LIV_MISEPREP_PREFIX + docEntry } });
+    if (!row) return false;
+    return (JSON.parse(row.value) as { misEnPrep?: boolean }).misEnPrep === true;
+  } catch {
+    return false;
+  }
+}
+
 /* ──────────────── Commande « BON DE COMMANDE » (lots à affecter) ────────────────
  * Une commande créée en « bon de commande » (choix explicite, précommande, ou
  * export) part SANS lot auto (chaque ligne en EM_PENDING) : on n'affecte JAMAIS
