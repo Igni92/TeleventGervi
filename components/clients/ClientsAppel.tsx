@@ -29,6 +29,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Search, Loader2, Phone, AlertTriangle, PackageX, UserCheck, Users, ExternalLink,
@@ -44,6 +45,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { SALESPEOPLE, displayNameFromSlp, normalizeSlp } from "@/lib/salespeople";
+import { ContextMenu, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, useContextMenu } from "@/components/ui/context-menu";
 import { SortArrow, nextSort, type SortDir } from "@/components/ui/sort";
 import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
 import { parisDayOfWeek } from "@/lib/paris-time";
@@ -152,20 +154,33 @@ type AssignPatch = Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTe
 
 /** Ligne mémoïsée : cocher / changer un select ne re-rend QUE la ligne concernée. */
 const PlanRow = memo(function PlanRow({
-  c, sel, today, canManage, showTel, showJours, showLastOrder, showLastCall, showIncidents, showVendeur, showCommercial,
-  onToggle, onAssign, onReminder, onToggleActive,
+  c, sel, selCount, today, canManage, showTel, showJours, showLastOrder, showLastCall, showIncidents, showVendeur, showCommercial,
+  onToggle, onAssign, onReminder, onToggleActive, onCtxAssign, onCtxActivate, onCtxDeactivate,
 }: {
-  c: PlanClient; sel: boolean; today: number; canManage: boolean;
+  c: PlanClient; sel: boolean; selCount: number; today: number; canManage: boolean;
   showTel: boolean; showJours: boolean; showLastOrder: boolean; showLastCall: boolean;
   showIncidents: boolean; showVendeur: boolean; showCommercial: boolean;
   onToggle: (id: string) => void;
   onAssign: (id: string, patch: AssignPatch) => void;
   onReminder: (c: PlanClient) => void;
   onToggleActive: (c: PlanClient) => void;
+  onCtxAssign: (id: string, field: "vendeur" | "commercial", v: string | null) => void;
+  onCtxActivate: (id: string) => void;
+  onCtxDeactivate: (id: string) => void;
 }) {
+  const router = useRouter();
+  const { menu, openAt, close } = useContextMenu(240, 340);
   const tel = firstTel(c);
+  // Cible du clic droit : la SÉLECTION si la ligne cliquée en fait partie (≥ 2
+  // cochés), sinon ce seul client — cohérent avec la barre de sélection.
+  const targetCount = sel && selCount > 1 ? selCount : 1;
+  const vNorm = c.vendeur ? normalizeSlp(c.vendeur) : null;
+  const cNorm = c.commercial ? normalizeSlp(c.commercial) : null;
   return (
-    <tr className={`transition-colors ${sel ? "bg-brand-50/60 dark:bg-brand-950/30" : "hover:bg-secondary/30"} ${!c.activeTelevente ? "opacity-60" : ""}`}>
+    <>
+    <tr
+      onContextMenu={openAt}
+      className={`transition-colors ${sel ? "bg-brand-50/60 dark:bg-brand-950/30" : "hover:bg-secondary/30"} ${!c.activeTelevente ? "opacity-60" : ""}`}>
       {canManage && <td className="w-9 px-3 py-2"><Checkbox checked={sel} onChange={() => onToggle(c.id)} /></td>}
       <td className="px-3 py-2">
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -208,9 +223,79 @@ const PlanRow = memo(function PlanRow({
         </Link>
       </td>
     </tr>
+
+    {/* Clic droit sur la ligne — mêmes actions que la barre de sélection
+        (assigner vendeur/commercial, activer, désactiver) ET que la colonne
+        Actions (rappel, activer/désactiver, ouvrir la fiche). S'applique à la
+        sélection quand la ligne cliquée est cochée (≥ 2), sinon à ce client. */}
+    <ContextMenu
+      menu={menu}
+      onClose={close}
+      minWidth={238}
+      header={
+        <div className="px-3 py-1.5 border-b border-border/60">
+          <p className="text-[11.5px] font-semibold text-foreground truncate">
+            {targetCount > 1 ? `${targetCount} clients sélectionnés` : c.nom}
+          </p>
+        </div>
+      }
+    >
+      {canManage && (
+        <>
+          <ContextMenuLabel>Assigner au vendeur</ContextMenuLabel>
+          <SlpPicker current={targetCount > 1 ? null : vNorm} onPick={(v) => { onCtxAssign(c.id, "vendeur", v); close(); }} />
+          <ContextMenuLabel>Assigner au commercial</ContextMenuLabel>
+          <SlpPicker current={targetCount > 1 ? null : cNorm} onPick={(v) => { onCtxAssign(c.id, "commercial", v); close(); }} />
+          <ContextMenuSeparator />
+        </>
+      )}
+      <ContextMenuItem icon={Bell} onClick={() => { onReminder(c); close(); }}>Programmer un rappel</ContextMenuItem>
+      {canManage && (targetCount > 1 ? (
+        <>
+          <ContextMenuItem icon={Check} accent="success" onClick={() => { onCtxActivate(c.id); close(); }}>Activer ({targetCount})</ContextMenuItem>
+          <ContextMenuItem icon={Power} accent="danger" onClick={() => { onCtxDeactivate(c.id); close(); }}>Désactiver ({targetCount})</ContextMenuItem>
+        </>
+      ) : c.activeTelevente ? (
+        <ContextMenuItem icon={Power} accent="danger" onClick={() => { onCtxDeactivate(c.id); close(); }}>Désactiver en télévente</ContextMenuItem>
+      ) : (
+        <ContextMenuItem icon={Check} accent="success" onClick={() => { onCtxActivate(c.id); close(); }}>Activer en télévente</ContextMenuItem>
+      ))}
+      <ContextMenuSeparator />
+      <ContextMenuItem icon={ExternalLink} onClick={() => { router.push(`/clients/${c.id}`); close(); }}>Ouvrir la fiche</ContextMenuItem>
+    </ContextMenu>
+    </>
   );
 });
 PlanRow.displayName = "PlanRow";
+
+/** Sélecteur compact de commercial (clic droit) — 3 trigrammes + « retirer ». */
+function SlpPicker({ current, onPick }: { current: string | null; onPick: (v: string | null) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1 px-2 pb-1.5 pt-0.5">
+      {VENDEURS.map((v) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onPick(v)}
+          title={displayNameFromSlp(v) ?? v}
+          className={`h-6 px-2 rounded-md text-[11.5px] font-semibold border transition-colors ${
+            current === v ? "bg-brand-600 border-brand-600 text-white" : "border-border text-foreground/80 hover:bg-secondary/60"
+          }`}
+        >
+          {displayNameFromSlp(v) ?? v}
+        </button>
+      ))}
+      <button
+        type="button"
+        onClick={() => onPick(null)}
+        title="Retirer l'assignation"
+        className="h-6 px-2 rounded-md text-[11.5px] font-medium border border-border text-muted-foreground hover:bg-secondary/60 transition-colors"
+      >
+        —
+      </button>
+    </div>
+  );
+}
 
 export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
   const [search, setSearch] = useState("");
@@ -330,6 +415,28 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
       });
     } catch { toast.error("Échec de l'action en série"); fetchData(); }
     finally { setConfirmLoading(false); }
+  };
+
+  // ── Actions du clic droit (ligne) : ciblent la SÉLECTION quand la ligne
+  //    cliquée est cochée (≥ 2), sinon le seul client. Mêmes écritures que la
+  //    barre de sélection et la colonne Actions. ──
+  const ctxTargets = (id: string): string[] =>
+    selected.has(id) && selected.size > 1 ? Array.from(selected) : [id];
+
+  const ctxAssign = async (id: string, field: "vendeur" | "commercial", v: string | null) => {
+    const ids = ctxTargets(id);
+    const patch: AssignPatch = field === "vendeur" ? { vendeur: v } : { commercial: v };
+    if (ids.length === 1) { assign(ids[0], patch); return; }   // ligne seule → endpoint unitaire (silencieux)
+    try {
+      const updated = await postBulk(ids, patch);
+      toast.success(`${updated} client(s) → ${field} ${v ? (displayNameFromSlp(v) ?? v) : "—"}`);
+      setSelected(new Set());
+    } catch { toast.error("Échec de l'assignation"); fetchData(); }
+  };
+  const ctxActivate = (id: string) => activate(ctxTargets(id));
+  const ctxDeactivate = (id: string) => {
+    const ids = ctxTargets(id);
+    setConfirmDeactivate({ ids, nom: ids.length === 1 ? data.find((x) => x.id === id)?.nom : undefined });
   };
 
   const syncVendeurs = async () => {
@@ -603,6 +710,7 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
                   key={c.id}
                   c={c}
                   sel={selected.has(c.id)}
+                  selCount={selected.size}
                   today={today}
                   canManage={canManage}
                   showTel={show("tel")}
@@ -616,6 +724,9 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
                   onAssign={assign}
                   onReminder={setReminderClient}
                   onToggleActive={toggleActive}
+                  onCtxAssign={ctxAssign}
+                  onCtxActivate={ctxActivate}
+                  onCtxDeactivate={ctxDeactivate}
                 />
               ))}
             </tbody>
