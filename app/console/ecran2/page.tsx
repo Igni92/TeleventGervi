@@ -247,11 +247,14 @@ function ClientBanner({
   if (!clientName) {
     return (
       <div className="shrink-0 flex flex-col-reverse lg:flex-row lg:items-center lg:justify-between gap-2">
-        <header className="panel w-fit max-w-full px-3.5 py-2 flex items-center gap-2.5">
-          <h1 className="text-[15px] font-semibold tracking-tight text-muted-foreground">
-            En attente d&apos;un client…
-          </h1>
-          <Ecran1Link />
+        <header className="panel w-fit max-w-full px-4 py-2.5">
+          <p className="kicker mb-1.5">Console de commande</p>
+          <div className="flex items-center gap-2.5">
+            <h1 className="font-display text-[22px] sm:text-[26px] font-semibold tracking-tight text-muted-foreground leading-none">
+              En attente d&apos;un client…
+            </h1>
+            <Ecran1Link />
+          </div>
         </header>
         {/* Recherche d'un compte — en haut à DROITE */}
         <div className="w-full lg:w-[320px] shrink-0">{searchRow}</div>
@@ -267,13 +270,18 @@ function ClientBanner({
 
   const incidents = info?.openIncidents ?? 0;
 
-  // ── Bande client COMPACTE — Écran 2 = prise de commande uniquement. Les
-  //    informations commerce (interlocuteurs, habitudes, commercial, e-mail…)
-  //    vivent sur l'Écran 1. Une seule ligne, largeur au contenu (w-fit).
+  // ── Bandeau client — Écran 2 = prise de commande. Le nom du client est le
+  //    HÉRO du bandeau (même traitement « display » que le « Bonjour » de
+  //    l'accueil : kicker + grand titre), pour l'identifier au premier coup
+  //    d'œil pendant la saisie. Les infos commerce (interlocuteurs, habitudes,
+  //    commercial, e-mail…) vivent sur l'Écran 1 ; ici on garde une méta légère
+  //    (type, incidents, téléphones, mini-frise). Largeur au contenu (w-fit).
   return (
     <div className="shrink-0 flex flex-col-reverse lg:flex-row lg:items-start lg:justify-between gap-2">
-      <header className="panel w-fit max-w-full px-3.5 py-1.5">
-        <div className="flex items-center gap-2.5 flex-wrap min-w-0">
+      <header className="panel w-fit max-w-full px-4 py-2.5">
+        <p className="kicker mb-1.5">Compte · prise de commande</p>
+        {/* Nom client — HÉRO du bandeau (grand titre display, comme l'accueil). */}
+        <div className="flex items-center gap-2.5 min-w-0">
           {/* Le nom EST le lien vers la fiche complète. */}
           {clientId ? (
             <Link
@@ -281,12 +289,12 @@ function ClientBanner({
               target="_blank"
               rel="noopener noreferrer"
               title="Ouvrir la fiche client complète (nouvel onglet)"
-              className="text-[16px] font-semibold tracking-tight text-foreground leading-tight truncate max-w-[320px] hover:text-brand-600 dark:hover:text-brand-400 hover:underline decoration-2 underline-offset-2 transition-colors"
+              className="font-display text-[24px] sm:text-[27px] font-semibold tracking-tight text-foreground leading-none truncate max-w-[440px] hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
             >
               {clientName}
             </Link>
           ) : (
-            <h1 className="text-[16px] font-semibold tracking-tight text-foreground leading-tight truncate max-w-[320px]">
+            <h1 className="font-display text-[24px] sm:text-[27px] font-semibold tracking-tight text-foreground leading-none truncate max-w-[440px]">
               {clientName}
             </h1>
           )}
@@ -299,6 +307,9 @@ function ClientBanner({
               {info.type}
             </span>
           )}
+        </div>
+        {/* Méta légère — incidents, téléphones, mini-frise, retour Écran 1. */}
+        <div className="mt-2 flex items-center gap-2.5 flex-wrap min-w-0">
           {incidents > 0 && (
             <span
               className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
