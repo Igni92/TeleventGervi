@@ -1928,7 +1928,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
           className="flex items-center justify-between gap-2 mb-2 shrink-0 cursor-pointer select-none"
         >
           <p className="kicker inline-flex items-center gap-1.5">
-            <ShoppingCart className="h-3 w-3" /> Commande
+            {/* En modification : le n° de BL remplace le libellé « Commande »
+                (caddie + numéro, sans le mot). En saisie neuve (pas de BL encore),
+                on garde « Commande ». */}
+            <ShoppingCart className="h-3 w-3" /> {modif ? `BL # ${modif.docNum}` : "Commande"}
           </p>
           <div className="flex items-center gap-1.5">
             {/* Dupliquer la DERNIÈRE commande du client — pré-remplit le panier */}
