@@ -1943,6 +1943,9 @@ const OrderRow = memo(function OrderRow({
       setDepartedBy(by);
       setDepartedAt(at);
       onPatchDoc(doc.docEntry, { departedBy: by, departedAt: at });
+      // Alerte douce (lot présent mais périmé, ou lots non vérifiés) — le départ
+      // est accepté, mais on prévient le préparateur.
+      if (next && j?.warning) toast.warning(j.warning);
     } catch {
       rollback();
       toast.error("Échec de l'enregistrement");
