@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { ChevronLeft, ChevronRight, CalendarDays, Clock } from "lucide-react";
+import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
 import { fmtJourDate } from "@/lib/date-fr";
 
 /** Date du jour au format yyyy-mm-dd (pour <input type="date">). */
@@ -19,11 +19,13 @@ export function nowHM(): string {
  * Sélecteur de date avec flèches ◀ ▶ pour reculer / avancer d'un jour.
  *
  * La case affiche directement le format unifié des états SAP — jour + date en
- * points (« LUN 13.07.26 ») — au-dessus d'un <input type="date"> natif (invisible
+ * points (« LUN 13.07.26 ») — par-dessus un <input type="date"> natif (invisible
  * mais cliquable) qui ouvre le calendrier et reste éditable au clavier.
  *
- * Heure optionnelle : passer `time` + `onTimeChange` ajoute une ligne « heure »
- * sous la date (ex. heure de réception de la marchandise / de prise de commande).
+ * Heure optionnelle : passer `time` + `onTimeChange` ajoute l'heure À CÔTÉ de la
+ * date DANS la même case, en points (« LUN 13.07.26 14.30 ») — ex. heure de
+ * réception de la marchandise / de prise de commande. Cliquer le segment date
+ * ouvre le calendrier, cliquer le segment heure ouvre l'horloge.
  */
 export function DateStepper({
   value, onChange, className, time, onTimeChange, timeLabel,
@@ -56,61 +58,59 @@ export function DateStepper({
   };
 
   return (
-    <div className={`flex flex-col gap-1.5 ${className ?? ""}`}>
-      <div className="flex items-center gap-1.5">
-        <button
-          type="button" onClick={() => shift(-1)} aria-label="Jour précédent"
-          className="h-10 w-10 shrink-0 inline-flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-colors"
-        >
-          <ChevronLeft className="h-5 w-5" />
-        </button>
+    <div className={`flex items-center gap-1.5 ${className ?? ""}`}>
+      <button
+        type="button" onClick={() => shift(-1)} aria-label="Jour précédent"
+        className="h-10 w-10 shrink-0 inline-flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-colors"
+      >
+        <ChevronLeft className="h-5 w-5" />
+      </button>
 
-        {/* Case date : format SAP « LUN 13.07.26 » par-dessus l'input natif. */}
-        <div className="relative flex-1 min-w-0">
+      {/* Case unique « LUN 13.07.26 14.30 » : date + heure côte à côte, chaque
+          segment posé par-dessus son input natif (calendrier / horloge). */}
+      <div
+        onClick={openPicker}
+        className="flex h-10 flex-1 min-w-0 cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-md border border-input bg-background px-3 text-[13px] font-semibold uppercase tracking-wide tnum text-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background"
+      >
+        <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
+        {/* Segment DATE — « LUN 13.07.26 » */}
+        <span className="relative inline-flex items-center whitespace-nowrap">
+          <span>{value ? fmtJourDate(value) : "—"}</span>
           <input
             ref={dateRef}
             type="date"
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            onClick={openPicker}
             aria-label="Choisir la date"
-            className="peer absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
           />
-          <div className="flex h-10 w-full items-center justify-center gap-2 rounded-md border border-input bg-background px-3 text-[13px] font-semibold uppercase tracking-wide tnum text-foreground peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background">
-            <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span>{value ? fmtJourDate(value) : "—"}</span>
-          </div>
-        </div>
-
-        <button
-          type="button" onClick={() => shift(1)} aria-label="Jour suivant"
-          className="h-10 w-10 shrink-0 inline-flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-colors"
-        >
-          <ChevronRight className="h-5 w-5" />
-        </button>
-      </div>
-
-      {/* Ligne heure (optionnelle), alignée sous la case entre les deux flèches. */}
-      {onTimeChange && (
-        <div className="flex items-center gap-1.5">
-          <span aria-hidden className="h-10 w-10 shrink-0" />
-          <div className="relative flex-1 min-w-0">
-            <Clock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 z-10 h-4 w-4 text-muted-foreground" />
+        </span>
+        {/* Segment HEURE (optionnel) — « 14.30 » (points, comme la date) */}
+        {onTimeChange && (
+          <span className="relative inline-flex items-center whitespace-nowrap">
+            <span>{time ? time.replace(":", ".") : "—"}</span>
             <input
               type="time"
               value={time ?? ""}
               onChange={(e) => onTimeChange(e.target.value)}
               onClick={(e) => {
+                e.stopPropagation();
                 const el = e.currentTarget;
                 if (typeof el.showPicker === "function") { try { el.showPicker(); } catch { /* déjà ouvert : sans effet */ } }
               }}
               aria-label={timeLabel ?? "Heure"}
-              className="h-10 w-full cursor-pointer rounded-md border border-input bg-background px-9 text-[13px] font-semibold tnum text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background [&::-webkit-calendar-picker-indicator]:hidden"
+              className="absolute inset-0 h-full w-full cursor-pointer opacity-0 [&::-webkit-calendar-picker-indicator]:hidden"
             />
-          </div>
-          <span aria-hidden className="h-10 w-10 shrink-0" />
-        </div>
-      )}
+          </span>
+        )}
+      </div>
+
+      <button
+        type="button" onClick={() => shift(1)} aria-label="Jour suivant"
+        className="h-10 w-10 shrink-0 inline-flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-colors"
+      >
+        <ChevronRight className="h-5 w-5" />
+      </button>
     </div>
   );
 }
