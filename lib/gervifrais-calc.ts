@@ -157,13 +157,16 @@ export function isLotPending(lot: string | null | undefined): boolean {
   return s === "" || s === LOT_PENDING || s.startsWith(LOT_FAMILY_PREFIX);
 }
 
-/** Un VRAI lot de réception `EM<DocNum>` (chiffres) — exclut les sentinels
- *  d'attente (EM_PENDING, EM_FAM:<fruit>) et tout ce qui n'est pas « EM » + un
- *  numéro. Sert au registre des lots (crédit/débit ne visent que les vrais lots). */
+/** Un VRAI lot suivi au registre :
+ *   • `EM<DocNum>`  — lot d'une entrée marchandise (réception) ;
+ *   • `OP<NNNNN>`   — lot d'un ordre de production (produit FABRIQUÉ, cf. /assembly).
+ *  Exclut les sentinels d'attente (EM_PENDING, EM_FAM:<fruit>) et tout le reste.
+ *  Sert au registre des lots : crédit/débit ne visent que les vrais lots, et un
+ *  produit fabriqué doit être suivi par lot au même titre qu'un article reçu. */
 export function isRealLot(lot: string | null | undefined): boolean {
   const s = (lot ?? "").trim();
   if (!s || isLotPending(s)) return false;
-  return /^EM\d+$/i.test(s);
+  return /^(EM|OP)\d+$/i.test(s);
 }
 
 export type LotChoice = {

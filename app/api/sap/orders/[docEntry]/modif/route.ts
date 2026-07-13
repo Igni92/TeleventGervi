@@ -7,7 +7,7 @@ import { sap } from "@/lib/sapb1";
 import { mirrorCreatedOrder, type CreatedOrderForMirror } from "@/lib/sapMirror";
 import { getLotMaps, resolveLotDetailed, LOT_PENDING } from "@/lib/lotResolver";
 import { chooseLot, unitInfo } from "@/lib/gervifrais-calc";
-import { debitLots, creditLots, isRealLot } from "@/lib/lotLedger";
+import { debitLots, creditLots, isRealLot, getLedgerFifoLot } from "@/lib/lotLedger";
 import { getDeliveryPreparerOne, getDeliveryMiseEnPrepOne } from "@/lib/inventory";
 import { notifyPreparateursPresents } from "@/lib/push";
 
@@ -240,6 +240,9 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
     }
   }
   const lotMaps = needLot ? await getLotMaps() : null;
+  // Repli REGISTRE (produits fabriqués OP<NNNNN> / articles suivis uniquement au
+  // registre) : lot FIFO en stock par article quand le résolveur PDN est aveugle.
+  const ledgerLotByItem = needLot ? await getLedgerFifoLot(itemCodes) : new Map<string, string>();
 
   const TPF_AUTO = (process.env.GERVIFRAIS_AUTO_TAX ?? "true") !== "false";
   const expenses = new Map<number, SapExpense>();
@@ -307,7 +310,11 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
         sapOnHand: sapStockByItem.get(l.itemCode) ?? null,
         envDefault: process.env.GERVIFRAIS_LOT_DEFAUT ?? null,
       });
-      line.U_NoLot = choice.lot || LOT_PENDING;
+      // Repli REGISTRE : produit fabriqué (OP<NNNNN>) ou article suivi uniquement
+      // au registre — le résolveur PDN est aveugle, on pose le lot FIFO en stock.
+      const ledgerLot = choice.lot === LOT_PENDING && resolved.lot === null
+        ? ledgerLotByItem.get(l.itemCode) : undefined;
+      line.U_NoLot = ledgerLot || choice.lot || LOT_PENDING;
     }
 
     return line;

@@ -439,6 +439,9 @@ export async function POST(req: NextRequest) {
   //    En miroir, les "FabricationRunLine" locales encore en sentinel sur les
   //    items patchés sont mises à jour (runs du jour uniquement).
   let retroFabricationCount = 0;
+  // Débits registre des composants fabriqués à découvert désormais servis par ce
+  // lot (miroir de la retro Orders) — appliqués après PATCH SAP réussi.
+  const retroFabDebits: { itemCode: string; lot: string; qty: number }[] = [];
   try {
     type SapExitLine = {
       LineNum: number; ItemCode: string; Quantity: number; U_NoLot?: string; WarehouseCode?: string;
@@ -457,6 +460,7 @@ export async function POST(req: NextRequest) {
     const patchedItems = new Set<string>();
     for (const exit of exits) {
       const patchLines: Record<string, unknown>[] = [];
+      const exitDebits: { itemCode: string; lot: string; qty: number }[] = [];
       for (const ln of (exit.DocumentLines || [])) {
         if (ln.U_NoLot !== LOT_PENDING) continue;
         if (remainingForItem(budget, ln.ItemCode) <= 0) continue;
@@ -465,14 +469,21 @@ export async function POST(req: NextRequest) {
         const patch: Record<string, unknown> = { LineNum: ln.LineNum, U_NoLot: lotCode };
         if (whs !== ln.WarehouseCode) patch.WarehouseCode = whs;
         patchLines.push(patch);
+        exitDebits.push({ itemCode: ln.ItemCode, lot: lotCode, qty: ln.Quantity });
         patchedItems.add(ln.ItemCode);
         consumeBudget(budget, ln.ItemCode, whs, ln.Quantity);
       }
       if (patchLines.length > 0) {
         await sap.patch(`InventoryGenExits(${exit.DocEntry})`, { DocumentLines: patchLines });
         retroFabricationCount += patchLines.length;
+        retroFabDebits.push(...exitDebits); // débit après PATCH réussi
         console.log(`[GoodsReceipt] Retro lot ${lotCode} → InventoryGenExit #${exit.DocNum} (${patchLines.length} ligne(s))`);
       }
+    }
+    // Débit registre des composants fabriqués désormais servis par ce lot.
+    if (retroFabDebits.length > 0) {
+      try { await debitLots(retroFabDebits); }
+      catch (e) { console.warn("[GoodsReceipt] Débit registre rétro fabrication échoué (non-bloquant):", (e as Error).message); }
     }
 
     // Miroir local : FabricationRunLine encore en sentinel sur les items patchés

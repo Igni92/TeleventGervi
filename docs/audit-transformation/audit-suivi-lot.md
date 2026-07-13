@@ -205,19 +205,43 @@ Classifieur de départ : `lib/orderLots.ts` (pur, couvert par `lib/orderLots.tes
   en `EM_PENDING` → elle **revient** dans la file et est bloquée au départ tant qu'un
   lot présent n'est pas posé.
 
+### ✅ Lot 3 — Le registre est L'AUTORITÉ, alimenté à CHAQUE mouvement
+Décision client : *« à chaque EM et chaque sortie (bon / sortie / fabrication) la
+gestion des lots est gérée par l'app »* et *« pas de stock → pas de lot »*.
+
+- 🔴→✅ **Fabrication (`/api/sap/assembly`)** : **débit** des lots composants
+  consommés + **crédit** du lot PARENT produit sous son code `OP<NNNNN>` (nouveau
+  stock fabriqué, suivi par lot comme une réception).
+- 🔴→✅ **`isRealLot` étendu aux lots `OP<NNNNN>`** : un produit FABRIQUÉ est un vrai
+  lot au même titre qu'un article reçu (crédit/débit, proposition, départ).
+- 🔴→✅ **Repli REGISTRE à la vente + modif** (`orders`, `orders/[docEntry]/modif`) :
+  quand le résolveur PDN est aveugle (produit fabriqué, ou article suivi seulement
+  au registre), on pose le **lot FIFO en stock du registre** au lieu d'`EM_PENDING`
+  (`getLedgerFifoLot`). Un produit fabriqué (DECO…) part donc **automatiquement avec
+  son lot OP** — plus de blocage au départ. « Pas de stock, pas de lot » : un lot à
+  quantité 0 n'est jamais renvoyé.
+- 🔴→✅ **Régularisation d'inventaire** (`inventoryAdjust`) : **débit** des manques
+  (sorties) + **crédit** des excédents (entrées).
+- 🔴→✅ **Retour fournisseur** (`goods-receipts/[docEntry]/return`) : **débit** du lot
+  d'origine `EM<DocNum>` retourné.
+- 🔴→✅ **Débit à la retro fabrication** (`goods-receipts`) : les composants fabriqués
+  à découvert désormais servis par le lot reçu sont **débités** (miroir de la retro
+  Orders).
+
+Bilan : le registre `ProductBatch.quantity` est maintenant crédité/débité à
+**chaque** mouvement — réception, PO-receive, vente (BL/découvert/modif/annulation),
+fabrication (composants + parent), régularisation d'inventaire, retour fournisseur.
+
 ### 🟠 Reste (chantier / décision)
-- **Retro sur `purchase-orders/receive`** : crédit registre branché, mais la
-  **propagation rétro** (réécrire les découverts ouverts) reste inline dans
-  `goods-receipts` (à extraire). Filet : le garde-fou de départ couvre déjà le cas.
 - **Idempotence de la réception** (clé `NumAtCard`/hash) contre un double-crédit sur
   retry réseau — non fait (SAP-side).
-- **Fenêtre retro 60 j** paramétrable + **découpe partielle** des lignes (§5.4).
-- **Garde-fou stock au niveau LOT dans `chooseLot`/orders** (§5.1) : contrôle encore
-  au niveau *article*. Résiduel faible (auto-résolution = EM la plus récente) ;
-  couvert au départ (présence) et à la proposition (stock).
-- **Réconciliation registre ↔ stock physique** : si un article×entrepôt est
-  physiquement à 0, remettre à 0 les reliquats registre de ce couple (purge de la
-  dérive historique). Le filtre stock de la proposition masque déjà ces lots.
+- **Retro sur `purchase-orders/receive`** : crédit registre branché, propagation
+  rétro (réécrire les découverts) toujours inline dans `goods-receipts` (à extraire).
+  Filet : garde-fou de départ + repli registre couvrent le cas.
+- **Assemblage v1 legacy** (`assemblyLegacy`, BOM) : sans lots composants — parent non
+  crédité (le flux réel est v2/v3, couvert). À traiter si v1 encore utilisé.
+- **Réconciliation registre ↔ stock physique** : purge des reliquats historiques là où
+  l'article×entrepôt est physiquement à 0 (petit script one-shot).
 
 ### Note
 - **DLC hors périmètre** : décision client — la DLC ne pilote pas la sélection du
