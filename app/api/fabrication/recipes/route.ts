@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
   }
   const recipe = await getRecipe(parent);
   if (!recipe) {
-    return NextResponse.json({ ok: true, parentItemCode: parent, parentQty: 1, components: [], costs: [] });
+    return NextResponse.json({ ok: true, parentItemCode: parent, parentQty: 1, conserveLot: false, components: [], costs: [] });
   }
   return NextResponse.json({ ok: true, ...recipe });
 }
@@ -80,6 +80,8 @@ const PutSchema = z.object({
   parentItemCode: z.string().trim().min(1),
   /** Colis de parent produits par « tour » de recette (ex. 1 pour 1 DECO16). */
   parentQty: z.number().positive().max(999),
+  /** Conserver le lot EM du composant sur le produit fini (traçabilité amont). */
+  conserveLot: z.boolean().default(false),
   components: z.array(z.object({
     familyKey: z.string().trim().min(1),
     familyLabel: z.string().trim().min(1),
@@ -102,7 +104,7 @@ export async function PUT(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Données invalides", details: parsed.error.flatten() }, { status: 400 });
   }
-  const { parentItemCode, parentQty, components, costs } = parsed.data;
+  const { parentItemCode, parentQty, conserveLot, components, costs } = parsed.data;
 
   // Garde-fous : parent existant, pas deux fois la même famille.
   const parentRows = await prisma.$queryRawUnsafe<{ itemCode: string }[]>(
@@ -118,11 +120,11 @@ export async function PUT(req: NextRequest) {
 
   await prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRawUnsafe<{ id: string }[]>(
-      `INSERT INTO "ProductionRecipe" ("id", "parentItemCode", "parentQty", "createdAt", "updatedAt")
-       VALUES (gen_random_uuid()::text, $1, $2, NOW(), NOW())
-       ON CONFLICT ("parentItemCode") DO UPDATE SET "parentQty" = $2, "updatedAt" = NOW()
+      `INSERT INTO "ProductionRecipe" ("id", "parentItemCode", "parentQty", "conserveLot", "createdAt", "updatedAt")
+       VALUES (gen_random_uuid()::text, $1, $2, $3, NOW(), NOW())
+       ON CONFLICT ("parentItemCode") DO UPDATE SET "parentQty" = $2, "conserveLot" = $3, "updatedAt" = NOW()
        RETURNING "id";`,
-      parentItemCode, parentQty,
+      parentItemCode, parentQty, conserveLot,
     );
     const recipeId = rows[0].id;
 

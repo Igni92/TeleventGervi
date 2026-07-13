@@ -181,6 +181,33 @@ export async function GET() {
 
     // Cartes de lots + affectations EM + stock physique par article (une fois).
     const [maps, affects, stock] = await Promise.all([getLotMaps(), getEmAffects(), getItemStock(itemCodes)]);
+    // Lots hérités des produits FABRIQUÉS (conservation de lot) : un produit fini
+    // n'a aucune entrée marchandise à lui, mais peut PORTER le lot EM de son
+    // composant principal (cf. Fabrication › recette « conserver le lot »). On
+    // injecte ce lot dans les candidats de l'article pour qu'il remonte dans le
+    // sélecteur (via le repli stock de buildLotCandidates). `parentBatch`
+    // commence par « EM » UNIQUEMENT quand la conservation était active (sinon
+    // c'est un code OP synthétique, ignoré ici).
+    const fabDocsByItem = new Map<string, number[]>();
+    if (itemCodes.length > 0) {
+      try {
+        const fabRows = await prisma.$queryRawUnsafe<{ parentItemCode: string; parentBatch: string }[]>(
+          `SELECT "parentItemCode", "parentBatch" FROM "FabricationRun"
+            WHERE "status" = 'done' AND "parentBatch" LIKE 'EM%' AND "parentItemCode" = ANY($1::text[])
+            ORDER BY "createdAt" DESC LIMIT 500;`,
+          itemCodes,
+        );
+        for (const r of fabRows) {
+          const dn = Number((r.parentBatch || "").replace(/^EM/i, ""));
+          if (!Number.isFinite(dn) || dn <= 0) continue;
+          const list = fabDocsByItem.get(r.parentItemCode) ?? [];
+          if (!list.includes(dn)) { list.push(dn); fabDocsByItem.set(r.parentItemCode, list); }
+        }
+      } catch {
+        // Colonne "parentBatch" absente (migration pas encore appliquée) ou requête
+        // indisponible : pas de lot fabriqué proposé, mais la page ne casse pas.
+      }
+    }
     // Libellé lisible d'une EM (au survol) : « Reçu le jj/mm/aaaa · Fournisseur ».
     const emLabel = (dn: number): string => {
       const meta = maps.docMeta.get(dn);
@@ -202,7 +229,8 @@ export async function GET() {
         itemCode,
         orderWarehouse,
         segment,
-        emDocs: maps.byItemList.get(itemCode) ?? [],
+        // EM réelles de l'article + lot(s) EM hérité(s) d'une fabrication (produit transformé).
+        emDocs: [...(fabDocsByItem.get(itemCode) ?? []), ...(maps.byItemList.get(itemCode) ?? [])],
         warehouseOf: (dn) => maps.whsOfItemDoc.get(`${itemCode}|${dn}`) ?? null,
         affectOf: (dn) => affects.get(dn) ?? "TOUS",
         metaOf: (dn) => {

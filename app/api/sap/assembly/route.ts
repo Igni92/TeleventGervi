@@ -271,6 +271,16 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
   // ── Code OP + enregistrement du run AVANT l'appel SAP ──
   const opCode = await nextOpCode();
   const runId = randomUUID();
+  // Lot du produit FINI. Si la recette conserve le lot, il HÉRITE du lot EM du
+  // composant PRINCIPAL (1er composant avec un lot EM réel, dans l'ordre de la
+  // recette) : traçabilité amont + ce lot remonte dans le sélecteur de lots
+  // (cf. /api/bons-commande, via FabricationRun.parentBatch), un produit
+  // fabriqué n'ayant aucune entrée marchandise à lui. Sinon (ou si aucun
+  // composant n'a de lot réel résolu → tout à découvert) : le code OP, comme avant.
+  const inheritedLot = recipe.conserveLot
+    ? (runLines.find((l) => !l.pending && l.batchNumber && l.batchNumber !== LOT_PENDING)?.batchNumber ?? null)
+    : null;
+  const parentLot = inheritedLot ?? opCode;
   const snapshot = {
     opCode,
     parentQty: recipe.parentQty,
@@ -287,10 +297,10 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
   await prisma.$executeRawUnsafe(
     `INSERT INTO "FabricationRun"
        ("id", "opCode", "parentItemCode", "parentItemName", "parentColis", "warehouseCode",
-        "recipeSnapshot", "totalCost", "parentValue", "status", "createdBy")
-     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, 'pending', $10);`,
+        "recipeSnapshot", "totalCost", "parentValue", "parentBatch", "status", "createdBy")
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, 'pending', $11);`,
     runId, opCode, parentCode, parentMeta.itemName, body.parentColis, entryWarehouse,
-    JSON.stringify(snapshot), totalCost, parentValue, userLabel(session),
+    JSON.stringify(snapshot), totalCost, parentValue, parentLot, userLabel(session),
   );
   for (const l of runLines) {
     await prisma.$executeRawUnsafe(
@@ -364,9 +374,10 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
       ItemCode: parentCode,
       Quantity: parentPieceQty,
       WarehouseCode: entryWarehouse,
-      // Parent batch-managed (rare) : le lot du produit fini = code OP.
+      // Parent batch-managed : lot du produit fini = parentLot (lot EM hérité du
+      // composant si la recette conserve le lot, sinon le code OP).
       ...(parentMeta.manageBatch
-        ? { BatchNumbers: [{ BatchNumber: opCode, Quantity: parentPieceQty }] }
+        ? { BatchNumbers: [{ BatchNumber: parentLot, Quantity: parentPieceQty }] }
         : {}),
     }],
   };
@@ -384,13 +395,14 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     }, { status: 500 });
   }
 
-  // ── 2b. Traçabilité : U_NoLot = code OP sur l'entrée parent — best-effort ──
+  // ── 2b. Traçabilité : U_NoLot = lot du produit fini (lot EM hérité ou code OP)
+  //        sur l'entrée parent — best-effort ──
   try {
     type CreatedLine = { LineNum: number };
     const refetch = await sap.get<{ DocumentLines: CreatedLine[] }>(
       `/InventoryGenEntries(${entryDoc.DocEntry})?$select=DocumentLines`,
     );
-    const patchLines = (refetch.DocumentLines || []).map((l) => ({ LineNum: l.LineNum, U_NoLot: opCode }));
+    const patchLines = (refetch.DocumentLines || []).map((l) => ({ LineNum: l.LineNum, U_NoLot: parentLot }));
     if (patchLines.length > 0) {
       await sap.patch(`InventoryGenEntries(${entryDoc.DocEntry})`, { DocumentLines: patchLines });
     }

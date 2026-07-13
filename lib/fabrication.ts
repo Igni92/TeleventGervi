@@ -39,6 +39,7 @@ export type RecipeCost = { label: string; costPerColis: number };
 export type RecipeFull = {
   parentItemCode: string;
   parentQty: number;            // colis de parent produits par « tour »
+  conserveLot: boolean;         // le produit fini hérite du lot EM du composant
   components: RecipeComponent[];
   costs: RecipeCost[];
 };
@@ -66,12 +67,12 @@ export { colisInfo, type ColisInfo, type ProductColisFields } from "@/lib/colis"
 
 // ── Recette complète (avec parentQty — raw SQL) ───────────────────────
 export async function getRecipe(parentItemCode: string): Promise<RecipeFull | null> {
-  const heads = await prisma.$queryRawUnsafe<{ id: string; parentQty: number }[]>(
-    `SELECT "id", "parentQty" FROM "ProductionRecipe" WHERE "parentItemCode" = $1 LIMIT 1;`,
+  const heads = await prisma.$queryRawUnsafe<{ id: string; parentQty: number; conserveLot: boolean }[]>(
+    `SELECT "id", "parentQty", "conserveLot" FROM "ProductionRecipe" WHERE "parentItemCode" = $1 LIMIT 1;`,
     parentItemCode,
   );
   if (heads.length === 0) return null;
-  const { id, parentQty } = heads[0];
+  const { id, parentQty, conserveLot } = heads[0];
   type ComponentRow = { familyKey: string; familyLabel: string; qtyColis: number; qtyUnits: number | null };
   const [components, costs] = await Promise.all([
     prisma.$queryRawUnsafe<ComponentRow[]>(
@@ -88,6 +89,7 @@ export async function getRecipe(parentItemCode: string): Promise<RecipeFull | nu
   return {
     parentItemCode,
     parentQty: Number(parentQty) || 1,
+    conserveLot: !!conserveLot,
     // qtyUnits non NULL → ligne v3 en unités de base ; sinon legacy v2 en colis.
     components: components.map((c): RecipeComponent => (c.qtyUnits != null
       ? { familyKey: c.familyKey, familyLabel: c.familyLabel, qty: Number(c.qtyUnits), mode: "unite" }

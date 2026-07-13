@@ -102,6 +102,7 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
   // Éditeur
   const [parent, setParent] = useState<ProductHit | null>(null);
   const [parentQty, setParentQty] = useState(1);
+  const [conserveLot, setConserveLot] = useState(false);
   const [components, setComponents] = useState<ComponentLine[]>([]);
   const [costs, setCosts] = useState<CostLine[]>([]);
   const [loading, setLoading] = useState(false);
@@ -127,13 +128,14 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
       const r = await fetch(`/api/fabrication/recipes?parentItemCode=${encodeURIComponent(code)}`, { cache: "no-store" });
       const j = await r.json();
       setParentQty(Number(j.parentQty) || 1);
+      setConserveLot(!!j.conserveLot);
       setComponents((j.components ?? []).map((c: ComponentLine) => ({ ...c })));
       setCosts((j.costs ?? []).map((c: CostLine) => ({ ...c })));
-    } catch { setParentQty(1); setComponents([]); setCosts([]); }
+    } catch { setParentQty(1); setConserveLot(false); setComponents([]); setCosts([]); }
     finally { setLoading(false); }
   }, []);
 
-  const closeEditor = () => { setParent(null); setParentQty(1); setComponents([]); setCosts([]); };
+  const closeEditor = () => { setParent(null); setParentQty(1); setConserveLot(false); setComponents([]); setCosts([]); };
 
   const addFamily = (f: Family) => {
     setComponents((cur) => {
@@ -164,6 +166,7 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
         body: JSON.stringify({
           parentItemCode: parent.itemCode,
           parentQty,
+          conserveLot,
           components: components.map((l) => ({ familyKey: l.familyKey, familyLabel: l.familyLabel, qty: l.qty, mode: l.mode })),
           costs: costs.map((c) => ({ label: c.label.trim(), costPerColis: c.costPerColis || 0 })),
         }),
@@ -271,6 +274,26 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
               className="w-24 text-right text-[15px] font-semibold" />
             <span className="text-[12px] text-muted-foreground">colis de {parent.itemCode}</span>
           </div>
+
+          {/* Conservation du lot du composant (traçabilité EM) */}
+          <label className="flex items-start gap-2.5 cursor-pointer select-none rounded-lg border border-border bg-card/50 px-3 py-2.5">
+            <input
+              type="checkbox"
+              checked={conserveLot}
+              onChange={(e) => setConserveLot(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-brand-600 cursor-pointer"
+            />
+            <span className="min-w-0">
+              <span className="block text-[12.5px] font-semibold text-foreground">
+                Conserver le lot du composant (traçabilité EM)
+              </span>
+              <span className="block text-[11.5px] text-muted-foreground mt-0.5">
+                Le produit fini hérite du n° d&apos;<b>EM</b> du composant principal (au lieu d&apos;un code OP) —
+                il apparaît alors comme lot dans les bons de commande / BL. Idéal pour un transformé
+                « 1 fruit → 1 forme » (ex. Kiwi épluché ← Kiwi).
+              </span>
+            </span>
+          </label>
 
           {/* Familles — chips cliquables */}
           <div className="space-y-2">

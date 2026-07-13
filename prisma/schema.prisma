@@ -390,6 +390,11 @@ model ProductionRecipe {
   // Ratio colis : nb de colis parent produits par « tour » de recette
   // (2 DECO16 = 1 colis myrtille + 1 colis groseille + 2 colis mûre → parentQty=2).
   parentQty      Float                       @default(1)
+  // Conservation du lot : quand true, le produit fini HÉRITE du lot EM du
+  // composant principal (traçabilité amont) au lieu d'un code OP synthétique.
+  // Pertinent pour les transformés « 1 fruit → 1 forme » (ex. Kiwi épluché ←
+  // Kiwi). Choix par recette (cf. Fabrication › Recettes).
+  conserveLot    Boolean                     @default(false)
   components     ProductionRecipeComponent[]
   costs          ProductionRecipeCost[]
   createdAt      DateTime                    @default(now())
@@ -438,6 +443,10 @@ model FabricationRun {
   parentItemCode String
   parentItemName String?
   parentColis    Float
+  // Lot du produit FINI : lot EM hérité du composant (« EM<DocNum> ») quand la
+  // recette conserve le lot, sinon le code OP. Sert au sélecteur de lots à
+  // proposer ce lot pour le produit fabriqué (qui n'a pas d'entrée marchandise).
+  parentBatch    String?
   warehouseCode  String   @default("01") // magasin d'ENTRÉE du produit fini (les sorties composants portent leur propre magasin sur chaque ligne)
   recipeSnapshot Json // recette figée au moment du run
   totalCost      Float?
@@ -454,6 +463,8 @@ model FabricationRun {
   lines FabricationRunLine[]
 
   @@index([createdAt])
+  // Recherche des lots hérités d'un produit fabriqué (sélecteur de lots).
+  @@index([parentItemCode, createdAt])
 }
 
 model FabricationRunLine {
