@@ -5,7 +5,6 @@ import { getAccessScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { incrementLocalStock, decrementLocalStock } from "@/lib/stockSync";
-import { familyOf } from "@/lib/familles";
 import { getRecipe, resolveLotsForItems, packRatio, LOT_PENDING, type LotResolution } from "@/lib/fabrication";
 import { quantitesComposant } from "@/lib/fabrication-optim";
 
@@ -145,11 +144,27 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
   // ── Méta produits (parent + composants choisis) ──
   const pickedCodes = recipe.components.map((c) => (pickByFamily.get(c.familyKey) as { itemCode: string }).itemCode);
   type Meta = {
-    itemCode: string; itemName: string; groupName: string | null;
+    itemCode: string; itemName: string; familyKey: string;
     salesUnit: string | null; salesQtyPerPackUnit: number | null; manageBatch: boolean;
   };
+  // familyKey calculée par la MÊME règle que FAMILY_CTE_SQL / getFamilyItems
+  // (petits fruits par nom, sinon groupe SAP par ID « g_<itemGroup> ») : ainsi la
+  // validation d'appartenance famille COÏNCIDE avec la liste des candidats proposés
+  // par l'UI. ⚠️ Ne PAS utiliser familyOf() ici : côté JS il retombe sur
+  // « g_<groupName> » (le NOM du groupe), qui ne matche jamais un « g_<itemGroup> »
+  // — d'où le rejet à tort d'articles pourtant proposés (kiwi & tout non-petit-fruit).
   const metas = await prisma.$queryRawUnsafe<Meta[]>(
-    `SELECT "itemCode", "itemName", "groupName", "salesUnit", "salesQtyPerPackUnit", "manageBatch"
+    `SELECT "itemCode", "itemName", "salesUnit", "salesQtyPerPackUnit", "manageBatch",
+            CASE
+              WHEN UPPER("itemName") LIKE '%MYRTILLE%'  THEN 'myrtille'
+              WHEN UPPER("itemName") LIKE '%GROSEILLE%' THEN 'groseille'
+              WHEN UPPER("itemName") LIKE '%FRAMBOISE%' THEN 'framboise'
+              WHEN UPPER("itemName") LIKE '%CASSIS%'    THEN 'cassis'
+              WHEN UPPER("itemName") LIKE '%MURE%'
+                OR UPPER("itemName") LIKE '%MÛRE%'      THEN 'mure'
+              WHEN UPPER("itemName") LIKE '%FRAISE%'    THEN 'fraise'
+              ELSE 'g_' || COALESCE("itemGroup"::text, 'na')
+            END AS "familyKey"
        FROM "Product" WHERE "itemCode" = ANY($1::text[]);`,
     [parentCode, ...pickedCodes],
   );
@@ -163,11 +178,13 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
       return NextResponse.json({ error: `Article "${code}" introuvable.` }, { status: 404 });
     }
   }
-  // Intégrité : l'article choisi appartient bien à la famille demandée.
+  // Intégrité : l'article choisi appartient bien à la famille demandée. Clé
+  // calculée côté SQL (cf. metas) = même règle que la liste des candidats, donc
+  // pas de rejet d'un article que l'UI a pourtant proposé pour cette famille.
   for (const c of recipe.components) {
     const pick = pickByFamily.get(c.familyKey) as { itemCode: string; warehouse: string };
     const m = metaByCode.get(pick.itemCode) as Meta;
-    if (familyOf(m.itemName, m.groupName).key !== c.familyKey) {
+    if (m.familyKey !== c.familyKey) {
       return NextResponse.json({
         error: `"${m.itemName}" (${pick.itemCode}) n'appartient pas à la famille ${c.familyLabel}.`,
       }, { status: 400 });
