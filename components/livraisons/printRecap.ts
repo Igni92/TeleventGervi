@@ -36,6 +36,10 @@ export interface PrintContext {
   dateLabel: string;
   carrierName?: string | null;
   tourneeLabel?: string | null;
+  /** Heure d'enlèvement / de départ (« HH:MM » ou déjà formatée) — colonne dédiée. */
+  pickupTime?: string | null;
+  /** Préparateur (déjà formaté pour l'affichage). */
+  preparedBy?: string | null;
   /** Codes articles manquants (stock SAP négatif) sur ce BL. */
   missingCodes?: Set<string>;
 }
@@ -44,9 +48,19 @@ const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const num = (v: number) =>
   new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(v);
+/** « 08:00 » → « 8H00 » (heure d'enlèvement). Laisse la valeur telle quelle si
+ *  elle n'est pas au format HH:MM. */
+const fmtHeure = (h?: string | null): string | null => {
+  const s = (h ?? "").trim();
+  const m = /^(\d{1,2}):(\d{2})/.exec(s);
+  return m ? `${Number(m[1])}H${m[2]}` : (s || null);
+};
 
-/** Ouvre la fenêtre d'impression du bon de préparation d'UN BL. */
-export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
+/**
+ * Construit le document HTML du bon de préparation (PUR — testable, sans DOM).
+ * `origin` = base d'URL pour le logo (window.location.origin à l'impression).
+ */
+export function renderOrderRecapHtml(doc: PrintDoc, ctx: PrintContext, origin = ""): string {
   const missing = ctx.missingCodes ?? new Set<string>();
   const missingLines = doc.lines.filter((l) => missing.has(l.itemCode));
 
@@ -55,8 +69,10 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   const details = (l: PrintLine) =>
     [l.marque, l.condt, l.pays].map((t) => (t ?? "").trim()).filter((t) => t && t !== "—" && t !== "-");
 
-  // Case « Fait » à GAUCHE (première colonne cochée par le préparateur).
-  // Article : nom en GRAS, sans code, détails en texte brut à la suite.
+  // Case « Fait » à GAUCHE (première colonne cochée par le préparateur). L'icône
+  // MANQUANT (⚠) est dans une COLONNE dédiée à position FIXE (avant le poids), et
+  // la ligne manquante est ENCADRÉE légèrement (classe .missing) — pas barrée.
+  // Le nombre de PIÈCES (Qté) n'est plus affiché : colis + poids suffisent.
   const rows = doc.lines
     .map((l) => {
       const isMissing = missing.has(l.itemCode);
@@ -68,31 +84,36 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
           <span class="name">${esc(l.itemName)}</span>
           ${details(l).length ? `<span class="det">— ${details(l).map(esc).join(" · ")}</span>` : ""}
           ${l.lot != null ? (/^EM\d+$/.test(l.lot) ? `<span class="lot">${esc(l.lot)}</span>` : `<span class="lot pending">lot à affecter</span>`) : ""}
-          ${isMissing ? `<span class="flag">MANQUANT</span>` : ""}
         </td>
-        <td class="num">${num(l.quantity)}${l.unit?.trim() ? ` <span class="unit">${esc(l.unit.trim().toLowerCase())}</span>` : ""}</td>
+        <td class="warn">${isMissing ? "⚠" : ""}</td>
         <td class="num">${num(l.weightKg)} <span class="unit">kg</span></td>
       </tr>`;
     })
     .join("");
 
-  // Le CLIENT a sa propre case, aux côtés du transporteur et de la tournée.
-  const infos: [string, string][] = [
-    ["Client", `${doc.cardName}${doc.clientType ? ` (${doc.clientType})` : ""}`],
-    ["Transporteur", ctx.carrierName?.trim() || "Non affecté"],
-    ["Tournée", ctx.tourneeLabel?.trim() || "—"],
+  // En-tête d'infos : CLIENT (avec le n° de BL SOUS le nom), TYPE, TRANSPORTEUR,
+  // TOURNÉE, HEURE D'ENLÈVEMENT, PRÉPARÉE PAR. Chaque case peut porter une
+  // sous-ligne (`sub`) — le BL sous le client, la case SMS sous l'heure.
+  const heure = fmtHeure(ctx.pickupTime);
+  const infos: { k: string; v: string; sub?: string; smsBox?: boolean }[] = [
+    { k: "Client", v: doc.cardName, sub: `BL n°${doc.docNum}` },
+    { k: "Type", v: (doc.clientType ?? "").trim() || "—" },
+    { k: "Transporteur", v: ctx.carrierName?.trim() || "Non affecté" },
+    { k: "Tournée", v: ctx.tourneeLabel?.trim() || "—" },
+    { k: "Heure enlèvt", v: heure ?? "—", smsBox: !!heure },
+    { k: "Préparée par", v: ctx.preparedBy?.trim() || "—" },
   ];
 
   const html = `<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="utf-8" />
-<title>BL n°${doc.docNum} — ${esc(doc.cardName)}</title>
+<title>Bon de préparation</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   @page { size: A4; margin: 12mm; }
-  /* Police GLOBALE augmentée (12 → 14px) : bon lu debout, en entrepôt. */
-  body { font: 14px/1.5 "Segoe UI", Arial, sans-serif; color: #111; padding: 16px; }
+  /* Police CONVENTIONNELLE (serif Times New Roman) — document formel. */
+  body { font: 14px/1.5 "Times New Roman", Times, Georgia, serif; color: #111; padding: 16px; }
   @media print { body { padding: 0; } .noprint { display: none !important; } }
 
   header { display: flex; justify-content: space-between; align-items: center; gap: 12px;
@@ -101,23 +122,28 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   .brand img.logo { height: 52px; width: auto; object-fit: contain; }
   header .title p { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #555; }
   header .title h1 { font-size: 22px; letter-spacing: -0.3px; }
-  /* BL en PETIT, date de livraison en GRAND (jour en surgras) — repère n°1 du bon. */
+  /* Plus de BL au-dessus de la date (dupliqué dans la case Client) : date seule. */
   header .bl { text-align: right; }
-  header .bl .num { font-size: 13px; font-weight: 600; color: #333; }
-  header .bl .date { font-size: 19px; margin-top: 1px; }
+  header .bl .date { font-size: 19px; }
   header .bl .date b { font-weight: 900; }
 
-  .infos { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 0;
+  .infos { display: grid; grid-template-columns: 1.5fr 0.7fr 1.15fr 0.85fr 1.15fr 1fr; gap: 0;
            border: 1.5px solid #111; border-radius: 6px; overflow: hidden; margin-bottom: 14px; }
   .infos > div { padding: 7px 10px; border-left: 1px solid #bbb; }
   .infos > div:first-child { border-left: none; }
-  .infos p.k { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #555; }
-  .infos p.v { font-size: 15px; font-weight: 700; margin-top: 1px; }
+  .infos p.k { font-size: 9.5px; text-transform: uppercase; letter-spacing: 1px; color: #555; }
+  .infos p.v { font-size: 14px; font-weight: 700; margin-top: 1px; }
+  .infos p.sub { font-size: 11.5px; font-weight: 700; color: #333; margin-top: 2px;
+                 font-variant-numeric: tabular-nums; }
+  .infos p.sms { font-size: 10px; color: #444; margin-top: 3px; }
+  .infos p.sms .box { display: inline-block; width: 10px; height: 10px; border: 1.2px solid #111;
+                      border-radius: 2px; vertical-align: -1px; margin-right: 3px; }
 
   table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
   thead th { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #333;
              border-bottom: 2px solid #111; padding: 6px 8px; text-align: left; }
   thead th.num, td.num { text-align: right; white-space: nowrap; }
+  thead th.warn, td.warn { text-align: center; width: 40px; }
   tbody td { border-bottom: 1px solid #ccc; padding: 7px 8px; vertical-align: middle; }
   td.colis { font-size: 19px; font-weight: 800; text-align: center; width: 62px;
              font-variant-numeric: tabular-nums; }
@@ -126,11 +152,12 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   td.check { width: 46px; }
   td.check::after { content: ""; display: block; width: 17px; height: 17px;
                     border: 1.5px solid #111; border-radius: 3px; margin: 0 auto; }
-  tr.missing td { color: #999; }
-  tr.missing td.art .name { text-decoration: line-through; }
-  td.art .flag { display: inline-block; margin-left: 8px; border: 1.5px solid #111;
-                 border-radius: 3px; padding: 0 5px; font-size: 11px; font-weight: 800;
-                 letter-spacing: 0.8px; color: #111; }
+  /* Icône MANQUANT à position fixe (colonne dédiée). */
+  td.warn { font-size: 17px; line-height: 1; }
+  /* Ligne d'article MANQUANT : encadrée légèrement (pas barrée, texte lisible). */
+  tr.missing td { border-top: 1.3px solid #111; border-bottom: 1.3px solid #111; background: #f6f6f6; }
+  tr.missing td:first-child { border-left: 1.3px solid #111; }
+  tr.missing td:last-child { border-right: 1.3px solid #111; }
   td.art .lot { display: inline-block; margin-left: 8px; border: 1.5px solid #111;
                 border-radius: 3px; padding: 0 5px; font-size: 12px; font-weight: 800;
                 font-variant-numeric: tabular-nums; color: #111; }
@@ -144,7 +171,7 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   .manquants li { margin-left: 16px; font-size: 14px; }
 
   .noprint { margin-bottom: 14px; }
-  .noprint button { font: 600 13px "Segoe UI", Arial, sans-serif; padding: 8px 18px;
+  .noprint button { font: 600 13px "Times New Roman", Times, serif; padding: 8px 18px;
                     border: 1.5px solid #111; border-radius: 6px; background: #111;
                     color: #fff; cursor: pointer; }
 </style>
@@ -154,20 +181,24 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
 
   <header>
     <div class="brand">
-      <img class="logo" src="${esc(`${window.location.origin}/logo-mark.png`)}" alt="Gervifrais" />
+      <img class="logo" src="${esc(`${origin}/logo-mark.png`)}" alt="Gervifrais" />
       <div class="title">
         <p>Gervifrais · Détail livraison</p>
         <h1>Bon de préparation</h1>
       </div>
     </div>
     <div class="bl">
-      <p class="num">BL n°${doc.docNum}</p>
       <p class="date">Livraison du <b>${esc(ctx.dateLabel)}</b></p>
     </div>
   </header>
 
   <div class="infos">
-    ${infos.map(([k, v]) => `<div><p class="k">${esc(k)}</p><p class="v">${esc(v)}</p></div>`).join("")}
+    ${infos.map((i) => `<div>
+      <p class="k">${esc(i.k)}</p>
+      <p class="v">${esc(i.v)}</p>
+      ${i.sub ? `<p class="sub">${esc(i.sub)}</p>` : ""}
+      ${i.smsBox ? `<p class="sms"><span class="box"></span>SMS transporteur</p>` : ""}
+    </div>`).join("")}
   </div>
 
   <table>
@@ -176,7 +207,7 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
         <th style="text-align:center">Fait</th>
         <th style="text-align:center">Colis</th>
         <th>Article</th>
-        <th class="num">Qté</th>
+        <th class="warn"></th>
         <th class="num">Poids (kg)</th>
       </tr>
     </thead>
@@ -186,7 +217,7 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
         <td></td>
         <td style="text-align:center">${num(doc.colis)} <span class="unit">colis</span></td>
         <td class="label">Total — ${doc.lines.length} article${doc.lines.length > 1 ? "s" : ""}</td>
-        <td class="num">${num(doc.lines.reduce((s, l) => s + l.quantity, 0))}</td>
+        <td class="warn"></td>
         <td class="num">${num(doc.weightKg)} <span class="unit">kg</span></td>
       </tr>
     </tfoot>
@@ -196,7 +227,7 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
   <div class="manquants">
     <h2>⚠ Articles manquants (${missingLines.length})</h2>
     <ul>
-      ${missingLines.map((l) => `<li><b>${esc(l.itemName)}</b> — ${num(l.colis)} colis (${num(l.quantity)} un.)</li>`).join("")}
+      ${missingLines.map((l) => `<li><b>${esc(l.itemName)}</b> — ${num(l.colis)} colis</li>`).join("")}
     </ul>
   </div>` : ""}
 
@@ -204,6 +235,13 @@ export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
 </body>
 </html>`;
 
+  return html;
+}
+
+/** Ouvre la fenêtre d'impression du bon de préparation d'UN BL. */
+export function printOrderRecap(doc: PrintDoc, ctx: PrintContext): boolean {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const html = renderOrderRecapHtml(doc, ctx, origin);
   const w = window.open("", "_blank", "width=900,height=1000");
   if (!w) return false;
   w.document.open();
