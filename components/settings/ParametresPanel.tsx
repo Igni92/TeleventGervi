@@ -151,16 +151,25 @@ const ONOFF: SegOption<"on" | "off">[] = [
 ];
 
 /** Effet au clic — choix de l'animation (ou aucune). */
-type ClickFx = "sparks" | "ripple" | "rain" | "off";
+type ClickFx = "sparks" | "nova" | "radar" | "ripple" | "bloom" | "rain" | "off";
 const CLICK_FX: SegOption<ClickFx>[] = [
   { id: "sparks", label: "Étincelles", hint: "Éclat de particules or" },
+  { id: "nova",   label: "Supernova",  hint: "Cœur incandescent, éclat en croix et constellation" },
+  { id: "radar",  label: "Radar",      hint: "Ping sonar : réticule, balayage rotatif et échos" },
   { id: "ripple", label: "Onde d'eau", hint: "Anneaux concentriques" },
-  { id: "rain",   label: "Cascade",    hint: "Gouttes qui tombent jusqu'en bas" },
+  { id: "bloom",  label: "Aurore",     hint: "Halo lumineux diffus, teinté marque" },
+  { id: "rain",   label: "Cascade",    hint: "Gouttes d'eau 3D qui tombent jusqu'en bas" },
   { id: "off",    label: "Aucun" },
 ];
 /** Normalise la valeur stockée (« on » historique → « sparks »). */
 function readClickFx(v: string): ClickFx {
-  return v === "off" ? "off" : v === "ripple" ? "ripple" : v === "rain" ? "rain" : "sparks";
+  return v === "off" ? "off"
+    : v === "nova" ? "nova"
+    : v === "radar" ? "radar"
+    : v === "ripple" ? "ripple"
+    : v === "bloom" ? "bloom"
+    : v === "rain" ? "rain"
+    : "sparks";
 }
 
 type DensityId = (typeof DENSITES)[number]["id"];
