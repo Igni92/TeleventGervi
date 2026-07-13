@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import { SurfaceCard } from "@/components/ui/surface-card";
-import { DateStepper, todayISO } from "@/components/ui/date-stepper";
+import { DateStepper, todayISO, nowHM } from "@/components/ui/date-stepper";
 import { designationProduit } from "@/lib/produit-designation";
 import { DesignationChips, Chip } from "./DesignationChips";
 import { SupplierPicker, ProductPicker, type Supplier, type ProductHit } from "./GoodsReceiptForm";
@@ -28,6 +28,7 @@ const WAREHOUSES: { code: "000" | "01" | "R1"; label: string }[] = [
 export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [dueDate, setDueDate] = useState(todayISO());
+  const [orderTime, setOrderTime] = useState(nowHM());   // heure de prise de commande
   const [numAtCard, setNumAtCard] = useState("");
   const [comment, setComment] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
@@ -42,7 +43,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
   const updateLine = (i: number, patch: Partial<Line>) => setLines((c) => c.map((l, k) => k === i ? { ...l, ...patch } : l));
   const removeLine = (i: number) => setLines((c) => c.filter((_, k) => k !== i));
   const totalHT = lines.reduce((s, l) => { const p = l.price === "" ? null : parseFloat(l.price); return s + (p != null ? p * l.packageQuantity * l.ratio : 0); }, 0);
-  const reset = () => { setSupplier(null); setNumAtCard(""); setComment(""); setLines([]); setDueDate(todayISO()); };
+  const reset = () => { setSupplier(null); setNumAtCard(""); setComment(""); setLines([]); setDueDate(todayISO()); setOrderTime(nowHM()); };
 
   const submit = async () => {
     if (!supplier) { toast.error("Sélectionne un fournisseur"); return; }
@@ -54,7 +55,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          cardCode: supplier.cardCode, dueDate, numAtCard: numAtCard.trim() || undefined, comment: comment.trim() || undefined,
+          cardCode: supplier.cardCode, dueDate, orderTime: orderTime || undefined, numAtCard: numAtCard.trim() || undefined, comment: comment.trim() || undefined,
           lines: lines.map((l) => ({ itemCode: l.itemCode, packageQuantity: l.packageQuantity, warehouseCode: l.warehouseCode, price: l.price ? parseFloat(l.price) : undefined })),
         }),
       });
@@ -89,6 +90,10 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
         <div className="space-y-1.5">
           <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Livraison prévue</label>
           <DateStepper value={dueDate} onChange={setDueDate} />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Prise de commande (heure)</label>
+          <Input type="time" value={orderTime} onChange={(e) => setOrderTime(e.target.value)} aria-label="Heure de prise de commande" className="tnum text-center font-semibold" />
         </div>
       </div>
 

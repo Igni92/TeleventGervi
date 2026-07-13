@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
   }
 
   let body: {
-    cardCode?: string; dueDate?: string; numAtCard?: string; comment?: string;
+    cardCode?: string; dueDate?: string; orderTime?: string; numAtCard?: string; comment?: string;
     lines?: { itemCode: string; packageQuantity: number; warehouseCode: string; price?: number }[];
   };
   try { body = await req.json(); }
@@ -49,6 +49,9 @@ export async function POST(req: NextRequest) {
   const cardCode = body.cardCode.trim();
   const today = new Date().toISOString().slice(0, 10);
   const due = body.dueDate ? new Date(body.dueDate).toISOString().slice(0, 10) : today;
+  // Heure de prise de commande « HH:MM » : SAP DocDate est sans heure → reportée
+  // dans les Comments (« … · Commande à 09h15 »), visible sur la CF et l'historique.
+  const orderTime = (body.orderTime && /^([01]\d|2[0-3]):[0-5]\d$/.test(body.orderTime)) ? body.orderTime : null;
 
   // Ratio colis → pie depuis le catalogue local.
   const codes = Array.from(new Set(body.lines.map((l) => l.itemCode)));
@@ -75,7 +78,10 @@ export async function POST(req: NextRequest) {
     DocDate: today,
     DocDueDate: due,
     TaxDate: today,
-    Comments: body.comment?.trim() || docLabel("CF", session.user?.name, session.user?.email),
+    Comments: [
+      body.comment?.trim() || docLabel("CF", session.user?.name, session.user?.email),
+      orderTime ? `Commande à ${orderTime.replace(":", "h")}` : null,
+    ].filter(Boolean).join(" · "),
     DocumentLines,
   };
   if (body.numAtCard?.trim()) payload.NumAtCard = body.numAtCard.trim();
