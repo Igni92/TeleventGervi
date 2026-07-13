@@ -1,13 +1,13 @@
 /**
  * Décomposition d'un article en désignation complète, dans l'ordre métier
- * demandé : Fruit · Pays · Marque · Variété · Condt.
+ * (charte Écran 2) : Fruit · Marque · Condt · Variété · Pays.
  *
  * Source des champs (SAP / catalogue local, cf. model Product) :
  *   - Fruit   = itemName  (ex. « Framboise », « Cerise », « Abricot »)
- *   - Pays    = uPays      (U_Pays      — ex. « Portugal »)
  *   - Marque  = uMarque    (U_GER_Marque — ex. « Driscoll's »)
- *   - Variété = (pas de champ dédié pour l'instant → vide)
  *   - Condt   = uCondi      (U_GER_Det_Condt — ex. « 12x125g »)
+ *   - Variété = (pas de champ dédié pour l'instant → vide)
+ *   - Pays    = uPays      (U_Pays      — ex. « Portugal »)
  *
  * Utilisé par la page Stocks, le formulaire d'entrée marchandise et le détail
  * d'une entrée — pour présenter partout la même désignation décomposée.
@@ -15,10 +15,10 @@
 
 export interface ProduitDesignation {
   fruit: string;
-  pays: string;
   marque: string;
-  variete: string;
   condt: string;
+  variete: string;
+  pays: string;
 }
 
 export interface ProduitAttributs {
@@ -47,21 +47,21 @@ export function ouVide(v: string | null | undefined): string {
   return clean(v) || VIDE;
 }
 
-/** Décompose un article dans l'ordre Fruit · Pays · Marque · Variété · Condt. */
+/** Décompose un article dans l'ordre Fruit · Marque · Condt · Variété · Pays. */
 export function designationProduit(p: ProduitAttributs): ProduitDesignation {
   return {
     fruit: clean(p.itemName) || VIDE,
-    pays: clean(p.uPays) || VIDE,
     marque: clean(p.uMarque) || VIDE,
-    variete: clean(p.uVariete) || clean(p.frgnName) || VIDE,
     condt: clean(p.uCondi) || VIDE,
+    variete: clean(p.uVariete) || clean(p.frgnName) || VIDE,
+    pays: clean(p.uPays) || VIDE,
   };
 }
 
-/** Désignation complète sur une ligne — « Framboise · Portugal · Driscoll's · 12x125g ». */
+/** Désignation complète sur une ligne — « Framboise · Driscoll's · 12x125g · Portugal ». */
 export function designationCourte(p: ProduitAttributs): string {
   const d = designationProduit(p);
-  return [d.fruit, d.pays, d.marque, d.variete, d.condt]
+  return [d.fruit, d.marque, d.condt, d.variete, d.pays]
     .filter((x) => x && x !== VIDE)
     .join(" · ");
 }

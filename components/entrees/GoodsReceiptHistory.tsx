@@ -901,10 +901,10 @@ function ReceiptDetail({
               <th className={`text-left font-semibold w-24 ${th}`}>Qté</th>
               <th className={`text-left font-semibold w-28 ${th}`}>Code Article</th>
               <th className={`text-left font-semibold ${th}`}>Fruit</th>
-              <th className={`text-left font-semibold ${th}`}>Pays</th>
               <th className={`text-left font-semibold ${th}`}>Marque</th>
-              <th className={`text-left font-semibold ${th}`}>Variété</th>
               <th className={`text-left font-semibold ${th}`}>Condt</th>
+              <th className={`text-left font-semibold ${th}`}>Variété</th>
+              <th className={`text-left font-semibold ${th}`}>Pays</th>
               <th className={`text-left font-semibold w-40 ${th}`}>DLC</th>
               {!restricted && <th className={`text-right font-semibold w-24 ${th}`}>PU HT</th>}
               {!restricted && <th className={`text-right font-semibold w-24 ${th}`}>Total HT</th>}
@@ -919,10 +919,10 @@ function ReceiptDetail({
                   <td className={`tnum whitespace-nowrap ${td}`}>{fmtColis(l.packageQuantity)} <span className="text-muted-foreground">colis</span></td>
                   <td className={`font-mono ${td}`}>{l.itemCode}</td>
                   <td className={`text-foreground ${td}`}>{dz.fruit}</td>
-                  <td className={td}><Chip kind="pays">{dz.pays}</Chip></td>
                   <td className={td}><Chip kind="marque">{dz.marque}</Chip></td>
-                  <td className={td}><Chip kind="variete">{dz.variete}</Chip></td>
                   <td className={td}><Chip kind="condt">{dz.condt}</Chip></td>
+                  <td className={td}><Chip kind="variete">{dz.variete}</Chip></td>
+                  <td className={td}><Chip kind="pays">{dz.pays}</Chip></td>
                   <td className={td}>
                     {/* DLC (fraîcheur) du lot — sur la ligne, éditable */}
                     <div className="flex items-center gap-1.5">
