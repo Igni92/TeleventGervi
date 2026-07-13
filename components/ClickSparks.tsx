@@ -22,9 +22,11 @@ import { SETTING_KEYS, readSetting, onSettingChange } from "@/components/setting
  * Règles communes :
  *   - PC UNIQUEMENT : `pointerType === "mouse"` (une tape tactile / stylet ne
  *     déclenche jamais) ;
- *   - déclenché DÈS l'appui (`pointerdown`, pas `click`) → aucun délai, on peut
- *     spam-cliquer ; le double/triple-clic n'entraîne PAS de sélection de texte
- *     (preventDefault sur les clics multiples en zone morte) ;
+ *   - déclenché sur un VRAI clic (pointeur quasi immobile entre l'appui et le
+ *     relâché, et aucune sélection de texte) : rester appuyé pour sélectionner
+ *     n'active jamais l'effet ; le spam-clic reste possible ; un cooldown réglable
+ *     (`televente:clickSparksDelay`) peut espacer les effets ; le double/triple-clic
+ *     n'entraîne PAS de sélection de texte (preventDefault en zone morte) ;
  *   - jamais sur un élément interactif (bouton, lien, champ, ligne cliquable) —
  *     détection par ancêtre interactif ET par curseur calculé ;
  *   - coupé d'office si animations désactivées (data-reduce-anim) ou si le
@@ -48,7 +50,7 @@ const DEAD_CURSORS = new Set(["auto", "default"]);
 const MAX_PARTICLES = 1600;
 
 type Kind =
-  | "dot" | "ring" | "ripple" | "drop"      // effets historiques
+  | "dot" | "ring" | "ripple" | "disc" | "drop"  // effets historiques
   | "core" | "flare" | "star"               // supernova
   | "reticle" | "sweep" | "blip"            // radar
   | "bloom";                                // aurore
@@ -93,13 +95,21 @@ export function ClickSparks() {
   const particles = useRef<Particle[]>([]);
   const raf = useRef<number | null>(null);
   const mode = useRef<Mode>("sparks");
+  const delay = useRef<number>(0);   // cooldown (ms) entre deux effets — réglable
+  const lastBurst = useRef<number>(0);
 
   useEffect(() => {
     mode.current = readMode();
+    const readDelay = () => {
+      const v = Number(readSetting(SETTING_KEYS.clickSparksDelay, "0"));
+      delay.current = Number.isFinite(v) && v > 0 ? Math.min(v, 5000) : 0;
+    };
+    readDelay();
     const offSetting = onSettingChange((key) => {
       if (key === SETTING_KEYS.clickSparks || key === SETTING_KEYS.animations) {
         mode.current = readMode();
       }
+      if (key === SETTING_KEYS.clickSparksDelay) readDelay();
     });
 
     const canvas = canvasRef.current!;
@@ -140,6 +150,21 @@ export function ClickSparks() {
           ctx.strokeStyle = `hsl(${p.hue} ${p.sat}% ${p.light}% / ${p.alpha * fade})`;
           ctx.lineWidth = (p.kind === "ripple" ? 2.4 : 2) * (1 - t) + 0.4;
           ctx.stroke();
+
+        /* ── Corps d'eau translucide qui s'étend sous les anneaux (onde) ── */
+        } else if (p.kind === "disc") {
+          const eased = 1 - Math.pow(1 - t, 2);
+          const r = 4 + eased * p.maxR;
+          const a = p.alpha * (1 - t);
+          ctx.save();
+          if (d) ctx.globalCompositeOperation = "lighter";
+          const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+          g.addColorStop(0,   `hsl(${p.hue} ${p.sat}% ${p.light}% / ${a * 0.5})`);
+          g.addColorStop(0.7, `hsl(${p.hue} ${p.sat}% ${p.light}% / ${a * 0.12})`);
+          g.addColorStop(1,   `hsl(${p.hue} ${p.sat}% ${p.light}% / 0)`);
+          ctx.fillStyle = g;
+          ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
         } else if (p.kind === "drop") {
           // Goutte d'eau « 3D » : bille vitreuse ombrée + reflet spéculaire, avec
           // PARALLAXE DE PROFONDEUR (z) — les gouttes proches sont plus grosses et
@@ -318,13 +343,26 @@ export function ClickSparks() {
           ctx.restore();
 
         } else {
+          // Étincelle : point avec halo additif (nuit) + cœur clair — plus « braise ».
           p.vx *= 0.94;                             // friction
           p.vy = p.vy * 0.94 + 0.11;                // + gravité légère
           p.x += p.vx;
           p.y += p.vy;
+          const r = Math.max(0.4, p.size * (1 - t * 0.8));
+          const a = p.alpha * fade;
+          if (d) {
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3.2);
+            g.addColorStop(0, `hsl(${p.hue} ${p.sat}% ${Math.min(p.light + 8, 88)}% / ${a * 0.6})`);
+            g.addColorStop(1, `hsl(${p.hue} ${p.sat}% ${p.light}% / 0)`);
+            ctx.fillStyle = g;
+            ctx.beginPath(); ctx.arc(p.x, p.y, r * 3.2, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+          }
           ctx.beginPath();
-          ctx.arc(p.x, p.y, Math.max(0.4, p.size * (1 - t * 0.8)), 0, Math.PI * 2);
-          ctx.fillStyle = `hsl(${p.hue} ${p.sat}% ${p.light}% / ${p.alpha * fade})`;
+          ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+          ctx.fillStyle = `hsl(${p.hue} ${Math.min(p.sat + 4, 100)}% ${Math.min(p.light + 14, 92)}% / ${a})`;
           ctx.fill();
         }
         alive.push(p);
@@ -372,32 +410,59 @@ export function ClickSparks() {
       return Number.isFinite(h) ? h : 45;
     };
 
-    /* ── Étincelles : éclat de particules or + anneau de choc ── */
+    /* ── Étincelles : éclat de braises (teinte marque) + double anneau de choc ── */
     const burstSparks = (x: number, y: number) => {
       const now = performance.now();
       const d = dark();
-      const count = 12 + Math.floor(Math.random() * 5);
+      const hue = brandHue();
+      // Flash de cœur blanc-chaud (donne le « pop » lumineux de départ).
+      push({
+        x, y, vx: 0, vy: 0, size: 0, hue, sat: 100, light: 80, alpha: 0.85,
+        born: now, delay: 0, life: 220, kind: "core", maxR: 15,
+      });
+      // Gerbe de particules — teintées marque avec légère variance chaude.
+      const count = 14 + Math.floor(Math.random() * 6);
       for (let i = 0; i < count; i++) {
         const angle = Math.random() * Math.PI * 2;
-        const speed = 2.2 + Math.random() * 4.4;
-        const gold = Math.random() < 0.72;
+        const speed = 2.2 + Math.random() * 5.0;
+        const warm = Math.random() < 0.7;
         push({
           x, y,
           vx: Math.cos(angle) * speed,
           vy: Math.sin(angle) * speed - 0.7,
-          size: 1.7 + Math.random() * 2.5,
-          hue: gold ? 44 + Math.random() * 8 : 32 + Math.random() * 10,
-          sat: 92,
-          light: d ? 58 + Math.random() * 18 : 42 + Math.random() * 14,
+          size: 1.6 + Math.random() * 2.6,
+          hue: warm ? hue + (Math.random() * 10 - 3) : hue - 10 + Math.random() * 6,
+          sat: 94,
+          light: d ? 56 + Math.random() * 20 : 42 + Math.random() * 14,
           alpha: 1,
-          born: now, delay: 0, life: 420 + Math.random() * 260,
+          born: now, delay: 0, life: 440 + Math.random() * 300,
           kind: "dot", maxR: 0,
         });
       }
+      // Braises qui s'attardent et scintillent (réutilise « star »).
+      const embers = 3 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < embers; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 1.2 + Math.random() * 2.4;
+        push({
+          x, y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 0.5,
+          size: 1.3 + Math.random() * 1.4,
+          hue, sat: 92, light: d ? 66 + Math.random() * 14 : 48 + Math.random() * 10,
+          alpha: 0.9,
+          born: now, delay: 40, life: 780 + Math.random() * 360,
+          kind: "star", maxR: 0, phase: Math.random() * Math.PI * 2,
+        });
+      }
+      // Double anneau de choc (le 2e, décalé et plus large, donne du relief).
       push({
-        x, y, vx: 0, vy: 0, size: 0,
-        hue: 46, sat: 90, light: d ? 62 : 45, alpha: 0.65,
-        born: now, delay: 0, life: 380, kind: "ring", maxR: 32,
+        x, y, vx: 0, vy: 0, size: 0, hue, sat: 92, light: d ? 64 : 45, alpha: 0.7,
+        born: now, delay: 0, life: 360, kind: "ring", maxR: 30,
+      });
+      push({
+        x, y, vx: 0, vy: 0, size: 0, hue, sat: 88, light: d ? 60 : 48, alpha: 0.4,
+        born: now, delay: 70, life: 460, kind: "ring", maxR: 52,
       });
       start();
     };
@@ -515,17 +580,46 @@ export function ClickSparks() {
       start();
     };
 
-    /* ── Onde d'eau : anneaux concentriques bleutés qui s'étendent ── */
+    /* ── Onde d'eau : impact lumineux + corps d'eau + anneaux + gouttelettes ── */
     const burstRipple = (x: number, y: number) => {
       const now = performance.now();
       const d = dark();
+      const hue = 198;
+      // Corps d'eau translucide qui monte sous les anneaux (donne du volume).
+      push({
+        x, y, vx: 0, vy: 0, size: 0, hue, sat: 82, light: d ? 62 : 48, alpha: 0.5,
+        born: now, delay: 0, life: 560, kind: "disc", maxR: 58,
+      });
+      // Point d'impact lumineux (le « plop »).
+      push({
+        x, y, vx: 0, vy: 0, size: 0, hue, sat: 90, light: d ? 78 : 58, alpha: 0.8,
+        born: now, delay: 0, life: 260, kind: "core", maxR: 12,
+      });
+      // Anneaux concentriques qui s'étendent.
       for (let i = 0; i < 3; i++) {
         push({
           x, y, vx: 0, vy: 0, size: 0,
-          hue: 198, sat: 85, light: d ? 64 : 46,
+          hue, sat: 85, light: d ? 64 : 46,
           alpha: 0.5 - i * 0.13,
           born: now, delay: i * 95, life: 680 + i * 70,
           kind: "ripple", maxR: 78 + i * 26,
+        });
+      }
+      // Gouttelettes de couronne qui giclent puis retombent.
+      const flecks = 5 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < flecks; i++) {
+        const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.1;
+        const speed = 2.4 + Math.random() * 2.6;
+        push({
+          x, y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          size: 1.2 + Math.random() * 1.2,
+          hue: hue + Math.random() * 8, sat: 80,
+          light: d ? 72 + Math.random() * 10 : 54 + Math.random() * 8,
+          alpha: 0.7,
+          born: now, delay: 0, life: 620 + Math.random() * 240,
+          kind: "drop", maxR: 0, z: 0.5 + Math.random() * 0.4,
         });
       }
       start();
@@ -596,20 +690,56 @@ export function ClickSparks() {
       return DEAD_CURSORS.has(getComputedStyle(target).cursor);
     };
 
-    /* ── Déclenchement (pointerdown = zéro délai, mouse only) ── */
+    /* ── Déclenchement — on ARME au pointerdown, mais on ne tire qu'au pointerup
+       SI c'est un vrai clic : pointeur quasi immobile ET aucune sélection de texte.
+       Un press-drag (rester appuyé pour sélectionner) n'active donc JAMAIS l'effet.
+       Le spam-clic reste possible (chaque down→up rapide tire), et un cooldown
+       réglable (delay) peut espacer les effets. ── */
+    const CLICK_MOVE_TOL = 6;   // px : au-delà, on considère un « glisser » (sélection)
+    let pending: { x: number; y: number; mode: Mode } | null = null;
+
+    const fire = (m: Mode, x: number, y: number) => {
+      if (delay.current > 0) {
+        const now = performance.now();
+        if (now - lastBurst.current < delay.current) return;
+        lastBurst.current = now;
+      }
+      if (m === "sparks") burstSparks(x, y);
+      else if (m === "nova") burstNova(x, y);
+      else if (m === "radar") burstRadar(x, y);
+      else if (m === "ripple") burstRipple(x, y);
+      else if (m === "bloom") burstBloom(x, y);
+      else if (m === "rain") burstRain(x, y);
+    };
+
     const onPointerDown = (e: PointerEvent) => {
+      pending = null;
       const m = mode.current;
       if (m === "off") return;
       if (e.pointerType !== "mouse") return;        // PC uniquement
       if (e.button !== 0) return;                    // clic gauche
       if (!isDeadZone(e.target)) return;
-      if (m === "sparks") burstSparks(e.clientX, e.clientY);
-      else if (m === "nova") burstNova(e.clientX, e.clientY);
-      else if (m === "radar") burstRadar(e.clientX, e.clientY);
-      else if (m === "ripple") burstRipple(e.clientX, e.clientY);
-      else if (m === "bloom") burstBloom(e.clientX, e.clientY);
-      else burstRain(e.clientX, e.clientY);
+      pending = { x: e.clientX, y: e.clientY, mode: m };
     };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (!pending) return;
+      if (Math.hypot(e.clientX - pending.x, e.clientY - pending.y) > CLICK_MOVE_TOL) {
+        pending = null;                              // c'est devenu un glisser → on annule
+      }
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      const p = pending;
+      pending = null;
+      if (!p || e.button !== 0) return;
+      if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > CLICK_MOVE_TOL) return;
+      const sel = window.getSelection?.();
+      if (sel && !sel.isCollapsed) return;           // du texte a été sélectionné → pas d'effet
+      fire(p.mode, e.clientX, e.clientY);
+    };
+
+    const onPointerCancel = () => { pending = null; };
 
     /* ── Anti-sélection : le double/triple-clic en zone morte ne doit PAS
        sélectionner de texte (sinon spam-clic impossible). preventDefault sur
@@ -623,10 +753,16 @@ export function ClickSparks() {
 
     // Phase capture : on observe sans jamais interférer avec les handlers app.
     document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("pointermove", onPointerMove, true);
+    document.addEventListener("pointerup", onPointerUp, true);
+    document.addEventListener("pointercancel", onPointerCancel, true);
     document.addEventListener("mousedown", onMouseDown, true);
     return () => {
       offSetting();
       document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("pointermove", onPointerMove, true);
+      document.removeEventListener("pointerup", onPointerUp, true);
+      document.removeEventListener("pointercancel", onPointerCancel, true);
       document.removeEventListener("mousedown", onMouseDown, true);
       window.removeEventListener("resize", resize);
       if (raf.current != null) cancelAnimationFrame(raf.current);

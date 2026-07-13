@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { AppToaster } from "@/components/ui/toaster";
 import { ClickSparks } from "@/components/ClickSparks";
+import { SaleCelebration } from "@/components/SaleCelebration";
 import { Providers } from "./providers";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
@@ -55,6 +56,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="app-zoom-root">{children}</div>
           <AppToaster />
           <ClickSparks />
+          <SaleCelebration />
         </Providers>
         <ServiceWorkerRegister />
       </body>

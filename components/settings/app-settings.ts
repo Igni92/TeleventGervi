@@ -68,6 +68,23 @@ export const SETTING_KEYS = {
    */
   clickSparks: "televente:clickSparks",
   /**
+   * Délai (cooldown) minimal en millisecondes entre deux effets au clic. "0"
+   * (défaut) = instantané, spam-clic possible. Une valeur > 0 espace les effets
+   * (le clic reste actif, seul l'effet visuel est throttlé). Honoré par ClickSparks.
+   */
+  clickSparksDelay: "televente:clickSparksDelay",
+  /**
+   * Célébration « grosse marge » : ON/OFF maître (défaut "on"). Quand une commande
+   * est validée avec une marge nette ≥ seuil (cf. celebrationMargin), une pluie de
+   * billets / pièces s'abat sur l'écran. Entièrement désactivable ici. Honoré par
+   * SaleCelebration + le helper celebrateSale.
+   */
+  celebration: "televente:celebration",
+  /** Seuil de marge nette (en €) déclenchant la célébration. Défaut "200", éditable. */
+  celebrationMargin: "televente:celebrationMargin",
+  /** Style de la célébration : "bills" | "confetti" | "both" (défaut "both"). */
+  celebrationStyle: "televente:celebrationStyle",
+  /**
    * Contraste de la surbrillance au survol des lignes (0–100). PROPRE À CHAQUE
    * UTILISATEUR : la clé réelle est suffixée par l'identité de session
    * (cf. hoverContrastKey) pour que jm/mm aient chacun leur réglage, même sur
@@ -133,6 +150,51 @@ export function applyHoverContrast(pct: number | null): void {
   const clamped = Math.max(0, Math.min(HOVER_CONTRAST_MAX, pct));
   r.style.setProperty("--hover-contrast", String(clamped / 100));
   r.setAttribute("data-hover-contrast", "1");
+}
+
+/** Seuil de marge nette (en €) par défaut déclenchant la célébration. */
+export const CELEBRATION_MARGIN_DEFAULT = 200;
+
+/** Styles de célébration proposés. */
+export const CELEBRATION_STYLES = ["bills", "confetti", "both"] as const;
+export type CelebrationStyle = (typeof CELEBRATION_STYLES)[number];
+export const CELEBRATION_STYLE_DEFAULT: CelebrationStyle = "both";
+
+/** Évènement global émis quand une vente franchit le seuil de marge. */
+export const CELEBRATION_EVENT = "televente:celebration";
+
+/** Style de célébration effectif (valeur stockée normalisée). */
+export function readCelebrationStyle(v: string | null | undefined): CelebrationStyle {
+  return CELEBRATION_STYLES.includes(v as CelebrationStyle)
+    ? (v as CelebrationStyle)
+    : CELEBRATION_STYLE_DEFAULT;
+}
+
+/**
+ * Déclenche la célébration « grosse marge » SI :
+ *   - la fonction est activée (réglage `celebration` ≠ "off") ;
+ *   - la marge nette atteint le seuil (`celebrationMargin`, défaut 200 €) ;
+ *   - les animations ne sont pas coupées (data-reduce-anim) ni le système en
+ *     prefers-reduced-motion (sauf animations forcées « on »).
+ * Émet l'évènement `televente:celebration` (detail { margin, threshold }) consommé
+ * par le composant SaleCelebration. No-op côté serveur.
+ */
+export function celebrateSale(netMargin: number): void {
+  if (typeof window === "undefined") return;
+  if (!Number.isFinite(netMargin)) return;
+  if (readSetting(SETTING_KEYS.celebration, "on") === "off") return;
+  const raw = Number(readSetting(SETTING_KEYS.celebrationMargin, String(CELEBRATION_MARGIN_DEFAULT)));
+  const threshold = Number.isFinite(raw) ? raw : CELEBRATION_MARGIN_DEFAULT;
+  if (netMargin < threshold) return;
+  const html = document.documentElement;
+  if (html.getAttribute("data-reduce-anim") === "1") return;
+  if (html.getAttribute("data-anim") !== "force" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  try {
+    window.dispatchEvent(
+      new CustomEvent(CELEBRATION_EVENT, { detail: { margin: netMargin, threshold } }),
+    );
+  } catch { /* ignore */ }
 }
 
 /** Évènement same-tab émis après chaque écriture via writeSetting. */
