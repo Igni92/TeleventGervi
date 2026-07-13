@@ -124,6 +124,13 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   const [editing, setEditing] = useState<SessionDTO | null>(null);
   const [loadingEdit, setLoadingEdit] = useState<string | null>(null);
 
+  // Réactualisation des valeurs SAP EN CORRECTION : quand le comptage a été fait
+  // sur un stock SAP faussé (ex. commande oubliée en prépa → réintégration
+  // manquée), on re-tire le stock SAP frais + réintègre les commandes non
+  // préparées, en CONSERVANT les quantités réelles comptées → seuls `sapQty` et
+  // les écarts sont recalculés. Réactive `withAddBack` et la pré-étape en édition.
+  const [editRefreshSap, setEditRefreshSap] = useState(false);
+
   // Import du stock SAP avant comptage (clic « Commencer »).
   const [refreshing, setRefreshing] = useState(false);
 
@@ -314,16 +321,17 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   // Stock théorique = `available` + colis des commandes non préparées (encore en
   // rayon). On gonfle `available` (entrepôt 01) : sapInfo() et tout l'aval
   // reflètent alors le stock théorique. En CORRECTION, on n'ajuste pas (la base a
-  // déjà été figée à la création de l'inventaire).
+  // déjà été figée à la création de l'inventaire) — SAUF réactualisation explicite
+  // des valeurs SAP (`editRefreshSap`), où l'on recalcule contre le stock frais.
   const withAddBack = useCallback((list: Product[]) => {
-    if (editing || addUnitsByItem.size === 0) return list;
+    if ((editing && !editRefreshSap) || addUnitsByItem.size === 0) return list;
     return list.map((p) => {
       const add = addUnitsByItem.get(p.itemCode);
       if (!add) return p;
       const w = p.stockByWarehouse["01"] ?? { available: 0, inStock: 0 };
       return { ...p, stockByWarehouse: { ...p.stockByWarehouse, "01": { ...w, available: (w.available ?? 0) + add } } };
     });
-  }, [addUnitsByItem, editing]);
+  }, [addUnitsByItem, editing, editRefreshSap]);
   const effectiveProducts = useMemo(() => {
     const base = withAddBack(products);
     if (extraProducts.length === 0) return base;
@@ -473,6 +481,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
       if (editing) {
         toast.success(`Inventaire corrigé — ${json.session.nbEcarts} écart(s)${photos.length ? ` · ${photos.length} photo(s)` : ""}.`, { duration: 6000 });
         setEditing(null);
+        setEditRefreshSap(false);
         setExtraProducts([]); setAddQuery(""); setAddResults(null);
         loadDraftFromStorage();   // restaure le brouillon « nouveau comptage »
       } else {
@@ -529,6 +538,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
       if (!res.ok || !s) { toast.error(json.error ?? "Erreur"); return; }
       const nextCounts: Counts = {};
       for (const l of s.lines) nextCounts[l.itemCode] = l.realQty;
+      setEditRefreshSap(false);   // correction sur les valeurs SAP figées, jusqu'à réactualisation explicite
       setEditing(s);
       setCounts(nextCounts);
       setNote(s.note ?? "");
@@ -541,6 +551,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   /** Abandonne la correction en cours et restaure le brouillon « nouveau comptage ». */
   function cancelEdit() {
     setEditing(null);
+    setEditRefreshSap(false);
     setExtraProducts([]); setAddQuery(""); setAddResults(null);
     loadDraftFromStorage();
     setMode("home");
@@ -578,6 +589,17 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     // stock malgré l'import qu'on vient de faire).
     const { ordered: freshOrdered } = buildFamilies(withAddBack(fresh ?? products));
     startCount(freshOrdered, "Inventaire complet");
+  }
+
+  /** EN CORRECTION : réactualise les valeurs SAP quand le comptage a été fait sur
+   *  un stock SAP faussé (commande oubliée en prépa…). Re-tire le stock SAP frais
+   *  et réintègre les commandes non préparées (pré-étape corrigeable), SANS
+   *  toucher aux quantités réelles comptées → `withAddBack` se réactive en édition
+   *  et le récap recalcule sapQty + écarts contre ce stock à jour. */
+  async function refreshSapForEdit() {
+    setEditRefreshSap(true);
+    await refreshStock();                  // stock SAP frais → recalcule sapQty
+    await loadPrepOrders({ open: true });  // commandes non préparées (pré-cochées, corrigeables)
   }
 
   /** Ouvre l'aperçu de régularisation SAP pour une session (admin/direction). */
@@ -1004,6 +1026,42 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
             et le repasse en <b>« à revoir »</b>.
           </div>
         )}
+
+        {/* Réactualisation des valeurs SAP : comptage fait sur un stock SAP faussé
+            (ex. commande oubliée en prépa) → re-tire le stock frais + réintègre les
+            commandes non préparées, en gardant les quantités réelles comptées. */}
+        {editing && (
+          <SurfaceCard accent="violet" className="p-4 space-y-3">
+            <div className="flex items-start gap-3">
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-violet-500/15 text-violet-600 dark:text-violet-300">
+                <Database className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-[13.5px] font-semibold text-foreground">Réactualiser les valeurs SAP</h3>
+                <p className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
+                  Le comptage a été fait sur un <b>stock SAP faussé</b> (ex. commande oubliée en prépa) ?
+                  Re-tire le stock SAP à jour et réintègre les commandes non préparées.
+                  <b className="text-foreground"> Tes quantités réelles comptées sont conservées</b> — seules les valeurs SAP et les écarts sont recalculés.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" className="h-9" onClick={refreshSapForEdit} disabled={refreshing}>
+                {refreshing ? <Loader2 className="!size-4 animate-spin" /> : <RotateCcw className="!size-4" />}
+                {refreshing ? "Mise à jour du stock SAP…" : editRefreshSap ? "Réactualiser à nouveau" : "Réactualiser les valeurs SAP"}
+              </Button>
+              {editRefreshSap && !refreshing && (
+                <span className="inline-flex items-center gap-1 text-[11.5px] text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Valeurs SAP réactualisées
+                </span>
+              )}
+            </div>
+          </SurfaceCard>
+        )}
+
+        {/* Pré-étape « commandes non préparées » — corrigeable ici pour réintégrer
+            la commande oubliée avant de recalculer les écarts. */}
+        {editing && editRefreshSap && renderPrepStep()}
 
         {/* Ajout d'un article ABSENT du comptage (réf. inversée, hors stock SAP…) */}
         <SurfaceCard accent="emerald" className="p-4 space-y-2">
