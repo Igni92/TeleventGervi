@@ -154,13 +154,15 @@ export function BonsCommandePanel() {
     }
   }, [load]);
 
-  // Remplit les lignes en attente avec la suggestion (EM du segment, sinon à
-  // découvert). On NE touche PAS aux lignes taguées « produit » (fruit) : ce tag
-  // est un rappel manuel explicite, à résoudre à la main.
+  // « Valider les lots en stock » : n'affecte QUE les lignes dont la suggestion a
+  // un lot réellement en stock. Les lignes sans lot dispo restent « en attente »
+  // (à découvert) — on valide certains articles, on garde les autres en attente,
+  // sans écraser un choix ni réécrire inutilement EM_PENDING. On NE touche PAS aux
+  // lignes taguées « produit » (fruit) : ce tag est un rappel manuel explicite.
   const suggestAll = useCallback(async (doc: BonDoc) => {
-    const pend = doc.lines.filter((l) => l.pending && !l.familyTarget);
+    const pend = doc.lines.filter((l) => l.pending && !l.familyTarget && l.suggested);
     for (const l of pend) {
-      const ok = await assignLot(doc, l.itemCode, l.suggested ?? PENDING);
+      const ok = await assignLot(doc, l.itemCode, l.suggested!);
       if (!ok) break;
     }
   }, [assignLot]);
@@ -460,11 +462,11 @@ export function BonsCommandePanel() {
                   <button
                     type="button"
                     onClick={() => suggestAll(doc)}
-                    disabled={ready || busyLine !== null}
-                    title="Affecter la suggestion (arrivage du segment, sinon à découvert) à chaque ligne en attente"
+                    disabled={ready || busyLine !== null || !doc.lines.some((l) => l.pending && !l.familyTarget && l.suggested)}
+                    title="Valider le lot suggéré (arrivage en stock du segment) sur les lignes qui en ont un ; les articles sans lot dispo restent en attente"
                     className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
                   >
-                    <Sparkles className="h-4 w-4" /> Suggérer les lots
+                    <Sparkles className="h-4 w-4" /> Valider les lots en stock
                   </button>
                   {/* Ouvre le bon dans la console (pilotée par le stock) pour
                       changer les articles/quantités et garantir des lots dispo. */}

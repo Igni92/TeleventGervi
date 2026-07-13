@@ -5,7 +5,8 @@ import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { getLotMaps, resolveLotForSegment, LOT_PENDING } from "@/lib/lotResolver";
 import { getEmAffects } from "@/lib/emAffect";
-import { getItemStock, lotInStock, lotStockQty } from "@/lib/lotStock";
+import { getItemStock } from "@/lib/lotStock";
+import { buildLotCandidates } from "@/lib/lotCandidates";
 import { listBonCommandeDocEntries, setDeliveryBonCommande } from "@/lib/inventory";
 import { debitLots, isRealLot } from "@/lib/lotLedger";
 import { isLotPending, familyOfLot, LOT_FAMILY_PREFIX } from "@/lib/gervifrais-calc";
@@ -217,30 +218,27 @@ export async function GET() {
       if (meta?.supplier) parts.push(meta.supplier);
       return parts.join(" · ");
     };
-    const candidatesFor = (itemCode: string, segment: string | null) => {
-      const docs = maps.byItemList.get(itemCode) ?? [];
-      // On ne propose QUE les lots avec du stock physique dans TeleVent
-      // (article×entrepôt) — le stock par lot n'existe pas dans ce SAP.
-      const candidates = docs
-        .map((dn) => {
+    // Lots candidats d'un article : liste COURTE et FIABLE (cf. lib/lotCandidates).
+    // On ne propose qu'une EM par (entrepôt × segment), la plus récente, et
+    // seulement si l'entrepôt de réception porte du stock physique — le stock par
+    // lot n'existe pas dans ce SAP (maille article × entrepôt). `orderWarehouse`
+    // = magasin de la ligne (priorité douce d'affichage).
+    const candidatesFor = (itemCode: string, segment: string | null, orderWarehouse: string | null) =>
+      buildLotCandidates({
+        itemCode,
+        orderWarehouse,
+        segment,
+        emDocs: maps.byItemList.get(itemCode) ?? [],
+        warehouseOf: (dn) => maps.whsOfItemDoc.get(`${itemCode}|${dn}`) ?? null,
+        affectOf: (dn) => affects.get(dn) ?? "TOUS",
+        metaOf: (dn) => {
           const meta = maps.docMeta.get(dn);
-          const warehouse = maps.whsOfItemDoc.get(`${itemCode}|${dn}`) ?? null;
-          return {
-            lot: `EM${dn}`, docNum: dn,
-            warehouse,
-            affect: affects.get(dn) ?? "TOUS",
-            date: meta?.date ?? null,          // "YYYY-MM-DD" — réception EM
-            supplier: meta?.supplier ?? null,  // fournisseur (CardName PDN)
-            label: emLabel(dn),                // repli texte (titre natif)
-            qty: lotStockQty(stock, itemCode, warehouse),  // stock physique (affichage)
-          };
-        })
-        .filter((c) => lotInStock(stock, itemCode, c.warehouse));
-      const sug = resolveLotForSegment(maps, affects, itemCode, undefined, segment).lot;
-      // Suggestion seulement si elle a du stock (fait partie des candidats retenus).
-      const suggested = sug && candidates.some((c) => c.lot === sug) ? sug : null;
-      return { candidates, suggested };
-    };
+          return { date: meta?.date ?? null, supplier: meta?.supplier ?? null, label: emLabel(dn) };
+        },
+        stockInWarehouse: (whs) => (whs ? (stock.byItemWhs.get(`${itemCode}|${whs}`) ?? 0) : 0),
+        itemTotalStock: stock.byItem.get(itemCode) ?? 0,
+        suggestedLot: resolveLotForSegment(maps, affects, itemCode, undefined, segment).lot,
+      });
 
     const docs = live.map((d) => {
       const segment = (typeByCard.get(d.CardCode) ?? "").trim().toUpperCase() || null;
@@ -287,7 +285,7 @@ export async function GET() {
         }
       }
       const lines = [...byItem.values()].map((l) => {
-        const { candidates, suggested } = candidatesFor(l.itemCode, segment);
+        const { candidates, suggested } = candidatesFor(l.itemCode, segment, l.warehouse);
         return {
           itemCode: l.itemCode, itemName: l.itemName,
           quantity: l.quantity, colis: Math.round(l.colisRaw * 10) / 10,
