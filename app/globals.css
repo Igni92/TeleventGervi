@@ -460,6 +460,28 @@
 }
 
 /* ═══════════════════════════════════════════════════════════
+   BARRE D'ACCENT DES CARTES (SurfaceCard)
+   Position réglable via [data-accent-pos] sur <html> (Paramètres →
+   Apparence) : gauche par défaut (attribut absent) · haut · bas · aucune.
+   La couleur vient de --sc-accent (posée en inline par SurfaceCard) ; on
+   ne fait que déplacer le côté épaissi + coloré (mêmes 4px qu'avant).
+═══════════════════════════════════════════════════════════ */
+html:not([data-accent-pos]) .sc-accent,
+html[data-accent-pos="left"] .sc-accent {
+  border-left-width: 4px;
+  border-left-color: var(--sc-accent);
+}
+html[data-accent-pos="top"] .sc-accent {
+  border-top-width: 4px;
+  border-top-color: var(--sc-accent);
+}
+html[data-accent-pos="bottom"] .sc-accent {
+  border-bottom-width: 4px;
+  border-bottom-color: var(--sc-accent);
+}
+/* [data-accent-pos="off"] : aucune barre — la carte garde son bord 1px uniforme. */
+
+/* ═══════════════════════════════════════════════════════════
    AMBIANCE DE FOND — "salle de signal"
    Aurora teintée par l'accent (suit la colorimétrie via --brand-*),
    grille technique masquée, anneaux radar. Discret derrière les

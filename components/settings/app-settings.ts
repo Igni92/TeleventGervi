@@ -74,6 +74,12 @@ export const SETTING_KEYS = {
    */
   clickSparksDelay: "televente:clickSparksDelay",
   /**
+   * Position de la barre d'accent colorée des cartes (SurfaceCard) :
+   *   "left" (défaut) · "top" · "bottom" · "off" (aucune).
+   * Pilote l'attribut `data-accent-pos` sur <html> (cf. globals.css + applyAccentPos).
+   */
+  accentPos: "televente:accentPos",
+  /**
    * Célébration « grosse marge » : ON/OFF maître (défaut "on"). Quand une commande
    * est validée avec une marge nette ≥ seuil (cf. celebrationMargin), une pluie de
    * billets / pièces s'abat sur l'écran. Entièrement désactivable ici. Honoré par
@@ -150,6 +156,26 @@ export function applyHoverContrast(pct: number | null): void {
   const clamped = Math.max(0, Math.min(HOVER_CONTRAST_MAX, pct));
   r.style.setProperty("--hover-contrast", String(clamped / 100));
   r.setAttribute("data-hover-contrast", "1");
+}
+
+/** Positions possibles de la barre d'accent des cartes (SurfaceCard). */
+export const ACCENT_POSITIONS = ["left", "top", "bottom", "off"] as const;
+export type AccentPos = (typeof ACCENT_POSITIONS)[number];
+export const ACCENT_POS_DEFAULT: AccentPos = "left";
+
+/**
+ * Applique la position de la barre d'accent des cartes : pose (ou retire)
+ * l'attribut `data-accent-pos` sur <html>. "left" = défaut → attribut retiré
+ * (globals.css cible `html:not([data-accent-pos])`). Robuste côté serveur.
+ */
+export function applyAccentPos(pos: string | null): void {
+  if (typeof document === "undefined") return;
+  const r = document.documentElement;
+  const v: AccentPos = ACCENT_POSITIONS.includes(pos as AccentPos)
+    ? (pos as AccentPos)
+    : ACCENT_POS_DEFAULT;
+  if (v === "left") r.removeAttribute("data-accent-pos");
+  else r.setAttribute("data-accent-pos", v);
 }
 
 /** Seuil de marge nette (en €) par défaut déclenchant la célébration. */
