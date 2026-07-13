@@ -28,8 +28,8 @@ const SECTION_LABEL: Record<string, string> = {
   // ⚠️ « /console2 » AVANT « /console » : le match est par préfixe (startsWith).
   "/console2": "Console 2 · Commande",
   "/console": "Console d'appels",
-  "/plan-appel": "Plan d'appel",
-  "/clients": "Clients",
+  "/plan-appel": "Clients & plan d'appel",
+  "/clients": "Clients & plan d'appel",
   "/ventes-du-jour": "Ventes du jour",
   "/livraisons": "Livraisons du jour",
   "/details-livraison": "Livraisons · par article",
