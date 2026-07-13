@@ -9,7 +9,9 @@ import { getItemStock } from "@/lib/lotStock";
 import { buildLotCandidates, type LotCandidate } from "@/lib/lotCandidates";
 import { listBonCommandeDocEntries, setDeliveryBonCommande } from "@/lib/inventory";
 import { debitLots, isRealLot } from "@/lib/lotLedger";
+import { getDlcMap } from "@/lib/lotDlc";
 import { isLotPending, familyOfLot, LOT_FAMILY_PREFIX } from "@/lib/gervifrais-calc";
+import { isExpiredLot } from "@/lib/lotFreshness";
 import { FRUIT_FAMILIES } from "@/lib/familles";
 import { isDepartureReached } from "@/lib/livraison";
 
@@ -513,6 +515,36 @@ export async function POST(req: NextRequest) {
     if ((quote.NumAtCard ?? "").trim()) orderPayload.NumAtCard = quote.NumAtCard;
     type SapOrder = { DocEntry: number; DocNum: number };
     const order = await sap.post<SapOrder>("/Orders", orderPayload);
+
+    // ── Re-validation FRAÎCHEUR à la conversion (anti « affectation qui date ») ──
+    // Un lot pré-affecté sur l'offre il y a plusieurs jours peut être PÉRIMÉ. La
+    // commande recopie le U_NoLot tel quel (BaseType 23) et, si elle est
+    // entièrement affectée, DISPARAÎT de la file (pendingCount=0) → le lot périmé
+    // partirait sans jamais être revu. On remet donc en EM_PENDING toute ligne
+    // dont le lot est périmé : elle revient dans la file (à ré-affecter un lot
+    // frais) ET sera bloquée au départ tant qu'un vrai lot n'est pas posé.
+    try {
+      const conv = await sap.get<SapOrderDoc>(`Orders(${order.DocEntry})?$select=DocEntry,DocumentLines`);
+      const realLots = [...new Set((conv.DocumentLines ?? [])
+        .map((l) => (l.U_NoLot ?? "").trim())
+        .filter((x) => isRealLot(x)))];
+      if (realLots.length > 0) {
+        const dlc = await getDlcMap(realLots);
+        const today = new Date();
+        const expired = new Set(realLots.filter((lot) => isExpiredLot(dlc.get(lot) ?? null, today)));
+        if (expired.size > 0) {
+          const patchLines = (conv.DocumentLines ?? [])
+            .filter((l) => l.LineNum != null && expired.has((l.U_NoLot ?? "").trim()))
+            .map((l) => ({ LineNum: l.LineNum, U_NoLot: LOT_PENDING }));
+          if (patchLines.length > 0) {
+            await sap.patch(`Orders(${order.DocEntry})`, { DocumentLines: patchLines });
+            console.log(`[BonCommande] Conversion #${order.DocNum} : ${patchLines.length} ligne(s) à lot PÉRIMÉ remises en attente.`);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[BonCommande] Re-validation fraîcheur à la conversion échouée (non-bloquant):", (e as Error).message);
+    }
 
     // La commande issue de l'offre porte des lignes EM_PENDING → à affecter :
     // on la marque « bon de commande » pour qu'elle rejoigne la file des lots.

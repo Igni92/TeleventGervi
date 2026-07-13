@@ -180,39 +180,54 @@ lib/lotSuiviAudit.smoke.test.ts` → **18 verts**.
 
 ---
 
-## 8. Solutions — feuille de route priorisée
+## 8. Solutions — état d'avancement
 
-### ✅ Fait dans ce lot (contenu, sans risque SAP)
+### ✅ Lot 1 — Fraîcheur sur la proposition (contenu, sans risque SAP)
 - 🔴→✅ **Filtre DLC + tri FEFO sur la proposition** (`/api/lots/candidates`) : un
   lot **périmé n'est plus proposé** (isolé, `expiredCount`), les proposables sont
-  triés « à écouler d'abord ». Repli FIFO conservé quand la DLC manque ; jamais de
-  liste vide (si tout est périmé, on montre en le signalant). Primitive pure +
-  tests + smoke test.
+  triés « à écouler d'abord ». Repli FIFO quand la DLC manque ; jamais de liste
+  vide. Primitive pure (`lib/lotFreshness.ts`) + tests + smoke test.
 
-### 🟠 À décider / chantier (touche les écritures SAP — je ne le fais pas à l'aveugle)
-1. **Fiabiliser le registre (Cause A)** — le plus fort ROI :
-   - **débiter à la retro** de `goods-receipts` (découverts) ;
-   - **re-créditer à l'annulation** et **rejouer le delta à la modif** ;
-   - **idempotence** sur la réception (clé `NumAtCard`/hash) contre le double-crédit ;
-   - filet : un **job de réconciliation** périodique registre ↔ stock SAP article.
-2. **Re-résoudre le lot à la conversion offre→commande (Cause B, §5.2)** — ou au
-   minimum re-valider (stock du lot / DLC) et **re-marquer « à affecter »** toute
-   commande dont le lot pré-affecté est périmé/épuisé, pour qu'elle **revienne**
-   dans la file au lieu d'en disparaître.
-3. **Garde-fou lot à la vente (Cause B, §5.1)** — passer d'un contrôle stock
-   *article* à un contrôle *lot + DLC* dans `chooseLot`/`orders`, avec repli
-   `EM_PENDING` si le lot résolu est périmé/épuisé.
-4. **Fermer les trous de la retro (§5.4)** : brancher la retro sur
-   `purchase-orders/receive`, élargir/paramétrer la fenêtre 60 j, gérer le partiel.
-5. **DLC (Cause C) au niveau process** : rendre la durée de vie serveur (brancher
-   `getShelfLifeMap`), calculer sur la **date de réception**, permettre une DLC
-   **par article** dans une EM multi-articles.
+### ✅ Lot 2 — Garantie de départ + fiabilisation du registre
+- 🔴→✅ **GARANTIE : aucune commande ne part sans lot réel.** Garde-fou serveur dans
+  `/api/livraisons/departed` : le passage en « départ » est **refusé (409, code
+  `LOT_PENDING`)** si une ligne est encore vide / EM_PENDING / EM_FAM. La commande
+  bloquée est **mise en file d'affectation** automatiquement ; dérogation possible
+  (`force:true`) mais **tracée en audit** (`DEPART_SANS_LOT`). Panne SAP → on ne
+  fige pas l'entrepôt (avertissement). Classifieur pur `lib/orderLots.ts` + tests.
+  **Alerte douce** en plus si un lot présent est **périmé** (DLC), sans bloquer.
+- 🔴→✅ **Registre fiabilisé (Cause A)** :
+  - **débit à la retro** des ventes à découvert (`goods-receipts`) — fin du stock
+    fantôme crédité-jamais-débité ;
+  - **re-crédit à l'annulation** (`orders/cancel`) ;
+  - **réconciliation différentielle à la modif** (`orders/[docEntry]/modif` :
+    ajout/retrait/changement de lot → débit/crédit du delta) ;
+  - **crédit au PO-receive** (`purchase-orders/receive`, aligné sur `goods-receipts`).
+  - *(Le rebind reste cohérent tel quel — débit initial conservé — non modifié.)*
+- 🟠→✅ **Re-validation fraîcheur à la conversion (Cause B §5.2)** : à la conversion
+  offre→commande, toute ligne au lot **pré-affecté périmé** est remise en
+  `EM_PENDING` → elle **revient** dans la file et est bloquée au départ tant qu'un
+  lot frais n'est pas posé.
 
-### Décision métier requise
-- **FEFO vs FIFO** comme règle de rotation officielle (le correctif applique FEFO,
-  conforme à `PRODUCT.md` #4 ; à confirmer comme la règle unique des 3 surfaces).
-- **Bloquer** la vente d'un lot périmé, ou seulement **alerter** ? (le correctif
-  n'écarte que de la *proposition* ; il ne bloque pas une saisie manuelle forcée.)
+### 🟠 Reste (chantier / décision)
+- **Retro sur `purchase-orders/receive`** : crédit registre branché, mais la
+  **propagation rétro** (réécrire les découverts ouverts) reste inline dans
+  `goods-receipts` (à extraire). Filet : le garde-fou de départ couvre déjà le cas.
+- **Idempotence de la réception** (clé `NumAtCard`/hash) contre un double-crédit sur
+  retry réseau — non fait (SAP-side).
+- **Fenêtre retro 60 j** paramétrable + **découpe partielle** des lignes (§5.4).
+- **Garde-fou lot+DLC dans `chooseLot`/orders** (§5.1) : contrôle encore au niveau
+  *article*. Résiduel faible (auto-résolution = EM la plus récente) ; couvert au
+  départ (présence) et à la proposition (DLC).
+- **DLC (Cause C) au niveau process** : durée de vie serveur (`getShelfLifeMap`),
+  calcul sur la **date de réception**, DLC **par article** dans une EM multi-articles.
+
+### Décision métier
+- **FEFO** appliqué à la proposition (conforme `PRODUCT.md` #4) — à confirmer comme
+  règle unique des 3 surfaces.
+- Départ : lot **absent** = **bloqué** (fait) ; lot **périmé** = **alerte** (pas de
+  blocage dur, pour ne pas figer l'expédition sur une DLC mal saisie). À trancher si
+  vous voulez aussi un blocage dur sur le périmé.
 
 ---
 

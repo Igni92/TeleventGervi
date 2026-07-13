@@ -8,7 +8,7 @@ import { incrementLocalStock } from "@/lib/stockSync";
 import { bumpLot, LOT_PENDING } from "@/lib/lotResolver";
 import { buildWhsBudget, remainingForItem, pickReceiptWarehouse, consumeBudget } from "@/lib/receiptRetro";
 import { normalizeEmAffect, setEmAffect } from "@/lib/emAffect";
-import { creditLots } from "@/lib/lotLedger";
+import { creditLots, debitLots } from "@/lib/lotLedger";
 import { setMarchandiseNote, sanitizeRating } from "@/lib/marchandiseNote";
 import { convertQuotationToOrder } from "@/lib/quotationConvert";
 import { isDepartureReached } from "@/lib/livraison";
@@ -327,6 +327,11 @@ export async function POST(req: NextRequest) {
   })));
 
   let retroPatchCount = 0;
+  // Débits registre à appliquer une fois les BL patchés : une vente à découvert
+  // (EM_PENDING) résolue ici consomme le lot fraîchement reçu — sinon le lot
+  // reste crédité de la réception SANS jamais être débité de cette vente (stock
+  // fantôme qui « date »). Débité APRÈS le PATCH SAP réussi uniquement.
+  const retroDebits: { itemCode: string; lot: string; qty: number }[] = [];
   try {
     type SapOrderLine = {
       LineNum: number; ItemCode: string; Quantity: number; U_NoLot?: string; WarehouseCode?: string;
@@ -385,6 +390,7 @@ export async function POST(req: NextRequest) {
 
     for (const ord of orders) {
       const patchLines: Record<string, unknown>[] = [];
+      const orderDebits: { itemCode: string; lot: string; qty: number }[] = [];
       for (const ln of (ord.DocumentLines || [])) {
         // Filtrage côté serveur : ligne en attente de lot ET item présent dans
         // ce PDN (reliquat = 0 pour les items hors PDN → skip).
@@ -401,13 +407,21 @@ export async function POST(req: NextRequest) {
         const patch: Record<string, unknown> = { LineNum: ln.LineNum, U_NoLot: lotCode };
         if (whs !== ln.WarehouseCode) patch.WarehouseCode = whs;
         patchLines.push(patch);
+        // La ligne entière est désormais attribuée à ce lot → débit de sa quantité.
+        orderDebits.push({ itemCode: ln.ItemCode, lot: lotCode, qty: ln.Quantity });
         consumeBudget(budget, ln.ItemCode, whs, ln.Quantity);
       }
       if (patchLines.length > 0) {
         await sap.patch(`Orders(${ord.DocEntry})`, { DocumentLines: patchLines });
         retroPatchCount += patchLines.length;
+        retroDebits.push(...orderDebits); // débit seulement après PATCH réussi
         console.log(`[GoodsReceipt] Retro lot ${lotCode} → Order #${ord.DocNum} (${patchLines.length} ligne(s))`);
       }
+    }
+    // Débit registre des ventes à découvert désormais servies par ce lot.
+    if (retroDebits.length > 0) {
+      try { await debitLots(retroDebits); }
+      catch (e) { console.warn("[GoodsReceipt] Débit registre rétro échoué (non-bloquant):", (e as Error).message); }
     }
     console.log(
       `[GoodsReceipt] Propagation rétro : ${orders.length} commande(s) ouverte(s) depuis le ${retroSince} scannée(s), `
