@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import { SurfaceCard } from "@/components/ui/surface-card";
-import { DateStepper, todayISO } from "@/components/ui/date-stepper";
+import { DateStepper, todayISO, nowHM } from "@/components/ui/date-stepper";
 import { designationProduit } from "@/lib/produit-designation";
 import { StarRating } from "@/components/ui/star-rating";
 import { DesignationChips, Chip } from "./DesignationChips";
@@ -249,6 +249,7 @@ function plusDaysISO(n: number): string {
 export function GoodsReceiptForm() {
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [docDate, setDocDate] = useState(todayISO());
+  const [docTime, setDocTime] = useState(nowHM());   // heure de réception (agréage)
   const [numAtCard, setNumAtCard] = useState("");
   const [comment, setComment] = useState("");
   // Affectation de l'EM à un segment client — « TOUS » (stock commun, défaut) ou
@@ -321,7 +322,7 @@ export function GoodsReceiptForm() {
   const totalHT = lines.reduce((s, l) => s + (effTotal(l) ?? 0), 0);
 
   const reset = () => {
-    setSupplier(null); setDocDate(todayISO()); setNumAtCard(""); setComment(""); setLines([]); setAffect("TOUS");
+    setSupplier(null); setDocDate(todayISO()); setDocTime(nowHM()); setNumAtCard(""); setComment(""); setLines([]); setAffect("TOUS");
   };
 
   const submit = async () => {
@@ -342,6 +343,7 @@ export function GoodsReceiptForm() {
         body: JSON.stringify({
           cardCode: supplier.cardCode,
           docDate: docDate || undefined,
+          docTime: docTime || undefined,
           numAtCard: numAtCard.trim() || undefined,
           comment: comment.trim() || undefined,
           affect,
@@ -426,8 +428,8 @@ export function GoodsReceiptForm() {
           <SupplierPicker value={supplier} onChange={setSupplier} />
         </div>
         <div className="space-y-1.5">
-          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Date de réception</label>
-          <DateStepper value={docDate} onChange={setDocDate} />
+          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Date &amp; heure de réception</label>
+          <DateStepper value={docDate} onChange={setDocDate} time={docTime} onTimeChange={setDocTime} timeLabel="Heure de réception" />
         </div>
         <div className="space-y-1.5 sm:col-span-2">
           <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Référence (BL, Cde, F… — optionnel)</label>

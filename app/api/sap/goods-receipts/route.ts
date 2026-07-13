@@ -64,6 +64,7 @@ interface InLine {
 interface CreateBody {
   cardCode: string;
   docDate?: string;       // date de réception (défaut : aujourd'hui)
+  docTime?: string;       // heure de réception « HH:MM » (agréage) — reportée dans les Comments
   numAtCard?: string;
   comment?: string;
   /** Affectation de l'EM à un segment client — « TOUS » (défaut), « EXPORT »,
@@ -182,6 +183,10 @@ export async function POST(req: NextRequest) {
   // Date du DOCUMENT (réception) : saisie au formulaire ou aujourd'hui. Distincte
   // de `today` (jour réel) qui sert aux scans de propagation rétro ci-dessous.
   const docDate = (body.docDate && /^\d{4}-\d{2}-\d{2}$/.test(body.docDate)) ? body.docDate : today;
+  // Heure de réception (agréage) : SAP DocDate est sans heure → on reporte
+  // l'heure saisie dans les Comments (« … · Reçu à 14h30 »), visible sur le BR
+  // SAP et dans l'historique des entrées.
+  const docTime = (body.docTime && /^([01]\d|2[0-3]):[0-5]\d$/.test(body.docTime)) ? body.docTime : null;
   const resolvedLines = body.lines.map((l) => {
     const meta = productMap.get(l.itemCode);
     const ratio = (meta?.salesQtyPerPackUnit && meta.salesQtyPerPackUnit > 1) ? meta.salesQtyPerPackUnit : 1;
@@ -206,8 +211,10 @@ export async function POST(req: NextRequest) {
     DocDate: docDate,
     DocDueDate: docDate,
     TaxDate: docDate,
-    Comments: body.comment?.trim()
-      || docLabel("EM", session.user?.name, session.user?.email),
+    Comments: [
+      body.comment?.trim() || docLabel("EM", session.user?.name, session.user?.email),
+      docTime ? `Reçu à ${docTime.replace(":", "h")}` : null,
+    ].filter(Boolean).join(" · "),
     DocumentLines: documentLines,
   };
   if (body.numAtCard?.trim()) payload.NumAtCard = body.numAtCard.trim();
