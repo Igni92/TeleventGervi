@@ -1932,10 +1932,25 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
           title="Double-cliquez pour afficher le récapitulatif de la commande en grand"
           className="flex items-center justify-between gap-2 mb-2 shrink-0 cursor-pointer select-none"
         >
-          <p className="kicker inline-flex items-center gap-1.5">
-            <ShoppingCart className="h-3 w-3" /> Commande
+          <p className="kicker inline-flex items-center gap-1.5 min-w-0">
+            {/* En modification : nom du client + n° de BL + date de livraison,
+                à gauche du caddie — le BL s'identifie d'un coup d'œil. En saisie
+                neuve (pas de BL encore), on garde « Commande ». */}
+            <ShoppingCart className="h-3 w-3 shrink-0" />
+            {modif ? (
+              <span className="inline-flex items-center gap-1.5 min-w-0">
+                <span className="truncate max-w-[220px] text-foreground">{clientName}</span>
+                <span className="text-muted-foreground/50" aria-hidden>·</span>
+                <span className="shrink-0">BL&nbsp;#&nbsp;{modif.docNum}</span>
+                {modifMeta?.dueDate && (
+                  <span className="shrink-0 font-normal text-muted-foreground">
+                    · {new Date(modifMeta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}
+                  </span>
+                )}
+              </span>
+            ) : "Commande"}
           </p>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 shrink-0">
             {/* Dupliquer la DERNIÈRE commande du client — pré-remplit le panier */}
             {!modif && (
               <button

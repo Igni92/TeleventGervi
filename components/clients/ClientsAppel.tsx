@@ -75,6 +75,7 @@ const JOUR_NUM = [1, 2, 3, 4, 5, 6, 0];
 // Colonnes masquables (le nom + cases + actions restent toujours). `manage` =
 // colonne réservée aux profils qui pilotent le plan d'appel (masquée au livreur).
 const COLS: { id: string; label: string; manage?: boolean }[] = [
+  { id: "type", label: "Type" },
   { id: "tel", label: "Tél" },
   { id: "jours", label: "Jours d'appel" },
   { id: "lastOrder", label: "Dernière cde" },
@@ -154,11 +155,11 @@ type AssignPatch = Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTe
 
 /** Ligne mémoïsée : cocher / changer un select ne re-rend QUE la ligne concernée. */
 const PlanRow = memo(function PlanRow({
-  c, sel, selCount, today, canManage, showTel, showJours, showLastOrder, showLastCall, showIncidents, showVendeur, showCommercial,
+  c, sel, selCount, today, canManage, showType, showTel, showJours, showLastOrder, showLastCall, showIncidents, showVendeur, showCommercial,
   onToggle, onAssign, onReminder, onToggleActive, onCtxAssign, onCtxActivate, onCtxDeactivate,
 }: {
   c: PlanClient; sel: boolean; selCount: number; today: number; canManage: boolean;
-  showTel: boolean; showJours: boolean; showLastOrder: boolean; showLastCall: boolean;
+  showType: boolean; showTel: boolean; showJours: boolean; showLastOrder: boolean; showLastCall: boolean;
   showIncidents: boolean; showVendeur: boolean; showCommercial: boolean;
   onToggle: (id: string) => void;
   onAssign: (id: string, patch: AssignPatch) => void;
@@ -185,11 +186,17 @@ const PlanRow = memo(function PlanRow({
       <td className="px-3 py-2">
         <div className="flex items-center gap-1.5 flex-wrap">
           <Link href={`/clients/${c.id}`} className="font-semibold text-foreground hover:text-brand-600 hover:underline underline-offset-2">{c.nom}</Link>
-          {c.type && <Badge variant={c.type === "GMS" ? "gms" : c.type === "EXPORT" ? "export" : "outline"} className="text-[9.5px]">{c.type}</Badge>}
           {!c.activeTelevente && <span className="text-[9px] font-bold uppercase text-amber-600 dark:text-amber-400">inactif</span>}
         </div>
         <span className="text-[10.5px] font-mono text-muted-foreground">{c.code}</span>
       </td>
+      {showType && (
+        <td className="px-3 py-2 whitespace-nowrap">
+          {c.type
+            ? <Badge variant={c.type === "GMS" ? "gms" : c.type === "EXPORT" ? "export" : c.type === "CHR" ? "chr" : "outline"} className="text-[9.5px]">{c.type}</Badge>
+            : <span className="text-muted-foreground/40">—</span>}
+        </td>
+      )}
       {showTel && (
         <td className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground whitespace-nowrap">
           {tel ? <a href={`tel:${standardizePhone(tel)}`} className="inline-flex items-center gap-1 hover:text-brand-600"><Phone className="h-3 w-3" />{formatPhoneDisplay(tel)}</a> : "—"}
@@ -496,6 +503,7 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
     const val = (c: PlanClient): string | number => {
       switch (sort.key) {
         case "nom": return c.nom?.toLowerCase() ?? "";
+        case "type": return c.type ?? "";
         case "tel": return firstTel(c) ?? "";
         case "lastOrder": return c.lastOrderDays == null ? Number.POSITIVE_INFINITY : c.lastOrderDays;
         case "lastCall": return c.lastCallDays == null ? Number.POSITIVE_INFINITY : c.lastCallDays;
@@ -690,6 +698,7 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
               <tr className="border-b border-border">
                 {canManage && <th className="w-9 px-3 py-2.5 bg-card"><Checkbox checked={allVisibleSelected} indeterminate={someSelected} onChange={toggleAll} /></th>}
                 <PlanTh sortKey="nom" sort={sort} onSort={toggleSort}>Client</PlanTh>
+                {show("type") && <PlanTh sortKey="type" sort={sort} onSort={toggleSort}>Type</PlanTh>}
                 {show("tel") && <PlanTh sortKey="tel" sort={sort} onSort={toggleSort}>Tél</PlanTh>}
                 {show("jours") && <th className="text-left px-3 py-2.5 font-semibold bg-card">Jours d&apos;appel</th>}
                 {show("lastOrder") && <PlanTh sortKey="lastOrder" sort={sort} onSort={toggleSort} align="right">Dernière cde</PlanTh>}
@@ -713,6 +722,7 @@ export function ClientsAppel({ canManage = true }: { canManage?: boolean }) {
                   selCount={selected.size}
                   today={today}
                   canManage={canManage}
+                  showType={show("type")}
                   showTel={show("tel")}
                   showJours={show("jours")}
                   showLastOrder={show("lastOrder")}

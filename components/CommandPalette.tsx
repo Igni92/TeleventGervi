@@ -6,7 +6,7 @@ import { Command } from "cmdk";
 import {
   Home, Radio, ClipboardList, Users, Package, PackagePlus, PackageCheck, Factory, Truck,
   LayoutDashboard, Receipt, Briefcase, Settings, Search, CornerDownLeft, Store, ShoppingCart,
-  ClipboardCheck, PackageX, Clock3, ScrollText, CalendarDays,
+  ClipboardCheck, PackageX, Clock3, FileText, CalendarDays,
 } from "lucide-react";
 
 interface NavItem { href: string; label: string; icon: typeof Home; keywords?: string }
@@ -19,7 +19,7 @@ const NAV: NavItem[] = [
   { href: "/livraisons", label: "Livraisons du jour", icon: Truck, keywords: "détail livraison préparation dispatch bons transporteur tournée ventes mise en préparation" },
   { href: "/details-livraison", label: "Livraisons · par article", icon: PackageCheck, keywords: "détails livraison articles récap segments gms chr export tags produit conditionnement" },
   { href: "/preparations", label: "Livraisons · à préparer", icon: ClipboardList, keywords: "préparations à faire charge dates livraison à préparer non préparé" },
-  { href: "/bons-commande", label: "Bons de commande", icon: ScrollText, keywords: "bon de commande précommande lot affecter em pending export lots à affecter" },
+  { href: "/bons-commande", label: "Bons de commande", icon: FileText, keywords: "bon de commande précommande lot affecter em pending export lots à affecter" },
   { href: "/manquants", label: "Livraisons · manquants", icon: PackageX, keywords: "rupture stock négatif achats à prévoir articles manquants déficit" },
   { href: "/products", label: "Stock", icon: Package, keywords: "produits articles" },
   { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, keywords: "comptage stock entrepôt" },

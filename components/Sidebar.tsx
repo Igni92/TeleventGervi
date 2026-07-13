@@ -9,7 +9,7 @@ import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, ShoppingCart, Package, PackagePlus, Factory, Receipt, AlertTriangle,
   Home, Settings, PackageCheck, ClipboardCheck, Truck, Eye, Store,
-  Pencil, Loader2, RotateCcw, ScrollText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight, Check,
+  Pencil, Loader2, RotateCcw, FileText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight, Check,
   CalendarDays,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -106,7 +106,7 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
       // (/api/livraisons) : fusionnées sous une entrée, routes secondaires en
       // `also` (l'entrée reste active sur /details-livraison, /preparations, /manquants).
       { href: "/livraisons", label: "Livraisons du jour", icon: Truck, also: ["/details-livraison", "/preparations", "/manquants"] },
-      { href: "/bons-commande", label: "Bons de commande", icon: ScrollText, badge: "offresDue" },
+      { href: "/bons-commande", label: "Bons de commande", icon: FileText, badge: "offresDue" },
       { href: "/products", label: "Stock", icon: Package },
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventairePending" },
       { href: "/fabrication", label: "Fabrication", icon: Factory },
