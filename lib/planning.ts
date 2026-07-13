@@ -22,9 +22,9 @@
  */
 import {
   computeWeek, dayMinutes, isoWeekId, typicalDayMinutes, weekDates,
-  type DayHours, type HeuresOption, type HoursProfile,
+  type DayHours, type DayTag, type HeuresOption, type HoursProfile,
 } from "./heuresCalc";
-import { isIsoDate, rangesOverlap, type CongeRequest } from "./conges";
+import { isIsoDate, rangesOverlap, type CongeRequest, type CongeType } from "./conges";
 
 /* ─────────────────────────── Dates utilitaires ────────────────────────────── */
 
@@ -90,6 +90,77 @@ export function monthGridDays(monthId: string): GridDay[] {
     d.setUTCDate(d.getUTCDate() + 1);
   }
   return out;
+}
+
+/* ──────────────────── Catégorie affichée d'une case du calendrier ───────────
+ * Une case = UNE pastille dominante, avec son libellé court (CP, Récup, …).
+ * Règle métier (demande) : PRÉSENT PAR DÉFAUT sur l'horaire type (lun→ven) —
+ * on ne « change » la pastille que pour un CP / récup / absence / maladie /
+ * autre, un jour FÉRIÉ (prioritaire, jour chômé), ou un congé en attente. Le
+ * week-end et les jours hors mois n'affichent rien par défaut. */
+
+/** Catégories possibles d'une pastille (congés + présence + férié). */
+export type DayCategory =
+  | "present" | "ferie"
+  | "cp" | "rtt" | "recup" | "maladie" | "sans_solde" | "autre" | "absent" | "conges";
+
+/** Libellé COURT affiché DANS la pastille (« CP » pour congés payés, etc.). */
+export const DAY_CATEGORY_LABEL: Record<DayCategory, string> = {
+  present: "Présent",
+  ferie: "Férié",
+  cp: "CP",
+  rtt: "RTT",
+  recup: "Récup",
+  maladie: "Maladie",
+  sans_solde: "Sans solde",
+  autre: "Autre",
+  absent: "Absent",
+  conges: "Congés",
+};
+
+export interface CalendarDayResolved {
+  /** Catégorie dominante, ou null = rien à afficher (week-end / hors planning). */
+  category: DayCategory | null;
+  /** Congé en attente de validation (pastille creuse/pointillée). */
+  pending: boolean;
+  /** Récup posée pas encore décomptée (repos à venir). */
+  planned: boolean;
+  /** Libellé du férié, si `category === "ferie"`. */
+  ferieLabel: string | null;
+}
+
+/** Un tag de feuille d'heures (present/absent/conges/récup/maladie) → catégorie. */
+function tagToCategory(tag: DayTag): DayCategory {
+  return tag === "conges" ? "conges" : tag;
+}
+
+/**
+ * Résout la pastille DOMINANTE d'un jour à partir de tout ce qui le touche.
+ * Priorité : férié (jour chômé) → congé validé → tag feuille d'heures → congé
+ * en attente → récup posée → PRÉSENT PAR DÉFAUT (lun→ven du mois) → rien.
+ */
+export function resolveCalendarDay(input: {
+  dow: number;                 // 0 = dimanche … 6 = samedi (UTC)
+  inMonth: boolean;
+  ferieLabel?: string | null;  // libellé jour férié, ou null/absent
+  approvedTypes?: CongeType[];  // types des congés VALIDÉS ce jour
+  pendingTypes?: CongeType[];   // types des congés EN ATTENTE ce jour
+  tag?: DayTag;                 // tag de la feuille d'heures
+  recupPosee?: boolean;         // jour de récup posé (planning)
+}): CalendarDayResolved {
+  const { dow, inMonth, ferieLabel, approvedTypes = [], pendingTypes = [], tag, recupPosee } = input;
+
+  if (ferieLabel) return { category: "ferie", pending: false, planned: false, ferieLabel };
+  if (approvedTypes.length) return { category: approvedTypes[0] as DayCategory, pending: false, planned: false, ferieLabel: null };
+  if (tag) return { category: tagToCategory(tag), pending: false, planned: false, ferieLabel: null };
+  if (pendingTypes.length) return { category: pendingTypes[0] as DayCategory, pending: true, planned: false, ferieLabel: null };
+  if (recupPosee) return { category: "recup", pending: false, planned: true, ferieLabel: null };
+
+  // PRÉSENT PAR DÉFAUT : jour ouvré (lundi→vendredi) du mois, rien d'autre posé.
+  const isWeekday = dow >= 1 && dow <= 5;
+  if (inMonth && isWeekday) return { category: "present", pending: false, planned: false, ferieLabel: null };
+
+  return { category: null, pending: false, planned: false, ferieLabel: null };
 }
 
 /* ────────────────────────── Compteur RÉCUP (heures) ───────────────────────── */

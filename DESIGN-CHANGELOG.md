@@ -788,3 +788,20 @@ ratio marge/seuil (« 🎉 Belle marge » → « 🔥 Grosse marge »).
 | **Onde d'eau** | 3 anneaux nus. | + **point d'impact** lumineux, **corps d'eau** translucide qui monte sous les anneaux, **gouttelettes de couronne** 3D qui giclent puis retombent. |
 | **Délai entre effets** (NOUVEAU) | Toujours instantané. | **Cooldown réglable** (Instantané · 0,2 · 0,4 · 0,8 s) — réglage `clickSparksDelay`. |
 | **Rester appuyé pour sélectionner** | L'effet partait dès l'appui → il se déclenchait au début d'une sélection de texte. | L'effet ne se déclenche qu'au **relâché d'un VRAI clic** (pointeur quasi immobile ET aucune sélection) : un press-drag n'active plus jamais l'effet. Le spam-clic reste possible. |
+
+### Planning — pastilles allongées, présence par défaut, fériés & événements
+
+Refonte des **pastilles du calendrier** (onglet Planning) — `components/planning/PlanningPanel.tsx`,
+`lib/planning.ts` (logique pure testée), `lib/events.ts`.
+
+| Sujet | Avant | Après |
+|-------|-------|-------|
+| **Lisibilité des pastilles** | Petits **points** ronds (couleur seule, sans texte) — il fallait ouvrir le jour pour savoir « quoi ». | **Pastilles ALLONGÉES** pleine largeur portant le **libellé de la catégorie** (CP, Récup, Présent, Maladie, Absent, Férié…). Libellé abrégé sur mobile (case étroite → pas de « … »), plein dès `md`. |
+| **Présence par défaut** | Un jour sans congé/tag n'affichait **rien**. | **Présent par défaut** sur l'horaire type (**lun→ven** du mois, à tout le monde). La pastille ne « change » que pour un **CP / récup / absence / maladie / autre**, un **congé en attente** (pointillés) ou un **jour férié**. Week-ends et jours hors mois restent vides. |
+| **Jours fériés** | Absents du calendrier. | **Fériés français** (réutilise `frenchHolidays`, `lib/livraison`) affichés en pastille **orange « Férié »** (couleur distincte de la maladie) + teinte de colonne dans le calendrier d'équipe. Prioritaires (jour chômé). |
+| **Événements** | Uniquement dans la bannière du haut. | **Événements commerciaux** (Noël, 14 juillet, Saint-Valentin…) posés sur la case du jour via un **repère emoji** (coin supérieur droit) — `eventsByDate`. |
+| **Calendrier d'équipe** | Barres de congés + points de tag. | Même résolution : présence en **ligne de fond discrète** (verte), congés en barres colorées, fériés en colonne teintée + emoji d'événement dans l'en-tête. |
+| **Légende** | Types de congé seulement. | + **Présent**, **Férié**, **absent**, **en attente / posé**, **événement**. |
+
+La résolution « une case → une catégorie dominante » vit dans `resolveCalendarDay` (pur, testé) :
+férié → congé validé → tag feuille d'heures → congé en attente → récup posée → **présent par défaut** → rien.

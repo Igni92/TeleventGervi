@@ -3,6 +3,7 @@ import {
   expandDates, expandOuvrables, expandSemaine, monthGridDays, isoWeekOfDate,
   computeRecupCounter, recupCapExcessMin, cpPeriodOf, computeCpCounter,
   computeMonthRecap, monthEndISO, dayAfter, congeCreditsHours,
+  resolveCalendarDay, DAY_CATEGORY_LABEL,
   type CounterWeekInput,
 } from "./planning";
 import { computeWeek, type DayHours } from "./heuresCalc";
@@ -192,5 +193,62 @@ describe("planning — récap mensuel (état compta)", () => {
     expect(congeCreditsHours("cp")).toBe(true);
     expect(congeCreditsHours("recup")).toBe(false);
     expect(congeCreditsHours("maladie")).toBe(false);
+  });
+});
+
+describe("planning — pastille du calendrier (resolveCalendarDay)", () => {
+  // 2026-07-13 = lundi (jour ouvré), 2026-07-18 = samedi, 2026-07-14 = férié.
+  const MON = 1, SAT = 6, SUN = 0;
+
+  it("PRÉSENT par défaut : jour ouvré (lun→ven) du mois, rien d'autre posé", () => {
+    const r = resolveCalendarDay({ dow: MON, inMonth: true });
+    expect(r.category).toBe("present");
+    expect(r.pending).toBe(false);
+  });
+  it("week-end : aucune pastille par défaut", () => {
+    expect(resolveCalendarDay({ dow: SAT, inMonth: true }).category).toBeNull();
+    expect(resolveCalendarDay({ dow: SUN, inMonth: true }).category).toBeNull();
+  });
+  it("hors mois : aucune pastille par défaut (jour ouvré compris)", () => {
+    expect(resolveCalendarDay({ dow: MON, inMonth: false }).category).toBeNull();
+  });
+  it("férié : prioritaire (jour chômé), même un jour ouvré", () => {
+    const r = resolveCalendarDay({ dow: MON, inMonth: true, ferieLabel: "Fête nationale" });
+    expect(r.category).toBe("ferie");
+    expect(r.ferieLabel).toBe("Fête nationale");
+  });
+  it("férié l'emporte sur un congé validé", () => {
+    const r = resolveCalendarDay({ dow: MON, inMonth: true, ferieLabel: "Noël", approvedTypes: ["cp"] });
+    expect(r.category).toBe("ferie");
+  });
+  it("congé validé remplace le présent par défaut", () => {
+    expect(resolveCalendarDay({ dow: MON, inMonth: true, approvedTypes: ["cp"] }).category).toBe("cp");
+    expect(resolveCalendarDay({ dow: MON, inMonth: true, approvedTypes: ["recup"] }).category).toBe("recup");
+  });
+  it("tag de feuille d'heures : « conges » → catégorie conges, sinon tel quel", () => {
+    expect(resolveCalendarDay({ dow: MON, inMonth: true, tag: "maladie" }).category).toBe("maladie");
+    expect(resolveCalendarDay({ dow: MON, inMonth: true, tag: "absent" }).category).toBe("absent");
+    expect(resolveCalendarDay({ dow: MON, inMonth: true, tag: "conges" }).category).toBe("conges");
+    expect(resolveCalendarDay({ dow: MON, inMonth: true, tag: "present" }).category).toBe("present");
+  });
+  it("congé en attente : pastille creuse (pending)", () => {
+    const r = resolveCalendarDay({ dow: MON, inMonth: true, pendingTypes: ["cp"] });
+    expect(r.category).toBe("cp");
+    expect(r.pending).toBe(true);
+  });
+  it("congé validé prime sur un congé en attente le même jour", () => {
+    const r = resolveCalendarDay({ dow: MON, inMonth: true, approvedTypes: ["cp"], pendingTypes: ["maladie"] });
+    expect(r.category).toBe("cp");
+    expect(r.pending).toBe(false);
+  });
+  it("récup posée (à venir) : catégorie récup, marquée planned", () => {
+    const r = resolveCalendarDay({ dow: SAT, inMonth: true, recupPosee: true });
+    expect(r.category).toBe("recup");
+    expect(r.planned).toBe(true);
+  });
+  it("libellés courts : CP pour congés payés", () => {
+    expect(DAY_CATEGORY_LABEL.cp).toBe("CP");
+    expect(DAY_CATEGORY_LABEL.present).toBe("Présent");
+    expect(DAY_CATEGORY_LABEL.ferie).toBe("Férié");
   });
 });
