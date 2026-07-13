@@ -583,10 +583,10 @@ export function ProductsTable() {
               </th>
               <SortTh sortKey="code" sort={sort} onSort={toggleSort}>Code Article</SortTh>
               <SortTh sortKey="fruit" sort={sort} onSort={toggleSort}>Fruit</SortTh>
-              <SortTh sortKey="pays" sort={sort} onSort={toggleSort}>Pays</SortTh>
               <SortTh sortKey="marque" sort={sort} onSort={toggleSort}>Marque</SortTh>
-              <SortTh sortKey="variete" sort={sort} onSort={toggleSort}>Variété</SortTh>
               <SortTh sortKey="condt" sort={sort} onSort={toggleSort}>Condt</SortTh>
+              <SortTh sortKey="variete" sort={sort} onSort={toggleSort}>Variété</SortTh>
+              <SortTh sortKey="pays" sort={sort} onSort={toggleSort}>Pays</SortTh>
             </tr>
           </thead>
           <tbody>
@@ -663,10 +663,10 @@ export function ProductsTable() {
                     </td>
                     <td className="px-4 py-2.5 font-mono text-[11.5px] font-semibold text-foreground">{p.itemCode}</td>
                     <td className="px-3 py-2.5 text-foreground/90">{dz.fruit}</td>
-                    <td className="px-3 py-2.5"><Chip kind="pays">{dz.pays}</Chip></td>
                     <td className="px-3 py-2.5"><Chip kind="marque">{dz.marque}</Chip></td>
-                    <td className="px-3 py-2.5"><Chip kind="variete">{dz.variete}</Chip></td>
                     <td className="px-3 py-2.5"><Chip kind="condt">{dz.condt}</Chip></td>
+                    <td className="px-3 py-2.5"><Chip kind="variete">{dz.variete}</Chip></td>
+                    <td className="px-3 py-2.5"><Chip kind="pays">{dz.pays}</Chip></td>
                   </tr>,
                 ];
                 if (isExpanded) {

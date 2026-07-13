@@ -224,7 +224,7 @@ export function ProductPicker({ onPick }: { onPick: (p: ProductHit) => void }) {
                 className="w-full text-left px-3 py-2 hover:bg-secondary/60 transition-colors"
               >
                 <div className="text-[13px] font-medium truncate">
-                  {[p.itemName, p.uPays, p.uMarque, p.uCondi].filter((x) => x && x.trim() && x.trim() !== "-").join(" · ")}
+                  {[p.itemName, p.uMarque, p.uCondi, p.uPays].filter((x) => x && x.trim() && x.trim() !== "-").join(" · ")}
                 </div>
                 <div className="text-[11px] text-muted-foreground font-mono">{p.itemCode}</div>
               </button>
@@ -574,10 +574,10 @@ export function GoodsReceiptForm() {
                 <th className="text-left px-2 py-2 font-semibold w-24">Qté</th>
                 <th className="text-left px-2 py-2 font-semibold w-28">Code Article</th>
                 <th className="text-left px-2 py-2 font-semibold">Fruit</th>
-                <th className="text-left px-2 py-2 font-semibold">Pays</th>
                 <th className="text-left px-2 py-2 font-semibold">Marque</th>
-                <th className="text-left px-2 py-2 font-semibold">Variété</th>
                 <th className="text-left px-2 py-2 font-semibold">Condt</th>
+                <th className="text-left px-2 py-2 font-semibold">Variété</th>
+                <th className="text-left px-2 py-2 font-semibold">Pays</th>
                 <th className="text-left px-2 py-2 font-semibold w-36">Entrepôt</th>
                 <th className="text-left px-2 py-2 font-semibold w-36">DLC</th>
                 <th className="text-right px-2 py-2 font-semibold w-24">Prix /pie HT</th>
@@ -609,10 +609,10 @@ export function GoodsReceiptForm() {
                       <div>{dz.fruit}</div>
                       <StarRating value={l.note} onChange={(v) => updateLine(i, { note: v })} size="sm" className="mt-0.5" ariaLabel={`Note qualité ${dz.fruit}`} />
                     </td>
-                    <td className="px-2 py-2"><Chip kind="pays">{dz.pays}</Chip></td>
                     <td className="px-2 py-2"><Chip kind="marque">{dz.marque}</Chip></td>
-                    <td className="px-2 py-2"><Chip kind="variete">{dz.variete}</Chip></td>
                     <td className="px-2 py-2"><Chip kind="condt">{dz.condt}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="variete">{dz.variete}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="pays">{dz.pays}</Chip></td>
                     <td className="px-2 py-2">
                       <select
                         value={l.warehouseCode}

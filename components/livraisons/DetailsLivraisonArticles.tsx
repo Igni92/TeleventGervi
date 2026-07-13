@@ -3,7 +3,7 @@
 /**
  * DÉTAILS LIVRAISON — récap PAR ARTICLE de tout ce qui PART le jour J
  * (date de livraison = DocDueDate), avec les tags produit (marque ·
- * conditionnement · origine · variété) pour identifier précisément l'article,
+ * conditionnement · variété · origine) pour identifier précisément l'article,
  * et la quantité ventilée par segment GMS / CHR / EXPORT (+ total).
  *
  * ≠ Ventes du jour (qui liste les ventes SAISIES aujourd'hui, DocDate). Ici on
@@ -90,7 +90,7 @@ export function DetailsLivraisonArticles() {
         for (const l of d.lines) {
           let a = map.get(l.itemCode);
           if (!a) {
-            const tags = [cleanTag(l.marque), cleanTag(l.condt), cleanTag(l.pays), cleanTag(l.variete)]
+            const tags = [cleanTag(l.marque), cleanTag(l.condt), cleanTag(l.variete), cleanTag(l.pays)]
               .filter((t) => t && t.toUpperCase() !== l.itemName.toUpperCase());
             a = { itemCode: l.itemCode, itemName: l.itemName, tags: [...new Set(tags)],
               seg: { GMS: { colis: 0, kg: 0 }, CHR: { colis: 0, kg: 0 }, EXPORT: { colis: 0, kg: 0 } }, openDocs: [] };

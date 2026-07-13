@@ -859,7 +859,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     // sinon prix conseillé.
     const promo = opts?.noPromo ? null : (promos[p.itemCode] ?? null);
     // Prix : cotation SKU exacte > TARIF PAR FRUITS (désignation : famille ·
-    // origine · calibre · variété) > prix conseillé. Le calibre vient des hints
+    // calibre · variété · origine) > prix conseillé. Le calibre vient des hints
     // (U_GER_CALIBRE, live SAP).
     const fruitPrice = tarifFruits.length
       ? priceForArticle(tarifFruits, {

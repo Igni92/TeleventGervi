@@ -337,7 +337,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   const productByCode = useMemo(() => new Map(ordered.map((p) => [p.itemCode, p])), [ordered]);
   const brandLogos = useBrandLogos("inventaire");
 
-  /** Tags désignation (marque/condt/calibre/pays) d'un article — mêmes couleurs que les commandes. */
+  /** Tags désignation (marque/condt/variété/pays) d'un article — mêmes couleurs que les commandes. */
   const productChips = (itemCode: string, className?: string) => {
     const p = productByCode.get(itemCode);
     if (!p) return null;
@@ -345,7 +345,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
       itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque,
       uCondi: p.uCondi ?? p.uUvc, frgnName: p.frgnName,
     });
-    return <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className={className} />;
+    return <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className={className} />;
   };
 
   /** Logo de marque d'un article (null si la marque n'a pas de logo). */
@@ -793,7 +793,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                                 {" · "}{m.sens === "sortie" ? "Sortir" : "Entrer"} {fmt(Math.abs(m.ecartColis))} colis
                                 {whTxt ? ` · ${whTxt}` : ""}
                               </div>
-                              <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1" />
+                              <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1" />
                             </div>
                             <div className="shrink-0 text-right">
                               <div className={`text-[12px] font-bold tnum ${m.sens === "sortie" ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>

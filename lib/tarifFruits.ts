@@ -1,10 +1,10 @@
 /**
  * TARIF PAR FRUITS — prix négociés par CLIENT au niveau d'une DÉSIGNATION fruit
- * (famille + origine + calibre + variété), et non par code article exact.
+ * (famille + calibre + variété + origine), et non par code article exact.
  *
  * Exemple (fiche client / console) :
- *   Fraise · Belgique · 3AE       → 6,20 €
- *   Fraise · Belgique · 2AE       → 5,80 €
+ *   Fraise · 3AE · Belgique       → 6,20 €
+ *   Fraise · 2AE · Belgique       → 5,80 €
  *   Framboise · Portugal          → 4,50 €   (calibre non précisé → tous calibres)
  *
  * À la création de la commande, on choisit le LOT / code article concret ; son
@@ -80,9 +80,9 @@ export function priceForArticle(rows: TarifFruitRow[], art: ArticleDesignation):
   return m ? m.price : null;
 }
 
-/** Libellé lisible d'une ligne, ex. « Fraise · Belgique · 3AE ». */
+/** Libellé lisible d'une ligne, ex. « Fraise · 3AE · Belgique ». */
 export function tarifFruitLabel(row: { label?: string } & TarifFruitRow, familyLabel?: string): string {
-  const parts = [familyLabel || row.label || row.family, row.pays, row.calibre, row.variete]
+  const parts = [familyLabel || row.label || row.family, row.calibre, row.variete, row.pays]
     .map((p) => (p ?? "").trim())
     .filter(Boolean);
   return parts.join(" · ");

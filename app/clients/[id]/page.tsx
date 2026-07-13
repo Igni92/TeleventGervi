@@ -159,7 +159,7 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
           <ProduitsRecurrents clientId={client.id} />
         ) },
         { id: "tarif-fruits", label: "Tarif par fruits", wide: true, node: (
-          <SectionCard accent="brand" title="Tarif par fruits" subtitle="Prix négociés par fruit · origine · calibre · variété — appliqués à la commande" icon={<Grape />}>
+          <SectionCard accent="brand" title="Tarif par fruits" subtitle="Prix négociés par fruit · calibre · variété · origine — appliqués à la commande" icon={<Grape />}>
             <TarifFruitsEditor clientId={client.id} />
           </SectionCard>
         ) },

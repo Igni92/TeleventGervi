@@ -161,10 +161,10 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
                 <th className="text-left px-2 py-2 font-semibold w-24">Qté</th>
                 <th className="text-left px-2 py-2 font-semibold w-28">Code</th>
                 <th className="text-left px-2 py-2 font-semibold">Fruit</th>
-                <th className="text-left px-2 py-2 font-semibold">Pays</th>
                 <th className="text-left px-2 py-2 font-semibold">Marque</th>
-                <th className="text-left px-2 py-2 font-semibold">Variété</th>
                 <th className="text-left px-2 py-2 font-semibold">Condt</th>
+                <th className="text-left px-2 py-2 font-semibold">Variété</th>
+                <th className="text-left px-2 py-2 font-semibold">Pays</th>
                 <th className="text-left px-2 py-2 font-semibold w-36">Entrepôt</th>
                 <th className="text-right px-2 py-2 font-semibold w-24">Prix /pie HT</th>
                 <th className="text-right px-2 py-2 font-semibold w-24">Total HT</th>
@@ -182,10 +182,10 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
                     <td className="px-2 py-2"><NumberInput value={l.packageQuantity} onValueChange={(n) => updateLine(i, { packageQuantity: n ?? 0 })} min={0} step={1} className="text-right h-9 w-20" /></td>
                     <td className="px-2 py-2 font-mono">{l.itemCode}</td>
                     <td className="px-2 py-2 text-foreground">{dz.fruit}</td>
-                    <td className="px-2 py-2"><Chip kind="pays">{dz.pays}</Chip></td>
                     <td className="px-2 py-2"><Chip kind="marque">{dz.marque}</Chip></td>
-                    <td className="px-2 py-2"><Chip kind="variete">{dz.variete}</Chip></td>
                     <td className="px-2 py-2"><Chip kind="condt">{dz.condt}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="variete">{dz.variete}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="pays">{dz.pays}</Chip></td>
                     <td className="px-2 py-2">
                       <select value={l.warehouseCode} onChange={(e) => updateLine(i, { warehouseCode: e.target.value as Line["warehouseCode"] })} tabIndex={-1} className="h-9 w-full rounded-md border border-input bg-background px-2 text-[12.5px]">
                         {WAREHOUSES.map((w) => <option key={w.code} value={w.code}>{w.label}</option>)}
