@@ -55,12 +55,16 @@ export const SETTING_KEYS = {
    * Effet au clic sur une zone NON interactive (PC uniquement) — feedback
    * ludique, purement décoratif. Valeurs :
    *   "sparks" (défaut) → éclat de particules or ;
+   *   "nova"            → supernova (cœur incandescent, croix lens-flare, constellation) ;
+   *   "radar"           → ping sonar (réticule, anneaux de scan, balayage rotatif, échos) ;
    *   "ripple"          → onde d'eau (anneaux concentriques) ;
-   *   "rain"            → cascade (gouttes qui tombent jusqu'en bas) ;
+   *   "bloom"           → aurore (halos lumineux diffus teintés marque) ;
+   *   "rain"            → cascade 3D (gouttes vitreuses en profondeur qui tombent) ;
    *   "off"             → aucun effet.
-   * (La valeur historique "on" est traitée comme "sparks".) Honoré par
-   * ClickSparks ; coupé d'office par animations=off (data-reduce-anim) et
-   * prefers-reduced-motion.
+   * Les effets "signal" (nova / radar / bloom) suivent la colorimétrie de marque
+   * (Or / Agrume / Fraise) via --brand-500. (La valeur historique "on" est traitée
+   * comme "sparks".) Honoré par ClickSparks ; coupé d'office par animations=off
+   * (data-reduce-anim) et prefers-reduced-motion.
    */
   clickSparks: "televente:clickSparks",
   /**

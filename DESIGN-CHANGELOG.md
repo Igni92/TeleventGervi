@@ -709,3 +709,32 @@ une seule entrée à onglets in-page — même pattern que « Clients & plan d'a
 - **Masqué aux rôles terrain confinés** (préparateur/livreur) : `proxy.ts` ne leur ouvre que `/livraisons` (+ `/preparations`) — ils gardent `PreparateurNav`.
 - Aligné partout : `Sidebar`, `MobileTiles`, `CommandPalette` (⌘K — les 4 routes groupées sous « Livraisons · … », `/details-livraison` ajouté), `MobileTopBar`.
 - **Aucune page ni fonctionnalité supprimée** : uniquement un regroupement de navigation. `tsc` 0 · `eslint` 0 · `next build` 51 pages · 458 tests verts.
+
+---
+
+## ✨ Effets au clic — 3 signatures « salle de signal » + cascade 3D
+
+`components/ClickSparks.tsx` — le micro-feedback ludique au clic (zone morte, PC
+uniquement, canvas plein écran unique, boucle rAF active seulement tant que des
+particules vivent) passe de **3 à 6 effets**. Réglable dans **Paramètres →
+Apparence → Effet au clic**.
+
+| Effet | Rendu |
+|-------|-------|
+| **Supernova** (`nova`) | Cœur incandescent (blanc chaud → marque), **éclat en croix** façon lens-flare (étoile 8 branches), onde de choc, puis **constellation** : les éclats projetés scintillent et se relient par de fines lignes lumineuses avant de s'éteindre. |
+| **Radar** (`radar`) | Ping sonar raccord avec la DA : **réticule/crosshair**, 3 **anneaux de scan** concentriques décalés, **balayage rotatif** avec traîne en éventail, et **échos (blips)** qui pulsent le long du sweep. |
+| **Aurore** (`bloom`) | **Halos radiaux diffus** teintés marque en mode additif (`lighter`), qui dérivent puis se dissolvent (fondu entrée + sortie), ponctués de **scintillements** — feel soft/luxe, non « gamer ». |
+
+- **Colorimétrie-aware** : nova / radar / aurore lisent `--brand-500` à chaud → ils
+  suivent **Or / Agrume / Fraise** selon le thème (les effets historiques restaient
+  figés en or/bleu).
+- **Cascade refondue « 3D »** (`rain`) : chaque goutte devient une **bille vitreuse
+  ombrée** — dégradé radial DÉCENTRÉ (point chaud → corps → bord/ombre) = volume, plus
+  un **reflet spéculaire** blanc décentré — avec **filament de traîne** (motion-blur) et
+  **parallaxe de profondeur** (z : les gouttes proches sont plus grosses, plus saturées
+  et accélèrent davantage ; les lointaines restent petites et atmosphériques, rendues du
+  plus LOIN au plus PRÈS pour une occlusion correcte). Ajout d'une **couronne
+  d'éclaboussure** (tension de surface) au point d'impact.
+- Garde-fous inchangés : coupé par `animations=off` (data-reduce-anim) et
+  `prefers-reduced-motion` (sauf « forcé »), tactile exclu, plafond de particules
+  (anti-spam), jamais déclenché sur un élément interactif.
