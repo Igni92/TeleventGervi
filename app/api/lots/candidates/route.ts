@@ -6,8 +6,6 @@ import { getEmAffects } from "@/lib/emAffect";
 import { getItemStock, lotInStock, lotStockQty } from "@/lib/lotStock";
 import { getLotNotes } from "@/lib/marchandiseNote";
 import { colisInfo } from "@/lib/colis";
-import { getDlcMap } from "@/lib/lotDlc";
-import { partitionByFreshness, lotFreshness, type LotFreshness } from "@/lib/lotFreshness";
 
 export const dynamic = "force-dynamic";
 
@@ -48,8 +46,6 @@ interface Candidate {
   currency: string | null;
   rating: number | null;          // note qualité 1..5 (étoiles) du lot
   admissionDate: string | null;   // ISO — clé de tri FIFO
-  expirationDate?: string | null; // ISO — DLC (LotDlc) : null si non saisie
-  freshness?: LotFreshness;       // fresh | expiring | expired | unknown (cf. lib/lotFreshness)
 }
 
 function docNumOfLot(lot: string): number {
@@ -118,21 +114,25 @@ export async function GET(req: NextRequest) {
     // Clé de tri FIFO : date d'entrée (jour), repli n° d'EM croissant.
     const fifoKey = (c: Candidate) => (c.admissionDate ?? "").slice(0, 10);
 
-    const finals: { code: string; candidates: Candidate[]; sug: string | null }[] = [];
-    const allLots = new Set<string>();
-    const today = new Date();
+    const out: Record<string, { candidates: Candidate[]; suggested: string | null }> = {};
     for (const code of items) {
       const notes = notesByItem.get(code) ?? new Map<string, number>();
       const byLot = new Map<string, Candidate>();
 
-      // 1) Lots du REGISTRE (colis-restant par-EM fiable).
+      // 1) Lots du REGISTRE (colis-restant par-EM fiable) — MAIS uniquement s'ils
+      //    sont RÉELLEMENT EN STOCK. Règle métier : on ne propose que les lots
+      //    présents dans le stock. Si l'entrepôt de réception du lot n'a plus de
+      //    stock physique (article×entrepôt), le lot est épuisé et n'est PAS
+      //    proposé — même si le registre garde un reliquat (dérive possible). La
+      //    DLC n'entre pas en compte.
       for (const lot of ledgerLotsByItem.get(code) ?? []) {
         const r = ledgerByKey.get(`${code}|${lot}`);
         if (!r) continue;
         const docNum = docNumOfLot(lot);
+        const warehouse = maps.whsOfItemDoc.get(`${code}|${docNum}`) ?? null;
+        if (!lotInStock(stock, code, warehouse)) continue;   // épuisé → non proposé
         byLot.set(lot, {
-          lot, docNum,
-          warehouse: maps.whsOfItemDoc.get(`${code}|${docNum}`) ?? null,
+          lot, docNum, warehouse,
           affect: affects.get(docNum) ?? "TOUS",
           qty: r.quantity,
           colis: toColis(code, r.quantity),
@@ -189,39 +189,11 @@ export async function GET(req: NextRequest) {
         return a.docNum - b.docNum;
       });
 
-      // Suggestion (segment) résolue ; la validation « périmé / en stock » se fait
-      // au post-traitement fraîcheur ci-dessous (une fois la DLC connue).
+      // Suggestion (segment) : conservée seulement si elle est dans les candidats
+      // (donc en stock — la suggestion d'un lot épuisé a déjà été écartée).
       const sug = resolveLotForSegment(maps, affects, code, undefined, segment).lot;
-      finals.push({ code, candidates, sug: sug ?? null });
-      for (const c of candidates) allLots.add(c.lot);
-    }
-
-    // ── Fraîcheur (DLC) : écarte les lots PÉRIMÉS des propositions et trie FEFO ──
-    // La DLC (LotDlc, saisie à la réception) n'était jusqu'ici qu'AFFICHÉE. On la
-    // BRANCHE ici sur la SÉLECTION : un lot dont la DLC est dépassée n'est plus
-    // proposé à la vente (isolé « à écouler »), et les proposables sont triés « à
-    // écouler d'abord » (FEFO, DLC la plus proche). Cf. lib/lotFreshness +
-    // PRODUCT.md « Do » #4 (FIFO/FEFO réel + DLC). Cause directe des « propositions
-    // de lot qui datent » : de vieux lots au registre > 0 étaient proposés en tête
-    // (tri FIFO admission) SANS jamais regarder leur DLC.
-    const dlcMap = await getDlcMap([...allLots]);
-    const out: Record<string, { candidates: Candidate[]; suggested: string | null; expiredCount: number }> = {};
-    for (const { code, candidates, sug } of finals) {
-      const dated = candidates.map((c) => ({
-        c, expirationDate: dlcMap.get(c.lot) ?? null, admissionDate: c.admissionDate, docNum: c.docNum,
-      }));
-      const { proposable, expired } = partitionByFreshness(dated, today);
-      // Jamais laisser l'opérateur sans option : si TOUT est périmé, on montre quand
-      // même les lots (clairement marqués « périmé ») plutôt qu'une liste vide.
-      const order = proposable.length > 0 ? proposable : expired;
-      const finalCandidates: Candidate[] = order.map(({ c, expirationDate }) => ({
-        ...c,
-        expirationDate: expirationDate ? expirationDate.toISOString() : null,
-        freshness: lotFreshness(expirationDate, today),
-      }));
-      // Ne JAMAIS suggérer un lot périmé : la suggestion doit rester dans les proposables.
-      const suggested = sug && proposable.some(({ c }) => c.lot === sug) ? sug : null;
-      out[code] = { candidates: finalCandidates, suggested, expiredCount: expired.length };
+      const suggested = sug && candidates.some((c) => c.lot === sug) ? sug : null;
+      out[code] = { candidates, suggested };
     }
     return NextResponse.json({ ok: true, items: out, pending: LOT_PENDING });
   } catch (e) {

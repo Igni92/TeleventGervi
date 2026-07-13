@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { setDeliveryDeparted, setDeliveryPrepared, getDeliveryPreparedOne, setDeliveryIncomplete, setDeliveryBonCommande } from "@/lib/inventory";
 import { getOrderLotStatus } from "@/lib/orderLots";
-import { getDlcMap } from "@/lib/lotDlc";
-import { isExpiredLot } from "@/lib/lotFreshness";
 import { writeAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
@@ -70,19 +68,6 @@ export async function POST(req: NextRequest) {
       }).catch(() => { /* audit best-effort */ });
     }
 
-    // (2) ALERTE DOUCE — lot présent mais PÉRIMÉ (DLC dépassée) : on ne halte pas
-    //     l'expédition sur une DLC (parfois mal saisie), mais on prévient.
-    if (status.resolved.length > 0) {
-      try {
-        const dlc = await getDlcMap(status.resolved.map((r) => r.lot));
-        const today = new Date();
-        const expired = status.resolved.filter((r) => isExpiredLot(dlc.get(r.lot) ?? null, today));
-        if (expired.length > 0) {
-          warning = `Attention : ${expired.length} lot(s) PÉRIMÉ(s) sur ce BL — ` +
-            expired.map((e) => `${e.itemCode} (${e.lot})`).join(", ") + ".";
-        }
-      } catch { /* contrôle DLC best-effort */ }
-    }
     if (status.unverified) {
       warning = "Lots non vérifiés (SAP indisponible) : contrôlez que chaque ligne porte bien un lot.";
     }

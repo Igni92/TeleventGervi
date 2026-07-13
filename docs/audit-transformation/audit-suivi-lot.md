@@ -20,13 +20,16 @@ la DLC**. Résultat : à la vente comme à la préparation, on voit remonter des
 « qui datent » : soit **périmés**, soit **déjà épuisés** (fantômes), soit **figés
 au moment de l'offre** et jamais rafraîchis.
 
-Trois causes racines, indépendantes et cumulatives :
+> **Règle métier tranchée par le client :** on ne propose / n'affecte QUE les
+> lots **réellement présents en stock**. La **DLC n'entre pas en compte** dans la
+> sélection du lot — seule la présence en stock décide.
+
+Deux causes racines, indépendantes et cumulatives :
 
 | # | Cause racine | Produit le symptôme… |
 |---|---|---|
-| **A** | Le **registre des lots dérive** (crédité à la réception, débité presque jamais) → de vieux lots gardent une quantité fantôme > 0 | **proposition** de lot qui date (candidats triés FIFO : le plus vieux fantôme en tête) |
+| **A** | Le **registre des lots dérive** (crédité à la réception, débité presque jamais) → de vieux lots gardent une quantité fantôme > 0, ET la proposition ne recoupait pas la quantité registre avec le **stock physique** | **proposition** de lot qui date (un lot épuisé remonte encore) |
 | **B** | Le lot est **choisi au niveau ARTICLE, jamais au niveau lot**, et **jamais re-résolu** après coup (offre figée, retro incomplète) | **affectation** de lot qui date (vieux lot posé/gelé alors que l'article a du stock ailleurs) |
-| **C** | La **DLC n'est branchée nulle part sur la sélection** — elle est saisie, stockée, affichée… mais jamais utilisée pour filtrer/trier | les lots **périmés** sont proposés et affectés comme des frais |
 
 ---
 
@@ -40,10 +43,12 @@ C'est le cœur du problème d'ergonomie : selon l'écran, l'ordre des lots chang
 | Proposition manuelle (bons de commande) | `app/api/lots/candidates/route.ts:178` | **FIFO** — admission la plus ancienne | ❌ non (avant ce correctif) |
 | Détail des lots (console, clic droit) | `app/api/products/[id]/batches/route.ts:35` | **FEFO** — DLC la plus proche | ⚠️ sur `ProductBatch.expirationDate` (≈ toujours null, cf. §4) |
 
-Le module de production, lui, réclame explicitement « **plus vieux lot d'abord** »
-(`prisma/schema.prisma:381`) — jamais appliqué à la vente. **Le bon standard pour
-une denrée périssable est FEFO** (First Expired First Out) : on écoule d'abord ce
-qui périme le plus tôt. Aucune des trois surfaces ne l'applique correctement.
+**Règle retenue (client) : le tri importe peu — ce qui compte est de ne proposer
+QUE des lots présents en stock.** L'ordre reste FIFO (plus vieux d'abord, rotation
+naturelle) ; la **DLC est hors sujet** pour la sélection. Le vrai défaut n'était
+pas l'ordre mais l'**absence de recoupement avec le stock** : la proposition
+listait des lots au registre `> 0` sans vérifier qu'ils étaient encore physiquement
+là.
 
 ---
 
@@ -80,31 +85,21 @@ vécu par l'opérateur.
 
 ---
 
-## 4. Cause C — La DLC existe mais n'est branchée nulle part sur la sélection
+## 4. Cause C — La proposition ne recoupait pas la présence en STOCK
 
-L'audit métier l'avait déjà pointé (« aveugle à la fraîcheur ») ; depuis, la donnée
-a été **créée** (table `LotDlc`, saisie à la réception, `freshnessLabel` pour
-l'affichage) mais **jamais raccordée à la décision** :
+**Décision client : la DLC n'entre PAS en compte dans la sélection du lot.** Le
+seul critère est la **présence en stock**. Le défaut réel n'était donc pas la DLC
+mais le fait que `/api/lots/candidates` proposait un lot dès que le **registre**
+`ProductBatch.quantity > 0`, **sans recouper avec le stock physique** (`ProductStock`).
+Comme le registre peut dériver (cf. §3), un lot **épuisé** (entrepôt sans stock)
+restait proposé — c'est le « lot qui date ».
 
-- La DLC saisie à la réception va dans **`LotDlc`** (table séparée), via
-  `POST /api/lots/dlc` (best-effort, non bloquant) — `GoodsReceiptForm.tsx:383`.
-- `ProductBatch.expirationDate` n'est alimenté que par la synchro depuis
-  `BatchNumberDetails` — or **cette base n'a pas d'articles gérés par lot**, donc
-  cette colonne est **quasi toujours null**. Le filtre FEFO de la console
-  (`products/[id]/batches/route.ts:33`) porte donc sur une colonne vide → **no-op
-  de fait**. La vraie DLC (dans `LotDlc`) n'est jamais jointe à la sélection.
-- 🔴 **Aucune route de sélection/affectation ne lit la DLC** : ni `orders`, ni
-  `bons-commande`, ni `candidates` (avant ce correctif), ni la retro de
-  `goods-receipts`. Un `EM<DocNum>` **périmé** peut être proposé, affecté et
-  expédié sans le moindre signal.
-- 🟠 **La DLC est pré-remplie côté client seulement, et skippable** : le serveur
-  n'appelle jamais `getShelfLifeMap` (`lib/shelfLife.ts` = code mort). Si la durée
-  de vie d'un article n'est pas configurée → DLC vide → « DLC non saisie ».
-- 🟠 **Une seule DLC par EM** (`LotDlc.batchNumber @unique`) : une EM multi-articles
-  à durées de vie hétérogènes s'effondre sur une seule date (dernière écriture).
-- 🟠 La DLC client est calculée sur `new Date()` (aujourd'hui), **pas** sur la date
-  de réception saisie (`GoodsReceiptForm.tsx:240`) → DLC fausse sur une réception
-  antidatée.
+Le correctif (Lot 1) ajoute le **filtre stock** sur la source registre : un lot
+n'est proposé que si son entrepôt de réception a réellement du stock physique pour
+l'article (la source de repli le faisait déjà). La DLC n'est ni lue ni utilisée.
+
+*(La table `LotDlc` et l'affichage `freshnessLabel` restent pour information à
+l'écran, sans jamais piloter la sélection.)*
 
 ---
 
@@ -120,11 +115,11 @@ stock « Tous » plus frais.
 
 ### 5.2 Lot figé à l'offre, jamais re-résolu à la commande
 🔴 Un lot affecté sur une **offre** (Quotation) est **recopié tel quel** à la
-conversion en commande (BaseType 23), des jours plus tard, **sans re-vérifier**
-stock/segment/DLC (`app/api/bons-commande/route.ts:428-545`). Pire : une fois
-pré-affectée, la commande a `pendingCount = 0` et **disparaît de la file
-d'affectation** (`bons-commande/route.ts:314`) → le lot périmé n'est **jamais**
-revisité. C'est littéralement « **affectation qui date énormément** ».
+conversion en commande (BaseType 23), des jours plus tard, **sans re-vérifier le
+stock** (`app/api/bons-commande/route.ts:428-545`). Pire : une fois pré-affectée,
+la commande a `pendingCount = 0` et **disparaît de la file d'affectation**
+(`bons-commande/route.ts:314`) → le lot épuisé n'est **jamais** revisité. C'est
+littéralement « **affectation qui date énormément** ».
 
 ### 5.3 Lots figés « écrits une fois, jamais rafraîchis »
 🟠 Trois stockages *write-once* : le `U_NoLot` d'offre (5.2), les lots forcés d'un
@@ -166,27 +161,29 @@ en cours d'audit a été **infirmée** — ce code n'existe pas.)*
 ## 7. Smoke test livré
 
 `lib/lotSuiviAudit.smoke.test.ts` reproduit, sur la logique **pure et testable**,
-les trois causes et prouve le correctif :
+les causes et prouve la **règle stock** :
 
-- **Cause #1** : `chooseLot` pose un vieux lot tant que l'article a du stock ;
-- **Cause #2** : `resolveLotForSegment` fige un vieux lot de segment ;
-- **Cause #3** : `buildLotCandidates` liste un lot périmé comme un frais (aucune
-  entrée DLC) → puis **FIX** : `partitionByFreshness` l'écarte et trie FEFO ;
-- **Garde-fou** : sans DLC saisie, l'ordre reste FIFO (aucune régression).
+- **Cause #1** : `chooseLot` pose un vieux lot tant que l'article a du stock
+  (contrôle article, pas lot) ;
+- **Cause #2** : `resolveLotForSegment` fige un vieux lot de segment sans vérifier
+  son stock ;
+- **RÈGLE** : `buildLotCandidates` ne retient QUE les lots présents en stock — un
+  lot dont l'entrepôt est vide (épuisé) n'est **pas** proposé, et n'est jamais
+  « suggéré ». Aucune notion de DLC.
 
-Primitive de fraîcheur : `lib/lotFreshness.ts` (pure, couverte par
-`lib/lotFreshness.test.ts`). `npx vitest run lib/lotFreshness.test.ts
-lib/lotSuiviAudit.smoke.test.ts` → **18 verts**.
+Classifieur de départ : `lib/orderLots.ts` (pur, couvert par `lib/orderLots.test.ts`).
+`npx vitest run lib/orderLots.test.ts lib/lotSuiviAudit.smoke.test.ts` → verts.
 
 ---
 
 ## 8. Solutions — état d'avancement
 
-### ✅ Lot 1 — Fraîcheur sur la proposition (contenu, sans risque SAP)
-- 🔴→✅ **Filtre DLC + tri FEFO sur la proposition** (`/api/lots/candidates`) : un
-  lot **périmé n'est plus proposé** (isolé, `expiredCount`), les proposables sont
-  triés « à écouler d'abord ». Repli FIFO quand la DLC manque ; jamais de liste
-  vide. Primitive pure (`lib/lotFreshness.ts`) + tests + smoke test.
+### ✅ Lot 1 — Proposition filtrée sur le STOCK (contenu, sans risque SAP)
+- 🔴→✅ **Filtre stock sur la proposition** (`/api/lots/candidates`) : un lot n'est
+  proposé que s'il est **réellement en stock** (l'entrepôt de réception a du stock
+  physique pour l'article). Un lot épuisé au registre `> 0` n'est plus proposé ni
+  « suggéré ». Ordre FIFO conservé. **La DLC n'entre pas en compte** (décision
+  client). Smoke test `lib/lotSuiviAudit.smoke.test.ts`.
 
 ### ✅ Lot 2 — Garantie de départ + fiabilisation du registre
 - 🔴→✅ **GARANTIE : aucune commande ne part sans lot réel.** Garde-fou serveur dans
@@ -195,7 +192,6 @@ lib/lotSuiviAudit.smoke.test.ts` → **18 verts**.
   bloquée est **mise en file d'affectation** automatiquement ; dérogation possible
   (`force:true`) mais **tracée en audit** (`DEPART_SANS_LOT`). Panne SAP → on ne
   fige pas l'entrepôt (avertissement). Classifieur pur `lib/orderLots.ts` + tests.
-  **Alerte douce** en plus si un lot présent est **périmé** (DLC), sans bloquer.
 - 🔴→✅ **Registre fiabilisé (Cause A)** :
   - **débit à la retro** des ventes à découvert (`goods-receipts`) — fin du stock
     fantôme crédité-jamais-débité ;
@@ -204,10 +200,10 @@ lib/lotSuiviAudit.smoke.test.ts` → **18 verts**.
     ajout/retrait/changement de lot → débit/crédit du delta) ;
   - **crédit au PO-receive** (`purchase-orders/receive`, aligné sur `goods-receipts`).
   - *(Le rebind reste cohérent tel quel — débit initial conservé — non modifié.)*
-- 🟠→✅ **Re-validation fraîcheur à la conversion (Cause B §5.2)** : à la conversion
-  offre→commande, toute ligne au lot **pré-affecté périmé** est remise en
-  `EM_PENDING` → elle **revient** dans la file et est bloquée au départ tant qu'un
-  lot frais n'est pas posé.
+- 🟠→✅ **Re-validation STOCK à la conversion (Cause B §5.2)** : à la conversion
+  offre→commande, toute ligne au lot **pré-affecté ÉPUISÉ** (registre à 0) est remise
+  en `EM_PENDING` → elle **revient** dans la file et est bloquée au départ tant qu'un
+  lot présent n'est pas posé.
 
 ### 🟠 Reste (chantier / décision)
 - **Retro sur `purchase-orders/receive`** : crédit registre branché, mais la
@@ -216,18 +212,16 @@ lib/lotSuiviAudit.smoke.test.ts` → **18 verts**.
 - **Idempotence de la réception** (clé `NumAtCard`/hash) contre un double-crédit sur
   retry réseau — non fait (SAP-side).
 - **Fenêtre retro 60 j** paramétrable + **découpe partielle** des lignes (§5.4).
-- **Garde-fou lot+DLC dans `chooseLot`/orders** (§5.1) : contrôle encore au niveau
-  *article*. Résiduel faible (auto-résolution = EM la plus récente) ; couvert au
-  départ (présence) et à la proposition (DLC).
-- **DLC (Cause C) au niveau process** : durée de vie serveur (`getShelfLifeMap`),
-  calcul sur la **date de réception**, DLC **par article** dans une EM multi-articles.
+- **Garde-fou stock au niveau LOT dans `chooseLot`/orders** (§5.1) : contrôle encore
+  au niveau *article*. Résiduel faible (auto-résolution = EM la plus récente) ;
+  couvert au départ (présence) et à la proposition (stock).
+- **Réconciliation registre ↔ stock physique** : si un article×entrepôt est
+  physiquement à 0, remettre à 0 les reliquats registre de ce couple (purge de la
+  dérive historique). Le filtre stock de la proposition masque déjà ces lots.
 
-### Décision métier
-- **FEFO** appliqué à la proposition (conforme `PRODUCT.md` #4) — à confirmer comme
-  règle unique des 3 surfaces.
-- Départ : lot **absent** = **bloqué** (fait) ; lot **périmé** = **alerte** (pas de
-  blocage dur, pour ne pas figer l'expédition sur une DLC mal saisie). À trancher si
-  vous voulez aussi un blocage dur sur le périmé.
+### Note
+- **DLC hors périmètre** : décision client — la DLC ne pilote pas la sélection du
+  lot. Seule la **présence en stock** décide. `LotDlc` reste pour l'affichage.
 
 ---
 

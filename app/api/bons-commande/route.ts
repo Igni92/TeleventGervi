@@ -9,9 +9,7 @@ import { getItemStock } from "@/lib/lotStock";
 import { buildLotCandidates, type LotCandidate } from "@/lib/lotCandidates";
 import { listBonCommandeDocEntries, setDeliveryBonCommande } from "@/lib/inventory";
 import { debitLots, isRealLot } from "@/lib/lotLedger";
-import { getDlcMap } from "@/lib/lotDlc";
 import { isLotPending, familyOfLot, LOT_FAMILY_PREFIX } from "@/lib/gervifrais-calc";
-import { isExpiredLot } from "@/lib/lotFreshness";
 import { FRUIT_FAMILIES } from "@/lib/familles";
 import { isDepartureReached } from "@/lib/livraison";
 
@@ -516,34 +514,50 @@ export async function POST(req: NextRequest) {
     type SapOrder = { DocEntry: number; DocNum: number };
     const order = await sap.post<SapOrder>("/Orders", orderPayload);
 
-    // ── Re-validation FRAÎCHEUR à la conversion (anti « affectation qui date ») ──
-    // Un lot pré-affecté sur l'offre il y a plusieurs jours peut être PÉRIMÉ. La
+    // ── Re-validation STOCK à la conversion (anti « affectation qui date ») ──
+    // Un lot pré-affecté sur l'offre il y a plusieurs jours peut être ÉPUISÉ. La
     // commande recopie le U_NoLot tel quel (BaseType 23) et, si elle est
-    // entièrement affectée, DISPARAÎT de la file (pendingCount=0) → le lot périmé
+    // entièrement affectée, DISPARAÎT de la file (pendingCount=0) → le lot épuisé
     // partirait sans jamais être revu. On remet donc en EM_PENDING toute ligne
-    // dont le lot est périmé : elle revient dans la file (à ré-affecter un lot
-    // frais) ET sera bloquée au départ tant qu'un vrai lot n'est pas posé.
+    // dont le lot n'est PLUS EN STOCK (registre à 0) : elle revient dans la file
+    // (à ré-affecter un lot présent) ET sera bloquée au départ. La DLC n'entre pas
+    // en compte — seule la présence en stock décide.
     try {
       const conv = await sap.get<SapOrderDoc>(`Orders(${order.DocEntry})?$select=DocEntry,DocumentLines`);
-      const realLots = [...new Set((conv.DocumentLines ?? [])
-        .map((l) => (l.U_NoLot ?? "").trim())
-        .filter((x) => isRealLot(x)))];
-      if (realLots.length > 0) {
-        const dlc = await getDlcMap(realLots);
-        const today = new Date();
-        const expired = new Set(realLots.filter((lot) => isExpiredLot(dlc.get(lot) ?? null, today)));
-        if (expired.size > 0) {
+      const realKeys = (conv.DocumentLines ?? [])
+        .map((l) => ({ itemCode: l.ItemCode, lot: (l.U_NoLot ?? "").trim() }))
+        .filter((x) => x.itemCode && isRealLot(x.lot));
+      if (realKeys.length > 0) {
+        // Registre par (article, lot) : un lot ÉPUISÉ = ligne présente à quantity ≤ 0.
+        const rows = await prisma.productBatch.findMany({
+          where: {
+            warehouseCode: "",
+            batchNumber: { in: [...new Set(realKeys.map((k) => k.lot))] },
+            product: { itemCode: { in: [...new Set(realKeys.map((k) => k.itemCode as string))] } },
+          },
+          select: { batchNumber: true, quantity: true, product: { select: { itemCode: true } } },
+        });
+        const qtyByKey = new Map(rows.map((r) => [`${r.product.itemCode}|${r.batchNumber}`, r.quantity]));
+        // Épuisé seulement si le registre CONNAÎT le lot et le donne à 0 (lot hors
+        // registre → on ne touche pas, faute de signal fiable).
+        const depleted = new Set(
+          realKeys.filter((k) => {
+            const q = qtyByKey.get(`${k.itemCode}|${k.lot}`);
+            return q != null && q <= 0;
+          }).map((k) => k.lot),
+        );
+        if (depleted.size > 0) {
           const patchLines = (conv.DocumentLines ?? [])
-            .filter((l) => l.LineNum != null && expired.has((l.U_NoLot ?? "").trim()))
+            .filter((l) => l.LineNum != null && depleted.has((l.U_NoLot ?? "").trim()))
             .map((l) => ({ LineNum: l.LineNum, U_NoLot: LOT_PENDING }));
           if (patchLines.length > 0) {
             await sap.patch(`Orders(${order.DocEntry})`, { DocumentLines: patchLines });
-            console.log(`[BonCommande] Conversion #${order.DocNum} : ${patchLines.length} ligne(s) à lot PÉRIMÉ remises en attente.`);
+            console.log(`[BonCommande] Conversion #${order.DocNum} : ${patchLines.length} ligne(s) à lot ÉPUISÉ remises en attente.`);
           }
         }
       }
     } catch (e) {
-      console.warn("[BonCommande] Re-validation fraîcheur à la conversion échouée (non-bloquant):", (e as Error).message);
+      console.warn("[BonCommande] Re-validation stock à la conversion échouée (non-bloquant):", (e as Error).message);
     }
 
     // La commande issue de l'offre porte des lignes EM_PENDING → à affecter :
