@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { PreparationsAFaire } from "@/components/livraisons/PreparationsAFaire";
+import { LivraisonsSectionTabs } from "@/components/livraisons/LivraisonsSectionTabs";
 import { isTerrainConfined } from "@/lib/preparateur";
 import { PreparateurNav } from "@/components/PreparateurNav";
 
@@ -15,6 +16,8 @@ export default async function PreparationsPage() {
     <div className="space-y-6 animate-fade-up">
       {/* Nav terrain (mobile) pour les rôles confinés. */}
       {isTerrainConfined(session) && <PreparateurNav current="preparations" />}
+      {/* Onglets de section « Livraisons du jour » (postes non confinés). */}
+      {!isTerrainConfined(session) && <LivraisonsSectionTabs />}
       <header>
         <p className="kicker mb-1.5">Entrepôt · charge</p>
         <h1 className="font-display text-[28px] sm:text-[34px] font-semibold text-foreground tracking-tight leading-none">

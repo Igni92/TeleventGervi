@@ -672,3 +672,22 @@ et du **format de date** sur les états SAP.
 - **En-têtes d'une seule lettre** (L M M J V S D) sous `sm` → plus de largeur par colonne.
 - **Liste « Ce mois-ci »** sous le calendrier (mobile) : chaque congé/récup du mois avec type, plage et statut ; un tap sélectionne la plage. Les pastilles disent « quoi », la liste dit « quand & quel statut ».
 - Sélection liée (bandeau continu) et choix clic début/clic fin inchangés.
+
+---
+
+## 🚚 Livraisons — hub à onglets (fin des « états doublons »)
+
+Audit smoke-test métier : **4 entrées de navigation lisaient déjà la même donnée**
+(`/api/livraisons`, types `lib/livraisonView`) sous 4 angles. On les fusionne sous
+une seule entrée à onglets in-page — même pattern que « Clients & plan d'appel ».
+
+| Avant | Après |
+|-------|-------|
+| **4 entrées Entrepôt** : « Préparation livraisons » (titre H1 *Détail livraison*), « Détails livraison », « Préparations à faire », « Manquants » — quasi-homonymes, ressenties comme des doublons. | **1 entrée « Livraisons du jour »** avec bandeau d'onglets : **Préparation · Par article · À préparer · Manquants**. Chaque route reste adressable (deep-link), l'entrée sidebar reste active sur ses routes secondaires (`also`). Sidebar Entrepôt : **8 → 5 entrées**. |
+| Homonymie **« Détail livraison » / « Détails livraison »** (singulier/pluriel) — la confusion pointée. | Vue maître = **« Livraisons du jour »** (H1 + onglet *Préparation*) ; vue article = **« Détails par article »** (onglet *Par article*). Plus de collision. |
+| Tuiles mobiles : « Préparation livraisons », « Préparations à faire », « Manquants » éparpillées sur 2 axes (Commercial / Acheteur). | Une tuile **« Livraisons du jour »** (axe Commercial) ; les sous-vues deviennent des onglets du hub. |
+
+- `components/livraisons/LivraisonsSectionTabs.tsx` (NOUVEAU) : bandeau d'onglets par route, pastille active animée (`layoutId`), rail défilant sur mobile — calqué sur `ClientsSectionTabs`.
+- **Masqué aux rôles terrain confinés** (préparateur/livreur) : `proxy.ts` ne leur ouvre que `/livraisons` (+ `/preparations`) — ils gardent `PreparateurNav`.
+- Aligné partout : `Sidebar`, `MobileTiles`, `CommandPalette` (⌘K — les 4 routes groupées sous « Livraisons · … », `/details-livraison` ajouté), `MobileTopBar`.
+- **Aucune page ni fonctionnalité supprimée** : uniquement un regroupement de navigation. `tsc` 0 · `eslint` 0 · `next build` 51 pages · 458 tests verts.
