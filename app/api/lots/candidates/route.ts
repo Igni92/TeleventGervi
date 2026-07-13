@@ -119,14 +119,20 @@ export async function GET(req: NextRequest) {
       const notes = notesByItem.get(code) ?? new Map<string, number>();
       const byLot = new Map<string, Candidate>();
 
-      // 1) Lots du REGISTRE (colis-restant par-EM fiable).
+      // 1) Lots du REGISTRE (colis-restant par-EM fiable) — MAIS uniquement s'ils
+      //    sont RÉELLEMENT EN STOCK. Règle métier : on ne propose que les lots
+      //    présents dans le stock. Si l'entrepôt de réception du lot n'a plus de
+      //    stock physique (article×entrepôt), le lot est épuisé et n'est PAS
+      //    proposé — même si le registre garde un reliquat (dérive possible). La
+      //    DLC n'entre pas en compte.
       for (const lot of ledgerLotsByItem.get(code) ?? []) {
         const r = ledgerByKey.get(`${code}|${lot}`);
         if (!r) continue;
         const docNum = docNumOfLot(lot);
+        const warehouse = maps.whsOfItemDoc.get(`${code}|${docNum}`) ?? null;
+        if (!lotInStock(stock, code, warehouse)) continue;   // épuisé → non proposé
         byLot.set(lot, {
-          lot, docNum,
-          warehouse: maps.whsOfItemDoc.get(`${code}|${docNum}`) ?? null,
+          lot, docNum, warehouse,
           affect: affects.get(docNum) ?? "TOUS",
           qty: r.quantity,
           colis: toColis(code, r.quantity),
@@ -183,7 +189,8 @@ export async function GET(req: NextRequest) {
         return a.docNum - b.docNum;
       });
 
-      // Suggestion (segment) seulement si elle fait partie des candidats.
+      // Suggestion (segment) : conservée seulement si elle est dans les candidats
+      // (donc en stock — la suggestion d'un lot épuisé a déjà été écartée).
       const sug = resolveLotForSegment(maps, affects, code, undefined, segment).lot;
       const suggested = sug && candidates.some((c) => c.lot === sug) ? sug : null;
       out[code] = { candidates, suggested };

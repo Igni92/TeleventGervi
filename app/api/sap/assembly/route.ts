@@ -5,6 +5,7 @@ import { getAccessScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { incrementLocalStock, decrementLocalStock } from "@/lib/stockSync";
+import { creditLots, debitLots } from "@/lib/lotLedger";
 import { getRecipe, resolveLotsForItems, packRatio, LOT_PENDING, type LotResolution } from "@/lib/fabrication";
 import { quantitesComposant } from "@/lib/fabrication-optim";
 
@@ -409,6 +410,25 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     console.warn(`[Assembly v2] ${opCode} stockSync échoué (non-bloquant):`, (e as Error).message);
   }
 
+  // ── REGISTRE DES LOTS : la fabrication est un MOUVEMENT — on la gère aussi par lot ──
+  // • DÉBIT des lots COMPOSANTS consommés (vrais EM<DocNum> ; les composants à
+  //   découvert (EM_PENDING) sont ignorés par isRealLot) ;
+  // • CRÉDIT du lot PARENT produit = code OP<NNNNN> (nouveau stock fabriqué, suivi
+  //   par lot comme une réception → « pas de stock, pas de lot » respecté).
+  // Quantités en pie (unité SAP), cohérentes avec réception/vente. Best-effort.
+  try {
+    await debitLots(runLines.map((l) => ({ itemCode: l.itemCode, lot: l.batchNumber, qty: l.pieceQty })));
+    await creditLots([{
+      itemCode: parentCode,
+      lot: opCode,
+      qty: parentPieceQty,
+      sourceDocNum: String(entryDoc.DocNum),
+      admissionDate: new Date(`${today}T12:00:00Z`),
+    }]);
+  } catch (e) {
+    console.warn(`[Assembly v2] ${opCode} registre lots échoué (non-bloquant):`, (e as Error).message);
+  }
+
   // ── 4. Run complété ──
   try {
     await prisma.$executeRawUnsafe(
@@ -565,6 +585,23 @@ async function assemblyLegacy(body: LegacyBody, session: Session, admin: boolean
     }]);
   } catch (e) {
     console.warn("[Assembly] stockSync échoué (non-bloquant):", (e as Error).message);
+  }
+
+  // ── REGISTRE DES LOTS (comme v2) : débit des lots composants (résolus FIFO au
+  //    registre/PDN) + crédit du lot PARENT produit sous son code OP<NNNNN>. ──
+  try {
+    const lotByComp = await resolveLotsForItems(resolvedComponents.map((c) => c.componentItemCode), warehouse);
+    await debitLots(resolvedComponents.map((c) => ({
+      itemCode: c.componentItemCode,
+      lot: lotByComp.get(c.componentItemCode)?.batchNumber ?? LOT_PENDING,
+      qty: c.qty,
+    })));
+    await creditLots([{
+      itemCode: parentCode, lot: opCode, qty: parentPieceQty,
+      sourceDocNum: String(entryDoc.DocNum), admissionDate: new Date(`${today}T12:00:00Z`),
+    }]);
+  } catch (e) {
+    console.warn("[Assembly] registre lots échoué (non-bloquant):", (e as Error).message);
   }
 
   return NextResponse.json({

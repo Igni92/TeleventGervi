@@ -4,6 +4,7 @@ import { requireCanReceivePurchaseOrder } from "@/lib/permissions";
 import { sap } from "@/lib/sapb1";
 import { incrementLocalStock } from "@/lib/stockSync";
 import { bumpLot } from "@/lib/lotResolver";
+import { creditLots } from "@/lib/lotLedger";
 import { applyAgreage, type AgreageStatus } from "@/lib/agreage";
 import { setMarchandiseNote, sanitizeRating } from "@/lib/marchandiseNote";
 
@@ -122,7 +123,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── 3. Lot EM<DocNum> + refetch des lignes créées (qté/entrepôt pour le stock) ──
-  type CreatedLine = { LineNum: number; ItemCode: string; Quantity: number; WarehouseCode?: string };
+  type CreatedLine = { LineNum: number; ItemCode: string; Quantity: number; WarehouseCode?: string; Price?: number };
   let createdLines: CreatedLine[] = [];
   try {
     const refetch = await sap.get<{ DocumentLines: CreatedLine[] }>(
@@ -142,6 +143,26 @@ export async function POST(req: NextRequest) {
   if (rating != null) {
     const codes = [...new Set(createdLines.map((l) => l.ItemCode).filter((c): c is string => !!c))];
     await Promise.all(codes.map((code) => setMarchandiseNote(code, lotCode, rating, me).catch(() => {})));
+  }
+
+  // ── Registre des lots : CRÉDIT (réception via commande fournisseur) ──
+  // Aligné sur /api/sap/goods-receipts : le lot EM<DocNum> naît ici, on mémorise
+  // la quantité reçue + fournisseur + prix pour le décrément à la vente. Sans ça,
+  // un lot reçu par ce chemin n'avait AUCUN suivi de stock par lot. Best-effort.
+  try {
+    const admission = new Date(`${today}T12:00:00Z`);
+    await creditLots(createdLines.map((l) => ({
+      itemCode: l.ItemCode,
+      lot: lotCode,
+      qty: l.Quantity,
+      supplierName: po.CardName?.trim() || po.CardCode,
+      purchasePrice: l.Price ?? null,
+      currency: "EUR",
+      sourceDocNum: String(created.DocNum),
+      admissionDate: admission,
+    })));
+  } catch (e) {
+    console.warn("[POReceive] Crédit registre lots échoué (non-bloquant):", (e as Error).message);
   }
 
   // ── 4. Cache lots + incrément stock local (latence 0) ──

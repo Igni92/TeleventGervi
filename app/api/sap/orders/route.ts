@@ -18,7 +18,7 @@ import { colisInfo } from "@/lib/colis";
 import { isPrecommande } from "@/lib/livraison";
 import { isComptoirClient } from "@/lib/segments";
 import { markComptoirDelivered } from "@/lib/inventory";
-import { debitLots } from "@/lib/lotLedger";
+import { debitLots, getLedgerFifoLot } from "@/lib/lotLedger";
 import { getSafeguardsConfig } from "@/lib/safeguardsStore";
 import {
   evaluateLineSafeguards, evaluateOrderSafeguards, splitViolations,
@@ -388,6 +388,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Lot FIFO en stock au REGISTRE, par article — repli quand le résolveur PDN est
+  // aveugle : produit FABRIQUÉ (lot OP<NNNNN>, jamais reçu par un BR) ou article
+  // suivi uniquement au registre. Le registre fait autorité (cf. getLedgerFifoLot).
+  const ledgerLotByItem = itemCodes.length > 0 ? await getLedgerFifoLot(itemCodes) : new Map<string, string>();
+
   // ── BON DE COMMANDE / PRÉCOMMANDE : aucun auto-lot ──
   // Choix explicite (docKind="COMMANDE") OU précommande (livraison au-delà du
   // prochain jour livrable). Exclut la transformation d'un bon de préparation
@@ -497,10 +502,22 @@ export async function POST(req: NextRequest) {
           sapOnHand,
           envDefault: process.env.GERVIFRAIS_LOT_DEFAUT ?? null,
         });
-    line.U_NoLot = choice.lot;
+    // Repli REGISTRE : le résolveur PDN n'a rien trouvé (resolved.lot null) et on
+    // retombait sur EM_PENDING → si le REGISTRE connaît un lot EN STOCK pour cet
+    // article (produit fabriqué OP<NNNNN>, ou article suivi uniquement au
+    // registre), on le POSE. Le registre fait autorité ; jamais sur une ligne à
+    // découvert (isDecouvert) ni un lot forcé. Évite qu'un produit fabriqué parte
+    // sans lot (et soit bloqué au départ).
+    let finalLot = choice.lot;
+    let lotReason: string = choice.reason;
+    if (!forcedLot && !isDecouvert && choice.lot === LOT_PENDING && resolved.lot === null) {
+      const ledgerLot = ledgerLotByItem.get(l.itemCode);
+      if (ledgerLot) { finalLot = ledgerLot; lotReason = "registre (lot en stock)"; }
+    }
+    line.U_NoLot = finalLot;
     console.log(
-      `[Order] Lot ${l.itemCode}@${l.warehouseCode ?? "?"} [seg ${clientSegment ?? "—"}] → ${choice.lot} ` +
-      `(${choice.reason}${resolved.source ? `/${resolved.source}` : ""} — dispo locale ${availLocal}, stock SAP ${sapOnHand ?? "?"})`,
+      `[Order] Lot ${l.itemCode}@${l.warehouseCode ?? "?"} [seg ${clientSegment ?? "—"}] → ${finalLot} ` +
+      `(${lotReason}${resolved.source ? `/${resolved.source}` : ""} — dispo locale ${availLocal}, stock SAP ${sapOnHand ?? "?"})`,
     );
 
     // Cohérence lot ↔ magasin (vente à découvert) : si le lot retenu provient d'un
