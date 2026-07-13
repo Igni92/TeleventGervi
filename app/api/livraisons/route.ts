@@ -5,6 +5,7 @@ import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { nextDeliveryDate, frenchHolidayLabel } from "@/lib/livraison";
 import { getDeliveryStatuses } from "@/lib/inventory";
+import { isComptoirClient } from "@/lib/segments";
 import { selectCarryoverEntries } from "@/lib/livraisonCarryover";
 import { getClientTournees, type ClientTournee } from "@/lib/clientTournee";
 import { getClientTrclCarriers } from "@/lib/clientCarriers";
@@ -231,26 +232,48 @@ export async function GET(req: NextRequest) {
       (async () => {
         const types = new Map<string, string>();
         const names = new Map<string, string>();
-        if (!cardCodes.length) return { types, names };
+        // Ventes comptoir : CardCodes RÉSOLUS dont le client est HORS des 3 segments
+        // livrés (GMS/CHR/EXPORT). Leur marchandise part à la vente → préparées +
+        // livrées d'office (cf. markComptoirDelivered à la création). Ici c'est le
+        // FILET au read time : toute commande comptoir est « faite + départ » quelle
+        // que soit sa provenance (SAP direct, conversion d'offre, avant la feature…),
+        // sans dépendre du marqueur persistant ni de la régularisation manuelle.
+        // ⚠️ Un CardCode NON résolu n'est jamais présumé comptoir (il pourrait être
+        // une adresse de livraison GMS) — même prudence que la régularisation.
+        const comptoir = new Set<string>();
+        const decide = (
+          code: string,
+          cli: { type: string | null; sapGroupCode: number | null; sapGroupName: string | null },
+        ) => {
+          if (isComptoirClient({ type: cli.type, groupCode: cli.sapGroupCode, groupName: cli.sapGroupName })) {
+            comptoir.add(code);
+          }
+        };
+        if (!cardCodes.length) return { types, names, comptoir };
         try {
+          const resolved = new Set<string>();
           const clients = await prisma.client.findMany({
             where: { code: { in: cardCodes } },
-            select: { code: true, type: true, nom: true },
+            select: { code: true, type: true, nom: true, sapGroupCode: true, sapGroupName: true },
           });
           for (const c of clients) {
+            resolved.add(c.code);
             if (c.type) types.set(c.code, c.type);
             if (c.nom?.trim()) names.set(c.code, c.nom.trim());
+            decide(c.code, c);
           }
           const modes = await prisma.clientDeliveryMode.findMany({
             where: { sapCardCode: { in: cardCodes } },
-            select: { sapCardCode: true, client: { select: { type: true, nom: true } } },
+            select: { sapCardCode: true, client: { select: { type: true, nom: true, sapGroupCode: true, sapGroupName: true } } },
           });
           for (const mo of modes) {
-            if (mo.client?.type && !types.has(mo.sapCardCode)) types.set(mo.sapCardCode, mo.client.type);
-            if (mo.client?.nom?.trim() && !names.has(mo.sapCardCode)) names.set(mo.sapCardCode, mo.client.nom.trim());
+            if (!mo.client) continue;
+            if (mo.client.type && !types.has(mo.sapCardCode)) types.set(mo.sapCardCode, mo.client.type);
+            if (mo.client.nom?.trim() && !names.has(mo.sapCardCode)) names.set(mo.sapCardCode, mo.client.nom.trim());
+            if (!resolved.has(mo.sapCardCode)) { resolved.add(mo.sapCardCode); decide(mo.sapCardCode, mo.client); }
           }
         } catch { /* type optionnel → BL rangés en « Autres » */ }
-        return { types, names };
+        return { types, names, comptoir };
       })(),
       // Tournée MÉMORISÉE par client (repli si SERG_TRCL indisponible).
       getClientTournees(cardCodes).catch(() => new Map<string, ClientTournee>()),
@@ -302,6 +325,7 @@ export async function GET(req: NextRequest) {
     const onHandStocks = stockInfo.onHand;
     const typeByCardCode = clientMeta.types;
     const nameByCardCode = clientMeta.names;
+    const comptoirByCardCode = clientMeta.comptoir;
     const pMap = new Map(prods.map((p) => [p.itemCode, p]));
     const {
       prepared: faiteByDoc, preparedBy: preparedByDoc, preparedAt: preparedAtDoc,
@@ -365,6 +389,12 @@ export async function GET(req: NextRequest) {
       // Lignes émises SANS les champs bruts (sommation serveur uniquement).
       const outLines = mergedLines.map(({ colisRaw: _c, weightRaw: _w, ...rest }) => rest);
       const trspCode = d.U_TrspCode?.trim() || null;
+      // Vente comptoir (client hors GMS/CHR/EXPORT) → « faite » + « départ » d'office.
+      // On force les deux états quel que soit le marqueur persistant : la marchandise
+      // est déjà partie à la vente, la commande n'a jamais à traîner en « pas préparé ».
+      const comptoir = comptoirByCardCode.has(d.CardCode);
+      const prepared = (faiteByDoc.get(d.DocEntry) ?? false) || comptoir;
+      const departed = (departedByDocEntry.get(d.DocEntry) ?? false) || comptoir;
       return {
         docEntry: d.DocEntry,
         docNum: d.DocNum,
@@ -397,11 +427,11 @@ export async function GET(req: NextRequest) {
         })(),
         carrierName: trspCode ? carrierByCode.get(trspCode) ?? trspCode : null,
         clientType: typeByCardCode.get(d.CardCode) ?? null,   // GMS | CHR | EXPORT | null
-        prepared: faiteByDoc.get(d.DocEntry) ?? false,        // « faite » = coché manuellement
-        preparedBy: preparedByDoc.get(d.DocEntry) ?? null,    // qui a marqué « faite »
+        prepared,                                             // « faite » (coché) OU vente comptoir d'office
+        preparedBy: preparedByDoc.get(d.DocEntry) ?? (comptoir ? "Comptoir" : null), // qui a marqué « faite »
         preparedAt: preparedAtDoc.get(d.DocEntry) ?? null,    // heure du clic « fait »
-        departed: departedByDocEntry.get(d.DocEntry) ?? false, // « départ » = parti en livraison
-        departedBy: departedByDoc.get(d.DocEntry) ?? null,    // qui a marqué « départ »
+        departed,                                             // « départ » (parti) OU vente comptoir d'office
+        departedBy: departedByDoc.get(d.DocEntry) ?? (comptoir ? "Comptoir" : null), // qui a marqué « départ »
         departedAt: departedAtDoc.get(d.DocEntry) ?? null,    // heure du clic « départ »
         preparer: prepByDoc.get(d.DocEntry) ?? null,          // préparateur affecté (qui a ouvert)
         incomplete: incompleteByDoc.get(d.DocEntry) ?? false, // « à reprendre » — remise sur la file

@@ -450,6 +450,24 @@ non parties**, faussant le suivi et l'inventaire.
   le groupe SAP prime, repli sur le `type` client ; par défaut (aucun signal) =
   comptoir.
 
+### Filet « d'office » au read time (`GET /api/livraisons`)
+
+Le marquage à la création + la régularisation manuelle ne couvraient que les
+commandes **passées par l'app**. Une vente comptoir créée **directement dans SAP**
+(ou par conversion d'offre, ou avant la feature) retombait en « pas préparé » dans
+**Ventes du jour / Préparations / Manquants** tant qu'on ne cliquait pas
+« Régulariser ».
+
+| Avant | Après |
+|-------|-------|
+| Vente comptoir non passée par l'app → « pas préparé » jusqu'à régularisation manuelle. | `GET /api/livraisons` force **`prepared` + `departed`** pour tout client **résolu** hors GMS/CHR/Export (`isComptoirClient`, groupe SAP + repli type). **Automatique**, quelle que soit la provenance de la commande — plus aucune dépendance au marqueur persistant ni au bouton « Régulariser ». |
+
+- Le CardCode **non résolu** n'est **jamais** présumé comptoir (pourrait être une
+  adresse de livraison GMS) — même prudence que la régularisation.
+- Aucun impact sur le **Détail livraison** (déjà restreint aux 3 segments livrés
+  via `keepDeliverableClients`) ; le filet agit sur les écrans qui listent **tous**
+  les clients.
+
 ---
 
 ## 🛒 Console — lots au clic droit : plus de « aucun lot » sur un article en stock
