@@ -100,13 +100,15 @@ export async function POST(req: NextRequest) {
       note, status: "pending", origin: "salarie", createdAt: now,
     };
     await saveConge(conge);
-    const days = congeDayCount(conge.start, conge.end);
+    // Décompte réel notifié à la personne en charge des congés : jours OUVRABLES
+    // (lun→sam, hors dimanches ET fériés), pas les jours calendaires bruts.
+    const ouvr = expandOuvrables(conge.start, conge.end).length;
     // La demande part vers l'employeur sur TOUS les canaux configurés :
     // push in-app + email + WhatsApp (chacun best-effort, aucun ne bloque).
     const dirEmails = await directionEmails();
     notifyEmails(dirEmails, {
       title: "🌴 Demande de congés",
-      body: `${c.name} — ${CONGE_TYPE_LABEL[conge.type]}, ${rangeLabel(conge)}${days ? ` (${days} j)` : ""} à valider.`,
+      body: `${c.name} — ${CONGE_TYPE_LABEL[conge.type]}, ${rangeLabel(conge)}${ouvr ? ` (${ouvr} j ouvrable${ouvr > 1 ? "s" : ""}, hors dim./fériés)` : ""} à valider.`,
       url: "/planning", tag: `conge-${conge.id}`, renotify: true,
     }).catch(() => {});
     emailDirectionConge(conge, dirEmails).catch((e) => console.error("[conges] email direction:", e));

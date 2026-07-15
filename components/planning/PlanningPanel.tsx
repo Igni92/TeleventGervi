@@ -23,7 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   CalendarDays, ChevronLeft, ChevronRight, RotateCcw, Loader2, Send, Check, X,
-  Users, Palmtree, Clock3, SlidersHorizontal, Save, Sun,
+  Users, Palmtree, Clock3, SlidersHorizontal, Save, Sun, Lightbulb,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { displayPersonName } from "@/lib/userNames";
@@ -31,7 +31,7 @@ import {
   fmtHM, monthIdOf, shiftMonth, monthLabel, type DayTag, DAY_TAG_LABEL,
 } from "@/lib/heuresCalc";
 import {
-  monthGridDays, expandOuvrables, monthEndISO,
+  monthGridDays, expandOuvrables, monthEndISO, saturdaysInRange,
   resolveCalendarDay, DAY_CATEGORY_LABEL, type DayCategory,
 } from "@/lib/planning";
 import { frenchHolidayLabel } from "@/lib/livraison";
@@ -486,6 +486,16 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
 
   const ouvrables = sel.start ? expandOuvrables(sel.start, sel.end).length : 0;
 
+  // SUGGESTION « récup au lieu de CP » (à l'avantage du salarié) : un CP dont la
+  // plage inclut un SAMEDI (jour ouvrable décompté mais NON travaillé) gaspille
+  // des CP. Si de la récup est disponible, on propose de la poser à la place —
+  // ses CP sont préservés. Dimanches et fériés sont déjà hors décompte.
+  const cpSaturdays = type === "cp" && sel.start ? saturdaysInRange(sel.start, sel.end) : [];
+  const typDayMin = person.profile.typicalDayMin;
+  const recupBalanceMin = person.counters.recup.balanceMin;
+  const recupDaysAvail = typDayMin > 0 ? Math.floor(recupBalanceMin / typDayMin) : 0;
+  const suggestRecup = cpSaturdays.length > 0 && recupBalanceMin > 0;
+
   // Congés/récup du MOIS affiché (validés + en attente) — liste détaillée sous
   // le calendrier sur mobile (les pastilles disent « quoi », la liste dit
   // « quand & quel statut » sans avoir à ouvrir chaque jour).
@@ -646,6 +656,26 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
               <span className="md:hidden"> — touchez le 1ᵉʳ jour puis le dernier</span>
             </span>
           </p>
+
+          {/* SUGGESTION à l'avantage du salarié : ce CP « gaspille » un samedi
+              (jour ouvrable décompté, non travaillé) alors qu'il reste de la
+              récup → propose de basculer en récupération (ses CP sont préservés).
+              Validation par la personne en charge des congés (circuit boomerang). */}
+          {suggestRecup && (
+            <div className="mb-2.5 flex flex-col gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-2.5 sm:flex-row sm:items-center">
+              <Lightbulb className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400" />
+              <p className="min-w-0 flex-1 text-[12px] text-sky-800 dark:text-sky-200">
+                Ce CP décompte aussi <b className="font-semibold">{cpSaturdays.length} samedi{cpSaturdays.length > 1 ? "s" : ""}</b> (jour ouvrable non travaillé).
+                {" "}Tu as <b className="font-semibold tnum">{fmtHM(recupBalanceMin)}</b> de récup{recupDaysAvail > 0 ? ` (~${recupDaysAvail} j)` : ""} —
+                pose une <b className="font-semibold">récupération</b> à la place pour <b className="font-semibold">préserver tes CP</b>.
+              </p>
+              <button type="button" onClick={() => setType("recup")}
+                className="inline-flex shrink-0 items-center justify-center gap-1.5 h-9 px-3 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[12.5px] font-semibold">
+                <RotateCcw className="h-3.5 w-3.5" /> Basculer en récup
+              </button>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-end gap-2.5">
             <div>
               <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Type</label>
@@ -675,7 +705,7 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
           </div>
           {sel.start && (
             <p className="mt-2 text-[11.5px] text-muted-foreground tnum">
-              {rangeLabel({ start: sel.start, end: sel.end })} · {ouvrables} jour{ouvrables > 1 ? "s" : ""} ouvrable{ouvrables > 1 ? "s" : ""}
+              {rangeLabel({ start: sel.start, end: sel.end })} · <span className="font-semibold text-foreground">{ouvrables}</span> jour{ouvrables > 1 ? "s" : ""} ouvrable{ouvrables > 1 ? "s" : ""} <span className="normal-case">(hors dimanches et fériés)</span>
               {type === "cp" && " — les jours de CP validés comptent comme travaillés (journée type créditée)"}
               {type === "recup" && " — décomptée du compteur seulement si la semaine finit sous le contrat"}
             </p>

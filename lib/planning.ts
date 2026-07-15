@@ -25,6 +25,7 @@ import {
   type DayHours, type DayTag, type HeuresOption, type HoursProfile,
 } from "./heuresCalc";
 import { isIsoDate, rangesOverlap, type CongeRequest, type CongeType } from "./conges";
+import { frenchHolidayLabel } from "./livraison";
 
 /* ─────────────────────────── Dates utilitaires ────────────────────────────── */
 
@@ -51,10 +52,11 @@ export function expandDates(start: string, end: string): string[] {
   return out;
 }
 
-/** Jours OUVRABLES (lun→sam) d'une plage — décompte des CP à la française
- *  (le dimanche ne consomme jamais un congé : à l'avantage du salarié). */
+/** Jours OUVRABLES (lun→sam) d'une plage — décompte des CP à la française.
+ *  Ni les DIMANCHES ni les JOURS FÉRIÉS (chômés) ne consomment un congé : ils
+ *  sont exclus du décompte — toujours à l'avantage du salarié. */
 export function expandOuvrables(start: string, end: string): string[] {
-  return expandDates(start, end).filter((d) => atNoon(d).getUTCDay() !== 0);
+  return expandDates(start, end).filter((d) => atNoon(d).getUTCDay() !== 0 && !frenchHolidayLabel(d));
 }
 
 /** Jours de SEMAINE (lun→ven) d'une plage — jours crédités d'une journée type
@@ -64,6 +66,15 @@ export function expandSemaine(start: string, end: string): string[] {
     const dow = atNoon(d).getUTCDay();
     return dow >= 1 && dow <= 5;
   });
+}
+
+/** SAMEDIS (hors fériés) d'une plage. Un CP est décompté en jours ouvrables
+ *  (lun→sam) mais un samedi n'est PAS crédité comme travaillé (expandSemaine =
+ *  lun→ven) : il coûte donc un CP « à vide ». On les repère pour proposer de la
+ *  récup à la place — à l'avantage du salarié (ses CP sont préservés). Un samedi
+ *  férié est déjà non décompté → exclu ici aussi (rien à « éviter »). */
+export function saturdaysInRange(start: string, end: string): string[] {
+  return expandDates(start, end).filter((d) => atNoon(d).getUTCDay() === 6 && !frenchHolidayLabel(d));
 }
 
 /* ─────────────────────── Grille du calendrier mensuel ─────────────────────── */

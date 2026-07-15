@@ -805,3 +805,18 @@ Refonte des **pastilles du calendrier** (onglet Planning) — `components/planni
 
 La résolution « une case → une catégorie dominante » vit dans `resolveCalendarDay` (pur, testé) :
 férié → congé validé → tag feuille d'heures → congé en attente → récup posée → **présent par défaut** → rien.
+
+### Planning — récup à la place des CP + CP hors dimanches/fériés + décompte ouvrable notifié
+
+Suite de la refonte Planning — `lib/planning.ts`, `components/planning/PlanningPanel.tsx`,
+`lib/congesNotify.ts`, `app/api/effectif/conges/route.ts`.
+
+| Sujet | Avant | Après |
+|-------|-------|-------|
+| **CP & jours fériés** | Le décompte des CP en jours ouvrables (`expandOuvrables`) excluait le **dimanche** mais **comptait les jours fériés**. | Les **jours fériés chômés** sont désormais **exclus** du décompte (comme le dimanche) — un férié compris dans un CP ne consomme plus de congé. Toujours à l'avantage du salarié. |
+| **Récup au lieu de CP** (NOUVEAU) | Poser un CP incluant un **samedi** (jour ouvrable décompté mais non travaillé) « gaspillait » un CP, sans alternative proposée. | Si de la **récup est disponible**, une **suggestion** apparaît à la saisie du CP : « ce CP décompte aussi N samedi(s)… bascule en **récupération** pour préserver tes CP ». Bouton **Basculer en récup** → la demande part en récup, **validée par la personne en charge** (circuit boomerang existant). |
+| **Décompte notifié** | La notification à la personne en charge des congés indiquait les **jours calendaires** bruts (`X j`). | Elle indique le **décompte réel en jours ouvrables** (lun→sam, **hors dimanches ET fériés**) sur tous les canaux : push in-app, email, WhatsApp/Outlook. |
+| **Saisie** | « N jours ouvrables ». | « N jours ouvrables **(hors dimanches et fériés)** » — le coût réel est explicite. |
+
+Helpers purs testés ajoutés à `lib/planning.ts` : `saturdaysInRange` (samedis « à vide » d'un CP,
+fériés exclus) et exclusion des fériés dans `expandOuvrables`.

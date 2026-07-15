@@ -3,7 +3,7 @@ import {
   expandDates, expandOuvrables, expandSemaine, monthGridDays, isoWeekOfDate,
   computeRecupCounter, recupCapExcessMin, cpPeriodOf, computeCpCounter,
   computeMonthRecap, monthEndISO, dayAfter, congeCreditsHours,
-  resolveCalendarDay, DAY_CATEGORY_LABEL,
+  resolveCalendarDay, DAY_CATEGORY_LABEL, saturdaysInRange,
   type CounterWeekInput,
 } from "./planning";
 import { computeWeek, type DayHours } from "./heuresCalc";
@@ -250,5 +250,31 @@ describe("planning — pastille du calendrier (resolveCalendarDay)", () => {
     expect(DAY_CATEGORY_LABEL.cp).toBe("CP");
     expect(DAY_CATEGORY_LABEL.present).toBe("Présent");
     expect(DAY_CATEGORY_LABEL.ferie).toBe("Férié");
+  });
+});
+
+describe("planning — CP ne décompte ni dimanches ni fériés", () => {
+  it("expandOuvrables exclut un jour férié dans la plage (14 juillet)", () => {
+    // 13 lun, 14 mar (Fête nationale), 15 mer 2026 → seuls le 13 et le 15.
+    const out = expandOuvrables("2026-07-13", "2026-07-15");
+    expect(out).toEqual(["2026-07-13", "2026-07-15"]);
+    expect(out).not.toContain("2026-07-14");
+  });
+  it("computeCpCounter ne débite pas le férié compris dans un CP", () => {
+    const conges = [
+      { type: "cp" as const, status: "approved" as const, start: "2026-07-13", end: "2026-07-15" }, // 14 férié
+    ];
+    const cp = computeCpCounter(25, conges, "2026-07-20");
+    expect(cp.takenDays).toBe(2);       // 13 + 15 (le 14 juillet ne compte pas)
+    expect(cp.balanceDays).toBe(23);
+  });
+  it("saturdaysInRange repère un samedi ouvré (coûte un CP à vide)", () => {
+    // 10 ven, 11 sam juillet 2026 (samedi non férié).
+    expect(saturdaysInRange("2026-07-10", "2026-07-11")).toEqual(["2026-07-11"]);
+  });
+  it("saturdaysInRange ignore un samedi férié (déjà non décompté)", () => {
+    // 1er mai 2027 = samedi ET Fête du Travail → rien à « éviter ».
+    expect(saturdaysInRange("2027-04-30", "2027-05-01")).toEqual([]);
+    expect(expandOuvrables("2027-04-30", "2027-05-01")).toEqual(["2027-04-30"]);
   });
 });
