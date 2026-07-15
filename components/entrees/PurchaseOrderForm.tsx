@@ -88,12 +88,8 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
           <SupplierPicker value={supplier} onChange={setSupplier} />
         </div>
         <div className="space-y-1.5">
-          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Livraison prévue</label>
-          <DateStepper value={dueDate} onChange={setDueDate} />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Prise de commande (heure)</label>
-          <Input type="time" value={orderTime} onChange={(e) => setOrderTime(e.target.value)} aria-label="Heure de prise de commande" className="tnum text-center font-semibold" />
+          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Livraison prévue &amp; prise de commande</label>
+          <DateStepper value={dueDate} onChange={setDueDate} time={orderTime} onTimeChange={setOrderTime} timeLabel="Heure de prise de commande" />
         </div>
       </div>
 
