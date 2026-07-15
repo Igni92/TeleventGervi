@@ -899,3 +899,17 @@ hauteur** (plus de lignes produit visibles sans scroller).
 | **N° de commande (réf. client) + note BL** | Rangée dédiée au **pied** de la commande. | **Calées en tête du bloc gauche** (avec le client) — le pied de la commande est allégé d'autant. |
 | **« Dupliquer la dernière cde »** | Bouton texte + icône, à **gauche** des raccourcis. | **Icône seule**, posée **à droite** des raccourcis. |
 | **Raccourcis produits** | Nombre illimité. | **Limités à 4** (bouton « + Raccourci » masqué au-delà). |
+
+### Planning — découpe automatique récup + CP (jours ENTIERS)
+
+`lib/planning.ts` (`splitLeaveRecupCp`, pur/testé), `components/planning/PlanningPanel.tsx`.
+
+Quand le salarié pose des **congés payés** et qu'il lui reste de la récup, celle-ci est
+consommée **d'abord**, mais uniquement en **journées entières** : N = ⌊solde ÷ journée type⌋.
+Le reste part en CP. Deux demandes sont créées automatiquement (récup + CP), avec un **aperçu**
+avant l'envoi. Remplace le « défaut tout-récup » précédent (qui pouvait dépasser le solde).
+
+Exemple (journée 7h15) : poser une semaine avec **18 h de récup** → **2 j en récup** (14h30,
+`floor(18 ÷ 7,25) = 2`) **+ le reste en CP** ; jamais une 3ᵉ journée partielle (21h45 > 18 h).
+Un samedi éventuel restant en CP est signalé. Toujours à l'avantage du salarié (récup majorée
+au crédit, débit plafonné au manque réel vs 35 h).

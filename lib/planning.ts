@@ -80,6 +80,61 @@ export function saturdaysInRange(start: string, end: string): string[] {
   return expandDates(start, end).filter((d) => atNoon(d).getUTCDay() === 6 && !frenchHolidayLabel(d));
 }
 
+/** Sous-plage de congé (dates ISO incluses). */
+export interface LeaveRange { start: string; end: string }
+
+export interface LeaveSplit {
+  recup: LeaveRange | null;   // portion payée par la récup (jours ENTIERS), ou null
+  cp: LeaveRange | null;      // portion en congés payés, ou null
+  recupDays: number;          // jours de contrat (lun→ven) couverts par la récup
+  cpDays: number;             // jours ouvrables (lun→sam hors dim/fériés) en CP
+}
+
+/**
+ * DÉCOUPE une plage de congé en portion RÉCUP + portion CP, en n'utilisant que
+ * des JOURS ENTIERS de récup (à l'avantage du salarié : la récup se consomme
+ * avant les CP, jamais une journée partielle).
+ *
+ * `recupWholeDays` = nombre de journées ENTIÈRES de récup disponibles =
+ * floor(solde de récup / journée type). Ex. 18 h de récup, journée 7h15 →
+ * 2 jours (14h30), pas 3 (21h45 > 18 h). On affecte les `recupWholeDays`
+ * PREMIERS jours de contrat (lun→ven hors fériés) à la récup ; le reste part en
+ * CP. Deux sous-plages CONTIGUËS (préfixe récup / suffixe CP).
+ */
+export function splitLeaveRecupCp(start: string, end: string, recupWholeDays: number): LeaveSplit {
+  const days = expandDates(start, end);
+  if (days.length === 0) return { recup: null, cp: null, recupDays: 0, cpDays: 0 };
+
+  const isContract = (d: string) => {
+    const dow = atNoon(d).getUTCDay();
+    return dow >= 1 && dow <= 5 && !frenchHolidayLabel(d);
+  };
+  const contractTotal = days.filter(isContract).length;
+  const n = Math.max(0, Math.min(Math.floor(recupWholeDays), contractTotal));
+
+  // Aucune journée entière de récup → tout en CP.
+  if (n <= 0) {
+    return { recup: null, cp: { start, end }, recupDays: 0, cpDays: expandOuvrables(start, end).length };
+  }
+  // La récup couvre TOUS les jours de contrat de la plage → tout en récup
+  // (les samedis éventuels sont gratuits en récup).
+  if (n >= contractTotal) {
+    return { recup: { start, end }, cp: null, recupDays: contractTotal, cpDays: 0 };
+  }
+  // Sinon : récup = préfixe couvrant les n premiers jours de contrat, CP = suffixe.
+  let count = 0, splitIdx = 0;
+  for (let i = 0; i < days.length; i++) {
+    if (isContract(days[i]) && ++count === n) { splitIdx = i; break; }
+  }
+  const cp = { start: days[splitIdx + 1], end };
+  return {
+    recup: { start, end: days[splitIdx] },
+    cp,
+    recupDays: n,
+    cpDays: expandOuvrables(cp.start, cp.end).length,
+  };
+}
+
 /* ─────────────────────── Grille du calendrier mensuel ─────────────────────── */
 
 export interface GridDay { date: string; inMonth: boolean }

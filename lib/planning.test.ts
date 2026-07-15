@@ -3,7 +3,7 @@ import {
   expandDates, expandOuvrables, expandSemaine, monthGridDays, isoWeekOfDate,
   computeRecupCounter, recupCapExcessMin, cpPeriodOf, computeCpCounter,
   computeMonthRecap, monthEndISO, dayAfter, congeCreditsHours,
-  resolveCalendarDay, DAY_CATEGORY_LABEL, saturdaysInRange,
+  resolveCalendarDay, DAY_CATEGORY_LABEL, saturdaysInRange, splitLeaveRecupCp,
   type CounterWeekInput,
 } from "./planning";
 import { computeWeek, type DayHours } from "./heuresCalc";
@@ -303,5 +303,42 @@ describe("planning — récup : seuls les jours ouvrés (lun→ven) décomptent"
     // Impossible via l'UI (le férié prime), mais la règle doit tenir : 14 juillet.
     const c = computeRecupCounter([], ["2026-07-14"], PROFILE, "2026-07-20");
     expect(c.debitMin).toBe(0);
+  });
+});
+
+describe("planning — découpe récup/CP par jours entiers (splitLeaveRecupCp)", () => {
+  // 2026-07-06 lun … 07 mar 08 mer 09 jeu 10 ven 11 sam (W28).
+  it("semaine lun→sam, 2 jours de récup → 2 j récup (lun-mar) + 4 j CP (mer-sam)", () => {
+    const s = splitLeaveRecupCp("2026-07-06", "2026-07-11", 2);
+    expect(s.recup).toEqual({ start: "2026-07-06", end: "2026-07-07" });
+    expect(s.cp).toEqual({ start: "2026-07-08", end: "2026-07-11" });
+    expect(s.recupDays).toBe(2);
+    expect(s.cpDays).toBe(4);   // mer, jeu, ven, sam
+  });
+  it("récup couvre tout (≥ jours de contrat) → tout en récup, pas de CP", () => {
+    const s = splitLeaveRecupCp("2026-07-06", "2026-07-10", 5); // lun→ven
+    expect(s.recup).toEqual({ start: "2026-07-06", end: "2026-07-10" });
+    expect(s.cp).toBeNull();
+    expect(s.recupDays).toBe(5);
+  });
+  it("moins d'une journée entière de récup → tout en CP", () => {
+    const s = splitLeaveRecupCp("2026-07-06", "2026-07-10", 0);
+    expect(s.recup).toBeNull();
+    expect(s.cp).toEqual({ start: "2026-07-06", end: "2026-07-10" });
+    expect(s.cpDays).toBe(5);
+  });
+  it("un seul jour posé + récup dispo → ce jour en récup", () => {
+    const s = splitLeaveRecupCp("2026-07-06", "2026-07-06", 3);
+    expect(s.recup).toEqual({ start: "2026-07-06", end: "2026-07-06" });
+    expect(s.cp).toBeNull();
+    expect(s.recupDays).toBe(1);
+  });
+  it("un férié dans la plage ne compte pas comme jour de contrat récupérable", () => {
+    // 2026-07-13 lun, 14 mar (férié), 15 mer, 16 jeu, 17 ven.
+    const s = splitLeaveRecupCp("2026-07-13", "2026-07-17", 2);
+    // 2 jours de contrat = lun 13 + mer 15 (le 14 férié est sauté).
+    expect(s.recup).toEqual({ start: "2026-07-13", end: "2026-07-15" });
+    expect(s.cp).toEqual({ start: "2026-07-16", end: "2026-07-17" });
+    expect(s.recupDays).toBe(2);
   });
 });
