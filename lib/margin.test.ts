@@ -29,6 +29,20 @@ describe("grossMarginPct — base unique marge brute %", () => {
     expect(grossMarginPct(margin, caProduct)).toBeGreaterThan(grossMarginPct(margin, caTotal));
   });
 
+  it("coût fabrication (articles reconditionnés) : marge = revenu × (1 − ratio coût), indépendant des unités", () => {
+    // Un kit DECO n'a pas de réception d'achat directe : son coût vient de la
+    // fabrication (composants + main d'œuvre). Ratio coût = totalCost/parentValue
+    // du run. Le coût d'une ligne vendue = lineTotal × ratio (pur €, aucune
+    // conversion colis/pièce/kg). Ex. run à 70 % de coût (30 % de marge) :
+    const costRatio = 0.7;
+    const lineTotal = 240;               // revenu d'une ligne vendue (€)
+    const margin = lineTotal * (1 - costRatio); // = 72 € (branche COGS_MARGIN_FAB)
+    expect(margin).toBeCloseTo(72, 10);
+    // Rapportée à son propre CA, la marge de cette ligne = (1 − ratio) = 30 %,
+    // quelle que soit l'unité de vente (le ratio est en euros).
+    expect(grossMarginPct(margin, lineTotal)).toBeCloseTo(30, 10);
+  });
+
   it("ventes à découvert : la base = CA des lignes COSTÉES (num. et dénom. sur le même jeu)", () => {
     // Journée type négoce frais : une ligne costée (EM reçue) + une vente à
     // découvert (coût EM pas encore saisi → exclue du numérateur `margin`).

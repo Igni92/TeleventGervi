@@ -53,7 +53,8 @@ const NEXT = (() => { const d = new Date(DAY + "T00:00:00Z"); d.setUTCDate(d.get
 const RECEPTION_LOOKBACK_DAYS = 8; // = lib/pilotage.ts
 const RECV_START = (() => { const d = new Date(DAY + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - RECEPTION_LOOKBACK_DAYS); return d.toISOString().slice(0, 10); })();
 
-// FROM + LATERAL EM — copie fidèle de cogsFromSql("order") (lib/cogs.ts).
+// FROM + LATERAL EM + LATERAL fabrication — copie fidèle de
+// cogsFromSql("order") + FAB_COST_LATERAL (lib/cogs.ts).
 const COGS_FROM = `
   "SapOrderLine" l
   JOIN "SapOrder" i ON i."docEntry" = l."docEntry"
@@ -67,7 +68,19 @@ const COGS_FROM = `
              CASE WHEN emh."docDate" >  i."docDate" THEN emh."docDate" END ASC,
              em."docEntry" DESC, em."lineNum" DESC
     LIMIT 1
-  ) cogs ON TRUE`;
+  ) cogs ON TRUE
+  LEFT JOIN LATERAL (
+    SELECT fr."totalCost" / fr."parentValue" AS "costRatio"
+    FROM "FabricationRun" fr
+    WHERE fr."parentItemCode" = l."itemCode" AND fr."status" = 'done'
+      AND fr."totalCost" IS NOT NULL AND fr."parentValue" IS NOT NULL AND fr."parentValue" > 0
+      AND fr."totalCost" < fr."parentValue" * 2
+    ORDER BY (fr."createdAt" <= i."docDate") DESC,
+             CASE WHEN fr."createdAt" <= i."docDate" THEN fr."createdAt" END DESC,
+             CASE WHEN fr."createdAt" >  i."docDate" THEN fr."createdAt" END ASC,
+             fr."createdAt" DESC
+    LIMIT 1
+  ) fab ON TRUE`;
 
 async function main() {
   console.log(`\n=== DIAG marge/fiabilité — jour ${DAY} (BL / SapOrder) ===\n`);
@@ -76,11 +89,11 @@ async function main() {
   const [tot] = await prisma.$queryRawUnsafe(`
     SELECT
       COALESCE(SUM(l."lineTotal") FILTER (WHERE l."isService" = false), 0)::float8 AS ca_all_product,
-      COALESCE(SUM(l."lineTotal") FILTER (WHERE cogs."unitCost" IS NOT NULL), 0)::float8 AS ca_costed,
-      COALESCE(SUM(CASE WHEN cogs."unitCost" IS NOT NULL
-                        THEN l."lineTotal" - l."quantity" * cogs."unitCost" END), 0)::float8 AS margin,
+      COALESCE(SUM(l."lineTotal") FILTER (WHERE cogs."unitCost" IS NOT NULL OR fab."costRatio" IS NOT NULL), 0)::float8 AS ca_costed,
+      COALESCE(SUM(CASE WHEN cogs."unitCost" IS NOT NULL THEN l."lineTotal" - l."quantity" * cogs."unitCost"
+                        WHEN fab."costRatio" IS NOT NULL THEN l."lineTotal" * (1 - fab."costRatio") END), 0)::float8 AS margin,
       COUNT(*) FILTER (WHERE l."itemCode" IS NOT NULL)::int AS product_lines,
-      COUNT(cogs."unitCost")::int AS costed_lines
+      COUNT(*) FILTER (WHERE l."itemCode" IS NOT NULL AND (cogs."unitCost" IS NOT NULL OR fab."costRatio" IS NOT NULL))::int AS costed_lines
     FROM ${COGS_FROM}
     WHERE i."cancelled" = false AND i."docDate" >= $1::date AND i."docDate" < $2::date
   `, DAY, NEXT);
@@ -134,23 +147,30 @@ async function main() {
            p."itemName", p."isKit", p."salesUnit", p."purchaseUnit", p."inventoryUnit",
            EXISTS(SELECT 1 FROM "SapPdnLine" em WHERE em."itemCode" = s.code AND em."quantity" > 0) AS has_pdn,
            EXISTS(SELECT 1 FROM "ProductBom" b WHERE b."parentItemCode" = s.code) AS has_bom,
-           EXISTS(SELECT 1 FROM "ProductionRecipe" r WHERE r."parentItemCode" = s.code) AS has_recipe
+           EXISTS(SELECT 1 FROM "ProductionRecipe" r WHERE r."parentItemCode" = s.code) AS has_recipe,
+           EXISTS(SELECT 1 FROM "FabricationRun" fr WHERE fr."parentItemCode" = s.code
+                    AND fr."status" = 'done' AND fr."totalCost" IS NOT NULL
+                    AND fr."parentValue" > 0 AND fr."totalCost" < fr."parentValue" * 2) AS has_fab_cost
     FROM sold s LEFT JOIN "Product" p ON p."itemCode" = s.code
     WHERE NOT EXISTS(SELECT 1 FROM "SapPdnLine" em WHERE em."itemCode" = s.code AND em."quantity" > 0)
+      AND NOT EXISTS(SELECT 1 FROM "FabricationRun" fr WHERE fr."parentItemCode" = s.code
+                       AND fr."status" = 'done' AND fr."totalCost" IS NOT NULL
+                       AND fr."parentValue" > 0 AND fr."totalCost" < fr."parentValue" * 2)
     ORDER BY s.ca DESC
     LIMIT 20
   `, DAY, NEXT);
 
-  // Agrégats par motif
+  // Agrégats par motif (ce qui reste NON costé après repli fabrication)
   const buckets = { kit: 0, noPdn: 0 };
   for (const r of uncov) (r.isKit || r.has_bom || r.has_recipe ? (buckets.kit += r.ca) : (buckets.noPdn += r.ca));
-  console.log(`\n— TOP articles NON costés (aucune réception sous ce code) —`);
+  console.log(`\n— TOP articles ENCORE non costés (ni réception PDN, ni coût fabrication) —`);
   console.log("  Code        Article                          CA        Kit/BoM  Unités v/a/s");
   for (const r of uncov) {
-    const flag = r.isKit || r.has_bom || r.has_recipe ? "KIT" : "—";
+    const flag = r.isKit || r.has_bom || r.has_recipe ? "KIT*" : "—";
     const units = `${r.salesUnit ?? "?"}/${r.purchaseUnit ?? "?"}/${r.inventoryUnit ?? "?"}`;
     console.log(`  ${String(r.code).padEnd(11)} ${String(r.itemName ?? "").slice(0, 30).padEnd(30)} ${eur(r.ca).padStart(9)}  ${flag.padEnd(7)} ${units}`);
   }
+  console.log("  (KIT* = recette/BoM présent mais AUCUN run de fabrication costable → à produire via /fabrication pour être costé)");
 
   // ── 4. Parmi les COSTÉS : unité de vente ≠ unité d'achat (marge suspecte) ──
   const unitMismatch = await prisma.$queryRawUnsafe(`
