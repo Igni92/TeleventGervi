@@ -126,7 +126,19 @@ export function splitLeaveRecupCp(start: string, end: string, recupWholeDays: nu
   for (let i = 0; i < days.length; i++) {
     if (isContract(days[i]) && ++count === n) { splitIdx = i; break; }
   }
-  const cp = { start: days[splitIdx + 1], end };
+  // Le CP démarre au PROCHAIN jour de contrat (lun→ven) après la récup. Les
+  // samedis (et dimanches) qui suivent immédiatement la récup sont COUVERTS par
+  // la semaine ainsi complétée à 35 h (heures travaillées + récup) : ils ne sont
+  // PAS décomptés — c.-à-d. quand la récup va jusqu'au vendredi, le samedi qui
+  // suit est gratuit ; on ne pose un CP qu'à partir du lundi suivant.
+  let cpIdx = splitIdx + 1;
+  while (cpIdx < days.length && !isContract(days[cpIdx])) cpIdx++;
+  if (cpIdx >= days.length) {
+    // Plus aucun jour de contrat après la récup → tout est couvert (samedi
+    // éventuel absorbé par la semaine complétée), pas de CP.
+    return { recup: { start, end }, cp: null, recupDays: n, cpDays: 0 };
+  }
+  const cp = { start: days[cpIdx], end };
   return {
     recup: { start, end: days[splitIdx] },
     cp,
@@ -225,9 +237,11 @@ export function resolveCalendarDay(input: {
   if (pendingTypes.length) return { category: pendingTypes[0] as DayCategory, pending: true, planned: false, ferieLabel: null };
   if (recupPosee) return { category: "recup", pending: false, planned: true, ferieLabel: null };
 
-  // PRÉSENT PAR DÉFAUT : jour ouvré (lundi→vendredi) du mois, rien d'autre posé.
-  const isWeekday = dow >= 1 && dow <= 5;
-  if (inMonth && isWeekday) return { category: "present", pending: false, planned: false, ferieLabel: null };
+  // PRÉSENT PAR DÉFAUT : jour travaillé (lundi→SAMEDI) du mois, rien d'autre posé.
+  // Le samedi est un jour travaillé dans l'entreprise → présent par défaut, comme
+  // un jour de semaine (seul le dimanche reste hors calendrier de travail).
+  const isWorkday = dow >= 1 && dow <= 6;
+  if (inMonth && isWorkday) return { category: "present", pending: false, planned: false, ferieLabel: null };
 
   return { category: null, pending: false, planned: false, ferieLabel: null };
 }

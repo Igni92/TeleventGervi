@@ -206,8 +206,10 @@ describe("planning — pastille du calendrier (resolveCalendarDay)", () => {
     expect(r.category).toBe("present");
     expect(r.pending).toBe(false);
   });
-  it("week-end : aucune pastille par défaut", () => {
-    expect(resolveCalendarDay({ dow: SAT, inMonth: true }).category).toBeNull();
+  it("samedi : PRÉSENT par défaut (jour travaillé dans l'entreprise)", () => {
+    expect(resolveCalendarDay({ dow: SAT, inMonth: true }).category).toBe("present");
+  });
+  it("dimanche : aucune pastille par défaut (seul jour chômé)", () => {
     expect(resolveCalendarDay({ dow: SUN, inMonth: true }).category).toBeNull();
   });
   it("hors mois : aucune pastille par défaut (jour ouvré compris)", () => {
@@ -314,6 +316,22 @@ describe("planning — découpe récup/CP par jours entiers (splitLeaveRecupCp)"
     expect(s.cp).toEqual({ start: "2026-07-08", end: "2026-07-11" });
     expect(s.recupDays).toBe(2);
     expect(s.cpDays).toBe(4);   // mer, jeu, ven, sam
+  });
+  it("RÈGLE SAMEDI : récup jeu+ven (semaine complétée à 35 h) → samedi NON décompté, seul le lundi en CP", () => {
+    // 16 jeu, 17 ven, 18 SAM, 19 dim, 20 lun (juillet 2026). Récup couvre jeu+ven
+    // → la semaine est à 35 h : le samedi 18 est gratuit, le CP démarre lundi 20.
+    const s = splitLeaveRecupCp("2026-07-16", "2026-07-20", 2);
+    expect(s.recup).toEqual({ start: "2026-07-16", end: "2026-07-17" });
+    expect(s.cp).toEqual({ start: "2026-07-20", end: "2026-07-20" }); // le samedi 18 n'est PAS dans le CP
+    expect(s.recupDays).toBe(2);
+    expect(s.cpDays).toBe(1);   // uniquement le lundi
+  });
+  it("RÈGLE SAMEDI : récup s'arrête au jeudi (semaine NON complétée) → le samedi reste décompté", () => {
+    // Récup couvre seulement jeu 16 ; ven 17 + sam 18 partent en CP (semaine < 35 h).
+    const s = splitLeaveRecupCp("2026-07-16", "2026-07-20", 1);
+    expect(s.recup).toEqual({ start: "2026-07-16", end: "2026-07-16" });
+    expect(s.cp).toEqual({ start: "2026-07-17", end: "2026-07-20" });
+    expect(s.cpDays).toBe(3);   // ven + sam + lun (le samedi compte : semaine non bouclée par la récup)
   });
   it("récup couvre tout (≥ jours de contrat) → tout en récup, pas de CP", () => {
     const s = splitLeaveRecupCp("2026-07-06", "2026-07-10", 5); // lun→ven
