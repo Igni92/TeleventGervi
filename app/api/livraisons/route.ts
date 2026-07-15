@@ -9,8 +9,7 @@ import { isComptoirClient } from "@/lib/segments";
 import { selectCarryoverEntries } from "@/lib/livraisonCarryover";
 import { getClientTournees, type ClientTournee } from "@/lib/clientTournee";
 import { getClientTrclCarriers } from "@/lib/clientCarriers";
-import { isRestrictedPreparateur } from "@/lib/preparateur";
-import { isLivreur } from "@/lib/permissions";
+import { isLivraisonRestricted } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +61,7 @@ export async function GET(req: NextRequest) {
   // Rôles à accès restreint (préparateur verrouillé, livreur) : le CA (totalHT /
   // totalTTC) est un chiffre commercial — masqué CÔTÉ SERVEUR, pas seulement
   // dans l'UI (canDispatch), sinon il reste lisible en appelant l'API.
-  const restricted = isRestrictedPreparateur(session.user?.email) || (await isLivreur(session));
+  const restricted = await isLivraisonRestricted(session);
 
   const { searchParams } = new URL(req.url);
   const isISO = (s: string | null) => /^\d{4}-\d{2}-\d{2}$/.test(s ?? "");

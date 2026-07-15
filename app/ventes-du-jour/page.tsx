@@ -1,8 +1,7 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { VentesDuJour } from "@/components/livraisons/VentesDuJour";
-import { isRestrictedPreparateur } from "@/lib/preparateur";
-import { isLivreur } from "@/lib/permissions";
+import { isLivraisonRestricted } from "@/lib/permissions";
 
 export const metadata = { title: "Ventes du jour" };
 export const dynamic = "force-dynamic";
@@ -14,7 +13,7 @@ export default async function VentesDuJourPage() {
   // État COMMERCIAL : les rôles restreints (préparateur verrouillé, livreur) ont
   // leur propre écran (Détail livraison) — et ne doivent pas voir les magasins
   // pas encore « mis en préparation ».
-  const restricted = isRestrictedPreparateur(session.user?.email) || (await isLivreur(session));
+  const restricted = await isLivraisonRestricted(session);
   if (restricted) redirect("/livraisons");
 
   return (

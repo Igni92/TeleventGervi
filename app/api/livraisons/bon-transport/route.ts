@@ -4,8 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { formatDeliveryDate } from "@/lib/livraison";
-import { isRestrictedPreparateur } from "@/lib/preparateur";
-import { isLivreur } from "@/lib/permissions";
+import { isLivraisonRestricted } from "@/lib/permissions";
 import { getCarrierInfo } from "@/lib/carrierInfo";
 import { getTransporteurDetail } from "@/lib/transporteurs";
 import { sendMailAsShared } from "@/lib/graph";
@@ -32,7 +31,7 @@ const FROM_MAILBOX = process.env.BON_TRANSPORT_FROM || "commercial@gervifrais.co
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  const restricted = isRestrictedPreparateur(session.user.email) || (await isLivreur(session));
+  const restricted = await isLivraisonRestricted(session);
   if (restricted) return NextResponse.json({ error: "Réservé aux commerciaux / admins" }, { status: 403 });
 
   let body: { date?: string; trspCode?: string };

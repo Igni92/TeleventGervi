@@ -932,3 +932,45 @@ même fruit (ex. Fraise *Belorta / Karima* vs *Lady Gold*, calibre différent).
 - **Calibre** = SAP `Items.U_GER_CALIBRE`, **lu en direct** dans `/api/livraisons`
   (piggyback sur la requête stock existante) — aucun champ local ni migration :
   le calibre n'apparaît que pour les articles où SAP le renseigne.
+
+---
+
+## 🐛 Fix — création d'un type de contact/incident impossible (menu rogné)
+
+`components/TypeCombobox.tsx` (types de contact & d'incident réutilisables).
+
+**Symptôme** : impossible de créer un nouveau type de contact — le bouton
+« Créer « … » » semblait absent / inopérant.
+
+**Cause** : le menu déroulant était un enfant `absolute` d'une carte
+`SectionCard` en **`overflow-hidden`** → le **bas du menu était rogné**, or c'est
+là que vit le bouton « Créer » (le haut, « — Aucun », restait visible, d'où
+l'effet « étrange »).
+
+| Sujet | Avant | Après |
+|-------|-------|-------|
+| **Menu déroulant** | Enfant `absolute`, rogné par la carte parente. | Rendu dans un **portal** (position fixe) → s'affiche par-dessus tout, plus jamais coupé. |
+| **Entrée (⏎) sur un libellé existant** | Ne faisait **rien** (impasse). | **Sélectionne** la correspondance exacte ; sinon **crée**. |
+| **Erreurs (création / réseau)** | **Avalées en silence** (« ça ne marche pas »). | **Toast** explicite ; création idempotente (pas de doublon). |
+
+---
+
+## 🐛 Fix — un chef livreur/préparateur ne voyait pas les livraisons à préparer
+
+`lib/permissions.ts` (`isLivraisonRestricted`, nouveau) + routes/pages du module
+livraisons.
+
+**Symptôme** : Jean-Michel (direction + commercial **et** livreur) ne voyait pas
+les livraisons « en cours » à venir et ne pouvait donc pas les **mettre en
+préparation** — l'action semblait réservée au commercial qui avait vendu.
+
+**Cause** : le rôle « accès restreint » du module livraisons était
+`préparateur restreint OU livreur`. Comme Jean-Michel porte le flag `isLivreur`
+(il aide à livrer), il était confiné comme un pur livreur : il ne voyait que les
+BL déjà mis en prépa et le bouton « mettre en prépa » lui était refusé.
+
+**Fix** : un rôle **élevé** (admin / direction / commercial) garde l'**accès
+complet** même s'il porte aussi un flag terrain. Un préparateur/livreur **pur**
+reste confiné (inchangé). Appliqué de façon homogène à tout le module
+(Détail livraison, mise-en-prépa, exclusions, bon de transport, ventes du jour,
+fiche transporteur) via l'unique helper `isLivraisonRestricted`.
