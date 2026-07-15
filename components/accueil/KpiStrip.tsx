@@ -27,8 +27,8 @@ interface ActivityBucket {
 interface ActivityResponse {
   curr?: ActivityBucket;
   prev?: ActivityBucket;
-  /** Fiabilité « stock propre » : part du CA du jour dont la marchandise a été
-   *  reçue (les ventes à découvert la tirent sous 100 %). */
+  /** Fiabilité : part des lignes du jour effectivement costées (coût hybride
+   *  réception/fabrication/SAP) — proche de 100 %. */
   reliability?: number;
 }
 
@@ -122,8 +122,8 @@ function MargeTile({ curr, reliability, state, delay }: { curr: ActivityBucket; 
   const hasReliability = typeof reliability === "number";
   const coverage = Math.round(reliability ?? 0);
   const hasData = (curr.caProductNet ?? 0) > 0;
-  // Fiabilité = part du CA du jour dont la marchandise a été REÇUE. Les ventes à
-  // découvert la tirent sous 100 % ; elle remonte à mesure que les réceptions rentrent.
+  // Fiabilité = part des lignes du jour effectivement costées (coût hybride
+  // réception/fabrication/SAP). Proche de 100 % ; < 100 % = lignes sans coût connu.
   const covTone = coverage >= 80 ? "text-emerald-600 dark:text-emerald-400"
     : coverage >= 50 ? "text-amber-600 dark:text-amber-400"
     : "text-muted-foreground";
@@ -149,8 +149,8 @@ function MargeTile({ curr, reliability, state, delay }: { curr: ActivityBucket; 
 
       <div className="mt-2 flex items-center gap-1.5 min-h-[18px] whitespace-nowrap">
         {state === "ok" && hasData && hasReliability ? (
-          <span className="text-[10.5px] text-muted-foreground" title="Marge brute du jour sur le coût réel d'entrée marchandise. « Fiabilité » = part du CA du jour dont la marchandise a déjà été REÇUE — les ventes à découvert la font baisser, elle remonte à mesure que les réceptions rentrent.">
-            fiabilité <b className={covTone}>{coverage}%</b>{coverage < 60 ? " · à découvert" : ""}
+          <span className="text-[10.5px] text-muted-foreground" title="Marge brute du jour. Coût de chaque vente : réception récente si disponible, sinon coût de fabrication, sinon coût enregistré par SAP sur la ligne (pied de BL). « Fiabilité » = part des lignes effectivement costées — proche de 100 %.">
+            fiabilité <b className={covTone}>{coverage}%</b>{coverage < 60 ? " · coût incomplet" : ""}
           </span>
         ) : state === "error" ? (
           <span className="text-[10.5px] text-muted-foreground">Indisponible</span>

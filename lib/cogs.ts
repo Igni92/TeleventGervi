@@ -131,6 +131,61 @@ export const COGS_MARGIN_FAB: Prisma.Sql = Prisma.sql`CASE
 export const COGS_COSTED_FAB: Prisma.Sql = Prisma.sql`(cogs."unitCost" IS NOT NULL OR fab."costRatio" IS NOT NULL)`;
 
 /* ─────────────────────────────────────────────────────────────────
+   MARGE DU JOUR — priorité de coût HYBRIDE (décision métier juillet 2026).
+
+   Constat terrain : le recompute « coût réception » SEUL devient FAUX dès que la
+   synchro des réceptions prend du retard — sur de la fraise saisonnière, un coût
+   d'hiver (réception de nov.) appliqué à une vente d'été fabrique de fausses
+   pertes. Or SAP inscrit déjà sur CHAQUE ligne de BL un coût correct
+   (`grossProfit` / `lineCost`), présent ~100 % du temps (= le « pied de BL »).
+
+   Priorité retenue pour la tuile « Marge du jour » (chemin BL/jour UNIQUEMENT) :
+     1. coût de la dernière réception RÉCENTE (≤ COGS_FRESH_RECEPTION_DAYS avant la
+        vente) — le coût réel d'entrée quand il est frais ;
+     2. sinon coût FABRICATION (articles reconditionnés) ;
+     3. sinon coût SAP de la ligne (`grossProfit`) — toujours présent, = pied de BL.
+   → marge robuste au retard de synchro, ~100 % costée. Validé sur données réelles
+     (37,8 % vs 38 % SAP, 0 ligne négative). L'écran comptable (Écran 2, factures)
+     N'EST PAS concerné : il reste sur le recompute réception pur (historique audité).
+   ───────────────────────────────────────────────────────────────── */
+
+/** Fenêtre (jours) au-delà de laquelle une réception est jugée trop ancienne pour
+ *  coster une vente du jour (prix saisonnier périmé) → on retombe sur le coût SAP. */
+export const COGS_FRESH_RECEPTION_DAYS = 21;
+
+/** FROM order + LATERAL EM « FRAÎCHE » : coût de la dernière réception de l'article
+ *  comprise entre (vente − `days`) et la vente. Au-delà → NULL (repli fab/SAP). */
+export function freshCogsOrderFromSql(days: number): Prisma.Sql {
+  return Prisma.sql`"SapOrderLine" l
+    JOIN "SapOrder" i ON i."docEntry" = l."docEntry"
+    LEFT JOIN LATERAL (
+      SELECT em."lineTotal" / em."quantity" AS "unitCost"
+      FROM "SapPdnLine" em
+      JOIN "SapPurchaseDeliveryNote" emh ON emh."docEntry" = em."docEntry"
+      WHERE em."itemCode" = l."itemCode"
+        AND em."quantity" > 0
+        AND emh."cancelled" = false
+        AND emh."docDate" <= i."docDate"
+        AND emh."docDate" >= i."docDate" - (${days}::int * INTERVAL '1 day')
+      ORDER BY emh."docDate" DESC, em."docEntry" DESC, em."lineNum" DESC
+      LIMIT 1
+    ) cogs ON TRUE`;
+}
+
+/** Marge d'une ligne — priorité réception fraîche → fabrication → coût SAP.
+ *  Requiert freshCogsOrderFromSql(...) + FAB_COST_LATERAL dans le FROM. */
+export const COGS_MARGIN_HYBRID: Prisma.Sql = Prisma.sql`CASE
+  WHEN cogs."unitCost" IS NOT NULL THEN l."lineTotal" - l."quantity" * cogs."unitCost"
+  WHEN fab."costRatio" IS NOT NULL THEN l."lineTotal" * (1 - fab."costRatio")
+  WHEN l."isService" = false AND l."grossProfit" IS NOT NULL THEN l."grossProfit"
+  END`;
+
+/** Prédicat « ligne costée » (réception fraîche OU fabrication OU coût SAP). */
+export const COGS_COSTED_HYBRID: Prisma.Sql = Prisma.sql`(
+  cogs."unitCost" IS NOT NULL OR fab."costRatio" IS NOT NULL
+  OR (l."isService" = false AND l."grossProfit" IS NOT NULL))`;
+
+/* ─────────────────────────────────────────────────────────────────
    Agrégat simple — marge réelle totale d'un type de doc sur une fenêtre.
    ───────────────────────────────────────────────────────────────── */
 

@@ -29,6 +29,20 @@ describe("grossMarginPct — base unique marge brute %", () => {
     expect(grossMarginPct(margin, caProduct)).toBeGreaterThan(grossMarginPct(margin, caTotal));
   });
 
+  it("coût hybride : repli sur le coût SAP (grossProfit) quand la réception est périmée/absente", () => {
+    // Fraise vendue 540 € (72 kg × 7,50). Réception récente absente (dernière = 8
+    // mois avant, prix d'hiver 11 €/kg) → on N'utilise PAS ce coût périmé. Repli
+    // sur le coût SAP de la ligne : grossProfit = 180 € (coût réel 5 €/kg).
+    const lineTotal = 540;
+    const sapGrossProfit = 180;          // branche COGS_MARGIN_HYBRID « coût SAP »
+    // Marge de la ligne = grossProfit (pas 540 − 72×11 = −252 € du coût périmé).
+    expect(sapGrossProfit).toBeGreaterThan(0);
+    expect(grossMarginPct(sapGrossProfit, lineTotal)).toBeCloseTo(33.3, 1);
+    // Le coût périmé aurait donné une fausse perte :
+    const staleMargin = lineTotal - 72 * 11;
+    expect(staleMargin).toBeLessThan(0);
+  });
+
   it("coût fabrication (articles reconditionnés) : marge = revenu × (1 − ratio coût), indépendant des unités", () => {
     // Un kit DECO n'a pas de réception d'achat directe : son coût vient de la
     // fabrication (composants + main d'œuvre). Ratio coût = totalCost/parentValue
