@@ -11,11 +11,11 @@ const CONGE: CongeRequest = {
 };
 
 describe("congesNotify — contenus (purs)", () => {
-  it("résumé : nom, type, plage, nb de jours", () => {
+  it("résumé : nom, type, plage, nb de jours OUVRABLES (hors dim./fériés)", () => {
     const s = congeSummary(CONGE);
     expect(s).toContain("Jean Dupont");
     expect(s).toContain("Récupération");
-    expect(s).toContain("(2 j)");
+    expect(s).toContain("(2 j ouvrables)");   // 3–4 août = lundi+mardi
   });
 
   it("plage d'un seul jour sans « du … au »", () => {

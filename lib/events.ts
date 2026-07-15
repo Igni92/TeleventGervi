@@ -60,6 +60,42 @@ export function eventsInWindow(
   return out;
 }
 
+export interface DatedEvent {
+  key: string;
+  label: string;
+  emoji: string;
+}
+
+/**
+ * Événements commerciaux indexés PAR DATE ISO (« YYYY-MM-DD »), pour un ensemble
+ * de dates (typiquement la grille d'un mois de calendrier). Calcule l'occurrence
+ * de chaque événement pour les années couvertes par les dates fournies → pose le
+ * repère (emoji) sur la bonne case. Pur (aucun réseau) : la grille sait déjà quels
+ * jours elle affiche, on ne fait que les décorer.
+ */
+export function eventsByDate(isoDates: string[]): Map<string, DatedEvent[]> {
+  const out = new Map<string, DatedEvent[]>();
+  if (isoDates.length === 0) return out;
+  const wanted = new Set(isoDates);
+  const years = new Set<number>();
+  for (const iso of isoDates) {
+    const y = Number(iso.slice(0, 4));
+    if (Number.isFinite(y)) years.add(y);
+  }
+  for (const ev of COMMERCIAL_EVENTS) {
+    for (const y of years) {
+      const d = ev.date(y);
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      if (!wanted.has(iso)) continue;
+      const list = out.get(iso);
+      const item = { key: ev.key, label: ev.label, emoji: ev.emoji };
+      if (list) { if (!list.some((e) => e.key === item.key)) list.push(item); }
+      else out.set(iso, [item]);
+    }
+  }
+  return out;
+}
+
 /** Libellé relatif court et lisible : « aujourd'hui », « dans 3 j », « il y a 2 j ». */
 export function relativeDayLabel(daysFromRef: number): string {
   if (daysFromRef === 0) return "aujourd'hui";

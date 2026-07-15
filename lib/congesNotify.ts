@@ -15,7 +15,7 @@
  * contenu sont PURS (testés) ; seuls les senders touchent le réseau.
  */
 import { CONGE_TYPE_LABEL, congeDayCount, type CongeRequest } from "./conges";
-import { dayAfter } from "./planning";
+import { dayAfter, expandOuvrables } from "./planning";
 import { sendMailAsShared, createCalendarEventAsApp } from "./graph";
 
 const esc = (s: string) =>
@@ -35,15 +35,17 @@ export function appBaseUrl(): string {
 
 /* ───────────────────────── Constructeurs PURS (testés) ─────────────────────── */
 
-/** Ligne résumé : « Jean Dupont — Récupération, du lundi 3 au mardi 4 août (2 j) ». */
+/** Ligne résumé : « Jean Dupont — Récupération, du lundi 3 au mardi 4 août
+ *  (2 j ouvrables) ». Le décompte notifié est en jours OUVRABLES (lun→sam, hors
+ *  dimanches ET fériés) — le vrai coût du congé pour la personne qui valide. */
 export function congeSummary(c: CongeRequest): string {
-  const days = congeDayCount(c.start, c.end);
-  return `${c.name} — ${CONGE_TYPE_LABEL[c.type]}, ${congeRangeLabel(c)}${days ? ` (${days} j)` : ""}`;
+  const ouvr = expandOuvrables(c.start, c.end).length;
+  return `${c.name} — ${CONGE_TYPE_LABEL[c.type]}, ${congeRangeLabel(c)}${ouvr ? ` (${ouvr} j ouvrable${ouvr > 1 ? "s" : ""})` : ""}`;
 }
 
 /** Email HTML envoyé à la direction à chaque DEMANDE d'un salarié. */
 export function congeMailHtml(c: CongeRequest, planningUrl: string): string {
-  const days = congeDayCount(c.start, c.end);
+  const ouvr = expandOuvrables(c.start, c.end).length;
   return `
   <div style="font:14px/1.6 'Segoe UI',Arial,sans-serif;color:#111;max-width:560px">
     <p style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#666;margin:0 0 4px">Gervifrais · Planning</p>
@@ -51,7 +53,7 @@ export function congeMailHtml(c: CongeRequest, planningUrl: string): string {
     <table style="border-collapse:collapse;width:100%;margin-bottom:14px">
       <tr><td style="padding:6px 10px;border:1px solid #ddd;color:#555;width:110px">Salarié</td><td style="padding:6px 10px;border:1px solid #ddd;font-weight:600">${esc(c.name)}</td></tr>
       <tr><td style="padding:6px 10px;border:1px solid #ddd;color:#555">Type</td><td style="padding:6px 10px;border:1px solid #ddd">${esc(CONGE_TYPE_LABEL[c.type])}</td></tr>
-      <tr><td style="padding:6px 10px;border:1px solid #ddd;color:#555">Période</td><td style="padding:6px 10px;border:1px solid #ddd">${esc(congeRangeLabel(c))}${days ? ` · <b>${days} j</b>` : ""}</td></tr>
+      <tr><td style="padding:6px 10px;border:1px solid #ddd;color:#555">Période</td><td style="padding:6px 10px;border:1px solid #ddd">${esc(congeRangeLabel(c))}${ouvr ? ` · <b>${ouvr} j ouvrable${ouvr > 1 ? "s" : ""}</b> <span style="color:#888">(hors dim./fériés)</span>` : ""}</td></tr>
       ${c.note ? `<tr><td style="padding:6px 10px;border:1px solid #ddd;color:#555">Motif</td><td style="padding:6px 10px;border:1px solid #ddd">« ${esc(c.note)} »</td></tr>` : ""}
     </table>
     <p style="margin:0 0 18px">

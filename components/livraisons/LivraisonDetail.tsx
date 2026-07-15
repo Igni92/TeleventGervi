@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useSearchParams } from "next/navigation";
 import {
   Truck, Boxes, Scale, Users, FileText, Receipt,
   ChevronLeft, ChevronRight, ChevronDown, CalendarDays, AlertTriangle,
@@ -28,6 +29,7 @@ import {
   filterBySegment, computeSegmentCounts, keepDeliverableClients, SEGMENT_LABEL,
   type StatusTab, type SegmentTab, type Tournee, type Doc, type Carrier, type Totals, type ApiResp,
 } from "@/lib/livraisonView";
+import { consolidateDeliveryLines } from "@/lib/livraisonLines";
 import { printOrderRecap } from "./printRecap";
 import { renderBonTransport } from "@/lib/bonTransport";
 import { BonsPreparationPanel } from "./BonsPreparationPanel";
@@ -82,7 +84,22 @@ const SEG_UI: Record<"CHR" | "EXPORT" | "GMS", { label: string; badge: string }>
    Composant principal
 ═════════════════════════════════════════════════════════════ */
 export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
-  const [date, setDate] = useState<string>(() => nextDeliveryDate());
+  // Deep-link depuis « Préparations à faire » (et ailleurs) : ?date=…&open=<docEntry>&t=<nonce>
+  //  · date  → jour de livraison affiché
+  //  · open  → commande à OUVRIR directement (vue en grand → console de lot)
+  //  · t     → nonce (change à chaque clic) pour ROUVRIR la même commande.
+  const searchParams = useSearchParams();
+  const [date, setDate] = useState<string>(() => searchParams.get("date") || nextDeliveryDate());
+  const [autoOpen, setAutoOpen] = useState<{ docEntry: number; nonce: string } | null>(() => {
+    const o = searchParams.get("open");
+    return o ? { docEntry: Number(o), nonce: searchParams.get("t") || o } : null;
+  });
+  useEffect(() => {
+    const d = searchParams.get("date");
+    const o = searchParams.get("open");
+    if (d) setDate(d);
+    if (o) setAutoOpen({ docEntry: Number(o), nonce: searchParams.get("t") || o });
+  }, [searchParams]);
   const [data, setData] = useState<ApiResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -157,7 +174,10 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
       const fresh = () => !signal?.aborted && seq === loadSeq.current;
       setLoading(true);
       setError(null);
-      fetch(`/api/livraisons?date=${date}`, { cache: "no-store", signal })
+      // carryover=1 : le Détail livraison REPORTE la file de préparation — une
+      // commande mise en prépa mais pas encore faite reste dans la vue du jour
+      // (en retard comme en avance), tant qu'elle n'est pas marquée « faite ».
+      fetch(`/api/livraisons?date=${date}&carryover=1`, { cache: "no-store", signal })
         .then(async (r) => {
           const j: ApiResp = await r.json();
           if (!fresh()) return;
@@ -469,11 +489,25 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   const allCollapsed = allKeys.length > 0 && !allKeys.some((k) => expanded.has(k));
   const toggleAll = () => setExpanded(allCollapsed ? new Set(allKeys) : new Set());
   // Pendant une recherche, TOUT est déplié : on veut voir le bon trouvé
-  // immédiatement, sans cliquer sur les groupes.
-  const effectiveExpanded = useMemo(
-    () => (searching ? new Set(allKeys) : expanded),
-    [searching, allKeys, expanded],
-  );
+  // immédiatement, sans cliquer sur les groupes. En deep-link (?open=…), on force
+  // l'ouverture du transporteur ET du sous-groupe tournée qui portent la commande
+  // cible — sinon elle resterait masquée (tout est replié par défaut) et
+  // l'ouverture directe ne trouverait pas la ligne.
+  const effectiveExpanded = useMemo(() => {
+    if (searching) return new Set(allKeys);
+    if (!autoOpen) return expanded;
+    const extra: string[] = [];
+    for (const c of view?.carriers ?? []) {
+      const target = c.docs.find((d) => d.docEntry === autoOpen.docEntry);
+      if (!target) continue;
+      const ck = c.code ?? "__none__";
+      extra.push(ck);
+      const trn = tourneesByCode[(c.code ?? "").toUpperCase()];
+      extra.push(`${ck}::${docTourneeKeyLabel(target, trn).key}`);
+      break;
+    }
+    return extra.length ? new Set([...expanded, ...extra]) : expanded;
+  }, [searching, allKeys, expanded, autoOpen, view, tourneesByCode]);
 
   return (
     <div className="space-y-5 animate-fade-up">
@@ -482,7 +516,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
         <div>
           <p className="kicker mb-1.5">Télévente · logistique</p>
           <h1 className="font-display text-[28px] sm:text-[34px] font-semibold text-foreground tracking-tight leading-none">
-            Détail livraison
+            Livraisons du jour
           </h1>
           <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
             Toutes les commandes à préparer pour la prochaine tournée
@@ -647,6 +681,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
                 expanded={effectiveExpanded} onToggle={toggleKey}
                 onPatchDoc={patchDoc} onReload={load} canDispatch={canDispatch}
                 statusTab={statusTab} onBulkStatus={bulkSetStatus} gen={gen}
+                autoOpen={autoOpen}
               />
             );
           })}
@@ -815,7 +850,7 @@ function CarrierGroup({
   carrier, carrierKey, date, fullDocs, carriers, onCarrierChange, onDateChange,
   tourneesByCode, onLoadTournees, onTourneeChange,
   expanded, onToggle, onPatchDoc, onReload, canDispatch,
-  statusTab, onBulkStatus, gen,
+  statusTab, onBulkStatus, gen, autoOpen,
 }: {
   carrier: Carrier;
   carrierKey: string;
@@ -835,6 +870,7 @@ function CarrierGroup({
   statusTab: ViewTab;
   onBulkStatus: (docEntries: number[], target: StatusTab) => void;
   gen: number;
+  autoOpen: { docEntry: number; nonce: string } | null;
 }) {
   const unassigned = !carrier.code;
   const collapsed = !expanded.has(carrierKey);
@@ -1002,11 +1038,12 @@ function CarrierGroup({
               <ul className="divide-y divide-border/60">
                 {tg.docs.map((d) => (
                   <OrderRow
-                    key={`${d.docEntry}:${gen}`} doc={d} carriers={carriers}
+                    key={`${d.docEntry}:${gen}`} doc={d} viewDate={date} carriers={carriers}
                     onCarrierChange={onCarrierChange} onDateChange={onDateChange}
                     tournees={d.trspCode ? tourneesByCode[d.trspCode.toUpperCase()] : undefined}
                     onLoadTournees={onLoadTournees} onTourneeChange={onTourneeChange}
                     onPatchDoc={onPatchDoc} onReload={onReload} canDispatch={canDispatch}
+                    autoOpenNonce={autoOpen && autoOpen.docEntry === d.docEntry ? autoOpen.nonce : null}
                   />
                 ))}
               </ul>
@@ -1619,9 +1656,10 @@ function PreparedByDialog({
    réellement modifiées re-rendent (le reste garde son identité de props).
 ═════════════════════════════════════════════════════════════ */
 const OrderRow = memo(function OrderRow({
-  doc, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange, onPatchDoc, onReload, canDispatch,
+  doc, viewDate, carriers, onCarrierChange, onDateChange, tournees, onLoadTournees, onTourneeChange, onPatchDoc, onReload, canDispatch, autoOpenNonce,
 }: {
   doc: Doc;
+  viewDate: string;
   carriers: CarrierOption[];
   onCarrierChange: (docEntry: number, sapValue: string) => Promise<boolean>;
   onDateChange: (docEntry: number, dueDate: string) => Promise<boolean>;
@@ -1631,7 +1669,11 @@ const OrderRow = memo(function OrderRow({
   onPatchDoc: (docEntry: number, patch: Partial<Doc>) => void;
   onReload: () => void;
   canDispatch: boolean;
+  /** Deep-link : nonce non nul → ouvre cette commande en grand + défile jusqu'à
+   *  elle (change à chaque clic pour rouvrir la même commande). */
+  autoOpenNonce?: string | null;
 }) {
+  const rowRef = useRef<HTMLLIElement>(null);
   const [open, setOpen] = useState(false);
   const [savingCarrier, setSavingCarrier] = useState(false);
   const [savingTournee, setSavingTournee] = useState(false);
@@ -1653,6 +1695,17 @@ const OrderRow = memo(function OrderRow({
 
   // ── Articles MANQUANTS = stock SAP total négatif (détecté par l'API). ──
   const missingSet = useMemo(() => new Set(doc.missingItems ?? []), [doc.missingItems]);
+
+  // ── Lignes d'AFFICHAGE : regroupe un article racheté après manquant (2ᵉ code,
+  //    même désignation) en une seule ligne « colis complet » et écarte les
+  //    lignes à quantité 0 — sinon un colis s'affichait éclaté en demi-colis
+  //    (« 0 mûre » + « 0,5 » + « 0,5 ») alors que le total du BL dit « 1 colis ».
+  //    Une ligne est manquante si l'UN de ses codes fusionnés l'est. ──
+  const displayLines = useMemo(() => consolidateDeliveryLines(doc.lines), [doc.lines]);
+  const isLineMissing = useCallback(
+    (codes: string[]) => codes.some((c) => missingSet.has(c)),
+    [missingSet],
+  );
 
   // Charge les tournées du transporteur courant (une fois) pour le sélecteur.
   useEffect(() => {
@@ -1696,6 +1749,12 @@ const OrderRow = memo(function OrderRow({
   // Date de livraison (DocDueDate) — modifiable directement sur la ligne. Au
   // changement → PATCH + rechargement (la commande quitte la vue si elle bouge).
   const dueISO = (doc.dueDate ?? "").slice(0, 10);
+  // « Reportée » dans la file : la commande est affichée dans la vue d'un AUTRE
+  // jour que sa date de livraison (report des prépas non faites). En RETARD si
+  // sa livraison était prévue AVANT le jour affiché, ANTICIPÉE si elle l'est APRÈS.
+  const carriedOver = !!viewDate && dueISO.length === 10 && dueISO !== viewDate;
+  const carriedOverdue = carriedOver && dueISO < viewDate;
+  const dueShort = dueISO.length === 10 ? `${dueISO.slice(8, 10)}/${dueISO.slice(5, 7)}` : "";
   const [savingDate, setSavingDate] = useState(false);
   async function handleDate(value: string) {
     if (!value || value === dueISO) return;
@@ -1746,6 +1805,16 @@ const OrderRow = memo(function OrderRow({
   const [incomplete, setIncomplete] = useState<boolean>(!!doc.incomplete);
   const [bigOpen, setBigOpen] = useState(false);
   const [requeuing, setRequeuing] = useState(false);
+
+  // Deep-link (« rentrer dans la commande ») : ouvre la vue en grand — la console
+  // de lot — et défile jusqu'à la ligne. Le nonce change à chaque clic depuis la
+  // liste → rouvre la même commande (« si je rentre encore dedans, rouvrir »).
+  useEffect(() => {
+    if (!autoOpenNonce) return;
+    setBigOpen(true);
+    const h = setTimeout(() => rowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+    return () => clearTimeout(h);
+  }, [autoOpenNonce]);
   // Vérification avant de marquer « faite » (évite les validations par erreur).
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -1886,6 +1955,9 @@ const OrderRow = memo(function OrderRow({
       setDepartedBy(by);
       setDepartedAt(at);
       onPatchDoc(doc.docEntry, { departedBy: by, departedAt: at });
+      // Alerte douce (lot présent mais périmé, ou lots non vérifiés) — le départ
+      // est accepté, mais on prévient le préparateur.
+      if (next && j?.warning) toast.warning(j.warning);
     } catch {
       rollback();
       toast.error("Échec de l'enregistrement");
@@ -2107,9 +2179,10 @@ const OrderRow = memo(function OrderRow({
   const docStatusOf: StatusTab = departed ? "DEPART" : prepared ? "FAIT" : "A_PREPARER";
 
   // ── Récap imprimable (bon de préparation) — fenêtre dédiée + impression.
-  //    Volontairement épuré : ni préparateur, ni commentaires (promos…) — le
-  //    préparateur n'a besoin que du client, de la logistique et des lignes. ──
+  //    En-tête logistique complet : transporteur, tournée, HEURE D'ENLÈVEMENT et
+  //    PRÉPARATEUR (demande direction) ; le corps reste épuré (pas de promos). ──
   function handlePrint() {
+    const preparerName = preparedBy ?? preparer;
     const ok = printOrderRecap(
       {
         docNum: doc.docNum,
@@ -2119,12 +2192,16 @@ const OrderRow = memo(function OrderRow({
         clientType: doc.clientType,
         colis: doc.colis,
         weightKg: doc.weightKg,
-        lines: doc.lines,
+        // Mêmes lignes consolidées qu'à l'écran (colis complets, sans ligne à 0).
+        lines: displayLines,
       },
       {
         dateLabel: formatDeliveryDate(doc.dueDate),
         carrierName: doc.carrierName,
         tourneeLabel: docTourneeKeyLabel(doc, tournees).label,
+        // Heure d'enlèvement : celle de la tournée mémorisée, sinon l'heure du BL.
+        pickupTime: doc.savedTournee?.heure ?? doc.trspHeure,
+        preparedBy: preparerName ? displayPersonName(preparerName) : null,
         missingCodes: missingSet,
       },
     );
@@ -2132,7 +2209,7 @@ const OrderRow = memo(function OrderRow({
   }
 
   return (
-    <li>
+    <li ref={rowRef}>
       {/* MOBILE (< sm) : la ligne passe sur DEUX rangées — identité client pleine
           largeur (le nom ne se fait plus écraser par les boutons), puis l'action
           d'état en GRANDE cible tactile + colis + agrandir. ≥ sm : une seule
@@ -2194,6 +2271,23 @@ const OrderRow = memo(function OrderRow({
             {doc.clientType && (SEG_UI[doc.clientType as keyof typeof SEG_UI] ?? null) && (
               <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEG_UI[doc.clientType as keyof typeof SEG_UI].badge}`}>
                 {SEG_UI[doc.clientType as keyof typeof SEG_UI].label}
+              </span>
+            )}
+            {carriedOver && (
+              <span
+                title={
+                  carriedOverdue
+                    ? `Livraison prévue le ${capitalize(formatDeliveryDate(dueISO))} — pas encore faite, reportée dans la file du jour`
+                    : `Livraison prévue le ${capitalize(formatDeliveryDate(dueISO))} — mise en préparation en avance, dans la file jusqu'à ce qu'elle soit faite`
+                }
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                  carriedOverdue
+                    ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                    : "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300"
+                }`}
+              >
+                <CalendarDays className="h-3 w-3 shrink-0" />
+                {carriedOverdue ? "Reportée" : "Anticipée"} · Livr. {dueShort}
               </span>
             )}
             {prepared && !departed && (preparedBy ?? preparer) && (
@@ -2416,8 +2510,8 @@ const OrderRow = memo(function OrderRow({
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40">
-              {doc.lines.map((l, i) => {
-                const isMissing = missingSet.has(l.itemCode);
+              {displayLines.map((l, i) => {
+                const isMissing = isLineMissing(l.mergedCodes);
                 return (
                 <tr
                   key={`${l.itemCode}-${i}`}
@@ -2444,7 +2538,7 @@ const OrderRow = memo(function OrderRow({
                             </span>
                           )}
                         </div>
-                        <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} size="md" className="mt-1" />
+                        <DesignationChips marque={l.marque} condt={l.condt} calibre={l.calibre} variete={l.variete} pays={l.pays} size="md" className="mt-1" />
                       </div>
                     </div>
                   </td>
@@ -2521,16 +2615,25 @@ const OrderRow = memo(function OrderRow({
           </div>
           {doc.comments && <p className="text-[12.5px] italic text-muted-foreground">« {doc.comments} »</p>}
 
+          {/* Astuce : sur BL ouvert, toucher une ligne ouvre la console de lot. */}
+          {doc.open && (
+            <p className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+              <Pencil className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+              Touchez un article pour <b className="text-foreground font-semibold">changer son lot</b> ou l&apos;échanger.
+            </p>
+          )}
+
           {/* Lignes en grand : colisage à gauche + tags + signalement manquant */}
           <ul className="divide-y divide-border/50 rounded-xl border border-border overflow-hidden">
-            {doc.lines.map((l, i) => {
-              const isMissing = missingSet.has(l.itemCode);
+            {displayLines.map((l, i) => {
+              const isMissing = isLineMissing(l.mergedCodes);
               return (
               <li
                 key={`big-${l.itemCode}-${i}`}
+                onClick={(e) => openSwap(e, l.itemCode, l.itemName)}
                 onContextMenu={(e) => openSwap(e, l.itemCode, l.itemName)}
-                title={doc.open ? "Clic droit : échanger cet article contre un autre code" : undefined}
-                className={`flex items-center gap-3 px-3 py-2.5 ${isMissing ? "bg-rose-500/5" : ""} ${doc.open ? "cursor-context-menu" : ""}`}
+                title={doc.open ? "Toucher pour changer le lot ou échanger l'article" : undefined}
+                className={`flex items-center gap-3 px-3 py-2.5 ${isMissing ? "bg-rose-500/5" : ""} ${doc.open ? "cursor-pointer" : ""}`}
               >
                 <span className="inline-flex min-w-[44px] items-center justify-center rounded-lg bg-foreground/10 px-2 py-1 text-[18px] font-bold tnum text-foreground shrink-0">
                   {fmtNum(l.colis)}
@@ -2544,7 +2647,7 @@ const OrderRow = memo(function OrderRow({
                       </span>
                     )}
                   </p>
-                  <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} className="mt-1" />
+                  <DesignationChips marque={l.marque} condt={l.condt} calibre={l.calibre} variete={l.variete} pays={l.pays} className="mt-1" />
                 </div>
                 <BrandLogo marque={l.marque} logos={brandLogos} size="lg" className="self-center" zoomable />
               </li>

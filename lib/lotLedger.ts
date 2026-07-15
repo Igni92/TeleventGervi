@@ -81,6 +81,31 @@ export async function creditLots(credits: LotCredit[]): Promise<number> {
 }
 
 /**
+ * Lot FIFO EN STOCK par article, d'après le REGISTRE (le plus vieux lot encore
+ * `quantity > 0`). Sert de REPLI de résolution à la vente quand le résolveur PDN
+ * est aveugle — typiquement un produit FABRIQUÉ (lot OP<NNNNN>, jamais reçu par
+ * un bon de réception) ou un article suivi uniquement au registre. « Pas de stock
+ * → pas de lot » : un article sans lot au registre > 0 est absent de la map.
+ */
+export async function getLedgerFifoLot(itemCodes: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const codes = [...new Set(itemCodes.filter(Boolean))];
+  if (codes.length === 0) return out;
+  try {
+    const rows = await prisma.$queryRawUnsafe<{ itemCode: string; batchNumber: string }[]>(
+      `SELECT DISTINCT ON (p."itemCode") p."itemCode", b."batchNumber"
+         FROM "ProductBatch" b
+         JOIN "Product" p ON p."id" = b."productId"
+        WHERE p."itemCode" = ANY($1::text[]) AND b."quantity" > 0
+        ORDER BY p."itemCode", b."admissionDate" ASC NULLS LAST, b."batchNumber" ASC;`,
+      codes,
+    );
+    for (const r of rows) if (isRealLot(r.batchNumber)) out.set(r.itemCode, r.batchNumber);
+  } catch { /* registre indisponible → aucune résolution de repli */ }
+  return out;
+}
+
+/**
  * DÉBIT de lots (vente) : `quantity -= vendu`, plancher 0. Les quantités d'un
  * même lot réparties sur plusieurs lignes sont cumulées. Un lot inconnu du
  * registre (reçu avant l'activation, ou hors TeleVent) est ignoré — on ne

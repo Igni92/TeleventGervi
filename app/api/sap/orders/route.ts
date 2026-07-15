@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { docLabel } from "@/lib/docLabel";
+import { docLabel, docRef } from "@/lib/docLabel";
 import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { getTrclDefaultCarrier, getTrclCarrierHeure } from "@/lib/clientCarriers";
@@ -18,7 +18,8 @@ import { colisInfo } from "@/lib/colis";
 import { isPrecommande } from "@/lib/livraison";
 import { isComptoirClient } from "@/lib/segments";
 import { markComptoirDelivered } from "@/lib/inventory";
-import { debitLots } from "@/lib/lotLedger";
+import { debitLots, getLedgerFifoLot } from "@/lib/lotLedger";
+import { heureParis } from "@/lib/paris-time";
 import { getSafeguardsConfig } from "@/lib/safeguardsStore";
 import {
   evaluateLineSafeguards, evaluateOrderSafeguards, splitViolations,
@@ -388,6 +389,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Lot FIFO en stock au REGISTRE, par article — repli quand le résolveur PDN est
+  // aveugle : produit FABRIQUÉ (lot OP<NNNNN>, jamais reçu par un BR) ou article
+  // suivi uniquement au registre. Le registre fait autorité (cf. getLedgerFifoLot).
+  const ledgerLotByItem = itemCodes.length > 0 ? await getLedgerFifoLot(itemCodes) : new Map<string, string>();
+
   // ── BON DE COMMANDE / PRÉCOMMANDE : aucun auto-lot ──
   // Choix explicite (docKind="COMMANDE") OU précommande (livraison au-delà du
   // prochain jour livrable). Exclut la transformation d'un bon de préparation
@@ -497,10 +503,22 @@ export async function POST(req: NextRequest) {
           sapOnHand,
           envDefault: process.env.GERVIFRAIS_LOT_DEFAUT ?? null,
         });
-    line.U_NoLot = choice.lot;
+    // Repli REGISTRE : le résolveur PDN n'a rien trouvé (resolved.lot null) et on
+    // retombait sur EM_PENDING → si le REGISTRE connaît un lot EN STOCK pour cet
+    // article (produit fabriqué OP<NNNNN>, ou article suivi uniquement au
+    // registre), on le POSE. Le registre fait autorité ; jamais sur une ligne à
+    // découvert (isDecouvert) ni un lot forcé. Évite qu'un produit fabriqué parte
+    // sans lot (et soit bloqué au départ).
+    let finalLot = choice.lot;
+    let lotReason: string = choice.reason;
+    if (!forcedLot && !isDecouvert && choice.lot === LOT_PENDING && resolved.lot === null) {
+      const ledgerLot = ledgerLotByItem.get(l.itemCode);
+      if (ledgerLot) { finalLot = ledgerLot; lotReason = "registre (lot en stock)"; }
+    }
+    line.U_NoLot = finalLot;
     console.log(
-      `[Order] Lot ${l.itemCode}@${l.warehouseCode ?? "?"} [seg ${clientSegment ?? "—"}] → ${choice.lot} ` +
-      `(${choice.reason}${resolved.source ? `/${resolved.source}` : ""} — dispo locale ${availLocal}, stock SAP ${sapOnHand ?? "?"})`,
+      `[Order] Lot ${l.itemCode}@${l.warehouseCode ?? "?"} [seg ${clientSegment ?? "—"}] → ${finalLot} ` +
+      `(${lotReason}${resolved.source ? `/${resolved.source}` : ""} — dispo locale ${availLocal}, stock SAP ${sapOnHand ?? "?"})`,
     );
 
     // Cohérence lot ↔ magasin (vente à découvert) : si le lot retenu provient d'un
@@ -854,6 +872,22 @@ export async function POST(req: NextRequest) {
     const created = await sap.post<SapOrder>(`/${targetEntity}`, payload);
 
     console.log(`[Order] ✅ SUCCESS (${targetEntity}) — DocNum:`, created.DocNum, "| DocEntry:", created.DocEntry, "| Total:", created.DocTotal);
+
+    // Référence signée du BL sur SAP : « BL N°<DocNum> - <initiales> à <heure> »
+    // (le n° n'existe qu'après création → PATCH). Best-effort : n'affecte jamais
+    // la création. Uniquement pour un VRAI BL (Order), pas une offre (Quotation).
+    // Un éventuel commentaire (mention promo) est préservé en suffixe après « · ».
+    if (!isBonCommande) {
+      try {
+        const blNote = body.comments?.trim() || body.comment?.trim() || null;
+        await sap.patch(`${targetEntity}(${created.DocEntry})`, {
+          Comments: docRef({ prefix: "BL", docNum: created.DocNum, name: session.user?.name, email: session.user?.email, heure: heureParis(), numSign: true, note: blNote }),
+        });
+      } catch (e) {
+        console.warn("[Order] PATCH référence BL échoué (non-bloquant):", (e as Error).message);
+      }
+    }
+
     // NB : on ne marque plus l'offre via setDeliveryBonCommande — les offres sont
     // découvertes en interrogeant les Quotations ouvertes (cf. /api/bons-commande).
     // Le marquage « lots à affecter » est posé sur la COMMANDE issue de la

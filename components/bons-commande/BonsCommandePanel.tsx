@@ -45,14 +45,17 @@ interface BonDoc {
   clientType: string | null; dueDate: string | null; docDate: string | null; open: boolean;
   markedBy: string | null; markedAt: string | null; pendingCount: number; lines: BonLine[];
 }
-interface OffreLine { itemCode: string; itemName: string; colis: number }
-/** OFFRE CLIENT (Quotation SAP) = précommande en attente d'être passée en commande. */
+/** OFFRE CLIENT (Quotation SAP) = précommande en attente d'être passée en commande.
+ *  Ses lignes portent DÉJÀ un lot (ou EM_PENDING) : on peut les affecter ICI, avant
+ *  de passer en commande — la commande créée héritera des lots. */
 interface OffreDoc {
   docEntry: number; docNum: number; cardCode: string; cardName: string;
   clientType: string | null; dueDate: string | null; docDate: string | null;
   numAtCard: string | null;
   /** true = jour de départ atteint → à passer en commande maintenant. */
-  due: boolean; lineCount: number; colis: number; lines: OffreLine[];
+  due: boolean; lineCount: number; colis: number;
+  /** Nb de lignes encore « en attente » d'un lot. */
+  pendingCount: number; lines: BonLine[];
 }
 
 const AFFECT_LABEL: Record<string, string> = { TOUS: "Tous", EXPORT: "Export", GMS: "GMS", CHR: "CHR" };
@@ -69,7 +72,8 @@ export function BonsCommandePanel() {
   const [offres, setOffres] = useState<OffreDoc[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
-  const [busyLine, setBusyLine] = useState<string | null>(null); // `${docEntry}:${itemCode}`
+  const [offreOpen, setOffreOpen] = useState<Set<number>>(new Set()); // offres dépliées (affectation des lots)
+  const [busyLine, setBusyLine] = useState<string | null>(null); // `${docEntry}:${itemCode}` ou `offre:${docEntry}:${itemCode}`
   const [convertingId, setConvertingId] = useState<number | null>(null); // offre en cours de passage
   const [deletingId, setDeletingId] = useState<number | null>(null); // offre en cours de suppression
   const [modifBusy, setModifBusy] = useState<number | null>(null); // docEntry en cours d'ouverture
@@ -154,13 +158,56 @@ export function BonsCommandePanel() {
     }
   }, [load]);
 
-  // Remplit les lignes en attente avec la suggestion (EM du segment, sinon à
-  // découvert). On NE touche PAS aux lignes taguées « produit » (fruit) : ce tag
-  // est un rappel manuel explicite, à résoudre à la main.
-  const suggestAll = useCallback(async (doc: BonDoc) => {
-    const pend = doc.lines.filter((l) => l.pending && !l.familyTarget);
+  // Affecte un lot à toutes les lignes d'un article d'une OFFRE (PATCH Quotation) —
+  // AVANT le passage en commande. L'offre reste listée (elle ne « sort » qu'au
+  // passage en commande) ; on met juste à jour son état d'affectation.
+  const assignLotOffre = useCallback(async (offre: OffreDoc, itemCode: string, lot: string): Promise<boolean> => {
+    if (!lot) return false;
+    const key = `offre:${offre.docEntry}:${itemCode}`;
+    setBusyLine(key);
+    const famKey = familyOfLot(lot);
+    const famTarget = famKey && FAMILY_LABEL.has(famKey) ? { key: famKey, label: FAMILY_LABEL.get(famKey)! } : null;
+    const nowPending = lot === PENDING || famTarget !== null;
+    setOffres((prev) => prev?.map((o) => {
+      if (o.docEntry !== offre.docEntry) return o;
+      const lines = o.lines.map((l) => l.itemCode === itemCode
+        ? { ...l, lot, pending: nowPending, familyTarget: famTarget }
+        : l);
+      return { ...o, lines, pendingCount: lines.filter((l) => l.pending).length };
+    }) ?? prev);
+    try {
+      const r = await fetch("/api/bons-commande", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ docEntry: offre.docEntry, itemCode, lot, target: "offre" }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) { toast.error(j?.error || "Échec de l'affectation du lot"); load(); return false; }
+      return true;
+    } catch {
+      toast.error("SAP injoignable — lot non enregistré"); load(); return false;
+    } finally {
+      setBusyLine(null);
+    }
+  }, [load]);
+
+  // Idem « Valider les lots en stock », mais sur une OFFRE (avant passage).
+  const suggestAllOffre = useCallback(async (offre: OffreDoc) => {
+    const pend = offre.lines.filter((l) => l.pending && !l.familyTarget && l.suggested);
     for (const l of pend) {
-      const ok = await assignLot(doc, l.itemCode, l.suggested ?? PENDING);
+      const ok = await assignLotOffre(offre, l.itemCode, l.suggested!);
+      if (!ok) break;
+    }
+  }, [assignLotOffre]);
+
+  // « Valider les lots en stock » : n'affecte QUE les lignes dont la suggestion a
+  // un lot réellement en stock. Les lignes sans lot dispo restent « en attente »
+  // (à découvert) — on valide certains articles, on garde les autres en attente,
+  // sans écraser un choix ni réécrire inutilement EM_PENDING. On NE touche PAS aux
+  // lignes taguées « produit » (fruit) : ce tag est un rappel manuel explicite.
+  const suggestAll = useCallback(async (doc: BonDoc) => {
+    const pend = doc.lines.filter((l) => l.pending && !l.familyTarget && l.suggested);
+    for (const l of pend) {
+      const ok = await assignLot(doc, l.itemCode, l.suggested!);
       if (!ok) break;
     }
   }, [assignLot]);
@@ -279,21 +326,31 @@ export function BonsCommandePanel() {
             )}
           </div>
           <p className="text-[11.5px] text-muted-foreground">
-            Une précommande crée une <b>offre client</b> (devis SAP), pas une commande engagée. Au <b>jour de départ</b>,
-            passe-la en commande : elle rejoint alors la file d&apos;affectation des lots ci-dessous.
+            Une précommande crée une <b>offre client</b> (devis SAP), pas une commande engagée. Tu peux
+            <b> affecter les lots ici</b> (déplie l&apos;offre) <b>avant</b> de la passer en commande — la commande
+            créée héritera des lots. Au <b>jour de départ</b>, passe-la en commande.
           </p>
           <ul className="space-y-2">
             {offres.map((o) => {
               const converting = convertingId === o.docEntry;
               const deleting = deletingId === o.docEntry;
               const busy = converting || deleting;
+              const isOpen = offreOpen.has(o.docEntry);
+              const missing = o.pendingCount;
+              const ready = missing === 0;
+              const toggleOpen = () => setOffreOpen((prev) => {
+                const next = new Set(prev);
+                if (next.has(o.docEntry)) next.delete(o.docEntry); else next.add(o.docEntry);
+                return next;
+              });
               return (
                 <li
                   key={o.docEntry}
-                  className={`rounded-xl border px-3 sm:px-4 py-2.5 flex flex-col sm:flex-row sm:items-start gap-2 ${
+                  className={`rounded-xl border overflow-hidden ${
                     o.due ? "border-amber-400/60 bg-amber-50/40 dark:bg-amber-950/15" : "border-border bg-card"
                   }`}
                 >
+                <div className="px-3 sm:px-4 py-2.5 flex flex-col sm:flex-row sm:items-start gap-2">
                   <div className="min-w-0 flex-1 space-y-1.5">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[13.5px] font-semibold text-foreground truncate">{o.cardName}</span>
@@ -304,6 +361,20 @@ export function BonsCommandePanel() {
                       )}
                       <span className="text-[11px] text-muted-foreground">offre n°{o.docNum}</span>
                       <span className="text-[11px] text-muted-foreground tnum">· {o.lineCount} ligne{o.lineCount > 1 ? "s" : ""} · {o.colis} colis</span>
+                      {/* Statut des lots — cliquable pour déplier/replier l'affectation. */}
+                      <button
+                        type="button"
+                        onClick={toggleOpen}
+                        aria-expanded={isOpen}
+                        title="Affecter les lots avant de passer en commande"
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors ${
+                          ready ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25"
+                                : "bg-amber-500/15 text-amber-700 dark:text-amber-300 hover:bg-amber-500/25"
+                        }`}
+                      >
+                        <ChevronDown className={`h-3 w-3 transition-transform ${isOpen ? "" : "-rotate-90"}`} />
+                        {ready ? <><CheckCircle2 className="h-3 w-3" /> Lots complets</> : `${missing} lot${missing > 1 ? "s" : ""} à affecter`}
+                      </button>
                     </div>
                     {/* Date de livraison + n° de commande éditables */}
                     <div className="flex items-center gap-2 flex-wrap">
@@ -347,7 +418,9 @@ export function BonsCommandePanel() {
                       type="button"
                       onClick={() => convertOffre(o)}
                       disabled={busy}
-                      title="Créer la commande client SAP à partir de cette offre (lots à affecter ensuite)"
+                      title={ready
+                        ? "Créer la commande client SAP — les lots affectés sur l'offre sont conservés"
+                        : "Créer la commande client SAP — les articles sans lot resteront à affecter dans la file ci-dessous"}
                       className={`inline-flex items-center gap-1.5 h-10 sm:h-9 px-3.5 rounded-xl text-[12.5px] font-semibold transition-colors disabled:opacity-50 ${
                         o.due ? "bg-brand-600 hover:bg-brand-700 text-white" : "border border-border text-foreground hover:bg-secondary/60"
                       }`}
@@ -366,6 +439,50 @@ export function BonsCommandePanel() {
                       {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                     </button>
                   </div>
+                </div>
+
+                {/* ── Affectation des lots de l'OFFRE (avant passage en commande) ── */}
+                {isOpen && (
+                  <div className="px-3 sm:px-4 pb-3 pt-3 space-y-3 border-t border-border/60">
+                    <ul className="divide-y divide-border/50 rounded-xl border border-border overflow-hidden">
+                      {o.lines.map((l) => {
+                        const key = `offre:${o.docEntry}:${l.itemCode}`;
+                        const isBusy = busyLine === key;
+                        const current = l.familyTarget
+                          ? familyLotSentinel(l.familyTarget.key)
+                          : l.pending ? "" : l.lot;
+                        return (
+                          <li key={l.itemCode} className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-2.5">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-baseline gap-2 flex-wrap">
+                                <span className="text-[14px] sm:text-[13px] font-semibold sm:font-medium text-foreground truncate">{l.itemName}</span>
+                                <span className="text-[11.5px] text-muted-foreground tnum shrink-0">
+                                  {l.colis} colis{l.warehouse ? ` · mag. ${l.warehouse}` : ""}
+                                </span>
+                                {l.familyTarget && (
+                                  <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 shrink-0">
+                                    <Grape className="h-3 w-3" /> {l.familyTarget.label} — à préciser
+                                  </span>
+                                )}
+                              </div>
+                              <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} size="md" className="mt-1" />
+                            </div>
+                            <LotCell line={l} current={current} isBusy={isBusy} onPick={(v) => assignLotOffre(o, l.itemCode, v)} />
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <button
+                      type="button"
+                      onClick={() => suggestAllOffre(o)}
+                      disabled={ready || busyLine !== null || !o.lines.some((l) => l.pending && !l.familyTarget && l.suggested)}
+                      title="Valider le lot suggéré (arrivage en stock) sur les lignes qui en ont un ; les articles sans lot dispo restent en attente"
+                      className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
+                    >
+                      <Sparkles className="h-4 w-4" /> Valider les lots en stock
+                    </button>
+                  </div>
+                )}
                 </li>
               );
             })}
@@ -460,11 +577,11 @@ export function BonsCommandePanel() {
                   <button
                     type="button"
                     onClick={() => suggestAll(doc)}
-                    disabled={ready || busyLine !== null}
-                    title="Affecter la suggestion (arrivage du segment, sinon à découvert) à chaque ligne en attente"
+                    disabled={ready || busyLine !== null || !doc.lines.some((l) => l.pending && !l.familyTarget && l.suggested)}
+                    title="Valider le lot suggéré (arrivage en stock du segment) sur les lignes qui en ont un ; les articles sans lot dispo restent en attente"
                     className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
                   >
-                    <Sparkles className="h-4 w-4" /> Suggérer les lots
+                    <Sparkles className="h-4 w-4" /> Valider les lots en stock
                   </button>
                   {/* Ouvre le bon dans la console (pilotée par le stock) pour
                       changer les articles/quantités et garantir des lots dispo. */}

@@ -3,8 +3,26 @@ import {
   splitByWarehouse, totalAvailable, computeItfel, computeDdg,
   categoryFromGroupName, resolveCoef, computeSuggestedPrice, personalStock, unitInfo,
   chooseLot, LOT_PENDING,
-  LOT_FAMILY_PREFIX, familyLotSentinel, familyOfLot, isLotPending,
+  LOT_FAMILY_PREFIX, familyLotSentinel, familyOfLot, isLotPending, isRealLot,
 } from "./gervifrais-calc";
+
+describe("isRealLot — vrais lots EM (réception) ET OP (fabrication)", () => {
+  it("accepte un lot de réception EM<DocNum>", () => {
+    expect(isRealLot("EM14878")).toBe(true);
+  });
+  it("accepte un lot d'ordre de production OP<NNNNN> (produit fabriqué)", () => {
+    expect(isRealLot("OP00001")).toBe(true);
+    expect(isRealLot("OP12345")).toBe(true);
+  });
+  it("rejette les sentinels d'attente et le bruit", () => {
+    expect(isRealLot("EM_PENDING")).toBe(false);
+    expect(isRealLot("EM_FAM:fraise")).toBe(false);
+    expect(isRealLot("")).toBe(false);
+    expect(isRealLot(null)).toBe(false);
+    expect(isRealLot("OP")).toBe(false);   // pas de numéro
+    expect(isRealLot("LOT42")).toBe(false);
+  });
+});
 
 describe("splitByWarehouse — découpe multi-entrepôt", () => {
   it("6 framboises (5 en 000, 2 en 01) → 5×000 + 1×01", () => {

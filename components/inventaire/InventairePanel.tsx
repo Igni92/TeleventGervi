@@ -124,6 +124,13 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   const [editing, setEditing] = useState<SessionDTO | null>(null);
   const [loadingEdit, setLoadingEdit] = useState<string | null>(null);
 
+  // Réactualisation des valeurs SAP EN CORRECTION : quand le comptage a été fait
+  // sur un stock SAP faussé (ex. commande oubliée en prépa → réintégration
+  // manquée), on re-tire le stock SAP frais + réintègre les commandes non
+  // préparées, en CONSERVANT les quantités réelles comptées → seuls `sapQty` et
+  // les écarts sont recalculés. Réactive `withAddBack` et la pré-étape en édition.
+  const [editRefreshSap, setEditRefreshSap] = useState(false);
+
   // Import du stock SAP avant comptage (clic « Commencer »).
   const [refreshing, setRefreshing] = useState(false);
 
@@ -148,6 +155,11 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   const [adjustFor, setAdjustFor] = useState<SessionDTO | null>(null);
   const [adjustPlan, setAdjustPlan] = useState<AdjustPreview | "loading" | null>(null);
   const [adjusting, setAdjusting] = useState(false);
+
+  // Popup de confirmation pour « Marquer revu » / « Rouvrir » (actions qui, sinon,
+  // s'exécutaient au premier clic sans filet). Réservée admin/direction.
+  const [confirmPatch, setConfirmPatch] = useState<{ session: SessionDTO; action: "review" | "reopen" } | null>(null);
+  const [confirmingPatch, setConfirmingPatch] = useState(false);
 
   // Navigation
   const [mode, setMode] = useState<Mode>("home");
@@ -309,16 +321,17 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   // Stock théorique = `available` + colis des commandes non préparées (encore en
   // rayon). On gonfle `available` (entrepôt 01) : sapInfo() et tout l'aval
   // reflètent alors le stock théorique. En CORRECTION, on n'ajuste pas (la base a
-  // déjà été figée à la création de l'inventaire).
+  // déjà été figée à la création de l'inventaire) — SAUF réactualisation explicite
+  // des valeurs SAP (`editRefreshSap`), où l'on recalcule contre le stock frais.
   const withAddBack = useCallback((list: Product[]) => {
-    if (editing || addUnitsByItem.size === 0) return list;
+    if ((editing && !editRefreshSap) || addUnitsByItem.size === 0) return list;
     return list.map((p) => {
       const add = addUnitsByItem.get(p.itemCode);
       if (!add) return p;
       const w = p.stockByWarehouse["01"] ?? { available: 0, inStock: 0 };
       return { ...p, stockByWarehouse: { ...p.stockByWarehouse, "01": { ...w, available: (w.available ?? 0) + add } } };
     });
-  }, [addUnitsByItem, editing]);
+  }, [addUnitsByItem, editing, editRefreshSap]);
   const effectiveProducts = useMemo(() => {
     const base = withAddBack(products);
     if (extraProducts.length === 0) return base;
@@ -332,7 +345,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   const productByCode = useMemo(() => new Map(ordered.map((p) => [p.itemCode, p])), [ordered]);
   const brandLogos = useBrandLogos("inventaire");
 
-  /** Tags désignation (marque/condt/calibre/pays) d'un article — mêmes couleurs que les commandes. */
+  /** Tags désignation (marque/condt/variété/pays) d'un article — mêmes couleurs que les commandes. */
   const productChips = (itemCode: string, className?: string) => {
     const p = productByCode.get(itemCode);
     if (!p) return null;
@@ -340,7 +353,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
       itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque,
       uCondi: p.uCondi ?? p.uUvc, frgnName: p.frgnName,
     });
-    return <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className={className} />;
+    return <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className={className} />;
   };
 
   /** Logo de marque d'un article (null si la marque n'a pas de logo). */
@@ -468,6 +481,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
       if (editing) {
         toast.success(`Inventaire corrigé — ${json.session.nbEcarts} écart(s)${photos.length ? ` · ${photos.length} photo(s)` : ""}.`, { duration: 6000 });
         setEditing(null);
+        setEditRefreshSap(false);
         setExtraProducts([]); setAddQuery(""); setAddResults(null);
         loadDraftFromStorage();   // restaure le brouillon « nouveau comptage »
       } else {
@@ -497,6 +511,23 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     } else toast.error("Erreur");
   }
 
+  /** Ouvre la popup de confirmation avant de valider (revu) ou rouvrir un inventaire. */
+  function askPatch(session: SessionDTO, action: "review" | "reopen") {
+    setConfirmPatch({ session, action });
+  }
+
+  /** Confirme l'action de la popup puis l'exécute. */
+  async function runConfirmPatch() {
+    if (!confirmPatch) return;
+    setConfirmingPatch(true);
+    try {
+      await patchSession(confirmPatch.session.id, confirmPatch.action);
+      setConfirmPatch(null);
+    } finally {
+      setConfirmingPatch(false);
+    }
+  }
+
   /** Charge un inventaire existant dans l'éditeur pour le corriger / recompter. */
   async function startEdit(id: string) {
     setLoadingEdit(id);
@@ -507,6 +538,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
       if (!res.ok || !s) { toast.error(json.error ?? "Erreur"); return; }
       const nextCounts: Counts = {};
       for (const l of s.lines) nextCounts[l.itemCode] = l.realQty;
+      setEditRefreshSap(false);   // correction sur les valeurs SAP figées, jusqu'à réactualisation explicite
       setEditing(s);
       setCounts(nextCounts);
       setNote(s.note ?? "");
@@ -519,6 +551,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
   /** Abandonne la correction en cours et restaure le brouillon « nouveau comptage ». */
   function cancelEdit() {
     setEditing(null);
+    setEditRefreshSap(false);
     setExtraProducts([]); setAddQuery(""); setAddResults(null);
     loadDraftFromStorage();
     setMode("home");
@@ -556,6 +589,17 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     // stock malgré l'import qu'on vient de faire).
     const { ordered: freshOrdered } = buildFamilies(withAddBack(fresh ?? products));
     startCount(freshOrdered, "Inventaire complet");
+  }
+
+  /** EN CORRECTION : réactualise les valeurs SAP quand le comptage a été fait sur
+   *  un stock SAP faussé (commande oubliée en prépa…). Re-tire le stock SAP frais
+   *  et réintègre les commandes non préparées (pré-étape corrigeable), SANS
+   *  toucher aux quantités réelles comptées → `withAddBack` se réactive en édition
+   *  et le récap recalcule sapQty + écarts contre ce stock à jour. */
+  async function refreshSapForEdit() {
+    setEditRefreshSap(true);
+    await refreshStock();                  // stock SAP frais → recalcule sapQty
+    await loadPrepOrders({ open: true });  // commandes non préparées (pré-cochées, corrigeables)
   }
 
   /** Ouvre l'aperçu de régularisation SAP pour une session (admin/direction). */
@@ -689,6 +733,9 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
 
       {/* Aperçu + confirmation de régularisation SAP */}
       <AnimatePresence>{adjustFor && renderAdjustModal()}</AnimatePresence>
+
+      {/* Confirmation « Marquer revu » / « Rouvrir » */}
+      <AnimatePresence>{confirmPatch && renderConfirmPatchModal()}</AnimatePresence>
     </div>
   );
 
@@ -768,7 +815,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                                 {" · "}{m.sens === "sortie" ? "Sortir" : "Entrer"} {fmt(Math.abs(m.ecartColis))} colis
                                 {whTxt ? ` · ${whTxt}` : ""}
                               </div>
-                              <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1" />
+                              <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1" />
                             </div>
                             <div className="shrink-0 text-right">
                               <div className={`text-[12px] font-bold tnum ${m.sens === "sortie" ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
@@ -795,6 +842,59 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
             >
               {adjusting ? <Loader2 className="!size-4 animate-spin" /> : <Boxes className="!size-4" />}
               Confirmer l&apos;ajustement SAP
+            </Button>
+          </div>
+        </motion.div>
+      </motion.div>
+    );
+  }
+
+  /* ---------------- Modale : confirmation « revu » / « rouvrir » ---------------- */
+  function renderConfirmPatchModal() {
+    if (!confirmPatch) return null;
+    const isReview = confirmPatch.action === "review";
+    return (
+      <motion.div
+        className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={() => !confirmingPatch && setConfirmPatch(null)}
+      >
+        <motion.div
+          className="w-full max-w-sm overflow-hidden rounded-t-2xl bg-card shadow-xl sm:rounded-2xl"
+          initial={{ y: 24, opacity: 0.6 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 24, opacity: 0 }}
+          transition={{ duration: 0.18 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-start gap-3 p-5">
+            <div
+              className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[20px] ${isReview ? "bg-emerald-500/15" : "bg-amber-500/15"}`}
+              aria-hidden
+            >
+              {isReview ? "✅" : "🔄"}
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-[15px] font-bold text-foreground">
+                {isReview ? "Marquer l’inventaire comme revu ?" : "Rouvrir l’inventaire ?"}
+              </h3>
+              <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">
+                {isReview
+                  ? `L’inventaire du ${fmtDate(confirmPatch.session.createdAt)} sera validé par la direction. Tu pourras encore le rouvrir ensuite si besoin.`
+                  : `L’inventaire du ${fmtDate(confirmPatch.session.createdAt)} repassera en « à revoir » et pourra être recorrigé.`}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 border-t border-border p-3">
+            <Button variant="ghost" className="flex-1" onClick={() => setConfirmPatch(null)} disabled={confirmingPatch}>
+              Annuler
+            </Button>
+            <Button
+              variant={isReview ? "success" : "default"}
+              className="flex-1"
+              onClick={runConfirmPatch}
+              disabled={confirmingPatch}
+            >
+              {confirmingPatch ? <Loader2 className="!size-4 animate-spin" /> : <span aria-hidden>{isReview ? "✅" : "🔄"}</span>}
+              {isReview ? "Oui, marquer revu" : "Oui, rouvrir"}
             </Button>
           </div>
         </motion.div>
@@ -926,6 +1026,42 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
             et le repasse en <b>« à revoir »</b>.
           </div>
         )}
+
+        {/* Réactualisation des valeurs SAP : comptage fait sur un stock SAP faussé
+            (ex. commande oubliée en prépa) → re-tire le stock frais + réintègre les
+            commandes non préparées, en gardant les quantités réelles comptées. */}
+        {editing && (
+          <SurfaceCard accent="violet" className="p-4 space-y-3">
+            <div className="flex items-start gap-3">
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-violet-500/15 text-violet-600 dark:text-violet-300">
+                <Database className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-[13.5px] font-semibold text-foreground">Réactualiser les valeurs SAP</h3>
+                <p className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
+                  Le comptage a été fait sur un <b>stock SAP faussé</b> (ex. commande oubliée en prépa) ?
+                  Re-tire le stock SAP à jour et réintègre les commandes non préparées.
+                  <b className="text-foreground"> Tes quantités réelles comptées sont conservées</b> — seules les valeurs SAP et les écarts sont recalculés.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" className="h-9" onClick={refreshSapForEdit} disabled={refreshing}>
+                {refreshing ? <Loader2 className="!size-4 animate-spin" /> : <RotateCcw className="!size-4" />}
+                {refreshing ? "Mise à jour du stock SAP…" : editRefreshSap ? "Réactualiser à nouveau" : "Réactualiser les valeurs SAP"}
+              </Button>
+              {editRefreshSap && !refreshing && (
+                <span className="inline-flex items-center gap-1 text-[11.5px] text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Valeurs SAP réactualisées
+                </span>
+              )}
+            </div>
+          </SurfaceCard>
+        )}
+
+        {/* Pré-étape « commandes non préparées » — corrigeable ici pour réintégrer
+            la commande oubliée avant de recalculer les écarts. */}
+        {editing && editRefreshSap && renderPrepStep()}
 
         {/* Ajout d'un article ABSENT du comptage (réf. inversée, hors stock SAP…) */}
         <SurfaceCard accent="emerald" className="p-4 space-y-2">
@@ -1337,7 +1473,10 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                       </div>
                     )}
                   </div>
-                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  {/* Actions : empilées pleine largeur sur mobile (le `overflow-x-clip`
+                      de la page tronquait sinon les 2e/3e boutons de la rangée), puis
+                      en ligne alignées à droite dès `sm`. */}
+                  <div className="flex w-full shrink-0 flex-col items-stretch gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
                     {sessionLocked(s) ? (
                       <span className={`inline-flex items-center gap-1 text-[12px] ${s.adjustment?.status === "error" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"}`}>
                         {s.adjustment?.status === "error" ? <AlertCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />} régularisé
@@ -1350,25 +1489,27 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                       <span className="text-[12px] font-semibold text-amber-600 dark:text-amber-400">à revoir</span>
                     )}
                     {canManage && !sessionLocked(s) && (
-                      <>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
                         {s.nbEcarts > 0 && (
-                          <Button size="sm" onClick={() => openAdjust(s)}>
-                            <Boxes className="!size-3.5" /> Valider &amp; ajuster le stock
+                          <Button size="sm" className="w-full sm:w-auto" onClick={() => openAdjust(s)}>
+                            📦 Valider &amp; ajuster le stock
                           </Button>
                         )}
-                        {s.status === "submitted" ? (
-                          <Button size="sm" variant="outline" onClick={() => patchSession(s.id, "review")}>
-                            <CheckCircle2 className="!size-3.5" /> Marquer revu
+                        <div className="flex gap-2">
+                          {s.status === "submitted" ? (
+                            <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => askPatch(s, "review")}>
+                              ✅ Marquer revu
+                            </Button>
+                          ) : (
+                            <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => askPatch(s, "reopen")}>
+                              🔄 Rouvrir
+                            </Button>
+                          )}
+                          <Button size="sm" variant="ghost" className="flex-1 sm:flex-none" disabled={loadingEdit === s.id} onClick={() => startEdit(s.id)}>
+                            {loadingEdit === s.id ? <Loader2 className="!size-3.5 animate-spin" /> : "✏️"} Corriger
                           </Button>
-                        ) : (
-                          <Button size="sm" variant="outline" onClick={() => patchSession(s.id, "reopen")}>
-                            <RotateCcw className="!size-3.5" /> Rouvrir
-                          </Button>
-                        )}
-                        <Button size="sm" variant="ghost" disabled={loadingEdit === s.id} onClick={() => startEdit(s.id)}>
-                          {loadingEdit === s.id ? <Loader2 className="!size-3.5 animate-spin" /> : <Pencil className="!size-3.5" />} Corriger
-                        </Button>
-                      </>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>

@@ -8,10 +8,10 @@ import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import { SurfaceCard } from "@/components/ui/surface-card";
-import { DateStepper, todayISO } from "@/components/ui/date-stepper";
+import { DateStepper, todayISO, nowHM } from "@/components/ui/date-stepper";
 import { designationProduit } from "@/lib/produit-designation";
 import { StarRating } from "@/components/ui/star-rating";
-import { DesignationChips } from "./DesignationChips";
+import { DesignationChips, Chip } from "./DesignationChips";
 
 /** Montant € à 2 décimales (séparateur FR). */
 const fmtEur = (n: number): string =>
@@ -224,7 +224,7 @@ export function ProductPicker({ onPick }: { onPick: (p: ProductHit) => void }) {
                 className="w-full text-left px-3 py-2 hover:bg-secondary/60 transition-colors"
               >
                 <div className="text-[13px] font-medium truncate">
-                  {[p.itemName, p.uPays, p.uMarque, p.uCondi].filter((x) => x && x.trim() && x.trim() !== "-").join(" · ")}
+                  {[p.itemName, p.uMarque, p.uCondi, p.uPays].filter((x) => x && x.trim() && x.trim() !== "-").join(" · ")}
                 </div>
                 <div className="text-[11px] text-muted-foreground font-mono">{p.itemCode}</div>
               </button>
@@ -249,6 +249,7 @@ function plusDaysISO(n: number): string {
 export function GoodsReceiptForm() {
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [docDate, setDocDate] = useState(todayISO());
+  const [docTime, setDocTime] = useState(nowHM());   // heure de réception (agréage)
   const [numAtCard, setNumAtCard] = useState("");
   const [comment, setComment] = useState("");
   // Affectation de l'EM à un segment client — « TOUS » (stock commun, défaut) ou
@@ -321,8 +322,13 @@ export function GoodsReceiptForm() {
   const totalHT = lines.reduce((s, l) => s + (effTotal(l) ?? 0), 0);
 
   const reset = () => {
-    setSupplier(null); setDocDate(todayISO()); setNumAtCard(""); setComment(""); setLines([]); setAffect("TOUS");
+    setSupplier(null); setDocDate(todayISO()); setDocTime(nowHM()); setNumAtCard(""); setComment(""); setLines([]); setAffect("TOUS");
   };
+
+  // Clé d'idempotence : STABLE tant que la réception n'a pas abouti (un retry après
+  // échec réseau rejoue la MÊME clé → le serveur ne crée pas un 2ᵉ BR). Régénérée
+  // seulement après un succès (nouvelle réception = nouvelle clé).
+  const idemKeyRef = useRef<string | null>(null);
 
   const submit = async () => {
     if (!supplier) { toast.error("Sélectionne un fournisseur"); return; }
@@ -333,6 +339,9 @@ export function GoodsReceiptForm() {
         return;
       }
     }
+    if (!idemKeyRef.current) {
+      idemKeyRef.current = (globalThis.crypto?.randomUUID?.() ?? `gr-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    }
     setSubmitting(true);
     setLastReceipt(null);
     try {
@@ -341,7 +350,9 @@ export function GoodsReceiptForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cardCode: supplier.cardCode,
+          idempotencyKey: idemKeyRef.current,
           docDate: docDate || undefined,
+          docTime: docTime || undefined,
           numAtCard: numAtCard.trim() || undefined,
           comment: comment.trim() || undefined,
           affect,
@@ -403,6 +414,7 @@ export function GoodsReceiptForm() {
       }
 
       setLastReceipt({ docNum: json.docNum, lot: json.lot });
+      idemKeyRef.current = null;   // succès → la prochaine réception aura une nouvelle clé
       reset();
     } catch (e) {
       toast.error((e as Error).message);
@@ -426,8 +438,8 @@ export function GoodsReceiptForm() {
           <SupplierPicker value={supplier} onChange={setSupplier} />
         </div>
         <div className="space-y-1.5">
-          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Date de réception</label>
-          <DateStepper value={docDate} onChange={setDocDate} />
+          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Date &amp; heure de réception</label>
+          <DateStepper value={docDate} onChange={setDocDate} time={docTime} onTimeChange={setDocTime} timeLabel="Heure de réception" />
         </div>
         <div className="space-y-1.5 sm:col-span-2">
           <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Référence (BL, Cde, F… — optionnel)</label>
@@ -489,7 +501,7 @@ export function GoodsReceiptForm() {
                   <div className="min-w-0">
                     <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
                     <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-                    <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
+                    <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1.5" />
                   </div>
                   <Button variant="ghost" size="icon-sm" tabIndex={-1} onClick={() => removeLine(i)} aria-label="Supprimer">
                     <Trash2 className="h-4 w-4" />
@@ -574,10 +586,10 @@ export function GoodsReceiptForm() {
                 <th className="text-left px-2 py-2 font-semibold w-24">Qté</th>
                 <th className="text-left px-2 py-2 font-semibold w-28">Code Article</th>
                 <th className="text-left px-2 py-2 font-semibold">Fruit</th>
-                <th className="text-left px-2 py-2 font-semibold">Pays</th>
                 <th className="text-left px-2 py-2 font-semibold">Marque</th>
-                <th className="text-left px-2 py-2 font-semibold">Variété</th>
                 <th className="text-left px-2 py-2 font-semibold">Condt</th>
+                <th className="text-left px-2 py-2 font-semibold">Variété</th>
+                <th className="text-left px-2 py-2 font-semibold">Pays</th>
                 <th className="text-left px-2 py-2 font-semibold w-36">Entrepôt</th>
                 <th className="text-left px-2 py-2 font-semibold w-36">DLC</th>
                 <th className="text-right px-2 py-2 font-semibold w-24">Prix /pie HT</th>
@@ -609,10 +621,10 @@ export function GoodsReceiptForm() {
                       <div>{dz.fruit}</div>
                       <StarRating value={l.note} onChange={(v) => updateLine(i, { note: v })} size="sm" className="mt-0.5" ariaLabel={`Note qualité ${dz.fruit}`} />
                     </td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.pays}</td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.marque}</td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.variete}</td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.condt}</td>
+                    <td className="px-2 py-2"><Chip kind="marque">{dz.marque}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="condt">{dz.condt}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="variete">{dz.variete}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="pays">{dz.pays}</Chip></td>
                     <td className="px-2 py-2">
                       <select
                         value={l.warehouseCode}

@@ -19,6 +19,7 @@ import { familyOf } from "@/lib/familles";
 import { grossMarginPct } from "@/lib/margin";
 import {
   COGS_MARGIN, COGS_PRODUCT_LINES, COGS_COSTED_LINES,
+  FAB_COST_LATERAL, COGS_MARGIN_FAB, COGS_COSTED_FAB,
   cogsFromSql, realMarginAgg,
 } from "@/lib/cogs";
 
@@ -224,10 +225,10 @@ export interface TopSalesperson {
 
 export interface ActivityBucket {
   volume: number;         // Σ DocTotal HT des Orders non annulés (= CA HT BL)
-  caProductNet: number;   // Σ lineTotal des lignes produit (isService=false) — base marge %
+  caProductNet: number;   // Σ lineTotal des lignes COSTÉES (coût EM réception OU fabrication) — base marge % ; 0 = pas encore de vente costable
   weightKg: number;       // Σ quantity × salesUnitWeight par ligne (= Volume kg)
   margin: number;         // Σ (lineTotal − quantity × coût_EM) par ligne (lib/cogs)
-  marginPct: number;      // marge BRUTE / CA produit NET × 100 (base unique lib/margin)
+  marginPct: number;      // marge BRUTE / CA produit COSTÉ × 100 (base unique lib/margin)
   marginCoverage: number; // % des lignes produit dont le coût EM est résolu (qualité données)
   ordersCount: number;
   activeClients: number;
@@ -236,8 +237,9 @@ export interface ActivityBucket {
 
 export async function aggregateActivity(start: Date, end: Date, slpName?: string | null): Promise<ActivityBucket> {
   // 2 requêtes SQL agrégées (en-têtes + lignes) — on ne rapatrie plus les
-  // milliers de lignes en JS : SUM/COUNT côté Postgres. Le coût vient du
-  // LATERAL EM (lib/cogs), alias i = SapOrder, l = SapOrderLine.
+  // milliers de lignes en JS : SUM/COUNT côté Postgres. Le coût vient du LATERAL
+  // EM (lib/cogs) ET, à défaut, du LATERAL fabrication (articles reconditionnés
+  // sans réception d'achat directe). Alias i = SapOrder, l = SapOrderLine.
   const slpHdr = slpName ? Prisma.sql`AND "slpName" = ${slpName}` : Prisma.empty;
   const [[hdr], [ln]] = await Promise.all([
     prisma.$queryRaw<{ volume: number; orders: number; clients: number }[]>(Prisma.sql`
@@ -246,13 +248,13 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
              COUNT(DISTINCT "cardCode")::int AS clients
       FROM "SapOrder"
       WHERE "cancelled" = false AND "docDate" >= ${start} AND "docDate" < ${end} ${slpHdr}`),
-    prisma.$queryRaw<{ n: number; with_cost: number; margin: number; weight: number; ca_product: number }[]>(Prisma.sql`
+    prisma.$queryRaw<{ n: number; with_cost: number; margin: number; weight: number; ca_costed: number }[]>(Prisma.sql`
       SELECT ${COGS_PRODUCT_LINES}::int AS n,
-             ${COGS_COSTED_LINES}::int AS with_cost,
-             COALESCE(SUM(${COGS_MARGIN}), 0)::float AS margin,
+             COUNT(*) FILTER (WHERE l."itemCode" IS NOT NULL AND ${COGS_COSTED_FAB})::int AS with_cost,
+             COALESCE(SUM(${COGS_MARGIN_FAB}), 0)::float AS margin,
              COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS weight,
-             COALESCE(SUM(l."lineTotal") FILTER (WHERE l."isService" = false), 0)::float AS ca_product
-      FROM ${cogsFromSql("order")}
+             COALESCE(SUM(l."lineTotal") FILTER (WHERE ${COGS_COSTED_FAB}), 0)::float AS ca_costed
+      FROM ${cogsFromSql("order")} ${FAB_COST_LATERAL}
       LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
       WHERE i."cancelled" = false AND i."docDate" >= ${start} AND i."docDate" < ${end} ${slpSql("i", slpName)}`),
   ]);
@@ -261,15 +263,23 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
   const ordersCount = Number(hdr?.orders ?? 0);
   const margin = Number(ln?.margin ?? 0);
   const linesCount = Number(ln?.n ?? 0);
-  const caProductNet = Number(ln?.ca_product ?? 0);
+  // Base de la marge % = CA des SEULES lignes costées (coût EM réception OU coût
+  // fabrication pour les reconditionnés), exactement le jeu de lignes qui
+  // alimente le numérateur `margin`. Une vente à découvert non encore costable
+  // est absente des DEUX termes : elle ne gonfle plus le dénominateur sans
+  // contribuer au numérateur. Sans ça, un jour à forte part de découvert (ou de
+  // kits sans réception directe) écrasait mécaniquement la marge % (num. costé /
+  // dénom. tout produit → % ~0). La fiabilité « stock propre » reste l'indicateur
+  // transparent de la part costée/reçue.
+  const caProductNet = Number(ln?.ca_costed ?? 0);
 
   return {
     volume,
     caProductNet,
     weightKg: Number(ln?.weight ?? 0),
     margin,
-    // Marge BRUTE % sur le CA produit NET (hors services), pas sur le volume BL
-    // total — alignée sur l'écran 2 / la matrice annuelle (base unique lib/margin).
+    // Marge BRUTE % sur le CA produit COSTÉ (num. et dénom. sur le même jeu de
+    // lignes) — jamais sur le volume BL total. Base unique lib/margin.
     marginPct: grossMarginPct(margin, caProductNet),
     marginCoverage: linesCount > 0 ? (Number(ln?.with_cost ?? 0) / linesCount) * 100 : 0,
     ordersCount,
@@ -285,16 +295,19 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
 const RECEPTION_LOOKBACK_DAYS = 8;
 
 /**
- * FIABILITÉ « stock propre » — part du CA vendu dont la marchandise a été
- * effectivement REÇUE. Par article, couverture = min(1, reçu / vendu), où
- * « reçu » = EM des `RECEPTION_LOOKBACK_DAYS` derniers jours (jusqu'à `end`) :
- * la marchandise vendue ce jour a généralement été reçue la veille. Une VENTE
- * À DÉCOUVERT (article jamais reçu récemment) tire la fiabilité sous 100 % ;
- * elle remonte à mesure que les réceptions rentrent.
+ * FIABILITÉ « stock propre » — part du CA vendu dont la marchandise était bien
+ * en stock (reçue à l'achat OU produite en interne). Par article :
+ *   • article FABRIQUÉ (kit / reconditionné produit via un run de fabrication de
+ *     la fenêtre) → couverture 1 : sa marchandise vient de la fabrication, pas
+ *     d'une réception d'achat directe — ce N'EST PAS une vente à découvert ;
+ *   • sinon couverture = min(1, reçu / vendu), « reçu » = EM des
+ *     `RECEPTION_LOOKBACK_DAYS` derniers jours (jusqu'à `end`).
+ * Une vraie VENTE À DÉCOUVERT (ni reçu ni fabriqué récemment) tire la fiabilité
+ * sous 100 % ; elle remonte à mesure que les réceptions / fabrications rentrent.
  *
- * ⚠️ Volontairement GLOBAL (les réceptions sont à l'échelle de l'entreprise, pas
- * d'un commercial) : c'est un indicateur de QUALITÉ de la donnée, pas un KPI
- * commercial. Renvoie 0..100 (0 si aucune vente sur la fenêtre).
+ * ⚠️ Volontairement GLOBAL (réceptions & fabrications sont à l'échelle de
+ * l'entreprise, pas d'un commercial) : indicateur de QUALITÉ de la donnée, pas
+ * un KPI commercial. Renvoie 0..100 (0 si aucune vente sur la fenêtre).
  */
 export async function salesReceptionCoverage(start: Date, end: Date): Promise<number> {
   const recvStart = new Date(start);
@@ -313,10 +326,19 @@ export async function salesReceptionCoverage(start: Date, end: Date): Promise<nu
       WHERE emh."cancelled" = false AND em."itemCode" IS NOT NULL
         AND emh."docDate" >= ${recvStart} AND emh."docDate" < ${end}
       GROUP BY em."itemCode"
+    ),
+    fabr AS (
+      SELECT DISTINCT fr."parentItemCode" AS code
+      FROM "FabricationRun" fr
+      WHERE fr."status" = 'done'
+        AND fr."createdAt" >= ${recvStart} AND fr."createdAt" < ${end}
     )
     SELECT COALESCE(SUM(sold.ca), 0)::float AS ca_total,
-           COALESCE(SUM(sold.ca * LEAST(1, COALESCE(recv.qty, 0) / NULLIF(sold.qty, 0))), 0)::float AS ca_covered
-    FROM sold LEFT JOIN recv ON recv.code = sold.code`);
+           COALESCE(SUM(sold.ca * CASE WHEN fabr.code IS NOT NULL THEN 1
+                                       ELSE LEAST(1, COALESCE(recv.qty, 0) / NULLIF(sold.qty, 0)) END), 0)::float AS ca_covered
+    FROM sold
+    LEFT JOIN recv ON recv.code = sold.code
+    LEFT JOIN fabr ON fabr.code = sold.code`);
   const r = rows[0];
   const total = Number(r?.ca_total ?? 0);
   const covered = Number(r?.ca_covered ?? 0);

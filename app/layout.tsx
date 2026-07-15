@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { AppToaster } from "@/components/ui/toaster";
 import { ClickSparks } from "@/components/ClickSparks";
+import { SaleCelebration } from "@/components/SaleCelebration";
 import { Providers } from "./providers";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
@@ -43,7 +44,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             et user-agent (émulateurs d'appareil qui ne posent que l'UA). */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var r=document.documentElement;try{if(localStorage.getItem('televent-theme'))localStorage.removeItem('televent-theme');}catch(e){}var d=localStorage.getItem('televente:ecran2Density');if(d==='compact'||d==='aere'){r.setAttribute('data-density',d);}var z=localStorage.getItem('televente:uiZoom');if(z==='110'||z==='125'||z==='140'){r.style.setProperty('--app-zoom',String(Number(z)/100));}var n=navigator;if((window.matchMedia&&matchMedia('(pointer: coarse)').matches)||(n.maxTouchPoints||0)>1||/Android|iPhone|iPad|iPod|Mobi|Tablet/i.test(n.userAgent||'')){r.setAttribute('data-ui','touch');}}catch(e){}})();`,
+            __html: `(function(){try{var r=document.documentElement;try{if(localStorage.getItem('televent-theme'))localStorage.removeItem('televent-theme');}catch(e){}var d=localStorage.getItem('televente:ecran2Density');if(d==='compact'||d==='aere'){r.setAttribute('data-density',d);}var z=localStorage.getItem('televente:uiZoom');if(z==='110'||z==='125'||z==='140'){r.style.setProperty('--app-zoom',String(Number(z)/100));}var ap=localStorage.getItem('televente:accentPos');if(ap==='top'||ap==='bottom'||ap==='off'){r.setAttribute('data-accent-pos',ap);}var n=navigator;if((window.matchMedia&&matchMedia('(pointer: coarse)').matches)||(n.maxTouchPoints||0)>1||/Android|iPhone|iPad|iPod|Mobi|Tablet/i.test(n.userAgent||'')){r.setAttribute('data-ui','touch');}}catch(e){}})();`,
           }}
         />
       </head>
@@ -55,6 +56,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="app-zoom-root">{children}</div>
           <AppToaster />
           <ClickSparks />
+          <SaleCelebration />
         </Providers>
         <ServiceWorkerRegister />
       </body>

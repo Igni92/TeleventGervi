@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { docLabel } from "@/lib/docLabel";
+import { docRef } from "@/lib/docLabel";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { isAgreeur, requirePreparateurOrAdmin } from "@/lib/permissions";
@@ -8,7 +8,7 @@ import { incrementLocalStock } from "@/lib/stockSync";
 import { bumpLot, LOT_PENDING } from "@/lib/lotResolver";
 import { buildWhsBudget, remainingForItem, pickReceiptWarehouse, consumeBudget } from "@/lib/receiptRetro";
 import { normalizeEmAffect, setEmAffect } from "@/lib/emAffect";
-import { creditLots } from "@/lib/lotLedger";
+import { creditLots, debitLots } from "@/lib/lotLedger";
 import { setMarchandiseNote, sanitizeRating } from "@/lib/marchandiseNote";
 import { convertQuotationToOrder } from "@/lib/quotationConvert";
 import { isDepartureReached } from "@/lib/livraison";
@@ -64,6 +64,7 @@ interface InLine {
 interface CreateBody {
   cardCode: string;
   docDate?: string;       // date de réception (défaut : aujourd'hui)
+  docTime?: string;       // heure de réception « HH:MM » (agréage) — reportée dans les Comments
   numAtCard?: string;
   comment?: string;
   /** Affectation de l'EM à un segment client — « TOUS » (défaut), « EXPORT »,
@@ -71,6 +72,10 @@ interface CreateBody {
    *  lot à la saisie télévente) et sert ses commandes en PREMIER lors de la
    *  propagation rétro ci-dessous. Cf. lib/emAffect. */
   affect?: string;
+  /** Clé d'idempotence (UUID généré par le client, stable sur les retries d'UNE
+   *  soumission) — évite le double BR / double crédit sur double-clic ou retry
+   *  réseau. Optionnelle : sans clé, comportement inchangé. */
+  idempotencyKey?: string;
   lines: InLine[];
 }
 
@@ -107,6 +112,15 @@ export async function POST(req: NextRequest) {
     }
   }
   const cardCode = body.cardCode.trim();
+
+  // Idempotence (anti double-BR / double-crédit) : clé optionnelle du client, stable
+  // sur les retries d'UNE soumission. Le CLAIM atomique se fait juste avant le POST
+  // SAP (après les pré-validations, pour ne pas laisser de clé bloquée sur erreur).
+  const idemKey = (body.idempotencyKey ?? "").trim().slice(0, 100);
+  const idemSettingKey = idemKey ? `gr:idem:${idemKey}` : null;
+  const releaseIdem = async () => {
+    if (idemSettingKey) await prisma.appSetting.deleteMany({ where: { key: idemSettingKey } }).catch(() => {});
+  };
 
   // ── Récupère le ratio colis→pie depuis le catalogue local ──
   // Pour FRAMB12PD (barquettes de 125g, 12 par colis) : salesQtyPerPackUnit=12
@@ -182,6 +196,10 @@ export async function POST(req: NextRequest) {
   // Date du DOCUMENT (réception) : saisie au formulaire ou aujourd'hui. Distincte
   // de `today` (jour réel) qui sert aux scans de propagation rétro ci-dessous.
   const docDate = (body.docDate && /^\d{4}-\d{2}-\d{2}$/.test(body.docDate)) ? body.docDate : today;
+  // Heure de réception (agréage) : SAP DocDate est sans heure → on reporte
+  // l'heure saisie dans les Comments (« … · Reçu à 14h30 »), visible sur le BR
+  // SAP et dans l'historique des entrées.
+  const docTime = (body.docTime && /^([01]\d|2[0-3]):[0-5]\d$/.test(body.docTime)) ? body.docTime : null;
   const resolvedLines = body.lines.map((l) => {
     const meta = productMap.get(l.itemCode);
     const ratio = (meta?.salesQtyPerPackUnit && meta.salesQtyPerPackUnit > 1) ? meta.salesQtyPerPackUnit : 1;
@@ -201,16 +219,40 @@ export async function POST(req: NextRequest) {
     }
     return line;
   });
+  const heure = docTime ? docTime.replace(":", "h") : null;
+  const note = body.comment?.trim() || null;
   const payload: Record<string, unknown> = {
     CardCode: cardCode,
     DocDate: docDate,
     DocDueDate: docDate,
     TaxDate: docDate,
-    Comments: body.comment?.trim()
-      || docLabel("EM", session.user?.name, session.user?.email),
+    // Référence signée « EM <n°> - <initiales> à <heure> ». Le n° d'EM n'existe
+    // qu'après création → provisoire ici (sans n°), patchée avec le DocNum plus bas.
+    Comments: docRef({ prefix: "EM", name: session.user?.name, email: session.user?.email, heure, note }),
     DocumentLines: documentLines,
   };
   if (body.numAtCard?.trim()) payload.NumAtCard = body.numAtCard.trim();
+
+  // ── Idempotence : CLAIM atomique juste avant le POST (fenêtre minimale) ──
+  if (idemSettingKey) {
+    const claimed = await prisma.$queryRawUnsafe<{ key: string }[]>(
+      `INSERT INTO "AppSetting" ("key", "value", "updatedAt") VALUES ($1, 'pending', NOW())
+       ON CONFLICT ("key") DO NOTHING RETURNING "key";`,
+      idemSettingKey,
+    );
+    if (!Array.isArray(claimed) || claimed.length === 0) {
+      // Clé déjà présente = doublon : on rejoue le résultat produit, ou 409 si en cours.
+      const existing = await prisma.appSetting.findUnique({ where: { key: idemSettingKey } });
+      if (existing?.value && existing.value !== "pending") {
+        try { return NextResponse.json({ ...JSON.parse(existing.value), idempotent: true }); }
+        catch { /* valeur illisible → 409 ci-dessous */ }
+      }
+      return NextResponse.json(
+        { ok: false, error: "Réception déjà en cours (double envoi ignoré)." },
+        { status: 409 },
+      );
+    }
+  }
 
   // ── POST SAP /PurchaseDeliveryNotes ──
   console.log("[GoodsReceipt] → POST SAP/PurchaseDeliveryNotes — DB:", process.env.SAP_B1_COMPANY_DB);
@@ -223,6 +265,7 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     console.error("[GoodsReceipt] ❌ SAP CREATE FAILED:", message);
+    await releaseIdem();   // échec → on libère la clé pour permettre une vraie relance
     return NextResponse.json(
       { ok: false, error: message, payload: process.env.NODE_ENV === "development" ? payload : undefined },
       { status: 500 },
@@ -230,6 +273,14 @@ export async function POST(req: NextRequest) {
   }
 
   const lotCode = `EM${created.DocNum}`;
+  // Mémorise le résultat sur la clé d'idempotence — un retry rejouera CE BR au lieu
+  // d'en créer un second (double crédit évité).
+  if (idemSettingKey) {
+    await prisma.appSetting.update({
+      where: { key: idemSettingKey },
+      data: { value: JSON.stringify({ ok: true, docNum: created.DocNum, docEntry: created.DocEntry, lot: lotCode, cardCode }) },
+    }).catch(() => { /* best-effort */ });
+  }
   console.log("[GoodsReceipt] ✅ SUCCESS — DocNum:", created.DocNum, "| Lot:", lotCode);
 
   // ── PATCH U_NoLot=EM<DocNum> sur chaque ligne ──
@@ -243,11 +294,15 @@ export async function POST(req: NextRequest) {
       LineNum: l.LineNum,
       U_NoLot: lotCode,
     }));
-    if (patchLines.length > 0) {
-      await sap.patch(`PurchaseDeliveryNotes(${created.DocEntry})`, { DocumentLines: patchLines });
-    }
+    // Grave le n° définitif dans la référence (« EM <DocNum> - <initiales> à
+    // <heure> ») ET pose le lot sur chaque ligne, en un seul PATCH.
+    const patchBody: Record<string, unknown> = {
+      Comments: docRef({ prefix: "EM", docNum: created.DocNum, name: session.user?.name, email: session.user?.email, heure, note }),
+    };
+    if (patchLines.length > 0) patchBody.DocumentLines = patchLines;
+    await sap.patch(`PurchaseDeliveryNotes(${created.DocEntry})`, patchBody);
   } catch (e) {
-    console.warn("[GoodsReceipt] PATCH U_NoLot échoué (non-bloquant):", (e as Error).message);
+    console.warn("[GoodsReceipt] PATCH U_NoLot / référence échoué (non-bloquant):", (e as Error).message);
   }
 
   // ── Cache des lots : injection immédiate pour les Orders qui suivent ──
@@ -320,6 +375,11 @@ export async function POST(req: NextRequest) {
   })));
 
   let retroPatchCount = 0;
+  // Débits registre à appliquer une fois les BL patchés : une vente à découvert
+  // (EM_PENDING) résolue ici consomme le lot fraîchement reçu — sinon le lot
+  // reste crédité de la réception SANS jamais être débité de cette vente (stock
+  // fantôme qui « date »). Débité APRÈS le PATCH SAP réussi uniquement.
+  const retroDebits: { itemCode: string; lot: string; qty: number }[] = [];
   try {
     type SapOrderLine = {
       LineNum: number; ItemCode: string; Quantity: number; U_NoLot?: string; WarehouseCode?: string;
@@ -378,6 +438,7 @@ export async function POST(req: NextRequest) {
 
     for (const ord of orders) {
       const patchLines: Record<string, unknown>[] = [];
+      const orderDebits: { itemCode: string; lot: string; qty: number }[] = [];
       for (const ln of (ord.DocumentLines || [])) {
         // Filtrage côté serveur : ligne en attente de lot ET item présent dans
         // ce PDN (reliquat = 0 pour les items hors PDN → skip).
@@ -394,13 +455,21 @@ export async function POST(req: NextRequest) {
         const patch: Record<string, unknown> = { LineNum: ln.LineNum, U_NoLot: lotCode };
         if (whs !== ln.WarehouseCode) patch.WarehouseCode = whs;
         patchLines.push(patch);
+        // La ligne entière est désormais attribuée à ce lot → débit de sa quantité.
+        orderDebits.push({ itemCode: ln.ItemCode, lot: lotCode, qty: ln.Quantity });
         consumeBudget(budget, ln.ItemCode, whs, ln.Quantity);
       }
       if (patchLines.length > 0) {
         await sap.patch(`Orders(${ord.DocEntry})`, { DocumentLines: patchLines });
         retroPatchCount += patchLines.length;
+        retroDebits.push(...orderDebits); // débit seulement après PATCH réussi
         console.log(`[GoodsReceipt] Retro lot ${lotCode} → Order #${ord.DocNum} (${patchLines.length} ligne(s))`);
       }
+    }
+    // Débit registre des ventes à découvert désormais servies par ce lot.
+    if (retroDebits.length > 0) {
+      try { await debitLots(retroDebits); }
+      catch (e) { console.warn("[GoodsReceipt] Débit registre rétro échoué (non-bloquant):", (e as Error).message); }
     }
     console.log(
       `[GoodsReceipt] Propagation rétro : ${orders.length} commande(s) ouverte(s) depuis le ${retroSince} scannée(s), `
@@ -418,6 +487,9 @@ export async function POST(req: NextRequest) {
   //    En miroir, les "FabricationRunLine" locales encore en sentinel sur les
   //    items patchés sont mises à jour (runs du jour uniquement).
   let retroFabricationCount = 0;
+  // Débits registre des composants fabriqués à découvert désormais servis par ce
+  // lot (miroir de la retro Orders) — appliqués après PATCH SAP réussi.
+  const retroFabDebits: { itemCode: string; lot: string; qty: number }[] = [];
   try {
     type SapExitLine = {
       LineNum: number; ItemCode: string; Quantity: number; U_NoLot?: string; WarehouseCode?: string;
@@ -436,6 +508,7 @@ export async function POST(req: NextRequest) {
     const patchedItems = new Set<string>();
     for (const exit of exits) {
       const patchLines: Record<string, unknown>[] = [];
+      const exitDebits: { itemCode: string; lot: string; qty: number }[] = [];
       for (const ln of (exit.DocumentLines || [])) {
         if (ln.U_NoLot !== LOT_PENDING) continue;
         if (remainingForItem(budget, ln.ItemCode) <= 0) continue;
@@ -444,14 +517,21 @@ export async function POST(req: NextRequest) {
         const patch: Record<string, unknown> = { LineNum: ln.LineNum, U_NoLot: lotCode };
         if (whs !== ln.WarehouseCode) patch.WarehouseCode = whs;
         patchLines.push(patch);
+        exitDebits.push({ itemCode: ln.ItemCode, lot: lotCode, qty: ln.Quantity });
         patchedItems.add(ln.ItemCode);
         consumeBudget(budget, ln.ItemCode, whs, ln.Quantity);
       }
       if (patchLines.length > 0) {
         await sap.patch(`InventoryGenExits(${exit.DocEntry})`, { DocumentLines: patchLines });
         retroFabricationCount += patchLines.length;
+        retroFabDebits.push(...exitDebits); // débit après PATCH réussi
         console.log(`[GoodsReceipt] Retro lot ${lotCode} → InventoryGenExit #${exit.DocNum} (${patchLines.length} ligne(s))`);
       }
+    }
+    // Débit registre des composants fabriqués désormais servis par ce lot.
+    if (retroFabDebits.length > 0) {
+      try { await debitLots(retroFabDebits); }
+      catch (e) { console.warn("[GoodsReceipt] Débit registre rétro fabrication échoué (non-bloquant):", (e as Error).message); }
     }
 
     // Miroir local : FabricationRunLine encore en sentinel sur les items patchés

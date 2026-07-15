@@ -13,6 +13,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
+import { fmtJourDate } from "@/lib/date-fr";
 import { DesignationChips } from "./DesignationChips";
 import { INCIDENT_TYPES, notifyReceptionIncidentsChanged } from "./ReceptionIncidents";
 import { ProductPicker, type ProductHit } from "./GoodsReceiptForm";
@@ -39,20 +40,22 @@ type PurchaseOrder = {
  *  Les types de réserve = INCIDENT_TYPES (mêmes types que les incidents de réception). */
 type ReceiveAgreage = { status: "CONFORME" | "RESERVE"; type?: string; note?: string; rating?: number | null };
 
-/** Date jj.mm.aa (points, année sur 2 chiffres). */
-const fmtDate = (s?: string | null): string => {
-  if (!s) return "—";
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return "—";
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${p(d.getFullYear() % 100)}`;
-};
+/** Date « jour + date » unifiée des états SAP : « VEN 10.07.26 ». */
+const fmtDate = fmtJourDate;
 const eur = (n: number): string =>
   n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 const fmtColis = (n: number | null | undefined): string => {
   if (n == null) return "—";
   return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(".", ",");
 };
+
+/** Heure « HHhMM » de prise de commande, extraite du commentaire SAP
+ *  (« CF 2709 - JMG à 13h10 » ou l'ancien « … · Commande à 13h10 »). */
+function heureFromComments(comments?: string | null): string | null {
+  if (!comments) return null;
+  const matches = comments.match(/\d{1,2}h\d{2}/g);
+  return matches ? matches[matches.length - 1] : null;
+}
 
 function StatusBadge({ open, cancelled, large }: { open: boolean; cancelled?: boolean; large?: boolean }) {
   const tone = cancelled
@@ -179,7 +182,7 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <h2 className="text-[15px] font-semibold flex items-center gap-2">
             <PackageCheck className="h-4 w-4 text-muted-foreground" />
-            Commandes fournisseurs
+            Cde Fournisseur
           </h2>
           <Button variant="ghost" size="sm" onClick={load} disabled={loading}>
             {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
@@ -260,7 +263,10 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                     {d.cardName || d.cardCode}
                   </div>
                   <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
-                    Cmd {fmtDate(d.docDate)}{d.dueDate ? ` · livr. ${fmtDate(d.dueDate)}` : ""} · {d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}
+                    {fmtDate(d.docDate)}{heureFromComments(d.comments) ? ` à ${heureFromComments(d.comments)}` : ""}
+                  </div>
+                  <div className="text-[13px] text-muted-foreground tnum">
+                    {d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}
                   </div>
                 </div>
                 <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
@@ -323,7 +329,7 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
           <DialogHeader className="text-left">
             <DialogTitle className="flex items-center gap-2 justify-start pr-8 text-[16px] sm:text-[18px] whitespace-nowrap">
               <PackageCheck className="h-5 w-5 shrink-0 text-violet-600 dark:text-violet-400" />
-              <span className="truncate min-w-0">Commande fournisseur N° {largeDoc?.docNum}</span>
+              <span className="truncate min-w-0">CF {largeDoc?.docNum}</span>
             </DialogTitle>
             <DialogDescription className="sr-only">Détail de la commande fournisseur : lignes commandées et réception.</DialogDescription>
           </DialogHeader>
@@ -484,8 +490,8 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
           <table className="w-full text-[12.5px]">
             <thead className="bg-secondary/40 text-[10.5px] uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th className="text-left px-2 py-2 font-semibold">Article</th>
                 <th className="text-left px-2 py-2 font-semibold w-24">Qté colis</th>
+                <th className="text-left px-2 py-2 font-semibold">Article</th>
                 <th className="text-left px-2 py-2 font-semibold w-32">Entrepôt</th>
                 <th className="text-right px-2 py-2 font-semibold w-24">PU /pie HT</th>
                 <th className="text-right px-2 py-2 font-semibold w-28">Total HT</th>
@@ -497,14 +503,14 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
                 const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, frgnName: l.variete });
                 return (
                   <tr key={`${l.itemCode}-${i}`} className={`border-t border-border align-top ${swapIdx === i ? "bg-violet-50 dark:bg-violet-500/10" : ""}`}>
+                    <td className="px-2 py-2"><NumberInput value={l.packageQuantity} onValueChange={(n) => updateEditLine(i, { packageQuantity: n ?? 0 })} min={0} step={1} className="text-right h-9 w-20" /></td>
                     <td className="px-2 py-2">
                       <div className="font-semibold text-foreground">{dz.fruit}</div>
                       <button type="button" onClick={() => setSwapIdx(swapIdx === i ? null : i)} className="group inline-flex items-center gap-1 font-mono text-[11px] text-muted-foreground hover:text-violet-600 dark:hover:text-violet-400" title="Changer l'article">
                         {l.itemCode} <Pencil className="h-3 w-3 opacity-50 group-hover:opacity-100" />
                       </button>
-                      <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-0.5" />
+                      <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-0.5" />
                     </td>
-                    <td className="px-2 py-2"><NumberInput value={l.packageQuantity} onValueChange={(n) => updateEditLine(i, { packageQuantity: n ?? 0 })} min={0} step={1} className="text-right h-9 w-20" /></td>
                     <td className="px-2 py-2">
                       <select value={l.warehouseCode} onChange={(e) => updateEditLine(i, { warehouseCode: e.target.value as EditLine["warehouseCode"] })} className="h-9 w-full rounded-md border border-input bg-background px-2 text-[12.5px]">
                         {PO_WAREHOUSES.map((w) => <option key={w.code} value={w.code}>{w.label}</option>)}
@@ -691,9 +697,10 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
           {po.cardName && <span className="text-muted-foreground">· {po.cardName}</span>}
         </span>
         <StatusBadge open={po.open} cancelled={po.cancelled} large />
-        <span className="text-[14px] text-muted-foreground tnum">Commandé le {fmtDate(po.docDate)}</span>
-        {po.dueDate && <span className="text-[14px] text-muted-foreground tnum">Livraison prévue {fmtDate(po.dueDate)}</span>}
-        {po.numAtCard && <span className="text-[14px] text-muted-foreground">Réf. {po.numAtCard}</span>}
+        <span className="text-[14px] text-muted-foreground tnum">
+          Commandée {fmtDate(po.docDate)}{heureFromComments(po.comments) ? ` à ${heureFromComments(po.comments)}` : ""}
+        </span>
+        {po.numAtCard && <span className="text-[14px] text-muted-foreground">{po.numAtCard}</span>}
       </div>
       {po.comments && <p className="italic text-muted-foreground text-[13px]">« {po.comments} »</p>}
 
@@ -708,7 +715,7 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
                 <div className="min-w-0">
                   <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
                   <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-                  <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
+                  <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1.5" />
                 </div>
                 {!restricted && (
                   <div className="text-right shrink-0">
@@ -742,9 +749,9 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
         <table className="w-full text-[15px]">
           <thead className="bg-secondary/40 uppercase tracking-wide text-muted-foreground text-[11.5px]">
             <tr>
+              <th className="text-left px-3 py-2.5 font-semibold w-20">Colis</th>
               <th className="text-left px-3 py-2.5 font-semibold">Article</th>
               <th className="text-left px-3 py-2.5 font-semibold">Désignation</th>
-              <th className="text-right px-3 py-2.5 font-semibold">Colis</th>
               {!restricted && <th className="text-right px-3 py-2.5 font-semibold">PU HT</th>}
               {!restricted && <th className="text-right px-3 py-2.5 font-semibold">Total HT</th>}
               <th className="text-left px-3 py-2.5 font-semibold">Statut</th>
@@ -756,12 +763,12 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
               const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
               return (
                 <tr key={`${l.itemCode}-${i}`} className="border-t border-border/60">
+                  <td className="px-3 py-2.5 tnum font-semibold text-foreground whitespace-nowrap">{fmtColis(l.packageQuantity)}</td>
                   <td className="px-3 py-2.5">
                     <div className="font-semibold text-foreground">{dz.fruit}</div>
                     <div className="font-mono text-[12px] text-muted-foreground">{l.itemCode}</div>
                   </td>
-                  <td className="px-3 py-2.5"><DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} /></td>
-                  <td className="px-3 py-2.5 text-right tnum">{fmtColis(l.packageQuantity)}</td>
+                  <td className="px-3 py-2.5"><DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} /></td>
                   {!restricted && <td className="px-3 py-2.5 text-right tnum">{l.price != null ? eur(l.price) : "—"}</td>}
                   {!restricted && <td className="px-3 py-2.5 text-right tnum font-semibold">{lineHT != null ? eur(lineHT) : "—"}</td>}
                   <td className="px-3 py-2.5">

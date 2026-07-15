@@ -1,6 +1,7 @@
 import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { initialsFromEmail } from "@/lib/salespeople";
+import { isRestrictedPreparateur } from "@/lib/preparateur";
 
 /**
  * Gestion des droits — « par défaut, un commercial ne voit que ses propres
@@ -183,6 +184,39 @@ export async function isLivreur(session: Session | null): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Confiné au module LIVRAISONS : un préparateur restreint OU un livreur ne voit
+ * que les BL DÉJÀ « mis en préparation » et ne peut pas les mettre en prépa
+ * lui-même (réservé au commercial qui dispatche).
+ *
+ * EXCEPTION — un rôle ÉLEVÉ garde l'accès COMPLET même s'il porte AUSSI un flag
+ * terrain : admin / direction (`requireAdmin`) OU commercial. Sinon un chef qui
+ * aide à la livraison (flag `isLivreur`) se retrouve à tort confiné et ne voit
+ * plus les livraisons du jour à préparer. Ex. Jean-Michel (livreur + direction
+ * + commercial) doit voir toutes les livraisons et pouvoir les mettre en prépa,
+ * pas seulement le commercial qui a vendu.
+ *
+ * Lecture défensive (repli sur le comportement restreint si une colonne manque).
+ */
+export async function isLivraisonRestricted(session: Session | null): Promise<boolean> {
+  const terrain = isRestrictedPreparateur(session?.user?.email) || (await isLivreur(session));
+  if (!terrain) return false;
+  // Rôle élevé (admin / direction) → jamais confiné.
+  if (await requireAdmin(session)) return false;
+  // Commercial (même s'il porte aussi un flag terrain) → accès complet.
+  const email = session?.user?.email?.trim().toLowerCase() ?? null;
+  if (email) {
+    try {
+      const rows = await prisma.$queryRawUnsafe<{ isCommercial: boolean | null }[]>(
+        `SELECT "isCommercial" FROM "User" WHERE LOWER("email") = $1 LIMIT 1`,
+        email,
+      );
+      if (rows[0]?.isCommercial) return false;
+    } catch { /* colonne absente → on garde le comportement restreint */ }
+  }
+  return true;
 }
 
 /**

@@ -5,7 +5,8 @@ import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { getLotMaps, resolveLotForSegment, LOT_PENDING } from "@/lib/lotResolver";
 import { getEmAffects } from "@/lib/emAffect";
-import { getItemStock, lotInStock, lotStockQty } from "@/lib/lotStock";
+import { getItemStock } from "@/lib/lotStock";
+import { buildLotCandidates, type LotCandidate } from "@/lib/lotCandidates";
 import { listBonCommandeDocEntries, setDeliveryBonCommande } from "@/lib/inventory";
 import { debitLots, isRealLot } from "@/lib/lotLedger";
 import { isLotPending, familyOfLot, LOT_FAMILY_PREFIX } from "@/lib/gervifrais-calc";
@@ -63,79 +64,53 @@ const FAMILY_LABEL = new Map(FRUIT_FAMILIES.map((f) => [f.key, f.label]));
 // affecter »). Objet SAP oQuotations = 23 (pour la conversion base→cible).
 const QUOTATION_OBJTYPE = 23;
 
-type OffreLine = { itemCode: string; itemName: string; colis: number };
+// Une ligne préparable (offre OU commande) : article fusionné + son lot courant
+// et les lots candidats. Partagée entre l'affectation sur l'OFFRE (avant passage
+// en commande) et sur la COMMANDE (file d'affectation classique).
+interface PrepLine {
+  itemCode: string; itemName: string; quantity: number; colis: number;
+  warehouse: string | null; marque: string | null; condt: string | null; pays: string | null;
+  variete: string | null; uvc: string | null; calibre: string | null;
+  lot: string; pending: boolean; candidates: LotCandidate[]; suggested: string | null;
+  familyTarget: { key: string; label: string } | null;
+}
 type OffreDoc = {
   docEntry: number; docNum: number; cardCode: string; cardName: string;
   clientType: string | null; dueDate: string | null; docDate: string | null;
   numAtCard: string | null;
   /** true = jour de départ atteint → à passer en commande (pastille). */
-  due: boolean; lineCount: number; colis: number; lines: OffreLine[];
+  due: boolean; lineCount: number; colis: number;
+  /** Nb de lignes encore « en attente » de lot (à affecter avant de passer). */
+  pendingCount: number;
+  lines: PrepLine[];
 };
 
 /**
- * Liste les OFFRES CLIENT (Quotations SAP ouvertes, non annulées) = « bons de
- * commande » TeleVent en attente. Best-effort : échec SAP → [] (l'onglet reste
- * utilisable pour l'affectation des lots).
+ * Lecture BRUTE des OFFRES CLIENT (Quotations SAP ouvertes, non annulées) = « bons
+ * de commande » TeleVent en attente. Best-effort : échec SAP → [] (l'onglet reste
+ * utilisable pour l'affectation des lots des commandes). Les lignes (avec lots +
+ * candidats) sont construites dans le GET, en réutilisant le stock/les cartes de
+ * lots communs aux offres ET aux commandes.
  */
-async function loadOffres(): Promise<OffreDoc[]> {
-  let quotes: SapOrderDoc[] = [];
+async function loadOffresRaw(): Promise<SapOrderDoc[]> {
   try {
     const res = await sap.get<{ value: SapOrderDoc[] }>(
       `Quotations?$orderby=DocDueDate asc&$top=100`
       + `&$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,NumAtCard,DocumentStatus,Cancelled,DocumentLines`
       + `&$filter=${encodeURIComponent("DocumentStatus eq 'bost_Open' and Cancelled eq 'tNO'")}`,
     );
-    quotes = res.value ?? [];
+    return res.value ?? [];
   } catch (e) {
     console.warn("[BonCommande] Lecture des offres (Quotations) échouée:", (e as Error).message);
     return [];
   }
-  if (quotes.length === 0) return [];
-
-  const itemCodes = Array.from(new Set(quotes.flatMap((d) => (d.DocumentLines ?? []).map((l) => l.ItemCode))));
-  const pMap = new Map<string, { itemName: string; salesUnit: string | null; salesUnitWeight: number | null; salesQtyPerPackUnit: number | null }>();
-  if (itemCodes.length > 0) {
-    const prods = await prisma.product.findMany({
-      where: { itemCode: { in: itemCodes } },
-      select: { itemCode: true, itemName: true, salesUnit: true, salesUnitWeight: true, salesQtyPerPackUnit: true },
-    });
-    for (const p of prods) pMap.set(p.itemCode, p);
-  }
-  const unitsPerColis = (code: string) => {
-    const p = pMap.get(code);
-    return p ? (colisInfo(p).unitsPerColis || 1) : 1;
-  };
-
-  const cardCodes = Array.from(new Set(quotes.map((d) => d.CardCode)));
-  const typeByCard = new Map<string, string | null>();
-  if (cardCodes.length > 0) {
-    const clients = await prisma.client.findMany({ where: { code: { in: cardCodes } }, select: { code: true, type: true } });
-    for (const c of clients) typeByCard.set(c.code, c.type);
-  }
-
-  return quotes
-    .map((d) => {
-      const dueDate = d.DocDueDate ? d.DocDueDate.slice(0, 10) : null;
-      const lines: OffreLine[] = (d.DocumentLines ?? []).map((l) => {
-        const p = pMap.get(l.ItemCode);
-        const colis = (l.Quantity ?? 0) / (unitsPerColis(l.ItemCode) || 1);
-        return { itemCode: l.ItemCode, itemName: l.ItemDescription || p?.itemName || l.ItemCode, colis: Math.round(colis * 10) / 10 };
-      });
-      return {
-        docEntry: d.DocEntry, docNum: d.DocNum,
-        cardCode: d.CardCode, cardName: d.CardName ?? d.CardCode,
-        clientType: (typeByCard.get(d.CardCode) ?? "").trim().toUpperCase() || null,
-        dueDate, docDate: d.DocDate ?? null,
-        numAtCard: (d.NumAtCard ?? "").trim() || null,
-        due: dueDate ? isDepartureReached(dueDate) : false,
-        lineCount: lines.length,
-        colis: Math.round(lines.reduce((s, l) => s + l.colis, 0) * 10) / 10,
-        lines,
-      };
-    })
-    // À passer (jour de départ atteint) en tête, puis par date de livraison.
-    .sort((a, b) => Number(b.due) - Number(a.due) || (a.dueDate ?? "").localeCompare(b.dueDate ?? ""));
 }
+
+type ProductInfo = {
+  itemName: string; salesUnit: string | null; salesUnitWeight: number | null;
+  salesQtyPerPackUnit: number | null; uMarque: string | null; uCondi: string | null;
+  uPays: string | null; uUvc: string | null; frgnName: string | null;
+};
 
 export async function GET() {
   const session = await auth();
@@ -146,11 +121,11 @@ export async function GET() {
   const docEntries = marks.map((m) => m.docEntry);
 
   try {
-    // Offres client (Quotations) en attente d'être passées en commande — toujours,
-    // même sans commande marquée « lots à affecter ».
-    const offres = await loadOffres();
+    // Offres client (Quotations) en attente + commandes marquées « lots à affecter ».
+    // On charge les deux jeux BRUTS d'abord, puis on calcule stock/cartes de lots
+    // UNE fois pour l'union des articles (offres ⋃ commandes).
+    const offresRaw = await loadOffresRaw();
 
-    // Récupère les commandes marquées (par lots de 20 → filtre OData raisonnable).
     const CHUNK = 20;
     const fetched: SapOrderDoc[] = [];
     for (let i = 0; i < docEntries.length; i += CHUNK) {
@@ -165,11 +140,10 @@ export async function GET() {
     // On ne garde que les commandes vivantes (non annulées).
     const live = fetched.filter((d) => d.Cancelled !== "tYES");
 
-    // Produits (tags désignation + colisage) pour toutes les lignes.
-    const itemCodes = Array.from(new Set(live.flatMap((d) => (d.DocumentLines ?? []).map((l) => l.ItemCode))));
-    const pMap = new Map<string, { itemName: string; salesUnit: string | null; salesUnitWeight: number | null;
-      salesQtyPerPackUnit: number | null; uMarque: string | null; uCondi: string | null; uPays: string | null;
-      uUvc: string | null; frgnName: string | null }>();
+    // Union des articles (offres + commandes) → produits, calibre, stock, lots.
+    const allDocs = [...offresRaw, ...live];
+    const itemCodes = Array.from(new Set(allDocs.flatMap((d) => (d.DocumentLines ?? []).map((l) => l.ItemCode))));
+    const pMap = new Map<string, ProductInfo>();
     if (itemCodes.length > 0) {
       const prods = await prisma.product.findMany({
         where: { itemCode: { in: itemCodes } },
@@ -196,13 +170,14 @@ export async function GET() {
       return p ? colisInfo(p).unitsPerColis || 1 : 1;
     };
 
-    // Segment client par CardCode (pour la suggestion de lot par segment).
-    const cardCodes = Array.from(new Set(live.map((d) => d.CardCode)));
+    // Segment client par CardCode (union offres + commandes).
+    const cardCodes = Array.from(new Set(allDocs.map((d) => d.CardCode)));
     const typeByCard = new Map<string, string | null>();
     if (cardCodes.length > 0) {
       const clients = await prisma.client.findMany({ where: { code: { in: cardCodes } }, select: { code: true, type: true } });
       for (const c of clients) typeByCard.set(c.code, c.type);
     }
+    const segmentOf = (cardCode: string) => (typeByCard.get(cardCode) ?? "").trim().toUpperCase() || null;
 
     // Cartes de lots + affectations EM + stock physique par article (une fois).
     const [maps, affects, stock] = await Promise.all([getLotMaps(), getEmAffects(), getItemStock(itemCodes)]);
@@ -217,40 +192,37 @@ export async function GET() {
       if (meta?.supplier) parts.push(meta.supplier);
       return parts.join(" · ");
     };
-    const candidatesFor = (itemCode: string, segment: string | null) => {
-      const docs = maps.byItemList.get(itemCode) ?? [];
-      // On ne propose QUE les lots avec du stock physique dans TeleVent
-      // (article×entrepôt) — le stock par lot n'existe pas dans ce SAP.
-      const candidates = docs
-        .map((dn) => {
+    // Lots candidats d'un article : liste COURTE et FIABLE (cf. lib/lotCandidates).
+    // On ne propose qu'une EM par (entrepôt × segment), la plus récente, et
+    // seulement si l'entrepôt de réception porte du stock physique — le stock par
+    // lot n'existe pas dans ce SAP (maille article × entrepôt). `orderWarehouse`
+    // = magasin de la ligne (priorité douce d'affichage).
+    const candidatesFor = (itemCode: string, segment: string | null, orderWarehouse: string | null) =>
+      buildLotCandidates({
+        itemCode,
+        orderWarehouse,
+        segment,
+        emDocs: maps.byItemList.get(itemCode) ?? [],
+        warehouseOf: (dn) => maps.whsOfItemDoc.get(`${itemCode}|${dn}`) ?? null,
+        affectOf: (dn) => affects.get(dn) ?? "TOUS",
+        metaOf: (dn) => {
           const meta = maps.docMeta.get(dn);
-          const warehouse = maps.whsOfItemDoc.get(`${itemCode}|${dn}`) ?? null;
-          return {
-            lot: `EM${dn}`, docNum: dn,
-            warehouse,
-            affect: affects.get(dn) ?? "TOUS",
-            date: meta?.date ?? null,          // "YYYY-MM-DD" — réception EM
-            supplier: meta?.supplier ?? null,  // fournisseur (CardName PDN)
-            label: emLabel(dn),                // repli texte (titre natif)
-            qty: lotStockQty(stock, itemCode, warehouse),  // stock physique (affichage)
-          };
-        })
-        .filter((c) => lotInStock(stock, itemCode, c.warehouse));
-      const sug = resolveLotForSegment(maps, affects, itemCode, undefined, segment).lot;
-      // Suggestion seulement si elle a du stock (fait partie des candidats retenus).
-      const suggested = sug && candidates.some((c) => c.lot === sug) ? sug : null;
-      return { candidates, suggested };
-    };
+          return { date: meta?.date ?? null, supplier: meta?.supplier ?? null, label: emLabel(dn) };
+        },
+        stockInWarehouse: (whs) => (whs ? (stock.byItemWhs.get(`${itemCode}|${whs}`) ?? 0) : 0),
+        itemTotalStock: stock.byItem.get(itemCode) ?? 0,
+        suggestedLot: resolveLotForSegment(maps, affects, itemCode, undefined, segment).lot,
+      });
 
-    const docs = live.map((d) => {
-      const segment = (typeByCard.get(d.CardCode) ?? "").trim().toUpperCase() || null;
-      // Fusion par article : le lot est le même sur toutes les lignes d'un article
-      // (elles seront affectées ensemble). « pending » = au moins une ligne EM_PENDING.
+    // Fusion par article des lignes d'un document (offre OU commande) : le lot est
+    // le même sur toutes les lignes d'un article (affectées ensemble). « pending »
+    // = au moins une ligne EM_PENDING. PARTAGÉ offre/commande.
+    const buildPrepLines = (docLines: SapLine[], segment: string | null): { lines: PrepLine[]; pendingCount: number; colis: number } => {
       const byItem = new Map<string, { itemCode: string; itemName: string; quantity: number; colisRaw: number;
         warehouse: string | null; marque: string | null; condt: string | null; pays: string | null;
         variete: string | null; uvc: string | null; calibre: string | null;
         lot: string; pending: boolean; familyKey: string | null }>();
-      for (const l of d.DocumentLines ?? []) {
+      for (const l of docLines) {
         const p = pMap.get(l.ItemCode);
         const qty = l.Quantity ?? 0;
         const g = byItem.get(l.ItemCode);
@@ -286,18 +258,46 @@ export async function GET() {
           }
         }
       }
-      const lines = [...byItem.values()].map((l) => {
-        const { candidates, suggested } = candidatesFor(l.itemCode, segment);
+      const lines: PrepLine[] = [...byItem.values()].map((l) => {
+        const { candidates, suggested } = candidatesFor(l.itemCode, segment, l.warehouse);
         return {
           itemCode: l.itemCode, itemName: l.itemName,
           quantity: l.quantity, colis: Math.round(l.colisRaw * 10) / 10,
           warehouse: l.warehouse, marque: l.marque, condt: l.condt, pays: l.pays,
           variete: l.variete, uvc: l.uvc, calibre: l.calibre,
           lot: l.lot, pending: l.pending, candidates, suggested,
-          // Tag « produit » à préciser : { key, label } ou null.
           familyTarget: l.familyKey ? { key: l.familyKey, label: FAMILY_LABEL.get(l.familyKey)! } : null,
         };
       });
+      return {
+        lines,
+        pendingCount: lines.filter((l) => l.pending).length,
+        colis: Math.round(lines.reduce((s, l) => s + l.colis, 0) * 10) / 10,
+      };
+    };
+
+    // ── OFFRES : lignes AVEC lots/candidats (affectation AVANT passage en commande) ──
+    const offres: OffreDoc[] = offresRaw
+      .map((d) => {
+        const dueDate = d.DocDueDate ? d.DocDueDate.slice(0, 10) : null;
+        const { lines, pendingCount, colis } = buildPrepLines(d.DocumentLines ?? [], segmentOf(d.CardCode));
+        return {
+          docEntry: d.DocEntry, docNum: d.DocNum,
+          cardCode: d.CardCode, cardName: d.CardName ?? d.CardCode,
+          clientType: segmentOf(d.CardCode),
+          dueDate, docDate: d.DocDate ?? null,
+          numAtCard: (d.NumAtCard ?? "").trim() || null,
+          due: dueDate ? isDepartureReached(dueDate) : false,
+          lineCount: lines.length, colis, pendingCount, lines,
+        };
+      })
+      // À passer (jour de départ atteint) en tête, puis par date de livraison.
+      .sort((a, b) => Number(b.due) - Number(a.due) || (a.dueDate ?? "").localeCompare(b.dueDate ?? ""));
+
+    // ── COMMANDES marquées « lots à affecter » ──
+    const docs = live.map((d) => {
+      const segment = segmentOf(d.CardCode);
+      const { lines, pendingCount } = buildPrepLines(d.DocumentLines ?? [], segment);
       const mark = markInfo.get(d.DocEntry);
       return {
         docEntry: d.DocEntry, docNum: d.DocNum,
@@ -306,8 +306,7 @@ export async function GET() {
         dueDate: d.DocDueDate ?? null, docDate: d.DocDate ?? null,
         open: d.DocumentStatus !== "bost_Close",
         markedBy: mark?.by ?? null, markedAt: mark?.at ?? null,
-        pendingCount: lines.filter((l) => l.pending).length,
-        lines,
+        pendingCount, lines,
       };
     })
     // Les commandes entièrement affectées ne devraient plus être marquées, mais on
@@ -323,26 +322,33 @@ export async function GET() {
 }
 
 /**
- * PATCH — affecte un lot à TOUTES les lignes d'un article d'une commande.
- * Body : { docEntry: number, itemCode: string, lot: string }
+ * PATCH — affecte un lot à TOUTES les lignes d'un article d'un document.
+ * Body : { docEntry: number, itemCode: string, lot: string, target?: "offre" | "commande" }
+ *   • target "commande" (défaut) → COMMANDE (Order) de la file d'affectation ;
+ *   • target "offre"             → OFFRE (Quotation) : affecter les lots AVANT de
+ *                                  passer en commande — la commande créée héritera
+ *                                  du lot (BaseType 23 recopie U_NoLot).
  * `lot` vaut :
  *   • "EM<DocNum>"        → arrivage choisi (résolu) ;
  *   • "EM_PENDING"        → à découvert générique (réécrit auto à la réception) ;
  *   • "EM_FAM:<fruit>"    → produit à préciser (rappel — PAS d'auto-affectation),
  *                           la clé de fruit doit être connue (cf. FRUIT_FAMILIES).
- * Les deux derniers laissent la ligne « en attente » → la commande reste dans l'onglet.
+ * Les deux derniers laissent la ligne « en attente ».
  */
 export async function PATCH(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  let body: { docEntry?: number; itemCode?: string; lot?: string };
+  let body: { docEntry?: number; itemCode?: string; lot?: string; target?: string };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
   const docEntry = Number(body.docEntry);
   const itemCode = (body.itemCode ?? "").trim();
   const lot = (body.lot ?? "").trim();
+  // Document cible : OFFRE (Quotation) ou COMMANDE (Order, défaut).
+  const isOffre = body.target === "offre";
+  const entity = isOffre ? "Quotations" : "Orders";
   if (!Number.isInteger(docEntry) || docEntry <= 0) return NextResponse.json({ error: "docEntry invalide" }, { status: 400 });
   if (!itemCode) return NextResponse.json({ error: "itemCode requis" }, { status: 400 });
   if (!lot) return NextResponse.json({ error: "lot requis" }, { status: 400 });
@@ -356,27 +362,34 @@ export async function PATCH(req: NextRequest) {
   }
 
   try {
-    const order = await sap.get<SapOrderDoc>(
-      `Orders(${docEntry})?$select=DocEntry,DocNum,DocumentLines`,
+    const doc = await sap.get<SapOrderDoc>(
+      `${entity}(${docEntry})?$select=DocEntry,DocNum,DocumentLines`,
     );
-    const allLines = order.DocumentLines ?? [];
+    const allLines = doc.DocumentLines ?? [];
     const patchLines = allLines
       .filter((l) => l.ItemCode === itemCode && l.LineNum != null)
       .map((l) => ({ LineNum: l.LineNum, U_NoLot: lot }));
     if (patchLines.length === 0) {
-      return NextResponse.json({ error: `Aucune ligne « ${itemCode} » sur la commande` }, { status: 404 });
+      return NextResponse.json({ error: `Aucune ligne « ${itemCode} » sur ${isOffre ? "l'offre" : "la commande"}` }, { status: 404 });
     }
-    // Registre des lots — DÉBIT à la PREMIÈRE affectation d'un vrai lot : si les
-    // lignes de cet article étaient toutes « en attente » avant ce PATCH et qu'on
-    // pose un vrai EM<DocNum>, la marchandise est consommée sur ce lot. Une simple
-    // RÉaffectation (lignes déjà résolues) ne re-débite pas. Calculé AVANT le PATCH.
+    // Registre des lots — DÉBIT à la PREMIÈRE affectation d'un vrai lot sur une
+    // COMMANDE : si les lignes de cet article étaient toutes « en attente » avant ce
+    // PATCH et qu'on pose un vrai EM<DocNum>, la marchandise est consommée sur ce lot.
+    // Une simple RÉaffectation (lignes déjà résolues) ne re-débite pas. Calculé AVANT
+    // le PATCH.
+    //
+    // ⚠️ PAS de débit sur une OFFRE : le lot posé sur l'offre est hérité par la
+    // commande à la conversion (BaseType 23). Débiter ici risquerait un DOUBLE débit
+    // si la reprise du U_NoLot échouait (la commande retomberait dans la file et
+    // serait re-affectée → re-débit). Le débit reste porté par la COMMANDE (comme
+    // aujourd'hui pour les offres déjà résolues, qui ne débitent pas non plus).
     const itemLines = allLines.filter((l) => l.ItemCode === itemCode);
     const wasAllPending = itemLines.every((l) => isPending(l.U_NoLot));
     const soldQty = itemLines.reduce((s, l) => s + (l.Quantity ?? 0), 0);
 
-    await sap.patch(`Orders(${docEntry})`, { DocumentLines: patchLines });
+    await sap.patch(`${entity}(${docEntry})`, { DocumentLines: patchLines });
 
-    if (wasAllPending && isRealLot(lot) && soldQty > 0) {
+    if (!isOffre && wasAllPending && isRealLot(lot) && soldQty > 0) {
       try {
         await debitLots([{ itemCode, lot, qty: soldQty }]);
       } catch (e) {
@@ -389,14 +402,15 @@ export async function PATCH(req: NextRequest) {
       const effLot = l.ItemCode === itemCode ? lot : l.U_NoLot;
       return isPending(effLot);
     });
-    if (!stillPending) {
-      // Toutes les lignes ont un lot → la commande sort de l'onglet.
+    // Une COMMANDE entièrement affectée sort de l'onglet (on lève la marque). Une
+    // OFFRE n'est jamais marquée : elle reste listée jusqu'à son passage en commande.
+    if (!stillPending && !isOffre) {
       await setDeliveryBonCommande(docEntry, false, "").catch(() => {});
     }
     return NextResponse.json({ ok: true, docEntry, itemCode, lot, cleared: !stillPending });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    console.error(`[BonCommande] PATCH lot ${itemCode}@${docEntry} échoué:`, message);
+    console.error(`[BonCommande] PATCH lot ${itemCode}@${entity}(${docEntry}) échoué:`, message);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
@@ -499,6 +513,52 @@ export async function POST(req: NextRequest) {
     if ((quote.NumAtCard ?? "").trim()) orderPayload.NumAtCard = quote.NumAtCard;
     type SapOrder = { DocEntry: number; DocNum: number };
     const order = await sap.post<SapOrder>("/Orders", orderPayload);
+
+    // ── Re-validation STOCK à la conversion (anti « affectation qui date ») ──
+    // Un lot pré-affecté sur l'offre il y a plusieurs jours peut être ÉPUISÉ. La
+    // commande recopie le U_NoLot tel quel (BaseType 23) et, si elle est
+    // entièrement affectée, DISPARAÎT de la file (pendingCount=0) → le lot épuisé
+    // partirait sans jamais être revu. On remet donc en EM_PENDING toute ligne
+    // dont le lot n'est PLUS EN STOCK (registre à 0) : elle revient dans la file
+    // (à ré-affecter un lot présent) ET sera bloquée au départ. La DLC n'entre pas
+    // en compte — seule la présence en stock décide.
+    try {
+      const conv = await sap.get<SapOrderDoc>(`Orders(${order.DocEntry})?$select=DocEntry,DocumentLines`);
+      const realKeys = (conv.DocumentLines ?? [])
+        .map((l) => ({ itemCode: l.ItemCode, lot: (l.U_NoLot ?? "").trim() }))
+        .filter((x) => x.itemCode && isRealLot(x.lot));
+      if (realKeys.length > 0) {
+        // Registre par (article, lot) : un lot ÉPUISÉ = ligne présente à quantity ≤ 0.
+        const rows = await prisma.productBatch.findMany({
+          where: {
+            warehouseCode: "",
+            batchNumber: { in: [...new Set(realKeys.map((k) => k.lot))] },
+            product: { itemCode: { in: [...new Set(realKeys.map((k) => k.itemCode as string))] } },
+          },
+          select: { batchNumber: true, quantity: true, product: { select: { itemCode: true } } },
+        });
+        const qtyByKey = new Map(rows.map((r) => [`${r.product.itemCode}|${r.batchNumber}`, r.quantity]));
+        // Épuisé seulement si le registre CONNAÎT le lot et le donne à 0 (lot hors
+        // registre → on ne touche pas, faute de signal fiable).
+        const depleted = new Set(
+          realKeys.filter((k) => {
+            const q = qtyByKey.get(`${k.itemCode}|${k.lot}`);
+            return q != null && q <= 0;
+          }).map((k) => k.lot),
+        );
+        if (depleted.size > 0) {
+          const patchLines = (conv.DocumentLines ?? [])
+            .filter((l) => l.LineNum != null && depleted.has((l.U_NoLot ?? "").trim()))
+            .map((l) => ({ LineNum: l.LineNum, U_NoLot: LOT_PENDING }));
+          if (patchLines.length > 0) {
+            await sap.patch(`Orders(${order.DocEntry})`, { DocumentLines: patchLines });
+            console.log(`[BonCommande] Conversion #${order.DocNum} : ${patchLines.length} ligne(s) à lot ÉPUISÉ remises en attente.`);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[BonCommande] Re-validation stock à la conversion échouée (non-bloquant):", (e as Error).message);
+    }
 
     // La commande issue de l'offre porte des lignes EM_PENDING → à affecter :
     // on la marque « bon de commande » pour qu'elle rejoigne la file des lots.

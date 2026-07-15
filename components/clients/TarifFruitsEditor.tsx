@@ -3,8 +3,8 @@
 /**
  * TARIF PAR FRUITS — éditeur (fiche client ET console, onglet Tarif).
  *
- * Prix négociés au niveau DÉSIGNATION : Famille (obligatoire) + Origine + Calibre
- * + Variété (optionnels). Le prix descend automatiquement sur l'article à la
+ * Prix négociés au niveau DÉSIGNATION : Famille (obligatoire) + Calibre + Variété
+ * + Origine (optionnels). Le prix descend automatiquement sur l'article à la
  * création si sa désignation matche la ligne la plus précise. Sauvegarde auto.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -85,8 +85,9 @@ export function TarifFruitsEditor({ clientId, compact = false }: { clientId: str
   const sorted = useMemo(
     () => (rows ?? []).map((r, i) => ({ r, i }))
       .sort((a, b) => familyLabel(a.r.family).localeCompare(familyLabel(b.r.family))
-        || (a.r.pays ?? "").localeCompare(b.r.pays ?? "")
-        || (a.r.calibre ?? "").localeCompare(b.r.calibre ?? "")),
+        || (a.r.calibre ?? "").localeCompare(b.r.calibre ?? "")
+        || (a.r.variete ?? "").localeCompare(b.r.variete ?? "")
+        || (a.r.pays ?? "").localeCompare(b.r.pays ?? "")),
     [rows],
   );
 
@@ -98,7 +99,7 @@ export function TarifFruitsEditor({ clientId, compact = false }: { clientId: str
         <div className="flex items-center gap-2 text-[12.5px] text-muted-foreground">
           <Grape className="h-4 w-4 text-brand-500 shrink-0" />
           <p>
-            Prix par <b>fruit</b> (famille) affinés par <b>origine</b>, <b>calibre</b> et <b>variété</b> (optionnels).
+            Prix par <b>fruit</b> (famille) affinés par <b>calibre</b>, <b>variété</b> et <b>origine</b> (optionnels).
             À la commande, l&apos;article prend le prix de la ligne la plus précise qui lui correspond.
           </p>
           <span className="ml-auto shrink-0 inline-flex items-center gap-1 text-[11px]">
@@ -110,8 +111,8 @@ export function TarifFruitsEditor({ clientId, compact = false }: { clientId: str
 
       {/* Lignes existantes */}
       <div className="rounded-xl border border-border overflow-hidden">
-        <div className="hidden sm:grid grid-cols-[1.2fr_1fr_0.8fr_1fr_100px_36px] gap-2 px-3 py-2 bg-secondary/30 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
-          <span>Fruit</span><span>Origine</span><span>Calibre</span><span>Variété</span><span className="text-right">Prix HT</span><span />
+        <div className="hidden sm:grid grid-cols-[1.2fr_0.8fr_1fr_1fr_100px_36px] gap-2 px-3 py-2 bg-secondary/30 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span>Fruit</span><span>Calibre</span><span>Variété</span><span>Origine</span><span className="text-right">Prix HT</span><span />
         </div>
         {rows === null ? (
           <div className="flex items-center gap-2 px-3 py-4 text-[13px] text-muted-foreground">
@@ -122,11 +123,11 @@ export function TarifFruitsEditor({ clientId, compact = false }: { clientId: str
         ) : (
           <ul className="divide-y divide-border/50">
             {sorted.map(({ r, i }) => (
-              <li key={i} className="grid grid-cols-2 sm:grid-cols-[1.2fr_1fr_0.8fr_1fr_100px_36px] gap-2 px-3 py-2 items-center">
+              <li key={i} className="grid grid-cols-2 sm:grid-cols-[1.2fr_0.8fr_1fr_1fr_100px_36px] gap-2 px-3 py-2 items-center">
                 <span className="text-[13.5px] font-semibold text-foreground">{familyLabel(r.family)}</span>
-                <span className="text-[13px] text-muted-foreground truncate">{r.pays || <span className="opacity-40">toutes</span>}</span>
                 <span className="text-[13px] text-muted-foreground truncate">{r.calibre || <span className="opacity-40">tous</span>}</span>
                 <span className="text-[13px] text-muted-foreground truncate">{r.variete || <span className="opacity-40">toutes</span>}</span>
+                <span className="text-[13px] text-muted-foreground truncate">{r.pays || <span className="opacity-40">toutes</span>}</span>
                 <div className="flex items-center gap-1 justify-end">
                   <input
                     type="text" inputMode="decimal" defaultValue={String(r.price)}
@@ -149,13 +150,13 @@ export function TarifFruitsEditor({ clientId, compact = false }: { clientId: str
       </div>
 
       {/* Ajout d'une ligne */}
-      <div className="grid grid-cols-2 sm:grid-cols-[1.2fr_1fr_0.8fr_1fr_100px_auto] gap-2 items-center">
+      <div className="grid grid-cols-2 sm:grid-cols-[1.2fr_0.8fr_1fr_1fr_100px_auto] gap-2 items-center">
         <select value={nf} onChange={(e) => setNf(e.target.value)} aria-label="Fruit" className={inputCls}>
           {FRUIT_FAMILIES.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
         </select>
-        <input value={np} onChange={(e) => setNp(e.target.value)} placeholder="Origine" aria-label="Origine" className={inputCls} />
         <input value={nc} onChange={(e) => setNc(e.target.value)} placeholder="Calibre" aria-label="Calibre" className={inputCls} />
         <input value={nv} onChange={(e) => setNv(e.target.value)} placeholder="Variété" aria-label="Variété" className={inputCls} />
+        <input value={np} onChange={(e) => setNp(e.target.value)} placeholder="Origine" aria-label="Origine" className={inputCls} />
         <input value={nprice} onChange={(e) => setNprice(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addRow(); }}
           type="text" inputMode="decimal" placeholder="Prix €" aria-label="Prix" className={`${inputCls} text-right tnum`} />
         <button

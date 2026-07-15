@@ -7,9 +7,9 @@ import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import { SurfaceCard } from "@/components/ui/surface-card";
-import { DateStepper, todayISO } from "@/components/ui/date-stepper";
+import { DateStepper, todayISO, nowHM } from "@/components/ui/date-stepper";
 import { designationProduit } from "@/lib/produit-designation";
-import { DesignationChips } from "./DesignationChips";
+import { DesignationChips, Chip } from "./DesignationChips";
 import { SupplierPicker, ProductPicker, type Supplier, type ProductHit } from "./GoodsReceiptForm";
 
 const fmtEur = (n: number) => n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
@@ -28,6 +28,7 @@ const WAREHOUSES: { code: "000" | "01" | "R1"; label: string }[] = [
 export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [dueDate, setDueDate] = useState(todayISO());
+  const [orderTime, setOrderTime] = useState(nowHM());   // heure de prise de commande
   const [numAtCard, setNumAtCard] = useState("");
   const [comment, setComment] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
@@ -42,7 +43,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
   const updateLine = (i: number, patch: Partial<Line>) => setLines((c) => c.map((l, k) => k === i ? { ...l, ...patch } : l));
   const removeLine = (i: number) => setLines((c) => c.filter((_, k) => k !== i));
   const totalHT = lines.reduce((s, l) => { const p = l.price === "" ? null : parseFloat(l.price); return s + (p != null ? p * l.packageQuantity * l.ratio : 0); }, 0);
-  const reset = () => { setSupplier(null); setNumAtCard(""); setComment(""); setLines([]); setDueDate(todayISO()); };
+  const reset = () => { setSupplier(null); setNumAtCard(""); setComment(""); setLines([]); setDueDate(todayISO()); setOrderTime(nowHM()); };
 
   const submit = async () => {
     if (!supplier) { toast.error("Sélectionne un fournisseur"); return; }
@@ -54,7 +55,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          cardCode: supplier.cardCode, dueDate, numAtCard: numAtCard.trim() || undefined, comment: comment.trim() || undefined,
+          cardCode: supplier.cardCode, dueDate, orderTime: orderTime || undefined, numAtCard: numAtCard.trim() || undefined, comment: comment.trim() || undefined,
           lines: lines.map((l) => ({ itemCode: l.itemCode, packageQuantity: l.packageQuantity, warehouseCode: l.warehouseCode, price: l.price ? parseFloat(l.price) : undefined })),
         }),
       });
@@ -90,6 +91,10 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
           <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Livraison prévue</label>
           <DateStepper value={dueDate} onChange={setDueDate} />
         </div>
+        <div className="space-y-1.5">
+          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Prise de commande (heure)</label>
+          <Input type="time" value={orderTime} onChange={(e) => setOrderTime(e.target.value)} aria-label="Heure de prise de commande" className="tnum text-center font-semibold" />
+        </div>
       </div>
 
       <div className="space-y-1.5">
@@ -116,7 +121,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
                   <div className="min-w-0">
                     <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
                     <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-                    <DesignationChips marque={dz.marque} condt={dz.condt} calibre={dz.variete} pays={dz.pays} className="mt-1.5" />
+                    <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1.5" />
                   </div>
                   <Button variant="ghost" size="icon-sm" tabIndex={-1} onClick={() => removeLine(i)} aria-label="Supprimer"><Trash2 className="h-4 w-4" /></Button>
                 </div>
@@ -161,10 +166,10 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
                 <th className="text-left px-2 py-2 font-semibold w-24">Qté</th>
                 <th className="text-left px-2 py-2 font-semibold w-28">Code</th>
                 <th className="text-left px-2 py-2 font-semibold">Fruit</th>
-                <th className="text-left px-2 py-2 font-semibold">Pays</th>
                 <th className="text-left px-2 py-2 font-semibold">Marque</th>
-                <th className="text-left px-2 py-2 font-semibold">Variété</th>
                 <th className="text-left px-2 py-2 font-semibold">Condt</th>
+                <th className="text-left px-2 py-2 font-semibold">Variété</th>
+                <th className="text-left px-2 py-2 font-semibold">Pays</th>
                 <th className="text-left px-2 py-2 font-semibold w-36">Entrepôt</th>
                 <th className="text-right px-2 py-2 font-semibold w-24">Prix /pie HT</th>
                 <th className="text-right px-2 py-2 font-semibold w-24">Total HT</th>
@@ -182,10 +187,10 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
                     <td className="px-2 py-2"><NumberInput value={l.packageQuantity} onValueChange={(n) => updateLine(i, { packageQuantity: n ?? 0 })} min={0} step={1} className="text-right h-9 w-20" /></td>
                     <td className="px-2 py-2 font-mono">{l.itemCode}</td>
                     <td className="px-2 py-2 text-foreground">{dz.fruit}</td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.pays}</td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.marque}</td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.variete}</td>
-                    <td className="px-2 py-2 text-muted-foreground">{dz.condt}</td>
+                    <td className="px-2 py-2"><Chip kind="marque">{dz.marque}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="condt">{dz.condt}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="variete">{dz.variete}</Chip></td>
+                    <td className="px-2 py-2"><Chip kind="pays">{dz.pays}</Chip></td>
                     <td className="px-2 py-2">
                       <select value={l.warehouseCode} onChange={(e) => updateLine(i, { warehouseCode: e.target.value as Line["warehouseCode"] })} tabIndex={-1} className="h-9 w-full rounded-md border border-input bg-background px-2 text-[12.5px]">
                         {WAREHOUSES.map((w) => <option key={w.code} value={w.code}>{w.label}</option>)}

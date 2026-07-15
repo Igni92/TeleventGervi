@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef, Fragment } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef, Fragment, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
@@ -29,6 +29,7 @@ import { useContextMenu, ContextMenu, ContextMenuItem, ContextMenuLabel } from "
 import { useBrandLogos } from "@/lib/useBrandLogos";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
 import { transportPerKgForCarrier, isDirectCarrier, type TransportCostModel, type ClientCarrierPricing } from "@/lib/transportCost";
+import { celebrateSale } from "@/components/settings/app-settings";
 
 interface StockEntry { available: number }
 interface Product {
@@ -85,7 +86,6 @@ interface CartLine {
     pieces: number; lot: string | null; closed: boolean;
   } | null;
 }
-interface DeliveryMode { id: string; name: string; sapCardCode: string; isDefault: boolean }
 /** Cotation SPÉCIFIQUE client par code article (onglet « Tarif ») — le prix
  *  négocié est PRIORITAIRE sur le prix conseillé à l'ajout au panier. */
 interface TarifItem { itemCode: string; price: number; note?: string | null }
@@ -130,7 +130,7 @@ function promoBadge(pr: Promo): string {
    l'action « Créer quand même » (re-post confirmEncours) — la commande n'est
    PAS créée tant que l'action n'est pas cliquée. */
 type BackgroundOrder =
-  | { kind: "create"; clientName: string; body: Record<string, unknown> }
+  | { kind: "create"; clientName: string; body: Record<string, unknown>; margeNette?: number }
   | { kind: "modif"; clientName: string; docEntry: number; docNum: number; body: Record<string, unknown> };
 
 function notifyOrderResult(
@@ -174,6 +174,10 @@ function notifyOrderResult(
       description: `${fmt(json.totalTTC)} € TTC`,
       duration: 10000,
     });
+    // Célébration « grosse marge » — no-op si désactivée ou marge < seuil.
+    if (job.kind === "create" && typeof job.margeNette === "number") {
+      celebrateSale(job.margeNette);
+    }
   }
 }
 
@@ -315,12 +319,15 @@ function OrderShortcuts({ onPick }: { onPick: (code: string) => void }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
 
+  // Nombre maximum de raccourcis affichés/mémorisés.
+  const MAX_SHORTCUTS = 4;
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(SHORTCUTS_KEY);
       if (raw) {
         const a = JSON.parse(raw);
-        if (Array.isArray(a)) setShortcuts(a.filter((x) => typeof x === "string"));
+        if (Array.isArray(a)) setShortcuts(a.filter((x) => typeof x === "string").slice(0, MAX_SHORTCUTS));
       }
     } catch { /* ignore */ }
   }, []);
@@ -331,7 +338,7 @@ function OrderShortcuts({ onPick }: { onPick: (code: string) => void }) {
   };
   const add = (v: string) => {
     const t = v.trim().toUpperCase();
-    if (!t || shortcuts.includes(t)) return;
+    if (!t || shortcuts.includes(t) || shortcuts.length >= MAX_SHORTCUTS) return;
     persist([...shortcuts, t]);
   };
 
@@ -360,12 +367,12 @@ function OrderShortcuts({ onPick }: { onPick: (code: string) => void }) {
           aria-label="Nouveau raccourci"
           className="h-6 w-[76px] rounded-md border border-border bg-background px-1.5 text-[11.5px] uppercase focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
-      ) : (
-        <button type="button" onClick={() => setAdding(true)} title="Ajouter un raccourci produit"
+      ) : shortcuts.length < MAX_SHORTCUTS ? (
+        <button type="button" onClick={() => setAdding(true)} title="Ajouter un raccourci produit (4 max)"
           className="inline-flex items-center gap-0.5 rounded-md border border-dashed border-border px-1.5 py-0.5 text-[11.5px] font-semibold text-muted-foreground hover:border-brand-400/60 hover:text-foreground">
           <Plus className="h-3 w-3" /> Raccourci
         </button>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -396,11 +403,17 @@ function CartDropGap({
   );
 }
 
-export function Ecran2Order({ clientId, clientName, clientType = null, stockSharePct = 100, modifier: modifierProp = null, onExitModif, onSubmitted }: {
+export function Ecran2Order({ clientId, clientName, clientType = null, stockSharePct = 100, deliveryModeId = "", clientHeader = null, modifier: modifierProp = null, onExitModif, onSubmitted }: {
   clientId: string; clientName: string;
   /** Type du magasin actif (EXPORT | GMS | CHR) — filtre les promos ciblées. */
   clientType?: string | null;
   stockSharePct?: number;
+  /** Mode de livraison / compte SAP du bon — choisi dans le bandeau client
+   *  (à côté du nom) ; par défaut le mode par défaut du client. */
+  deliveryModeId?: string;
+  /** Bandeau client (nom + méta + recherche) REGROUPÉ avec le stock : posé en
+   *  tête de la colonne stock pour ne former qu'un seul bloc à gauche. */
+  clientHeader?: ReactNode;
   /** Cible de MODIFICATION (diffusée par « Détail livraison ») : on pré-remplit le
    *  panier avec les lignes du BL et on enregistre sur ce BL. */
   modifier?: { docEntry: number; docNum: number } | null;
@@ -589,8 +602,8 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     return () => { cancelled = true; };
   }, [clientId]);
   const [numAtCard, setNumAtCard] = useState("");
-  const [modes, setModes] = useState<DeliveryMode[]>([]);
-  const [modeId, setModeId] = useState("");
+  // Mode de livraison / compte SAP : géré par le parent (sélecteur dans le
+  // bandeau client, à côté du nom) et reçu via `deliveryModeId`.
   // C11/B3 — transporteur + TOURNÉE (ORDR.U_TrspCode / U_TrspHeur), OBLIGATOIRES
   // sur le bon. Pré-remplis automatiquement avec le défaut du client (SERG_TRCL
   // → mémoire app → tournée unique) — l'utilisateur ne change que par exception.
@@ -667,12 +680,6 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     // dimanche ou un férié). Heure de tournée par défaut 09:00.
     const t = new Date(`${nextWorkingDeliveryDay(nextDeliveryDate())}T09:00:00`);
     setDeliveryDate(formatDateInput(t));
-    fetch(`/api/clients/${clientId}/delivery-modes`).then((r) => r.json()).then((d) => {
-      const ms: DeliveryMode[] = d.modes ?? [];
-      setModes(ms);
-      const def = ms.find((m) => m.isDefault) ?? ms[0];
-      setModeId(def?.id ?? "");
-    }).catch(() => {});
   }, [clientId]);
 
   // (B3 — transporteurs filtrés par client + tournée : déplacé dans
@@ -872,7 +879,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     // sinon prix conseillé.
     const promo = opts?.noPromo ? null : (promos[p.itemCode] ?? null);
     // Prix : cotation SKU exacte > TARIF PAR FRUITS (désignation : famille ·
-    // origine · calibre · variété) > prix conseillé. Le calibre vient des hints
+    // calibre · variété · origine) > prix conseillé. Le calibre vient des hints
     // (U_GER_CALIBRE, live SAP).
     const fruitPrice = tarifFruits.length
       ? priceForArticle(tarifFruits, {
@@ -1195,7 +1202,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   /** Corps du POST /api/sap/orders — transporteur + tournée EXPLICITES
    *  (validés avant l'envoi), texte du BL = note saisie + mention promo. */
   const buildOrderBody = (apiLines: ApiLine[], safeguardsConfirmed = false): Record<string, unknown> => ({
-    clientId, deliveryModeId: modeId || undefined,
+    clientId, deliveryModeId: deliveryModeId || undefined,
     ...(tourneePayload() ?? {}),
     deliveryDate: new Date(deliveryDate).toISOString(),
     numAtCard: numAtCard.trim() || undefined, lines: apiLines,
@@ -1367,7 +1374,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     // (pré-remplis avec le défaut client — l'erreur ne sort que par exception).
     const tourneeError = validateTournee();
     if (tourneeError) { toast.error(tourneeError); return; }
-    sendOrderInBackground({ kind: "create", clientName, body: buildOrderBody(buildApiLines(), opts?.safeguardsConfirmed === true) });
+    sendOrderInBackground({ kind: "create", clientName, body: buildOrderBody(buildApiLines(), opts?.safeguardsConfirmed === true), margeNette: hasCostData ? margeNetteTotal : undefined });
     toast.info(`${clientName} — commande envoyée, création en arrière-plan…`);
     setCart([]); setNumAtCard(""); setComments("");
     onSubmitted?.();
@@ -1563,6 +1570,35 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
              [+]  Nom — description           prix €/u    stock u
       */}
       <div className="flex-1 min-w-0 min-h-0 flex flex-col panel p-3">
+        {/* Bandeau client REGROUPÉ ici : nom + méta + recherche « créer / modifier
+            un bon », en tête de la colonne stock (un seul bloc à gauche). */}
+        {clientHeader}
+        {/* Réf. client + note du BL — CALÉES ici (dans le bloc gauche) plutôt qu'au
+            pied de la commande, pour laisser plus de place aux lignes produit. */}
+        <div className="shrink-0 mb-2 space-y-1">
+          {modif && cart.some((l) => l.promo) && (
+            <div className="flex justify-end">
+              <button type="button"
+                onClick={() => setComments((c) => {
+                  const t = buildPromoComment();
+                  if (!t) return c;
+                  return c.trim() ? `${c.trim()} · ${t}` : t;
+                })}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline">
+                <Megaphone className="h-3 w-3" /> Insérer le texte promo
+              </button>
+            </div>
+          )}
+          <div className="flex gap-1.5">
+            <input id="bl-numatcard" value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)}
+              placeholder="N° de commande (réf. client)" aria-label="N° de commande (réf. client)"
+              className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13.5px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+            <input id="bl-note" value={comments} onChange={(e) => setComments(e.target.value)} maxLength={254}
+              placeholder={modif ? "Texte sur le BL (note/promo)" : "Texte sur le BL (note)"}
+              aria-label="Texte sur le BL"
+              className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+          </div>
+        </div>
         <div className="flex items-center gap-2 mb-2 shrink-0">
           {/* Onglets : Stock (catalogue) / Tarif (cotations spécifiques du client) */}
           <div className="inline-flex items-center gap-0.5 rounded-md border border-border p-0.5 shrink-0">
@@ -1947,23 +1983,38 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
           title="Double-cliquez pour afficher le récapitulatif de la commande en grand"
           className="flex items-center justify-between gap-2 mb-2 shrink-0 cursor-pointer select-none"
         >
-          <p className="kicker inline-flex items-center gap-1.5">
-            <ShoppingCart className="h-3 w-3" /> Commande
+          <p className="kicker inline-flex items-center gap-1.5 min-w-0">
+            {/* En modification : nom du client + n° de BL + date de livraison,
+                à gauche du caddie — le BL s'identifie d'un coup d'œil. En saisie
+                neuve (pas de BL encore), on garde « Commande ». */}
+            <ShoppingCart className="h-3 w-3 shrink-0" />
+            {modif ? (
+              <span className="inline-flex items-center gap-1.5 min-w-0">
+                <span className="truncate max-w-[220px] text-foreground">{clientName}</span>
+                <span className="text-muted-foreground/50" aria-hidden>·</span>
+                <span className="shrink-0">BL&nbsp;#&nbsp;{modif.docNum}</span>
+                {modifMeta?.dueDate && (
+                  <span className="shrink-0 font-normal text-muted-foreground">
+                    · {new Date(modifMeta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}
+                  </span>
+                )}
+              </span>
+            ) : "Commande"}
           </p>
-          <div className="flex items-center gap-1.5">
-            {/* Dupliquer la DERNIÈRE commande du client — pré-remplit le panier */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Raccourcis produits personnalisables (ajout direct au panier) */}
+            <OrderShortcuts onPick={addByShortcut} />
+            {/* Dupliquer la DERNIÈRE commande — ICÔNE SEULE, à droite des raccourcis. */}
             {!modif && (
               <button
                 type="button" onClick={replayLast} disabled={replaying || prefilling}
+                aria-label="Dupliquer la dernière commande"
                 title="Dupliquer la dernière commande du client dans le panier (quantités + prix)"
-                className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border text-[12px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
+                className="inline-flex items-center justify-center h-8 w-8 shrink-0 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
               >
                 {replaying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <History className="h-3.5 w-3.5" />}
-                Dupliquer la dernière cde
               </button>
             )}
-            {/* Raccourcis produits personnalisables (ajout direct au panier) */}
-            <OrderShortcuts onPick={addByShortcut} />
           </div>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
@@ -2248,12 +2299,8 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
           {/* En modification, le BL existe déjà : mode/transporteur/date/réf sont figés. */}
           {!modif && (
             <>
-              {modes.length > 0 && (
-                <select value={modeId} onChange={(e) => setModeId(e.target.value)}
-                  className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2">
-                  {modes.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.sapCardCode})</option>)}
-                </select>
-              )}
+              {/* Le mode de livraison / compte SAP est choisi dans le bandeau
+                  client (à côté du nom) — il n'est plus dans ce pied. */}
               {/* Transporteur + TOURNÉE — obligatoires sur le bon, pré-remplis avec
                   le défaut du client. Bordure ambre tant qu'un choix manque. */}
               {(() => {
@@ -2299,78 +2346,35 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                   </div>
                 );
               })()}
-              {/* Date de livraison SANS heure : l'heure est portée par la TOURNÉE. */}
+              {/* Date de livraison SANS heure (l'heure est portée par la TOURNÉE)
+                  + bascule « Bon de commande » COMPACTE sur la même rangée. */}
               <div className="flex gap-1.5">
                 <input type="date" value={deliveryDate.slice(0, 10)} onChange={(e) => setDeliveryDate(e.target.value)}
                   aria-label="Date de livraison"
-                  className="flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2" />
-              </div>
-              {/* Bon de commande — aucun auto-lot, lots affectés ensuite dans l'onglet
-                  « Bons de commande ». Forcé (coché + verrouillé) si précommande OU
-                  si un article est à découvert (stock insuffisant). */}
-              <label
-                title={hasDecouvert
-                  ? "Article à découvert (stock insuffisant) → forcé en bon de commande : il ne réserve pas de stock et se validera automatiquement en commande à la réception"
-                  : precommande
-                  ? "Livraison au-delà du prochain jour livrable → précommande : créée en bon de commande (lots affectés plus tard)"
-                  : "Créer en bon de commande : aucun lot automatique, tu affectes les lots ensuite dans l'onglet Bons de commande"}
-                className={`flex items-center gap-2 rounded-md border px-2.5 h-9 text-[12.5px] select-none ${precommande || hasDecouvert ? "cursor-default" : "cursor-pointer"} ${
-                  isBonCommande ? "border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300" : "border-border text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <input type="checkbox" checked={isBonCommande} disabled={precommande || hasDecouvert}
-                  onChange={(e) => setBonCommandeManual(e.target.checked)}
-                  className="h-4 w-4 accent-amber-600" />
-                <span className="font-semibold">Bon de commande</span>
-                <span className="text-[11px] opacity-80 truncate">
-                  {hasDecouvert ? "· article à découvert → validé à la réception" : precommande ? "· précommande — lots à affecter" : "· lots affectés plus tard"}
-                </span>
-              </label>
-              {/* Réf. client + TEXTE du BL côte à côte (même rangée que transporteur/tournée). */}
-              <div className="flex gap-1.5">
-                <input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="N° de commande (réf. client)"
-                  aria-label="N° de commande (réf. client)"
-                  className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13.5px] px-2" />
-                <input value={comments} onChange={(e) => setComments(e.target.value)} maxLength={254}
-                  placeholder="Texte sur le BL (note)"
-                  aria-label="Texte sur le BL"
-                  className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13.5px] px-2" />
+                  className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2" />
+                {/* Bon de commande (aucun auto-lot, lots affectés plus tard) — compact.
+                    Forcé (coché + verrouillé) si précommande OU article à découvert. */}
+                <label
+                  title={hasDecouvert
+                    ? "Article à découvert (stock insuffisant) → forcé en bon de commande : il ne réserve pas de stock et se validera automatiquement en commande à la réception"
+                    : precommande
+                    ? "Livraison au-delà du prochain jour livrable → précommande : créée en bon de commande (lots affectés plus tard)"
+                    : "Créer en bon de commande : aucun lot automatique, tu affectes les lots ensuite dans l'onglet Bons de commande"}
+                  className={`shrink-0 inline-flex items-center gap-1.5 rounded-md border px-2 h-9 text-[11.5px] select-none ${precommande || hasDecouvert ? "cursor-default" : "cursor-pointer"} ${
+                    isBonCommande ? "border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300" : "border-border text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <input type="checkbox" checked={isBonCommande} disabled={precommande || hasDecouvert}
+                    onChange={(e) => setBonCommandeManual(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-amber-600" />
+                  <span className="font-semibold whitespace-nowrap">Bon de commande</span>
+                </label>
               </div>
             </>
           )}
-          {/* Modification : N° de commande (réf. client) + ligne TEXTE du BL,
-              CÔTE À CÔTE (même rangée que transporteur/tournée à la création). */}
-          {modif && (
-            <div className="space-y-1">
-              {cart.some((l) => l.promo) && (
-                <div className="flex justify-end">
-                  <button type="button"
-                    onClick={() => setComments((c) => {
-                      const t = buildPromoComment();
-                      if (!t) return c;
-                      return c.trim() ? `${c.trim()} · ${t}` : t;
-                    })}
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline">
-                    <Megaphone className="h-3 w-3" /> Insérer le texte promo
-                  </button>
-                </div>
-              )}
-              <div className="flex gap-1.5">
-                <input id="bl-numatcard" value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)}
-                  placeholder="N° de commande (réf. client)"
-                  aria-label="N° de commande (réf. client)"
-                  className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13.5px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
-                <input id="bl-note" value={comments} onChange={(e) => setComments(e.target.value)}
-                  maxLength={254} placeholder="Texte sur le BL (note/promo)"
-                  aria-label="Ligne texte sur le BL"
-                  className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
-              </div>
-            </div>
-          )}
-          <div className="flex items-center justify-between text-[14px]">
-            <span className="text-muted-foreground">{modif ? "Total HT du BL" : "Total HT estimé"}</span>
-            <span className="font-bold tnum text-foreground">{totalHT.toFixed(2)} €</span>
-          </div>
+          {/* Réf. client + note du BL : déplacées en tête du bloc gauche
+              (cf. colonne stock) — plus au pied de la commande. */}
+          {/* Total HT : porté sur le bouton d'action (plus de ligne dédiée). */}
           {/* Indicateur de marge — prix transport /kg en haut à droite + bascule
               /livraison ↔ /kg. MARGE NETTE en gros en bas (feu tricolore : rouge
               = à perte, orange < 10 % net, vert ≥ 10 %). */}
@@ -2466,15 +2470,23 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
           <button type="button" onClick={() => submit()}
             disabled={prefilling || cart.length === 0 || (!!modif && modifMeta?.editable === false)}
             title={modif ? "Enregistrer en arrière-plan — l'écran passe au client suivant" : "Créer en arrière-plan — l'écran passe au client suivant"}
-            className={`w-full h-11 rounded-xl disabled:opacity-50 text-white text-[15px] font-semibold inline-flex items-center justify-center gap-2 ${
+            className={`w-full h-11 rounded-xl disabled:opacity-50 text-white text-[15px] font-semibold inline-flex items-center justify-center gap-2 px-3 ${
               modif ? "bg-amber-600 hover:bg-amber-700" : "bg-emerald-600 hover:bg-emerald-700"
             }`}>
-            <ShoppingCart className="h-4 w-4" />
-            {modif
-              ? `Enregistrer le BL # ${modif.docNum}`
-              : isBonCommande
-              ? `Créer le bon de commande (${cart.length})`
-              : `Créer la commande (${cart.length})`}
+            <ShoppingCart className="h-4 w-4 shrink-0" />
+            <span className="truncate">
+              {modif
+                ? `Enregistrer le BL # ${modif.docNum}`
+                : isBonCommande
+                ? `Créer le bon de commande (${cart.length})`
+                : `Créer la commande (${cart.length})`}
+            </span>
+            {/* Total HT estimé porté sur le bouton (remplace la ligne dédiée). */}
+            {cart.length > 0 && (
+              <span className="ml-auto pl-2 tnum font-bold whitespace-nowrap border-l border-white/25">
+                {totalHT.toFixed(2)} € HT
+              </span>
+            )}
           </button>
         </div>
       </div>

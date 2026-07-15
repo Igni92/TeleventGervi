@@ -3,6 +3,7 @@ import {
   expandDates, expandOuvrables, expandSemaine, monthGridDays, isoWeekOfDate,
   computeRecupCounter, recupCapExcessMin, cpPeriodOf, computeCpCounter,
   computeMonthRecap, monthEndISO, dayAfter, congeCreditsHours,
+  resolveCalendarDay, DAY_CATEGORY_LABEL, saturdaysInRange, splitLeaveRecupCp,
   type CounterWeekInput,
 } from "./planning";
 import { computeWeek, type DayHours } from "./heuresCalc";
@@ -71,14 +72,14 @@ describe("planning — compteur récup (décompte au passage de la semaine)", ()
   // 2026-W27 = 29 juin → 5 juillet ; 2026-W28 = 6 → 12 juillet.
   const ASOF = "2026-07-11"; // W27 terminée, W28 en cours
 
-  it("crédit : semaine passée à 39 h en option récup → +4 h", () => {
+  it("crédit MAJORÉ : semaine à 39 h en option récup → +4 h supp × 1,25 = +5 h", () => {
     const weeks: CounterWeekInput[] = [
       { week: "2026-W27", days: [day(8), day(8), day(8), day(8), day(7)], option: "recup" },
     ];
     const c = computeRecupCounter(weeks, [], PROFILE, ASOF);
-    expect(c.creditMin).toBe(4 * 60);
+    expect(c.creditMin).toBe(5 * 60);   // 4 h supp, toutes à +25 % → 5 h de récup
     expect(c.debitMin).toBe(0);
-    expect(c.balanceMin).toBe(4 * 60);
+    expect(c.balanceMin).toBe(5 * 60);
   });
 
   it("pas de crédit tant que la semaine n'est pas passée", () => {
@@ -134,7 +135,7 @@ describe("planning — compteur récup (décompte au passage de la semaine)", ()
       { week: "2026-W26", days: [day(8), day(8), day(8), day(8), day(7)], option: "recup", recupDates: ["2026-07-03"] },
     ];
     const c = computeRecupCounter(weeks, [], PROFILE, ASOF);
-    expect(c.creditMin).toBe(4 * 60);
+    expect(c.creditMin).toBe(5 * 60);   // 4 h supp majorées (+25 %) = 5 h
     expect(c.debitMin).toBe(7 * 60);   // W27 passée sans saisie → journée réputée prise
   });
 });
@@ -180,17 +181,164 @@ describe("planning — récap mensuel (état compta)", () => {
   });
   it("solde fin de mois + excédent plafond reporté au paiement", () => {
     const weeks: CounterWeekInput[] = [
-      { week: "2026-W27", days: [day(9), day(9), day(9), day(9), day(9)], option: "recup" }, // +10 h
+      { week: "2026-W27", days: [day(9), day(9), day(9), day(9), day(9)], option: "recup" }, // 45 h → 10 h supp
     ];
     const recap = computeMonthRecap(weeks, [], [], { ...PROFILE, recupCapHours: 7, cpAllowanceDays: 25 }, "2026-07");
-    expect(recap.recupBalanceMin).toBe(10 * 60);
+    // 10 h supp = 8 h à +25 % (→10 h) + 2 h à +50 % (→3 h) = 13 h de récup MAJORÉE.
+    expect(recap.recupBalanceMin).toBe(13 * 60);
     expect(recap.recupCapMin).toBe(7 * 60);
-    expect(recap.excessMin).toBe(3 * 60);    // 3 h à payer sur le bulletin du mois suivant
+    expect(recap.excessMin).toBe(6 * 60);    // 13 − 7 = 6 h à payer sur le bulletin du mois suivant
     expect(recap.cpBalanceDays).toBe(25);
   });
   it("congeCreditsHours : seuls les CP créditent des heures", () => {
     expect(congeCreditsHours("cp")).toBe(true);
     expect(congeCreditsHours("recup")).toBe(false);
     expect(congeCreditsHours("maladie")).toBe(false);
+  });
+});
+
+describe("planning — pastille du calendrier (resolveCalendarDay)", () => {
+  // 2026-07-13 = lundi (jour ouvré), 2026-07-18 = samedi, 2026-07-14 = férié.
+  const MON = 1, SAT = 6, SUN = 0;
+
+  it("PRÉSENT par défaut : jour ouvré (lun→ven) du mois, rien d'autre posé", () => {
+    const r = resolveCalendarDay({ dow: MON, inMonth: true });
+    expect(r.category).toBe("present");
+    expect(r.pending).toBe(false);
+  });
+  it("week-end : aucune pastille par défaut", () => {
+    expect(resolveCalendarDay({ dow: SAT, inMonth: true }).category).toBeNull();
+    expect(resolveCalendarDay({ dow: SUN, inMonth: true }).category).toBeNull();
+  });
+  it("hors mois : aucune pastille par défaut (jour ouvré compris)", () => {
+    expect(resolveCalendarDay({ dow: MON, inMonth: false }).category).toBeNull();
+  });
+  it("férié : prioritaire (jour chômé), même un jour ouvré", () => {
+    const r = resolveCalendarDay({ dow: MON, inMonth: true, ferieLabel: "Fête nationale" });
+    expect(r.category).toBe("ferie");
+    expect(r.ferieLabel).toBe("Fête nationale");
+  });
+  it("férié l'emporte sur un congé validé", () => {
+    const r = resolveCalendarDay({ dow: MON, inMonth: true, ferieLabel: "Noël", approvedTypes: ["cp"] });
+    expect(r.category).toBe("ferie");
+  });
+  it("congé validé remplace le présent par défaut", () => {
+    expect(resolveCalendarDay({ dow: MON, inMonth: true, approvedTypes: ["cp"] }).category).toBe("cp");
+    expect(resolveCalendarDay({ dow: MON, inMonth: true, approvedTypes: ["recup"] }).category).toBe("recup");
+  });
+  it("tag de feuille d'heures : « conges » → catégorie conges, sinon tel quel", () => {
+    expect(resolveCalendarDay({ dow: MON, inMonth: true, tag: "maladie" }).category).toBe("maladie");
+    expect(resolveCalendarDay({ dow: MON, inMonth: true, tag: "absent" }).category).toBe("absent");
+    expect(resolveCalendarDay({ dow: MON, inMonth: true, tag: "conges" }).category).toBe("conges");
+    expect(resolveCalendarDay({ dow: MON, inMonth: true, tag: "present" }).category).toBe("present");
+  });
+  it("congé en attente : pastille creuse (pending)", () => {
+    const r = resolveCalendarDay({ dow: MON, inMonth: true, pendingTypes: ["cp"] });
+    expect(r.category).toBe("cp");
+    expect(r.pending).toBe(true);
+  });
+  it("congé validé prime sur un congé en attente le même jour", () => {
+    const r = resolveCalendarDay({ dow: MON, inMonth: true, approvedTypes: ["cp"], pendingTypes: ["maladie"] });
+    expect(r.category).toBe("cp");
+    expect(r.pending).toBe(false);
+  });
+  it("récup posée (à venir) : catégorie récup, marquée planned", () => {
+    const r = resolveCalendarDay({ dow: SAT, inMonth: true, recupPosee: true });
+    expect(r.category).toBe("recup");
+    expect(r.planned).toBe(true);
+  });
+  it("libellés courts : CP pour congés payés", () => {
+    expect(DAY_CATEGORY_LABEL.cp).toBe("CP");
+    expect(DAY_CATEGORY_LABEL.present).toBe("Présent");
+    expect(DAY_CATEGORY_LABEL.ferie).toBe("Férié");
+  });
+});
+
+describe("planning — CP ne décompte ni dimanches ni fériés", () => {
+  it("expandOuvrables exclut un jour férié dans la plage (14 juillet)", () => {
+    // 13 lun, 14 mar (Fête nationale), 15 mer 2026 → seuls le 13 et le 15.
+    const out = expandOuvrables("2026-07-13", "2026-07-15");
+    expect(out).toEqual(["2026-07-13", "2026-07-15"]);
+    expect(out).not.toContain("2026-07-14");
+  });
+  it("computeCpCounter ne débite pas le férié compris dans un CP", () => {
+    const conges = [
+      { type: "cp" as const, status: "approved" as const, start: "2026-07-13", end: "2026-07-15" }, // 14 férié
+    ];
+    const cp = computeCpCounter(25, conges, "2026-07-20");
+    expect(cp.takenDays).toBe(2);       // 13 + 15 (le 14 juillet ne compte pas)
+    expect(cp.balanceDays).toBe(23);
+  });
+  it("saturdaysInRange repère un samedi ouvré (coûte un CP à vide)", () => {
+    // 10 ven, 11 sam juillet 2026 (samedi non férié).
+    expect(saturdaysInRange("2026-07-10", "2026-07-11")).toEqual(["2026-07-11"]);
+  });
+  it("saturdaysInRange ignore un samedi férié (déjà non décompté)", () => {
+    // 1er mai 2027 = samedi ET Fête du Travail → rien à « éviter ».
+    expect(saturdaysInRange("2027-04-30", "2027-05-01")).toEqual([]);
+    expect(expandOuvrables("2027-04-30", "2027-05-01")).toEqual(["2027-04-30"]);
+  });
+});
+
+describe("planning — récup : seuls les jours ouvrés (lun→ven) décomptent", () => {
+  const ASOF = "2026-07-13"; // W28 (6→12 juillet) terminée
+  const day = (h: number): DayHours => ({ m1: "06:00", m2: `${String(6 + h).padStart(2, "0")}:00` });
+
+  it("Ven+Sam SANS saisie → ne décompte QUE le vendredi (7h, pas 14h)", () => {
+    // 2026-07-10 = ven, 2026-07-11 = sam (W28).
+    const c = computeRecupCounter([], ["2026-07-10", "2026-07-11"], PROFILE, ASOF);
+    expect(c.debitMin).toBe(7 * 60);   // le samedi (hors 35 h lun→ven) est gratuit
+  });
+  it("Ven+Sam AVEC saisie (Lun→Jeu = 28h) → 7h (déficit vs 35h)", () => {
+    const weeks: CounterWeekInput[] = [
+      { week: "2026-W28", days: [day(7), day(7), day(7), day(7), { tag: "recup" }, { tag: "recup" }, {}], option: null },
+    ];
+    expect(computeRecupCounter(weeks, [], PROFILE, ASOF).debitMin).toBe(7 * 60);
+  });
+  it("Samedi SEUL posé en récup → ne décompte RIEN (jour non travaillé)", () => {
+    const c = computeRecupCounter([], ["2026-07-11"], PROFILE, ASOF); // samedi
+    expect(c.debitMin).toBe(0);
+  });
+  it("un jour férié (lun→ven) posé en récup ne décompte rien non plus", () => {
+    // Impossible via l'UI (le férié prime), mais la règle doit tenir : 14 juillet.
+    const c = computeRecupCounter([], ["2026-07-14"], PROFILE, "2026-07-20");
+    expect(c.debitMin).toBe(0);
+  });
+});
+
+describe("planning — découpe récup/CP par jours entiers (splitLeaveRecupCp)", () => {
+  // 2026-07-06 lun … 07 mar 08 mer 09 jeu 10 ven 11 sam (W28).
+  it("semaine lun→sam, 2 jours de récup → 2 j récup (lun-mar) + 4 j CP (mer-sam)", () => {
+    const s = splitLeaveRecupCp("2026-07-06", "2026-07-11", 2);
+    expect(s.recup).toEqual({ start: "2026-07-06", end: "2026-07-07" });
+    expect(s.cp).toEqual({ start: "2026-07-08", end: "2026-07-11" });
+    expect(s.recupDays).toBe(2);
+    expect(s.cpDays).toBe(4);   // mer, jeu, ven, sam
+  });
+  it("récup couvre tout (≥ jours de contrat) → tout en récup, pas de CP", () => {
+    const s = splitLeaveRecupCp("2026-07-06", "2026-07-10", 5); // lun→ven
+    expect(s.recup).toEqual({ start: "2026-07-06", end: "2026-07-10" });
+    expect(s.cp).toBeNull();
+    expect(s.recupDays).toBe(5);
+  });
+  it("moins d'une journée entière de récup → tout en CP", () => {
+    const s = splitLeaveRecupCp("2026-07-06", "2026-07-10", 0);
+    expect(s.recup).toBeNull();
+    expect(s.cp).toEqual({ start: "2026-07-06", end: "2026-07-10" });
+    expect(s.cpDays).toBe(5);
+  });
+  it("un seul jour posé + récup dispo → ce jour en récup", () => {
+    const s = splitLeaveRecupCp("2026-07-06", "2026-07-06", 3);
+    expect(s.recup).toEqual({ start: "2026-07-06", end: "2026-07-06" });
+    expect(s.cp).toBeNull();
+    expect(s.recupDays).toBe(1);
+  });
+  it("un férié dans la plage ne compte pas comme jour de contrat récupérable", () => {
+    // 2026-07-13 lun, 14 mar (férié), 15 mer, 16 jeu, 17 ven.
+    const s = splitLeaveRecupCp("2026-07-13", "2026-07-17", 2);
+    // 2 jours de contrat = lun 13 + mer 15 (le 14 férié est sauté).
+    expect(s.recup).toEqual({ start: "2026-07-13", end: "2026-07-15" });
+    expect(s.cp).toEqual({ start: "2026-07-16", end: "2026-07-17" });
+    expect(s.recupDays).toBe(2);
   });
 });
