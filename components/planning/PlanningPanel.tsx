@@ -350,7 +350,7 @@ function CounterBar({ person, isManager }: { person: PersonPlanning; isManager: 
       <CounterChip icon={<Clock3 className="h-3.5 w-3.5" />} tone="sky"
         label="Récup disponible"
         value={fmtHM(recup.balanceMin)}
-        hint={`${fmtHM(recup.creditMin)} acquises · ${fmtHM(recup.debitMin)} prises${recup.plannedDates.length ? ` · ${recup.plannedDates.length} j posé(s) à venir` : ""}`} />
+        hint={`${fmtHM(recup.creditMin)} acquises (majorées +25/+50 %) · ${fmtHM(recup.debitMin)} prises${recup.plannedDates.length ? ` · ${recup.plannedDates.length} j posé(s) à venir` : ""}`} />
       {capMin != null && (
         <CounterChip icon={<SlidersHorizontal className="h-3.5 w-3.5" />} tone={excessMin > 0 ? "rose" : "muted"}
           label="Plafond récup"

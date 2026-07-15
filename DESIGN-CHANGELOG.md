@@ -834,3 +834,22 @@ Correctif du compteur de récup (`lib/planning.ts`, `computeRecupCounter`).
 Règle : un **samedi / dimanche / jour férié** posé en récup n'est **jamais** décompté —
 il n'y a aucune heure à récupérer sur un jour hors du contrat lun→ven (35 h). Le débit reste
 plafonné par le déficit réel de la semaine (contrat atteint → rien déduit). Toujours à l'avantage du salarié.
+
+### Planning — récup créditée en heures MAJORÉES (repos compensateur de remplacement)
+
+`lib/planning.ts` (`computeRecupCounter`).
+
+Le compteur de récup crédite désormais les heures supp **majorées** (+25 %/+50 % inclus),
+et non plus les heures brutes — un repos compensateur de remplacement doit valoir la paie
+qu'il remplace.
+
+| Semaine (contrat 35 h, journée 7h15) | Récup créditée — avant | après |
+|---|---|---|
+| 6 jours (43h30) = 8h30 supp (8 h à +25 %, 0h30 à +50 %) | 8h30 | **10h45** |
+| 39 h = 4 h supp (+25 %) | 4 h | **5 h** |
+| 45 h = 10 h supp (8 h +25 %, 2 h +50 %) | 10 h | **13 h** |
+
+**Rétroactif** : le compteur est recalculé à la volée depuis les saisies de semaines, donc
+toute la récup déjà acquise est **revalorisée automatiquement** (aucune migration de données).
+Combiné au débit à l'heure brute (jour de récup posé = journée type) et à l'exclusion
+samedi/dimanche/férié, la récup est **doublement à l'avantage du salarié**.

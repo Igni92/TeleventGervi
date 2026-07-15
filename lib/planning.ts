@@ -3,12 +3,15 @@
  *
  * Règles métier, TOUJOURS à l'avantage du salarié et VALIDÉES par l'employeur :
  *
- *   • COMPTEUR RÉCUP (heures) — crédit = heures supp des semaines dont
- *     l'employeur a choisi l'option « récupération » ; débit = jours de récup
- *     posés, décomptés UNIQUEMENT AU PASSAGE DE LA SEMAINE : si, au final, la
- *     semaine atteint quand même le contrat (les 35 h sont faites), le déficit
- *     est nul → la récup N'EST PAS déduite. Le débit est borné par
- *     min(déficit réel, jours posés × journée type).
+ *   • COMPTEUR RÉCUP (heures) — crédit = heures supp MAJORÉES des semaines dont
+ *     l'employeur a choisi l'option « récupération » (repos compensateur de
+ *     remplacement : les +25 %/+50 % sont acquis en repos, ex. 8 h supp à
+ *     +25 % = 10 h de récup) ; débit = jours de récup posés, décomptés
+ *     UNIQUEMENT AU PASSAGE DE LA SEMAINE : si, au final, la semaine atteint
+ *     quand même le contrat (les 35 h sont faites), le déficit est nul → la
+ *     récup N'EST PAS déduite. Le débit est borné par min(déficit réel, jours
+ *     OUVRÉS lun→ven posés × journée type). Crédit majoré + débit à l'heure
+ *     brute = doublement à l'avantage du salarié.
  *
  *   • COMPTEUR CP (jours) — solde annuel fixé par l'employeur (période de
  *     référence 1er juin → 31 mai) − jours OUVRABLES (lun→sam) des congés payés
@@ -185,7 +188,7 @@ export interface CounterWeekInput {
 }
 
 export interface RecupCounter {
-  creditMin: number;      // heures supp créditées (semaines option « récup » passées)
+  creditMin: number;      // heures supp MAJORÉES créditées (+25/+50 inclus — semaines option « récup » passées)
   debitMin: number;       // récup réellement déduite (au passage des semaines)
   balanceMin: number;     // solde disponible = crédit − débit
   plannedDates: string[]; // jours de récup posés PAS ENCORE décomptés (à venir)
@@ -235,7 +238,11 @@ export function computeRecupCounter(
     }
     if (input?.option === "recup") {
       const c = computeWeek(input.days, profile.weeklyHours, typDay);
-      creditMin += c.sup25Min + c.sup50Min;
+      // Repos compensateur de remplacement : on crédite les heures MAJORÉES
+      // (+25 %/+50 % inclus), pas les heures brutes — 8 h supp à +25 % =
+      // 10 h de récup. Rétroactif : le compteur est recalculé depuis les
+      // saisies, donc la récup déjà acquise est revalorisée automatiquement.
+      creditMin += c.majEquivMin;
     }
     if (recupDays.size > 0) {
       // Seuls les JOURS DE CONTRAT (lun→ven, hors fériés) consomment de la
