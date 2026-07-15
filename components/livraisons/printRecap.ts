@@ -19,6 +19,9 @@ export interface PrintLine {
   pays?: string | null;
   /** Lot à préparer (bon de commande) — « EM<n> » affiché, sinon « lot à affecter ». */
   lot?: string | null;
+  /** Codes article fusionnés dans cette ligne d'affichage (racheté après manquant).
+   *  Défaut : [itemCode]. Sert à retrouver le statut « manquant » après fusion. */
+  mergedCodes?: string[];
 }
 
 export interface PrintDoc {
@@ -62,7 +65,8 @@ const fmtHeure = (h?: string | null): string | null => {
  */
 export function renderOrderRecapHtml(doc: PrintDoc, ctx: PrintContext, origin = ""): string {
   const missing = ctx.missingCodes ?? new Set<string>();
-  const missingLines = doc.lines.filter((l) => missing.has(l.itemCode));
+  const isMissingLine = (l: PrintLine) => (l.mergedCodes ?? [l.itemCode]).some((c) => missing.has(c));
+  const missingLines = doc.lines.filter(isMissingLine);
 
   // Détails de désignation en TEXTE BRUT (marque · conditionnement · origine) —
   // plus lisible à l'impression que les tags encadrés de l'app.
@@ -75,7 +79,7 @@ export function renderOrderRecapHtml(doc: PrintDoc, ctx: PrintContext, origin = 
   // Le nombre de PIÈCES (Qté) n'est plus affiché : colis + poids suffisent.
   const rows = doc.lines
     .map((l) => {
-      const isMissing = missing.has(l.itemCode);
+      const isMissing = isMissingLine(l);
       return `
       <tr class="${isMissing ? "missing" : ""}">
         <td class="check"></td>
