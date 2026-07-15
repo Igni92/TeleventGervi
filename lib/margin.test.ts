@@ -28,4 +28,38 @@ describe("grossMarginPct — base unique marge brute %", () => {
     const caTotal = 130;     // base erronée (30 € de prestation sans coût)
     expect(grossMarginPct(margin, caProduct)).toBeGreaterThan(grossMarginPct(margin, caTotal));
   });
+
+  it("coût fabrication (articles reconditionnés) : marge = revenu × (1 − ratio coût), indépendant des unités", () => {
+    // Un kit DECO n'a pas de réception d'achat directe : son coût vient de la
+    // fabrication (composants + main d'œuvre). Ratio coût = totalCost/parentValue
+    // du run. Le coût d'une ligne vendue = lineTotal × ratio (pur €, aucune
+    // conversion colis/pièce/kg). Ex. run à 70 % de coût (30 % de marge) :
+    const costRatio = 0.7;
+    const lineTotal = 240;               // revenu d'une ligne vendue (€)
+    const margin = lineTotal * (1 - costRatio); // = 72 € (branche COGS_MARGIN_FAB)
+    expect(margin).toBeCloseTo(72, 10);
+    // Rapportée à son propre CA, la marge de cette ligne = (1 − ratio) = 30 %,
+    // quelle que soit l'unité de vente (le ratio est en euros).
+    expect(grossMarginPct(margin, lineTotal)).toBeCloseTo(30, 10);
+  });
+
+  it("ventes à découvert : la base = CA des lignes COSTÉES (num. et dénom. sur le même jeu)", () => {
+    // Journée type négoce frais : une ligne costée (EM reçue) + une vente à
+    // découvert (coût EM pas encore saisi → exclue du numérateur `margin`).
+    //   ligne costée   : lineTotal 100 €, coût 80 € → marge 20 €
+    //   ligne découvert: lineTotal 300 €, coût inconnu → marge NULL (exclue)
+    const marginCosted = 20;      // Σ marge sur lignes costées uniquement
+    const caCosted = 100;         // Σ lineTotal sur lignes costées uniquement
+    const caAllProduct = 400;     // 100 + 300 (inclut le découvert)
+
+    // Base CORRECTE (costée) : marge réelle du costable = 20 %.
+    expect(grossMarginPct(marginCosted, caCosted)).toBe(20);
+
+    // Base BUGGÉE (tout le produit) : 20 / 400 = 5 % — la marge s'effondre alors
+    // que rien n'a changé côté marge, juste parce que le CA à découvert reste au
+    // dénominateur sans contribuer au numérateur. C'est le symptôme « 2,6 % ».
+    expect(grossMarginPct(marginCosted, caAllProduct)).toBeCloseTo(5, 10);
+    expect(grossMarginPct(marginCosted, caAllProduct))
+      .toBeLessThan(grossMarginPct(marginCosted, caCosted));
+  });
 });
