@@ -238,15 +238,26 @@ export function computeRecupCounter(
       creditMin += c.sup25Min + c.sup50Min;
     }
     if (recupDays.size > 0) {
+      // Seuls les JOURS DE CONTRAT (lun→ven, hors fériés) consomment de la
+      // récup : un samedi / dimanche / jour férié posé n'est pas travaillé → il
+      // n'y a AUCUNE heure à récupérer dessus. Ainsi, poser vendredi + samedi ne
+      // décompte que le vendredi (le samedi, au-delà des 35 h lun→ven, est
+      // gratuit) — à l'avantage du salarié.
+      const contractRecupDays = [...recupDays].filter((d) => {
+        const dow = atNoon(d).getUTCDay();
+        return dow >= 1 && dow <= 5 && !frenchHolidayLabel(d);
+      }).length;
+      const posableMin = contractRecupDays * typDay;
       if (input) {
         // Semaine saisie : le déficit RÉEL tranche. Contrat atteint malgré la
         // récup → déficit 0 → RIEN n'est déduit (à l'avantage du salarié).
         const c = computeWeek(input.days, profile.weeklyHours, typDay);
         const deficit = Math.max(0, c.contractMin - c.totalMin);
-        debitMin += Math.min(deficit, recupDays.size * typDay);
+        debitMin += Math.min(deficit, posableMin);
       } else {
-        // Aucune saisie : la récup est réputée prise comme posée.
-        debitMin += recupDays.size * typDay;
+        // Aucune saisie : la récup est réputée prise comme posée — mais seuls
+        // les jours ouvrés (lun→ven hors fériés) la décomptent.
+        debitMin += posableMin;
       }
     }
   }

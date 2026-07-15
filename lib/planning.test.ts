@@ -278,3 +278,29 @@ describe("planning — CP ne décompte ni dimanches ni fériés", () => {
     expect(expandOuvrables("2027-04-30", "2027-05-01")).toEqual(["2027-04-30"]);
   });
 });
+
+describe("planning — récup : seuls les jours ouvrés (lun→ven) décomptent", () => {
+  const ASOF = "2026-07-13"; // W28 (6→12 juillet) terminée
+  const day = (h: number): DayHours => ({ m1: "06:00", m2: `${String(6 + h).padStart(2, "0")}:00` });
+
+  it("Ven+Sam SANS saisie → ne décompte QUE le vendredi (7h, pas 14h)", () => {
+    // 2026-07-10 = ven, 2026-07-11 = sam (W28).
+    const c = computeRecupCounter([], ["2026-07-10", "2026-07-11"], PROFILE, ASOF);
+    expect(c.debitMin).toBe(7 * 60);   // le samedi (hors 35 h lun→ven) est gratuit
+  });
+  it("Ven+Sam AVEC saisie (Lun→Jeu = 28h) → 7h (déficit vs 35h)", () => {
+    const weeks: CounterWeekInput[] = [
+      { week: "2026-W28", days: [day(7), day(7), day(7), day(7), { tag: "recup" }, { tag: "recup" }, {}], option: null },
+    ];
+    expect(computeRecupCounter(weeks, [], PROFILE, ASOF).debitMin).toBe(7 * 60);
+  });
+  it("Samedi SEUL posé en récup → ne décompte RIEN (jour non travaillé)", () => {
+    const c = computeRecupCounter([], ["2026-07-11"], PROFILE, ASOF); // samedi
+    expect(c.debitMin).toBe(0);
+  });
+  it("un jour férié (lun→ven) posé en récup ne décompte rien non plus", () => {
+    // Impossible via l'UI (le férié prime), mais la règle doit tenir : 14 juillet.
+    const c = computeRecupCounter([], ["2026-07-14"], PROFILE, "2026-07-20");
+    expect(c.debitMin).toBe(0);
+  });
+});

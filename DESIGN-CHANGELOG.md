@@ -820,3 +820,17 @@ Suite de la refonte Planning — `lib/planning.ts`, `components/planning/Plannin
 
 Helpers purs testés ajoutés à `lib/planning.ts` : `saturdaysInRange` (samedis « à vide » d'un CP,
 fériés exclus) et exclusion des fériés dans `expandOuvrables`.
+
+### Planning — récup : seuls les jours ouvrés (lun→ven) décomptent
+
+Correctif du compteur de récup (`lib/planning.ts`, `computeRecupCounter`).
+
+| Cas (contrat 35 h, journée 7 h, lun→ven) | Avant | Après |
+|---|---|---|
+| Poser **vendredi + samedi** en récup, sans saisie d'heures | **14 h** décomptées (2 jours pleins — le samedi coûtait à tort) | **7 h** (seul le vendredi, jour de contrat) |
+| **Samedi seul** posé en récup | jusqu'à 1 jour | **0 h** (jour non travaillé → rien à récupérer) |
+| Vendredi + samedi **avec** saisie (lun→jeu = 28 h) | 7 h | 7 h (inchangé) |
+
+Règle : un **samedi / dimanche / jour férié** posé en récup n'est **jamais** décompté —
+il n'y a aucune heure à récupérer sur un jour hors du contrat lun→ven (35 h). Le débit reste
+plafonné par le déficit réel de la semaine (contrat atteint → rien déduit). Toujours à l'avantage du salarié.
