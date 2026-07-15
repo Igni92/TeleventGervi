@@ -869,3 +869,16 @@ et le pied, et remonter les contrôles clés **à côté du client**.
 | **« Bon de commande »** (lots affectés plus tard) | Bandeau pleine largeur sur sa propre rangée. | **Puce compacte** placée sur la rangée de la date de livraison — mêmes règles (forcé + verrouillé si précommande / découvert), détail dans l'infobulle. |
 | **Total HT** | Ligne dédiée « Total HT estimé … € » au-dessus du bouton. | **Porté sur le bouton d'action** (« Créer la commande (n) … 152,40 € HT ») — une rangée de gagnée. |
 | **Bandeau client** | `py-2.5`, marges internes plus larges. | Rythme vertical resserré (`py-2`, marges réduites) — quelques pixels rendus à la commande. |
+
+### Planning — récup utilisée AVANT les CP par défaut
+
+`components/planning/PlanningPanel.tsx`.
+
+Côté salarié, dès qu'il reste de la récup au compteur, le formulaire de demande part
+sur **« Récupération » par défaut** (au lieu de « Congés payés ») : la récup se consomme
+**avant** les CP, elle les remplace — les CP sont préservés. Reste modifiable manuellement.
+
+Si le salarié repasse malgré tout sur **CP** alors qu'il a de la récup, un rappel s'affiche —
+« Il te reste X de récup — utilise-la avant tes CP » + bouton **Utiliser ma récup** (et signale
+au passage un éventuel samedi décompté). Réservé au salarié (jamais la direction), validé
+ensuite par la personne en charge (circuit boomerang).

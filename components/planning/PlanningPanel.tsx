@@ -400,7 +400,13 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
   // Événements commerciaux (Noël, 14 juillet, Saint-Valentin…) posés sur la grille.
   const eventMap = useMemo(() => eventsByDate(grid.map((g) => g.date)), [grid]);
   const [sel, setSel] = useState({ start: "", end: "" });
-  const [type, setType] = useState<CongeType>(isDirection && !isSelf ? "recup" : "cp");
+  // Type PAR DÉFAUT : la récup se consomme AVANT les CP dès qu'il en reste (elle
+  // les remplace — à l'avantage du salarié). La direction propose de la récup par
+  // défaut ; le salarié qui a un solde de récup part aussi sur « récup » ; sinon CP.
+  const hasRecupBalance = person.counters.recup.balanceMin > 0;
+  const [type, setType] = useState<CongeType>(
+    (isDirection && !isSelf) || (isSelf && hasRecupBalance) ? "recup" : "cp",
+  );
   const [note, setNote] = useState("");
 
   // ── Sélection de la plage — DEUX gestes qui cohabitent :
@@ -486,15 +492,15 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
 
   const ouvrables = sel.start ? expandOuvrables(sel.start, sel.end).length : 0;
 
-  // SUGGESTION « récup au lieu de CP » (à l'avantage du salarié) : un CP dont la
-  // plage inclut un SAMEDI (jour ouvrable décompté mais NON travaillé) gaspille
-  // des CP. Si de la récup est disponible, on propose de la poser à la place —
-  // ses CP sont préservés. Dimanches et fériés sont déjà hors décompte.
+  // RAPPEL « utilise ta récup avant tes CP » (à l'avantage du salarié) : dès qu'on
+  // prend du CP alors qu'il reste de la récup, on propose de la poser à la place
+  // (elle remplace le CP → CP préservés). Un samedi dans la plage est signalé en
+  // plus (jour ouvrable décompté mais non travaillé). Dimanches/fériés déjà exclus.
   const cpSaturdays = type === "cp" && sel.start ? saturdaysInRange(sel.start, sel.end) : [];
   const typDayMin = person.profile.typicalDayMin;
   const recupBalanceMin = person.counters.recup.balanceMin;
   const recupDaysAvail = typDayMin > 0 ? Math.floor(recupBalanceMin / typDayMin) : 0;
-  const suggestRecup = cpSaturdays.length > 0 && recupBalanceMin > 0;
+  const suggestRecup = type === "cp" && !!sel.start && recupBalanceMin > 0;
 
   // Congés/récup du MOIS affiché (validés + en attente) — liste détaillée sous
   // le calendrier sur mobile (les pastilles disent « quoi », la liste dit
@@ -657,18 +663,18 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             </span>
           </p>
 
-          {/* SUGGESTION réservée au SALARIÉ (jamais la direction) : ce CP inclut
-              un samedi décompté alors qu'il reste de la récup → bascule en récup
-              pour préserver ses CP. Validée ensuite par la personne en charge. */}
+          {/* RAPPEL réservé au SALARIÉ (jamais la direction) : il reste de la récup
+              alors qu'il prend du CP → l'utiliser d'abord (elle remplace le CP).
+              Validée ensuite par la personne en charge. */}
           {isSelf && !isDirection && suggestRecup && (
             <div className="mb-2.5 flex flex-col gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-2.5 sm:flex-row sm:items-center">
               <Lightbulb className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400" />
               <p className="min-w-0 flex-1 text-[12px] text-sky-800 dark:text-sky-200">
-                Ce CP décompte <b className="font-semibold">{cpSaturdays.length} samedi{cpSaturdays.length > 1 ? "s" : ""}</b> — bascule en récup pour préserver tes CP{recupDaysAvail > 0 ? ` (${recupDaysAvail} j dispo)` : ""}.
+                Il te reste <b className="font-semibold tnum">{fmtHM(recupBalanceMin)}</b> de récup{recupDaysAvail > 0 ? ` (~${recupDaysAvail} j)` : ""} — utilise-la <b className="font-semibold">avant tes CP</b>{cpSaturdays.length > 0 ? `, et évite de décompter ${cpSaturdays.length} samedi${cpSaturdays.length > 1 ? "s" : ""}` : ""}.
               </p>
               <button type="button" onClick={() => setType("recup")}
                 className="inline-flex shrink-0 items-center justify-center gap-1.5 h-9 px-3 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[12.5px] font-semibold">
-                <RotateCcw className="h-3.5 w-3.5" /> Basculer en récup
+                <RotateCcw className="h-3.5 w-3.5" /> Utiliser ma récup
               </button>
             </div>
           )}
