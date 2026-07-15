@@ -14,6 +14,7 @@ import {
 } from "@/lib/sapMirror";
 import { annualWindowStart } from "@/lib/pilotage-time";
 import { invalidate } from "@/lib/ttlCache";
+import { isCronAuthorized } from "@/lib/cronAuth";
 
 // Pull de 5 entités + BP (pagination SAP) → peut dépasser le défaut serverless.
 export const dynamic = "force-dynamic";
@@ -30,20 +31,6 @@ export const maxDuration = 300;
  */
 
 const THROTTLE_MS = 60_000;
-
-/**
- * Auth machine pour cron Vercel : `Authorization: Bearer <CRON_SECRET>` ou
- * en-tête `x-cron-secret`. Vercel ajoute automatiquement le Bearer aux requêtes
- * cron. Désactivé si `CRON_SECRET` n'est pas défini (aucun bypass possible).
- */
-function isCronAuthorized(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  const bearer = req.headers.get("authorization");
-  if (bearer === `Bearer ${secret}`) return true;
-  if (req.headers.get("x-cron-secret") === secret) return true;
-  return false;
-}
 
 /**
  * Seed initial du miroir (curseur neuf) — pull DÉCOUPÉ par mois sur la fenêtre

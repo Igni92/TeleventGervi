@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap, type SapItem, type SapItemGroup, type SapBatchDetail } from "@/lib/sapb1";
+import { isCronAuthorized } from "@/lib/cronAuth";
 
 // ~1300 items paginés depuis SAP → peut dépasser le défaut serverless.
 export const dynamic = "force-dynamic";
@@ -26,13 +27,17 @@ const WAREHOUSES_TO_SYNC = new Set(["000", "01", "R1"]);
 const PACKAGING_GROUP_CODES = new Set([114]);
 const NOISE_GROUP_CODES = new Set([100, 104, 105, 111, 112, 117, 121, 126, 128, 130]);
 
-export async function POST() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  }
-  if (!(await requireAdmin(session))) {
-    return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+export async function POST(req: NextRequest) {
+  // Déclenchement machine (cron Vercel via CRON_SECRET) OU admin en session.
+  const cron = isCronAuthorized(req);
+  const session = cron ? null : await auth();
+  if (!cron) {
+    if (!session?.user) {
+      return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+    }
+    if (!(await requireAdmin(session))) {
+      return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+    }
   }
 
   const startedAt = new Date();
@@ -42,7 +47,7 @@ export async function POST() {
       type: "products",
       status: "running",
       startedAt,
-      triggeredBy: session.user.id ?? null,
+      triggeredBy: cron ? "cron" : session?.user.id ?? null,
     },
   });
 
