@@ -57,7 +57,7 @@ export default auth((req) => {
     const allowedPrefixes = ["/api", "/login", "/heures", "/planning"];
     if (isPrep) allowedPrefixes.push("/livraisons", "/inventaire", "/preparations");
     if (isLivreur) allowedPrefixes.push("/livraisons", "/clients");
-    if (isAgreeur) allowedPrefixes.push("/commandes-fournisseurs", "/entrees");
+    if (isAgreeur) allowedPrefixes.push("/commandes-fournisseurs", "/entrees", "/fournisseurs");
     const allowed = allowedPrefixes.some((p) => pathname.startsWith(p));
     if (!allowed) {
       // Écran d'atterrissage : la prépa/livraison si terrain, sinon les commandes

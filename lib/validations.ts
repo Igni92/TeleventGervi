@@ -56,6 +56,63 @@ export const clientSchema = z.object({
 
 export type ClientFormValues = z.infer<typeof clientSchema>;
 
+// ── Fournisseurs (fiche d'ACHAT, distincte du client de VENTE) ──
+export const supplierSchema = z.object({
+  code: z
+    .string()
+    .min(1, "Le code fournisseur est requis")
+    .max(50, "Le code fournisseur ne peut pas dépasser 50 caractères"),
+  nom: z
+    .string()
+    .min(1, "Le nom du fournisseur est requis")
+    .max(200, "Le nom ne peut pas dépasser 200 caractères"),
+  // Famille d'achat libre (Fruits, Emballage, Transport…) — liste réutilisable.
+  type: z
+    .string()
+    .max(100, "La famille ne peut pas dépasser 100 caractères")
+    .optional()
+    .or(z.literal("")),
+  // CardCode SAP du fournisseur (BusinessPartner CardType=V) si rattaché.
+  sapCardCode: z
+    .string()
+    .max(50)
+    .optional()
+    .or(z.literal("")),
+  email: z
+    .string()
+    .email("Format d'email invalide")
+    .max(200)
+    .optional()
+    .or(z.literal("")),
+  tel1: z
+    .string()
+    .regex(frPhoneRegex, "Format de téléphone invalide (ex: 06 12 34 56 78)")
+    .optional()
+    .or(z.literal("")),
+  tel2: z
+    .string()
+    .regex(frPhoneRegex, "Format de téléphone invalide (ex: 06 12 34 56 78)")
+    .optional()
+    .or(z.literal("")),
+  tel3: z
+    .string()
+    .regex(frPhoneRegex, "Format de téléphone invalide (ex: 06 12 34 56 78)")
+    .optional()
+    .or(z.literal("")),
+  adresse: z
+    .string()
+    .max(500, "L'adresse ne peut pas dépasser 500 caractères")
+    .optional()
+    .or(z.literal("")),
+  notes: z
+    .string()
+    .max(2000, "Les notes ne peuvent pas dépasser 2000 caractères")
+    .optional()
+    .or(z.literal("")),
+});
+
+export type SupplierFormValues = z.infer<typeof supplierSchema>;
+
 // Schema pour l'import CSV (seul le code est obligatoire)
 export const clientImportSchema = z.object({
   code: z.string().min(1, "Code requis"),
