@@ -23,14 +23,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   CalendarDays, ChevronLeft, ChevronRight, RotateCcw, Loader2, Send, Check, X,
-  Users, Palmtree, Clock3, SlidersHorizontal, Save, Sun,
+  Users, Palmtree, Clock3, SlidersHorizontal, Save, Sun, Lightbulb,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { displayPersonName } from "@/lib/userNames";
 import {
   fmtHM, monthIdOf, shiftMonth, monthLabel, type DayTag, DAY_TAG_LABEL,
 } from "@/lib/heuresCalc";
-import { monthGridDays, expandOuvrables, monthEndISO } from "@/lib/planning";
+import {
+  monthGridDays, expandOuvrables, monthEndISO, saturdaysInRange,
+  resolveCalendarDay, DAY_CATEGORY_LABEL, type DayCategory,
+} from "@/lib/planning";
+import { frenchHolidayLabel } from "@/lib/livraison";
+import { eventsByDate } from "@/lib/events";
 import {
   CONGE_TYPE_LABEL, CONGE_STATUS_LABEL, congeDayCount, congeOrigin, rangesOverlap,
   type CongeType, type CongeStatus,
@@ -73,9 +78,21 @@ const TYPE_TONE: Record<CongeType, { solid: string; soft: string; text: string }
   sans_solde: { solid: "bg-zinc-400", soft: "bg-zinc-400/15", text: "text-zinc-600 dark:text-zinc-300" },
   autre:      { solid: "bg-zinc-400", soft: "bg-zinc-400/15", text: "text-zinc-600 dark:text-zinc-300" },
 };
-const TAG_DOT: Record<DayTag, string> = {
-  present: "bg-emerald-500", absent: "bg-rose-500", conges: "bg-violet-500",
-  recup: "bg-sky-500", maladie: "bg-amber-500",
+/* Teintes des pastilles ALLONGÉES du calendrier (une couleur par catégorie).
+   `solid` = barre pleine (calendrier d'équipe) ; `soft`+`text`+`border` = la
+   pastille lisible avec libellé (calendrier d'une personne). Le férié a sa
+   propre couleur (orange), distincte de la maladie (ambre). */
+const CAT_TONE: Record<DayCategory, { solid: string; soft: string; text: string; border: string }> = {
+  present:    { solid: "bg-emerald-500", soft: "bg-emerald-500/15", text: "text-emerald-700 dark:text-emerald-300", border: "border-emerald-500/45" },
+  ferie:      { solid: "bg-orange-500",  soft: "bg-orange-500/15",  text: "text-orange-700 dark:text-orange-300",   border: "border-orange-500/45" },
+  cp:         { solid: "bg-violet-500",  soft: "bg-violet-500/15",  text: "text-violet-700 dark:text-violet-300",   border: "border-violet-500/45" },
+  conges:     { solid: "bg-violet-500",  soft: "bg-violet-500/15",  text: "text-violet-700 dark:text-violet-300",   border: "border-violet-500/45" },
+  rtt:        { solid: "bg-fuchsia-500", soft: "bg-fuchsia-500/15", text: "text-fuchsia-700 dark:text-fuchsia-300", border: "border-fuchsia-500/45" },
+  recup:      { solid: "bg-sky-500",     soft: "bg-sky-500/15",     text: "text-sky-700 dark:text-sky-300",         border: "border-sky-500/45" },
+  maladie:    { solid: "bg-amber-500",   soft: "bg-amber-500/15",   text: "text-amber-700 dark:text-amber-300",     border: "border-amber-500/45" },
+  absent:     { solid: "bg-rose-500",    soft: "bg-rose-500/15",    text: "text-rose-700 dark:text-rose-300",       border: "border-rose-500/45" },
+  sans_solde: { solid: "bg-zinc-400",    soft: "bg-zinc-400/15",    text: "text-zinc-600 dark:text-zinc-300",       border: "border-zinc-400/45" },
+  autre:      { solid: "bg-zinc-400",    soft: "bg-zinc-400/15",    text: "text-zinc-600 dark:text-zinc-300",       border: "border-zinc-400/45" },
 };
 const STATUS_TONE: Record<CongeStatus, string> = {
   pending: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
@@ -380,6 +397,8 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
   onSubmit: (payload: Record<string, unknown>) => Promise<boolean>;
 }) {
   const grid = useMemo(() => monthGridDays(month), [month]);
+  // Événements commerciaux (Noël, 14 juillet, Saint-Valentin…) posés sur la grille.
+  const eventMap = useMemo(() => eventsByDate(grid.map((g) => g.date)), [grid]);
   const [sel, setSel] = useState({ start: "", end: "" });
   const [type, setType] = useState<CongeType>(isDirection && !isSelf ? "recup" : "cp");
   const [note, setNote] = useState("");
@@ -467,6 +486,16 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
 
   const ouvrables = sel.start ? expandOuvrables(sel.start, sel.end).length : 0;
 
+  // SUGGESTION « récup au lieu de CP » (à l'avantage du salarié) : un CP dont la
+  // plage inclut un SAMEDI (jour ouvrable décompté mais NON travaillé) gaspille
+  // des CP. Si de la récup est disponible, on propose de la poser à la place —
+  // ses CP sont préservés. Dimanches et fériés sont déjà hors décompte.
+  const cpSaturdays = type === "cp" && sel.start ? saturdaysInRange(sel.start, sel.end) : [];
+  const typDayMin = person.profile.typicalDayMin;
+  const recupBalanceMin = person.counters.recup.balanceMin;
+  const recupDaysAvail = typDayMin > 0 ? Math.floor(recupBalanceMin / typDayMin) : 0;
+  const suggestRecup = cpSaturdays.length > 0 && recupBalanceMin > 0;
+
   // Congés/récup du MOIS affiché (validés + en attente) — liste détaillée sous
   // le calendrier sur mobile (les pastilles disent « quoi », la liste dit
   // « quand & quel statut » sans avoir à ouvrir chaque jour).
@@ -518,9 +547,17 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             const dow = new Date(`${date}T12:00:00Z`).getUTCDay();
             const weekend = dow === 0 || dow === 6;
             const hasRecupDot = recupSet.has(date) && !approved.some((c) => c.type === "recup");
-            // Teinte mobile : la cellule prend la couleur du congé validé
-            // dominant (lecture immédiate sans ouvrir le jour).
-            const dominant = approved[0]?.type;
+            const ferieLabel = frenchHolidayLabel(date);
+            const events = eventMap.get(date) ?? [];
+            // Pastille DOMINANTE du jour : férié → congé validé → tag → congé en
+            // attente → récup posée → PRÉSENT PAR DÉFAUT (lun→ven). Une seule
+            // pastille lisible, allongée, avec son libellé (CP, Récup, Présent…).
+            const resolved = resolveCalendarDay({
+              dow, inMonth, ferieLabel,
+              approvedTypes: approved.map((c) => c.type),
+              pendingTypes: pending.map((c) => c.type),
+              tag, recupPosee: hasRecupDot,
+            });
             // Sélection LIÉE : un seul bandeau continu (pas de bordure entre 2
             // jours). Un calque `-inset-px` déborde d'1 px et masque les traits
             // de grille entre cellules sélectionnées ; arrondi UNIQUEMENT aux
@@ -528,14 +565,6 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             const selected = inSel(date);
             const capL = selected && (date === sel.start || dow === 1);
             const capR = selected && (date === sel.end || dow === 0);
-            // Pastilles mobiles (points) : validés pleins, en attente creux,
-            // récup + tag feuille d'heures.
-            const dots = [
-              ...approved.map((c) => ({ key: c.id, cls: TYPE_TONE[c.type].solid, hollow: false, text: "" })),
-              ...pending.map((c) => ({ key: `p${c.id}`, cls: "", hollow: true, text: TYPE_TONE[c.type].text })),
-              ...(hasRecupDot ? [{ key: "r", cls: "bg-sky-500", hollow: false, text: "" }] : []),
-              ...(tag ? [{ key: "t", cls: TAG_DOT[tag], hollow: false, text: "" }] : []),
-            ];
             return (
               <button
                 key={date} type="button" data-date={date}
@@ -548,22 +577,20 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
                   tapDay(date);
                 }}
                 title={[
+                  ferieLabel ? `Férié : ${ferieLabel}` : null,
                   ...approved.map((c) => `${CONGE_TYPE_LABEL[c.type]} (validé)`),
                   ...pending.map((c) => `${CONGE_TYPE_LABEL[c.type]} (en attente)`),
-                  ...(recupSet.has(date) ? ["Récup posée"] : []),
-                  ...(tag ? [`Feuille d'heures : ${DAY_TAG_LABEL[tag]}`] : []),
-                ].join(" · ") || undefined}
-                className={`relative flex flex-col items-center md:items-start gap-0.5 md:gap-1 min-h-[54px] sm:min-h-[64px] p-1 md:text-left transition-colors focus:outline-none focus:ring-1 focus:ring-brand-500 focus:z-20
+                  hasRecupDot ? "Récup posée" : null,
+                  tag ? `Feuille d'heures : ${DAY_TAG_LABEL[tag]}` : null,
+                  resolved.category === "present" ? "Présent (horaire par défaut)" : null,
+                  ...events.map((e) => e.label),
+                ].filter(Boolean).join(" · ") || undefined}
+                className={`relative flex flex-col items-center md:items-start gap-1 min-h-[58px] sm:min-h-[70px] p-1 md:text-left transition-colors focus:outline-none focus:ring-1 focus:ring-brand-500 focus:z-20
                   ${inMonth ? "bg-background" : "bg-secondary/20 opacity-50"}
-                  ${weekend ? "bg-secondary/10" : ""}
+                  ${weekend && !ferieLabel ? "bg-secondary/10" : ""}
                   ${!selected && canAct ? "hover:bg-secondary/40" : ""}
                   ${!selected && !canAct ? "cursor-default" : ""}`}
               >
-                {/* Teinte mobile du type de congé validé (sous le contenu, jamais
-                    quand la cellule est sélectionnée — le bandeau prend le relais). */}
-                {dominant && !selected && (
-                  <span aria-hidden className={`md:hidden pointer-events-none absolute inset-0 z-0 ${TYPE_TONE[dominant].soft}`} />
-                )}
                 {/* Bandeau de sélection continu : fond unique qui déborde d'1 px
                     pour masquer les traits de grille entre jours sélectionnés
                     (aucune bordure interne). Liseré haut+bas pour définir la
@@ -574,33 +601,26 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
                     className={`pointer-events-none absolute -inset-px z-0 bg-brand-500/25 border-y border-brand-500/60
                       ${capL ? "rounded-l-lg border-l" : ""} ${capR ? "rounded-r-lg border-r" : ""}`} />
                 )}
-                <span className={`relative z-10 inline-flex items-center justify-center rounded-full font-semibold tnum h-6 w-6 text-[12.5px] md:h-5 md:w-5 md:text-[11px]
-                  ${isToday ? "bg-brand-500 text-white shadow-sm" : dominant && !selected ? TYPE_TONE[dominant].text + " md:text-foreground" : "text-foreground"}`}>
-                  {dayNum}
+
+                {/* Repère ÉVÉNEMENT (emoji) en haut à droite — Noël, 14 juillet… */}
+                {events.length > 0 && (
+                  <span aria-hidden className="pointer-events-none absolute right-0.5 top-0.5 z-20 text-[11px] leading-none">
+                    {events[0].emoji}
+                  </span>
+                )}
+
+                {/* Ligne du numéro : centré (mobile) / à gauche (desktop). */}
+                <span className="relative z-10 flex w-full items-center justify-center md:justify-start">
+                  <span className={`inline-flex items-center justify-center rounded-full font-semibold tnum h-6 w-6 text-[12.5px] md:h-5 md:w-5 md:text-[11px]
+                    ${isToday ? "bg-brand-500 text-white shadow-sm" : "text-foreground"}`}>
+                    {dayNum}
+                  </span>
                 </span>
 
-                {/* MOBILE (< md) : points centrés (max 4 + « … »). */}
-                <span className="md:hidden relative z-10 flex items-center justify-center gap-1 h-3">
-                  {dots.slice(0, 4).map((d) => (
-                    <span key={d.key}
-                      className={d.hollow
-                        ? `h-2.5 w-2.5 rounded-full border-2 border-current ${d.text}`
-                        : `h-2.5 w-2.5 rounded-full ${d.cls}`} />
-                  ))}
-                  {dots.length > 4 && <span className="text-[9px] font-bold text-muted-foreground leading-none">…</span>}
-                </span>
-
-                {/* DESKTOP (≥ md) : barres pleines/hachurées + points récup/tag. */}
-                <span className="hidden md:flex relative z-10 mt-1 flex-wrap items-center gap-1">
-                  {approved.map((c) => (
-                    <span key={c.id} className={`h-2.5 w-full max-w-[46px] rounded ${TYPE_TONE[c.type].solid}`} />
-                  ))}
-                  {pending.map((c) => (
-                    <span key={c.id} className={`h-2.5 w-full max-w-[46px] rounded border border-dashed ${TYPE_TONE[c.type].soft} border-current ${TYPE_TONE[c.type].text}`} />
-                  ))}
-                  {hasRecupDot && <span className="h-3 w-3 rounded-full bg-sky-500 ring-2 ring-background" />}
-                  {tag && <span className={`h-3 w-3 rounded-full ring-2 ring-background ${TAG_DOT[tag]}`} />}
-                </span>
+                {/* PASTILLE allongée + lisible : libellé de la catégorie du jour. */}
+                {resolved.category && (
+                  <DayPill category={resolved.category} pending={resolved.pending} planned={resolved.planned} />
+                )}
               </button>
             );
           })}
@@ -636,6 +656,23 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
               <span className="md:hidden"> — touchez le 1ᵉʳ jour puis le dernier</span>
             </span>
           </p>
+
+          {/* SUGGESTION réservée au SALARIÉ (jamais la direction) : ce CP inclut
+              un samedi décompté alors qu'il reste de la récup → bascule en récup
+              pour préserver ses CP. Validée ensuite par la personne en charge. */}
+          {isSelf && !isDirection && suggestRecup && (
+            <div className="mb-2.5 flex flex-col gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-2.5 sm:flex-row sm:items-center">
+              <Lightbulb className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400" />
+              <p className="min-w-0 flex-1 text-[12px] text-sky-800 dark:text-sky-200">
+                Ce CP décompte <b className="font-semibold">{cpSaturdays.length} samedi{cpSaturdays.length > 1 ? "s" : ""}</b> — bascule en récup pour préserver tes CP{recupDaysAvail > 0 ? ` (${recupDaysAvail} j dispo)` : ""}.
+              </p>
+              <button type="button" onClick={() => setType("recup")}
+                className="inline-flex shrink-0 items-center justify-center gap-1.5 h-9 px-3 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[12.5px] font-semibold">
+                <RotateCcw className="h-3.5 w-3.5" /> Basculer en récup
+              </button>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-end gap-2.5">
             <div>
               <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Type</label>
@@ -665,7 +702,7 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
           </div>
           {sel.start && (
             <p className="mt-2 text-[11.5px] text-muted-foreground tnum">
-              {rangeLabel({ start: sel.start, end: sel.end })} · {ouvrables} jour{ouvrables > 1 ? "s" : ""} ouvrable{ouvrables > 1 ? "s" : ""}
+              {rangeLabel({ start: sel.start, end: sel.end })} · <span className="font-semibold text-foreground">{ouvrables}</span> jour{ouvrables > 1 ? "s" : ""} ouvrable{ouvrables > 1 ? "s" : ""} <span className="normal-case">(hors dimanches et fériés)</span>
               {type === "cp" && " — les jours de CP validés comptent comme travaillés (journée type créditée)"}
               {type === "recup" && " — décomptée du compteur seulement si la semaine finit sous le contrat"}
             </p>
@@ -752,6 +789,14 @@ function TeamCalendar({ team, month, todayISO, onPick }: {
 }) {
   const days = useMemo(() => monthGridDays(month).filter((g) => g.inMonth), [month]);
   const rows = useMemo(() => [...team].sort((a, b) => fullName(a.name).localeCompare(fullName(b.name), "fr")), [team]);
+  // Fériés (chômés pour TOUTE l'équipe) + événements — calculés une fois, posés
+  // sur la colonne du jour (en-tête + fond de colonne).
+  const ferieByDate = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const { date } of days) { const l = frenchHolidayLabel(date); if (l) m.set(date, l); }
+    return m;
+  }, [days]);
+  const eventMap = useMemo(() => eventsByDate(days.map((g) => g.date)), [days]);
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
@@ -761,9 +806,13 @@ function TeamCalendar({ team, month, todayISO, onPick }: {
             <th className="sticky left-0 z-10 bg-secondary/40 text-left font-semibold px-3 py-2 min-w-[150px]">Employé · compteurs</th>
             {days.map(({ date }) => {
               const dow = new Date(`${date}T12:00:00Z`).getUTCDay();
+              const ferie = ferieByDate.get(date);
+              const ev = eventMap.get(date)?.[0];
               return (
-                <th key={date} className={`px-0.5 py-1 text-center font-semibold min-w-[24px] ${date === todayISO ? "text-brand-600 dark:text-brand-400" : ""} ${dow === 0 || dow === 6 ? "bg-secondary/50" : ""}`}>
+                <th key={date} title={[ferie ? `Férié : ${ferie}` : null, ev?.label].filter(Boolean).join(" · ") || undefined}
+                  className={`px-0.5 py-1 text-center font-semibold min-w-[24px] ${date === todayISO ? "text-brand-600 dark:text-brand-400" : ""} ${ferie ? "bg-orange-500/15" : dow === 0 || dow === 6 ? "bg-secondary/50" : ""}`}>
                   <span className="block tnum">{Number(date.slice(-2))}</span>
+                  {ev && <span aria-hidden className="block text-[10px] leading-none">{ev.emoji}</span>}
                 </th>
               );
             })}
@@ -804,19 +853,33 @@ function TeamCalendar({ team, month, todayISO, onPick }: {
                   const c = byDate.get(date);
                   const tag = p.tags[date];
                   const dow = new Date(`${date}T12:00:00Z`).getUTCDay();
-                  const title = c
-                    ? `${fullName(p.name)} — ${CONGE_TYPE_LABEL[c.type]} (${c.status === "approved" ? "validé" : "en attente"})`
-                    : recupSet.has(date) ? `${fullName(p.name)} — récup posée`
-                    : tag ? `${fullName(p.name)} — ${DAY_TAG_LABEL[tag]}` : undefined;
+                  const ferie = ferieByDate.get(date);
+                  const recupPosee = recupSet.has(date) && !(c?.status === "approved" && c.type === "recup");
+                  // Même résolution que le calendrier individuel : férié → congé
+                  // → tag → en attente → récup posée → PRÉSENT PAR DÉFAUT.
+                  const resolved = resolveCalendarDay({
+                    dow, inMonth: true, ferieLabel: ferie,
+                    approvedTypes: c?.status === "approved" ? [c.type] : [],
+                    pendingTypes: c?.status === "pending" ? [c.type] : [],
+                    tag, recupPosee,
+                  });
+                  const cat = resolved.category;
+                  const title = ferie
+                    ? `Férié : ${ferie}`
+                    : c ? `${fullName(p.name)} — ${CONGE_TYPE_LABEL[c.type]} (${c.status === "approved" ? "validé" : "en attente"})`
+                    : recupPosee ? `${fullName(p.name)} — récup posée`
+                    : tag ? `${fullName(p.name)} — ${DAY_TAG_LABEL[tag]}`
+                    : cat === "present" ? `${fullName(p.name)} — présent` : undefined;
                   return (
                     <td key={date} title={title}
-                      className={`h-9 px-0.5 text-center align-middle ${dow === 0 || dow === 6 ? "bg-secondary/30" : ""} ${date === todayISO ? "outline outline-1 -outline-offset-1 outline-brand-500/40" : ""}`}>
-                      {c ? (
-                        <span className={`mx-auto block h-5 w-full min-w-[18px] rounded ${c.status === "approved" ? TYPE_TONE[c.type].solid : `border border-dashed ${TYPE_TONE[c.type].soft} border-current ${TYPE_TONE[c.type].text}`}`} />
-                      ) : recupSet.has(date) ? (
-                        <span className="mx-auto block h-5 w-full min-w-[18px] rounded bg-sky-500/70" />
-                      ) : tag ? (
-                        <span className={`mx-auto block h-2 w-2 rounded-full ${TAG_DOT[tag]}`} />
+                      className={`h-9 px-0.5 text-center align-middle ${ferie ? "bg-orange-500/10" : dow === 0 || dow === 6 ? "bg-secondary/30" : ""} ${date === todayISO ? "outline outline-1 -outline-offset-1 outline-brand-500/40" : ""}`}>
+                      {cat === "present" ? (
+                        // Présence = ligne de fond discrète (ne surcharge pas la grille).
+                        <span className="mx-auto block h-1.5 w-full min-w-[18px] rounded-full bg-emerald-500/40" />
+                      ) : cat === "ferie" ? (
+                        <span className="mx-auto block h-1.5 w-full min-w-[18px] rounded-full bg-orange-500/50" />
+                      ) : cat ? (
+                        <span className={`mx-auto block h-5 w-full min-w-[18px] rounded ${resolved.pending || resolved.planned ? `border border-dashed ${CAT_TONE[cat].soft} border-current ${CAT_TONE[cat].text}` : CAT_TONE[cat].solid}`} />
                       ) : null}
                     </td>
                   );
@@ -840,16 +903,47 @@ function TypePill({ type }: { type: CongeType }) {
   );
 }
 
+/** Libellé COURT (mobile) — la case d'un téléphone est étroite ; on abrège pour
+ *  que la pastille reste ENTIÈRE (pas de « … »). Desktop garde le libellé plein. */
+const CAT_SHORT: Record<DayCategory, string> = {
+  present: "Prés.", ferie: "Férié", cp: "CP", rtt: "RTT", recup: "Récup",
+  maladie: "Mal.", absent: "Abs.", sans_solde: "SS", autre: "Autre", conges: "Congé",
+};
+
+/** Pastille ALLONGÉE et LISIBLE d'une case du calendrier : barre pleine largeur
+ *  portant le libellé de la catégorie (CP, Récup, Présent, Férié…). Un congé en
+ *  attente (ou une récup posée à venir) est rendu en pointillés. Libellé abrégé
+ *  sur mobile (case étroite), plein dès `md`. */
+function DayPill({ category, pending, planned }: { category: DayCategory; pending: boolean; planned: boolean }) {
+  const tone = CAT_TONE[category];
+  const dashed = pending || planned;
+  return (
+    <span
+      title={DAY_CATEGORY_LABEL[category]}
+      className={`relative z-10 block w-full max-w-[76px] md:max-w-none truncate rounded-md px-1 py-[3px] text-center text-[10px] md:text-[11px] font-semibold leading-tight tracking-tight border
+        ${dashed ? `border-dashed bg-transparent ${tone.text} ${tone.border}` : `${tone.soft} ${tone.text} ${tone.border}`}`}
+    >
+      <span className="md:hidden">{CAT_SHORT[category]}</span>
+      <span className="hidden md:inline">{DAY_CATEGORY_LABEL[category]}{planned && !pending ? " ·" : ""}</span>
+    </span>
+  );
+}
+
 function Legend() {
+  // « Présent » et « Férié » d'abord (les plus fréquents), puis les types de congé.
+  const cats: DayCategory[] = ["present", "cp", "rtt", "recup", "maladie", "absent", "ferie"];
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
-      {(["cp", "rtt", "recup", "maladie", "sans_solde"] as CongeType[]).map((t) => (
-        <span key={t} className="inline-flex items-center gap-1.5">
-          <span className={`h-2.5 w-4 rounded-sm ${TYPE_TONE[t].solid}`} /> {CONGE_TYPE_LABEL[t]}
+      {cats.map((c) => (
+        <span key={c} className="inline-flex items-center gap-1.5">
+          <span className={`h-2.5 w-4 rounded-sm ${CAT_TONE[c].solid}`} /> {DAY_CATEGORY_LABEL[c]}
         </span>
       ))}
       <span className="inline-flex items-center gap-1.5">
-        <span className="h-2.5 w-4 rounded-sm border border-dashed border-muted-foreground/60" /> en attente de validation
+        <span className="h-2.5 w-4 rounded-sm border border-dashed border-muted-foreground/60" /> en attente / posé
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span aria-hidden>🎄</span> événement
       </span>
     </div>
   );
