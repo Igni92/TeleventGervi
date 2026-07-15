@@ -31,7 +31,7 @@ import {
   fmtHM, monthIdOf, shiftMonth, monthLabel, type DayTag, DAY_TAG_LABEL,
 } from "@/lib/heuresCalc";
 import {
-  monthGridDays, expandOuvrables, monthEndISO, saturdaysInRange,
+  monthGridDays, expandOuvrables, monthEndISO, saturdaysInRange, splitLeaveRecupCp,
   resolveCalendarDay, DAY_CATEGORY_LABEL, type DayCategory,
 } from "@/lib/planning";
 import { frenchHolidayLabel } from "@/lib/livraison";
@@ -400,13 +400,10 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
   // Événements commerciaux (Noël, 14 juillet, Saint-Valentin…) posés sur la grille.
   const eventMap = useMemo(() => eventsByDate(grid.map((g) => g.date)), [grid]);
   const [sel, setSel] = useState({ start: "", end: "" });
-  // Type PAR DÉFAUT : la récup se consomme AVANT les CP dès qu'il en reste (elle
-  // les remplace — à l'avantage du salarié). La direction propose de la récup par
-  // défaut ; le salarié qui a un solde de récup part aussi sur « récup » ; sinon CP.
-  const hasRecupBalance = person.counters.recup.balanceMin > 0;
-  const [type, setType] = useState<CongeType>(
-    (isDirection && !isSelf) || (isSelf && hasRecupBalance) ? "recup" : "cp",
-  );
+  // Le salarié pose ses CONGÉS ; la récup disponible est ensuite consommée
+  // automatiquement en jours ENTIERS (découpe récup + CP à l'envoi, cf. submit).
+  // La direction, elle, propose de la récup par défaut.
+  const [type, setType] = useState<CongeType>(isDirection && !isSelf ? "recup" : "cp");
   const [note, setNote] = useState("");
 
   // ── Sélection de la plage — DEUX gestes qui cohabitent :
@@ -492,15 +489,18 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
 
   const ouvrables = sel.start ? expandOuvrables(sel.start, sel.end).length : 0;
 
-  // RAPPEL « utilise ta récup avant tes CP » (à l'avantage du salarié) : dès qu'on
-  // prend du CP alors qu'il reste de la récup, on propose de la poser à la place
-  // (elle remplace le CP → CP préservés). Un samedi dans la plage est signalé en
-  // plus (jour ouvrable décompté mais non travaillé). Dimanches/fériés déjà exclus.
-  const cpSaturdays = type === "cp" && sel.start ? saturdaysInRange(sel.start, sel.end) : [];
+  // DÉCOUPE AUTO récup + CP (à l'avantage du salarié) : quand le salarié pose des
+  // CONGÉS PAYÉS et qu'il lui reste de la récup, on consomme d'abord la récup en
+  // JOURS ENTIERS (floor(solde / journée type)), le reste part en CP. Les deux
+  // demandes sont envoyées à la validation. Dimanches/fériés déjà hors décompte.
   const typDayMin = person.profile.typicalDayMin;
   const recupBalanceMin = person.counters.recup.balanceMin;
   const recupDaysAvail = typDayMin > 0 ? Math.floor(recupBalanceMin / typDayMin) : 0;
-  const suggestRecup = type === "cp" && !!sel.start && recupBalanceMin > 0;
+  const autoSplit = isSelf && type === "cp" && !!sel.start && recupDaysAvail >= 1
+    ? splitLeaveRecupCp(sel.start, sel.end, recupDaysAvail)
+    : null;
+  // Samedi(s) restant en CP (jour ouvrable décompté mais non travaillé) — signalé.
+  const cpSaturdays = autoSplit?.cp ? saturdaysInRange(autoSplit.cp.start, autoSplit.cp.end) : [];
 
   // Congés/récup du MOIS affiché (validés + en attente) — liste détaillée sous
   // le calendrier sur mobile (les pastilles disent « quoi », la liste dit
@@ -514,6 +514,15 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
 
   const submit = async () => {
     if (!sel.start) return;
+    // DÉCOUPE AUTO (salarié, CP, récup entière dispo) : on envoie d'abord la
+    // portion RÉCUP (jours entiers), puis la portion CP restante — deux demandes.
+    if (autoSplit && (autoSplit.recup || autoSplit.cp)) {
+      let ok = true;
+      if (autoSplit.recup) ok = await onSubmit({ action: "request", type: "recup", start: autoSplit.recup.start, end: autoSplit.recup.end, note });
+      if (ok && autoSplit.cp) ok = await onSubmit({ action: "request", type: "cp", start: autoSplit.cp.start, end: autoSplit.cp.end, note });
+      if (ok) { setSel({ start: "", end: "" }); setNote(""); }
+      return;
+    }
     const base = { type, start: sel.start, end: sel.end, note };
     const ok = isSelf
       ? await onSubmit({ action: "request", ...base })
@@ -663,19 +672,17 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             </span>
           </p>
 
-          {/* RAPPEL réservé au SALARIÉ (jamais la direction) : il reste de la récup
-              alors qu'il prend du CP → l'utiliser d'abord (elle remplace le CP).
-              Validée ensuite par la personne en charge. */}
-          {isSelf && !isDirection && suggestRecup && (
-            <div className="mb-2.5 flex flex-col gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-2.5 sm:flex-row sm:items-center">
-              <Lightbulb className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400" />
+          {/* APERÇU DÉCOUPE AUTO (salarié) : la récup se consomme en jours ENTIERS
+              avant les CP. Deux demandes seront envoyées à la validation. */}
+          {autoSplit && autoSplit.recup && (
+            <div className="mb-2.5 flex items-start gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-2.5">
+              <Lightbulb className="h-4 w-4 shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" />
               <p className="min-w-0 flex-1 text-[12px] text-sky-800 dark:text-sky-200">
-                Il te reste <b className="font-semibold tnum">{fmtHM(recupBalanceMin)}</b> de récup{recupDaysAvail > 0 ? ` (~${recupDaysAvail} j)` : ""} — utilise-la <b className="font-semibold">avant tes CP</b>{cpSaturdays.length > 0 ? `, et évite de décompter ${cpSaturdays.length} samedi${cpSaturdays.length > 1 ? "s" : ""}` : ""}.
+                Ta récup (<b className="font-semibold tnum">{fmtHM(recupBalanceMin)}</b>) couvre <b className="font-semibold">{autoSplit.recupDays} jour{autoSplit.recupDays > 1 ? "s" : ""} entier{autoSplit.recupDays > 1 ? "s" : ""}</b> → à l&apos;envoi&nbsp;:{" "}
+                <b className="font-semibold">{autoSplit.recupDays} j en récup</b>
+                {autoSplit.cp ? <> + <b className="font-semibold">{autoSplit.cpDays} j en CP</b> (2 demandes)</> : <> (tout couvert, tes CP sont préservés)</>}.
+                {cpSaturdays.length > 0 && <span className="opacity-80"> Dont {cpSaturdays.length} samedi{cpSaturdays.length > 1 ? "s" : ""} en CP.</span>}
               </p>
-              <button type="button" onClick={() => setType("recup")}
-                className="inline-flex shrink-0 items-center justify-center gap-1.5 h-9 px-3 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[12.5px] font-semibold">
-                <RotateCcw className="h-3.5 w-3.5" /> Utiliser ma récup
-              </button>
             </div>
           )}
 
