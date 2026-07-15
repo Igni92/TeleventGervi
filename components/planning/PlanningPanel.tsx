@@ -624,9 +624,12 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
                   </span>
                 )}
 
-                {/* Ligne du numéro : centré (mobile) / à gauche (desktop). */}
+                {/* Ligne du numéro : centré (mobile) / à gauche (desktop).
+                    Marqueur « aujourd'hui » : pastille arrondie (rounded-md),
+                    même langage de forme que la sélection et les pastilles —
+                    plus de rond isolé au milieu des rectangles. */}
                 <span className="relative z-10 flex w-full items-center justify-center md:justify-start">
-                  <span className={`inline-flex items-center justify-center rounded-full font-semibold tnum h-6 w-6 text-[12.5px] md:h-5 md:w-5 md:text-[11px]
+                  <span className={`inline-flex items-center justify-center rounded-md font-semibold tnum h-6 w-6 text-[12.5px] md:h-5 md:w-5 md:text-[11px]
                     ${isToday ? "bg-brand-500 text-white shadow-sm" : "text-foreground"}`}>
                     {dayNum}
                   </span>
