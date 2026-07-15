@@ -932,3 +932,23 @@ même fruit (ex. Fraise *Belorta / Karima* vs *Lady Gold*, calibre différent).
 - **Calibre** = SAP `Items.U_GER_CALIBRE`, **lu en direct** dans `/api/livraisons`
   (piggyback sur la requête stock existante) — aucun champ local ni migration :
   le calibre n'apparaît que pour les articles où SAP le renseigne.
+
+---
+
+## 🐛 Fix — création d'un type de contact/incident impossible (menu rogné)
+
+`components/TypeCombobox.tsx` (types de contact & d'incident réutilisables).
+
+**Symptôme** : impossible de créer un nouveau type de contact — le bouton
+« Créer « … » » semblait absent / inopérant.
+
+**Cause** : le menu déroulant était un enfant `absolute` d'une carte
+`SectionCard` en **`overflow-hidden`** → le **bas du menu était rogné**, or c'est
+là que vit le bouton « Créer » (le haut, « — Aucun », restait visible, d'où
+l'effet « étrange »).
+
+| Sujet | Avant | Après |
+|-------|-------|-------|
+| **Menu déroulant** | Enfant `absolute`, rogné par la carte parente. | Rendu dans un **portal** (position fixe) → s'affiche par-dessus tout, plus jamais coupé. |
+| **Entrée (⏎) sur un libellé existant** | Ne faisait **rien** (impasse). | **Sélectionne** la correspondance exacte ; sinon **crée**. |
+| **Erreurs (création / réseau)** | **Avalées en silence** (« ça ne marche pas »). | **Toast** explicite ; création idempotente (pas de doublon). |
