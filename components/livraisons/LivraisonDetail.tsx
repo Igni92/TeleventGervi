@@ -29,6 +29,7 @@ import {
   filterBySegment, computeSegmentCounts, keepDeliverableClients, SEGMENT_LABEL,
   type StatusTab, type SegmentTab, type Tournee, type Doc, type Carrier, type Totals, type ApiResp,
 } from "@/lib/livraisonView";
+import { consolidateDeliveryLines } from "@/lib/livraisonLines";
 import { printOrderRecap } from "./printRecap";
 import { renderBonTransport } from "@/lib/bonTransport";
 import { BonsPreparationPanel } from "./BonsPreparationPanel";
@@ -1695,6 +1696,17 @@ const OrderRow = memo(function OrderRow({
   // ── Articles MANQUANTS = stock SAP total négatif (détecté par l'API). ──
   const missingSet = useMemo(() => new Set(doc.missingItems ?? []), [doc.missingItems]);
 
+  // ── Lignes d'AFFICHAGE : regroupe un article racheté après manquant (2ᵉ code,
+  //    même désignation) en une seule ligne « colis complet » et écarte les
+  //    lignes à quantité 0 — sinon un colis s'affichait éclaté en demi-colis
+  //    (« 0 mûre » + « 0,5 » + « 0,5 ») alors que le total du BL dit « 1 colis ».
+  //    Une ligne est manquante si l'UN de ses codes fusionnés l'est. ──
+  const displayLines = useMemo(() => consolidateDeliveryLines(doc.lines), [doc.lines]);
+  const isLineMissing = useCallback(
+    (codes: string[]) => codes.some((c) => missingSet.has(c)),
+    [missingSet],
+  );
+
   // Charge les tournées du transporteur courant (une fois) pour le sélecteur.
   useEffect(() => {
     if (doc.open && doc.trspCode) onLoadTournees(doc.trspCode);
@@ -2180,7 +2192,8 @@ const OrderRow = memo(function OrderRow({
         clientType: doc.clientType,
         colis: doc.colis,
         weightKg: doc.weightKg,
-        lines: doc.lines,
+        // Mêmes lignes consolidées qu'à l'écran (colis complets, sans ligne à 0).
+        lines: displayLines,
       },
       {
         dateLabel: formatDeliveryDate(doc.dueDate),
@@ -2497,8 +2510,8 @@ const OrderRow = memo(function OrderRow({
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40">
-              {doc.lines.map((l, i) => {
-                const isMissing = missingSet.has(l.itemCode);
+              {displayLines.map((l, i) => {
+                const isMissing = isLineMissing(l.mergedCodes);
                 return (
                 <tr
                   key={`${l.itemCode}-${i}`}
@@ -2612,8 +2625,8 @@ const OrderRow = memo(function OrderRow({
 
           {/* Lignes en grand : colisage à gauche + tags + signalement manquant */}
           <ul className="divide-y divide-border/50 rounded-xl border border-border overflow-hidden">
-            {doc.lines.map((l, i) => {
-              const isMissing = missingSet.has(l.itemCode);
+            {displayLines.map((l, i) => {
+              const isMissing = isLineMissing(l.mergedCodes);
               return (
               <li
                 key={`big-${l.itemCode}-${i}`}
