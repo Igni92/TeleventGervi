@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { PromoBanner } from "@/components/promos/PromoBanner";
 import { MobileTiles } from "@/components/mobile/MobileTiles";
+import { MeteoBar } from "./MeteoBar";
 import { KpiStrip } from "./KpiStrip";
 import { PoidsFamilles } from "./PoidsFamilles";
 import { DernieresCommandes } from "./DernieresCommandes";
@@ -72,6 +73,9 @@ export function AccueilHub() {
 
   return (
     <div className="space-y-4 animate-fade-up">
+      {/* ── Bandeau météo (haut de l'écran, zone à définir · masquable) ── */}
+      <MeteoBar />
+
       <HubHeader firstName={firstName} />
 
       {/* ── Bandeau promotions ── */}

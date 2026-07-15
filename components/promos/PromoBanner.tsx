@@ -4,13 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useReducedMotion } from "framer-motion";
 import {
-  BadgePercent, CalendarRange, ChevronLeft, ChevronRight, Gift, Tag,
+  BadgePercent, ChevronLeft, ChevronRight, Gift,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SETTING_KEYS, onSettingChange, readSetting } from "@/components/settings/app-settings";
 import { PromoNotifications } from "@/components/promos/PromoNotifications";
 import {
-  ActivePromo, formatPeriode, promoArticle, promoChip, promoTitre,
+  ActivePromo, promoChip, promoTitre,
 } from "@/components/promos/promo-utils";
 
 /**
@@ -22,9 +22,9 @@ import {
  *   <PromoBanner context="commande" />  ← posé par l'agent Console (plus dense)
  *
  * Comportement :
- *   - 1 promo affichée à la fois : chip type (−10 % / 5+1), libellé, période
- *     « du JJ/MM au JJ/MM » (ou « permanente »), article résolu, argumentaire,
- *     badge « NOUVEAU » tant que non consultée (PromoSeen).
+ *   - 1 promo affichée à la fois : chip type/prix (−10 % / 5+1 / 1,50 €),
+ *     libellé et badge « NOUVEAU » tant que non consultée (PromoSeen).
+ *     Bandeau volontairement compact : article, période et argumentaire retirés.
  *   - Rotation auto ~6 s (transition douce framer-motion), pause au survol,
  *     boutons ‹ › TOUJOURS présents.
  *   - Réglage televente:promoBannerAnim = "off" (page /parametres) ou
@@ -129,9 +129,6 @@ export function PromoBanner({
   const current = promos[Math.min(idx, count - 1)];
   const compact = context === "commande";
   const titre = promoTitre(current);
-  const article = promoArticle(current);
-  const articleDistinct = titre.toLowerCase() !== article.toLowerCase();
-  const pitch = current.pitch?.trim() || null;
 
   // Ticker BFM : on remplit une séquence assez large (≥ container même avec peu
   // de promos) puis on la duplique → boucle sans couture (translateX 0 → -50 %).
@@ -145,12 +142,12 @@ export function PromoBanner({
       href="/promos"
       onClick={() => consult(current)}
       title="Voir la fiche promo"
-      className="group flex items-center gap-2.5 min-w-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-rose-400 rounded-md"
+      className="group flex items-center gap-2 min-w-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-rose-400 rounded-md"
     >
-      {/* Chip type — même signature visuelle que /promos et l'Écran 2 */}
+      {/* Chip type / prix — même signature visuelle que /promos et l'Écran 2 */}
       <span className={cn(
-        "inline-flex justify-center items-center px-2 rounded-[5px] font-bold shrink-0 bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-400/70 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/60",
-        compact ? "h-[22px] min-w-[56px] text-[12px]" : "h-[26px] min-w-[66px] text-[13.5px]",
+        "inline-flex justify-center items-center px-1.5 rounded-[5px] font-bold shrink-0 bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-400/70 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/60",
+        compact ? "h-[20px] min-w-[52px] text-[11.5px]" : "h-[22px] min-w-[60px] text-[12.5px]",
       )}>
         {(current.kind === "X_PLUS_Y" || current.kind === "FREE") && <Gift className="h-3 w-3 mr-1" />}
         {promoChip(current)}
@@ -158,45 +155,19 @@ export function PromoBanner({
 
       {current.isNew && (
         <span className={cn(
-          "shrink-0 px-1.5 py-0.5 rounded text-[9.5px] font-extrabold uppercase tracking-[0.08em] bg-amber-400 text-black",
+          "shrink-0 px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-[0.08em] bg-amber-400 text-black",
           animOn && "animate-pulse",
         )}>
           Nouveau
         </span>
       )}
 
-      <span className="min-w-0 flex-1">
-        {/* Ligne principale : libellé + article + période */}
-        <span className="flex items-center gap-2 min-w-0">
-          <span className={cn(
-            "font-semibold text-foreground truncate group-hover:text-rose-400 transition-colors",
-            compact ? "text-[13.5px]" : "text-[15px]",
-          )}>
-            {titre}
-          </span>
-          {articleDistinct && (
-            <span className="hidden md:inline-flex items-center gap-1 shrink min-w-0 max-w-[220px] px-1.5 py-0.5 rounded bg-secondary/60 text-[11px] font-medium text-muted-foreground ring-1 ring-inset ring-border">
-              <Tag className="h-3 w-3 shrink-0 opacity-70" />
-              <span className="truncate">{article}</span>
-            </span>
-          )}
-          <span className="inline-flex items-center gap-1 shrink-0 text-[11.5px] text-muted-foreground">
-            <CalendarRange className="h-3 w-3 opacity-70" />
-            {formatPeriode(current.startsAt, current.endsAt)}
-          </span>
-          {/* commande : pitch inline pour rester sur une seule ligne */}
-          {compact && pitch && (
-            <span className="hidden lg:inline text-[12px] text-muted-foreground/90 italic truncate">
-              — {pitch}
-            </span>
-          )}
-        </span>
-        {/* accueil : argumentaire commercial sur sa propre ligne (plus riche) */}
-        {!compact && pitch && (
-          <span className="block text-[12.5px] text-muted-foreground italic truncate mt-0.5">
-            {pitch}
-          </span>
-        )}
+      {/* Libellé seul — article, période et argumentaire retirés */}
+      <span className={cn(
+        "min-w-0 flex-1 font-semibold text-foreground truncate group-hover:text-rose-400 transition-colors",
+        compact ? "text-[13px]" : "text-[14px]",
+      )}>
+        {titre}
       </span>
     </Link>
   );
@@ -215,8 +186,8 @@ export function PromoBanner({
       )}
     >
       <div className={cn(
-        "flex items-center gap-2.5",
-        compact ? "px-3 py-1.5 min-h-[44px]" : "px-4 py-2.5 min-h-[58px]",
+        "flex items-center gap-2",
+        compact ? "px-2.5 py-1 min-h-[36px]" : "px-3 py-1.5 min-h-[44px]",
       )}>
         {/* Label « PROMOS » façon BFM — boîte rouge, cliquable → page Promotions */}
         <Link
@@ -303,9 +274,6 @@ function PromoTickerItem({
   onConsult: (p: ActivePromo) => void;
 }) {
   const titre = promoTitre(p);
-  const article = promoArticle(p);
-  const articleDistinct = titre.toLowerCase() !== article.toLowerCase();
-  const pitch = p.pitch?.trim() || null;
   return (
     <Link
       href="/promos"
@@ -315,7 +283,7 @@ function PromoTickerItem({
     >
       <span className={cn(
         "inline-flex justify-center items-center px-1.5 rounded-[5px] font-bold shrink-0 bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-400/70 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/60",
-        compact ? "h-[20px] min-w-[52px] text-[11.5px]" : "h-[22px] min-w-[58px] text-[12.5px]",
+        compact ? "h-[19px] min-w-[50px] text-[11px]" : "h-[21px] min-w-[56px] text-[12px]",
       )}>
         {(p.kind === "X_PLUS_Y" || p.kind === "FREE") && <Gift className="h-3 w-3 mr-1" />}
         {promoChip(p)}
@@ -328,23 +296,13 @@ function PromoTickerItem({
           Nouveau
         </span>
       )}
+      {/* Libellé seul — article, période et argumentaire retirés */}
       <span className={cn(
         "font-semibold text-foreground whitespace-nowrap group-hover:text-rose-400 transition-colors",
-        compact ? "text-[13px]" : "text-[14px]",
+        compact ? "text-[12.5px]" : "text-[13.5px]",
       )}>
         {titre}
       </span>
-      {articleDistinct && (
-        <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground whitespace-nowrap">
-          <Tag className="h-3 w-3 opacity-70" />{article}
-        </span>
-      )}
-      <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground whitespace-nowrap">
-        <CalendarRange className="h-3 w-3 opacity-70" />{formatPeriode(p.startsAt, p.endsAt)}
-      </span>
-      {pitch && (
-        <span className="text-[11.5px] text-muted-foreground/90 italic whitespace-nowrap">— {pitch}</span>
-      )}
       {/* Séparateur losange façon BFM */}
       <span aria-hidden className="mx-3 h-1.5 w-1.5 rotate-45 bg-rose-500/70 shrink-0" />
     </Link>
