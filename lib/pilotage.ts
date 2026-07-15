@@ -224,10 +224,10 @@ export interface TopSalesperson {
 
 export interface ActivityBucket {
   volume: number;         // Σ DocTotal HT des Orders non annulés (= CA HT BL)
-  caProductNet: number;   // Σ lineTotal des lignes produit (isService=false) — base marge %
+  caProductNet: number;   // Σ lineTotal des lignes COSTÉES (coût EM connu) — base marge % ; 0 = pas encore de vente costable
   weightKg: number;       // Σ quantity × salesUnitWeight par ligne (= Volume kg)
   margin: number;         // Σ (lineTotal − quantity × coût_EM) par ligne (lib/cogs)
-  marginPct: number;      // marge BRUTE / CA produit NET × 100 (base unique lib/margin)
+  marginPct: number;      // marge BRUTE / CA produit COSTÉ × 100 (base unique lib/margin)
   marginCoverage: number; // % des lignes produit dont le coût EM est résolu (qualité données)
   ordersCount: number;
   activeClients: number;
@@ -246,12 +246,12 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
              COUNT(DISTINCT "cardCode")::int AS clients
       FROM "SapOrder"
       WHERE "cancelled" = false AND "docDate" >= ${start} AND "docDate" < ${end} ${slpHdr}`),
-    prisma.$queryRaw<{ n: number; with_cost: number; margin: number; weight: number; ca_product: number }[]>(Prisma.sql`
+    prisma.$queryRaw<{ n: number; with_cost: number; margin: number; weight: number; ca_costed: number }[]>(Prisma.sql`
       SELECT ${COGS_PRODUCT_LINES}::int AS n,
              ${COGS_COSTED_LINES}::int AS with_cost,
              COALESCE(SUM(${COGS_MARGIN}), 0)::float AS margin,
              COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS weight,
-             COALESCE(SUM(l."lineTotal") FILTER (WHERE l."isService" = false), 0)::float AS ca_product
+             COALESCE(SUM(l."lineTotal") FILTER (WHERE cogs."unitCost" IS NOT NULL), 0)::float AS ca_costed
       FROM ${cogsFromSql("order")}
       LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
       WHERE i."cancelled" = false AND i."docDate" >= ${start} AND i."docDate" < ${end} ${slpSql("i", slpName)}`),
@@ -261,15 +261,22 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
   const ordersCount = Number(hdr?.orders ?? 0);
   const margin = Number(ln?.margin ?? 0);
   const linesCount = Number(ln?.n ?? 0);
-  const caProductNet = Number(ln?.ca_product ?? 0);
+  // Base de la marge % = CA des SEULES lignes costées (coût EM connu), exactement
+  // le jeu de lignes qui alimente le numérateur `margin`. Une vente à découvert
+  // (coût EM pas encore saisi) est absente des DEUX termes : elle ne gonfle plus
+  // le dénominateur sans contribuer au numérateur. Sans ça, un jour à forte part
+  // de ventes à découvert écrasait mécaniquement la marge % (num. costé / dénom.
+  // tout produit → % ~0). La fiabilité « stock propre » reste l'indicateur
+  // transparent de la part costée/reçue.
+  const caProductNet = Number(ln?.ca_costed ?? 0);
 
   return {
     volume,
     caProductNet,
     weightKg: Number(ln?.weight ?? 0),
     margin,
-    // Marge BRUTE % sur le CA produit NET (hors services), pas sur le volume BL
-    // total — alignée sur l'écran 2 / la matrice annuelle (base unique lib/margin).
+    // Marge BRUTE % sur le CA produit COSTÉ (num. et dénom. sur le même jeu de
+    // lignes) — jamais sur le volume BL total. Base unique lib/margin.
     marginPct: grossMarginPct(margin, caProductNet),
     marginCoverage: linesCount > 0 ? (Number(ln?.with_cost ?? 0) / linesCount) * 100 : 0,
     ordersCount,

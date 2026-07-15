@@ -155,7 +155,7 @@ function MargeTile({ curr, reliability, state, delay }: { curr: ActivityBucket; 
         ) : state === "error" ? (
           <span className="text-[10.5px] text-muted-foreground">Indisponible</span>
         ) : state === "ok" && !hasData ? (
-          <span className="text-[10.5px] text-muted-foreground">pas encore de vente</span>
+          <span className="text-[10.5px] text-muted-foreground">pas encore de vente costable</span>
         ) : null}
       </div>
     </SurfaceCard>
