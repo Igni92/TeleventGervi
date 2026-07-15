@@ -6,7 +6,7 @@ import { PurchaseOrderHistory } from "@/components/entrees/PurchaseOrderHistory"
 import { PurchaseOrderForm } from "@/components/entrees/PurchaseOrderForm";
 import { PreparateurNav } from "@/components/PreparateurNav";
 
-export const metadata = { title: "Commandes fournisseurs" };
+export const metadata = { title: "Cde Fournisseur" };
 export const dynamic = "force-dynamic";
 
 export default async function CommandesFournisseursPage() {
@@ -23,7 +23,7 @@ export default async function CommandesFournisseursPage() {
       <div>
         <p className="kicker mb-2 hidden md:block">SAP B1 · PurchaseOrder</p>
         <h1 className="text-[26px] sm:text-[32px] font-bold text-foreground tracking-tight leading-none">
-          Commandes fournisseurs
+          Cde Fournisseur
         </h1>
         <p className="hidden md:block text-[13px] text-muted-foreground mt-3 max-w-2xl">
           Suivi des commandes d&apos;achat (engagements fournisseurs). Une commande arrivée

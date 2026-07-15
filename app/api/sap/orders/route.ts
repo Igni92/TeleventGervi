@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { docLabel } from "@/lib/docLabel";
+import { docLabel, docRef } from "@/lib/docLabel";
 import { getAccessScope, clientInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { getTrclDefaultCarrier, getTrclCarrierHeure } from "@/lib/clientCarriers";
@@ -19,6 +19,7 @@ import { isPrecommande } from "@/lib/livraison";
 import { isComptoirClient } from "@/lib/segments";
 import { markComptoirDelivered } from "@/lib/inventory";
 import { debitLots, getLedgerFifoLot } from "@/lib/lotLedger";
+import { heureParis } from "@/lib/paris-time";
 import { getSafeguardsConfig } from "@/lib/safeguardsStore";
 import {
   evaluateLineSafeguards, evaluateOrderSafeguards, splitViolations,
@@ -871,6 +872,22 @@ export async function POST(req: NextRequest) {
     const created = await sap.post<SapOrder>(`/${targetEntity}`, payload);
 
     console.log(`[Order] ✅ SUCCESS (${targetEntity}) — DocNum:`, created.DocNum, "| DocEntry:", created.DocEntry, "| Total:", created.DocTotal);
+
+    // Référence signée du BL sur SAP : « BL N°<DocNum> - <initiales> à <heure> »
+    // (le n° n'existe qu'après création → PATCH). Best-effort : n'affecte jamais
+    // la création. Uniquement pour un VRAI BL (Order), pas une offre (Quotation).
+    // Un éventuel commentaire (mention promo) est préservé en suffixe après « · ».
+    if (!isBonCommande) {
+      try {
+        const blNote = body.comments?.trim() || body.comment?.trim() || null;
+        await sap.patch(`${targetEntity}(${created.DocEntry})`, {
+          Comments: docRef({ prefix: "BL", docNum: created.DocNum, name: session.user?.name, email: session.user?.email, heure: heureParis(), numSign: true, note: blNote }),
+        });
+      } catch (e) {
+        console.warn("[Order] PATCH référence BL échoué (non-bloquant):", (e as Error).message);
+      }
+    }
+
     // NB : on ne marque plus l'offre via setDeliveryBonCommande — les offres sont
     // découvertes en interrogeant les Quotations ouvertes (cf. /api/bons-commande).
     // Le marquage « lots à affecter » est posé sur la COMMANDE issue de la

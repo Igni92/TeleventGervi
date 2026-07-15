@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { docLabel } from "@/lib/docLabel";
+import { docRef } from "@/lib/docLabel";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { isAgreeur, requirePreparateurOrAdmin } from "@/lib/permissions";
@@ -219,15 +219,16 @@ export async function POST(req: NextRequest) {
     }
     return line;
   });
+  const heure = docTime ? docTime.replace(":", "h") : null;
+  const note = body.comment?.trim() || null;
   const payload: Record<string, unknown> = {
     CardCode: cardCode,
     DocDate: docDate,
     DocDueDate: docDate,
     TaxDate: docDate,
-    Comments: [
-      body.comment?.trim() || docLabel("EM", session.user?.name, session.user?.email),
-      docTime ? `Reçu à ${docTime.replace(":", "h")}` : null,
-    ].filter(Boolean).join(" · "),
+    // Référence signée « EM <n°> - <initiales> à <heure> ». Le n° d'EM n'existe
+    // qu'après création → provisoire ici (sans n°), patchée avec le DocNum plus bas.
+    Comments: docRef({ prefix: "EM", name: session.user?.name, email: session.user?.email, heure, note }),
     DocumentLines: documentLines,
   };
   if (body.numAtCard?.trim()) payload.NumAtCard = body.numAtCard.trim();
@@ -293,11 +294,15 @@ export async function POST(req: NextRequest) {
       LineNum: l.LineNum,
       U_NoLot: lotCode,
     }));
-    if (patchLines.length > 0) {
-      await sap.patch(`PurchaseDeliveryNotes(${created.DocEntry})`, { DocumentLines: patchLines });
-    }
+    // Grave le n° définitif dans la référence (« EM <DocNum> - <initiales> à
+    // <heure> ») ET pose le lot sur chaque ligne, en un seul PATCH.
+    const patchBody: Record<string, unknown> = {
+      Comments: docRef({ prefix: "EM", docNum: created.DocNum, name: session.user?.name, email: session.user?.email, heure, note }),
+    };
+    if (patchLines.length > 0) patchBody.DocumentLines = patchLines;
+    await sap.patch(`PurchaseDeliveryNotes(${created.DocEntry})`, patchBody);
   } catch (e) {
-    console.warn("[GoodsReceipt] PATCH U_NoLot échoué (non-bloquant):", (e as Error).message);
+    console.warn("[GoodsReceipt] PATCH U_NoLot / référence échoué (non-bloquant):", (e as Error).message);
   }
 
   // ── Cache des lots : injection immédiate pour les Orders qui suivent ──
