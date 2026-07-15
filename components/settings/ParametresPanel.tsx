@@ -6,7 +6,7 @@ import Link from "next/link";
 import {
   Moon, Sun, ZoomIn, Check, Database, Contrast, Tags, ChevronRight, CalendarClock,
   Palette, Glasses, MonitorCog, MousePointerClick, Wand2, BadgePercent, Rows3,
-  ShieldAlert,
+  ShieldAlert, CloudSun,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { ShelfLifePanel } from "@/components/settings/ShelfLifePanel";
@@ -22,6 +22,7 @@ import {
   UI_ZOOM_VALUES, UI_ZOOM_DEFAULT, applyUiZoom, type UiZoomValue,
   CELEBRATION_MARGIN_DEFAULT, readCelebrationStyle, type CelebrationStyle, CELEBRATION_EVENT,
   applyAccentPos, ACCENT_POS_DEFAULT, ACCENT_POSITIONS, type AccentPos,
+  METEO_ZONE_DEFAULT,
 } from "@/components/settings/app-settings";
 
 /**
@@ -283,6 +284,9 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
   const [accentPos, setAccentPos] = useState<AccentPos>(ACCENT_POS_DEFAULT);
   const [promoAnim, setPromoAnim] = useState<"on" | "off">("on");
   const [promoNotifs, setPromoNotifs] = useState<"on" | "off">("on");
+  // Bandeau météo de l'accueil (visibilité + zone/ville).
+  const [meteoOn, setMeteoOn] = useState<"on" | "off">("on");
+  const [meteoZone, setMeteoZone] = useState<string>("");
   // Célébration « grosse marge »
   const [celebOn, setCelebOn] = useState<"on" | "off">("on");
   const [celebMargin, setCelebMargin] = useState<string>(String(CELEBRATION_MARGIN_DEFAULT));
@@ -321,6 +325,8 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
     setCelebStyle(readCelebrationStyle(readSetting(SETTING_KEYS.celebrationStyle, "both")));
     setPromoAnim(readSetting(SETTING_KEYS.promoBannerAnim, "on") === "off" ? "off" : "on");
     setPromoNotifs(readSetting(SETTING_KEYS.promoNotifs, "on") === "off" ? "off" : "on");
+    setMeteoOn(readSetting(SETTING_KEYS.meteo, "on") === "off" ? "off" : "on");
+    setMeteoZone(readSetting(SETTING_KEYS.meteoZone, ""));
     setLogoConsole(readSetting(SETTING_KEYS.brandLogosConsole, "on") === "off" ? "off" : "on");
     setLogoLivraison(readSetting(SETTING_KEYS.brandLogosLivraison, "on") === "off" ? "off" : "on");
     setLogoInventaire(readSetting(SETTING_KEYS.brandLogosInventaire, "on") === "off" ? "off" : "on");
@@ -346,6 +352,8 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
       if (key === SETTING_KEYS.celebrationStyle) setCelebStyle(readCelebrationStyle(value));
       if (key === SETTING_KEYS.promoBannerAnim) setPromoAnim(value === "off" ? "off" : "on");
       if (key === SETTING_KEYS.promoNotifs) setPromoNotifs(value === "off" ? "off" : "on");
+      if (key === SETTING_KEYS.meteo) setMeteoOn(value === "off" ? "off" : "on");
+      if (key === SETTING_KEYS.meteoZone && value != null) setMeteoZone(value);
       if (key === SETTING_KEYS.brandLogosConsole) setLogoConsole(value === "off" ? "off" : "on");
       if (key === SETTING_KEYS.brandLogosLivraison) setLogoLivraison(value === "off" ? "off" : "on");
       if (key === SETTING_KEYS.brandLogosInventaire) setLogoInventaire(value === "off" ? "off" : "on");
@@ -585,6 +593,36 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
                   options={ONOFF}
                 />
               </SettingRow>
+              <SettingRow
+                title="Bandeau météo (accueil)"
+                desc="Affiche la météo courante en haut de l'accueil. Masquable d'un clic depuis le bandeau (croix)."
+              >
+                <SegmentToggle
+                  ariaLabel="Affichage du bandeau météo"
+                  value={meteoOn}
+                  onChange={(v) => { setMeteoOn(v); writeSetting(SETTING_KEYS.meteo, v); }}
+                  options={ONOFF}
+                />
+              </SettingRow>
+              {meteoOn === "on" && (
+                <SettingRow
+                  title="Zone météo"
+                  desc="Ville affichée par le bandeau (à définir). Vide = zone par défaut."
+                >
+                  <div className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-secondary/60 px-2.5 ring-1 ring-inset ring-border focus-within:ring-brand-500/60">
+                    <CloudSun className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <input
+                      type="text"
+                      aria-label="Ville de la météo"
+                      value={meteoZone}
+                      placeholder={METEO_ZONE_DEFAULT}
+                      onChange={(e) => setMeteoZone(e.target.value)}
+                      onBlur={() => writeSetting(SETTING_KEYS.meteoZone, meteoZone.trim())}
+                      className="w-40 bg-transparent text-[13.5px] font-semibold text-foreground outline-none placeholder:font-normal placeholder:text-muted-foreground"
+                    />
+                  </div>
+                </SettingRow>
+              )}
               <SettingRow
                 title="Célébration des grosses marges"
                 desc="Quand une commande est validée avec une marge nette élevée, une pluie de billets salue le coup. Entièrement désactivable."

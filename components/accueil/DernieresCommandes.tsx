@@ -135,6 +135,7 @@ export function DernieresCommandes() {
             <span className="w-16 shrink-0 flex justify-center" title="Poids (kg)"><Scale className="h-4 w-4" /></span>
             <span className="w-4 shrink-0" />
           </div>
+          <div className="-mx-1 px-1 max-h-[300px] overflow-y-auto overscroll-contain">
           <ul className="divide-y divide-border/60">
             {docs.map((d) => (
               <li key={d.docEntry ?? `${d.docNum}-${d.cardCode}`}>
@@ -159,6 +160,7 @@ export function DernieresCommandes() {
               </li>
             ))}
           </ul>
+          </div>
         </>
       )}
 

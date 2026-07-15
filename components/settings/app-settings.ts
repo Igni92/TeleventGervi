@@ -98,7 +98,25 @@ export const SETTING_KEYS = {
    * attribut `data-hover-contrast` sur <html>).
    */
   hoverContrast: "televente:hoverContrast",
+  /**
+   * Bandeau météo de l'accueil : "on" (défaut) | "off" (masqué). Masquable
+   * d'un clic depuis le bandeau lui-même (croix) ou depuis les Paramètres.
+   * Honoré par MeteoBar.
+   */
+  meteo: "televente:meteo",
+  /**
+   * Zone (ville) affichée par le bandeau météo — À DÉFINIR selon le poste.
+   * Chaîne libre (ex. « Perpignan »), résolue côté serveur par /api/meteo.
+   * Vide → METEO_ZONE_DEFAULT.
+   */
+  meteoZone: "televente:meteoZone",
 } as const;
+
+/**
+ * Zone (ville) météo par défaut — PROVISOIRE, à définir avec la Direction.
+ * Sert de repli quand aucune zone n'est saisie dans les Paramètres.
+ */
+export const METEO_ZONE_DEFAULT = "Perpignan";
 
 /** Valeur de contraste de survol par défaut (en %). */
 export const HOVER_CONTRAST_DEFAULT = 60;
