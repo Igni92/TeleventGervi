@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef, Fragment } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef, Fragment, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
@@ -316,12 +316,15 @@ function OrderShortcuts({ onPick }: { onPick: (code: string) => void }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
 
+  // Nombre maximum de raccourcis affichés/mémorisés.
+  const MAX_SHORTCUTS = 4;
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(SHORTCUTS_KEY);
       if (raw) {
         const a = JSON.parse(raw);
-        if (Array.isArray(a)) setShortcuts(a.filter((x) => typeof x === "string"));
+        if (Array.isArray(a)) setShortcuts(a.filter((x) => typeof x === "string").slice(0, MAX_SHORTCUTS));
       }
     } catch { /* ignore */ }
   }, []);
@@ -332,7 +335,7 @@ function OrderShortcuts({ onPick }: { onPick: (code: string) => void }) {
   };
   const add = (v: string) => {
     const t = v.trim().toUpperCase();
-    if (!t || shortcuts.includes(t)) return;
+    if (!t || shortcuts.includes(t) || shortcuts.length >= MAX_SHORTCUTS) return;
     persist([...shortcuts, t]);
   };
 
@@ -361,12 +364,12 @@ function OrderShortcuts({ onPick }: { onPick: (code: string) => void }) {
           aria-label="Nouveau raccourci"
           className="h-6 w-[76px] rounded-md border border-border bg-background px-1.5 text-[11.5px] uppercase focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
-      ) : (
-        <button type="button" onClick={() => setAdding(true)} title="Ajouter un raccourci produit"
+      ) : shortcuts.length < MAX_SHORTCUTS ? (
+        <button type="button" onClick={() => setAdding(true)} title="Ajouter un raccourci produit (4 max)"
           className="inline-flex items-center gap-0.5 rounded-md border border-dashed border-border px-1.5 py-0.5 text-[11.5px] font-semibold text-muted-foreground hover:border-brand-400/60 hover:text-foreground">
           <Plus className="h-3 w-3" /> Raccourci
         </button>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -397,11 +400,14 @@ function CartDropGap({
   );
 }
 
-export function Ecran2Order({ clientId, clientName, stockSharePct = 100, deliveryModeId = "", modifier: modifierProp = null, onExitModif, onSubmitted }: {
+export function Ecran2Order({ clientId, clientName, stockSharePct = 100, deliveryModeId = "", clientHeader = null, modifier: modifierProp = null, onExitModif, onSubmitted }: {
   clientId: string; clientName: string; stockSharePct?: number;
   /** Mode de livraison / compte SAP du bon — choisi dans le bandeau client
    *  (à côté du nom) ; par défaut le mode par défaut du client. */
   deliveryModeId?: string;
+  /** Bandeau client (nom + méta + recherche) REGROUPÉ avec le stock : posé en
+   *  tête de la colonne stock pour ne former qu'un seul bloc à gauche. */
+  clientHeader?: ReactNode;
   /** Cible de MODIFICATION (diffusée par « Détail livraison ») : on pré-remplit le
    *  panier avec les lignes du BL et on enregistre sur ce BL. */
   modifier?: { docEntry: number; docNum: number } | null;
@@ -1544,6 +1550,35 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, deliver
              [+]  Nom — description           prix €/u    stock u
       */}
       <div className="flex-1 min-w-0 min-h-0 flex flex-col panel p-3">
+        {/* Bandeau client REGROUPÉ ici : nom + méta + recherche « créer / modifier
+            un bon », en tête de la colonne stock (un seul bloc à gauche). */}
+        {clientHeader}
+        {/* Réf. client + note du BL — CALÉES ici (dans le bloc gauche) plutôt qu'au
+            pied de la commande, pour laisser plus de place aux lignes produit. */}
+        <div className="shrink-0 mb-2 space-y-1">
+          {modif && cart.some((l) => l.promo) && (
+            <div className="flex justify-end">
+              <button type="button"
+                onClick={() => setComments((c) => {
+                  const t = buildPromoComment();
+                  if (!t) return c;
+                  return c.trim() ? `${c.trim()} · ${t}` : t;
+                })}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline">
+                <Megaphone className="h-3 w-3" /> Insérer le texte promo
+              </button>
+            </div>
+          )}
+          <div className="flex gap-1.5">
+            <input id="bl-numatcard" value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)}
+              placeholder="N° de commande (réf. client)" aria-label="N° de commande (réf. client)"
+              className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13.5px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+            <input id="bl-note" value={comments} onChange={(e) => setComments(e.target.value)} maxLength={254}
+              placeholder={modif ? "Texte sur le BL (note/promo)" : "Texte sur le BL (note)"}
+              aria-label="Texte sur le BL"
+              className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+          </div>
+        </div>
         <div className="flex items-center gap-2 mb-2 shrink-0">
           {/* Onglets : Stock (catalogue) / Tarif (cotations spécifiques du client) */}
           <div className="inline-flex items-center gap-0.5 rounded-md border border-border p-0.5 shrink-0">
@@ -1947,19 +1982,19 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, deliver
             ) : "Commande"}
           </p>
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Dupliquer la DERNIÈRE commande du client — pré-remplit le panier */}
+            {/* Raccourcis produits personnalisables (ajout direct au panier) */}
+            <OrderShortcuts onPick={addByShortcut} />
+            {/* Dupliquer la DERNIÈRE commande — ICÔNE SEULE, à droite des raccourcis. */}
             {!modif && (
               <button
                 type="button" onClick={replayLast} disabled={replaying || prefilling}
+                aria-label="Dupliquer la dernière commande"
                 title="Dupliquer la dernière commande du client dans le panier (quantités + prix)"
-                className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border text-[12px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
+                className="inline-flex items-center justify-center h-8 w-8 shrink-0 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
               >
                 {replaying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <History className="h-3.5 w-3.5" />}
-                Dupliquer la dernière cde
               </button>
             )}
-            {/* Raccourcis produits personnalisables (ajout direct au panier) */}
-            <OrderShortcuts onPick={addByShortcut} />
           </div>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
@@ -2315,47 +2350,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, deliver
                   <span className="font-semibold whitespace-nowrap">Bon de commande</span>
                 </label>
               </div>
-              {/* Réf. client + TEXTE du BL côte à côte (même rangée que transporteur/tournée). */}
-              <div className="flex gap-1.5">
-                <input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="N° de commande (réf. client)"
-                  aria-label="N° de commande (réf. client)"
-                  className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13.5px] px-2" />
-                <input value={comments} onChange={(e) => setComments(e.target.value)} maxLength={254}
-                  placeholder="Texte sur le BL (note)"
-                  aria-label="Texte sur le BL"
-                  className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13.5px] px-2" />
-              </div>
             </>
           )}
-          {/* Modification : N° de commande (réf. client) + ligne TEXTE du BL,
-              CÔTE À CÔTE (même rangée que transporteur/tournée à la création). */}
-          {modif && (
-            <div className="space-y-1">
-              {cart.some((l) => l.promo) && (
-                <div className="flex justify-end">
-                  <button type="button"
-                    onClick={() => setComments((c) => {
-                      const t = buildPromoComment();
-                      if (!t) return c;
-                      return c.trim() ? `${c.trim()} · ${t}` : t;
-                    })}
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline">
-                    <Megaphone className="h-3 w-3" /> Insérer le texte promo
-                  </button>
-                </div>
-              )}
-              <div className="flex gap-1.5">
-                <input id="bl-numatcard" value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)}
-                  placeholder="N° de commande (réf. client)"
-                  aria-label="N° de commande (réf. client)"
-                  className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13.5px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
-                <input id="bl-note" value={comments} onChange={(e) => setComments(e.target.value)}
-                  maxLength={254} placeholder="Texte sur le BL (note/promo)"
-                  aria-label="Ligne texte sur le BL"
-                  className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
-              </div>
-            </div>
-          )}
+          {/* Réf. client + note du BL : déplacées en tête du bloc gauche
+              (cf. colonne stock) — plus au pied de la commande. */}
           {/* Total HT : porté sur le bouton d'action (plus de ligne dédiée). */}
           {/* Indicateur de marge — prix transport /kg en haut à droite + bascule
               /livraison ↔ /kg. MARGE NETTE en gros en bas (feu tricolore : rouge

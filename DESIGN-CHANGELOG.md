@@ -882,3 +882,20 @@ Si le salarié repasse malgré tout sur **CP** alors qu'il a de la récup, un ra
 « Il te reste X de récup — utilise-la avant tes CP » + bouton **Utiliser ma récup** (et signale
 au passage un éventuel samedi décompté). Réservé au salarié (jamais la direction), validé
 ensuite par la personne en charge (circuit boomerang).
+
+---
+
+## 🧱 Écran 2 — bloc client + stock regroupés, commande pleine hauteur
+
+Suite de la refonte de l'Écran 2 : le **bandeau client** n'est plus une rangée
+pleine largeur au-dessus des colonnes — il est **regroupé avec le stock dans un
+seul bloc à gauche**, ce qui laisse la **colonne commande s'aligner sur toute la
+hauteur** (plus de lignes produit visibles sans scroller).
+
+| Élément | Avant | Après |
+|---------|-------|-------|
+| **Bloc gauche** | Bandeau client (panneau plein) au-dessus, puis colonne stock en dessous. | **Un seul bloc** : identité client + méta + recherche « créer / modifier un bon » **intégrées en tête de la colonne stock** (bandeau « plat », séparateur, plus de panneau séparé). Passé au constructeur via `clientHeader`. |
+| **Colonne commande** | Démarrait sous le bandeau client → écourtée. | S'**aligne sur toute la hauteur** du bloc → nettement plus de lignes visibles sans scroller. |
+| **N° de commande (réf. client) + note BL** | Rangée dédiée au **pied** de la commande. | **Calées en tête du bloc gauche** (avec le client) — le pied de la commande est allégé d'autant. |
+| **« Dupliquer la dernière cde »** | Bouton texte + icône, à **gauche** des raccourcis. | **Icône seule**, posée **à droite** des raccourcis. |
+| **Raccourcis produits** | Nombre illimité. | **Limités à 4** (bouton « + Raccourci » masqué au-delà). |
