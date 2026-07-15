@@ -1003,3 +1003,13 @@ lisible mais aéré) :
 | Exceptions peu distinctes | **CP, récup, férié, absence, maladie** ressortent nettement (pastille pleine colorée, `font-semibold`) |
 
 Lisibilité conservée (libellés partout, abrégés sur mobile) ; le calendrier respire.
+
+---
+
+## 📦 Détail livraison — signaler un manquant en remettant sur la file (NOUVEAU)
+
+| Élément | Détail |
+|---------|--------|
+| Remise sur la file avec signalement | Le bouton **« Pas terminée — remettre sur la file »** (vue en grand) ouvre désormais un dialog où le préparateur **touche les articles manquants** (facultatif) avant de renvoyer la commande « à préparer ». Les codes signalés sont persistés avec l'état « à reprendre » (`livincomplete:` étendu de `missing[]`, exposé par l'API en `reportedMissing`). |
+| Optimisé mobile / tablette | Dialog `max-h-[92vh]` défilant, lignes en **grandes cibles tactiles** (case à cocher 24 px + colisage + article), boutons d'action **empilés pleine largeur** sur petit écran (h-11), toast récapitulatif (« N manquant(s) signalé(s) »). |
+| Restitution | Badge ambre **« N signalé(s) »** sur la ligne commande (à côté de « À reprendre »), articles marqués **« Signalé manquant »** (fond ambre) dans le détail et la vue en grand. Signalement levé automatiquement quand la commande est reprise (claim), marquée « faite » ou « départ ». |
