@@ -657,17 +657,14 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             </span>
           </p>
 
-          {/* SUGGESTION à l'avantage du salarié : ce CP « gaspille » un samedi
-              (jour ouvrable décompté, non travaillé) alors qu'il reste de la
-              récup → propose de basculer en récupération (ses CP sont préservés).
-              Validation par la personne en charge des congés (circuit boomerang). */}
-          {suggestRecup && (
+          {/* SUGGESTION réservée au SALARIÉ (jamais la direction) : ce CP inclut
+              un samedi décompté alors qu'il reste de la récup → bascule en récup
+              pour préserver ses CP. Validée ensuite par la personne en charge. */}
+          {isSelf && !isDirection && suggestRecup && (
             <div className="mb-2.5 flex flex-col gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-2.5 sm:flex-row sm:items-center">
               <Lightbulb className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-400" />
               <p className="min-w-0 flex-1 text-[12px] text-sky-800 dark:text-sky-200">
-                Ce CP décompte aussi <b className="font-semibold">{cpSaturdays.length} samedi{cpSaturdays.length > 1 ? "s" : ""}</b> (jour ouvrable non travaillé).
-                {" "}Tu as <b className="font-semibold tnum">{fmtHM(recupBalanceMin)}</b> de récup{recupDaysAvail > 0 ? ` (~${recupDaysAvail} j)` : ""} —
-                pose une <b className="font-semibold">récupération</b> à la place pour <b className="font-semibold">préserver tes CP</b>.
+                Ce CP décompte <b className="font-semibold">{cpSaturdays.length} samedi{cpSaturdays.length > 1 ? "s" : ""}</b> — bascule en récup pour préserver tes CP{recupDaysAvail > 0 ? ` (${recupDaysAvail} j dispo)` : ""}.
               </p>
               <button type="button" onClick={() => setType("recup")}
                 className="inline-flex shrink-0 items-center justify-center gap-1.5 h-9 px-3 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[12.5px] font-semibold">
