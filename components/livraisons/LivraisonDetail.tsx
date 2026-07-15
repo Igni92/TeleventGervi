@@ -2525,7 +2525,7 @@ const OrderRow = memo(function OrderRow({
                             </span>
                           )}
                         </div>
-                        <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} size="md" className="mt-1" />
+                        <DesignationChips marque={l.marque} condt={l.condt} calibre={l.calibre} variete={l.variete} pays={l.pays} size="md" className="mt-1" />
                       </div>
                     </div>
                   </td>
@@ -2634,7 +2634,7 @@ const OrderRow = memo(function OrderRow({
                       </span>
                     )}
                   </p>
-                  <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} className="mt-1" />
+                  <DesignationChips marque={l.marque} condt={l.condt} calibre={l.calibre} variete={l.variete} pays={l.pays} className="mt-1" />
                 </div>
                 <BrandLogo marque={l.marque} logos={brandLogos} size="lg" className="self-center" zoomable />
               </li>
