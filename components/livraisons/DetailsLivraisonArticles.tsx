@@ -90,7 +90,7 @@ export function DetailsLivraisonArticles() {
         for (const l of d.lines) {
           let a = map.get(l.itemCode);
           if (!a) {
-            const tags = [cleanTag(l.marque), cleanTag(l.condt), cleanTag(l.variete), cleanTag(l.pays)]
+            const tags = [cleanTag(l.marque), cleanTag(l.condt), cleanTag(l.calibre), cleanTag(l.variete), cleanTag(l.pays)]
               .filter((t) => t && t.toUpperCase() !== l.itemName.toUpperCase());
             a = { itemCode: l.itemCode, itemName: l.itemName, tags: [...new Set(tags)],
               seg: { GMS: { colis: 0, kg: 0 }, CHR: { colis: 0, kg: 0 }, EXPORT: { colis: 0, kg: 0 } }, openDocs: [] };

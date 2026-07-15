@@ -296,13 +296,16 @@ export async function GET(req: NextRequest) {
       (async () => {
         const neg: Record<string, number> = {};
         const onHand: Record<string, number> = {};
+        // Calibre (U_GER_CALIBRE) — LU EN DIRECT sur SAP Items (pas synchronisé en
+        // local) pour l'afficher en tag de PRÉPARATION. Best-effort par lot.
+        const cal: Record<string, string> = {};
         const chunks: string[][] = [];
         for (let i = 0; i < allItemCodes.length; i += 20) chunks.push(allItemCodes.slice(i, i + 20));
         await Promise.all(chunks.map(async (chunk) => {
           try {
             const or = chunk.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
-            const items = await sap.getAll<{ ItemCode: string; QuantityOnStock?: number; QuantityOrderedByCustomers?: number }>(
-              `Items?$select=ItemCode,QuantityOnStock,QuantityOrderedByCustomers&$filter=${encodeURIComponent(`(${or})`)}`,
+            const items = await sap.getAll<{ ItemCode: string; QuantityOnStock?: number; QuantityOrderedByCustomers?: number; U_GER_CALIBRE?: string | null }>(
+              `Items?$select=ItemCode,QuantityOnStock,QuantityOrderedByCustomers,U_GER_CALIBRE&$filter=${encodeURIComponent(`(${or})`)}`,
               { pageSize: 50, maxPages: 2 },
             );
             for (const it of items) {
@@ -315,14 +318,17 @@ export async function GET(req: NextRequest) {
               // AUTRES jours / reliquats.
               const available = (it.QuantityOnStock ?? 0) - (it.QuantityOrderedByCustomers ?? 0);
               if (available < 0) neg[it.ItemCode] = available;
+              const c = (it.U_GER_CALIBRE ?? "").trim();
+              if (c) cal[it.ItemCode] = c;
             }
           } catch { /* lot en échec → pas de stock pour ces articles */ }
         }));
-        return { neg, onHand };
+        return { neg, onHand, cal };
       })(),
     ]);
     const negativeStocks = stockInfo.neg;
     const onHandStocks = stockInfo.onHand;
+    const calibreByCode = stockInfo.cal;
     const typeByCardCode = clientMeta.types;
     const nameByCardCode = clientMeta.names;
     const comptoirByCardCode = clientMeta.comptoir;
@@ -360,11 +366,12 @@ export async function GET(req: NextRequest) {
           colis: Math.round(colisRaw * 10) / 10,
           weightKg: Math.round(weightRaw * 10) / 10,
           warehouse: l.WarehouseCode ?? null,
-          // Tags désignation (préparation) — marque · conditionnement · origine · variété.
+          // Tags désignation (préparation) — marque · conditionnement · calibre · variété · origine.
           marque: p?.uMarque ?? null,
           condt: p?.uCondi ?? null,
           pays: p?.uPays ?? null,
           variete: p?.frgnName ?? null,
+          calibre: calibreByCode[l.ItemCode] ?? null,
         };
       });
       // Fusion des lignes d'un MÊME article (ex. ligne gratuite en plus de la

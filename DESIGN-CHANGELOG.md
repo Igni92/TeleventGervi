@@ -913,3 +913,22 @@ Exemple (journée 7h15) : poser une semaine avec **18 h de récup** → **2 j en
 `floor(18 ÷ 7,25) = 2`) **+ le reste en CP** ; jamais une 3ᵉ journée partielle (21h45 > 18 h).
 Un samedi éventuel restant en CP est signalé. Toujours à l'avantage du salarié (récup majorée
 au crédit, débit plafonné au manque réel vs 35 h).
+
+---
+
+## 🏷️ Préparation — tags variété + calibre sur les articles
+
+Les écrans de **préparation** (Détail livraison + récap par article) affichent
+désormais, en plus de la marque · conditionnement · origine, la **variété** et le
+**calibre** de chaque article — pour lever les ambiguïtés entre deux lots d'un
+même fruit (ex. Fraise *Belorta / Karima* vs *Lady Gold*, calibre différent).
+
+| Écran | Avant | Après |
+|-------|-------|-------|
+| **Détail livraison** (console de préparation, lue au téléphone) | Tags marque · condt · origine. | + **calibre** (teal) et **variété** (rose) — mêmes couleurs que l'Écran 2. |
+| **Récap par article** | marque · condt · variété · origine. | + **calibre**. |
+
+- **Variété** = `Product.frgnName` (SAP `FrgnName`), déjà synchronisée.
+- **Calibre** = SAP `Items.U_GER_CALIBRE`, **lu en direct** dans `/api/livraisons`
+  (piggyback sur la requête stock existante) — aucun champ local ni migration :
+  le calibre n'apparaît que pour les articles où SAP le renseigne.
