@@ -653,6 +653,19 @@ salarié, validé par l'employeur** — chaque camp valide ce que l'autre pose
 
 ---
 
+## 🏷️ Promotions — tarif imposé + ciblage par type de magasin
+
+| Élément | Comportement |
+|---------|--------------|
+| **Nouveau type « Tarif imposé »** (`kind='PRICE'`) | En plus de Remise %, X+Y et Colis offert, une promo peut désormais **fixer un prix unitaire** qui **remplace le prix conseillé/négocié** à l'ajout au panier (Console Écran 2). Le badge affiche le prix (« 2,80 € ») ; la mention BL devient « … — tarif 2.80 € ». |
+| **Ciblage par type de magasin** (`storeType`) | Une promo peut viser **tous les magasins d'un type** (Export / GMS / CHR) ou rester globale (« Tous »). L'Écran 2 ne pré-applique que les promos dont le type correspond au magasin actif (ou non ciblées). Chip de cible colorée (violet Export / bleu GMS / vert CHR) dans le gestionnaire. |
+| **Libellé riche à tags** | Pour un tarif, le libellé est **composé automatiquement** depuis les tags de l'article — ex. « Groseille Mixte  12x125g  Belgique  Belorta   Prix Unitaire  2.80 EUR » — et reste modifiable. Les tags (conditionnement · pays · marque · variété) s'affichent en pastilles dans la liste des promos. |
+
+- Colonne additive `Promo."storeType"` (TEXT, nullable) — DDL idempotent `scripts/ddl-promos-store-type.mjs` + migration manuelle `prisma/migrations/manual/20260711_promo_store_type.sql`. Le prix imposé réutilise `value` (pas de nouvelle colonne).
+- `/api/promos` (GET filtre `?storeType=`, POST/PATCH acceptent `kind='PRICE'` + `storeType`) renvoie aussi les tags produit (LEFT JOIN `Product`) pour le libellé riche.
+
+---
+
 ## 🖱️ Effet au clic — 3 effets au choix + spam-clic
 
 | Avant | Après |

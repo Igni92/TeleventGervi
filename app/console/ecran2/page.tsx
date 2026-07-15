@@ -186,7 +186,7 @@ export default function Ecran2Page() {
         ) : clientId && clientName ? (
           <Ecran2Order
             key={modif ? `m${modif.docEntry}` : clientId}
-            clientId={clientId} clientName={clientName} stockSharePct={sharePct}
+            clientId={clientId} clientName={clientName} clientType={info?.type ?? null} stockSharePct={sharePct}
             deliveryModeId={modeId}
             clientHeader={banner}
             modifier={modifier} onExitModif={exitModif} onSubmitted={handleSubmitted}

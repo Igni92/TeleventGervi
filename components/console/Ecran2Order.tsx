@@ -48,8 +48,10 @@ interface Hint {
 }
 /** C2 — Promo active sur un article (cf. /api/promos?active=1). */
 interface Promo {
-  id: string; itemCode: string; kind: "PERCENT" | "X_PLUS_Y" | "FREE";
+  id: string; itemCode: string; kind: "PERCENT" | "X_PLUS_Y" | "FREE" | "PRICE";
   value: number; buyQty: number; freeQty: number; label: string | null;
+  /** Type de magasin ciblé (EXPORT | GMS | CHR) — null = tous. */
+  storeType?: string | null;
   startsAt?: string | null; endsAt?: string | null;
 }
 interface CartLine {
@@ -111,9 +113,10 @@ function applyPromoFree(line: CartLine): CartLine {
   return line;
 }
 
-/** Libellé court du badge promo : « −10 % », « 5+1 » ou « +1 offert ». */
+/** Libellé court du badge promo : « −10 % », « 2,80 € », « 5+1 » ou « +1 offert ». */
 function promoBadge(pr: Promo): string {
   if (pr.kind === "PERCENT") return `−${String(Math.round(pr.value * 100) / 100)} %`;
+  if (pr.kind === "PRICE") return `${pr.value.toFixed(2).replace(".", ",")} €`;
   if (pr.kind === "FREE") return `+${pr.freeQty} offert${pr.freeQty > 1 ? "s" : ""}`;
   return `${pr.buyQty}+${pr.freeQty}`;
 }
@@ -400,8 +403,11 @@ function CartDropGap({
   );
 }
 
-export function Ecran2Order({ clientId, clientName, stockSharePct = 100, deliveryModeId = "", clientHeader = null, modifier: modifierProp = null, onExitModif, onSubmitted }: {
-  clientId: string; clientName: string; stockSharePct?: number;
+export function Ecran2Order({ clientId, clientName, clientType = null, stockSharePct = 100, deliveryModeId = "", clientHeader = null, modifier: modifierProp = null, onExitModif, onSubmitted }: {
+  clientId: string; clientName: string;
+  /** Type du magasin actif (EXPORT | GMS | CHR) — filtre les promos ciblées. */
+  clientType?: string | null;
+  stockSharePct?: number;
   /** Mode de livraison / compte SAP du bon — choisi dans le bandeau client
    *  (à côté du nom) ; par défaut le mode par défaut du client. */
   deliveryModeId?: string;
@@ -737,19 +743,26 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, deliver
     });
   };
 
-  // ── C2 — Promos actives (Dialog récap + remise auto au panier) ──
+  // ── C2 — Promos actives (Dialog récap + remise/tarif auto au panier) ──
+  // On ne garde que les promos qui CIBLENT ce magasin : storeType null (toutes)
+  // OU storeType == type du client actif. Ainsi un « tarif imposé GMS » ne
+  // s'applique qu'aux magasins GMS.
   useEffect(() => {
+    const ct = (clientType || "").trim().toUpperCase();
     fetch(`/api/promos?active=1`).then((r) => r.json())
       .then((d) => {
         const list = (d?.promos ?? []) as Promo[];
         const map: Record<string, Promo> = {};
         for (const pr of list) {
-          if (pr?.itemCode && !map[pr.itemCode]) map[pr.itemCode] = pr;
+          if (!pr?.itemCode) continue;
+          const st = (pr.storeType || "").trim().toUpperCase();
+          if (st && st !== ct) continue;       // promo ciblée sur un autre type
+          if (!map[pr.itemCode]) map[pr.itemCode] = pr;
         }
         setPromos(map);
       })
       .catch(() => { /* promos optionnelles */ });
-  }, []);
+  }, [clientType]);
 
   // ── Notes qualité (étoiles) par article — saisies à la réception ──
   useEffect(() => {
@@ -880,7 +893,10 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, deliver
       ? opts.price
       : (tarifByCode.get(p.itemCode) ?? fruitPrice ?? hints[p.itemCode]?.prixConseille ?? null);
     let discountPercent = 0;
-    if (promo?.kind === "PERCENT" && promo.value > 0 && promo.value < 100) {
+    if (promo?.kind === "PRICE" && promo.value > 0) {
+      // Tarif imposé : le prix unitaire fixe REMPLACE le prix conseillé/négocié.
+      price = promo.value;
+    } else if (promo?.kind === "PERCENT" && promo.value > 0 && promo.value < 100) {
       discountPercent = promo.value;
       if (price != null) price = Math.round(price * (1 - promo.value / 100) * 100) / 100;
     }
@@ -1030,7 +1046,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, deliver
       if (!pr) return l;
       let price = l.price;
       let discountPercent = 0;
-      if (pr.kind === "PERCENT" && pr.value > 0 && pr.value < 100) {
+      if (pr.kind === "PRICE" && pr.value > 0) {
+        price = pr.value;   // tarif imposé → prix unitaire fixe
+      } else if (pr.kind === "PERCENT" && pr.value > 0 && pr.value < 100) {
         discountPercent = pr.value;
         if (price != null) price = Math.round(price * (1 - pr.value / 100) * 100) / 100;
       }
@@ -1168,7 +1186,9 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, deliver
     for (const l of cart) {
       if (!l.promo) continue;
       const name = l.promo.label?.trim() || l.itemName;
-      if (l.promo.kind === "PERCENT" && l.discountPercent > 0) {
+      if (l.promo.kind === "PRICE" && l.promo.value > 0) {
+        parts.push(`${name} — tarif ${l.promo.value.toFixed(2)} €`);
+      } else if (l.promo.kind === "PERCENT" && l.discountPercent > 0) {
         parts.push(`−${String(Math.round(l.discountPercent * 100) / 100)}% ${name}`);
       } else if (l.promo.kind === "X_PLUS_Y" && l.freeUnits > 0) {
         parts.push(`${l.promo.buyQty}+${l.promo.freeQty} ${name} (${l.freeUnits} colis offert${l.freeUnits > 1 ? "s" : ""})`);
