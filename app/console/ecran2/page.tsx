@@ -153,23 +153,31 @@ export default function Ecran2Page() {
     setDismissedId(displayedIdRef.current);
   }, []);
 
+  // Bandeau client (nom + méta + recherche « créer / modifier un bon »).
+  // REGROUPÉ avec le stock dans un même bloc à gauche : passé au constructeur
+  // via `clientHeader` (posé en tête de la colonne stock), ou rendu seul dans
+  // l'état « en attente d'un client ».
+  const banner = (
+    <ClientBanner
+      clientId={clientId} clientName={clientName} info={info}
+      manual={manual != null || dismissed}
+      searchMode={searchMode} onSearchModeChange={setSearchMode}
+      onPick={pickClient} onClearManual={clearManual}
+      modes={modif ? [] : modes} modeId={modeId} onModeChange={setModeId}
+    />
+  );
+
   return (
     <div className="h-full flex flex-col gap-3 animate-fade-up min-h-0">
       {/* ── Bandeau PROMOTIONS — barre tout en haut de l'écran ── */}
       <PromoBanner context="commande" />
 
-      <ClientBanner
-        clientId={clientId} clientName={clientName} info={info}
-        manual={manual != null || dismissed}
-        searchMode={searchMode} onSearchModeChange={setSearchMode}
-        onPick={pickClient} onClearManual={clearManual}
-        modes={modif ? [] : modes} modeId={modeId} onModeChange={setModeId}
-      />
-
       {/* Sélecteur de BL (mode « Modifier un bon ») — liste des bons du compte choisi. */}
       <BLPickerDialog client={browseClient} onClose={() => setBrowseClient(null)} onPick={pickModifDoc} />
 
-      {/* Constructeur de commande — prend tout l'espace restant */}
+      {/* Constructeur de commande — prend tout l'espace restant. Le bandeau client
+          est regroupé avec le stock (bloc gauche) ; la colonne commande s'aligne
+          alors sur toute la hauteur → plus de lignes visibles sans scroller. */}
       <div className="flex-1 min-h-0">
         {!ready ? (
           <p className="text-[13px] text-muted-foreground inline-flex items-center gap-2 p-4">
@@ -180,13 +188,17 @@ export default function Ecran2Page() {
             key={modif ? `m${modif.docEntry}` : clientId}
             clientId={clientId} clientName={clientName} stockSharePct={sharePct}
             deliveryModeId={modeId}
+            clientHeader={banner}
             modifier={modifier} onExitModif={exitModif} onSubmitted={handleSubmitted}
           />
         ) : (
-          <div className="h-full flex items-center justify-center panel">
-            <p className="hidden md:block text-[13px] text-muted-foreground text-center max-w-xs">
-              Sélectionne un client sur l&apos;écran 1 — ou recherche un compte ci-dessus — pour afficher son stock et saisir une commande ici.
-            </p>
+          <div className="h-full flex flex-col gap-3 min-h-0">
+            {banner}
+            <div className="flex-1 flex items-center justify-center panel">
+              <p className="hidden md:block text-[13px] text-muted-foreground text-center max-w-xs">
+                Sélectionne un client sur l&apos;écran 1 — ou recherche un compte ci-dessus — pour afficher son stock et saisir une commande ici.
+              </p>
+            </div>
           </div>
         )}
       </div>
@@ -287,10 +299,13 @@ function ClientBanner({
   //    commercial, e-mail…) vivent sur l'Écran 1 ; ici on garde une méta légère
   //    (type, incidents, téléphones, mini-frise). Largeur au contenu (w-fit).
   return (
-    <div className="shrink-0 flex flex-col-reverse lg:flex-row lg:items-start gap-3">
-      <header className="panel w-fit max-w-full px-4 py-2">
+    <div className="shrink-0 border-b border-border pb-2.5 mb-2.5">
+      {/* Identité client + recherche « créer / modifier un bon » intégrée à droite —
+          le tout REGROUPÉ avec le stock dans un même bloc (pas de panneau séparé). */}
+      <div className="flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
         <p className="kicker mb-1">Compte · prise de commande</p>
-        {/* Nom client — HÉRO du bandeau (grand titre display, comme l'accueil). */}
+        {/* Nom client — HÉRO du bloc (grand titre display, comme l'accueil). */}
         <div className="flex items-center gap-2.5 min-w-0">
           {/* Le nom EST le lien vers la fiche complète. */}
           {clientId ? (
@@ -361,9 +376,10 @@ function ClientBanner({
         </div>
         {/* Notes des dernières commandes (vraies remarques) — utile à la saisie */}
         <OrderNotes docs={deliveryDocs} compact />
-      </header>
-      {/* Recherche + création de bon — juste à côté du client */}
-      <div className="w-full lg:flex-1 lg:max-w-[560px]">{searchRow}</div>
+        </div>
+        {/* Recherche + créer / modifier un bon — intégrée en haut du bloc, à droite. */}
+        <div className="w-full xl:w-[380px] shrink-0">{searchRow}</div>
+      </div>
     </div>
   );
 }
