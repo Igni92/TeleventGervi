@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import { requireCanReceivePurchaseOrder } from "@/lib/permissions";
 import { sap } from "@/lib/sapb1";
 import { incrementLocalStock } from "@/lib/stockSync";
-import { bumpLot } from "@/lib/lotResolver";
-import { creditLots } from "@/lib/lotLedger";
+import { bumpLot, LOT_PENDING } from "@/lib/lotResolver";
+import { creditLots, debitLots } from "@/lib/lotLedger";
+import { buildWhsBudget, remainingForItem, pickReceiptWarehouse, consumeBudget } from "@/lib/receiptRetro";
 import { applyAgreage, type AgreageStatus } from "@/lib/agreage";
 import { setMarchandiseNote, sanitizeRating } from "@/lib/marchandiseNote";
 import { docRef } from "@/lib/docLabel";
@@ -188,6 +190,137 @@ export async function POST(req: NextRequest) {
     console.warn("[POReceive] incrementLocalStock échoué (non-bloquant):", (e as Error).message);
   }
 
+  // ── 5. Propagation rétro : recoller les ventes / sorties fabrication à
+  //    DÉCOUVERT à cette réception — MÊME logique que /api/sap/goods-receipts.
+  //    Une commande vendue à découvert est parquée en magasin d'attente 000
+  //    (« A/C - A/D ») avec le lot sentinel EM_PENDING. Quand la marchandise
+  //    qui la couvre arrive — ICI, via la réception d'une commande fournisseur —
+  //    on DÉPLACE la ligne vers le magasin de réception (01) et on lui pose le
+  //    vrai lot EM<DocNum>. Sans ça, la ligne restait bloquée en 000 (jamais
+  //    reliée au lot ni déplacée) : le magasin 000 restait négatif, le stock
+  //    s'accumulait en 01, et l'article restait affiché « manquant ».
+  //    Ce chemin (réception de commande fournisseur) ne le faisait PAS, contrairement
+  //    à l'entrée marchandise libre — d'où le décalage constaté.
+  //    Budget de couverture par (article × magasin), en unité d'inventaire (pie),
+  //    construit à partir des lignes RÉELLEMENT créées côté SAP.
+  const RETRO_WINDOW_DAYS = 60;
+  const retroSince = new Date(Date.now() - RETRO_WINDOW_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const budget = buildWhsBudget(
+    createdLines
+      .filter((l) => l.WarehouseCode && (l.Quantity ?? 0) > 0)
+      .map((l) => ({ itemCode: l.ItemCode, warehouseCode: l.WarehouseCode as string, pieceQty: l.Quantity })),
+  );
+
+  // ── 5a. Commandes clients ouvertes à découvert (FIFO DocEntry asc) ──
+  let retroPatchCount = 0;
+  const retroDebits: { itemCode: string; lot: string; qty: number }[] = [];
+  try {
+    type SapOrderLine = { LineNum: number; ItemCode: string; Quantity: number; U_NoLot?: string; WarehouseCode?: string };
+    type SapOrderForRetro = { DocEntry: number; DocNum: number; DocumentLines: SapOrderLine[] };
+    const orders = await sap.getAll<SapOrderForRetro>(
+      `Orders?$orderby=DocEntry asc`
+      + `&$select=DocEntry,DocNum,DocumentLines`
+      + `&$filter=${encodeURIComponent(`DocDate ge '${retroSince}' and DocumentStatus eq 'bost_Open'`)}`,
+      { pageSize: 200 },
+    );
+    for (const ord of orders) {
+      const patchLines: Record<string, unknown>[] = [];
+      const orderDebits: { itemCode: string; lot: string; qty: number }[] = [];
+      for (const ln of (ord.DocumentLines || [])) {
+        if (ln.U_NoLot !== LOT_PENDING) continue;                 // ligne en attente de lot uniquement
+        if (remainingForItem(budget, ln.ItemCode) <= 0) continue; // rien reçu pour cet article → skip
+        const whs = pickReceiptWarehouse(budget, ln.ItemCode, ln.WarehouseCode);
+        if (!whs) continue;
+        const patch: Record<string, unknown> = { LineNum: ln.LineNum, U_NoLot: lotCode };
+        if (whs !== ln.WarehouseCode) patch.WarehouseCode = whs;  // déplace 000 → magasin de réception
+        patchLines.push(patch);
+        orderDebits.push({ itemCode: ln.ItemCode, lot: lotCode, qty: ln.Quantity });
+        consumeBudget(budget, ln.ItemCode, whs, ln.Quantity);
+      }
+      if (patchLines.length > 0) {
+        await sap.patch(`Orders(${ord.DocEntry})`, { DocumentLines: patchLines });
+        retroPatchCount += patchLines.length;
+        retroDebits.push(...orderDebits);                          // débit registre APRÈS PATCH réussi
+        console.log(`[POReceive] Retro lot ${lotCode} → Order #${ord.DocNum} (${patchLines.length} ligne(s))`);
+      }
+    }
+    if (retroDebits.length > 0) {
+      try { await debitLots(retroDebits); }
+      catch (e) { console.warn("[POReceive] Débit registre rétro échoué (non-bloquant):", (e as Error).message); }
+    }
+    console.log(
+      `[POReceive] Propagation rétro : ${orders.length} commande(s) ouverte(s) depuis le ${retroSince} scannée(s), `
+      + `${retroPatchCount} ligne(s) ${LOT_PENDING} → ${lotCode}`,
+    );
+  } catch (e) {
+    console.warn("[POReceive] Propagation rétro échouée (non-bloquant):", (e as Error).message);
+  }
+
+  // ── 5b. Sorties fabrication (InventoryGenExits) du jour à découvert — miroir
+  //    de la retro Orders (composant fabriqué à découvert), même budget partagé.
+  let retroFabricationCount = 0;
+  const retroFabDebits: { itemCode: string; lot: string; qty: number }[] = [];
+  try {
+    type SapExitLine = { LineNum: number; ItemCode: string; Quantity: number; U_NoLot?: string; WarehouseCode?: string };
+    type SapExitForRetro = { DocEntry: number; DocNum: number; DocumentLines: SapExitLine[] };
+    const exits = await sap.getAll<SapExitForRetro>(
+      `InventoryGenExits?$orderby=DocEntry asc`
+      + `&$select=DocEntry,DocNum,DocumentLines`
+      + `&$filter=${encodeURIComponent(`DocDate eq '${today}'`)}`,
+      { pageSize: 200 },
+    );
+    const patchedItems = new Set<string>();
+    for (const exit of exits) {
+      const patchLines: Record<string, unknown>[] = [];
+      const exitDebits: { itemCode: string; lot: string; qty: number }[] = [];
+      for (const ln of (exit.DocumentLines || [])) {
+        if (ln.U_NoLot !== LOT_PENDING) continue;
+        if (remainingForItem(budget, ln.ItemCode) <= 0) continue;
+        const whs = pickReceiptWarehouse(budget, ln.ItemCode, ln.WarehouseCode);
+        if (!whs) continue;
+        const patch: Record<string, unknown> = { LineNum: ln.LineNum, U_NoLot: lotCode };
+        if (whs !== ln.WarehouseCode) patch.WarehouseCode = whs;
+        patchLines.push(patch);
+        exitDebits.push({ itemCode: ln.ItemCode, lot: lotCode, qty: ln.Quantity });
+        patchedItems.add(ln.ItemCode);
+        consumeBudget(budget, ln.ItemCode, whs, ln.Quantity);
+      }
+      if (patchLines.length > 0) {
+        await sap.patch(`InventoryGenExits(${exit.DocEntry})`, { DocumentLines: patchLines });
+        retroFabricationCount += patchLines.length;
+        retroFabDebits.push(...exitDebits);
+        console.log(`[POReceive] Retro lot ${lotCode} → InventoryGenExit #${exit.DocNum} (${patchLines.length} ligne(s))`);
+      }
+    }
+    if (retroFabDebits.length > 0) {
+      try { await debitLots(retroFabDebits); }
+      catch (e) { console.warn("[POReceive] Débit registre rétro fabrication échoué (non-bloquant):", (e as Error).message); }
+    }
+    // Miroir local : FabricationRunLine encore en sentinel sur les items patchés,
+    // restreint aux runs du jour (on ne réécrit pas d'anciens runs jamais couverts).
+    for (const itemCode of Array.from(patchedItems)) {
+      const updated = await prisma.$executeRawUnsafe(
+        `UPDATE "FabricationRunLine" AS rl
+            SET "batchNumber" = $1
+           FROM "FabricationRun" AS r
+          WHERE r."id" = rl."runId"
+            AND rl."batchNumber" = $2
+            AND rl."itemCode" = $3
+            AND r."createdAt" >= CURRENT_DATE;`,
+        lotCode, LOT_PENDING, itemCode,
+      );
+      if (updated > 0) {
+        console.log(`[POReceive] FabricationRunLine ${itemCode}: ${updated} ligne(s) ${LOT_PENDING} → ${lotCode}`);
+      }
+    }
+    console.log(
+      `[POReceive] Propagation rétro fabrication : ${exits.length} sortie(s) du ${today} scannée(s), `
+      + `${retroFabricationCount} ligne(s) ${LOT_PENDING} → ${lotCode}`,
+    );
+  } catch (e) {
+    console.warn("[POReceive] Propagation rétro fabrication échouée (non-bloquant):", (e as Error).message);
+  }
+
   return NextResponse.json({
     ok: true,
     docNum: created.DocNum,
@@ -195,5 +328,7 @@ export async function POST(req: NextRequest) {
     lot: lotCode,
     fromPoNum: po.DocNum,
     agreage,
+    retroPatchedLines: retroPatchCount,          // BL ouverts à découvert repris en EM<DocNum> (déplacés 000 → 01)
+    retroFabricationLines: retroFabricationCount, // sorties fabrication du jour reprises en EM<DocNum>
   });
 }
