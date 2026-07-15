@@ -853,3 +853,19 @@ qu'il remplace.
 toute la récup déjà acquise est **revalorisée automatiquement** (aucune migration de données).
 Combiné au débit à l'heure brute (jour de récup posé = journée type) et à l'exclusion
 samedi/dimanche/férié, la récup est **doublement à l'avantage du salarié**.
+
+---
+
+## 🧾 Écran 2 — bandeau compact + pied de commande allégé
+
+Prise de commande (`app/console/ecran2/page.tsx` + `components/console/Ecran2Order.tsx`).
+Objectif : **agrandir la colonne COMMANDE en hauteur** en dégraissant le bandeau
+et le pied, et remonter les contrôles clés **à côté du client**.
+
+| Élément | Avant | Après |
+|---------|-------|-------|
+| **Recherche + « Créer / Modifier un bon »** | Bloc vertical de 320 px empilé (bascule au-dessus, champ en dessous), poussé tout à droite. | **Une seule rangée** (bascule + champ + « Suivre l'écran 1 ») posée **juste à côté du client**. Bandeau plus court → COMMANDE plus haute. |
+| **Compte / mode de livraison** (« Direct (AKREM) ») | `<select>` pleine largeur en **pied** de la colonne commande, toujours affiché. | Remonté **à côté du nom client** (haut à gauche) et **masqué s'il n'y a qu'un seul compte** (le défaut est appliqué silencieusement) — n'apparaît que quand il y a un vrai choix. État remonté au parent, passé au constructeur via `deliveryModeId`. |
+| **« Bon de commande »** (lots affectés plus tard) | Bandeau pleine largeur sur sa propre rangée. | **Puce compacte** placée sur la rangée de la date de livraison — mêmes règles (forcé + verrouillé si précommande / découvert), détail dans l'infobulle. |
+| **Total HT** | Ligne dédiée « Total HT estimé … € » au-dessus du bouton. | **Porté sur le bouton d'action** (« Créer la commande (n) … 152,40 € HT ») — une rangée de gagnée. |
+| **Bandeau client** | `py-2.5`, marges internes plus larges. | Rythme vertical resserré (`py-2`, marges réduites) — quelques pixels rendus à la commande. |

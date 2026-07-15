@@ -84,7 +84,6 @@ interface CartLine {
     pieces: number; lot: string | null; closed: boolean;
   } | null;
 }
-interface DeliveryMode { id: string; name: string; sapCardCode: string; isDefault: boolean }
 /** Cotation SPÉCIFIQUE client par code article (onglet « Tarif ») — le prix
  *  négocié est PRIORITAIRE sur le prix conseillé à l'ajout au panier. */
 interface TarifItem { itemCode: string; price: number; note?: string | null }
@@ -398,8 +397,11 @@ function CartDropGap({
   );
 }
 
-export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifier: modifierProp = null, onExitModif, onSubmitted }: {
+export function Ecran2Order({ clientId, clientName, stockSharePct = 100, deliveryModeId = "", modifier: modifierProp = null, onExitModif, onSubmitted }: {
   clientId: string; clientName: string; stockSharePct?: number;
+  /** Mode de livraison / compte SAP du bon — choisi dans le bandeau client
+   *  (à côté du nom) ; par défaut le mode par défaut du client. */
+  deliveryModeId?: string;
   /** Cible de MODIFICATION (diffusée par « Détail livraison ») : on pré-remplit le
    *  panier avec les lignes du BL et on enregistre sur ce BL. */
   modifier?: { docEntry: number; docNum: number } | null;
@@ -588,8 +590,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     return () => { cancelled = true; };
   }, [clientId]);
   const [numAtCard, setNumAtCard] = useState("");
-  const [modes, setModes] = useState<DeliveryMode[]>([]);
-  const [modeId, setModeId] = useState("");
+  // Mode de livraison / compte SAP : géré par le parent (sélecteur dans le
+  // bandeau client, à côté du nom) et reçu via `deliveryModeId`.
   // C11/B3 — transporteur + TOURNÉE (ORDR.U_TrspCode / U_TrspHeur), OBLIGATOIRES
   // sur le bon. Pré-remplis automatiquement avec le défaut du client (SERG_TRCL
   // → mémoire app → tournée unique) — l'utilisateur ne change que par exception.
@@ -666,12 +668,6 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
     // dimanche ou un férié). Heure de tournée par défaut 09:00.
     const t = new Date(`${nextWorkingDeliveryDay(nextDeliveryDate())}T09:00:00`);
     setDeliveryDate(formatDateInput(t));
-    fetch(`/api/clients/${clientId}/delivery-modes`).then((r) => r.json()).then((d) => {
-      const ms: DeliveryMode[] = d.modes ?? [];
-      setModes(ms);
-      const def = ms.find((m) => m.isDefault) ?? ms[0];
-      setModeId(def?.id ?? "");
-    }).catch(() => {});
   }, [clientId]);
 
   // (B3 — transporteurs filtrés par client + tournée : déplacé dans
@@ -1180,7 +1176,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
   /** Corps du POST /api/sap/orders — transporteur + tournée EXPLICITES
    *  (validés avant l'envoi), texte du BL = note saisie + mention promo. */
   const buildOrderBody = (apiLines: ApiLine[], safeguardsConfirmed = false): Record<string, unknown> => ({
-    clientId, deliveryModeId: modeId || undefined,
+    clientId, deliveryModeId: deliveryModeId || undefined,
     ...(tourneePayload() ?? {}),
     deliveryDate: new Date(deliveryDate).toISOString(),
     numAtCard: numAtCard.trim() || undefined, lines: apiLines,
@@ -2248,12 +2244,8 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
           {/* En modification, le BL existe déjà : mode/transporteur/date/réf sont figés. */}
           {!modif && (
             <>
-              {modes.length > 0 && (
-                <select value={modeId} onChange={(e) => setModeId(e.target.value)}
-                  className="w-full h-9 rounded-md border border-border bg-background text-[13.5px] px-2">
-                  {modes.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.sapCardCode})</option>)}
-                </select>
-              )}
+              {/* Le mode de livraison / compte SAP est choisi dans le bandeau
+                  client (à côté du nom) — il n'est plus dans ce pied. */}
               {/* Transporteur + TOURNÉE — obligatoires sur le bon, pré-remplis avec
                   le défaut du client. Bordure ambre tant qu'un choix manque. */}
               {(() => {
@@ -2299,33 +2291,30 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
                   </div>
                 );
               })()}
-              {/* Date de livraison SANS heure : l'heure est portée par la TOURNÉE. */}
+              {/* Date de livraison SANS heure (l'heure est portée par la TOURNÉE)
+                  + bascule « Bon de commande » COMPACTE sur la même rangée. */}
               <div className="flex gap-1.5">
                 <input type="date" value={deliveryDate.slice(0, 10)} onChange={(e) => setDeliveryDate(e.target.value)}
                   aria-label="Date de livraison"
-                  className="flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2" />
+                  className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2" />
+                {/* Bon de commande (aucun auto-lot, lots affectés plus tard) — compact.
+                    Forcé (coché + verrouillé) si précommande OU article à découvert. */}
+                <label
+                  title={hasDecouvert
+                    ? "Article à découvert (stock insuffisant) → forcé en bon de commande : il ne réserve pas de stock et se validera automatiquement en commande à la réception"
+                    : precommande
+                    ? "Livraison au-delà du prochain jour livrable → précommande : créée en bon de commande (lots affectés plus tard)"
+                    : "Créer en bon de commande : aucun lot automatique, tu affectes les lots ensuite dans l'onglet Bons de commande"}
+                  className={`shrink-0 inline-flex items-center gap-1.5 rounded-md border px-2 h-9 text-[11.5px] select-none ${precommande || hasDecouvert ? "cursor-default" : "cursor-pointer"} ${
+                    isBonCommande ? "border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300" : "border-border text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <input type="checkbox" checked={isBonCommande} disabled={precommande || hasDecouvert}
+                    onChange={(e) => setBonCommandeManual(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-amber-600" />
+                  <span className="font-semibold whitespace-nowrap">Bon de commande</span>
+                </label>
               </div>
-              {/* Bon de commande — aucun auto-lot, lots affectés ensuite dans l'onglet
-                  « Bons de commande ». Forcé (coché + verrouillé) si précommande OU
-                  si un article est à découvert (stock insuffisant). */}
-              <label
-                title={hasDecouvert
-                  ? "Article à découvert (stock insuffisant) → forcé en bon de commande : il ne réserve pas de stock et se validera automatiquement en commande à la réception"
-                  : precommande
-                  ? "Livraison au-delà du prochain jour livrable → précommande : créée en bon de commande (lots affectés plus tard)"
-                  : "Créer en bon de commande : aucun lot automatique, tu affectes les lots ensuite dans l'onglet Bons de commande"}
-                className={`flex items-center gap-2 rounded-md border px-2.5 h-9 text-[12.5px] select-none ${precommande || hasDecouvert ? "cursor-default" : "cursor-pointer"} ${
-                  isBonCommande ? "border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300" : "border-border text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <input type="checkbox" checked={isBonCommande} disabled={precommande || hasDecouvert}
-                  onChange={(e) => setBonCommandeManual(e.target.checked)}
-                  className="h-4 w-4 accent-amber-600" />
-                <span className="font-semibold">Bon de commande</span>
-                <span className="text-[11px] opacity-80 truncate">
-                  {hasDecouvert ? "· article à découvert → validé à la réception" : precommande ? "· précommande — lots à affecter" : "· lots affectés plus tard"}
-                </span>
-              </label>
               {/* Réf. client + TEXTE du BL côte à côte (même rangée que transporteur/tournée). */}
               <div className="flex gap-1.5">
                 <input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="N° de commande (réf. client)"
@@ -2367,10 +2356,7 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
               </div>
             </div>
           )}
-          <div className="flex items-center justify-between text-[14px]">
-            <span className="text-muted-foreground">{modif ? "Total HT du BL" : "Total HT estimé"}</span>
-            <span className="font-bold tnum text-foreground">{totalHT.toFixed(2)} €</span>
-          </div>
+          {/* Total HT : porté sur le bouton d'action (plus de ligne dédiée). */}
           {/* Indicateur de marge — prix transport /kg en haut à droite + bascule
               /livraison ↔ /kg. MARGE NETTE en gros en bas (feu tricolore : rouge
               = à perte, orange < 10 % net, vert ≥ 10 %). */}
@@ -2466,15 +2452,23 @@ export function Ecran2Order({ clientId, clientName, stockSharePct = 100, modifie
           <button type="button" onClick={() => submit()}
             disabled={prefilling || cart.length === 0 || (!!modif && modifMeta?.editable === false)}
             title={modif ? "Enregistrer en arrière-plan — l'écran passe au client suivant" : "Créer en arrière-plan — l'écran passe au client suivant"}
-            className={`w-full h-11 rounded-xl disabled:opacity-50 text-white text-[15px] font-semibold inline-flex items-center justify-center gap-2 ${
+            className={`w-full h-11 rounded-xl disabled:opacity-50 text-white text-[15px] font-semibold inline-flex items-center justify-center gap-2 px-3 ${
               modif ? "bg-amber-600 hover:bg-amber-700" : "bg-emerald-600 hover:bg-emerald-700"
             }`}>
-            <ShoppingCart className="h-4 w-4" />
-            {modif
-              ? `Enregistrer le BL # ${modif.docNum}`
-              : isBonCommande
-              ? `Créer le bon de commande (${cart.length})`
-              : `Créer la commande (${cart.length})`}
+            <ShoppingCart className="h-4 w-4 shrink-0" />
+            <span className="truncate">
+              {modif
+                ? `Enregistrer le BL # ${modif.docNum}`
+                : isBonCommande
+                ? `Créer le bon de commande (${cart.length})`
+                : `Créer la commande (${cart.length})`}
+            </span>
+            {/* Total HT estimé porté sur le bouton (remplace la ligne dédiée). */}
+            {cart.length > 0 && (
+              <span className="ml-auto pl-2 tnum font-bold whitespace-nowrap border-l border-white/25">
+                {totalHT.toFixed(2)} € HT
+              </span>
+            )}
           </button>
         </div>
       </div>
