@@ -974,3 +974,19 @@ complet** même s'il porte aussi un flag terrain. Un préparateur/livreur **pur*
 reste confiné (inchangé). Appliqué de façon homogène à tout le module
 (Détail livraison, mise-en-prépa, exclusions, bon de transport, ventes du jour,
 fiche transporteur) via l'unique helper `isLivraisonRestricted`.
+
+### Planning — hiérarchie visuelle des pastilles (présence en filigrane)
+
+`components/planning/PlanningPanel.tsx` (`DayPill`).
+
+Le « Présent » par défaut remplissait tout le calendrier de pastilles vertes pleines et
+bordées, aussi marquées que les exceptions → surchargé. Nouvelle hiérarchie (« juste milieu » :
+lisible mais aéré) :
+
+| Avant | Après |
+|-------|-------|
+| Présent = pastille pleine + bordure, même poids que CP/récup | Présent = **filigrane** (fond très doux 7 %, texte allégé, `font-medium`, **sans bordure**) — la présence ne noie plus la grille |
+| Toutes les pastilles bordées | **Plus de bordure** sur les pastilles pleines ; le **pointillé** reste réservé aux congés **en attente / posés** |
+| Exceptions peu distinctes | **CP, récup, férié, absence, maladie** ressortent nettement (pastille pleine colorée, `font-semibold`) |
+
+Lisibilité conservée (libellés partout, abrégés sur mobile) ; le calendrier respire.

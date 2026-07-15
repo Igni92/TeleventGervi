@@ -930,11 +930,21 @@ const CAT_SHORT: Record<DayCategory, string> = {
 function DayPill({ category, pending, planned }: { category: DayCategory; pending: boolean; planned: boolean }) {
   const tone = CAT_TONE[category];
   const dashed = pending || planned;
+  const isPresent = category === "present";
+  // Hiérarchie visuelle (le « juste milieu ») : la PRÉSENCE (état normal, tous
+  // les jours ouvrés) reste EN FILIGRANE — pastille très douce, sans bordure,
+  // texte allégé — pour ne pas noyer le calendrier de vert. Les EXCEPTIONS (CP,
+  // récup, férié, absence, maladie) ressortent en pastille pleine colorée.
+  // « En attente / posé » garde le contour en pointillés.
+  const cls = dashed
+    ? `border border-dashed bg-transparent font-semibold ${tone.text} ${tone.border}`
+    : isPresent
+      ? "bg-emerald-500/[0.07] font-medium text-emerald-700/80 dark:text-emerald-300/80"
+      : `${tone.soft} font-semibold ${tone.text}`;
   return (
     <span
       title={DAY_CATEGORY_LABEL[category]}
-      className={`relative z-10 block w-full max-w-[76px] md:max-w-none truncate rounded-md px-1 py-[3px] text-center text-[10px] md:text-[11px] font-semibold leading-tight tracking-tight border
-        ${dashed ? `border-dashed bg-transparent ${tone.text} ${tone.border}` : `${tone.soft} ${tone.text} ${tone.border}`}`}
+      className={`relative z-10 block w-full max-w-[76px] md:max-w-none truncate rounded-md px-1 py-[3px] text-center text-[10px] md:text-[11px] leading-tight tracking-tight transition-colors ${cls}`}
     >
       <span className="md:hidden">{CAT_SHORT[category]}</span>
       <span className="hidden md:inline">{DAY_CATEGORY_LABEL[category]}{planned && !pending ? " ·" : ""}</span>
