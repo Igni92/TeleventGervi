@@ -181,10 +181,10 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
   if (empty) return null;
 
   return (
-    <section className="rounded-2xl border border-violet-300/60 dark:border-violet-500/30 bg-card overflow-hidden">
-      <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-violet-300/40 dark:border-violet-500/20 bg-violet-50 dark:bg-violet-900/15">
+    <section className="rounded-2xl border border-violet-600/60 dark:border-violet-600/45 bg-card overflow-hidden">
+      <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-violet-600/40 dark:border-violet-600/30 bg-violet-600/10 dark:bg-violet-600/15">
         <div className="flex items-center gap-2.5 min-w-0">
-          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-violet-600 dark:text-violet-400">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-600/15 text-violet-600 dark:text-violet-400">
             <ClipboardList className="h-4 w-4" strokeWidth={2} />
           </span>
           <div className="min-w-0">

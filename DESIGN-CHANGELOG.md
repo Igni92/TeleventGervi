@@ -450,6 +450,24 @@ non parties**, faussant le suivi et l'inventaire.
   le groupe SAP prime, repli sur le `type` client ; par défaut (aucun signal) =
   comptoir.
 
+### Filet « d'office » au read time (`GET /api/livraisons`)
+
+Le marquage à la création + la régularisation manuelle ne couvraient que les
+commandes **passées par l'app**. Une vente comptoir créée **directement dans SAP**
+(ou par conversion d'offre, ou avant la feature) retombait en « pas préparé » dans
+**Ventes du jour / Préparations / Manquants** tant qu'on ne cliquait pas
+« Régulariser ».
+
+| Avant | Après |
+|-------|-------|
+| Vente comptoir non passée par l'app → « pas préparé » jusqu'à régularisation manuelle. | `GET /api/livraisons` force **`prepared` + `departed`** pour tout client **résolu** hors GMS/CHR/Export (`isComptoirClient`, groupe SAP + repli type). **Automatique**, quelle que soit la provenance de la commande — plus aucune dépendance au marqueur persistant ni au bouton « Régulariser ». |
+
+- Le CardCode **non résolu** n'est **jamais** présumé comptoir (pourrait être une
+  adresse de livraison GMS) — même prudence que la régularisation.
+- Aucun impact sur le **Détail livraison** (déjà restreint aux 3 segments livrés
+  via `keepDeliverableClients`) ; le filet agit sur les écrans qui listent **tous**
+  les clients.
+
 ---
 
 ## 🛒 Console — lots au clic droit : plus de « aucun lot » sur un article en stock
@@ -632,3 +650,343 @@ salarié, validé par l'employeur** — chaque camp valide ce que l'autre pose
 
 - Nouveaux réglages `.env` documentés : `CONGES_FROM_ADDRESS`, `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_DIRECTION_TO` / `WHATSAPP_TEMPLATE_NAME`, `APP_PUBLIC_URL`.
 - `lib/congesNotify.ts` : constructeurs de contenu PURS (email HTML échappé, texte WhatsApp, évènement Outlook all-day fin-exclusive) couverts par 5 tests.
+
+---
+
+## 🖱️ Effet au clic — 3 effets au choix + spam-clic
+
+| Avant | Après |
+|-------|-------|
+| Étincelles or, on/off, sur `click`. | **3 effets au choix** dans Paramètres › Apparence : **Étincelles** (or), **Onde d'eau** (anneaux concentriques bleutés), **Cascade** (gouttes qui giclent puis tombent jusqu'en bas de l'écran) — ou **Aucun**. |
+| `click` → délai (attend le relâchement), spam-clic mou. | Déclenché sur **`pointerdown`** : zéro délai, spam-clic fluide. |
+| Double-clic → sélection de texte → étincelles bloquées. | Double/triple-clic en zone morte : **sélection de texte annulée** (`preventDefault` sur mousedown multi-clic) → on peut spammer. |
+| Tactile déclenchait aussi (tap). | **PC uniquement** (`pointerType === "mouse"`) — tablette/téléphone jamais. |
+
+- Clé `televente:clickSparks` élargie : `sparks` (défaut, ex-« on ») · `ripple` · `rain` · `off`. Rétro-compatible (« on » → étincelles). Toujours coupé par animations=off et `prefers-reduced-motion`.
+
+---
+
+## 🏷️ Charte codes article + format date — CF · EM · Stock
+
+Uniformisation de la **charte graphique des codes article** (cartouches couleur)
+et du **format de date** sur les états SAP.
+
+| Avant | Après |
+|-------|-------|
+| Codes article en **texte gris** dans les tableaux Commandes fournisseurs (CDE FOURNS), Entrée marchandise (EM) et Stock. | **Cartouches couleur** partout, même charte que l'Écran 2 : marque = **violet** · condt = **bleu** · calibre = **teal** · variété = **rose** · origine = **ambre**. |
+| Variété affichée dans le créneau **teal** (couleur du calibre). | Variété dans son propre créneau **rose** (`variete`), le teal redevient réservé au calibre (`cal. …`). |
+| Dates au format `10.07.26` (ou `10/07/2026` sur les sélecteurs). | **`VEN 10.07.26`** (jour court + date) sur tous les états — CF, EM, sélecteurs de date. |
+
+- `lib/date-fr.ts` (NOUVEAU) : `fmtJourDate` / `fmtDateCourte` / `fmtJourDateHeure` — source unique du format « jour + date », plus de `fmtDate` local dupliqué par fichier.
+- `DesignationChips` : nouveau tag `variete` (rose) distinct du `calibre` (teal, préfixe `cal.` auto). `Chip` unitaire aligné sur la même palette.
+- `DateStepper` : rappel `VEN 10.07.26` sous le sélecteur (CDE FOURNS, EM, détails livraison).
+- Écrans redéfinis : `PurchaseOrderForm` / `PurchaseOrderHistory` (CDE FOURNS), `GoodsReceiptForm` / `GoodsReceiptHistory` (EM), `ProductsTable` (Stock — variété `frgnName` désormais câblée).
+
+---
+
+## 📱 Planning — calendrier mobile repensé
+
+- **Cellules façon appli** sur mobile : numéro du jour dans une pastille ronde plus grande, cellule **teintée par le type du congé validé** (lecture immédiate), statuts en **points ronds** (validé plein, en attente creux, récup, tag feuille d'heures ; max 4 + « … »). Sur desktop, barres pleines conservées.
+- **En-têtes d'une seule lettre** (L M M J V S D) sous `sm` → plus de largeur par colonne.
+- **Liste « Ce mois-ci »** sous le calendrier (mobile) : chaque congé/récup du mois avec type, plage et statut ; un tap sélectionne la plage. Les pastilles disent « quoi », la liste dit « quand & quel statut ».
+- Sélection liée (bandeau continu) et choix clic début/clic fin inchangés.
+
+---
+
+## 🚚 Livraisons — hub à onglets (fin des « états doublons »)
+
+Audit smoke-test métier : **4 entrées de navigation lisaient déjà la même donnée**
+(`/api/livraisons`, types `lib/livraisonView`) sous 4 angles. On les fusionne sous
+une seule entrée à onglets in-page — même pattern que « Clients & plan d'appel ».
+
+| Avant | Après |
+|-------|-------|
+| **4 entrées Entrepôt** : « Préparation livraisons » (titre H1 *Détail livraison*), « Détails livraison », « Préparations à faire », « Manquants » — quasi-homonymes, ressenties comme des doublons. | **1 entrée « Livraisons du jour »** avec bandeau d'onglets : **Préparation · Par article · À préparer · Manquants**. Chaque route reste adressable (deep-link), l'entrée sidebar reste active sur ses routes secondaires (`also`). Sidebar Entrepôt : **8 → 5 entrées**. |
+| Homonymie **« Détail livraison » / « Détails livraison »** (singulier/pluriel) — la confusion pointée. | Vue maître = **« Livraisons du jour »** (H1 + onglet *Préparation*) ; vue article = **« Détails par article »** (onglet *Par article*). Plus de collision. |
+| Tuiles mobiles : « Préparation livraisons », « Préparations à faire », « Manquants » éparpillées sur 2 axes (Commercial / Acheteur). | Une tuile **« Livraisons du jour »** (axe Commercial) ; les sous-vues deviennent des onglets du hub. |
+
+- `components/livraisons/LivraisonsSectionTabs.tsx` (NOUVEAU) : bandeau d'onglets par route, pastille active animée (`layoutId`), rail défilant sur mobile — calqué sur `ClientsSectionTabs`.
+- **Masqué aux rôles terrain confinés** (préparateur/livreur) : `proxy.ts` ne leur ouvre que `/livraisons` (+ `/preparations`) — ils gardent `PreparateurNav`.
+- Aligné partout : `Sidebar`, `MobileTiles`, `CommandPalette` (⌘K — les 4 routes groupées sous « Livraisons · … », `/details-livraison` ajouté), `MobileTopBar`.
+- **Aucune page ni fonctionnalité supprimée** : uniquement un regroupement de navigation. `tsc` 0 · `eslint` 0 · `next build` 51 pages · 458 tests verts.
+
+---
+
+## ✨ Effets au clic — 3 signatures « salle de signal » + cascade 3D
+
+`components/ClickSparks.tsx` — le micro-feedback ludique au clic (zone morte, PC
+uniquement, canvas plein écran unique, boucle rAF active seulement tant que des
+particules vivent) passe de **3 à 6 effets**. Réglable dans **Paramètres →
+Apparence → Effet au clic**.
+
+| Effet | Rendu |
+|-------|-------|
+| **Supernova** (`nova`) | Cœur incandescent (blanc chaud → marque), **éclat en croix** façon lens-flare (étoile 8 branches), onde de choc, puis **constellation** : les éclats projetés scintillent et se relient par de fines lignes lumineuses avant de s'éteindre. |
+| **Radar** (`radar`) | Ping sonar raccord avec la DA : **réticule/crosshair**, 3 **anneaux de scan** concentriques décalés, **balayage rotatif** avec traîne en éventail, et **échos (blips)** qui pulsent le long du sweep. |
+| **Aurore** (`bloom`) | **Halos radiaux diffus** teintés marque en mode additif (`lighter`), qui dérivent puis se dissolvent (fondu entrée + sortie), ponctués de **scintillements** — feel soft/luxe, non « gamer ». |
+
+- **Colorimétrie-aware** : nova / radar / aurore lisent `--brand-500` à chaud → ils
+  suivent **Or / Agrume / Fraise** selon le thème (les effets historiques restaient
+  figés en or/bleu).
+- **Cascade refondue « 3D »** (`rain`) : chaque goutte devient une **bille vitreuse
+  ombrée** — dégradé radial DÉCENTRÉ (point chaud → corps → bord/ombre) = volume, plus
+  un **reflet spéculaire** blanc décentré — avec **filament de traîne** (motion-blur) et
+  **parallaxe de profondeur** (z : les gouttes proches sont plus grosses, plus saturées
+  et accélèrent davantage ; les lointaines restent petites et atmosphériques, rendues du
+  plus LOIN au plus PRÈS pour une occlusion correcte). Ajout d'une **couronne
+  d'éclaboussure** (tension de surface) au point d'impact.
+- Garde-fous inchangés : coupé par `animations=off` (data-reduce-anim) et
+  `prefers-reduced-motion` (sauf « forcé »), tactile exclu, plafond de particules
+  (anti-spam), jamais déclenché sur un élément interactif.
+
+---
+
+## 📄 « Bons de commande » — icône plus lisible
+
+L'icône `ScrollText` (parchemin) se lisait comme une **accolade `{`** au format
+sidebar, surtout à l'état actif en `brand-400` : forme ambiguë, peu reconnaissable.
+
+| Avant | Après |
+|-------|-------|
+| `ScrollText` — parchemin dont la boucle supérieure évoque une accolade, peu lisible en petit. | **`FileText`** — document à lignes, silhouette nette de « bon / formulaire », plus visible et immédiatement reconnaissable. |
+
+- Aligné partout : `Sidebar`, `MobileTiles`, `CommandPalette` (⌘K).
+- Distincte des voisines : `ClipboardCheck` (Inventaire) et `Receipt` (Encours) restent identifiables.
+- Aucune autre modification — simple échange d'icône.
+
+---
+
+## 💸 Célébration « grosse marge » + effets au clic affinés
+
+Volet « dynamiser les ventes » + finitions des micro-interactions.
+
+### Célébration des grosses marges (NOUVEAU) — `components/SaleCelebration.tsx`
+
+Quand une commande est validée dans la Console avec une **marge nette ≥ seuil**
+(défaut **200 €**, éditable), une **pluie de billets** (billets euros stylisés qui
+culbutent en 3D + pièces d'or) s'abat sur l'écran, avec un **éclat doré central** et
+un **badge « +X € »** animé (framer-motion). L'intensité et la mention montent avec le
+ratio marge/seuil (« 🎉 Belle marge » → « 🔥 Grosse marge »).
+
+- Déclenché par un évènement global `televente:celebration` émis par
+  `celebrateSale(margeNette)` (`app-settings.ts`) — n'émet QUE si la fonction est
+  activée, la marge atteint le seuil, et les animations ne sont pas coupées
+  (data-reduce-anim / prefers-reduced-motion). Overlay canvas unique, rAF actif
+  seulement tant que des particules vivent.
+- Accroché dans `Ecran2Order.tsx` : la marge nette de la commande (`margeNetteTotal`,
+  quand elle est costée) est transportée dans le job d'envoi puis passée à
+  `celebrateSale` au succès de création (jamais sur une offre / un BL / une modif).
+- **Réglages** (Paramètres → Console & catalogue) : interrupteur ON/OFF, **seuil en €**
+  éditable, **style** (Billets · Confettis · Les deux), + bouton **Tester**.
+  Entièrement désactivable.
+
+### Effets au clic — affinages
+
+| Sujet | Avant | Après |
+|-------|-------|-------|
+| **Étincelles** | Points or plats, teinte figée. | Teintées **marque** (suivent Or/Agrume/Fraise), **halo additif** + cœur blanc-chaud, **double anneau de choc**, braises scintillantes qui s'attardent. |
+| **Onde d'eau** | 3 anneaux nus. | + **point d'impact** lumineux, **corps d'eau** translucide qui monte sous les anneaux, **gouttelettes de couronne** 3D qui giclent puis retombent. |
+| **Délai entre effets** (NOUVEAU) | Toujours instantané. | **Cooldown réglable** (Instantané · 0,2 · 0,4 · 0,8 s) — réglage `clickSparksDelay`. |
+| **Rester appuyé pour sélectionner** | L'effet partait dès l'appui → il se déclenchait au début d'une sélection de texte. | L'effet ne se déclenche qu'au **relâché d'un VRAI clic** (pointeur quasi immobile ET aucune sélection) : un press-drag n'active plus jamais l'effet. Le spam-clic reste possible. |
+
+### Planning — pastilles allongées, présence par défaut, fériés & événements
+
+Refonte des **pastilles du calendrier** (onglet Planning) — `components/planning/PlanningPanel.tsx`,
+`lib/planning.ts` (logique pure testée), `lib/events.ts`.
+
+| Sujet | Avant | Après |
+|-------|-------|-------|
+| **Lisibilité des pastilles** | Petits **points** ronds (couleur seule, sans texte) — il fallait ouvrir le jour pour savoir « quoi ». | **Pastilles ALLONGÉES** pleine largeur portant le **libellé de la catégorie** (CP, Récup, Présent, Maladie, Absent, Férié…). Libellé abrégé sur mobile (case étroite → pas de « … »), plein dès `md`. |
+| **Présence par défaut** | Un jour sans congé/tag n'affichait **rien**. | **Présent par défaut** sur l'horaire type (**lun→ven** du mois, à tout le monde). La pastille ne « change » que pour un **CP / récup / absence / maladie / autre**, un **congé en attente** (pointillés) ou un **jour férié**. Week-ends et jours hors mois restent vides. |
+| **Jours fériés** | Absents du calendrier. | **Fériés français** (réutilise `frenchHolidays`, `lib/livraison`) affichés en pastille **orange « Férié »** (couleur distincte de la maladie) + teinte de colonne dans le calendrier d'équipe. Prioritaires (jour chômé). |
+| **Événements** | Uniquement dans la bannière du haut. | **Événements commerciaux** (Noël, 14 juillet, Saint-Valentin…) posés sur la case du jour via un **repère emoji** (coin supérieur droit) — `eventsByDate`. |
+| **Calendrier d'équipe** | Barres de congés + points de tag. | Même résolution : présence en **ligne de fond discrète** (verte), congés en barres colorées, fériés en colonne teintée + emoji d'événement dans l'en-tête. |
+| **Légende** | Types de congé seulement. | + **Présent**, **Férié**, **absent**, **en attente / posé**, **événement**. |
+
+La résolution « une case → une catégorie dominante » vit dans `resolveCalendarDay` (pur, testé) :
+férié → congé validé → tag feuille d'heures → congé en attente → récup posée → **présent par défaut** → rien.
+
+### Planning — récup à la place des CP + CP hors dimanches/fériés + décompte ouvrable notifié
+
+Suite de la refonte Planning — `lib/planning.ts`, `components/planning/PlanningPanel.tsx`,
+`lib/congesNotify.ts`, `app/api/effectif/conges/route.ts`.
+
+| Sujet | Avant | Après |
+|-------|-------|-------|
+| **CP & jours fériés** | Le décompte des CP en jours ouvrables (`expandOuvrables`) excluait le **dimanche** mais **comptait les jours fériés**. | Les **jours fériés chômés** sont désormais **exclus** du décompte (comme le dimanche) — un férié compris dans un CP ne consomme plus de congé. Toujours à l'avantage du salarié. |
+| **Récup au lieu de CP** (NOUVEAU) | Poser un CP incluant un **samedi** (jour ouvrable décompté mais non travaillé) « gaspillait » un CP, sans alternative proposée. | Si de la **récup est disponible**, une **suggestion courte** apparaît **côté salarié uniquement** (jamais la direction) à la saisie du CP : « ce CP décompte N samedi(s) — bascule en récup pour préserver tes CP ». Bouton **Basculer en récup** → la demande part en récup, **validée par la personne en charge** (circuit boomerang existant). |
+| **Décompte notifié** | La notification à la personne en charge des congés indiquait les **jours calendaires** bruts (`X j`). | Elle indique le **décompte réel en jours ouvrables** (lun→sam, **hors dimanches ET fériés**) sur tous les canaux : push in-app, email, WhatsApp/Outlook. |
+| **Saisie** | « N jours ouvrables ». | « N jours ouvrables **(hors dimanches et fériés)** » — le coût réel est explicite. |
+
+Helpers purs testés ajoutés à `lib/planning.ts` : `saturdaysInRange` (samedis « à vide » d'un CP,
+fériés exclus) et exclusion des fériés dans `expandOuvrables`.
+
+### Planning — récup : seuls les jours ouvrés (lun→ven) décomptent
+
+Correctif du compteur de récup (`lib/planning.ts`, `computeRecupCounter`).
+
+| Cas (contrat 35 h, journée 7 h, lun→ven) | Avant | Après |
+|---|---|---|
+| Poser **vendredi + samedi** en récup, sans saisie d'heures | **14 h** décomptées (2 jours pleins — le samedi coûtait à tort) | **7 h** (seul le vendredi, jour de contrat) |
+| **Samedi seul** posé en récup | jusqu'à 1 jour | **0 h** (jour non travaillé → rien à récupérer) |
+| Vendredi + samedi **avec** saisie (lun→jeu = 28 h) | 7 h | 7 h (inchangé) |
+
+Règle : un **samedi / dimanche / jour férié** posé en récup n'est **jamais** décompté —
+il n'y a aucune heure à récupérer sur un jour hors du contrat lun→ven (35 h). Le débit reste
+plafonné par le déficit réel de la semaine (contrat atteint → rien déduit). Toujours à l'avantage du salarié.
+
+### Planning — récup créditée en heures MAJORÉES (repos compensateur de remplacement)
+
+`lib/planning.ts` (`computeRecupCounter`).
+
+Le compteur de récup crédite désormais les heures supp **majorées** (+25 %/+50 % inclus),
+et non plus les heures brutes — un repos compensateur de remplacement doit valoir la paie
+qu'il remplace.
+
+| Semaine (contrat 35 h, journée 7h15) | Récup créditée — avant | après |
+|---|---|---|
+| 6 jours (43h30) = 8h30 supp (8 h à +25 %, 0h30 à +50 %) | 8h30 | **10h45** |
+| 39 h = 4 h supp (+25 %) | 4 h | **5 h** |
+| 45 h = 10 h supp (8 h +25 %, 2 h +50 %) | 10 h | **13 h** |
+
+**Rétroactif** : le compteur est recalculé à la volée depuis les saisies de semaines, donc
+toute la récup déjà acquise est **revalorisée automatiquement** (aucune migration de données).
+Combiné au débit à l'heure brute (jour de récup posé = journée type) et à l'exclusion
+samedi/dimanche/férié, la récup est **doublement à l'avantage du salarié**.
+
+---
+
+## 🧾 Écran 2 — bandeau compact + pied de commande allégé
+
+Prise de commande (`app/console/ecran2/page.tsx` + `components/console/Ecran2Order.tsx`).
+Objectif : **agrandir la colonne COMMANDE en hauteur** en dégraissant le bandeau
+et le pied, et remonter les contrôles clés **à côté du client**.
+
+| Élément | Avant | Après |
+|---------|-------|-------|
+| **Recherche + « Créer / Modifier un bon »** | Bloc vertical de 320 px empilé (bascule au-dessus, champ en dessous), poussé tout à droite. | **Une seule rangée** (bascule + champ + « Suivre l'écran 1 ») posée **juste à côté du client**. Bandeau plus court → COMMANDE plus haute. |
+| **Compte / mode de livraison** (« Direct (AKREM) ») | `<select>` pleine largeur en **pied** de la colonne commande, toujours affiché. | Remonté **à côté du nom client** (haut à gauche) et **masqué s'il n'y a qu'un seul compte** (le défaut est appliqué silencieusement) — n'apparaît que quand il y a un vrai choix. État remonté au parent, passé au constructeur via `deliveryModeId`. |
+| **« Bon de commande »** (lots affectés plus tard) | Bandeau pleine largeur sur sa propre rangée. | **Puce compacte** placée sur la rangée de la date de livraison — mêmes règles (forcé + verrouillé si précommande / découvert), détail dans l'infobulle. |
+| **Total HT** | Ligne dédiée « Total HT estimé … € » au-dessus du bouton. | **Porté sur le bouton d'action** (« Créer la commande (n) … 152,40 € HT ») — une rangée de gagnée. |
+| **Bandeau client** | `py-2.5`, marges internes plus larges. | Rythme vertical resserré (`py-2`, marges réduites) — quelques pixels rendus à la commande. |
+
+### Planning — récup utilisée AVANT les CP par défaut
+
+`components/planning/PlanningPanel.tsx`.
+
+Côté salarié, dès qu'il reste de la récup au compteur, le formulaire de demande part
+sur **« Récupération » par défaut** (au lieu de « Congés payés ») : la récup se consomme
+**avant** les CP, elle les remplace — les CP sont préservés. Reste modifiable manuellement.
+
+Si le salarié repasse malgré tout sur **CP** alors qu'il a de la récup, un rappel s'affiche —
+« Il te reste X de récup — utilise-la avant tes CP » + bouton **Utiliser ma récup** (et signale
+au passage un éventuel samedi décompté). Réservé au salarié (jamais la direction), validé
+ensuite par la personne en charge (circuit boomerang).
+
+---
+
+## 🧱 Écran 2 — bloc client + stock regroupés, commande pleine hauteur
+
+Suite de la refonte de l'Écran 2 : le **bandeau client** n'est plus une rangée
+pleine largeur au-dessus des colonnes — il est **regroupé avec le stock dans un
+seul bloc à gauche**, ce qui laisse la **colonne commande s'aligner sur toute la
+hauteur** (plus de lignes produit visibles sans scroller).
+
+| Élément | Avant | Après |
+|---------|-------|-------|
+| **Bloc gauche** | Bandeau client (panneau plein) au-dessus, puis colonne stock en dessous. | **Un seul bloc** : identité client + méta + recherche « créer / modifier un bon » **intégrées en tête de la colonne stock** (bandeau « plat », séparateur, plus de panneau séparé). Passé au constructeur via `clientHeader`. |
+| **Colonne commande** | Démarrait sous le bandeau client → écourtée. | S'**aligne sur toute la hauteur** du bloc → nettement plus de lignes visibles sans scroller. |
+| **N° de commande (réf. client) + note BL** | Rangée dédiée au **pied** de la commande. | **Calées en tête du bloc gauche** (avec le client) — le pied de la commande est allégé d'autant. |
+| **« Dupliquer la dernière cde »** | Bouton texte + icône, à **gauche** des raccourcis. | **Icône seule**, posée **à droite** des raccourcis. |
+| **Raccourcis produits** | Nombre illimité. | **Limités à 4** (bouton « + Raccourci » masqué au-delà). |
+
+### Planning — découpe automatique récup + CP (jours ENTIERS)
+
+`lib/planning.ts` (`splitLeaveRecupCp`, pur/testé), `components/planning/PlanningPanel.tsx`.
+
+Quand le salarié pose des **congés payés** et qu'il lui reste de la récup, celle-ci est
+consommée **d'abord**, mais uniquement en **journées entières** : N = ⌊solde ÷ journée type⌋.
+Le reste part en CP. Deux demandes sont créées automatiquement (récup + CP), avec un **aperçu**
+avant l'envoi. Remplace le « défaut tout-récup » précédent (qui pouvait dépasser le solde).
+
+Exemple (journée 7h15) : poser une semaine avec **18 h de récup** → **2 j en récup** (14h30,
+`floor(18 ÷ 7,25) = 2`) **+ le reste en CP** ; jamais une 3ᵉ journée partielle (21h45 > 18 h).
+Un samedi éventuel restant en CP est signalé. Toujours à l'avantage du salarié (récup majorée
+au crédit, débit plafonné au manque réel vs 35 h).
+
+---
+
+## 🏷️ Préparation — tags variété + calibre sur les articles
+
+Les écrans de **préparation** (Détail livraison + récap par article) affichent
+désormais, en plus de la marque · conditionnement · origine, la **variété** et le
+**calibre** de chaque article — pour lever les ambiguïtés entre deux lots d'un
+même fruit (ex. Fraise *Belorta / Karima* vs *Lady Gold*, calibre différent).
+
+| Écran | Avant | Après |
+|-------|-------|-------|
+| **Détail livraison** (console de préparation, lue au téléphone) | Tags marque · condt · origine. | + **calibre** (teal) et **variété** (rose) — mêmes couleurs que l'Écran 2. |
+| **Récap par article** | marque · condt · variété · origine. | + **calibre**. |
+
+- **Variété** = `Product.frgnName` (SAP `FrgnName`), déjà synchronisée.
+- **Calibre** = SAP `Items.U_GER_CALIBRE`, **lu en direct** dans `/api/livraisons`
+  (piggyback sur la requête stock existante) — aucun champ local ni migration :
+  le calibre n'apparaît que pour les articles où SAP le renseigne.
+
+---
+
+## 🐛 Fix — création d'un type de contact/incident impossible (menu rogné)
+
+`components/TypeCombobox.tsx` (types de contact & d'incident réutilisables).
+
+**Symptôme** : impossible de créer un nouveau type de contact — le bouton
+« Créer « … » » semblait absent / inopérant.
+
+**Cause** : le menu déroulant était un enfant `absolute` d'une carte
+`SectionCard` en **`overflow-hidden`** → le **bas du menu était rogné**, or c'est
+là que vit le bouton « Créer » (le haut, « — Aucun », restait visible, d'où
+l'effet « étrange »).
+
+| Sujet | Avant | Après |
+|-------|-------|-------|
+| **Menu déroulant** | Enfant `absolute`, rogné par la carte parente. | Rendu dans un **portal** (position fixe) → s'affiche par-dessus tout, plus jamais coupé. |
+| **Entrée (⏎) sur un libellé existant** | Ne faisait **rien** (impasse). | **Sélectionne** la correspondance exacte ; sinon **crée**. |
+| **Erreurs (création / réseau)** | **Avalées en silence** (« ça ne marche pas »). | **Toast** explicite ; création idempotente (pas de doublon). |
+
+---
+
+## 🐛 Fix — un chef livreur/préparateur ne voyait pas les livraisons à préparer
+
+`lib/permissions.ts` (`isLivraisonRestricted`, nouveau) + routes/pages du module
+livraisons.
+
+**Symptôme** : Jean-Michel (direction + commercial **et** livreur) ne voyait pas
+les livraisons « en cours » à venir et ne pouvait donc pas les **mettre en
+préparation** — l'action semblait réservée au commercial qui avait vendu.
+
+**Cause** : le rôle « accès restreint » du module livraisons était
+`préparateur restreint OU livreur`. Comme Jean-Michel porte le flag `isLivreur`
+(il aide à livrer), il était confiné comme un pur livreur : il ne voyait que les
+BL déjà mis en prépa et le bouton « mettre en prépa » lui était refusé.
+
+**Fix** : un rôle **élevé** (admin / direction / commercial) garde l'**accès
+complet** même s'il porte aussi un flag terrain. Un préparateur/livreur **pur**
+reste confiné (inchangé). Appliqué de façon homogène à tout le module
+(Détail livraison, mise-en-prépa, exclusions, bon de transport, ventes du jour,
+fiche transporteur) via l'unique helper `isLivraisonRestricted`.
+
+### Planning — hiérarchie visuelle des pastilles (présence en filigrane)
+
+`components/planning/PlanningPanel.tsx` (`DayPill`).
+
+Le « Présent » par défaut remplissait tout le calendrier de pastilles vertes pleines et
+bordées, aussi marquées que les exceptions → surchargé. Nouvelle hiérarchie (« juste milieu » :
+lisible mais aéré) :
+
+| Avant | Après |
+|-------|-------|
+| Présent = pastille pleine + bordure, même poids que CP/récup | Présent = **filigrane** (fond très doux 7 %, texte allégé, `font-medium`, **sans bordure**) — la présence ne noie plus la grille |
+| Toutes les pastilles bordées | **Plus de bordure** sur les pastilles pleines ; le **pointillé** reste réservé aux congés **en attente / posés** |
+| Exceptions peu distinctes | **CP, récup, férié, absence, maladie** ressortent nettement (pastille pleine colorée, `font-semibold`) |
+
+Lisibilité conservée (libellés partout, abrégés sur mobile) ; le calendrier respire.

@@ -82,6 +82,55 @@ export const COGS_PRODUCT_LINES: Prisma.Sql = Prisma.sql`COUNT(*) FILTER (WHERE 
 export const COGS_COSTED_LINES: Prisma.Sql = Prisma.sql`COUNT(cogs."unitCost")`;
 
 /* ─────────────────────────────────────────────────────────────────
+   REPLI FABRICATION — coût des articles RECONDITIONNÉS / ASSEMBLÉS.
+
+   Un kit DECO / une barquette n'a PAS de réception d'achat (PDN) directe sous
+   son propre code : sa marchandise entre en stock par la FABRICATION (sortie
+   des composants achetés + entrée du produit fini). Le coût est donc porté par
+   `FabricationRun` : `totalCost` (composants × prix d'achat + main d'œuvre) pour
+   `parentColis` colis produits, et `parentValue` (revenu de référence estimé).
+
+   On expose `fab."costRatio" = totalCost / parentValue` = COGS / revenu, un
+   ratio en € donc INDÉPENDANT DES UNITÉS (colis / pièce / kg) : le coût d'une
+   ligne vendue = `lineTotal × costRatio`. On évite ainsi toute conversion
+   d'unité fragile. NULL si l'article n'a aucun run costable.
+
+   ⚠️ Compose APRÈS cogsFromSql(kind) (mêmes alias l, i, cogs) :
+       FROM ${'${cogsFromSql("order")} ${FAB_COST_LATERAL}'}
+   ───────────────────────────────────────────────────────────────── */
+
+/** LATERAL fabrication — `fab."costRatio"` du run le plus pertinent (done, le
+ *  plus récent ≤ date de vente, sinon le plus ancien). Garde-fou anti-aberration :
+ *  coût ≤ 2× le revenu de référence (au-delà, `parentValue` est douteux → on
+ *  laisse la ligne NON costée plutôt que de polluer la marge). */
+export const FAB_COST_LATERAL: Prisma.Sql = Prisma.sql`
+  LEFT JOIN LATERAL (
+    SELECT fr."totalCost" / fr."parentValue" AS "costRatio"
+    FROM "FabricationRun" fr
+    WHERE fr."parentItemCode" = l."itemCode"
+      AND fr."status" = 'done'
+      AND fr."totalCost" IS NOT NULL
+      AND fr."parentValue" IS NOT NULL AND fr."parentValue" > 0
+      AND fr."totalCost" < fr."parentValue" * 2
+    ORDER BY (fr."createdAt" <= i."docDate") DESC,
+             CASE WHEN fr."createdAt" <= i."docDate" THEN fr."createdAt" END DESC,
+             CASE WHEN fr."createdAt" >  i."docDate" THEN fr."createdAt" END ASC,
+             fr."createdAt" DESC
+    LIMIT 1
+  ) fab ON TRUE`;
+
+/** Marge d'une ligne AVEC repli fabrication : coût EM d'abord, sinon coût recette
+ *  (`lineTotal × costRatio`). NULL si ni l'un ni l'autre → exclue des SUM. */
+export const COGS_MARGIN_FAB: Prisma.Sql = Prisma.sql`CASE
+  WHEN cogs."unitCost" IS NOT NULL THEN l."lineTotal" - l."quantity" * cogs."unitCost"
+  WHEN fab."costRatio" IS NOT NULL THEN l."lineTotal" * (1 - fab."costRatio")
+  END`;
+
+/** Prédicat « ligne costée » (réception EM OU fabrication) — pour les FILTER.
+ *  Requiert FAB_COST_LATERAL dans le FROM. */
+export const COGS_COSTED_FAB: Prisma.Sql = Prisma.sql`(cogs."unitCost" IS NOT NULL OR fab."costRatio" IS NOT NULL)`;
+
+/* ─────────────────────────────────────────────────────────────────
    Agrégat simple — marge réelle totale d'un type de doc sur une fenêtre.
    ───────────────────────────────────────────────────────────────── */
 

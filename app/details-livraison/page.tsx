@@ -1,8 +1,9 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { DetailsLivraisonArticles } from "@/components/livraisons/DetailsLivraisonArticles";
+import { LivraisonsSectionTabs } from "@/components/livraisons/LivraisonsSectionTabs";
 
-export const metadata = { title: "Détails livraison" };
+export const metadata = { title: "Détails par article" };
 export const dynamic = "force-dynamic";
 
 /**
@@ -17,10 +18,12 @@ export default async function DetailsLivraisonPage() {
 
   return (
     <div className="space-y-6 animate-fade-up">
+      {/* Onglets de section « Livraisons du jour » — vues d'une même donnée. */}
+      <LivraisonsSectionTabs />
       <header>
         <p className="kicker mb-1.5">Entrepôt</p>
         <h1 className="font-display text-[34px] font-semibold text-foreground tracking-tight leading-none">
-          Détails livraison
+          Détails par article
         </h1>
         <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
           Récap <b>par article</b> de tout ce qui <b>part le jour choisi</b> (date de livraison),

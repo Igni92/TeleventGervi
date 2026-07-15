@@ -28,6 +28,7 @@ export interface Line {
   condt?: string | null;
   pays?: string | null;
   variete?: string | null;     // frgnName SAP (variété) — précision produit
+  calibre?: string | null;     // U_GER_CALIBRE SAP — précision produit (préparation)
 }
 
 export interface Doc {

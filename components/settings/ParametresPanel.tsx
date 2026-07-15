@@ -20,6 +20,8 @@ import {
   SETTING_KEYS, readSetting, writeSetting, onSettingChange,
   hoverContrastKey, applyHoverContrast, HOVER_CONTRAST_DEFAULT, HOVER_CONTRAST_MAX,
   UI_ZOOM_VALUES, UI_ZOOM_DEFAULT, applyUiZoom, type UiZoomValue,
+  CELEBRATION_MARGIN_DEFAULT, readCelebrationStyle, type CelebrationStyle, CELEBRATION_EVENT,
+  applyAccentPos, ACCENT_POS_DEFAULT, ACCENT_POSITIONS, type AccentPos,
 } from "@/components/settings/app-settings";
 
 /**
@@ -150,6 +152,57 @@ const ONOFF: SegOption<"on" | "off">[] = [
   { id: "off", label: "Désactivé" },
 ];
 
+/** Effet au clic — choix de l'animation (ou aucune). */
+type ClickFx = "sparks" | "nova" | "radar" | "ripple" | "bloom" | "rain" | "off";
+const CLICK_FX: SegOption<ClickFx>[] = [
+  { id: "sparks", label: "Étincelles", hint: "Éclat de particules or" },
+  { id: "nova",   label: "Supernova",  hint: "Cœur incandescent, éclat en croix et constellation" },
+  { id: "radar",  label: "Radar",      hint: "Ping sonar : réticule, balayage rotatif et échos" },
+  { id: "ripple", label: "Onde d'eau", hint: "Anneaux concentriques" },
+  { id: "bloom",  label: "Aurore",     hint: "Halo lumineux diffus, teinté marque" },
+  { id: "rain",   label: "Cascade",    hint: "Gouttes d'eau 3D qui tombent jusqu'en bas" },
+  { id: "off",    label: "Aucun" },
+];
+/** Normalise la valeur stockée (« on » historique → « sparks »). */
+function readClickFx(v: string): ClickFx {
+  return v === "off" ? "off"
+    : v === "nova" ? "nova"
+    : v === "radar" ? "radar"
+    : v === "ripple" ? "ripple"
+    : v === "bloom" ? "bloom"
+    : v === "rain" ? "rain"
+    : "sparks";
+}
+
+/** Délai (cooldown) entre deux effets au clic — en millisecondes ("0" = instantané). */
+const CLICK_DELAYS: SegOption<string>[] = [
+  { id: "0",   label: "Instantané", hint: "Aucun délai (spam-clic)" },
+  { id: "200", label: "Court",      hint: "0,2 s entre deux effets" },
+  { id: "400", label: "Moyen",      hint: "0,4 s entre deux effets" },
+  { id: "800", label: "Long",       hint: "0,8 s entre deux effets" },
+];
+function readClickDelay(v: string): string {
+  return ["0", "200", "400", "800"].includes(v) ? v : "0";
+}
+
+/** Position de la barre d'accent colorée des cartes. */
+const ACCENT_POS_OPTS: SegOption<AccentPos>[] = [
+  { id: "left",   label: "Gauche", hint: "Barre verticale à gauche (défaut)" },
+  { id: "top",    label: "Haut",   hint: "Barre horizontale en haut" },
+  { id: "bottom", label: "Bas",    hint: "Barre horizontale en bas" },
+  { id: "off",    label: "Aucune", hint: "Pas de barre d'accent" },
+];
+function readAccentPos(v: string | null | undefined): AccentPos {
+  return ACCENT_POSITIONS.includes(v as AccentPos) ? (v as AccentPos) : ACCENT_POS_DEFAULT;
+}
+
+/** Style de la célébration « grosse marge ». */
+const CELEB_STYLES: SegOption<CelebrationStyle>[] = [
+  { id: "bills",    label: "Billets",  hint: "Pluie de billets + pièces d'or" },
+  { id: "confetti", label: "Confettis", hint: "Confettis dorés" },
+  { id: "both",     label: "Les deux",  hint: "Billets + confettis" },
+];
+
 type DensityId = (typeof DENSITES)[number]["id"];
 
 /** Applique la densité GLOBALE → attribut data-density sur <html> (cf. globals.css). */
@@ -225,9 +278,15 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
   const [zoom, setZoom] = useState<UiZoomValue>(UI_ZOOM_DEFAULT);
   const [densite, setDensite] = useState<DensityId>("normal");
   const [animations, setAnimations] = useState<"auto" | "on" | "off">("auto");
-  const [sparks, setSparks] = useState<"on" | "off">("on");
+  const [clickFx, setClickFx] = useState<ClickFx>("sparks");
+  const [clickDelay, setClickDelay] = useState<string>("0");
+  const [accentPos, setAccentPos] = useState<AccentPos>(ACCENT_POS_DEFAULT);
   const [promoAnim, setPromoAnim] = useState<"on" | "off">("on");
   const [promoNotifs, setPromoNotifs] = useState<"on" | "off">("on");
+  // Célébration « grosse marge »
+  const [celebOn, setCelebOn] = useState<"on" | "off">("on");
+  const [celebMargin, setCelebMargin] = useState<string>(String(CELEBRATION_MARGIN_DEFAULT));
+  const [celebStyle, setCelebStyle] = useState<CelebrationStyle>("both");
   // Logos de marque — réglables indépendamment par zone.
   const [logoConsole, setLogoConsole] = useState<"on" | "off">("on");
   const [logoLivraison, setLogoLivraison] = useState<"on" | "off">("on");
@@ -252,7 +311,14 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
     const a = readSetting(SETTING_KEYS.animations, "auto");
     setAnimations((["auto", "on", "off"].includes(a) ? a : "auto") as typeof animations);
 
-    setSparks(readSetting(SETTING_KEYS.clickSparks, "on") === "off" ? "off" : "on");
+    setClickFx(readClickFx(readSetting(SETTING_KEYS.clickSparks, "sparks")));
+    setClickDelay(readClickDelay(readSetting(SETTING_KEYS.clickSparksDelay, "0")));
+    const ap = readAccentPos(readSetting(SETTING_KEYS.accentPos, ACCENT_POS_DEFAULT));
+    setAccentPos(ap); applyAccentPos(ap); // resync idempotent
+
+    setCelebOn(readSetting(SETTING_KEYS.celebration, "on") === "off" ? "off" : "on");
+    setCelebMargin(readSetting(SETTING_KEYS.celebrationMargin, String(CELEBRATION_MARGIN_DEFAULT)));
+    setCelebStyle(readCelebrationStyle(readSetting(SETTING_KEYS.celebrationStyle, "both")));
     setPromoAnim(readSetting(SETTING_KEYS.promoBannerAnim, "on") === "off" ? "off" : "on");
     setPromoNotifs(readSetting(SETTING_KEYS.promoNotifs, "on") === "off" ? "off" : "on");
     setLogoConsole(readSetting(SETTING_KEYS.brandLogosConsole, "on") === "off" ? "off" : "on");
@@ -272,7 +338,12 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
       if (key === SETTING_KEYS.uiZoom && value) { setZoom(value as UiZoomValue); applyUiZoom(value as UiZoomValue); }
       if (key === SETTING_KEYS.density && value) { setDensite(value as DensityId); applyDensity(value as DensityId); }
       if (key === SETTING_KEYS.animations && value) setAnimations(value as typeof animations);
-      if (key === SETTING_KEYS.clickSparks) setSparks(value === "off" ? "off" : "on");
+      if (key === SETTING_KEYS.clickSparks) setClickFx(readClickFx(value ?? "sparks"));
+      if (key === SETTING_KEYS.clickSparksDelay) setClickDelay(readClickDelay(value ?? "0"));
+      if (key === SETTING_KEYS.accentPos) { const p = readAccentPos(value); setAccentPos(p); applyAccentPos(p); }
+      if (key === SETTING_KEYS.celebration) setCelebOn(value === "off" ? "off" : "on");
+      if (key === SETTING_KEYS.celebrationMargin && value != null) setCelebMargin(value);
+      if (key === SETTING_KEYS.celebrationStyle) setCelebStyle(readCelebrationStyle(value));
       if (key === SETTING_KEYS.promoBannerAnim) setPromoAnim(value === "off" ? "off" : "on");
       if (key === SETTING_KEYS.promoNotifs) setPromoNotifs(value === "off" ? "off" : "on");
       if (key === SETTING_KEYS.brandLogosConsole) setLogoConsole(value === "off" ? "off" : "on");
@@ -341,14 +412,38 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
                 />
               </SettingRow>
               <SettingRow
-                title="Étincelles au clic"
-                desc="Petit éclat de particules sur les zones vides (jamais sur les boutons ou champs). Coupé d'office quand les animations sont désactivées."
+                title="Effet au clic"
+                desc="Animation au clic sur une zone vide (jamais sur les boutons ou champs), sur PC uniquement. Coupé d'office quand les animations sont désactivées."
               >
                 <SegmentToggle
-                  ariaLabel="Étincelles au clic"
-                  value={sparks}
-                  onChange={(v) => { setSparks(v); writeSetting(SETTING_KEYS.clickSparks, v); }}
-                  options={ONOFF}
+                  ariaLabel="Effet au clic"
+                  value={clickFx}
+                  onChange={(v) => { setClickFx(v); writeSetting(SETTING_KEYS.clickSparks, v); }}
+                  options={CLICK_FX}
+                />
+              </SettingRow>
+              {clickFx !== "off" && (
+                <SettingRow
+                  title="Délai entre deux effets"
+                  desc="Espace les effets au clic. « Instantané » autorise le spam-clic ; un délai calme l'affichage."
+                >
+                  <SegmentToggle
+                    ariaLabel="Délai entre deux effets au clic"
+                    value={clickDelay}
+                    onChange={(v) => { setClickDelay(v); writeSetting(SETTING_KEYS.clickSparksDelay, v); }}
+                    options={CLICK_DELAYS}
+                  />
+                </SettingRow>
+              )}
+              <SettingRow
+                title="Barre d'accent des cartes"
+                desc="Position du liseré coloré des cartes (comme celui à gauche de ce bloc)."
+              >
+                <SegmentToggle
+                  ariaLabel="Position de la barre d'accent des cartes"
+                  value={accentPos}
+                  onChange={(v) => { setAccentPos(v); applyAccentPos(v); writeSetting(SETTING_KEYS.accentPos, v); }}
+                  options={ACCENT_POS_OPTS}
                 />
               </SettingRow>
             </div>
@@ -490,6 +585,75 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
                   options={ONOFF}
                 />
               </SettingRow>
+              <SettingRow
+                title="Célébration des grosses marges"
+                desc="Quand une commande est validée avec une marge nette élevée, une pluie de billets salue le coup. Entièrement désactivable."
+              >
+                <SegmentToggle
+                  ariaLabel="Célébration des grosses marges"
+                  value={celebOn}
+                  onChange={(v) => { setCelebOn(v); writeSetting(SETTING_KEYS.celebration, v); }}
+                  options={ONOFF}
+                />
+              </SettingRow>
+              {celebOn === "on" && (
+                <>
+                  <SettingRow
+                    title="Seuil de marge nette"
+                    desc="Montant de marge nette (en €) à partir duquel la célébration se déclenche. Modifiable."
+                  >
+                    <div className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-secondary/60 px-2.5 ring-1 ring-inset ring-border focus-within:ring-brand-500/60">
+                      <input
+                        type="number" min={0} step={10} inputMode="numeric"
+                        aria-label="Seuil de marge nette en euros"
+                        value={celebMargin}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setCelebMargin(v);
+                          if (v.trim() === "") return;
+                          const n = Math.max(0, Math.round(Number(v)));
+                          if (Number.isFinite(n)) writeSetting(SETTING_KEYS.celebrationMargin, String(n));
+                        }}
+                        onBlur={() => {
+                          if (celebMargin.trim() === "" || !Number.isFinite(Number(celebMargin))) {
+                            const dft = String(CELEBRATION_MARGIN_DEFAULT);
+                            setCelebMargin(dft); writeSetting(SETTING_KEYS.celebrationMargin, dft);
+                          }
+                        }}
+                        className="w-20 bg-transparent text-right text-[13.5px] font-semibold tabular-nums text-foreground outline-none"
+                      />
+                      <span className="text-[13px] font-semibold text-muted-foreground">€</span>
+                    </div>
+                  </SettingRow>
+                  <SettingRow
+                    title="Style de célébration"
+                    desc="Pluie de billets, confettis dorés, ou les deux."
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <SegmentToggle
+                        ariaLabel="Style de célébration"
+                        value={celebStyle}
+                        onChange={(v) => { setCelebStyle(v); writeSetting(SETTING_KEYS.celebrationStyle, v); }}
+                        options={CELEB_STYLES}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const n = Math.max(1, Math.round(Number(celebMargin) || CELEBRATION_MARGIN_DEFAULT));
+                          try {
+                            window.dispatchEvent(new CustomEvent(CELEBRATION_EVENT, {
+                              detail: { margin: Math.round(n * 1.35), threshold: n },
+                            }));
+                          } catch { /* ignore */ }
+                        }}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand-500/15 px-3 text-[12.5px] font-semibold text-brand-700 ring-1 ring-inset ring-brand-500/40 transition-colors hover:bg-brand-500/25 dark:text-brand-300"
+                      >
+                        <Wand2 className="h-3.5 w-3.5" /> Tester
+                      </button>
+                    </div>
+                  </SettingRow>
+                </>
+              )}
               <div className="pt-3">
                 <Link
                   href="/parametres/marques"

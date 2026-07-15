@@ -25,6 +25,9 @@ type ModifTarget = { docEntry: number; docNum: number; clientId: string | null; 
 type ManualClient = { clientId: string; clientName: string; info: ActiveClientInfo | null };
 /** Mode de la recherche de compte : créer un nouveau bon, ou en modifier un existant. */
 type SearchMode = "create" | "modify";
+/** Mode de livraison / compte SAP du client — alimente le sélecteur « compte »
+ *  posé à côté du nom dans le bandeau (n'apparaît que si le client en a ≥ 2). */
+interface DeliveryMode { id: string; name: string; sapCardCode: string; isDefault: boolean }
 
 /**
  * Écran 2 (fenêtre détachée) — optimisé **marge + relation client + incident**.
@@ -135,6 +138,11 @@ export default function Ecran2Page() {
   const info = modif || dismissed ? null : (manual ? manual.info : (state?.client ?? null));
   const modifier = modif ? { docEntry: modif.docEntry, docNum: modif.docNum } : null;
 
+  // Mode de livraison / compte SAP du client — remonté ici (au lieu du pied du
+  // constructeur) pour poser le sélecteur « compte » à côté du nom dans le bandeau.
+  // La valeur est passée au constructeur (utilisée à la création du bon).
+  const { modes, modeId, setModeId } = useDeliveryModes(clientId);
+
   // BL envoyé (création/modif en ARRIÈRE-PLAN) : le client quitte la vue tout
   // de suite — le poste enchaîne pendant que SAP travaille (résultat en toast).
   const displayedIdRef = useRef<string | null>(null);
@@ -145,22 +153,31 @@ export default function Ecran2Page() {
     setDismissedId(displayedIdRef.current);
   }, []);
 
+  // Bandeau client (nom + méta + recherche « créer / modifier un bon »).
+  // REGROUPÉ avec le stock dans un même bloc à gauche : passé au constructeur
+  // via `clientHeader` (posé en tête de la colonne stock), ou rendu seul dans
+  // l'état « en attente d'un client ».
+  const banner = (
+    <ClientBanner
+      clientId={clientId} clientName={clientName} info={info}
+      manual={manual != null || dismissed}
+      searchMode={searchMode} onSearchModeChange={setSearchMode}
+      onPick={pickClient} onClearManual={clearManual}
+      modes={modif ? [] : modes} modeId={modeId} onModeChange={setModeId}
+    />
+  );
+
   return (
     <div className="h-full flex flex-col gap-3 animate-fade-up min-h-0">
       {/* ── Bandeau PROMOTIONS — barre tout en haut de l'écran ── */}
       <PromoBanner context="commande" />
 
-      <ClientBanner
-        clientId={clientId} clientName={clientName} info={info}
-        manual={manual != null || dismissed}
-        searchMode={searchMode} onSearchModeChange={setSearchMode}
-        onPick={pickClient} onClearManual={clearManual}
-      />
-
       {/* Sélecteur de BL (mode « Modifier un bon ») — liste des bons du compte choisi. */}
       <BLPickerDialog client={browseClient} onClose={() => setBrowseClient(null)} onPick={pickModifDoc} />
 
-      {/* Constructeur de commande — prend tout l'espace restant */}
+      {/* Constructeur de commande — prend tout l'espace restant. Le bandeau client
+          est regroupé avec le stock (bloc gauche) ; la colonne commande s'aligne
+          alors sur toute la hauteur → plus de lignes visibles sans scroller. */}
       <div className="flex-1 min-h-0">
         {!ready ? (
           <p className="text-[13px] text-muted-foreground inline-flex items-center gap-2 p-4">
@@ -170,13 +187,18 @@ export default function Ecran2Page() {
           <Ecran2Order
             key={modif ? `m${modif.docEntry}` : clientId}
             clientId={clientId} clientName={clientName} stockSharePct={sharePct}
+            deliveryModeId={modeId}
+            clientHeader={banner}
             modifier={modifier} onExitModif={exitModif} onSubmitted={handleSubmitted}
           />
         ) : (
-          <div className="h-full flex items-center justify-center panel">
-            <p className="hidden md:block text-[13px] text-muted-foreground text-center max-w-xs">
-              Sélectionne un client sur l&apos;écran 1 — ou recherche un compte ci-dessus — pour afficher son stock et saisir une commande ici.
-            </p>
+          <div className="h-full flex flex-col gap-3 min-h-0">
+            {banner}
+            <div className="flex-1 flex items-center justify-center panel">
+              <p className="hidden md:block text-[13px] text-muted-foreground text-center max-w-xs">
+                Sélectionne un client sur l&apos;écran 1 — ou recherche un compte ci-dessus — pour afficher son stock et saisir une commande ici.
+              </p>
+            </div>
           </div>
         )}
       </div>
@@ -210,10 +232,12 @@ function Ecran1Link() {
 
 function ClientBanner({
   clientId, clientName, info, manual, searchMode, onSearchModeChange, onPick, onClearManual,
+  modes, modeId, onModeChange,
 }: {
   clientId: string | null; clientName: string | null; info: ActiveClientInfo | null;
   manual: boolean; searchMode: SearchMode; onSearchModeChange: (m: SearchMode) => void;
   onPick: (c: SearchClient) => void; onClearManual: () => void;
+  modes: DeliveryMode[]; modeId: string; onModeChange: (id: string) => void;
 }) {
   // Fetch unique des dernières livraisons (mini-frise à droite du nom + notes).
   // Appelé AVANT tout return conditionnel (règle des hooks) ; no-op si pas de client.
@@ -224,37 +248,38 @@ function ClientBanner({
   //   • « Créer un bon »   → charge le compte pour saisir un nouveau BL ;
   //   • « Modifier un bon » → ouvre la liste de ses BL pour en consulter/modifier un.
   const searchRow = (
-    <div className="space-y-1.5">
+    <div className="flex flex-wrap items-center gap-2">
       <SearchModeToggle mode={searchMode} onChange={onSearchModeChange} />
-      <div className="flex items-center gap-2">
-        <div className="flex-1 min-w-0">
-          <ClientSearch mode={searchMode} onPick={onPick} />
-        </div>
-        {manual && (
-          <button
-            type="button"
-            onClick={onClearManual}
-            title="Abandonner ce compte et revenir au client synchronisé depuis l'écran 1"
-            className="shrink-0 inline-flex items-center gap-1 h-9 px-2.5 rounded-md border border-border bg-card text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-brand-400 transition-colors"
-          >
-            <MonitorSmartphone className="h-3.5 w-3.5" /> Suivre l&apos;écran 1
-          </button>
-        )}
+      <div className="flex-1 min-w-[160px]">
+        <ClientSearch mode={searchMode} onPick={onPick} />
       </div>
+      {manual && (
+        <button
+          type="button"
+          onClick={onClearManual}
+          title="Abandonner ce compte et revenir au client synchronisé depuis l'écran 1"
+          className="shrink-0 inline-flex items-center gap-1 h-9 px-2.5 rounded-md border border-border bg-card text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-brand-400 transition-colors"
+        >
+          <MonitorSmartphone className="h-3.5 w-3.5" /> Suivre l&apos;écran 1
+        </button>
+      )}
     </div>
   );
 
   if (!clientName) {
     return (
-      <div className="shrink-0 flex flex-col-reverse lg:flex-row lg:items-center lg:justify-between gap-2">
-        <header className="panel w-fit max-w-full px-3.5 py-2 flex items-center gap-2.5">
-          <h1 className="text-[15px] font-semibold tracking-tight text-muted-foreground">
-            En attente d&apos;un client…
-          </h1>
-          <Ecran1Link />
+      <div className="shrink-0 flex flex-col-reverse lg:flex-row lg:items-center gap-3">
+        <header className="panel w-fit max-w-full px-4 py-2">
+          <p className="kicker mb-1">Console de commande</p>
+          <div className="flex items-center gap-2.5">
+            <h1 className="font-display text-[22px] sm:text-[26px] font-semibold tracking-tight text-muted-foreground leading-none">
+              En attente d&apos;un client…
+            </h1>
+            <Ecran1Link />
+          </div>
         </header>
-        {/* Recherche d'un compte — en haut à DROITE */}
-        <div className="w-full lg:w-[320px] shrink-0">{searchRow}</div>
+        {/* Recherche + création de bon — juste à côté du client */}
+        <div className="w-full lg:flex-1 lg:max-w-[560px]">{searchRow}</div>
       </div>
     );
   }
@@ -267,13 +292,21 @@ function ClientBanner({
 
   const incidents = info?.openIncidents ?? 0;
 
-  // ── Bande client COMPACTE — Écran 2 = prise de commande uniquement. Les
-  //    informations commerce (interlocuteurs, habitudes, commercial, e-mail…)
-  //    vivent sur l'Écran 1. Une seule ligne, largeur au contenu (w-fit).
+  // ── Bandeau client — Écran 2 = prise de commande. Le nom du client est le
+  //    HÉRO du bandeau (même traitement « display » que le « Bonjour » de
+  //    l'accueil : kicker + grand titre), pour l'identifier au premier coup
+  //    d'œil pendant la saisie. Les infos commerce (interlocuteurs, habitudes,
+  //    commercial, e-mail…) vivent sur l'Écran 1 ; ici on garde une méta légère
+  //    (type, incidents, téléphones, mini-frise). Largeur au contenu (w-fit).
   return (
-    <div className="shrink-0 flex flex-col-reverse lg:flex-row lg:items-start lg:justify-between gap-2">
-      <header className="panel w-fit max-w-full px-3.5 py-1.5">
-        <div className="flex items-center gap-2.5 flex-wrap min-w-0">
+    <div className="shrink-0 border-b border-border pb-2.5 mb-2.5">
+      {/* Identité client + recherche « créer / modifier un bon » intégrée à droite —
+          le tout REGROUPÉ avec le stock dans un même bloc (pas de panneau séparé). */}
+      <div className="flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
+        <p className="kicker mb-1">Compte · prise de commande</p>
+        {/* Nom client — HÉRO du bloc (grand titre display, comme l'accueil). */}
+        <div className="flex items-center gap-2.5 min-w-0">
           {/* Le nom EST le lien vers la fiche complète. */}
           {clientId ? (
             <Link
@@ -281,12 +314,12 @@ function ClientBanner({
               target="_blank"
               rel="noopener noreferrer"
               title="Ouvrir la fiche client complète (nouvel onglet)"
-              className="text-[16px] font-semibold tracking-tight text-foreground leading-tight truncate max-w-[320px] hover:text-brand-600 dark:hover:text-brand-400 hover:underline decoration-2 underline-offset-2 transition-colors"
+              className="font-display text-[24px] sm:text-[27px] font-semibold tracking-tight text-foreground leading-none truncate max-w-[440px] hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
             >
               {clientName}
             </Link>
           ) : (
-            <h1 className="text-[16px] font-semibold tracking-tight text-foreground leading-tight truncate max-w-[320px]">
+            <h1 className="font-display text-[24px] sm:text-[27px] font-semibold tracking-tight text-foreground leading-none truncate max-w-[440px]">
               {clientName}
             </h1>
           )}
@@ -299,6 +332,22 @@ function ClientBanner({
               {info.type}
             </span>
           )}
+          {/* Compte / mode de livraison — À CÔTÉ DU NOM. N'apparaît que si le
+              client a ≥ 2 comptes (sinon le défaut est appliqué silencieusement). */}
+          {modes.length > 1 && (
+            <select
+              value={modeId}
+              onChange={(e) => onModeChange(e.target.value)}
+              aria-label="Compte / mode de livraison"
+              title="Compte SAP / mode de livraison du bon"
+              className="shrink-0 h-7 max-w-[190px] rounded-md border border-border bg-background text-[12px] font-medium px-1.5"
+            >
+              {modes.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.sapCardCode})</option>)}
+            </select>
+          )}
+        </div>
+        {/* Méta légère — incidents, téléphones, mini-frise, retour Écran 1. */}
+        <div className="mt-1.5 flex items-center gap-2.5 flex-wrap min-w-0">
           {incidents > 0 && (
             <span
               className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
@@ -327,9 +376,10 @@ function ClientBanner({
         </div>
         {/* Notes des dernières commandes (vraies remarques) — utile à la saisie */}
         <OrderNotes docs={deliveryDocs} compact />
-      </header>
-      {/* Recherche d'un compte — en haut à DROITE */}
-      <div className="w-full lg:w-[320px] shrink-0">{searchRow}</div>
+        </div>
+        {/* Recherche + créer / modifier un bon — intégrée en haut du bloc, à droite. */}
+        <div className="w-full xl:w-[380px] shrink-0">{searchRow}</div>
+      </div>
     </div>
   );
 }
@@ -485,12 +535,12 @@ function ClientSearch({ mode, onPick }: {
 function SearchModeToggle({ mode, onChange }: {
   mode: SearchMode; onChange: (m: SearchMode) => void;
 }) {
-  const base = "inline-flex items-center justify-center gap-1 flex-1 h-7 rounded-md text-[11px] font-semibold transition-colors";
+  const base = "inline-flex items-center justify-center gap-1 shrink-0 px-2.5 h-8 rounded-md text-[11px] font-semibold transition-colors";
   const on = "bg-card text-foreground shadow-sm ring-1 ring-border";
   const off = "text-muted-foreground hover:text-foreground";
   return (
     <div
-      className="flex items-center gap-0.5 rounded-lg border border-border bg-secondary/40 p-0.5"
+      className="flex items-center gap-0.5 rounded-lg border border-border bg-secondary/40 p-0.5 shrink-0"
       role="tablist"
       aria-label="Mode de la recherche de compte"
     >
@@ -663,6 +713,30 @@ function useClientDeliveries(clientId: string | null) {
     return () => { cancelled = true; };
   }, [clientId]);
   return { docs, loading };
+}
+
+/** Modes de livraison / comptes SAP d'un client (sélecteur « compte » du bandeau).
+ *  Charge /api/clients/:id/delivery-modes ; pré-sélectionne le mode par défaut. */
+function useDeliveryModes(clientId: string | null) {
+  const [modes, setModes] = useState<DeliveryMode[]>([]);
+  const [modeId, setModeId] = useState("");
+  useEffect(() => {
+    if (!clientId) { setModes([]); setModeId(""); return; }
+    let cancelled = false;
+    setModes([]); setModeId("");
+    fetch(`/api/clients/${clientId}/delivery-modes`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { modes?: DeliveryMode[] }) => {
+        if (cancelled) return;
+        const ms = d.modes ?? [];
+        setModes(ms);
+        const def = ms.find((m) => m.isDefault) ?? ms[0];
+        setModeId(def?.id ?? "");
+      })
+      .catch(() => { if (!cancelled) { setModes([]); setModeId(""); } });
+    return () => { cancelled = true; };
+  }, [clientId]);
+  return { modes, modeId, setModeId };
 }
 
 type DayCell = { dt: Date; key: string; dow: number; del: { weightKg: number; colis: number; count: number } | null; future: boolean };

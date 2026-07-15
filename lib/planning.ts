@@ -3,12 +3,15 @@
  *
  * Règles métier, TOUJOURS à l'avantage du salarié et VALIDÉES par l'employeur :
  *
- *   • COMPTEUR RÉCUP (heures) — crédit = heures supp des semaines dont
- *     l'employeur a choisi l'option « récupération » ; débit = jours de récup
- *     posés, décomptés UNIQUEMENT AU PASSAGE DE LA SEMAINE : si, au final, la
- *     semaine atteint quand même le contrat (les 35 h sont faites), le déficit
- *     est nul → la récup N'EST PAS déduite. Le débit est borné par
- *     min(déficit réel, jours posés × journée type).
+ *   • COMPTEUR RÉCUP (heures) — crédit = heures supp MAJORÉES des semaines dont
+ *     l'employeur a choisi l'option « récupération » (repos compensateur de
+ *     remplacement : les +25 %/+50 % sont acquis en repos, ex. 8 h supp à
+ *     +25 % = 10 h de récup) ; débit = jours de récup posés, décomptés
+ *     UNIQUEMENT AU PASSAGE DE LA SEMAINE : si, au final, la semaine atteint
+ *     quand même le contrat (les 35 h sont faites), le déficit est nul → la
+ *     récup N'EST PAS déduite. Le débit est borné par min(déficit réel, jours
+ *     OUVRÉS lun→ven posés × journée type). Crédit majoré + débit à l'heure
+ *     brute = doublement à l'avantage du salarié.
  *
  *   • COMPTEUR CP (jours) — solde annuel fixé par l'employeur (période de
  *     référence 1er juin → 31 mai) − jours OUVRABLES (lun→sam) des congés payés
@@ -22,9 +25,10 @@
  */
 import {
   computeWeek, dayMinutes, isoWeekId, typicalDayMinutes, weekDates,
-  type DayHours, type HeuresOption, type HoursProfile,
+  type DayHours, type DayTag, type HeuresOption, type HoursProfile,
 } from "./heuresCalc";
-import { isIsoDate, rangesOverlap, type CongeRequest } from "./conges";
+import { isIsoDate, rangesOverlap, type CongeRequest, type CongeType } from "./conges";
+import { frenchHolidayLabel } from "./livraison";
 
 /* ─────────────────────────── Dates utilitaires ────────────────────────────── */
 
@@ -51,10 +55,11 @@ export function expandDates(start: string, end: string): string[] {
   return out;
 }
 
-/** Jours OUVRABLES (lun→sam) d'une plage — décompte des CP à la française
- *  (le dimanche ne consomme jamais un congé : à l'avantage du salarié). */
+/** Jours OUVRABLES (lun→sam) d'une plage — décompte des CP à la française.
+ *  Ni les DIMANCHES ni les JOURS FÉRIÉS (chômés) ne consomment un congé : ils
+ *  sont exclus du décompte — toujours à l'avantage du salarié. */
 export function expandOuvrables(start: string, end: string): string[] {
-  return expandDates(start, end).filter((d) => atNoon(d).getUTCDay() !== 0);
+  return expandDates(start, end).filter((d) => atNoon(d).getUTCDay() !== 0 && !frenchHolidayLabel(d));
 }
 
 /** Jours de SEMAINE (lun→ven) d'une plage — jours crédités d'une journée type
@@ -64,6 +69,70 @@ export function expandSemaine(start: string, end: string): string[] {
     const dow = atNoon(d).getUTCDay();
     return dow >= 1 && dow <= 5;
   });
+}
+
+/** SAMEDIS (hors fériés) d'une plage. Un CP est décompté en jours ouvrables
+ *  (lun→sam) mais un samedi n'est PAS crédité comme travaillé (expandSemaine =
+ *  lun→ven) : il coûte donc un CP « à vide ». On les repère pour proposer de la
+ *  récup à la place — à l'avantage du salarié (ses CP sont préservés). Un samedi
+ *  férié est déjà non décompté → exclu ici aussi (rien à « éviter »). */
+export function saturdaysInRange(start: string, end: string): string[] {
+  return expandDates(start, end).filter((d) => atNoon(d).getUTCDay() === 6 && !frenchHolidayLabel(d));
+}
+
+/** Sous-plage de congé (dates ISO incluses). */
+export interface LeaveRange { start: string; end: string }
+
+export interface LeaveSplit {
+  recup: LeaveRange | null;   // portion payée par la récup (jours ENTIERS), ou null
+  cp: LeaveRange | null;      // portion en congés payés, ou null
+  recupDays: number;          // jours de contrat (lun→ven) couverts par la récup
+  cpDays: number;             // jours ouvrables (lun→sam hors dim/fériés) en CP
+}
+
+/**
+ * DÉCOUPE une plage de congé en portion RÉCUP + portion CP, en n'utilisant que
+ * des JOURS ENTIERS de récup (à l'avantage du salarié : la récup se consomme
+ * avant les CP, jamais une journée partielle).
+ *
+ * `recupWholeDays` = nombre de journées ENTIÈRES de récup disponibles =
+ * floor(solde de récup / journée type). Ex. 18 h de récup, journée 7h15 →
+ * 2 jours (14h30), pas 3 (21h45 > 18 h). On affecte les `recupWholeDays`
+ * PREMIERS jours de contrat (lun→ven hors fériés) à la récup ; le reste part en
+ * CP. Deux sous-plages CONTIGUËS (préfixe récup / suffixe CP).
+ */
+export function splitLeaveRecupCp(start: string, end: string, recupWholeDays: number): LeaveSplit {
+  const days = expandDates(start, end);
+  if (days.length === 0) return { recup: null, cp: null, recupDays: 0, cpDays: 0 };
+
+  const isContract = (d: string) => {
+    const dow = atNoon(d).getUTCDay();
+    return dow >= 1 && dow <= 5 && !frenchHolidayLabel(d);
+  };
+  const contractTotal = days.filter(isContract).length;
+  const n = Math.max(0, Math.min(Math.floor(recupWholeDays), contractTotal));
+
+  // Aucune journée entière de récup → tout en CP.
+  if (n <= 0) {
+    return { recup: null, cp: { start, end }, recupDays: 0, cpDays: expandOuvrables(start, end).length };
+  }
+  // La récup couvre TOUS les jours de contrat de la plage → tout en récup
+  // (les samedis éventuels sont gratuits en récup).
+  if (n >= contractTotal) {
+    return { recup: { start, end }, cp: null, recupDays: contractTotal, cpDays: 0 };
+  }
+  // Sinon : récup = préfixe couvrant les n premiers jours de contrat, CP = suffixe.
+  let count = 0, splitIdx = 0;
+  for (let i = 0; i < days.length; i++) {
+    if (isContract(days[i]) && ++count === n) { splitIdx = i; break; }
+  }
+  const cp = { start: days[splitIdx + 1], end };
+  return {
+    recup: { start, end: days[splitIdx] },
+    cp,
+    recupDays: n,
+    cpDays: expandOuvrables(cp.start, cp.end).length,
+  };
 }
 
 /* ─────────────────────── Grille du calendrier mensuel ─────────────────────── */
@@ -92,6 +161,77 @@ export function monthGridDays(monthId: string): GridDay[] {
   return out;
 }
 
+/* ──────────────────── Catégorie affichée d'une case du calendrier ───────────
+ * Une case = UNE pastille dominante, avec son libellé court (CP, Récup, …).
+ * Règle métier (demande) : PRÉSENT PAR DÉFAUT sur l'horaire type (lun→ven) —
+ * on ne « change » la pastille que pour un CP / récup / absence / maladie /
+ * autre, un jour FÉRIÉ (prioritaire, jour chômé), ou un congé en attente. Le
+ * week-end et les jours hors mois n'affichent rien par défaut. */
+
+/** Catégories possibles d'une pastille (congés + présence + férié). */
+export type DayCategory =
+  | "present" | "ferie"
+  | "cp" | "rtt" | "recup" | "maladie" | "sans_solde" | "autre" | "absent" | "conges";
+
+/** Libellé COURT affiché DANS la pastille (« CP » pour congés payés, etc.). */
+export const DAY_CATEGORY_LABEL: Record<DayCategory, string> = {
+  present: "Présent",
+  ferie: "Férié",
+  cp: "CP",
+  rtt: "RTT",
+  recup: "Récup",
+  maladie: "Maladie",
+  sans_solde: "Sans solde",
+  autre: "Autre",
+  absent: "Absent",
+  conges: "Congés",
+};
+
+export interface CalendarDayResolved {
+  /** Catégorie dominante, ou null = rien à afficher (week-end / hors planning). */
+  category: DayCategory | null;
+  /** Congé en attente de validation (pastille creuse/pointillée). */
+  pending: boolean;
+  /** Récup posée pas encore décomptée (repos à venir). */
+  planned: boolean;
+  /** Libellé du férié, si `category === "ferie"`. */
+  ferieLabel: string | null;
+}
+
+/** Un tag de feuille d'heures (present/absent/conges/récup/maladie) → catégorie. */
+function tagToCategory(tag: DayTag): DayCategory {
+  return tag === "conges" ? "conges" : tag;
+}
+
+/**
+ * Résout la pastille DOMINANTE d'un jour à partir de tout ce qui le touche.
+ * Priorité : férié (jour chômé) → congé validé → tag feuille d'heures → congé
+ * en attente → récup posée → PRÉSENT PAR DÉFAUT (lun→ven du mois) → rien.
+ */
+export function resolveCalendarDay(input: {
+  dow: number;                 // 0 = dimanche … 6 = samedi (UTC)
+  inMonth: boolean;
+  ferieLabel?: string | null;  // libellé jour férié, ou null/absent
+  approvedTypes?: CongeType[];  // types des congés VALIDÉS ce jour
+  pendingTypes?: CongeType[];   // types des congés EN ATTENTE ce jour
+  tag?: DayTag;                 // tag de la feuille d'heures
+  recupPosee?: boolean;         // jour de récup posé (planning)
+}): CalendarDayResolved {
+  const { dow, inMonth, ferieLabel, approvedTypes = [], pendingTypes = [], tag, recupPosee } = input;
+
+  if (ferieLabel) return { category: "ferie", pending: false, planned: false, ferieLabel };
+  if (approvedTypes.length) return { category: approvedTypes[0] as DayCategory, pending: false, planned: false, ferieLabel: null };
+  if (tag) return { category: tagToCategory(tag), pending: false, planned: false, ferieLabel: null };
+  if (pendingTypes.length) return { category: pendingTypes[0] as DayCategory, pending: true, planned: false, ferieLabel: null };
+  if (recupPosee) return { category: "recup", pending: false, planned: true, ferieLabel: null };
+
+  // PRÉSENT PAR DÉFAUT : jour ouvré (lundi→vendredi) du mois, rien d'autre posé.
+  const isWeekday = dow >= 1 && dow <= 5;
+  if (inMonth && isWeekday) return { category: "present", pending: false, planned: false, ferieLabel: null };
+
+  return { category: null, pending: false, planned: false, ferieLabel: null };
+}
+
 /* ────────────────────────── Compteur RÉCUP (heures) ───────────────────────── */
 
 /** Semaine d'entrée du compteur : la saisie brute (jours + option employeur). */
@@ -103,7 +243,7 @@ export interface CounterWeekInput {
 }
 
 export interface RecupCounter {
-  creditMin: number;      // heures supp créditées (semaines option « récup » passées)
+  creditMin: number;      // heures supp MAJORÉES créditées (+25/+50 inclus — semaines option « récup » passées)
   debitMin: number;       // récup réellement déduite (au passage des semaines)
   balanceMin: number;     // solde disponible = crédit − débit
   plannedDates: string[]; // jours de récup posés PAS ENCORE décomptés (à venir)
@@ -153,18 +293,33 @@ export function computeRecupCounter(
     }
     if (input?.option === "recup") {
       const c = computeWeek(input.days, profile.weeklyHours, typDay);
-      creditMin += c.sup25Min + c.sup50Min;
+      // Repos compensateur de remplacement : on crédite les heures MAJORÉES
+      // (+25 %/+50 % inclus), pas les heures brutes — 8 h supp à +25 % =
+      // 10 h de récup. Rétroactif : le compteur est recalculé depuis les
+      // saisies, donc la récup déjà acquise est revalorisée automatiquement.
+      creditMin += c.majEquivMin;
     }
     if (recupDays.size > 0) {
+      // Seuls les JOURS DE CONTRAT (lun→ven, hors fériés) consomment de la
+      // récup : un samedi / dimanche / jour férié posé n'est pas travaillé → il
+      // n'y a AUCUNE heure à récupérer dessus. Ainsi, poser vendredi + samedi ne
+      // décompte que le vendredi (le samedi, au-delà des 35 h lun→ven, est
+      // gratuit) — à l'avantage du salarié.
+      const contractRecupDays = [...recupDays].filter((d) => {
+        const dow = atNoon(d).getUTCDay();
+        return dow >= 1 && dow <= 5 && !frenchHolidayLabel(d);
+      }).length;
+      const posableMin = contractRecupDays * typDay;
       if (input) {
         // Semaine saisie : le déficit RÉEL tranche. Contrat atteint malgré la
         // récup → déficit 0 → RIEN n'est déduit (à l'avantage du salarié).
         const c = computeWeek(input.days, profile.weeklyHours, typDay);
         const deficit = Math.max(0, c.contractMin - c.totalMin);
-        debitMin += Math.min(deficit, recupDays.size * typDay);
+        debitMin += Math.min(deficit, posableMin);
       } else {
-        // Aucune saisie : la récup est réputée prise comme posée.
-        debitMin += recupDays.size * typDay;
+        // Aucune saisie : la récup est réputée prise comme posée — mais seuls
+        // les jours ouvrés (lun→ven hors fériés) la décomptent.
+        debitMin += posableMin;
       }
     }
   }

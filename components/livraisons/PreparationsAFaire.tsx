@@ -12,7 +12,8 @@
  * Détail livraison) — le préparateur voit exactement sa charge.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ClipboardList, Loader2, RefreshCw, Search, Store, Truck } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { CheckCircle2, ChevronRight, ClipboardList, Loader2, RefreshCw, Search, Store, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { addDaysISO, formatDeliveryDate } from "@/lib/livraison";
 import { hasMissing, type ApiResp, type Doc } from "@/lib/livraisonView";
@@ -54,10 +55,20 @@ function toDayGroups(data: ApiResp | null): DayGroup[] {
 }
 
 export function PreparationsAFaire() {
+  const router = useRouter();
   const [data, setData] = useState<ApiResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const today = useMemo(() => parisTodayISO(), []);
+
+  // Ouvrir une commande = filer vers « Livraisons du jour » à la bonne date, la
+  // commande cible ouverte directement (vue en grand → console de lot). Le nonce
+  // `t` change à chaque clic pour ROUVRIR la même commande (« si je rentre encore
+  // dedans, rouvrir la console »).
+  const openDoc = useCallback((groupDate: string, d: Doc) => {
+    const date = (d.dueDate || groupDate || "").slice(0, 10);
+    router.push(`/livraisons?date=${date}&open=${d.docEntry}&t=${Date.now()}`);
+  }, [router]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -150,7 +161,15 @@ export function PreparationsAFaire() {
               </div>
               <ul className="divide-y divide-border/60">
                 {g.docs.map((d) => (
-                  <li key={d.docEntry} className="flex items-center gap-2 px-4 sm:px-5 py-3">
+                  <li key={d.docEntry}>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openDoc(g.date, d)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDoc(g.date, d); } }}
+                      title={`Ouvrir « ${d.cardFullName ?? d.cardName} » (BL n°${d.docNum}) — modifier les lots`}
+                      className="flex items-center gap-2 px-4 sm:px-5 py-3 cursor-pointer select-none hover:bg-secondary/40 active:bg-secondary/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 transition-colors"
+                    >
                     <div className="min-w-0 flex-1">
                       <p className="flex items-center gap-2 min-w-0 text-[13.5px] font-semibold text-foreground">
                         <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -181,6 +200,8 @@ export function PreparationsAFaire() {
                     <span className="hidden sm:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-700 dark:text-amber-300 shrink-0">
                       À préparer
                     </span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" aria-hidden />
+                    </div>
                   </li>
                 ))}
               </ul>

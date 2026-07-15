@@ -7,6 +7,9 @@ import { sap } from "@/lib/sapb1";
 import { mirrorCreatedOrder, type CreatedOrderForMirror } from "@/lib/sapMirror";
 import { getLotMaps, resolveLotDetailed, LOT_PENDING } from "@/lib/lotResolver";
 import { chooseLot, unitInfo } from "@/lib/gervifrais-calc";
+import { debitLots, creditLots, isRealLot, getLedgerFifoLot } from "@/lib/lotLedger";
+import { getDeliveryPreparerOne, getDeliveryMiseEnPrepOne } from "@/lib/inventory";
+import { notifyPreparateursPresents } from "@/lib/push";
 
 /**
  * Modification d'une commande SAP EXISTANTE et OUVERTE (même BL, jamais de
@@ -237,6 +240,9 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
     }
   }
   const lotMaps = needLot ? await getLotMaps() : null;
+  // Repli REGISTRE (produits fabriqués OP<NNNNN> / articles suivis uniquement au
+  // registre) : lot FIFO en stock par article quand le résolveur PDN est aveugle.
+  const ledgerLotByItem = needLot ? await getLedgerFifoLot(itemCodes) : new Map<string, string>();
 
   const TPF_AUTO = (process.env.GERVIFRAIS_AUTO_TAX ?? "true") !== "false";
   const expenses = new Map<number, SapExpense>();
@@ -304,7 +310,11 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
         sapOnHand: sapStockByItem.get(l.itemCode) ?? null,
         envDefault: process.env.GERVIFRAIS_LOT_DEFAUT ?? null,
       });
-      line.U_NoLot = choice.lot || LOT_PENDING;
+      // Repli REGISTRE : produit fabriqué (OP<NNNNN>) ou article suivi uniquement
+      // au registre — le résolveur PDN est aveugle, on pose le lot FIFO en stock.
+      const ledgerLot = choice.lot === LOT_PENDING && resolved.lot === null
+        ? ledgerLotByItem.get(l.itemCode) : undefined;
+      line.U_NoLot = ledgerLot || choice.lot || LOT_PENDING;
     }
 
     return line;
@@ -350,6 +360,72 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
         console.warn(`[Modif] Miroir échoué (non-bloquant):`, (e as Error).message);
       }
     }
+
+    // ── Réconciliation du REGISTRE des lots : différentiel AVANT/APRÈS ──
+    // Un PATCH de modif remplace toute la collection : une ligne ajoutée/augmentée
+    // consomme plus du lot (débit), une ligne retirée/diminuée le rend (crédit),
+    // un changement de lot déplace la quantité. Sans ça, le registre dérive à
+    // chaque édition → de vieux lots gardent une quantité fantôme. Best-effort,
+    // ne bloque jamais la modif (le PATCH SAP a déjà réussi).
+    try {
+      const sumByLot = (rows: { itemCode: string; lot: string; qty: number }[]) => {
+        const m = new Map<string, { itemCode: string; lot: string; qty: number }>();
+        for (const r of rows) {
+          const cur = m.get(`${r.itemCode}|${r.lot}`);
+          if (cur) cur.qty += r.qty; else m.set(`${r.itemCode}|${r.lot}`, { ...r });
+        }
+        return m;
+      };
+      const before = sumByLot(
+        (order.DocumentLines ?? [])
+          .filter((l) => l.ItemCode && isRealLot(l.U_NoLot) && (l.Quantity ?? 0) > 0)
+          .map((l) => ({ itemCode: l.ItemCode, lot: (l.U_NoLot as string).trim(), qty: l.Quantity })),
+      );
+      const after = sumByLot(
+        documentLines
+          .map((l) => ({ itemCode: l.ItemCode as string, lot: String(l.U_NoLot ?? "").trim(), qty: Number(l.Quantity ?? 0) }))
+          .filter((l) => l.itemCode && isRealLot(l.lot) && l.qty > 0),
+      );
+      const debits: { itemCode: string; lot: string; qty: number }[] = [];
+      const credits: { itemCode: string; lot: string; qty: number }[] = [];
+      for (const [key, a] of after) {
+        const delta = a.qty - (before.get(key)?.qty ?? 0);
+        if (delta > 0.0001) debits.push({ itemCode: a.itemCode, lot: a.lot, qty: delta });
+      }
+      for (const [key, b] of before) {
+        const delta = b.qty - (after.get(key)?.qty ?? 0);
+        if (delta > 0.0001) credits.push({ itemCode: b.itemCode, lot: b.lot, qty: delta });
+      }
+      if (debits.length) await debitLots(debits);
+      if (credits.length) await creditLots(credits);
+    } catch (e) {
+      console.warn(`[Modif] Réconciliation registre lots échouée (non-bloquant):`, (e as Error).message);
+    }
+
+    // ── Notification : si la commande est DÉJÀ EN PRÉPARATION (lâchée à
+    //    l'entrepôt ou prise par un préparateur), prévenir les préparateurs
+    //    PRÉSENTS aujourd'hui qu'elle vient d'être modifiée (lots / lignes) — ils
+    //    doivent revérifier leur préparation. Fire-and-forget, jamais bloquant.
+    try {
+      const [preparer, misEnPrep] = await Promise.all([
+        getDeliveryPreparerOne(docEntry),
+        getDeliveryMiseEnPrepOne(docEntry),
+      ]);
+      if (preparer || misEnPrep) {
+        const me = session.user?.name?.trim() || session.user?.email || "?";
+        const store = (refetched?.CardName ?? order.CardCode ?? "").toString().trim();
+        void notifyPreparateursPresents(
+          {
+            title: "✏️ Commande en préparation modifiée",
+            body: `BL n°${order.DocNum}${store ? ` · ${store}` : ""} — lots/lignes mis à jour par ${me}. Revérifie la préparation.`,
+            url: "/livraisons",
+            tag: `modif-prep:${docEntry}`,
+            renotify: true,
+          },
+          { exceptEmail: session.user?.email ?? null },
+        );
+      }
+    } catch { /* notification best-effort */ }
 
     return NextResponse.json({
       ok: true,

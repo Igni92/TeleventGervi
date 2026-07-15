@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requirePreparateurOrAdmin } from "@/lib/permissions";
 import { sap } from "@/lib/sapb1";
+import { debitLots } from "@/lib/lotLedger";
 
 /**
  * POST /api/sap/goods-receipts/[docEntry]/return
@@ -60,6 +61,10 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
 
   const lineByNum = new Map((pdn.DocumentLines || []).map((l) => [l.LineNum, l]));
   const DocumentLines: Record<string, unknown>[] = [];
+  // Lot du retour = celui de l'EM source (EM<DocNum>) : un retour est une SORTIE →
+  // on débitera le registre par lot (miroir du crédit posé à la réception).
+  const returnLot = `EM${pdn.DocNum}`;
+  const returnDebits: { itemCode: string; lot: string; qty: number }[] = [];
   for (const w of wanted) {
     const src = lineByNum.get(w.lineNum);
     if (!src) return NextResponse.json({ error: `Ligne ${w.lineNum} introuvable sur l'EM.` }, { status: 400 });
@@ -80,6 +85,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
       Quantity: retPieces,
       ...(pkg ? { PackageQuantity: w.packageQuantity } : {}),
     });
+    if (src.ItemCode) returnDebits.push({ itemCode: src.ItemCode, lot: returnLot, qty: retPieces });
   }
   if (DocumentLines.length === 0) {
     return NextResponse.json({ error: "Aucune ligne valide à retourner." }, { status: 400 });
@@ -91,6 +97,11 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
       { CardCode: pdn.CardCode, DocumentLines },
     );
     console.log(`[Retour] PurchaseReturns #${created.DocNum} depuis EM #${pdn.DocNum} (${DocumentLines.length} ligne(s))`);
+    // Registre : le retour est une sortie du lot d'origine → débit (best-effort).
+    if (returnDebits.length > 0) {
+      try { await debitLots(returnDebits); }
+      catch (e) { console.warn("[Retour] Débit registre lot échoué (non-bloquant):", (e as Error).message); }
+    }
     return NextResponse.json({ ok: true, docEntry: created.DocEntry, docNum: created.DocNum, fromDocNum: pdn.DocNum, lines: DocumentLines.length });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

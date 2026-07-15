@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { isRestrictedPreparateur } from "@/lib/preparateur";
-import { isLivreur } from "@/lib/permissions";
+import { isLivraisonRestricted } from "@/lib/permissions";
 import { getCarrierInfo, setCarrierInfo, sanitizeCarrierInfo } from "@/lib/carrierInfo";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +29,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  const restricted = isRestrictedPreparateur(session.user.email) || (await isLivreur(session));
+  const restricted = await isLivraisonRestricted(session);
   if (restricted) return NextResponse.json({ error: "Réservé aux commerciaux / admins" }, { status: 403 });
 
   let body: { code?: string; email?: unknown; phones?: unknown };

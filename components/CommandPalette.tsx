@@ -6,7 +6,7 @@ import { Command } from "cmdk";
 import {
   Home, Radio, ClipboardList, Users, Package, PackagePlus, PackageCheck, Factory, Truck,
   LayoutDashboard, Receipt, Briefcase, Settings, Search, CornerDownLeft, Store, ShoppingCart,
-  ClipboardCheck, PackageX, Clock3, ScrollText, CalendarDays,
+  ClipboardCheck, PackageX, Clock3, FileText, CalendarDays,
 } from "lucide-react";
 
 interface NavItem { href: string; label: string; icon: typeof Home; keywords?: string }
@@ -14,16 +14,16 @@ const NAV: NavItem[] = [
   { href: "/accueil", label: "Accueil", icon: Home },
   { href: "/console", label: "Console d'appels", icon: Radio, keywords: "commande bl vente télévente" },
   { href: "/console2", label: "Console 2 · Commande", icon: ShoppingCart, keywords: "bl bon livraison mobile saisie commande" },
-  { href: "/clients", label: "Clients", icon: Users, keywords: "base contacts" },
-  { href: "/plan-appel", label: "Plan d'appel", icon: ClipboardList, keywords: "televente appels clients" },
+  { href: "/clients", label: "Clients & plan d'appel", icon: Users, keywords: "base contacts plan appel televente vendeur commercial assignation incidents retard rappel annuaire" },
   { href: "/ventes-du-jour", label: "Ventes du jour", icon: Store, keywords: "ventes préparation livraison magasin mise en prep" },
-  { href: "/livraisons", label: "Préparation livraisons", icon: Truck, keywords: "détail livraison bons transporteur tournée ventes mise en préparation" },
-  { href: "/preparations", label: "Préparations à faire", icon: ClipboardList, keywords: "préparations à faire charge dates livraison à préparer non préparé" },
-  { href: "/bons-commande", label: "Bons de commande", icon: ScrollText, keywords: "bon de commande précommande lot affecter em pending export lots à affecter" },
-  { href: "/manquants", label: "Manquants", icon: PackageX, keywords: "rupture stock négatif achats à prévoir articles manquants" },
+  { href: "/livraisons", label: "Livraisons du jour", icon: Truck, keywords: "détail livraison préparation dispatch bons transporteur tournée ventes mise en préparation" },
+  { href: "/details-livraison", label: "Livraisons · par article", icon: PackageCheck, keywords: "détails livraison articles récap segments gms chr export tags produit conditionnement" },
+  { href: "/preparations", label: "Livraisons · à préparer", icon: ClipboardList, keywords: "préparations à faire charge dates livraison à préparer non préparé" },
+  { href: "/bons-commande", label: "Bons de commande", icon: FileText, keywords: "bon de commande précommande lot affecter em pending export lots à affecter" },
+  { href: "/manquants", label: "Livraisons · manquants", icon: PackageX, keywords: "rupture stock négatif achats à prévoir articles manquants déficit" },
   { href: "/products", label: "Stock", icon: Package, keywords: "produits articles" },
   { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, keywords: "comptage stock entrepôt" },
-  { href: "/commandes-fournisseurs", label: "Commandes fournisseurs", icon: PackageCheck, keywords: "achat fournisseur cf réception" },
+  { href: "/commandes-fournisseurs", label: "Cde Fournisseur", icon: PackageCheck, keywords: "achat fournisseur cf réception commandes" },
   { href: "/entrees", label: "Entrées marchandises", icon: PackagePlus, keywords: "réception marchandise em agréage réserve" },
   { href: "/fabrication", label: "Fabrication", icon: Factory, keywords: "production deco kit" },
   { href: "/dashboard", label: "Statistiques · Carte", icon: LayoutDashboard, keywords: "pilotage dashboard géo carte stats" },

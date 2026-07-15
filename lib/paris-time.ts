@@ -63,3 +63,9 @@ export function parisHourMinute(ref: Date): { hour: number; minute: number } {
 export function parisHour(ref: Date): number {
   return parisHourMinute(ref).hour;
 }
+
+/** Heure murale à Paris au format « HHhMM » (ex. « 09h05 ») pour un instant donné. */
+export function heureParis(ref: Date = new Date()): string {
+  const { hour, minute } = parisHourMinute(ref);
+  return `${String(hour).padStart(2, "0")}h${String(minute).padStart(2, "0")}`;
+}

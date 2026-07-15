@@ -19,6 +19,7 @@ import { AnimatedNumber } from "@/components/ui/animated-number";
 import { formatRelative } from "@/lib/utils";
 import { convertStockDisplay, type StockDisplayUnit } from "@/lib/gervifrais-calc";
 import { designationProduit } from "@/lib/produit-designation";
+import { DesignationChips, Chip } from "@/components/entrees/DesignationChips";
 
 interface StockEntry { inStock: number; committed: number; ordered: number; available: number; }
 interface Product {
@@ -41,6 +42,7 @@ interface Product {
   uPays: string | null;
   uMarque: string | null;
   uCondi: string | null;
+  frgnName: string | null;               // = variété (SAP FrgnName)
   stockByWarehouse: Record<string, StockEntry>;
 }
 
@@ -476,7 +478,6 @@ export function ProductsTable() {
               const arr = byGroup.get(g);
               if (arr) arr.push(p); else byGroup.set(g, [p]);
             }
-            const chip = "inline-flex items-center px-2 py-0.5 rounded-[5px] text-[11px] font-semibold";
             return Array.from(byGroup.entries())
               .sort(([a], [b]) => a.localeCompare(b))
               .map(([groupName, prods]) => {
@@ -502,7 +503,7 @@ export function ProductsTable() {
                       <div className="divide-y divide-border/60">
                         {prods.map((p) => {
                           const unit = (p.itemGroup != null ? groupUnits[String(p.itemGroup)] : undefined) ?? null;
-                          const dz = designationProduit({ itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque, uCondi: p.uCondi });
+                          const dz = designationProduit({ itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque, uCondi: p.uCondi, frgnName: p.frgnName });
                           const totalAvailable = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.available ?? 0), 0);
                           const totalOrdered = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.ordered ?? 0), 0);
                           const stockD = stockDisplay(p, totalAvailable, unit);
@@ -536,13 +537,7 @@ export function ProductsTable() {
                                 {/* Désignation + chips colorés à DROITE */}
                                 <span className="min-w-0 border-l border-border/60 pl-3">
                                   <span className="block text-[15px] font-semibold text-foreground truncate leading-tight">{dz.fruit}</span>
-                                  {(dz.marque !== "—" || dz.condt !== "—" || dz.pays !== "—") && (
-                                    <span className="mt-1.5 flex items-center gap-1 flex-wrap">
-                                      {dz.marque !== "—" && <span className={`${chip} bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100 dark:ring-1 dark:ring-inset dark:ring-violet-400/50`}>{dz.marque}</span>}
-                                      {dz.condt !== "—" && <span className={`${chip} bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100 dark:ring-1 dark:ring-inset dark:ring-sky-400/50`}>{dz.condt}</span>}
-                                      {dz.pays !== "—" && <span className={`${chip} bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100 dark:ring-1 dark:ring-inset dark:ring-amber-400/50`}>{dz.pays}</span>}
-                                    </span>
-                                  )}
+                                  <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} size="md" className="mt-1.5" />
                                   <span className="flex items-baseline gap-2 text-[11px] mt-1 min-w-0">
                                     <span className="font-mono text-muted-foreground/60 truncate">{p.itemCode}</span>
                                     {attendu && <span className="text-sky-600 dark:text-sky-400 shrink-0 font-medium">{attendu}</span>}
@@ -588,10 +583,10 @@ export function ProductsTable() {
               </th>
               <SortTh sortKey="code" sort={sort} onSort={toggleSort}>Code Article</SortTh>
               <SortTh sortKey="fruit" sort={sort} onSort={toggleSort}>Fruit</SortTh>
-              <SortTh sortKey="pays" sort={sort} onSort={toggleSort}>Pays</SortTh>
               <SortTh sortKey="marque" sort={sort} onSort={toggleSort}>Marque</SortTh>
-              <SortTh sortKey="variete" sort={sort} onSort={toggleSort}>Variété</SortTh>
               <SortTh sortKey="condt" sort={sort} onSort={toggleSort}>Condt</SortTh>
+              <SortTh sortKey="variete" sort={sort} onSort={toggleSort}>Variété</SortTh>
+              <SortTh sortKey="pays" sort={sort} onSort={toggleSort}>Pays</SortTh>
             </tr>
           </thead>
           <tbody>
@@ -614,7 +609,7 @@ export function ProductsTable() {
                 const isExpanded = expandedId === p.id;
                 // Surcharge d'unité d'affichage choisie pour le groupe (sinon auto).
                 const unit = (p.itemGroup != null ? groupUnits[String(p.itemGroup)] : undefined) ?? null;
-                const dz = designationProduit({ itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque, uCondi: p.uCondi });
+                const dz = designationProduit({ itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque, uCondi: p.uCondi, frgnName: p.frgnName });
                 // Quantités cumulées sur les 3 entrepôts synchronisés.
                 const totalAvailable = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.available ?? 0), 0);
                 const totalOrdered = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.ordered ?? 0), 0);
@@ -668,10 +663,10 @@ export function ProductsTable() {
                     </td>
                     <td className="px-4 py-2.5 font-mono text-[11.5px] font-semibold text-foreground">{p.itemCode}</td>
                     <td className="px-3 py-2.5 text-foreground/90">{dz.fruit}</td>
-                    <td className="px-3 py-2.5 text-[12px] text-muted-foreground">{dz.pays}</td>
-                    <td className="px-3 py-2.5 text-[12px] text-muted-foreground">{dz.marque}</td>
-                    <td className="px-3 py-2.5 text-[12px] text-muted-foreground">{dz.variete}</td>
-                    <td className="px-3 py-2.5 text-[12px] text-muted-foreground">{dz.condt}</td>
+                    <td className="px-3 py-2.5"><Chip kind="marque">{dz.marque}</Chip></td>
+                    <td className="px-3 py-2.5"><Chip kind="condt">{dz.condt}</Chip></td>
+                    <td className="px-3 py-2.5"><Chip kind="variete">{dz.variete}</Chip></td>
+                    <td className="px-3 py-2.5"><Chip kind="pays">{dz.pays}</Chip></td>
                   </tr>,
                 ];
                 if (isExpanded) {

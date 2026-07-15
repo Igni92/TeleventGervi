@@ -7,7 +7,10 @@ import { cn } from "@/lib/utils";
  *
  * Signature visuelle harmonisée partout :
  *   - fond `bg-card`, bord `border-border`, coins `rounded-xl`
- *   - bordure d'accent GAUCHE colorée (border-l-4) optionnelle
+ *   - barre d'accent colorée optionnelle, dont la POSITION est réglable
+ *     globalement (gauche par défaut · haut · bas · aucune) via l'attribut
+ *     `data-accent-pos` sur <html> (Paramètres → Apparence) : la couleur est
+ *     posée en inline (`--sc-accent`) et globals.css choisit le côté.
  *   - titre en « kicker » (uppercase, tracking large, muted)
  *   - entrée fade-up douce en CSS (compositeur, respecte reduced-motion via
  *     `motion-reduce:animate-none`) — plus de framer-motion : ces cartes sont
@@ -16,13 +19,14 @@ import { cn } from "@/lib/utils";
 
 export type Accent = "brand" | "emerald" | "rose" | "violet" | "amber" | "sky";
 
-const ACCENT_BORDER: Record<Accent, string> = {
-  brand:   "border-l-brand-500",
-  emerald: "border-l-emerald-500",
-  rose:    "border-l-rose-500",
-  violet:  "border-l-violet-500",
-  amber:   "border-l-amber-500",
-  sky:     "border-l-sky-500",
+/** Couleur de l'accent (posée en `--sc-accent`) ; le CÔTÉ est géré par globals.css. */
+const ACCENT_COLOR: Record<Accent, string> = {
+  brand:   "hsl(var(--brand-500))",
+  emerald: "#10b981",
+  rose:    "#f43f5e",
+  violet:  "#8b5cf6",
+  amber:   "#f59e0b",
+  sky:     "#0ea5e9",
 };
 
 interface SurfaceCardProps {
@@ -47,10 +51,15 @@ export function SurfaceCard({
 }: SurfaceCardProps) {
   const base = cn(
     "bg-card border border-border rounded-xl p-4",
-    accent && `border-l-4 ${ACCENT_BORDER[accent]}`,
+    accent && "sc-accent",
     animate && "animate-fade-up motion-reduce:animate-none",
     className,
   );
+
+  const style: React.CSSProperties = {
+    ...(animate && delay ? { animationDelay: `${delay}ms` } : {}),
+    ...(accent ? ({ "--sc-accent": ACCENT_COLOR[accent] } as React.CSSProperties) : {}),
+  };
 
   const header = (title || action) && (
     <div className="flex items-center justify-between gap-2 mb-3">
@@ -65,7 +74,7 @@ export function SurfaceCard({
   );
 
   return (
-    <section className={base} style={animate && delay ? { animationDelay: `${delay}ms` } : undefined}>
+    <section className={base} style={style}>
       {header}
       {children}
     </section>

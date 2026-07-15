@@ -51,6 +51,14 @@ export function familyOf(
   if (n.includes("CASSIS")) return { key: "cassis", label: "Cassis" };
   if (n.includes("MURE") || n.includes("MÛRE")) return { key: "mure", label: "Mûre" };
   if (n.includes("FRAISE")) return { key: "fraise", label: "Fraise" };
+  // ⚠️ REPLI (hors petits fruits) : la clé est dérivée du NOM de groupe
+  // (`g_<groupName>`), alors que FAMILY_CTE_SQL / getFamilyItems dérivent la leur
+  // de l'ID de groupe (`g_<itemGroup>`). Ces deux clés NE COÏNCIDENT PAS. `familyOf`
+  // convient donc pour REGROUPER des lignes entre elles (agrégats auto-cohérents :
+  // poids par famille, drilldown pilotage), mais JAMAIS pour COMPARER un article à
+  // une clé issue du CTE (ex. valider l'appartenance famille en fabrication : côté
+  // serveur, calculer la clé avec la règle SQL `g_<itemGroup>` — cf.
+  // app/api/sap/assembly/route.ts).
   const g = groupName?.trim();
   return { key: `g_${g ?? "na"}`, label: g || "Sans groupe" };
 }

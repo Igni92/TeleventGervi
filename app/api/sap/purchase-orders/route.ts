@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { docLabel } from "@/lib/docLabel";
+import { docRef } from "@/lib/docLabel";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { isAgreeur, requirePreparateurOrAdmin } from "@/lib/permissions";
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
   }
 
   let body: {
-    cardCode?: string; dueDate?: string; numAtCard?: string; comment?: string;
+    cardCode?: string; dueDate?: string; orderTime?: string; numAtCard?: string; comment?: string;
     lines?: { itemCode: string; packageQuantity: number; warehouseCode: string; price?: number }[];
   };
   try { body = await req.json(); }
@@ -49,6 +49,9 @@ export async function POST(req: NextRequest) {
   const cardCode = body.cardCode.trim();
   const today = new Date().toISOString().slice(0, 10);
   const due = body.dueDate ? new Date(body.dueDate).toISOString().slice(0, 10) : today;
+  // Heure de prise de commande « HH:MM » : SAP DocDate est sans heure → reportée
+  // dans les Comments (« … · Commande à 09h15 »), visible sur la CF et l'historique.
+  const orderTime = (body.orderTime && /^([01]\d|2[0-3]):[0-5]\d$/.test(body.orderTime)) ? body.orderTime : null;
 
   // Ratio colis → pie depuis le catalogue local.
   const codes = Array.from(new Set(body.lines.map((l) => l.itemCode)));
@@ -70,18 +73,31 @@ export async function POST(req: NextRequest) {
     return line;
   });
 
+  const heure = orderTime ? orderTime.replace(":", "h") : null;
+  const note = body.comment?.trim() || null;
   const payload: Record<string, unknown> = {
     CardCode: cardCode,
     DocDate: today,
     DocDueDate: due,
     TaxDate: today,
-    Comments: body.comment?.trim() || docLabel("CF", session.user?.name, session.user?.email),
+    // Référence signée « CF <n°> - <initiales> à <heure> ». Le n° de CF n'existe
+    // qu'après création → référence provisoire (sans n°) ici, patchée avec le
+    // DocNum juste après le POST ci-dessous.
+    Comments: docRef({ prefix: "CF", name: session.user?.name, email: session.user?.email, heure, note }),
     DocumentLines,
   };
   if (body.numAtCard?.trim()) payload.NumAtCard = body.numAtCard.trim();
 
   try {
     const created = await sap.post<{ DocEntry: number; DocNum: number }>("/PurchaseOrders", payload);
+    // Grave le n° définitif dans la référence : « CF <DocNum> - <initiales> à <heure> ».
+    try {
+      await sap.patch(`PurchaseOrders(${created.DocEntry})`, {
+        Comments: docRef({ prefix: "CF", docNum: created.DocNum, name: session.user?.name, email: session.user?.email, heure, note }),
+      });
+    } catch (e) {
+      console.warn("[PurchaseOrder] PATCH référence CF échoué (non-bloquant):", e instanceof Error ? e.message : String(e));
+    }
     return NextResponse.json({ ok: true, docNum: created.DocNum, docEntry: created.DocEntry });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
