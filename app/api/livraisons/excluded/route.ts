@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { setDeliveryExcluded } from "@/lib/inventory";
-import { isRestrictedPreparateur } from "@/lib/preparateur";
-import { isLivreur } from "@/lib/permissions";
+import { isLivraisonRestricted } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +19,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  const restricted = isRestrictedPreparateur(session.user.email) || (await isLivreur(session));
+  const restricted = await isLivraisonRestricted(session);
   if (restricted) return NextResponse.json({ error: "Action réservée au dispatch" }, { status: 403 });
 
   let body: { docEntry?: number; excluded?: boolean };

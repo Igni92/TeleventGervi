@@ -952,3 +952,25 @@ l'effet « étrange »).
 | **Menu déroulant** | Enfant `absolute`, rogné par la carte parente. | Rendu dans un **portal** (position fixe) → s'affiche par-dessus tout, plus jamais coupé. |
 | **Entrée (⏎) sur un libellé existant** | Ne faisait **rien** (impasse). | **Sélectionne** la correspondance exacte ; sinon **crée**. |
 | **Erreurs (création / réseau)** | **Avalées en silence** (« ça ne marche pas »). | **Toast** explicite ; création idempotente (pas de doublon). |
+
+---
+
+## 🐛 Fix — un chef livreur/préparateur ne voyait pas les livraisons à préparer
+
+`lib/permissions.ts` (`isLivraisonRestricted`, nouveau) + routes/pages du module
+livraisons.
+
+**Symptôme** : Jean-Michel (direction + commercial **et** livreur) ne voyait pas
+les livraisons « en cours » à venir et ne pouvait donc pas les **mettre en
+préparation** — l'action semblait réservée au commercial qui avait vendu.
+
+**Cause** : le rôle « accès restreint » du module livraisons était
+`préparateur restreint OU livreur`. Comme Jean-Michel porte le flag `isLivreur`
+(il aide à livrer), il était confiné comme un pur livreur : il ne voyait que les
+BL déjà mis en prépa et le bouton « mettre en prépa » lui était refusé.
+
+**Fix** : un rôle **élevé** (admin / direction / commercial) garde l'**accès
+complet** même s'il porte aussi un flag terrain. Un préparateur/livreur **pur**
+reste confiné (inchangé). Appliqué de façon homogène à tout le module
+(Détail livraison, mise-en-prépa, exclusions, bon de transport, ventes du jour,
+fiche transporteur) via l'unique helper `isLivraisonRestricted`.
