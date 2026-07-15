@@ -560,7 +560,9 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             const tag = person.tags[date];
             const isToday = date === todayISO;
             const dow = new Date(`${date}T12:00:00Z`).getUTCDay();
-            const weekend = dow === 0 || dow === 6;
+            // Seul le DIMANCHE est chômé (fond grisé) : le samedi est travaillé
+            // dans l'entreprise → traité comme un jour de semaine normal.
+            const weekend = dow === 0;
             const hasRecupDot = recupSet.has(date) && !approved.some((c) => c.type === "recup");
             const ferieLabel = frenchHolidayLabel(date);
             const events = eventMap.get(date) ?? [];
@@ -826,7 +828,7 @@ function TeamCalendar({ team, month, todayISO, onPick }: {
               const ev = eventMap.get(date)?.[0];
               return (
                 <th key={date} title={[ferie ? `Férié : ${ferie}` : null, ev?.label].filter(Boolean).join(" · ") || undefined}
-                  className={`px-0.5 py-1 text-center font-semibold min-w-[24px] ${date === todayISO ? "text-brand-600 dark:text-brand-400" : ""} ${ferie ? "bg-orange-500/15" : dow === 0 || dow === 6 ? "bg-secondary/50" : ""}`}>
+                  className={`px-0.5 py-1 text-center font-semibold min-w-[24px] ${date === todayISO ? "text-brand-600 dark:text-brand-400" : ""} ${ferie ? "bg-orange-500/15" : dow === 0 ? "bg-secondary/50" : ""}`}>
                   <span className="block tnum">{Number(date.slice(-2))}</span>
                   {ev && <span aria-hidden className="block text-[10px] leading-none">{ev.emoji}</span>}
                 </th>
@@ -888,7 +890,7 @@ function TeamCalendar({ team, month, todayISO, onPick }: {
                     : cat === "present" ? `${fullName(p.name)} — présent` : undefined;
                   return (
                     <td key={date} title={title}
-                      className={`h-9 px-0.5 text-center align-middle ${ferie ? "bg-orange-500/10" : dow === 0 || dow === 6 ? "bg-secondary/30" : ""} ${date === todayISO ? "outline outline-1 -outline-offset-1 outline-brand-500/40" : ""}`}>
+                      className={`h-9 px-0.5 text-center align-middle ${ferie ? "bg-orange-500/10" : dow === 0 ? "bg-secondary/30" : ""} ${date === todayISO ? "outline outline-1 -outline-offset-1 outline-brand-500/40" : ""}`}>
                       {cat === "present" ? (
                         // Présence = ligne de fond discrète (ne surcharge pas la grille).
                         <span className="mx-auto block h-1.5 w-full min-w-[18px] rounded-full bg-emerald-500/40" />

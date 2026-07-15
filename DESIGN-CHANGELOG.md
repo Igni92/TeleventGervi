@@ -1013,3 +1013,14 @@ Lisibilité conservée (libellés partout, abrégés sur mobile) ; le calendrier
 | Remise sur la file avec signalement | Le bouton **« Pas terminée — remettre sur la file »** (vue en grand) ouvre désormais un dialog où le préparateur **touche les articles manquants** (facultatif) avant de renvoyer la commande « à préparer ». Les codes signalés sont persistés avec l'état « à reprendre » (`livincomplete:` étendu de `missing[]`, exposé par l'API en `reportedMissing`). |
 | Optimisé mobile / tablette | Dialog `max-h-[92vh]` défilant, lignes en **grandes cibles tactiles** (case à cocher 24 px + colisage + article), boutons d'action **empilés pleine largeur** sur petit écran (h-11), toast récapitulatif (« N manquant(s) signalé(s) »). |
 | Restitution | Badge ambre **« N signalé(s) »** sur la ligne commande (à côté de « À reprendre »), articles marqués **« Signalé manquant »** (fond ambre) dans le détail et la vue en grand. Signalement levé automatiquement quand la commande est reprise (claim), marquée « faite » ou « départ ». |
+
+---
+
+## 🗓️ Planning — le SAMEDI est un jour travaillé (visuel + récup qui complète la semaine)
+
+| Avant | Après |
+|-------|-------|
+| Samedi grisé comme le dimanche (fond « week-end »), aucune pastille par défaut. | Le **samedi est un jour travaillé** : fond normal (seul le **dimanche** reste grisé) et **« Présent » par défaut**, comme un jour de semaine. Vue personne ET vue équipe. |
+| Découpe récup/CP : quand la récup s'arrêtait un vendredi, le **samedi suivant partait en CP** (« Dont 1 samedi en CP »). | Quand la **récup complète la semaine à 35 h** (heures travaillées + récup), le **samedi qui suit n'est PAS décompté** : le CP ne démarre qu'au **lundi suivant**. Ex. : bossé lun–mer (21h45), récup jeu+ven → il ne reste que **le lundi en CP**. Si la récup s'arrête plus tôt (semaine < 35 h), le samedi reste décompté. |
+
+`splitLeaveRecupCp` fait démarrer le CP au **prochain jour de contrat (lun→ven)** après la récup — les samedis/dimanches couverts par la semaine complétée sont sautés. **Non rétroactif** : le décompte CP en jours ouvrables (lun→sam) et les soldes existants sont inchangés ; seule la découpe récup+CP à l'envoi évolue. Fichiers : `lib/planning.ts`, `components/planning/PlanningPanel.tsx` (+ tests).
