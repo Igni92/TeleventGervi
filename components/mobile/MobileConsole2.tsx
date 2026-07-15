@@ -11,15 +11,17 @@
  * tête + étoile par article, /api/favorites) et les TARIFS FIXES du client
  * (groupe « Tarif client » épinglé, prix négocié en violet, prioritaire au panier).
  *
- * Flux : rechercher un compte → toucher un article pour l'ajouter au panier →
- * ajuster quantités/prix → transporteur + tournée (pré-remplis, obligatoires)
- * → créer le BL (POST /api/sap/orders, mêmes garde-fous encours que l'Écran 2).
+ * Flux LIGNE À LIGNE (adapté au téléphone) : rechercher un compte → « Ajouter
+ * une ligne » ouvre le stock dans un sélecteur plein écran → choisir UN article
+ * (il devient une ligne, le sélecteur se referme) → ajuster quantités/prix →
+ * répéter → transporteur + tournée (pré-remplis, obligatoires) → créer le BL
+ * (POST /api/sap/orders, mêmes garde-fous encours que l'Écran 2).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
-  BadgeEuro, ChevronDown, ChevronUp, Loader2, Minus, Plus, Search, ShoppingCart, Star, Trash2, Truck, X,
+  BadgeEuro, Check, ChevronDown, ChevronUp, Loader2, Minus, Plus, Search, ShoppingCart, Star, Trash2, Truck, X,
 } from "lucide-react";
 import { splitByWarehouse, totalAvailable, unitInfo } from "@/lib/gervifrais-calc";
 import { nextDeliveryDate, nextWorkingDeliveryDay, isPrecommande } from "@/lib/livraison";
@@ -236,6 +238,9 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
   const [loading, setLoading] = useState(true);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState("");
+  // Saisie LIGNE À LIGNE : le stock n'est plus affiché en permanence, il s'ouvre
+  // dans un sélecteur plein écran via « Ajouter une ligne ».
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [hints, setHints] = useState<Record<string, Hint>>({});
   const hintsRequested = useRef<Set<string>>(new Set());
   const [tarifByCode, setTarifByCode] = useState<Map<string, number>>(new Map());
@@ -408,11 +413,15 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
     };
   }, [displayByCode, hints, tarifByCode, tarifFruits]);
 
-  const toggleCart = (p: Product) => {
+  const closePicker = () => { setPickerOpen(false); setFilter(""); };
+  // Ligne à ligne : on choisit UN produit dans le stock → il devient une ligne de
+  // la commande, et le sélecteur se referme (on rouvre « Ajouter une ligne » pour
+  // la suivante). Un produit déjà présent n'est pas dupliqué (on ajuste la qté).
+  const pickProduct = (p: Product) => {
     loadHints([p.itemCode]);
-    setCart((cur) => cur.some((l) => l.itemCode === p.itemCode)
-      ? cur.filter((l) => l.itemCode !== p.itemCode)
-      : [...cur, buildLine(p)]);
+    if (cart.some((l) => l.itemCode === p.itemCode)) toast("Déjà dans la commande", { description: p.itemName });
+    else setCart((cur) => [...cur, buildLine(p)]);
+    closePicker();
   };
   const updateLine = (i: number, patch: Partial<CartLine>) =>
     setCart((c) => c.map((l, k) => (k === i ? { ...l, ...patch } : l)));
@@ -553,18 +562,33 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
   }, [groups, loadHints]);
   const inCart = useMemo(() => new Set(cart.map((l) => l.itemCode)), [cart]);
 
+  // Verrou de défilement de l'arrière-plan quand le sélecteur plein écran est ouvert.
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [pickerOpen]);
+
   return (
     <div className="space-y-4 pb-28">
-      {/* ── Panier (en tête : c'est l'objet du geste) ── */}
-      {cart.length > 0 && (
-        <section className="rounded-2xl border border-brand-400/50 bg-card overflow-hidden">
-          <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-border bg-secondary/30">
-            <ShoppingCart className="h-4 w-4 text-brand-600 dark:text-brand-400 shrink-0" />
-            <p className="text-[13px] font-semibold text-foreground flex-1">
-              Panier — {cart.length} ligne{cart.length > 1 ? "s" : ""}
-            </p>
+      {/* ── Commande : lignes ajoutées UNE PAR UNE via « Ajouter une ligne » ── */}
+      <section className="rounded-2xl border border-brand-400/50 bg-card overflow-hidden">
+        <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-border bg-secondary/30">
+          <ShoppingCart className="h-4 w-4 text-brand-600 dark:text-brand-400 shrink-0" />
+          <p className="text-[13px] font-semibold text-foreground flex-1">
+            Commande — {cart.length} ligne{cart.length > 1 ? "s" : ""}
+          </p>
+          {cart.length > 0 && (
             <p className="text-[13px] font-bold tnum text-foreground">{eur.format(totalHT)} HT</p>
-          </div>
+          )}
+        </div>
+        {cart.length === 0 ? (
+          <p className="px-3.5 py-8 text-center text-[13px] leading-relaxed text-muted-foreground">
+            Aucune ligne pour l’instant.<br />
+            Touchez « Ajouter une ligne » pour choisir un produit dans le stock.
+          </p>
+        ) : (
           <ul className="divide-y divide-border/60">
             {cart.map((l, i) => (
               <li key={l.itemCode} className="px-3.5 py-2.5 space-y-1.5">
@@ -644,9 +668,25 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
               </li>
             ))}
           </ul>
+        )}
 
-          {/* Livraison : date · adresse (si choix) · transporteur · tournée */}
-          <div className="px-3.5 py-3 border-t border-border space-y-2.5">
+        {/* Action principale : ouvre le stock (sélecteur plein écran) pour
+            ajouter la ligne suivante — c'est le geste central sur mobile. */}
+        <div className="p-3 border-t border-border">
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className="w-full inline-flex items-center justify-center gap-2 h-12 rounded-xl border-2 border-dashed border-brand-400/70 text-[14.5px] font-semibold text-brand-700 dark:text-brand-300 hover:bg-brand-50 dark:hover:bg-brand-950/30 active:scale-[0.99] transition-all"
+          >
+            <Plus className="h-5 w-5" /> Ajouter une ligne
+          </button>
+        </div>
+      </section>
+
+      {/* ── Livraison + création du BL (dès qu'il y a une ligne) ── */}
+      {cart.length > 0 && (
+        <section className="rounded-2xl border border-border bg-card overflow-hidden">
+          <div className="px-3.5 py-3 space-y-2.5">
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
                 <span className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Livraison le</span>
@@ -744,108 +784,155 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
         </section>
       )}
 
-      {/* ── Liste stock (groupes famille repliés, tags conservés) ── */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filtrer les articles…"
-          aria-label="Filtrer les articles"
-          className="h-11 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-[14px] focus:outline-none focus:ring-2 focus:ring-ring/40"
-        />
-      </div>
-      {loading ? (
-        <p className="flex items-center gap-2 text-[13px] text-muted-foreground px-1">
-          <Loader2 className="h-4 w-4 animate-spin" /> Chargement du stock…
-        </p>
-      ) : groups.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground px-1">Aucun article en stock.</p>
-      ) : (
-        <div className="space-y-2">
-          {groups.map((g) => {
-            const isOpen = needle ? true : !!openGroups[g.key];
-            return (
-              <section key={g.key} className={`rounded-2xl border bg-card overflow-hidden ${
-                g.pinned === "fav" ? "border-amber-400/50" : g.pinned === "tarif" ? "border-violet-400/50" : "border-border"
-              }`}>
+      {/* ── Sélecteur de stock PLEIN ÉCRAN : recherche + familles + favoris +
+            tarif client. On y choisit UN produit → il devient une ligne de la
+            commande, puis on revient ici (ligne à ligne). ── */}
+      {pickerOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex flex-col bg-background"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Choisir un produit dans le stock"
+        >
+          {/* En-tête figé : titre · fermer · recherche */}
+          <div
+            className="shrink-0 border-b border-border bg-card px-3 pb-2.5 space-y-2.5"
+            style={{ paddingTop: "max(env(safe-area-inset-top), 0.75rem)" }}
+          >
+            <div className="flex items-center gap-2">
+              <p className="text-[15px] font-semibold text-foreground flex-1">Choisir un produit</p>
+              <button
+                type="button"
+                onClick={closePicker}
+                aria-label="Fermer sans ajouter"
+                className="inline-flex h-9 items-center gap-1.5 px-3 rounded-lg border border-border text-[13px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="h-4 w-4" /> Fermer
+              </button>
+            </div>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filtrer les articles…"
+                aria-label="Filtrer les articles"
+                className="h-11 w-full rounded-xl border border-border bg-card pl-9 pr-9 text-[14px] focus:outline-none focus:ring-2 focus:ring-ring/40"
+              />
+              {filter && (
                 <button
                   type="button"
-                  onClick={() => toggleGroup(g.key, g.prods)}
-                  className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-left hover:bg-secondary/30 transition-colors"
+                  onClick={() => setFilter("")}
+                  aria-label="Effacer le filtre"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
                 >
-                  <span className="flex items-center gap-1.5 min-w-0">
-                    {g.pinned === "tarif" && <BadgeEuro className="h-4 w-4 shrink-0 text-violet-600 dark:text-violet-400" />}
-                    <span className="text-[13px] font-semibold text-foreground truncate">{g.label}</span>
-                  </span>
-                  <span className="flex items-center gap-2 shrink-0">
-                    <span className="text-[11px] text-muted-foreground">{g.prods.length}</span>
-                    <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isOpen ? "" : "-rotate-90"}`} />
-                  </span>
+                  <X className="h-4 w-4" />
                 </button>
-                {isOpen && (
-                  <ul className="divide-y divide-border/50 border-t border-border/60">
-                    {g.prods.map((p) => {
-                      const d = displayByCode.get(p.itemCode) ?? computeDisplay(p);
-                      const tarif = tarifByCode.get(p.itemCode) ?? null;
-                      const price = tarif ?? hints[p.itemCode]?.prixConseille ?? null;
-                      const added = inCart.has(p.itemCode);
-                      const isFav = favorites.has(p.itemCode);
-                      return (
-                        <li key={p.itemCode} className={`flex items-stretch ${added ? "bg-brand-50 dark:bg-brand-950/30" : ""}`}>
-                          {/* Étoile FAVORI — bouton séparé (pas de bouton imbriqué). */}
-                          <button
-                            type="button"
-                            onClick={() => toggleFavorite(p.itemCode)}
-                            aria-pressed={isFav}
-                            aria-label={isFav ? `Retirer ${p.itemName} des favoris` : `Ajouter ${p.itemName} aux favoris`}
-                            className="shrink-0 w-10 inline-flex items-center justify-center text-muted-foreground/50 hover:text-amber-500 transition-colors"
-                          >
-                            <Star className={`h-4 w-4 ${isFav ? "fill-amber-400 text-amber-500" : ""}`} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => toggleCart(p)}
-                            className={`min-w-0 flex-1 text-left pr-3.5 py-2.5 flex items-center gap-2.5 transition-colors ${added ? "" : "hover:bg-secondary/30"}`}
-                          >
-                            <span className="min-w-0 flex-1">
-                              <span className="block text-[13.5px] font-medium text-foreground leading-tight">{p.itemName}</span>
-                              <DesignationChips
-                                marque={p.uMarque} condt={p.uCondi ?? p.uUvc} calibre={hints[p.itemCode]?.calibre} variete={p.frgnName} pays={p.uPays}
-                                className="mt-1"
-                              />
-                            </span>
-                            <span className="shrink-0 text-right">
-                              <span className="block text-[15px] font-bold tnum text-foreground leading-none">
-                                {d.dispo.toLocaleString("fr-FR")}
-                                <span className="ml-0.5 text-[9.5px] font-semibold uppercase text-muted-foreground">{d.displayUnit}</span>
-                              </span>
-                              {price != null && (
-                                // Prix VIOLET = tarif fixé pour ce client (cotation), sinon prix conseillé.
-                                <span
-                                  title={tarif != null ? "Prix fixé pour ce client (tarif)" : "Prix conseillé"}
-                                  className={`block text-[11px] tnum mt-0.5 ${tarif != null ? "font-bold text-violet-600 dark:text-violet-400" : "text-muted-foreground"}`}
+              )}
+            </div>
+          </div>
+
+          {/* Liste défilante des groupes / articles (même rendu que l'ancienne
+              liste : dispo, prix conseillé/tarif, tags, favoris). */}
+          <div
+            className="flex-1 overflow-y-auto px-3 py-3"
+            style={{ paddingBottom: "max(env(safe-area-inset-bottom), 1rem)" }}
+          >
+            {loading ? (
+              <p className="flex items-center gap-2 text-[13px] text-muted-foreground px-1">
+                <Loader2 className="h-4 w-4 animate-spin" /> Chargement du stock…
+              </p>
+            ) : groups.length === 0 ? (
+              <p className="text-[13px] text-muted-foreground px-1">Aucun article en stock.</p>
+            ) : (
+              <div className="space-y-2">
+                {groups.map((g) => {
+                  const isOpen = needle ? true : !!openGroups[g.key];
+                  return (
+                    <section key={g.key} className={`rounded-2xl border bg-card overflow-hidden ${
+                      g.pinned === "fav" ? "border-amber-400/50" : g.pinned === "tarif" ? "border-violet-400/50" : "border-border"
+                    }`}>
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(g.key, g.prods)}
+                        className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-left hover:bg-secondary/30 transition-colors"
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          {g.pinned === "tarif" && <BadgeEuro className="h-4 w-4 shrink-0 text-violet-600 dark:text-violet-400" />}
+                          <span className="text-[13px] font-semibold text-foreground truncate">{g.label}</span>
+                        </span>
+                        <span className="flex items-center gap-2 shrink-0">
+                          <span className="text-[11px] text-muted-foreground">{g.prods.length}</span>
+                          <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isOpen ? "" : "-rotate-90"}`} />
+                        </span>
+                      </button>
+                      {isOpen && (
+                        <ul className="divide-y divide-border/50 border-t border-border/60">
+                          {g.prods.map((p) => {
+                            const d = displayByCode.get(p.itemCode) ?? computeDisplay(p);
+                            const tarif = tarifByCode.get(p.itemCode) ?? null;
+                            const price = tarif ?? hints[p.itemCode]?.prixConseille ?? null;
+                            const added = inCart.has(p.itemCode);
+                            const isFav = favorites.has(p.itemCode);
+                            return (
+                              <li key={p.itemCode} className={`flex items-stretch ${added ? "bg-brand-50 dark:bg-brand-950/30" : ""}`}>
+                                {/* Étoile FAVORI — bouton séparé (pas de bouton imbriqué). */}
+                                <button
+                                  type="button"
+                                  onClick={() => toggleFavorite(p.itemCode)}
+                                  aria-pressed={isFav}
+                                  aria-label={isFav ? `Retirer ${p.itemName} des favoris` : `Ajouter ${p.itemName} aux favoris`}
+                                  className="shrink-0 w-10 inline-flex items-center justify-center text-muted-foreground/50 hover:text-amber-500 transition-colors"
                                 >
-                                  {eur.format(price)}
-                                </span>
-                              )}
-                            </span>
-                            <span className={`shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
-                              added
-                                ? "border-brand-500 bg-brand-600 text-white"
-                                : "border-border text-muted-foreground"
-                            }`}>
-                              {added ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                            </span>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </section>
-            );
-          })}
+                                  <Star className={`h-4 w-4 ${isFav ? "fill-amber-400 text-amber-500" : ""}`} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => pickProduct(p)}
+                                  className={`min-w-0 flex-1 text-left pr-3.5 py-2.5 flex items-center gap-2.5 transition-colors ${added ? "" : "hover:bg-secondary/30"}`}
+                                >
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block text-[13.5px] font-medium text-foreground leading-tight">{p.itemName}</span>
+                                    <DesignationChips
+                                      marque={p.uMarque} condt={p.uCondi ?? p.uUvc} calibre={hints[p.itemCode]?.calibre} variete={p.frgnName} pays={p.uPays}
+                                      className="mt-1"
+                                    />
+                                  </span>
+                                  <span className="shrink-0 text-right">
+                                    <span className="block text-[15px] font-bold tnum text-foreground leading-none">
+                                      {d.dispo.toLocaleString("fr-FR")}
+                                      <span className="ml-0.5 text-[9.5px] font-semibold uppercase text-muted-foreground">{d.displayUnit}</span>
+                                    </span>
+                                    {price != null && (
+                                      // Prix VIOLET = tarif fixé pour ce client (cotation), sinon prix conseillé.
+                                      <span
+                                        title={tarif != null ? "Prix fixé pour ce client (tarif)" : "Prix conseillé"}
+                                        className={`block text-[11px] tnum mt-0.5 ${tarif != null ? "font-bold text-violet-600 dark:text-violet-400" : "text-muted-foreground"}`}
+                                      >
+                                        {eur.format(price)}
+                                      </span>
+                                    )}
+                                  </span>
+                                  {/* Coche VERTE = déjà dans la commande (on ne duplique pas). */}
+                                  <span className={`shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
+                                    added
+                                      ? "border-emerald-500 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                                      : "border-border text-muted-foreground"
+                                  }`}>
+                                    {added ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                                  </span>
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </section>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
