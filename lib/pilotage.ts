@@ -19,7 +19,8 @@ import { familyOf } from "@/lib/familles";
 import { grossMarginPct } from "@/lib/margin";
 import {
   COGS_MARGIN, COGS_PRODUCT_LINES, COGS_COSTED_LINES,
-  FAB_COST_LATERAL, COGS_MARGIN_FAB, COGS_COSTED_FAB,
+  FAB_COST_LATERAL, COGS_FRESH_RECEPTION_DAYS, freshCogsOrderFromSql,
+  COGS_MARGIN_HYBRID, COGS_COSTED_HYBRID,
   cogsFromSql, realMarginAgg,
 } from "@/lib/cogs";
 
@@ -225,7 +226,7 @@ export interface TopSalesperson {
 
 export interface ActivityBucket {
   volume: number;         // Σ DocTotal HT des Orders non annulés (= CA HT BL)
-  caProductNet: number;   // Σ lineTotal des lignes COSTÉES (coût EM réception OU fabrication) — base marge % ; 0 = pas encore de vente costable
+  caProductNet: number;   // Σ lineTotal des lignes COSTÉES (coût hybride : réception fraîche / fabrication / coût SAP) — base marge % ; 0 = pas encore de vente costable
   weightKg: number;       // Σ quantity × salesUnitWeight par ligne (= Volume kg)
   margin: number;         // Σ (lineTotal − quantity × coût_EM) par ligne (lib/cogs)
   marginPct: number;      // marge BRUTE / CA produit COSTÉ × 100 (base unique lib/margin)
@@ -236,10 +237,10 @@ export interface ActivityBucket {
 }
 
 export async function aggregateActivity(start: Date, end: Date, slpName?: string | null): Promise<ActivityBucket> {
-  // 2 requêtes SQL agrégées (en-têtes + lignes) — on ne rapatrie plus les
-  // milliers de lignes en JS : SUM/COUNT côté Postgres. Le coût vient du LATERAL
-  // EM (lib/cogs) ET, à défaut, du LATERAL fabrication (articles reconditionnés
-  // sans réception d'achat directe). Alias i = SapOrder, l = SapOrderLine.
+  // 2 requêtes SQL agrégées (en-têtes + lignes) — SUM/COUNT côté Postgres. Coût
+  // HYBRIDE (lib/cogs) : réception RÉCENTE (≤ COGS_FRESH_RECEPTION_DAYS) d'abord,
+  // sinon fabrication (reconditionnés), sinon coût SAP de la ligne (grossProfit).
+  // → robuste au retard de synchro réception. Alias i = SapOrder, l = SapOrderLine.
   const slpHdr = slpName ? Prisma.sql`AND "slpName" = ${slpName}` : Prisma.empty;
   const [[hdr], [ln]] = await Promise.all([
     prisma.$queryRaw<{ volume: number; orders: number; clients: number }[]>(Prisma.sql`
@@ -250,11 +251,11 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
       WHERE "cancelled" = false AND "docDate" >= ${start} AND "docDate" < ${end} ${slpHdr}`),
     prisma.$queryRaw<{ n: number; with_cost: number; margin: number; weight: number; ca_costed: number }[]>(Prisma.sql`
       SELECT ${COGS_PRODUCT_LINES}::int AS n,
-             COUNT(*) FILTER (WHERE l."itemCode" IS NOT NULL AND ${COGS_COSTED_FAB})::int AS with_cost,
-             COALESCE(SUM(${COGS_MARGIN_FAB}), 0)::float AS margin,
+             COUNT(*) FILTER (WHERE l."itemCode" IS NOT NULL AND ${COGS_COSTED_HYBRID})::int AS with_cost,
+             COALESCE(SUM(${COGS_MARGIN_HYBRID}), 0)::float AS margin,
              COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS weight,
-             COALESCE(SUM(l."lineTotal") FILTER (WHERE ${COGS_COSTED_FAB}), 0)::float AS ca_costed
-      FROM ${cogsFromSql("order")} ${FAB_COST_LATERAL}
+             COALESCE(SUM(l."lineTotal") FILTER (WHERE ${COGS_COSTED_HYBRID}), 0)::float AS ca_costed
+      FROM ${freshCogsOrderFromSql(COGS_FRESH_RECEPTION_DAYS)} ${FAB_COST_LATERAL}
       LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
       WHERE i."cancelled" = false AND i."docDate" >= ${start} AND i."docDate" < ${end} ${slpSql("i", slpName)}`),
   ]);
@@ -263,14 +264,10 @@ export async function aggregateActivity(start: Date, end: Date, slpName?: string
   const ordersCount = Number(hdr?.orders ?? 0);
   const margin = Number(ln?.margin ?? 0);
   const linesCount = Number(ln?.n ?? 0);
-  // Base de la marge % = CA des SEULES lignes costées (coût EM réception OU coût
-  // fabrication pour les reconditionnés), exactement le jeu de lignes qui
-  // alimente le numérateur `margin`. Une vente à découvert non encore costable
-  // est absente des DEUX termes : elle ne gonfle plus le dénominateur sans
-  // contribuer au numérateur. Sans ça, un jour à forte part de découvert (ou de
-  // kits sans réception directe) écrasait mécaniquement la marge % (num. costé /
-  // dénom. tout produit → % ~0). La fiabilité « stock propre » reste l'indicateur
-  // transparent de la part costée/reçue.
+  // Base de la marge % = CA des lignes costées (coût hybride : réception fraîche,
+  // fabrication, ou coût SAP), exactement le jeu de lignes qui alimente le
+  // numérateur `margin`. Le coût SAP étant présent ~100 % du temps, la couverture
+  // est ~complète — la marge n'est plus faussée par un retard de synchro réception.
   const caProductNet = Number(ln?.ca_costed ?? 0);
 
   return {

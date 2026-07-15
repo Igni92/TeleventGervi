@@ -4,7 +4,7 @@ import { getAccessScope, resolvePilotageView, scopePayload } from "@/lib/permiss
 import {
   aggregateActivity, periodBounds, previousYearBounds,
   topClientsOrder, topSalespersonsOrder, orderWeightMaps,
-  crmActivity, crmCallsByCardCode, salesReceptionCoverage,
+  crmActivity, crmCallsByCardCode,
   type Granularity,
 } from "@/lib/pilotage";
 import { cached, invalidate } from "@/lib/ttlCache";
@@ -53,7 +53,7 @@ export async function GET(req: Request) {
     const curr = periodBounds(g);
     const prev = previousYearBounds(curr, g);
 
-    const [currAct, prevAct, currCrm, prevCrm, tcs, sps, weightMaps, reliability] = await Promise.all([
+    const [currAct, prevAct, currCrm, prevCrm, tcs, sps, weightMaps] = await Promise.all([
       aggregateActivity(curr.start, curr.end, slp),
       aggregateActivity(prev.start, prev.end, slp),
       crmActivity(curr.start, curr.end, slp),
@@ -61,10 +61,13 @@ export async function GET(req: Request) {
       topClientsOrder(curr.start, curr.end, 6, slp),
       showTransverse ? topSalespersonsOrder(curr.start, curr.end, 6) : Promise.resolve([]),
       orderWeightMaps(curr.start, curr.end, slp),
-      // Fiabilité « stock propre » de la fenêtre (global : réceptions = entreprise).
-      // Best-effort : un échec ne casse PAS les autres KPI (null → sous-ligne masquée).
-      salesReceptionCoverage(curr.start, curr.end).catch(() => null),
     ]);
+
+    // Fiabilité = part des lignes du jour effectivement COSTÉES (coût hybride).
+    // Avec le coût SAP en dernier recours, c'est ~100 % : la marge n'est plus
+    // faussée par un retard de synchro réception. (< 100 % signale de vraies
+    // lignes sans aucun coût connu — pas une « vente à découvert ».)
+    const reliability = currAct.caProductNet > 0 ? Math.round(currAct.marginCoverage) : null;
 
     // Enrichit top clients avec # appels CRM + poids BL (kg) sur la même fenêtre
     const crmCalls = await crmCallsByCardCode(tcs.map((t) => t.cardCode), curr.start, curr.end);
@@ -85,8 +88,8 @@ export async function GET(req: Request) {
       crmPrev: prevCrm,
       clients,
       salespersons,
-      // Fiabilité « stock propre » : part du CA de la fenêtre dont la marchandise
-      // a été reçue (les ventes à découvert la tirent sous 100 %).
+      // Fiabilité = part des lignes du jour costées (coût hybride) ; ~100 % grâce
+      // au repli coût SAP. < 100 % = vraies lignes sans coût connu.
       reliability,
     };
   });
