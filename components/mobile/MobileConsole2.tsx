@@ -43,7 +43,7 @@ interface CartLine {
   itemCode: string; itemName: string; unit: string; priceUnit: string; packDivisor: number;
   availByWarehouse: Record<string, number>;
   quantity: number; price: number | null; stepColis: number;
-  marque: string | null; condi: string | null; pays: string | null;
+  marque: string | null; condi: string | null; variete: string | null; pays: string | null;
 }
 interface DeliveryMode { id: string; name: string; sapCardCode: string; isDefault: boolean }
 interface SearchClient { id: string; code: string; nom: string; type: string | null }
@@ -404,7 +404,7 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
       availByWarehouse: d.avail, quantity: d.stepColis,
       price: tarifByCode.get(p.itemCode) ?? fruitPrice ?? hints[p.itemCode]?.prixConseille ?? null,
       stepColis: d.stepColis,
-      marque: p.uMarque ?? null, condi: p.uCondi ?? p.uUvc ?? null, pays: p.uPays ?? null,
+      marque: p.uMarque ?? null, condi: p.uCondi ?? p.uUvc ?? null, variete: p.frgnName ?? null, pays: p.uPays ?? null,
     };
   }, [displayByCode, hints, tarifByCode, tarifFruits]);
 
@@ -572,7 +572,7 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
                   <div className="min-w-0 flex-1">
                     <p className="text-[13.5px] font-medium text-foreground leading-tight">{l.itemName}</p>
                     {/* Tags produit — conservés sur la version allégée. */}
-                    <DesignationChips marque={l.marque} condt={l.condi} pays={l.pays} className="mt-1" />
+                    <DesignationChips marque={l.marque} condt={l.condi} variete={l.variete} pays={l.pays} className="mt-1" />
                   </div>
                   {/* Réordonner (flèches, tactile) — l'ordre du panier = l'ordre du BL. */}
                   {cart.length > 1 && (
@@ -811,7 +811,7 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
                             <span className="min-w-0 flex-1">
                               <span className="block text-[13.5px] font-medium text-foreground leading-tight">{p.itemName}</span>
                               <DesignationChips
-                                marque={p.uMarque} condt={p.uCondi ?? p.uUvc} calibre={hints[p.itemCode]?.calibre} pays={p.uPays}
+                                marque={p.uMarque} condt={p.uCondi ?? p.uUvc} calibre={hints[p.itemCode]?.calibre} variete={p.frgnName} pays={p.uPays}
                                 className="mt-1"
                               />
                             </span>
