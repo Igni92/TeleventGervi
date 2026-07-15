@@ -72,14 +72,14 @@ describe("planning — compteur récup (décompte au passage de la semaine)", ()
   // 2026-W27 = 29 juin → 5 juillet ; 2026-W28 = 6 → 12 juillet.
   const ASOF = "2026-07-11"; // W27 terminée, W28 en cours
 
-  it("crédit : semaine passée à 39 h en option récup → +4 h", () => {
+  it("crédit MAJORÉ : semaine à 39 h en option récup → +4 h supp × 1,25 = +5 h", () => {
     const weeks: CounterWeekInput[] = [
       { week: "2026-W27", days: [day(8), day(8), day(8), day(8), day(7)], option: "recup" },
     ];
     const c = computeRecupCounter(weeks, [], PROFILE, ASOF);
-    expect(c.creditMin).toBe(4 * 60);
+    expect(c.creditMin).toBe(5 * 60);   // 4 h supp, toutes à +25 % → 5 h de récup
     expect(c.debitMin).toBe(0);
-    expect(c.balanceMin).toBe(4 * 60);
+    expect(c.balanceMin).toBe(5 * 60);
   });
 
   it("pas de crédit tant que la semaine n'est pas passée", () => {
@@ -135,7 +135,7 @@ describe("planning — compteur récup (décompte au passage de la semaine)", ()
       { week: "2026-W26", days: [day(8), day(8), day(8), day(8), day(7)], option: "recup", recupDates: ["2026-07-03"] },
     ];
     const c = computeRecupCounter(weeks, [], PROFILE, ASOF);
-    expect(c.creditMin).toBe(4 * 60);
+    expect(c.creditMin).toBe(5 * 60);   // 4 h supp majorées (+25 %) = 5 h
     expect(c.debitMin).toBe(7 * 60);   // W27 passée sans saisie → journée réputée prise
   });
 });
@@ -181,12 +181,13 @@ describe("planning — récap mensuel (état compta)", () => {
   });
   it("solde fin de mois + excédent plafond reporté au paiement", () => {
     const weeks: CounterWeekInput[] = [
-      { week: "2026-W27", days: [day(9), day(9), day(9), day(9), day(9)], option: "recup" }, // +10 h
+      { week: "2026-W27", days: [day(9), day(9), day(9), day(9), day(9)], option: "recup" }, // 45 h → 10 h supp
     ];
     const recap = computeMonthRecap(weeks, [], [], { ...PROFILE, recupCapHours: 7, cpAllowanceDays: 25 }, "2026-07");
-    expect(recap.recupBalanceMin).toBe(10 * 60);
+    // 10 h supp = 8 h à +25 % (→10 h) + 2 h à +50 % (→3 h) = 13 h de récup MAJORÉE.
+    expect(recap.recupBalanceMin).toBe(13 * 60);
     expect(recap.recupCapMin).toBe(7 * 60);
-    expect(recap.excessMin).toBe(3 * 60);    // 3 h à payer sur le bulletin du mois suivant
+    expect(recap.excessMin).toBe(6 * 60);    // 13 − 7 = 6 h à payer sur le bulletin du mois suivant
     expect(recap.cpBalanceDays).toBe(25);
   });
   it("congeCreditsHours : seuls les CP créditent des heures", () => {
