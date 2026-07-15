@@ -1,9 +1,3 @@
 {
-  "regions": ["cdg1"],
-  "crons": [
-    {
-      "path": "/api/cron/sap-sync",
-      "schedule": "*/30 * * * *"
-    }
-  ]
+  "regions": ["cdg1"]
 }
