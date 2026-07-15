@@ -49,6 +49,14 @@ const fmtColis = (n: number | null | undefined): string => {
   return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(".", ",");
 };
 
+/** Heure « HHhMM » de prise de commande, extraite du commentaire SAP
+ *  (« CF 2709 - JMG à 13h10 » ou l'ancien « … · Commande à 13h10 »). */
+function heureFromComments(comments?: string | null): string | null {
+  if (!comments) return null;
+  const matches = comments.match(/\d{1,2}h\d{2}/g);
+  return matches ? matches[matches.length - 1] : null;
+}
+
 function StatusBadge({ open, cancelled, large }: { open: boolean; cancelled?: boolean; large?: boolean }) {
   const tone = cancelled
     ? "bg-rose-500/15 border border-rose-500/50 text-rose-600 dark:text-rose-400"
@@ -174,7 +182,7 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <h2 className="text-[15px] font-semibold flex items-center gap-2">
             <PackageCheck className="h-4 w-4 text-muted-foreground" />
-            Commandes fournisseurs
+            Cde Fournisseur
           </h2>
           <Button variant="ghost" size="sm" onClick={load} disabled={loading}>
             {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
@@ -255,7 +263,10 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                     {d.cardName || d.cardCode}
                   </div>
                   <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
-                    Cmd {fmtDate(d.docDate)}{d.dueDate ? ` · livr. ${fmtDate(d.dueDate)}` : ""} · {d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}
+                    {fmtDate(d.docDate)}{heureFromComments(d.comments) ? ` à ${heureFromComments(d.comments)}` : ""}
+                  </div>
+                  <div className="text-[13px] text-muted-foreground tnum">
+                    {d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}
                   </div>
                 </div>
                 <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
@@ -318,7 +329,7 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
           <DialogHeader className="text-left">
             <DialogTitle className="flex items-center gap-2 justify-start pr-8 text-[16px] sm:text-[18px] whitespace-nowrap">
               <PackageCheck className="h-5 w-5 shrink-0 text-violet-600 dark:text-violet-400" />
-              <span className="truncate min-w-0">Commande fournisseur N° {largeDoc?.docNum}</span>
+              <span className="truncate min-w-0">CF {largeDoc?.docNum}</span>
             </DialogTitle>
             <DialogDescription className="sr-only">Détail de la commande fournisseur : lignes commandées et réception.</DialogDescription>
           </DialogHeader>
@@ -686,9 +697,10 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
           {po.cardName && <span className="text-muted-foreground">· {po.cardName}</span>}
         </span>
         <StatusBadge open={po.open} cancelled={po.cancelled} large />
-        <span className="text-[14px] text-muted-foreground tnum">Commandé le {fmtDate(po.docDate)}</span>
-        {po.dueDate && <span className="text-[14px] text-muted-foreground tnum">Livraison prévue {fmtDate(po.dueDate)}</span>}
-        {po.numAtCard && <span className="text-[14px] text-muted-foreground">Réf. {po.numAtCard}</span>}
+        <span className="text-[14px] text-muted-foreground tnum">
+          Commandée {fmtDate(po.docDate)}{heureFromComments(po.comments) ? ` à ${heureFromComments(po.comments)}` : ""}
+        </span>
+        {po.numAtCard && <span className="text-[14px] text-muted-foreground">{po.numAtCard}</span>}
       </div>
       {po.comments && <p className="italic text-muted-foreground text-[13px]">« {po.comments} »</p>}
 

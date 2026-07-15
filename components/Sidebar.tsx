@@ -118,7 +118,7 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
     label: "Achats",
     collapsible: true,
     items: [
-      { href: "/commandes-fournisseurs", label: "Commandes fournisseurs", icon: PackageCheck, badge: "commandesDue" },
+      { href: "/commandes-fournisseurs", label: "Cde Fournisseur", icon: PackageCheck, badge: "commandesDue" },
       { href: "/entrees", label: "Entrées marchandises", icon: PackagePlus, badge: "receptionIncidents" },
     ],
   },

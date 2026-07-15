@@ -66,7 +66,7 @@ const AXES: Axis[] = [
     // « Préparations à faire » et « Manquants » ne sont plus des tuiles distinctes :
     // ce sont des onglets du hub « Livraisons du jour » (axe Commercial ci-dessus).
     tiles: [
-      { href: "/commandes-fournisseurs", label: "Commandes fournisseurs", icon: PackageCheck, badge: "commandesDue" },
+      { href: "/commandes-fournisseurs", label: "Cde Fournisseur", icon: PackageCheck, badge: "commandesDue" },
       { href: "/entrees", label: "Entrées march.", icon: PackagePlus, badge: "receptionIncidents" },
       { href: "/bons-commande", label: "Bons de commande", icon: FileText },
       { href: "/products", label: "Stock", icon: Package },

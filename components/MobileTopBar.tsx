@@ -39,7 +39,7 @@ const SECTION_LABEL: Record<string, string> = {
   "/heures": "Mes heures",
   "/planning": "Planning",
   "/commerciaux": "Équipe commerciale",
-  "/commandes-fournisseurs": "Commandes fournisseurs",
+  "/commandes-fournisseurs": "Cde Fournisseur",
   "/entrees": "Entrées marchandises",
   "/inventaire": "Inventaire",
   "/products": "Stock",

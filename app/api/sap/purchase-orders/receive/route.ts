@@ -7,6 +7,8 @@ import { bumpLot } from "@/lib/lotResolver";
 import { creditLots } from "@/lib/lotLedger";
 import { applyAgreage, type AgreageStatus } from "@/lib/agreage";
 import { setMarchandiseNote, sanitizeRating } from "@/lib/marchandiseNote";
+import { docRef } from "@/lib/docLabel";
+import { heureParis } from "@/lib/paris-time";
 
 /**
  * POST /api/sap/purchase-orders/receive  { docEntry, agreage? }
@@ -82,12 +84,15 @@ export async function POST(req: NextRequest) {
 
   // ── 2. PDN basé sur la commande (BaseType=22 → SAP copie qté/prix, clôture la commande) ──
   const today = new Date().toISOString().slice(0, 10);
+  const emHeure = heureParis();   // heure de réception (serveur, fuseau Paris)
   const payload: Record<string, unknown> = {
     CardCode: po.CardCode,
     DocDate: today,
     DocDueDate: today,
     TaxDate: today,
-    Comments: `Réception de la commande fournisseur #${po.DocNum} via TeleVent — ${session.user?.name ?? session.user?.email ?? "?"}`,
+    // Référence signée « EM <n°> - <initiales> à <heure> · réception CF <n° CF> ».
+    // Le n° d'EM n'existe qu'après création → provisoire (sans n°), patchée plus bas.
+    Comments: docRef({ prefix: "EM", name: session.user?.name, email: session.user?.email, heure: emHeure, note: `réception CF ${po.DocNum}` }),
     DocumentLines: openLines.map((l) => ({
       BaseType: 22,            // 22 = PurchaseOrder
       BaseEntry: po.DocEntry,
@@ -131,11 +136,15 @@ export async function POST(req: NextRequest) {
     );
     createdLines = refetch.DocumentLines || [];
     const patchLines = createdLines.map((l) => ({ LineNum: l.LineNum, U_NoLot: lotCode }));
-    if (patchLines.length > 0) {
-      await sap.patch(`PurchaseDeliveryNotes(${created.DocEntry})`, { DocumentLines: patchLines });
-    }
+    // Grave le n° définitif dans la référence (« EM <DocNum> - <initiales> à
+    // <heure> · réception CF <n° CF> ») ET pose le lot sur chaque ligne, en un PATCH.
+    const patchBody: Record<string, unknown> = {
+      Comments: docRef({ prefix: "EM", docNum: created.DocNum, name: session.user?.name, email: session.user?.email, heure: emHeure, note: `réception CF ${po.DocNum}` }),
+    };
+    if (patchLines.length > 0) patchBody.DocumentLines = patchLines;
+    await sap.patch(`PurchaseDeliveryNotes(${created.DocEntry})`, patchBody);
   } catch (e) {
-    console.warn("[POReceive] PATCH U_NoLot échoué (non-bloquant):", (e as Error).message);
+    console.warn("[POReceive] PATCH U_NoLot / référence échoué (non-bloquant):", (e as Error).message);
   }
 
   // ── Note qualité (étoiles) de l'agréeur — posée sur chaque article reçu + le lot ──

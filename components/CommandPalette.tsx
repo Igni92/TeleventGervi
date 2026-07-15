@@ -23,7 +23,7 @@ const NAV: NavItem[] = [
   { href: "/manquants", label: "Livraisons · manquants", icon: PackageX, keywords: "rupture stock négatif achats à prévoir articles manquants déficit" },
   { href: "/products", label: "Stock", icon: Package, keywords: "produits articles" },
   { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, keywords: "comptage stock entrepôt" },
-  { href: "/commandes-fournisseurs", label: "Commandes fournisseurs", icon: PackageCheck, keywords: "achat fournisseur cf réception" },
+  { href: "/commandes-fournisseurs", label: "Cde Fournisseur", icon: PackageCheck, keywords: "achat fournisseur cf réception commandes" },
   { href: "/entrees", label: "Entrées marchandises", icon: PackagePlus, keywords: "réception marchandise em agréage réserve" },
   { href: "/fabrication", label: "Fabrication", icon: Factory, keywords: "production deco kit" },
   { href: "/dashboard", label: "Statistiques · Carte", icon: LayoutDashboard, keywords: "pilotage dashboard géo carte stats" },
