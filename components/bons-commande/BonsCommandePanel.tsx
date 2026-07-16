@@ -23,6 +23,9 @@ import { broadcastActiveClient } from "@/lib/consoleSync";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { FRUIT_FAMILIES } from "@/lib/familles";
 import { familyLotSentinel, familyOfLot } from "@/lib/gervifrais-calc";
+import { Button } from "@/components/ui/button";
+import { FullscreenPanel } from "@/components/ui/fullscreen-panel";
+import { InfoHint } from "@/components/ui/info-hint";
 
 const FAMILY_LABEL = new Map(FRUIT_FAMILIES.map((f) => [f.key, f.label]));
 
@@ -71,8 +74,11 @@ export function BonsCommandePanel() {
   const [docs, setDocs] = useState<BonDoc[] | null>(null);
   const [offres, setOffres] = useState<OffreDoc[] | null>(null);
   const [loading, setLoading] = useState(false);
-  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
-  const [offreOpen, setOffreOpen] = useState<Set<number>>(new Set()); // offres dépliées (affectation des lots)
+  // Détail = PLEIN ÉCRAN (plus d'accordéon inline) : un seul bon / une seule
+  // offre ouverte à la fois, dérivés de l'état (si le doc sort de la liste,
+  // le panneau se ferme tout seul).
+  const [openBonId, setOpenBonId] = useState<number | null>(null);
+  const [openOffreId, setOpenOffreId] = useState<number | null>(null);
   const [busyLine, setBusyLine] = useState<string | null>(null); // `${docEntry}:${itemCode}` ou `offre:${docEntry}:${itemCode}`
   const [convertingId, setConvertingId] = useState<number | null>(null); // offre en cours de passage
   const [deletingId, setDeletingId] = useState<number | null>(null); // offre en cours de suppression
@@ -293,6 +299,8 @@ export function BonsCommandePanel() {
 
   const count = docs?.length ?? 0;
   const dueCount = (offres ?? []).filter((o) => o.due).length;
+  const openBon = openBonId != null ? (docs ?? []).find((d) => d.docEntry === openBonId) ?? null : null;
+  const openOffre = openOffreId != null ? (offres ?? []).find((o) => o.docEntry === openOffreId) ?? null : null;
 
   return (
     <div className="space-y-4">
@@ -302,15 +310,10 @@ export function BonsCommandePanel() {
             : count === 0 ? "Aucune commande en attente de lot."
             : `${count} commande${count > 1 ? "s" : ""} à traiter : choisis, par article, le lot réellement en stock.`}
         </p>
-        <button
-          type="button"
-          onClick={load}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border bg-card text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60 shrink-0"
-        >
+        <Button variant="outline" size="sm" onClick={load} disabled={loading} className="shrink-0">
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           Actualiser
-        </button>
+        </Button>
       </div>
 
       {/* ── OFFRES CLIENT (précommandes) à passer en commande ────────── */}
@@ -335,14 +338,8 @@ export function BonsCommandePanel() {
               const converting = convertingId === o.docEntry;
               const deleting = deletingId === o.docEntry;
               const busy = converting || deleting;
-              const isOpen = offreOpen.has(o.docEntry);
               const missing = o.pendingCount;
               const ready = missing === 0;
-              const toggleOpen = () => setOffreOpen((prev) => {
-                const next = new Set(prev);
-                if (next.has(o.docEntry)) next.delete(o.docEntry); else next.add(o.docEntry);
-                return next;
-              });
               return (
                 <li
                   key={o.docEntry}
@@ -350,139 +347,63 @@ export function BonsCommandePanel() {
                     o.due ? "border-amber-400/60 bg-amber-50/40 dark:bg-amber-950/15" : "border-border bg-card"
                   }`}
                 >
-                <div className="px-3 sm:px-4 py-2.5 flex flex-col sm:flex-row sm:items-start gap-2">
-                  <div className="min-w-0 flex-1 space-y-1.5">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[13.5px] font-semibold text-foreground truncate">{o.cardName}</span>
-                      {o.clientType && SEG_BADGE[o.clientType] && (
-                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEG_BADGE[o.clientType]}`}>
-                          {o.clientType}
+                  {/* Ligne-résumé : l'IMPORTANT en clair (client, livraison, statut
+                      des lots) — le détail s'ouvre en PLEIN ÉCRAN. */}
+                  <div
+                    role="button" tabIndex={0}
+                    onClick={() => setOpenOffreId(o.docEntry)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenOffreId(o.docEntry); } }}
+                    className="px-3 sm:px-4 py-3 flex items-center gap-3 cursor-pointer select-none hover:bg-secondary/30 transition-colors"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[15px] font-semibold text-foreground truncate">{o.cardName}</span>
+                        {o.clientType && SEG_BADGE[o.clientType] && (
+                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEG_BADGE[o.clientType]}`}>
+                            {o.clientType}
+                          </span>
+                        )}
+                        <InfoHint label="Détails de l'offre">
+                          <span className="block space-y-0.5">
+                            <span className="block">Offre n°{o.docNum}</span>
+                            <span className="block">{o.lineCount} ligne{o.lineCount > 1 ? "s" : ""} · {o.colis} colis</span>
+                            {o.numAtCard && <span className="block">N° commande client : {o.numAtCard}</span>}
+                          </span>
+                        </InfoHint>
+                      </div>
+                      <div className="mt-1 flex items-center gap-x-3 gap-y-1 flex-wrap text-[12px] text-muted-foreground">
+                        {o.dueDate && (
+                          <span className="inline-flex items-center gap-1 tnum">
+                            <CalendarDays className="h-3.5 w-3.5" /> Livraison {formatDeliveryDate(o.dueDate)}
+                          </span>
+                        )}
+                        {o.due
+                          ? <span className="inline-flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-300"><Clock className="h-3.5 w-3.5" /> jour de départ</span>
+                          : <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> en attente</span>}
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                          ready ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                        }`}>
+                          {ready ? <><CheckCircle2 className="h-3 w-3" /> Lots complets</> : `${missing} lot${missing > 1 ? "s" : ""} à affecter`}
                         </span>
-                      )}
-                      <span className="text-[11px] text-muted-foreground">offre n°{o.docNum}</span>
-                      <span className="text-[11px] text-muted-foreground tnum">· {o.lineCount} ligne{o.lineCount > 1 ? "s" : ""} · {o.colis} colis</span>
-                      {/* Statut des lots — cliquable pour déplier/replier l'affectation. */}
-                      <button
-                        type="button"
-                        onClick={toggleOpen}
-                        aria-expanded={isOpen}
-                        title="Affecter les lots avant de passer en commande"
-                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors ${
-                          ready ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25"
-                                : "bg-amber-500/15 text-amber-700 dark:text-amber-300 hover:bg-amber-500/25"
-                        }`}
+                      </div>
+                    </div>
+                    <div className="shrink-0 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <Button
+                        variant={o.due ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => convertOffre(o)}
+                        disabled={busy}
+                        title={ready
+                          ? "Créer la commande client SAP — les lots affectés sur l'offre sont conservés"
+                          : "Créer la commande client SAP — les articles sans lot resteront à affecter dans la file ci-dessous"}
+                        className="hidden sm:inline-flex"
                       >
-                        <ChevronDown className={`h-3 w-3 transition-transform ${isOpen ? "" : "-rotate-90"}`} />
-                        {ready ? <><CheckCircle2 className="h-3 w-3" /> Lots complets</> : `${missing} lot${missing > 1 ? "s" : ""} à affecter`}
-                      </button>
-                    </div>
-                    {/* Date de livraison + n° de commande éditables */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <label className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground" title="Date de livraison">
-                        <CalendarDays className="h-3.5 w-3.5 shrink-0" />
-                        <input
-                          type="date"
-                          defaultValue={o.dueDate ?? ""}
-                          disabled={busy}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            if (/^\d{4}-\d{2}-\d{2}$/.test(v) && v !== o.dueDate) saveOffre(o, { dueDate: v });
-                          }}
-                          aria-label={`Date de livraison de l'offre n°${o.docNum}`}
-                          className="h-8 rounded-lg border border-border bg-card px-2 text-[12px] text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
-                        />
-                      </label>
-                      <label className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground" title="N° de commande client">
-                        <Hash className="h-3.5 w-3.5 shrink-0" />
-                        <input
-                          type="text"
-                          defaultValue={o.numAtCard ?? ""}
-                          disabled={busy}
-                          placeholder="N° commande"
-                          onBlur={(e) => {
-                            const v = e.target.value.trim();
-                            if (v !== (o.numAtCard ?? "")) saveOffre(o, { numAtCard: v });
-                          }}
-                          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                          aria-label={`N° de commande de l'offre n°${o.docNum}`}
-                          className="h-8 w-[130px] rounded-lg border border-border bg-card px-2 text-[12px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
-                        />
-                      </label>
+                        {converting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightCircle className="h-4 w-4" />}
+                        Passer en commande
+                      </Button>
+                      <ChevronDown className="h-4 w-4 -rotate-90 text-muted-foreground/50" />
                     </div>
                   </div>
-                  <div className="shrink-0 flex items-center gap-2 self-end sm:self-auto">
-                    {o.due
-                      ? <span className="hidden sm:inline-flex items-center gap-1 text-[10.5px] font-semibold text-amber-700 dark:text-amber-300"><Clock className="h-3.5 w-3.5" /> jour de départ</span>
-                      : <span className="hidden sm:inline-flex items-center gap-1 text-[10.5px] text-muted-foreground"><Clock className="h-3.5 w-3.5" /> en attente</span>}
-                    <button
-                      type="button"
-                      onClick={() => convertOffre(o)}
-                      disabled={busy}
-                      title={ready
-                        ? "Créer la commande client SAP — les lots affectés sur l'offre sont conservés"
-                        : "Créer la commande client SAP — les articles sans lot resteront à affecter dans la file ci-dessous"}
-                      className={`inline-flex items-center gap-1.5 h-10 sm:h-9 px-3.5 rounded-xl text-[12.5px] font-semibold transition-colors disabled:opacity-50 ${
-                        o.due ? "bg-brand-600 hover:bg-brand-700 text-white" : "border border-border text-foreground hover:bg-secondary/60"
-                      }`}
-                    >
-                      {converting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightCircle className="h-4 w-4" />}
-                      Passer en commande
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => deleteOffre(o)}
-                      disabled={busy}
-                      title="Supprimer l'offre"
-                      aria-label={`Supprimer l'offre n°${o.docNum}`}
-                      className="inline-flex h-10 sm:h-9 w-10 sm:w-9 items-center justify-center rounded-xl border border-border text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors disabled:opacity-50"
-                    >
-                      {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* ── Affectation des lots de l'OFFRE (avant passage en commande) ── */}
-                {isOpen && (
-                  <div className="px-3 sm:px-4 pb-3 pt-3 space-y-3 border-t border-border/60">
-                    <ul className="divide-y divide-border/50 rounded-xl border border-border overflow-hidden">
-                      {o.lines.map((l) => {
-                        const key = `offre:${o.docEntry}:${l.itemCode}`;
-                        const isBusy = busyLine === key;
-                        const current = l.familyTarget
-                          ? familyLotSentinel(l.familyTarget.key)
-                          : l.pending ? "" : l.lot;
-                        return (
-                          <li key={l.itemCode} className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-2.5">
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-baseline gap-2 flex-wrap">
-                                <span className="text-[14px] sm:text-[13px] font-semibold sm:font-medium text-foreground truncate">{l.itemName}</span>
-                                <span className="text-[11.5px] text-muted-foreground tnum shrink-0">
-                                  {l.colis} colis{l.warehouse ? ` · mag. ${l.warehouse}` : ""}
-                                </span>
-                                {l.familyTarget && (
-                                  <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 shrink-0">
-                                    <Grape className="h-3 w-3" /> {l.familyTarget.label} — à préciser
-                                  </span>
-                                )}
-                              </div>
-                              <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} size="md" className="mt-1" />
-                            </div>
-                            <LotCell line={l} current={current} isBusy={isBusy} onPick={(v) => assignLotOffre(o, l.itemCode, v)} />
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    <button
-                      type="button"
-                      onClick={() => suggestAllOffre(o)}
-                      disabled={ready || busyLine !== null || !o.lines.some((l) => l.pending && !l.familyTarget && l.suggested)}
-                      title="Valider le lot suggéré (arrivage en stock) sur les lignes qui en ont un ; les articles sans lot dispo restent en attente"
-                      className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
-                    >
-                      <Sparkles className="h-4 w-4" /> Valider les lots en stock
-                    </button>
-                  </div>
-                )}
                 </li>
               );
             })}
@@ -504,111 +425,47 @@ export function BonsCommandePanel() {
       )}
 
       {(docs ?? []).map((doc) => {
-        const isCollapsed = collapsed.has(doc.docEntry);
         const missing = doc.pendingCount;
         const ready = missing === 0;
         return (
           <section key={doc.docEntry} className="rounded-2xl border border-border bg-card overflow-hidden">
+            {/* Ligne-résumé : client, livraison, statut des lots — le détail
+                (affectation des lots) s'ouvre en PLEIN ÉCRAN. */}
             <div
               role="button" tabIndex={0}
-              onClick={() => setCollapsed((prev) => {
-                const next = new Set(prev);
-                if (next.has(doc.docEntry)) next.delete(doc.docEntry); else next.add(doc.docEntry);
-                return next;
-              })}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); (e.currentTarget as HTMLElement).click(); } }}
-              className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 bg-secondary/20 hover:bg-secondary/40 cursor-pointer select-none transition-colors"
+              onClick={() => setOpenBonId(doc.docEntry)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenBonId(doc.docEntry); } }}
+              className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3.5 hover:bg-secondary/30 cursor-pointer select-none transition-colors"
             >
               <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                <ChevronDown className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
-                <span className="text-[14.5px] sm:text-[13.5px] font-semibold text-foreground truncate">{doc.cardName}</span>
+                <span className="text-[15px] font-semibold text-foreground truncate">{doc.cardName}</span>
                 {doc.clientType && SEG_BADGE[doc.clientType] && (
                   <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEG_BADGE[doc.clientType]}`}>
                     {doc.clientType}
                   </span>
                 )}
-                <span className="text-[11px] text-muted-foreground">BL n°{doc.docNum}</span>
+                <InfoHint label="Détails du bon">
+                  <span className="block space-y-0.5">
+                    <span className="block">BL n°{doc.docNum}</span>
+                    <span className="block">{doc.lines.length} ligne{doc.lines.length > 1 ? "s" : ""}</span>
+                    {doc.markedBy && <span className="block">Créé par {displayPersonName(doc.markedBy)}</span>}
+                  </span>
+                </InfoHint>
                 {doc.dueDate && (
-                  <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-                    <CalendarDays className="h-3 w-3" /> {formatDeliveryDate(doc.dueDate)}
+                  <span className="inline-flex items-center gap-1 text-[12px] text-muted-foreground tnum">
+                    <CalendarDays className="h-3.5 w-3.5" /> {formatDeliveryDate(doc.dueDate)}
                   </span>
                 )}
               </div>
-              <span className={`shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                ready ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-              }`}>
-                {ready ? <><CheckCircle2 className="h-3 w-3" /> Lots complets</> : `${missing} lot${missing > 1 ? "s" : ""} à affecter`}
-              </span>
-            </div>
-
-            {!isCollapsed && (
-              <div className="px-4 sm:px-5 py-3 space-y-3">
-                <ul className="divide-y divide-border/50 rounded-xl border border-border overflow-hidden">
-                  {doc.lines.map((l) => {
-                    const key = `${doc.docEntry}:${l.itemCode}`;
-                    const isBusy = busyLine === key;
-                    // Valeur sélectionnée : tag famille (EM_FAM:…) prioritaire, sinon
-                    // vrai lot, sinon vide (à découvert générique).
-                    const current = l.familyTarget
-                      ? familyLotSentinel(l.familyTarget.key)
-                      : l.pending ? "" : l.lot;
-                    return (
-                      <li key={l.itemCode} className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-2.5">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-baseline gap-2 flex-wrap">
-                            <span className="text-[14px] sm:text-[13px] font-semibold sm:font-medium text-foreground truncate">{l.itemName}</span>
-                            <span className="text-[11.5px] text-muted-foreground tnum shrink-0">
-                              {l.colis} colis{l.warehouse ? ` · mag. ${l.warehouse}` : ""}
-                            </span>
-                            {l.familyTarget && (
-                              <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 shrink-0">
-                                <Grape className="h-3 w-3" /> {l.familyTarget.label} — à préciser
-                              </span>
-                            )}
-                          </div>
-                          <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} size="md" className="mt-1" />
-                        </div>
-                        <LotCell line={l} current={current} isBusy={isBusy} onPick={(v) => assignLot(doc, l.itemCode, v)} />
-                      </li>
-                    );
-                  })}
-                </ul>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => suggestAll(doc)}
-                    disabled={ready || busyLine !== null || !doc.lines.some((l) => l.pending && !l.familyTarget && l.suggested)}
-                    title="Valider le lot suggéré (arrivage en stock du segment) sur les lignes qui en ont un ; les articles sans lot dispo restent en attente"
-                    className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
-                  >
-                    <Sparkles className="h-4 w-4" /> Valider les lots en stock
-                  </button>
-                  {/* Ouvre le bon dans la console (pilotée par le stock) pour
-                      changer les articles/quantités et garantir des lots dispo. */}
-                  <button
-                    type="button"
-                    onClick={() => startModif(doc)}
-                    disabled={modifBusy === doc.docEntry}
-                    title="Modifier la commande dans la console (stock en direct) : changer les articles/quantités pour garantir les lots disponibles"
-                    className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-brand-500/40 text-brand-600 dark:text-brand-400 text-[12.5px] font-semibold hover:bg-brand-500/10 transition-colors disabled:opacity-50"
-                  >
-                    {modifBusy === doc.docEntry ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />} Modifier la commande
-                  </button>
-                  {/* Impression pour la préparation (articles, colis, lots). */}
-                  <button
-                    type="button"
-                    onClick={() => printPrep(doc)}
-                    title="Imprimer le bon de commande pour la préparation (articles, colis, lots)"
-                    className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
-                  >
-                    <Printer className="h-4 w-4" /> Imprimer
-                  </button>
-                  {doc.markedBy && (
-                    <span className="text-[11px] text-muted-foreground ml-auto">Créé par {displayPersonName(doc.markedBy)}</span>
-                  )}
-                </div>
+              <div className="shrink-0 flex items-center gap-2">
+                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                  ready ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                }`}>
+                  {ready ? <><CheckCircle2 className="h-3 w-3" /> Lots complets</> : `${missing} lot${missing > 1 ? "s" : ""} à affecter`}
+                </span>
+                <ChevronDown className="h-4 w-4 -rotate-90 text-muted-foreground/50" />
               </div>
-            )}
+            </div>
           </section>
         );
       })}
@@ -618,7 +475,205 @@ export function BonsCommandePanel() {
           <Loader2 className="h-4 w-4 animate-spin" /> Chargement des bons de commande…
         </div>
       )}
+
+      {/* ══ PLEIN ÉCRAN — affectation des lots d'une OFFRE (avant passage) ══ */}
+      <FullscreenPanel
+        open={!!openOffre}
+        onOpenChange={(v) => { if (!v) setOpenOffreId(null); }}
+        title={openOffre?.cardName ?? ""}
+        subtitle={
+          openOffre ? (
+            <span className="inline-flex items-center gap-2 flex-wrap">
+              <span>Offre n°{openOffre.docNum}</span>
+              <span className="tnum">· {openOffre.lineCount} ligne{openOffre.lineCount > 1 ? "s" : ""} · {openOffre.colis} colis</span>
+              {openOffre.due && <span className="inline-flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-300"><Clock className="h-3.5 w-3.5" /> jour de départ</span>}
+            </span>
+          ) : undefined
+        }
+        highlight={
+          openOffre
+            ? (openOffre.pendingCount === 0
+                ? <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 text-[15px] sm:text-[17px]"><CheckCircle2 className="h-5 w-5" /> Lots complets</span>
+                : <span className="text-amber-600 dark:text-amber-400 text-[15px] sm:text-[17px]">{openOffre.pendingCount} lot{openOffre.pendingCount > 1 ? "s" : ""} à affecter</span>)
+            : undefined
+        }
+        actions={
+          openOffre ? (
+            <>
+              <Button
+                variant={openOffre.due ? "default" : "outline"}
+                size="sm"
+                onClick={() => convertOffre(openOffre)}
+                disabled={convertingId === openOffre.docEntry || deletingId === openOffre.docEntry}
+              >
+                {convertingId === openOffre.docEntry ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightCircle className="h-4 w-4" />}
+                Passer en commande
+              </Button>
+              <Button
+                variant="outline" size="icon"
+                onClick={() => deleteOffre(openOffre)}
+                disabled={convertingId === openOffre.docEntry || deletingId === openOffre.docEntry}
+                title="Supprimer l'offre" aria-label={`Supprimer l'offre n°${openOffre.docNum}`}
+                className="text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400"
+              >
+                {deletingId === openOffre.docEntry ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              </Button>
+            </>
+          ) : undefined
+        }
+      >
+        {openOffre && (
+          <div className="space-y-4">
+            {/* Date de livraison + n° de commande éditables */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground" title="Date de livraison">
+                <CalendarDays className="h-4 w-4 shrink-0" />
+                <input
+                  type="date"
+                  defaultValue={openOffre.dueDate ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (/^\d{4}-\d{2}-\d{2}$/.test(v) && v !== openOffre.dueDate) saveOffre(openOffre, { dueDate: v });
+                  }}
+                  aria-label={`Date de livraison de l'offre n°${openOffre.docNum}`}
+                  className="h-9 rounded-lg border border-border bg-card px-2 text-[13px] text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                />
+              </label>
+              <label className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground" title="N° de commande client">
+                <Hash className="h-4 w-4 shrink-0" />
+                <input
+                  type="text"
+                  defaultValue={openOffre.numAtCard ?? ""}
+                  placeholder="N° commande"
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    if (v !== (openOffre.numAtCard ?? "")) saveOffre(openOffre, { numAtCard: v });
+                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                  aria-label={`N° de commande de l'offre n°${openOffre.docNum}`}
+                  className="h-9 w-[150px] rounded-lg border border-border bg-card px-2 text-[13px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                />
+              </label>
+            </div>
+            <LotAssignList
+              lines={openOffre.lines}
+              keyPrefix={`offre:${openOffre.docEntry}:`}
+              busyLine={busyLine}
+              onPick={(itemCode, v) => assignLotOffre(openOffre, itemCode, v)}
+            />
+            <Button
+              variant="outline"
+              onClick={() => suggestAllOffre(openOffre)}
+              disabled={openOffre.pendingCount === 0 || busyLine !== null || !openOffre.lines.some((l) => l.pending && !l.familyTarget && l.suggested)}
+              title="Valider le lot suggéré (arrivage en stock) sur les lignes qui en ont un ; les articles sans lot dispo restent en attente"
+            >
+              <Sparkles className="h-4 w-4" /> Valider les lots en stock
+            </Button>
+          </div>
+        )}
+      </FullscreenPanel>
+
+      {/* ══ PLEIN ÉCRAN — affectation des lots d'un BON DE COMMANDE ══ */}
+      <FullscreenPanel
+        open={!!openBon}
+        onOpenChange={(v) => { if (!v) setOpenBonId(null); }}
+        title={openBon?.cardName ?? ""}
+        subtitle={
+          openBon ? (
+            <span className="inline-flex items-center gap-2 flex-wrap">
+              <span>BL n°{openBon.docNum}</span>
+              {openBon.dueDate && <span className="tnum">· Livraison {formatDeliveryDate(openBon.dueDate)}</span>}
+              {openBon.markedBy && <span>· Créé par {displayPersonName(openBon.markedBy)}</span>}
+            </span>
+          ) : undefined
+        }
+        highlight={
+          openBon
+            ? (openBon.pendingCount === 0
+                ? <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 text-[15px] sm:text-[17px]"><CheckCircle2 className="h-5 w-5" /> Lots complets</span>
+                : <span className="text-amber-600 dark:text-amber-400 text-[15px] sm:text-[17px]">{openBon.pendingCount} lot{openBon.pendingCount > 1 ? "s" : ""} à affecter</span>)
+            : undefined
+        }
+        actions={
+          openBon ? (
+            <>
+              <Button
+                variant="outline" size="sm"
+                onClick={() => startModif(openBon)}
+                disabled={modifBusy === openBon.docEntry}
+                title="Modifier la commande dans la console (stock en direct) : changer les articles/quantités pour garantir les lots disponibles"
+              >
+                {modifBusy === openBon.docEntry ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />} Modifier
+              </Button>
+              <Button variant="outline" size="icon" onClick={() => printPrep(openBon)}
+                title="Imprimer le bon de commande pour la préparation (articles, colis, lots)" aria-label="Imprimer">
+                <Printer className="h-4 w-4" />
+              </Button>
+            </>
+          ) : undefined
+        }
+      >
+        {openBon && (
+          <div className="space-y-4">
+            <LotAssignList
+              lines={openBon.lines}
+              keyPrefix={`${openBon.docEntry}:`}
+              busyLine={busyLine}
+              onPick={(itemCode, v) => assignLot(openBon, itemCode, v)}
+            />
+            <Button
+              variant="outline"
+              onClick={() => suggestAll(openBon)}
+              disabled={openBon.pendingCount === 0 || busyLine !== null || !openBon.lines.some((l) => l.pending && !l.familyTarget && l.suggested)}
+              title="Valider le lot suggéré (arrivage en stock du segment) sur les lignes qui en ont un ; les articles sans lot dispo restent en attente"
+            >
+              <Sparkles className="h-4 w-4" /> Valider les lots en stock
+            </Button>
+          </div>
+        )}
+      </FullscreenPanel>
     </div>
+  );
+}
+
+/* ── Liste d'affectation des lots (partagée offre / bon) — chaque ligne :
+      article en clair + LotCell. Utilisée dans les panneaux PLEIN ÉCRAN. ── */
+function LotAssignList({ lines, keyPrefix, busyLine, onPick }: {
+  lines: BonLine[];
+  keyPrefix: string;
+  busyLine: string | null;
+  onPick: (itemCode: string, v: string) => void;
+}) {
+  return (
+    <ul className="divide-y divide-border/50 rounded-xl border border-border overflow-hidden bg-card">
+      {lines.map((l) => {
+        const isBusy = busyLine === `${keyPrefix}${l.itemCode}`;
+        // Valeur sélectionnée : tag famille (EM_FAM:…) prioritaire, sinon
+        // vrai lot, sinon vide (à découvert générique).
+        const current = l.familyTarget
+          ? familyLotSentinel(l.familyTarget.key)
+          : l.pending ? "" : l.lot;
+        return (
+          <li key={l.itemCode} className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-[15px] font-semibold text-foreground truncate">{l.itemName}</span>
+                <span className="text-[12px] text-muted-foreground tnum shrink-0">
+                  {l.colis} colis{l.warehouse ? ` · mag. ${l.warehouse}` : ""}
+                </span>
+                {l.familyTarget && (
+                  <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 shrink-0">
+                    <Grape className="h-3 w-3" /> {l.familyTarget.label} — à préciser
+                  </span>
+                )}
+              </div>
+              <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} size="md" className="mt-1" />
+            </div>
+            <LotCell line={l} current={current} isBusy={isBusy} onPick={(v) => onPick(l.itemCode, v)} />
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

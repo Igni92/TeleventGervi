@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { AppToaster } from "@/components/ui/toaster";
 import { ClickSparks } from "@/components/ClickSparks";
@@ -8,13 +8,21 @@ import { Providers } from "./providers";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 
-// One sans for everything — Inter is screen-engineered for max legibility.
-// "Premium" comes from spacing, hierarchy, and restraint — not font swaps.
+// Inter = texte courant (lisibilité max). Space Grotesk = DISPLAY : titres et
+// gros chiffres. Sa personnalité géométrique-industrielle colle à l'identité
+// anthracite + jaune, et sort l'app du « tout-Inter » générique. Il embarque
+// les chiffres tabulaires (tnum) → aucun saut de layout sur les KPI animés.
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
   display: "swap",
   weight: ["300", "400", "500", "600", "700", "800"],
+});
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-display",
+  display: "swap",
+  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
@@ -33,7 +41,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="fr" className={inter.variable}>
+    <html lang="fr" className={`${inter.variable} ${spaceGrotesk.variable}`}>
       <head>
         {/* Anti-FOUC : applique densité + zoom d'interface avant le 1er paint.
             Colorimétrie retirée (marque = Or unique) → on purge un ancien choix.

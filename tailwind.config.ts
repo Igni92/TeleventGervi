@@ -25,7 +25,7 @@ const config: Config = {
       },
       fontFamily: {
         sans:    ["var(--font-inter)", "Inter", "system-ui", "sans-serif"],
-        display: ["var(--font-inter)", "Inter", "system-ui", "sans-serif"],
+        display: ["var(--font-display)", "var(--font-inter)", "system-ui", "sans-serif"],
         mono:    ["JetBrains Mono", "Fira Code", "ui-monospace", "monospace"],
       },
       colors: {

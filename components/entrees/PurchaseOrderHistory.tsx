@@ -10,10 +10,13 @@ import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { FullscreenPanel } from "@/components/ui/fullscreen-panel";
+import { InfoHint } from "@/components/ui/info-hint";
+import { StatBlock } from "@/components/ui/stat-block";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
 import { fmtJourDate } from "@/lib/date-fr";
+import { eur, eur0, fmtColis } from "@/lib/format";
 import { DesignationChips } from "./DesignationChips";
 import { INCIDENT_TYPES, notifyReceptionIncidentsChanged } from "./ReceptionIncidents";
 import { ProductPicker, type ProductHit } from "./GoodsReceiptForm";
@@ -42,12 +45,6 @@ type ReceiveAgreage = { status: "CONFORME" | "RESERVE"; type?: string; note?: st
 
 /** Date « jour + date » unifiée des états SAP : « VEN 10.07.26 ». */
 const fmtDate = fmtJourDate;
-const eur = (n: number): string =>
-  n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
-const fmtColis = (n: number | null | undefined): string => {
-  if (n == null) return "—";
-  return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(".", ",");
-};
 
 /** Heure « HHhMM » de prise de commande, extraite du commentaire SAP
  *  (« CF 2709 - JMG à 13h10 » ou l'ancien « … · Commande à 13h10 »). */
@@ -87,17 +84,6 @@ function DueBadge() {
     <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2 h-6 text-[11px] font-semibold bg-amber-500/15 border border-amber-500/60 text-amber-600 dark:text-amber-400">
       <AlertTriangle className="h-3 w-3 shrink-0" /> À réceptionner
     </span>
-  );
-}
-
-function Stat({ label, value, tone }: { label: string; value: React.ReactNode; tone?: "emerald" }) {
-  return (
-    <div>
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">{label}</div>
-      <div className={`text-[20px] font-bold tnum leading-tight ${tone === "emerald" ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>
-        {value}
-      </div>
-    </div>
   );
 }
 
@@ -226,21 +212,21 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
 
         {filtered.length > 0 && (
           <div className="flex flex-wrap gap-6 pb-1">
-            <Stat label="Commandes" value={<AnimatedNumber value={filtered.length} />} />
+            <StatBlock label="Commandes" value={<AnimatedNumber value={filtered.length} />} />
             {!restricted && (
-              <Stat
+              <StatBlock
                 label="Engagé (HT)"
                 tone="emerald"
                 value={
                   <AnimatedNumber
                     value={filtered.reduce((s, d) => s + (d.totalHT ?? 0), 0)}
-                    format={(n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n)}
+                    format={eur0}
                   />
                 }
               />
             )}
-            <Stat label="Ouvertes" value={<AnimatedNumber value={filtered.filter((d) => d.open).length} />} />
-            {dueCount > 0 && <Stat label="À réceptionner" value={<span className="text-amber-600 dark:text-amber-400">{dueCount}</span>} />}
+            <StatBlock label="Ouvertes" value={<AnimatedNumber value={filtered.filter((d) => d.open).length} />} />
+            {dueCount > 0 && <StatBlock label="À réceptionner" tone="amber" value={dueCount} />}
           </div>
         )}
 
@@ -255,24 +241,22 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                 className="w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono font-semibold text-[16px] text-foreground"># {d.docNum}</span>
-                    {isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}
-                  </div>
-                  <div className="text-[14px] text-foreground/90 mt-0.5 truncate" title={d.cardName}>
+                  {/* Mobile : l'IMPORTANT seulement — fournisseur, statut, livraison,
+                      montant. (n° CF, heure de prise, nb lignes → dans le détail.) */}
+                  <div className="text-[16px] font-semibold text-foreground truncate">
                     {d.cardName || d.cardCode}
                   </div>
                   <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
-                    {fmtDate(d.docDate)}{heureFromComments(d.comments) ? ` à ${heureFromComments(d.comments)}` : ""}
+                    Livraison {fmtDate(d.dueDate)}
                   </div>
-                  <div className="text-[13px] text-muted-foreground tnum">
-                    {d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}
+                  <div className="mt-1">
+                    {isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}
                   </div>
                 </div>
                 <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
                   {!restricted && (
                     <div>
-                      <span className="text-[17px] font-bold tnum text-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
+                      <span className="font-display text-[18px] font-bold tnum text-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
                       <span className="ml-1 text-[11px] text-muted-foreground">HT</span>
                     </div>
                   )}
@@ -291,10 +275,9 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                 <tr>
                   <th className="text-left px-3 py-2 font-semibold w-24">N° Cde</th>
                   <th className="text-left px-3 py-2 font-semibold">Fournisseur</th>
-                  <th className="text-left px-3 py-2 font-semibold w-24">Commande</th>
-                  <th className="text-left px-3 py-2 font-semibold w-24">Livraison</th>
+                  <th className="text-left px-3 py-2 font-semibold w-28">Livraison</th>
                   <th className="text-left px-3 py-2 font-semibold w-36">Statut</th>
-                  {!restricted && <th className="text-right px-3 py-2 font-semibold w-28">Total HT</th>}
+                  {!restricted && <th className="text-right px-3 py-2 font-semibold w-32">Total HT</th>}
                   <th className="w-10" />
                 </tr>
               </thead>
@@ -305,16 +288,26 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                     onClick={() => setLargeEntry(d.docEntry)}
                     className="border-t border-border/60 hover:bg-secondary/30 cursor-pointer transition-colors"
                   >
-                    <td className="px-3 py-2 font-mono font-semibold"># {d.docNum}</td>
-                    <td className="px-3 py-2">
-                      <span className="font-medium text-foreground">{d.cardName || d.cardCode}</span>
-                      <span className="text-muted-foreground ml-1.5 font-mono text-[11px]">{d.cardCode}</span>
+                    <td className="px-3 py-2.5 font-mono font-semibold"># {d.docNum}</td>
+                    <td className="px-3 py-2.5">
+                      {/* Le NOM d'abord ; le technique (code SAP, date/heure de prise,
+                          réf., nb lignes) derrière le « ? ». */}
+                      <span className="inline-flex items-center gap-2 min-w-0">
+                        <span className="font-semibold text-foreground truncate text-[14px]">{d.cardName || d.cardCode}</span>
+                        <InfoHint label="Détails commande" side="right">
+                          <span className="block space-y-0.5">
+                            <span className="block">Code SAP : <span className="font-mono">{d.cardCode}</span></span>
+                            <span className="block">Commandée le {fmtDate(d.docDate)}{heureFromComments(d.comments) ? ` à ${heureFromComments(d.comments)}` : ""}</span>
+                            {d.numAtCard && <span className="block">Réf. : <span className="tnum">{d.numAtCard}</span></span>}
+                            <span className="block">{d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}</span>
+                          </span>
+                        </InfoHint>
+                      </span>
                     </td>
-                    <td className="px-3 py-2 tnum text-muted-foreground">{fmtDate(d.docDate)}</td>
-                    <td className="px-3 py-2 tnum text-muted-foreground">{fmtDate(d.dueDate)}</td>
-                    <td className="px-3 py-2">{isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}</td>
-                    {!restricted && <td className="px-3 py-2 text-right tnum font-semibold">{eur(d.totalHT ?? 0)}</td>}
-                    <td className="px-2 py-2 text-right"><ChevronRight className="h-4 w-4 text-muted-foreground/50 inline" /></td>
+                    <td className="px-3 py-2.5 tnum text-muted-foreground">{fmtDate(d.dueDate)}</td>
+                    <td className="px-3 py-2.5">{isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}</td>
+                    {!restricted && <td className="px-3 py-2.5 text-right tnum font-display font-bold text-[15px]">{eur(d.totalHT ?? 0)}</td>}
+                    <td className="px-2 py-2.5 text-right"><ChevronRight className="h-4 w-4 text-muted-foreground/50 inline" /></td>
                   </tr>
                 ))}
               </tbody>
@@ -323,19 +316,24 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
         )}
       </SurfaceCard>
 
-      {/* ── Détail plein écran ── */}
-      <Dialog open={!!largeDoc} onOpenChange={(o) => { if (!o) setLargeEntry(null); }}>
-        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-6">
-          <DialogHeader className="text-left">
-            <DialogTitle className="flex items-center gap-2 justify-start pr-8 text-[16px] sm:text-[18px] whitespace-nowrap">
-              <PackageCheck className="h-5 w-5 shrink-0 text-violet-600 dark:text-violet-400" />
-              <span className="truncate min-w-0">CF {largeDoc?.docNum}</span>
-            </DialogTitle>
-            <DialogDescription className="sr-only">Détail de la commande fournisseur : lignes commandées et réception.</DialogDescription>
-          </DialogHeader>
-          {largeDoc && <PoDetail po={largeDoc} onReceive={receive} receiving={receiving} onModified={load} restricted={restricted} />}
-        </DialogContent>
-      </Dialog>
+      {/* ── Détail PLEIN ÉCRAN (on oublie le fond) ── */}
+      <FullscreenPanel
+        open={!!largeDoc}
+        onOpenChange={(o) => { if (!o) setLargeEntry(null); }}
+        title={largeDoc?.cardName || largeDoc?.cardCode || ""}
+        subtitle={
+          largeDoc ? (
+            <span className="inline-flex items-center gap-2 flex-wrap">
+              <span className="font-mono">CF # {largeDoc.docNum}</span>
+              <span className="tnum">· Livraison {fmtDate(largeDoc.dueDate)}</span>
+              {isDue(largeDoc) ? <DueBadge /> : <StatusBadge open={largeDoc.open} cancelled={largeDoc.cancelled} />}
+            </span>
+          ) : undefined
+        }
+        highlight={!restricted && largeDoc ? <>{eur(largeDoc.totalHT ?? 0)} <span className="text-[12px] font-sans font-medium text-muted-foreground">HT</span></> : undefined}
+      >
+        {largeDoc && <PoDetail po={largeDoc} onReceive={receive} receiving={receiving} onModified={load} restricted={restricted} />}
+      </FullscreenPanel>
     </div>
   );
 }
@@ -564,14 +562,12 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
           ) : (
             <div className="inline-flex items-center gap-2">
               <span className="text-[12.5px] text-foreground">Annuler la commande # {po.docNum} ?</span>
-              <button type="button" onClick={cancelOrder} disabled={cancelling}
-                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[12.5px] font-semibold disabled:opacity-60">
+              <Button variant="destructive" size="sm" onClick={cancelOrder} disabled={cancelling}>
                 {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Confirmer
-              </button>
-              <button type="button" onClick={() => setCancelConfirm(false)} disabled={cancelling}
-                className="inline-flex items-center h-8 px-3 rounded-lg border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground">
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setCancelConfirm(false)} disabled={cancelling}>
                 Non
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -580,13 +576,9 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
       {po.open && (
         <div className="rounded-xl border border-amber-400/50 bg-amber-50/60 dark:bg-amber-950/20 p-3">
           {!confirm ? (
-            <button
-              type="button"
-              onClick={() => setConfirm(true)}
-              className="w-full inline-flex items-center justify-center gap-2 h-11 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-[14px] font-semibold transition-colors"
-            >
+            <Button size="xl" className="w-full" onClick={() => setConfirm(true)}>
               <PackageCheck className="h-4 w-4" /> Réceptionner → entrée marchandise
-            </button>
+            </Button>
           ) : (
             <div className="space-y-2.5">
               <p className="text-[13px] text-foreground">
@@ -662,8 +654,8 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
+                <Button
+                  size="lg"
                   onClick={() => onReceive(po.docEntry, {
                     status: agreeStatus,
                     ...(agreeStatus === "RESERVE" ? { type: reserveType, note: reserveNote.trim() } : {}),
@@ -671,32 +663,25 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
                   })}
                   disabled={receiving || reserveIncomplete}
                   title={reserveIncomplete ? "Décris la réserve avant de confirmer" : undefined}
-                  className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-[13px] font-semibold disabled:opacity-60"
                 >
                   {receiving ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageCheck className="h-4 w-4" />}
                   {agreeStatus === "RESERVE" ? "Réceptionner avec réserve" : "Confirmer la réception"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirm(false)}
-                  disabled={receiving}
-                  className="inline-flex items-center h-10 px-4 rounded-lg border border-border text-[13px] font-medium text-muted-foreground hover:text-foreground"
-                >
+                </Button>
+                <Button variant="outline" size="lg" onClick={() => setConfirm(false)} disabled={receiving}>
                   Annuler
-                </button>
+                </Button>
               </div>
             </div>
           )}
         </div>
       )}
-      {/* En-tête : fournisseur + dates + statut + réf */}
+      {/* En-tête : code SAP + prise de commande.
+          (Nom, statut, livraison et total vivent dans l'en-tête plein écran.) */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
         <span className="inline-flex items-center gap-1.5 text-[15px] text-foreground">
           <Truck className="h-4 w-4 text-muted-foreground" />
           <span className="font-mono font-semibold">{po.cardCode}</span>
-          {po.cardName && <span className="text-muted-foreground">· {po.cardName}</span>}
         </span>
-        <StatusBadge open={po.open} cancelled={po.cancelled} large />
         <span className="text-[14px] text-muted-foreground tnum">
           Commandée {fmtDate(po.docDate)}{heureFromComments(po.comments) ? ` à ${heureFromComments(po.comments)}` : ""}
         </span>

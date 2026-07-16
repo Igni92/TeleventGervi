@@ -1024,3 +1024,43 @@ Lisibilité conservée (libellés partout, abrégés sur mobile) ; le calendrier
 | Découpe récup/CP : quand la récup s'arrêtait un vendredi, le **samedi suivant partait en CP** (« Dont 1 samedi en CP »). | Quand la **récup complète la semaine à 35 h** (heures travaillées + récup), le **samedi qui suit n'est PAS décompté** : le CP ne démarre qu'au **lundi suivant**. Ex. : bossé lun–mer (21h45), récup jeu+ven → il ne reste que **le lundi en CP**. Si la récup s'arrête plus tôt (semaine < 35 h), le samedi reste décompté. |
 
 `splitLeaveRecupCp` fait démarrer le CP au **prochain jour de contrat (lun→ven)** après la récup — les samedis/dimanches couverts par la semaine complétée sont sautés. **Non rétroactif** : le décompte CP en jours ouvrables (lun→sam) et les soldes existants sont inchangés ; seule la découpe récup+CP à l'envoi évolue. Fichiers : `lib/planning.ts`, `components/planning/PlanningPanel.tsx` (+ tests).
+
+---
+
+## 🎨 REDESIGN GLOBAL 07/2026 — « moins IA », hiérarchie forte, plein écran
+
+> Audit complet + plan : voir `AUDIT-REDESIGN.md`. Règle d'or appliquée :
+> **l'important (noms, montants, quantités, statuts) en blanc/jaune et EN GRAND ;
+> le secondaire derrière un « ? » cerclé au survol ; supprimé sur mobile.**
+
+### Fondations
+
+| Avant | Après |
+|-------|-------|
+| Une seule police (Inter) partout — `font-display` était un alias d'Inter. | **Space Grotesk** en display (titres + gros chiffres, chiffres tabulaires conservés) ; Inter reste en texte courant. Une vraie voix typographique. |
+| Fond « salle de signal » : 2 auroras multicolores + grille technique + anneaux radar (template IA). | **Fond apaisé** : une seule nappe de teinte marque très discrète. Grille et radar supprimés. |
+| `ui/button` : variantes outline/secondary/ghost en `slate-*` codé en dur, `transition-all`. | Variantes **100 % tokens** (cohérence papier chaud / charcoal automatique), transitions sur propriétés explicites. |
+| `ui/badge` : jeu `-50/-700` sans variantes dark (illisible en sombre). | Teintes **translucides** (`bg-x-500/12 + ring`) lisibles clair ET sombre. |
+| 4 patterns d'`<h1>` concurrents (26–34px, semibold/bold/light). | **`<PageHeader>` partagé** : un seul titre héros display ; l'ancien sous-titre gris passe derrière le « ? ». |
+
+### Nouvelles primitives
+
+| Composant | Rôle |
+|-----------|------|
+| `ui/info-hint.tsx` (`InfoHint`) | Pictogramme **« ? » cerclé** : l'info secondaire s'affiche au survol/focus (portal, 150 ms ease-out) ; **masqué sur mobile/tactile** (info supprimée, demande client). `InfoTip` (mode icône) aligné sur le même visuel. |
+| `ui/fullscreen-panel.tsx` (`FullscreenPanel`) | Détail **PLEIN ÉCRAN sur fond opaque** (Radix Dialog : focus trap, Échap, scroll lock) — en-tête retour + titre héros + **montant en jaune** + actions. |
+| `ui/stat-block.tsx` (`StatBlock`) | Mini-stat unifiée (label kicker + valeur 24px display) — remplace les clones locaux de `Stat`. |
+| `lib/format.ts` | `eur`, `eur0`, `fmtColis` partagés (4 copies locales supprimées). |
+
+### Écrans convertis au plein écran
+
+| Écran | Avant | Après |
+|-------|-------|-------|
+| **Réceptions** (`GoodsReceiptHistory`) | Accordéon inline dans le tableau **ET** modale centrée (2 chemins, double jeu de tailles). Nom du fournisseur absent du tableau desktop (seul le code SAP). | **Un seul chemin plein écran.** Liste : **nom du fournisseur en clair**, total HT en gras display ; code SAP / lot / réf. BL / nb lignes derrière « ? ». Carte mobile élaguée (nom, date, montant, statuts). |
+| **Commandes fournisseurs** (`PurchaseOrderHistory`) | Modale centrée `max-w-5xl` (fond visible), colonne « Commande » redondante. | **Plein écran** (titre = fournisseur, statut + livraison en sous-titre, total en jaune). Date/heure de prise, code SAP, réf. → « ? ». CTA réception sur `ui/button`. |
+| **Bons de commande** (`BonsCommandePanel`) | 2 accordéons inline sans animation (offres + bons). | **Lignes-résumés** (client, livraison, statut lots) → détail **plein écran** avec l'affectation des lots, actions en en-tête (passer en commande, imprimer, modifier). Liste d'affectation factorisée (`LotAssignList`). |
+
+### Nettoyages
+
+- `ImportModal`, `app/error.tsx`, formulaire fournisseur (erreurs → `text-destructive`), badge SAP dédupliqué, bandeau annulation `slate` → tokens.
+- Accueil (`KpiStrip`) : chiffres héros plus grands (28→32px display), « vs N-1 » et le mode de calcul de la marge derrière « ? » (plus de `title=` natif).

@@ -6,6 +6,7 @@ import { CommercialCard } from "@/components/commerciaux/CommercialCard";
 import { EffectifsPreviewBar } from "@/components/role-preview/EffectifsPreviewBar";
 import { CommerciauxSapList } from "./CommerciauxSapList";
 import { HeuresPanel } from "@/components/effectifs/HeuresPanel";
+import { PageHeader } from "@/components/ui/page-header";
 
 export const metadata = { title: "Effectifs | Gervi" };
 export const dynamic = "force-dynamic";
@@ -153,17 +154,17 @@ export default async function CommerciauxPage() {
 
   return (
     <div className="space-y-8 animate-fade-up">
-      <header>
-        <p className="kicker mb-1.5">Équipe &amp; rôles</p>
-        <h1 className="font-display text-[34px] font-semibold text-foreground tracking-tight leading-none">
-          Effectifs
-        </h1>
-        <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
-          Commerciaux SAP (activité sur 12 mois : CA net, volume BL, clients actifs) et,
-          pour les administrateurs, gestion de l&apos;équipe : présence du jour, % de stock
-          attribué et rôles (admin, préparateur en charge du stock).
-        </p>
-      </header>
+      <PageHeader
+        kicker="Équipe & rôles"
+        title="Effectifs"
+        help={
+          <>
+            Commerciaux SAP (activité sur 12 mois : CA net, volume BL, clients actifs) et,
+            pour les administrateurs, gestion de l&apos;équipe : présence du jour, % de stock
+            attribué et rôles (admin, préparateur en charge du stock).
+          </>
+        }
+      />
 
       <CommerciauxSapList />
 

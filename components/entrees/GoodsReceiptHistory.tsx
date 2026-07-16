@@ -3,17 +3,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  Loader2, RefreshCw, ClipboardList, Search, ChevronRight, ChevronDown,
-  AlertTriangle, Truck, X, Maximize2, Ban, Undo2, PackageCheck,
+  Loader2, RefreshCw, ClipboardList, Search, ChevronRight,
+  AlertTriangle, Truck, X, Ban, Undo2, PackageCheck,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { FullscreenPanel } from "@/components/ui/fullscreen-panel";
+import { InfoHint } from "@/components/ui/info-hint";
+import { StatBlock } from "@/components/ui/stat-block";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
 import { fmtJourDate } from "@/lib/date-fr";
+import { eur, eur0, fmtColis } from "@/lib/format";
 import { DesignationChips, Chip } from "./DesignationChips";
 import {
   OpenReceptionIncidents, InlineIncidentDeclare, IncidentTypeIcon, useReceptionIncidents,
@@ -45,7 +48,7 @@ const isVoided = (d: Receipt): boolean => !!d.cancelled || !!d.isCancellation;
 function CancelBadge({ d, className = "" }: { d: Receipt; className?: string }) {
   if (d.isCancellation) {
     return (
-      <span className={`inline-flex items-center gap-1 rounded-full bg-slate-500/15 px-2 py-0.5 text-[10.5px] font-semibold text-slate-600 dark:text-slate-300 ${className}`}>
+      <span className={`inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground ring-1 ring-border ${className}`}>
         <Ban className="h-3 w-3" />
         Annulation{d.cancelsDocNum ? ` · # ${d.cancelsDocNum}` : ""}
       </span>
@@ -140,15 +143,6 @@ const isToday = (s?: string): boolean => {
   const n = new Date();
   return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
 };
-/** Montant € à 2 décimales (séparateur FR). */
-const eur = (n: number): string =>
-  n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
-/** Nb de colis : entier si rond, sinon 1 décimale. */
-const fmtColis = (n: number | null | undefined): string => {
-  if (n == null) return "—";
-  return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(".", ",");
-};
-
 /* ─────────────────────────────────────────────────────────────────
    Fraîcheur / DLC des lots — version CLIENT.
    ⚠️ `lib/lotDlc.ts` importe `@/lib/prisma` au niveau module : l'importer ici
@@ -243,7 +237,7 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [dateFilter, setDateFilter] = useState("");
-  const [expanded, setExpanded] = useState<number | null>(null);
+  // Détail : UN SEUL chemin — plein écran (plus d'accordéon inline dans le tableau).
   const [largeEntry, setLargeEntry] = useState<number | null>(null);
   const { incidents, loading: incLoading, reload: reloadIncidents, byDoc } = useReceptionIncidents();
   // Agréages des EM listées (contrôle qualité) — un fetch groupé par chargement.
@@ -300,7 +294,6 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
     });
   }, [docs, query, dateFilter]);
 
-  const toggle = (docEntry: number) => setExpanded((cur) => (cur === docEntry ? null : docEntry));
   const updateNumAtCard = (docEntry: number, numAtCard: string) =>
     setDocs((cur) => cur.map((d) => (d.docEntry === docEntry ? { ...d, numAtCard } : d)));
   const hasFilters = query.trim() !== "" || dateFilter !== "";
@@ -365,21 +358,21 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
           const voided = filtered.length - live.length;
           return (
             <div className="flex flex-wrap gap-6 pb-1">
-              <Stat label="Entrées" value={<AnimatedNumber value={live.length} />} />
+              <StatBlock label="Entrées" value={<AnimatedNumber value={live.length} />} />
               {!restricted && (
-                <Stat
+                <StatBlock
                   label="Valeur cumulée (HT)"
                   tone="emerald"
                   value={
                     <AnimatedNumber
                       value={live.reduce((s, d) => s + (d.totalHT ?? 0), 0)}
-                      format={(n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n)}
+                      format={eur0}
                     />
                   }
                 />
               )}
-              <Stat label="Lignes" value={<AnimatedNumber value={live.reduce((s, d) => s + (d.lineCount ?? 0), 0)} />} />
-              {voided > 0 && <Stat label="Annulées" value={<AnimatedNumber value={voided} />} />}
+              <StatBlock label="Lignes" value={<AnimatedNumber value={live.reduce((s, d) => s + (d.lineCount ?? 0), 0)} />} />
+              {voided > 0 && <StatBlock label="Annulées" value={<AnimatedNumber value={voided} />} />}
             </div>
           );
         })()}
@@ -398,22 +391,23 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                   className={`w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40 ${isVoided(d) ? "opacity-60" : ""}`}
                 >
                   <div className="min-w-0 flex-1">
-                    <span className="inline-flex items-center gap-1.5 flex-wrap">
-                      <span className={`font-mono font-semibold text-[16px] ${isVoided(d) ? "line-through text-muted-foreground" : "text-foreground"}`}># {d.docNum}</span>
-                      <CancelBadge d={d} />
-                      {!isVoided(d) && <AgreageBadge a={agreages[d.docEntry]} />}
-                    </span>
-                    <div className="text-[14px] text-foreground/90 mt-0.5 truncate" title={d.cardName}>
+                    {/* Mobile : l'IMPORTANT seulement — fournisseur, date, montant,
+                        statuts. (n° EM, lot, nb lignes → visibles dans le détail.) */}
+                    <div className={`text-[16px] font-semibold truncate ${isVoided(d) ? "line-through text-muted-foreground" : "text-foreground"}`}>
                       {d.cardName || d.cardCode}
                     </div>
                     <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
-                      {fmtJourDate(d.docDate)} · {d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}
+                      {fmtJourDate(d.docDate)}
                     </div>
+                    <span className="inline-flex items-center gap-1.5 flex-wrap mt-1">
+                      <CancelBadge d={d} />
+                      {!isVoided(d) && <AgreageBadge a={agreages[d.docEntry]} />}
+                    </span>
                   </div>
                   <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
                     {!restricted && (
                       <div>
-                        <span className="text-[17px] font-bold tnum text-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
+                        <span className="font-display text-[18px] font-bold tnum text-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
                         <span className="ml-1 text-[11px] text-muted-foreground">HT</span>
                       </div>
                     )}
@@ -433,88 +427,74 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
 
         {filtered.length > 0 && (
           <div className="hidden md:block rounded-lg border border-border overflow-hidden">
-            <table className="w-full text-[13px]">
+            <table className="w-full text-[13.5px]">
               <thead className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
                 <tr>
-                  <th className="w-8 px-2 py-2" />
                   <th className="text-left px-3 py-2 font-semibold w-24">N° EM</th>
-                  <th className="text-left px-3 py-2 font-semibold w-28">Lot</th>
                   <th className="text-left px-3 py-2 font-semibold">Fournisseur</th>
                   <th className="text-left px-3 py-2 font-semibold w-28">Date</th>
-                  <th className="text-right px-3 py-2 font-semibold w-16">Lignes</th>
-                  {!restricted && <th className="text-right px-3 py-2 font-semibold w-28">Total HT</th>}
+                  {!restricted && <th className="text-right px-3 py-2 font-semibold w-32">Total HT</th>}
                   <th className="text-center px-3 py-2 font-semibold w-28">Agréage</th>
                   <th className="text-center px-3 py-2 font-semibold w-20">Incident</th>
+                  <th className="w-8 px-2 py-2" />
                 </tr>
               </thead>
               <tbody>
-                {filtered.flatMap((d) => {
-                  const isOpen = expanded === d.docEntry;
-                  const rows = [
-                    <tr
-                      key={d.docEntry}
-                      className={`border-t border-border cursor-pointer transition-colors ${isOpen ? "bg-secondary/40" : "hover:bg-secondary/30"} ${isVoided(d) ? "opacity-60" : ""}`}
-                      onClick={() => toggle(d.docEntry)}
-                    >
-                      <td className="px-2 py-2 text-center text-muted-foreground">
-                        {isOpen ? <ChevronDown className="h-3.5 w-3.5 inline" /> : <ChevronRight className="h-3.5 w-3.5 inline" />}
-                      </td>
-                      <td className="px-3 py-2 font-mono font-semibold whitespace-nowrap">
-                        <span className={isVoided(d) ? "line-through text-muted-foreground" : ""}># {d.docNum}</span>
-                        <CancelBadge d={d} className="ml-1.5 align-middle" />
-                      </td>
-                      <td className="px-3 py-2 font-mono text-muted-foreground whitespace-nowrap">
-                        {d.lot}
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="font-mono font-medium truncate" title={d.cardName}>{d.cardCode}</div>
-                        {d.numAtCard && <div className="text-[11px] text-muted-foreground tnum">{d.numAtCard}</div>}
-                      </td>
-                      <td className="px-3 py-2 text-muted-foreground tnum">{fmtJourDate(d.docDate)}</td>
-                      <td className="px-3 py-2 text-right tnum">{d.lineCount}</td>
-                      {!restricted && <td className="px-3 py-2 text-right tnum font-semibold">{eur(d.totalHT ?? 0)}</td>}
-                      <td className="px-3 py-2 text-center">
-                        {/* Agréage posé à la réception CF → EM ; EM directe = pas d'agréage. */}
-                        {!isVoided(d) && agreages[d.docEntry]
-                          ? <AgreageBadge a={agreages[d.docEntry]} />
-                          : <span className="text-muted-foreground/30 text-[11px]">—</span>}
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        {/* Logo(s) du TYPE d'incident ouvert (thermomètre pour le froid…) — pas de compteur */}
-                        {(() => {
-                          const open = (byDoc.get(d.docEntry) ?? []).filter((i) => !i.resolved);
-                          if (open.length === 0) return <span className="text-muted-foreground/30 text-[11px]">—</span>;
-                          return (
-                            <span className="inline-flex items-center justify-center gap-1.5">
-                              {open.map((i) => <IncidentTypeIcon key={i.id} type={i.type} className="h-[18px] w-[18px]" />)}
-                            </span>
-                          );
-                        })()}
-                      </td>
-                    </tr>,
-                  ];
-                  if (isOpen) {
-                    rows.push(
-                      <tr key={`${d.docEntry}-detail`}>
-                        <td colSpan={restricted ? 8 : 9} className="bg-secondary/20 px-4 py-4 border-t border-border/60">
-                          <ReceiptDetail
-                            receipt={d}
-                            dlc={dlcMap[d.lot]}
-                            onDlcSaved={mergeDlc}
-                            incidents={byDoc.get(d.docEntry) ?? []}
-                            onIncidentChanged={reloadIncidents}
-                            onNumAtCardChange={updateNumAtCard}
-                            onModified={load}
-                            onEnlarge={() => setLargeEntry(d.docEntry)}
-                            agreage={agreages[d.docEntry] ?? null}
-                            restricted={restricted}
-                          />
-                        </td>
-                      </tr>,
-                    );
-                  }
-                  return rows;
-                })}
+                {/* Clic sur la ligne → détail PLEIN ÉCRAN (plus d'accordéon inline). */}
+                {filtered.map((d) => (
+                  <tr
+                    key={d.docEntry}
+                    className={`border-t border-border cursor-pointer transition-colors hover:bg-secondary/30 ${isVoided(d) ? "opacity-60" : ""}`}
+                    onClick={() => setLargeEntry(d.docEntry)}
+                  >
+                    <td className="px-3 py-2.5 font-mono font-semibold whitespace-nowrap">
+                      <span className={isVoided(d) ? "line-through text-muted-foreground" : ""}># {d.docNum}</span>
+                      <CancelBadge d={d} className="ml-1.5 align-middle" />
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {/* L'IMPORTANT : le NOM du fournisseur, net et lisible.
+                          Le technique (code SAP, lot, réf. BL) vit derrière le « ? ». */}
+                      <span className="inline-flex items-center gap-2 min-w-0">
+                        <span className="font-semibold text-foreground truncate text-[14px]">
+                          {d.cardName || d.cardCode}
+                        </span>
+                        <InfoHint label="Références" side="right">
+                          <span className="block space-y-0.5">
+                            <span className="block">Code SAP : <span className="font-mono">{d.cardCode}</span></span>
+                            <span className="block">Lot : <span className="font-mono">{d.lot || "—"}</span></span>
+                            <span className="block">Réf. BL : <span className="tnum">{d.numAtCard || "—"}</span></span>
+                            <span className="block">{d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}</span>
+                          </span>
+                        </InfoHint>
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-muted-foreground tnum">{fmtJourDate(d.docDate)}</td>
+                    {!restricted && (
+                      <td className="px-3 py-2.5 text-right tnum font-display font-bold text-[15px]">{eur(d.totalHT ?? 0)}</td>
+                    )}
+                    <td className="px-3 py-2.5 text-center">
+                      {/* Agréage posé à la réception CF → EM ; EM directe = pas d'agréage. */}
+                      {!isVoided(d) && agreages[d.docEntry]
+                        ? <AgreageBadge a={agreages[d.docEntry]} />
+                        : <span className="text-muted-foreground/30 text-[11px]">—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      {/* Logo(s) du TYPE d'incident ouvert (thermomètre pour le froid…) — pas de compteur */}
+                      {(() => {
+                        const open = (byDoc.get(d.docEntry) ?? []).filter((i) => !i.resolved);
+                        if (open.length === 0) return <span className="text-muted-foreground/30 text-[11px]">—</span>;
+                        return (
+                          <span className="inline-flex items-center justify-center gap-1.5">
+                            {open.map((i) => <IncidentTypeIcon key={i.id} type={i.type} className="h-[18px] w-[18px]" />)}
+                          </span>
+                        );
+                      })()}
+                    </td>
+                    <td className="px-2 py-2.5 text-center text-muted-foreground/50">
+                      <ChevronRight className="h-4 w-4 inline" />
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -523,46 +503,42 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
 
       <OpenReceptionIncidents incidents={incidents} loading={incLoading} onChanged={reloadIncidents} />
 
-      {/* ── Affichage agrandi (plein cadre) d'une entrée marchandise ── */}
-      <Dialog open={!!largeDoc} onOpenChange={(o) => { if (!o) setLargeEntry(null); }}>
-        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
-          <DialogHeader className="text-left">
-            <DialogTitle className="flex items-center gap-2 justify-start pr-8 text-[16px] sm:text-[18px] whitespace-nowrap">
-              <ClipboardList className={`h-5 w-5 shrink-0 ${largeHasIncident ? "text-rose-600 dark:text-rose-400" : "text-sky-600 dark:text-sky-400"}`} />
-              <span className={`truncate min-w-0 font-mono ${largeHasIncident ? "text-rose-600 dark:text-rose-400" : ""}`}>EM. {largeDoc?.docNum}</span>
-              {/* Lot = « EM{docNum} » → redondant avec le N° ci-dessus : masqué sur mobile pour tenir sur UNE ligne. */}
-              {largeDoc?.lot && <span className="hidden sm:inline text-[13px] font-normal font-mono text-muted-foreground shrink-0">· {largeDoc.lot}</span>}
-              {largeDoc?.lot && <FreshnessBadge dlc={dlcMap[largeDoc.lot]} className="shrink-0" />}
-            </DialogTitle>
-            <DialogDescription className="sr-only">Détail de l&apos;entrée marchandise : lignes reçues, lot et fraîcheur.</DialogDescription>
-          </DialogHeader>
-          {largeDoc && (
-            <ReceiptDetail
-              large
-              receipt={largeDoc}
-              dlc={dlcMap[largeDoc.lot]}
-              onDlcSaved={mergeDlc}
-              incidents={byDoc.get(largeDoc.docEntry) ?? []}
-              onIncidentChanged={reloadIncidents}
-              onNumAtCardChange={updateNumAtCard}
-              onModified={load}
-              agreage={agreages[largeDoc.docEntry] ?? null}
-              restricted={restricted}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
-function Stat({ label, value, tone }: { label: string; value: React.ReactNode; tone?: "emerald" }) {
-  return (
-    <div>
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">{label}</div>
-      <div className={`text-[20px] font-bold tnum leading-tight ${tone === "emerald" ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>
-        {value}
-      </div>
+      {/* ── Détail PLEIN ÉCRAN d'une entrée marchandise (on oublie le fond) ── */}
+      <FullscreenPanel
+        open={!!largeDoc}
+        onOpenChange={(o) => { if (!o) setLargeEntry(null); }}
+        title={
+          <span className={`inline-flex items-center gap-2 min-w-0 ${largeHasIncident ? "text-rose-600 dark:text-rose-400" : ""}`}>
+            {largeHasIncident && <AlertTriangle className="h-5 w-5 shrink-0" />}
+            <span className="truncate">{largeDoc?.cardName || largeDoc?.cardCode || ""}</span>
+          </span>
+        }
+        subtitle={
+          largeDoc ? (
+            <span className="inline-flex items-center gap-2 flex-wrap">
+              <span className="font-mono">EM # {largeDoc.docNum}</span>
+              <span className="tnum">· {fmtJourDate(largeDoc.docDate)}</span>
+              {largeDoc.lot && <FreshnessBadge dlc={dlcMap[largeDoc.lot]} className="shrink-0" />}
+              <CancelBadge d={largeDoc} />
+            </span>
+          ) : undefined
+        }
+        highlight={!restricted && largeDoc ? <>{eur(largeDoc.totalHT ?? 0)} <span className="text-[12px] font-sans font-medium text-muted-foreground">HT</span></> : undefined}
+      >
+        {largeDoc && (
+          <ReceiptDetail
+            receipt={largeDoc}
+            dlc={dlcMap[largeDoc.lot]}
+            onDlcSaved={mergeDlc}
+            incidents={byDoc.get(largeDoc.docEntry) ?? []}
+            onIncidentChanged={reloadIncidents}
+            onNumAtCardChange={updateNumAtCard}
+            onModified={load}
+            agreage={agreages[largeDoc.docEntry] ?? null}
+            restricted={restricted}
+          />
+        )}
+      </FullscreenPanel>
     </div>
   );
 }
@@ -574,7 +550,7 @@ function Stat({ label, value, tone }: { label: string; value: React.ReactNode; t
    directement depuis cette consultation.
    ───────────────────────────────────────────────────────────────── */
 function ReceiptDetail({
-  receipt, dlc, onDlcSaved, incidents, onIncidentChanged, onNumAtCardChange, onModified, large, onEnlarge,
+  receipt, dlc, onDlcSaved, incidents, onIncidentChanged, onNumAtCardChange, onModified,
   agreage, restricted = false,
 }: {
   receipt: Receipt;
@@ -587,10 +563,6 @@ function ReceiptDetail({
   onNumAtCardChange: (docEntry: number, numAtCard: string) => void;
   /** Rafraîchit la liste après une annulation de réception. */
   onModified?: () => void | Promise<void>;
-  /** Affichage agrandi (modale plein cadre) — textes et espacements plus grands. */
-  large?: boolean;
-  /** Ouvre l'affichage agrandi (visible seulement en mode normal). */
-  onEnlarge?: () => void;
   /** Agréage posé à la réception CF → EM (null = EM directe, jamais agréée). */
   agreage?: AgreageInfo | null;
   /** Agréeur « pur » : aucun prix visible/éditable, ni retour ni annulation. */
@@ -741,13 +713,12 @@ function ReceiptDetail({
     } finally { setSavingDlc(false); }
   };
 
-  // Jeu de tailles : compact (inline) vs agrandi (modale).
-  const big = !!large;
-  const tbl = big ? "text-[15px]" : "text-[12px]";
-  const th = big ? "px-3 py-2.5 text-[11.5px]" : "px-2 py-1.5 text-[10px]";
-  const td = big ? "px-3 py-2.5" : "px-2 py-1.5";
-  const totLbl = big ? "text-[12px]" : "text-[10px]";
-  const totVal = big ? "text-[17px]" : "";
+  // Un seul jeu de tailles : le détail ne vit plus qu'en PLEIN ÉCRAN.
+  const tbl = "text-[15px]";
+  const th = "px-3 py-2.5 text-[11.5px]";
+  const td = "px-3 py-2.5";
+  const totLbl = "text-[12px]";
+  const totVal = "text-[17px]";
 
   async function saveNumAtCard(v: string) {
     const next = v.trim();
@@ -780,15 +751,14 @@ function ReceiptDetail({
   }
 
   return (
-    <div className={big ? "space-y-5" : "space-y-3"}>
-      {/* En-tête : fournisseur + référence + commentaire (+ bouton Agrandir) */}
+    <div className="space-y-5">
+      {/* En-tête : code SAP + référence BL éditable + commentaire.
+          (Nom du fournisseur, date et total vivent dans l'en-tête plein écran.) */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-        <span className={`inline-flex items-center gap-1.5 text-foreground ${big ? "text-[15px]" : "text-[12px]"}`}>
-          <Truck className={big ? "h-4 w-4 text-muted-foreground" : "h-3.5 w-3.5 text-muted-foreground"} />
+        <span className="inline-flex items-center gap-1.5 text-[15px] text-foreground">
+          <Truck className="h-4 w-4 text-muted-foreground" />
           <span className="font-mono font-semibold">{receipt.cardCode}</span>
-          {receipt.cardName && <span className="text-muted-foreground">· {receipt.cardName}</span>}
         </span>
-        <span className={`text-muted-foreground tnum ${big ? "text-[14px]" : "text-[12px]"}`}>Entrée le {fmtJourDate(receipt.docDate)}</span>
         {/* Référence fournisseur — éditable, valeur libre (BL, Cde, F…), aucun préfixe imposé */}
         <span className="inline-flex items-center gap-1.5">
           <input
@@ -797,22 +767,16 @@ function ReceiptDetail({
             disabled={savingBl}
             onBlur={(e) => saveNumAtCard(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-            className={`rounded-md border border-border bg-background px-2 tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60 ${big ? "h-9 w-56 text-[14px]" : "h-7 w-48 text-[12px]"}`}
+            className="h-9 w-56 rounded-md border border-border bg-background px-2 text-[14px] tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
           />
           {savingBl && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
         </span>
-        {onEnlarge && (
-          <Button variant="outline" size="sm" className="ml-auto" onClick={onEnlarge}>
-            <Maximize2 className="h-3.5 w-3.5" />
-            Agrandir
-          </Button>
-        )}
       </div>
-      {receipt.comments && <p className={`italic text-muted-foreground ${big ? "text-[13px]" : "text-[11.5px]"}`}>« {receipt.comments} »</p>}
+      {receipt.comments && <p className="italic text-muted-foreground text-[13px]">« {receipt.comments} »</p>}
 
       {/* Bandeau d'annulation — l'EM n'est plus un stock entré « vivant » */}
       {receipt.isCancellation && (
-        <div className="flex items-start gap-2 rounded-lg border border-slate-400/40 bg-slate-500/10 px-3 py-2 text-[12.5px] text-slate-700 dark:text-slate-200">
+        <div className="flex items-start gap-2 rounded-lg border border-border bg-secondary/60 px-3 py-2 text-[12.5px] text-foreground">
           <Ban className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
             <b>Document d&apos;annulation</b>
@@ -983,12 +947,12 @@ function ReceiptDetail({
         <div className="rounded-xl border border-border bg-secondary/20 p-3 space-y-1.5">
           <div className="flex items-center gap-2 flex-wrap">
             <AgreageBadge a={agreage} />
-            <span className={`${large ? "text-[12.5px]" : "text-[11px]"} text-muted-foreground`}>
+            <span className="text-[12.5px] text-muted-foreground">
               Par {agreage.by} · {fmtDateHeure(agreage.at)}
             </span>
           </div>
           {agreage.note && (
-            <p className={`${large ? "text-[13px]" : "text-[12px]"} text-foreground`}>« {agreage.note} »</p>
+            <p className="text-[13px] text-foreground">« {agreage.note} »</p>
           )}
         </div>
       )}
@@ -997,7 +961,7 @@ function ReceiptDetail({
       {incidents.length > 0 && (
         <ul className="space-y-1">
           {incidents.map((i) => (
-            <li key={i.id} className={`flex items-center gap-2 ${big ? "text-[14px]" : "text-[12px]"}`}>
+            <li key={i.id} className="flex items-center gap-2 text-[14px]">
               <button
                 type="button"
                 onClick={() => toggleResolved(i.id, i.resolved)}
@@ -1060,17 +1024,15 @@ function ReceiptDetail({
                 </Button>
               ) : (
                 <span className="inline-flex items-center gap-2">
-                  <span className={`${big ? "text-[13.5px]" : "text-[12.5px]"} text-foreground`}>
+                  <span className="text-[13.5px] text-foreground">
                     Annuler l&apos;entrée # {receipt.docNum} ? Le stock entré sera sorti.
                   </span>
-                  <button type="button" onClick={cancelReceipt} disabled={cancelling}
-                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[12.5px] font-semibold disabled:opacity-60">
+                  <Button variant="destructive" size="sm" onClick={cancelReceipt} disabled={cancelling}>
                     {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Confirmer
-                  </button>
-                  <button type="button" onClick={() => setCancelConfirm(false)} disabled={cancelling}
-                    className="inline-flex items-center h-8 px-3 rounded-lg border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground">
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setCancelConfirm(false)} disabled={cancelling}>
                     Non
-                  </button>
+                  </Button>
                 </span>
               )
             )}
@@ -1122,14 +1084,13 @@ function ReceiptDetail({
             })}
           </ul>
           <div className="flex items-center gap-2 pt-0.5">
-            <button type="button" onClick={submitReturn} disabled={returning}
-              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[13px] font-semibold disabled:opacity-60">
+            <Button onClick={submitReturn} disabled={returning}
+              className="bg-sky-600 hover:bg-sky-700 text-white shadow-none hover:brightness-100">
               {returning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />} Créer le retour
-            </button>
-            <button type="button" onClick={() => setReturnOpen(false)} disabled={returning}
-              className="inline-flex items-center h-9 px-4 rounded-lg border border-border text-[13px] font-medium text-muted-foreground hover:text-foreground">
+            </Button>
+            <Button variant="outline" onClick={() => setReturnOpen(false)} disabled={returning}>
               Fermer
-            </button>
+            </Button>
           </div>
         </div>
       )}

@@ -18,21 +18,9 @@ export default async function LoginPage() {
   return (
     <div className="min-h-screen bg-[#08090E] flex items-center justify-center p-4 relative overflow-hidden">
 
-      {/* ── Ambiance "salle de signal" — aurora accent + grille + radar ── */}
+      {/* ── Ambiance apaisée : une seule nappe de teinte marque ── */}
       <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="ambient-aurora" />
-        <div className="ambient-grid" />
-        {/* Anneaux radar centrés derrière la carte (écho au logo waveform) */}
-        <svg
-          className="ambient-rings absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[860px] w-[860px] opacity-[0.12]"
-          viewBox="0 0 600 600" fill="none"
-        >
-          {[90, 180, 260, 330].map((r) => (
-            <circle key={r} cx="300" cy="300" r={r} stroke="currentColor" strokeWidth="1" />
-          ))}
-          <line x1="300" y1="0" x2="300" y2="600" stroke="currentColor" strokeWidth="1" strokeDasharray="2 10" />
-          <line x1="0" y1="300" x2="600" y2="300" stroke="currentColor" strokeWidth="1" strokeDasharray="2 10" />
-        </svg>
       </div>
 
       {/* ── Card ──────────────────────────────────────────────── */}

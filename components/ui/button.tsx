@@ -6,35 +6,33 @@ import { cn } from "@/lib/utils";
 const buttonVariants = cva(
   [
     "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-[13.5px] font-medium",
-    "transition-all duration-150 ease-smooth",
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+    // Propriétés explicites (pas `all`) : couleurs + ombre + transform.
+    "transition-[background-color,border-color,color,box-shadow,transform,filter] duration-150 ease-out",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     "disabled:pointer-events-none disabled:opacity-50",
     "active:scale-[0.97]",
     "[&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   ].join(" "),
   {
     variants: {
+      // Variantes 100 % TOKENS (clair/sombre automatiques) — plus de slate-*
+      // codé en dur qui jurait avec le papier chaud / charcoal.
       variant: {
         default:
           "bg-primary text-primary-foreground font-semibold " +
-          "shadow-[0_2px_10px_rgba(250,204,21,0.25)] " +
-          "hover:brightness-105 hover:shadow-[0_4px_18px_rgba(250,204,21,0.4)]",
+          "shadow-[0_2px_10px_hsl(var(--primary)/0.25)] " +
+          "hover:brightness-105 hover:shadow-[0_4px_18px_hsl(var(--primary)/0.4)]",
         destructive:
-          "bg-rose-600 text-white shadow-[0_1px_3px_rgba(225,29,72,0.3)] " +
-          "hover:bg-rose-700",
+          "bg-destructive text-destructive-foreground shadow-[0_1px_3px_hsl(var(--destructive)/0.3)] " +
+          "hover:brightness-110",
         outline:
-          "border border-slate-200 bg-white text-slate-700 shadow-xs " +
-          "hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900 " +
-          "dark:border-slate-700 dark:bg-transparent dark:text-slate-300 " +
-          "dark:hover:bg-slate-800 dark:hover:border-slate-600 dark:hover:text-slate-100",
+          "border border-border bg-card text-foreground shadow-xs " +
+          "hover:bg-secondary hover:border-input",
         secondary:
-          "bg-slate-100 text-slate-700 " +
-          "hover:bg-slate-200 hover:text-slate-900 " +
-          "dark:bg-slate-800 dark:text-slate-300 " +
-          "dark:hover:bg-slate-700 dark:hover:text-slate-100",
+          "bg-secondary text-secondary-foreground " +
+          "hover:bg-secondary/75 hover:text-foreground",
         ghost:
-          "text-slate-600 hover:bg-slate-100 hover:text-slate-900 " +
-          "dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100",
+          "text-muted-foreground hover:bg-secondary hover:text-foreground",
         link:
           "text-brand-600 dark:text-brand-400 underline-offset-4 hover:underline",
         success:
