@@ -134,11 +134,12 @@ function buildMonthRow(
       week: w,
       calc: entry ? computeWeek(entry.days, prof.weeklyHours, typDay) : null,
       option: entry?.option ?? null,          // choix compta reporté sur l'état
-      recupDates: entry?.recupDates,          // dates de récup (option « recup »)
+      paySuppMin: entry?.paySuppMin,          // part payée (option « mixte »)
+      recupDates: entry?.recupDates,          // dates de récup (options « recup »/« mixte »)
     };
   });
   const allWeeks: CounterWeekInput[] = [...(entries ?? new Map<string, WeekEntry>()).entries()]
-    .map(([week, e]) => ({ week, days: e.days, option: e.option, recupDates: e.recupDates }));
+    .map(([week, e]) => ({ week, days: e.days, option: e.option, paySuppMin: e.paySuppMin, recupDates: e.recupDates }));
   const extraRecup = conges
     .filter((g) => g.type === "recup" && g.status === "approved")
     .flatMap((g) => expandOuvrables(g.start, g.end));
@@ -155,7 +156,7 @@ function buildMonthRow(
 export async function POST(req: NextRequest) {
   const c = await ctx();
   if (!c) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  let body: { week?: string; days?: unknown; user?: string; option?: unknown; recupDates?: unknown };
+  let body: { week?: string; days?: unknown; user?: string; option?: unknown; paySuppMin?: unknown; recupDates?: unknown };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -170,10 +171,11 @@ export async function POST(req: NextRequest) {
     // Le choix récup / paiement est une décision de l'EMPLOYEUR : un non-manager
     // ne peut pas le poser ni le modifier. On conserve alors la décision déjà
     // enregistrée, quelle que soit la charge utile envoyée.
-    let opt: { option?: unknown; recupDates?: unknown } = { option: body.option, recupDates: body.recupDates };
+    let opt: { option?: unknown; paySuppMin?: unknown; recupDates?: unknown } =
+      { option: body.option, paySuppMin: body.paySuppMin, recupDates: body.recupDates };
     if (!c.isManager) {
       const existing = await getWeekEntry(target, week);
-      opt = { option: existing?.option ?? null, recupDates: existing?.recupDates };
+      opt = { option: existing?.option ?? null, paySuppMin: existing?.paySuppMin, recupDates: existing?.recupDates };
     }
 
     // RECALCUL anti-« récup fantôme » : la récup ne concerne QUE des heures supp.
@@ -184,10 +186,50 @@ export async function POST(req: NextRequest) {
     const profile = await getProfile(target);
     const typDay = typicalDayMinutes(profile);
     const calc = computeWeek(sanitizeDays(body.days), profile.weeklyHours, typDay);
-    if (calc.sup25Min + calc.sup50Min === 0) opt = { option: null, recupDates: undefined };
+    if (calc.sup25Min + calc.sup50Min === 0) opt = { option: null, paySuppMin: undefined, recupDates: undefined };
 
     const entry = await saveWeekEntry(target, week, body.days, c.email, opt);
     return NextResponse.json({ ok: true, week, user: target, entry, calc: computeWeek(entry.days, profile.weeklyHours, typDay) });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+  }
+}
+
+/** PATCH { week, user, option, paySuppMin?, recupDates? } — pose UNIQUEMENT la
+ *  décision compta d'une semaine (paiement / récup / mixte) SANS toucher aux
+ *  jours saisis. Réservé aux managers : c'est le détail « avant PDF compta »
+ *  (payer un bout des heures supp, laisser le reste en récup, par employé). */
+export async function PATCH(req: NextRequest) {
+  const c = await ctx();
+  if (!c) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!c.isManager) return NextResponse.json({ error: "Réservé aux managers" }, { status: 403 });
+
+  let body: { week?: string; user?: string; option?: unknown; paySuppMin?: unknown; recupDates?: unknown };
+  try { body = await req.json(); }
+  catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
+
+  const week = body.week ?? "";
+  if (!isWeekId(week)) return NextResponse.json({ error: "Semaine invalide" }, { status: 400 });
+  const target = (body.user ?? "").trim().toLowerCase() || c.email;
+
+  try {
+    const existing = await getWeekEntry(target, week);
+    if (!existing) return NextResponse.json({ error: "Semaine non saisie" }, { status: 404 });
+
+    const profile = await getProfile(target);
+    const typDay = typicalDayMinutes(profile);
+    const calc = computeWeek(existing.days, profile.weeklyHours, typDay);
+    // Pas d'heures supp → aucune décision à poser (anti-« récup fantôme »).
+    const opt = calc.sup25Min + calc.sup50Min === 0
+      ? { option: null, paySuppMin: undefined, recupDates: undefined }
+      : {
+          option: body.option,
+          paySuppMin: body.paySuppMin,
+          // recupDates omis dans le payload → celles déjà posées sont conservées.
+          recupDates: body.recupDates === undefined ? existing.recupDates : body.recupDates,
+        };
+    const entry = await saveWeekEntry(target, week, existing.days, c.email, opt);
+    return NextResponse.json({ ok: true, week, user: target, entry, calc });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }

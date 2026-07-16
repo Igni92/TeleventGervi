@@ -24,7 +24,7 @@
  *     compta (lib/heuresPdf).
  */
 import {
-  computeWeek, dayMinutes, isoWeekId, typicalDayMinutes, weekDates,
+  computeWeek, dayMinutes, effectivePaySuppMin, isoWeekId, splitSupp, typicalDayMinutes, weekDates,
   type DayHours, type DayTag, type HeuresOption, type HoursProfile,
 } from "./heuresCalc";
 import { isIsoDate, rangesOverlap, type CongeRequest, type CongeType } from "./conges";
@@ -252,8 +252,9 @@ export function resolveCalendarDay(input: {
 export interface CounterWeekInput {
   week: string;                    // « YYYY-Www »
   days: DayHours[];                // 7 jours saisis
-  option: HeuresOption | null;     // décision employeur (récup / paiement)
-  recupDates?: string[];           // jours de récup posés (option « récup »)
+  option: HeuresOption | null;     // décision employeur (récup / paiement / mixte)
+  paySuppMin?: number | null;      // option « mixte » : minutes de supp payées
+  recupDates?: string[];           // jours de récup posés (options « récup »/« mixte »)
 }
 
 export interface RecupCounter {
@@ -305,13 +306,18 @@ export function computeRecupCounter(
       plannedDates.push(...recupDays);
       continue;
     }
-    if (input?.option === "recup") {
+    if (input?.option === "recup" || input?.option === "mixte") {
       const c = computeWeek(input.days, profile.weeklyHours, typDay);
       // Repos compensateur de remplacement : on crédite les heures MAJORÉES
       // (+25 %/+50 % inclus), pas les heures brutes — 8 h supp à +25 % =
-      // 10 h de récup. Rétroactif : le compteur est recalculé depuis les
-      // saisies, donc la récup déjà acquise est revalorisée automatiquement.
-      creditMin += c.majEquivMin;
+      // 10 h de récup. Option « mixte » : seule la part NON payée est créditée
+      // (la part payée part sur le bulletin). Rétroactif : le compteur est
+      // recalculé depuis les saisies, donc la récup déjà acquise est
+      // revalorisée (ou reprise si l'employeur bascule au paiement)
+      // automatiquement.
+      const supp = c.sup25Min + c.sup50Min;
+      const payMin = effectivePaySuppMin(input.option, input.paySuppMin, supp);
+      creditMin += splitSupp(c.sup25Min, c.sup50Min, payMin).recupEquivMin;
     }
     if (recupDays.size > 0) {
       // Seuls les JOURS DE CONTRAT (lun→ven, hors fériés) consomment de la
@@ -405,6 +411,13 @@ export interface MonthRecap {
   cpBalanceDays: number | null;
   cpTakenDays: number;
   cpAllowanceDays: number | null;
+  /** Jours de récup POSÉS/VALIDÉS pas encore décomptés (semaines à venir) —
+   *  le solde affiché doit encore les couvrir : garde-fou quand l'employeur
+   *  bascule des heures « récup » vers le paiement (détail compta pré-PDF). */
+  plannedRecupDates: string[];
+  /** Jours de contrat (lun→ven hors fériés) des demandes de récup EN ATTENTE
+   *  de validation — pas encore dans le compteur, mais susceptibles de l'être. */
+  pendingRecupDays: number;
 }
 
 /** Dernier jour du mois « YYYY-MM » → ISO, et lendemain (asOf exclusif). */
@@ -433,6 +446,15 @@ export function computeMonthRecap(
   const counter = computeRecupCounter(weeks, extraRecupDates, profile, dayAfter(end));
   const cp = computeCpCounter(profile.cpAllowanceDays, conges, end);
   const capMin = profile.recupCapHours == null ? null : Math.round(profile.recupCapHours * 60);
+  // Demandes de récup PAS ENCORE validées : comptées en jours de contrat
+  // (lun→ven hors fériés — les seuls qui débiteront le compteur).
+  const pendingRecupDays = conges
+    .filter((c) => c.type === "recup" && c.status === "pending")
+    .flatMap((c) => expandDates(c.start, c.end))
+    .filter((d) => {
+      const dow = atNoon(d).getUTCDay();
+      return dow >= 1 && dow <= 5 && !frenchHolidayLabel(d);
+    }).length;
   return {
     recupBalanceMin: counter.balanceMin,
     recupCapMin: capMin,
@@ -440,6 +462,8 @@ export function computeMonthRecap(
     cpBalanceDays: cp.balanceDays,
     cpTakenDays: cp.takenDays,
     cpAllowanceDays: cp.allowanceDays,
+    plannedRecupDates: counter.plannedDates,
+    pendingRecupDays,
   };
 }
 

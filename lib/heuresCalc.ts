@@ -14,14 +14,15 @@
 
 /* ─────────────────────────── Tags de journée ────────────────────────────────
  * Qualification RAPIDE d'un jour (remplace la note libre sur mobile) : Présent,
- * Absent, Congés, Récup, Maladie. Le tag « Congés » COMPTE COMME TRAVAILLÉ :
- * une journée type est créditée dans les heures de la semaine (un CP validé ne
- * crée jamais de déficit — décision employeur, à l'avantage du salarié). Les
- * autres tags n'ajoutent pas d'heures (la récup se décompte du compteur au
- * passage de la semaine, cf. lib/planning). */
-export type DayTag = "present" | "absent" | "conges" | "recup" | "maladie";
+ * Absent, Congés, Récup, Maladie, Férié. Les tags « Congés » et « Férié »
+ * COMPTENT COMME TRAVAILLÉ : une journée type est créditée dans les heures de
+ * la semaine (un CP validé ou un jour férié chômé ne crée jamais de déficit —
+ * le férié est DÛ et payé comme une journée type). Les autres tags n'ajoutent
+ * pas d'heures (la récup se décompte du compteur au passage de la semaine,
+ * cf. lib/planning). */
+export type DayTag = "present" | "absent" | "conges" | "recup" | "maladie" | "ferie";
 
-export const DAY_TAGS: DayTag[] = ["present", "absent", "conges", "recup", "maladie"];
+export const DAY_TAGS: DayTag[] = ["present", "absent", "conges", "recup", "maladie", "ferie"];
 
 export const DAY_TAG_LABEL: Record<DayTag, string> = {
   present: "Présent",
@@ -29,10 +30,11 @@ export const DAY_TAG_LABEL: Record<DayTag, string> = {
   conges: "Congés",
   recup: "Récup",
   maladie: "Maladie",
+  ferie: "Férié",
 };
 
 export function isDayTag(v: unknown): v is DayTag {
-  return v === "present" || v === "absent" || v === "conges" || v === "recup" || v === "maladie";
+  return v === "present" || v === "absent" || v === "conges" || v === "recup" || v === "maladie" || v === "ferie";
 }
 
 /** Une journée saisie — plages matin (m1→m2) et après-midi (a1→a2), "HH:MM". */
@@ -95,14 +97,15 @@ export function dayMinutes(d: DayHours | undefined | null): number {
 
 export interface WeekCalc {
   dayMin: number[];       // minutes par jour (Lun→Dim), crédit congés inclus
-  totalMin: number;       // total travaillé (crédit congés inclus)
+  totalMin: number;       // total travaillé (crédits congés + fériés inclus)
   contractMin: number;    // contrat hebdo
   deltaMin: number;       // total − contrat (négatif = récup)
-  sup25Min: number;       // heures supp à +25 % (8 premières)
-  sup50Min: number;       // heures supp à +50 % (au-delà)
+  sup25Min: number;       // heures supp à +25 % (8 premières) — dépassement TRAVAILLÉ seulement
+  sup50Min: number;       // heures supp à +50 % (au-delà) — dépassement TRAVAILLÉ seulement
   recupMin: number;       // heures de récupération (si total < contrat)
   majEquivMin: number;    // équivalent PAYÉ des heures supp (×1,25 / ×1,5)
   congesMin: number;      // minutes CRÉDITÉES par les jours de congés (journée type)
+  ferieMin: number;       // minutes CRÉDITÉES par les jours fériés chômés (journée type — TOUJOURS payées, jamais en récup)
 }
 
 /** Minutes de la « journée type » du profil ; repli = contrat / 5 jours.
@@ -114,15 +117,24 @@ export function typicalDayMinutes(profile: Pick<HoursProfile, "weeklyHours" | "t
 }
 
 /** Calcule la semaine : total, écart au contrat, ventilation 25/50, récup.
- *  `typicalDayMin` > 0 → chaque jour taggé « congés » SANS heures saisies est
- *  crédité d'une journée type (le CP compte comme travaillé — jamais de déficit
- *  créé par un congé validé). */
+ *  `typicalDayMin` > 0 → chaque jour taggé « congés » ou « férié » SANS heures
+ *  saisies est crédité d'une journée type (le CP compte comme travaillé, le
+ *  férié chômé est DÛ — jamais de déficit créé par un congé validé ni par un
+ *  jour férié).
+ *
+ *  JOUR FÉRIÉ « FORCÉMENT PAYÉ » : la part du dépassement attribuable au crédit
+ *  férié est payée telle quelle (heures normales, détaillées à part dans
+ *  `ferieMin`) et n'entre JAMAIS dans les heures supp arbitrables — les
+ *  majorations 25/50 ne portent que sur le dépassement réellement TRAVAILLÉ.
+ *  Ex. contrat 35 h, 37h45 travaillées + férié 7h15 crédité (total 45h00) →
+ *  supp arbitrables 2h45 (récup/paiement), férié 7h15 payé quoi qu'il arrive. */
 export function computeWeek(
   days: (DayHours | undefined)[],
   weeklyHours: number,
   typicalDayMin = 0,
 ): WeekCalc {
   let congesMin = 0;
+  let ferieMin = 0;
   const dayMin = Array.from({ length: 7 }, (_, i) => {
     const d = days[i];
     const worked = dayMinutes(d);
@@ -130,17 +142,22 @@ export function computeWeek(
       congesMin += typicalDayMin;
       return typicalDayMin;
     }
+    if (worked === 0 && d?.tag === "ferie" && typicalDayMin > 0) {
+      ferieMin += typicalDayMin;
+      return typicalDayMin;
+    }
     return worked;
   });
   const totalMin = dayMin.reduce((s, m) => s + m, 0);
   const contractMin = Math.max(0, Math.round((weeklyHours || 0) * 60));
   const deltaMin = totalMin - contractMin;
-  const supMin = Math.max(0, deltaMin);
+  // Dépassement TRAVAILLÉ = dépassement total − part férié (forcément payée).
+  const supMin = Math.max(0, Math.max(0, deltaMin) - ferieMin);
   const sup25Min = Math.min(supMin, SUP25_BAND_MIN);
   const sup50Min = Math.max(0, supMin - SUP25_BAND_MIN);
   const recupMin = Math.max(0, -deltaMin);
   const majEquivMin = Math.round(sup25Min * 1.25 + sup50Min * 1.5);
-  return { dayMin, totalMin, contractMin, deltaMin, sup25Min, sup50Min, recupMin, majEquivMin, congesMin };
+  return { dayMin, totalMin, contractMin, deltaMin, sup25Min, sup50Min, recupMin, majEquivMin, congesMin, ferieMin };
 }
 
 /** Minutes → « 38h30 » (signe conservé : −150 → « −2h30 »). */
@@ -153,22 +170,70 @@ export function fmtHM(min: number): string {
 }
 
 /* ───────────────────── Option compta des heures supp ──────────────────────
- * Quand une semaine dépasse le contrat, l'employeur tranche : soit
- * RÉCUPÉRATION (repos compensateur, compté en JOURS — dates posées), soit
- * PAIEMENT des heures supp (majorées). Le choix, fait à la semaine, est reporté
- * sur l'état mensuel (PDF) transmis à la compta ET au salarié. */
-export type HeuresOption = "recup" | "paiement";
+ * Quand une semaine dépasse le contrat, l'employeur tranche : RÉCUPÉRATION
+ * (repos compensateur, compté en JOURS — dates posées), PAIEMENT des heures
+ * supp (majorées), ou MIXTE (une partie payée, le reste crédité en récup —
+ * décision posée depuis le détail compta, au moment de générer le PDF). Le
+ * choix, fait à la semaine, est reporté sur l'état mensuel (PDF) transmis à
+ * la compta ET au salarié. */
+export type HeuresOption = "recup" | "paiement" | "mixte";
 
 /** Libellés canoniques — réutilisés à l'écran ET sur l'état PDF (une seule
  *  source de vérité, pas de reformulation divergente). */
 export const HEURES_OPTION_LABEL: Record<HeuresOption, string> = {
   recup: "Récupération (en jours)",
   paiement: "Paiement des heures supp.",
+  mixte: "Paiement partiel + récup",
 };
 
 /** Garde de type : `v` est-il une option valide ? */
 export function isHeuresOption(v: unknown): v is HeuresOption {
-  return v === "recup" || v === "paiement";
+  return v === "recup" || v === "paiement" || v === "mixte";
+}
+
+/** Ventilation d'un PARTAGE des heures supp entre paiement et récup. */
+export interface SuppSplit {
+  payMin: number;        // minutes de supp (brutes) PAYÉES
+  recupMin: number;      // minutes de supp (brutes) laissées en RÉCUP
+  payEquivMin: number;   // équivalent PAYÉ majoré de la part payée (×1,25 / ×1,5)
+  recupEquivMin: number; // équivalent MAJORÉ crédité au compteur de récup
+}
+
+/**
+ * Partage les heures supp d'une semaine entre PAIEMENT et RÉCUP.
+ * `paySuppMin` = minutes de supp (brutes) que l'employeur paye ; le reste part
+ * au compteur de récup (repos compensateur de remplacement — les majorations
+ * suivent chaque part). La part payée consomme d'abord la tranche +25 % (les
+ * premières heures au-delà du contrat), puis la tranche +50 %. Les équivalents
+ * majorés se COMPLÈTENT exactement : payEquiv + recupEquiv = majEquiv total.
+ */
+export function splitSupp(sup25Min: number, sup50Min: number, paySuppMin: number): SuppSplit {
+  const totalSupp = Math.max(0, sup25Min) + Math.max(0, sup50Min);
+  const payMin = Math.max(0, Math.min(Math.round(paySuppMin), totalSupp));
+  const pay25 = Math.min(payMin, Math.max(0, sup25Min));
+  const pay50 = payMin - pay25;
+  const payEquivMin = Math.round(pay25 * 1.25 + pay50 * 1.5);
+  const majEquivMin = Math.round(Math.max(0, sup25Min) * 1.25 + Math.max(0, sup50Min) * 1.5);
+  return {
+    payMin,
+    recupMin: totalSupp - payMin,
+    payEquivMin,
+    recupEquivMin: majEquivMin - payEquivMin,
+  };
+}
+
+/** Part PAYÉE effective d'une semaine selon l'option retenue : « paiement » =
+ *  tout payé, « recup »/aucune décision = rien, « mixte » = `paySuppMin` borné
+ *  aux supp réelles. Le complément part au compteur de récup (semaines
+ *  « recup »/« mixte » uniquement — sans décision, rien n'est crédité). */
+export function effectivePaySuppMin(
+  option: HeuresOption | null | undefined,
+  paySuppMin: number | null | undefined,
+  totalSuppMin: number,
+): number {
+  if (option === "paiement") return totalSuppMin;
+  if (option === "mixte") return Math.max(0, Math.min(Math.round(paySuppMin ?? 0), totalSuppMin));
+  return 0;
 }
 
 /* ───────────────────────── Semaines ISO (Lun→Dim) ─────────────────────────── */
@@ -306,11 +371,12 @@ export interface MonthCalc {
   recupMin: number;
   majEquivMin: number;
   congesMin: number;
+  ferieMin: number;
   weeksWithData: number;
 }
 
 export function aggregateMonth(weekCalcs: (WeekCalc | null | undefined)[]): MonthCalc {
-  const agg: MonthCalc = { totalMin: 0, contractMin: 0, deltaMin: 0, sup25Min: 0, sup50Min: 0, recupMin: 0, majEquivMin: 0, congesMin: 0, weeksWithData: 0 };
+  const agg: MonthCalc = { totalMin: 0, contractMin: 0, deltaMin: 0, sup25Min: 0, sup50Min: 0, recupMin: 0, majEquivMin: 0, congesMin: 0, ferieMin: 0, weeksWithData: 0 };
   for (const c of weekCalcs) {
     if (!c) continue;
     agg.totalMin += c.totalMin;
@@ -321,6 +387,7 @@ export function aggregateMonth(weekCalcs: (WeekCalc | null | undefined)[]): Mont
     agg.recupMin += c.recupMin;
     agg.majEquivMin += c.majEquivMin;
     agg.congesMin += c.congesMin ?? 0;
+    agg.ferieMin += c.ferieMin ?? 0;
     agg.weeksWithData += 1;
   }
   return agg;

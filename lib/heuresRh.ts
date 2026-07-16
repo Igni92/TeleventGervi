@@ -16,10 +16,13 @@ const WEEK_PREFIX = "rhsem:";
 
 export interface WeekEntry {
   days: DayHours[];              // 7 entrées (Lun→Dim)
-  /** Option compta des heures supp de la semaine (récup / paiement), null tant
-   *  qu'aucun choix n'est fait. Reportée sur l'état mensuel (PDF). */
+  /** Option compta des heures supp de la semaine (récup / paiement / mixte),
+   *  null tant qu'aucun choix n'est fait. Reportée sur l'état mensuel (PDF). */
   option: HeuresOption | null;
-  /** Dates de récup posées (option « recup »), ISO « YYYY-MM-DD » — absent sinon. */
+  /** Option « mixte » : minutes de supp (brutes) PAYÉES — le reste part au
+   *  compteur de récup. Absent pour les autres options. */
+  paySuppMin?: number;
+  /** Dates de récup posées (options « recup »/« mixte »), ISO « YYYY-MM-DD » — absent sinon. */
   recupDates?: string[];
   updatedAt: string;
   updatedBy: string;             // email de la dernière écriture (soi-même ou admin)
@@ -121,16 +124,27 @@ function sanitizeRecupDates(v: unknown): string[] | undefined {
 }
 
 /** Champs bruts (JSON stocké OU payload client) avant nettoyage. */
-type RawEntry = { days?: unknown; option?: unknown; recupDates?: unknown };
+type RawEntry = { days?: unknown; option?: unknown; paySuppMin?: unknown; recupDates?: unknown };
+
+/** Minutes payées (option « mixte ») : entier positif borné à une semaine
+ *  pleine (7 × 24 h) — le plafonnement aux supp RÉELLES se fait au calcul
+ *  (effectivePaySuppMin), jamais en stockage. undefined si absent/invalide. */
+function sanitizePaySuppMin(v: unknown): number | undefined {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return Math.min(Math.round(n), 7 * 24 * 60);
+}
 
 /** Reconstruit une WeekEntry propre depuis un JSON stocké OU un payload client
- *  (les dates de récup ne sont conservées que pour l'option « recup »). */
+ *  (dates de récup conservées pour « recup »/« mixte », minutes payées pour
+ *  « mixte » uniquement). */
 function parseEntry(v: RawEntry, updatedAt: string, updatedBy: string): WeekEntry {
   const option = isHeuresOption(v.option) ? v.option : null;
   return {
     days: sanitizeDays(v.days),
     option,
-    recupDates: option === "recup" ? sanitizeRecupDates(v.recupDates) : undefined,
+    paySuppMin: option === "mixte" ? sanitizePaySuppMin(v.paySuppMin) : undefined,
+    recupDates: option === "recup" || option === "mixte" ? sanitizeRecupDates(v.recupDates) : undefined,
     updatedAt,
     updatedBy,
   };
@@ -152,10 +166,10 @@ export async function saveWeekEntry(
   weekId: string,
   days: unknown,
   by: string,
-  opts?: { option?: unknown; recupDates?: unknown },
+  opts?: { option?: unknown; paySuppMin?: unknown; recupDates?: unknown },
 ): Promise<WeekEntry> {
   const entry = parseEntry(
-    { days, option: opts?.option, recupDates: opts?.recupDates },
+    { days, option: opts?.option, paySuppMin: opts?.paySuppMin, recupDates: opts?.recupDates },
     new Date().toISOString(),
     by,
   );
@@ -257,7 +271,7 @@ export async function tagDaysInWeeks(
       if (days[idx]?.tag !== tag) { days[idx] = { ...days[idx], tag }; changed = true; }
     }
     if (!changed) continue;
-    await saveWeekEntry(email, weekId, days, by, { option: cur?.option ?? null, recupDates: cur?.recupDates });
+    await saveWeekEntry(email, weekId, days, by, { option: cur?.option ?? null, paySuppMin: cur?.paySuppMin, recupDates: cur?.recupDates });
   }
 }
 

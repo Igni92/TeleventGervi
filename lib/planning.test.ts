@@ -138,6 +138,29 @@ describe("planning — compteur récup (décompte au passage de la semaine)", ()
     expect(c.creditMin).toBe(5 * 60);   // 4 h supp majorées (+25 %) = 5 h
     expect(c.debitMin).toBe(7 * 60);   // W27 passée sans saisie → journée réputée prise
   });
+
+  it("option MIXTE : seule la part NON payée est créditée (majorée)", () => {
+    const weeks: CounterWeekInput[] = [
+      // W27 : 45 h → 10 h supp (équiv. majoré 13 h). 4 h payées (tranche +25 %
+      // d'abord → équiv. payé 5 h) → crédit récup = 13 − 5 = 8 h.
+      { week: "2026-W27", days: [day(9), day(9), day(9), day(9), day(9)], option: "mixte", paySuppMin: 4 * 60 },
+    ];
+    const c = computeRecupCounter(weeks, [], PROFILE, ASOF);
+    expect(c.creditMin).toBe(8 * 60);
+  });
+
+  it("option MIXTE sans part payée renseignée = tout en récup ; payée ≥ supp = rien", () => {
+    const w45 = [day(9), day(9), day(9), day(9), day(9)];
+    expect(computeRecupCounter([{ week: "2026-W27", days: w45, option: "mixte" }], [], PROFILE, ASOF).creditMin).toBe(13 * 60);
+    expect(computeRecupCounter([{ week: "2026-W27", days: w45, option: "mixte", paySuppMin: 15 * 60 }], [], PROFILE, ASOF).creditMin).toBe(0);
+  });
+
+  it("option PAIEMENT : rien n'est crédité au compteur", () => {
+    const weeks: CounterWeekInput[] = [
+      { week: "2026-W27", days: [day(9), day(9), day(9), day(9), day(9)], option: "paiement" },
+    ];
+    expect(computeRecupCounter(weeks, [], PROFILE, ASOF).creditMin).toBe(0);
+  });
 });
 
 describe("planning — plafond récup → paiement M+1", () => {
@@ -189,6 +212,20 @@ describe("planning — récap mensuel (état compta)", () => {
     expect(recap.recupCapMin).toBe(7 * 60);
     expect(recap.excessMin).toBe(6 * 60);    // 13 − 7 = 6 h à payer sur le bulletin du mois suivant
     expect(recap.cpBalanceDays).toBe(25);
+  });
+  it("récup posée à venir + demandes en attente exposées (garde-fou du détail compta)", () => {
+    const weeks: CounterWeekInput[] = [
+      { week: "2026-W27", days: [day(9), day(9), day(9), day(9), day(9)], option: "recup" },
+    ];
+    const conges = [
+      // Récup validée fin août (semaines APRÈS la fin du mois) → « posée à venir ».
+      { type: "recup" as const, status: "approved" as const, start: "2026-08-24", end: "2026-08-25" },
+      // Récup demandée (pending) : 2 jours de contrat — pas encore au compteur.
+      { type: "recup" as const, status: "pending" as const, start: "2026-08-27", end: "2026-08-28" },
+    ];
+    const recap = computeMonthRecap(weeks, ["2026-08-24", "2026-08-25"], conges, PROFILE, "2026-07");
+    expect(recap.plannedRecupDates).toEqual(["2026-08-24", "2026-08-25"]);
+    expect(recap.pendingRecupDays).toBe(2);
   });
   it("congeCreditsHours : seuls les CP créditent des heures", () => {
     expect(congeCreditsHours("cp")).toBe(true);
