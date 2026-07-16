@@ -26,6 +26,7 @@ import {
   Users, Palmtree, Clock3, SlidersHorizontal, Save, Sun, Lightbulb,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
+import { InfoHint } from "@/components/ui/info-hint";
 import { displayPersonName } from "@/lib/userNames";
 import {
   fmtHM, monthIdOf, shiftMonth, monthLabel, type DayTag, DAY_TAG_LABEL,
@@ -378,11 +379,16 @@ function CounterChip({ icon, label, value, hint, tone }: {
     rose: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300",
     muted: "border-border bg-secondary/30 text-muted-foreground",
   };
+  // Hiérarchie (redesign) : la VALEUR est l'info importante (héros display) ;
+  // l'explication (hint) est secondaire → derrière le « ? » au survol,
+  // supprimée sur mobile (plus de doublon texte gris + title natif).
   return (
-    <div className={`flex-1 min-w-[150px] rounded-lg border px-3 py-2 ${tones[tone]}`} title={hint}>
-      <p className="flex items-center gap-1.5 text-[9.5px] uppercase tracking-[0.12em] font-semibold opacity-80">{icon}{label}</p>
-      <p className="text-[17px] font-bold tnum leading-tight text-foreground">{value}</p>
-      {hint && <p className="text-[10.5px] leading-snug opacity-80 mt-0.5">{hint}</p>}
+    <div className={`flex-1 min-w-[150px] rounded-lg border px-3 py-2 ${tones[tone]}`}>
+      <p className="flex items-center gap-1.5 text-[9.5px] uppercase tracking-[0.12em] font-semibold opacity-80">
+        {icon}{label}
+        {hint && <InfoHint label={label} size={13}>{hint}</InfoHint>}
+      </p>
+      <p className="font-display text-[20px] font-bold tnum leading-tight text-foreground">{value}</p>
     </div>
   );
 }
