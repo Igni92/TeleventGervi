@@ -8,7 +8,9 @@ import { prisma } from "@/lib/prisma";
  * Query params:
  *   search        : ItemCode/ItemName contains (case-insensitive)
  *   group         : ItemsGroupCode (number)
- *   inStock       : "true" → only products with total stock > 0
+ *   inStock       : "true" → only products with available stock > 0 in a
+ *                   warehouse (a product at 0 available — even on supplier order —
+ *                   is hidden here and only reachable via the "+ Rupture" mode)
  *   includePack   : "true" → include packaging-tagged items (default: false, hidden)
  *   page          : default 1
  *   limit         : default 50, max 200
@@ -49,11 +51,16 @@ export async function GET(req: NextRequest) {
 
   const where: Record<string, unknown> = {};
   if (!includePackaging) where.isPackaging = false;
-  // "En stock" = dispo > 0 (inStock − committed) OU en COMMANDE FOURNISSEUR
-  // (ordered > 0) : un article attendu (ex. GOLDEN 50X30PLT sans stock mais
-  // commandé) doit rester visible jusqu'à sa réception.
+  // "En stock" = au moins un entrepôt avec du DISPONIBLE réel (available =
+  // inStock − committed > 0). Un article sans disponible — même en COMMANDE
+  // FOURNISSEUR (ordered > 0) ou entièrement vendu dans la journée — n'apparaît
+  // PLUS dans la vue par défaut : il est « à découvert » et ne doit être retrouvé
+  // que via le mode « + Rupture » (qui retire ce filtre et charge tout le
+  // catalogue, articles à 0 inclus). Demande métier : ne jamais laisser un
+  // article à 0 stock proposé « à découvert » par défaut — il disparaît de la
+  // liste tant qu'il n'a pas été réceptionné, et reste cherchable en rupture.
   if (inStockOnly) {
-    where.stocks = { some: { OR: [{ available: { gt: 0 } }, { ordered: { gt: 0 } }] } };
+    where.stocks = { some: { available: { gt: 0 } } };
   }
   // Single group (legacy) OR multi-group (?groups=1,2,3)
   if (groupsParam) {
