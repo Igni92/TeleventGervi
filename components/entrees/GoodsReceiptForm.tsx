@@ -422,7 +422,7 @@ export function GoodsReceiptForm() {
   };
 
   return (
-    <SurfaceCard accent="brand" className="p-5 space-y-5">
+    <SurfaceCard accent="brand" bleed className="p-5 space-y-5">
       {lastReceipt && (
         <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[13px] text-emerald-700 dark:text-emerald-300">
           <CheckCircle2 className="h-4 w-4 shrink-0" />

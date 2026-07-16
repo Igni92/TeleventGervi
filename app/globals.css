@@ -482,6 +482,23 @@ html[data-accent-pos="bottom"] .sc-accent {
 }
 /* [data-accent-pos="off"] : aucune barre — la carte garde son bord 1px uniforme. */
 
+/* ── PLEIN ÉCRAN MOBILE (`SurfaceCard bleed`) ──────────────────────────
+   Sous 640 px, la carte s'APLATIT : plus de bordures (la barre d'accent
+   4px comprise, d'où les !important face aux règles [data-accent-pos]),
+   plus de coins arrondis ni d'ombre. Combinée au wrapper de page
+   `max-sm:-mx-4 …`, le contenu occupe TOUT l'écran — pas une case posée
+   sur un fond. Demande client (écrans Réceptions / Cde fournisseurs / BC). */
+@media (max-width: 639.98px) {
+  html .sc-bleed {
+    border-left-width: 0 !important;
+    border-right-width: 0 !important;
+    border-top-width: 0 !important;
+    border-bottom-width: 0 !important;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════
    AMBIANCE DE FOND — version APAISÉE (redesign 07/2026)
    UNE nappe de teinte marque, très discrète. L'ancienne « salle

@@ -18,10 +18,13 @@ export default async function CommandesFournisseursPage() {
   // et l'action « Réceptionner → entrée marchandise » (son seul droit).
   const agreeurOnly = (await isAgreeur(session)) && !(await requirePreparateurOrAdmin(session));
   return (
-    <div className="space-y-6 sm:space-y-8 animate-fade-up">
+    // Mobile : PLEIN ÉCRAN — gouttières de la coquille annulées, panneaux à
+    // plat (`bleed`) : contenu bord à bord, pas une case sur un fond.
+    <div className="space-y-6 sm:space-y-8 animate-fade-up max-sm:-mx-4 max-sm:-mt-2 max-sm:-mb-4 max-sm:space-y-3">
       {/* Nav terrain (mobile) : l'agréeur confiné navigue entre ses écrans. */}
-      {isTerrainConfined(session) && <PreparateurNav current="commandes-fournisseurs" />}
+      {isTerrainConfined(session) && <div className="max-sm:px-4"><PreparateurNav current="commandes-fournisseurs" /></div>}
       <PageHeader
+        className="max-sm:hidden"
         kicker="SAP B1 · PurchaseOrder"
         title="Cde Fournisseur"
         help={
