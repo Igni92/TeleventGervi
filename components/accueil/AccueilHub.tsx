@@ -31,8 +31,12 @@ function useNow(refreshMs = 30_000): Date | null {
   return now;
 }
 
-/** En-tête salutation + date + horloge — SEUL composant re-rendu au tick 30 s. */
-function HubHeader({ firstName }: { firstName: string | null }) {
+/**
+ * En-tête salutation + date + horloge — SEUL composant re-rendu au tick 30 s.
+ * `meteo` (élément créé par le parent, référence stable) se loge à gauche de
+ * l'horloge : React saute son re-rendu à chaque tick.
+ */
+function HubHeader({ firstName, meteo }: { firstName: string | null; meteo?: React.ReactNode }) {
   const now = useNow();
   const hour = now?.getHours() ?? 9;
   const salutation = hour >= 18 || hour < 4 ? "Bonsoir" : "Bonjour";
@@ -55,13 +59,16 @@ function HubHeader({ firstName }: { firstName: string | null }) {
           L&apos;activité du jour !
         </p>
       </div>
-      <div className="text-right" aria-live="off">
-        <p className="font-display text-[26px] font-semibold text-foreground leading-none tnum min-h-[26px]">
-          {heure || " "}
-        </p>
-        <p className="text-[11.5px] text-muted-foreground mt-1.5 min-h-[14px]">
-          {dateLongue ? dateLongue.charAt(0).toUpperCase() + dateLongue.slice(1) : " "}
-        </p>
+      <div className="flex items-center gap-5 min-w-0">
+        {meteo}
+        <div className="text-right shrink-0" aria-live="off">
+          <p className="font-display text-[26px] font-semibold text-foreground leading-none tnum min-h-[26px]">
+            {heure || " "}
+          </p>
+          <p className="text-[11.5px] text-muted-foreground mt-1.5 min-h-[14px]">
+            {dateLongue ? dateLongue.charAt(0).toUpperCase() + dateLongue.slice(1) : " "}
+          </p>
+        </div>
       </div>
     </header>
   );
@@ -73,10 +80,13 @@ export function AccueilHub() {
 
   return (
     <div className="space-y-4 animate-fade-up">
-      {/* ── Bandeau météo (haut de l'écran, zone à définir · masquable) ── */}
-      <MeteoBar />
-
-      <HubHeader firstName={firstName} />
+      {/* Météo compacte EN HAUT À DROITE (dans l'en-tête, à gauche de l'horloge) :
+          aucune hauteur ajoutée — l'accueil doit tenir sans défilement. Desktop
+          uniquement (le mobile a ses tuiles). */}
+      <HubHeader
+        firstName={firstName}
+        meteo={<div className="hidden lg:block min-w-0"><MeteoBar /></div>}
+      />
 
       {/* ── Bandeau promotions ── */}
       <PromoBanner context="accueil" />
