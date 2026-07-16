@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Ecran2Order } from "@/components/console/Ecran2Order";
 import { PromoBanner } from "@/components/promos/PromoBanner";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Input } from "@/components/ui/input";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -349,12 +350,16 @@ function ClientBanner({
         {/* Méta légère — incidents, téléphones, mini-frise, retour Écran 1. */}
         <div className="mt-1.5 flex items-center gap-2.5 flex-wrap min-w-0">
           {incidents > 0 && (
-            <span
-              className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
-              title={`${incidents} incident(s) BL ouvert(s)`}
-            >
-              <AlertTriangle className="h-3 w-3" /> {incidents}
-            </span>
+            <>
+              <span
+                className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
+              >
+                <AlertTriangle className="h-3 w-3" /> {incidents}
+              </span>
+              <InfoHint label="Incidents BL" size={14}>
+                {`${incidents} incident(s) BL ouvert(s)`}
+              </InfoHint>
+            </>
           )}
           {/* Téléphones — inline, compacts (le 1er mis en avant) */}
           {tels.slice(0, 2).map((t, i) => (
@@ -773,7 +778,7 @@ function WeekStripMini({ docs }: { docs: DeliveryDoc[] }) {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayKey = dayKey(today);
   return (
-    <div className="shrink-0 flex items-end gap-[3px]" title="Livraisons de la semaine — poids livré par jour">
+    <div className="shrink-0 flex items-end gap-[3px]">
       <Truck className="h-4 w-4 text-muted-foreground/60 mb-[7px] mr-1 shrink-0" />
       {days.map((day) => {
         const weekend = day.dow >= 5;
@@ -799,6 +804,9 @@ function WeekStripMini({ docs }: { docs: DeliveryDoc[] }) {
           </div>
         );
       })}
+      <InfoHint label="Livraisons semaine" size={14} className="mb-[7px] ml-1">
+        Livraisons de la semaine — poids livré par jour
+      </InfoHint>
     </div>
   );
 }

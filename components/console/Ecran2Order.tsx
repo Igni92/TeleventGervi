@@ -19,6 +19,7 @@ import { familyOf } from "@/lib/familles";
 import { priceForArticle, type TarifFruitRow } from "@/lib/tarifFruits";
 import { TarifFruitsEditor } from "@/components/clients/TarifFruitsEditor";
 import { Button } from "@/components/ui/button";
+import { InfoHint } from "@/components/ui/info-hint";
 import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { BrandLogo } from "@/components/BrandLogo";
@@ -1529,8 +1530,6 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
         <div className="shrink-0 flex items-center gap-x-2 rounded-md border px-2 py-1 border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15">
           <span
             className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-amber-800 dark:text-amber-200 shrink-0"
-            title={`Modification du BL # ${modif.docNum} — modifie, supprime ou ajoute des lignes, enregistré sur ce même BL${
-              modifMeta?.dueDate ? ` · livraison ${new Date(modifMeta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}` : ""}`}
           >
             <Pencil className="h-3 w-3" strokeWidth={2.2} />
             BL # {modif.docNum}
@@ -1541,10 +1540,19 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
             )}
             {prefilling && <Loader2 className="h-3 w-3 animate-spin" />}
           </span>
+          <InfoHint label="Mode modification" size={14}>
+            {`Modification du BL # ${modif.docNum} — modifie, supprime ou ajoute des lignes, enregistré sur ce même BL${
+              modifMeta?.dueDate ? ` · livraison ${new Date(modifMeta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}` : ""}`}
+          </InfoHint>
           {modifMeta?.editable === false && (
-            <span className="text-[10.5px] font-medium text-rose-600 dark:text-rose-400 shrink-0" title="Commande clôturée — la modification sera refusée par SAP.">
-              ⚠️ clôturée
-            </span>
+            <>
+              <span className="text-[10.5px] font-medium text-rose-600 dark:text-rose-400 shrink-0">
+                ⚠️ clôturée
+              </span>
+              <InfoHint label="Commande clôturée" size={14}>
+                Commande clôturée — la modification sera refusée par SAP.
+              </InfoHint>
+            </>
           )}
           <span className="flex-1" />
           {onExitModif && (
@@ -2143,10 +2151,15 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                       ) : null}
                       {/* Modification : ligne déjà LIVRÉE → verrouillée (ni édition ni retrait) */}
                       {locked && (
-                        <span title="Ligne déjà livrée — verrouillée"
-                          className="inline-flex h-5 items-center gap-1 px-1.5 rounded text-[11px] font-bold bg-muted text-muted-foreground">
-                          <Lock className="h-3 w-3" /> livré
-                        </span>
+                        <>
+                          <span
+                            className="inline-flex h-5 items-center gap-1 px-1.5 rounded text-[11px] font-bold bg-muted text-muted-foreground">
+                            <Lock className="h-3 w-3" /> livré
+                          </span>
+                          <InfoHint label="Ligne livrée" size={14}>
+                            Ligne déjà livrée — verrouillée
+                          </InfoHint>
+                        </>
                       )}
                       {/* Tags désignation — inline à droite du libellé (lignes compactes, code masqué) */}
                       {(() => {
@@ -2398,10 +2411,15 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
               ? (isPos ? fmtE(coutTransportTotal) : fmtK(transportPerKgClient))
               : "externe n.c.";
             return (
-            <div className={`mt-1 rounded-lg border px-2.5 py-2 ${hasCostData ? RING[netTone] : "border-border/60 bg-secondary/20"}`} title="Feu : rouge = à perte, orange < 10 % de marge nette, vert ≥ 10 %.">
+            <div className={`mt-1 rounded-lg border px-2.5 py-2 ${hasCostData ? RING[netTone] : "border-border/60 bg-secondary/20"}`}>
               {/* Haut : libellé + bascule /livraison ↔ /kg + prix transport /kg à droite */}
               <div className="flex items-center justify-between gap-2 text-[11px]">
-                <span className="uppercase tracking-wide font-semibold text-muted-foreground">Marge nette transport</span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="uppercase tracking-wide font-semibold text-muted-foreground">Marge nette transport</span>
+                  <InfoHint label="Feu tricolore" size={14}>
+                    {"Feu : rouge = à perte, orange < 10 % de marge nette, vert ≥ 10 %."}
+                  </InfoHint>
+                </span>
                 <div className="flex items-center gap-2">
                   <div className="inline-flex rounded-md border border-border/60 overflow-hidden text-[10.5px] font-semibold">
                     <button type="button" onClick={() => setMarginUnit("position")} className={`px-1.5 h-5 ${isPos ? "bg-brand-500/20 text-brand-700 dark:text-brand-300" : "text-muted-foreground hover:text-foreground"}`}>/livr.</button>
