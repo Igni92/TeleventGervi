@@ -10,12 +10,10 @@ import { Button } from "@/components/ui/button";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { DateStepper, todayISO, nowHM } from "@/components/ui/date-stepper";
 import { designationProduit } from "@/lib/produit-designation";
+import { eur as fmtEur } from "@/lib/format";
 import { StarRating } from "@/components/ui/star-rating";
 import { DesignationChips, Chip } from "./DesignationChips";
 
-/** Montant € à 2 décimales (séparateur FR). */
-const fmtEur = (n: number): string =>
-  n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 
 export type Supplier = { cardCode: string; cardName: string };
 export type ProductHit = {

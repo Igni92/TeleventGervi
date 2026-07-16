@@ -49,8 +49,11 @@ interface SurfaceCardProps {
 export function SurfaceCard({
   children, accent, title, action, icon, animate = true, delay = 0, className,
 }: SurfaceCardProps) {
+  // `surface-card` : marqueur du PLEIN ÉCRAN MOBILE global (< 640 px la carte
+  // s'étale bord à bord et perd son cadre — cf. globals.css ; l'accueil
+  // [.keep-bricks] et les grilles de tuiles sont épargnés).
   const base = cn(
-    "bg-card border border-border rounded-xl p-4",
+    "surface-card bg-card border border-border rounded-xl p-4",
     accent && "sc-accent",
     animate && "animate-fade-up motion-reduce:animate-none",
     className,

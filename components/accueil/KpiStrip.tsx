@@ -4,6 +4,7 @@ import { Euro, Package, ShoppingCart, Percent } from "lucide-react";
 import { SurfaceCard, type Accent } from "@/components/ui/surface-card";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { Delta } from "@/components/ui/delta";
+import { InfoHint } from "@/components/ui/info-hint";
 import { useJson, type FetchState } from "./use-json";
 
 /**
@@ -85,9 +86,9 @@ export function KpiStrip() {
             </div>
 
             {state === "loading" ? (
-              <div className="mt-3 h-[28px] w-24 rounded-md bg-secondary/70 animate-pulse" />
+              <div className="mt-3 h-[30px] w-24 rounded-md bg-secondary/70 animate-pulse" />
             ) : (
-              <div className="mt-2.5 font-display text-[26px] sm:text-[28px] font-bold text-foreground leading-none tnum">
+              <div className="mt-2.5 font-display text-[28px] sm:text-[32px] font-bold text-foreground leading-none tnum">
                 {state === "error" ? (
                   <span className="text-muted-foreground">—</span>
                 ) : (
@@ -100,7 +101,10 @@ export function KpiStrip() {
               {state === "ok" && prevValue != null && (
                 <>
                   <Delta curr={value} prev={prevValue} size="sm" />
-                  <span className="text-[10.5px] text-muted-foreground">vs N-1</span>
+                  {/* Explication du comparatif → derrière le « ? » (masqué mobile). */}
+                  <InfoHint label={t.label} size={14}>
+                    Comparé au même jour de l&apos;année précédente (N-1).
+                  </InfoHint>
                 </>
               )}
               {state === "error" && (
@@ -136,9 +140,9 @@ function MargeTile({ curr, reliability, state, delay }: { curr: ActivityBucket; 
       </div>
 
       {state === "loading" ? (
-        <div className="mt-3 h-[28px] w-20 rounded-md bg-secondary/70 animate-pulse" />
+        <div className="mt-3 h-[30px] w-20 rounded-md bg-secondary/70 animate-pulse" />
       ) : (
-        <div className="mt-2.5 font-display text-[26px] sm:text-[28px] font-bold text-foreground leading-none tnum">
+        <div className="mt-2.5 font-display text-[28px] sm:text-[32px] font-bold text-foreground leading-none tnum">
           {state === "error" || !hasData ? (
             <span className="text-muted-foreground">—</span>
           ) : (
@@ -149,9 +153,17 @@ function MargeTile({ curr, reliability, state, delay }: { curr: ActivityBucket; 
 
       <div className="mt-2 flex items-center gap-1.5 min-h-[18px] whitespace-nowrap">
         {state === "ok" && hasData && hasReliability ? (
-          <span className="text-[10.5px] text-muted-foreground" title="Marge brute du jour. Coût de chaque vente : réception récente si disponible, sinon coût de fabrication, sinon coût enregistré par SAP sur la ligne (pied de BL). « Fiabilité » = part des lignes effectivement costées — proche de 100 %.">
-            fiabilité <b className={covTone}>{coverage}%</b>{coverage < 60 ? " · coût incomplet" : ""}
-          </span>
+          <>
+            <span className="text-[10.5px] text-muted-foreground">
+              fiabilité <b className={covTone}>{coverage}%</b>{coverage < 60 ? " · coût incomplet" : ""}
+            </span>
+            {/* Le mode de calcul (long) vit derrière le « ? » — plus de title= natif. */}
+            <InfoHint label="Marge du jour" size={14}>
+              Marge brute du jour. Coût de chaque vente : réception récente si disponible,
+              sinon coût de fabrication, sinon coût enregistré par SAP sur la ligne (pied de BL).
+              « Fiabilité » = part des lignes effectivement costées — proche de 100 %.
+            </InfoHint>
+          </>
         ) : state === "error" ? (
           <span className="text-[10.5px] text-muted-foreground">Indisponible</span>
         ) : state === "ok" && !hasData ? (

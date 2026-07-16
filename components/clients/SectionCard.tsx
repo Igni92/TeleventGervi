@@ -59,15 +59,18 @@ export function SectionCard({
   return (
     <section
       className={cn(
-        "group/section relative isolate h-full overflow-hidden rounded-2xl border border-border bg-card",
+        // `surface-card` : plein écran mobile global (bord à bord, sans cadre
+        // ni accent — cf. globals.css). Le chrome « carte » reste sur ≥ sm.
+        "surface-card group/section relative isolate h-full overflow-hidden rounded-2xl border border-border bg-card",
         "shadow-card transition-all duration-300 hover:-translate-y-px hover:shadow-card-hover",
         className,
       )}
     >
-      {/* Top-bar d'accent — fil rouge de la grille (même en mode bare). */}
+      {/* Top-bar d'accent — fil rouge de la grille (même en mode bare).
+          Masquée sur mobile (plein écran app : pas de chrome décoratif). */}
       <span
         aria-hidden
-        className={cn("absolute inset-x-0 top-0 z-[1] h-[3px] bg-gradient-to-r", ACCENT_BAR[accent])}
+        className={cn("absolute inset-x-0 top-0 z-[1] h-[3px] bg-gradient-to-r max-sm:hidden", ACCENT_BAR[accent])}
       />
       {/* Micro-grille radiale — prolonge la grille technique du fond global,
           masquée en fondu pour ne jamais gêner la lecture des formulaires. */}

@@ -164,30 +164,30 @@ export function SupplierForm({ initialData, mode }: SupplierFormProps) {
         {/* Code */}
         <div className="space-y-2">
           <Label htmlFor="code">
-            Code fournisseur <span className="text-red-500">*</span>
+            Code fournisseur <span className="text-destructive">*</span>
           </Label>
           <Input
             id="code"
             placeholder="EX: FRS001 ou CardCode SAP"
             {...register("code")}
             disabled={mode === "edit"}
-            className={errors.code ? "border-red-500" : ""}
+            className={errors.code ? "border-destructive" : ""}
           />
-          {errors.code && <p className="text-sm text-red-500">{errors.code.message}</p>}
+          {errors.code && <p className="text-sm text-destructive">{errors.code.message}</p>}
         </div>
 
         {/* Nom */}
         <div className="space-y-2">
           <Label htmlFor="nom">
-            Nom du fournisseur <span className="text-red-500">*</span>
+            Nom du fournisseur <span className="text-destructive">*</span>
           </Label>
           <Input
             id="nom"
             placeholder="Raison sociale"
             {...register("nom")}
-            className={errors.nom ? "border-red-500" : ""}
+            className={errors.nom ? "border-destructive" : ""}
           />
-          {errors.nom && <p className="text-sm text-red-500">{errors.nom.message}</p>}
+          {errors.nom && <p className="text-sm text-destructive">{errors.nom.message}</p>}
         </div>
 
         {/* Famille / type d'achat */}
@@ -234,45 +234,45 @@ export function SupplierForm({ initialData, mode }: SupplierFormProps) {
             type="email"
             placeholder="contact@fournisseur.fr"
             {...register("email")}
-            className={errors.email ? "border-red-500" : ""}
+            className={errors.email ? "border-destructive" : ""}
           />
-          {errors.email && <p className="text-sm text-red-500">{errors.email.message}</p>}
+          {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
         </div>
 
         {/* Standard */}
         <div className="space-y-2">
           <Label htmlFor="tel1">Standard</Label>
-          <Input id="tel1" placeholder="Standard téléphonique" {...register("tel1")} className={errors.tel1 ? "border-red-500" : ""} />
-          {errors.tel1 && <p className="text-sm text-red-500">{errors.tel1.message}</p>}
+          <Input id="tel1" placeholder="Standard téléphonique" {...register("tel1")} className={errors.tel1 ? "border-destructive" : ""} />
+          {errors.tel1 && <p className="text-sm text-destructive">{errors.tel1.message}</p>}
         </div>
 
         {/* Direct 1 */}
         <div className="space-y-2">
           <Label htmlFor="tel2">Direct 1</Label>
-          <Input id="tel2" placeholder="Ligne directe 1" {...register("tel2")} className={errors.tel2 ? "border-red-500" : ""} />
-          {errors.tel2 && <p className="text-sm text-red-500">{errors.tel2.message}</p>}
+          <Input id="tel2" placeholder="Ligne directe 1" {...register("tel2")} className={errors.tel2 ? "border-destructive" : ""} />
+          {errors.tel2 && <p className="text-sm text-destructive">{errors.tel2.message}</p>}
         </div>
 
         {/* Direct 2 */}
         <div className="space-y-2">
           <Label htmlFor="tel3">Direct 2</Label>
-          <Input id="tel3" placeholder="Ligne directe 2" {...register("tel3")} className={errors.tel3 ? "border-red-500" : ""} />
-          {errors.tel3 && <p className="text-sm text-red-500">{errors.tel3.message}</p>}
+          <Input id="tel3" placeholder="Ligne directe 2" {...register("tel3")} className={errors.tel3 ? "border-destructive" : ""} />
+          {errors.tel3 && <p className="text-sm text-destructive">{errors.tel3.message}</p>}
         </div>
       </div>
 
       {/* Adresse */}
       <div className="space-y-2">
         <Label htmlFor="adresse">Adresse</Label>
-        <Textarea id="adresse" placeholder="Siège / dépôt fournisseur…" rows={2} {...register("adresse")} className={errors.adresse ? "border-red-500" : ""} />
-        {errors.adresse && <p className="text-sm text-red-500">{errors.adresse.message}</p>}
+        <Textarea id="adresse" placeholder="Siège / dépôt fournisseur…" rows={2} {...register("adresse")} className={errors.adresse ? "border-destructive" : ""} />
+        {errors.adresse && <p className="text-sm text-destructive">{errors.adresse.message}</p>}
       </div>
 
       {/* Notes */}
       <div className="space-y-2">
         <Label htmlFor="notes">Notes</Label>
-        <Textarea id="notes" placeholder="Conditions, remarques, historique…" rows={4} {...register("notes")} className={errors.notes ? "border-red-500" : ""} />
-        {errors.notes && <p className="text-sm text-red-500">{errors.notes.message}</p>}
+        <Textarea id="notes" placeholder="Conditions, remarques, historique…" rows={4} {...register("notes")} className={errors.notes ? "border-destructive" : ""} />
+        {errors.notes && <p className="text-sm text-destructive">{errors.notes.message}</p>}
       </div>
 
       {/* Actions */}

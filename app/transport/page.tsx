@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/permissions";
 import { TransportCostPanel } from "@/components/transport/TransportCostPanel";
+import { PageHeader } from "@/components/ui/page-header";
 
 export const metadata = { title: "Coût de transport | Gervi" };
 export const dynamic = "force-dynamic";
@@ -25,18 +26,18 @@ export default async function TransportPage() {
 
   return (
     <div className="space-y-8 animate-fade-up">
-      <header>
-        <p className="kicker mb-1.5">Pilotage · logistique</p>
-        <h1 className="font-display text-[34px] font-semibold text-foreground tracking-tight leading-none">
-          Coût de transport
-        </h1>
-        <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
-          Structure de coûts de la livraison en propre (amortissement, entretien, casse,
-          salaire livreur…) et dépenses du transporteur. On en dérive le <span className="font-medium text-foreground">prix position</span> (coût
-          au kilo) qui sert au calcul de la marge nette transport. Île-de-France uniquement :
-          l&apos;export est à 0 (transport payé par le client), le CHR est calculé de la même façon.
-        </p>
-      </header>
+      <PageHeader
+        kicker="Pilotage · logistique"
+        title="Coût de transport"
+        help={
+          <>
+            Structure de coûts de la livraison en propre (amortissement, entretien, casse,
+            salaire livreur…) et dépenses du transporteur. On en dérive le <span className="font-medium text-foreground">prix position</span> (coût
+            au kilo) qui sert au calcul de la marge nette transport. Île-de-France uniquement :
+            l&apos;export est à 0 (transport payé par le client), le CHR est calculé de la même façon.
+          </>
+        }
+      />
 
       <TransportCostPanel isManager={isManager} />
     </div>

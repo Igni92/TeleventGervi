@@ -5,6 +5,7 @@ import { isTerrainConfined } from "@/lib/preparateur";
 import { GoodsReceiptForm } from "@/components/entrees/GoodsReceiptForm";
 import { GoodsReceiptHistory } from "@/components/entrees/GoodsReceiptHistory";
 import { PreparateurNav } from "@/components/PreparateurNav";
+import { PageHeader } from "@/components/ui/page-header";
 
 export const metadata = { title: "Entrée marchandise" };
 export const dynamic = "force-dynamic";
@@ -19,23 +20,24 @@ export default async function EntreesPage() {
   // FOURNISSEUR (écran Commandes fournisseurs) — ici, il est seulement AFFICHÉ.
   const agreeurOnly = (await isAgreeur(session)) && !(await requirePreparateurOrAdmin(session));
   return (
-    <div className="space-y-6 sm:space-y-8 animate-fade-up">
+    // Mobile : plein écran app — les panneaux s'étalent d'eux-mêmes
+    // (règle globale .surface-card, cf. globals.css) ; titre porté par la
+    // barre du haut.
+    <div className="space-y-6 sm:space-y-8 animate-fade-up max-sm:space-y-3">
       {/* Nav terrain (mobile) : l'agréeur confiné navigue entre ses écrans. */}
       {isTerrainConfined(session) && <PreparateurNav current="entrees" />}
-      <div>
-        <p className="kicker mb-2 hidden md:block">SAP B1 · PurchaseDeliveryNote</p>
-        <h1 className="text-[26px] sm:text-[32px] font-bold text-foreground tracking-tight leading-none">
-          Entrée marchandise
-        </h1>
-        {/* Intro détaillée réservée au bureau — sur mobile on va à l'essentiel. */}
-        <p className="hidden md:block text-[13px] text-muted-foreground mt-3 max-w-2xl">
-          {agreeurOnly
+      <PageHeader
+        className="max-sm:hidden"
+        kicker="SAP B1 · PurchaseDeliveryNote"
+        title="Entrée marchandise"
+        help={
+          agreeurOnly
             ? "Consultez ici les entrées marchandises. La réception d'une commande fournisseur se valide depuis l'écran « Commandes fournisseurs »."
             : (<>Saisis ici la réception physique d&apos;une marchandise — création directe du
               bon de réception côté SAP (DocNum généré), incrément immédiat du stock local
-              et lot <b>EM&lt;DocNum&gt;</b> propagé aux prochaines commandes.</>)}
-        </p>
-      </div>
+              et lot <b>EM&lt;DocNum&gt;</b> propagé aux prochaines commandes.</>)
+        }
+      />
       {!agreeurOnly && <GoodsReceiptForm />}
       <GoodsReceiptHistory restricted={agreeurOnly} />
     </div>

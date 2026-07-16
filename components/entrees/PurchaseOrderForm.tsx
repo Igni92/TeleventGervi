@@ -9,10 +9,10 @@ import { Button } from "@/components/ui/button";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { DateStepper, todayISO, nowHM } from "@/components/ui/date-stepper";
 import { designationProduit } from "@/lib/produit-designation";
+import { eur as fmtEur } from "@/lib/format";
 import { DesignationChips, Chip } from "./DesignationChips";
 import { SupplierPicker, ProductPicker, type Supplier, type ProductHit } from "./GoodsReceiptForm";
 
-const fmtEur = (n: number) => n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 
 type Line = {
   itemCode: string; itemName: string; ratio: number;

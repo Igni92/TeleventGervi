@@ -275,26 +275,26 @@ export function ImportModal({ onImported }: ImportModalProps) {
 
         <div className="space-y-4">
           {/* Format attendu */}
-          <div className="rounded-md bg-slate-50 dark:bg-slate-800/50 border border-border p-3 text-xs text-slate-600 dark:text-slate-300">
+          <div className="rounded-md bg-secondary/60 border border-border p-3 text-xs text-foreground/80">
             <p className="font-semibold mb-1">Format attendu (séparateur : virgule ou point-virgule) :</p>
             <code className="block font-mono">Code,Nom,Standard,Direct1,Direct2</code>
-            <code className="block font-mono text-slate-400 dark:text-slate-500">CLI001,Dupont SA,0612345678,0187654321,</code>
-            <p className="mt-1 text-slate-500 dark:text-slate-400">Seul le <strong>Code</strong> est obligatoire. L&apos;en-tête est détecté automatiquement.</p>
+            <code className="block font-mono text-muted-foreground/70">CLI001,Dupont SA,0612345678,0187654321,</code>
+            <p className="mt-1 text-muted-foreground">Seul le <strong>Code</strong> est obligatoire. L&apos;en-tête est détecté automatiquement.</p>
           </div>
 
           {/* Zone de dépôt */}
           {rows.length === 0 && !result && (
             <div
-              className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-lg p-8 text-center cursor-pointer hover:border-brand-400 dark:hover:border-brand-500 hover:bg-brand-50/30 dark:hover:bg-brand-900/10 transition-colors"
+              className="border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:border-brand-400 dark:hover:border-brand-500 hover:bg-brand-500/5 transition-colors"
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDrop}
               onClick={() => fileRef.current?.click()}
             >
-              <Upload className="h-8 w-8 mx-auto text-slate-400 dark:text-slate-500 mb-2" />
-              <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
+              <Upload className="h-8 w-8 mx-auto text-muted-foreground/70 mb-2" />
+              <p className="text-sm font-medium text-foreground/80">
                 Glissez votre fichier CSV ici ou cliquez pour sélectionner
               </p>
-              <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Fichiers .csv acceptés</p>
+              <p className="text-xs text-muted-foreground/70 mt-1">Fichiers .csv acceptés</p>
               <input
                 ref={fileRef}
                 type="file"
@@ -309,7 +309,7 @@ export function ImportModal({ onImported }: ImportModalProps) {
           {rows.length > 0 && !result && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                <p className="text-sm font-medium text-foreground/80">
                   {rows.length} ligne{rows.length > 1 ? "s" : ""} détectée{rows.length > 1 ? "s" : ""}
                 </p>
                 <Button variant="ghost" size="sm" onClick={reset} className="gap-1">
@@ -319,10 +319,10 @@ export function ImportModal({ onImported }: ImportModalProps) {
 
               <div className="rounded-md border border-border overflow-auto max-h-52">
                 <table className="w-full text-xs">
-                  <thead className="bg-slate-50 dark:bg-slate-800/60 sticky top-0">
+                  <thead className="bg-secondary/60 sticky top-0">
                     <tr>
                       {["Code", "Nom", "Standard", "Direct 1", "Direct 2"].map((h) => (
-                        <th key={h} className="px-3 py-2 text-left font-semibold text-slate-600 dark:text-slate-400">
+                        <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground">
                           {h}
                         </th>
                       ))}
@@ -332,14 +332,14 @@ export function ImportModal({ onImported }: ImportModalProps) {
                     {rows.slice(0, 20).map((row, i) => (
                       <tr key={i} className="border-t border-border">
                         <td className="px-3 py-1.5 font-mono font-medium text-foreground">{row.code}</td>
-                        <td className="px-3 py-1.5 text-foreground">{row.nom || <span className="text-slate-400 dark:text-slate-600">—</span>}</td>
-                        <td className="px-3 py-1.5 font-mono text-foreground">{row.tel1 || <span className="text-slate-400 dark:text-slate-600">—</span>}</td>
-                        <td className="px-3 py-1.5 font-mono text-foreground">{row.tel2 || <span className="text-slate-400 dark:text-slate-600">—</span>}</td>
-                        <td className="px-3 py-1.5 font-mono text-foreground">{row.tel3 || <span className="text-slate-400 dark:text-slate-600">—</span>}</td>
+                        <td className="px-3 py-1.5 text-foreground">{row.nom || <span className="text-muted-foreground/50">—</span>}</td>
+                        <td className="px-3 py-1.5 font-mono text-foreground">{row.tel1 || <span className="text-muted-foreground/50">—</span>}</td>
+                        <td className="px-3 py-1.5 font-mono text-foreground">{row.tel2 || <span className="text-muted-foreground/50">—</span>}</td>
+                        <td className="px-3 py-1.5 font-mono text-foreground">{row.tel3 || <span className="text-muted-foreground/50">—</span>}</td>
                       </tr>
                     ))}
                     {rows.length > 20 && (
-                      <tr className="border-t border-border bg-slate-50 dark:bg-slate-800/40">
+                      <tr className="border-t border-border bg-secondary/40">
                         <td colSpan={5} className="px-3 py-1.5 text-center text-muted-foreground">
                           ... et {rows.length - 20} autre{rows.length - 20 > 1 ? "s" : ""} lignes
                         </td>
