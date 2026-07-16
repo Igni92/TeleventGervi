@@ -60,7 +60,7 @@ function buildPerson(
   todayISO: string,
 ) {
   const weeks: CounterWeekInput[] = [...entries.entries()].map(([week, e]) => ({
-    week, days: e.days, option: e.option, recupDates: e.recupDates,
+    week, days: e.days, option: e.option, paySuppMin: e.paySuppMin, recupDates: e.recupDates,
   }));
   // Jours de récup validés via le planning (boomerang) — dédupliqués dans le
   // compteur avec ceux déjà reportés dans les saisies.

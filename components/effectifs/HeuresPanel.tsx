@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Clock3, ChevronLeft, ChevronRight, Loader2, Save, Printer, Wand2,
   CalendarDays, RotateCcw, Plus, Minus, Coins, CalendarCheck, SlidersHorizontal,
-  Lock, Users,
+  Lock, Users, X, AlertTriangle, Scale,
 } from "lucide-react";
 import { toast } from "sonner";
 import { SurfaceCard } from "@/components/ui/surface-card";
@@ -25,8 +25,10 @@ import {
   JOURS_SEMAINE, DEFAULT_PROFILE, computeWeek, fmtHM, typicalDayMinutes,
   isoWeekId, shiftWeek, weekDates, weekLabel, isDateInWeek, daysAfterWeek,
   monthIdOf, shiftMonth, monthLabel, DAY_TAGS, DAY_TAG_LABEL,
+  splitSupp, effectivePaySuppMin,
   type DayHours, type DayTag, type HoursProfile, type WeekCalc, type MonthCalc, type HeuresOption,
 } from "@/lib/heuresCalc";
+import { frenchHolidayLabel } from "@/lib/livraison";
 import type { MonthRecap } from "@/lib/planning";
 import { printEtatMensuel, type MoisEmploye } from "@/lib/heuresPdf";
 
@@ -43,7 +45,7 @@ interface MonthRow {
   email: string;
   name: string;
   profile: HoursProfile | null;
-  weeks: { week: string; calc: WeekCalc | null; option?: HeuresOption | null; recupDates?: string[] }[];
+  weeks: { week: string; calc: WeekCalc | null; option?: HeuresOption | null; paySuppMin?: number | null; recupDates?: string[] }[];
   total: MonthCalc;
   recap?: MonthRecap | null;
 }
@@ -51,6 +53,8 @@ interface MonthRow {
 export function HeuresPanel({ isManager }: { isManager: boolean }) {
   const [week, setWeek] = useState(() => isoWeekId(new Date()));
   const dates = useMemo(() => weekDates(week), [week]);
+  // Libellés des jours fériés de la semaine (« Fête nationale »…), par jour.
+  const feries = useMemo(() => dates.map((d) => (d ? frenchHolidayLabel(d) : null)), [dates]);
 
   // ── Le choix récup / paiement est une décision de l'EMPLOYEUR : verrouillé
   //    pour le salarié, modifiable seulement par un manager. Un manager peut en
@@ -66,8 +70,9 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
-  // ── Option compta des heures supp de la semaine (récup / paiement) ──
+  // ── Option compta des heures supp de la semaine (récup / paiement / mixte) ──
   const [option, setOption] = useState<HeuresOption | null>(null);
+  const [paySuppMin, setPaySuppMin] = useState<number | null>(null);
   const [recupDates, setRecupDates] = useState<string[]>([]);
 
   const load = useCallback(async () => {
@@ -76,11 +81,25 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
       const r = await fetch(`/api/effectif/heures?week=${week}${userQS}`, { cache: "no-store" });
       const j = await r.json().catch(() => null);
       if (j?.ok) {
-        setDays(j.entry?.days ?? EMPTY_WEEK());
+        const loaded: DayHours[] = j.entry?.days ?? EMPTY_WEEK();
+        // JOUR FÉRIÉ lun→ven encore VIDE (ni heures ni tag) → tag « Férié »
+        // proposé d'office (journée type due) ; il ne persiste qu'à l'enregistrement
+        // et reste retirable d'un clic (jour réellement travaillé).
+        const wd = weekDates(week);
+        let autoTagged = false;
+        const merged = loaded.map((d, i) => {
+          if (i > 4 || !wd[i] || !frenchHolidayLabel(wd[i])) return d;
+          const empty = !d?.m1 && !d?.m2 && !d?.a1 && !d?.a2 && !d?.tag;
+          if (!empty) return d;
+          autoTagged = true;
+          return { ...d, tag: "ferie" as DayTag };
+        });
+        setDays(merged);
         setOption(j.entry?.option ?? null);
+        setPaySuppMin(typeof j.entry?.paySuppMin === "number" ? j.entry.paySuppMin : null);
         setRecupDates(Array.isArray(j.entry?.recupDates) ? j.entry.recupDates.filter(Boolean) : []);
         if (j.profile) setProfile(j.profile);
-        setDirty(false);
+        setDirty(autoTagged);
       }
     } finally {
       setLoading(false);
@@ -166,7 +185,8 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           // annule de toute façon). Sinon le choix est renvoyé tel quel (le serveur
           // ignore une modif venant d'un non-manager).
           option: hasSupp ? option : null,
-          recupDates: hasSupp && option === "recup" ? recupDates.filter(Boolean) : [],
+          paySuppMin: hasSupp && option === "mixte" ? paySuppMin : undefined,
+          recupDates: hasSupp && (option === "recup" || option === "mixte") ? recupDates.filter(Boolean) : [],
         }),
       });
       const j = await r.json().catch(() => null);
@@ -239,15 +259,26 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
     profile: row.profile ?? { ...DEFAULT_PROFILE }, weeks: row.weeks,
     recap: row.recap ?? null,
   });
+
+  // ── DÉTAIL COMPTA pré-PDF : s'il y a des heures supp à arbitrer, on passe par
+  //    un écran de détail PAR EMPLOYÉ (payer un bout, laisser le reste en récup)
+  //    avant de générer le PDF. Sans heures supp → impression directe. ──
+  const [comptaRows, setComptaRows] = useState<MonthRow[] | null>(null);
+  const openCompta = (rows: MonthRow[]) => {
+    const withData = rows.filter((r) => r.total.weeksWithData > 0);
+    if (withData.length === 0) { toast.info("Aucune saisie ce mois-ci."); return; }
+    const hasSupp = withData.some((r) => r.weeks.some((w) => w.calc && w.calc.sup25Min + w.calc.sup50Min > 0));
+    if (!hasSupp) {
+      if (!printEtatMensuel(month, withData.map(toMois))) toast.error("Impression bloquée — autorisez les pop-ups.");
+      return;
+    }
+    setComptaRows(withData);
+  };
   const printMonthOne = (row: MonthRow) => {
     if (row.total.weeksWithData === 0) { toast.info("Aucune saisie ce mois-ci pour cet employé."); return; }
-    if (!printEtatMensuel(month, [toMois(row)])) toast.error("Impression bloquée — autorisez les pop-ups.");
+    openCompta([row]);
   };
-  const printMonthAll = () => {
-    const feuilles = (teamMonth ?? []).filter((r) => r.total.weeksWithData > 0).map(toMois);
-    if (feuilles.length === 0) { toast.info("Aucune saisie ce mois-ci."); return; }
-    if (!printEtatMensuel(month, feuilles)) toast.error("Impression bloquée — autorisez les pop-ups.");
-  };
+  const printMonthAll = () => openCompta(teamMonth ?? []);
 
   const timeCls = "h-9 w-full min-w-[74px] rounded-md border border-border bg-background px-1.5 text-[13px] tnum text-center focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50";
   // Inputs des cartes MOBILE : plus hauts (cible tactile), s'étirent sur la ligne.
@@ -365,15 +396,20 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           {JOURS_SEMAINE.map((jour, i) => (
             <div key={jour} className={`rounded-lg border border-border p-3 ${i > 4 ? "bg-secondary/15" : "bg-background"}`}>
               <div className="flex items-center justify-between gap-2 mb-2">
-                <span className="text-[13.5px] font-semibold text-foreground">
+                <span className="min-w-0 text-[13.5px] font-semibold text-foreground">
                   {jour}
                   {dates[i] && (
                     <span className="ml-1.5 font-normal text-[11px] text-muted-foreground tnum">
                       {new Date(`${dates[i]}T12:00:00Z`).toLocaleDateString("fr-FR", { timeZone: "UTC", day: "2-digit", month: "2-digit" })}
                     </span>
                   )}
+                  {feries[i] && (
+                    <span className="ml-1.5 inline-flex items-center rounded-md bg-orange-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-orange-700 dark:text-orange-300">
+                      Férié · {feries[i]}
+                    </span>
+                  )}
                 </span>
-                <span className="text-[13.5px] font-bold tnum text-foreground">{calc.dayMin[i] > 0 ? fmtHM(calc.dayMin[i]) : "—"}</span>
+                <span className="text-[13.5px] font-bold tnum text-foreground shrink-0">{calc.dayMin[i] > 0 ? fmtHM(calc.dayMin[i]) : "—"}</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-11 shrink-0 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Matin</span>
@@ -400,6 +436,11 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
               {days[i]?.tag === "conges" && !dayHasHours(days[i]) && typDayMin > 0 && (
                 <p className="mt-1.5 text-[11px] text-sky-700 dark:text-sky-300">
                   Journée type créditée : <b className="tnum">{fmtHM(typDayMin)}</b> — le congé compte comme travaillé.
+                </p>
+              )}
+              {days[i]?.tag === "ferie" && !dayHasHours(days[i]) && typDayMin > 0 && (
+                <p className="mt-1.5 text-[11px] text-orange-700 dark:text-orange-300">
+                  Journée type créditée : <b className="tnum">{fmtHM(typDayMin)}</b> — jour férié dû et payé.
                 </p>
               )}
             </div>
@@ -431,6 +472,11 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                         {new Date(`${dates[i]}T12:00:00Z`).toLocaleDateString("fr-FR", { timeZone: "UTC", day: "2-digit", month: "2-digit" })}
                       </span>
                     )}
+                    {feries[i] && (
+                      <span className="block text-[10px] font-bold uppercase tracking-wide text-orange-600 dark:text-orange-400" title={`Jour férié — ${feries[i]}`}>
+                        {feries[i]}
+                      </span>
+                    )}
                   </td>
                   <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.m1 ?? ""} onChange={(e) => setDay(i, { m1: e.target.value })} className={timeCls} aria-label={`${jour} matin début`} /></td>
                   <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.m2 ?? ""} onChange={(e) => setDay(i, { m2: e.target.value })} className={timeCls} aria-label={`${jour} matin fin`} /></td>
@@ -440,6 +486,9 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                     {calc.dayMin[i] > 0 ? fmtHM(calc.dayMin[i]) : "—"}
                     {days[i]?.tag === "conges" && !dayHasHours(days[i]) && typDayMin > 0 && (
                       <span className="ml-1 align-middle text-[9px] font-bold uppercase tracking-wide text-sky-600 dark:text-sky-400" title="Journée type créditée — le congé compte comme travaillé">CP</span>
+                    )}
+                    {days[i]?.tag === "ferie" && !dayHasHours(days[i]) && typDayMin > 0 && (
+                      <span className="ml-1 align-middle text-[9px] font-bold uppercase tracking-wide text-orange-600 dark:text-orange-400" title="Journée type créditée — jour férié dû et payé">FÉRIÉ</span>
                     )}
                   </td>
                   <td className="px-2 py-1.5">
@@ -491,12 +540,19 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                     icon={<Coins className="h-4 w-4" />} label="Paiement" hint="des heures supp." />
                 </div>
 
-                {option === "recup" && (
+                {/* Partage « mixte » posé depuis le détail compta (pré-PDF) : une
+                    partie payée, le reste en récup. Cliquer une option ci-dessus
+                    remplace le partage. */}
+                {option === "mixte" && <MixteSummary calc={calc} paySuppMin={paySuppMin} />}
+
+                {(option === "recup" || option === "mixte") && (
                   <RecupDayPicker week={week} recupDates={recupDates} onToggle={toggleRecupDay} />
                 )}
 
                 <p className="mt-2.5 text-[11px] text-muted-foreground">
                   Le choix est reporté sur l&apos;état mensuel (PDF) transmis à la compta et au salarié.
+                  Le partage fin (payer une partie, le reste en récup) se pose depuis le bouton
+                  «&nbsp;PDF compta&nbsp;» de l&apos;état mensuel.
                 </p>
               </>
             ) : (
@@ -519,6 +575,8 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                   <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-300">
                     <Coins className="h-3.5 w-3.5" /> Paiement des heures supp.
                   </span>
+                ) : option === "mixte" ? (
+                  <MixteSummary calc={calc} paySuppMin={paySuppMin} />
                 ) : (
                   <span className="italic text-muted-foreground">En attente de la décision de l&apos;employeur.</span>
                 )}
@@ -536,6 +594,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           {calc.majEquivMin > 0 && <Badge label="Équiv. payé" value={fmtHM(calc.majEquivMin)} tone="emerald" />}
           {calc.recupMin > 0 && <Badge label="Récup" value={fmtHM(calc.recupMin)} tone="sky" />}
           {calc.congesMin > 0 && <Badge label="Congés crédités" value={fmtHM(calc.congesMin)} tone="violet" />}
+          {calc.ferieMin > 0 && <Badge label="Férié crédité" value={fmtHM(calc.ferieMin)} tone="orange" />}
           {/* Bouton pleine largeur sur mobile (grande cible), aligné à droite ≥ sm. */}
           <button type="button" onClick={saveWeek} disabled={saving || loading || !dirty}
             className="w-full sm:w-auto sm:ml-auto inline-flex items-center justify-center gap-1.5 h-11 sm:h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[13px] font-semibold disabled:opacity-50">
@@ -598,6 +657,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                       {c.sup25Min > 0 && <span className="text-muted-foreground">+25 % <b className="text-foreground">{fmtHM(c.sup25Min)}</b></span>}
                       {c.sup50Min > 0 && <span className="text-muted-foreground">+50 % <b className="text-foreground">{fmtHM(c.sup50Min)}</b></span>}
                       {c.majEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Équiv. payé <b>{fmtHM(c.majEquivMin)}</b></span>}
+                      {(c.ferieMin ?? 0) > 0 && <span className="text-orange-600 dark:text-orange-400">Férié <b>{fmtHM(c.ferieMin)}</b></span>}
                       {c.recupMin > 0 && <span className="text-sky-600 dark:text-sky-400">Récup <b>{fmtHM(c.recupMin)}</b></span>}
                     </div>
                   )}
@@ -613,6 +673,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                   {myMonth.total.sup25Min > 0 && <span className="text-muted-foreground">+25 % <b className="text-foreground">{fmtHM(myMonth.total.sup25Min)}</b></span>}
                   {myMonth.total.sup50Min > 0 && <span className="text-muted-foreground">+50 % <b className="text-foreground">{fmtHM(myMonth.total.sup50Min)}</b></span>}
                   {myMonth.total.majEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Équiv. payé <b>{fmtHM(myMonth.total.majEquivMin)}</b></span>}
+                  {(myMonth.total.ferieMin ?? 0) > 0 && <span className="text-orange-600 dark:text-orange-400">Férié <b>{fmtHM(myMonth.total.ferieMin)}</b></span>}
                   {myMonth.total.recupMin > 0 && <span className="text-sky-600 dark:text-sky-400">Récup <b>{fmtHM(myMonth.total.recupMin)}</b></span>}
                 </div>
               </div>
@@ -629,6 +690,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                     <th className="text-right font-semibold px-2 py-2">+25 %</th>
                     <th className="text-right font-semibold px-2 py-2">+50 %</th>
                     <th className="text-right font-semibold px-2 py-2">Équiv. payé</th>
+                    <th className="text-right font-semibold px-2 py-2">Férié</th>
                     <th className="text-right font-semibold px-3 py-2">Récup</th>
                   </tr>
                 </thead>
@@ -646,6 +708,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                       <td className="px-2 py-1.5 text-right tnum">{c && c.sup25Min > 0 ? fmtHM(c.sup25Min) : "—"}</td>
                       <td className="px-2 py-1.5 text-right tnum">{c && c.sup50Min > 0 ? fmtHM(c.sup50Min) : "—"}</td>
                       <td className="px-2 py-1.5 text-right tnum font-semibold text-emerald-700 dark:text-emerald-300">{c && c.majEquivMin > 0 ? fmtHM(c.majEquivMin) : "—"}</td>
+                      <td className="px-2 py-1.5 text-right tnum text-orange-600 dark:text-orange-400">{c && (c.ferieMin ?? 0) > 0 ? fmtHM(c.ferieMin) : "—"}</td>
                       <td className="px-3 py-1.5 text-right tnum">{c && c.recupMin > 0 ? fmtHM(c.recupMin) : "—"}</td>
                     </tr>
                   ))}
@@ -658,6 +721,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                     <td className="px-2 py-2 text-right tnum">{fmtHM(myMonth.total.sup25Min)}</td>
                     <td className="px-2 py-2 text-right tnum">{fmtHM(myMonth.total.sup50Min)}</td>
                     <td className="px-2 py-2 text-right tnum text-emerald-700 dark:text-emerald-300">{fmtHM(myMonth.total.majEquivMin)}</td>
+                    <td className="px-2 py-2 text-right tnum text-orange-600 dark:text-orange-400">{fmtHM(myMonth.total.ferieMin)}</td>
                     <td className="px-3 py-2 text-right tnum">{fmtHM(myMonth.total.recupMin)}</td>
                   </tr>
                 </tfoot>
@@ -713,6 +777,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                         {row.total.sup25Min > 0 && <span className="text-muted-foreground">+25 % <b className="text-foreground">{fmtHM(row.total.sup25Min)}</b></span>}
                         {row.total.sup50Min > 0 && <span className="text-muted-foreground">+50 % <b className="text-foreground">{fmtHM(row.total.sup50Min)}</b></span>}
                         {row.total.majEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Équiv. payé <b>{fmtHM(row.total.majEquivMin)}</b></span>}
+                        {(row.total.ferieMin ?? 0) > 0 && <span className="text-orange-600 dark:text-orange-400">Férié <b>{fmtHM(row.total.ferieMin)}</b></span>}
                         {row.total.recupMin > 0 && <span className="text-sky-600 dark:text-sky-400">Récup <b>{fmtHM(row.total.recupMin)}</b></span>}
                         {row.recap && <span className="text-muted-foreground">Solde récup <b className="text-foreground">{fmtHM(row.recap.recupBalanceMin)}</b></span>}
                         {(row.recap?.excessMin ?? 0) > 0 && (
@@ -741,6 +806,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                         <th className="text-right font-semibold px-2 py-2">+25 %</th>
                         <th className="text-right font-semibold px-2 py-2">+50 %</th>
                         <th className="text-right font-semibold px-2 py-2">Équiv. payé</th>
+                        <th className="text-right font-semibold px-2 py-2">Férié</th>
                         <th className="text-right font-semibold px-2 py-2">Récup</th>
                         <th className="text-right font-semibold px-2 py-2" title="Heures de récup au-delà du plafond employeur — payées sur le bulletin du mois suivant">Payé M+1</th>
                         <th className="text-right font-semibold px-3 py-2">PDF</th>
@@ -762,6 +828,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                           <td className="px-2 py-2 text-right tnum">{row.total.sup25Min > 0 ? fmtHM(row.total.sup25Min) : "—"}</td>
                           <td className="px-2 py-2 text-right tnum">{row.total.sup50Min > 0 ? fmtHM(row.total.sup50Min) : "—"}</td>
                           <td className="px-2 py-2 text-right tnum font-semibold text-emerald-700 dark:text-emerald-300">{row.total.majEquivMin > 0 ? fmtHM(row.total.majEquivMin) : "—"}</td>
+                          <td className="px-2 py-2 text-right tnum text-orange-600 dark:text-orange-400">{(row.total.ferieMin ?? 0) > 0 ? fmtHM(row.total.ferieMin) : "—"}</td>
                           <td className="px-2 py-2 text-right tnum">{row.total.recupMin > 0 ? fmtHM(row.total.recupMin) : "—"}</td>
                           <td className={`px-2 py-2 text-right tnum font-semibold ${(row.recap?.excessMin ?? 0) > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>
                             {(row.recap?.excessMin ?? 0) > 0 ? fmtHM(row.recap!.excessMin) : "—"}
@@ -776,7 +843,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                         </tr>
                       ))}
                       {(teamMonth ?? []).length === 0 && (
-                        <tr><td colSpan={11} className="px-3 py-4 text-[12.5px] italic text-muted-foreground">Aucun compte.</td></tr>
+                        <tr><td colSpan={12} className="px-3 py-4 text-[12.5px] italic text-muted-foreground">Aucun compte.</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -786,6 +853,17 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           </div>
         )}
       </SurfaceCard>
+
+      {/* Détail compta pré-PDF : arbitrage paiement / récup des heures supp,
+          par employé, AVANT de générer l'état mensuel. */}
+      {comptaRows && (
+        <ComptaDialog
+          month={month}
+          rows={comptaRows}
+          onClose={() => setComptaRows(null)}
+          onDone={() => { load(); loadMonth(); }}
+        />
+      )}
     </div>
   );
 }
@@ -794,6 +872,233 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
 function displayFullName(raw: string): string {
   if (raw.includes("@")) return displayPersonName(raw);
   return raw;
+}
+
+/* ────────────────── Détail compta pré-PDF (managers) ──────────────────────
+ * Avant de générer l'état mensuel, l'employeur arbitre les heures supp de
+ * chaque semaine, PAR EMPLOYÉ : tout payer, tout en récup, ou MIXTE (payer un
+ * bout, laisser le reste en récup). Le solde de récup PROJETÉ est recalculé en
+ * direct, et on alerte si la récup DÉJÀ POSÉE (jours validés pas encore
+ * débités) n'est plus couverte — elle reste ajustable ici avant d'imprimer. */
+
+interface ComptaDecision { option: HeuresOption | ""; payH: string }
+
+const decKey = (email: string, week: string) => `${email}|${week}`;
+
+/** Saisie « heures à payer » (décimal, virgule tolérée) → minutes bornées aux supp. */
+function payInputToMin(payH: string, suppMin: number): number {
+  const h = Number(String(payH).replace(",", ".").trim());
+  if (!Number.isFinite(h) || h <= 0) return 0;
+  return Math.min(Math.round(h * 60), suppMin);
+}
+
+/** Équivalent MAJORÉ crédité au compteur de récup pour une décision donnée. */
+function recupEquivOf(c: WeekCalc, option: HeuresOption | "" | null | undefined, payMin: number): number {
+  if (option !== "recup" && option !== "mixte") return 0;
+  return splitSupp(c.sup25Min, c.sup50Min, payMin).recupEquivMin;
+}
+
+function ComptaDialog({ month, rows, onClose, onDone }: {
+  month: string;
+  rows: MonthRow[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [decisions, setDecisions] = useState<Record<string, ComptaDecision>>(() => {
+    const out: Record<string, ComptaDecision> = {};
+    for (const r of rows) {
+      for (const w of r.weeks) {
+        if (!w.calc || w.calc.sup25Min + w.calc.sup50Min <= 0) continue;
+        out[decKey(r.email, w.week)] = {
+          option: w.option ?? "",
+          payH: w.option === "mixte" && w.paySuppMin ? String(Math.round((w.paySuppMin / 60) * 100) / 100) : "",
+        };
+      }
+    }
+    return out;
+  });
+  const setDecision = (key: string, patch: Partial<ComptaDecision>) =>
+    setDecisions((cur) => ({ ...cur, [key]: { ...cur[key], ...patch } }));
+
+  const generate = async () => {
+    setBusy(true);
+    try {
+      // 1. Enregistre les décisions MODIFIÉES (PATCH — ne touche pas aux jours).
+      for (const r of rows) {
+        for (const w of r.weeks) {
+          if (!w.calc) continue;
+          const supp = w.calc.sup25Min + w.calc.sup50Min;
+          if (supp <= 0) continue;
+          const d = decisions[decKey(r.email, w.week)];
+          if (!d) continue;
+          const newOpt = d.option || null;
+          const newPay = d.option === "mixte" ? payInputToMin(d.payH, supp) : undefined;
+          const savedPay = w.option === "mixte" ? (w.paySuppMin ?? 0) : undefined;
+          if (newOpt === (w.option ?? null) && (newOpt !== "mixte" || newPay === savedPay)) continue;
+          const res = await fetch("/api/effectif/heures", {
+            method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ week: w.week, user: r.email, option: newOpt, paySuppMin: newPay }),
+          });
+          const j = await res.json().catch(() => null);
+          if (!res.ok || !j?.ok) throw new Error(j?.error || `Échec d'enregistrement — ${displayFullName(r.name)}, ${w.week}`);
+        }
+      }
+      // 2. Recharge le mois (décisions incluses) puis génère le PDF.
+      const res = await fetch(`/api/effectif/heures?month=${month}&all=1`, { cache: "no-store" });
+      const j = await res.json().catch(() => null);
+      if (!j?.ok) throw new Error(j?.error || "Rechargement du mois impossible");
+      const wanted = new Set(rows.map((x) => x.email));
+      const feuilles: MoisEmploye[] = ((j.rows ?? []) as MonthRow[])
+        .filter((x) => wanted.has(x.email) && x.total.weeksWithData > 0)
+        .map((x) => ({
+          name: displayFullName(x.name), email: x.email,
+          profile: x.profile ?? { ...DEFAULT_PROFILE }, weeks: x.weeks, recap: x.recap ?? null,
+        }));
+      if (feuilles.length === 0) { toast.info("Aucune saisie ce mois-ci."); return; }
+      if (!printEtatMensuel(month, feuilles)) { toast.error("Impression bloquée — autorisez les pop-ups."); return; }
+      onDone();
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Échec de l'enregistrement des décisions");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-6"
+      role="dialog" aria-modal="true" aria-label="Détail compta avant PDF">
+      <div className="w-full max-w-2xl max-h-[88vh] overflow-y-auto rounded-xl border border-border bg-background p-4 shadow-xl">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground">Avant le PDF compta — {monthLabel(month)}</p>
+            <h2 className="text-[15px] font-bold text-foreground">Heures supp : payer ou récupérer ?</h2>
+            <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+              Par employé et par semaine : tout payer, tout en récup, ou <b>mixte</b> (payer une partie,
+              le reste crédite le compteur de récup). Reporté tel quel sur le PDF.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Fermer"
+            className="h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          {rows.map((r) => {
+            const prof = r.profile ?? { ...DEFAULT_PROFILE };
+            const typDay = typicalDayMinutes(prof);
+            const suppWeeks = r.weeks.filter((w) => w.calc && w.calc.sup25Min + w.calc.sup50Min > 0);
+            if (suppWeeks.length === 0) return null;
+
+            // Solde de récup PROJETÉ = solde fin de mois recalculé avec les
+            // décisions du dialogue (crédit retiré quand on bascule au paiement).
+            const delta = suppWeeks.reduce((s, w) => {
+              const c = w.calc!;
+              const supp = c.sup25Min + c.sup50Min;
+              const d = decisions[decKey(r.email, w.week)];
+              const newEq = d ? recupEquivOf(c, d.option, d.option === "mixte" ? payInputToMin(d.payH, supp) : 0) : 0;
+              const savedEq = recupEquivOf(c, w.option, effectivePaySuppMin(w.option, w.paySuppMin, supp));
+              return s + (newEq - savedEq);
+            }, 0);
+            const balance = (r.recap?.recupBalanceMin ?? 0) + delta;
+            const plannedDays = r.recap?.plannedRecupDates?.length ?? 0;
+            const plannedMin = plannedDays * typDay;
+            const pendingDays = r.recap?.pendingRecupDays ?? 0;
+            const shortfall = plannedMin > balance;
+
+            return (
+              <div key={r.email} className="rounded-lg border border-border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[13px] font-bold text-foreground">{displayFullName(r.name)}</span>
+                  <span className="text-[11.5px] tnum text-muted-foreground">
+                    Solde récup projeté <b className={balance < 0 ? "text-rose-600 dark:text-rose-400" : "text-foreground"}>{fmtHM(balance)}</b>
+                    {plannedDays > 0 && <> · posée à venir <b className="text-foreground">{plannedDays} j ({fmtHM(plannedMin)})</b></>}
+                    {pendingDays > 0 && <> · demandée <b className="text-foreground">{pendingDays} j</b></>}
+                  </span>
+                </div>
+
+                {/* Récup déjà posée/demandée pas encore débitée : si le paiement
+                    vide trop le compteur, on prévient AVANT de générer le PDF. */}
+                {(shortfall || balance < 0) && (
+                  <p className="mt-1.5 flex items-start gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[11.5px] text-amber-700 dark:text-amber-300">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      {balance < 0
+                        ? <>Le solde de récup projeté est <b>négatif</b> — réduisez la part payée.</>
+                        : <>La récup déjà posée ({plannedDays} j = {fmtHM(plannedMin)}) ne serait plus couverte
+                          par le solde projeté ({fmtHM(balance)}) — ajustez la part payée ou les jours posés.</>}
+                    </span>
+                  </p>
+                )}
+
+                <div className="mt-2 space-y-2">
+                  {suppWeeks.map((w) => {
+                    const c = w.calc!;
+                    const supp = c.sup25Min + c.sup50Min;
+                    const key = decKey(r.email, w.week);
+                    const d = decisions[key] ?? { option: "", payH: "" };
+                    const payMin = d.option === "paiement" ? supp : d.option === "mixte" ? payInputToMin(d.payH, supp) : 0;
+                    const split = splitSupp(c.sup25Min, c.sup50Min, payMin);
+                    return (
+                      <div key={w.week} className="rounded-md border border-border/70 bg-secondary/15 px-2.5 py-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="min-w-0 flex-1 text-[12px] font-semibold text-foreground">{weekLabel(w.week)}</span>
+                          <span className="text-[11.5px] tnum font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">{fmtHM(supp)} supp</span>
+                          <select
+                            value={d.option}
+                            disabled={busy}
+                            onChange={(e) => setDecision(key, { option: e.target.value as HeuresOption | "" })}
+                            aria-label={`Décision ${weekLabel(w.week)}`}
+                            className="h-8 rounded-md border border-border bg-background px-1.5 text-[12px] focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">
+                            <option value="">— à décider</option>
+                            <option value="paiement">Tout payer</option>
+                            <option value="recup">Tout en récup</option>
+                            <option value="mixte">Mixte (partager)</option>
+                          </select>
+                        </div>
+                        {d.option === "mixte" && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                            <label className="text-[11px] text-muted-foreground" htmlFor={`pay-${key}`}>Heures payées</label>
+                            <input
+                              id={`pay-${key}`} type="number" inputMode="decimal" min={0} max={Math.round((supp / 60) * 100) / 100} step={0.25}
+                              value={d.payH} disabled={busy}
+                              onChange={(e) => setDecision(key, { payH: e.target.value })}
+                              placeholder="ex. 1,5"
+                              className="h-8 w-[88px] rounded-md border border-border bg-background px-2 text-[12.5px] tnum focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+                            />
+                            <span className="text-[11.5px] tnum text-muted-foreground">
+                              → payé <b className="text-emerald-700 dark:text-emerald-300">{fmtHM(split.payMin)}</b>
+                              <span className="opacity-75"> (équiv. {fmtHM(split.payEquivMin)})</span>
+                              {" · "}récup <b className="text-sky-700 dark:text-sky-300">{fmtHM(split.recupMin)}</b>
+                              <span className="opacity-75"> (équiv. {fmtHM(split.recupEquivMin)})</span>
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-4 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={busy}
+            className="inline-flex items-center justify-center h-10 px-4 rounded-lg border border-border text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-50">
+            Annuler
+          </button>
+          <button type="button" onClick={generate} disabled={busy}
+            className="inline-flex items-center justify-center gap-1.5 h-10 px-4 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[13px] font-semibold disabled:opacity-50">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+            Enregistrer &amp; générer le PDF
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** « 2026-07-13 » → « lun. 13/07 » (jour de récup). */
@@ -850,6 +1155,7 @@ const TAG_TONE: Record<DayTag, string> = {
   conges: "border-violet-500/50 bg-violet-500/10 text-violet-700 dark:text-violet-300",
   recup: "border-sky-500/50 bg-sky-500/10 text-sky-700 dark:text-sky-300",
   maladie: "border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  ferie: "border-orange-500/50 bg-orange-500/10 text-orange-700 dark:text-orange-300",
 };
 
 function TagChip({ tag, active, disabled, onClick }: { tag: DayTag; active: boolean; disabled?: boolean; onClick: () => void }) {
@@ -908,10 +1214,36 @@ function OptionChoice({ active, onClick, icon, label, hint }: {
   );
 }
 
+/** Résumé du partage « mixte » d'une semaine (X payées / Y en récup, avec les
+ *  équivalents majorés) — affiché sous les options et en lecture seule salarié. */
+function MixteSummary({ calc, paySuppMin }: { calc: WeekCalc; paySuppMin: number | null }) {
+  const supp = calc.sup25Min + calc.sup50Min;
+  const split = splitSupp(calc.sup25Min, calc.sup50Min, effectivePaySuppMin("mixte", paySuppMin, supp));
+  return (
+    <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12.5px]">
+      <span className="inline-flex items-center gap-1.5 font-semibold text-amber-700 dark:text-amber-300">
+        <Scale className="h-3.5 w-3.5" /> Partage posé (détail compta)
+      </span>
+      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 tnum text-[12px]">
+        <span className="text-emerald-700 dark:text-emerald-300">Payées <b>{fmtHM(split.payMin)}</b> <span className="opacity-75">(équiv. {fmtHM(split.payEquivMin)})</span></span>
+        <span className="text-sky-700 dark:text-sky-300">En récup <b>{fmtHM(split.recupMin)}</b> <span className="opacity-75">(équiv. {fmtHM(split.recupEquivMin)})</span></span>
+      </div>
+    </div>
+  );
+}
+
 /** Pastille compacte de l'option retenue (état mensuel à l'écran). */
 function OptionChip({ option, recupDates }: { option: HeuresOption; recupDates?: string[] }) {
-  const isRecup = option === "recup";
   const n = recupDates?.filter(Boolean).length ?? 0;
+  if (option === "mixte") {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300">
+        <Scale className="h-3 w-3" /> Mixte
+        {n > 0 && <span className="font-normal opacity-80">· {n} j</span>}
+      </span>
+    );
+  }
+  const isRecup = option === "recup";
   return (
     <span className={`inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-semibold ${
       isRecup ? "bg-sky-500/15 text-sky-700 dark:text-sky-300" : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
@@ -923,7 +1255,7 @@ function OptionChip({ option, recupDates }: { option: HeuresOption; recupDates?:
   );
 }
 
-function Badge({ label, value, tone }: { label: string; value: string; tone: "foreground" | "muted" | "amber" | "rose" | "emerald" | "sky" | "violet" }) {
+function Badge({ label, value, tone }: { label: string; value: string; tone: "foreground" | "muted" | "amber" | "rose" | "emerald" | "sky" | "violet" | "orange" }) {
   const cls: Record<string, string> = {
     foreground: "bg-foreground/10 text-foreground",
     muted: "bg-secondary text-muted-foreground",
@@ -932,6 +1264,7 @@ function Badge({ label, value, tone }: { label: string; value: string; tone: "fo
     emerald: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
     sky: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
     violet: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
+    orange: "bg-orange-500/15 text-orange-700 dark:text-orange-300",
   };
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 ${cls[tone]}`}>
