@@ -59,7 +59,10 @@ function HubHeader({ firstName, meteo }: { firstName: string | null; meteo?: Rea
           L&apos;activité du jour !
         </p>
       </div>
-      <div className="flex items-center gap-5 min-w-0">
+      {/* Bloc météo + horloge ANCRÉ EN HAUT À DROITE : self-start le colle au
+          haut de l'en-tête (le reste est aligné bas) et ml-auto le garde à
+          droite même quand l'en-tête passe sur deux lignes (flex-wrap). */}
+      <div className="flex items-center justify-end gap-5 min-w-0 ml-auto self-start">
         {meteo}
         <div className="text-right shrink-0" aria-live="off">
           <p className="font-display text-[26px] font-semibold text-foreground leading-none tnum min-h-[26px]">
@@ -81,7 +84,7 @@ export function AccueilHub() {
   return (
     <div className="keep-bricks space-y-4 animate-fade-up max-sm:py-3">
       {/* Météo EN HAUT À DROITE (dans l'en-tête, à gauche de l'horloge), format
-          grand (tailles ×2 — lisible de loin) : l'en-tête s'étire de quelques
+          grand (≈ ×1,5 — lisible de loin) : l'en-tête s'étire de quelques
           pixels mais l'accueil reste sans défilement. Desktop uniquement (le
           mobile a ses tuiles). */}
       <HubHeader
