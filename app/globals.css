@@ -482,18 +482,29 @@ html[data-accent-pos="bottom"] .sc-accent {
 }
 /* [data-accent-pos="off"] : aucune barre — la carte garde son bord 1px uniforme. */
 
-/* ── PLEIN ÉCRAN MOBILE (`SurfaceCard bleed`) ──────────────────────────
-   Sous 640 px, la carte s'APLATIT : plus de bordures (la barre d'accent
-   4px comprise, d'où les !important face aux règles [data-accent-pos]),
-   plus de coins arrondis ni d'ombre. Combinée au wrapper de page
-   `max-sm:-mx-4 …`, le contenu occupe TOUT l'écran — pas une case posée
-   sur un fond. Demande client (écrans Réceptions / Cde fournisseurs / BC). */
+/* ── PLEIN ÉCRAN MOBILE — PARTOUT (demande client : « c'est une app ») ──
+   Sous 640 px, tout panneau (.surface-card = SurfaceCard & SectionCard)
+   devient L'ÉCRAN lui-même : il s'étale sur la gouttière px-4 de la
+   coquille (marges négatives) et perd cadre, coins, ombre et barre
+   d'accent (!important face aux règles [data-accent-pos]). Seuls des
+   filets 1 px haut/bas séparent les sections empilées.
+
+   Exceptions :
+   - `.keep-bricks *` — l'ACCUEIL garde ses briques (demande client) ;
+   - `[class~="grid-cols-N"] *` — les tuiles posées côte à côte dès le
+     mobile (grilles multi-colonnes à la base) restent des tuiles ;
+     `~=` = mot exact, donc `sm:grid-cols-2` (1 colonne sur mobile)
+     n'est PAS exclu et ses cartes s'étalent bien. */
 @media (max-width: 639.98px) {
-  html .sc-bleed {
+  html .surface-card:not(.keep-bricks *):not([class~="grid-cols-2"] *):not([class~="grid-cols-3"] *):not([class~="grid-cols-4"] *) {
+    margin-left: -1rem;
+    margin-right: -1rem;
     border-left-width: 0 !important;
     border-right-width: 0 !important;
-    border-top-width: 0 !important;
-    border-bottom-width: 0 !important;
+    border-top-width: 1px !important;
+    border-bottom-width: 1px !important;
+    border-top-color: hsl(var(--border)) !important;
+    border-bottom-color: hsl(var(--border)) !important;
     border-radius: 0;
     box-shadow: none;
   }

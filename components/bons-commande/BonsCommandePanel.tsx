@@ -304,7 +304,7 @@ export function BonsCommandePanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3 max-sm:px-4">
+      <div className="flex items-center justify-between gap-3">
         <p className="text-[12.5px] text-muted-foreground">
           {docs === null ? "Chargement…"
             : count === 0 ? "Aucune commande en attente de lot."
@@ -319,7 +319,7 @@ export function BonsCommandePanel() {
       {/* ── OFFRES CLIENT (précommandes) à passer en commande ────────── */}
       {offres !== null && offres.length > 0 && (
         <div className="space-y-2">
-          <div className="flex items-center gap-2 flex-wrap max-sm:px-4">
+          <div className="flex items-center gap-2 flex-wrap">
             <FileText className="h-4 w-4 text-brand-500 shrink-0" />
             <h2 className="text-[13px] font-semibold text-foreground">Offres client — à passer en commande</h2>
             {dueCount > 0 && (
@@ -343,7 +343,7 @@ export function BonsCommandePanel() {
               return (
                 <li
                   key={o.docEntry}
-                  className={`rounded-xl border overflow-hidden max-sm:rounded-none max-sm:border-x-0 ${
+                  className={`rounded-xl border overflow-hidden max-sm:-mx-4 max-sm:rounded-none max-sm:border-x-0 ${
                     o.due ? "border-amber-400/60 bg-amber-50/40 dark:bg-amber-950/15" : "border-border bg-card"
                   }`}
                 >
@@ -412,7 +412,7 @@ export function BonsCommandePanel() {
       )}
 
       {docs !== null && count === 0 && (offres?.length ?? 0) === 0 && (
-        <div className="flex flex-col items-center justify-center text-center rounded-2xl border border-dashed border-border bg-card py-14 px-6 max-sm:rounded-none max-sm:border-x-0">
+        <div className="flex flex-col items-center justify-center text-center rounded-2xl border border-dashed border-border bg-card py-14 px-6 max-sm:-mx-4 max-sm:rounded-none max-sm:border-x-0">
           <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 mb-3">
             <CheckCircle2 className="h-6 w-6" strokeWidth={1.8} />
           </span>
@@ -428,7 +428,7 @@ export function BonsCommandePanel() {
         const missing = doc.pendingCount;
         const ready = missing === 0;
         return (
-          <section key={doc.docEntry} className="rounded-2xl border border-border bg-card overflow-hidden max-sm:rounded-none max-sm:border-x-0">
+          <section key={doc.docEntry} className="rounded-2xl border border-border bg-card overflow-hidden max-sm:-mx-4 max-sm:rounded-none max-sm:border-x-0">
             {/* Ligne-résumé : client, livraison, statut des lots — le détail
                 (affectation des lots) s'ouvre en PLEIN ÉCRAN. */}
             <div
@@ -471,7 +471,7 @@ export function BonsCommandePanel() {
       })}
 
       {docs === null && (
-        <div className="flex items-center gap-2 px-5 py-4 max-sm:px-4 text-[13px] text-muted-foreground">
+        <div className="flex items-center gap-2 px-5 py-4 max-sm:px-0 text-[13px] text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Chargement des bons de commande…
         </div>
       )}

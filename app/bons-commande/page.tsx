@@ -11,9 +11,9 @@ export default async function BonsCommandePage() {
   if (!session) redirect("/login");
 
   return (
-    // Mobile : PLEIN ÉCRAN — gouttières de la coquille annulées, lignes du
-    // panneau à plat : contenu bord à bord, pas une case sur un fond.
-    <div className="space-y-6 animate-fade-up max-sm:-mx-4 max-sm:-mt-2 max-sm:-mb-4 max-sm:space-y-3">
+    // Mobile : plein écran app — les lignes du panneau s'étalent
+    // elles-mêmes (max-sm:-mx-4 dans BonsCommandePanel).
+    <div className="space-y-6 animate-fade-up max-sm:space-y-3">
       <PageHeader
         className="max-sm:hidden"
         kicker="Entrepôt · lots"

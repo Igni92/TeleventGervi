@@ -20,12 +20,12 @@ export default async function EntreesPage() {
   // FOURNISSEUR (écran Commandes fournisseurs) — ici, il est seulement AFFICHÉ.
   const agreeurOnly = (await isAgreeur(session)) && !(await requirePreparateurOrAdmin(session));
   return (
-    // Mobile : PLEIN ÉCRAN — on annule les gouttières de la coquille
-    // (px-4/py-4) et les panneaux s'aplatissent (`bleed`) : le contenu est
-    // bord à bord, pas une case posée sur un fond.
-    <div className="space-y-6 sm:space-y-8 animate-fade-up max-sm:-mx-4 max-sm:-mt-2 max-sm:-mb-4 max-sm:space-y-3">
+    // Mobile : plein écran app — les panneaux s'étalent d'eux-mêmes
+    // (règle globale .surface-card, cf. globals.css) ; titre porté par la
+    // barre du haut.
+    <div className="space-y-6 sm:space-y-8 animate-fade-up max-sm:space-y-3">
       {/* Nav terrain (mobile) : l'agréeur confiné navigue entre ses écrans. */}
-      {isTerrainConfined(session) && <div className="max-sm:px-4"><PreparateurNav current="entrees" /></div>}
+      {isTerrainConfined(session) && <PreparateurNav current="entrees" />}
       <PageHeader
         className="max-sm:hidden"
         kicker="SAP B1 · PurchaseDeliveryNote"
