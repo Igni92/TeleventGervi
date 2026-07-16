@@ -11,8 +11,11 @@ export default async function BonsCommandePage() {
   if (!session) redirect("/login");
 
   return (
-    <div className="space-y-6 animate-fade-up">
+    // Mobile : PLEIN ÉCRAN — gouttières de la coquille annulées, lignes du
+    // panneau à plat : contenu bord à bord, pas une case sur un fond.
+    <div className="space-y-6 animate-fade-up max-sm:-mx-4 max-sm:-mt-2 max-sm:-mb-4 max-sm:space-y-3">
       <PageHeader
+        className="max-sm:hidden"
         kicker="Entrepôt · lots"
         title="Bons de commande"
         help={

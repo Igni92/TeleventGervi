@@ -304,7 +304,7 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
 
   return (
     <div className="space-y-6">
-      <SurfaceCard accent="sky" className="p-5 space-y-3">
+      <SurfaceCard accent="sky" bleed className="p-5 space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <h2 className="text-[15px] font-semibold flex items-center gap-2">
             <ClipboardList className="h-4 w-4 text-muted-foreground" />
