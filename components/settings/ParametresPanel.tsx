@@ -609,19 +609,19 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
               </SettingRow>
               {meteoOn === "on" && (
                 <SettingRow
-                  title="Zone météo"
-                  desc="Ville affichée par le bandeau (à définir). Vide = zone par défaut."
+                  title="Zones météo"
+                  desc="Une ou plusieurs villes séparées par des virgules (ex. « Perpignan, Rungis », 4 max). Dans le bandeau, cliquer sur une ville affiche sa semaine. Vide = zone par défaut."
                 >
                   <div className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-secondary/60 px-2.5 ring-1 ring-inset ring-border focus-within:ring-brand-500/60">
                     <CloudSun className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                     <input
                       type="text"
-                      aria-label="Ville de la météo"
+                      aria-label="Villes de la météo (séparées par des virgules)"
                       value={meteoZone}
-                      placeholder={METEO_ZONE_DEFAULT}
+                      placeholder={`${METEO_ZONE_DEFAULT}, Rungis…`}
                       onChange={(e) => setMeteoZone(e.target.value)}
                       onBlur={() => writeSetting(SETTING_KEYS.meteoZone, meteoZone.trim())}
-                      className="w-40 bg-transparent text-[13.5px] font-semibold text-foreground outline-none placeholder:font-normal placeholder:text-muted-foreground"
+                      className="w-56 bg-transparent text-[13.5px] font-semibold text-foreground outline-none placeholder:font-normal placeholder:text-muted-foreground"
                     />
                   </div>
                 </SettingRow>

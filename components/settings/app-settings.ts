@@ -105,9 +105,10 @@ export const SETTING_KEYS = {
    */
   meteo: "televente:meteo",
   /**
-   * Zone (ville) affichée par le bandeau météo — À DÉFINIR selon le poste.
-   * Chaîne libre (ex. « Perpignan »), résolue côté serveur par /api/meteo.
-   * Vide → METEO_ZONE_DEFAULT.
+   * Zone(s) — ville(s) — affichées par le bandeau météo. Chaîne libre : UNE
+   * ville (« Perpignan ») ou PLUSIEURS séparées par des virgules
+   * (« Perpignan, Rungis »), chacune résolue côté serveur par /api/meteo.
+   * À parser via parseMeteoZones. Vide → METEO_ZONE_DEFAULT.
    */
   meteoZone: "televente:meteoZone",
 } as const;
@@ -117,6 +118,29 @@ export const SETTING_KEYS = {
  * Sert de repli quand aucune zone n'est saisie dans les Paramètres.
  */
 export const METEO_ZONE_DEFAULT = "Perpignan";
+
+/** Nombre max de villes du bandeau météo (protège la largeur de l'en-tête). */
+export const METEO_ZONES_MAX = 4;
+
+/**
+ * Parse le réglage meteoZone en liste de villes : séparateur virgule (ou
+ * point-virgule), entrées nettoyées et dédupliquées (insensible à la casse),
+ * plafonnées à METEO_ZONES_MAX. Vide → [METEO_ZONE_DEFAULT].
+ * Rétro-compatible : une valeur mono-ville historique donne une liste de 1.
+ */
+export function parseMeteoZones(raw: string | null | undefined): string[] {
+  const seen = new Set<string>();
+  const zones: string[] = [];
+  for (const part of (raw ?? "").split(/[,;]/)) {
+    const z = part.trim();
+    const k = z.toLowerCase();
+    if (!z || seen.has(k)) continue;
+    seen.add(k);
+    zones.push(z);
+    if (zones.length >= METEO_ZONES_MAX) break;
+  }
+  return zones.length ? zones : [METEO_ZONE_DEFAULT];
+}
 
 /** Valeur de contraste de survol par défaut (en %). */
 export const HOVER_CONTRAST_DEFAULT = 60;

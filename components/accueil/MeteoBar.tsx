@@ -7,9 +7,9 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  SETTING_KEYS, METEO_ZONE_DEFAULT, readSetting, writeSetting, onSettingChange,
+  SETTING_KEYS, METEO_ZONE_DEFAULT, parseMeteoZones,
+  readSetting, writeSetting, onSettingChange,
 } from "@/components/settings/app-settings";
-import { useJson } from "./use-json";
 
 /**
  * Météo de l'accueil — logée EN HAUT À DROITE, dans l'en-tête (à gauche de
@@ -17,11 +17,15 @@ import { useJson } from "./use-json";
  * rapport à la première version compacte — demande utilisateur : lisibilité
  * de loin sur le poste télévente).
  *
- * - Conditions actuelles (pastille teintée selon le temps + température +
- *   ville) puis la SEMAINE : 7 colonnes jour · pictogramme coloré ·
+ * - PLUSIEURS VILLES possibles (Paramètres : villes séparées par des
+ *   virgules, cf. parseMeteoZones) : une pastille « conditions actuelles »
+ *   par ville ; un clic sur une pastille affiche SA semaine à droite.
+ *   Une seule ville → rendu identique à avant (pastille non cliquable).
+ * - La SEMAINE (ville active) : 7 colonnes jour · pictogramme coloré ·
  *   température moyenne, « Auj » mis en avant. Détail en infobulle.
- * - Zone (ville) réglable dans les Paramètres (SETTING_KEYS.meteoZone) ; défaut
- *   METEO_ZONE_DEFAULT. Relevé via /api/meteo (Open-Meteo, sans clé, cache 15 min).
+ * - Relevé via /api/meteo (Open-Meteo, sans clé, cache 15 min) — un appel par
+ *   ville, rafraîchi ~15 min ; une ville en erreur est simplement absente
+ *   (on garde la dernière bonne valeur connue, jamais de saut de page).
  * - MASQUABLE : croix → réglage `meteo` = "off". Réactivable depuis
  *   Paramètres → Console & catalogue. Réagit à chaud (onSettingChange).
  * - Motion sobre (vu tous les jours) : cascade fade-in 35 ms sur les colonnes
@@ -74,55 +78,133 @@ function dayLong(date: string): string {
     .toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
 }
 
+/**
+ * Relevés météo pour PLUSIEURS villes — un fetch /api/meteo par ville, tous
+ * rafraîchis à `intervalMs`. Même philosophie défensive que useJson : une
+ * erreur de refresh ne dégrade jamais une donnée déjà affichée (on garde la
+ * dernière bonne valeur), une ville en échec est simplement absente de la map.
+ */
+function useMeteoMulti(zones: string[], intervalMs: number): Record<string, MeteoResponse> {
+  const [byZone, setByZone] = useState<Record<string, MeteoResponse>>({});
+  // Clé stable : l'effet ne se relance que si la LISTE change réellement.
+  // Séparateur \u0000 : impossible dans un nom de ville (« Le Havre » passe).
+  const zonesKey = zones.join("\u0000");
+
+  useEffect(() => {
+    let cancelled = false;
+    const list = zonesKey.split("\u0000").filter(Boolean);
+
+    const load = async () => {
+      const entries = await Promise.all(list.map(async (z) => {
+        try {
+          const r = await fetch(`/api/meteo?q=${encodeURIComponent(z)}`, { cache: "no-store" });
+          if (!r.ok) throw new Error(String(r.status));
+          return [z, (await r.json()) as MeteoResponse] as const;
+        } catch {
+          return [z, null] as const;
+        }
+      }));
+      if (cancelled) return;
+      setByZone((prev) => {
+        const next: Record<string, MeteoResponse> = {};
+        for (const [z, d] of entries) {
+          if (d?.ok && d.temp != null) next[z] = d;
+          else if (prev[z]) next[z] = prev[z]; // erreur → dernière bonne valeur
+        }
+        return next;
+      });
+    };
+
+    load();
+    const t = setInterval(load, intervalMs);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [zonesKey, intervalMs]);
+
+  return byZone;
+}
+
 export function MeteoBar({ className }: { className?: string }) {
-  // Visibilité + zone (réglages locaux, propagés à chaud entre onglets/widgets).
+  // Visibilité + zones (réglages locaux, propagés à chaud entre onglets/widgets).
   const [visible, setVisible] = useState(true);
-  const [zone, setZone] = useState(METEO_ZONE_DEFAULT);
+  const [zones, setZones] = useState<string[]>([METEO_ZONE_DEFAULT]);
+  // Ville dont la SEMAINE est affichée (choisie au clic) — nom de zone, pas
+  // un index : la liste peut changer à chaud sans dérégler la sélection.
+  const [activeZone, setActiveZone] = useState<string | null>(null);
 
   useEffect(() => {
     setVisible(readSetting(SETTING_KEYS.meteo, "on") !== "off");
-    setZone(readSetting(SETTING_KEYS.meteoZone, "").trim() || METEO_ZONE_DEFAULT);
+    setZones(parseMeteoZones(readSetting(SETTING_KEYS.meteoZone, "")));
     return onSettingChange((key, value) => {
       if (key === SETTING_KEYS.meteo) setVisible(value !== "off");
-      if (key === SETTING_KEYS.meteoZone) setZone((value ?? "").trim() || METEO_ZONE_DEFAULT);
+      if (key === SETTING_KEYS.meteoZone) setZones(parseMeteoZones(value));
     });
   }, []);
 
-  // Relevé (rafraîchi ~15 min). Hook toujours appelé — on masque au rendu.
-  const { data, state } = useJson<MeteoResponse>(
-    `/api/meteo?q=${encodeURIComponent(zone)}`,
-    900_000,
-  );
+  // Relevés (rafraîchis ~15 min). Hook toujours appelé — on masque au rendu.
+  const byZone = useMeteoMulti(zones, 900_000);
 
-  // Masqué par réglage, ou pas encore de donnée exploitable → rien (pas de saut).
+  // Masqué par réglage, ou aucune donnée exploitable → rien (pas de saut).
   if (!visible) return null;
-  if (state !== "ok" || !data?.ok || data.temp == null) return null;
+  const loaded = zones.filter((z) => byZone[z]);
+  if (loaded.length === 0) return null;
 
-  const cur = describe(data.code ?? 0);
+  const multi = loaded.length > 1;
+  const active = activeZone && loaded.includes(activeZone) ? activeZone : loaded[0];
+  const data = byZone[active];
   const days = (data.days ?? []).slice(0, 7);
 
   return (
     <section aria-label="Météo" className={cn("flex items-center gap-1", className)}>
-      {/* ── Conditions actuelles ── */}
-      <div
-        className="mr-3 flex items-center gap-3 border-r border-border/60 pr-5"
-        title={`${cur.label} — ${data.city ?? zone}${data.wind != null && data.wind > 0 ? ` · vent ${data.wind} km/h` : ""}`}
-      >
-        <span className={cn("flex h-14 w-14 items-center justify-center rounded-2xl ring-1 ring-inset", cur.tile)}>
-          <cur.Icon className={cn("h-8 w-8", cur.tone)} aria-hidden />
-        </span>
-        <div className="leading-none">
-          <p className="font-display text-[30px] font-semibold leading-none text-foreground tnum">{data.temp}°</p>
-          <p className="mt-1 max-w-[128px] truncate text-[18px] text-muted-foreground">{data.city ?? zone}</p>
-        </div>
+      {/* ── Conditions actuelles — une pastille PAR VILLE (clic = semaine) ── */}
+      <div className="mr-3 flex items-center gap-1.5 border-r border-border/60 pr-5">
+        {loaded.map((z) => {
+          const d = byZone[z];
+          const c = describe(d.code ?? 0);
+          const isActive = z === active;
+          const title =
+            `${c.label} — ${d.city ?? z}` +
+            (d.wind != null && d.wind > 0 ? ` · vent ${d.wind} km/h` : "") +
+            (multi && !isActive ? " — cliquer pour afficher sa semaine" : "");
+          const inner = (
+            <>
+              <span className={cn("flex h-14 w-14 items-center justify-center rounded-2xl ring-1 ring-inset", c.tile)}>
+                <c.Icon className={cn("h-8 w-8", c.tone)} aria-hidden />
+              </span>
+              <div className="leading-none text-left">
+                <p className="font-display text-[30px] font-semibold leading-none text-foreground tnum">{d.temp}°</p>
+                <p className="mt-1 max-w-[128px] truncate text-[18px] text-muted-foreground">{d.city ?? z}</p>
+              </div>
+            </>
+          );
+          // Une seule ville : rendu inerte (pas de bouton), comme historiquement.
+          if (!multi) {
+            return <div key={z} title={title} className="flex items-center gap-3">{inner}</div>;
+          }
+          return (
+            <button
+              key={z}
+              type="button"
+              onClick={() => setActiveZone(z)}
+              aria-pressed={isActive}
+              title={title}
+              className={cn(
+                "flex items-center gap-3 rounded-2xl px-2 py-1.5 transition-colors",
+                isActive ? "bg-secondary/70" : "hover:bg-secondary/40",
+              )}
+            >
+              {inner}
+            </button>
+          );
+        })}
       </div>
 
-      {/* ── Semaine : moyenne journalière + pictogramme (days[0] = aujourd'hui) ── */}
+      {/* ── Semaine (ville active) : moyenne journalière + pictogramme
+             (days[0] = aujourd'hui) — la cascade rejoue au changement de ville ── */}
       {days.map((d, i) => {
         const w = describe(d.code);
         return (
           <div
-            key={d.date}
+            key={`${active}:${d.date}`}
             title={`${dayLong(d.date)} — ${w.label}, ${d.temp}° en moyenne`}
             className={cn(
               "flex w-16 shrink-0 flex-col items-center gap-1.5 rounded-xl py-2 animate-fade-in",
