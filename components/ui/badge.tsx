@@ -25,11 +25,11 @@ const badgeVariants = cva(
           "bg-orange-500/12 text-orange-700 ring-1 ring-orange-500/25 dark:text-orange-300",
         chr:
           "bg-emerald-500/12 text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-300",
-        // Statuts rappel
+        // Statuts rappel — tokens sémantiques (basculent seuls clair/sombre)
         planifie:
-          "bg-amber-500/12 text-amber-700 ring-1 ring-amber-500/25 dark:text-amber-300",
+          "bg-warning/12 text-warning ring-1 ring-warning/25",
         fait:
-          "bg-emerald-500/12 text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-300",
+          "bg-success/12 text-success ring-1 ring-success/25",
         annule:
           "bg-secondary text-muted-foreground/70 ring-1 ring-border line-through",
       },
