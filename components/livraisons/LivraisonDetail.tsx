@@ -11,6 +11,7 @@ import {
   Send, Phone, Plus, Trash2, Search, X, Store, BadgeEuro, Check,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { StarRating } from "@/components/ui/star-rating";
 import { PageHeader } from "@/components/ui/page-header";
 import { InfoHint } from "@/components/ui/info-hint";
@@ -525,15 +526,17 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
           </>
         }
         actions={
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={() => load()}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border bg-card text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60 shrink-0"
+            className="shrink-0"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             Actualiser
-          </button>
+          </Button>
         }
       />
 
@@ -1233,39 +1236,45 @@ function BonTransportActions({
           Masqué sur MOBILE : on n'imprime pas depuis le téléphone et le bouton
           écrasait le nom du transporteur dans l'en-tête. */}
       {orderCount > 0 && (
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="icon"
           onClick={printBon}
           title={`Imprimer le bon de transport de ${carrier.name} (original + copie)`}
           aria-label={`Imprimer le bon de transport de ${carrier.name}`}
-          className="hidden sm:inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
+          className="hidden sm:inline-flex"
         >
           <Printer className="h-4 w-4" />
-        </button>
+        </Button>
       )}
       {/* Envoyer par mail + fiche — commerciaux / admins, transporteur affecté */}
       {canDispatch && carrier.code && (
         <>
           {orderCount > 0 && (
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="icon"
               onClick={openMail}
               title={`Envoyer le bon de transport à ${carrier.name} par mail (depuis commercial@gervifrais.com)`}
               aria-label={`Envoyer le bon de transport de ${carrier.name} par mail`}
-              className="hidden sm:inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-brand-600 dark:hover:text-brand-400 hover:bg-secondary/60 active:scale-95 transition-all"
+              className="hidden sm:inline-flex hover:text-brand-600 dark:hover:text-brand-400"
             >
               <Send className="h-4 w-4" />
-            </button>
+            </Button>
           )}
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="icon"
             onClick={openFiche}
             title={`Fiche transporteur ${carrier.name} — email et téléphones`}
             aria-label={`Fiche transporteur ${carrier.name}`}
-            className="hidden sm:inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
+            className="hidden sm:inline-flex"
           >
             <Phone className="h-4 w-4" />
-          </button>
+          </Button>
         </>
       )}
 
@@ -1339,14 +1348,16 @@ function BonTransportActions({
                 </div>
               </div>
               <div className="flex items-center gap-2 pt-1">
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="xl"
                   onClick={() => setFicheOpen(false)}
                   disabled={ficheSaving}
-                  className="inline-flex flex-1 items-center justify-center h-11 px-4 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60"
+                  className="flex-1"
                 >
                   Annuler
-                </button>
+                </Button>
                 <button
                   type="button"
                   onClick={saveFiche}
@@ -1402,14 +1413,16 @@ function BonTransportActions({
             </div>
           )}
           <div className="flex items-center gap-2 pt-1">
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="xl"
               onClick={() => setMailOpen(false)}
               disabled={sending}
-              className="inline-flex flex-1 items-center justify-center h-11 px-4 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60"
+              className="flex-1"
             >
               Annuler
-            </button>
+            </Button>
             <button
               type="button"
               onClick={sendMail}
@@ -1548,14 +1561,16 @@ function StatusTabs({
             </button>
           )}
         </div>
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={onToggleAll}
-          className="inline-flex items-center gap-1.5 h-11 sm:h-8 px-3 rounded-lg border border-border bg-card text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors shrink-0"
+          className="h-11 sm:h-8 shrink-0"
         >
           <ChevronDown className={`h-3.5 w-3.5 transition-transform ${allCollapsed ? "-rotate-90" : ""}`} />
           {allCollapsed ? "Tout déplier" : "Tout replier"}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -2482,37 +2497,42 @@ const OrderRow = memo(function OrderRow({
           </button>
           {/* Récap imprimable (bon de préparation) — desktop ; sur mobile, passer
               par la vue en grand qui porte le même bouton. */}
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="icon"
             onClick={handlePrint}
             title={`Imprimer le bon de préparation (BL n°${doc.docNum})`}
             aria-label={`Imprimer le récap de la commande ${doc.docNum}`}
-            className="hidden sm:inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
+            className="hidden sm:inline-flex"
           >
             <Printer className="h-4 w-4" />
-          </button>
+          </Button>
           {canDispatch && doc.open && (
-            <button
+            <Button
               type="button"
+              variant="warning"
               onClick={startModif}
               disabled={modifBusy}
               title={`Modifier le BL # ${doc.docNum} (sur l'Écran 2) — quantités + ajout de lignes`}
-              className="hidden lg:inline-flex items-center gap-1 h-9 px-2.5 rounded-lg border border-amber-300/70 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-900/20 text-[12px] font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/35 active:scale-95 transition-all disabled:opacity-60"
+              className="hidden lg:inline-flex px-2.5"
             >
               {modifBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" strokeWidth={2.2} />}
               <span className="hidden sm:inline">Modifier</span>
-            </button>
+            </Button>
           )}
           {/* Repli desktop uniquement : sur mobile le contenu est toujours affiché. */}
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="icon"
             onClick={() => setOpen((o) => !o)}
             aria-label={open ? "Replier le détail" : "Voir le détail"}
             aria-expanded={open}
-            className="hidden lg:inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
+            className="hidden lg:inline-flex"
           >
             <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -2699,14 +2719,16 @@ const OrderRow = memo(function OrderRow({
           {/* Actions de préparation — EMPILÉES pleine largeur sur mobile (grandes
               cibles, libellés jamais compressés) ; en ligne à partir de sm. */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:flex-wrap pt-1">
-            <button
+            <Button
               type="button"
+              variant="success"
+              size="xl"
               onClick={() => { setPreparedTo(true); setBigOpen(false); }}
               disabled={savingPrep}
-              className="inline-flex items-center justify-center gap-2 h-12 sm:h-11 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[14px] font-semibold disabled:opacity-60"
+              className="h-12 sm:h-11"
             >
               <CheckCircle2 className="h-4 w-4" /> Préparation terminée
-            </button>
+            </Button>
             <button
               type="button"
               onClick={() => { setRequeuePicks(new Set(reportedMissing)); setRequeueOpen(true); }}
@@ -2716,14 +2738,15 @@ const OrderRow = memo(function OrderRow({
               {requeuing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
               Pas terminée — remettre sur la file
             </button>
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="xl"
               onClick={handlePrint}
               title={`Imprimer le bon de préparation (BL n°${doc.docNum})`}
-              className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
             >
               <Printer className="h-4 w-4" /> Imprimer
-            </button>
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -2782,25 +2805,29 @@ const OrderRow = memo(function OrderRow({
           </ul>
 
           <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center gap-2 pt-1">
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="xl"
               onClick={() => setRequeueOpen(false)}
               disabled={requeuing}
-              className="inline-flex flex-1 items-center justify-center h-11 px-4 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60"
+              className="flex-1"
             >
               Annuler
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="destructive"
+              size="xl"
               onClick={() => requeue([...requeuePicks])}
               disabled={requeuing}
-              className="inline-flex flex-1 items-center justify-center gap-2 h-11 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[14px] font-semibold disabled:opacity-60 active:scale-95 transition-all"
+              className="flex-1"
             >
               {requeuing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
               {requeuePicks.size > 0
                 ? `Remettre — ${requeuePicks.size} manquant${requeuePicks.size > 1 ? "s" : ""}`
                 : "Remettre sur la file"}
-            </button>
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -2837,21 +2864,25 @@ const OrderRow = memo(function OrderRow({
             <span className="ml-auto text-[12.5px] font-semibold tnum text-muted-foreground">{fmtNum(doc.weightKg)} kg · {doc.lineCount} article(s)</span>
           </div>
           <div className="flex items-center gap-2 pt-1">
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="xl"
               onClick={() => setConfirmOpen(false)}
-              className="inline-flex flex-1 items-center justify-center h-11 px-4 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+              className="flex-1"
             >
               Annuler
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="success"
+              size="xl"
               onClick={() => { setConfirmOpen(false); setPreparedTo(true); }}
               disabled={savingPrep}
-              className="inline-flex flex-1 items-center justify-center gap-2 h-11 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[14px] font-semibold disabled:opacity-60"
+              className="flex-1"
             >
               <CheckCircle2 className="h-4 w-4" /> Confirmer la préparation
-            </button>
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -2922,14 +2953,16 @@ const OrderRow = memo(function OrderRow({
           </div>
 
           <div className="flex items-center gap-2 pt-1">
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="xl"
               onClick={() => { setRebindOpen(false); setNewCode(""); setPreview({ state: "idle" }); }}
               disabled={rebinding}
-              className="inline-flex flex-1 items-center justify-center h-11 px-4 rounded-xl border border-border text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60"
+              className="flex-1"
             >
               Annuler
-            </button>
+            </Button>
             <button
               type="button"
               onClick={confirmRebind}
