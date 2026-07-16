@@ -9,6 +9,7 @@ import {
 import { TypeCombobox } from "@/components/TypeCombobox";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { InfoHint } from "@/components/ui/info-hint";
 
 interface SapOrder {
   docEntry: number; docNum: number; docDate: string; dueDate: string;
@@ -218,8 +219,8 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
           <div className="flex items-center gap-2 pb-1.5 mb-0.5 border-b border-border/60 text-muted-foreground">
             <span className="w-10 shrink-0" />
             <span className="flex-1 min-w-0" />
-            <span className="w-12 shrink-0 flex justify-center" title="Nombre de colis"><Boxes className="h-4 w-4" /></span>
-            <span className="w-16 shrink-0 flex justify-center" title="Poids (kg)"><Scale className="h-4 w-4" /></span>
+            <span className="w-12 shrink-0 flex items-center justify-center"><Boxes className="h-4 w-4" /><InfoHint label="Colis" size={14} className="ml-1">Nombre de colis</InfoHint></span>
+            <span className="w-16 shrink-0 flex items-center justify-center"><Scale className="h-4 w-4" /><InfoHint label="Poids" size={14} className="ml-1">Poids (kg)</InfoHint></span>
             <span className="w-[70px] shrink-0" />
             <span className="w-4 shrink-0" />
           </div>
