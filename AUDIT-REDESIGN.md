@@ -133,6 +133,8 @@
   incohérent du repo — 172 tailles ad hoc, 52 boutons bruts, ~16 pastilles).
 - [ ] Généralisation `ui/button` (419 boutons bruts) ; primitive table partagée
   (39 tables maison).
-- [ ] Tokens sémantiques de statut (`--success/--warning/--danger/--info`) pour
-  les ~120 badges de statut hardcodés.
+- [~] Tokens sémantiques de statut : `--success/--warning/--info` définis
+  (clair + sombre) et branchés sur les toasts et les badges de statut
+  (`fait`/`planifie`) ; le rouge d'erreur reste `--destructive`. Reste :
+  adoption progressive dans les ~120 badges hardcodés.
 - [ ] Sidebar : tokenisation complète des 94 couleurs en dur.

@@ -46,6 +46,11 @@ const config: Config = {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
         },
+        // Statuts sémantiques (cf. globals.css) — `text-success`, `bg-warning/12`,
+        // `ring-info/25`… basculent automatiquement clair/sombre.
+        success: "hsl(var(--success) / <alpha-value>)",
+        warning: "hsl(var(--warning) / <alpha-value>)",
+        info:    "hsl(var(--info) / <alpha-value>)",
         muted: {
           DEFAULT: "hsl(var(--muted))",
           foreground: "hsl(var(--muted-foreground))",
