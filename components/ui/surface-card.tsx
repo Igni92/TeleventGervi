@@ -43,21 +43,18 @@ interface SurfaceCardProps {
   animate?: boolean;
   /** délai d'entrée (ms) pour une cascade entre cartes */
   delay?: number;
-  /** PLEIN ÉCRAN mobile : sous 640 px la carte s'aplatit (plus de bordures,
-      de coins, d'ombre ni de barre d'accent) — le contenu est bord à bord,
-      « on oublie le fond ». À combiner avec un wrapper de page qui annule
-      les gouttières (`max-sm:-mx-4`…). Cf. globals.css `.sc-bleed`. */
-  bleed?: boolean;
   className?: string;
 }
 
 export function SurfaceCard({
-  children, accent, title, action, icon, animate = true, delay = 0, bleed = false, className,
+  children, accent, title, action, icon, animate = true, delay = 0, className,
 }: SurfaceCardProps) {
+  // `surface-card` : marqueur du PLEIN ÉCRAN MOBILE global (< 640 px la carte
+  // s'étale bord à bord et perd son cadre — cf. globals.css ; l'accueil
+  // [.keep-bricks] et les grilles de tuiles sont épargnés).
   const base = cn(
-    "bg-card border border-border rounded-xl p-4",
+    "surface-card bg-card border border-border rounded-xl p-4",
     accent && "sc-accent",
-    bleed && "sc-bleed",
     animate && "animate-fade-up motion-reduce:animate-none",
     className,
   );

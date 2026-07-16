@@ -79,7 +79,7 @@ export function AccueilHub() {
   const firstName = (session?.user?.name ?? "").trim().split(/\s+/)[0] || null;
 
   return (
-    <div className="space-y-4 animate-fade-up">
+    <div className="keep-bricks space-y-4 animate-fade-up max-sm:py-3">
       {/* Météo compacte EN HAUT À DROITE (dans l'en-tête, à gauche de l'horloge) :
           aucune hauteur ajoutée — l'accueil doit tenir sans défilement. Desktop
           uniquement (le mobile a ses tuiles). */}

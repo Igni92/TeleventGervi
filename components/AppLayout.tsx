@@ -33,7 +33,12 @@ export async function AppLayout({ children }: AppLayoutProps) {
             densité « Aéré » où l'échelle rem racine augmente). Les tableaux larges
             scrollent dans leurs propres conteneurs `overflow-x-auto`, donc rien
             d'utile n'est rogné ; `clip` (≠ `hidden`) préserve la barre sticky. */}
-        <main className="flex-1 min-w-0 max-w-[1440px] mx-auto px-4 sm:px-10 lg:px-14 py-4 sm:py-8 lg:py-10 overflow-x-clip">
+        {/* Mobile = APP plein écran : aucune gouttière verticale (la barre du
+            haut colle au bord, le contenu file jusqu'en bas). Les gouttières
+            horizontales px-4 restent pour le texte hors carte — les panneaux
+            (SurfaceCard/SectionCard) les annulent eux-mêmes (cf. globals.css
+            « plein écran mobile »). Le confort d'écran (py) reste sur ≥ sm. */}
+        <main className="flex-1 min-w-0 max-w-[1440px] mx-auto px-4 sm:px-10 lg:px-14 py-0 sm:py-8 lg:py-10 overflow-x-clip">
           {/* Interface MOBILE aussi sur TABLETTE : la bascule n'est plus seulement
               la largeur (md) mais le TYPE d'appareil — `pointer: coarse` = écran
               tactile (téléphone/tablette) → barre du haut forcée, sidebar masquée. */}

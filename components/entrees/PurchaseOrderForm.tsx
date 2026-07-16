@@ -69,7 +69,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
   };
 
   return (
-    <SurfaceCard accent="violet" bleed className="p-5 space-y-5">
+    <SurfaceCard accent="violet" className="p-5 space-y-5">
       <div className="flex items-center gap-2">
         <PackageCheck className="h-4 w-4 text-muted-foreground" />
         <h2 className="text-[15px] font-semibold">Nouvelle commande fournisseur</h2>
