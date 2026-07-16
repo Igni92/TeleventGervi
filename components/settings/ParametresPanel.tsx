@@ -9,6 +9,7 @@ import {
   ShieldAlert, CloudSun, FileDown,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
+import { InfoHint } from "@/components/ui/info-hint";
 import { ShelfLifePanel } from "@/components/settings/ShelfLifePanel";
 import { SafeguardsPanel } from "@/components/settings/SafeguardsPanel";
 import { StatsExportPanel } from "@/components/settings/StatsExportPanel";
@@ -97,11 +98,14 @@ function SettingRow({
   desc?: string;
   children: React.ReactNode;
 }) {
+  // Hiérarchie (redesign) : le LIBELLÉ reste en clair ; l'explication (desc)
+  // est de l'info SECONDAIRE → derrière le « ? » au survol, supprimée sur
+  // mobile (InfoHint se masque tout seul < sm).
   return (
     <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-6 py-3.5 first:pt-0 last:pb-0">
-      <div className="min-w-0">
+      <div className="min-w-0 flex items-center gap-2">
         <p className="text-[13.5px] font-semibold text-foreground">{title}</p>
-        {desc && <p className="text-[12px] text-muted-foreground mt-0.5 max-w-md">{desc}</p>}
+        {desc && <InfoHint label={title} size={15}>{desc}</InfoHint>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -463,7 +467,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
 
         {/* 2 ── CONFORT DE LECTURE ────────────────────────────── */}
         <section id="lecture" className="scroll-mt-6">
-          <SurfaceCard accent="amber" title="Confort de lecture" icon={<Glasses className="h-3.5 w-3.5" />}>
+          <SurfaceCard accent="brand" title="Confort de lecture" icon={<Glasses className="h-3.5 w-3.5" />}>
             <div className="divide-y divide-border/50">
               <SettingRow
                 title="Taille de l'interface"
@@ -541,7 +545,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
 
         {/* 3 ── CONSOLE & CATALOGUE ───────────────────────────── */}
         <section id="console" className="scroll-mt-6">
-          <SurfaceCard accent="violet" title="Console & catalogue" icon={<MonitorCog className="h-3.5 w-3.5" />}>
+          <SurfaceCard accent="brand" title="Console & catalogue" icon={<MonitorCog className="h-3.5 w-3.5" />}>
             <div className="divide-y divide-border/50">
               <SettingRow
                 title="Logos de marque"
@@ -722,7 +726,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
             par tous : les API pilotage scopent déjà les données aux droits
             de l'utilisateur (un commercial n'exporte que son périmètre). */}
         <section id="export" className="scroll-mt-6">
-          <SurfaceCard accent="emerald" title="Export & analyse" icon={<FileDown className="h-3.5 w-3.5" />}>
+          <SurfaceCard accent="brand" title="Export & analyse" icon={<FileDown className="h-3.5 w-3.5" />}>
             <StatsExportPanel />
           </SurfaceCard>
         </section>
@@ -730,7 +734,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
         {/* 5 ── ADMINISTRATION (admin) ────────────────────────── */}
         {admin && (
           <section id="admin" className="scroll-mt-6 space-y-5">
-            <SurfaceCard accent="sky" title="Administration · Données SAP" icon={<Database className="h-3.5 w-3.5" />}>
+            <SurfaceCard accent="brand" title="Administration · Données SAP" icon={<Database className="h-3.5 w-3.5" />}>
               <p className="text-[12px] text-muted-foreground -mt-1 mb-1 max-w-xl">
                 Centre de synchronisation — à lancer ponctuellement, pas en continu.
               </p>
@@ -771,11 +775,11 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
             {/* Garde-fous de vente — règles métier GLOBALES (serveur), admin/direction.
                 Prix < prix d'achat, volume > N × la moyenne du client, plafonds de
                 commande… chaque règle est réglable Off / Avertir / Bloquer + seuils. */}
-            <SurfaceCard accent="rose" title="Garde-fous de vente" icon={<ShieldAlert className="h-3.5 w-3.5" />}>
+            <SurfaceCard accent="brand" title="Garde-fous de vente" icon={<ShieldAlert className="h-3.5 w-3.5" />}>
               <SafeguardsPanel />
             </SurfaceCard>
 
-            <SurfaceCard accent="amber" title="Fraîcheur · DLC par défaut" icon={<CalendarClock className="h-3.5 w-3.5" />}>
+            <SurfaceCard accent="brand" title="Fraîcheur · DLC par défaut" icon={<CalendarClock className="h-3.5 w-3.5" />}>
               <ShelfLifePanel />
             </SurfaceCard>
           </section>
