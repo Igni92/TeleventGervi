@@ -16,16 +16,24 @@
  *      invérifiables.
  *
  * Ce module réduit la liste au STRICT nécessaire : une EM par (entrepôt × segment),
- * la plus récente, uniquement si l'entrepôt de réception a du stock physique. Une
- * EM sans entrepôt vérifiable n'est retenue qu'en DERNIER RECOURS (aucun candidat
- * vérifié mais l'article a du stock) — pour ne jamais laisser l'opérateur sans
- * option, sans pour autant le noyer de faux positifs.
+ * la plus récente, uniquement si l'entrepôt de réception a du DISPO. Une EM sans
+ * entrepôt vérifiable n'est retenue qu'en DERNIER RECOURS (aucun candidat vérifié
+ * mais l'article a du dispo) — pour ne jamais laisser l'opérateur sans option,
+ * sans pour autant le noyer de faux positifs.
+ *
+ * UNITÉ (16/07/2026) : les quantités injectées (`stockInWarehouse`,
+ * `itemTotalStock`) sont le DISPONIBLE (= stock − réservé) exprimé EN COLIS —
+ * plus le stock physique en unités SAP. Un entrepôt sous 1 COLIS de dispo est
+ * traité comme épuisé : ses lots ne sont pas proposés (badge « en stock »
+ * trompeur quand tout était déjà réservé).
  */
 
 /** Affectation « stock commun » (défaut) — cf. lib/emAffect. */
 const AFFECT_ALL = "TOUS";
 /** Garde-fou : jamais plus de N lots proposés (après dédup, la liste est déjà courte). */
 const DEFAULT_MAX = 6;
+/** Dispo minimal (en colis) pour qu'un lot soit proposé — sous 1 colis : épuisé. */
+const MIN_DISPO_COLIS = 1;
 
 export interface LotCandidate {
   lot: string;
@@ -35,7 +43,7 @@ export interface LotCandidate {
   date: string | null;
   supplier: string | null;
   label?: string;
-  /** Stock physique indicatif (article × entrepôt de l'EM) — pas un stock PAR lot. */
+  /** Dispo indicatif (stock − réservé, article × entrepôt de l'EM), EN COLIS — pas un stock PAR lot. */
   qty: number | null;
 }
 
@@ -54,9 +62,9 @@ export interface CandidateInputs {
   affectOf: (docNum: number) => string;
   /** DocNum d'EM → métadonnées d'affichage (date de réception, fournisseur, libellé). */
   metaOf: (docNum: number) => { date: string | null; supplier: string | null; label?: string };
-  /** Stock physique de l'article dans un entrepôt donné (0 si aucun / inconnu). */
+  /** Dispo (stock − réservé) de l'article dans un entrepôt donné, EN COLIS (0 si aucun / inconnu). */
   stockInWarehouse: (warehouse: string | null) => number;
-  /** Stock physique total de l'article (tous entrepôts). */
+  /** Dispo total de l'article (tous entrepôts), EN COLIS. */
   itemTotalStock: number;
   /** Lot suggéré par resolveLotForSegment (« EM<DocNum> » ou null). */
   suggestedLot: string | null;
@@ -76,7 +84,7 @@ export function buildLotCandidates(input: CandidateInputs): {
   const seg = (input.segment ?? "").trim().toUpperCase() || null;
   const max = input.max ?? DEFAULT_MAX;
 
-  // 1. EM brutes → candidats avec métadonnées + stock indicatif de leur entrepôt.
+  // 1. EM brutes → candidats avec métadonnées + dispo indicatif (colis) de leur entrepôt.
   const raw: LotCandidate[] = emDocs.map((dn) => {
     const warehouse = input.warehouseOf(dn);
     const meta = input.metaOf(dn);
@@ -92,9 +100,9 @@ export function buildLotCandidates(input: CandidateInputs): {
     };
   });
 
-  // 2. Ne garde QUE les EM dont l'entrepôt de réception porte du stock physique.
-  //    Une EM sans entrepôt connu est invérifiable → écartée ici (repli en 4).
-  const stocked = raw.filter((c) => c.warehouse != null && input.stockInWarehouse(c.warehouse) > 0);
+  // 2. Ne garde QUE les EM dont l'entrepôt de réception a AU MOINS 1 COLIS de
+  //    dispo. Une EM sans entrepôt connu est invérifiable → écartée ici (repli en 4).
+  const stocked = raw.filter((c) => c.warehouse != null && input.stockInWarehouse(c.warehouse) >= MIN_DISPO_COLIS);
 
   // 3. Dédup : une seule EM par (entrepôt × affectation) — la PLUS RÉCENTE. Les
   //    réceptions antérieures du même couple sont consommées (FIFO) : les lister
@@ -107,10 +115,11 @@ export function buildLotCandidates(input: CandidateInputs): {
   }
   let candidates = [...byGroup.values()];
 
-  // 4. Repli : rien de vérifiable en stock MAIS l'article a du stock total → on
-  //    propose la SEULE EM la plus récente (miroir stock parfois non ventilé par
-  //    entrepôt), plutôt qu'une liste vide. Jamais plus d'un lot invérifiable.
-  if (candidates.length === 0 && input.itemTotalStock > 0 && raw.length > 0) {
+  // 4. Repli : rien de vérifiable en stock MAIS l'article a ≥ 1 colis de dispo
+  //    total → on propose la SEULE EM la plus récente (miroir stock parfois non
+  //    ventilé par entrepôt), plutôt qu'une liste vide. Jamais plus d'un lot
+  //    invérifiable.
+  if (candidates.length === 0 && input.itemTotalStock >= MIN_DISPO_COLIS && raw.length > 0) {
     const mostRecent = raw.reduce((a, b) => (b.docNum > a.docNum ? b : a));
     candidates = [mostRecent];
   }

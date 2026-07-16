@@ -12,8 +12,8 @@ import { StarRating } from "@/components/ui/star-rating";
  * Chaque EM (entrée marchandise) est un lot distinct, présenté en FIFO (plus
  * ancienne entrée d'abord) avec, quand le registre TeleVent les connaît :
  * FOURNISSEUR · EM# · PRIX d'achat · COLIS RESTANT (par-EM) · ÉTOILES (qualité).
- * Les lots hors registre mais avec du stock physique restent proposés (repli,
- * sans colis-restant par-EM). Source : /api/lots/candidates.
+ * Les lots hors registre mais avec du DISPO (≥ 1 colis, filtré côté API) restent
+ * proposés (repli, sans colis-restant par-EM). Source : /api/lots/candidates.
  */
 
 export interface ConsoleLotCandidate {
@@ -21,8 +21,9 @@ export interface ConsoleLotCandidate {
   docNum: number;
   warehouse: string | null;
   affect: string;
-  qty?: number | null;              // reste (registre) ou stock article×entrepôt (repli)
+  qty?: number | null;              // reste (registre) ou dispo article×entrepôt (repli)
   colis?: number | null;            // reste en COLIS (registre uniquement)
+  availColis?: number | null;       // dispo (stock − réservé) article×entrepôt, en COLIS
   fromLedger?: boolean;             // true = colis-restant par-EM fiable
   supplierName?: string | null;
   purchasePrice?: number | null;
@@ -143,9 +144,9 @@ export function ConsoleLotPicker({
                         <span className="text-[10.5px] px-1.5 py-px rounded bg-brand-500/12 text-brand-700 dark:text-brand-300 font-bold tnum" title="Colis restants sur cette entrée (registre TeleVent)">
                           {fmtColis(c.colis)} colis
                         </span>
-                      ) : c.qty != null && c.qty > 0 ? (
-                        <span className="text-[10px] px-1 py-px rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 tnum" title="Stock physique de l'article dans cet entrepôt">
-                          {Math.round(c.qty)} en stock
+                      ) : c.availColis != null && c.availColis > 0 ? (
+                        <span className="text-[10px] px-1 py-px rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 tnum" title="Disponible (stock − réservé) de l'article dans cet entrepôt, en colis">
+                          {fmtColis(c.availColis)} colis dispo
                         </span>
                       ) : null}
                     </span>

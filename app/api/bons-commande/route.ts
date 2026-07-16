@@ -179,7 +179,7 @@ export async function GET() {
     }
     const segmentOf = (cardCode: string) => (typeByCard.get(cardCode) ?? "").trim().toUpperCase() || null;
 
-    // Cartes de lots + affectations EM + stock physique par article (une fois).
+    // Cartes de lots + affectations EM + dispo (stock − réservé) par article (une fois).
     const [maps, affects, stock] = await Promise.all([getLotMaps(), getEmAffects(), getItemStock(itemCodes)]);
     // Libellé lisible d'une EM (au survol) : « Reçu le jj/mm/aaaa · Fournisseur ».
     const emLabel = (dn: number): string => {
@@ -194,11 +194,14 @@ export async function GET() {
     };
     // Lots candidats d'un article : liste COURTE et FIABLE (cf. lib/lotCandidates).
     // On ne propose qu'une EM par (entrepôt × segment), la plus récente, et
-    // seulement si l'entrepôt de réception porte du stock physique — le stock par
-    // lot n'existe pas dans ce SAP (maille article × entrepôt). `orderWarehouse`
-    // = magasin de la ligne (priorité douce d'affichage).
-    const candidatesFor = (itemCode: string, segment: string | null, orderWarehouse: string | null) =>
-      buildLotCandidates({
+    // seulement si l'entrepôt de réception a AU MOINS 1 COLIS de DISPO (= stock −
+    // réservé) — le stock par lot n'existe pas dans ce SAP (maille article ×
+    // entrepôt). Les quantités passées à la lib (et donc `qty` des candidats)
+    // sont EN COLIS. `orderWarehouse` = magasin de la ligne (priorité douce
+    // d'affichage).
+    const candidatesFor = (itemCode: string, segment: string | null, orderWarehouse: string | null) => {
+      const dispoColis = (qty: number) => Math.round((qty / (unitsPerColis(itemCode) || 1)) * 10) / 10;
+      return buildLotCandidates({
         itemCode,
         orderWarehouse,
         segment,
@@ -209,10 +212,11 @@ export async function GET() {
           const meta = maps.docMeta.get(dn);
           return { date: meta?.date ?? null, supplier: meta?.supplier ?? null, label: emLabel(dn) };
         },
-        stockInWarehouse: (whs) => (whs ? (stock.byItemWhs.get(`${itemCode}|${whs}`) ?? 0) : 0),
-        itemTotalStock: stock.byItem.get(itemCode) ?? 0,
+        stockInWarehouse: (whs) => (whs ? dispoColis(stock.byItemWhs.get(`${itemCode}|${whs}`) ?? 0) : 0),
+        itemTotalStock: dispoColis(stock.byItem.get(itemCode) ?? 0),
         suggestedLot: resolveLotForSegment(maps, affects, itemCode, undefined, segment).lot,
       });
+    };
 
     // Fusion par article des lignes d'un document (offre OU commande) : le lot est
     // le même sur toutes les lignes d'un article (affectées ensemble). « pending »

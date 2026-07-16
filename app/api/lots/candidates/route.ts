@@ -22,12 +22,18 @@ export const dynamic = "force-dynamic";
  *
  * Deux sources fusionnées :
  *   1. REGISTRE : lots avec un reste > 0 → colis-restant PAR-EM fiable (fromLedger) ;
- *   2. RÉSOLVEUR + stock physique (ProductStock) : lots reçus AVANT le registre
- *      (ou hors TeleVent) qui ont du stock article×entrepôt → repli (fromLedger=false),
- *      sans colis-restant par-EM. Évite toute régression si le registre est vide.
+ *   2. RÉSOLVEUR + dispo (ProductStock.available) : lots reçus AVANT le registre
+ *      (ou hors TeleVent) dont l'entrepôt a du dispo article×entrepôt → repli
+ *      (fromLedger=false), sans colis-restant par-EM. Évite toute régression si
+ *      le registre est vide.
+ *
+ * RÈGLE STOCK (16/07/2026) : on raisonne en DISPO (= stock − réservé), jamais en
+ * stock physique — un article entièrement réservé est à découvert. Un lot dont
+ * l'entrepôt a MOINS D'1 COLIS de dispo n'est PAS proposé. `availColis` porte ce
+ * dispo converti en colis pour l'affichage.
  *
  * Réponse : { ok, items: { [itemCode]: {
- *   candidates: [{ lot, docNum, warehouse, affect, qty, colis, fromLedger,
+ *   candidates: [{ lot, docNum, warehouse, affect, qty, colis, availColis, fromLedger,
  *                  supplierName, purchasePrice, currency, rating, admissionDate }],  // FIFO
  *   suggested: string | null,
  * } }, pending: "EM_PENDING" }
@@ -38,8 +44,9 @@ interface Candidate {
   docNum: number;
   warehouse: string | null;
   affect: string;
-  qty: number;                    // reste (registre) OU stock article×entrepôt (repli), unité SAP
+  qty: number;                    // reste (registre) OU dispo article×entrepôt (repli), unité SAP
   colis: number | null;           // reste en COLIS (registre uniquement — sinon null)
+  availColis: number;             // dispo (stock − réservé) article×entrepôt, en COLIS
   fromLedger: boolean;            // true = colis-restant par-EM fiable (registre)
   supplierName: string | null;
   purchasePrice: number | null;
@@ -90,6 +97,11 @@ export async function GET(req: NextRequest) {
     const divByItem = new Map<string, number>();
     for (const p of prods) { const d = colisInfo(p).unitsPerColis; divByItem.set(p.itemCode, d > 0 ? d : 1); }
     const toColis = (code: string, qty: number) => Math.round((qty / (divByItem.get(code) ?? 1)) * 10) / 10;
+    // Seuil « ≥ 1 colis de dispo » exprimé en unités SAP (= unités d'UN colis).
+    const unColis = (code: string) => divByItem.get(code) ?? 1;
+    // Dispo article×entrepôt d'un lot, converti en colis (pour badge UI).
+    const availColisOf = (code: string, warehouse: string | null) =>
+      toColis(code, lotStockQty(stock, code, warehouse));
 
     // Registre indexé par (itemCode, lot) + lots du registre par article.
     const ledgerByKey = new Map<string, (typeof ledgerRows)[number]>();
@@ -120,22 +132,23 @@ export async function GET(req: NextRequest) {
       const byLot = new Map<string, Candidate>();
 
       // 1) Lots du REGISTRE (colis-restant par-EM fiable) — MAIS uniquement s'ils
-      //    sont RÉELLEMENT EN STOCK. Règle métier : on ne propose que les lots
-      //    présents dans le stock. Si l'entrepôt de réception du lot n'a plus de
-      //    stock physique (article×entrepôt), le lot est épuisé et n'est PAS
-      //    proposé — même si le registre garde un reliquat (dérive possible). La
-      //    DLC n'entre pas en compte.
+      //    sont RÉELLEMENT DISPONIBLES. Règle métier : on ne propose que les lots
+      //    dont l'entrepôt de réception a AU MOINS 1 COLIS de dispo (= stock −
+      //    réservé, article×entrepôt). Sinon le lot est épuisé/à découvert et
+      //    n'est PAS proposé — même si le registre garde un reliquat (dérive
+      //    possible). La DLC n'entre pas en compte.
       for (const lot of ledgerLotsByItem.get(code) ?? []) {
         const r = ledgerByKey.get(`${code}|${lot}`);
         if (!r) continue;
         const docNum = docNumOfLot(lot);
         const warehouse = maps.whsOfItemDoc.get(`${code}|${docNum}`) ?? null;
-        if (!lotInStock(stock, code, warehouse)) continue;   // épuisé → non proposé
+        if (!lotInStock(stock, code, warehouse, unColis(code))) continue;   // < 1 colis dispo → non proposé
         byLot.set(lot, {
           lot, docNum, warehouse,
           affect: affects.get(docNum) ?? "TOUS",
           qty: r.quantity,
           colis: toColis(code, r.quantity),
+          availColis: availColisOf(code, warehouse),
           fromLedger: true,
           supplierName: r.supplierName ?? maps.docMeta.get(docNum)?.supplier ?? null,
           purchasePrice: r.purchasePrice ?? null,
@@ -151,8 +164,8 @@ export async function GET(req: NextRequest) {
       for (const c of byLot.values()) ledgerWhs.add(c.warehouse ?? "?");
 
       // 2) Repli (registre absent pour cet entrepôt) : SEULEMENT la PLUS RÉCENTE
-      //    EM par entrepôt-avec-stock. Le stock physique vient de la DERNIÈRE
-      //    arrivée, pas des vieux lots déjà épuisés — sinon on proposait tout
+      //    EM par entrepôt-avec-dispo. Le dispo vient de la DERNIÈRE arrivée,
+      //    pas des vieux lots déjà épuisés — sinon on proposait tout
       //    l'historique des EM tant que l'entrepôt avait du stock (bug signalé).
       //    byItemList est trié DESC par DocNum → la 1re EM vue d'un entrepôt est
       //    la plus récente.
@@ -164,13 +177,14 @@ export async function GET(req: NextRequest) {
         const whsKey = warehouse ?? "?";
         if (ledgerWhs.has(whsKey)) continue;          // registre fiable pour cet entrepôt
         if (fallbackWhsSeen.has(whsKey)) continue;    // déjà la plus récente EM de cet entrepôt
-        if (!lotInStock(stock, code, warehouse)) continue;
+        if (!lotInStock(stock, code, warehouse, unColis(code))) continue;   // < 1 colis dispo → non proposé
         fallbackWhsSeen.add(whsKey);
         byLot.set(lot, {
           lot, docNum: d, warehouse,
           affect: affects.get(d) ?? "TOUS",
           qty: lotStockQty(stock, code, warehouse),
-          colis: null,   // stock article×entrepôt (pas par-EM) → pas de colis-restant fiable
+          colis: null,   // dispo article×entrepôt (pas par-EM) → pas de colis-restant fiable
+          availColis: availColisOf(code, warehouse),
           fromLedger: false,
           supplierName: maps.docMeta.get(d)?.supplier ?? null,
           purchasePrice: null,

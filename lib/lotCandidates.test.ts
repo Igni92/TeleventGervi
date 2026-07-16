@@ -7,14 +7,15 @@ import { buildLotCandidates, type CandidateInputs } from "./lotCandidates";
  * des lots « pas en stock », et vérifie la sélection/validation.
  */
 
-// Fabrique un jeu d'entrées à partir d'EM décrites simplement, avec un stock
-// article × entrepôt. `emDocs` est trié plus récent d'abord (comme lotResolver).
+// Fabrique un jeu d'entrées à partir d'EM décrites simplement, avec un DISPO
+// (= stock − réservé, EN COLIS) article × entrepôt. `emDocs` est trié plus
+// récent d'abord (comme lotResolver).
 function makeInputs(opts: {
   itemCode?: string;
   orderWarehouse?: string | null;
   segment?: string | null;
   ems: { dn: number; whs: string | null; affect?: string; date?: string; supplier?: string }[];
-  stockByWhs: Record<string, number>; // entrepôt → stock physique
+  stockByWhs: Record<string, number>; // entrepôt → dispo en colis
   suggestedLot?: string | null;
   max?: number;
 }): CandidateInputs {
@@ -69,13 +70,53 @@ describe("buildLotCandidates — filtre stock (« pas en stock »)", () => {
     expect(lots(r)).toEqual(["EM200"]);
   });
 
-  it("repli : aucune EM vérifiable mais stock total > 0 → propose UNE seule EM (la plus récente)", () => {
+  it("repli : aucune EM vérifiable mais dispo total ≥ 1 colis → propose UNE seule EM (la plus récente)", () => {
     const r = buildLotCandidates(makeInputs({
       ems: [{ dn: 300, whs: null }, { dn: 250, whs: null }, { dn: 100, whs: null }],
-      stockByWhs: { "01": 12 }, // stock existe mais pas ventilé sur une EM connue
+      stockByWhs: { "01": 12 }, // dispo existe mais pas ventilé sur une EM connue
     }));
     expect(lots(r)).toEqual(["EM300"]);
-    expect(r.candidates[0].qty).toBe(12); // qty = stock total de l'article
+    expect(r.candidates[0].qty).toBe(12); // qty = dispo total de l'article (colis)
+  });
+});
+
+describe("buildLotCandidates — seuil « moins d'1 colis de dispo » (16/07/2026)", () => {
+  it("écarte une EM dont l'entrepôt a moins d'1 colis de dispo (tout réservé)", () => {
+    const r = buildLotCandidates(makeInputs({
+      ems: [
+        { dn: 300, whs: "01" },   // 0.5 colis dispo → écarté
+        { dn: 200, whs: "R1" },   // 40 colis dispo → gardé
+      ],
+      stockByWhs: { "01": 0.5, R1: 40 },
+    }));
+    expect(lots(r)).toEqual(["EM200"]);
+  });
+
+  it("garde une EM à EXACTEMENT 1 colis de dispo (seuil inclusif)", () => {
+    const r = buildLotCandidates(makeInputs({
+      ems: [{ dn: 300, whs: "01" }],
+      stockByWhs: { "01": 1 },
+    }));
+    expect(lots(r)).toEqual(["EM300"]);
+  });
+
+  it("pas de repli quand le dispo total est sous 1 colis", () => {
+    const r = buildLotCandidates(makeInputs({
+      ems: [{ dn: 300, whs: null }, { dn: 250, whs: null }],
+      stockByWhs: { "01": 0.9 }, // < 1 colis au total → aucun lot proposé
+    }));
+    expect(r.candidates).toEqual([]);
+    expect(r.suggested).toBeNull();
+  });
+
+  it("annule la suggestion quand son entrepôt passe sous 1 colis de dispo", () => {
+    const r = buildLotCandidates(makeInputs({
+      ems: [{ dn: 300, whs: "01" }, { dn: 200, whs: "R1" }],
+      stockByWhs: { "01": 0.4, R1: 30 },
+      suggestedLot: "EM300",
+    }));
+    expect(lots(r)).toEqual(["EM200"]);
+    expect(r.suggested).toBeNull();
   });
 });
 

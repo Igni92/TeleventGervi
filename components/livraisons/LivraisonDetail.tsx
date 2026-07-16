@@ -3006,6 +3006,7 @@ interface SwapSrcLine {
 interface LotCand {
   lot: string; docNum: number; warehouse: string | null; affect: string;
   qty?: number | null; colis?: number | null; fromLedger?: boolean;
+  availColis?: number | null;   // dispo (stock − réservé) article×entrepôt, en COLIS
   supplierName?: string | null; purchasePrice?: number | null; currency?: string | null;
   rating?: number | null;
 }
@@ -3194,8 +3195,8 @@ function LineToolMenu({ docEntry, docNum, pos, onClose, onDone }: {
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                   ) : c.fromLedger && c.colis != null && c.colis > 0 ? (
                     <span className="text-[10.5px] px-1.5 py-px rounded bg-brand-500/12 text-brand-700 dark:text-brand-300 font-bold tnum" title="Colis restants sur cette entrée">{fmtColisLot(c.colis)} colis</span>
-                  ) : c.qty != null && c.qty > 0 ? (
-                    <span className="text-[10px] px-1 py-px rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 tnum" title="Stock physique de l'article dans cet entrepôt">{Math.round(c.qty)} en stock</span>
+                  ) : c.availColis != null && c.availColis > 0 ? (
+                    <span className="text-[10px] px-1 py-px rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 tnum" title="Disponible (stock − réservé) de l'article dans cet entrepôt, en colis">{fmtColisLot(c.availColis)} colis dispo</span>
                   ) : null}
                 </span>
               </div>

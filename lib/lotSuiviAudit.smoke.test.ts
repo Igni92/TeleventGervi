@@ -19,6 +19,7 @@ import { resolveLotForSegment, type LotMaps } from "./lotResolver";
 const d = (iso: string) => iso; // dates ISO simples pour le tri FIFO
 
 // Builder d'entrées buildLotCandidates (repris de lotCandidates.test.ts).
+// `stockByWhs` = DISPO (= stock − réservé) en COLIS par entrepôt.
 function makeInputs(opts: {
   segment?: string | null;
   ems: { dn: number; whs: string | null; affect?: string; date?: string }[];
