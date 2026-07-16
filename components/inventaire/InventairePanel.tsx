@@ -9,6 +9,7 @@ import {
   PackageMinus, PackagePlus, Database, AlertCircle, Boxes, Search, Plus,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
+import { StatBlock } from "@/components/ui/stat-block";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1556,15 +1557,11 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
 }
 
 /* ----------------------------- Petits blocs ----------------------------- */
+/** Tuile stat locale — délègue la typo au StatBlock partagé (dédoublonnage). */
 function Stat({ label, value, tone = "muted" }: { label: string; value: number; tone?: "muted" | "amber" | "sky" }) {
-  const color =
-    tone === "amber" ? "text-amber-600 dark:text-amber-400"
-    : tone === "sky" ? "text-sky-600 dark:text-sky-400"
-    : "text-foreground";
   return (
-    <div className="rounded-xl bg-muted/50 py-2">
-      <div className={`text-[20px] font-bold leading-none tnum ${color}`}>{value}</div>
-      <div className="mt-0.5 text-[10.5px] uppercase tracking-wide text-muted-foreground">{label}</div>
+    <div className="rounded-xl bg-muted/50 px-3 py-2">
+      <StatBlock label={label} value={value} size="md" tone={tone === "muted" ? "default" : tone} />
     </div>
   );
 }

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { Loader2, X, Send, Mail, AlertTriangle, ShieldCheck, History } from "lucide-react";
+import { StatBlock } from "@/components/ui/stat-block";
+import { InfoHint } from "@/components/ui/info-hint";
 import { RELANCE_LEVELS, suggestLevel, type RelanceCode } from "@/lib/relance/levels";
 
 interface PreviewRecipient {
@@ -285,12 +287,15 @@ export function RelanceDialog({
   );
 }
 
+/** Tuile stat locale — StatBlock partagé ; la précision (hint) vit derrière le « ? ». */
 function Stat({ label, value, hint, strong }: { label: string; value: string; hint?: string; strong?: boolean }) {
   return (
     <div className="rounded-lg border border-border bg-secondary/30 px-3 py-2">
-      <div className="text-[9.5px] uppercase tracking-wide text-muted-foreground font-semibold">{label}</div>
-      <div className={`tnum mt-0.5 ${strong ? "text-[15px] font-bold text-foreground" : "text-[13.5px] font-semibold text-foreground"}`}>{value}</div>
-      {hint && <div className="text-[9.5px] text-muted-foreground mt-0.5">{hint}</div>}
+      <StatBlock
+        label={hint ? <span className="inline-flex items-center gap-1.5">{label}<InfoHint label={label} size={13}>{hint}</InfoHint></span> : label}
+        value={value}
+        size={strong ? "md" : "sm"}
+      />
     </div>
   );
 }
