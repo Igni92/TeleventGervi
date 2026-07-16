@@ -5,49 +5,55 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 
 /**
- * <InfoTip /> — lightweight tooltip for explaining metrics/terms.
+ * <InfoHint /> — pictogramme « ? » cerclé pour l'info SECONDAIRE.
  *
- * Rendered via a portal so it never gets clipped by parent overflow.
- * Mode icône : rend le MÊME « ? » cerclé que <InfoHint/> (ui/info-hint.tsx)
- * pour une seule identité visuelle d'aide contextuelle dans toute l'app.
- * Usage:
+ * Règle de hiérarchie (DA) : l'écran n'affiche en clair que l'essentiel
+ * (blanc/jaune, grand) ; les détails et métadonnées vivent derrière ce « ? »
+ * et n'apparaissent qu'au survol (ou au focus clavier).
  *
- *   1. Standalone "?" icon:
- *      <InfoTip label="Conversion" content="commandes / appels" />
+ *   <InfoHint label="Référence SAP">DOC-142857 · créé le 12/07 08:14</InfoHint>
  *
- *   2. Wrap any element:
- *      <InfoTip label="Restants" content="..."><span>12</span></InfoTip>
+ * Mobile : l'info secondaire est SUPPRIMÉE (demande client) — le composant
+ * est masqué en dessous de `sm` et sur coquille tactile (`touch:hidden`),
+ * sauf `keepOnMobile`. Le tooltip est rendu en portal (jamais rogné par un
+ * overflow parent), origine côté déclencheur, entrée 150 ms ease-out.
  */
+
 type Side = "top" | "bottom" | "left" | "right";
 
-interface InfoTipProps {
-  children?: React.ReactNode;
-  content?: React.ReactNode;
+interface InfoHintProps {
+  /** Contenu affiché dans la bulle (l'info secondaire elle-même). */
+  children: React.ReactNode;
+  /** Petit intitulé uppercase au-dessus du contenu (ex. « Référence »). */
   label?: string;
   side?: Side;
+  /** Par défaut le « ? » disparaît sur mobile/tactile ; true pour le garder. */
+  keepOnMobile?: boolean;
   className?: string;
-  iconSize?: number;
+  /** Taille du rond (px). 16 par défaut — discret à côté du texte. */
+  size?: number;
 }
 
-export function InfoTip({
+export function InfoHint({
   children,
-  content,
   label,
   side = "top",
+  keepOnMobile = false,
   className,
-  iconSize = 12,
-}: InfoTipProps) {
+  size = 16,
+}: InfoHintProps) {
   const [open, setOpen] = React.useState(false);
   const [pos, setPos] = React.useState<{ x: number; y: number } | null>(null);
-  const ref = React.useRef<HTMLSpanElement>(null);
-  const timer = React.useRef<NodeJS.Timeout | undefined>(undefined);
+  const ref = React.useRef<HTMLButtonElement>(null);
+  const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const computePos = React.useCallback(() => {
     const el = ref.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const margin = 10;
-    let x = 0, y = 0;
+    const margin = 8;
+    let x = 0,
+      y = 0;
     switch (side) {
       case "top":    x = r.left + r.width / 2; y = r.top - margin; break;
       case "bottom": x = r.left + r.width / 2; y = r.bottom + margin; break;
@@ -62,14 +68,13 @@ export function InfoTip({
     timer.current = setTimeout(() => {
       computePos();
       setOpen(true);
-    }, 180);
+    }, 150);
   };
   const hide = () => {
     clearTimeout(timer.current);
     setOpen(false);
   };
 
-  // Reposition on scroll/resize while open
   React.useEffect(() => {
     if (!open) return;
     const onUpdate = () => computePos();
@@ -81,71 +86,56 @@ export function InfoTip({
     };
   }, [open, computePos]);
 
-  // Wrap mode: pass children as trigger + content as tip body
-  // Icon mode: no children → render built-in "i" icon, content as tip body
-  const isWrap = children !== undefined && React.Children.count(children) > 0;
-  const tipBody = content;
-
-  if (isWrap) {
-    return (
-      <>
-        <span
-          ref={ref}
-          className={cn("relative inline-flex items-center", className)}
-          onMouseEnter={show}
-          onMouseLeave={hide}
-          onFocus={show}
-          onBlur={hide}
-        >
-          {children}
-        </span>
-        {open && pos && <Portal pos={pos} side={side} label={label} body={tipBody} />}
-      </>
-    );
-  }
-
-  // Icon mode — « ? » cerclé (même identité visuelle qu'InfoHint)
-  const circle = Math.max(iconSize + 4, 15);
   return (
     <>
-      <span
+      <button
+        type="button"
         ref={ref}
+        tabIndex={0}
+        aria-label={label ?? "Détails"}
         className={cn(
-          "relative inline-flex items-center justify-center cursor-help align-middle select-none",
-          "rounded-full border border-border/90",
+          "inline-flex items-center justify-center shrink-0 align-middle cursor-help select-none",
+          "rounded-full border border-border/90 bg-transparent",
           "text-muted-foreground/70 hover:text-foreground hover:border-foreground/40",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           "transition-colors duration-150",
+          // Mobile / tactile : l'info secondaire disparaît purement et simplement.
+          !keepOnMobile && "hidden sm:inline-flex touch:hidden",
           className,
         )}
-        style={{ width: circle, height: circle, fontSize: Math.round(circle * 0.62) }}
-        tabIndex={0}
-        role="button"
-        aria-label={label ?? "Info"}
+        style={{ width: size, height: size, fontSize: Math.round(size * 0.62) }}
         onMouseEnter={show}
         onMouseLeave={hide}
         onFocus={show}
         onBlur={hide}
+        onClick={(e) => e.preventDefault()}
       >
         <span className="font-semibold leading-none" aria-hidden>?</span>
-      </span>
-      {open && pos && <Portal pos={pos} side={side} label={label} body={tipBody} />}
+      </button>
+      {open && pos && (
+        <HintPortal pos={pos} side={side} label={label}>
+          {children}
+        </HintPortal>
+      )}
     </>
   );
 }
 
-function Portal({
-  pos, side, label, body,
+function HintPortal({
+  pos,
+  side,
+  label,
+  children,
 }: {
   pos: { x: number; y: number };
   side: Side;
   label?: string;
-  body: React.ReactNode;
+  children: React.ReactNode;
 }) {
   const [mounted, setMounted] = React.useState(false);
-  React.useEffect(() => { setMounted(true); }, []);
+  React.useEffect(() => setMounted(true), []);
   if (!mounted) return null;
 
-  // Translate origin per side
   const translate =
     side === "top"    ? "translate(-50%, -100%)" :
     side === "bottom" ? "translate(-50%, 0)" :
@@ -156,23 +146,19 @@ function Portal({
     <div
       role="tooltip"
       className={cn(
-        "fixed z-[100] pointer-events-none w-max max-w-[280px]",
-        "px-3 py-2 rounded-lg text-[12px] leading-snug",
+        "fixed z-[100] pointer-events-none w-max max-w-[300px]",
+        "px-3.5 py-2.5 rounded-xl text-[12.5px] leading-relaxed",
         "bg-popover text-popover-foreground border border-border shadow-modal",
-        "animate-fade-in",
+        "animate-scale-in motion-reduce:animate-none",
       )}
-      style={{
-        left: pos.x,
-        top: pos.y,
-        transform: translate,
-      }}
+      style={{ left: pos.x, top: pos.y, transform: translate }}
     >
       {label && (
         <span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground mb-1">
           {label}
         </span>
       )}
-      <span className="block text-foreground">{body}</span>
+      <span className="block">{children}</span>
     </div>,
     document.body,
   );

@@ -113,7 +113,7 @@ export function SupplierTable() {
                   {s.type && <Badge variant="secondary">{s.type}</Badge>}
                   {!s.active && <Badge variant="annule">Archivé</Badge>}
                   {s.sapCardCode && (
-                    <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200/60 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/20">
+                    <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/12 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-300">
                       <Link2 className="h-3 w-3" /> SAP
                     </span>
                   )}

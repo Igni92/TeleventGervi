@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { VentesDuJour } from "@/components/livraisons/VentesDuJour";
 import { isLivraisonRestricted } from "@/lib/permissions";
+import { PageHeader } from "@/components/ui/page-header";
 
 export const metadata = { title: "Ventes du jour" };
 export const dynamic = "force-dynamic";
@@ -18,17 +19,17 @@ export default async function VentesDuJourPage() {
 
   return (
     <div className="space-y-6 animate-fade-up">
-      <header>
-        <p className="kicker mb-1.5">Télévente</p>
-        <h1 className="font-display text-[34px] font-semibold text-foreground tracking-tight leading-none">
-          Ventes du jour
-        </h1>
-        <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
-          Les ventes <b>saisies aujourd&apos;hui</b> (jour où la commande est rentrée),
-          groupées par <b>transporteur</b>. Pour chaque BL : sa <b>date de livraison</b> et
-          l&apos;avancement de la préparation (<b>Préparé</b> ✓ / <b>Départ</b> ✓).
-        </p>
-      </header>
+      <PageHeader
+        kicker="Télévente"
+        title="Ventes du jour"
+        help={
+          <>
+            Les ventes <b>saisies aujourd&apos;hui</b> (jour où la commande est rentrée),
+            groupées par <b>transporteur</b>. Pour chaque BL : sa <b>date de livraison</b> et
+            l&apos;avancement de la préparation (<b>Préparé</b> ✓ / <b>Départ</b> ✓).
+          </>
+        }
+      />
       <VentesDuJour />
     </div>
   );

@@ -4,6 +4,7 @@ import { PreparationsAFaire } from "@/components/livraisons/PreparationsAFaire";
 import { LivraisonsSectionTabs } from "@/components/livraisons/LivraisonsSectionTabs";
 import { isTerrainConfined } from "@/lib/preparateur";
 import { PreparateurNav } from "@/components/PreparateurNav";
+import { PageHeader } from "@/components/ui/page-header";
 
 export const metadata = { title: "Préparations à faire" };
 export const dynamic = "force-dynamic";
@@ -18,17 +19,17 @@ export default async function PreparationsPage() {
       {isTerrainConfined(session) && <PreparateurNav current="preparations" />}
       {/* Onglets de section « Livraisons du jour » (postes non confinés). */}
       {!isTerrainConfined(session) && <LivraisonsSectionTabs />}
-      <header>
-        <p className="kicker mb-1.5">Entrepôt · charge</p>
-        <h1 className="font-display text-[28px] sm:text-[34px] font-semibold text-foreground tracking-tight leading-none">
-          Préparations à faire
-        </h1>
-        <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
-          Toutes les commandes <b>pas encore préparées</b> des livraisons à venir, groupées par
-          <b> date de livraison</b> (la plus proche en premier). Pour préparer une commande précise,
-          passe par <b>Préparation livraisons</b>.
-        </p>
-      </header>
+      <PageHeader
+        kicker="Entrepôt · charge"
+        title="Préparations à faire"
+        help={
+          <>
+            Toutes les commandes <b>pas encore préparées</b> des livraisons à venir, groupées par
+            <b> date de livraison</b> (la plus proche en premier). Pour préparer une commande précise,
+            passe par <b>Préparation livraisons</b>.
+          </>
+        }
+      />
       <PreparationsAFaire />
     </div>
   );

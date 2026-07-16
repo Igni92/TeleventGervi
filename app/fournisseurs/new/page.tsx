@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { SupplierForm } from "@/components/suppliers/SupplierForm";
+import { PageHeader } from "@/components/ui/page-header";
 
 export const metadata = {
   title: "Nouveau fournisseur | Gervi",
@@ -24,15 +25,11 @@ export default async function NewSupplierPage() {
         </Button>
       </div>
 
-      <div>
-        <p className="kicker mb-2">Création</p>
-        <h1 className="font-display text-[28px] sm:text-[36px] lg:text-[40px] font-light text-foreground leading-none tracking-tight">
-          Nouveau <span className="italic text-foreground/50">fournisseur</span>
-        </h1>
-        <p className="text-[13px] text-muted-foreground mt-3 italic">
-          Rattachez un tiers SAP ou saisissez la fiche à la main, puis ajoutez ses interlocuteurs.
-        </p>
-      </div>
+      <PageHeader
+        kicker="Création"
+        title={<>Nouveau <span className="italic text-foreground/50">fournisseur</span></>}
+        help={<>Rattachez un tiers SAP ou saisissez la fiche à la main, puis ajoutez ses interlocuteurs.</>}
+      />
 
       <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-6">
         <SupplierForm mode="create" />

@@ -60,7 +60,7 @@ export default function Error({
 
           <Link
             href="/"
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 h-10 text-[14px] font-medium text-slate-700 transition-all duration-150 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 dark:border-slate-700 dark:bg-transparent dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:border-slate-600 dark:hover:text-slate-100"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-card px-5 h-10 text-[14px] font-medium text-foreground transition-[background-color,border-color,color,transform] duration-150 hover:bg-secondary hover:border-input active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
             <Home className="h-4 w-4" aria-hidden />
             Retour à l&apos;accueil
