@@ -108,6 +108,10 @@ function moisEmployePage(f: MoisEmploye, monthId: string): string {
   const payLine = pay > 0
     ? `<div class="pay pay-ok"><span class="k">Heures supp À PAYER ce mois (équiv. majoré, décision employeur)</span><span class="v">${fmtHM(pay)}</span></div>`
     : "";
+  // Jours fériés : TOUJOURS payés (jamais en récup), détaillés à part pour la paie.
+  const ferieLine = total.ferieMin > 0
+    ? `<div class="pay pay-ok"><span class="k">Jours fériés — journée type due, TOUJOURS PAYÉE</span><span class="v">${fmtHM(total.ferieMin)}</span></div>`
+    : "";
   return `
   <section class="page">
     <header>
@@ -143,6 +147,7 @@ function moisEmployePage(f: MoisEmploye, monthId: string): string {
       </tfoot>
     </table>
 
+    ${ferieLine}
     ${payLine}
     ${recapBlock(f.recap)}
 
@@ -152,7 +157,8 @@ function moisEmployePage(f: MoisEmploye, monthId: string): string {
     « Équiv. payé » = heures supp converties en heures payées (×1,25 / ×1,5) — donnée paie.
     Un jour de CONGÉS validé est compté comme TRAVAILLÉ (journée type créditée — il ne crée jamais de
     déficit). Un JOUR FÉRIÉ chômé est DÛ : une journée type est créditée (colonne « Férié »), incluse
-    dans le total — À PAYER comme du temps travaillé.
+    dans le total et TOUJOURS PAYÉE — jamais transformée en récup ; les majorations d'heures supp ne
+    portent que sur le dépassement réellement TRAVAILLÉ (hors crédit férié).
     La récup posée n'est déduite du compteur qu'au passage de la semaine, et seulement si le
     contrat n'y est pas atteint. Les heures de récup AU-DELÀ du plafond fixé par l'employeur partent au
     PAIEMENT sur le bulletin du mois suivant (ligne « payé M+1 » ci-dessus).
@@ -223,8 +229,8 @@ function moisSynthesePage(feuilles: MoisEmploye[], monthId: string): string {
     <p class="legende">Heures supp calculées par semaine civile puis totalisées ; semaine à cheval rattachée au
     mois de son dimanche. « À payer (supp) » = équivalent MAJORÉ des heures supp dont le paiement a été décidé
     (paiement intégral ou part payée d'un partage « mixte ») — le reste crédite le compteur de récup.
-    « Férié » = journées types créditées pour les jours fériés chômés (incluses dans le total, à payer comme
-    du temps travaillé). « Payé M+1 » = heures de récup AU-DELÀ du plafond fixé par l'employeur, à payer
+    « Férié » = journées types créditées pour les jours fériés chômés — incluses dans le total et TOUJOURS
+    payées (jamais en récup ; les majorations ne portent que sur le dépassement travaillé). « Payé M+1 » = heures de récup AU-DELÀ du plafond fixé par l'employeur, à payer
     sur le bulletin du mois suivant. Un état détaillé par employé suit (à signer).</p>
   </section>`;
 }

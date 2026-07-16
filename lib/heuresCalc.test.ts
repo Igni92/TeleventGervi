@@ -87,6 +87,29 @@ describe("heuresCalc — tag « Férié » (journée type due et payée)", () =>
     expect(c.totalMin).toBe(28 * 60 + TYP);
     expect(c.ferieMin).toBe(TYP);
     expect(c.congesMin).toBe(0);
+    // 35h15 > contrat, mais le dépassement vient du férié → RIEN d'arbitrable.
+    expect(c.sup25Min).toBe(0);
+    expect(c.sup50Min).toBe(0);
+  });
+
+  it("FORCÉMENT PAYÉ : le dépassement dû au férié n'est jamais arbitrable, seules les heures TRAVAILLÉES au-delà du contrat restent en supp", () => {
+    // Cas réel : lun 7h45, mardi 14/07 férié, mer 8h15, jeu/ven/sam 7h15 → 37h45
+    // travaillées + 7h15 créditées = 45h00. Supp arbitrables = 2h45 seulement.
+    const days: DayHours[] = [
+      { m1: "04:45", m2: "12:30" },
+      { tag: "ferie" },
+      { m1: "04:45", m2: "13:00" },
+      { m1: "04:45", m2: "12:00" },
+      { m1: "04:45", m2: "12:00" },
+      { m1: "04:45", m2: "12:00" },
+      {},
+    ];
+    const c = computeWeek(days, 35, TYP);
+    expect(c.totalMin).toBe(45 * 60);
+    expect(c.ferieMin).toBe(TYP);
+    expect(c.sup25Min).toBe(2 * 60 + 45);
+    expect(c.sup50Min).toBe(0);
+    expect(c.majEquivMin).toBe(Math.round((2 * 60 + 45) * 1.25));   // 3h26
   });
 
   it("férié TRAVAILLÉ (heures saisies) → les heures réelles priment, pas de crédit", () => {

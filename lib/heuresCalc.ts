@@ -97,15 +97,15 @@ export function dayMinutes(d: DayHours | undefined | null): number {
 
 export interface WeekCalc {
   dayMin: number[];       // minutes par jour (Lun→Dim), crédit congés inclus
-  totalMin: number;       // total travaillé (crédit congés inclus)
+  totalMin: number;       // total travaillé (crédits congés + fériés inclus)
   contractMin: number;    // contrat hebdo
   deltaMin: number;       // total − contrat (négatif = récup)
-  sup25Min: number;       // heures supp à +25 % (8 premières)
-  sup50Min: number;       // heures supp à +50 % (au-delà)
+  sup25Min: number;       // heures supp à +25 % (8 premières) — dépassement TRAVAILLÉ seulement
+  sup50Min: number;       // heures supp à +50 % (au-delà) — dépassement TRAVAILLÉ seulement
   recupMin: number;       // heures de récupération (si total < contrat)
   majEquivMin: number;    // équivalent PAYÉ des heures supp (×1,25 / ×1,5)
   congesMin: number;      // minutes CRÉDITÉES par les jours de congés (journée type)
-  ferieMin: number;       // minutes CRÉDITÉES par les jours fériés chômés (journée type — dues et payées)
+  ferieMin: number;       // minutes CRÉDITÉES par les jours fériés chômés (journée type — TOUJOURS payées, jamais en récup)
 }
 
 /** Minutes de la « journée type » du profil ; repli = contrat / 5 jours.
@@ -120,7 +120,14 @@ export function typicalDayMinutes(profile: Pick<HoursProfile, "weeklyHours" | "t
  *  `typicalDayMin` > 0 → chaque jour taggé « congés » ou « férié » SANS heures
  *  saisies est crédité d'une journée type (le CP compte comme travaillé, le
  *  férié chômé est DÛ — jamais de déficit créé par un congé validé ni par un
- *  jour férié). */
+ *  jour férié).
+ *
+ *  JOUR FÉRIÉ « FORCÉMENT PAYÉ » : la part du dépassement attribuable au crédit
+ *  férié est payée telle quelle (heures normales, détaillées à part dans
+ *  `ferieMin`) et n'entre JAMAIS dans les heures supp arbitrables — les
+ *  majorations 25/50 ne portent que sur le dépassement réellement TRAVAILLÉ.
+ *  Ex. contrat 35 h, 37h45 travaillées + férié 7h15 crédité (total 45h00) →
+ *  supp arbitrables 2h45 (récup/paiement), férié 7h15 payé quoi qu'il arrive. */
 export function computeWeek(
   days: (DayHours | undefined)[],
   weeklyHours: number,
@@ -144,7 +151,8 @@ export function computeWeek(
   const totalMin = dayMin.reduce((s, m) => s + m, 0);
   const contractMin = Math.max(0, Math.round((weeklyHours || 0) * 60));
   const deltaMin = totalMin - contractMin;
-  const supMin = Math.max(0, deltaMin);
+  // Dépassement TRAVAILLÉ = dépassement total − part férié (forcément payée).
+  const supMin = Math.max(0, Math.max(0, deltaMin) - ferieMin);
   const sup25Min = Math.min(supMin, SUP25_BAND_MIN);
   const sup50Min = Math.max(0, supMin - SUP25_BAND_MIN);
   const recupMin = Math.max(0, -deltaMin);

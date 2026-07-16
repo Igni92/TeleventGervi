@@ -976,7 +976,8 @@ function ComptaDialog({ month, rows, onClose, onDone }: {
             <h2 className="text-[15px] font-bold text-foreground">Heures supp : payer ou récupérer ?</h2>
             <p className="mt-0.5 text-[11.5px] text-muted-foreground">
               Par employé et par semaine : tout payer, tout en récup, ou <b>mixte</b> (payer une partie,
-              le reste crédite le compteur de récup). Reporté tel quel sur le PDF.
+              le reste crédite le compteur de récup). Seul le dépassement <b>travaillé</b> s&apos;arbitre —
+              les jours fériés sont <b>toujours payés</b>, à part. Reporté tel quel sur le PDF.
             </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Fermer"
@@ -1018,6 +1019,13 @@ function ComptaDialog({ month, rows, onClose, onDone }: {
                     {pendingDays > 0 && <> · demandée <b className="text-foreground">{pendingDays} j</b></>}
                   </span>
                 </div>
+
+                {/* Fériés : TOUJOURS payés, détaillés à part — aucun arbitrage possible. */}
+                {(r.total.ferieMin ?? 0) > 0 && (
+                  <p className="mt-1 text-[11.5px] tnum text-orange-700 dark:text-orange-300">
+                    Fériés du mois : <b>{fmtHM(r.total.ferieMin)}</b> — toujours payés, hors arbitrage.
+                  </p>
+                )}
 
                 {/* Récup déjà posée/demandée pas encore débitée : si le paiement
                     vide trop le compteur, on prévient AVANT de générer le PDF. */}
