@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { PromoBanner } from "@/components/promos/PromoBanner";
 import { MobileTiles } from "@/components/mobile/MobileTiles";
-import { MeteoBar } from "./MeteoBar";
 import { KpiStrip } from "./KpiStrip";
 import { PoidsFamilles } from "./PoidsFamilles";
 import { DernieresCommandes } from "./DernieresCommandes";
@@ -33,10 +32,10 @@ function useNow(refreshMs = 30_000): Date | null {
 
 /**
  * En-tête salutation + date + horloge — SEUL composant re-rendu au tick 30 s.
- * `meteo` (élément créé par le parent, référence stable) se loge AU-DESSUS de
- * l'horloge, collé en haut à droite : React saute son re-rendu à chaque tick.
+ * NB : la météo n'habite plus l'en-tête — elle est remontée dans la bande du
+ * haut de la coquille (TopStrip), sur la même ligne que les événements.
  */
-function HubHeader({ firstName, meteo }: { firstName: string | null; meteo?: React.ReactNode }) {
+function HubHeader({ firstName }: { firstName: string | null }) {
   const now = useNow();
   const hour = now?.getHours() ?? 9;
   const salutation = hour >= 18 || hour < 4 ? "Bonsoir" : "Bonjour";
@@ -59,21 +58,13 @@ function HubHeader({ firstName, meteo }: { firstName: string | null; meteo?: Rea
           L&apos;activité du jour !
         </p>
       </div>
-      {/* COLONNE en haut à droite : MÉTÉO tout en haut, HORLOGE juste dessous,
-          le tout aligné à droite. self-start ancre la colonne au SOMMET de
-          l'en-tête (le titre reste aligné bas) et ml-auto la garde collée à
-          droite même quand l'en-tête passe sur deux lignes (flex-wrap). La
-          colonne fait ± la hauteur du bloc titre : rien ne bouge en dessous. */}
-      <div className="flex flex-col items-end gap-2 min-w-0 ml-auto self-start">
-        {meteo}
-        <div className="text-right shrink-0" aria-live="off">
-          <p className="font-display text-[26px] font-semibold text-foreground leading-none tnum min-h-[26px]">
-            {heure || " "}
-          </p>
-          <p className="text-[11.5px] text-muted-foreground mt-1.5 min-h-[14px]">
-            {dateLongue ? dateLongue.charAt(0).toUpperCase() + dateLongue.slice(1) : " "}
-          </p>
-        </div>
+      <div className="text-right shrink-0" aria-live="off">
+        <p className="font-display text-[26px] font-semibold text-foreground leading-none tnum min-h-[26px]">
+          {heure || " "}
+        </p>
+        <p className="text-[11.5px] text-muted-foreground mt-1.5 min-h-[14px]">
+          {dateLongue ? dateLongue.charAt(0).toUpperCase() + dateLongue.slice(1) : " "}
+        </p>
       </div>
     </header>
   );
@@ -85,13 +76,9 @@ export function AccueilHub() {
 
   return (
     <div className="keep-bricks space-y-4 animate-fade-up max-sm:py-3">
-      {/* Météo TOUT EN HAUT À DROITE (au-dessus de l'horloge, colonne alignée
-          à droite), format grand (≈ ×1,5 — lisible de loin) ; l'accueil reste
-          sans défilement. Desktop uniquement (le mobile a ses tuiles). */}
-      <HubHeader
-        firstName={firstName}
-        meteo={<div className="hidden lg:block min-w-0"><MeteoBar /></div>}
-      />
+      {/* La météo est TOUT EN HAUT, sur la même ligne que la bannière
+          événements — rendue par la coquille (TopStrip), pas par l'accueil. */}
+      <HubHeader firstName={firstName} />
 
       {/* ── Bandeau promotions ── */}
       <PromoBanner context="accueil" />

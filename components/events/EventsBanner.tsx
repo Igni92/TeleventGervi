@@ -22,8 +22,11 @@ export function EventsBanner() {
   return (
     // Mobile : une SEULE ligne compacte qui défile (plus de gros bloc qui prend
     // 2-3 lignes) ; desktop : chips confortables qui reviennent à la ligne.
+    // NB : la marge basse est portée par la bande parente (TopStrip) — la
+    // bannière partage désormais sa ligne avec la météo ; min-w-0 lui permet
+    // de rétrécir (scroll interne) sans pousser la météo hors écran.
     <div
-      className="mb-3 sm:mb-5 flex items-center gap-1.5 sm:gap-2 overflow-x-auto sm:flex-wrap pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden print:hidden"
+      className="min-w-0 flex items-center gap-1.5 sm:gap-2 overflow-x-auto sm:flex-wrap pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden print:hidden"
       aria-label="Événements de la semaine"
     >
       {/* Libellé « Événements » retiré : les puces portent déjà chacune leur
