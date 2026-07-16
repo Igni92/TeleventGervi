@@ -594,8 +594,8 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
                 />
               </SettingRow>
               <SettingRow
-                title="Bandeau météo (accueil)"
-                desc="Affiche la météo courante en haut de l'accueil. Masquable d'un clic depuis le bandeau (croix)."
+                title="Météo (accueil)"
+                desc="Météo du jour et de la semaine, en haut à droite de l'accueil. Masquable d'un clic (croix)."
               >
                 <SegmentToggle
                   ariaLabel="Affichage du bandeau météo"
