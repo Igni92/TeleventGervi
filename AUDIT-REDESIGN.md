@@ -119,13 +119,20 @@
 
 16. `tsc` 0 · `eslint` 0 · `vitest` verts · `next build` OK · revue visuelle.
 
-### Backlog assumé (chantiers suivants, hors de cette passe)
+### Backlog — suivi de la boucle d'audit
 
-- Migration des **355 `title=`** restants vers `InfoHint` (fichiers les plus
-  denses : `LivraisonDetail` 35, `Ecran2Order` 28, `ParametresPanel` 25).
-- **`LivraisonDetail.tsx`** (184 Ko) : refonte dédiée (le fichier le plus
-  incohérent du repo — 172 tailles ad hoc, 52 boutons bruts).
-- Généralisation `ui/table` (39 tables maison) et `ui/button` (419 boutons bruts).
-- Tokens sémantiques de statut (`--success/--warning/--danger/--info`) pour les
-  ~120 badges de statut hardcodés.
-- Sidebar : tokenisation complète des 94 couleurs en dur.
+- [x] **Mobile = app plein écran** : panneaux bord à bord partout (sauf accueil),
+  puis **une seule surface** (fond = couleur des panneaux, zéro décor, titre de
+  page masqué, bannière événements desktop-only). PR #286/#287/#290.
+- [x] **Paramètres** : descriptions des réglages derrière le « ? », accents de
+  sections unifiés (fin de l'arc-en-ciel). PR #289.
+- [~] Migration des **`title=`** explicatifs vers `InfoHint` — fait : écrans
+  console (Écran 2, CallConsole, SapOrderHistory). Reste : `LivraisonDetail`
+  (35), `PlanningPanel` (12), `HeuresPanel` (12), divers.
+- [ ] **`LivraisonDetail.tsx`** (184 Ko) : refonte dédiée par tranches (le plus
+  incohérent du repo — 172 tailles ad hoc, 52 boutons bruts, ~16 pastilles).
+- [ ] Généralisation `ui/button` (419 boutons bruts) ; primitive table partagée
+  (39 tables maison).
+- [ ] Tokens sémantiques de statut (`--success/--warning/--danger/--info`) pour
+  les ~120 badges de statut hardcodés.
+- [ ] Sidebar : tokenisation complète des 94 couleurs en dur.
