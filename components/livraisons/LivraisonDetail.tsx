@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import { StarRating } from "@/components/ui/star-rating";
 import { PageHeader } from "@/components/ui/page-header";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ClientLink } from "@/components/ClientLink";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
@@ -720,11 +721,11 @@ function DatePanel({
                 Livraison du
               </span>
               {isAuto ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-brand-500/12 text-brand-600 dark:text-brand-400 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                <span className="inline-flex items-center gap-1 rounded-full bg-brand-500/12 text-brand-700 dark:text-brand-300 ring-1 ring-brand-500/25 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
                   <Clock className="h-3 w-3" /> Prochaine
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/12 text-amber-700 dark:text-amber-300 ring-1 ring-amber-500/25 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
                   Date choisie
                 </span>
               )}
@@ -2299,10 +2300,10 @@ const OrderRow = memo(function OrderRow({
                     ? `Livraison prévue le ${capitalize(formatDeliveryDate(dueISO))} — pas encore faite, reportée dans la file du jour`
                     : `Livraison prévue le ${capitalize(formatDeliveryDate(dueISO))} — mise en préparation en avance, dans la file jusqu'à ce qu'elle soit faite`
                 }
-                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ${
                   carriedOverdue
-                    ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                    : "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300"
+                    ? "bg-amber-500/12 text-amber-700 dark:text-amber-300 ring-amber-500/25"
+                    : "bg-indigo-500/12 text-indigo-700 dark:text-indigo-300 ring-indigo-500/25"
                 }`}
               >
                 <CalendarDays className="h-3 w-3 shrink-0" />
@@ -2315,49 +2316,49 @@ const OrderRow = memo(function OrderRow({
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setEditByOpen(true); }}
                 title={`Préparée par ${displayPersonName(preparedBy ?? preparer)}${fmtClock(preparedAt) ? ` à ${fmtClock(preparedAt)}` : ""} — cliquer pour changer la personne`}
-                className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 text-[10px] font-semibold hover:bg-emerald-500/25 transition-colors">
+                className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/25 px-2 py-0.5 text-[10px] font-semibold hover:bg-emerald-500/25 transition-colors">
                 <UserCheck className="h-3 w-3 shrink-0" /> <span className="truncate">Fait par {displayPersonName(preparedBy ?? preparer)}{fmtClock(preparedAt) ? ` · ${fmtClock(preparedAt)}` : ""}</span>
                 <Pencil className="h-2.5 w-2.5 opacity-70 shrink-0" />
               </button>
             )}
             {departed && (
               <span title={departedBy ? `Parti — ${displayPersonName(departedBy)}${fmtClock(departedAt) ? ` à ${fmtClock(departedAt)}` : ""}` : "Partie en livraison"}
-                className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full bg-sky-500/12 text-sky-700 dark:text-sky-300 ring-1 ring-sky-500/25 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
                 <Truck className="h-3 w-3 shrink-0" /> <span className="truncate">Parti{departedBy ? ` · ${displayPersonName(departedBy)}` : ""}{fmtClock(departedAt) ? ` · ${fmtClock(departedAt)}` : ""}</span>
               </span>
             )}
             {incomplete && (
               <span title="Pas entièrement préparée — remise sur la file"
-                className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                className="inline-flex items-center gap-1 rounded-full bg-rose-500/12 text-rose-700 dark:text-rose-300 ring-1 ring-rose-500/25 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
                 <AlertTriangle className="h-3 w-3" /> À reprendre
               </span>
             )}
             {reportedMissing.length > 0 && (
               <span title={`Signalé(s) manquant(s) par le préparateur : ${reportedMissingNames}`}
-                className="inline-flex items-center gap-1 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                className="inline-flex items-center gap-1 rounded-full bg-amber-500/12 text-amber-700 dark:text-amber-300 ring-1 ring-amber-500/25 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
                 <PackageX className="h-3 w-3" /> {reportedMissing.length} signalé{reportedMissing.length > 1 ? "s" : ""}
               </span>
             )}
             {missingSet.size > 0 && (
               <span title="Articles en stock SAP négatif (tous entrepôts) sur cette commande — achat à prévoir"
-                className="inline-flex items-center gap-1 rounded-full bg-rose-500 text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                className="inline-flex items-center gap-1 rounded-full bg-rose-500/12 text-rose-700 dark:text-rose-300 ring-1 ring-rose-500/25 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
                 <PackageX className="h-3 w-3" /> {missingSet.size} manquant{missingSet.size > 1 ? "s" : ""}
               </span>
             )}
             {preparer && !prepared && (
               <span title={`En préparation par ${displayPersonName(preparer)}`}
-                className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2 py-0.5 text-[10px] font-semibold">
+                className="inline-flex items-center gap-1 rounded-full bg-sky-500/12 text-sky-700 dark:text-sky-300 ring-1 ring-sky-500/25 px-2 py-0.5 text-[10px] font-semibold">
                 <UserCheck className="h-3 w-3" /> {displayPersonName(preparer)}
               </span>
             )}
             {!doc.open && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide">
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/25 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide">
                 <CheckCircle2 className="h-2.5 w-2.5" /> Livrée
               </span>
             )}
             {doc.excluded && (
               <span title="BL totalement avoiré (facturé puis avoir total / doublon) — déduit des totaux"
-                className="inline-flex items-center gap-1 rounded-full bg-rose-500 text-white px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide">
+                className="inline-flex items-center gap-1 rounded-full bg-rose-500/12 text-rose-700 dark:text-rose-300 ring-1 ring-rose-500/25 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide">
                 <RotateCcw className="h-2.5 w-2.5" /> Avoir — déduit
               </span>
             )}
@@ -2614,9 +2615,10 @@ const OrderRow = memo(function OrderRow({
             <span className="text-[15px] font-semibold tnum text-muted-foreground">{fmtNum(doc.weightKg)} kg</span>
             {/* Heure de PRISE de la commande dans le système (création SAP). */}
             {fmtClock(doc.takenAt) && (
-              <span title={`Commande prise dans le système à ${fmtClock(doc.takenAt)}`}
-                className="inline-flex items-center gap-1 rounded-full bg-secondary text-muted-foreground px-2.5 py-1 text-[12px] font-bold uppercase">
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-secondary text-muted-foreground ring-1 ring-border px-2.5 py-1 text-[12px] font-bold uppercase">
                 <Clock className="h-3.5 w-3.5" /> Prise · {fmtClock(doc.takenAt)}
+                <InfoHint label="Heure de prise" size={14}>Commande prise dans le système à {fmtClock(doc.takenAt)}</InfoHint>
               </span>
             )}
             {(preparedBy ?? preparer) && (
@@ -2626,7 +2628,7 @@ const OrderRow = memo(function OrderRow({
                 onClick={() => { if (prepared) setEditByOpen(true); }}
                 disabled={!prepared}
                 title={prepared ? "Changer la personne qui a fait la commande" : undefined}
-                className={`inline-flex items-center gap-1.5 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2.5 py-1 text-[12px] font-semibold ${prepared ? "hover:bg-sky-500/25 transition-colors" : "cursor-default"}`}
+                className={`inline-flex items-center gap-1.5 rounded-full bg-sky-500/12 text-sky-700 dark:text-sky-300 ring-1 ring-sky-500/25 px-2.5 py-1 text-[12px] font-semibold ${prepared ? "hover:bg-sky-500/25 transition-colors" : "cursor-default"}`}
               >
                 <UserCheck className="h-3.5 w-3.5" /> {prepared ? "Fait par" : "Préparée par"} {displayPersonName(preparedBy ?? preparer)}
                 {prepared && <Pencil className="h-3 w-3 opacity-70" />}
@@ -2634,13 +2636,13 @@ const OrderRow = memo(function OrderRow({
             )}
             {prepared && (
               <span title={fmtClock(preparedAt) ? `Marquée « faite » à ${fmtClock(preparedAt)}` : "Marquée « faite »"}
-                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2.5 py-1 text-[12px] font-bold uppercase">
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/25 px-2.5 py-1 text-[12px] font-bold uppercase">
                 <CheckCircle2 className="h-3.5 w-3.5" /> Faite{fmtClock(preparedAt) ? ` · ${fmtClock(preparedAt)}` : ""}
               </span>
             )}
             {departed && (
               <span title={fmtClock(departedAt) ? `Partie en livraison à ${fmtClock(departedAt)}` : "Partie en livraison"}
-                className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 px-2.5 py-1 text-[12px] font-bold uppercase">
+                className="inline-flex items-center gap-1 rounded-full bg-sky-500/12 text-sky-700 dark:text-sky-300 ring-1 ring-sky-500/25 px-2.5 py-1 text-[12px] font-bold uppercase">
                 <Truck className="h-3.5 w-3.5" /> Parti{fmtClock(departedAt) ? ` · ${fmtClock(departedAt)}` : ""}
               </span>
             )}
@@ -2769,7 +2771,7 @@ const OrderRow = memo(function OrderRow({
                       <span className="block text-[11px] text-muted-foreground">{fmtNum(l.quantity)} · {fmtNum(l.weightKg)} kg</span>
                     </span>
                     {picked && (
-                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/12 text-amber-700 dark:text-amber-300 ring-1 ring-amber-500/25 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
                         <PackageX className="h-3 w-3" /> Manquant
                       </span>
                     )}
