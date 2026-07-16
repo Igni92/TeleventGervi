@@ -52,6 +52,8 @@ interface Promo {
 interface ProductHit {
   itemCode: string; itemName: string; groupName: string | null;
   marque: string | null; pays: string | null; condi: string | null; variete: string | null;
+  /** article sans stock disponible — retrouvé uniquement par code exact */
+  horsStock: boolean;
 }
 
 /** Types de magasin ciblables + « Tous ». */
@@ -287,24 +289,36 @@ function CreatePromoDialog({
 
   // Recherche produits (debounce 250 ms) — on capture aussi les tags produit
   // (conditionnement / pays / marque / variété) pour composer le libellé riche.
+  // Par défaut seuls les articles EN STOCK (disponible > 0) sont proposés ;
+  // si rien ne matche, repli sans filtre stock limité à la correspondance
+  // EXACTE de code — un code article existant tapé en entier passe toujours.
   useEffect(() => {
     const q = query.trim();
     if (picked || q.length < 2) { setHits([]); return; }
     const t = setTimeout(async () => {
       setSearching(true);
       try {
-        const res = await fetch(`/api/products?search=${encodeURIComponent(q)}&limit=15`);
-        const json = await res.json().catch(() => ({}));
         type ApiProduct = {
           itemCode: string; itemName: string; groupName?: string | null;
           uMarque?: string | null; uPays?: string | null;
           uCondi?: string | null; uUvc?: string | null; frgnName?: string | null;
         };
-        setHits(((json?.products ?? []) as ApiProduct[]).map((p) => ({
-          itemCode: p.itemCode, itemName: p.itemName, groupName: p.groupName ?? null,
-          marque: p.uMarque ?? null, pays: p.uPays ?? null,
-          condi: p.uCondi ?? p.uUvc ?? null, variete: p.frgnName ?? null,
-        })));
+        const toHits = (json: unknown, horsStock: boolean): ProductHit[] =>
+          (((json as { products?: ApiProduct[] } | null)?.products ?? [])).map((p) => ({
+            itemCode: p.itemCode, itemName: p.itemName, groupName: p.groupName ?? null,
+            marque: p.uMarque ?? null, pays: p.uPays ?? null,
+            condi: p.uCondi ?? p.uUvc ?? null, variete: p.frgnName ?? null,
+            horsStock,
+          }));
+        const res = await fetch(`/api/products?search=${encodeURIComponent(q)}&inStock=true&limit=15`);
+        const json = await res.json().catch(() => ({}));
+        let list = toHits(json, false);
+        if (list.length === 0) {
+          const res2 = await fetch(`/api/products?search=${encodeURIComponent(q)}&limit=15`);
+          const json2 = await res2.json().catch(() => ({}));
+          list = toHits(json2, true).filter((h) => h.itemCode.toLowerCase() === q.toLowerCase());
+        }
+        setHits(list);
       } catch { setHits([]); }
       finally { setSearching(false); }
     }, 250);
@@ -399,13 +413,23 @@ function CreatePromoDialog({
               />
               {searching && <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />}
             </div>
+            <p className="text-[11.5px] text-muted-foreground mt-1">
+              Seuls les articles en stock sont proposés — un code exact hors stock reste accepté.
+            </p>
             {hits.length > 0 && (
               <ul className="absolute z-50 left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-md border border-border bg-card shadow-modal">
                 {hits.map((h) => (
                   <li key={h.itemCode}>
                     <button type="button" onClick={() => pick(h)}
                       className="w-full px-3 py-2 text-left hover:bg-secondary/50">
-                      <span className="block text-[13.5px] font-medium text-foreground truncate">{h.itemName}</span>
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-[13.5px] font-medium text-foreground truncate">{h.itemName}</span>
+                        {h.horsStock && (
+                          <span className="shrink-0 inline-flex items-center h-[17px] px-1.5 rounded-[4px] text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-300/70 dark:bg-amber-950/50 dark:text-amber-300 dark:ring-amber-400/40">
+                            Hors stock
+                          </span>
+                        )}
+                      </span>
                       <span className="block text-[10.5px] font-mono text-muted-foreground/70">
                         {h.itemCode}{h.groupName ? ` · ${h.groupName}` : ""}
                       </span>
