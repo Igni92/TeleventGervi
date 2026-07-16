@@ -12,10 +12,10 @@ import {
 } from "@/components/settings/app-settings";
 
 /**
- * Météo de l'accueil — logée EN HAUT À DROITE, dans l'en-tête (à gauche de
- * l'horloge, cf. AccueilHub). Format GRAND (≈ ×1,5 de la première version
- * compacte — d'abord doublé puis réduit « d'un chouia » à la demande :
- * lisible de loin sans envahir l'en-tête).
+ * Météo de l'accueil — TOUT EN HAUT À DROITE de l'en-tête, au-dessus de
+ * l'horloge (colonne alignée à droite, cf. AccueilHub). Format GRAND
+ * (≈ ×1,5 de la première version compacte — d'abord doublé puis réduit
+ * « d'un chouia » à la demande : lisible de loin sans envahir l'en-tête).
  *
  * - PLUSIEURS VILLES possibles (Paramètres : villes séparées par des
  *   virgules, cf. parseMeteoZones) : une pastille « conditions actuelles »
