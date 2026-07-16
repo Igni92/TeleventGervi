@@ -6,11 +6,12 @@ import Link from "next/link";
 import {
   Moon, Sun, ZoomIn, Check, Database, Contrast, Tags, ChevronRight, CalendarClock,
   Palette, Glasses, MonitorCog, MousePointerClick, Wand2, BadgePercent, Rows3,
-  ShieldAlert, CloudSun,
+  ShieldAlert, CloudSun, FileDown,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { ShelfLifePanel } from "@/components/settings/ShelfLifePanel";
 import { SafeguardsPanel } from "@/components/settings/SafeguardsPanel";
+import { StatsExportPanel } from "@/components/settings/StatsExportPanel";
 import { ClientImportButton } from "@/components/clients/ClientImportButton";
 import { MirrorBackfillPanel } from "@/components/admin/MirrorBackfillPanel";
 import { ProductsSyncButton } from "@/components/admin/ProductsSyncButton";
@@ -26,13 +27,14 @@ import {
 } from "@/components/settings/app-settings";
 
 /**
- * Panneau « Paramètres » — refonte : QUATRE sections nettes au lieu d'une pile
+ * Panneau « Paramètres » — refonte : CINQ sections nettes au lieu d'une pile
  * de cartes, avec sommaire ancré (scroll-spy) sur desktop.
  *
  *   1. Apparence          — thème, animations, étincelles au clic
  *   2. Confort de lecture — zoom, densité, contraste de survol
  *   3. Console & catalogue — logos de marque, bandeau promotions
- *   4. Administration     — DLC par défaut, synchronisations SAP (admin)
+ *   4. Export & analyse   — export JSON de l'onglet Stats (analyse Claude)
+ *   5. Administration     — DLC par défaut, synchronisations SAP (admin)
  *
  * Persistance inchangée : localStorage via writeSetting (SETTING_KEYS) +
  * ThemeProvider (`tv-theme`). Tous les consommateurs réagissent à chaud.
@@ -220,6 +222,7 @@ const SECTIONS: SectionDef[] = [
   { id: "apparence", label: "Apparence",           icon: <Palette className="h-3.5 w-3.5" /> },
   { id: "lecture",   label: "Confort de lecture",  icon: <Glasses className="h-3.5 w-3.5" /> },
   { id: "console",   label: "Console & catalogue", icon: <MonitorCog className="h-3.5 w-3.5" /> },
+  { id: "export",    label: "Export & analyse",    icon: <FileDown className="h-3.5 w-3.5" /> },
   { id: "admin",     label: "Administration",      icon: <Database className="h-3.5 w-3.5" />, adminOnly: true },
 ];
 
@@ -713,7 +716,18 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
           </SurfaceCard>
         </section>
 
-        {/* 4 ── ADMINISTRATION (admin) ────────────────────────── */}
+        {/* 4 ── EXPORT & ANALYSE ──────────────────────────────── */}
+        {/* Export JSON de tout ce qu'affiche l'onglet Stats (/dashboard),
+            à glisser dans Claude Cowork pour analyse approfondie. Visible
+            par tous : les API pilotage scopent déjà les données aux droits
+            de l'utilisateur (un commercial n'exporte que son périmètre). */}
+        <section id="export" className="scroll-mt-6">
+          <SurfaceCard accent="emerald" title="Export & analyse" icon={<FileDown className="h-3.5 w-3.5" />}>
+            <StatsExportPanel />
+          </SurfaceCard>
+        </section>
+
+        {/* 5 ── ADMINISTRATION (admin) ────────────────────────── */}
         {admin && (
           <section id="admin" className="scroll-mt-6 space-y-5">
             <SurfaceCard accent="sky" title="Administration · Données SAP" icon={<Database className="h-3.5 w-3.5" />}>
