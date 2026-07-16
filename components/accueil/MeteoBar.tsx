@@ -12,10 +12,10 @@ import {
 } from "@/components/settings/app-settings";
 
 /**
- * Météo de l'accueil — TOUT EN HAUT À DROITE de l'en-tête, au-dessus de
- * l'horloge (colonne alignée à droite, cf. AccueilHub). Format GRAND
- * (≈ ×1,5 de la première version compacte — d'abord doublé puis réduit
- * « d'un chouia » à la demande : lisible de loin sans envahir l'en-tête).
+ * Météo de l'accueil — TOUT EN HAUT À DROITE, incrustée dans la bande du haut
+ * de la coquille (TopStrip), SUR LA MÊME LIGNE que la bannière événements.
+ * Format GRAND (≈ ×1,5 de la première version compacte — d'abord doublé puis
+ * réduit « d'un chouia » à la demande : lisible de loin sans envahir le haut).
  *
  * - PLUSIEURS VILLES possibles (Paramètres : villes séparées par des
  *   virgules, cf. parseMeteoZones) : une pastille « conditions actuelles »

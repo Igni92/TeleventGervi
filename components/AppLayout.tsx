@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import { Sidebar } from "@/components/Sidebar";
 import { MobileTopBar } from "@/components/MobileTopBar";
-import { EventsBanner } from "@/components/events/EventsBanner";
+import { TopStrip } from "@/components/TopStrip";
 import { RolePreviewProvider } from "@/components/role-preview/RolePreviewProvider";
 import { RolePreviewBanner } from "@/components/role-preview/RolePreviewBanner";
 import { HoursValidationGate } from "@/components/effectifs/HoursValidationGate";
@@ -44,7 +44,8 @@ export async function AppLayout({ children }: AppLayoutProps) {
               tactile (téléphone/tablette) → barre du haut forcée, sidebar masquée. */}
           <MobileTopBar className="md:hidden touch:!block" />
           <RolePreviewBanner />
-          <EventsBanner />
+          {/* Bande du haut : événements à gauche + météo à droite (accueil). */}
+          <TopStrip />
           <HoursValidationGate />
           {children}
         </main>
