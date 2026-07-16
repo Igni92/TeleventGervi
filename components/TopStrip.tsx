@@ -10,7 +10,9 @@ import { MeteoBar } from "@/components/accueil/MeteoBar";
  * la météo s'incruste au niveau de l'événement en cours, tout en haut à droite).
  *
  * - La météo n'apparaît que sur l'ACCUEIL (elle appartient à cet écran) et sur
- *   desktop (le mobile a ses tuiles) ; la bannière événements reste globale.
+ *   desktop large (lg) ; la bannière événements reste globale.
+ * - Bande DESKTOP uniquement (hidden sm:flex) : sur mobile (app pro), pas de
+ *   chrome décoratif entre la barre du haut et le contenu.
  * - `empty:hidden` : quand ni événement ni météo ne rendent quoi que ce soit,
  *   la bande disparaît entièrement (pas de marge fantôme).
  */
@@ -20,7 +22,7 @@ export function TopStrip() {
     pathname === "/" || pathname === "/accueil" || !!pathname?.startsWith("/accueil/");
 
   return (
-    <div className="mb-3 sm:mb-5 flex items-center justify-between gap-4 empty:hidden print:hidden">
+    <div className="mb-3 sm:mb-5 hidden sm:flex items-center justify-between gap-4 empty:hidden print:hidden">
       <EventsBanner />
       {onAccueil && <MeteoBar className="hidden lg:flex ml-auto shrink-0" />}
     </div>

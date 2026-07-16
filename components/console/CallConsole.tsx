@@ -51,6 +51,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { InfoTip } from "@/components/ui/info-tip";
+import { InfoHint } from "@/components/ui/info-hint";
 import { formatDate, formatDateInput, formatRelative } from "@/lib/utils";
 import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
 import { motion } from "framer-motion";
@@ -2681,12 +2682,14 @@ function ShortcutsDialog({
               <li key={a} className="flex items-center gap-3 py-2.5">
                 <span className="flex-1 text-[13px] text-foreground">{SHORTCUT_LABELS[a]}</span>
                 {isConflict && !isCapturing && (
-                  <span
-                    className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
-                    title="Cette touche est partagée avec une autre action"
-                  >
-                    conflit
-                  </span>
+                  <>
+                    <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
+                      conflit
+                    </span>
+                    <InfoHint label="Conflit de touche" size={14}>
+                      Cette touche est partagée avec une autre action
+                    </InfoHint>
+                  </>
                 )}
                 <button
                   type="button"

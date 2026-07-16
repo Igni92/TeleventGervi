@@ -72,11 +72,11 @@ export function SectionCard({
         aria-hidden
         className={cn("absolute inset-x-0 top-0 z-[1] h-[3px] bg-gradient-to-r max-sm:hidden", ACCENT_BAR[accent])}
       />
-      {/* Micro-grille radiale — prolonge la grille technique du fond global,
-          masquée en fondu pour ne jamais gêner la lecture des formulaires. */}
+      {/* Micro-grille radiale — décor desktop uniquement (mobile app pro :
+          surface parfaitement plate, aucun motif). */}
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10 opacity-[0.45] bg-[radial-gradient(hsl(var(--foreground)/0.025)_1px,transparent_1px)] [background-size:18px_18px] [mask-image:linear-gradient(to_bottom,#000,transparent_42%)]"
+        className="pointer-events-none absolute inset-0 -z-10 opacity-[0.45] bg-[radial-gradient(hsl(var(--foreground)/0.025)_1px,transparent_1px)] [background-size:18px_18px] [mask-image:linear-gradient(to_bottom,#000,transparent_42%)] max-sm:hidden"
       />
 
       {hasHeader && (

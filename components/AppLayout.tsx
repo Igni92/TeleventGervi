@@ -44,7 +44,9 @@ export async function AppLayout({ children }: AppLayoutProps) {
               tactile (téléphone/tablette) → barre du haut forcée, sidebar masquée. */}
           <MobileTopBar className="md:hidden touch:!block" />
           <RolePreviewBanner />
-          {/* Bande du haut : événements à gauche + météo à droite (accueil). */}
+          {/* Bande du haut : événements à gauche + météo à droite (accueil).
+              Desktop uniquement — sur mobile (app pro), pas de chrome décoratif
+              entre la barre du haut et le contenu (géré DANS TopStrip). */}
           <TopStrip />
           <HoursValidationGate />
           {children}
