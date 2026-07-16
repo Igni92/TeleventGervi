@@ -17,7 +17,7 @@ export default async function NewSupplierPage() {
   return (
     <div className="space-y-6 max-w-3xl">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" asChild className="gap-1 text-slate-500 dark:text-slate-400">
+        <Button variant="ghost" size="sm" asChild className="gap-1 text-muted-foreground">
           <Link href="/fournisseurs">
             <ArrowLeft className="h-4 w-4" />
             Retour aux fournisseurs
@@ -31,7 +31,7 @@ export default async function NewSupplierPage() {
         help={<>Rattachez un tiers SAP ou saisissez la fiche à la main, puis ajoutez ses interlocuteurs.</>}
       />
 
-      <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-6">
+      <div className="bg-card rounded-xl border border-border shadow-card p-6">
         <SupplierForm mode="create" />
       </div>
     </div>

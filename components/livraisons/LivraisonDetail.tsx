@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { StarRating } from "@/components/ui/star-rating";
+import { PageHeader } from "@/components/ui/page-header";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ClientLink } from "@/components/ClientLink";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
@@ -512,28 +513,28 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
   return (
     <div className="space-y-5 animate-fade-up">
       {/* ── En-tête ── */}
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="kicker mb-1.5">Télévente · logistique</p>
-          <h1 className="font-display text-[28px] sm:text-[34px] font-semibold text-foreground tracking-tight leading-none">
-            Livraisons du jour
-          </h1>
-          <p className="hidden md:block text-[12.5px] text-muted-foreground mt-2 max-w-2xl">
+      <PageHeader
+        kicker="Télévente · logistique"
+        title="Livraisons du jour"
+        help={
+          <>
             Toutes les commandes à préparer pour la prochaine tournée
             (<b>J+1</b>, sauf le samedi → <b>J+2</b>). En cas de jour férié, ajustez la
             date de livraison ci-dessous.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => load()}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border bg-card text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60 shrink-0"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-          Actualiser
-        </button>
-      </header>
+          </>
+        }
+        actions={
+          <button
+            type="button"
+            onClick={() => load()}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border bg-card text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60 shrink-0"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            Actualiser
+          </button>
+        }
+      />
 
       {/* ── Sélecteur de jour de livraison (pièce maîtresse) ── */}
       <DatePanel
