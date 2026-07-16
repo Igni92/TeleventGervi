@@ -44,7 +44,9 @@ export async function AppLayout({ children }: AppLayoutProps) {
               tactile (téléphone/tablette) → barre du haut forcée, sidebar masquée. */}
           <MobileTopBar className="md:hidden touch:!block" />
           <RolePreviewBanner />
-          <EventsBanner />
+          {/* Bannière événements : desktop uniquement — sur mobile (app pro),
+              pas de chrome décoratif entre la barre du haut et le contenu. */}
+          <div className="hidden sm:block"><EventsBanner /></div>
           <HoursValidationGate />
           {children}
         </main>
