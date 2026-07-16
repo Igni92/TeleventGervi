@@ -12,11 +12,13 @@ import {
 import { useJson } from "./use-json";
 
 /**
- * Météo compacte de l'accueil — logée EN HAUT À DROITE, dans l'en-tête (à
- * gauche de l'horloge, cf. AccueilHub) : AUCUNE hauteur ajoutée à la page.
+ * Météo de l'accueil — logée EN HAUT À DROITE, dans l'en-tête (à gauche de
+ * l'horloge, cf. AccueilHub). Format GRAND (toutes les tailles doublées par
+ * rapport à la première version compacte — demande utilisateur : lisibilité
+ * de loin sur le poste télévente).
  *
  * - Conditions actuelles (pastille teintée selon le temps + température +
- *   ville) puis la SEMAINE : 7 mini-colonnes jour · pictogramme coloré ·
+ *   ville) puis la SEMAINE : 7 colonnes jour · pictogramme coloré ·
  *   température moyenne, « Auj » mis en avant. Détail en infobulle.
  * - Zone (ville) réglable dans les Paramètres (SETTING_KEYS.meteoZone) ; défaut
  *   METEO_ZONE_DEFAULT. Relevé via /api/meteo (Open-Meteo, sans clé, cache 15 min).
@@ -100,18 +102,18 @@ export function MeteoBar({ className }: { className?: string }) {
   const days = (data.days ?? []).slice(0, 7);
 
   return (
-    <section aria-label="Météo" className={cn("flex items-center gap-0.5", className)}>
-      {/* ── Conditions actuelles — compactes ── */}
+    <section aria-label="Météo" className={cn("flex items-center gap-1", className)}>
+      {/* ── Conditions actuelles ── */}
       <div
-        className="mr-1.5 flex items-center gap-1.5 border-r border-border/60 pr-2.5"
+        className="mr-3 flex items-center gap-3 border-r border-border/60 pr-5"
         title={`${cur.label} — ${data.city ?? zone}${data.wind != null && data.wind > 0 ? ` · vent ${data.wind} km/h` : ""}`}
       >
-        <span className={cn("flex h-7 w-7 items-center justify-center rounded-lg ring-1 ring-inset", cur.tile)}>
-          <cur.Icon className={cn("h-4 w-4", cur.tone)} aria-hidden />
+        <span className={cn("flex h-14 w-14 items-center justify-center rounded-2xl ring-1 ring-inset", cur.tile)}>
+          <cur.Icon className={cn("h-8 w-8", cur.tone)} aria-hidden />
         </span>
         <div className="leading-none">
-          <p className="font-display text-[15px] font-semibold leading-none text-foreground tnum">{data.temp}°</p>
-          <p className="mt-0.5 max-w-[64px] truncate text-[9px] text-muted-foreground">{data.city ?? zone}</p>
+          <p className="font-display text-[30px] font-semibold leading-none text-foreground tnum">{data.temp}°</p>
+          <p className="mt-1 max-w-[128px] truncate text-[18px] text-muted-foreground">{data.city ?? zone}</p>
         </div>
       </div>
 
@@ -123,19 +125,19 @@ export function MeteoBar({ className }: { className?: string }) {
             key={d.date}
             title={`${dayLong(d.date)} — ${w.label}, ${d.temp}° en moyenne`}
             className={cn(
-              "flex w-8 shrink-0 flex-col items-center gap-[3px] rounded-md py-1 animate-fade-in",
+              "flex w-16 shrink-0 flex-col items-center gap-1.5 rounded-xl py-2 animate-fade-in",
               i === 0 ? "bg-secondary/70" : "transition-colors hover:bg-secondary/40",
             )}
             style={{ animationDelay: `${i * 35}ms` }}
           >
             <span className={cn(
-              "text-[8.5px] font-bold uppercase leading-none tracking-[0.06em]",
+              "text-[17px] font-bold uppercase leading-none tracking-[0.06em]",
               i === 0 ? "text-foreground" : "text-muted-foreground",
             )}>
               {i === 0 ? "Auj" : dayShort(d.date)}
             </span>
-            <w.Icon className={cn("h-3.5 w-3.5", w.tone)} aria-hidden />
-            <span className="tnum text-[10.5px] font-semibold leading-none text-foreground">{d.temp}°</span>
+            <w.Icon className={cn("h-7 w-7", w.tone)} aria-hidden />
+            <span className="tnum text-[21px] font-semibold leading-none text-foreground">{d.temp}°</span>
           </div>
         );
       })}
@@ -145,9 +147,9 @@ export function MeteoBar({ className }: { className?: string }) {
         onClick={() => { setVisible(false); writeSetting(SETTING_KEYS.meteo, "off"); }}
         aria-label="Masquer la météo"
         title="Masquer (réactivable dans les Paramètres)"
-        className="ml-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-secondary/60 hover:text-foreground"
+        className="ml-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground/50 transition-colors hover:bg-secondary/60 hover:text-foreground"
       >
-        <X className="h-3 w-3" />
+        <X className="h-6 w-6" />
       </button>
     </section>
   );
