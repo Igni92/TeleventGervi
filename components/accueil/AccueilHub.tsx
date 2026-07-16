@@ -80,9 +80,10 @@ export function AccueilHub() {
 
   return (
     <div className="keep-bricks space-y-4 animate-fade-up max-sm:py-3">
-      {/* Météo compacte EN HAUT À DROITE (dans l'en-tête, à gauche de l'horloge) :
-          aucune hauteur ajoutée — l'accueil doit tenir sans défilement. Desktop
-          uniquement (le mobile a ses tuiles). */}
+      {/* Météo EN HAUT À DROITE (dans l'en-tête, à gauche de l'horloge), format
+          grand (tailles ×2 — lisible de loin) : l'en-tête s'étire de quelques
+          pixels mais l'accueil reste sans défilement. Desktop uniquement (le
+          mobile a ses tuiles). */}
       <HubHeader
         firstName={firstName}
         meteo={<div className="hidden lg:block min-w-0"><MeteoBar /></div>}
