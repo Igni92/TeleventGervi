@@ -35,9 +35,18 @@ export function PageHeader({
   actions?: React.ReactNode;
   className?: string;
 }) {
+  // MOBILE (app pro) : le titre de page est DÉJÀ porté par la barre du haut
+  // → on ne l'affiche jamais en double sous 640 px. S'il y a des actions,
+  // seule leur rangée reste visible ; sinon l'en-tête disparaît entièrement.
   return (
-    <header className={cn("flex items-end justify-between gap-3 flex-wrap", className)}>
-      <div className="min-w-0">
+    <header
+      className={cn(
+        "flex items-end justify-between gap-3 flex-wrap",
+        !actions && "max-sm:hidden",
+        className,
+      )}
+    >
+      <div className="min-w-0 max-sm:hidden">
         {kicker && <p className="kicker mb-1.5">{kicker}</p>}
         <h1 className="font-display text-[27px] sm:text-[34px] font-bold tracking-tight leading-none text-foreground flex items-center gap-2.5">
           <span className="truncate">{title}</span>
@@ -48,7 +57,7 @@ export function PageHeader({
           )}
         </h1>
       </div>
-      {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+      {actions && <div className="flex items-center gap-2 shrink-0 max-sm:w-full max-sm:justify-end">{actions}</div>}
     </header>
   );
 }

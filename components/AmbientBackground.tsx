@@ -13,7 +13,9 @@ import { AmbientMotionGate } from "@/components/settings/AmbientMotionGate";
  */
 export function AmbientBackground() {
   return (
-    <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+    // Mobile : AUCUNE ambiance — une app pro n'a pas de fond décoratif,
+    // la surface est parfaitement plate (cf. globals.css « une seule surface »).
+    <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden hidden sm:block">
       <AmbientMotionGate />
       <div className="ambient-aurora" />
     </div>

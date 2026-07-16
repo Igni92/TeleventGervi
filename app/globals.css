@@ -239,6 +239,17 @@
     body { font-size: 14px; }
   }
 
+  /* ═══════════════════════════════════════════════════════════
+     MOBILE = UNE SEULE SURFACE (app pro, « on ne voit jamais le fond »).
+     Sous 640 px le fond de page PREND LA COULEUR DES PANNEAUX : plus
+     aucune distinction fond/carte — tout est plat, les sections ne sont
+     séparées que par des filets 1 px. Fonctionne en clair et en sombre
+     (var(--card) se résout selon le thème de l'élément).
+  ═══════════════════════════════════════════════════════════ */
+  @media (max-width: 639.98px) {
+    :root, .dark { --background: var(--card); }
+  }
+
   /* ── Subtle film-grain overlay (editorial premium feel) ── */
   body::before {
     content: "";
@@ -253,6 +264,10 @@
       url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
   }
   .dark body::before { opacity: 0.045; }
+  /* Mobile app pro : pas de texture décorative — surface parfaitement plate. */
+  @media (max-width: 639.98px) {
+    body::before { display: none; }
+  }
 
   /* Sélection alignée sur l'identité jaune/or (plus d'indigo) */
   ::selection {
