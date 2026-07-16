@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, Check, Clock, Hash, Loader2, RefreshCw, Search, ShieldAlert, Store, Truck } from "lucide-react";
 import { toast } from "sonner";
+import { StatBlock } from "@/components/ui/stat-block";
 import { formatDeliveryDate } from "@/lib/livraison";
 import type { ApiResp, Doc } from "@/lib/livraisonView";
 import type { SafeguardViolation } from "@/lib/safeguards";
@@ -184,14 +185,11 @@ export function VentesDuJour() {
   );
 }
 
+/** Tuile stat locale — délègue la typo au StatBlock partagé (dédoublonnage). */
 function Stat({ label, value, tone }: { label: string; value: string; tone?: "emerald" | "sky" | "amber" }) {
-  const color = tone === "emerald" ? "text-emerald-600 dark:text-emerald-400"
-    : tone === "sky" ? "text-sky-600 dark:text-sky-400"
-    : tone === "amber" ? "text-amber-600 dark:text-amber-400" : "text-foreground";
   return (
     <div className="rounded-xl border border-border bg-card px-3 py-2">
-      <p className="text-[9.5px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</p>
-      <p className={`text-[18px] font-bold tnum leading-tight ${color}`}>{value}</p>
+      <StatBlock label={label} value={value} size="md" tone={tone ?? "default"} />
     </div>
   );
 }
