@@ -132,6 +132,57 @@ export function libelleUnite(unite: string, n = 1): string {
   return Math.abs(n) >= 2 ? `${unite}s` : unite;
 }
 
+// ── Répartition de l'ENTRÉE du produit fini (couverture du découvert) ──
+
+export type LigneEntreeFabrication = {
+  warehouseCode: string;
+  /** Quantité en unités de base (quantité SAP). */
+  quantity: number;
+  /** true si cette ligne COMBLE un stock négatif (vente à découvert). */
+  couvreDecouvert: boolean;
+};
+
+/**
+ * Répartit l'entrée du produit fini d'une fabrication entre magasins :
+ * si le produit est À DÉCOUVERT ailleurs (dispo < 0 — vendu avant d'être
+ * fabriqué), la production comble ces découverts D'ABORD (ordre 000, 01, R1),
+ * et seul le RESTE entre dans le magasin d'entrée choisi. Ainsi le stock
+ * négatif est régularisé par la fabrication elle-même — plus besoin d'aller
+ * corriger le magasin dans SAP après coup.
+ *
+ *   repartitionEntree(4, "01", { "000": -2 })
+ *     → [{ warehouseCode: "000", quantity: 2, couvreDecouvert: true },
+ *        { warehouseCode: "01",  quantity: 2, couvreDecouvert: false }]
+ *
+ * Le magasin d'entrée lui-même n'est jamais listé comme découvert : y entrer
+ * la production le régularise déjà. Si les découverts absorbent toute la
+ * production, le magasin d'entrée ne reçoit rien (ligne omise).
+ */
+export function repartitionEntree(
+  totalQty: number,
+  entryWarehouse: string,
+  dispoByWhs: Record<string, number>,
+  ordre: readonly string[] = ["000", "01", "R1"],
+): LigneEntreeFabrication[] {
+  if (!Number.isFinite(totalQty) || totalQty <= 0) return [];
+  const lines: LigneEntreeFabrication[] = [];
+  let remaining = r3(totalQty);
+  for (const whs of ordre) {
+    if (whs === entryWarehouse) continue;
+    const deficit = r3(-(dispoByWhs[whs] ?? 0));
+    if (deficit <= EPS) continue;
+    const take = r3(Math.min(remaining, deficit));
+    if (take <= EPS) continue;
+    lines.push({ warehouseCode: whs, quantity: take, couvreDecouvert: true });
+    remaining = r3(remaining - take);
+    if (remaining <= EPS) break;
+  }
+  if (remaining > EPS) {
+    lines.push({ warehouseCode: entryWarehouse, quantity: remaining, couvreDecouvert: false });
+  }
+  return lines;
+}
+
 // ── Scénarios de transformation ───────────────────────────────────────
 
 export type ScenarioTransformation = {

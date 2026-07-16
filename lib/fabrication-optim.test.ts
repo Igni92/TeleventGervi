@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   uniteGestion, quantitePhysique, libelleUnite, scenariosTransformation, uniteBase, quantitesComposant,
+  repartitionEntree,
 } from "./fabrication-optim";
 
 describe("uniteGestion — unité de gestion réelle d'un article", () => {
@@ -223,5 +224,57 @@ describe("quantitesComposant — conversion unités ↔ colis d'une ligne de rec
   });
   it("arrondi 3 décimales (5 barquettes d'un colis de 12 → 0,417 colis)", () => {
     expect(quantitesComposant(5, "unite", 1, 12).colisQty).toBe(0.417);
+  });
+});
+
+describe("repartitionEntree — l'entrée de fabrication comble d'abord les découverts", () => {
+  it("cas Gervifrais : 4 fabriqués, -2 en 000, entrée 01 → 2 comblent 000, 2 entrent en 01", () => {
+    expect(repartitionEntree(4, "01", { "000": -2, "01": 5, R1: 0 })).toEqual([
+      { warehouseCode: "000", quantity: 2, couvreDecouvert: true },
+      { warehouseCode: "01", quantity: 2, couvreDecouvert: false },
+    ]);
+  });
+  it("aucun découvert → tout entre dans le magasin choisi", () => {
+    expect(repartitionEntree(4, "01", { "000": 3, "01": 0, R1: 0 })).toEqual([
+      { warehouseCode: "01", quantity: 4, couvreDecouvert: false },
+    ]);
+  });
+  it("découvert plus grand que la production → tout part le combler (rien pour l'entrée)", () => {
+    expect(repartitionEntree(4, "01", { "000": -6 })).toEqual([
+      { warehouseCode: "000", quantity: 4, couvreDecouvert: true },
+    ]);
+  });
+  it("découvert dans le magasin d'entrée lui-même → pas de répartition (y entrer suffit)", () => {
+    expect(repartitionEntree(4, "000", { "000": -2, "01": 1 })).toEqual([
+      { warehouseCode: "000", quantity: 4, couvreDecouvert: false },
+    ]);
+  });
+  it("plusieurs découverts : comblés dans l'ordre 000 puis R1", () => {
+    expect(repartitionEntree(10, "01", { "000": -3, R1: -2 })).toEqual([
+      { warehouseCode: "000", quantity: 3, couvreDecouvert: true },
+      { warehouseCode: "R1", quantity: 2, couvreDecouvert: true },
+      { warehouseCode: "01", quantity: 5, couvreDecouvert: false },
+    ]);
+  });
+  it("production insuffisante pour tous les découverts → ordre de priorité respecté", () => {
+    expect(repartitionEntree(4, "01", { "000": -3, R1: -2 })).toEqual([
+      { warehouseCode: "000", quantity: 3, couvreDecouvert: true },
+      { warehouseCode: "R1", quantity: 1, couvreDecouvert: true },
+    ]);
+  });
+  it("découvert fractionnaire (article au kg) → arrondi 3 décimales", () => {
+    expect(repartitionEntree(5, "01", { "000": -1.2345 })).toEqual([
+      { warehouseCode: "000", quantity: 1.235, couvreDecouvert: true },
+      { warehouseCode: "01", quantity: 3.765, couvreDecouvert: false },
+    ]);
+  });
+  it("quantité nulle ou négative → aucune ligne", () => {
+    expect(repartitionEntree(0, "01", { "000": -2 })).toEqual([]);
+    expect(repartitionEntree(-3, "01", {})).toEqual([]);
+  });
+  it("magasin inconnu du stock (dispo absente) → traité comme 0, pas de découvert", () => {
+    expect(repartitionEntree(2, "R1", {})).toEqual([
+      { warehouseCode: "R1", quantity: 2, couvreDecouvert: false },
+    ]);
   });
 });

@@ -6,7 +6,7 @@ import { Loader2, Factory, CheckCircle2, TriangleAlert, ArrowRight } from "lucid
 import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import { SurfaceCard } from "@/components/ui/surface-card";
-import { libelleUnite, quantitesComposant, uniteBase, type ModeQuantite } from "@/lib/fabrication-optim";
+import { libelleUnite, quantitesComposant, uniteBase, repartitionEntree, type ModeQuantite, type LigneEntreeFabrication } from "@/lib/fabrication-optim";
 import { ChipMarque, ChipCondi, ChipPays, LotBadge, WAREHOUSES, type WarehouseCode, eur, colis, qtePhys } from "./ui";
 
 /**
@@ -23,6 +23,10 @@ import { ChipMarque, ChipCondi, ChipPays, LotBadge, WAREHOUSES, type WarehouseCo
  *      avec l'équivalent colis de l'article choisi (0,5 colis de 12 — les
  *      colis peuvent être entamés),
  *   4. récap coût/marge puis validation → sorties + entrée SAP, lots tracés.
+ *      Si le produit fini a été VENDU À DÉCOUVERT (dispo < 0 dans un autre
+ *      magasin, ex. -2 en 000), l'entrée est RÉPARTIE automatiquement : les
+ *      découverts sont comblés d'abord, le reste entre dans le magasin choisi
+ *      — annoncé dans le récap, plus aucune correction à faire dans SAP.
  */
 
 type RecipeComponent = { familyKey: string; familyLabel: string; qty: number; mode: ModeQuantite };
@@ -49,7 +53,11 @@ type FamilyOptions = {
   items: ItemOption[];
 };
 type Options = {
-  parent: { itemCode: string; itemName: string; ratio: number; unite: Unite; lastSalePriceColis: number | null };
+  parent: {
+    itemCode: string; itemName: string; ratio: number; unite: Unite; lastSalePriceColis: number | null;
+    /** stock du produit fini par magasin, SIGNÉ (découvert < 0) */
+    availUnits: Record<string, number>;
+  };
   recipe: { parentQty: number; costs: { label: string; costPerColis: number }[] };
   families: FamilyOptions[];
 };
@@ -164,11 +172,16 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
     const totalCost = Math.round((componentsCost + recipeCosts) * 100) / 100;
     const parentValue = options.parent.lastSalePriceColis != null
       ? Math.round(options.parent.lastSalePriceColis * parentColis * 100) / 100 : null;
+    // Répartition de l'entrée du produit fini : les magasins où le parent est à
+    // découvert (dispo < 0, vente à découvert) sont comblés d'abord — MÊME règle
+    // que le serveur (repartitionEntree), pour l'annoncer avant validation.
+    const parentPieceQty = Math.round(parentColis * options.parent.ratio * 1000) / 1000;
+    const entree = repartitionEntree(parentPieceQty, entryWhs, options.parent.availUnits ?? {});
     return {
-      lines: ok, componentsCost, recipeCosts, totalCost, parentValue,
+      lines: ok, componentsCost, recipeCosts, totalCost, parentValue, entree,
       margin: parentValue != null ? Math.round((parentValue - totalCost) * 100) / 100 : null,
     };
-  }, [options, picks, tours, parentColis, isMultiple]);
+  }, [options, picks, tours, parentColis, isMultiple, entryWhs]);
 
   const submit = async () => {
     if (!recipe || !options || !recap) return;
@@ -189,8 +202,16 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
       });
       const j = await res.json();
       if (!res.ok || !j.ok) { toast.error(j.error || "Erreur SAP"); return; }
+      // Destination réelle de l'entrée (répartie si découvert comblé ailleurs).
+      const split = (j.entrySplit ?? []) as LigneEntreeFabrication[];
+      const ratio = options.parent.ratio || 1;
+      const dest = split.length > 0
+        ? split.map((l) =>
+            `${colis(Math.round((l.quantity / ratio) * 10) / 10)} colis → ${l.warehouseCode}${l.couvreDecouvert ? " (découvert comblé)" : ""}`,
+          ).join(" · ")
+        : entryWhs;
       toast.success(`${j.opCode} · Fabriqué ${parentColis} colis ${recipe.parentItemCode}`, {
-        description: `Sortie #${j.sapExitDocNum} · Entrée #${j.sapEntryDocNum} → ${entryWhs} · Coût ${j.totalCost.toFixed(2)} €`,
+        description: `Sortie #${j.sapExitDocNum} · Entrée #${j.sapEntryDocNum} : ${dest} · Coût ${j.totalCost.toFixed(2)} €`,
         duration: 10000,
       });
       setLastResult({ opCode: j.opCode, exit: j.sapExitDocNum, entry: j.sapEntryDocNum, cost: j.totalCost });
@@ -407,6 +428,24 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
                   </span>
                 </p>
               </div>
+              {/* Vente à découvert du produit fini : l'entrée sera répartie pour
+                  combler d'abord les magasins négatifs — annoncé AVANT validation. */}
+              {recap.entree.some((l) => l.couvreDecouvert) && (
+                <div className="px-3 py-2 border-t border-amber-500/40 bg-amber-500/10 flex items-start gap-2 text-[12.5px] text-amber-700 dark:text-amber-300">
+                  <TriangleAlert className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>
+                    <b>{options.parent.itemCode} est à découvert</b> (vendu avant fabrication) en{" "}
+                    {recap.entree.filter((l) => l.couvreDecouvert)
+                      .map((l) => `${l.warehouseCode} (${qtePhys(options.parent.availUnits?.[l.warehouseCode] ?? 0)})`)
+                      .join(", ")}.
+                    {" "}L&apos;entrée sera répartie automatiquement :{" "}
+                    {recap.entree.map((l) =>
+                      `${colis(Math.round((l.quantity / options.parent.ratio) * 10) / 10)} colis → ${l.warehouseCode}${l.couvreDecouvert ? " (comble le découvert)" : ""}`,
+                    ).join(" · ")}
+                    {" "}— rien à corriger dans SAP.
+                  </span>
+                </div>
+              )}
               <table className="w-full text-[13.5px]">
                 <thead className="text-[11px] uppercase tracking-wide text-muted-foreground">
                   <tr className="border-t border-border">

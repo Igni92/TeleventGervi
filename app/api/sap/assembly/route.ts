@@ -4,10 +4,10 @@ import { auth } from "@/lib/auth";
 import { getAccessScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
-import { incrementLocalStock, decrementLocalStock } from "@/lib/stockSync";
+import { incrementLocalStock, decrementLocalStock, refreshItemStocks } from "@/lib/stockSync";
 import { creditLots, debitLots } from "@/lib/lotLedger";
 import { getRecipe, resolveLotsForItems, packRatio, LOT_PENDING, type LotResolution } from "@/lib/fabrication";
-import { quantitesComposant } from "@/lib/fabrication-optim";
+import { quantitesComposant, repartitionEntree, type LigneEntreeFabrication } from "@/lib/fabrication-optim";
 
 /**
  * POST /api/sap/assembly
@@ -35,7 +35,10 @@ import { quantitesComposant } from "@/lib/fabrication-optim";
  *        pour les autres (cas réel Gervifrais), le lot est posé en U_NoLot par
  *        un PATCH ligne à ligne (même mécanique que /api/sap/goods-receipts).
  *        Un article à découvert porte le sentinel EM_PENDING.
- *     3. SAP InventoryGenEntries (entrée parent dans SON magasin, U_NoLot = code OP).
+ *     3. SAP InventoryGenEntries (entrée parent, U_NoLot = code OP). Si le parent
+ *        a été VENDU À DÉCOUVERT (dispo < 0 dans un autre magasin, ex. -2 en 000),
+ *        l'entrée est RÉPARTIE : les découverts sont comblés d'abord, le reste
+ *        entre dans le magasin choisi — plus de correction manuelle dans SAP.
  *     4. Stock local : décrément composants (par magasin source) + incrément parent.
  *     5. Run complété : status=done + DocEntry/DocNum SAP.
  *
@@ -81,6 +84,34 @@ async function nextOpCode(): Promise<string> {
 
 function userLabel(session: Session): string {
   return session.user?.name ?? session.user?.email ?? "?";
+}
+
+/**
+ * Lignes d'ENTRÉE du produit fini : si le parent a été VENDU À DÉCOUVERT
+ * (dispo < 0 dans un autre magasin — ex. -2 en 000), la production comble ces
+ * découverts d'abord et seul le reste entre dans le magasin choisi. Le stock
+ * négatif est ainsi régularisé par la fabrication elle-même, sans retour SAP.
+ * Le stock du parent est rafraîchi depuis SAP juste avant de décider
+ * (best-effort : en cas d'échec, on décide sur le miroir local).
+ */
+async function parentEntryLines(
+  parentCode: string,
+  entryWarehouse: string,
+  parentPieceQty: number,
+): Promise<LigneEntreeFabrication[]> {
+  try { await refreshItemStocks([parentCode]); }
+  catch (e) {
+    console.warn(`[Assembly] refresh stock ${parentCode} échoué (répartition sur miroir local):`, (e as Error).message);
+  }
+  const rows = await prisma.$queryRawUnsafe<{ warehouse: string; available: number }[]>(
+    `SELECT s."warehouse", COALESCE(s."available", 0) AS "available"
+       FROM "Product" p JOIN "ProductStock" s ON s."productId" = p."id"
+      WHERE p."itemCode" = $1;`,
+    parentCode,
+  );
+  const dispo: Record<string, number> = {};
+  for (const r of rows) dispo[r.warehouse] = Number(r.available);
+  return repartitionEntree(parentPieceQty, entryWarehouse, dispo);
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -269,6 +300,9 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     ? Math.round((Number(saleRows[0].lineTotal) / Number(saleRows[0].quantity)) * parentRatio * body.parentColis * 100) / 100
     : null;
 
+  // ── Répartition de l'entrée : couverture des découverts du parent ──
+  const entryLines = await parentEntryLines(parentCode, entryWarehouse, parentPieceQty);
+
   // ── Code OP + enregistrement du run AVANT l'appel SAP ──
   const opCode = await nextOpCode();
   const runId = randomUUID();
@@ -277,6 +311,7 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     parentQty: recipe.parentQty,
     tours,
     entryWarehouse,
+    entrySplit: entryLines,
     components: recipe.components,
     costs: recipe.costs,
     picks: runLines.map((l) => ({
@@ -357,19 +392,21 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     console.warn(`[Assembly v2] ${opCode} PATCH U_NoLot exit échoué (non-bloquant):`, (e as Error).message);
   }
 
-  // ── 2. SAP InventoryGenEntries — entrée du parent dans SON magasin ──
+  // ── 2. SAP InventoryGenEntries — entrée du parent, UNE ligne par magasin :
+  //       les magasins à découvert sont comblés d'abord, le reste va au magasin
+  //       d'entrée choisi (cf. parentEntryLines) ──
   const entryPayload = {
     DocDate: today,
     Comments: `${opCode} — Fabrication ${body.parentColis} colis ${parentCode} (entrée parent, exit#${exitDoc.DocNum})`,
-    DocumentLines: [{
+    DocumentLines: entryLines.map((l) => ({
       ItemCode: parentCode,
-      Quantity: parentPieceQty,
-      WarehouseCode: entryWarehouse,
+      Quantity: l.quantity,
+      WarehouseCode: l.warehouseCode,
       // Parent batch-managed (rare) : le lot du produit fini = code OP.
       ...(parentMeta.manageBatch
-        ? { BatchNumbers: [{ BatchNumber: opCode, Quantity: parentPieceQty }] }
+        ? { BatchNumbers: [{ BatchNumber: opCode, Quantity: l.quantity }] }
         : {}),
-    }],
+    })),
   };
   let entryDoc: SapDoc;
   try {
@@ -400,12 +437,14 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
   }
 
   // ── 3. Stock local : décrément composants (magasin source par ligne)
-  //       + incrément parent (magasin d'entrée) ──
+  //       + incrément parent (magasin par ligne d'entrée) ──
   try {
     await decrementLocalStock(runLines.map((l) => ({
       itemCode: l.itemCode, quantity: l.pieceQty, warehouseCode: l.warehouse,
     })));
-    await incrementLocalStock([{ itemCode: parentCode, quantity: parentPieceQty, warehouseCode: entryWarehouse }]);
+    await incrementLocalStock(entryLines.map((l) => ({
+      itemCode: parentCode, quantity: l.quantity, warehouseCode: l.warehouseCode,
+    })));
   } catch (e) {
     console.warn(`[Assembly v2] ${opCode} stockSync échoué (non-bloquant):`, (e as Error).message);
   }
@@ -464,6 +503,8 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
     sapExitDocNum: exitDoc.DocNum,
     sapEntryDocNum: entryDoc.DocNum,
     warehouse: entryWarehouse,
+    // Répartition réelle de l'entrée (couverture des découverts comprise).
+    entrySplit: entryLines,
   });
 }
 
@@ -552,15 +593,17 @@ async function assemblyLegacy(body: LegacyBody, session: Session, admin: boolean
     return NextResponse.json({ ok: false, error: `Sortie composants échouée : ${message}` }, { status: 500 });
   }
 
-  // ── SAP InventoryGenEntries : entrée parent ──
+  // ── SAP InventoryGenEntries : entrée parent — les magasins où le parent est
+  //    à découvert sont comblés d'abord, le reste entre dans le magasin choisi ──
+  const entryLines = await parentEntryLines(parentCode, warehouse, parentPieceQty);
   const entryPayload = {
     DocDate: today,
     Comments: `${opCode} — Fabrication ${body.packageQuantity} colis ${parentCode} (entrée parent, exit#${exitDoc.DocNum})`,
-    DocumentLines: [{
+    DocumentLines: entryLines.map((l) => ({
       ItemCode: parentCode,
-      Quantity: parentPieceQty,
-      WarehouseCode: warehouse,
-    }],
+      Quantity: l.quantity,
+      WarehouseCode: l.warehouseCode,
+    })),
   };
   let entryDoc: SapDoc;
   try {
@@ -575,14 +618,14 @@ async function assemblyLegacy(body: LegacyBody, session: Session, admin: boolean
     }, { status: 500 });
   }
 
-  // ── Stock local : décrément composants + incrément parent ──
+  // ── Stock local : décrément composants + incrément parent (par ligne d'entrée) ──
   try {
     await decrementLocalStock(resolvedComponents.map((c) => ({
       itemCode: c.componentItemCode, quantity: c.qty, warehouseCode: warehouse,
     })));
-    await incrementLocalStock([{
-      itemCode: parentCode, quantity: parentPieceQty, warehouseCode: warehouse,
-    }]);
+    await incrementLocalStock(entryLines.map((l) => ({
+      itemCode: parentCode, quantity: l.quantity, warehouseCode: l.warehouseCode,
+    })));
   } catch (e) {
     console.warn("[Assembly] stockSync échoué (non-bloquant):", (e as Error).message);
   }
@@ -617,5 +660,6 @@ async function assemblyLegacy(body: LegacyBody, session: Session, admin: boolean
     sapExitDocNum: exitDoc.DocNum,
     sapEntryDocNum: entryDoc.DocNum,
     warehouse,
+    entrySplit: entryLines,
   });
 }

@@ -72,6 +72,20 @@ export async function GET(req: NextRequest) {
   const salePie = await lastSalePricePie(parent);
   const parentSaleColis = salePie != null ? Math.round(salePie * parentRatio * 100) / 100 : null;
 
+  // Stock du PARENT par magasin (unités de base, SIGNÉ) : permet à l'UI
+  // d'annoncer AVANT validation que l'entrée comblera un découvert (dispo < 0,
+  // vente à découvert) — même répartition que le serveur (repartitionEntree).
+  const parentStockRows = await prisma.$queryRawUnsafe<{ warehouse: string; available: number }[]>(
+    `SELECT s."warehouse", COALESCE(s."available", 0) AS "available"
+       FROM "Product" p JOIN "ProductStock" s ON s."productId" = p."id"
+      WHERE p."itemCode" = $1;`,
+    parent,
+  );
+  const parentAvailUnits: Record<string, number> = { "000": 0, "01": 0, R1: 0 };
+  for (const r of parentStockRows) {
+    if (r.warehouse in parentAvailUnits) parentAvailUnits[r.warehouse] = Math.round(Number(r.available) * 1000) / 1000;
+  }
+
   // Articles concrets par famille + lots résolus pour CHAQUE magasin.
   const familyKeys = recipe.components.map((c) => c.familyKey);
   const itemsByFamily = await getFamilyItems(familyKeys);
@@ -121,6 +135,7 @@ export async function GET(req: NextRequest) {
       ratio: parentRatio,
       unite: parentUnite,                  // unité de gestion réelle (kg/colis/barquette)
       lastSalePriceColis: parentSaleColis, // €/colis — null si jamais vendu
+      availUnits: parentAvailUnits,        // stock par magasin, SIGNÉ (découvert < 0)
     },
     recipe: { parentQty: recipe.parentQty, costs: admin ? recipe.costs : [] },
     families,
