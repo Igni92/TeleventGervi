@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
     const ITEMS_FILTER = "Valid eq 'tYES' and Frozen eq 'tNO'";
     // Base SÛRE (champs historiques connus pour fonctionner sur ce SAP).
     const ITEMS_SELECT_BASE =
-      "ItemCode,ItemName,ItemsGroupCode,SalesUnit,SalesPackagingUnit,SalesQtyPerPackUnit,SalesItemsPerUnit,SalesUnitWeight,InventoryUOM,PurchaseUnit,ManageBatchNumbers,QuantityOnStock,ItemWarehouseInfoCollection,Valid,Frozen,U_Pays,U_GER_Marque,U_GER_Det_Condt,U_GER_UVC,U_GER_NB_BARQ_COLIS";
+      "ItemCode,ItemName,ItemsGroupCode,SalesUnit,SalesPackagingUnit,SalesQtyPerPackUnit,SalesItemsPerUnit,SalesUnitWeight,InventoryUOM,PurchaseUnit,ManageBatchNumbers,QuantityOnStock,ItemWarehouseInfoCollection,Valid,Frozen,U_Pays,U_GER_Marque,U_GER_Det_Condt,U_GER_CALIBRE,U_GER_UVC,U_GER_NB_BARQ_COLIS";
     // + variété. Sur la Service Layer SAP B1, la colonne DB « FrgnName » est
     // exposée sous le nom de propriété OData « ForeignName » (FrgnName renvoie
     // 400 « Property invalid »). On sélectionne donc ForeignName. Si ce champ
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
     // ⚠️ SalesItemsPerUnit (NumInSale) absent du type partagé SapItem ET du
     // client Prisma généré (colonne Product."salesItemsPerUnit" existe en base
     // mais pas dans le client) → extension de type locale + écriture raw SQL.
-    type SapItemEx = SapItem & { SalesItemsPerUnit?: number; ForeignName?: string; FrgnName?: string };
+    type SapItemEx = SapItem & { SalesItemsPerUnit?: number; ForeignName?: string; FrgnName?: string; U_GER_CALIBRE?: string };
     let items: SapItemEx[];
     try {
       items = await sap.getAllParallel<SapItemEx>(
@@ -127,6 +127,7 @@ export async function POST(req: NextRequest) {
         uPays: it.U_Pays ?? null,
         uMarque: it.U_GER_Marque ?? null,
         uCondi: it.U_GER_Det_Condt ?? null,
+        uCalibre: it.U_GER_CALIBRE ?? null,
         uUvc: it.U_GER_UVC ?? null,
         frgnName: it.ForeignName ?? it.FrgnName ?? null,   // = variété (SL: ForeignName)
         uNbBarqColis: it.U_GER_NB_BARQ_COLIS ?? null,
@@ -157,11 +158,11 @@ export async function POST(req: NextRequest) {
       const P_COLS =
         `"itemCode","itemName","itemGroup","groupName","salesUnit","salesPackagingUnit",` +
         `"salesQtyPerPackUnit","salesItemsPerUnit","salesUnitWeight","inventoryUnit","purchaseUnit",` +
-        `"manageBatch","isPackaging","totalStock","uPays","uMarque","uCondi","uUvc","frgnName","uNbBarqColis"`;
+        `"manageBatch","isPackaging","totalStock","uPays","uMarque","uCondi","uCalibre","uUvc","frgnName","uNbBarqColis"`;
       const P_CASTS = [
         "text", "text", "int", "text", "text", "text",
         "float8", "float8", "float8", "text", "text",
-        "boolean", "boolean", "float8", "text", "text", "text", "text", "text", "float8",
+        "boolean", "boolean", "float8", "text", "text", "text", "text", "text", "text", "float8",
       ];
       for (let i = 0; i < productRows.length; i += SQL_BATCH) {
         const slice = productRows.slice(i, i + SQL_BATCH);
@@ -172,7 +173,7 @@ export async function POST(req: NextRequest) {
           const row = [
             r.itemCode, r.itemName, r.itemGroup, r.groupName, r.salesUnit, r.salesPackagingUnit,
             r.salesQtyPerPackUnit, r.salesItemsPerUnit, r.salesUnitWeight, r.inventoryUnit, r.purchaseUnit,
-            r.manageBatch, r.isPackaging, r.totalStock, r.uPays, r.uMarque, r.uCondi, r.uUvc, r.frgnName, r.uNbBarqColis,
+            r.manageBatch, r.isPackaging, r.totalStock, r.uPays, r.uMarque, r.uCondi, r.uCalibre, r.uUvc, r.frgnName, r.uNbBarqColis,
           ];
           values.push(`(${row.map((_, k) => `$${p++}::${P_CASTS[k]}`).join(",")})`);
           params.push(...row);
@@ -185,7 +186,7 @@ export async function POST(req: NextRequest) {
              "salesUnitWeight"=v."salesUnitWeight","inventoryUnit"=v."inventoryUnit",
              "purchaseUnit"=v."purchaseUnit","manageBatch"=v."manageBatch",
              "isPackaging"=v."isPackaging","totalStock"=v."totalStock",
-             "uPays"=v."uPays","uMarque"=v."uMarque","uCondi"=v."uCondi",
+             "uPays"=v."uPays","uMarque"=v."uMarque","uCondi"=v."uCondi","uCalibre"=v."uCalibre",
              "uUvc"=v."uUvc","frgnName"=v."frgnName","uNbBarqColis"=v."uNbBarqColis","syncedAt"=NOW()
            FROM (VALUES ${values.join(",")}) AS v(${P_COLS})
            WHERE pr."itemCode" = v."itemCode"`,

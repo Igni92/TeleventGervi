@@ -898,8 +898,9 @@ function TeamCalendar({ team, month, todayISO, onPick }: {
                     <td key={date} title={title}
                       className={`h-9 px-0.5 text-center align-middle ${ferie ? "bg-orange-500/10" : dow === 0 ? "bg-secondary/30" : ""} ${date === todayISO ? "outline outline-1 -outline-offset-1 outline-brand-500/40" : ""}`}>
                       {cat === "present" ? (
-                        // Présence = ligne de fond discrète (ne surcharge pas la grille).
-                        <span className="mx-auto block h-1.5 w-full min-w-[18px] rounded-full bg-emerald-500/40" />
+                        // Présence = carré arrondi au cadre vert épais, centre vide
+                        // (noir en sombre / blanc en clair) — repère net, discret.
+                        <span className="mx-auto block h-4 w-4 rounded-[5px] border-2 border-emerald-500 bg-background" />
                       ) : cat === "ferie" ? (
                         <span className="mx-auto block h-1.5 w-full min-w-[18px] rounded-full bg-orange-500/50" />
                       ) : cat ? (
@@ -941,17 +942,23 @@ const CAT_SHORT: Record<DayCategory, string> = {
 function DayPill({ category, pending, planned }: { category: DayCategory; pending: boolean; planned: boolean }) {
   const tone = CAT_TONE[category];
   const dashed = pending || planned;
-  const isPresent = category === "present";
-  // Hiérarchie visuelle (le « juste milieu ») : la PRÉSENCE (état normal, tous
-  // les jours ouvrés) reste EN FILIGRANE — pastille très douce, sans bordure,
-  // texte allégé — pour ne pas noyer le calendrier de vert. Les EXCEPTIONS (CP,
-  // récup, férié, absence, maladie) ressortent en pastille pleine colorée.
-  // « En attente / posé » garde le contour en pointillés.
+  // PRÉSENCE (état normal, tous les jours ouvrés) : un CARRÉ ARRONDI au cadre
+  // vert épais, centre vide (noir en sombre / blanc en clair). Repère discret et
+  // net — plus la pastille pleine allongée qui noyait le calendrier de vert. Les
+  // EXCEPTIONS (CP, récup, férié, absence, maladie) gardent leur pastille lisible
+  // avec libellé ; « en attente / posé » garde le contour en pointillés.
+  if (category === "present") {
+    return (
+      <span
+        title={DAY_CATEGORY_LABEL.present}
+        aria-label={DAY_CATEGORY_LABEL.present}
+        className="relative z-10 block h-4 w-4 rounded-[5px] border-2 border-emerald-500 bg-background"
+      />
+    );
+  }
   const cls = dashed
     ? `border border-dashed bg-transparent font-semibold ${tone.text} ${tone.border}`
-    : isPresent
-      ? "bg-emerald-500/[0.07] font-medium text-emerald-700/80 dark:text-emerald-300/80"
-      : `${tone.soft} font-semibold ${tone.text}`;
+    : `${tone.soft} font-semibold ${tone.text}`;
   return (
     <span
       title={DAY_CATEGORY_LABEL[category]}
@@ -970,7 +977,13 @@ function Legend() {
     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
       {cats.map((c) => (
         <span key={c} className="inline-flex items-center gap-1.5">
-          <span className={`h-2.5 w-4 rounded-sm ${CAT_TONE[c].solid}`} /> {DAY_CATEGORY_LABEL[c]}
+          {c === "present" ? (
+            // Même repère que le calendrier : carré arrondi, cadre vert, centre vide.
+            <span className="h-3 w-3 rounded-[4px] border-2 border-emerald-500 bg-background" />
+          ) : (
+            <span className={`h-2.5 w-4 rounded-sm ${CAT_TONE[c].solid}`} />
+          )}
+          {DAY_CATEGORY_LABEL[c]}
         </span>
       ))}
       <span className="inline-flex items-center gap-1.5">

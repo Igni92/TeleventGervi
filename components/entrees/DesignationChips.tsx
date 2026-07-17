@@ -38,12 +38,12 @@ export function DesignationChips({
   size?: "sm" | "md";
 }) {
   const chips: [keyof typeof STYLES, string][] = [];
-  // Ordre métier = ordre de l'Écran 2 : marque · condt · calibre · variété · pays.
+  // Ordre métier (demande stock mobile) : marque · variété · calibre · pays · conditionnement.
   if (ok(marque)) chips.push(["marque", marque!.trim()]);
-  if (ok(condt)) chips.push(["condt", condt!.trim()]);
-  if (ok(calibre)) chips.push(["calibre", withCalPrefix(calibre!)]);
   if (ok(variete)) chips.push(["variete", variete!.trim()]);
+  if (ok(calibre)) chips.push(["calibre", withCalPrefix(calibre!)]);
   if (ok(pays)) chips.push(["pays", pays!.trim()]);
+  if (ok(condt)) chips.push(["condt", condt!.trim()]);
   if (chips.length === 0) return null;
   const base = size === "md" ? CHIP_MD : CHIP;
   return (

@@ -627,6 +627,15 @@ html[data-hover-contrast] [class*="hover:bg-muted"]:hover,
 html[data-hover-contrast] [class*="hover:bg-accent"]:hover {
   background-color: hsl(var(--brand-500) / calc(var(--hover-contrast) * 0.32));
 }
+/* MODE SOMBRE : sur la surbrillance teintée or, le texte blanc perd en
+   lisibilité (demande). On force le texte de la ligne survolée en NOIR — seul
+   le texte HÉRITÉ bascule : les éléments à couleur propre (prix violet, tags…)
+   gardent la leur (leur classe `text-*` prime sur l'héritage). */
+html.dark[data-hover-contrast] [class*="hover:bg-secondary"]:hover,
+html.dark[data-hover-contrast] [class*="hover:bg-muted"]:hover,
+html.dark[data-hover-contrast] [class*="hover:bg-accent"]:hover {
+  color: hsl(222 47% 9%);
+}
 
 /* ═══════════════════════════════════════════════════════════
    ICÔNES — toutes les icônes (lucide) 30% plus grandes partout
