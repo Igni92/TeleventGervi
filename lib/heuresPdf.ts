@@ -245,8 +245,9 @@ export function printEtatMensuel(monthId: string, feuilles: MoisEmploye[]): bool
   return openPrintWindow(`Heures ${monthId} — ${feuilles.length > 1 ? "équipe" : feuilles[0].name}`, pages);
 }
 
-/** Document A4 autonome + impression auto (mécanique commune hebdo/mensuel). */
-function openPrintWindow(title: string, pages: string): boolean {
+/** Document A4 autonome + impression auto (mécanique commune hebdo/mensuel —
+ *  réutilisée par l'état des salaires, cf. lib/salairesPdf). */
+export function openPrintWindow(title: string, pages: string): boolean {
   const html = `<!DOCTYPE html>
 <html lang="fr">
 <head>
