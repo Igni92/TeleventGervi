@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { ClientsAppel } from "@/components/clients/ClientsAppel";
+import { ClientsDirectory } from "@/components/clients/ClientsDirectory";
 import { isLivreur } from "@/lib/permissions";
 import { PageHeader } from "@/components/ui/page-header";
 
@@ -27,7 +27,7 @@ export default async function ClientsPage() {
           </>
         }
       />
-      <ClientsAppel canManage={!livreur} />
+      <ClientsDirectory canManage={!livreur} />
     </div>
   );
 }
