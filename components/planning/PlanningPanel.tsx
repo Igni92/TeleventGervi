@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { InfoHint } from "@/components/ui/info-hint";
-import { displayPersonName } from "@/lib/userNames";
+import { displayPersonName, stripOrgSuffix } from "@/lib/userNames";
 import {
   fmtHM, monthIdOf, shiftMonth, monthLabel, type DayTag, DAY_TAG_LABEL,
 } from "@/lib/heuresCalc";
@@ -52,7 +52,7 @@ interface Conge {
 interface PersonPlanning {
   email: string;
   name: string;
-  profile: { weeklyHours: number; cpAllowanceDays: number | null; recupCapHours: number | null; typicalDayMin: number };
+  profile: { weeklyHours: number; cpAllowanceDays: number | null; recupCapHours: number | null; typicalDayMin: number; initials?: string | null };
   counters: {
     recup: { creditMin: number; debitMin: number; balanceMin: number; plannedDates: string[] };
     cp: { allowanceDays: number | null; takenDays: number; pendingDays: number; balanceDays: number | null; period: { start: string; end: string } };
@@ -105,7 +105,16 @@ const STATUS_TONE: Record<CongeStatus, string> = {
 const TYPES: CongeType[] = ["cp", "rtt", "recup", "sans_solde", "maladie", "autre"];
 const fmtD = (iso: string) => (iso ? new Date(`${iso}T12:00:00Z`).toLocaleDateString("fr-FR", { timeZone: "UTC", day: "2-digit", month: "2-digit" }) : "—");
 const rangeLabel = (c: { start: string; end: string }) => (c.start === c.end ? fmtD(c.start) : `${fmtD(c.start)} → ${fmtD(c.end)}`);
-const fullName = (raw: string) => (raw.includes("@") ? displayPersonName(raw) : raw);
+/** Nom affiché : sans le suffixe « - Gervifrais » des comptes Microsoft. */
+const fullName = (raw: string) => {
+  const clean = stripOrgSuffix(raw);
+  return clean.includes("@") ? displayPersonName(clean) : (clean || "?");
+};
+
+/** Initiales dérivées du nom (« Jean-Michel GUNSLAY » → « JMG ») — repli quand
+ *  la fiche salarié n'en définit pas. 3 lettres max. */
+const deriveInitials = (raw: string) =>
+  fullName(raw).split(/[\s-]+/).filter(Boolean).map((w) => w[0]).join("").toUpperCase().slice(0, 3) || "?";
 
 /* ────────────────────────────── Composant racine ───────────────────────────── */
 
@@ -324,16 +333,41 @@ export function PlanningPanel({ isManager, isDirection }: { isManager: boolean; 
         )}
       </SurfaceCard>
 
-      {/* ── CALENDRIER D'ÉQUIPE (managers) ── */}
+      {/* ── CALENDRIER D'ÉQUIPE (managers) — l'en-tête EST le mois (« JUILLET 26 »),
+            encadré par les chevrons de navigation. */}
       {isManager && team.length > 0 && (
-        <SurfaceCard accent="violet" title="Calendrier d'équipe" icon={<Users className="h-3.5 w-3.5" />} action={monthNav}>
+        <SurfaceCard accent="violet"
+          title={<span className="uppercase tracking-wide tnum">{monthTitleShort(month)}</span>}
+          icon={<Users className="h-3.5 w-3.5" />}
+          action={
+            <div className="flex items-center gap-1.5">
+              <button type="button" onClick={() => setMonth((m) => shiftMonth(m, -1))} aria-label="Mois précédent"
+                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button type="button" onClick={() => setMonth((m) => shiftMonth(m, 1))} aria-label="Mois suivant"
+                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+                <ChevronRight className="h-4 w-4" />
+              </button>
+              {month !== monthIdOf(new Date()) && (
+                <button type="button" onClick={() => setMonth(monthIdOf(new Date()))} title="Revenir au mois en cours"
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          }>
           <TeamCalendar team={team} month={month} todayISO={data.todayISO} onPick={(email) => setWho(email === data.me.email ? "" : email)} />
-          <Legend />
         </SurfaceCard>
       )}
-      {!isManager && <Legend />}
     </div>
   );
+}
+
+/** « 2026-07 » → « JUILLET 26 » (en-tête du calendrier d'équipe). */
+function monthTitleShort(monthId: string): string {
+  const name = monthLabel(monthId).split(" ")[0] ?? monthId;
+  return `${name.toUpperCase()} ${monthId.slice(2, 4)}`;
 }
 
 /* ─────────────────── Compteurs (au-dessus de chaque calendrier) ────────────── */
@@ -585,9 +619,12 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             // jours). Un calque `-inset-px` déborde d'1 px et masque les traits
             // de grille entre cellules sélectionnées ; arrondi UNIQUEMENT aux
             // extrémités de la plage et en début/fin de ligne (lun / dim).
+            // Une plage qui DÉPASSE la grille affichée (fin de sélection sur le
+            // mois suivant — ex. CP à cheval) est refermée proprement au bord
+            // de la grille, sinon le bandeau « fuyait » sans arrondi ni bord.
             const selected = inSel(date);
-            const capL = selected && (date === sel.start || dow === 1);
-            const capR = selected && (date === sel.end || dow === 0);
+            const capL = selected && (date === sel.start || dow === 1 || date === grid[0]?.date);
+            const capR = selected && (date === sel.end || dow === 0 || date === grid[grid.length - 1]?.date);
             return (
               <button
                 key={date} type="button" data-date={date}
@@ -637,8 +674,10 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
                     même langage de forme que la sélection et les pastilles —
                     plus de rond isolé au milieu des rectangles. */}
                 <span className="relative z-10 flex w-full items-center justify-center md:justify-start">
-                  <span className={`inline-flex items-center justify-center rounded-md font-semibold tnum h-6 w-6 text-[12.5px] md:h-5 md:w-5 md:text-[11px]
-                    ${isToday ? "bg-brand-500 text-white shadow-sm" : "text-foreground"}`}>
+                  {/* Aujourd'hui : pastille jaune (brand) → texte NOIR (le blanc
+                      était illisible sur le jaune). */}
+                  <span className={`inline-flex items-center justify-center rounded-md tnum h-6 w-6 text-[12.5px] md:h-5 md:w-5 md:text-[11px]
+                    ${isToday ? "bg-brand-500 text-zinc-950 font-bold shadow-sm" : "text-foreground font-semibold"}`}>
                     {dayNum}
                   </span>
                 </span>
@@ -712,7 +751,15 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             </div>
             <div>
               <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Au</label>
-              <input type="date" value={sel.end} min={sel.start || undefined} onChange={(e) => setSel((c) => ({ ...c, end: e.target.value }))}
+              {/* Fin de plage BORNÉE au début : une fin antérieure au début
+                  (saisie clavier, `min` non appliqué partout sur mobile) cassait
+                  le bandeau de sélection — on la ramène au 1er jour. */}
+              <input type="date" value={sel.end} min={sel.start || undefined}
+                onChange={(e) => setSel((c) => {
+                  const v = e.target.value;
+                  if (!c.start) return { start: v, end: v };
+                  return { ...c, end: v && v < c.start ? c.start : v };
+                })}
                 className="h-9 rounded-md border border-border bg-background px-2 text-[13px] tnum focus:outline-none focus:ring-1 focus:ring-brand-500" />
             </div>
             <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="Précision (facultatif)"
@@ -756,18 +803,25 @@ function daysBetween(start: string, end: string): string[] {
 function EmployerSettings({ person, onSaved }: { person: PersonPlanning; onSaved: () => Promise<void> }) {
   const [cp, setCp] = useState<string>(person.profile.cpAllowanceDays?.toString() ?? "");
   const [cap, setCap] = useState<string>(person.profile.recupCapHours?.toString() ?? "");
+  const [initials, setInitials] = useState<string>(person.profile.initials ?? "");
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     setCp(person.profile.cpAllowanceDays?.toString() ?? "");
     setCap(person.profile.recupCapHours?.toString() ?? "");
-  }, [person.email, person.profile.cpAllowanceDays, person.profile.recupCapHours]);
+    setInitials(person.profile.initials ?? "");
+  }, [person.email, person.profile.cpAllowanceDays, person.profile.recupCapHours, person.profile.initials]);
 
   const save = async () => {
     setSaving(true);
     try {
       const r = await fetch("/api/effectif/planning", {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user: person.email, cpAllowanceDays: cp === "" ? null : Number(cp), recupCapHours: cap === "" ? null : Number(cap) }),
+        body: JSON.stringify({
+          user: person.email,
+          cpAllowanceDays: cp === "" ? null : Number(cp),
+          recupCapHours: cap === "" ? null : Number(cap),
+          initials: initials.trim() || null,
+        }),
       });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) { toast.error(j?.error || "Échec de l'enregistrement des réglages"); return; }
@@ -792,6 +846,14 @@ function EmployerSettings({ person, onSaved }: { person: PersonPlanning; onSaved
           <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Plafond récup (heures)</label>
           <input type="number" min={0} max={1000} step={0.5} value={cap} onChange={(e) => setCap(e.target.value)} placeholder="ex. 14"
             className="h-9 w-[110px] rounded-md border border-border bg-background px-2 text-[13.5px] tnum font-semibold focus:outline-none focus:ring-1 focus:ring-brand-500" />
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Initiales (3 max)</label>
+          <input type="text" maxLength={3} value={initials}
+            onChange={(e) => setInitials(e.target.value.toUpperCase())}
+            placeholder={deriveInitials(person.name)}
+            title="Affichées sur le calendrier d'équipe (mobile) — vide = dérivées du nom"
+            className="h-9 w-[84px] rounded-md border border-border bg-background px-2 text-[13.5px] font-semibold uppercase focus:outline-none focus:ring-1 focus:ring-brand-500" />
         </div>
         <button type="button" onClick={save} disabled={saving}
           className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-50">
@@ -827,7 +889,12 @@ function TeamCalendar({ team, month, todayISO, onPick }: {
       <table className="border-collapse text-[12px] w-full">
         <thead>
           <tr className="bg-secondary/40 text-[9.5px] uppercase tracking-wide text-muted-foreground">
-            <th className="sticky left-0 z-10 bg-secondary/40 text-left font-semibold px-3 py-2 min-w-[150px]">Employé · compteurs</th>
+            {/* Mobile : colonne étroite (initiales seules) pour que le déroulé
+                mensuel tienne à l'écran ; nom + compteurs dès sm. */}
+            <th className="sticky left-0 z-10 bg-secondary/40 text-left font-semibold px-2 py-2 sm:px-3 sm:min-w-[150px]">
+              <span className="sm:hidden">Emp.</span>
+              <span className="hidden sm:inline">Employé · compteurs</span>
+            </th>
             {days.map(({ date }) => {
               const dow = new Date(`${date}T12:00:00Z`).getUTCDay();
               const ferie = ferieByDate.get(date);
@@ -856,13 +923,17 @@ function TeamCalendar({ team, month, todayISO, onPick }: {
             const recupSet = new Set(p.recupDates);
             return (
               <tr key={p.email}>
-                <td className="sticky left-0 z-10 bg-card px-3 py-1.5 whitespace-nowrap border-r border-border/60">
-                  <button type="button" onClick={() => onPick(p.email)} title="Ouvrir son calendrier"
+                <td className="sticky left-0 z-10 bg-card px-2 py-1.5 sm:px-3 whitespace-nowrap border-r border-border/60">
+                  <button type="button" onClick={() => onPick(p.email)}
+                    title={`${fullName(p.name)} — ouvrir son calendrier`}
                     className="text-[12.5px] font-semibold text-foreground hover:text-brand-600 dark:hover:text-brand-400 text-left">
-                    {fullName(p.name)}
+                    {/* Mobile : INITIALES (fiche salarié, 3 lettres max — repli
+                        dérivé du nom) pour garder le mois entier lisible. */}
+                    <span className="sm:hidden tnum">{p.profile.initials || deriveInitials(p.name)}</span>
+                    <span className="hidden sm:inline">{fullName(p.name)}</span>
                   </button>
-                  {/* Les compteurs de la personne, VISIBLES au-dessus de sa ligne. */}
-                  <span className="block text-[10.5px] tnum text-muted-foreground">
+                  {/* Les compteurs de la personne — masqués sur mobile (largeur). */}
+                  <span className="hidden sm:block text-[10.5px] tnum text-muted-foreground">
                     <span className="text-sky-600 dark:text-sky-400 font-semibold">{fmtHM(p.counters.recup.balanceMin)}</span> récup
                     {" · "}
                     <span className="text-violet-600 dark:text-violet-400 font-semibold">
@@ -935,19 +1006,21 @@ const CAT_SHORT: Record<DayCategory, string> = {
   maladie: "Mal.", absent: "Abs.", sans_solde: "SS", autre: "Autre", conges: "Congé",
 };
 
-/** Pastille ALLONGÉE et LISIBLE d'une case du calendrier : barre pleine largeur
- *  portant le libellé de la catégorie (CP, Récup, Présent, Férié…). Un congé en
- *  attente (ou une récup posée à venir) est rendu en pointillés. Libellé abrégé
- *  sur mobile (case étroite), plein dès `md`. */
+/** Pastille ALLONGÉE et LISIBLE d'une case du calendrier. Un congé en attente
+ *  (ou une récup posée à venir) est rendu en pointillés. Libellé abrégé sur
+ *  mobile (case étroite), plein dès `md`.
+ *  Lisibilité (demande) : les vignettes VALIDÉES (Férié, Récup, CP…) sont en
+ *  fond PLEIN coloré + texte SOMBRE (l'ancien fond translucide + texte coloré
+ *  était illisible sur fond noir). La PRÉSENCE (état normal, tous les jours
+ *  ouvrés) est un carré arrondi au cadre vert, sans texte (centre noir/blanc
+ *  selon le thème). */
 function DayPill({ category, pending, planned }: { category: DayCategory; pending: boolean; planned: boolean }) {
   const tone = CAT_TONE[category];
   const dashed = pending || planned;
   // PRÉSENCE (état normal, tous les jours ouvrés) : un CARRÉ ARRONDI au cadre
   // vert épais, centre vide (noir en sombre / blanc en clair). Repère discret et
-  // net — plus la pastille pleine allongée qui noyait le calendrier de vert. Les
-  // EXCEPTIONS (CP, récup, férié, absence, maladie) gardent leur pastille lisible
-  // avec libellé ; « en attente / posé » garde le contour en pointillés.
-  if (category === "present") {
+  // net — plus la barre pleine qui noyait le calendrier de vert.
+  if (category === "present" && !dashed) {
     return (
       <span
         title={DAY_CATEGORY_LABEL.present}
@@ -958,7 +1031,7 @@ function DayPill({ category, pending, planned }: { category: DayCategory; pendin
   }
   const cls = dashed
     ? `border border-dashed bg-transparent font-semibold ${tone.text} ${tone.border}`
-    : `${tone.soft} font-semibold ${tone.text}`;
+    : `${tone.solid} font-bold text-zinc-950`;
   return (
     <span
       title={DAY_CATEGORY_LABEL[category]}
@@ -970,28 +1043,5 @@ function DayPill({ category, pending, planned }: { category: DayCategory; pendin
   );
 }
 
-function Legend() {
-  // « Présent » et « Férié » d'abord (les plus fréquents), puis les types de congé.
-  const cats: DayCategory[] = ["present", "cp", "rtt", "recup", "maladie", "absent", "ferie"];
-  return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
-      {cats.map((c) => (
-        <span key={c} className="inline-flex items-center gap-1.5">
-          {c === "present" ? (
-            // Même repère que le calendrier : carré arrondi, cadre vert, centre vide.
-            <span className="h-3 w-3 rounded-[4px] border-2 border-emerald-500 bg-background" />
-          ) : (
-            <span className={`h-2.5 w-4 rounded-sm ${CAT_TONE[c].solid}`} />
-          )}
-          {DAY_CATEGORY_LABEL[c]}
-        </span>
-      ))}
-      <span className="inline-flex items-center gap-1.5">
-        <span className="h-2.5 w-4 rounded-sm border border-dashed border-muted-foreground/60" /> en attente / posé
-      </span>
-      <span className="inline-flex items-center gap-1.5">
-        <span aria-hidden>🎄</span> événement
-      </span>
-    </div>
-  );
-}
+/* La légende des pastilles a été retirée (demande) : les pastilles portent
+   leur libellé directement, la désignation en fin d'écran faisait doublon. */

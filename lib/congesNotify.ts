@@ -14,8 +14,9 @@
  * la demande (le push in-app reste le canal de base). Les constructeurs de
  * contenu sont PURS (testés) ; seuls les senders touchent le réseau.
  */
-import { CONGE_TYPE_LABEL, congeDayCount, type CongeRequest } from "./conges";
+import { CONGE_TYPE_LABEL, congeDayCount, type CongeRequest, type CongeType } from "./conges";
 import { dayAfter, expandOuvrables } from "./planning";
+import { stripOrgSuffix } from "./userNames";
 import { sendMailAsShared, createCalendarEventAsApp } from "./graph";
 
 const esc = (s: string) =>
@@ -37,10 +38,43 @@ export function appBaseUrl(): string {
 
 /** Ligne résumé : « Jean Dupont — Récupération, du lundi 3 au mardi 4 août
  *  (2 j ouvrables) ». Le décompte notifié est en jours OUVRABLES (lun→sam, hors
- *  dimanches ET fériés) — le vrai coût du congé pour la personne qui valide. */
+ *  dimanches ET fériés) — le vrai coût du congé pour la personne qui valide.
+ *  Le nom est débarrassé du suffixe « - Gervifrais » des comptes Microsoft. */
 export function congeSummary(c: CongeRequest): string {
   const ouvr = expandOuvrables(c.start, c.end).length;
-  return `${c.name} — ${CONGE_TYPE_LABEL[c.type]}, ${congeRangeLabel(c)}${ouvr ? ` (${ouvr} j ouvrable${ouvr > 1 ? "s" : ""})` : ""}`;
+  return `${stripOrgSuffix(c.name)} — ${CONGE_TYPE_LABEL[c.type]}, ${congeRangeLabel(c)}${ouvr ? ` (${ouvr} j ouvrable${ouvr > 1 ? "s" : ""})` : ""}`;
+}
+
+/* ── Libellé « boîte de réception » : ce que la direction lit SANS ouvrir le
+      mail — sujet court « 🌴 Maxyme MANDINE », aperçu compact en 1re ligne du
+      corps « Récup. SAM 22.08.26 au MAR 25.08.26 inclu (3 jours) ». ── */
+
+/** Libellés compacts par type (ligne de réception). */
+const CONGE_TYPE_COMPACT: Record<CongeType, string> = {
+  cp: "Demande CP.",
+  rtt: "Demande RTT.",
+  sans_solde: "Sans solde.",
+  maladie: "Maladie.",
+  recup: "Récup.",
+  autre: "Absence.",
+};
+
+/** « 2026-08-22 » → « SAM 22.08.26 » (date compacte des libellés de réception). */
+function fmtDCompact(iso: string): string {
+  const d = new Date(`${iso}T12:00:00Z`);
+  const wd = d.toLocaleDateString("fr-FR", { timeZone: "UTC", weekday: "short" }).replace(/\./g, "").toUpperCase();
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const yy = String(d.getUTCFullYear()).slice(-2);
+  return `${wd} ${dd}.${mm}.${yy}`;
+}
+
+/** Ligne compacte « Récup. SAM 22.08.26 au MAR 25.08.26 inclu (3 jours) » —
+ *  jours comptés en OUVRABLES (lun→sam, hors dim./fériés), comme le résumé. */
+export function congeInboxLine(c: CongeRequest): string {
+  const ouvr = expandOuvrables(c.start, c.end).length;
+  const range = c.start === c.end ? fmtDCompact(c.start) : `${fmtDCompact(c.start)} au ${fmtDCompact(c.end)} inclu`;
+  return `${CONGE_TYPE_COMPACT[c.type]} ${range}${ouvr ? ` (${ouvr} jour${ouvr > 1 ? "s" : ""})` : ""}`;
 }
 
 /** Email HTML envoyé à la direction à chaque DEMANDE d'un salarié. */
@@ -48,6 +82,8 @@ export function congeMailHtml(c: CongeRequest, planningUrl: string): string {
   const ouvr = expandOuvrables(c.start, c.end).length;
   return `
   <div style="font:14px/1.6 'Segoe UI',Arial,sans-serif;color:#111;max-width:560px">
+    ${/* 1re ligne = APERÇU dans la boîte de réception (sous le sujet court). */""}
+    <p style="font-size:15px;font-weight:700;margin:0 0 10px">${esc(congeInboxLine(c))}</p>
     <p style="font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#666;margin:0 0 4px">Gervifrais · Planning</p>
     <h2 style="margin:0 0 12px;font-size:19px">Demande de ${esc(CONGE_TYPE_LABEL[c.type].toLowerCase())}</h2>
     <table style="border-collapse:collapse;width:100%;margin-bottom:14px">
@@ -99,7 +135,9 @@ export async function emailDirectionConge(c: CongeRequest, to: string[]): Promis
   if (!from || to.length === 0) return;
   await sendMailAsShared(from, {
     to,
-    subject: `🌴 ${congeSummary(c)}`,
+    // Sujet COURT (juste le nom) : le détail compact est la 1re ligne du corps,
+    // il s'affiche en aperçu sous le sujet dans la boîte de réception.
+    subject: `🌴 ${stripOrgSuffix(c.name)}`,
     html: congeMailHtml(c, `${appBaseUrl()}/planning`),
   });
 }

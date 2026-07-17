@@ -60,6 +60,9 @@ export interface HoursProfile {
    *  supp AU-DELÀ partent au PAIEMENT sur le bulletin du mois suivant (reporté
    *  sur l'état compta). null/absent = pas de plafond. */
   recupCapHours?: number | null;
+  /** Initiales affichées (3 lettres max, ex. « MM », « JMG ») — calendrier
+   *  d'équipe sur MOBILE. null/absent = dérivées du nom. */
+  initials?: string | null;
 }
 
 export const DEFAULT_PROFILE: HoursProfile = {
