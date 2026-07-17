@@ -969,8 +969,9 @@ function TeamCalendar({ team, month, todayISO, onPick }: {
                     <td key={date} title={title}
                       className={`h-9 px-0.5 text-center align-middle ${ferie ? "bg-orange-500/10" : dow === 0 ? "bg-secondary/30" : ""} ${date === todayISO ? "outline outline-1 -outline-offset-1 outline-brand-500/40" : ""}`}>
                       {cat === "present" ? (
-                        // Présence = ligne de fond discrète (ne surcharge pas la grille).
-                        <span className="mx-auto block h-1.5 w-full min-w-[18px] rounded-full bg-emerald-500/40" />
+                        // Présence = carré arrondi au cadre vert épais, centre vide
+                        // (noir en sombre / blanc en clair) — repère net, discret.
+                        <span className="mx-auto block h-4 w-4 rounded-[5px] border-2 border-emerald-500 bg-background" />
                       ) : cat === "ferie" ? (
                         <span className="mx-auto block h-1.5 w-full min-w-[18px] rounded-full bg-orange-500/50" />
                       ) : cat ? (
@@ -1011,15 +1012,20 @@ const CAT_SHORT: Record<DayCategory, string> = {
  *  Lisibilité (demande) : les vignettes VALIDÉES (Férié, Récup, CP…) sont en
  *  fond PLEIN coloré + texte SOMBRE (l'ancien fond translucide + texte coloré
  *  était illisible sur fond noir). La PRÉSENCE (état normal, tous les jours
- *  ouvrés) reste un simple trait discret SANS texte. */
+ *  ouvrés) est un carré arrondi au cadre vert, sans texte (centre noir/blanc
+ *  selon le thème). */
 function DayPill({ category, pending, planned }: { category: DayCategory; pending: boolean; planned: boolean }) {
   const tone = CAT_TONE[category];
   const dashed = pending || planned;
+  // PRÉSENCE (état normal, tous les jours ouvrés) : un CARRÉ ARRONDI au cadre
+  // vert épais, centre vide (noir en sombre / blanc en clair). Repère discret et
+  // net — plus la barre pleine qui noyait le calendrier de vert.
   if (category === "present" && !dashed) {
     return (
       <span
         title={DAY_CATEGORY_LABEL.present}
-        className="relative z-10 block w-full max-w-[76px] md:max-w-none h-1.5 rounded-full bg-emerald-500/35"
+        aria-label={DAY_CATEGORY_LABEL.present}
+        className="relative z-10 block h-4 w-4 rounded-[5px] border-2 border-emerald-500 bg-background"
       />
     );
   }

@@ -42,6 +42,7 @@ interface Product {
   uPays: string | null;
   uMarque: string | null;
   uCondi: string | null;
+  uCalibre: string | null;               // = calibre (SAP U_GER_CALIBRE)
   frgnName: string | null;               // = variété (SAP FrgnName)
   stockByWarehouse: Record<string, StockEntry>;
 }
@@ -537,7 +538,7 @@ export function ProductsTable() {
                                 {/* Désignation + chips colorés à DROITE */}
                                 <span className="min-w-0 border-l border-border/60 pl-3">
                                   <span className="block text-[15px] font-semibold text-foreground truncate leading-tight">{dz.fruit}</span>
-                                  <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} size="md" className="mt-1.5" />
+                                  <DesignationChips marque={dz.marque} condt={dz.condt} calibre={p.uCalibre} variete={dz.variete} pays={dz.pays} size="md" className="mt-1.5" />
                                   <span className="flex items-baseline gap-2 text-[11px] mt-1 min-w-0">
                                     <span className="font-mono text-muted-foreground/60 truncate">{p.itemCode}</span>
                                     {attendu && <span className="text-sky-600 dark:text-sky-400 shrink-0 font-medium">{attendu}</span>}

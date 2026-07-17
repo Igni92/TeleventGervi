@@ -93,6 +93,7 @@ export async function GET(req: NextRequest) {
   const products = items.map((rawP) => {
     const p = rawP as typeof rawP & {
       uPays: string | null; uMarque: string | null; uCondi: string | null;
+      uCalibre: string | null;
       uUvc: string | null; uNbBarqColis: number | null; frgnName: string | null;
     };
     const stockByWarehouse: Record<string, {
@@ -126,6 +127,7 @@ export async function GET(req: NextRequest) {
       uPays: p.uPays,
       uMarque: p.uMarque,
       uCondi: p.uCondi,
+      uCalibre: p.uCalibre,                 // = calibre (U_GER_CALIBRE)
       uUvc: p.uUvc,
       frgnName: p.frgnName,                 // = variété
       uNbBarqColis: p.uNbBarqColis,

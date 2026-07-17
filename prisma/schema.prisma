@@ -384,6 +384,7 @@ model Product {
   uPays               String? // SAP Items.U_Pays  → ligne.U_GER_Pays
   uMarque             String? // SAP Items.U_GER_Marque
   uCondi              String? // SAP Items.U_GER_Det_Condt (ex. "12x125g")
+  uCalibre            String? // SAP Items.U_GER_CALIBRE (ex. "3AE")
   uUvc                String? // SAP Items.U_GER_UVC (ex. "125g")
   frgnName            String? // SAP Items.FrgnName (nom étranger) = VARIÉTÉ
   uNbBarqColis        Float? // SAP Items.U_GER_NB_BARQ_COLIS
