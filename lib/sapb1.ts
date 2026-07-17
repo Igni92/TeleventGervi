@@ -454,23 +454,29 @@ export const sap = {
 export interface SapItem {
   ItemCode: string;
   ItemName: string;
+  ForeignName?: string;                // nom étranger = VARIÉTÉ (frgnName)
   ItemsGroupCode?: number;
+  BarCode?: string;                    // code-barres / EAN13
   // Units
-  SalesUnit?: string;                  // ex. "pie"
+  SalesUnit?: string;                  // ex. "pie" — unité de VENTE
   SalesPackagingUnit?: string;         // ex. "CAT I"
   SalesQtyPerPackUnit?: number;        // ex. 12
+  SalesItemsPerUnit?: number;          // unités par unité de vente (NumInSale)
   SalesUnitWeight?: number;            // poids d'1 unité en kg (ex. 0.125)
-  InventoryUOM?: string;               // ex. "pie"
-  PurchaseUnit?: string;
+  InventoryUOM?: string;               // ex. "pie" — unité de STOCKAGE
+  PurchaseUnit?: string;               // unité d'ACHAT
   ManageBatchNumbers?: "tYES" | "tNO";
   QuantityOnStock?: number;
   Valid?: "tYES" | "tNO";
   Frozen?: "tYES" | "tNO";
   ItemWarehouseInfoCollection?: SapItemWarehouse[];
-  // Custom Gervifrais fields
+  // Listes de prix (n°2 = prix d'achat, cf. lib/gerviPricing PURCHASE_PRICE_LIST)
+  ItemPrices?: { PriceList: number; Price?: number | null; Currency?: string | null }[];
+  // Custom Gervifrais fields (UDF U_*)
   U_Pays?: string;
   U_GER_Marque?: string;
   U_GER_Det_Condt?: string;
+  U_GER_CALIBRE?: string;
   U_GER_UVC?: string;
   U_GER_NB_BARQ_COLIS?: number;
 }

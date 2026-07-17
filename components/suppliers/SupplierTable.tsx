@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
-import { Search, Loader2, Truck, Users, Phone, Mail, Link2, ChevronRight } from "lucide-react";
+import { toast } from "sonner";
+import { Search, Loader2, Truck, Users, Phone, Mail, Link2, ChevronRight, DownloadCloud } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatPhoneDisplay } from "@/lib/phone";
 
@@ -30,6 +32,9 @@ export function SupplierTable() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [active, setActive] = useState<string>("actifs");
+  const [importing, setImporting] = useState(false);
+  // Auto-amorçage tenté une seule fois par montage (évite les boucles d'import).
+  const autoSeedTried = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -40,15 +45,47 @@ export function SupplierTable() {
       const res = await fetch(`/api/suppliers?${params}`, { cache: "no-store" });
       const json = await res.json();
       setSuppliers(json.suppliers ?? []);
-    } catch { setSuppliers([]); }
+      return (json.suppliers ?? []) as SupplierRow[];
+    } catch { setSuppliers([]); return [] as SupplierRow[]; }
     finally { setLoading(false); }
   }, [search, active]);
 
-  // Débounce léger sur la recherche.
-  useEffect(() => {
-    const t = setTimeout(load, 220);
-    return () => clearTimeout(t);
+  /** Importe les 50 derniers fournisseurs SAP à qui on a passé une commande. */
+  const runImport = useCallback(async (opts: { silent?: boolean } = {}) => {
+    setImporting(true);
+    try {
+      const res = await fetch("/api/sap/suppliers/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 50 }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json?.ok === false) throw new Error(json?.error || "Import échoué");
+      if (!opts.silent) {
+        toast.success(`${json.imported ?? 0} fournisseur${(json.imported ?? 0) > 1 ? "s" : ""} importé${(json.imported ?? 0) > 1 ? "s" : ""}`, {
+          description: `Les ${json.distinctVendors ?? 0} derniers fournisseurs commandés (${json.company ?? "SAP"}).`,
+        });
+      }
+      await load();
+    } catch (e) {
+      if (!opts.silent) toast.error(e instanceof Error ? e.message : "Import échoué");
+    } finally { setImporting(false); }
   }, [load]);
+
+  // Débounce léger sur la recherche + auto-amorçage si le référentiel est vide.
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      const rows = await load();
+      // Liste vide, sans recherche, sur l'onglet « Actifs » (défaut) → on amorce
+      // automatiquement une première fois avec les 50 derniers fournisseurs
+      // commandés (import silencieux, non destructif).
+      if (rows.length === 0 && !search.trim() && active === "actifs" && !autoSeedTried.current) {
+        autoSeedTried.current = true;
+        await runImport({ silent: true });
+      }
+    }, 220);
+    return () => clearTimeout(t);
+  }, [load, runImport, search, active]);
 
   return (
     <div className="space-y-4">
@@ -79,6 +116,17 @@ export function SupplierTable() {
             </button>
           ))}
         </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => runImport()}
+          disabled={importing}
+          title="Importer les 50 derniers fournisseurs à qui on a passé une commande (SAP)"
+        >
+          {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DownloadCloud className="h-3.5 w-3.5" />}
+          Importer les 50 derniers
+        </Button>
       </div>
 
       {loading ? (
