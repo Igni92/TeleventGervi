@@ -638,6 +638,56 @@ html.dark[data-hover-contrast] [class*="hover:bg-accent"]:hover {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   ONDE DE SURVOL DES BOUTONS (demande client 07/2026)
+   Au passage de la souris sur N'IMPORTE QUEL bouton, une onde
+   circulaire part du centre et se dissipe au bord — affordance
+   « c'est cliquable ». 100 % CSS : l'onde est un anneau en
+   radial-gradient teinté `currentColor` (s'adapte donc à tout
+   bouton, plein comme fantôme, clair comme sombre) dont on anime
+   la taille de fond ; tout vit DANS les keyframes (pas de fill),
+   donc aucun style résiduel après l'onde.
+
+   Périmètre : <button>, [role="button"] et .btn-ripple (posée par
+   buttonVariants pour couvrir les liens rendus via asChild).
+   Exclusions : boutons désactivés, fonds dégradés (l'onde
+   remplacerait leur background-image le temps de l'animation),
+   boutons porteurs d'une classe d'animation propre, et opt-out
+   explicite `.no-ripple`. Souris uniquement (pas de hover fantôme
+   au tap sur tactile) et respect de prefers-reduced-motion.
+═══════════════════════════════════════════════════════════ */
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  :is(button, [role="button"], .btn-ripple):not(:disabled):not(.no-ripple):not([class*="bg-gradient"]):not([class*="animate-"]):hover {
+    animation: btn-hover-ripple 650ms ease-out;
+  }
+}
+@keyframes btn-hover-ripple {
+  from {
+    background-image: radial-gradient(farthest-side,
+      transparent 0%, transparent 52%,
+      color-mix(in srgb, currentColor 22%, transparent) 66%,
+      color-mix(in srgb, currentColor 7%, transparent) 78%,
+      transparent 86%);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 0% 0%;
+  }
+  to {
+    background-image: radial-gradient(farthest-side,
+      transparent 0%, transparent 52%,
+      color-mix(in srgb, currentColor 22%, transparent) 66%,
+      color-mix(in srgb, currentColor 7%, transparent) 78%,
+      transparent 86%);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 250% 250%;
+  }
+}
+/* Réglage televente:animations « off » : onde coupée aussi. */
+html[data-reduce-anim="1"] :is(button, [role="button"], .btn-ripple):not([class*="animate-"]):hover {
+  animation: none;
+}
+
+/* ═══════════════════════════════════════════════════════════
    ICÔNES — toutes les icônes (lucide) 30% plus grandes partout
    (demande). `zoom` agrandit ET reflue la mise en page (la boîte
    grandit), contrairement à transform:scale qui déborderait. Ne
@@ -663,6 +713,32 @@ svg.lucide { zoom: 1.3; }
      lignes et alourdissent tout. On garde des icônes plus grandes que
      nominal (lisibilité), mais les lignes retrouvent de l'air. */
   svg.lucide { zoom: 1.12; }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   CHAMPS RENSEIGNABLES EN EXERGUE — MOBILE (demande client 07/2026)
+   Sous 640 px le fond de page prend la couleur des cartes (« une seule
+   surface », cf. plus haut) : les champs en `bg-background` deviennent
+   invisibles — seul un filet 1 px les distingue. On force donc TOUS les
+   champs de saisie (inputs texte, textareas, selects natifs et triggers
+   Radix [role="combobox"]) sur un FOND GRIS (--secondary, bascule
+   clair/sombre automatique) + une bordure renforcée : on repère d'un
+   coup d'œil tout ce qui se remplit. `!important` face aux utilitaires
+   Tailwind posés en classe (bg-background, bg-card…), même logique que
+   la règle mobile .surface-card ci-dessus.
+
+   Exclusions : les types non textuels (cases, radios, curseurs…) et les
+   champs volontairement transparents (`bg-transparent` : éditeurs inline
+   dont l'habillage visuel est porté par leur conteneur — palette de
+   commande, cellules éditables…). */
+@media (max-width: 639.98px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="hidden"]):not([class*="bg-transparent"]),
+  textarea:not([class*="bg-transparent"]),
+  select:not([class*="bg-transparent"]),
+  [role="combobox"]:not([class*="bg-transparent"]) {
+    background-color: hsl(var(--secondary)) !important;
+    border-color: hsl(var(--muted-foreground) / 0.35) !important;
+  }
 }
 
 /* Titres display : équilibre les retours à la ligne (pas de mot orphelin seul

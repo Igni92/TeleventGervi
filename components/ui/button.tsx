@@ -5,7 +5,10 @@ import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
   [
-    "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-[13.5px] font-medium",
+    // `btn-ripple` : onde de survol globale (globals.css) — les <button> natifs
+    // sont déjà couverts par le sélecteur `button:hover` ; la classe étend
+    // l'effet aux liens rendus via asChild (<a> par Slot).
+    "btn-ripple inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-[13.5px] font-medium",
     // Propriétés explicites (pas `all`) : couleurs + ombre + transform.
     "transition-[background-color,border-color,color,box-shadow,transform,filter] duration-150 ease-out",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
