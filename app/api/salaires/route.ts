@@ -1,0 +1,241 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { requireAdmin, isComptable, COMPTABLE_EMAILS } from "@/lib/permissions";
+import {
+  computeWeek, typicalDayMinutes, isMonthId, monthIdOf, monthWeeks,
+  splitSupp, effectivePaySuppMin,
+  type HoursProfile,
+} from "@/lib/heuresCalc";
+import { listAllWeekEntries, listProfiles, type WeekEntry } from "@/lib/heuresRh";
+import { listAllConges } from "@/lib/congesRh";
+import { expandOuvrables, monthEndISO } from "@/lib/planning";
+import { rangesOverlap, type CongeRequest } from "@/lib/conges";
+import { stripOrgSuffix } from "@/lib/userNames";
+import {
+  avantageNatureMensuel, missingElements, prorata13e, recapMailHtml, salaireMonthLabel,
+  type RecapRow, type SalaryHeures,
+} from "@/lib/salaires";
+import {
+  saveSalaryMonth, listSalaryMonths,
+  saveSalaryProfile, listSalaryProfiles,
+  getRecapSent, markRecapSent,
+} from "@/lib/salairesRh";
+import { appBaseUrl } from "@/lib/congesNotify";
+import { sendMailAsShared } from "@/lib/graph";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * ÉLÉMENTS DES SALAIRES (onglet /salaires) — remplace l'envoi du PDF compta.
+ *
+ *   GET  ?month=YYYY-MM            → une ligne par salarié : heures du mois
+ *                                    (travaillées, supp payées/récup décidées,
+ *                                    CP, absences, fériés), primes + frais
+ *                                    saisis, fiche paie (CDI, 13e, véhicule AN),
+ *                                    éléments manquants — admin/direction ET
+ *                                    profil COMPTABLE (lecture).
+ *   POST { month, user, primes, frais, note } → enregistre les éléments du mois
+ *   POST { action:"send", month }  → envoie le RÉCAP email au cabinet comptable
+ *   PUT  { user, profile }         → fiche paie (date CDI, 13e mois, véhicule)
+ *
+ * Écritures réservées aux managers (admin/direction) ; le comptable LIT.
+ */
+
+async function ctx() {
+  const session = await auth();
+  if (!session?.user) return null;
+  const email = (session.user.email ?? "").trim().toLowerCase();
+  if (!email) return null;
+  const [canEdit, comptable] = await Promise.all([requireAdmin(session), isComptable(session)]);
+  return { email, canEdit, comptable };
+}
+
+/** Résumé HEURES d'un salarié pour le mois (mêmes règles que l'état mensuel :
+ *  semaines rattachées au mois de leur dimanche, majorations hebdomadaires). */
+function buildHeures(
+  weekIds: string[],
+  entries: Map<string, WeekEntry> | undefined,
+  profile: HoursProfile,
+  conges: CongeRequest[],
+  monthId: string,
+): SalaryHeures {
+  const typDay = typicalDayMinutes(profile);
+  const out: SalaryHeures = {
+    totalMin: 0, contractMin: 0, suppPayEquivMin: 0, suppRecupEquivMin: 0, suppSansDecisionMin: 0,
+    ferieMin: 0, congesMin: 0, cpJours: 0, maladieJours: 0, absentJours: 0, recupJours: 0,
+    weeksWithData: 0, weeksTotal: weekIds.length,
+  };
+  for (const w of weekIds) {
+    const e = entries?.get(w);
+    if (!e) continue;
+    out.weeksWithData += 1;
+    const c = computeWeek(e.days, profile.weeklyHours, typDay);
+    out.totalMin += c.totalMin;
+    out.contractMin += c.contractMin;
+    out.ferieMin += c.ferieMin;
+    out.congesMin += c.congesMin;
+    const supp = c.sup25Min + c.sup50Min;
+    if (supp > 0) {
+      if (e.option) {
+        const pay = effectivePaySuppMin(e.option, e.paySuppMin, supp);
+        const s = splitSupp(c.sup25Min, c.sup50Min, pay);
+        out.suppPayEquivMin += s.payEquivMin;
+        out.suppRecupEquivMin += s.recupEquivMin;
+      } else {
+        out.suppSansDecisionMin += supp;
+      }
+    }
+    for (const d of e.days) {
+      if (d?.tag === "maladie") out.maladieJours += 1;
+      else if (d?.tag === "absent") out.absentJours += 1;
+      else if (d?.tag === "recup") out.recupJours += 1;
+    }
+  }
+  // CP VALIDÉS tombant dans le mois civil (jours ouvrables, hors dim./fériés).
+  const a = `${monthId}-01`, b = monthEndISO(monthId);
+  for (const g of conges) {
+    if (g.type !== "cp" || g.status !== "approved" || !rangesOverlap(g.start, g.end, a, b)) continue;
+    out.cpJours += expandOuvrables(g.start > a ? g.start : a, g.end < b ? g.end : b).length;
+  }
+  return out;
+}
+
+/** Construit toutes les lignes du mois (partagé GET / envoi du récap). */
+async function buildRows(monthId: string) {
+  const weeks = monthWeeks(monthId);
+  const [users, byUser, hourProfiles, salProfiles, salMonths, allConges] = await Promise.all([
+    prisma.user.findMany({ select: { name: true, email: true }, orderBy: { name: "asc" } }),
+    listAllWeekEntries(),
+    listProfiles(),
+    listSalaryProfiles(),
+    listSalaryMonths(monthId),
+    listAllConges(),
+  ]);
+  const congesByUser = new Map<string, CongeRequest[]>();
+  for (const g of allConges) {
+    const list = congesByUser.get(g.email);
+    if (list) list.push(g); else congesByUser.set(g.email, [g]);
+  }
+  const seen = new Set<string>();
+  const build = (email: string, rawName: string) => {
+    const hourProfile = hourProfiles.get(email) ?? { weeklyHours: 35, typicalDay: { m1: "06:00", m2: "13:00" } };
+    const salProfile = salProfiles.get(email) ?? null;
+    const salary = salMonths.get(email) ?? null;
+    const heures = buildHeures(weeks, byUser.get(email), hourProfile, congesByUser.get(email) ?? [], monthId);
+    const anMensuel = avantageNatureMensuel(salProfile?.vehicule);
+    return {
+      email,
+      name: stripOrgSuffix(rawName) || email,
+      heures,
+      salary,
+      profile: salProfile,
+      anMensuel,
+      prorata13: prorata13e(salProfile?.cdiDate, monthId),
+      missing: missingElements(monthId, salProfile, salary, heures),
+    };
+  };
+  const rows = (users as { name: string | null; email: string | null }[])
+    .filter((u) => u.email)
+    .map((u) => {
+      const email = u.email!.trim().toLowerCase();
+      seen.add(email);
+      return build(email, u.name || email);
+    });
+  // Saisies orphelines (compte supprimé mais heures présentes) : visibles quand
+  // même — la paie du mois les concerne encore.
+  for (const [email] of byUser) {
+    if (!seen.has(email)) rows.push(build(email, email));
+  }
+  return rows;
+}
+
+export async function GET(req: NextRequest) {
+  const c = await ctx();
+  if (!c) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!c.canEdit && !c.comptable) return NextResponse.json({ error: "Réservé aux managers et au comptable" }, { status: 403 });
+
+  const { searchParams } = new URL(req.url);
+  const month = searchParams.get("month") ?? monthIdOf(new Date());
+  if (!isMonthId(month)) return NextResponse.json({ error: "Mois invalide" }, { status: 400 });
+
+  try {
+    const [rows, sent] = await Promise.all([buildRows(month), getRecapSent(month)]);
+    return NextResponse.json({ ok: true, month, rows, sent, canEdit: c.canEdit });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const c = await ctx();
+  if (!c) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!c.canEdit) return NextResponse.json({ error: "Réservé aux managers" }, { status: 403 });
+
+  let body: { action?: string; month?: string; user?: string; primes?: unknown; frais?: unknown; note?: unknown };
+  try { body = await req.json(); }
+  catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
+
+  const month = body.month ?? "";
+  if (!isMonthId(month)) return NextResponse.json({ error: "Mois invalide" }, { status: 400 });
+
+  // ── ENVOI DU RÉCAP au cabinet comptable (remplace le PDF compta) ──
+  if (body.action === "send") {
+    try {
+      const from = process.env.CONGES_FROM_ADDRESS || process.env.RELANCE_FROM_ADDRESS;
+      if (!from) return NextResponse.json({ error: "Boîte d'envoi non configurée (CONGES_FROM_ADDRESS)" }, { status: 400 });
+      const to = (process.env.COMPTA_EMAIL ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+      const recipients = to.length ? to : [...COMPTABLE_EMAILS];
+
+      const rows = await buildRows(month);
+      const recapRows: RecapRow[] = rows
+        .filter((r) => r.heures.weeksWithData > 0 || (r.salary && (r.salary.primes.length || r.salary.frais.length)))
+        .map((r) => ({
+          name: r.name, email: r.email, heures: r.heures, anMensuel: r.anMensuel,
+          vehicule: r.profile?.vehicule ?? null,
+          primes: r.salary?.primes ?? [], frais: r.salary?.frais ?? [],
+          note: r.salary?.note, missing: r.missing,
+        }));
+      if (recapRows.length === 0) return NextResponse.json({ error: "Aucune donnée ce mois-ci" }, { status: 400 });
+
+      await sendMailAsShared(from, {
+        to: recipients,
+        subject: `💶 Éléments des salaires — ${salaireMonthLabel(month)}`,
+        html: recapMailHtml(month, recapRows, appBaseUrl()),
+      });
+      const sent = await markRecapSent(month, c.email, recipients);
+      return NextResponse.json({ ok: true, month, sent });
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
+  }
+
+  // ── Enregistrement des éléments du mois d'UN salarié ──
+  const target = (body.user ?? "").trim().toLowerCase();
+  if (!target) return NextResponse.json({ error: "Salarié manquant" }, { status: 400 });
+  try {
+    const data = await saveSalaryMonth(target, month, { primes: body.primes, frais: body.frais, note: body.note }, c.email);
+    return NextResponse.json({ ok: true, month, user: target, data });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  const c = await ctx();
+  if (!c) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!c.canEdit) return NextResponse.json({ error: "Réservé aux managers" }, { status: 403 });
+
+  let body: { user?: string; profile?: unknown };
+  try { body = await req.json(); }
+  catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
+
+  const target = (body.user ?? "").trim().toLowerCase();
+  if (!target) return NextResponse.json({ error: "Salarié manquant" }, { status: 400 });
+  try {
+    const profile = await saveSalaryProfile(target, body.profile);
+    return NextResponse.json({ ok: true, user: target, profile });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+  }
+}
