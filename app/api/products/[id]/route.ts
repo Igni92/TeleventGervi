@@ -40,6 +40,7 @@ interface LocalProductRow {
   salesUnit: string | null;
   salesPackagingUnit: string | null;
   salesQtyPerPackUnit: number | null;
+  salesItemsPerUnit: number | null;
   salesUnitWeight: number | null;
   inventoryUnit: string | null;
   purchaseUnit: string | null;
@@ -57,8 +58,11 @@ interface LocalProductRow {
 }
 
 const SELECT_ITEM =
-  "ItemCode,ItemName,ForeignName,ItemsGroupCode,BarCode,SalesUnit,SalesPackagingUnit," +
-  "SalesQtyPerPackUnit,SalesItemsPerUnit,SalesUnitWeight,InventoryUOM,PurchaseUnit," +
+  "ItemCode,ItemName,ForeignName,ItemsGroupCode,BarCode," +
+  // Conditionnement VENTE / STOCKAGE / ACHAT
+  "SalesUnit,SalesPackagingUnit,SalesQtyPerPackUnit,SalesItemsPerUnit,SalesUnitWeight," +
+  "InventoryUOM," +
+  "PurchaseUnit,PurchasePackagingUnit,PurchaseQtyPerPackUnit,PurchaseItemsPerUnit," +
   "ManageBatchNumbers,QuantityOnStock,Valid,Frozen,ItemPrices,U_Pays,U_GER_Marque," +
   "U_GER_Det_Condt,U_GER_CALIBRE,U_GER_UVC,U_GER_NB_BARQ_COLIS";
 
@@ -72,7 +76,7 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
   // Cache local (robuste à la dérive du client Prisma → SELECT brut explicite).
   const rows = await prisma.$queryRaw<LocalProductRow[]>`
     SELECT "itemCode","itemName","itemGroup","groupName","salesUnit","salesPackagingUnit",
-           "salesQtyPerPackUnit","salesUnitWeight","inventoryUnit","purchaseUnit","manageBatch",
+           "salesQtyPerPackUnit","salesItemsPerUnit","salesUnitWeight","inventoryUnit","purchaseUnit","manageBatch",
            "totalStock","uPays","uMarque","uCondi","uCalibre","uUvc","uNbBarqColis","frgnName",
            "barCode","commentaire"
     FROM "Product" WHERE "id" = ${params.id} LIMIT 1`;
@@ -122,13 +126,19 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
       itemName: pick(sapItem?.ItemName, local.itemName) ?? "",
       variete: pick(sapItem?.ForeignName, local.frgnName) ?? "",
       barCode: pick(sapItem?.BarCode, local.barCode) ?? "",
-      // Conditionnement
-      purchaseUnit: pick(sapItem?.PurchaseUnit, local.purchaseUnit) ?? "",   // ACHAT
-      salesUnit: pick(sapItem?.SalesUnit, local.salesUnit) ?? "",            // VENTE
-      inventoryUnit: pick(sapItem?.InventoryUOM, local.inventoryUnit) ?? "", // STOCKAGE
+      // Conditionnement d'ACHAT (Purchase*) — emballage live only (pas en cache)
+      purchaseUnit: pick(sapItem?.PurchaseUnit, local.purchaseUnit) ?? "",
+      purchasePackagingUnit: sapItem?.PurchasePackagingUnit ?? "",
+      purchaseQtyPerPackUnit: sapItem?.PurchaseQtyPerPackUnit ?? null,
+      purchaseItemsPerUnit: sapItem?.PurchaseItemsPerUnit ?? null,
+      // Conditionnement de VENTE (Sales*)
+      salesUnit: pick(sapItem?.SalesUnit, local.salesUnit) ?? "",
       salesPackagingUnit: pick(sapItem?.SalesPackagingUnit, local.salesPackagingUnit) ?? "",
       salesQtyPerPackUnit: pick(sapItem?.SalesQtyPerPackUnit, local.salesQtyPerPackUnit),
+      salesItemsPerUnit: pick(sapItem?.SalesItemsPerUnit, local.salesItemsPerUnit),
       salesUnitWeight: pick(sapItem?.SalesUnitWeight, local.salesUnitWeight),
+      // Conditionnement de STOCKAGE (Inventory*)
+      inventoryUnit: pick(sapItem?.InventoryUOM, local.inventoryUnit) ?? "",
       // Attributs Gervifrais
       uPays: pick(sapItem?.U_Pays, local.uPays) ?? "",
       uMarque: pick(sapItem?.U_GER_Marque, local.uMarque) ?? "",
@@ -148,12 +158,20 @@ interface PatchBody {
   itemName?: string;
   variete?: string;
   barCode?: string;
+  // Achat
   purchaseUnit?: string;
+  purchasePackagingUnit?: string;
+  purchaseQtyPerPackUnit?: number | null;
+  purchaseItemsPerUnit?: number | null;
+  // Vente
   salesUnit?: string;
-  inventoryUnit?: string;
   salesPackagingUnit?: string;
   salesQtyPerPackUnit?: number | null;
+  salesItemsPerUnit?: number | null;
   salesUnitWeight?: number | null;
+  // Stockage
+  inventoryUnit?: string;
+  // Attributs
   uPays?: string;
   uMarque?: string;
   uCondi?: string;
@@ -196,11 +214,15 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
     variete: s(body.variete),
     barCode: s(body.barCode),
     purchaseUnit: s(body.purchaseUnit),
+    purchasePackagingUnit: s(body.purchasePackagingUnit),
+    purchaseQtyPerPackUnit: n(body.purchaseQtyPerPackUnit),
+    purchaseItemsPerUnit: n(body.purchaseItemsPerUnit),
     salesUnit: s(body.salesUnit),
-    inventoryUnit: s(body.inventoryUnit),
     salesPackagingUnit: s(body.salesPackagingUnit),
     salesQtyPerPackUnit: n(body.salesQtyPerPackUnit),
+    salesItemsPerUnit: n(body.salesItemsPerUnit),
     salesUnitWeight: n(body.salesUnitWeight),
+    inventoryUnit: s(body.inventoryUnit),
     uPays: s(body.uPays),
     uMarque: s(body.uMarque),
     uCondi: s(body.uCondi),
@@ -217,12 +239,19 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
   if (has("itemName")) sapPayload.ItemName = f.itemName;
   if (has("variete")) sapPayload.ForeignName = f.variete ?? "";
   if (has("barCode")) sapPayload.BarCode = f.barCode ?? "";
+  // Achat
   if (has("purchaseUnit")) sapPayload.PurchaseUnit = f.purchaseUnit ?? "";
+  if (has("purchasePackagingUnit")) sapPayload.PurchasePackagingUnit = f.purchasePackagingUnit ?? "";
+  if (has("purchaseQtyPerPackUnit")) sapPayload.PurchaseQtyPerPackUnit = f.purchaseQtyPerPackUnit;
+  if (has("purchaseItemsPerUnit")) sapPayload.PurchaseItemsPerUnit = f.purchaseItemsPerUnit;
+  // Vente
   if (has("salesUnit")) sapPayload.SalesUnit = f.salesUnit ?? "";
-  if (has("inventoryUnit")) sapPayload.InventoryUOM = f.inventoryUnit ?? "";
   if (has("salesPackagingUnit")) sapPayload.SalesPackagingUnit = f.salesPackagingUnit ?? "";
   if (has("salesQtyPerPackUnit")) sapPayload.SalesQtyPerPackUnit = f.salesQtyPerPackUnit;
+  if (has("salesItemsPerUnit")) sapPayload.SalesItemsPerUnit = f.salesItemsPerUnit;
   if (has("salesUnitWeight")) sapPayload.SalesUnitWeight = f.salesUnitWeight;
+  // Stockage
+  if (has("inventoryUnit")) sapPayload.InventoryUOM = f.inventoryUnit ?? "";
   if (has("uPays")) sapPayload.U_Pays = f.uPays ?? "";
   if (has("uMarque")) sapPayload.U_GER_Marque = f.uMarque ?? "";
   if (has("uCondi")) sapPayload.U_GER_Det_Condt = f.uCondi ?? "";
@@ -255,6 +284,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
       "inventoryUnit" = ${f.inventoryUnit},
       "salesPackagingUnit" = ${f.salesPackagingUnit},
       "salesQtyPerPackUnit" = ${f.salesQtyPerPackUnit},
+      "salesItemsPerUnit" = ${f.salesItemsPerUnit},
       "salesUnitWeight" = ${f.salesUnitWeight},
       "uPays" = ${f.uPays},
       "uMarque" = ${f.uMarque},

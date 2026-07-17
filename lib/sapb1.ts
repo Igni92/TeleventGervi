@@ -457,14 +457,19 @@ export interface SapItem {
   ForeignName?: string;                // nom étranger = VARIÉTÉ (frgnName)
   ItemsGroupCode?: number;
   BarCode?: string;                    // code-barres / EAN13
-  // Units
+  // Conditionnement de VENTE (Sales*)
   SalesUnit?: string;                  // ex. "pie" — unité de VENTE
-  SalesPackagingUnit?: string;         // ex. "CAT I"
-  SalesQtyPerPackUnit?: number;        // ex. 12
+  SalesPackagingUnit?: string;         // emballage de vente (ex. "CAT I")
+  SalesQtyPerPackUnit?: number;        // qté par emballage de vente (ex. 12)
   SalesItemsPerUnit?: number;          // unités par unité de vente (NumInSale)
   SalesUnitWeight?: number;            // poids d'1 unité en kg (ex. 0.125)
+  // Conditionnement de STOCKAGE (Inventory*)
   InventoryUOM?: string;               // ex. "pie" — unité de STOCKAGE
+  // Conditionnement d'ACHAT (Purchase*)
   PurchaseUnit?: string;               // unité d'ACHAT
+  PurchasePackagingUnit?: string;      // emballage d'achat
+  PurchaseQtyPerPackUnit?: number;     // qté par emballage d'achat
+  PurchaseItemsPerUnit?: number;       // unités par unité d'achat (NumInBuy)
   ManageBatchNumbers?: "tYES" | "tNO";
   QuantityOnStock?: number;
   Valid?: "tYES" | "tNO";
