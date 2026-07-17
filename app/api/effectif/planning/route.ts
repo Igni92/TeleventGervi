@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getAccessScope, isDirection } from "@/lib/permissions";
+import { getAccessScope, isDirection, isComptable } from "@/lib/permissions";
 import {
   DEFAULT_PROFILE, isMonthId, monthIdOf, typicalDayMinutes, weekDates,
   type DayTag, type HoursProfile,
@@ -44,7 +44,9 @@ async function ctx() {
   return {
     email,
     name: session.user.name?.trim() || email,
-    isManager: !!scope.all,
+    // Le profil COMPTABLE lit le planning de toute l'équipe (les écritures —
+    // PUT réglages, décisions congés — restent gatées par isDir/routes conges).
+    isManager: !!scope.all || (await isComptable(session)),
     isDir: await isDirection(session),
   };
 }

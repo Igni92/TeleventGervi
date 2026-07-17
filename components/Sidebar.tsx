@@ -10,7 +10,7 @@ import {
   Radio, ShoppingCart, Package, PackagePlus, Factory, Receipt, AlertTriangle,
   Home, Settings, PackageCheck, ClipboardCheck, Truck, Eye, Store,
   Pencil, Loader2, RotateCcw, FileText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight, Check,
-  CalendarDays, Building2,
+  CalendarDays, Building2, Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -133,6 +133,9 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
       // Planning congés & récup : calendriers par personne + équipe, compteurs
       // CP/récup, propositions boomerang (direction ⇄ salarié).
       { href: "/planning", label: "Planning", icon: CalendarDays },
+      // Éléments des salaires : primes, 13e mois, avantages en nature, frais —
+      // récap mensuel envoyé au cabinet comptable (remplace le PDF compta).
+      { href: "/salaires", label: "Éléments de salaires", icon: Wallet },
       { href: "/transport", label: "Coût de transport", icon: Truck },
     ],
   },
