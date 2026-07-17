@@ -16,6 +16,7 @@ import { StatBlock } from "@/components/ui/stat-block";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
 import { fmtJourDate } from "@/lib/date-fr";
+import { heureFromRef } from "@/lib/docLabel";
 import { eur, eur0, fmtColis } from "@/lib/format";
 import { DesignationChips } from "./DesignationChips";
 import { INCIDENT_TYPES, notifyReceptionIncidentsChanged } from "./ReceptionIncidents";
@@ -35,6 +36,8 @@ type PurchaseOrder = {
   cardCode: string; cardName?: string; numAtCard: string;
   open: boolean;
   cancelled: boolean;
+  /** N° de l'entrée marchandise qui a réceptionné la commande (null si pas encore réceptionnée). */
+  emDocNum: number | null;
   total: number; totalTTC: number; totalHT: number; totalTVA: number;
   comments: string; lineCount: number; lines: PoLine[];
 };
@@ -48,11 +51,7 @@ const fmtDate = fmtJourDate;
 
 /** Heure « HHhMM » de prise de commande, extraite du commentaire SAP
  *  (« CF 2709 - JMG à 13h10 » ou l'ancien « … · Commande à 13h10 »). */
-function heureFromComments(comments?: string | null): string | null {
-  if (!comments) return null;
-  const matches = comments.match(/\d{1,2}h\d{2}/g);
-  return matches ? matches[matches.length - 1] : null;
-}
+const heureFromComments = heureFromRef;
 
 function StatusBadge({ open, cancelled, large }: { open: boolean; cancelled?: boolean; large?: boolean }) {
   const tone = cancelled
@@ -121,6 +120,7 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
       if (!q) return true;
       const haystack = [
         d.cardCode, d.cardName, d.numAtCard, `#${d.docNum}`, String(d.docNum),
+        ...(d.emDocNum != null ? [`EM${d.emDocNum}`, `EM ${d.emDocNum}`] : []),
         ...d.lines.flatMap((l) => [l.itemCode, l.itemName]),
       ];
       return haystack.some((h) => (h ?? "").toString().toLowerCase().includes(q));
@@ -241,10 +241,16 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                 className="w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40"
               >
                 <div className="min-w-0 flex-1">
-                  {/* Mobile : l'IMPORTANT seulement — fournisseur, statut, livraison,
-                      montant. (n° CF, heure de prise, nb lignes → dans le détail.) */}
+                  {/* Mobile : fournisseur, N° EM (dès réception, sinon N° CF) +
+                      heure de saisie, statut, livraison, montant. */}
                   <div className="text-[16px] font-semibold text-foreground truncate">
                     {d.cardName || d.cardCode}
+                  </div>
+                  <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
+                    <span className="font-mono font-semibold text-foreground">
+                      {d.emDocNum != null ? `EM ${d.emDocNum}` : `CF ${d.docNum}`}
+                    </span>
+                    {heureFromComments(d.comments) ? ` · saisie à ${heureFromComments(d.comments)}` : ""}
                   </div>
                   <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
                     Livraison {fmtDate(d.dueDate)}
@@ -274,7 +280,9 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
               <thead className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="text-left px-3 py-2 font-semibold w-24">N° Cde</th>
+                  <th className="text-left px-3 py-2 font-semibold w-24">N° EM</th>
                   <th className="text-left px-3 py-2 font-semibold">Fournisseur</th>
+                  <th className="text-left px-3 py-2 font-semibold w-36">Saisie</th>
                   <th className="text-left px-3 py-2 font-semibold w-28">Livraison</th>
                   <th className="text-left px-3 py-2 font-semibold w-36">Statut</th>
                   {!restricted && <th className="text-right px-3 py-2 font-semibold w-32">Total HT</th>}
@@ -288,7 +296,13 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                     onClick={() => setLargeEntry(d.docEntry)}
                     className="border-t border-border/60 hover:bg-secondary/30 cursor-pointer transition-colors"
                   >
-                    <td className="px-3 py-2.5 font-mono font-semibold"># {d.docNum}</td>
+                    <td className="px-3 py-2.5 font-mono font-semibold whitespace-nowrap"># {d.docNum}</td>
+                    <td className="px-3 py-2.5 font-mono font-semibold whitespace-nowrap">
+                      {/* EM de réception — posée dès que la commande est réceptionnée */}
+                      {d.emDocNum != null
+                        ? `EM ${d.emDocNum}`
+                        : <span className="text-muted-foreground/30 font-sans">—</span>}
+                    </td>
                     <td className="px-3 py-2.5">
                       {/* Le NOM d'abord ; le technique (code SAP, date/heure de prise,
                           réf., nb lignes) derrière le « ? ». */}
@@ -303,6 +317,11 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                           </span>
                         </InfoHint>
                       </span>
+                    </td>
+                    <td className="px-3 py-2.5 tnum text-muted-foreground whitespace-nowrap">
+                      {/* Date + heure de saisie (heure gravée dans la référence signée) */}
+                      {fmtDate(d.docDate)}
+                      {heureFromComments(d.comments) ? ` · ${heureFromComments(d.comments)}` : ""}
                     </td>
                     <td className="px-3 py-2.5 tnum text-muted-foreground">{fmtDate(d.dueDate)}</td>
                     <td className="px-3 py-2.5">{isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}</td>
@@ -325,6 +344,7 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
           largeDoc ? (
             <span className="inline-flex items-center gap-2 flex-wrap">
               <span className="font-mono">CF # {largeDoc.docNum}</span>
+              {largeDoc.emDocNum != null && <span className="font-mono">· EM {largeDoc.emDocNum}</span>}
               <span className="tnum">· Livraison {fmtDate(largeDoc.dueDate)}</span>
               {isDue(largeDoc) ? <DueBadge /> : <StatusBadge open={largeDoc.open} cancelled={largeDoc.cancelled} />}
             </span>

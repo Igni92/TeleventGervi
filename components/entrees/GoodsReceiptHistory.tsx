@@ -16,6 +16,7 @@ import { StatBlock } from "@/components/ui/stat-block";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
 import { fmtJourDate } from "@/lib/date-fr";
+import { heureFromRef } from "@/lib/docLabel";
 import { eur, eur0, fmtColis } from "@/lib/format";
 import { DesignationChips, Chip } from "./DesignationChips";
 import {
@@ -391,13 +392,15 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                   className={`w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40 ${isVoided(d) ? "opacity-60" : ""}`}
                 >
                   <div className="min-w-0 flex-1">
-                    {/* Mobile : l'IMPORTANT seulement — fournisseur, date, montant,
-                        statuts. (n° EM, lot, nb lignes → visibles dans le détail.) */}
+                    {/* Mobile : fournisseur, N° EM, date + heure de réception,
+                        montant, statuts. (lot, nb lignes → visibles dans le détail.) */}
                     <div className={`text-[16px] font-semibold truncate ${isVoided(d) ? "line-through text-muted-foreground" : "text-foreground"}`}>
                       {d.cardName || d.cardCode}
                     </div>
                     <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
-                      {fmtJourDate(d.docDate)}
+                      <span className="font-mono font-semibold text-foreground">EM {d.docNum}</span>
+                      {` · ${fmtJourDate(d.docDate)}`}
+                      {heureFromRef(d.comments) ? ` · ${heureFromRef(d.comments)}` : ""}
                     </div>
                     <span className="inline-flex items-center gap-1.5 flex-wrap mt-1">
                       <CancelBadge d={d} />
@@ -448,7 +451,7 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                     onClick={() => setLargeEntry(d.docEntry)}
                   >
                     <td className="px-3 py-2.5 font-mono font-semibold whitespace-nowrap">
-                      <span className={isVoided(d) ? "line-through text-muted-foreground" : ""}># {d.docNum}</span>
+                      <span className={isVoided(d) ? "line-through text-muted-foreground" : ""}>EM {d.docNum}</span>
                       <CancelBadge d={d} className="ml-1.5 align-middle" />
                     </td>
                     <td className="px-3 py-2.5">
@@ -468,7 +471,11 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                         </InfoHint>
                       </span>
                     </td>
-                    <td className="px-3 py-2.5 text-muted-foreground tnum">{fmtJourDate(d.docDate)}</td>
+                    <td className="px-3 py-2.5 text-muted-foreground tnum whitespace-nowrap">
+                      {/* Date + heure de réception (heure gravée dans la référence signée) */}
+                      {fmtJourDate(d.docDate)}
+                      {heureFromRef(d.comments) ? ` · ${heureFromRef(d.comments)}` : ""}
+                    </td>
                     {!restricted && (
                       <td className="px-3 py-2.5 text-right tnum font-display font-bold text-[15px]">{eur(d.totalHT ?? 0)}</td>
                     )}
@@ -516,8 +523,11 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
         subtitle={
           largeDoc ? (
             <span className="inline-flex items-center gap-2 flex-wrap">
-              <span className="font-mono">EM # {largeDoc.docNum}</span>
-              <span className="tnum">· {fmtJourDate(largeDoc.docDate)}</span>
+              <span className="font-mono">EM {largeDoc.docNum}</span>
+              <span className="tnum">
+                · {fmtJourDate(largeDoc.docDate)}
+                {heureFromRef(largeDoc.comments) ? ` · ${heureFromRef(largeDoc.comments)}` : ""}
+              </span>
               {largeDoc.lot && <FreshnessBadge dlc={dlcMap[largeDoc.lot]} className="shrink-0" />}
               <CancelBadge d={largeDoc} />
             </span>

@@ -153,6 +153,34 @@ export async function GET(req: NextRequest) {
       + `&$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,NumAtCard,DocTotal,VatSum,Comments,DocumentStatus,Cancelled,DocumentLines`,
     );
 
+    // ── N° d'EM de réception ─────────────────────────────────────
+    // « Réceptionner » crée un bon de réception dont chaque ligne référence la
+    // commande (BaseType=22 = oPurchaseOrders, BaseEntry = DocEntry commande) :
+    // on relie ici chaque commande réceptionnée à son EM pour afficher
+    // « EM <n°> » dans la liste. Scan des derniers BR (DocEntry desc → en cas de
+    // re-réception, le plus récent gagne), EM annulées exclues. Best-effort :
+    // en cas d'échec, emDocNum reste null partout.
+    const PO_OBJTYPE = 22;
+    const emByPoEntry = new Map<number, number>();
+    try {
+      type PdnLine = { BaseType?: number; BaseEntry?: number };
+      type PdnListed = { DocEntry: number; DocNum: number; Cancelled?: string; DocumentLines?: PdnLine[] };
+      const pdns = await sap.get<{ value: PdnListed[] }>(
+        `PurchaseDeliveryNotes?$top=${Math.max(100, last * 2)}&$orderby=DocEntry desc`
+        + `&$select=DocEntry,DocNum,Cancelled,DocumentLines`,
+      );
+      for (const p of pdns.value ?? []) {
+        if (p.Cancelled === "tYES") continue;   // réception annulée → la commande n'est plus « reçue » par elle
+        for (const l of p.DocumentLines ?? []) {
+          if (Number(l.BaseType) === PO_OBJTYPE && l.BaseEntry != null && !emByPoEntry.has(l.BaseEntry)) {
+            emByPoEntry.set(l.BaseEntry, p.DocNum);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[PurchaseOrders] Liaison EM de réception échouée (non-bloquant):", (e as Error).message);
+    }
+
     // Enrichissement local : désignation complète (Fruit/Pays/Marque/Condt) +
     // ratio colis pour reconstituer la quantité « type condt » dans le détail.
     const itemCodes = Array.from(
@@ -191,6 +219,9 @@ export async function GET(req: NextRequest) {
           // été réceptionnée : on ne la considère pas « ouverte » (pas d'actions).
           open: d.DocumentStatus !== "bost_Close",   // Ouverte tant que non clôturée
           cancelled,                                 // Annulée (≠ réceptionnée)
+          // N° de l'entrée marchandise qui a réceptionné la commande (null si
+          // pas encore réceptionnée / annulée / hors fenêtre de scan).
+          emDocNum: emByPoEntry.get(d.DocEntry) ?? null,
           total: priceBlind ? 0 : totalTTC,
           totalTTC: priceBlind ? 0 : totalTTC,
           totalHT: priceBlind ? 0 : totalHT,

@@ -42,3 +42,19 @@ export function docRef(opts: {
   const note = opts.note?.trim();
   return note ? `${base} · ${note}` : base;
 }
+
+/**
+ * Heure « HHhMM » extraite d'une référence signée (l'inverse de `docRef`) :
+ * « EM 22350 - MM à 14h30 · réception CF 2709 » → « 14h30 ».
+ *
+ * La signature précède la note libre → on prend la PREMIÈRE occurrence après
+ * « à » (une note contenant elle-même une heure ne pollue pas). Repli sur la
+ * dernière heure trouvée pour l'ancien format (« … · Commande à 13h10 »).
+ */
+export function heureFromRef(comments?: string | null): string | null {
+  if (!comments) return null;
+  const signed = comments.match(/à\s+(\d{1,2}h\d{2})/);
+  if (signed) return signed[1];
+  const all = comments.match(/\d{1,2}h\d{2}/g);
+  return all ? all[all.length - 1] : null;
+}
