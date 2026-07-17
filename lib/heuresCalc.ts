@@ -109,6 +109,7 @@ export interface WeekCalc {
   majEquivMin: number;    // équivalent PAYÉ des heures supp (×1,25 / ×1,5)
   congesMin: number;      // minutes CRÉDITÉES par les jours de congés (journée type)
   ferieMin: number;       // minutes CRÉDITÉES par les jours fériés chômés (journée type — TOUJOURS payées, jamais en récup)
+  recupCreditMin: number; // minutes de RÉCUP posée CRÉDITÉES dans le total (= récup consommée du compteur ; bornée au déficit)
 }
 
 /** Minutes de la « journée type » du profil ; repli = contrat / 5 jours.
@@ -130,7 +131,16 @@ export function typicalDayMinutes(profile: Pick<HoursProfile, "weeklyHours" | "t
  *  `ferieMin`) et n'entre JAMAIS dans les heures supp arbitrables — les
  *  majorations 25/50 ne portent que sur le dépassement réellement TRAVAILLÉ.
  *  Ex. contrat 35 h, 37h45 travaillées + férié 7h15 crédité (total 45h00) →
- *  supp arbitrables 2h45 (récup/paiement), férié 7h15 payé quoi qu'il arrive. */
+ *  supp arbitrables 2h45 (récup/paiement), férié 7h15 payé quoi qu'il arrive.
+ *
+ *  JOUR de RÉCUP POSÉ (tag « récup ») : il CRÉDITE une journée type dans le
+ *  total (le repos compensateur est du temps PAYÉ), mais BORNÉ AU DÉFICIT au
+ *  contrat — si la semaine atteint déjà le contrat par le travail réel, la
+ *  récup n'est PAS consommée (crédit 0 → re-créditée au compteur). Le crédit
+ *  vaut exactement la récup débitée du compteur (`recupCreditMin`). Ex.
+ *  contrat 35 h, 4 j travaillés = 27h45 + 1 j récup 7h15 → total 35h00, récup
+ *  consommée 7h15 ; si les 4 j font 30h → total 35h00 mais récup consommée 5h
+ *  seulement (2h15 re-créditées, car il a fait plus que 35 h − 7h15). */
 export function computeWeek(
   days: (DayHours | undefined)[],
   weeklyHours: number,
@@ -138,6 +148,7 @@ export function computeWeek(
 ): WeekCalc {
   let congesMin = 0;
   let ferieMin = 0;
+  const recupIdx: number[] = [];
   const dayMin = Array.from({ length: 7 }, (_, i) => {
     const d = days[i];
     const worked = dayMinutes(d);
@@ -149,10 +160,27 @@ export function computeWeek(
       ferieMin += typicalDayMin;
       return typicalDayMin;
     }
+    // Jour de récup posé : crédité plus bas (borné au déficit), 0 pour l'instant.
+    if (worked === 0 && d?.tag === "recup" && typicalDayMin > 0) {
+      recupIdx.push(i);
+      return 0;
+    }
     return worked;
   });
-  const totalMin = dayMin.reduce((s, m) => s + m, 0);
   const contractMin = Math.max(0, Math.round((weeklyHours || 0) * 60));
+  // Total AVANT récup (travail réel + congés + fériés) → déficit à combler.
+  const baseTotalMin = dayMin.reduce((s, m) => s + m, 0);
+  // RÉCUP POSÉE : chaque jour comble le déficit à hauteur d'une journée type,
+  // sans jamais dépasser le contrat (le surplus de travail « rend » la récup).
+  let recupCreditMin = 0;
+  let gap = Math.max(0, contractMin - baseTotalMin);
+  for (const i of recupIdx) {
+    const credit = Math.min(typicalDayMin, gap);
+    dayMin[i] = credit;
+    recupCreditMin += credit;
+    gap -= credit;
+  }
+  const totalMin = baseTotalMin + recupCreditMin;
   const deltaMin = totalMin - contractMin;
   // Dépassement TRAVAILLÉ = dépassement total − part férié (forcément payée).
   const supMin = Math.max(0, Math.max(0, deltaMin) - ferieMin);
@@ -160,7 +188,7 @@ export function computeWeek(
   const sup50Min = Math.max(0, supMin - SUP25_BAND_MIN);
   const recupMin = Math.max(0, -deltaMin);
   const majEquivMin = Math.round(sup25Min * 1.25 + sup50Min * 1.5);
-  return { dayMin, totalMin, contractMin, deltaMin, sup25Min, sup50Min, recupMin, majEquivMin, congesMin, ferieMin };
+  return { dayMin, totalMin, contractMin, deltaMin, sup25Min, sup50Min, recupMin, majEquivMin, congesMin, ferieMin, recupCreditMin };
 }
 
 /** Minutes → « 38h30 » (signe conservé : −150 → « −2h30 »). */
@@ -375,11 +403,12 @@ export interface MonthCalc {
   majEquivMin: number;
   congesMin: number;
   ferieMin: number;
+  recupCreditMin: number;
   weeksWithData: number;
 }
 
 export function aggregateMonth(weekCalcs: (WeekCalc | null | undefined)[]): MonthCalc {
-  const agg: MonthCalc = { totalMin: 0, contractMin: 0, deltaMin: 0, sup25Min: 0, sup50Min: 0, recupMin: 0, majEquivMin: 0, congesMin: 0, ferieMin: 0, weeksWithData: 0 };
+  const agg: MonthCalc = { totalMin: 0, contractMin: 0, deltaMin: 0, sup25Min: 0, sup50Min: 0, recupMin: 0, majEquivMin: 0, congesMin: 0, ferieMin: 0, recupCreditMin: 0, weeksWithData: 0 };
   for (const c of weekCalcs) {
     if (!c) continue;
     agg.totalMin += c.totalMin;
@@ -391,6 +420,7 @@ export function aggregateMonth(weekCalcs: (WeekCalc | null | undefined)[]): Mont
     agg.majEquivMin += c.majEquivMin;
     agg.congesMin += c.congesMin ?? 0;
     agg.ferieMin += c.ferieMin ?? 0;
+    agg.recupCreditMin += c.recupCreditMin ?? 0;
     agg.weeksWithData += 1;
   }
   return agg;

@@ -6,7 +6,7 @@ import {
   validateConge, canDecide, canRespond, congeOrigin, congeDayCount, CONGE_TYPE_LABEL,
   type CongeRequest, type CongeType,
 } from "@/lib/conges";
-import { saveConge, getConge, listUserConges, listAllConges } from "@/lib/congesRh";
+import { saveConge, getConge, listUserConges, listAllConges, saveCongeJustificatif } from "@/lib/congesRh";
 import { tagDaysInWeeks } from "@/lib/heuresRh";
 import { weekDates, type DayTag } from "@/lib/heuresCalc";
 import { expandOuvrables, expandSemaine, isoWeekOfDate } from "@/lib/planning";
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
   const c = await ctx();
   if (!c) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  let body: { action?: string; id?: unknown; email?: unknown; name?: unknown; type?: unknown; start?: unknown; end?: unknown; note?: unknown; decision?: unknown; accept?: unknown };
+  let body: { action?: string; id?: unknown; email?: unknown; name?: unknown; type?: unknown; start?: unknown; end?: unknown; note?: unknown; decision?: unknown; accept?: unknown; justificatif?: unknown; justificatifName?: unknown };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
   const action = body.action;
   const now = new Date().toISOString();
@@ -134,6 +134,48 @@ export async function POST(req: NextRequest) {
     notifyEmails([email], {
       title: conge.type === "recup" ? "🔄 Récupération proposée" : "🌴 Congés proposés",
       body: `La direction vous propose ${CONGE_TYPE_LABEL[conge.type].toLowerCase()} ${rangeLabel(conge)}${days ? ` (${days} j)` : ""} — acceptez ou refusez.`,
+      url: "/planning", tag: `conge-${conge.id}`, renotify: true,
+    }).catch(() => {});
+    return NextResponse.json({ ok: true, conge });
+  }
+
+  // ── Direction : DÉCLARER directement une absence (ARRÊT MALADIE surtout) —
+  //    approbation IMMÉDIATE, sans boomerang : un arrêt est un FAIT acté
+  //    (certificat), le salarié en est INFORMÉ, pas sollicité. Le jour est
+  //    reporté dans la feuille d'heures (tag) et poussé au calendrier Outlook. ──
+  if (action === "declare") {
+    if (!c.isDir) return NextResponse.json({ error: "Réservé à la direction" }, { status: 403 });
+    const email = String(body.email ?? "").trim().toLowerCase();
+    if (!email) return NextResponse.json({ error: "Salarié manquant" }, { status: 400 });
+    const err = validateConge({ type: body.type, start: body.start, end: body.end });
+    if (err) return NextResponse.json({ error: err }, { status: 400 });
+    // Justificatif (arrêt maladie) : data-URL base64 (image/PDF), stocké À PART
+    // du congé. Garde-fou taille ≈ 6 Mo encodés (photo de certificat).
+    let justificatifName: string | undefined;
+    const rawJustif = typeof body.justificatif === "string" ? body.justificatif : "";
+    if (rawJustif) {
+      if (!/^data:(image\/[a-z0-9.+-]+|application\/pdf);base64,/i.test(rawJustif)) {
+        return NextResponse.json({ error: "Justificatif : image ou PDF attendu." }, { status: 400 });
+      }
+      if (rawJustif.length > 6_000_000) {
+        return NextResponse.json({ error: "Justificatif trop volumineux (max ~4 Mo)." }, { status: 413 });
+      }
+      justificatifName = typeof body.justificatifName === "string" && body.justificatifName.trim()
+        ? body.justificatifName.trim().slice(0, 160) : "justificatif";
+    }
+    const conge: CongeRequest = {
+      id: newId(), email, name: String(body.name ?? email),
+      type: body.type as CongeType, start: body.start as string, end: body.end as string,
+      note, status: "approved", origin: "direction", createdAt: now,
+      decidedAt: now, decidedBy: c.email, justificatifName,
+    };
+    await saveConge(conge);
+    if (rawJustif) await saveCongeJustificatif(email, conge.id, rawJustif).catch((e) => console.error("[conges] justificatif:", e));
+    await applyApprovedConge(conge, c.email);
+    addCongeToOutlook(conge, await directionEmails()).catch((e) => console.error("[conges] Outlook direction:", e));
+    notifyEmails([email], {
+      title: conge.type === "maladie" ? "🩺 Arrêt maladie enregistré" : "📅 Absence enregistrée",
+      body: `${CONGE_TYPE_LABEL[conge.type]} ${rangeLabel(conge)} — enregistré par la direction.`,
       url: "/planning", tag: `conge-${conge.id}`, renotify: true,
     }).catch(() => {});
     return NextResponse.json({ ok: true, conge });

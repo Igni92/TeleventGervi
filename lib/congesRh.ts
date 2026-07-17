@@ -53,3 +53,28 @@ export async function listAllConges(): Promise<CongeRequest[]> {
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   } catch { return []; }
 }
+
+/* ── JUSTIFICATIF (arrêt maladie) : le FICHIER (data-URL base64) vit à part du
+      congé — clé `congejustif:<email>:<id>` — pour ne pas alourdir les listes
+      (listAllConges scanne tous les congés ; on ne veut pas y charger les PDF). ── */
+
+const JUSTIF_PREFIX = "congejustif:";
+const justifKey = (email: string, id: string) => `${JUSTIF_PREFIX}${emailKey(email)}:${id}`;
+
+export async function saveCongeJustificatif(email: string, id: string, dataUrl: string): Promise<void> {
+  await prisma.appSetting.upsert({
+    where: { key: justifKey(email, id) },
+    update: { value: dataUrl },
+    create: { key: justifKey(email, id), value: dataUrl },
+  });
+}
+
+export async function getCongeJustificatif(email: string, id: string): Promise<string | null> {
+  if (!email || !id) return null;
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: justifKey(email, id) } });
+    return row?.value ?? null;
+  } catch {
+    return null;
+  }
+}

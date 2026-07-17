@@ -61,9 +61,51 @@ describe("planning — crédit congés dans computeWeek (journée type)", () => 
     expect(c.totalMin).toBe(0);
     expect(c.congesMin).toBe(0);
   });
-  it("les tags absent / maladie / récup ne créditent rien", () => {
-    const days: DayHours[] = [{ tag: "absent" }, { tag: "maladie" }, { tag: "recup" }, {}, {}, {}, {}];
+  it("les tags absent / maladie ne créditent rien", () => {
+    const days: DayHours[] = [{ tag: "absent" }, { tag: "maladie" }, {}, {}, {}, {}, {}];
     const c = computeWeek(days, 35, 7 * 60);
+    expect(c.totalMin).toBe(0);
+    expect(c.recupCreditMin).toBe(0);
+  });
+});
+
+describe("planning — crédit RÉCUP dans computeWeek (bornée au déficit)", () => {
+  const TYP = 7 * 60 + 15;   // journée type 7h15
+
+  it("jour de récup posé : crédité d'une journée type quand la semaine est en déficit", () => {
+    // 4 jours travaillés 7h15 = 29h00 + 1 jour récup → total ramené vers le contrat.
+    const d = (): DayHours => ({ m1: "04:45", m2: "12:00" });   // 7h15
+    const days: DayHours[] = [d(), d(), d(), d(), { tag: "recup" }, {}, {}];
+    const c = computeWeek(days, 35, TYP);
+    // 29h00 travaillées + récup pour combler jusqu'à 35h = 6h00 créditées (borné au déficit).
+    expect(c.recupCreditMin).toBe(6 * 60);
+    expect(c.totalMin).toBe(35 * 60);
+    expect(c.deltaMin).toBe(0);
+    expect(c.sup25Min).toBe(0);
+  });
+
+  it("contrat atteint par le travail réel → récup NON consommée (crédit 0)", () => {
+    // 5 jours travaillés 7h00 = 35h00 + 1 samedi récup → déficit 0, récup re-créditée.
+    const d = (): DayHours => ({ m1: "06:00", m2: "13:00" });   // 7h00
+    const days: DayHours[] = [d(), d(), d(), d(), d(), { tag: "recup" }, {}];
+    const c = computeWeek(days, 35, TYP);
+    expect(c.recupCreditMin).toBe(0);
+    expect(c.totalMin).toBe(35 * 60);
+  });
+
+  it("sur-travail partiel : seule la part nécessaire est consommée (le reste re-crédité)", () => {
+    // 4 jours à 7h30 = 30h00 + 1 jour récup. Déficit = 5h00 → récup consommée 5h00
+    // (2h15 « rendues » car il a fait plus que 35h − 7h15).
+    const d = (): DayHours => ({ m1: "06:00", m2: "13:30" });   // 7h30
+    const days: DayHours[] = [d(), d(), d(), d(), { tag: "recup" }, {}, {}];
+    const c = computeWeek(days, 35, TYP);
+    expect(c.recupCreditMin).toBe(5 * 60);
+    expect(c.totalMin).toBe(35 * 60);
+  });
+
+  it("sans journée type fournie, aucun crédit récup (rétro-compatible)", () => {
+    const c = computeWeek([{ tag: "recup" }, {}, {}, {}, {}, {}, {}], 35);
+    expect(c.recupCreditMin).toBe(0);
     expect(c.totalMin).toBe(0);
   });
 });

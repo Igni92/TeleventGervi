@@ -49,6 +49,9 @@ export interface CongeRequest {
   decidedAt?: string;
   decidedBy?: string;
   decisionNote?: string;
+  /** Nom du fichier justificatif attaché (arrêt maladie), s'il existe — le
+   *  fichier lui-même vit à part (AppSetting `congejustif:…`, cf. congesRh). */
+  justificatifName?: string;
 }
 
 /* ─────────────────────────── Logique PURE ─────────────────────────────────── */
@@ -126,5 +129,7 @@ export function parseConge(v: Partial<CongeRequest>, email: string, id: string):
     decidedAt: typeof v.decidedAt === "string" ? v.decidedAt : undefined,
     decidedBy: typeof v.decidedBy === "string" ? v.decidedBy : undefined,
     decisionNote: typeof v.decisionNote === "string" ? v.decisionNote.slice(0, 500) : undefined,
+    justificatifName: typeof v.justificatifName === "string" && v.justificatifName.trim()
+      ? v.justificatifName.trim().slice(0, 160) : undefined,
   };
 }
