@@ -15,15 +15,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Clock3, ChevronLeft, ChevronRight, Loader2, Save, Printer, Wand2,
-  CalendarDays, RotateCcw, Plus, Minus, Coins, CalendarCheck, SlidersHorizontal,
-  Lock, Users, X, AlertTriangle, Scale,
+  CalendarDays, RotateCcw, Plus, Minus, Coins, CalendarCheck,
+  Users, X, AlertTriangle, Scale,
 } from "lucide-react";
 import { toast } from "sonner";
 import { SurfaceCard } from "@/components/ui/surface-card";
-import { displayPersonName } from "@/lib/userNames";
+import { displayPersonName, stripOrgSuffix } from "@/lib/userNames";
 import {
   JOURS_SEMAINE, DEFAULT_PROFILE, computeWeek, fmtHM, typicalDayMinutes,
-  isoWeekId, shiftWeek, weekDates, weekLabel, isDateInWeek, daysAfterWeek,
+  isoWeekId, shiftWeek, weekDates, weekLabel,
   monthIdOf, shiftMonth, monthLabel, DAY_TAGS, DAY_TAG_LABEL,
   splitSupp, effectivePaySuppMin,
   type DayHours, type DayTag, type HoursProfile, type WeekCalc, type MonthCalc, type HeuresOption,
@@ -56,10 +56,10 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
   // Libellés des jours fériés de la semaine (« Fête nationale »…), par jour.
   const feries = useMemo(() => dates.map((d) => (d ? frenchHolidayLabel(d) : null)), [dates]);
 
-  // ── Le choix récup / paiement est une décision de l'EMPLOYEUR : verrouillé
-  //    pour le salarié, modifiable seulement par un manager. Un manager peut en
-  //    plus ouvrir la semaine d'un salarié (`who` = son e-mail ; "" = soi). ──
-  const canEditOption = isManager;
+  // ── Un manager peut ouvrir la semaine d'un salarié pour saisir/corriger ses
+  //    heures (`who` = son e-mail ; "" = soi). Le choix récup / paiement, lui,
+  //    ne se pose PLUS ici : l'employeur le déclare dans le détail compta au
+  //    moment de générer le PDF (état mensuel). ──
   const [who, setWho] = useState("");
   const userQS = who ? `&user=${encodeURIComponent(who)}` : "";
 
@@ -69,11 +69,6 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
-
-  // ── Option compta des heures supp de la semaine (récup / paiement / mixte) ──
-  const [option, setOption] = useState<HeuresOption | null>(null);
-  const [paySuppMin, setPaySuppMin] = useState<number | null>(null);
-  const [recupDates, setRecupDates] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -95,9 +90,6 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           return { ...d, tag: "ferie" as DayTag };
         });
         setDays(merged);
-        setOption(j.entry?.option ?? null);
-        setPaySuppMin(typeof j.entry?.paySuppMin === "number" ? j.entry.paySuppMin : null);
-        setRecupDates(Array.isArray(j.entry?.recupDates) ? j.entry.recupDates.filter(Boolean) : []);
         if (j.profile) setProfile(j.profile);
         setDirty(autoTagged);
       }
@@ -121,35 +113,6 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
   // jour, re-cliquer le tag actif le retire.
   const setTag = (i: number, tag: DayTag) => {
     setDays((cur) => cur.map((d, k) => (k === i ? { ...d, tag: d?.tag === tag ? undefined : tag } : d)));
-    setDirty(true);
-  };
-
-  // ── Options « heures supp » : la récup/paiement ne concerne QUE des heures
-  //    supp. Sans supp (les 35 h faites sans dépassement) → RIEN à récupérer :
-  //    on masque le bloc et le serveur annule toute récup au recalcul. ──
-  const hasSupp = calc.sup25Min + calc.sup50Min > 0;
-  const showOptions = hasSupp;
-
-  // Semaine déjà AU CONTRAT (≥ 35 h faites) → on n'y pose pas de récup : elle se
-  // prend sur une autre semaine. Un clic sur l'option active la désélectionne.
-  const weekIsFull = calc.totalMin >= calc.contractMin && calc.contractMin > 0;
-
-  const chooseOption = (opt: HeuresOption) => {
-    if (!canEditOption) return;
-    setOption((cur) => (cur === opt ? null : opt));
-    setDirty(true);
-  };
-
-  // Ajout/retrait d'un jour de récup. INTERDIT dans la semaine des heures supp
-  // (36h15 lun→ven ⇒ pas de récup le samedi de CETTE semaine) : la récup se pose
-  // sur une autre semaine.
-  const toggleRecupDay = (dateISO: string) => {
-    if (!canEditOption || !dateISO) return;
-    if (weekIsFull && isDateInWeek(dateISO, week)) {
-      toast.error("Récup impossible cette semaine — le contrat y est déjà atteint. À poser sur une autre semaine.");
-      return;
-    }
-    setRecupDates((cur) => (cur.includes(dateISO) ? cur.filter((d) => d !== dateISO) : [...cur, dateISO].sort()));
     setDirty(true);
   };
 
@@ -179,15 +142,10 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
     try {
       const r = await fetch("/api/effectif/heures", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          week, days, user: who || undefined,
-          // Sans heures supp, aucune récup possible → on n'envoie rien (le serveur
-          // annule de toute façon). Sinon le choix est renvoyé tel quel (le serveur
-          // ignore une modif venant d'un non-manager).
-          option: hasSupp ? option : null,
-          paySuppMin: hasSupp && option === "mixte" ? paySuppMin : undefined,
-          recupDates: hasSupp && (option === "recup" || option === "mixte") ? recupDates.filter(Boolean) : [],
-        }),
+        // Seuls les JOURS sont enregistrés ici : la décision compta (paiement /
+        // récup / mixte) se déclare dans le détail pré-PDF et le serveur la
+        // préserve telle quelle au ré-enregistrement des heures.
+        body: JSON.stringify({ week, days, user: who || undefined }),
       });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) { toast.error(j?.error || "Échec de l'enregistrement des heures"); return; }
@@ -512,79 +470,6 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           </table>
         </div>
 
-        {/* ── OPTIONS « heures supp » (récupération vs paiement) ──
-            DÉCISION DE L'EMPLOYEUR : un manager choisit ; le salarié la voit en
-            LECTURE SEULE. La récup se pose sur une AUTRE semaine (jamais sur la
-            semaine des supp, déjà ≥ contrat). Mobile-first. */}
-        {showOptions && (
-          <div className="mt-3 rounded-lg border border-border bg-secondary/20 p-3">
-            <div className="mb-2 flex items-center gap-1.5">
-              <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              <span className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
-                Heures supp — {canEditOption ? "que faire ?" : "décision de l'employeur"}
-              </span>
-              {!canEditOption && <Lock className="h-3 w-3 text-muted-foreground shrink-0" aria-label="Réservé à l'employeur" />}
-              {hasSupp && (
-                <span className="ml-auto text-[11px] tnum font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">
-                  {fmtHM(calc.sup25Min + calc.sup50Min)} supp
-                </span>
-              )}
-            </div>
-
-            {canEditOption ? (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <OptionChoice active={option === "recup"} onClick={() => chooseOption("recup")}
-                    icon={<CalendarCheck className="h-4 w-4" />} label="Récupération" hint="en jours, autre semaine" />
-                  <OptionChoice active={option === "paiement"} onClick={() => chooseOption("paiement")}
-                    icon={<Coins className="h-4 w-4" />} label="Paiement" hint="des heures supp." />
-                </div>
-
-                {/* Partage « mixte » posé depuis le détail compta (pré-PDF) : une
-                    partie payée, le reste en récup. Cliquer une option ci-dessus
-                    remplace le partage. */}
-                {option === "mixte" && <MixteSummary calc={calc} paySuppMin={paySuppMin} />}
-
-                {(option === "recup" || option === "mixte") && (
-                  <RecupDayPicker week={week} recupDates={recupDates} onToggle={toggleRecupDay} />
-                )}
-
-                <p className="mt-2.5 text-[11px] text-muted-foreground">
-                  Le choix est reporté sur l&apos;état mensuel (PDF) transmis à la compta et au salarié.
-                  Le partage fin (payer une partie, le reste en récup) se pose depuis le bouton
-                  «&nbsp;PDF compta&nbsp;» de l&apos;état mensuel.
-                </p>
-              </>
-            ) : (
-              /* Salarié : lecture seule — il voit la décision, il ne la pose pas. */
-              <div className="text-[12.5px]">
-                {option === "recup" ? (
-                  <div>
-                    <span className="inline-flex items-center gap-1.5 font-semibold text-sky-700 dark:text-sky-300">
-                      <CalendarCheck className="h-3.5 w-3.5" /> Récupération{recupDates.length ? ` · ${recupDates.length} j` : ""}
-                    </span>
-                    {recupDates.length > 0 && (
-                      <div className="mt-1.5 flex flex-wrap gap-1.5">
-                        {recupDates.map((d) => (
-                          <span key={d} className="inline-flex items-center rounded-md bg-secondary px-1.5 py-0.5 text-[11px] tnum text-foreground">{fmtDayShort(d)}</span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : option === "paiement" ? (
-                  <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-300">
-                    <Coins className="h-3.5 w-3.5" /> Paiement des heures supp.
-                  </span>
-                ) : option === "mixte" ? (
-                  <MixteSummary calc={calc} paySuppMin={paySuppMin} />
-                ) : (
-                  <span className="italic text-muted-foreground">En attente de la décision de l&apos;employeur.</span>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
         {/* Totaux + actions */}
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Badge label="Total" value={fmtHM(calc.totalMin)} tone="foreground" />
@@ -868,10 +753,12 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
   );
 }
 
-/** Nom complet affichable (garde le nom tel quel, repli email lisible). */
+/** Nom complet affichable — sans le suffixe « - Gervifrais » des comptes
+ *  Microsoft (repli email lisible). */
 function displayFullName(raw: string): string {
-  if (raw.includes("@")) return displayPersonName(raw);
-  return raw;
+  const clean = stripOrgSuffix(raw);
+  if (clean.includes("@")) return displayPersonName(clean);
+  return clean || "?";
 }
 
 /* ────────────────── Détail compta pré-PDF (managers) ──────────────────────
@@ -1015,8 +902,8 @@ function ComptaDialog({ month, rows, onClose, onDone }: {
                   <span className="text-[13px] font-bold text-foreground">{displayFullName(r.name)}</span>
                   <span className="text-[11.5px] tnum text-muted-foreground">
                     Solde récup projeté <b className={balance < 0 ? "text-rose-600 dark:text-rose-400" : "text-foreground"}>{fmtHM(balance)}</b>
-                    {plannedDays > 0 && <> · posée à venir <b className="text-foreground">{plannedDays} j ({fmtHM(plannedMin)})</b></>}
-                    {pendingDays > 0 && <> · demandée <b className="text-foreground">{pendingDays} j</b></>}
+                    {plannedDays > 0 && <> · posée à venir <b className="text-foreground">{fmtHM(plannedMin)} ({plannedDays} j)</b></>}
+                    {pendingDays > 0 && <> · demandés <b className="text-foreground">{fmtHM(pendingDays * typDay)} ({pendingDays} j)</b></>}
                   </span>
                 </div>
 
@@ -1109,52 +996,6 @@ function ComptaDialog({ month, rows, onClose, onDone }: {
   );
 }
 
-/** « 2026-07-13 » → « lun. 13/07 » (jour de récup). */
-function fmtDayShort(iso: string): string {
-  return new Date(`${iso}T12:00:00Z`).toLocaleDateString("fr-FR", { timeZone: "UTC", weekday: "short", day: "2-digit", month: "2-digit" });
-}
-
-/** Sélecteur de jours de récup FACILE : jours cliquables des semaines suivantes
- *  (jamais la semaine des supp — déjà au contrat) + saisie d'une autre date.
- *  Un clic ajoute/retire le jour. */
-function RecupDayPicker({ week, recupDates, onToggle }: {
-  week: string; recupDates: string[]; onToggle: (d: string) => void;
-}) {
-  // Propositions = jours après la semaine (dimanches retirés), coupés à 8.
-  const suggestions = daysAfterWeek(week, 12)
-    .filter((d) => new Date(`${d}T12:00:00Z`).getUTCDay() !== 0)
-    .slice(0, 8);
-  const firstAllowed = daysAfterWeek(week, 1)[0];   // 1er jour hors semaine (min saisie)
-  // Dates déjà retenues mais hors des propositions (dates plus lointaines).
-  const extra = recupDates.filter((d) => !suggestions.includes(d)).sort();
-
-  return (
-    <div className="mt-3">
-      <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1.5">
-        Jours de récupération <span className="normal-case font-normal text-muted-foreground/80">— cliquez pour sélectionner</span>
-      </label>
-      <div className="flex flex-wrap gap-1.5">
-        {suggestions.map((d) => (
-          <DayChip key={d} date={d} active={recupDates.includes(d)} onClick={() => onToggle(d)} />
-        ))}
-        {extra.map((d) => (
-          <DayChip key={d} date={d} active onClick={() => onToggle(d)} />
-        ))}
-      </div>
-      <div className="mt-2 flex items-center gap-2">
-        <span className="shrink-0 text-[11px] text-muted-foreground">Autre date&nbsp;:</span>
-        <input type="date" min={firstAllowed}
-          onChange={(e) => { const v = e.target.value; if (v) onToggle(v); e.target.value = ""; }}
-          aria-label="Ajouter une autre date de récupération"
-          className="h-8 rounded-md border border-border bg-background px-2 text-[12.5px] tnum focus:outline-none focus:ring-1 focus:ring-brand-500" />
-      </div>
-      <p className="mt-1.5 text-[11px] text-muted-foreground">
-        Repos compensateur posé <b className="font-semibold">en dehors</b> de la semaine des heures supp.
-      </p>
-    </div>
-  );
-}
-
 /** Puce TAG de journée (mobile) — Présent / Absent / Congés / Récup / Maladie.
  *  Un seul tag par jour ; re-cliquer le tag actif le retire. */
 const TAG_TONE: Record<DayTag, string> = {
@@ -1174,69 +1015,6 @@ function TagChip({ tag, active, disabled, onClick }: { tag: DayTag; active: bool
       }`}>
       {DAY_TAG_LABEL[tag]}
     </button>
-  );
-}
-
-/** Puce « jour » toggle (récup) — cible tactile confortable, état sélectionné. */
-function DayChip({ date, active, onClick }: { date: string; active: boolean; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} aria-pressed={active}
-      className={`inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border text-[12px] font-semibold tnum transition-colors ${
-        active
-          ? "border-sky-500/50 bg-sky-500/10 text-sky-700 dark:text-sky-300"
-          : "border-border bg-background text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-      }`}>
-      {active && <CalendarCheck className="h-3 w-3 shrink-0" />}
-      {fmtDayShort(date)}
-    </button>
-  );
-}
-
-/** Case d'option « heures supp » façon radio (icône + libellé + puce active).
- *  Grande cible tactile, pleine largeur sur mobile via le parent en grille. */
-function OptionChoice({ active, onClick, icon, label, hint }: {
-  active: boolean; onClick: () => void; icon: React.ReactNode; label: string; hint: string;
-}) {
-  return (
-    <button type="button" onClick={onClick} aria-pressed={active}
-      className={`flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors ${
-        active
-          ? "border-brand-500/50 bg-brand-500/10"
-          : "border-border bg-background hover:bg-secondary/50"
-      }`}>
-      <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
-        active ? "bg-brand-500/15 text-brand-700 dark:text-brand-300" : "bg-secondary text-muted-foreground"
-      }`}>
-        {icon}
-      </span>
-      <span className="min-w-0">
-        <span className={`block text-[13px] font-semibold leading-tight ${active ? "text-foreground" : "text-muted-foreground"}`}>{label}</span>
-        <span className="block text-[11px] text-muted-foreground leading-tight">{hint}</span>
-      </span>
-      <span className={`ml-auto inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${
-        active ? "border-brand-500 bg-brand-500" : "border-border"
-      }`}>
-        {active && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
-      </span>
-    </button>
-  );
-}
-
-/** Résumé du partage « mixte » d'une semaine (X payées / Y en récup, avec les
- *  équivalents majorés) — affiché sous les options et en lecture seule salarié. */
-function MixteSummary({ calc, paySuppMin }: { calc: WeekCalc; paySuppMin: number | null }) {
-  const supp = calc.sup25Min + calc.sup50Min;
-  const split = splitSupp(calc.sup25Min, calc.sup50Min, effectivePaySuppMin("mixte", paySuppMin, supp));
-  return (
-    <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12.5px]">
-      <span className="inline-flex items-center gap-1.5 font-semibold text-amber-700 dark:text-amber-300">
-        <Scale className="h-3.5 w-3.5" /> Partage posé (détail compta)
-      </span>
-      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 tnum text-[12px]">
-        <span className="text-emerald-700 dark:text-emerald-300">Payées <b>{fmtHM(split.payMin)}</b> <span className="opacity-75">(équiv. {fmtHM(split.payEquivMin)})</span></span>
-        <span className="text-sky-700 dark:text-sky-300">En récup <b>{fmtHM(split.recupMin)}</b> <span className="opacity-75">(équiv. {fmtHM(split.recupEquivMin)})</span></span>
-      </div>
-    </div>
   );
 }
 

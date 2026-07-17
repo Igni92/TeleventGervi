@@ -54,3 +54,10 @@ export function displayPersonName(raw: string | null | undefined): string {
   }
   return firstNameOf(v);
 }
+
+/** Nom complet SANS le suffixe d'organisation (« Maxyme MANDINE - Gervifrais »
+ *  → « Maxyme MANDINE ») : les comptes Microsoft portent l'entité dans leur
+ *  displayName — bruit à l'écran (calendriers) comme dans les notifications. */
+export function stripOrgSuffix(raw: string | null | undefined): string {
+  return (raw ?? "").replace(/\s*[-–—]\s*gervifrais\s*$/i, "").trim();
+}

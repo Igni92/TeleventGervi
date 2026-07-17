@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   congeSummary, congeMailHtml, congeWhatsappText, outlookCongeEvent, congeRangeLabel,
+  congeInboxLine,
 } from "./congesNotify";
+import { stripOrgSuffix } from "./userNames";
 import type { CongeRequest } from "./conges";
 
 const CONGE: CongeRequest = {
@@ -20,6 +22,33 @@ describe("congesNotify — contenus (purs)", () => {
 
   it("plage d'un seul jour sans « du … au »", () => {
     expect(congeRangeLabel({ start: "2026-08-03", end: "2026-08-03" })).not.toContain("du ");
+  });
+
+  it("le suffixe « - Gervifrais » des comptes Microsoft est retiré partout", () => {
+    expect(stripOrgSuffix("Maxyme MANDINE - Gervifrais")).toBe("Maxyme MANDINE");
+    expect(stripOrgSuffix("Jean Dupont")).toBe("Jean Dupont");
+    expect(congeSummary({ ...CONGE, name: "Jean Dupont - Gervifrais" })).not.toContain("Gervifrais");
+  });
+
+  it("ligne de réception COMPACTE : « Récup. SAM 22.08.26 au MAR 25.08.26 inclu (3 jours) »", () => {
+    const line = congeInboxLine({ ...CONGE, type: "recup", start: "2026-08-22", end: "2026-08-25" });
+    expect(line).toBe("Récup. SAM 22.08.26 au MAR 25.08.26 inclu (3 jours)");
+  });
+
+  it("ligne de réception CP : « Demande CP. MER 26.08.26 au LUN 31.08.26 inclu (5 jours) »", () => {
+    const line = congeInboxLine({ ...CONGE, type: "cp", start: "2026-08-26", end: "2026-08-31" });
+    expect(line).toBe("Demande CP. MER 26.08.26 au LUN 31.08.26 inclu (5 jours)");
+  });
+
+  it("ligne de réception d'un seul jour : pas de « au … inclu »", () => {
+    const line = congeInboxLine({ ...CONGE, type: "recup", start: "2026-08-24", end: "2026-08-24" });
+    expect(line).toBe("Récup. LUN 24.08.26 (1 jour)");
+  });
+
+  it("l'aperçu compact est la 1re ligne du corps du mail", () => {
+    const html = congeMailHtml({ ...CONGE, start: "2026-08-22", end: "2026-08-25" }, "https://app/planning");
+    expect(html.indexOf("Récup. SAM 22.08.26")).toBeGreaterThan(-1);
+    expect(html.indexOf("Récup. SAM 22.08.26")).toBeLessThan(html.indexOf("Gervifrais · Planning"));
   });
 
   it("email : contient le lien vers le planning et échappe le HTML", () => {

@@ -98,6 +98,7 @@ function buildPerson(
       cpAllowanceDays: profile.cpAllowanceDays ?? null,
       recupCapHours: profile.recupCapHours ?? null,
       typicalDayMin: typicalDayMinutes(profile),
+      initials: profile.initials ?? null,
     },
     counters: {
       recup: { creditMin: recup.creditMin, debitMin: recup.debitMin, balanceMin: recup.balanceMin, plannedDates: recup.plannedDates },
@@ -173,13 +174,14 @@ function freshDefaultProfile(): HoursProfile {
   return { ...DEFAULT_PROFILE, typicalDay: { ...DEFAULT_PROFILE.typicalDay }, cpAllowanceDays: null, recupCapHours: null };
 }
 
-/** Réglages EMPLOYEUR (direction seule) : solde CP annuel + plafond récup. */
+/** Réglages EMPLOYEUR (direction seule) : solde CP annuel + plafond récup +
+ *  initiales (calendrier d'équipe mobile). */
 export async function PUT(req: NextRequest) {
   const c = await ctx();
   if (!c) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   if (!c.isDir) return NextResponse.json({ error: "Réservé à la direction" }, { status: 403 });
 
-  let body: { user?: unknown; cpAllowanceDays?: unknown; recupCapHours?: unknown };
+  let body: { user?: unknown; cpAllowanceDays?: unknown; recupCapHours?: unknown; initials?: unknown };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -197,6 +199,8 @@ export async function PUT(req: NextRequest) {
       ...cur,
       cpAllowanceDays: "cpAllowanceDays" in body ? num(body.cpAllowanceDays) : cur.cpAllowanceDays,
       recupCapHours: "recupCapHours" in body ? num(body.recupCapHours) : cur.recupCapHours,
+      // Nettoyage (3 lettres max, majuscules) fait par normalizeProfile à l'écriture.
+      initials: "initials" in body ? (typeof body.initials === "string" ? body.initials : null) : cur.initials,
     };
     const saved = await saveProfile(target, next);
     return NextResponse.json({ ok: true, user: target, profile: saved });
