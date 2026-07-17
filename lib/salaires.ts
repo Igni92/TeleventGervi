@@ -153,6 +153,7 @@ export function prorata13e(cdiDateISO: string | null | undefined, monthId: strin
 export interface SalaryHeures {
   totalMin: number;          // heures travaillées (crédits congés/fériés inclus)
   contractMin: number;
+  suppTotalMin: number;      // total des heures supp BRUTES du mois (à arbitrer)
   suppPayEquivMin: number;   // supp À PAYER (équiv. majoré, décision employeur)
   suppRecupEquivMin: number; // supp laissées en RÉCUP (équiv. majoré, décision)
   suppSansDecisionMin: number; // supp SANS décision (bloquant avant envoi)
