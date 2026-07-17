@@ -23,7 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   CalendarDays, ChevronLeft, ChevronRight, RotateCcw, Loader2, Send, Check, X,
-  Users, Palmtree, Clock3, SlidersHorizontal, Save, Sun, Lightbulb,
+  Users, Palmtree, Clock3, SlidersHorizontal, Save, Sun, Lightbulb, Stethoscope, Paperclip,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { InfoHint } from "@/components/ui/info-hint";
@@ -48,6 +48,7 @@ interface Conge {
   id: string; email: string; name: string; type: CongeType;
   start: string; end: string; note: string; status: CongeStatus;
   origin?: "salarie" | "direction"; createdAt: string;
+  justificatifName?: string;   // arrêt maladie : nom du fichier attaché
 }
 interface PersonPlanning {
   email: string;
@@ -313,8 +314,9 @@ export function PlanningPanel({ isManager, isDirection }: { isManager: boolean; 
           onSubmit={async (payload) => {
             const ok = await post(payload);
             if (ok) {
-              toast.success(payload.action === "propose"
-                ? "Proposition envoyée au salarié — il accepte ou refuse."
+              toast.success(
+                payload.action === "declare" ? "Arrêt maladie enregistré — le salarié en est informé."
+                : payload.action === "propose" ? "Proposition envoyée au salarié — il accepte ou refuse."
                 : "Demande envoyée à la direction.");
               await load();
             }
@@ -528,6 +530,19 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
   const inSel = (d: string) => sel.start && d >= sel.start && d <= sel.end;
 
   const ouvrables = sel.start ? expandOuvrables(sel.start, sel.end).length : 0;
+  // Direction + type « Maladie » → DÉCLARATION directe (arrêt acté), pas une
+  // proposition soumise à l'acceptation du salarié.
+  const maladieDeclare = !isSelf && type === "maladie";
+  // Justificatif d'arrêt maladie (image/PDF) — lu en data-URL côté client.
+  const [justif, setJustif] = useState<{ name: string; dataUrl: string } | null>(null);
+  const pickJustif = (file: File | null) => {
+    if (!file) { setJustif(null); return; }
+    if (file.size > 4_500_000) { toast.error("Fichier trop volumineux (max ~4 Mo)."); return; }
+    const reader = new FileReader();
+    reader.onload = () => setJustif({ name: file.name, dataUrl: String(reader.result) });
+    reader.onerror = () => toast.error("Lecture du fichier impossible.");
+    reader.readAsDataURL(file);
+  };
 
   // DÉCOUPE AUTO récup + CP (à l'avantage du salarié) : quand le salarié pose des
   // CONGÉS PAYÉS et qu'il lui reste de la récup, on consomme d'abord la récup en
@@ -564,10 +579,16 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
       return;
     }
     const base = { type, start: sel.start, end: sel.end, note };
+    // ARRÊT MALADIE (direction) = fait acté → DÉCLARÉ directement (validé, sans
+    // boomerang), avec justificatif éventuel. Les autres types restent PROPOSÉS.
     const ok = isSelf
       ? await onSubmit({ action: "request", ...base })
-      : await onSubmit({ action: "propose", email: person.email, name: person.name, ...base });
-    if (ok) { setSel({ start: "", end: "" }); setNote(""); }
+      : await onSubmit({
+          action: type === "maladie" ? "declare" : "propose",
+          email: person.email, name: person.name, ...base,
+          ...(maladieDeclare && justif ? { justificatif: justif.dataUrl, justificatifName: justif.name } : {}),
+        });
+    if (ok) { setSel({ start: "", end: "" }); setNote(""); setJustif(null); }
   };
 
   return (
@@ -692,6 +713,23 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
         </div>
       </div>
 
+      {/* JUSTIFICATIFS d'arrêt maladie du mois (image/PDF) — liens visibles sur
+          tous les écrans (direction et salarié concerné). */}
+      {monthEvents.some((c) => c.justificatifName) && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
+            <Paperclip className="h-3 w-3" /> Justificatifs
+          </span>
+          {monthEvents.filter((c) => c.justificatifName).map((c) => (
+            <a key={c.id} target="_blank" rel="noreferrer"
+              href={`/api/effectif/conges/justificatif?email=${encodeURIComponent(c.email)}&id=${encodeURIComponent(c.id)}`}
+              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11.5px] font-semibold text-sky-700 dark:text-sky-300 hover:bg-secondary/60">
+              <Paperclip className="h-3 w-3 shrink-0" /> {rangeLabel(c)}
+            </a>
+          ))}
+        </div>
+      )}
+
       {/* MOBILE : détail des congés du mois (les pastilles disent « quoi », cette
           liste dit « quand & quel statut »). Tap → sélectionne la plage. */}
       {monthEvents.length > 0 && (
@@ -714,7 +752,9 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
       {canAct && (
         <div className="mt-3 rounded-lg border border-border bg-secondary/20 p-3">
           <p className="mb-2 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
-            {isSelf ? "Demander (validé par la direction)" : "Proposer à ce salarié (il accepte ou refuse)"}
+            {isSelf ? "Demander (validé par la direction)"
+              : maladieDeclare ? "Déclarer un arrêt maladie (enregistré directement)"
+              : "Proposer à ce salarié (il accepte ou refuse)"}
             {/* PC : glisser OU clic début/clic fin. Mobile : clic début/clic fin. */}
             <span className="normal-case font-normal text-muted-foreground/80">
               <span className="hidden md:inline"> — glissez sur les jours, ou cliquez le 1ᵉʳ puis le dernier</span>
@@ -764,11 +804,24 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             </div>
             <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="Précision (facultatif)"
               className="h-9 flex-1 min-w-[140px] rounded-md border border-border bg-background px-2.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-brand-500" />
-            {/* Pleine largeur sur mobile (grande cible tactile), inline ≥ sm. */}
+            {/* Justificatif (arrêt maladie) : image ou PDF du certificat. */}
+            {maladieDeclare && (
+              <label className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-border bg-background text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 cursor-pointer whitespace-nowrap">
+                <Paperclip className="h-3.5 w-3.5" />
+                <span className="max-w-[140px] truncate">{justif ? justif.name : "Justificatif"}</span>
+                <input type="file" accept="image/*,application/pdf" className="hidden"
+                  onChange={(e) => pickJustif(e.target.files?.[0] ?? null)} />
+              </label>
+            )}
+            {/* Pleine largeur sur mobile (grande cible tactile), inline ≥ sm.
+                Arrêt maladie (déclaration directe) = bouton ambre (fait acté,
+                pas une proposition à négocier). */}
             <button type="button" onClick={submit} disabled={busy || !sel.start}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 h-11 sm:h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[13px] font-semibold disabled:opacity-50">
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              {isSelf ? "Demander" : "Proposer"}
+              className={`w-full sm:w-auto inline-flex items-center justify-center gap-1.5 h-11 sm:h-10 px-4 rounded-lg text-white text-[13px] font-semibold disabled:opacity-50 ${
+                maladieDeclare ? "bg-amber-600 hover:bg-amber-700" : "bg-emerald-600 hover:bg-emerald-700"
+              }`}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : maladieDeclare ? <Stethoscope className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+              {isSelf ? "Demander" : maladieDeclare ? "Déclarer l'arrêt" : "Proposer"}
             </button>
           </div>
           {sel.start && (
@@ -776,6 +829,7 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
               {rangeLabel({ start: sel.start, end: sel.end })} · <span className="font-semibold text-foreground">{ouvrables}</span> jour{ouvrables > 1 ? "s" : ""} ouvrable{ouvrables > 1 ? "s" : ""} <span className="normal-case">(hors dimanches et fériés)</span>
               {type === "cp" && " — les jours de CP validés comptent comme travaillés (journée type créditée)"}
               {type === "recup" && " — décomptée du compteur seulement si la semaine finit sous le contrat"}
+              {maladieDeclare && " — enregistré directement (le salarié est informé, pas sollicité)"}
             </p>
           )}
         </div>
@@ -901,8 +955,10 @@ function TeamCalendar({ team, month, todayISO, onPick }: {
               const ev = eventMap.get(date)?.[0];
               return (
                 <th key={date} title={[ferie ? `Férié : ${ferie}` : null, ev?.label].filter(Boolean).join(" · ") || undefined}
-                  className={`px-0.5 py-1 text-center font-semibold min-w-[24px] ${date === todayISO ? "text-brand-600 dark:text-brand-400" : ""} ${ferie ? "bg-orange-500/15" : dow === 0 ? "bg-secondary/50" : ""}`}>
-                  <span className="block tnum">{Number(date.slice(-2))}</span>
+                  className={`px-0.5 py-1 text-center font-semibold min-w-[24px] ${ferie ? "bg-orange-500/15" : dow === 0 ? "bg-secondary/50" : ""}`}>
+                  {/* Numéro du jour : BLANC (text-foreground) et 20 % plus gros
+                      que l'en-tête (9,5 → 11,5 px) — meilleure lisibilité. */}
+                  <span className={`block tnum text-[11.5px] ${date === todayISO ? "text-brand-600 dark:text-brand-400" : "text-foreground"}`}>{Number(date.slice(-2))}</span>
                   {ev && <span aria-hidden className="block text-[10px] leading-none">{ev.emoji}</span>}
                 </th>
               );

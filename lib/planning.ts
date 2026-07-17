@@ -325,21 +325,25 @@ export function computeRecupCounter(
       // n'y a AUCUNE heure à récupérer dessus. Ainsi, poser vendredi + samedi ne
       // décompte que le vendredi (le samedi, au-delà des 35 h lun→ven, est
       // gratuit) — à l'avantage du salarié.
-      const contractRecupDays = [...recupDays].filter((d) => {
+      const isContractDay = (d: string) => {
         const dow = atNoon(d).getUTCDay();
         return dow >= 1 && dow <= 5 && !frenchHolidayLabel(d);
-      }).length;
-      const posableMin = contractRecupDays * typDay;
+      };
       if (input) {
-        // Semaine saisie : le déficit RÉEL tranche. Contrat atteint malgré la
-        // récup → déficit 0 → RIEN n'est déduit (à l'avantage du salarié).
+        // Semaine saisie : le déficit RÉEL tranche. La récup TAGUÉE dans la
+        // feuille est déjà consommée (créditée au total, bornée au déficit) par
+        // computeWeek → `recupCreditMin`. Les jours posés via recupDates NON
+        // tagués comblent le déficit RÉSIDUEL (même borne). Contrat atteint
+        // malgré la récup → déficit 0 → RIEN n'est déduit (avantage salarié).
         const c = computeWeek(input.days, profile.weeklyHours, typDay);
-        const deficit = Math.max(0, c.contractMin - c.totalMin);
-        debitMin += Math.min(deficit, posableMin);
+        const feuilleRecup = new Set(dates.filter((_, i) => input.days[i]?.tag === "recup"));
+        const extraDays = [...recupDays].filter((d) => !feuilleRecup.has(d) && isContractDay(d)).length;
+        const residualDeficit = Math.max(0, c.contractMin - c.totalMin);
+        debitMin += c.recupCreditMin + Math.min(residualDeficit, extraDays * typDay);
       } else {
         // Aucune saisie : la récup est réputée prise comme posée — mais seuls
         // les jours ouvrés (lun→ven hors fériés) la décomptent.
-        debitMin += posableMin;
+        debitMin += [...recupDays].filter(isContractDay).length * typDay;
       }
     }
   }
