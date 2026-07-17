@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { isRestrictedPreparateur } from "@/lib/preparateur";
+import { COMPTABLE_EMAILS } from "@/lib/permissions";
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
@@ -31,9 +32,19 @@ export default auth((req) => {
     return NextResponse.redirect(loginUrl);
   }
 
+  // ── PROFIL COMPTABLE (boîte partagée, connexion par mot de passe dédié) :
+  //    confiné au PLANNING et aux ÉLÉMENTS DES SALAIRES — rien d'autre. ──
+  const sessionEmail = (req.auth?.user?.email ?? "").toLowerCase();
+  const isComptable = !!sessionEmail && COMPTABLE_EMAILS.some((a) => a.toLowerCase() === sessionEmail);
+
   // Redirect authenticated users away from login page
   if (req.auth && pathname === "/login") {
-    return NextResponse.redirect(new URL("/clients", origin));
+    return NextResponse.redirect(new URL(isComptable ? "/salaires" : "/clients", origin));
+  }
+
+  if (isComptable) {
+    const allowed = ["/api", "/login", "/salaires", "/planning"].some((p) => pathname.startsWith(p));
+    if (!allowed) return NextResponse.redirect(new URL("/salaires", origin));
   }
 
   // ── RÔLES À ACCÈS RESTREINT (terrain) : préparateur, livreur, agréeur ──
