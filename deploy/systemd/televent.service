@@ -1,0 +1,31 @@
+# TeleVent — service systemd (production, OVH VPS)
+# Installer : sudo cp deploy/systemd/televent.service /etc/systemd/system/
+#             sudo systemctl daemon-reload && sudo systemctl enable --now televent
+# Les variables d'environnement sont lues par Next.js lui-même depuis
+# /srv/televent/app/.env (next start charge .env en production) — pas
+# d'EnvironmentFile ici, pour éviter les divergences de parsing.
+
+[Unit]
+Description=TeleVent — Next.js (next start)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=televent
+Group=televent
+WorkingDirectory=/srv/televent/app
+Environment=NODE_ENV=production
+# Écoute uniquement en local : seul nginx est exposé.
+ExecStart=/srv/televent/app/node_modules/.bin/next start -H 127.0.0.1 -p 3000
+Restart=always
+RestartSec=5
+
+# Durcissement
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

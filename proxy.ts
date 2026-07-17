@@ -12,6 +12,20 @@ export default auth((req) => {
     return NextResponse.next();
   }
 
+  // ── Déclenchement machine (cron système du VPS, cron Vercel, déclencheur
+  // externe) : une requête porteuse du CRON_SECRET passe le middleware — sans
+  // quoi elle serait redirigée vers /login (pas de session) et la synchro ne
+  // tournerait jamais. Chaque route re-vérifie ensuite ELLE-MÊME le secret via
+  // isCronAuthorized ; si CRON_SECRET n'est pas défini, rien ne passe ici. ──
+  const cronSecret = process.env.CRON_SECRET;
+  if (
+    cronSecret &&
+    (req.headers.get("x-cron-secret") === cronSecret ||
+      req.headers.get("authorization") === `Bearer ${cronSecret}`)
+  ) {
+    return NextResponse.next();
+  }
+
   // Origine RÉELLE de la requête derrière le proxy Vercel. On n'utilise pas
   // req.url (ni NEXTAUTH_URL) qui peut pointer vers http://localhost:3000 si la
   // variable d'env a été écrasée — x-forwarded-host/proto reflètent toujours le
