@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { LoginButton } from "./LoginButton";
+import { ComptaLogin } from "./ComptaLogin";
 import { Shield, Zap, BarChart2 } from "lucide-react";
 
 export const metadata = { title: "Connexion | Gervi" };
@@ -69,6 +70,9 @@ export default async function LoginPage() {
 
           {/* Login */}
           <LoginButton />
+
+          {/* Cabinet comptable : boîte partagée sans SSO → mot de passe dédié. */}
+          <ComptaLogin />
 
           <p className="text-center text-[11px] text-white/25 mt-4 leading-relaxed">
             Accès réservé à l&apos;équipe commerciale.<br />

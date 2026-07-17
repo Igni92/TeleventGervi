@@ -23,6 +23,7 @@ import {
 } from "@/lib/salairesRh";
 import { appBaseUrl } from "@/lib/congesNotify";
 import { sendMailAsShared } from "@/lib/graph";
+import { getComptaPasswordHash, setComptaPassword, COMPTA_PASSWORD_MIN_LENGTH } from "@/lib/comptaAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -160,8 +161,14 @@ export async function GET(req: NextRequest) {
   if (!isMonthId(month)) return NextResponse.json({ error: "Mois invalide" }, { status: 400 });
 
   try {
-    const [rows, sent] = await Promise.all([buildRows(month), getRecapSent(month)]);
-    return NextResponse.json({ ok: true, month, rows, sent, canEdit: c.canEdit });
+    const [rows, sent, comptaHash] = await Promise.all([
+      buildRows(month), getRecapSent(month), getComptaPasswordHash(COMPTABLE_EMAILS[0]),
+    ]);
+    return NextResponse.json({
+      ok: true, month, rows, sent, canEdit: c.canEdit,
+      // L'accès par mot de passe du cabinet est-il déjà configuré ? (jamais le hash)
+      comptaConfigured: !!comptaHash,
+    });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
@@ -172,9 +179,24 @@ export async function POST(req: NextRequest) {
   if (!c) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   if (!c.canEdit) return NextResponse.json({ error: "Réservé aux managers" }, { status: 403 });
 
-  let body: { action?: string; month?: string; user?: string; primes?: unknown; frais?: unknown; note?: unknown };
+  let body: { action?: string; month?: string; user?: string; primes?: unknown; frais?: unknown; note?: unknown; password?: unknown };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
+
+  // ── MOT DE PASSE de l'accès comptable (boîte partagée — pas de SSO) :
+  //    définition / rotation par l'admin. Stocké HACHÉ (scrypt), jamais renvoyé. ──
+  if (body.action === "setComptaPassword") {
+    const password = typeof body.password === "string" ? body.password : "";
+    if (password.length < COMPTA_PASSWORD_MIN_LENGTH) {
+      return NextResponse.json({ error: `Mot de passe trop court (minimum ${COMPTA_PASSWORD_MIN_LENGTH} caractères)` }, { status: 400 });
+    }
+    try {
+      await setComptaPassword(COMPTABLE_EMAILS[0], password);
+      return NextResponse.json({ ok: true, comptaConfigured: true });
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
+  }
 
   const month = body.month ?? "";
   if (!isMonthId(month)) return NextResponse.json({ error: "Mois invalide" }, { status: 400 });

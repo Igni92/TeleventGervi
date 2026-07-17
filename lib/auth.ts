@@ -1,8 +1,10 @@
 import NextAuth, { type DefaultSession } from "next-auth";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
+import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
-import { ADMIN_EMAILS } from "@/lib/permissions";
+import { ADMIN_EMAILS, COMPTABLE_EMAILS } from "@/lib/permissions";
+import { getComptaPasswordHash, verifyComptaPassword } from "@/lib/comptaAuth";
 
 const ALLOWED_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || "gervifrais.com";
 
@@ -34,6 +36,27 @@ export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
           // Forcer le tenant spécifique au niveau de la requête d'autorisation
           tenant: process.env.AZURE_TENANT_ID,
         },
+      },
+    }),
+    // ── ACCÈS COMPTABLE (compta@gervifrais.com = BOÎTE PARTAGÉE, pas de SSO) :
+    //    connexion par MOT DE PASSE dédié, canal séparé de Microsoft. Sessions
+    //    JWT sans adapter → AUCUNE ligne `User` créée : le cabinet n'entre
+    //    jamais dans l'effectif (heures, planning, salaires ne le listent pas).
+    //    Hash scrypt en base (comptapass:), cf. lib/comptaAuth. ──
+    Credentials({
+      id: "comptable",
+      name: "Cabinet comptable",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Mot de passe", type: "password" },
+      },
+      async authorize(credentials) {
+        const email = String(credentials?.email ?? "").trim().toLowerCase();
+        const password = String(credentials?.password ?? "");
+        if (!COMPTABLE_EMAILS.some((a) => a.toLowerCase() === email)) return null;
+        const hash = await getComptaPasswordHash(email);
+        if (!verifyComptaPassword(password, hash)) return null;
+        return { id: `comptable:${email}`, email, name: "Cabinet comptable" };
       },
     }),
   ],
