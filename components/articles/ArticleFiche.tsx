@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Loader2, Save, Package, Boxes, Barcode, Tag, Ruler, Euro, Layers,
-  Warehouse, MessageSquare, Wheat, AlertTriangle,
+  Warehouse, MessageSquare, Wheat, AlertTriangle, ShoppingCart, Store,
 } from "lucide-react";
 import { SectionCard } from "@/components/clients/SectionCard";
 import { Input } from "@/components/ui/input";
@@ -18,12 +18,20 @@ type FormFields = {
   itemName: string;
   variete: string;
   barCode: string;
+  // Conditionnement d'ACHAT
   purchaseUnit: string;
+  purchasePackagingUnit: string;
+  purchaseQtyPerPackUnit: string;
+  purchaseItemsPerUnit: string;
+  // Conditionnement de VENTE
   salesUnit: string;
-  inventoryUnit: string;
   salesPackagingUnit: string;
   salesQtyPerPackUnit: string;
+  salesItemsPerUnit: string;
   salesUnitWeight: string;
+  // Conditionnement de STOCKAGE
+  inventoryUnit: string;
+  // Attributs
   uPays: string;
   uMarque: string;
   uCondi: string;
@@ -32,6 +40,9 @@ type FormFields = {
   uNbBarqColis: string;
   commentaire: string;
 };
+
+type Option = { value: string; label: string };
+type UdfLists = { uCalibre?: Option[]; uPays?: Option[]; uMarque?: Option[] };
 
 interface ArticleData {
   itemCode: string;
@@ -66,11 +77,15 @@ function toForm(fields: Record<string, unknown>): FormFields {
     variete: str(fields.variete),
     barCode: str(fields.barCode),
     purchaseUnit: str(fields.purchaseUnit),
+    purchasePackagingUnit: str(fields.purchasePackagingUnit),
+    purchaseQtyPerPackUnit: numStr(fields.purchaseQtyPerPackUnit),
+    purchaseItemsPerUnit: numStr(fields.purchaseItemsPerUnit),
     salesUnit: str(fields.salesUnit),
-    inventoryUnit: str(fields.inventoryUnit),
     salesPackagingUnit: str(fields.salesPackagingUnit),
     salesQtyPerPackUnit: numStr(fields.salesQtyPerPackUnit),
+    salesItemsPerUnit: numStr(fields.salesItemsPerUnit),
     salesUnitWeight: numStr(fields.salesUnitWeight),
+    inventoryUnit: str(fields.inventoryUnit),
     uPays: str(fields.uPays),
     uMarque: str(fields.uMarque),
     uCondi: str(fields.uCondi),
@@ -85,9 +100,14 @@ const fmtDate = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(
 const fmtEur = (v: number | null, cur: string | null) =>
   v == null ? "—" : `${v.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur || "€"}`;
 
+const NUM_KEYS = new Set<keyof FormFields>([
+  "purchaseQtyPerPackUnit", "purchaseItemsPerUnit", "salesQtyPerPackUnit", "salesItemsPerUnit", "salesUnitWeight", "uNbBarqColis",
+]);
+
 export function ArticleFiche({ id, canEdit }: { id: string; canEdit: boolean }) {
   const [data, setData] = useState<ArticleData | null>(null);
   const [batches, setBatches] = useState<Batch[]>([]);
+  const [udf, setUdf] = useState<UdfLists>({});
   const [form, setForm] = useState<FormFields | null>(null);
   const [initial, setInitial] = useState<FormFields | null>(null);
   const [loading, setLoading] = useState(true);
@@ -96,9 +116,10 @@ export function ArticleFiche({ id, canEdit }: { id: string; canEdit: boolean }) 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [dRes, bRes] = await Promise.all([
+      const [dRes, bRes, uRes] = await Promise.all([
         fetch(`/api/products/${id}`, { cache: "no-store" }),
         fetch(`/api/products/${id}/batches`, { cache: "no-store" }),
+        fetch(`/api/sap/item-udfs`, { cache: "no-store" }),
       ]);
       const d = await dRes.json();
       if (!dRes.ok) throw new Error(d?.error || "Chargement impossible");
@@ -108,6 +129,8 @@ export function ArticleFiche({ id, canEdit }: { id: string; canEdit: boolean }) 
       setInitial(f);
       const b = await bRes.json().catch(() => ({ batches: [] }));
       setBatches(b.batches ?? []);
+      const u = await uRes.json().catch(() => ({ fields: {} }));
+      setUdf(u.fields ?? {});
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Chargement impossible");
     } finally { setLoading(false); }
@@ -127,12 +150,8 @@ export function ArticleFiche({ id, canEdit }: { id: string; canEdit: boolean }) 
     if (!form.itemName.trim()) { toast.error("Le nom de l'article est obligatoire."); return; }
     setSaving(true);
     try {
-      const body = {
-        ...form,
-        salesQtyPerPackUnit: form.salesQtyPerPackUnit === "" ? null : Number(form.salesQtyPerPackUnit),
-        salesUnitWeight: form.salesUnitWeight === "" ? null : Number(form.salesUnitWeight),
-        uNbBarqColis: form.uNbBarqColis === "" ? null : Number(form.uNbBarqColis),
-      };
+      const body: Record<string, unknown> = { ...form };
+      for (const k of NUM_KEYS) body[k] = form[k] === "" ? null : Number(form[k]);
       const res = await fetch(`/api/products/${id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
@@ -144,8 +163,7 @@ export function ArticleFiche({ id, canEdit }: { id: string; canEdit: boolean }) 
         toast.success("Article enregistré", { description: json.message });
       }
       setInitial(form);
-      // Recharge pour refléter les valeurs canoniques SAP.
-      load();
+      load(); // reflète les valeurs canoniques SAP
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Enregistrement échoué");
     } finally { setSaving(false); }
@@ -172,58 +190,85 @@ export function ArticleFiche({ id, canEdit }: { id: string; canEdit: boolean }) 
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* Identité */}
-        <SectionCard accent="brand" title="Identité" subtitle="Désignation · variété · code-barres · marque · origine" icon={<Tag />} className="lg:col-span-2">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <SectionCard accent="brand" title="Identité" subtitle="Désignation · variété · code-barres · marque · origine · calibre" icon={<Tag />} className="lg:col-span-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Field label="Désignation (nom SAP)" required>
               <Input value={form.itemName} onChange={(e) => set("itemName", e.target.value)} disabled={!canEdit} />
             </Field>
             <Field label="Variété (nom étranger)">
               <Input value={form.variete} onChange={(e) => set("variete", e.target.value)} disabled={!canEdit} placeholder="ex. Gariguette" />
             </Field>
-            <Field label="EAN13 / code-barres" hint="Champ SAP BarCode">
+            <Field label="EAN13 / code-barres" hint="BarCode">
               <div className="relative">
                 <Barcode className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                 <Input value={form.barCode} onChange={(e) => set("barCode", e.target.value)} disabled={!canEdit} className="pl-8 font-mono" placeholder="3xxxxxxxxxxxx" inputMode="numeric" />
               </div>
             </Field>
-            <Field label="Marque">
-              <Input value={form.uMarque} onChange={(e) => set("uMarque", e.target.value)} disabled={!canEdit} />
+            <Field label="Marque" hint="U_GER_Marque">
+              <ChoiceOrText value={form.uMarque} onChange={(v) => set("uMarque", v)} options={udf.uMarque} disabled={!canEdit} placeholder="Marque" />
             </Field>
-            <Field label="Pays d'origine">
-              <Input value={form.uPays} onChange={(e) => set("uPays", e.target.value)} disabled={!canEdit} placeholder="ex. France" />
+            <Field label="Origine / pays" hint="U_Pays">
+              <ChoiceOrText value={form.uPays} onChange={(v) => set("uPays", v)} options={udf.uPays} disabled={!canEdit} placeholder="Pays d'origine" />
             </Field>
-            <Field label="Calibre">
+            <Field label="Calibre" hint="U_GER_CALIBRE">
               <div className="relative">
-                <Ruler className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                <Input value={form.uCalibre} onChange={(e) => set("uCalibre", e.target.value)} disabled={!canEdit} className="pl-8" placeholder="ex. 3AE" />
+                <Ruler className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground z-10" />
+                <ChoiceOrText value={form.uCalibre} onChange={(v) => set("uCalibre", v)} options={udf.uCalibre} disabled={!canEdit} placeholder="Calibre" className="pl-8" />
               </div>
             </Field>
           </div>
         </SectionCard>
 
-        {/* Conditionnement */}
-        <SectionCard accent="sky" title="Conditionnement" subtitle="Unités achat / vente / stockage · emballage · poids" icon={<Layers />} className="lg:col-span-2">
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-            <Field label="Unité d'ACHAT" hint="PurchaseUnit">
-              <Input value={form.purchaseUnit} onChange={(e) => set("purchaseUnit", e.target.value)} disabled={!canEdit} placeholder="ex. Colis" />
-            </Field>
-            <Field label="Unité de VENTE" hint="SalesUnit">
-              <Input value={form.salesUnit} onChange={(e) => set("salesUnit", e.target.value)} disabled={!canEdit} placeholder="ex. pie" />
-            </Field>
-            <Field label="Unité de STOCKAGE" hint="InventoryUOM">
-              <Input value={form.inventoryUnit} onChange={(e) => set("inventoryUnit", e.target.value)} disabled={!canEdit} placeholder="ex. pie" />
-            </Field>
+        {/* Conditionnement — SAP distingue ACHAT / VENTE / STOCKAGE */}
+        <SectionCard accent="sky" title="Conditionnement" subtitle="SAP distingue achat / vente / stockage — unité, emballage, quantités" icon={<Layers />} className="lg:col-span-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <Axis title="Achat" tone="amber" icon={<ShoppingCart className="h-3.5 w-3.5" />}>
+              <Field label="Unité d'achat" hint="PurchaseUnit">
+                <Input value={form.purchaseUnit} onChange={(e) => set("purchaseUnit", e.target.value)} disabled={!canEdit} placeholder="ex. Colis" />
+              </Field>
+              <Field label="Emballage d'achat" hint="PurchasePackagingUnit">
+                <Input value={form.purchasePackagingUnit} onChange={(e) => set("purchasePackagingUnit", e.target.value)} disabled={!canEdit} placeholder="ex. Palette" />
+              </Field>
+              <Field label="Qté / emballage" hint="PurchaseQtyPerPackUnit">
+                <Input value={form.purchaseQtyPerPackUnit} onChange={(e) => set("purchaseQtyPerPackUnit", e.target.value)} disabled={!canEdit} inputMode="decimal" placeholder="ex. 100" />
+              </Field>
+              <Field label="Unités / unité d'achat" hint="PurchaseItemsPerUnit">
+                <Input value={form.purchaseItemsPerUnit} onChange={(e) => set("purchaseItemsPerUnit", e.target.value)} disabled={!canEdit} inputMode="decimal" placeholder="ex. 1" />
+              </Field>
+            </Axis>
+
+            <Axis title="Vente" tone="brand" icon={<Store className="h-3.5 w-3.5" />}>
+              <Field label="Unité de vente" hint="SalesUnit">
+                <Input value={form.salesUnit} onChange={(e) => set("salesUnit", e.target.value)} disabled={!canEdit} placeholder="ex. pie" />
+              </Field>
+              <Field label="Emballage de vente" hint="SalesPackagingUnit">
+                <Input value={form.salesPackagingUnit} onChange={(e) => set("salesPackagingUnit", e.target.value)} disabled={!canEdit} placeholder="ex. CAT I" />
+              </Field>
+              <Field label="Qté / emballage" hint="SalesQtyPerPackUnit">
+                <Input value={form.salesQtyPerPackUnit} onChange={(e) => set("salesQtyPerPackUnit", e.target.value)} disabled={!canEdit} inputMode="decimal" placeholder="ex. 12" />
+              </Field>
+              <Field label="Unités / unité de vente" hint="SalesItemsPerUnit">
+                <Input value={form.salesItemsPerUnit} onChange={(e) => set("salesItemsPerUnit", e.target.value)} disabled={!canEdit} inputMode="decimal" placeholder="ex. 1" />
+              </Field>
+              <Field label="Poids unité (kg)" hint="SalesUnitWeight">
+                <Input value={form.salesUnitWeight} onChange={(e) => set("salesUnitWeight", e.target.value)} disabled={!canEdit} inputMode="decimal" placeholder="ex. 0.125" />
+              </Field>
+            </Axis>
+
+            <Axis title="Stockage" tone="emerald" icon={<Warehouse className="h-3.5 w-3.5" />}>
+              <Field label="Unité de stockage" hint="InventoryUOM">
+                <Input value={form.inventoryUnit} onChange={(e) => set("inventoryUnit", e.target.value)} disabled={!canEdit} placeholder="ex. pie" />
+              </Field>
+              <div className="rounded-lg border border-dashed border-border/70 p-2.5 text-[11px] leading-relaxed text-muted-foreground">
+                Le stockage utilise l&apos;unité d&apos;inventaire SAP. Le stock par entrepôt est dans « Prix &amp; stock ».
+              </div>
+            </Axis>
+          </div>
+
+          {/* Attributs de détail Gervifrais */}
+          <div className="mt-4 grid grid-cols-2 gap-4 border-t border-border/60 pt-4 sm:grid-cols-4">
             <Field label="Conditionnement détaillé" hint="U_GER_Det_Condt">
               <Input value={form.uCondi} onChange={(e) => set("uCondi", e.target.value)} disabled={!canEdit} placeholder="ex. 12x125g" />
-            </Field>
-            <Field label="Emballage de vente" hint="SalesPackagingUnit">
-              <Input value={form.salesPackagingUnit} onChange={(e) => set("salesPackagingUnit", e.target.value)} disabled={!canEdit} placeholder="ex. Barquette" />
-            </Field>
-            <Field label="Qté / emballage" hint="SalesQtyPerPackUnit">
-              <Input value={form.salesQtyPerPackUnit} onChange={(e) => set("salesQtyPerPackUnit", e.target.value)} disabled={!canEdit} inputMode="decimal" placeholder="ex. 12" />
-            </Field>
-            <Field label="Poids unité (kg)" hint="SalesUnitWeight">
-              <Input value={form.salesUnitWeight} onChange={(e) => set("salesUnitWeight", e.target.value)} disabled={!canEdit} inputMode="decimal" placeholder="ex. 0.125" />
             </Field>
             <Field label="UVC" hint="U_GER_UVC">
               <Input value={form.uUvc} onChange={(e) => set("uUvc", e.target.value)} disabled={!canEdit} placeholder="ex. 125g" />
@@ -251,13 +296,13 @@ export function ArticleFiche({ id, canEdit }: { id: string; canEdit: boolean }) 
                 <p className="text-[12.5px] italic text-muted-foreground">Aucun stock enregistré.</p>
               ) : (
                 <ul className="space-y-1.5">
-                  {warehouses.map(([wh, s]) => (
+                  {warehouses.map(([wh, sv]) => (
                     <li key={wh} className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2 text-[12.5px]">
                       <span className="inline-flex items-center gap-1.5 font-medium"><Warehouse className="h-3.5 w-3.5 text-muted-foreground" /> {wh}</span>
                       <span className="flex items-center gap-3 tnum">
-                        <span className="text-emerald-700 dark:text-emerald-400 font-semibold">{Math.round(s.available)} dispo</span>
-                        <span className="text-muted-foreground">{Math.round(s.inStock)} phys.</span>
-                        {s.ordered > 0 && <span className="text-sky-600 dark:text-sky-400">{Math.round(s.ordered)} cde</span>}
+                        <span className="text-emerald-700 dark:text-emerald-400 font-semibold">{Math.round(sv.available)} dispo</span>
+                        <span className="text-muted-foreground">{Math.round(sv.inStock)} phys.</span>
+                        {sv.ordered > 0 && <span className="text-sky-600 dark:text-sky-400">{Math.round(sv.ordered)} cde</span>}
                       </span>
                     </li>
                   ))}
@@ -323,10 +368,54 @@ export function ArticleFiche({ id, canEdit }: { id: string; canEdit: boolean }) 
   );
 }
 
+/** Bloc « axe » du conditionnement (Achat / Vente / Stockage). */
+function Axis({ title, tone, icon, children }: { title: string; tone: "amber" | "brand" | "emerald"; icon: React.ReactNode; children: React.ReactNode }) {
+  const cls = {
+    amber: "text-amber-600 dark:text-amber-400 bg-amber-500/10 ring-amber-500/20",
+    brand: "text-brand-600 dark:text-brand-400 bg-brand-500/10 ring-brand-500/20",
+    emerald: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 ring-emerald-500/20",
+  }[tone];
+  return (
+    <div className="rounded-xl border border-border bg-secondary/20 p-3.5">
+      <div className="mb-3 flex items-center gap-2">
+        <span className={`inline-flex h-6 w-6 items-center justify-center rounded-md ring-1 ${cls}`}>{icon}</span>
+        <span className="text-[13px] font-semibold text-foreground">{title}</span>
+      </div>
+      <div className="space-y-3">{children}</div>
+    </div>
+  );
+}
+
+/** Liste déroulante si des valeurs valides SAP existent, sinon champ texte libre.
+ *  La valeur courante hors-liste est préservée (option « hors liste »). */
+function ChoiceOrText({
+  value, onChange, options, disabled, placeholder, className,
+}: {
+  value: string; onChange: (v: string) => void; options?: Option[]; disabled?: boolean; placeholder?: string; className?: string;
+}) {
+  if (options && options.length > 0) {
+    const known = options.some((o) => o.value === value);
+    return (
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        aria-label={placeholder}
+        className={`h-9 w-full rounded-md border border-border bg-background text-[13px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-60 ${className ?? ""}`}
+      >
+        <option value="">—</option>
+        {value && !known && <option value={value}>{value} (hors liste)</option>}
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    );
+  }
+  return <Input value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} placeholder={placeholder} className={className} />;
+}
+
 function Field({ label, hint, required, children }: { label: string; hint?: string; required?: boolean; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <Label className="flex items-center gap-1.5 text-[12.5px]">
+      <Label className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
         {label} {required && <span className="text-destructive">*</span>}
         {hint && <span className="font-mono text-[10px] font-normal text-muted-foreground/60">{hint}</span>}
       </Label>
