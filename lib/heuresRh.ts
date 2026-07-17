@@ -40,6 +40,14 @@ function boundedOrNull(v: unknown, max: number): number | null {
   return Math.round(n * 100) / 100;
 }
 
+/** Initiales (fiche salarié) : lettres/chiffres uniquement, 3 max, MAJUSCULES —
+ *  affichées sur le calendrier d'équipe mobile. null si vide/invalide. */
+function sanitizeInitials(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const s = v.toUpperCase().replace(/[^A-Z0-9ÀÂÄÉÈÊËÎÏÔÖÙÛÜÇ]/g, "").slice(0, 3);
+  return s || null;
+}
+
 function normalizeProfile(v: unknown): HoursProfile {
   const p = (v ?? {}) as Partial<HoursProfile>;
   const weekly = Number(p.weeklyHours);
@@ -48,6 +56,7 @@ function normalizeProfile(v: unknown): HoursProfile {
     typicalDay: sanitizeDay(p.typicalDay) ?? { ...DEFAULT_PROFILE.typicalDay },
     cpAllowanceDays: boundedOrNull(p.cpAllowanceDays, 365),
     recupCapHours: boundedOrNull(p.recupCapHours, 1000),
+    initials: sanitizeInitials(p.initials),
   };
 }
 
