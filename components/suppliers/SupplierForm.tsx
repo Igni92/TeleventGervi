@@ -16,6 +16,11 @@ import { supplierSchema, type SupplierFormValues } from "@/lib/validations";
 interface SupplierFormProps {
   initialData?: SupplierFormValues & { id?: string; active?: boolean };
   mode: "create" | "edit";
+  /** Appelé après un enregistrement réussi (édition). Si fourni, remplace le
+   *  `router.refresh()` par défaut — utilisé par l'édition rapide (dialogue). */
+  onSaved?: () => void;
+  /** Remplace l'action du bouton « Annuler » (par défaut `router.back()`). */
+  onCancel?: () => void;
 }
 
 type SapVendor = { cardCode: string; cardName: string; email: string | null; phone: string | null };
@@ -81,7 +86,7 @@ function SapVendorPicker({ onPick }: { onPick: (v: SapVendor) => void }) {
   );
 }
 
-export function SupplierForm({ initialData, mode }: SupplierFormProps) {
+export function SupplierForm({ initialData, mode, onSaved, onCancel }: SupplierFormProps) {
   const router = useRouter();
   const [sapLinked, setSapLinked] = useState<boolean>(!!initialData?.sapCardCode);
 
@@ -138,6 +143,8 @@ export function SupplierForm({ initialData, mode }: SupplierFormProps) {
       toast.success(mode === "create" ? "Fournisseur créé" : "Fournisseur mis à jour");
       if (mode === "create") {
         router.push(`/fournisseurs/${saved.id}`);
+      } else if (onSaved) {
+        onSaved();
       } else {
         router.refresh();
       }
@@ -281,7 +288,7 @@ export function SupplierForm({ initialData, mode }: SupplierFormProps) {
           {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {mode === "create" ? "Créer le fournisseur" : "Enregistrer les modifications"}
         </Button>
-        <Button type="button" variant="outline" onClick={() => router.back()} disabled={isSubmitting}>
+        <Button type="button" variant="outline" onClick={onCancel ?? (() => router.back())} disabled={isSubmitting}>
           Annuler
         </Button>
       </div>
