@@ -1264,15 +1264,18 @@ function OptionChip({ option, recupDates }: { option: HeuresOption; recupDates?:
 }
 
 function Badge({ label, value, tone }: { label: string; value: string; tone: "foreground" | "muted" | "amber" | "rose" | "emerald" | "sky" | "violet" | "orange" }) {
+  // Recette CANONIQUE du design system (bg /12 + ring /25 + variante sombre).
+  // Les tons à sens métier passent par les tokens sémantiques (success/warning/
+  // info) ; les tons purement catégoriels gardent leur teinte littérale.
   const cls: Record<string, string> = {
-    foreground: "bg-foreground/10 text-foreground",
-    muted: "bg-secondary text-muted-foreground",
-    amber: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-    rose: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
-    emerald: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-    sky: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
-    violet: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
-    orange: "bg-orange-500/15 text-orange-700 dark:text-orange-300",
+    foreground: "bg-foreground/10 text-foreground ring-1 ring-foreground/15",
+    muted: "bg-secondary text-muted-foreground ring-1 ring-border",
+    amber: "bg-warning/12 text-warning ring-1 ring-warning/25",
+    rose: "bg-destructive/12 text-destructive ring-1 ring-destructive/25",
+    emerald: "bg-success/12 text-success ring-1 ring-success/25",
+    sky: "bg-info/12 text-info ring-1 ring-info/25",
+    violet: "bg-violet-500/12 text-violet-700 dark:text-violet-300 ring-1 ring-violet-500/25",
+    orange: "bg-orange-500/12 text-orange-700 dark:text-orange-300 ring-1 ring-orange-500/25",
   };
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 ${cls[tone]}`}>
