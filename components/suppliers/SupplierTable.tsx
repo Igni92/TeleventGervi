@@ -7,6 +7,7 @@ import { Search, Loader2, Truck, Users, Phone, Mail, Link2, ChevronRight, Downlo
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ViewToggle, useViewMode } from "@/components/ui/view-toggle";
 import { formatPhoneDisplay } from "@/lib/phone";
 
 interface SupplierRow {
@@ -33,6 +34,7 @@ export function SupplierTable() {
   const [search, setSearch] = useState("");
   const [active, setActive] = useState<string>("actifs");
   const [importing, setImporting] = useState(false);
+  const [view, setView] = useViewMode("televent-suppliers-view");
   // Auto-amorçage tenté une seule fois par montage (évite les boucles d'import).
   const autoSeedTried = useRef(false);
 
@@ -127,6 +129,7 @@ export function SupplierTable() {
           {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <DownloadCloud className="h-3.5 w-3.5" />}
           Importer les 50 derniers
         </Button>
+        <div className="ml-auto"><ViewToggle value={view} onChange={setView} /></div>
       </div>
 
       {loading ? (
@@ -141,7 +144,7 @@ export function SupplierTable() {
             Créez une première fiche pour renseigner ses interlocuteurs.
           </p>
         </div>
-      ) : (
+      ) : view === "cards" ? (
         <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
           {suppliers.map((s) => (
             <li key={s.id}>
@@ -186,7 +189,54 @@ export function SupplierTable() {
             </li>
           ))}
         </ul>
+      ) : (
+        <SupplierListView suppliers={suppliers} />
       )}
+    </div>
+  );
+}
+
+/** Vue LISTE classique (tableau compact) des fournisseurs. */
+function SupplierListView({ suppliers }: { suppliers: SupplierRow[] }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+              <th className="px-3 py-2.5 text-left font-semibold">Fournisseur</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Code</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Famille</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Téléphone</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Email</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Contacts</th>
+              <th className="px-3 py-2.5 text-center font-semibold">SAP</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {suppliers.map((s) => (
+              <tr key={s.id} className="transition-colors hover:bg-secondary/30">
+                <td className="px-3 py-2">
+                  <Link href={`/fournisseurs/${s.id}`} className="font-semibold text-foreground hover:text-brand-600 hover:underline underline-offset-2">
+                    {s.nom}
+                  </Link>
+                  {!s.active && <Badge variant="annule" className="ml-2 text-[9.5px]">Archivé</Badge>}
+                </td>
+                <td className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground">{s.code}</td>
+                <td className="px-3 py-2">{s.type ? <Badge variant="secondary" className="text-[10px]">{s.type}</Badge> : <span className="text-muted-foreground/40">—</span>}</td>
+                <td className="px-3 py-2 font-mono text-[12px] text-muted-foreground">{s.tel1 ? formatPhoneDisplay(s.tel1) : "—"}</td>
+                <td className="px-3 py-2 text-[12px] text-muted-foreground max-w-[220px] truncate">{s.email || "—"}</td>
+                <td className="px-3 py-2 text-right tnum text-muted-foreground">{s._count?.contacts ?? 0}</td>
+                <td className="px-3 py-2 text-center">
+                  {s.sapCardCode
+                    ? <Link2 className="inline h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                    : <span className="text-muted-foreground/30">—</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

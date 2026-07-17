@@ -33,6 +33,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ViewToggle, useViewMode } from "@/components/ui/view-toggle";
 import { SALESPEOPLE, displayNameFromSlp, normalizeSlp } from "@/lib/salespeople";
 import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
 import { parisDayOfWeek } from "@/lib/paris-time";
@@ -101,6 +102,7 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
   const [incidents, setIncidents] = useState(false);
   const [syncingVendeurs, setSyncingVendeurs] = useState(false);
   const [reminderClient, setReminderClient] = useState<PlanClient | null>(null);
+  const [view, setView] = useViewMode("televent-clients-view");
 
   const today = parisDayOfWeek();
 
@@ -213,6 +215,7 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
         <FilterSelect value={stale} onChange={setStale} placeholder="Sans cde depuis" options={[["", "Toute ancienneté"], ["14", "Sans cde ≥ 14 j"], ["30", "Sans cde ≥ 30 j"], ["60", "Sans cde ≥ 60 j"]]} />
 
         <div className="ml-auto flex items-center gap-2">
+          <ViewToggle value={view} onChange={setView} />
           {canManage && (
             <Button asChild variant="outline" size="sm" className="gap-1.5">
               <Link href="/console"><Radio className="h-4 w-4 text-brand-500" /> Console d&apos;appels</Link>
@@ -250,7 +253,7 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
           <p className="mt-3 text-[14px] font-medium text-foreground">Aucun client pour ces filtres</p>
           <p className="mt-1 text-[12.5px] text-muted-foreground">Ajustez la recherche ou les filtres ci-dessus.</p>
         </div>
-      ) : (
+      ) : view === "cards" ? (
         <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
           {filtered.map((c) => (
             <ClientCard
@@ -263,6 +266,8 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
             />
           ))}
         </ul>
+      ) : (
+        <ClientListView clients={filtered} today={today} canManage={canManage} onAssign={assign} onReminder={setReminderClient} />
       )}
 
       {reminderClient && (
@@ -301,41 +306,7 @@ function ClientCard({
           <p className="mt-0.5 font-mono text-[11.5px] text-muted-foreground">{c.code}</p>
         </Link>
         <div className="flex items-center gap-1 shrink-0">
-          {canManage && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button type="button" className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-secondary/60" title="Actions">
-                  <MoreHorizontal className="h-4 w-4" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Plan d&apos;appel</DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => onReminder(c)} className="cursor-pointer text-[13px] gap-2">
-                  <Bell className="h-3.5 w-3.5" /> Programmer un rappel
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onAssign(c.id, { activeTelevente: !c.activeTelevente })} className="cursor-pointer text-[13px] gap-2">
-                  <Power className="h-3.5 w-3.5" /> {c.activeTelevente ? "Désactiver en télévente" : "Activer en télévente"}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Assigner un vendeur</DropdownMenuLabel>
-                {VENDEURS.map((v) => (
-                  <DropdownMenuItem key={`v-${v}`} onClick={() => onAssign(c.id, { vendeur: v })} className="cursor-pointer text-[13px] gap-2">
-                    <span className={`h-1.5 w-1.5 rounded-full ${vNorm === v ? "bg-brand-500" : "bg-muted-foreground/30"}`} /> {displayNameFromSlp(v) ?? v}
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuItem onClick={() => onAssign(c.id, { vendeur: null })} className="cursor-pointer text-[13px] gap-2 text-muted-foreground">
-                  Retirer le vendeur
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Assigner un commercial</DropdownMenuLabel>
-                {VENDEURS.map((v) => (
-                  <DropdownMenuItem key={`c-${v}`} onClick={() => onAssign(c.id, { commercial: v })} className="cursor-pointer text-[13px] gap-2">
-                    <span className={`h-1.5 w-1.5 rounded-full ${cNorm === v ? "bg-brand-500" : "bg-muted-foreground/30"}`} /> {displayNameFromSlp(v) ?? v}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+          {canManage && <ClientActionsMenu c={c} onAssign={onAssign} onReminder={onReminder} />}
           <Link href={`/clients/${c.id}`} className="h-7 w-7 inline-flex items-center justify-center" aria-label="Ouvrir la fiche">
             <ChevronRight className="h-4 w-4 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-500" />
           </Link>
@@ -392,6 +363,121 @@ function ClientCard({
         </div>
       </div>
     </li>
+  );
+}
+
+/** Menu d'actions plan d'appel (rappel · activation · assignation), partagé
+ *  entre la carte et la ligne de liste. */
+function ClientActionsMenu({
+  c, onAssign, onReminder, align = "end",
+}: {
+  c: PlanClient;
+  onAssign: (id: string, patch: Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTelevente">>) => void;
+  onReminder: (c: PlanClient) => void;
+  align?: "end" | "start";
+}) {
+  const vNorm = c.vendeur ? normalizeSlp(c.vendeur) : null;
+  const cNorm = c.commercial ? normalizeSlp(c.commercial) : null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-secondary/60" title="Actions">
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align={align} className="w-56">
+        <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Plan d&apos;appel</DropdownMenuLabel>
+        <DropdownMenuItem onClick={() => onReminder(c)} className="cursor-pointer text-[13px] gap-2">
+          <Bell className="h-3.5 w-3.5" /> Programmer un rappel
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onAssign(c.id, { activeTelevente: !c.activeTelevente })} className="cursor-pointer text-[13px] gap-2">
+          <Power className="h-3.5 w-3.5" /> {c.activeTelevente ? "Désactiver en télévente" : "Activer en télévente"}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Assigner un vendeur</DropdownMenuLabel>
+        {VENDEURS.map((v) => (
+          <DropdownMenuItem key={`v-${v}`} onClick={() => onAssign(c.id, { vendeur: v })} className="cursor-pointer text-[13px] gap-2">
+            <span className={`h-1.5 w-1.5 rounded-full ${vNorm === v ? "bg-brand-500" : "bg-muted-foreground/30"}`} /> {displayNameFromSlp(v) ?? v}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuItem onClick={() => onAssign(c.id, { vendeur: null })} className="cursor-pointer text-[13px] gap-2 text-muted-foreground">
+          Retirer le vendeur
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Assigner un commercial</DropdownMenuLabel>
+        {VENDEURS.map((v) => (
+          <DropdownMenuItem key={`c-${v}`} onClick={() => onAssign(c.id, { commercial: v })} className="cursor-pointer text-[13px] gap-2">
+            <span className={`h-1.5 w-1.5 rounded-full ${cNorm === v ? "bg-brand-500" : "bg-muted-foreground/30"}`} /> {displayNameFromSlp(v) ?? v}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Vue LISTE classique (tableau compact) du portefeuille clients. */
+function ClientListView({
+  clients, today, canManage, onAssign, onReminder,
+}: {
+  clients: PlanClient[]; today: number; canManage: boolean;
+  onAssign: (id: string, patch: Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTelevente">>) => void;
+  onReminder: (c: PlanClient) => void;
+}) {
+  const dash = <span className="text-muted-foreground/40">—</span>;
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+              <th className="px-3 py-2.5 text-left font-semibold">Client</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Type</th>
+              {canManage && <th className="px-3 py-2.5 text-left font-semibold">Vendeur</th>}
+              <th className="px-3 py-2.5 text-left font-semibold">Commercial</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Téléphone</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Jours d&apos;appel</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Dernière cde</th>
+              <th className="px-3 py-2.5 text-center font-semibold">Inc.</th>
+              {canManage && <th className="px-3 py-2.5" />}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {clients.map((c) => {
+              const tel = firstTel(c);
+              const vNorm = c.vendeur ? normalizeSlp(c.vendeur) : null;
+              const cNorm = c.commercial ? normalizeSlp(c.commercial) : null;
+              return (
+                <tr key={c.id} className={`transition-colors hover:bg-secondary/30 ${!c.activeTelevente ? "opacity-60" : ""}`}>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <Link href={`/clients/${c.id}`} className="font-semibold text-foreground hover:text-brand-600 hover:underline underline-offset-2">{c.nom}</Link>
+                      {!c.activeTelevente && <span className="text-[9px] font-bold uppercase text-amber-600 dark:text-amber-400">inactif</span>}
+                    </div>
+                    <span className="font-mono text-[10.5px] text-muted-foreground">{c.code}</span>
+                  </td>
+                  <td className="px-3 py-2">{c.type ? <Badge variant={typeVariant(c.type)} className="text-[9.5px]">{c.type}</Badge> : dash}</td>
+                  {canManage && <td className="px-3 py-2">{vNorm ? (displayNameFromSlp(vNorm) ?? vNorm) : dash}</td>}
+                  <td className="px-3 py-2">{cNorm ? (displayNameFromSlp(cNorm) ?? cNorm) : dash}</td>
+                  <td className="px-3 py-2 font-mono text-[12px] text-muted-foreground">{tel ? formatPhoneDisplay(tel) : dash}</td>
+                  <td className="px-3 py-2"><JoursBadges joursAppel={c.joursAppel} today={today} /></td>
+                  <td className="px-3 py-2 text-right"><LastOrder days={c.lastOrderDays} /></td>
+                  <td className="px-3 py-2 text-center">
+                    {c.openIncidents > 0
+                      ? <span className="inline-flex items-center gap-1 rounded-md bg-rose-500/10 px-1.5 py-0.5 text-[10.5px] font-semibold text-rose-700 ring-1 ring-rose-500/25 dark:text-rose-300"><AlertTriangle className="h-3 w-3" /> {c.openIncidents}</span>
+                      : dash}
+                  </td>
+                  {canManage && (
+                    <td className="px-3 py-2 text-right">
+                      <ClientActionsMenu c={c} onAssign={onAssign} onReminder={onReminder} />
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Search, Loader2, Package, ChevronRight, Barcode, Boxes } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { ViewToggle, useViewMode } from "@/components/ui/view-toggle";
 
 interface ArticleRow {
   id: string;
@@ -43,6 +44,7 @@ export function ArticlesTable() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
+  const [view, setView] = useViewMode("televent-articles-view");
   const reqId = useRef(0);
 
   const load = useCallback(async (opts: { page: number; append: boolean }) => {
@@ -110,6 +112,7 @@ export function ArticlesTable() {
           </button>
         </div>
         {!loading && <span className="text-[12px] text-muted-foreground">{total} article{total > 1 ? "s" : ""}</span>}
+        <div className="ml-auto"><ViewToggle value={view} onChange={setView} /></div>
       </div>
 
       {loading ? (
@@ -126,6 +129,7 @@ export function ArticlesTable() {
         </div>
       ) : (
         <>
+          {view === "cards" ? (
           <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
             {articles.map((a) => {
               const avail = availOf(a);
@@ -164,6 +168,9 @@ export function ArticlesTable() {
               );
             })}
           </ul>
+          ) : (
+            <ArticleListView articles={articles} availOf={availOf} />
+          )}
 
           {page < totalPages && (
             <div className="flex justify-center pt-2">
@@ -175,6 +182,54 @@ export function ArticlesTable() {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/** Vue LISTE classique (tableau compact) des articles. */
+function ArticleListView({ articles, availOf }: { articles: ArticleRow[]; availOf: (a: ArticleRow) => number }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+              <th className="px-3 py-2.5 text-left font-semibold">Article</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Code</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Marque</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Variété</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Condt</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Calibre</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Pays</th>
+              <th className="px-3 py-2.5 text-left font-semibold">Groupe</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Dispo</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {articles.map((a) => {
+              const avail = availOf(a);
+              const cell = (v: string | null) => (v ? v : <span className="text-muted-foreground/40">—</span>);
+              return (
+                <tr key={a.id} className="transition-colors hover:bg-secondary/30">
+                  <td className="px-3 py-2 max-w-[260px]">
+                    <Link href={`/articles/${a.id}`} className="font-semibold text-foreground hover:text-brand-600 hover:underline underline-offset-2">
+                      {a.itemName}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground">{a.itemCode}</td>
+                  <td className="px-3 py-2">{cell(a.uMarque)}</td>
+                  <td className="px-3 py-2">{cell(a.frgnName)}</td>
+                  <td className="px-3 py-2">{cell(a.uCondi)}</td>
+                  <td className="px-3 py-2">{cell(a.uCalibre)}</td>
+                  <td className="px-3 py-2">{cell(a.uPays)}</td>
+                  <td className="px-3 py-2 text-muted-foreground max-w-[180px] truncate">{cell(a.groupName)}</td>
+                  <td className={`px-3 py-2 text-right font-semibold tnum ${avail > 0 ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground/60"}`}>{Math.round(avail)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
