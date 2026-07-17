@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, type MouseEvent as ReactMouseEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Search, Loader2, Truck, Users, Phone, Mail, Link2, ChevronRight, DownloadCloud } from "lucide-react";
+import { Search, Loader2, Truck, Users, Phone, Mail, Link2, ChevronRight, DownloadCloud, Pencil, ExternalLink, Archive, ArchiveRestore } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ViewToggle, useViewMode } from "@/components/ui/view-toggle";
+import { ContextMenu, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, useContextMenu } from "@/components/ui/context-menu";
+import { SupplierQuickEdit } from "@/components/suppliers/SupplierQuickEdit";
 import { formatPhoneDisplay } from "@/lib/phone";
 
 interface SupplierRow {
@@ -35,6 +38,10 @@ export function SupplierTable() {
   const [active, setActive] = useState<string>("actifs");
   const [importing, setImporting] = useState(false);
   const [view, setView] = useViewMode("televent-suppliers-view");
+  const router = useRouter();
+  const { menu, openAt, close } = useContextMenu(230, 260);
+  const [ctx, setCtx] = useState<SupplierRow | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
   // Auto-amorçage tenté une seule fois par montage (évite les boucles d'import).
   const autoSeedTried = useRef(false);
 
@@ -73,6 +80,38 @@ export function SupplierTable() {
       if (!opts.silent) toast.error(e instanceof Error ? e.message : "Import échoué");
     } finally { setImporting(false); }
   }, [load]);
+
+  const openCtx = (e: ReactMouseEvent, s: SupplierRow) => { setCtx(s); openAt(e); };
+
+  /** Archive / réactive sans ouvrir la fiche (repart de la fiche complète pour
+   *  ne pas écraser les champs non chargés dans la liste). */
+  const toggleActive = useCallback(async (s: SupplierRow) => {
+    close();
+    try {
+      const cur = await fetch(`/api/suppliers/${s.id}`).then((r) => r.json());
+      const res = await fetch(`/api/suppliers/${s.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nom: cur.nom,
+          type: cur.type ?? "",
+          sapCardCode: cur.sapCardCode ?? "",
+          email: cur.email ?? "",
+          tel1: cur.tel1 ?? "",
+          tel2: cur.tel2 ?? "",
+          tel3: cur.tel3 ?? "",
+          adresse: cur.adresse ?? "",
+          notes: cur.notes ?? "",
+          active: !s.active,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Échec");
+      toast.success(s.active ? "Fournisseur archivé" : "Fournisseur réactivé");
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Échec");
+    }
+  }, [close, load]);
 
   // Débounce léger sur la recherche + auto-amorçage si le référentiel est vide.
   useEffect(() => {
@@ -131,6 +170,9 @@ export function SupplierTable() {
         </Button>
         <div className="ml-auto"><ViewToggle value={view} onChange={setView} /></div>
       </div>
+      <p className="-mt-1 text-[11.5px] text-muted-foreground">
+        Astuce : <b>clic droit</b> sur un fournisseur pour le modifier sans ouvrir la fiche.
+      </p>
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
@@ -147,7 +189,7 @@ export function SupplierTable() {
       ) : view === "cards" ? (
         <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
           {suppliers.map((s) => (
-            <li key={s.id}>
+            <li key={s.id} onContextMenu={(e) => openCtx(e, s)}>
               <Link
                 href={`/fournisseurs/${s.id}`}
                 className="group flex h-full flex-col rounded-2xl border border-border bg-card p-4 shadow-card transition-all duration-200 hover:-translate-y-px hover:shadow-card-hover hover:border-brand-400/50"
@@ -190,14 +232,30 @@ export function SupplierTable() {
           ))}
         </ul>
       ) : (
-        <SupplierListView suppliers={suppliers} />
+        <SupplierListView suppliers={suppliers} onContext={openCtx} />
       )}
+
+      <ContextMenu menu={menu} onClose={close}>
+        {ctx && (
+          <>
+            <ContextMenuLabel>{ctx.nom}</ContextMenuLabel>
+            <ContextMenuItem icon={Pencil} onClick={() => { setEditId(ctx.id); close(); }}>Modifier…</ContextMenuItem>
+            <ContextMenuItem icon={ExternalLink} onClick={() => { router.push(`/fournisseurs/${ctx.id}`); close(); }}>Ouvrir la fiche</ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem icon={ctx.active ? Archive : ArchiveRestore} onClick={() => toggleActive(ctx)}>
+              {ctx.active ? "Archiver" : "Réactiver"}
+            </ContextMenuItem>
+          </>
+        )}
+      </ContextMenu>
+
+      <SupplierQuickEdit id={editId} onClose={() => setEditId(null)} onSaved={load} />
     </div>
   );
 }
 
 /** Vue LISTE classique (tableau compact) des fournisseurs. */
-function SupplierListView({ suppliers }: { suppliers: SupplierRow[] }) {
+function SupplierListView({ suppliers, onContext }: { suppliers: SupplierRow[]; onContext: (e: ReactMouseEvent, s: SupplierRow) => void }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
       <div className="overflow-x-auto">
@@ -215,7 +273,7 @@ function SupplierListView({ suppliers }: { suppliers: SupplierRow[] }) {
           </thead>
           <tbody className="divide-y divide-border">
             {suppliers.map((s) => (
-              <tr key={s.id} className="transition-colors hover:bg-secondary/30">
+              <tr key={s.id} onContextMenu={(e) => onContext(e, s)} title="Clic droit pour modifier" className="cursor-context-menu transition-colors hover:bg-secondary/30">
                 <td className="px-3 py-2">
                   <Link href={`/fournisseurs/${s.id}`} className="font-semibold text-foreground hover:text-brand-600 hover:underline underline-offset-2">
                     {s.nom}
