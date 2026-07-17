@@ -638,52 +638,36 @@ html.dark[data-hover-contrast] [class*="hover:bg-accent"]:hover {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   ONDE DE SURVOL DES BOUTONS (demande client 07/2026)
-   Au passage de la souris sur N'IMPORTE QUEL bouton, une onde
-   circulaire part du centre et se dissipe au bord — affordance
-   « c'est cliquable ». 100 % CSS : l'onde est un anneau en
-   radial-gradient teinté `currentColor` (s'adapte donc à tout
-   bouton, plein comme fantôme, clair comme sombre) dont on anime
-   la taille de fond ; tout vit DANS les keyframes (pas de fill),
-   donc aucun style résiduel après l'onde.
+   VA-ET-VIENT DE SURVOL DES BOUTONS (demande client 07/2026,
+   remplace l'onde jugée trop marquée). Au passage de la souris,
+   le bouton avance légèrement vers l'utilisateur puis revient
+   (échelle 1 → 1.03 → 1 en 380 ms, une seule fois) — affordance
+   « c'est cliquable », discrète.
 
-   Périmètre : <button>, [role="button"] et .btn-ripple (posée par
-   buttonVariants pour couvrir les liens rendus via asChild).
-   Exclusions : boutons désactivés, fonds dégradés (l'onde
-   remplacerait leur background-image le temps de l'animation),
-   boutons porteurs d'une classe d'animation propre, et opt-out
-   explicite `.no-ripple`. Souris uniquement (pas de hover fantôme
-   au tap sur tactile) et respect de prefers-reduced-motion.
+   On anime la propriété `scale` SEULE (pas `transform`) : elle se
+   compose avec les utilitaires translate/scale existants (boutons
+   centrés en absolu, active:scale-…) sans jamais les écraser. Pas
+   de fill → aucun style résiduel après l'animation.
+
+   Périmètre : les BOUTONS uniquement — <button> et .btn-nudge
+   (posée par buttonVariants pour couvrir les liens rendus via
+   asChild). Exclusions : désactivés, boutons porteurs d'une classe
+   d'animation propre, opt-out explicite `.no-nudge`. Souris
+   uniquement (pas de hover fantôme au tap sur tactile) et respect
+   de prefers-reduced-motion.
 ═══════════════════════════════════════════════════════════ */
 @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
-  :is(button, [role="button"], .btn-ripple):not(:disabled):not(.no-ripple):not([class*="bg-gradient"]):not([class*="animate-"]):hover {
-    animation: btn-hover-ripple 650ms ease-out;
+  :is(button, .btn-nudge):not(:disabled):not(.no-nudge):not([class*="animate-"]):hover {
+    animation: btn-hover-nudge 380ms ease-in-out;
   }
 }
-@keyframes btn-hover-ripple {
-  from {
-    background-image: radial-gradient(farthest-side,
-      transparent 0%, transparent 52%,
-      color-mix(in srgb, currentColor 22%, transparent) 66%,
-      color-mix(in srgb, currentColor 7%, transparent) 78%,
-      transparent 86%);
-    background-position: center;
-    background-repeat: no-repeat;
-    background-size: 0% 0%;
-  }
-  to {
-    background-image: radial-gradient(farthest-side,
-      transparent 0%, transparent 52%,
-      color-mix(in srgb, currentColor 22%, transparent) 66%,
-      color-mix(in srgb, currentColor 7%, transparent) 78%,
-      transparent 86%);
-    background-position: center;
-    background-repeat: no-repeat;
-    background-size: 250% 250%;
-  }
+@keyframes btn-hover-nudge {
+  0%   { scale: 1; }
+  50%  { scale: 1.03; }
+  100% { scale: 1; }
 }
-/* Réglage televente:animations « off » : onde coupée aussi. */
-html[data-reduce-anim="1"] :is(button, [role="button"], .btn-ripple):not([class*="animate-"]):hover {
+/* Réglage televente:animations « off » : va-et-vient coupé aussi. */
+html[data-reduce-anim="1"] :is(button, .btn-nudge):not([class*="animate-"]):hover {
   animation: none;
 }
 
