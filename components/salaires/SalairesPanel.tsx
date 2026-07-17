@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft, ChevronRight, ChevronDown, RotateCcw, Loader2, Save, Send, Plus, Trash2,
   Wallet, AlertTriangle, Car, Gift, ReceiptText, CheckCircle2, KeyRound, FileSpreadsheet, Pencil,
+  Coins, CalendarCheck, Scale,
 } from "lucide-react";
 import { toast } from "sonner";
 import { SurfaceCard } from "@/components/ui/surface-card";
@@ -280,6 +281,87 @@ function ComptaAccess({ configured, onChanged }: { configured: boolean; onChange
   );
 }
 
+/* ─────────── Décision des heures supp (payé / récup) — gérée ICI ──────────── */
+
+/** « 1,5 » / « 1h30 » → minutes ; borné aux supp du mois. 0 si vide/invalide. */
+function payInputToMin(v: string, maxMin: number): number {
+  const s = v.replace(",", ".").trim();
+  const m = /^(\d+)\s*h\s*(\d{1,2})?$/i.exec(s);
+  let min = 0;
+  if (m) min = Number(m[1]) * 60 + (m[2] ? Number(m[2]) : 0);
+  else { const h = Number(s); if (Number.isFinite(h) && h > 0) min = Math.round(h * 60); }
+  return Math.max(0, Math.min(min, maxMin));
+}
+
+function SuppDecision({ row, month, onSaved }: { row: Row; month: string; onSaved: () => Promise<void> }) {
+  const h = row.heures;
+  const [payH, setPayH] = useState("");
+  const [busy, setBusy] = useState<null | "pay" | "recup" | "split">(null);
+
+  const decided = h.suppSansDecisionMin === 0;
+  const apply = async (mode: "pay" | "recup" | "split") => {
+    const payMin = mode === "split" ? payInputToMin(payH, h.suppTotalMin) : 0;
+    if (mode === "split" && payMin <= 0) { toast.error("Indiquez le nombre d'heures à payer."); return; }
+    setBusy(mode);
+    try {
+      const r = await fetch("/api/salaires", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "suppDecision", month, user: row.email, mode, payMin }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) { toast.error(j?.error || "Décision impossible"); return; }
+      toast.success(`Décision enregistrée — ${row.name}`);
+      setPayH("");
+      await onSaved();
+    } catch { toast.error("Décision impossible — réseau ?"); }
+    finally { setBusy(null); }
+  };
+
+  const btn = "inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg text-[12.5px] font-semibold transition-colors disabled:opacity-50";
+  return (
+    <div className={`rounded-lg border p-3 ${decided ? "border-border bg-secondary/20" : "border-amber-500/40 bg-amber-500/10"}`}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
+          <Scale className="h-3.5 w-3.5" /> Heures supp du mois
+        </span>
+        <span className="text-[13px] font-bold tnum text-foreground">{fmtHM(h.suppTotalMin)}</span>
+        {decided ? (
+          <span className="flex flex-wrap gap-x-3 text-[11.5px] tnum">
+            {h.suppPayEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Payées <b>{fmtHM(h.suppPayEquivMin)}</b></span>}
+            {h.suppRecupEquivMin > 0 && <span className="text-sky-700 dark:text-sky-300">Récup <b>{fmtHM(h.suppRecupEquivMin)}</b></span>}
+          </span>
+        ) : (
+          <span className="text-[11.5px] font-semibold text-amber-700 dark:text-amber-300">à trancher : payer ou récup ?</span>
+        )}
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button type="button" disabled={!!busy} onClick={() => apply("pay")}
+          className={`${btn} bg-emerald-600 hover:bg-emerald-700 text-white`}>
+          {busy === "pay" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Coins className="h-4 w-4" />} Tout payer
+        </button>
+        <button type="button" disabled={!!busy} onClick={() => apply("recup")}
+          className={`${btn} bg-sky-600 hover:bg-sky-700 text-white`}>
+          {busy === "recup" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarCheck className="h-4 w-4" />} Tout en récup
+        </button>
+        <span className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background pl-2.5 pr-1 py-1">
+          <span className="text-[11.5px] text-muted-foreground">Payer</span>
+          <input value={payH} onChange={(e) => setPayH(e.target.value)} inputMode="decimal"
+            placeholder="ex. 1h30" aria-label="Heures à payer"
+            className="h-7 w-[70px] rounded-md border border-border bg-background px-1.5 text-[12.5px] tnum text-center focus:outline-none focus:ring-1 focus:ring-brand-500" />
+          <button type="button" disabled={!!busy} onClick={() => apply("split")}
+            className={`${btn} h-7 bg-foreground text-background hover:opacity-90`}>
+            {busy === "split" ? <Loader2 className="h-4 w-4 animate-spin" /> : "Partager"}
+          </button>
+        </span>
+      </div>
+      <p className="mt-1.5 text-[11px] text-muted-foreground">
+        La part payée part sur le bulletin (équiv. majoré +25/+50 %) ; le reste crédite le compteur de récup.
+      </p>
+    </div>
+  );
+}
+
 /* ───────────── Carte d'un salarié — REPLIABLE (l'en-tête résume) ──────────── */
 
 function EmployeeCard({ row, month, canEdit, onSaved }: {
@@ -363,6 +445,11 @@ function EmployeeCard({ row, month, canEdit, onSaved }: {
             {h.maladieJours > 0 && <span className="text-amber-700 dark:text-amber-300">Maladie <b>{h.maladieJours} j</b></span>}
             {h.absentJours > 0 && <span className="text-rose-700 dark:text-rose-300">Absence <b>{h.absentJours} j</b></span>}
           </div>
+
+          {/* DÉCISION HEURES SUPP — c'est ICI qu'on tranche : payé ou récup. */}
+          {canEdit && h.suppTotalMin > 0 && (
+            <SuppDecision row={row} month={month} onSaved={onSaved} />
+          )}
 
           {/* PRIMES */}
           <div>

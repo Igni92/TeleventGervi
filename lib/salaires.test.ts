@@ -13,7 +13,7 @@ const VEH: VehiculeAN = {
 
 const HEURES: SalaryHeures = {
   totalMin: 151 * 60 + 40, contractMin: 151 * 60 + 40,
-  suppPayEquivMin: 0, suppRecupEquivMin: 0, suppSansDecisionMin: 0,
+  suppTotalMin: 0, suppPayEquivMin: 0, suppRecupEquivMin: 0, suppSansDecisionMin: 0,
   ferieMin: 0, congesMin: 0, cpJours: 0, maladieJours: 0, absentJours: 0, recupJours: 0,
   weeksWithData: 4, weeksTotal: 4,
 };

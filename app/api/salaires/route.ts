@@ -7,7 +7,7 @@ import {
   splitSupp, effectivePaySuppMin,
   type HoursProfile,
 } from "@/lib/heuresCalc";
-import { listAllWeekEntries, listProfiles, type WeekEntry } from "@/lib/heuresRh";
+import { listAllWeekEntries, listProfiles, getProfile, getWeekEntry, saveWeekEntry, type WeekEntry } from "@/lib/heuresRh";
 import { listAllConges } from "@/lib/congesRh";
 import { expandOuvrables, monthEndISO } from "@/lib/planning";
 import { rangesOverlap, type CongeRequest } from "@/lib/conges";
@@ -63,7 +63,7 @@ function buildHeures(
 ): SalaryHeures {
   const typDay = typicalDayMinutes(profile);
   const out: SalaryHeures = {
-    totalMin: 0, contractMin: 0, suppPayEquivMin: 0, suppRecupEquivMin: 0, suppSansDecisionMin: 0,
+    totalMin: 0, contractMin: 0, suppTotalMin: 0, suppPayEquivMin: 0, suppRecupEquivMin: 0, suppSansDecisionMin: 0,
     ferieMin: 0, congesMin: 0, cpJours: 0, maladieJours: 0, absentJours: 0, recupJours: 0,
     weeksWithData: 0, weeksTotal: weekIds.length,
   };
@@ -78,6 +78,7 @@ function buildHeures(
     out.congesMin += c.congesMin;
     const supp = c.sup25Min + c.sup50Min;
     if (supp > 0) {
+      out.suppTotalMin += supp;
       if (e.option) {
         const pay = effectivePaySuppMin(e.option, e.paySuppMin, supp);
         const s = splitSupp(c.sup25Min, c.sup50Min, pay);
@@ -179,7 +180,10 @@ export async function POST(req: NextRequest) {
   if (!c) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   if (!c.canEdit) return NextResponse.json({ error: "Réservé aux managers" }, { status: 403 });
 
-  let body: { action?: string; month?: string; user?: string; primes?: unknown; frais?: unknown; note?: unknown; password?: unknown };
+  let body: {
+    action?: string; month?: string; user?: string; primes?: unknown; frais?: unknown; note?: unknown;
+    password?: unknown; mode?: string; payMin?: unknown;
+  };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -200,6 +204,50 @@ export async function POST(req: NextRequest) {
 
   const month = body.month ?? "";
   if (!isMonthId(month)) return NextResponse.json({ error: "Mois invalide" }, { status: 400 });
+
+  // ── DÉCISION HEURES SUPP (payer / récup / partage) — gérée ICI, par salarié
+  //    et par mois : on applique le choix à TOUTES les semaines du mois qui ont
+  //    des heures supp. « pay » = tout payé, « recup » = tout en récup, « split »
+  //    = payer `payMin` minutes (brutes) au total, remplies semaine par semaine
+  //    (chronologique), le reste en récup. Les jours saisis ne sont PAS touchés. ──
+  if (body.action === "suppDecision") {
+    const target = (body.user ?? "").trim().toLowerCase();
+    if (!target) return NextResponse.json({ error: "Salarié manquant" }, { status: 400 });
+    const mode = body.mode;
+    if (mode !== "pay" && mode !== "recup" && mode !== "split") {
+      return NextResponse.json({ error: "Décision invalide" }, { status: 400 });
+    }
+    try {
+      const profile = await getProfile(target);
+      const typDay = typicalDayMinutes(profile);
+      let remaining = mode === "split" ? Math.max(0, Math.round(Number(body.payMin) || 0)) : 0;
+      for (const w of monthWeeks(month)) {
+        const entry = await getWeekEntry(target, w);
+        if (!entry) continue;
+        const calc = computeWeek(entry.days, profile.weeklyHours, typDay);
+        const supp = calc.sup25Min + calc.sup50Min;
+        if (supp <= 0) continue;
+        let opt: { option: string; paySuppMin?: number; recupDates?: string[] };
+        if (mode === "pay") {
+          opt = { option: "paiement", recupDates: entry.recupDates };
+        } else if (mode === "recup") {
+          opt = { option: "recup", recupDates: entry.recupDates };
+        } else {
+          const assigned = Math.min(remaining, supp);
+          remaining -= assigned;
+          opt = assigned <= 0
+            ? { option: "recup", recupDates: entry.recupDates }
+            : assigned >= supp
+              ? { option: "paiement", recupDates: entry.recupDates }
+              : { option: "mixte", paySuppMin: assigned, recupDates: entry.recupDates };
+        }
+        await saveWeekEntry(target, w, entry.days, c.email, opt);
+      }
+      return NextResponse.json({ ok: true, month, user: target });
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
+  }
 
   // ── ENVOI DU RÉCAP au cabinet comptable (remplace le PDF compta) ──
   if (body.action === "send") {
