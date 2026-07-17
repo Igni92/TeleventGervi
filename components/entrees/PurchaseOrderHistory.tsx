@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, PackageCheck, Search, ChevronRight, X, Truck, AlertTriangle,
@@ -15,7 +15,7 @@ import { InfoHint } from "@/components/ui/info-hint";
 import { StatBlock } from "@/components/ui/stat-block";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
-import { fmtJourDate } from "@/lib/date-fr";
+import { fmtJourDate, groupByJour } from "@/lib/date-fr";
 import { heureFromRef } from "@/lib/docLabel";
 import { eur, eur0, fmtColis } from "@/lib/format";
 import { DesignationChips } from "./DesignationChips";
@@ -230,10 +230,16 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
           </div>
         )}
 
-        {/* Mobile : cartes — tap ouvre le détail plein écran */}
+        {/* Mobile : cartes GROUPÉES PAR JOUR de saisie (« VEN 17.05.26 » puis
+            les achats du jour) — tap ouvre le détail plein écran */}
         {filtered.length > 0 && (
           <div className="md:hidden space-y-2.5">
-            {filtered.map((d) => (
+            {groupByJour(filtered, (x) => x.docDate).map((g) => (
+              <Fragment key={g.day || "sans-date"}>
+                <div className="pt-1.5 first:pt-0 px-1 text-[12px] font-bold uppercase tracking-wide text-muted-foreground tnum">
+                  {fmtJourDate(g.day)}
+                </div>
+                {g.items.map((d) => (
               <button
                 key={d.docEntry}
                 type="button"
@@ -242,7 +248,8 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
               >
                 <div className="min-w-0 flex-1">
                   {/* Mobile : fournisseur, N° EM (dès réception, sinon N° CF) +
-                      heure de saisie, statut, livraison, montant. */}
+                      heure de saisie, statut, livraison, montant — la DATE de
+                      saisie vit dans l'en-tête du jour au-dessus. */}
                   <div className="text-[16px] font-semibold text-foreground truncate">
                     {d.cardName || d.cardCode}
                   </div>
@@ -250,7 +257,7 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                     <span className="font-mono font-semibold text-foreground">
                       {d.emDocNum != null ? `EM ${d.emDocNum}` : `CF ${d.docNum}`}
                     </span>
-                    {heureFromComments(d.comments) ? ` · saisie à ${heureFromComments(d.comments)}` : ""}
+                    {heureFromComments(d.comments) ? ` · ${heureFromComments(d.comments)}` : ""}
                   </div>
                   <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
                     Livraison {fmtDate(d.dueDate)}
@@ -269,6 +276,8 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                   <ChevronRight className="h-5 w-5 text-muted-foreground/50" />
                 </div>
               </button>
+                ))}
+              </Fragment>
             ))}
           </div>
         )}
@@ -282,7 +291,7 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                   <th className="text-left px-3 py-2 font-semibold w-24">N° Cde</th>
                   <th className="text-left px-3 py-2 font-semibold w-24">N° EM</th>
                   <th className="text-left px-3 py-2 font-semibold">Fournisseur</th>
-                  <th className="text-left px-3 py-2 font-semibold w-36">Saisie</th>
+                  <th className="text-left px-3 py-2 font-semibold w-20">Heure</th>
                   <th className="text-left px-3 py-2 font-semibold w-28">Livraison</th>
                   <th className="text-left px-3 py-2 font-semibold w-36">Statut</th>
                   {!restricted && <th className="text-right px-3 py-2 font-semibold w-32">Total HT</th>}
@@ -290,7 +299,19 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((d) => (
+                {/* Groupes PAR JOUR de saisie : ligne « VEN 17.05.26 » puis les
+                    achats du jour dessous. */}
+                {groupByJour(filtered, (x) => x.docDate).map((g) => (
+                  <Fragment key={g.day || "sans-date"}>
+                    <tr className="border-t border-border bg-secondary/50">
+                      <td
+                        colSpan={restricted ? 7 : 8}
+                        className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground tnum"
+                      >
+                        {fmtJourDate(g.day)}
+                      </td>
+                    </tr>
+                    {g.items.map((d) => (
                   <tr
                     key={d.docEntry}
                     onClick={() => setLargeEntry(d.docEntry)}
@@ -319,15 +340,17 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                       </span>
                     </td>
                     <td className="px-3 py-2.5 tnum text-muted-foreground whitespace-nowrap">
-                      {/* Date + heure de saisie (heure gravée dans la référence signée) */}
-                      {fmtDate(d.docDate)}
-                      {heureFromComments(d.comments) ? ` · ${heureFromComments(d.comments)}` : ""}
+                      {/* Heure de saisie (gravée dans la référence signée) — la
+                          DATE vit dans la ligne de jour au-dessus. */}
+                      {heureFromComments(d.comments) ?? "—"}
                     </td>
                     <td className="px-3 py-2.5 tnum text-muted-foreground">{fmtDate(d.dueDate)}</td>
                     <td className="px-3 py-2.5">{isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}</td>
                     {!restricted && <td className="px-3 py-2.5 text-right tnum font-display font-bold text-[15px]">{eur(d.totalHT ?? 0)}</td>}
                     <td className="px-2 py-2.5 text-right"><ChevronRight className="h-4 w-4 text-muted-foreground/50 inline" /></td>
                   </tr>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ClipboardList, Search, ChevronRight,
@@ -15,7 +15,7 @@ import { InfoHint } from "@/components/ui/info-hint";
 import { StatBlock } from "@/components/ui/stat-block";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
-import { fmtJourDate } from "@/lib/date-fr";
+import { fmtJourDate, groupByJour } from "@/lib/date-fr";
 import { heureFromRef } from "@/lib/docLabel";
 import { eur, eur0, fmtColis } from "@/lib/format";
 import { DesignationChips, Chip } from "./DesignationChips";
@@ -378,11 +378,17 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
           );
         })()}
 
-        {/* Mobile : liste de cartes — le tap OUVRE le détail en plein écran
-            (pas d'accordéon : le détail ne tient pas en ligne sur téléphone). */}
+        {/* Mobile : cartes GROUPÉES PAR JOUR (« VEN 17.05.26 » puis les entrées
+            du jour) — le tap OUVRE le détail en plein écran (pas d'accordéon :
+            le détail ne tient pas en ligne sur téléphone). */}
         {filtered.length > 0 && (
           <div className="md:hidden space-y-2.5">
-            {filtered.map((d) => {
+            {groupByJour(filtered, (x) => x.docDate).map((g) => (
+              <Fragment key={g.day || "sans-date"}>
+                <div className="pt-1.5 first:pt-0 px-1 text-[12px] font-bold uppercase tracking-wide text-muted-foreground tnum">
+                  {fmtJourDate(g.day)}
+                </div>
+                {g.items.map((d) => {
               const openIncidents = (byDoc.get(d.docEntry) ?? []).filter((i) => !i.resolved);
               return (
                 <button
@@ -392,14 +398,13 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                   className={`w-full rounded-2xl border border-border bg-card flex items-center gap-3 p-4 text-left active:bg-secondary/40 ${isVoided(d) ? "opacity-60" : ""}`}
                 >
                   <div className="min-w-0 flex-1">
-                    {/* Mobile : fournisseur, N° EM, date + heure de réception,
-                        montant, statuts. (lot, nb lignes → visibles dans le détail.) */}
+                    {/* Mobile : fournisseur, N° EM + heure de réception, montant,
+                        statuts — la DATE vit dans l'en-tête du jour au-dessus. */}
                     <div className={`text-[16px] font-semibold truncate ${isVoided(d) ? "line-through text-muted-foreground" : "text-foreground"}`}>
                       {d.cardName || d.cardCode}
                     </div>
                     <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
                       <span className="font-mono font-semibold text-foreground">EM {d.docNum}</span>
-                      {` · ${fmtJourDate(d.docDate)}`}
                       {heureFromRef(d.comments) ? ` · ${heureFromRef(d.comments)}` : ""}
                     </div>
                     <span className="inline-flex items-center gap-1.5 flex-wrap mt-1">
@@ -424,7 +429,9 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                   </div>
                 </button>
               );
-            })}
+                })}
+              </Fragment>
+            ))}
           </div>
         )}
 
@@ -435,7 +442,7 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                 <tr>
                   <th className="text-left px-3 py-2 font-semibold w-24">N° EM</th>
                   <th className="text-left px-3 py-2 font-semibold">Fournisseur</th>
-                  <th className="text-left px-3 py-2 font-semibold w-28">Date</th>
+                  <th className="text-left px-3 py-2 font-semibold w-24">Heure</th>
                   {!restricted && <th className="text-right px-3 py-2 font-semibold w-32">Total HT</th>}
                   <th className="text-center px-3 py-2 font-semibold w-28">Agréage</th>
                   <th className="text-center px-3 py-2 font-semibold w-20">Incident</th>
@@ -443,8 +450,19 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                 </tr>
               </thead>
               <tbody>
-                {/* Clic sur la ligne → détail PLEIN ÉCRAN (plus d'accordéon inline). */}
-                {filtered.map((d) => (
+                {/* Groupes PAR JOUR : ligne « VEN 17.05.26 » puis les entrées du
+                    jour dessous. Clic sur une entrée → détail PLEIN ÉCRAN. */}
+                {groupByJour(filtered, (x) => x.docDate).map((g) => (
+                  <Fragment key={g.day || "sans-date"}>
+                    <tr className="border-t border-border bg-secondary/50">
+                      <td
+                        colSpan={restricted ? 6 : 7}
+                        className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground tnum"
+                      >
+                        {fmtJourDate(g.day)}
+                      </td>
+                    </tr>
+                    {g.items.map((d) => (
                   <tr
                     key={d.docEntry}
                     className={`border-t border-border cursor-pointer transition-colors hover:bg-secondary/30 ${isVoided(d) ? "opacity-60" : ""}`}
@@ -472,9 +490,9 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground tnum whitespace-nowrap">
-                      {/* Date + heure de réception (heure gravée dans la référence signée) */}
-                      {fmtJourDate(d.docDate)}
-                      {heureFromRef(d.comments) ? ` · ${heureFromRef(d.comments)}` : ""}
+                      {/* Heure de réception (gravée dans la référence signée) —
+                          la DATE vit dans la ligne de jour au-dessus. */}
+                      {heureFromRef(d.comments) ?? "—"}
                     </td>
                     {!restricted && (
                       <td className="px-3 py-2.5 text-right tnum font-display font-bold text-[15px]">{eur(d.totalHT ?? 0)}</td>
@@ -501,6 +519,8 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                       <ChevronRight className="h-4 w-4 inline" />
                     </td>
                   </tr>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
