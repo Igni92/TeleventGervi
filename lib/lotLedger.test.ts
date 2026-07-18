@@ -80,6 +80,21 @@ describe("planLedgerTrim — écrêtage du registre au stock physique", () => {
     expect(92 + 88 + 352 + 308).toBe(840);
   });
 
+  it("répartition du RESTANT À VENDRE (détail console) : cas réel Fraise — dispo 312 kg", () => {
+    // Registre physique 112+88+352+288 = 840 ; dispo vente 312 (840 − 528 engagés).
+    // Affichage : les lots les plus anciens (déjà vendus/engagés) disparaissent,
+    // le plus récent garde tout — 288 (EM23171) + 24 (EM23162) = 312.
+    const lots = [
+      lot("EM23159", 112, "2026-07-13"),
+      lot("EM23160", 88, "2026-07-13"),
+      lot("EM23162", 352, "2026-07-15"),
+      lot("EM23171", 288, "2026-07-17"),
+    ];
+    const trims = planLedgerTrim(lots, 312);
+    expect(trims.map((t) => [t.lot.batchNumber, t.quantity]))
+      .toEqual([["EM23159", 0], ["EM23160", 0], ["EM23162", 24]]);
+  });
+
   it("arrondit au millième (comme debitLots)", () => {
     const trims = planLedgerTrim([lot("EM1", 10.5, "2026-07-01"), lot("EM2", 5, "2026-07-02")], 12.345);
     expect(trims).toHaveLength(1);

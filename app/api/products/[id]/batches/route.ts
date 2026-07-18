@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getLotNotes } from "@/lib/marchandiseNote";
+import { planLedgerTrim } from "@/lib/gervifrais-calc";
 
 /**
  * GET /api/products/[id]/batches[?inStock=1]
@@ -13,9 +14,15 @@ import { getLotNotes } from "@/lib/marchandiseNote";
  *     par lot n'existe pas dans le Service Layer de cette base ; la DLC est le
  *     signal fiable « encore en stock » pour du frais.
  *   • tri FEFO : DLC la plus proche d'abord (null en dernier), puis admission.
- * Renvoie aussi `physicalStock` (somme ProductStock.inStock, unité SAP) : c'est le
- * comparable des quantités par lot du registre — le « dispo » connu côté console
- * est NET des commandes engagées (available), donc plus bas que la somme des lots.
+ * Chaque lot porte `sellable` = quantité RESTANT À VENDRE : le DISPO de l'article
+ * (somme ProductStock.available = physique − commandes engagées) réparti sur les
+ * lots du registre, les PLUS RÉCENTS servis d'abord (FIFO : on vend les plus
+ * anciens en premier — ce qui reste à vendre vit dans les derniers arrivages).
+ * Un lot entièrement vendu/engagé a `sellable` 0 et disparaît du détail console.
+ * Le `quantity` du registre reste la présence PHYSIQUE (les commandes engagées
+ * pas encore parties ont toujours besoin de leur lot pour l'affectation).
+ * Renvoie aussi `physicalStock` (somme inStock) et `availableStock` (somme
+ * available), unité SAP.
  */
 export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -41,14 +48,38 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       take: 50,
     }),
     prisma.product.findUnique({ where: { id: params.id }, select: { itemCode: true } }),
-    prisma.productStock.aggregate({ where: { productId: params.id }, _sum: { inStock: true } }),
+    prisma.productStock.aggregate({ where: { productId: params.id }, _sum: { inStock: true, available: true } }),
   ]);
+
+  // RESTANT À VENDRE par lot : le dispo (physique − engagé) réparti sur les lots
+  // du registre, plus récents d'abord — planLedgerTrim écrête les plus anciens
+  // (déjà vendus/engagés). Dispo inconnu (aucun stock miroir) → registre tel quel.
+  const available = phys._sum.available;
+  const sellableById = new Map<string, number>();
+  if (available != null) {
+    for (const t of planLedgerTrim(batches.filter((b) => b.quantity > 0), available)) {
+      sellableById.set(t.lot.id, t.quantity);
+    }
+  }
+  const sellableOf = (b: { id: string; quantity: number }): number => {
+    if (b.quantity <= 0) return 0;
+    if (available == null) return b.quantity;
+    return sellableById.get(b.id) ?? b.quantity;
+  };
 
   // Note qualité (étoiles) par lot, saisie à la réception (clé par itemCode+lot).
   const lotNotes = product
     ? await getLotNotes(product.itemCode, batches.map((b) => b.batchNumber))
     : new Map<string, number>();
-  const withNotes = batches.map((b) => ({ ...b, rating: lotNotes.get(b.batchNumber) ?? null }));
+  const withNotes = batches.map((b) => ({
+    ...b,
+    rating: lotNotes.get(b.batchNumber) ?? null,
+    sellable: sellableOf(b),
+  }));
 
-  return NextResponse.json({ batches: withNotes, physicalStock: phys._sum.inStock ?? null });
+  return NextResponse.json({
+    batches: withNotes,
+    physicalStock: phys._sum.inStock ?? null,
+    availableStock: available ?? null,
+  });
 }

@@ -278,10 +278,16 @@ Correctifs :
   article dont le registre dépasse le stock physique (le cas « stock nul → tout
   à 0 » devient un cas particulier). Dry-run par défaut, `--apply` pour écrire,
   rapport par article/lot.
-- 🟠→✅ **Détail des lots clarifié** (`LotDetailsDialog` + `/batches`) : l'en-tête
-  affiche **« en stock » (physique)** — le comparable de la somme des lots — ET
-  **« dispo à la vente » (hors commandes engagées)** ; bandeau ⚠️ si la somme des
-  lots dépasse encore le stock physique (écart transitoire, résorbé à la synchro).
+- 🟠→✅ **Détail des lots = RESTANT À VENDRE** (`LotDetailsDialog` + `/batches`) —
+  décision client (18/07) : le détail montre ce qu'il **reste à vendre**, pas la
+  présence physique. La somme des lots = le **dispo** de l'article (physique −
+  commandes engagées), réparti sur les lots les **plus récents** d'abord (FIFO :
+  les plus anciens partent en premier) ; un lot entièrement vendu/engagé
+  **disparaît de la liste** (« les lots s'éteignent petit à petit »). Champ
+  `sellable` calculé par l'API (`planLedgerTrim` sur le dispo) — le `quantity`
+  du registre reste la présence physique, indispensable à l'affectation des
+  commandes engagées pas encore parties. Articles non suivis au registre :
+  affichage DLC inchangé (démarrage à froid honnête).
 
 ### 🟠 Reste
 - **Retro sur `purchase-orders/receive`** : crédit registre branché, propagation

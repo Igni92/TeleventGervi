@@ -1081,3 +1081,21 @@ Lisibilité conservée (libellés partout, abrégés sur mobile) ; le calendrier
 
 Répartition pure `planLedgerTrim` (`lib/gervifrais-calc`, testée — dont le cas réel
 Fraise). Audit détaillé : `docs/audit-transformation/audit-suivi-lot.md` §8 Lot 5.
+
+---
+
+## 📒 Détail des lots — on affiche le RESTANT À VENDRE (les lots s'éteignent au fil des ventes)
+
+> Décision client (suite du signalement Fraise) : « ce qui est déjà vendu ne doit
+> pas être affiché — l'idée est que les lots disparaissent petit à petit qu'ils
+> sont vendus ». Ex. : 840 kg physiques, 528 kg engagés → le détail doit montrer
+> **312 kg** répartis sur les derniers arrivages.
+
+| Avant | Après |
+|-------|-------|
+| Le détail listait la **présence physique** par lot (registre) — y compris la marchandise déjà engagée sur des commandes, d'où des totaux plus hauts que le « dispo » console. | Chaque lot affiche son **restant à vendre** : le **dispo** de l'article (physique − engagé) réparti sur les lots, **plus récents servis d'abord** (FIFO — on vend les plus anciens en premier). Somme des lots = dispo console. |
+| Un lot épuisé restait listé. | Un lot entièrement vendu/engagé **disparaît** de la liste (les lots bloqués SAP restent signalés). Articles non suivis au registre : affichage DLC inchangé. |
+
+Champ `sellable` calculé par `/api/products/[id]/batches` (répartition
+`planLedgerTrim` sur `ProductStock.available`) ; le registre physique est
+inchangé — il continue de servir l'affectation des commandes engagées.
