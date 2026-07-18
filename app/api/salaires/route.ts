@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/permissions";
+import { requireAdmin, isGerantEmail } from "@/lib/permissions";
 import {
   computeWeek, typicalDayMinutes, isMonthId, monthIdOf, monthWeeks, weekDates,
   splitSupp, effectivePaySuppMin, splitStructuralSupp, structuralSuppMin,
@@ -166,7 +166,9 @@ async function buildRows(monthId: string) {
   for (const [email] of byUser) {
     if (!seen.has(email)) rows.push(build(email, email));
   }
-  return rows;
+  // GÉRANTS : ils saisissent leurs heures mais n'ont pas de bulletin → exclus des
+  // éléments des salaires (saisie, état comptable PDF, récap email).
+  return rows.filter((r) => !isGerantEmail(r.email));
 }
 
 export async function GET(req: NextRequest) {

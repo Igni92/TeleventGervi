@@ -33,6 +33,19 @@ export const ADMIN_EMAILS = [
 export const UNMAPPED_MESSAGE =
   "Compte non relié à un commercial — contactez l'administrateur.";
 
+/** GÉRANTS / mandataires sociaux : ils saisissent leurs heures (planning) mais
+ *  n'ont PAS de bulletin de paie — ils sont EXCLUS des éléments des salaires
+ *  (récap email + état comptable PDF transmis au cabinet). Désignés par email. */
+export const GERANT_EMAILS = [
+  "jm.gunslay@gervifrais.com",
+] as const;
+
+/** True si l'email est un gérant (exclu de la paie / des documents compta). */
+export function isGerantEmail(email: string | null | undefined): boolean {
+  const e = email?.trim().toLowerCase();
+  return !!e && GERANT_EMAILS.some((g) => g.toLowerCase() === e);
+}
+
 export type AccessScope =
   /** Admin : accès global, aucun filtre. */
   | { all: true; email: string }
