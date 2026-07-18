@@ -580,6 +580,7 @@ model ProductBatch {
   supplierName    String? // nom fournisseur (du GR)
   sourceDocNum    String? // n° BR pour traçabilité
   syncedAt        DateTime  @default(now())
+  ledgerAt        DateTime? // dernier MOUVEMENT du registre (crédit/débit lotLedger) — garde anti-course de l'écrêtage
 
   @@unique([productId, batchNumber, warehouseCode])
   @@index([productId])

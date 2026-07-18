@@ -75,7 +75,7 @@ répare jamais :**
 | 🔴 | **Modification de BL** (`.../modif`) | ni débit ni re-crédit — ligne ajoutée/augmentée/retirée invisible du registre | `app/api/sap/orders/[docEntry]/modif/route.ts` (aucun import registre) |
 | 🔴 | **Annulation / rebind** | le débit initial **reste** ; le lot recréé n'est pas débité | `app/api/sap/orders/cancel/route.ts`, `.../rebind/route.ts` (aucun `creditLots`) |
 | 🟠 | **Re-affectation d'un lot** | ancien lot non re-crédité, nouveau non débité | `bons-commande/route.ts:387,394` (débit seulement si `wasAllPending`) |
-| 🟠 | **Vente directe dans SAP** (hors TeleVent) | jamais débitée (TeleVent ne la voit pas) | par construction |
+| 🟠 | **Vente directe dans SAP** (hors TeleVent) | jamais débitée (TeleVent ne la voit pas) — **résorbée depuis par l'écrêtage périodique au stock physique (Lot 5)** | par construction |
 | 🟠 | **Réception sans idempotence** | un retry réseau peut re-créer un PDN et **re-créditer** (double stock) | `goods-receipts/route.ts:222` (pas de clé d'idempotence) |
 
 **Conséquence** : la quantité par lot ne fait que se **désaccorder** au fil des
@@ -146,9 +146,12 @@ finissent avec un lot choisi bien plus tard) :
 
 - ✅ Le socle `chooseLot` + `EM_PENDING` + propagation rétro : aucune ligne ne part
   sans `U_NoLot` (bug BL 24011560 réglé) — bonne fondation.
-- ✅ La **synchro n'écrase pas le registre** : elle n'écrit jamais `quantity`, ne
-  supprime jamais `ProductBatch`, partage `warehouseCode=""` (pas de doublon). La
-  dérive du §3 vient **du côté vente**, pas de la synchro. *(vérifié)*
+- ✅ La **synchro n'écrase pas le registre** : elle n'écrit jamais `quantity` **à
+  partir de SAP** (le stock par lot n'y existe pas), ne supprime jamais
+  `ProductBatch`, partage `warehouseCode=""` (pas de doublon). La dérive du §3
+  vient **du côté vente**, pas de la synchro. *(vérifié)* — *Nuance depuis le
+  Lot 5 : la synchro déclenche un **écrêtage** du registre au stock physique
+  (à la baisse uniquement, jamais depuis une donnée par lot SAP) — cf. §8.*
 - ✅ La DLC comme **donnée** existe déjà (`LotDlc`, `freshnessLabel`) : il « suffit »
   de la brancher — c'est ce que fait le correctif ci-dessous.
 - ✅ `lib/colis.ts`, garde-fou encours, inventaire guidé : rigueur métier réelle.
@@ -243,6 +246,42 @@ fabrication (composants + parent), régularisation d'inventaire, retour fourniss
 - 🟠→✅ **Script de réconciliation** `scripts/reconcile-lot-ledger.mjs` : remet à 0 les
   reliquats registre là où l'article n'a **aucun stock physique** (purge de la dérive
   historique). **Dry-run par défaut**, `--apply` pour écrire.
+
+### ✅ Lot 5 — Écrêtage au STOCK PHYSIQUE (sur-créditation résiduelle)
+Symptôme signalé (Fraise `FB4KA3B`, 18/07) : console « 396 kg » dispo, détail des
+lots **308 + 352 + 210 + 88 = 958 kg** — impossible. Constaté en base : registre
+958 > stock physique 840 (`inStock` 000+01+R1) > dispo vente 376 (`available` =
+physique − engagé). Deux problèmes distincts :
+
+1. **Sur-créditation du registre** (958 > 840) : dérive héritée d'avant les
+   Lots 2–4 sur des articles **encore en stock** (le script ne purgeait que les
+   articles à stock nul) + ventes passées **directement dans SAP** (jamais
+   débitées côté TeleVent, par construction — seule source de dérive restante).
+2. **Confusion d'affichage** : le détail des lots comparait la somme des lots
+   (notion *physique*) au « dispo » console (notion *nette des engagements*).
+
+Correctifs :
+- 🔴→✅ **Écrêtage périodique** (`reconcileLedgerToPhysical`, `lib/lotLedger`) :
+  la somme des lots d'un article ne dépasse jamais son **stock physique**
+  (`ProductStock.inStock`, entrepôts télévente). Surplus retiré des lots les
+  **plus anciens** d'abord (FIFO — en réalité déjà vendus ; répartition pure
+  `planLedgerTrim` dans `gervifrais-calc`, testée). **Jamais d'écriture à la
+  hausse** (un registre < stock est légitime : lots affectés pas encore livrés).
+  Branché dans la **synchro produits** (toutes les 30 min, juste après le
+  rafraîchissement du stock).
+- 🔴→✅ **Garde anti-course** : `ProductBatch.ledgerAt` (nouveau, posé par
+  `creditLots`/`debitLots` à chaque mouvement — `syncedAt` est inutilisable, la
+  synchro le touche) ; un article avec un mouvement < 60 min n'est pas écrêté à
+  ce passage (le miroir de stock peut être en retard sur une réception en cours).
+  Migration additive `prisma/migrations/manual/20260718_product_batch_ledger_at.sql`.
+- 🟠→✅ **Script généralisé** (`scripts/reconcile-lot-ledger.mjs`) : écrête TOUT
+  article dont le registre dépasse le stock physique (le cas « stock nul → tout
+  à 0 » devient un cas particulier). Dry-run par défaut, `--apply` pour écrire,
+  rapport par article/lot.
+- 🟠→✅ **Détail des lots clarifié** (`LotDetailsDialog` + `/batches`) : l'en-tête
+  affiche **« en stock » (physique)** — le comparable de la somme des lots — ET
+  **« dispo à la vente » (hors commandes engagées)** ; bandeau ⚠️ si la somme des
+  lots dépasse encore le stock physique (écart transitoire, résorbé à la synchro).
 
 ### 🟠 Reste
 - **Retro sur `purchase-orders/receive`** : crédit registre branché, propagation

@@ -1064,3 +1064,20 @@ Lisibilité conservée (libellés partout, abrégés sur mobile) ; le calendrier
 
 - `ImportModal`, `app/error.tsx`, formulaire fournisseur (erreurs → `text-destructive`), badge SAP dédupliqué, bandeau annulation `slate` → tokens.
 - Accueil (`KpiStrip`) : chiffres héros plus grands (28→32px display), « vs N-1 » et le mode de calcul de la marge derrière « ? » (plus de `title=` natif).
+
+---
+
+## 📒 Registre des lots — écrêtage au stock physique (fin des sommes impossibles)
+
+> Signalement client : « j'ai 396 kg en stock, je ne peux pas avoir
+> 308 + 352 + 210 + 88 » (détail des lots d'une fraise). En base : registre
+> 958 kg > stock physique 840 kg > dispo vente 376 kg.
+
+| Avant | Après |
+|-------|-------|
+| La somme des lots d'un article pouvait **dépasser son stock physique** : dérive héritée d'avant le suivi complet des mouvements + ventes passées **directement dans SAP** (jamais débitées côté TeleVent). Le script de réconciliation ne purgeait que les articles à stock **nul**. | **Écrêtage périodique** (`reconcileLedgerToPhysical`) : à chaque synchro produits (30 min), tout article dont le registre dépasse le stock physique est ramené à celui-ci, surplus retiré des **lots les plus anciens** d'abord (FIFO — en réalité déjà vendus). Jamais d'écriture à la hausse. Garde anti-course : article avec un mouvement registre < 60 min (`ProductBatch.ledgerAt`, nouveau) laissé au passage suivant. |
+| Le détail des lots comparait la somme des lots (physique) au « dispo » console (**net des commandes engagées**) — deux notions différentes, confusion garantie. | L'en-tête distingue **« en stock » (physique — le comparable des lots)** et **« dispo à la vente (hors commandes engagées) »**. Bandeau ⚠️ si la somme des lots dépasse encore le stock physique (écart transitoire, résorbé à la synchro suivante). |
+| `scripts/reconcile-lot-ledger.mjs` : purge uniquement des articles sans stock. | Généralisé : **écrête tout article** registre > stock physique (stock nul = cas particulier), rapport par lot, dry-run par défaut / `--apply`. |
+
+Répartition pure `planLedgerTrim` (`lib/gervifrais-calc`, testée — dont le cas réel
+Fraise). Audit détaillé : `docs/audit-transformation/audit-suivi-lot.md` §8 Lot 5.

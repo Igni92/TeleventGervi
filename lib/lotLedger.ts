@@ -10,6 +10,11 @@
  *   • CRÉDIT à la RÉCEPTION (entrée marchandise) : quantité reçue + fournisseur
  *     + prix d'achat mémorisés sur le lot.
  *   • DÉBIT à la VENTE (commande) : la quantité vendue est retirée du lot affecté.
+ *   • ÉCRÊTAGE au STOCK PHYSIQUE (synchro produits) : la somme des lots d'un
+ *     article ne dépasse jamais son stock physique — le surplus fantôme (dérive,
+ *     ventes SAP directes) est retiré des lots les plus anciens
+ *     (reconcileLedgerToPhysical). Chaque mouvement pose `ledgerAt` (garde
+ *     anti-course de l'écrêtage).
  *
  * Clé unique : (productId, batchNumber="EM<DocNum>", warehouseCode="") — UN lot =
  * UNE ligne, quantité AGRÉGÉE tous entrepôts (cohérent avec la synchro, qui pose
@@ -20,7 +25,7 @@
  * vente ni une réception. Les appelants encapsulent déjà dans un try/catch.
  */
 import { prisma } from "@/lib/prisma";
-import { isRealLot } from "@/lib/gervifrais-calc";
+import { isRealLot, planLedgerTrim } from "@/lib/gervifrais-calc";
 
 // Ré-export : les consommateurs du registre (bons-commande…) importent isRealLot
 // depuis ce module. La définition PURE vit dans gervifrais-calc (testable sans Prisma).
@@ -71,8 +76,8 @@ export async function creditLots(credits: LotCredit[]): Promise<number> {
     try {
       await prisma.productBatch.upsert({
         where: { productId_batchNumber_warehouseCode: { productId, batchNumber: c.lot, warehouseCode: LEDGER_WHS } },
-        update: { quantity: { increment: c.qty }, syncedAt: new Date(), ...meta },
-        create: { productId, batchNumber: c.lot, warehouseCode: LEDGER_WHS, quantity: c.qty, ...meta },
+        update: { quantity: { increment: c.qty }, syncedAt: new Date(), ledgerAt: new Date(), ...meta },
+        create: { productId, batchNumber: c.lot, warehouseCode: LEDGER_WHS, quantity: c.qty, ledgerAt: new Date(), ...meta },
       });
       n++;
     } catch { /* best-effort : un lot en échec n'interrompt pas les autres */ }
@@ -103,6 +108,67 @@ export async function getLedgerFifoLot(itemCodes: string[]): Promise<Map<string,
     for (const r of rows) if (isRealLot(r.batchNumber)) out.set(r.itemCode, r.batchNumber);
   } catch { /* registre indisponible → aucune résolution de repli */ }
   return out;
+}
+
+/**
+ * ÉCRÊTAGE du registre au STOCK PHYSIQUE — la somme des lots d'un article ne peut
+ * pas dépasser son stock physique (miroir `ProductStock.inStock`, entrepôts
+ * télévente). Quand elle le dépasse (dérive historique, ventes passées directement
+ * dans SAP jamais débitées ici), le surplus fantôme est retiré des lots les PLUS
+ * ANCIENS (FIFO — cf. `planLedgerTrim`, pur & testé). N'écrit JAMAIS à la hausse :
+ * un registre ≤ stock (lots affectés pas encore livrés, etc.) est laissé tel quel.
+ *
+ * Garde ANTI-COURSE : un article dont un lot a bougé (`ledgerAt`) il y a moins de
+ * `quietMinutes` (défaut 60) est SAUTÉ — une réception/vente en cours peut devancer
+ * le miroir de stock, on réconcilie au passage suivant. Appelé par la synchro
+ * produits (toutes les 30 min, juste après le rafraîchissement de `ProductStock`)
+ * et par `scripts/reconcile-lot-ledger.mjs`. Best-effort, comme tout le registre.
+ */
+export async function reconcileLedgerToPhysical(
+  opts?: { quietMinutes?: number },
+): Promise<{ articles: number; lots: number; trimmedQty: number }> {
+  const quietMs = (opts?.quietMinutes ?? 60) * 60_000;
+  const res = { articles: 0, lots: 0, trimmedQty: 0 };
+  try {
+    const rows = await prisma.$queryRawUnsafe<{
+      id: string; productId: string; quantity: number; admissionDate: Date | null;
+      batchNumber: string; ledgerAt: Date | null; physical: number;
+    }[]>(
+      `SELECT b."id", b."productId", b."quantity", b."admissionDate", b."batchNumber", b."ledgerAt",
+              COALESCE(s."stock", 0)::float8 AS "physical"
+         FROM "ProductBatch" b
+         LEFT JOIN (SELECT "productId", SUM("inStock") AS "stock"
+                      FROM "ProductStock" GROUP BY "productId") s
+           ON s."productId" = b."productId"
+        WHERE b."quantity" > 0;`,
+    );
+
+    const byProduct = new Map<string, typeof rows>();
+    for (const r of rows) {
+      const g = byProduct.get(r.productId);
+      if (g) g.push(r); else byProduct.set(r.productId, [r]);
+    }
+
+    const now = Date.now();
+    for (const lots of byProduct.values()) {
+      const physical = lots[0].physical;
+      const total = lots.reduce((s, l) => s + l.quantity, 0);
+      if (total <= physical + 1e-6) continue;                    // registre ≤ stock : sain
+      if (lots.some((l) => l.ledgerAt && now - new Date(l.ledgerAt).getTime() < quietMs)) continue;
+      const trims = planLedgerTrim(lots, physical);
+      if (trims.length === 0) continue;
+      try {
+        for (const t of trims) {
+          await prisma.productBatch.update({ where: { id: t.lot.id }, data: { quantity: t.quantity } });
+        }
+        res.articles++;
+        res.lots += trims.length;
+        res.trimmedQty += trims.reduce((s, t) => s + (t.lot.quantity - t.quantity), 0);
+      } catch { /* best-effort : article suivant */ }
+    }
+    res.trimmedQty = Math.round(res.trimmedQty * 1000) / 1000;
+  } catch { /* registre/stock indisponible (ou colonne ledgerAt absente) → aucun écrêtage */ }
+  return res;
 }
 
 /**
@@ -138,7 +204,7 @@ export async function debitLots(debits: { itemCode: string; lot: string; qty: nu
       });
       if (!row) continue;   // lot hors registre → rien à débiter
       const next = Math.max(0, Math.round((row.quantity - qty) * 1000) / 1000);
-      await prisma.productBatch.update({ where: { id: row.id }, data: { quantity: next } });
+      await prisma.productBatch.update({ where: { id: row.id }, data: { quantity: next, ledgerAt: new Date() } });
       n++;
     } catch { /* best-effort */ }
   }
