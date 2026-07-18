@@ -376,6 +376,17 @@ describe("planning — récup : seuls les jours ouvrés (lun→ven) décomptent"
     ];
     expect(computeRecupCounter(weeks, [], PROFILE, ASOF).debitMin).toBe(7 * 60);
   });
+  it("MODÈLE MAXYME : Lun→Ven = 36h15 (5 × 7h15) + samedi récup → débite 1h15 (le dépassement), PAS 7h15", () => {
+    // Journée type 7h15 : 5 jours = 36h15, soit +1h15 au-dessus des 35 h. Poser
+    // un samedi de récup ne consomme donc QUE ce dépassement de 1h15.
+    const MAXYME = { weeklyHours: 35, typicalDay: { m1: "04:45", m2: "12:00" } }; // 7h15/jour
+    const d = (): DayHours => ({ m1: "04:45", m2: "12:00" });                     // 7h15
+    const weeks: CounterWeekInput[] = [
+      { week: "2026-W28", days: [d(), d(), d(), d(), d(), {}, {}], option: null, recupDates: ["2026-07-11"] },
+    ];
+    const c = computeRecupCounter(weeks, [], MAXYME, ASOF);
+    expect(c.debitMin).toBe(75);   // 1h15, pas 7h15
+  });
   it("Samedi SEUL posé en récup → ne décompte RIEN (jour non travaillé)", () => {
     const c = computeRecupCounter([], ["2026-07-11"], PROFILE, ASOF); // samedi
     expect(c.debitMin).toBe(0);
@@ -437,5 +448,51 @@ describe("planning — découpe récup/CP par jours entiers (splitLeaveRecupCp)"
     expect(s.recup).toEqual({ start: "2026-07-13", end: "2026-07-15" });
     expect(s.cp).toEqual({ start: "2026-07-16", end: "2026-07-17" });
     expect(s.recupDays).toBe(2);
+  });
+});
+
+describe("planning — CP en CUMUL PERMANENT (2,5 j/mois, sans période)", () => {
+  it("acquis = ancrage + 2,5 × mois écoulés ; pas de période de référence", () => {
+    // 19,5 j au 2026-07-01 ; au 2026-10-15 → 3 mois franchis → +7,5 = 27 j.
+    const c = computeCpCounter({ anchorDate: "2026-07-01", anchorDays: 19.5, accrualPerMonth: 2.5 }, [], "2026-10-15");
+    expect(c.accrual).toBe(true);
+    expect(c.allowanceDays).toBe(27);
+    expect(c.balanceDays).toBe(27);
+  });
+
+  it("les CP validés depuis l'ancrage débitent ; ceux d'AVANT l'ancrage sont ignorés", () => {
+    const conges = [
+      { type: "cp" as const, status: "approved" as const, start: "2026-06-10", end: "2026-06-12" }, // avant ancrage
+      { type: "cp" as const, status: "approved" as const, start: "2026-08-24", end: "2026-08-28" }, // 5 ouvrables
+    ];
+    const c = computeCpCounter({ anchorDate: "2026-07-01", anchorDays: 10, accrualPerMonth: 2.5 }, conges, "2026-09-01");
+    expect(c.allowanceDays).toBe(15);   // 10 + 2 mois × 2,5
+    expect(c.takenDays).toBe(5);
+    expect(c.balanceDays).toBe(10);
+  });
+
+  it("cadence par défaut 2,5 j/mois quand non précisée", () => {
+    const c = computeCpCounter({ anchorDate: "2026-01-01", anchorDays: 0 }, [], "2026-05-01");
+    expect(c.allowanceDays).toBe(10);   // 4 mois × 2,5
+  });
+
+  it("sans ancrage : repli sur l'ancien modèle (solde annuel / période)", () => {
+    const c = computeCpCounter({ allowanceDays: 25 }, [], "2026-07-11");
+    expect(c.accrual).toBe(false);
+    expect(c.allowanceDays).toBe(25);
+  });
+});
+
+describe("planning — récup : les heures supp STRUCTURELLES (contrat 42 h) ne sont pas créditées", () => {
+  const day = (h: number): DayHours => ({ m1: "06:00", m2: `${String(6 + h).padStart(2, "0")}:00` });
+
+  it("Hugo 42h, semaine 45 h option récup → seules les 3 h arbitrables créditent (pas 10 h)", () => {
+    const HUGO = { weeklyHours: 35, typicalDay: { m1: "06:00", m2: "13:00" }, paidWeeklyHours: 42 };
+    const weeks: CounterWeekInput[] = [
+      { week: "2026-W27", days: [day(9), day(9), day(9), day(9), day(9)], option: "recup" },
+    ];
+    const c = computeRecupCounter(weeks, [], HUGO, "2026-07-13");
+    // Arbitrable 3 h : 1 h à +25 % + 2 h à +50 % = 4h15 crédités (les 7 h structurelles sont payées).
+    expect(c.creditMin).toBe(Math.round(1 * 60 * 1.25 + 2 * 60 * 1.5)); // 255 = 4h15
   });
 });

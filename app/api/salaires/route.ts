@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin, isComptable, COMPTABLE_EMAILS } from "@/lib/permissions";
 import {
   computeWeek, typicalDayMinutes, isMonthId, monthIdOf, monthWeeks,
-  splitSupp, effectivePaySuppMin,
+  splitSupp, effectivePaySuppMin, splitStructuralSupp, structuralSuppMin,
   type HoursProfile,
 } from "@/lib/heuresCalc";
 import { listAllWeekEntries, listProfiles, getProfile, getWeekEntry, saveWeekEntry, type WeekEntry } from "@/lib/heuresRh";
@@ -79,13 +79,21 @@ function buildHeures(
     const supp = c.sup25Min + c.sup50Min;
     if (supp > 0) {
       out.suppTotalMin += supp;
-      if (e.option) {
-        const pay = effectivePaySuppMin(e.option, e.paySuppMin, supp);
-        const s = splitSupp(c.sup25Min, c.sup50Min, pay);
-        out.suppPayEquivMin += s.payEquivMin;
-        out.suppRecupEquivMin += s.recupEquivMin;
-      } else {
-        out.suppSansDecisionMin += supp;
+      // Heures supp STRUCTURELLES (contrat « 42 h ») : payées d'office, jamais
+      // arbitrées ni comptées « sans décision ». Seul le dépassement au-delà de
+      // `paidWeeklyHours` part au choix récup/paiement.
+      const st = splitStructuralSupp(c.sup25Min, c.sup50Min, structuralSuppMin(profile));
+      out.suppPayEquivMin += st.structEquivMin;
+      const arbitrable = st.arbitrableMin;
+      if (arbitrable > 0) {
+        if (e.option) {
+          const pay = effectivePaySuppMin(e.option, e.paySuppMin, arbitrable);
+          const s = splitSupp(st.arb25Min, st.arb50Min, pay);
+          out.suppPayEquivMin += s.payEquivMin;
+          out.suppRecupEquivMin += s.recupEquivMin;
+        } else {
+          out.suppSansDecisionMin += arbitrable;
+        }
       }
     }
     for (const d of e.days) {
@@ -225,19 +233,22 @@ export async function POST(req: NextRequest) {
         const entry = await getWeekEntry(target, w);
         if (!entry) continue;
         const calc = computeWeek(entry.days, profile.weeklyHours, typDay);
-        const supp = calc.sup25Min + calc.sup50Min;
-        if (supp <= 0) continue;
+        // La décision ne porte que sur les heures supp ARBITRABLES : la part
+        // structurelle (contrat « 42 h ») est toujours payée d'office.
+        const st = splitStructuralSupp(calc.sup25Min, calc.sup50Min, structuralSuppMin(profile));
+        const arbitrable = st.arbitrableMin;
+        if (arbitrable <= 0) continue;
         let opt: { option: string; paySuppMin?: number; recupDates?: string[] };
         if (mode === "pay") {
           opt = { option: "paiement", recupDates: entry.recupDates };
         } else if (mode === "recup") {
           opt = { option: "recup", recupDates: entry.recupDates };
         } else {
-          const assigned = Math.min(remaining, supp);
+          const assigned = Math.min(remaining, arbitrable);
           remaining -= assigned;
           opt = assigned <= 0
             ? { option: "recup", recupDates: entry.recupDates }
-            : assigned >= supp
+            : assigned >= arbitrable
               ? { option: "paiement", recupDates: entry.recupDates }
               : { option: "mixte", paySuppMin: assigned, recupDates: entry.recupDates };
         }

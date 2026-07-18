@@ -48,14 +48,31 @@ function sanitizeInitials(v: unknown): string | null {
   return s || null;
 }
 
+/** Date « YYYY-MM-DD » réelle, ou null si absente/invalide (ancrage CP). */
+function isoDateOrNull(v: unknown): string | null {
+  if (typeof v !== "string" || !ISO_DATE_RE.test(v.trim())) return null;
+  const s = v.trim();
+  const d = new Date(`${s}T12:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s ? s : null;
+}
+
 function normalizeProfile(v: unknown): HoursProfile {
   const p = (v ?? {}) as Partial<HoursProfile>;
-  const weekly = Number(p.weeklyHours);
+  const weekly = Number.isFinite(Number(p.weeklyHours)) && Number(p.weeklyHours) > 0 && Number(p.weeklyHours) <= 80
+    ? Math.round(Number(p.weeklyHours) * 100) / 100 : DEFAULT_PROFILE.weeklyHours;
+  // Heures payées / sem (contrat « 42 h ») : ≥ contrat, sinon ignorée (pas de
+  // supp structurelle). Bornée au raisonnable (80 h).
+  const paid = boundedOrNull(p.paidWeeklyHours, 80);
   return {
-    weeklyHours: Number.isFinite(weekly) && weekly > 0 && weekly <= 80 ? Math.round(weekly * 100) / 100 : DEFAULT_PROFILE.weeklyHours,
+    weeklyHours: weekly,
     typicalDay: sanitizeDay(p.typicalDay) ?? { ...DEFAULT_PROFILE.typicalDay },
+    paidWeeklyHours: paid != null && paid > weekly ? paid : null,
     cpAllowanceDays: boundedOrNull(p.cpAllowanceDays, 365),
     recupCapHours: boundedOrNull(p.recupCapHours, 1000),
+    // Cumul CP permanent (2,5 j/mois) : ancrage (date + solde) + cadence.
+    cpAnchorDate: isoDateOrNull(p.cpAnchorDate),
+    cpAnchorDays: boundedOrNull(p.cpAnchorDays, 365),
+    cpAccrualPerMonth: boundedOrNull(p.cpAccrualPerMonth, 31),
     initials: sanitizeInitials(p.initials),
   };
 }

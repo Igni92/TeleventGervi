@@ -25,6 +25,7 @@ import {
   JOURS_SEMAINE, DEFAULT_PROFILE, computeWeek, fmtHM, typicalDayMinutes,
   isoWeekId, shiftWeek, weekDates, weekLabel,
   monthIdOf, shiftMonth, monthLabel, DAY_TAGS, DAY_TAG_LABEL,
+  structuralSuppMin, splitStructuralSupp,
   type DayHours, type DayTag, type HoursProfile, type WeekCalc, type MonthCalc, type HeuresOption,
 } from "@/lib/heuresCalc";
 import { frenchHolidayLabel } from "@/lib/livraison";
@@ -317,6 +318,11 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           {savingProfile && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mb-2.5" />}
         </div>
 
+        {/* Réglages EMPLOYEUR (fiche salarié) — heures payées d'office (contrat
+            « 42 h ») + cumul CP permanent. Réservé aux managers (le patron y entre
+            depuis le sélecteur « Salarié » ci-dessus). */}
+        {isManager && <EmployerSettings profile={profile} saving={savingProfile} onSave={saveProfil} />}
+
         {/* Barre : bascule « après-midi » (masquée par défaut). Désactivée quand une
             saisie après-midi existe déjà (on ne peut pas cacher des données réelles). */}
         <div className="mb-2 flex items-center justify-between gap-2">
@@ -468,6 +474,13 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           <Badge label="Contrat" value={fmtHM(calc.contractMin)} tone="muted" />
           {calc.sup25Min > 0 && <Badge label="Supp +25 %" value={fmtHM(calc.sup25Min)} tone="amber" />}
           {calc.sup50Min > 0 && <Badge label="Supp +50 %" value={fmtHM(calc.sup50Min)} tone="rose" />}
+          {/* Contrat « 42 h » : part des supp payée d'office (jamais arbitrable). */}
+          {(() => {
+            const st = splitStructuralSupp(calc.sup25Min, calc.sup50Min, structuralSuppMin(profile));
+            return st.structEquivMin > 0
+              ? <Badge label="Payées d'office" value={fmtHM(st.structEquivMin)} tone="emerald" />
+              : null;
+          })()}
           {calc.majEquivMin > 0 && <Badge label="Équiv. payé" value={fmtHM(calc.majEquivMin)} tone="emerald" />}
           {calc.recupMin > 0 && <Badge label="Récup" value={fmtHM(calc.recupMin)} tone="sky" />}
           {calc.congesMin > 0 && <Badge label="Congés crédités" value={fmtHM(calc.congesMin)} tone="violet" />}
@@ -740,6 +753,89 @@ function displayFullName(raw: string): string {
   const clean = stripOrgSuffix(raw);
   if (clean.includes("@")) return displayPersonName(clean);
   return clean || "?";
+}
+
+/** Réglages EMPLOYEUR d'un salarié (fiche, manager seul) : heures payées / sem.
+ *  (contrat « 42 h » = 35 h + 7 h supp payées d'office) + cumul CP permanent
+ *  (ancrage solde + date + 2,5 j/mois). Saisie LOCALE enregistrée à la sortie du
+ *  champ (onBlur), resynchronisée quand on change de salarié. */
+function EmployerSettings({ profile, saving, onSave }: {
+  profile: HoursProfile; saving: boolean; onSave: (p: HoursProfile) => void;
+}) {
+  const [paid, setPaid] = useState("");
+  const [cpDays, setCpDays] = useState("");
+  const [cpDate, setCpDate] = useState("");
+  const [cpRate, setCpRate] = useState("");
+  useEffect(() => {
+    setPaid(profile.paidWeeklyHours != null ? String(profile.paidWeeklyHours) : "");
+    setCpDays(profile.cpAnchorDays != null ? String(profile.cpAnchorDays) : "");
+    setCpDate(profile.cpAnchorDate ?? "");
+    setCpRate(profile.cpAccrualPerMonth != null ? String(profile.cpAccrualPerMonth) : "");
+  }, [profile]);
+
+  const numOrNull = (s: string): number | null => {
+    const t = s.trim().replace(",", ".");
+    if (!t) return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  };
+  const commit = (patch: Partial<HoursProfile>) => onSave({ ...profile, ...patch });
+  const structMin = structuralSuppMin({ weeklyHours: profile.weeklyHours, paidWeeklyHours: numOrNull(paid) });
+
+  const inputCls = "h-9 w-full rounded-md border border-border bg-background px-2 text-[13px] tnum focus:outline-none focus:ring-1 focus:ring-brand-500";
+  const labelCls = "block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1";
+
+  return (
+    <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-3 py-3 space-y-3">
+      <p className="inline-flex items-center gap-1.5 text-[10.5px] uppercase tracking-[0.14em] font-semibold text-amber-700 dark:text-amber-300">
+        <Scale className="h-3.5 w-3.5" /> Réglages employeur {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+      </p>
+
+      {/* Contrat « 42 h » : heures supp payées d'office (jamais arbitrées). */}
+      <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
+        <div className="w-[150px]">
+          <label className={labelCls}>Heures payées / sem.</label>
+          <input type="number" min={profile.weeklyHours} max={60} step={0.5} inputMode="decimal"
+            value={paid} placeholder={String(profile.weeklyHours)}
+            onChange={(e) => setPaid(e.target.value)}
+            onBlur={() => commit({ paidWeeklyHours: numOrNull(paid) })}
+            className={inputCls} aria-label="Heures payées par semaine" />
+        </div>
+        <p className="flex-1 min-w-[220px] text-[11px] leading-snug text-muted-foreground">
+          Contrat « 42 h » = 35 h + <b className="text-foreground">7 h supp payées d&apos;office</b> chaque semaine (jamais en récup) ;
+          seul le dépassement au-delà part au choix récup/paiement.
+          {structMin > 0 && <> Ici <b className="text-amber-700 dark:text-amber-300">{fmtHM(structMin)}</b> payées d&apos;office.</>}
+          {" "}Vide = pas d&apos;heures supp structurelles.
+        </p>
+      </div>
+
+      {/* Cumul CP permanent : +2,5 j / mois, sans période de référence. */}
+      <div className="flex flex-wrap items-end gap-x-3 gap-y-2 border-t border-amber-500/20 pt-3">
+        <div className="w-[120px]">
+          <label className={labelCls}>Solde CP de réf.</label>
+          <input type="number" min={0} step={0.5} inputMode="decimal" value={cpDays}
+            onChange={(e) => setCpDays(e.target.value)} onBlur={() => commit({ cpAnchorDays: numOrNull(cpDays) })}
+            className={inputCls} placeholder="ex. 19,5" aria-label="Solde CP de référence" />
+        </div>
+        <div className="w-[150px]">
+          <label className={labelCls}>à la date du</label>
+          <input type="date" value={cpDate}
+            onChange={(e) => { setCpDate(e.target.value); commit({ cpAnchorDate: e.target.value || null }); }}
+            className={inputCls} aria-label="Date de référence du solde CP" />
+        </div>
+        <div className="w-[120px]">
+          <label className={labelCls}>Acquis. / mois</label>
+          <input type="number" min={0} step={0.5} inputMode="decimal" value={cpRate}
+            onChange={(e) => setCpRate(e.target.value)} onBlur={() => commit({ cpAccrualPerMonth: numOrNull(cpRate) })}
+            className={inputCls} placeholder="2,5" aria-label="Acquisition CP par mois" />
+        </div>
+        <p className="flex-1 min-w-[220px] text-[11px] leading-snug text-muted-foreground">
+          Cumul permanent, <b className="text-foreground">sans période</b> : + 2,5 j ouvrables / mois, tout est acquis en continu.
+          Solde = référence + 2,5 × mois écoulés − CP pris depuis la date. Vide = ancien mode (solde annuel côté Planning).
+        </p>
+      </div>
+    </div>
+  );
 }
 
 /** Puce TAG de journée (mobile) — Présent / Absent / Congés / Récup / Maladie.

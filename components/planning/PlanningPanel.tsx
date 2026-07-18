@@ -56,7 +56,7 @@ interface PersonPlanning {
   profile: { weeklyHours: number; cpAllowanceDays: number | null; recupCapHours: number | null; typicalDayMin: number; initials?: string | null };
   counters: {
     recup: { creditMin: number; debitMin: number; balanceMin: number; plannedDates: string[] };
-    cp: { allowanceDays: number | null; takenDays: number; pendingDays: number; balanceDays: number | null; period: { start: string; end: string } };
+    cp: { allowanceDays: number | null; takenDays: number; pendingDays: number; balanceDays: number | null; period: { start: string; end: string }; accrual: boolean };
     capMin: number | null;
     excessMin: number;
   };
@@ -382,8 +382,10 @@ function CounterBar({ person, isManager }: { person: PersonPlanning; isManager: 
         label="Congés payés"
         value={cp.balanceDays == null ? `${cp.takenDays} j pris` : `${cp.balanceDays} j restants`}
         hint={cp.balanceDays == null
-          ? "Solde annuel non défini par l'employeur"
-          : `${cp.takenDays} j pris${cp.pendingDays ? ` · ${cp.pendingDays} j en attente` : ""} — période ${fmtD(cp.period.start)} → ${fmtD(cp.period.end)}`} />
+          ? "Solde CP non défini par l'employeur"
+          : cp.accrual
+            ? `${cp.allowanceDays} j acquis (+2,5/mois) · ${cp.takenDays} j pris${cp.pendingDays ? ` · ${cp.pendingDays} j en attente` : ""} — cumul depuis le ${fmtD(cp.period.start)}`
+            : `${cp.takenDays} j pris${cp.pendingDays ? ` · ${cp.pendingDays} j en attente` : ""} — période ${fmtD(cp.period.start)} → ${fmtD(cp.period.end)}`} />
       <CounterChip icon={<Clock3 className="h-3.5 w-3.5" />} tone="sky"
         label="Récup disponible"
         value={fmtHM(recup.balanceMin)}
