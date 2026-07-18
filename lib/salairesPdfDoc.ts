@@ -73,9 +73,11 @@ export async function buildSalairesPdf(monthId: string, employes: PdfEmploye[]):
   doc.text(`Document transmis au cabinet comptable`, W - M, 55, { align: "right" });
 
   // ── Tableau équipe ──
+  // La compta voit le RÉSULTAT FINAL : ni la récup (payée-neutre, interne RH),
+  // ni les échanges récup↔CP — juste ce qui pèse sur la paie.
   const head = [[
-    "Salarié", "Heures", "Supp payées", "Supp → récup", "Férié",
-    "CP", "Récup", "Maladie", "Absence", "Primes", "AN", "Frais",
+    "Salarié", "Heures", "Supp payées", "Férié",
+    "CP", "Maladie", "Absence", "Primes", "AN", "Frais",
   ]];
   const body = employes.map((e) => {
     const h = e.heures;
@@ -85,10 +87,8 @@ export async function buildSalairesPdf(monthId: string, employes: PdfEmploye[]):
       ascii(e.name),
       ascii(hm(h.totalMin)),
       ascii(hm(h.suppPayEquivMin)),
-      ascii(hm(h.suppRecupEquivMin)),
       ascii(hm(h.ferieMin)),
       jours(h.cpJours),
-      jours(h.recupJours),
       jours(h.maladieJours),
       jours(h.absentJours),
       primesTotal > 0 ? ascii(eur(primesTotal)) : "—",
@@ -148,7 +148,7 @@ export async function buildSalairesPdf(monthId: string, employes: PdfEmploye[]):
     doc.setFontSize(7);
     doc.setTextColor(150, 150, 150);
     doc.text(
-      "Supp payées = équivalent majoré décidé (+25/+50 %) · fériés toujours payés · Récup = jours pris en récupération · AN = forfait mensuel véhicule",
+      "Supp payées = équivalent majoré décidé (+25/+50 %) · fériés toujours payés · AN = forfait mensuel véhicule",
       M, doc.internal.pageSize.getHeight() - 16,
     );
     doc.text(`${i} / ${pageCount}`, W - M, doc.internal.pageSize.getHeight() - 16, { align: "right" });
