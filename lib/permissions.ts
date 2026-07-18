@@ -33,19 +33,6 @@ export const ADMIN_EMAILS = [
 export const UNMAPPED_MESSAGE =
   "Compte non relié à un commercial — contactez l'administrateur.";
 
-/** Profil COMPTABLE (cabinet) : accès en LECTURE au planning et aux éléments
- *  des salaires — rien d'autre. Désigné par email (demande métier). */
-export const COMPTABLE_EMAILS = [
-  "compta@gervifrais.com",
-] as const;
-
-/** True si la session est le profil COMPTABLE (cabinet comptable). */
-export async function isComptable(session: Session | null): Promise<boolean> {
-  const email = session?.user?.email?.trim().toLowerCase();
-  if (!email) return false;
-  return COMPTABLE_EMAILS.some((a) => a.toLowerCase() === email);
-}
-
 export type AccessScope =
   /** Admin : accès global, aucun filtre. */
   | { all: true; email: string }

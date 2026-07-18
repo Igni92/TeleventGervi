@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin, isComptable, COMPTABLE_EMAILS } from "@/lib/permissions";
+import { requireAdmin } from "@/lib/permissions";
 import {
   computeWeek, typicalDayMinutes, isMonthId, monthIdOf, monthWeeks,
   splitSupp, effectivePaySuppMin, splitStructuralSupp, structuralSuppMin,
@@ -23,7 +23,6 @@ import {
 } from "@/lib/salairesRh";
 import { appBaseUrl } from "@/lib/congesNotify";
 import { sendMailAsShared } from "@/lib/graph";
-import { getComptaPasswordHash, setComptaPassword, COMPTA_PASSWORD_MIN_LENGTH } from "@/lib/comptaAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -48,8 +47,8 @@ async function ctx() {
   if (!session?.user) return null;
   const email = (session.user.email ?? "").trim().toLowerCase();
   if (!email) return null;
-  const [canEdit, comptable] = await Promise.all([requireAdmin(session), isComptable(session)]);
-  return { email, canEdit, comptable };
+  const canEdit = await requireAdmin(session);
+  return { email, canEdit };
 }
 
 /** Résumé HEURES d'un salarié pour le mois (mêmes règles que l'état mensuel :
@@ -163,21 +162,15 @@ async function buildRows(monthId: string) {
 export async function GET(req: NextRequest) {
   const c = await ctx();
   if (!c) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  if (!c.canEdit && !c.comptable) return NextResponse.json({ error: "Réservé aux managers et au comptable" }, { status: 403 });
+  if (!c.canEdit) return NextResponse.json({ error: "Réservé aux managers" }, { status: 403 });
 
   const { searchParams } = new URL(req.url);
   const month = searchParams.get("month") ?? monthIdOf(new Date());
   if (!isMonthId(month)) return NextResponse.json({ error: "Mois invalide" }, { status: 400 });
 
   try {
-    const [rows, sent, comptaHash] = await Promise.all([
-      buildRows(month), getRecapSent(month), getComptaPasswordHash(COMPTABLE_EMAILS[0]),
-    ]);
-    return NextResponse.json({
-      ok: true, month, rows, sent, canEdit: c.canEdit,
-      // L'accès par mot de passe du cabinet est-il déjà configuré ? (jamais le hash)
-      comptaConfigured: !!comptaHash,
-    });
+    const [rows, sent] = await Promise.all([buildRows(month), getRecapSent(month)]);
+    return NextResponse.json({ ok: true, month, rows, sent, canEdit: c.canEdit });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
@@ -194,21 +187,6 @@ export async function POST(req: NextRequest) {
   };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
-
-  // ── MOT DE PASSE de l'accès comptable (boîte partagée — pas de SSO) :
-  //    définition / rotation par l'admin. Stocké HACHÉ (scrypt), jamais renvoyé. ──
-  if (body.action === "setComptaPassword") {
-    const password = typeof body.password === "string" ? body.password : "";
-    if (password.length < COMPTA_PASSWORD_MIN_LENGTH) {
-      return NextResponse.json({ error: `Mot de passe trop court (minimum ${COMPTA_PASSWORD_MIN_LENGTH} caractères)` }, { status: 400 });
-    }
-    try {
-      await setComptaPassword(COMPTABLE_EMAILS[0], password);
-      return NextResponse.json({ ok: true, comptaConfigured: true });
-    } catch (e) {
-      return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
-    }
-  }
 
   const month = body.month ?? "";
   if (!isMonthId(month)) return NextResponse.json({ error: "Mois invalide" }, { status: 400 });
@@ -266,7 +244,7 @@ export async function POST(req: NextRequest) {
       const from = process.env.CONGES_FROM_ADDRESS || process.env.RELANCE_FROM_ADDRESS;
       if (!from) return NextResponse.json({ error: "Boîte d'envoi non configurée (CONGES_FROM_ADDRESS)" }, { status: 400 });
       const to = (process.env.COMPTA_EMAIL ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-      const recipients = to.length ? to : [...COMPTABLE_EMAILS];
+      const recipients = to.length ? to : ["compta@gervifrais.com"];
 
       const rows = await buildRows(month);
       const recapRows: RecapRow[] = rows
