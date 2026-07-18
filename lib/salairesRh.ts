@@ -9,12 +9,14 @@
 import { prisma } from "./prisma";
 import {
   VEHICULE_ENERGIES,
-  type SalaryFrais, type SalaryMonthData, type SalaryPrime, type SalaryProfile, type VehiculeAN,
+  type SalaryEnvoi, type SalaryFrais, type SalaryMonthData, type SalaryPrime, type SalaryProfile, type VehiculeAN,
 } from "./salaires";
 
 const PROFIL_PREFIX = "salprofil:";
 const MOIS_PREFIX = "salmois:";
 const RECAP_PREFIX = "salrecap:";
+const ENVOI_PREFIX = "salenvoi:";        // salenvoi:<id> → un envoi (PDF) au cabinet
+const COMPTA_EMAILS_KEY = "salcompta:emails";  // destinataires du cabinet (CSV)
 
 const emailKey = (email: string) => email.trim().toLowerCase();
 
@@ -191,4 +193,81 @@ export async function markRecapSent(monthId: string, by: string, to: string[]): 
   const value = JSON.stringify(rec);
   await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
   return rec;
+}
+
+/* ─────────── Destinataires du cabinet comptable (CSV, réglable dans l'UI) ──── */
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Normalise une saisie « a@x.fr, b@y.fr » en liste d'emails valides (max 10). */
+export function parseComptaEmails(v: unknown): string[] {
+  const raw = typeof v === "string" ? v : Array.isArray(v) ? v.join(",") : "";
+  return [...new Set(raw.split(/[,;\s]+/).map((s) => s.trim().toLowerCase()).filter((s) => EMAIL_RE.test(s)))].slice(0, 10);
+}
+
+export async function getComptaEmails(): Promise<string[]> {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: COMPTA_EMAILS_KEY } });
+    return row ? parseComptaEmails(row.value) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function setComptaEmails(v: unknown): Promise<string[]> {
+  const emails = parseComptaEmails(v);
+  const value = JSON.stringify(emails);
+  await prisma.appSetting.upsert({ where: { key: COMPTA_EMAILS_KEY }, update: { value }, create: { key: COMPTA_EMAILS_KEY, value } });
+  return emails;
+}
+
+/* ─────────── Journal des envois (liste des documents transmis) ────────────── */
+
+function parseEnvoi(id: string, value: string): SalaryEnvoi | null {
+  try {
+    const v = JSON.parse(value) as Partial<SalaryEnvoi>;
+    if (!v.monthId || !v.sentAt) return null;
+    return {
+      id,
+      monthId: v.monthId,
+      sentAt: v.sentAt,
+      sentBy: typeof v.sentBy === "string" ? v.sentBy : "",
+      to: Array.isArray(v.to) ? v.to.filter((t): t is string => typeof t === "string") : [],
+      kind: v.kind === "rectif" ? "rectif" : "normal",
+      filename: typeof v.filename === "string" ? v.filename : `elements-salaires-${v.monthId}.pdf`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Journalise un envoi (PDF transmis) et retourne la trace créée. */
+export async function logEnvoi(e: Omit<SalaryEnvoi, "id" | "sentAt">): Promise<SalaryEnvoi> {
+  const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const rec: SalaryEnvoi = {
+    id,
+    monthId: e.monthId,
+    sentAt: new Date().toISOString(),
+    sentBy: e.sentBy,
+    to: e.to,
+    kind: e.kind,
+    filename: e.filename,
+  };
+  const key = ENVOI_PREFIX + id;
+  await prisma.appSetting.upsert({ where: { key }, update: { value: JSON.stringify(rec) }, create: { key, value: JSON.stringify(rec) } });
+  return rec;
+}
+
+/** Tous les envois, plus récents d'abord (garde-fou 200). */
+export async function listEnvois(): Promise<SalaryEnvoi[]> {
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: ENVOI_PREFIX } } });
+    return rows
+      .map((r) => parseEnvoi(r.key.slice(ENVOI_PREFIX.length), r.value))
+      .filter((e): e is SalaryEnvoi => !!e)
+      .sort((a, b) => (a.sentAt < b.sentAt ? 1 : -1))
+      .slice(0, 200);
+  } catch {
+    return [];
+  }
 }

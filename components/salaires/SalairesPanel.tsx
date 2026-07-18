@@ -53,19 +53,16 @@ const newId = () => Math.random().toString(36).slice(2, 10);
 /* ─────────────── Vue racine : saisie (admin) OU état comptable ────────────── */
 
 export function SalairesView({ canEdit }: { canEdit: boolean }) {
-  // Cabinet comptable (lecture seule) → directement l'état professionnel,
-  // avec sa barre de navigation (profil confiné : pas de menu d'app).
   const [tab, setTab] = useState<"saisie" | "etat">("saisie");
-  if (!canEdit) return <ComptaStatement showNav />;
-
   return (
     <div className="mx-auto w-full max-w-4xl space-y-4">
-      {/* Onglets : la SAISIE du mois (ergonomique) / l'ÉTAT comptable (document). */}
+      {/* Onglets : la SAISIE du mois (ergonomique) / l'ÉTAT comptable (document
+          + envoi PDF au cabinet + liste des envois). */}
       <div className="inline-flex rounded-lg border border-border bg-secondary/30 p-0.5">
         <TabButton active={tab === "saisie"} onClick={() => setTab("saisie")} icon={<Pencil className="h-3.5 w-3.5" />} label="Saisie du mois" />
         <TabButton active={tab === "etat"} onClick={() => setTab("etat")} icon={<FileSpreadsheet className="h-3.5 w-3.5" />} label="État comptable" />
       </div>
-      {tab === "saisie" ? <SalairesPanel canEdit /> : <ComptaStatement showNav={false} />}
+      {tab === "saisie" ? <SalairesPanel canEdit={canEdit} /> : <ComptaStatement />}
     </div>
   );
 }
