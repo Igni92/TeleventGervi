@@ -13,14 +13,17 @@ import {
   EMPTY_TRANSPORT_MODEL,
   sanitizeTransportModel,
   sanitizeClientPricing,
+  normCarrier,
   type TransportCostModel,
   type TransportExpense,
   type ClientCarrierPricing,
 } from "@/lib/transportCost";
+import { sanitizeCarrierTariff, type CarrierTariff, type CarrierTariffMap } from "@/lib/carrierTariff";
 
 const MODEL_KEY = "transport:model";
 const EXP_PREFIX = "transportexp:";
 const CLIENT_PRICING_PREFIX = "transportcli:";
+const CARRIER_TARIFF_PREFIX = "transporttarif:";
 
 /* ── Modèle de coûts (singleton direction) ─────────────────────────────────── */
 
@@ -96,6 +99,48 @@ export async function setClientTransportPricing(clientId: string, pricing: Clien
   const key = CLIENT_PRICING_PREFIX + clientId;
   const clean = sanitizeClientPricing(pricing);
   if (Object.keys(clean).length === 0) {
+    try { await prisma.appSetting.delete({ where: { key } }); } catch { /* déjà absente */ }
+    return;
+  }
+  const value = JSON.stringify(clean);
+  await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+}
+
+/* ── Grilles tarifaires par TRANSPORTEUR externe (coût par position) ───────── */
+
+/** Grille d'un transporteur (null si absente/corrompue). */
+export async function getCarrierTariff(carrierCode: string): Promise<CarrierTariff | null> {
+  const code = normCarrier(carrierCode);
+  if (!code) return null;
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: CARRIER_TARIFF_PREFIX + code } });
+    if (!row) return null;
+    return sanitizeCarrierTariff(JSON.parse(row.value));
+  } catch {
+    return null;
+  }
+}
+
+/** Toutes les grilles, indexées par code transporteur (MAJUSCULES). */
+export async function listCarrierTariffs(): Promise<CarrierTariffMap> {
+  const out: CarrierTariffMap = {};
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: CARRIER_TARIFF_PREFIX } } });
+    for (const r of rows) {
+      const code = normCarrier(r.key.slice(CARRIER_TARIFF_PREFIX.length));
+      if (!code) continue;
+      try { out[code] = sanitizeCarrierTariff(JSON.parse(r.value)); } catch { /* ignore */ }
+    }
+  } catch { /* pas de grilles */ }
+  return out;
+}
+
+/** Enregistre (ou supprime si vide : ni zone ni ligne annexe) une grille. */
+export async function setCarrierTariff(tariff: CarrierTariff): Promise<void> {
+  const clean = sanitizeCarrierTariff(tariff);
+  if (!clean.carrierCode) return;
+  const key = CARRIER_TARIFF_PREFIX + clean.carrierCode;
+  if (clean.zones.length === 0 && clean.extras.length === 0) {
     try { await prisma.appSetting.delete({ where: { key } }); } catch { /* déjà absente */ }
     return;
   }

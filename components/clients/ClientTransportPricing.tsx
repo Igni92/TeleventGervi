@@ -1,33 +1,47 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { toast } from "sonner";
-import { Loader2, Save, Truck } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { normCarrier, type ClientCarrierPricing } from "@/lib/transportCost";
+import { Loader2, Truck } from "lucide-react";
+import { normCarrier } from "@/lib/transportCost";
+import type { CarrierTariff, CarrierTariffMap } from "@/lib/carrierTariff";
+import { CarrierTariffEditor } from "@/components/clients/CarrierTariffEditor";
 
 /**
- * Tarif transport PAR TRANSPORTEUR pour CE client (transporteurs non directs).
+ * Coût transport de la fiche client — PAR TRANSPORTEUR.
  *
- * Un client peut avoir plusieurs transporteurs possibles ; chacun porte son
- * propre prix au kilo, saisi ici. Les transporteurs « en direct » (flotte
- * propre) ne sont pas saisissables : ils sont valorisés au prix position global
- * (Pilotage › Coût de transport). Best-effort : si l'historique SAP du client
- * est indisponible, on retombe sur le catalogue complet des transporteurs.
+ *   • Transporteur DIRECT (flotte propre) : prix position €/kg — affiché
+ *     UNIQUEMENT si ce magasin peut être livré en direct (le prix direct n'est
+ *     plus un en-tête global de la fiche).
+ *   • Transporteur EXTERNE : GRILLE tarifaire au COÛT PAR POSITION — tranches
+ *     de poids modifiables × départements livrés + lignes fixes (€) et en %
+ *     (majoration gazole…). La grille est GLOBALE au transporteur (partagée
+ *     entre clients) ; le département du client montre la zone applicable.
+ *
+ * Best-effort : si l'historique SAP du client est indisponible, on retombe sur
+ * le catalogue complet des transporteurs.
  */
 
 interface CarrierOpt { code: string; name: string }
 
-export function ClientTransportPricing({ clientId, canEdit }: { clientId: string; canEdit: boolean }) {
+export function ClientTransportPricing({
+  clientId,
+  canEdit,
+  directPerKg = 0,
+}: {
+  clientId: string;
+  canEdit: boolean;
+  /** Prix position €/kg (livraison directe) — affiché sur les transporteurs directs du client. */
+  directPerKg?: number;
+}) {
   const [carriers, setCarriers] = useState<CarrierOpt[]>([]);
   const [directSet, setDirectSet] = useState<Set<string>>(new Set());
-  const [pricing, setPricing] = useState<ClientCarrierPricing>({});
+  const [tariffs, setTariffs] = useState<CarrierTariffMap>({});
+  const [departement, setDepartement] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
 
   const load = useCallback(async () => {
-    // 1) Transporteurs du client (repli catalogue complet), 2) directs + 3) tarifs.
+    // 1) Transporteurs du client (repli catalogue complet), 2) directs,
+    // 3) grilles tarifaires + département du client (transport-pricing).
     const [carriersRes, modelRes, pricingRes] = await Promise.allSettled([
       (async () => {
         const r = await fetch(`/api/clients/${clientId}/carriers`, { cache: "no-store" });
@@ -51,40 +65,13 @@ export function ClientTransportPricing({ clientId, canEdit }: { clientId: string
     if (modelRes.status === "fulfilled" && Array.isArray(modelRes.value?.model?.directCarriers)) {
       setDirectSet(new Set((modelRes.value.model.directCarriers as string[]).map(normCarrier)));
     }
-    if (pricingRes.status === "fulfilled" && pricingRes.value?.pricing) setPricing(pricingRes.value.pricing);
+    if (pricingRes.status === "fulfilled") {
+      if (pricingRes.value?.tariffs) setTariffs(pricingRes.value.tariffs as CarrierTariffMap);
+      setDepartement(typeof pricingRes.value?.departement === "string" ? pricingRes.value.departement : null);
+    }
   }, [clientId]);
 
   useEffect(() => { load().finally(() => setLoading(false)); }, [load]);
-
-  const setVal = (code: string, val: number) => {
-    const k = normCarrier(code);
-    setPricing((p) => {
-      const next = { ...p };
-      if (val > 0) next[k] = val; else delete next[k];
-      return next;
-    });
-    setDirty(true);
-  };
-
-  async function save() {
-    setSaving(true);
-    try {
-      const r = await fetch(`/api/clients/${clientId}/transport-pricing`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pricing }),
-      });
-      const j = await r.json().catch(() => null);
-      if (!r.ok || !j?.ok) throw new Error(j?.error || "Échec");
-      setPricing(j.pricing ?? {});
-      setDirty(false);
-      toast.success("Tarifs transport enregistrés");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Erreur");
-    } finally {
-      setSaving(false);
-    }
-  }
 
   if (loading) {
     return <div className="h-16 flex items-center text-[12px] text-muted-foreground gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Chargement des transporteurs…</div>;
@@ -92,58 +79,62 @@ export function ClientTransportPricing({ clientId, canEdit }: { clientId: string
 
   const external = carriers.filter((c) => !directSet.has(normCarrier(c.code)));
   const directOnes = carriers.filter((c) => directSet.has(normCarrier(c.code)));
+  const fmtPerKg = (v: number) =>
+    `${new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(v)} €/kg`;
 
   return (
-    <div className="mt-4 border-t border-border/60 pt-4">
-      <p className="text-[11px] uppercase tracking-[0.1em] font-semibold text-muted-foreground inline-flex items-center gap-1.5 mb-2">
-        <Truck className="h-3.5 w-3.5" /> Tarif par transporteur (€/kg)
-      </p>
-
-      {carriers.length === 0 ? (
-        <p className="text-[12px] text-muted-foreground">Aucun transporteur connu pour ce client.</p>
-      ) : (
-        <ul className="space-y-1.5">
-          {directOnes.map((c) => (
-            <li key={normCarrier(c.code)} className="flex items-center justify-between gap-3 text-[13px]">
-              <span className="min-w-0 truncate text-foreground">{c.name}</span>
-              <span className="shrink-0 text-[11px] font-semibold text-brand-600 dark:text-brand-400 inline-flex items-center gap-1">
-                <Truck className="h-3 w-3" /> Direct · prix position
-              </span>
-            </li>
-          ))}
-          {external.map((c) => {
-            const k = normCarrier(c.code);
-            return (
-              <li key={k} className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-[13px] text-foreground truncate">{c.name}</p>
-                  <p className="text-[10.5px] text-muted-foreground truncate">Code {c.code}</p>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <input
-                    type="number" min={0} step={0.01}
-                    className="h-8 w-24 rounded-md border border-input bg-background px-2 text-right text-[13px] tnum text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-                    placeholder="0.000"
-                    value={pricing[k] ?? ""}
-                    disabled={!canEdit}
-                    onChange={(e) => setVal(c.code, parseFloat(e.target.value) || 0)}
-                    aria-label={`Tarif €/kg pour ${c.name}`}
-                  />
-                  <span className="text-[11px] text-muted-foreground">€/kg</span>
-                </div>
+    <div className="space-y-3">
+      {/* Livraison directe — seulement pour les magasins livrables en direct. */}
+      {directOnes.length > 0 && (
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.1em] font-semibold text-muted-foreground inline-flex items-center gap-1.5 mb-1.5">
+            <Truck className="h-3.5 w-3.5" /> Livraison directe (flotte propre)
+          </p>
+          <ul className="space-y-1">
+            {directOnes.map((c) => (
+              <li key={normCarrier(c.code)} className="flex items-center justify-between gap-3 text-[13px]">
+                <span className="min-w-0 truncate text-foreground">{c.name}</span>
+                <span className="shrink-0 text-[11px] font-semibold text-brand-600 dark:text-brand-400 inline-flex items-center gap-1 tnum">
+                  <Truck className="h-3 w-3" /> Direct · prix position{directPerKg > 0 ? ` ${fmtPerKg(directPerKg)}` : ""}
+                </span>
               </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {canEdit && external.length > 0 && (
-        <div className="mt-3 flex justify-end">
-          <Button size="sm" onClick={save} disabled={saving || !dirty} variant={dirty ? "default" : "secondary"}>
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Enregistrer les tarifs
-          </Button>
+            ))}
+          </ul>
         </div>
       )}
+
+      {/* Transporteurs externes — grille au coût PAR POSITION. */}
+      <div>
+        <p className="text-[11px] uppercase tracking-[0.1em] font-semibold text-muted-foreground inline-flex items-center gap-1.5 mb-1.5">
+          <Truck className="h-3.5 w-3.5" /> Tarif par transporteur externe — coût par position
+        </p>
+        {carriers.length === 0 ? (
+          <p className="text-[12px] text-muted-foreground">Aucun transporteur connu pour ce client.</p>
+        ) : external.length === 0 ? (
+          <p className="text-[12px] text-muted-foreground">Client livré uniquement en direct.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {external.map((c) => {
+              const k = normCarrier(c.code);
+              return (
+                <CarrierTariffEditor
+                  key={k}
+                  carrierCode={k}
+                  carrierName={c.name}
+                  initialTariff={tariffs[k] ?? null}
+                  clientDept={departement}
+                  canEdit={canEdit}
+                  onSaved={(t: CarrierTariff) => setTariffs((m) => ({ ...m, [k]: t }))}
+                />
+              );
+            })}
+          </div>
+        )}
+        <p className="text-[10.5px] text-muted-foreground/80 mt-2">
+          Coût d&apos;une livraison = prix de la tranche de poids (selon le département livré) + majorations (%)
+          et frais fixes. Les grilles sont partagées entre tous les clients du transporteur.
+        </p>
+      </div>
     </div>
   );
 }

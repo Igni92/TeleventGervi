@@ -1,21 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getAccessScope, clientInScope, requireAdmin } from "@/lib/permissions";
-import { getClientTransportPricing, setClientTransportPricing } from "@/lib/transportCostStore";
+import { prisma } from "@/lib/prisma";
+import { getClientTransportPricing, setClientTransportPricing, listCarrierTariffs } from "@/lib/transportCostStore";
 import { sanitizeClientPricing } from "@/lib/transportCost";
+import { departementOfZip } from "@/lib/geo/zip";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Tarif transport d'un CLIENT par transporteur (transporteurs non directs).
  *
- * GET /api/clients/[id]/transport-pricing → { ok, pricing: { <U_TrspCode>: €/kg } }
+ * GET /api/clients/[id]/transport-pricing
+ *   → { ok, pricing: { <U_TrspCode>: €/kg }  — LEGACY (repli),
+ *        departement: string | null          — déduit du CP SAP du client,
+ *        tariffs: { <U_TrspCode>: CarrierTariff } — grilles PAR POSITION }
  * PUT /api/clients/[id]/transport-pricing { pricing: { <U_TrspCode>: €/kg } }
  *
- * Un client peut avoir plusieurs transporteurs possibles, chacun avec son
- * propre prix au kilo. Lecture : tout utilisateur dans le périmètre du client
- * (la console en a besoin). Écriture : direction / admin. Persistance AppSetting
- * (`transportcli:<id>`), aucune migration.
+ * Le coût d'une livraison externe se lit dans la GRILLE du transporteur
+ * (tranches de poids × département — cf. lib/carrierTariff) ; le €/kg par
+ * client ne sert plus que de repli tant qu'aucune grille n'est saisie.
+ * Lecture : tout utilisateur dans le périmètre du client (console). Écriture :
+ * direction / admin. Persistance AppSetting, aucune migration.
  */
 export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -24,8 +30,13 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
   if (!(await clientInScope(await getAccessScope(session), params.id))) {
     return NextResponse.json({ error: "Accès refusé à ce client." }, { status: 403 });
   }
-  const pricing = await getClientTransportPricing(params.id);
-  return NextResponse.json({ ok: true, pricing });
+  const [pricing, tariffs, client] = await Promise.all([
+    getClientTransportPricing(params.id),
+    listCarrierTariffs(),
+    prisma.client.findUnique({ where: { id: params.id }, select: { zipCode: true } }).catch(() => null),
+  ]);
+  const departement = departementOfZip(client?.zipCode);
+  return NextResponse.json({ ok: true, pricing, departement, tariffs });
 }
 
 export async function PUT(req: NextRequest, props: { params: Promise<{ id: string }> }) {

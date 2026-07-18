@@ -537,7 +537,7 @@ function CarriersSection({
         <p className="text-[12px] text-muted-foreground mt-1 max-w-xl">
           Marque « direct » les transporteurs de la flotte propre (ex. <span className="font-medium text-foreground">DIRECT IDF</span>, <span className="font-medium text-foreground">GERVIFRAIS IDF</span>) — valorisés au prix position
           {prixPositionPerKg > 0 ? <> · <span className="tnum font-medium text-foreground">{fmtPerKg(prixPositionPerKg)}</span></> : null}.
-          Le tarif des transporteurs externes se saisit <span className="font-medium text-foreground">par client</span> (fiche client › Logistique).
+          Les transporteurs externes portent une <span className="font-medium text-foreground">grille au coût par position</span> (tranches de poids × départements livrés + majorations gazole / frais fixes), saisie depuis la fiche client › Logistique — grille partagée entre tous les clients du transporteur.
           Tant qu&apos;aucun transporteur n&apos;est marqué direct, toutes les livraisons sont considérées directes.
         </p>
       </div>

@@ -29,7 +29,8 @@ import { ConsoleLotPicker, type ConsoleLotCandidate } from "./ConsoleLotPicker";
 import { useContextMenu, ContextMenu, ContextMenuItem, ContextMenuLabel } from "@/components/ui/context-menu";
 import { useBrandLogos } from "@/lib/useBrandLogos";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
-import { transportPerKgForCarrier, isDirectCarrier, type TransportCostModel, type ClientCarrierPricing } from "@/lib/transportCost";
+import { transportPerKgForCarrier, isDirectCarrier, normCarrier, type TransportCostModel, type ClientCarrierPricing } from "@/lib/transportCost";
+import { computePositionCost, type CarrierTariffMap } from "@/lib/carrierTariff";
 import { celebrateSale } from "@/components/settings/app-settings";
 
 interface StockEntry { available: number }
@@ -491,14 +492,23 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
       .catch(() => { /* habitudes indisponibles → règles « habitude » désarmées */ });
     return () => { cancelled = true; };
   }, [clientId]);
-  // Tarifs transport DU CLIENT par transporteur (transporteurs non directs).
+  // Tarifs transport : grilles PAR POSITION des transporteurs externes
+  // (tranches de poids × département — lib/carrierTariff) + repli legacy €/kg
+  // du client, + département de livraison (CP SAP).
   const [clientPricing, setClientPricing] = useState<ClientCarrierPricing>({});
+  const [carrierTariffs, setCarrierTariffs] = useState<CarrierTariffMap>({});
+  const [clientDept, setClientDept] = useState<string | null>(null);
   useEffect(() => {
-    if (!clientId) { setClientPricing({}); return; }
+    if (!clientId) { setClientPricing({}); setCarrierTariffs({}); setClientDept(null); return; }
     let cancelled = false;
     fetch(`/api/clients/${clientId}/transport-pricing`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (!cancelled && j?.pricing) setClientPricing(j.pricing as ClientCarrierPricing); })
+      .then((j) => {
+        if (cancelled || !j) return;
+        if (j.pricing) setClientPricing(j.pricing as ClientCarrierPricing);
+        if (j.tariffs) setCarrierTariffs(j.tariffs as CarrierTariffMap);
+        setClientDept(typeof j.departement === "string" ? j.departement : null);
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [clientId]);
@@ -1079,8 +1089,16 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     return Number.isFinite(w) && w > 0 ? w : 0;
   };
   const totalKg = useMemo(() => cart.reduce((s, l) => s + lineWeightKg(l), 0), [cart]);
-  const transportPerKgClient = transportPerKgForCarrier(transportModel, transportPerKg, carrierSap, clientPricing);
   const carrierIsDirect = isDirectCarrier(transportModel, carrierSap) || (transportModel?.directCarriers.length ?? 0) === 0;
+  // Transporteur EXTERNE avec une GRILLE : coût de CETTE livraison = prix de la
+  // tranche de poids du panier, pour le département du client, + majorations %
+  // et frais fixes (coût PAR POSITION — cf. lib/carrierTariff). Repli si pas de
+  // grille / département / tranche : legacy €/kg du client × poids.
+  const carrierTariff = !carrierIsDirect ? (carrierTariffs[normCarrier(carrierSap)] ?? null) : null;
+  const positionCost = carrierTariff ? computePositionCost(carrierTariff, clientDept, totalKg) : null;
+  const transportPerKgClient = positionCost && totalKg > 0
+    ? positionCost.total / totalKg
+    : transportPerKgForCarrier(transportModel, transportPerKg, carrierSap, clientPricing);
 
   // Marge BRUTE de la commande (depuis le prix d'achat des hints) + marge/kg
   // MOYENNE PONDÉRÉE PAR LE POIDS : Σ marge ligne ÷ Σ kg (des lignes costées).
@@ -1108,15 +1126,17 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   // position, ou tarif du transporteur non direct) — JAMAIS recalculé sur la
   // commande. Marge nette /kg = marge brute/kg − ce coût /kg moyen.
   const margeNetteKg = margeBruteKg - transportPerKgClient;
-  // ── Par LIVRAISON (position) ── Le coût transport d'une position est le coût
-  // MOYEN d'une livraison — il NE DOIT PAS varier avec le poids de CETTE commande.
-  // On prend donc le coût /kg moyen × le poids MOYEN d'une livraison directe
-  // (kg/an ÷ nb livraisons/an). Pour un transporteur direct cela redonne
-  // exactement `costPerDelivery` de la page Coût de transport (annuel ÷ livraisons).
+  // ── Par LIVRAISON (position) ──
+  //   • Transporteur externe AVEC GRILLE : coût RÉEL de cette position (tranche
+  //     de poids du panier × département) — il varie donc avec le poids.
+  //   • Sinon (direct / legacy) : coût MOYEN d'une livraison — coût /kg moyen ×
+  //     poids MOYEN d'une livraison directe (kg/an ÷ nb livraisons/an). Pour un
+  //     transporteur direct cela redonne exactement `costPerDelivery` de la
+  //     page Coût de transport (annuel ÷ livraisons).
   const avgKgPerDelivery = (transportModel?.deliveriesPerYear ?? 0) > 0
     ? (transportModel!.kgPerYear || 0) / transportModel!.deliveriesPerYear
     : 0;
-  const coutTransportTotal = transportPerKgClient * avgKgPerDelivery;        // € — coût MOYEN d'une livraison (fixe)
+  const coutTransportTotal = positionCost ? positionCost.total : transportPerKgClient * avgKgPerDelivery; // € / position
   const margeBruteTotal = marginAgg.margin;                                  // € marge brute de CETTE commande
   const margeNetteTotal = margeBruteTotal - coutTransportTotal;              // € marge nette = marge brute − coût moyen livraison
   // Marge nette % (du CA des lignes costées) — pour le feu tricolore.
@@ -2427,7 +2447,11 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                   </div>
                   <span className="inline-flex items-center gap-1 text-muted-foreground whitespace-nowrap">
                     <Truck className="h-3 w-3" />
-                    <b className="tnum text-foreground">{transportPerKgClient > 0 ? `${transportPerKgClient.toFixed(3)} €/kg` : (carrierIsDirect ? "0 €/kg" : "n.c.")}</b>
+                    <b className="tnum text-foreground">
+                      {positionCost
+                        ? `${positionCost.total.toFixed(2)} €/pos. (${positionCost.bracket.minKg}–${positionCost.bracket.maxKg ?? "∞"} kg)`
+                        : transportPerKgClient > 0 ? `${transportPerKgClient.toFixed(3)} €/kg` : (carrierIsDirect ? "0 €/kg" : "n.c.")}
+                    </b>
                   </span>
                 </div>
               </div>
