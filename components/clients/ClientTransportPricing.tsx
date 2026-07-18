@@ -5,6 +5,7 @@ import { Loader2, Truck } from "lucide-react";
 import { normCarrier } from "@/lib/transportCost";
 import type { CarrierTariff, CarrierTariffMap } from "@/lib/carrierTariff";
 import { CarrierTariffEditor } from "@/components/clients/CarrierTariffEditor";
+import { CarrierTariffImport } from "@/components/transport/CarrierTariffImport";
 
 /**
  * Coût transport de la fiche client — PAR TRANSPORTEUR.
@@ -105,9 +106,13 @@ export function ClientTransportPricing({
 
       {/* Transporteurs externes — grille au coût PAR POSITION. */}
       <div>
-        <p className="text-[11px] uppercase tracking-[0.1em] font-semibold text-muted-foreground inline-flex items-center gap-1.5 mb-1.5">
-          <Truck className="h-3.5 w-3.5" /> Tarif par transporteur externe — coût par position
-        </p>
+        <div className="flex items-center justify-between gap-2 mb-1.5">
+          <p className="text-[11px] uppercase tracking-[0.1em] font-semibold text-muted-foreground inline-flex items-center gap-1.5">
+            <Truck className="h-3.5 w-3.5" /> Tarif par transporteur externe — coût par position
+          </p>
+          {/* Import du fichier tarif fournisseur : remplit la grille pour TOUS les clients. */}
+          {canEdit && <CarrierTariffImport onImported={() => void load()} />}
+        </div>
         {carriers.length === 0 ? (
           <p className="text-[12px] text-muted-foreground">Aucun transporteur connu pour ce client.</p>
         ) : external.length === 0 ? (
@@ -118,7 +123,9 @@ export function ClientTransportPricing({
               const k = normCarrier(c.code);
               return (
                 <CarrierTariffEditor
-                  key={k}
+                  // updatedAt dans la clé : un import/enregistrement remonte
+                  // l'éditeur avec la grille fraîche (état local sinon figé).
+                  key={`${k}:${tariffs[k]?.updatedAt ?? "vide"}`}
                   carrierCode={k}
                   carrierName={c.name}
                   initialTariff={tariffs[k] ?? null}

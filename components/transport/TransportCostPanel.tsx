@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { PhotoStep } from "@/components/inventaire/PhotoStep";
 import type { DraftPhoto } from "@/components/inventaire/inv-utils";
 import { TransportBreakdown } from "@/components/transport/TransportBreakdown";
+import { CarrierTariffImport } from "@/components/transport/CarrierTariffImport";
 import {
   computeTransportMetrics,
   COST_KIND_LABELS,
@@ -531,9 +532,14 @@ function CarriersSection({
   return (
     <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
       <div className="mb-4">
-        <p className="text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1.5">
-          <Truck className="h-3.5 w-3.5" /> Transporteurs · livraison en direct
-        </p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1.5">
+            <Truck className="h-3.5 w-3.5" /> Transporteurs · livraison en direct
+          </p>
+          {/* Import du fichier tarif fournisseur (xlsx Delanchy / Antoine) :
+              la grille par position s'applique à TOUS les clients. */}
+          {isManager && <CarrierTariffImport />}
+        </div>
         <p className="text-[12px] text-muted-foreground mt-1 max-w-xl">
           Marque « direct » les transporteurs de la flotte propre (ex. <span className="font-medium text-foreground">DIRECT IDF</span>, <span className="font-medium text-foreground">GERVIFRAIS IDF</span>) — valorisés au prix position
           {prixPositionPerKg > 0 ? <> · <span className="tnum font-medium text-foreground">{fmtPerKg(prixPositionPerKg)}</span></> : null}.
