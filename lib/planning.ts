@@ -263,8 +263,10 @@ export interface CounterWeekInput {
 export interface RecupCounter {
   creditMin: number;      // heures supp MAJORÉES créditées (+25/+50 inclus — semaines option « récup » passées)
   debitMin: number;       // récup réellement déduite (au passage des semaines)
-  balanceMin: number;     // solde disponible = crédit − débit
+  balanceMin: number;     // solde ACQUIS (firme) = crédit − débit des semaines passées
   plannedDates: string[]; // jours de récup posés PAS ENCORE décomptés (à venir)
+  reservedMin: number;    // RÉSERVE provisoire des jours posés à venir (1 journée type/jour) — bloquée d'avance
+  availableMin: number;   // solde RÉELLEMENT disponible à poser = balance − réserve (borné ≥ 0)
 }
 
 /**
@@ -335,15 +337,24 @@ export function computeRecupCounter(
         //   • semaine déjà AU-DELÀ → il ne consomme QUE le dépassement : une
         //     journée type de 7h15 × 5 j = 36h15 dépasse déjà les 35 h, donc un
         //     samedi de récup ne débite que 1h15 (le surplus), pas 7h15.
-        // Débit = min(jours de récup posés × journée type, |travaillé − contrat|).
-        // La récup TAGUÉE dans la feuille est déjà créditée au total par
-        // computeWeek (`recupCreditMin`) : on la retire pour retrouver le travail
-        // réel. Aucun jour n'est exclu « par principe » (le samedi décompte selon
-        // le réel comme les autres) — à l'avantage du salarié : borné au surplus.
+        // Débit = min(jours de récup RÉELLEMENT PRIS × journée type, |travaillé −
+        // contrat|). La récup TAGUÉE dans la feuille est déjà créditée au total
+        // par computeWeek (`recupCreditMin`) : on la retire pour retrouver le
+        // travail réel.
+        //
+        // BASCULE EN SURPLUS : un jour POSÉ en récup mais FINALEMENT TRAVAILLÉ
+        // (des heures saisies dessus) n'est PAS un repos → il ne débite rien ; ses
+        // heures gonflent le total et repartent en surplus (crédité si l'option
+        // de la semaine est « récup »). On ne compte donc que les jours posés
+        // laissés VIDES (réellement pris).
         const c = computeWeek(input.days, profile.weeklyHours, typDay);
+        const takenRecupDays = [...recupDays].filter((d) => {
+          const idx = dates.indexOf(d);
+          return idx < 0 || dayMinutes(input.days[idx]) === 0;
+        }).length;
         const workedBase = c.totalMin - c.recupCreditMin;   // travail réel + congés + fériés (récup exclue)
         const deviation = Math.abs(workedBase - c.contractMin);
-        debitMin += Math.min(recupDays.size * typDay, deviation);
+        debitMin += Math.min(takenRecupDays * typDay, deviation);
       } else {
         // Aucune saisie : impossible de mesurer l'écart réel → hypothèse
         // PRUDENTE. On suppose les jours de semaine (lun→ven hors fériés)
@@ -358,7 +369,13 @@ export function computeRecupCounter(
       }
     }
   }
-  return { creditMin, debitMin, balanceMin: creditMin - debitMin, plannedDates: plannedDates.sort() };
+  // RÉSERVE À LA POSE : chaque jour posé à venir bloque une journée type d'avance
+  // (le pire cas), même s'il ne coûtera au final que le déficit réel. Le solde
+  // RÉELLEMENT disponible à poser en tient compte, sans jamais passer sous 0.
+  const balanceMin = creditMin - debitMin;
+  const reservedMin = plannedDates.length * typDay;
+  const availableMin = Math.max(0, balanceMin - reservedMin);
+  return { creditMin, debitMin, balanceMin, plannedDates: plannedDates.sort(), reservedMin, availableMin };
 }
 
 /** Excédent du compteur AU-DELÀ du plafond employeur (minutes) — part au

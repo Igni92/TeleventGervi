@@ -1,7 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { requireAdmin, isComptable } from "@/lib/permissions";
-import { isDirection } from "@/lib/permissions";
+import { requireAdmin, isDirection } from "@/lib/permissions";
 import { isTerrainConfined } from "@/lib/preparateur";
 import { PlanningPanel } from "@/components/planning/PlanningPanel";
 import { PreparateurNav } from "@/components/PreparateurNav";
@@ -22,9 +21,7 @@ export const dynamic = "force-dynamic";
 export default async function PlanningPage() {
   const session = await auth();
   if (!session) redirect("/login");
-  // Le profil COMPTABLE voit le planning de toute l'équipe (lecture — les
-  // validations/propositions restent gatées par isDirection côté UI et API).
-  const isManager = (await requireAdmin(session)) || (await isComptable(session));
+  const isManager = await requireAdmin(session);
   const isDir = await isDirection(session);
   const showTerrainNav = isTerrainConfined(session);
 

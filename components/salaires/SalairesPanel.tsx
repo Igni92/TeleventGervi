@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft, ChevronRight, ChevronDown, RotateCcw, Loader2, Save, Send, Plus, Trash2,
-  Wallet, AlertTriangle, Car, Gift, ReceiptText, CheckCircle2, KeyRound, FileSpreadsheet, Pencil,
+  Wallet, AlertTriangle, Car, Gift, ReceiptText, CheckCircle2, FileSpreadsheet, Pencil,
   Coins, CalendarCheck, Scale,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -45,8 +45,6 @@ interface ApiData {
   ok: boolean; month: string; rows: Row[];
   sent: { sentAt: string; sentBy: string; to: string[] } | null;
   canEdit: boolean;
-  /** L'accès par mot de passe du cabinet comptable est-il configuré ? */
-  comptaConfigured?: boolean;
 }
 
 const eur = (n: number) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(n);
@@ -191,9 +189,6 @@ export function SalairesPanel({ canEdit }: { canEdit: boolean }) {
             <Loader2 className="h-3.5 w-3.5 animate-spin" /> Chargement…
           </p>
         )}
-
-        {/* Accès du cabinet (boîte partagée sans SSO) : mot de passe dédié. */}
-        {canEdit && data && <ComptaAccess configured={!!data.comptaConfigured} onChanged={load} />}
       </SurfaceCard>
 
       {rows.map((r) => (
@@ -201,81 +196,6 @@ export function SalairesPanel({ canEdit }: { canEdit: boolean }) {
       ))}
       {!loading && rows.length === 0 && (
         <p className="px-1 py-3 text-[12.5px] italic text-muted-foreground">Aucune donnée ce mois-ci.</p>
-      )}
-    </div>
-  );
-}
-
-/* ───────────── Accès du cabinet comptable (mot de passe dédié) ────────────── */
-
-/** Mot de passe fort généré côté client (18 caractères, alphabet sans ambigus). */
-function generatePassword(): string {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!#%+*";
-  const bytes = new Uint32Array(18);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
-}
-
-function ComptaAccess({ configured, onChanged }: { configured: boolean; onChanged: () => Promise<void> }) {
-  const [open, setOpen] = useState(false);
-  const [password, setPassword] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      const r = await fetch("/api/salaires", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "setComptaPassword", password }),
-      });
-      const j = await r.json().catch(() => null);
-      if (!r.ok || !j?.ok) { toast.error(j?.error || "Échec de l'enregistrement du mot de passe"); return; }
-      toast.success("Mot de passe comptable enregistré — transmettez-le au cabinet.");
-      setOpen(false);
-      setPassword("");
-      await onChanged();
-    } catch { toast.error("Échec de l'enregistrement du mot de passe"); }
-    finally { setSaving(false); }
-  };
-
-  return (
-    <div className="mt-3 rounded-lg border border-border bg-secondary/20 px-3 py-2.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
-          <KeyRound className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Accès cabinet comptable —</span> compta@gervifrais.com
-        </p>
-        <span className={`rounded-md px-1.5 py-0.5 text-[10.5px] font-semibold ${
-          configured ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : "bg-rose-500/15 text-rose-700 dark:text-rose-300"
-        }`}>
-          {configured ? "mot de passe configuré" : "mot de passe NON configuré"}
-        </span>
-        <button type="button" onClick={() => setOpen((v) => !v)}
-          className="ml-auto inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-border text-[12px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60">
-          {configured ? "Changer le mot de passe" : "Définir le mot de passe"}
-        </button>
-      </div>
-      {open && (
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <input
-            type="text" value={password} onChange={(e) => setPassword(e.target.value)}
-            placeholder="Minimum 12 caractères" autoComplete="off" spellCheck={false}
-            className="h-9 flex-1 min-w-[200px] rounded-md border border-border bg-background px-2 text-[12.5px] tnum focus:outline-none focus:ring-1 focus:ring-brand-500"
-            aria-label="Nouveau mot de passe comptable"
-          />
-          <button type="button" onClick={() => setPassword(generatePassword())}
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60">
-            Générer
-          </button>
-          <button type="button" onClick={save} disabled={saving || password.length < 12}
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[12.5px] font-semibold disabled:opacity-50">
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Enregistrer
-          </button>
-          <p className="w-full text-[11px] text-muted-foreground">
-            Connexion séparée de Microsoft (boîte partagée) : le cabinet passe par « Accès cabinet
-            comptable » sur la page de login — planning + éléments des salaires uniquement, sans
-            devenir membre de l&apos;effectif. Notez le mot de passe AVANT d&apos;enregistrer.
-          </p>
-        </div>
       )}
     </div>
   );
