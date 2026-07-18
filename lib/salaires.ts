@@ -260,17 +260,15 @@ export function recapMailHtml(monthId: string, rows: RecapRow[], appUrl: string)
         <td style="${td};font-weight:700">${esc(r.name)}</td>
         <td style="${tdNum}">${hm(r.heures.totalMin)}</td>
         <td style="${tdNum}">${r.heures.suppPayEquivMin > 0 ? `<b>${hm(r.heures.suppPayEquivMin)}</b>` : "—"}</td>
-        <td style="${tdNum}">${r.heures.suppRecupEquivMin > 0 ? hm(r.heures.suppRecupEquivMin) : "—"}</td>
         <td style="${tdNum}">${r.heures.ferieMin > 0 ? hm(r.heures.ferieMin) : "—"}</td>
         <td style="${tdNum}">${r.heures.cpJours > 0 ? `${r.heures.cpJours} j` : "—"}</td>
-        <td style="${tdNum}">${r.heures.recupJours > 0 ? `${r.heures.recupJours} j` : "—"}</td>
         <td style="${tdNum}">${r.heures.maladieJours > 0 ? `${r.heures.maladieJours} j` : "—"}</td>
         <td style="${tdNum}">${r.heures.absentJours > 0 ? `${r.heures.absentJours} j` : "—"}</td>
         <td style="${tdNum}">${primesTotal > 0 ? `<b>${eur(primesTotal)}</b>` : "—"}</td>
         <td style="${tdNum}">${r.anMensuel > 0 ? eur(r.anMensuel) : "—"}</td>
         <td style="${tdNum}">${fraisTotal > 0 ? eur(fraisTotal) : "—"}</td>
       </tr>
-      ${details.length ? `<tr><td colspan="12" style="padding:4px 9px 10px;border:1px solid #ddd;border-top:none;font-size:12px;color:#444">${details.join("<br/>")}</td></tr>` : ""}`;
+      ${details.length ? `<tr><td colspan="10" style="padding:4px 9px 10px;border:1px solid #ddd;border-top:none;font-size:12px;color:#444">${details.join("<br/>")}</td></tr>` : ""}`;
   }).join("");
 
   return `
@@ -279,15 +277,14 @@ export function recapMailHtml(monthId: string, rows: RecapRow[], appUrl: string)
     <h2 style="margin:0 0 12px;font-size:19px">Récapitulatif paie — ${esc(salaireMonthLabel(monthId))}</h2>
     <table style="border-collapse:collapse;width:100%;margin-bottom:12px">
       <tr>
-        ${header("Salarié")}${header("Heures")}${header("Supp payées")}${header("Supp → récup")}${header("Férié")}
-        ${header("CP")}${header("Récup prise")}${header("Maladie")}${header("Absence")}${header("Primes")}${header("AN")}${header("Frais")}
+        ${header("Salarié")}${header("Heures")}${header("Supp payées")}${header("Férié")}
+        ${header("CP")}${header("Maladie")}${header("Absence")}${header("Primes")}${header("AN")}${header("Frais")}
       </tr>
       ${bodyRows}
     </table>
     <p style="font-size:12px;color:#555;margin:0 0 6px">
-      « Supp payées » = équivalent MAJORÉ (+25 %/+50 %) des heures supp dont le paiement a été décidé ;
-      « Supp → récup » = équivalent majoré crédité au compteur de récupération. Les jours FÉRIÉS chômés
-      sont crédités en journée type et TOUJOURS payés. « AN » = avantage en nature véhicule (forfait mensuel).
+      « Supp payées » = équivalent MAJORÉ (+25 %/+50 %) des heures supp dont le paiement a été décidé. Les jours
+      FÉRIÉS chômés sont crédités en journée type et TOUJOURS payés. « AN » = avantage en nature véhicule (forfait mensuel).
     </p>
     <p style="font-size:12px;color:#555;margin:0 0 14px">Détail et historique dans TeleVent : <a href="${esc(appUrl)}/salaires">${esc(appUrl)}/salaires</a></p>
   </div>`;
