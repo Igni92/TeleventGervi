@@ -24,7 +24,6 @@ import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { requireAdmin, isLivreur } from "@/lib/permissions";
 import { ReceptionSlots } from "@/components/clients/ReceptionSlots";
-import { TransportCostCard } from "@/components/clients/TransportCostCard";
 import { ClientTransportPricing } from "@/components/clients/ClientTransportPricing";
 import { getTransportModel } from "@/lib/transportCostStore";
 import { computeTransportMetrics } from "@/lib/transportCost";
@@ -217,24 +216,23 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
     />
   );
 
-  // Coût transport (prix position €/kg) de la livraison EN DIRECT — valeur
-  // ANNUELLE reportée depuis la structure de coûts (Pilotage › Coût de transport).
-  // On se base sur le transporteur : les livraisons externes utilisent une valeur
-  // €/kg saisie à la main (par transporteur), pas ce prix position.
+  // Coût transport : le prix position €/kg (direct) n'apparaît QUE sur les
+  // transporteurs directs du client (magasins livrables en direct) — plus
+  // d'en-tête global. Les transporteurs externes portent une GRILLE au coût
+  // PAR POSITION (tranches de poids × départements + lignes fixes/%).
   const transportMetrics = computeTransportMetrics(await getTransportModel());
-  const transportConfigured = transportMetrics.prixPositionPerKg > 0;
 
   const logistiquePane = (
     <ReorderableSections
       storageKey="fiche:logistique"
       sections={[
         { id: "cout-transport", label: "Coût transport", node: (
-          <SectionCard accent="brand" title="Coût transport" subtitle="Prix position €/kg (direct) + tarif par transporteur externe" icon={<Coins />}>
-            <TransportCostCard
-              perKg={transportMetrics.prixPositionPerKg}
-              configured={transportConfigured}
+          <SectionCard accent="brand" title="Coût transport" subtitle="Coût par position du transporteur — tranches de poids × département livré" icon={<Coins />}>
+            <ClientTransportPricing
+              clientId={client.id}
+              canEdit={admin}
+              directPerKg={transportMetrics.prixPositionPerKg}
             />
-            <ClientTransportPricing clientId={client.id} canEdit={admin} />
           </SectionCard>
         ) },
         { id: "jours-livraison", label: "Jours de livraison", node: (

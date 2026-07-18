@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
-import { getTransportModel } from "@/lib/transportCostStore";
+import { getTransportModel, listCarrierTariffs } from "@/lib/transportCostStore";
 import {
   computeTransportMetrics,
   transportPerKgForCarrier,
@@ -12,6 +12,8 @@ import {
   sanitizeClientPricing,
   type ClientCarrierPricing,
 } from "@/lib/transportCost";
+import { computePositionCost } from "@/lib/carrierTariff";
+import { departementOfZip } from "@/lib/geo/zip";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -24,8 +26,10 @@ export const maxDuration = 300;
  *   • par CLIENT — idem + part direct / externe.
  *
  * Le coût appliqué suit la règle : transporteur direct → prix position ;
- * transporteur externe → tarif €/kg du CLIENT pour ce transporteur. Réservé
- * direction / admin (rapport de gestion). GET (aucun effet de bord).
+ * transporteur externe → GRILLE par position du transporteur (tranche de poids
+ * × département du client + lignes fixes/%, cf. lib/carrierTariff), repli sur
+ * le tarif €/kg legacy du CLIENT si pas de grille. Réservé direction / admin
+ * (rapport de gestion). GET (aucun effet de bord).
  */
 
 type ListedLine = { ItemCode?: string; Quantity?: number };
@@ -89,12 +93,13 @@ export async function GET() {
     for (const p of prods) weightByCode.set(p.itemCode, p.salesUnitWeight ?? 0);
   }
 
-  // Fiches clients (CardCode → id/nom/type) + tarifs transport par client.
+  // Fiches clients (CardCode → id/nom/type/département) + tarifs legacy par
+  // client + GRILLES par transporteur (coût par position — lib/carrierTariff).
   const cardCodes = [...new Set(live.map((o) => o.CardCode).filter((c): c is string => !!c))];
-  const clientByCard = new Map<string, { id: string; nom: string; type: string | null }>();
+  const clientByCard = new Map<string, { id: string; nom: string; type: string | null; dept: string | null }>();
   if (cardCodes.length) {
-    const clients = await prisma.client.findMany({ where: { code: { in: cardCodes } }, select: { id: true, code: true, nom: true, type: true } });
-    for (const c of clients) clientByCard.set(c.code, { id: c.id, nom: c.nom, type: c.type });
+    const clients = await prisma.client.findMany({ where: { code: { in: cardCodes } }, select: { id: true, code: true, nom: true, type: true, zipCode: true } });
+    for (const c of clients) clientByCard.set(c.code, { id: c.id, nom: c.nom, type: c.type, dept: departementOfZip(c.zipCode) });
   }
   const pricingById = new Map<string, ClientCarrierPricing>();
   try {
@@ -104,6 +109,7 @@ export async function GET() {
       try { pricingById.set(id, sanitizeClientPricing(JSON.parse(row.value))); } catch { /* ignore */ }
     }
   } catch { /* pas de tarifs */ }
+  const carrierTariffs = await listCarrierTariffs();
 
   // Agrégation.
   type CarrierAgg = { code: string; deliveries: number; kg: number; cost: number; direct: boolean };
@@ -118,9 +124,11 @@ export async function GET() {
     const card = o.CardCode ?? "";
     const cli = card ? clientByCard.get(card) : undefined;
     const pricing = cli ? pricingById.get(cli.id) ?? null : null;
-    const perKg = transportPerKgForCarrier(model, prixPosition, code, pricing);
-    const cost = perKg * kg;
     const direct = isDirectCarrier(model, code) || (model.directCarriers.length === 0);
+    // Externe avec GRILLE : coût par position (tranche de poids × département
+    // du client). Repli : legacy €/kg (client) × kg, ou prix position (direct).
+    const posCost = !direct ? computePositionCost(carrierTariffs[code] ?? null, cli?.dept, kg) : null;
+    const cost = posCost ? posCost.total : transportPerKgForCarrier(model, prixPosition, code, pricing) * kg;
 
     totalKg += kg; totalCost += cost;
 
