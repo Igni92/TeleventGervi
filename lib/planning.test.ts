@@ -496,3 +496,38 @@ describe("planning — récup : les heures supp STRUCTURELLES (contrat 42 h) ne 
     expect(c.creditMin).toBe(Math.round(1 * 60 * 1.25 + 2 * 60 * 1.5)); // 255 = 4h15
   });
 });
+
+describe("planning — récup : réserve à la pose + bascule en surplus si travaillé", () => {
+  const day = (h: number): DayHours => ({ m1: "06:00", m2: `${String(6 + h).padStart(2, "0")}:00` });
+
+  it("RÉSERVE à la pose : un jour posé à venir est bloqué d'avance (dispo = acquis − réserve)", () => {
+    // W27 (passée) : 39 h option récup → +5 h acquises. Vendredi 17/07 (W29, à venir) posé.
+    const weeks: CounterWeekInput[] = [
+      { week: "2026-W27", days: [day(8), day(8), day(8), day(8), day(7)], option: "recup" },
+    ];
+    const c = computeRecupCounter(weeks, ["2026-07-17"], PROFILE, "2026-07-13");
+    expect(c.balanceMin).toBe(5 * 60);       // acquis (firme)
+    expect(c.reservedMin).toBe(7 * 60);      // 1 j posé × journée type (7 h) bloqué d'avance
+    expect(c.availableMin).toBe(0);          // max(0, 5h − 7h)
+    expect(c.plannedDates).toEqual(["2026-07-17"]);
+  });
+
+  it("BASCULE EN SURPLUS : un jour posé en récup mais FINALEMENT TRAVAILLÉ ne débite rien", () => {
+    // W27 : Lun→Ven 7 h (35 h) + samedi 04/07 posé en récup MAIS travaillé 4 h → 39 h.
+    // Le samedi n'est plus un repos → 0 récup débitée (ses heures repartent en surplus).
+    const weeks: CounterWeekInput[] = [
+      { week: "2026-W27", days: [day(7), day(7), day(7), day(7), day(7), day(4), {}], option: null, recupDates: ["2026-07-04"] },
+    ];
+    const c = computeRecupCounter(weeks, [], PROFILE, "2026-07-13");
+    expect(c.debitMin).toBe(0);
+  });
+
+  it("sans jour posé à venir : réserve nulle, dispo = solde acquis", () => {
+    const weeks: CounterWeekInput[] = [
+      { week: "2026-W27", days: [day(8), day(8), day(8), day(8), day(7)], option: "recup" },
+    ];
+    const c = computeRecupCounter(weeks, [], PROFILE, "2026-07-13");
+    expect(c.reservedMin).toBe(0);
+    expect(c.availableMin).toBe(5 * 60);
+  });
+});

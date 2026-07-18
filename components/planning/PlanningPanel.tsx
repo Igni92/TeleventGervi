@@ -55,7 +55,7 @@ interface PersonPlanning {
   name: string;
   profile: { weeklyHours: number; cpAllowanceDays: number | null; recupCapHours: number | null; typicalDayMin: number; initials?: string | null };
   counters: {
-    recup: { creditMin: number; debitMin: number; balanceMin: number; plannedDates: string[] };
+    recup: { creditMin: number; debitMin: number; balanceMin: number; plannedDates: string[]; reservedMin: number; availableMin: number };
     cp: { allowanceDays: number | null; takenDays: number; pendingDays: number; balanceDays: number | null; period: { start: string; end: string }; accrual: boolean };
     capMin: number | null;
     excessMin: number;
@@ -388,8 +388,10 @@ function CounterBar({ person, isManager }: { person: PersonPlanning; isManager: 
             : `${cp.takenDays} j pris${cp.pendingDays ? ` · ${cp.pendingDays} j en attente` : ""} — période ${fmtD(cp.period.start)} → ${fmtD(cp.period.end)}`} />
       <CounterChip icon={<Clock3 className="h-3.5 w-3.5" />} tone="sky"
         label="Récup disponible"
-        value={fmtHM(recup.balanceMin)}
-        hint={`${fmtHM(recup.creditMin)} acquises (majorées +25/+50 %) · ${fmtHM(recup.debitMin)} prises${recup.plannedDates.length ? ` · ${recup.plannedDates.length} j posé(s) à venir` : ""}`} />
+        value={fmtHM(recup.availableMin)}
+        hint={recup.reservedMin > 0
+          ? `${fmtHM(recup.balanceMin)} acquises − ${fmtHM(recup.reservedMin)} réservées (${recup.plannedDates.length} j posé(s) à venir, bloqués d'avance) · ajusté au réel une fois la semaine passée`
+          : `${fmtHM(recup.creditMin)} acquises (majorées +25/+50 %) · ${fmtHM(recup.debitMin)} prises`} />
       {capMin != null && (
         <CounterChip icon={<SlidersHorizontal className="h-3.5 w-3.5" />} tone={excessMin > 0 ? "rose" : "muted"}
           label="Plafond récup"
@@ -551,7 +553,9 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
   // JOURS ENTIERS (floor(solde / journée type)), le reste part en CP. Les deux
   // demandes sont envoyées à la validation. Dimanches/fériés déjà hors décompte.
   const typDayMin = person.profile.typicalDayMin;
-  const recupBalanceMin = person.counters.recup.balanceMin;
+  // Récup RÉELLEMENT disponible (nette des jours déjà posés/réservés) : la récup
+  // est prioritaire sur les CP, mais on ne réaffecte que ce qui n'est pas déjà bloqué.
+  const recupBalanceMin = person.counters.recup.availableMin;
   const recupDaysAvail = typDayMin > 0 ? Math.floor(recupBalanceMin / typDayMin) : 0;
   const autoSplit = isSelf && type === "cp" && !!sel.start && recupDaysAvail >= 1
     ? splitLeaveRecupCp(sel.start, sel.end, recupDaysAvail)
@@ -992,7 +996,7 @@ function TeamCalendar({ team, month, todayISO, onPick }: {
                   </button>
                   {/* Les compteurs de la personne — masqués sur mobile (largeur). */}
                   <span className="hidden sm:block text-[10.5px] tnum text-muted-foreground">
-                    <span className="text-sky-600 dark:text-sky-400 font-semibold">{fmtHM(p.counters.recup.balanceMin)}</span> récup
+                    <span className="text-sky-600 dark:text-sky-400 font-semibold">{fmtHM(p.counters.recup.availableMin)}</span> récup
                     {" · "}
                     <span className="text-violet-600 dark:text-violet-400 font-semibold">
                       {p.counters.cp.balanceDays == null ? `${p.counters.cp.takenDays} j pris` : `${p.counters.cp.balanceDays} j`}

@@ -103,7 +103,7 @@ function buildPerson(
       initials: profile.initials ?? null,
     },
     counters: {
-      recup: { creditMin: recup.creditMin, debitMin: recup.debitMin, balanceMin: recup.balanceMin, plannedDates: recup.plannedDates },
+      recup: { creditMin: recup.creditMin, debitMin: recup.debitMin, balanceMin: recup.balanceMin, plannedDates: recup.plannedDates, reservedMin: recup.reservedMin, availableMin: recup.availableMin },
       cp,
       capMin,
       excessMin: recupCapExcessMin(recup.balanceMin, profile.recupCapHours),
