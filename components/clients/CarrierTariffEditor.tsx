@@ -62,6 +62,9 @@ export function CarrierTariffEditor({
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  // Sur la fiche d'UN client on n'affiche QUE SA zone (grille complète sur
+  // demande) — la grille reste globale au transporteur.
+  const [showAllZones, setShowAllZones] = useState(false);
 
   const template = tariffTemplateFor(carrierCode);
   const clientZone = tariff ? zoneForDepartement(tariff.zones, clientDept) : null;
@@ -220,10 +223,11 @@ export function CarrierTariffEditor({
             </div>
           </div>
 
-          {/* ── Zones (départements) × prix par tranche ── */}
+          {/* ── Zones (départements) × prix par tranche — par défaut, seule la
+                 zone du CLIENT est montrée (bascule pour la grille complète) ── */}
           <div>
             <p className="text-[10.5px] uppercase tracking-[0.08em] font-semibold text-muted-foreground mb-1.5">
-              Zones livrées (départements) — prix par tranche
+              {clientZone && !showAllZones ? "Zone du client — prix par tranche" : "Zones livrées (départements) — prix par tranche"}
             </p>
             <div className="overflow-x-auto">
               <table className="w-full text-[12px]">
@@ -240,7 +244,7 @@ export function CarrierTariffEditor({
                   </tr>
                 </thead>
                 <tbody>
-                  {tariff.zones.map((z) => {
+                  {(clientZone && !showAllZones ? tariff.zones.filter((z) => z.id === clientZone.id) : tariff.zones).map((z) => {
                     const isClientZone = clientZone?.id === z.id;
                     return (
                       <tr key={z.id} className={`border-t border-border/40 ${isClientZone ? "bg-brand-500/5" : ""}`}>
@@ -304,12 +308,20 @@ export function CarrierTariffEditor({
                 </tbody>
               </table>
             </div>
-            {canEdit && (
-              <Button size="sm" variant="outline" className="h-7 text-[11px] mt-1.5"
-                onClick={() => mut((t) => ({ ...t, zones: [...t.zones, { id: `z-${uid()}`, label: "", departements: [], prices: {} } as TariffZone] }))}>
-                <Plus className="h-3.5 w-3.5" /> Zone
-              </Button>
-            )}
+            <div className="flex items-center gap-1.5 mt-1.5">
+              {clientZone && tariff.zones.length > 1 && (
+                <Button size="sm" variant="ghost" className="h-7 text-[11px]"
+                  onClick={() => setShowAllZones((v) => !v)}>
+                  {showAllZones ? "Ne montrer que la zone du client" : `Toutes les zones (${tariff.zones.length})`}
+                </Button>
+              )}
+              {canEdit && (showAllZones || !clientZone) && (
+                <Button size="sm" variant="outline" className="h-7 text-[11px]"
+                  onClick={() => mut((t) => ({ ...t, zones: [...t.zones, { id: `z-${uid()}`, label: "", departements: [], prices: {} } as TariffZone] }))}>
+                  <Plus className="h-3.5 w-3.5" /> Zone
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* ── Lignes annexes : fixes (€) et majorations (%) ── */}

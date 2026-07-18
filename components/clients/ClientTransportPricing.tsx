@@ -10,9 +10,10 @@ import { CarrierTariffImport } from "@/components/transport/CarrierTariffImport"
 /**
  * Coût transport de la fiche client — PAR TRANSPORTEUR.
  *
- *   • Transporteur DIRECT (flotte propre) : prix position €/kg — affiché
- *     UNIQUEMENT si ce magasin peut être livré en direct (le prix direct n'est
- *     plus un en-tête global de la fiche).
+ *   • Transporteur DIRECT (flotte propre) : le COÛT PAR POSITION (€ par
+ *     livraison = annuel ÷ nb livraisons) est LA valeur mise en avant ; le
+ *     €/kg n'est qu'une RÉFÉRENCE indicative. Affiché UNIQUEMENT si ce magasin
+ *     peut être livré en direct (le prix direct n'est plus un en-tête global).
  *   • Transporteur EXTERNE : GRILLE tarifaire au COÛT PAR POSITION — tranches
  *     de poids modifiables × départements livrés + lignes fixes (€) et en %
  *     (majoration gazole…). La grille est GLOBALE au transporteur (partagée
@@ -27,11 +28,14 @@ interface CarrierOpt { code: string; name: string }
 export function ClientTransportPricing({
   clientId,
   canEdit,
+  directPerPosition = 0,
   directPerKg = 0,
 }: {
   clientId: string;
   canEdit: boolean;
-  /** Prix position €/kg (livraison directe) — affiché sur les transporteurs directs du client. */
+  /** COÛT PAR POSITION de la livraison directe (€ / livraison = annuel ÷ nb livraisons) — la valeur principale. */
+  directPerPosition?: number;
+  /** Prix €/kg de la livraison directe — simple RÉFÉRENCE indicative. */
   directPerKg?: number;
 }) {
   const [carriers, setCarriers] = useState<CarrierOpt[]>([]);
@@ -82,6 +86,8 @@ export function ClientTransportPricing({
   const directOnes = carriers.filter((c) => directSet.has(normCarrier(c.code)));
   const fmtPerKg = (v: number) =>
     `${new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(v)} €/kg`;
+  const fmtE = (v: number) =>
+    `${new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v)} €`;
 
   return (
     <div className="space-y-3">
@@ -95,8 +101,16 @@ export function ClientTransportPricing({
             {directOnes.map((c) => (
               <li key={normCarrier(c.code)} className="flex items-center justify-between gap-3 text-[13px]">
                 <span className="min-w-0 truncate text-foreground">{c.name}</span>
-                <span className="shrink-0 text-[11px] font-semibold text-brand-600 dark:text-brand-400 inline-flex items-center gap-1 tnum">
-                  <Truck className="h-3 w-3" /> Direct · prix position{directPerKg > 0 ? ` ${fmtPerKg(directPerKg)}` : ""}
+                {/* LE chiffre qui compte : le PRIX PAR POSITION (€ / livraison).
+                    Le €/kg n'est qu'une référence indicative, en dessous. */}
+                <span className="shrink-0 flex flex-col items-end">
+                  <span className="text-[13px] font-bold text-brand-600 dark:text-brand-400 inline-flex items-center gap-1 tnum">
+                    <Truck className="h-3.5 w-3.5" />
+                    {directPerPosition > 0 ? `${fmtE(directPerPosition)} / position` : "Direct · à paramétrer"}
+                  </span>
+                  {directPerKg > 0 && (
+                    <span className="text-[10px] text-muted-foreground tnum">réf. {fmtPerKg(directPerKg)} · annuel</span>
+                  )}
                 </span>
               </li>
             ))}

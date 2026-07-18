@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
       );
       catalog = rows.map((r) => r.sapValue ?? "").filter(Boolean);
     } catch { /* catalogue indisponible → repli repères */ }
-    ({ codes, matched } = matchCarrierCodes(parsed.carrierHints, catalog));
+    ({ codes, matched } = matchCarrierCodes(parsed.format, catalog));
   }
 
   // Application : une grille par code cible (les % reprennent l'existant).

@@ -231,6 +231,7 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
             <ClientTransportPricing
               clientId={client.id}
               canEdit={admin}
+              directPerPosition={transportMetrics.costPerDelivery}
               directPerKg={transportMetrics.prixPositionPerKg}
             />
           </SectionCard>

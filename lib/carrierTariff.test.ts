@@ -109,8 +109,8 @@ describe("sanitizeCarrierTariff", () => {
 });
 
 describe("templates fournisseurs", () => {
-  it("DELANCHY / FT86 → grille Delanchy 2025 (par département, 2 tranches)", () => {
-    for (const code of ["DELANCHY", "FT86", "DELANCHY FT86"]) {
+  it("DELANCHY / FT<n° dépt> (tous les FT) → grille Delanchy 2025 (par département, 2 tranches)", () => {
+    for (const code of ["DELANCHY", "FT86", "FT94", "DELANCHY FT86"]) {
       const t = tariffTemplateFor(code)!;
       expect(t).not.toBeNull();
       expect(t.brackets).toHaveLength(2);
@@ -130,7 +130,8 @@ describe("templates fournisseurs", () => {
     // Pieds de facture GO + GNR + frais documentaire + palettes présents.
     expect(t.extras.map((x) => x.kind).sort()).toEqual(["fixed", "fixed", "percent", "percent"]);
   });
-  it("code inconnu → pas de template", () => {
+  it("code inconnu → pas de template (et pas de faux positif FT)", () => {
     expect(tariffTemplateFor("SCACHAP")).toBeNull();
+    expect(tariffTemplateFor("SOFT86")).toBeNull();   // « FT86 » précédé d'une lettre ≠ dépôt FT
   });
 });
