@@ -35,10 +35,14 @@ interface CommercialSap {
   nbCommandesYtd: number;
   volumeKgYtd: number;
   caPortefeuilleYtd: number;
-  /** Prime = primeMargeBrute × primeRate. */
+  /** Prime = primeMargeNette × primeRate (jamais négative). */
   prime: number;
   /** Marge brute facturée (nette d'avoirs) du portefeuille depuis primeSince. */
   primeMargeBrute: number;
+  /** Coût transport estimé déduit (grilles par position / prix position). */
+  primeTransport: number;
+  /** Marge NETTE transport = brute − transport (base de la prime). */
+  primeMargeNette: number;
   /** Taux de prime du commercial (fraction, 0.05 = 5 %). */
   primeRate: number;
   /** Date de début de la période de prime (ISO). */
@@ -298,10 +302,10 @@ function CommercialCard({ c, isAdmin, onObjectifs }: { c: CommercialSap; isAdmin
         />
         <Tile
           value={fmtEur2(c.prime)}
-          label={`Prime ${primePct} % · marge ${fmtEur(c.primeMargeBrute)}`}
+          label={`Prime ${primePct} % · marge nette ${fmtEur(c.primeMargeNette)}`}
           icon={BadgeEuro}
           tone="emerald"
-          title={`${primePct} % de la marge brute du portefeuille · commandes depuis le ${primeSince} (marge nette transport à venir)`}
+          title={`${primePct} % de la marge NETTE transport du portefeuille (brute ${fmtEur(c.primeMargeBrute)} − transport ${fmtEur(c.primeTransport)}) · factures depuis le ${primeSince}`}
         />
       </div>
 
@@ -466,9 +470,10 @@ function ObjectifModal({
               <span className="text-[14px] font-bold tnum text-emerald-700 dark:text-emerald-300">{fmtEur2(c.prime)}</span>
             </div>
             <p className="text-[10.5px] text-muted-foreground mt-1">
-              {primeRatePct}% × marge brute {fmtEur(c.primeMargeBrute)} — factures du portefeuille
-              (nettes d&apos;avoirs) depuis le {fmtDateShort(c.primeSince)}.
-              <br />La marge « nette transport » n&apos;est pas encore déduite.
+              {primeRatePct}% × marge <span className="font-semibold text-foreground">nette transport</span> {fmtEur(c.primeMargeNette)} — factures du
+              portefeuille (nettes d&apos;avoirs) depuis le {fmtDateShort(c.primeSince)}.
+              <br />Marge brute {fmtEur(c.primeMargeBrute)} − coût transport estimé {fmtEur(c.primeTransport)}
+              {" "}(grille par position du transporteur habituel × département × poids livré).
             </p>
             {isAdmin && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">

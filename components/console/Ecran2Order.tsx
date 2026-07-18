@@ -405,14 +405,18 @@ function CartDropGap({
   );
 }
 
-export function Ecran2Order({ clientId, clientName, clientType = null, stockSharePct = 100, deliveryModeId = "", clientHeader = null, modifier: modifierProp = null, onExitModif, onSubmitted }: {
+export function Ecran2Order({ clientId, clientName, clientType = null, stockSharePct = 100, deliveryModeId = "", deliveryModes = [], onDeliveryModeChange, clientHeader = null, modifier: modifierProp = null, onExitModif, onSubmitted }: {
   clientId: string; clientName: string;
   /** Type du magasin actif (EXPORT | GMS | CHR) — filtre les promos ciblées. */
   clientType?: string | null;
   stockSharePct?: number;
-  /** Mode de livraison / compte SAP du bon — choisi dans le bandeau client
-   *  (à côté du nom) ; par défaut le mode par défaut du client. */
+  /** Mode de livraison / compte SAP du bon — choisi DANS le sélecteur
+   *  transporteur du pied (une seule sélection) ; défaut = mode par défaut. */
   deliveryModeId?: string;
+  /** Comptes de livraison du client (LPOI, SCACHAP…) — proposés dans le MÊME
+   *  sélecteur que les transporteurs (« livré sur le compte X »). */
+  deliveryModes?: { id: string; name: string; sapCardCode: string; isDefault: boolean }[];
+  onDeliveryModeChange?: (id: string) => void;
   /** Bandeau client (nom + méta + recherche) REGROUPÉ avec le stock : posé en
    *  tête de la colonne stock pour ne former qu'un seul bloc à gauche. */
   clientHeader?: ReactNode;
@@ -2332,29 +2336,52 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
           {/* En modification, le BL existe déjà : mode/transporteur/date/réf sont figés. */}
           {!modif && (
             <>
-              {/* Le mode de livraison / compte SAP est choisi dans le bandeau
-                  client (à côté du nom) — il n'est plus dans ce pied. */}
-              {/* Transporteur + TOURNÉE — obligatoires sur le bon, pré-remplis avec
-                  le défaut du client. Bordure ambre tant qu'un choix manque. */}
+              {/* SÉLECTION UNIQUE : transporteur OU compte de livraison (LPOI,
+                  SCACHAP…) dans le MÊME sélecteur — choisir un compte fait
+                  partir le bon sur ce compte SAP ; choisir un transporteur
+                  ramène le bon sur le compte par défaut du client. */}
               {(() => {
                 const needsTournee = !!carrierSap && tournees !== undefined && tournees.some((t) => t.heure);
                 const missingCarrier = !carrierSap;
                 const missingTournee = needsTournee && !tourneeId;
                 const warnCls = "border-amber-400/70 bg-amber-50/50 dark:bg-amber-950/20";
+                const defaultMode = deliveryModes.find((m) => m.isDefault) ?? deliveryModes[0];
+                const accountModes = deliveryModes.filter((m) => !m.isDefault);
+                const activeAccount = accountModes.find((m) => m.id === deliveryModeId) ?? null;
+                // Valeur combinée : compte non-défaut sélectionné → « m:<id> »,
+                // sinon le transporteur courant → « c:<code> ».
+                const combined = activeAccount ? `m:${activeAccount.id}` : (carrierSap ? `c:${carrierSap}` : "");
+                const onCombined = (v: string) => {
+                  if (v.startsWith("m:")) {
+                    onDeliveryModeChange?.(v.slice(2));
+                  } else if (v.startsWith("c:")) {
+                    if (defaultMode) onDeliveryModeChange?.(defaultMode.id);
+                    setCarrierSap(v.slice(2));
+                  }
+                };
                 return (
                   <div className="flex gap-1.5">
-                    <select value={carrierSap} onChange={(e) => setCarrierSap(e.target.value)}
-                      aria-label="Transporteur"
-                      title="Transporteur du bon (défaut du client pré-sélectionné)"
+                    <select value={combined} onChange={(e) => onCombined(e.target.value)}
+                      aria-label="Transporteur ou compte de livraison"
+                      title="Transporteur du bon (défaut du client pré-sélectionné) — ou compte sur lequel le bon doit partir (LPOI, SCACHAP…)"
                       className={`min-w-0 flex-1 h-9 rounded-md border bg-background text-[13.5px] px-2 ${
-                        missingCarrier ? warnCls : "border-border"}`}>
+                        missingCarrier && !activeAccount ? warnCls : "border-border"}`}>
                       <option value="" disabled>🚚 Transporteur…</option>
                       {/* B3 — count présent quand la liste est filtrée par client (habitudes) */}
                       {carriers.map((c) => (
-                        <option key={c.id} value={c.sapValue}>
+                        <option key={c.id} value={`c:${c.sapValue}`}>
                           🚚 {c.name}{c.count ? ` · ${c.count} cde${c.count > 1 ? "s" : ""}` : ""}
                         </option>
                       ))}
+                      {accountModes.length > 0 && (
+                        <optgroup label="Livré sur un autre compte">
+                          {accountModes.map((m) => (
+                            <option key={m.id} value={`m:${m.id}`}>
+                              🏬 Compte {m.name} ({m.sapCardCode})
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                     <select value={tourneeId} onChange={(e) => setTourneeId(e.target.value)}
                       disabled={!carrierSap || tournees === undefined || (tournees !== undefined && !needsTournee)}

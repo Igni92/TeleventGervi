@@ -4,6 +4,18 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getAccessScope, scopePayload, UNMAPPED_MESSAGE } from "@/lib/permissions";
 import { emailFromInitials } from "@/lib/salespeople";
+import { getTransportModel, listCarrierTariffs } from "@/lib/transportCostStore";
+import {
+  computeTransportMetrics,
+  transportPerKgForCarrier,
+  isDirectCarrier,
+  normCarrier,
+  sanitizeClientPricing,
+  type ClientCarrierPricing,
+} from "@/lib/transportCost";
+import { computePositionCost } from "@/lib/carrierTariff";
+import { departementOfZip } from "@/lib/geo/zip";
+import { getClientTournees } from "@/lib/clientTournee";
 
 /**
  * GET /api/commerciaux/sap — liste des commerciaux SAP (slpName) actifs sur
@@ -37,10 +49,13 @@ export async function GET() {
   const sparkStart = new Date(now.getTime() - 12 * 7 * 86_400_000);
 
   // ── PRIME commerciale ──────────────────────────────────────
-  // Base = marge BRUTE du PORTEFEUILLE (clients dont il est le commercial) sur
-  // les FACTURES nettes d'avoirs, depuis la date de début. Taux + date de début
-  // PROPRES à chaque commercial (table CommercialPrime ; défauts 5 % /
-  // 01.11.2025). Marge « nette transport » à venir — transport non déduit.
+  // Base = marge NETTE TRANSPORT du PORTEFEUILLE (clients dont il est le
+  // commercial) sur les FACTURES nettes d'avoirs, depuis la date de début :
+  // marge brute − coût de transport estimé de chaque facture (grille par
+  // position du transporteur habituel du client × département × poids livré,
+  // repli prix position / €/kg legacy — cf. bloc PRIME plus bas). Taux + date
+  // de début PROPRES à chaque commercial (table CommercialPrime ; défauts 5 % /
+  // 01.11.2025).
   const PRIME_DEFAULT_RATE = 0.05;
   const primeDefaultStart = new Date(Date.UTC(2025, 10, 1)); // 1ᵉʳ novembre 2025
 
@@ -126,9 +141,10 @@ export async function GET() {
   // Bloc isolé en try/catch → si la table CommercialPrime n'existe pas encore
   // dans un environnement, la liste des commerciaux reste fonctionnelle (prime 0).
   const primeCfg = new Map<string, { rate: number; since: Date }>();
-  const primeMargeMap = new Map<string, number>();
+  const primeMargeMap = new Map<string, number>();      // marge BRUTE (nette d'avoirs)
+  const primeTransportMap = new Map<string, number>();  // coût transport estimé à déduire
   try {
-    const [cfgRows, primeInv, primeCn] = await Promise.all([
+    const [cfgRows, primeInv, primeCn, invKgRows] = await Promise.all([
       prisma.$queryRaw<{ slp: string; rate: number; since: Date }[]>(Prisma.sql`
         SELECT "slpName" AS slp, "rate"::float AS rate, "since" FROM "CommercialPrime"`),
       // Marge brute facturée du portefeuille depuis la date de début (par commercial).
@@ -153,10 +169,54 @@ export async function GET() {
           AND n."docDate" >= COALESCE(p."since", ${primeDefaultStart})
           ${slpCond(Prisma.sql`c."commercial"`)}
         GROUP BY 1`),
+      // Poids livré PAR FACTURE (grille par tranches ⇒ le coût dépend du poids
+      // de CHAQUE livraison, pas du cumul) + département/id du client.
+      prisma.$queryRaw<{ slp: string; card: string; cid: string; zip: string | null; kg: number }[]>(Prisma.sql`
+        SELECT c."commercial" AS slp, i."cardCode" AS card, c."id" AS cid, c."zipCode" AS zip,
+               COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS kg
+        FROM "SapInvoiceLine" l
+        JOIN "SapInvoice" i ON i."docEntry" = l."docEntry"
+        JOIN "Client" c ON c."code" = i."cardCode"
+        LEFT JOIN "CommercialPrime" pr ON pr."slpName" = c."commercial"
+        LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
+        WHERE i."cancelled" = false
+          AND c."commercial" IS NOT NULL AND c."commercial" <> ''
+          AND i."docDate" >= COALESCE(pr."since", ${primeDefaultStart})
+          ${slpCond(Prisma.sql`c."commercial"`)}
+        GROUP BY 1, 2, i."docEntry", 3, 4`),
     ]);
     for (const r of cfgRows) primeCfg.set(r.slp, { rate: Number(r.rate), since: new Date(r.since) });
     const cnMap = new Map(primeCn.map((r) => [r.slp, Number(r.marge)]));
     for (const r of primeInv) primeMargeMap.set(r.slp, Number(r.marge) - (cnMap.get(r.slp) ?? 0));
+
+    // Coût transport estimé PAR FACTURE : transporteur HABITUEL du client
+    // (tournée mémorisée cltour:) → direct = prix position €/kg × kg ; externe
+    // avec grille = coût par position (département × tranche du poids livré) ;
+    // repli €/kg legacy du client. Transporteur inconnu → 0 (on ne devine pas,
+    // le transport des avoirs n'est pas re-crédité non plus).
+    const model = await getTransportModel();
+    const prixPosition = computeTransportMetrics(model).prixPositionPerKg;
+    const tariffs = await listCarrierTariffs();
+    const pricingById = new Map<string, ClientCarrierPricing>();
+    try {
+      const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: "transportcli:" } } });
+      for (const row of rows) {
+        try { pricingById.set(row.key.slice("transportcli:".length), sanitizeClientPricing(JSON.parse(row.value))); } catch { /* ignore */ }
+      }
+    } catch { /* pas de tarifs legacy */ }
+    const tournees = await getClientTournees([...new Set(invKgRows.map((r) => r.card))]);
+    for (const r of invKgRows) {
+      const kg = Number(r.kg);
+      if (kg <= 0) continue;
+      const code = normCarrier(tournees.get(r.card.trim().toUpperCase())?.trspCode);
+      if (!code) continue; // transporteur habituel inconnu → pas de déduction
+      const direct = isDirectCarrier(model, code) || model.directCarriers.length === 0;
+      const posCost = !direct ? computePositionCost(tariffs[code] ?? null, departementOfZip(r.zip), kg) : null;
+      const cost = posCost
+        ? posCost.total
+        : transportPerKgForCarrier(model, prixPosition, code, pricingById.get(r.cid) ?? null) * kg;
+      if (cost > 0) primeTransportMap.set(r.slp, (primeTransportMap.get(r.slp) ?? 0) + cost);
+    }
   } catch { /* table CommercialPrime absente → prime neutre */ }
 
   // Objectifs CA (table optionnelle — repli silencieux si DDL non lancée).
@@ -218,10 +278,13 @@ export async function GET() {
         // Ventes de SES CLIENTS (portefeuille : Client.commercial = lui, quel que
         // soit le vendeur qui a saisi le doc). Net d'avoirs.
         caPortefeuilleYtd: (portInvMap.get(a.slp) ?? 0) - (portCnMap.get(a.slp) ?? 0),
-        // PRIME : taux × marge brute facturée (nette d'avoirs) du portefeuille
-        // depuis la date de début — taux + date propres au commercial.
+        // PRIME : taux × marge NETTE TRANSPORT (brute − coût transport estimé),
+        // factures nettes d'avoirs du portefeuille depuis la date de début —
+        // taux + date propres au commercial. Jamais négative.
         primeMargeBrute: primeMargeMap.get(a.slp) ?? 0,
-        prime: Math.round((primeMargeMap.get(a.slp) ?? 0) * (primeCfg.get(a.slp)?.rate ?? PRIME_DEFAULT_RATE) * 100) / 100,
+        primeTransport: Math.round((primeTransportMap.get(a.slp) ?? 0) * 100) / 100,
+        primeMargeNette: Math.round(((primeMargeMap.get(a.slp) ?? 0) - (primeTransportMap.get(a.slp) ?? 0)) * 100) / 100,
+        prime: Math.max(0, Math.round(((primeMargeMap.get(a.slp) ?? 0) - (primeTransportMap.get(a.slp) ?? 0)) * (primeCfg.get(a.slp)?.rate ?? PRIME_DEFAULT_RATE) * 100) / 100),
         primeRate: primeCfg.get(a.slp)?.rate ?? PRIME_DEFAULT_RATE,
         primeSince: (primeCfg.get(a.slp)?.since ?? primeDefaultStart).toISOString(),
         // Objectifs annuels (0 = non défini) — CA / marge brute / volume kg.
