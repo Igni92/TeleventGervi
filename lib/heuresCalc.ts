@@ -51,11 +51,28 @@ export interface DayHours {
 
 /** Profil horaire d'un employé : contrat hebdo + journée type (préremplissage). */
 export interface HoursProfile {
-  weeklyHours: number;    // heures contractuelles / semaine (ex. 35, 39)
+  weeklyHours: number;    // heures contractuelles / semaine (ex. 35, 39) — BASE LÉGALE des majorations 25/50
   typicalDay: DayHours;   // « journée type » appliquée d'un clic sur Lun→Ven
+  /** Heures PAYÉES / semaine quand le contrat inclut des heures supp
+   *  STRUCTURELLES payées d'office (ex. « contrat 42 h » = 35 h + 7 h supp
+   *  payées chaque semaine). Ces 7 h sont TOUJOURS payées — jamais arbitrables
+   *  (ni récup, ni décision). Seul le dépassement AU-DELÀ de `paidWeeklyHours`
+   *  part au choix récup/paiement. null/absent ou ≤ `weeklyHours` = pas d'heures
+   *  supp structurelles (paie = contrat). */
+  paidWeeklyHours?: number | null;
   /** Solde annuel de congés payés (jours) attribué par l'employeur — période
-   *  de référence 1er juin → 31 mai. null/absent = non défini. */
+   *  de référence 1er juin → 31 mai. Utilisé UNIQUEMENT en repli, quand aucun
+   *  cumul (`cpAnchorDate`) n'est défini. null/absent = non défini. */
   cpAllowanceDays?: number | null;
+  /** CUMUL PERMANENT des CP (pas de période de référence) : le solde s'acquiert
+   *  au fil de l'eau, `cpAccrualPerMonth` jours ouvrables par mois. Point
+   *  d'ancrage = solde CONNU (`cpAnchorDays`) à une date (`cpAnchorDate`) ; le
+   *  compteur vaut alors `cpAnchorDays + cpAccrualPerMonth × mois écoulés depuis
+   *  l'ancrage − CP pris depuis l'ancrage`. `cpAnchorDate` absent → on retombe
+   *  sur le solde annuel `cpAllowanceDays` (ancien modèle). */
+  cpAnchorDate?: string | null;      // YYYY-MM-DD
+  cpAnchorDays?: number | null;      // solde CP (jours) à la date d'ancrage
+  cpAccrualPerMonth?: number | null; // jours ouvrables acquis / mois (défaut 2,5)
   /** Plafond du compteur de récup (heures) fixé par l'employeur : les heures
    *  supp AU-DELÀ partent au PAIEMENT sur le bulletin du mois suivant (reporté
    *  sur l'état compta). null/absent = pas de plafond. */
@@ -265,6 +282,56 @@ export function effectivePaySuppMin(
   if (option === "paiement") return totalSuppMin;
   if (option === "mixte") return Math.max(0, Math.min(Math.round(paySuppMin ?? 0), totalSuppMin));
   return 0;
+}
+
+/* ─────────────── Heures supp STRUCTURELLES (contrat « 42 h » payé) ──────────
+ * Certains contrats paient d'office un volume d'heures supp chaque semaine (ex.
+ * 42 h = 35 h + 7 h supp payées). Ces heures ne sont JAMAIS arbitrées (toujours
+ * payées, jamais en récup) ; seul le dépassement AU-DELÀ part au choix
+ * récup/paiement. La base légale des majorations reste `weeklyHours` (35 h) :
+ * les 7 h structurelles tombent dans la tranche +25 % comme n'importe quelle
+ * heure supp — on les paie simplement d'office. */
+
+/** Minutes d'heures supp STRUCTURELLES d'un profil = (heures payées − contrat),
+ *  bornées ≥ 0. 0 si `paidWeeklyHours` absent/≤ contrat. */
+export function structuralSuppMin(profile: Pick<HoursProfile, "weeklyHours" | "paidWeeklyHours">): number {
+  const paid = profile.paidWeeklyHours;
+  if (paid == null || !Number.isFinite(paid)) return 0;
+  return Math.max(0, Math.round((paid - (profile.weeklyHours || 0)) * 60));
+}
+
+/** Répartition des heures supp d'une semaine entre part STRUCTURELLE (payée
+ *  d'office) et part ARBITRABLE (récup/paiement). */
+export interface SuppArbitrage {
+  struct25Min: number;       // supp structurelle en tranche +25 %
+  struct50Min: number;       // supp structurelle en tranche +50 % (rare)
+  arb25Min: number;          // supp ARBITRABLE en tranche +25 %
+  arb50Min: number;          // supp ARBITRABLE en tranche +50 %
+  structEquivMin: number;    // équivalent PAYÉ des heures structurelles (toujours payé)
+  arbitrableMin: number;     // total BRUT arbitrable (arb25 + arb50)
+}
+
+/**
+ * Sépare les heures supp d'une semaine (`sup25Min` + `sup50Min`) en part
+ * STRUCTURELLE (les `structFloorMin` premières minutes, payées d'office) et part
+ * ARBITRABLE (le reste). La part structurelle consomme d'abord la tranche +25 %
+ * (les heures les plus basses), puis la +50 %. `structFloorMin` = 0 → tout est
+ * arbitrable (comportement historique, salarié sans heures structurelles).
+ */
+export function splitStructuralSupp(sup25Min: number, sup50Min: number, structFloorMin: number): SuppArbitrage {
+  const s25 = Math.max(0, sup25Min), s50 = Math.max(0, sup50Min);
+  const floor = Math.max(0, Math.min(Math.round(structFloorMin), s25 + s50));
+  const struct25 = Math.min(floor, s25);
+  const struct50 = floor - struct25;
+  const arb25 = s25 - struct25, arb50 = s50 - struct50;
+  return {
+    struct25Min: struct25,
+    struct50Min: struct50,
+    arb25Min: arb25,
+    arb50Min: arb50,
+    structEquivMin: Math.round(struct25 * 1.25 + struct50 * 1.5),
+    arbitrableMin: arb25 + arb50,
+  };
 }
 
 /* ───────────────────────── Semaines ISO (Lun→Dim) ─────────────────────────── */

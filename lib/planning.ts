@@ -7,11 +7,13 @@
  *     l'employeur a choisi l'option « récupération » (repos compensateur de
  *     remplacement : les +25 %/+50 % sont acquis en repos, ex. 8 h supp à
  *     +25 % = 10 h de récup) ; débit = jours de récup posés, décomptés
- *     UNIQUEMENT AU PASSAGE DE LA SEMAINE : si, au final, la semaine atteint
- *     quand même le contrat (les 35 h sont faites), le déficit est nul → la
- *     récup N'EST PAS déduite. Le débit est borné par min(déficit réel, jours
- *     OUVRÉS lun→ven posés × journée type). Crédit majoré + débit à l'heure
- *     brute = doublement à l'avantage du salarié.
+ *     UNIQUEMENT AU PASSAGE DE LA SEMAINE, calés sur les HEURES RÉELLES : un
+ *     jour de récup ramène la semaine AU CONTRAT (35 h) sans jamais débiter une
+ *     journée type à l'aveugle. Débit = min(jours posés × journée type,
+ *     |travaillé − contrat|) : semaine en déficit → il comble le manque ;
+ *     semaine déjà au-delà (5 × 7h15 = 36h15 > 35 h) → il ne consomme que le
+ *     DÉPASSEMENT (un samedi de récup débite 1h15, pas 7h15). Crédit majoré +
+ *     débit à l'heure brute = doublement à l'avantage du salarié.
  *
  *   • COMPTEUR CP (jours) — solde annuel fixé par l'employeur (période de
  *     référence 1er juin → 31 mai) − jours OUVRABLES (lun→sam) des congés payés
@@ -24,7 +26,8 @@
  *     compta (lib/heuresPdf).
  */
 import {
-  computeWeek, dayMinutes, effectivePaySuppMin, isoWeekId, splitSupp, typicalDayMinutes, weekDates,
+  computeWeek, dayMinutes, effectivePaySuppMin, isoWeekId, splitSupp,
+  splitStructuralSupp, structuralSuppMin, typicalDayMinutes, weekDates,
   type DayHours, type DayTag, type HeuresOption, type HoursProfile,
 } from "./heuresCalc";
 import { isIsoDate, rangesOverlap, type CongeRequest, type CongeType } from "./conges";
@@ -276,7 +279,7 @@ export interface RecupCounter {
 export function computeRecupCounter(
   weeks: CounterWeekInput[],
   extraRecupDates: string[],
-  profile: Pick<HoursProfile, "weeklyHours" | "typicalDay">,
+  profile: Pick<HoursProfile, "weeklyHours" | "typicalDay" | "paidWeeklyHours">,
   asOfISO: string,
 ): RecupCounter {
   const typDay = typicalDayMinutes(profile);
@@ -315,34 +318,42 @@ export function computeRecupCounter(
       // recalculé depuis les saisies, donc la récup déjà acquise est
       // revalorisée (ou reprise si l'employeur bascule au paiement)
       // automatiquement.
-      const supp = c.sup25Min + c.sup50Min;
-      const payMin = effectivePaySuppMin(input.option, input.paySuppMin, supp);
-      creditMin += splitSupp(c.sup25Min, c.sup50Min, payMin).recupEquivMin;
+      // Seule la part ARBITRABLE peut partir en récup ; les heures supp
+      // STRUCTURELLES (contrat « 42 h » payé) sont toujours payées, jamais
+      // créditées au compteur.
+      const st = splitStructuralSupp(c.sup25Min, c.sup50Min, structuralSuppMin(profile));
+      const payMin = effectivePaySuppMin(input.option, input.paySuppMin, st.arbitrableMin);
+      creditMin += splitSupp(st.arb25Min, st.arb50Min, payMin).recupEquivMin;
     }
     if (recupDays.size > 0) {
-      // Seuls les JOURS DE CONTRAT (lun→ven, hors fériés) consomment de la
-      // récup : un samedi / dimanche / jour férié posé n'est pas travaillé → il
-      // n'y a AUCUNE heure à récupérer dessus. Ainsi, poser vendredi + samedi ne
-      // décompte que le vendredi (le samedi, au-delà des 35 h lun→ven, est
-      // gratuit) — à l'avantage du salarié.
-      const isContractDay = (d: string) => {
-        const dow = atNoon(d).getUTCDay();
-        return dow >= 1 && dow <= 5 && !frenchHolidayLabel(d);
-      };
       if (input) {
-        // Semaine saisie : le déficit RÉEL tranche. La récup TAGUÉE dans la
-        // feuille est déjà consommée (créditée au total, bornée au déficit) par
-        // computeWeek → `recupCreditMin`. Les jours posés via recupDates NON
-        // tagués comblent le déficit RÉSIDUEL (même borne). Contrat atteint
-        // malgré la récup → déficit 0 → RIEN n'est déduit (avantage salarié).
+        // Semaine SAISIE : le débit se cale sur les HEURES RÉELLES, jamais sur
+        // une « journée type » à l'aveugle. Un jour de récup ramène la semaine
+        // AU CONTRAT (35 h) — depuis l'un OU l'autre côté :
+        //   • semaine en déficit  → il comble le manque (ex. 4 j à 7h15 = 29h00
+        //     + 1 j récup → débit 6h00, pas 7h15) ;
+        //   • semaine déjà AU-DELÀ → il ne consomme QUE le dépassement : une
+        //     journée type de 7h15 × 5 j = 36h15 dépasse déjà les 35 h, donc un
+        //     samedi de récup ne débite que 1h15 (le surplus), pas 7h15.
+        // Débit = min(jours de récup posés × journée type, |travaillé − contrat|).
+        // La récup TAGUÉE dans la feuille est déjà créditée au total par
+        // computeWeek (`recupCreditMin`) : on la retire pour retrouver le travail
+        // réel. Aucun jour n'est exclu « par principe » (le samedi décompte selon
+        // le réel comme les autres) — à l'avantage du salarié : borné au surplus.
         const c = computeWeek(input.days, profile.weeklyHours, typDay);
-        const feuilleRecup = new Set(dates.filter((_, i) => input.days[i]?.tag === "recup"));
-        const extraDays = [...recupDays].filter((d) => !feuilleRecup.has(d) && isContractDay(d)).length;
-        const residualDeficit = Math.max(0, c.contractMin - c.totalMin);
-        debitMin += c.recupCreditMin + Math.min(residualDeficit, extraDays * typDay);
+        const workedBase = c.totalMin - c.recupCreditMin;   // travail réel + congés + fériés (récup exclue)
+        const deviation = Math.abs(workedBase - c.contractMin);
+        debitMin += Math.min(recupDays.size * typDay, deviation);
       } else {
-        // Aucune saisie : la récup est réputée prise comme posée — mais seuls
-        // les jours ouvrés (lun→ven hors fériés) la décomptent.
+        // Aucune saisie : impossible de mesurer l'écart réel → hypothèse
+        // PRUDENTE. On suppose les jours de semaine (lun→ven hors fériés)
+        // travaillés au contrat ; seul un jour de récup posé sur un jour de
+        // contrat crée alors un déficit d'une journée type. Un samedi posé seul
+        // (jour hors contrat) ne crée aucun déficit → ne décompte rien.
+        const isContractDay = (d: string) => {
+          const dow = atNoon(d).getUTCDay();
+          return dow >= 1 && dow <= 5 && !frenchHolidayLabel(d);
+        };
         debitMin += [...recupDays].filter(isContractDay).length * typDay;
       }
     }
@@ -369,11 +380,12 @@ export function cpPeriodOf(dateISO: string): CpPeriod {
 }
 
 export interface CpCounter {
-  allowanceDays: number | null;  // solde attribué (null = non défini par l'employeur)
-  takenDays: number;             // jours ouvrables de CP VALIDÉS dans la période
-  pendingDays: number;           // jours ouvrables de CP EN ATTENTE dans la période
-  balanceDays: number | null;    // solde restant (null si allowance non définie)
-  period: CpPeriod;
+  allowanceDays: number | null;  // droit ACQUIS à date (cumul) ou solde annuel (repli) ; null = non défini
+  takenDays: number;             // jours ouvrables de CP VALIDÉS imputés
+  pendingDays: number;           // jours ouvrables de CP EN ATTENTE imputés
+  balanceDays: number | null;    // solde restant (acquis − pris) ; null si non défini
+  period: CpPeriod;              // cumul : { ancrage → asOf } ; repli : 1 juin → 31 mai
+  accrual: boolean;              // true = cumul permanent (2,5 j/mois, sans période)
 }
 
 /** Jours ouvrables (lun→sam) d'un congé TOMBANT dans la période. */
@@ -384,25 +396,93 @@ function ouvrablesInPeriod(c: Pick<CongeRequest, "start" | "end">, p: CpPeriod):
   return expandOuvrables(start, end).length;
 }
 
+/** Index de mois d'une date ISO (année × 12 + mois) — écart = mois entiers. */
+function monthIndexOf(dateISO: string): number {
+  const d = atNoon(dateISO);
+  return d.getUTCFullYear() * 12 + d.getUTCMonth();
+}
+
+/** Cadence d'acquisition par défaut : 2,5 jours ouvrables / mois (légal FR). */
+export const CP_ACCRUAL_DEFAULT = 2.5;
+
+/** Réglage CP d'un profil (cumul permanent OU repli période). */
+export interface CpConfig {
+  allowanceDays?: number | null;   // repli : solde annuel (période 1 juin→31 mai)
+  anchorDate?: string | null;      // cumul : date d'ancrage (YYYY-MM-DD)
+  anchorDays?: number | null;      // cumul : solde CONNU à l'ancrage
+  accrualPerMonth?: number | null; // cumul : jours/mois (défaut 2,5)
+}
+
+/** Extrait le réglage CP d'un profil horaire (cumul permanent ou repli). */
+export function cpConfigOf(profile: Pick<HoursProfile, "cpAllowanceDays" | "cpAnchorDate" | "cpAnchorDays" | "cpAccrualPerMonth">): CpConfig {
+  return {
+    allowanceDays: profile.cpAllowanceDays,
+    anchorDate: profile.cpAnchorDate,
+    anchorDays: profile.cpAnchorDays,
+    accrualPerMonth: profile.cpAccrualPerMonth,
+  };
+}
+
+/**
+ * Compteur CP « au » `asOfISO`. DEUX modes :
+ *   • CUMUL PERMANENT (si `anchorDate` défini) — pas de période de référence :
+ *     acquis = ancrage + `accrualPerMonth` (défaut 2,5) × mois écoulés depuis
+ *     l'ancrage ; pris = CP ouvrables imputés depuis l'ancrage (sans borne
+ *     haute — les CP validés futurs réservent déjà le solde). « Tout est acquis
+ *     tout le temps » : le solde monte de 2,5 j à chaque mois franchi.
+ *   • REPLI (aucun ancrage) — ancien modèle : solde annuel `allowanceDays` −
+ *     jours ouvrables de CP validés dans la période 1er juin → 31 mai.
+ */
 export function computeCpCounter(
-  allowanceDays: number | null | undefined,
+  cfg: CpConfig | number | null | undefined,
   conges: Pick<CongeRequest, "type" | "status" | "start" | "end">[],
-  todayISO: string,
+  asOfISO: string,
 ): CpCounter {
-  const period = cpPeriodOf(todayISO);
+  // Rétro-compat : un nombre/null passé directement = solde annuel (repli).
+  const config: CpConfig = typeof cfg === "object" && cfg !== null ? cfg : { allowanceDays: cfg ?? null };
+  const anchor = config.anchorDate && isIsoDate(config.anchorDate) ? config.anchorDate : null;
+
+  // ── MODE CUMUL PERMANENT ──
+  if (anchor) {
+    const rate = config.accrualPerMonth != null && Number.isFinite(config.accrualPerMonth) && config.accrualPerMonth >= 0
+      ? config.accrualPerMonth : CP_ACCRUAL_DEFAULT;
+    const base = config.anchorDays != null && Number.isFinite(config.anchorDays) ? config.anchorDays : 0;
+    const months = Math.max(0, monthIndexOf(asOfISO) - monthIndexOf(anchor));
+    const acquired = Math.round((base + rate * months) * 100) / 100;
+    let takenDays = 0, pendingDays = 0;
+    for (const c of conges) {
+      if (c.type !== "cp" || c.end < anchor) continue;       // congé entièrement avant l'ancrage → ignoré
+      const from = c.start > anchor ? c.start : anchor;
+      const n = expandOuvrables(from, c.end).length;
+      if (c.status === "approved") takenDays += n;
+      else if (c.status === "pending") pendingDays += n;
+    }
+    return {
+      allowanceDays: acquired,
+      takenDays,
+      pendingDays,
+      balanceDays: Math.round((acquired - takenDays) * 100) / 100,
+      period: { start: anchor, end: asOfISO },
+      accrual: true,
+    };
+  }
+
+  // ── REPLI : période de référence 1er juin → 31 mai ──
+  const period = cpPeriodOf(asOfISO);
   let takenDays = 0, pendingDays = 0;
   for (const c of conges) {
     if (c.type !== "cp") continue;
     if (c.status === "approved") takenDays += ouvrablesInPeriod(c, period);
     else if (c.status === "pending") pendingDays += ouvrablesInPeriod(c, period);
   }
-  const allowance = allowanceDays == null || !Number.isFinite(allowanceDays) ? null : allowanceDays;
+  const allowance = config.allowanceDays == null || !Number.isFinite(config.allowanceDays) ? null : config.allowanceDays;
   return {
     allowanceDays: allowance,
     takenDays,
     pendingDays,
     balanceDays: allowance == null ? null : Math.round((allowance - takenDays) * 100) / 100,
     period,
+    accrual: false,
   };
 }
 
@@ -448,7 +528,7 @@ export function computeMonthRecap(
 ): MonthRecap {
   const end = monthEndISO(monthId);
   const counter = computeRecupCounter(weeks, extraRecupDates, profile, dayAfter(end));
-  const cp = computeCpCounter(profile.cpAllowanceDays, conges, end);
+  const cp = computeCpCounter(cpConfigOf(profile), conges, end);
   const capMin = profile.recupCapHours == null ? null : Math.round(profile.recupCapHours * 60);
   // Demandes de récup PAS ENCORE validées : comptées en jours de contrat
   // (lun→ven hors fériés — les seuls qui débiteront le compteur).

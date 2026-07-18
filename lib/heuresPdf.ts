@@ -8,6 +8,7 @@
  */
 import {
   fmtHM, weekLabel, aggregateMonth, monthLabel, splitSupp, effectivePaySuppMin,
+  splitStructuralSupp, structuralSuppMin,
   type HoursProfile, type WeekCalc, type HeuresOption,
 } from "./heuresCalc";
 import type { MonthRecap } from "./planning";
@@ -28,20 +29,26 @@ function optionLine(
   recupDates: string[] | undefined,
   calc?: WeekCalc | null,
   paySuppMin?: number | null,
+  structFloorMin = 0,
 ): string {
   const ds = (recupDates ?? []).filter(Boolean);
   const dsSuffix = ds.length ? ` — ${esc(ds.map(fmtDateShort).join(", "))}` : "";
+  // Part STRUCTURELLE (contrat « 42 h ») : payée d'office, hors arbitrage.
+  const st = calc ? splitStructuralSupp(calc.sup25Min, calc.sup50Min, structFloorMin) : null;
+  const structLine = st && st.structEquivMin > 0
+    ? `<div class="opt paie">▪ ${fmtHM(st.struct25Min + st.struct50Min)} payées d'office (contrat, équiv. ${fmtHM(st.structEquivMin)})</div>`
+    : "";
+  const arbitrable = st ? st.arbitrableMin : (calc ? calc.sup25Min + calc.sup50Min : 0);
   if (option === "recup") {
-    return `<div class="opt recup">▪ Récupération${dsSuffix || " (jours à poser)"}</div>`;
+    return `${structLine}<div class="opt recup">▪ Récupération${dsSuffix || " (jours à poser)"}</div>`;
   }
-  if (option === "paiement") return `<div class="opt paie">▪ Paiement des heures supp.</div>`;
-  if (option === "mixte" && calc) {
-    const split = splitSupp(calc.sup25Min, calc.sup50Min,
-      effectivePaySuppMin("mixte", paySuppMin, calc.sup25Min + calc.sup50Min));
-    return `<div class="opt paie">▪ Paiement partiel : ${fmtHM(split.payMin)} payées (équiv. ${fmtHM(split.payEquivMin)})</div>`
+  if (option === "paiement") return `${structLine}<div class="opt paie">▪ Paiement des heures supp.</div>`;
+  if (option === "mixte" && st) {
+    const split = splitSupp(st.arb25Min, st.arb50Min, effectivePaySuppMin("mixte", paySuppMin, arbitrable));
+    return `${structLine}<div class="opt paie">▪ Paiement partiel : ${fmtHM(split.payMin)} payées (équiv. ${fmtHM(split.payEquivMin)})</div>`
       + `<div class="opt recup">▪ ${fmtHM(split.recupMin)} en récup (équiv. ${fmtHM(split.recupEquivMin)})${dsSuffix}</div>`;
   }
-  return "";
+  return structLine;
 }
 
 /* ───────────────────────── État MENSUEL (compta / paie) ─────────────────────
@@ -87,10 +94,10 @@ function recapBlock(recap: MonthRecap | null | undefined): string {
     ${excess}`;
 }
 
-function moisRows(weeks: MoisEmploye["weeks"]): string {
+function moisRows(weeks: MoisEmploye["weeks"], structFloorMin = 0): string {
   return weeks.map(({ week, calc, option, paySuppMin, recupDates }) => `
     <tr${calc ? "" : ' class="vide"'}>
-      <td class="jour">${esc(weekLabel(week))}${calc && calc.sup25Min + calc.sup50Min > 0 ? optionLine(option, recupDates, calc, paySuppMin) : ""}</td>
+      <td class="jour">${esc(weekLabel(week))}${calc && calc.sup25Min + calc.sup50Min > 0 ? optionLine(option, recupDates, calc, paySuppMin, structFloorMin) : ""}</td>
       <td class="num">${calc ? fmtHM(calc.contractMin) : "—"}</td>
       <td class="num">${calc ? fmtHM(calc.totalMin) : "non saisi"}</td>
       <td class="num">${calc ? fmtHM(calc.deltaMin) : "—"}</td>
@@ -104,7 +111,8 @@ function moisRows(weeks: MoisEmploye["weeks"]): string {
 
 function moisEmployePage(f: MoisEmploye, monthId: string): string {
   const total = aggregateMonth(f.weeks.map((w) => w.calc));
-  const pay = payEquivDecided(f.weeks);
+  const structFloor = structuralSuppMin(f.profile);
+  const pay = payEquivDecided(f.weeks, structFloor);
   const payLine = pay > 0
     ? `<div class="pay pay-ok"><span class="k">Heures supp À PAYER ce mois (équiv. majoré, décision employeur)</span><span class="v">${fmtHM(pay)}</span></div>`
     : "";
@@ -131,7 +139,7 @@ function moisEmployePage(f: MoisEmploye, monthId: string): string {
           <th class="num">Supp +25 %</th><th class="num">Supp +50 %</th><th class="num">Équiv. payé</th><th class="num">Férié</th><th class="num">Récup</th>
         </tr>
       </thead>
-      <tbody>${moisRows(f.weeks)}</tbody>
+      <tbody>${moisRows(f.weeks, structFloor)}</tbody>
       <tfoot>
         <tr>
           <td class="label">Total du mois</td>
@@ -173,15 +181,17 @@ function moisEmployePage(f: MoisEmploye, monthId: string): string {
   </section>`;
 }
 
-/** Équivalent majoré des heures supp À PAYER ce mois, d'après les décisions
- *  posées semaine par semaine (paiement intégral, ou part payée du mixte). */
-function payEquivDecided(weeks: MoisEmploye["weeks"]): number {
+/** Équivalent majoré des heures supp À PAYER ce mois : part STRUCTURELLE (contrat
+ *  « 42 h », payée d'office chaque semaine) + part ARBITRABLE dont le paiement a
+ *  été décidé (paiement intégral, ou part payée du mixte). */
+function payEquivDecided(weeks: MoisEmploye["weeks"], structFloorMin = 0): number {
   let out = 0;
   for (const { calc, option, paySuppMin } of weeks) {
     if (!calc) continue;
-    const supp = calc.sup25Min + calc.sup50Min;
-    if (supp <= 0 || (option !== "paiement" && option !== "mixte")) continue;
-    out += splitSupp(calc.sup25Min, calc.sup50Min, effectivePaySuppMin(option, paySuppMin, supp)).payEquivMin;
+    const st = splitStructuralSupp(calc.sup25Min, calc.sup50Min, structFloorMin);
+    out += st.structEquivMin;   // structurel : toujours payé
+    if (st.arbitrableMin <= 0 || (option !== "paiement" && option !== "mixte")) continue;
+    out += splitSupp(st.arb25Min, st.arb50Min, effectivePaySuppMin(option, paySuppMin, st.arbitrableMin)).payEquivMin;
   }
   return out;
 }
@@ -190,7 +200,7 @@ function moisSynthesePage(feuilles: MoisEmploye[], monthId: string): string {
   const rows = feuilles.map((f) => {
     const t = aggregateMonth(f.weeks.map((w) => w.calc));
     const excess = f.recap?.excessMin ?? 0;
-    const pay = payEquivDecided(f.weeks);
+    const pay = payEquivDecided(f.weeks, structuralSuppMin(f.profile));
     return `
       <tr>
         <td>${esc(f.name)}</td>

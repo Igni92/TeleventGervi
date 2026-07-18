@@ -5,6 +5,7 @@ import {
   isMonthId, shiftMonth, monthWeeks, aggregateMonth,
   isHeuresOption, HEURES_OPTION_LABEL, isDateInWeek, daysAfterWeek,
   splitSupp, effectivePaySuppMin, DAY_TAGS,
+  structuralSuppMin, splitStructuralSupp,
   type DayHours,
 } from "./heuresCalc";
 
@@ -270,5 +271,43 @@ describe("heuresCalc — splitSupp (partage paiement / récup, option « mixte �
     expect(effectivePaySuppMin("mixte", 4 * 60, 10 * 60)).toBe(4 * 60);
     expect(effectivePaySuppMin("mixte", 20 * 60, 10 * 60)).toBe(10 * 60);  // borné aux supp réelles
     expect(effectivePaySuppMin("mixte", null, 10 * 60)).toBe(0);
+  });
+});
+
+describe("heuresCalc — heures supp STRUCTURELLES (contrat « 42 h » payé)", () => {
+  it("structuralSuppMin = heures payées − contrat, ≥ 0, 0 si absent/≤ contrat", () => {
+    expect(structuralSuppMin({ weeklyHours: 35, paidWeeklyHours: 42 })).toBe(7 * 60);
+    expect(structuralSuppMin({ weeklyHours: 35, paidWeeklyHours: 35 })).toBe(0);
+    expect(structuralSuppMin({ weeklyHours: 35, paidWeeklyHours: 30 })).toBe(0);
+    expect(structuralSuppMin({ weeklyHours: 35, paidWeeklyHours: null })).toBe(0);
+    expect(structuralSuppMin({ weeklyHours: 35 })).toBe(0);
+  });
+
+  it("Hugo 42h à 45h : 7h structurelles (payées d'office) + 3h arbitrables (1h à +25, 2h à +50)", () => {
+    // 45 h → supp 10 h : +25 % sur 8 h (35→43), +50 % sur 2 h (43→45).
+    const sup25 = 8 * 60, sup50 = 2 * 60;
+    const st = splitStructuralSupp(sup25, sup50, 7 * 60);   // 7 h structurelles
+    // Structurel consomme d'abord la tranche +25 % : 7 h à +25 %.
+    expect(st.struct25Min).toBe(7 * 60);
+    expect(st.struct50Min).toBe(0);
+    expect(st.structEquivMin).toBe(Math.round(7 * 60 * 1.25)); // 8h45 équiv.
+    // Arbitrable : 1 h à +25 % (43e h) + 2 h à +50 %.
+    expect(st.arb25Min).toBe(1 * 60);
+    expect(st.arb50Min).toBe(2 * 60);
+    expect(st.arbitrableMin).toBe(3 * 60);
+  });
+
+  it("Hugo à 40h : tout structurel (5h ≤ 7h), rien d'arbitrable", () => {
+    const st = splitStructuralSupp(5 * 60, 0, 7 * 60);
+    expect(st.arbitrableMin).toBe(0);
+    expect(st.structEquivMin).toBe(Math.round(5 * 60 * 1.25));
+  });
+
+  it("floor 0 (salarié standard) : tout est arbitrable, rien de structurel", () => {
+    const st = splitStructuralSupp(8 * 60, 2 * 60, 0);
+    expect(st.structEquivMin).toBe(0);
+    expect(st.arb25Min).toBe(8 * 60);
+    expect(st.arb50Min).toBe(2 * 60);
+    expect(st.arbitrableMin).toBe(10 * 60);
   });
 });

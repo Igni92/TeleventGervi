@@ -13,7 +13,7 @@ import {
 import { listUserConges, listAllConges } from "@/lib/congesRh";
 import { rangesOverlap, type CongeRequest } from "@/lib/conges";
 import {
-  computeRecupCounter, computeCpCounter, recupCapExcessMin,
+  computeRecupCounter, computeCpCounter, cpConfigOf, recupCapExcessMin,
   expandOuvrables, isoWeekOfDate, monthGridDays, type CounterWeekInput,
 } from "@/lib/planning";
 
@@ -71,7 +71,7 @@ function buildPerson(
     .flatMap((c) => expandOuvrables(c.start, c.end));
 
   const recup = computeRecupCounter(weeks, extraRecup, profile, todayISO);
-  const cp = computeCpCounter(profile.cpAllowanceDays, conges, todayISO);
+  const cp = computeCpCounter(cpConfigOf(profile), conges, todayISO);
   const capMin = profile.recupCapHours == null ? null : Math.round(profile.recupCapHours * 60);
 
   // Grille du mois : tags jour par jour (issus des saisies) + récup posées.
