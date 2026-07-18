@@ -15,6 +15,14 @@ import { StarRating } from "@/components/ui/star-rating";
  * crédité à la réception (quantité + fournisseur + prix d'achat), décrémenté à la
  * vente — quand la valeur est là, on affiche la quantité restante, le fournisseur
  * et le prix d'achat du lot. Les lots avec du stock (quantité > 0) sont en tête.
+ *
+ * DEUX repères de stock, distincts par nature :
+ *   • EN STOCK (physique)   = marchandise réellement présente (`physicalStock`
+ *     de l'API) — c'est LE comparable de la somme des lots ;
+ *   • DISPO À LA VENTE      = physique − commandes engagées (le « dispo » de la
+ *     console, passé en prop).
+ * Si la somme des lots dépasse le stock physique (dérive héritée du registre),
+ * un bandeau le signale — l'écart est écrêté automatiquement par la synchro.
  */
 
 interface Batch {
@@ -42,16 +50,20 @@ const isLocked = (status: string | null | undefined): boolean => /lock/i.test(st
 export function LotDetailsDialog({ item, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [batches, setBatches] = useState<Batch[]>([]);
+  const [physical, setPhysical] = useState<number | null>(null);   // stock physique (unité SAP)
 
   useEffect(() => {
     if (!item) return;
     let cancelled = false;
-    setLoading(true); setBatches([]);
+    setLoading(true); setBatches([]); setPhysical(null);
     (async () => {
       try {
         const r = await fetch(`/api/products/${encodeURIComponent(item.id)}/batches?inStock=1`, { cache: "no-store" });
         const j = await r.json().catch(() => null);
-        if (!cancelled) setBatches(Array.isArray(j?.batches) ? j.batches : []);
+        if (!cancelled) {
+          setBatches(Array.isArray(j?.batches) ? j.batches : []);
+          setPhysical(typeof j?.physicalStock === "number" ? j.physicalStock : null);
+        }
       } catch { /* silencieux */ } finally {
         if (!cancelled) setLoading(false);
       }
@@ -62,12 +74,19 @@ export function LotDetailsDialog({ item, onClose }: Props) {
   const dispo = item?.dispo;
   const unit = item?.unit || "colis";
   const packDivisor = item?.packDivisor && item.packDivisor > 0 ? item.packDivisor : 1;
-  const hasStock = dispo == null || dispo > 0;   // dispo inconnu → on n'exclut rien
+
+  // Quantité en unité d'affichage (colis) — le registre/stock est en pie/kg SAP.
+  const lotColis = (q: number) => Math.round((q / packDivisor) * 10) / 10;
+  // Stock PHYSIQUE en unité d'affichage : le comparable de la somme des lots.
+  const physColis = physical != null ? lotColis(physical) : null;
+  const stockRef = physColis ?? dispo;
+  const hasStock = stockRef == null || stockRef > 0;   // stock inconnu → on n'exclut rien
 
   // Lots AVEC stock (registre) en tête, puis l'ordre FEFO renvoyé par l'API.
   const sorted = [...batches].sort((a, b) => (b.quantity > 0 ? 1 : 0) - (a.quantity > 0 ? 1 : 0));
-  // Quantité d'un lot en unité d'affichage (colis) — le registre stocke en pie/kg.
-  const lotColis = (q: number) => Math.round((q / packDivisor) * 10) / 10;
+  const sumLots = sorted.reduce((s, b) => s + (b.quantity > 0 ? lotColis(b.quantity) : 0), 0);
+  // Somme des lots > stock physique : écart hérité du registre (écrêté à la synchro).
+  const overStock = !loading && physColis != null && sumLots > physColis + 0.05;
 
   return (
     <Dialog open={!!item} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -79,10 +98,24 @@ export function LotDetailsDialog({ item, onClose }: Props) {
           </DialogTitle>
           <DialogDescription>
             Code article <span className="font-mono text-foreground">{item?.code}</span>
-            {dispo != null && <> · en stock <span className="font-semibold text-foreground tnum">{fmtQty(dispo)} {unit}</span></>}
+            {physColis != null && <> · en stock <span className="font-semibold text-foreground tnum">{fmtQty(physColis)} {unit}</span></>}
+            {dispo != null && (
+              physColis != null
+                ? <> · dispo à la vente <span className="font-semibold text-foreground tnum">{fmtQty(dispo)} {unit}</span> <span className="whitespace-nowrap">(hors commandes engagées)</span></>
+                : <> · en stock <span className="font-semibold text-foreground tnum">{fmtQty(dispo)} {unit}</span></>
+            )}
             {" "}· quantité par lot, fournisseur &amp; prix d&apos;achat (décrémentés à la vente).
           </DialogDescription>
         </DialogHeader>
+
+        {overStock && (
+          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-snug text-amber-700 dark:text-amber-300">
+            ⚠️ La somme des lots ({fmtQty(Math.round(sumLots * 10) / 10)} {unit}) dépasse le stock
+            physique ({fmtQty(physColis!)} {unit}) : écart hérité du registre (anciennes ventes non
+            décomptées). Il est résorbé automatiquement à la prochaine synchronisation — les lots
+            les plus anciens seront réduits en premier.
+          </p>
+        )}
 
         {loading ? (
           <p className="py-4 text-[13px] text-muted-foreground inline-flex items-center gap-2">

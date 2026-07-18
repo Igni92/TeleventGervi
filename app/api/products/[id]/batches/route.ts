@@ -13,8 +13,9 @@ import { getLotNotes } from "@/lib/marchandiseNote";
  *     par lot n'existe pas dans le Service Layer de cette base ; la DLC est le
  *     signal fiable « encore en stock » pour du frais.
  *   • tri FEFO : DLC la plus proche d'abord (null en dernier), puis admission.
- * La quantité en stock est affichée en tête du détail à partir du dispo déjà connu
- * côté console (en colis) — inutile de le recalculer ici.
+ * Renvoie aussi `physicalStock` (somme ProductStock.inStock, unité SAP) : c'est le
+ * comparable des quantités par lot du registre — le « dispo » connu côté console
+ * est NET des commandes engagées (available), donc plus bas que la somme des lots.
  */
 export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const [batches, product] = await Promise.all([
+  const [batches, product, phys] = await Promise.all([
     prisma.productBatch.findMany({
       where: {
         productId: params.id,
@@ -40,6 +41,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
       take: 50,
     }),
     prisma.product.findUnique({ where: { id: params.id }, select: { itemCode: true } }),
+    prisma.productStock.aggregate({ where: { productId: params.id }, _sum: { inStock: true } }),
   ]);
 
   // Note qualité (étoiles) par lot, saisie à la réception (clé par itemCode+lot).
@@ -48,5 +50,5 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
     : new Map<string, number>();
   const withNotes = batches.map((b) => ({ ...b, rating: lotNotes.get(b.batchNumber) ?? null }));
 
-  return NextResponse.json({ batches: withNotes });
+  return NextResponse.json({ batches: withNotes, physicalStock: phys._sum.inStock ?? null });
 }

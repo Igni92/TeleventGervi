@@ -169,6 +169,59 @@ export function isRealLot(lot: string | null | undefined): boolean {
   return /^(EM|OP)\d+$/i.test(s);
 }
 
+// ── Écrêtage du registre des lots au stock physique ───────────
+/** Lot du registre tel que vu par l'écrêtage (sous-ensemble de ProductBatch). */
+export interface LedgerLotLike {
+  quantity: number;
+  admissionDate?: Date | string | null;
+  batchNumber?: string | null;
+}
+
+/**
+ * Plan d'ÉCRÊTAGE du registre d'un article : la somme des quantités par lot ne
+ * peut PAS dépasser le stock PHYSIQUE de l'article (« 396 kg en stock, impossible
+ * d'avoir 308 + 352 + 210 + 88 au registre »). Quand elle le dépasse, le surplus
+ * est fantôme : dérive historique d'avant le suivi complet des mouvements, ou
+ * ventes passées directement dans SAP (invisibles de TeleVent, jamais débitées).
+ *
+ * Répartition FIFO : le fantôme vit dans les lots les PLUS ANCIENS (en réalité
+ * déjà vendus) → on retire le surplus du plus vieux vers le plus récent
+ * (admission croissante, inconnue = réputé récent, écrêté en dernier). Plancher 0.
+ *
+ * Renvoie UNIQUEMENT les lots à corriger, avec leur NOUVELLE quantité (arrondie
+ * au millième, comme debitLots). Somme finale ≤ stock physique ; registre déjà
+ * ≤ stock (ou stock inconnu ≤ 0 avec registre vide) → aucun changement.
+ */
+export function planLedgerTrim<T extends LedgerLotLike>(
+  lots: T[],
+  physicalStock: number,
+): { lot: T; quantity: number }[] {
+  const round3 = (n: number) => Math.round(n * 1000) / 1000;
+  const stock = Math.max(0, physicalStock);
+  const total = lots.reduce((s, l) => s + Math.max(0, l.quantity), 0);
+  let surplus = round3(total - stock);
+  if (surplus <= 0) return [];
+
+  const time = (l: LedgerLotLike): number => {
+    const t = l.admissionDate ? new Date(l.admissionDate).getTime() : NaN;
+    return Number.isFinite(t) ? t : Infinity;
+  };
+  const ordered = [...lots].sort(
+    (a, b) => time(a) - time(b)
+      || String(a.batchNumber ?? "").localeCompare(String(b.batchNumber ?? "")),
+  );
+
+  const trims: { lot: T; quantity: number }[] = [];
+  for (const lot of ordered) {
+    if (surplus <= 0) break;
+    if (lot.quantity <= 0) continue;
+    const cut = Math.min(lot.quantity, surplus);
+    surplus = round3(surplus - cut);
+    trims.push({ lot, quantity: round3(lot.quantity - cut) });
+  }
+  return trims;
+}
+
 export type LotChoice = {
   lot: string;                                       // JAMAIS vide — EM<DocNum> ou EM_PENDING
   reason: "fifo" | "decouvert" | "aucun-pdn" | "env-defaut";

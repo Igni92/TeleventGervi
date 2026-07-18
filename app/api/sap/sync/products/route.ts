@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap, type SapItem, type SapItemGroup, type SapBatchDetail } from "@/lib/sapb1";
 import { isCronAuthorized } from "@/lib/cronAuth";
+import { reconcileLedgerToPhysical } from "@/lib/lotLedger";
 
 // ~1300 items paginés depuis SAP → peut dépasser le défaut serverless.
 export const dynamic = "force-dynamic";
@@ -248,6 +249,22 @@ export async function POST(req: NextRequest) {
       errorSamples.push(`Bulk products: ${(e as Error).message}`);
     }
 
+    // ── 4bis. Écrêtage du registre des lots au stock physique ──
+    // La somme des lots d'un article (registre lib/lotLedger) ne peut pas
+    // dépasser son stock physique : le surplus est fantôme (dérive historique,
+    // ventes passées directement dans SAP jamais débitées côté TeleVent). Le
+    // stock venant d'être rafraîchi (4c), on écrête ICI — à la baisse uniquement,
+    // du lot le plus ancien au plus récent ; les articles avec un mouvement
+    // registre < 60 min sont laissés au passage suivant (garde anti-course).
+    // NB : ce n'est PAS la synchro qui « écrase » le registre — elle n'écrit
+    // toujours aucune quantité par lot venant de SAP (ce stock n'y existe pas) ;
+    // elle réconcilie le TOTAL par article avec la réalité physique.
+    let ledger: { articles: number; lots: number; trimmedQty: number } | null = null;
+    if (synced > 0) {
+      try { ledger = await reconcileLedgerToPhysical(); }
+      catch (e) { errorSamples.push(`Ledger reconcile: ${(e as Error).message}`); }
+    }
+
     // ── 5. Sync batches for batch-managed products ──────────
     // SAP B1 a BatchNumberDetails (1 row par lot). Pour le prix d'achat,
     // on enrichit via PurchaseDeliveryNotes filtré par ItemCode (best effort).
@@ -394,6 +411,7 @@ export async function POST(req: NextRequest) {
       skipped,
       batchSynced,
       priceEnriched,
+      ledger,
       durationMs: finishedAt.getTime() - startedAt.getTime(),
       errors: errorSamples,
     });
