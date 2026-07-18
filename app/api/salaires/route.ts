@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/permissions";
 import {
-  computeWeek, typicalDayMinutes, isMonthId, monthIdOf, monthWeeks,
+  computeWeek, typicalDayMinutes, isMonthId, monthIdOf, monthWeeks, weekDates,
   splitSupp, effectivePaySuppMin, splitStructuralSupp, structuralSuppMin,
   type HoursProfile,
 } from "@/lib/heuresCalc";
@@ -20,6 +20,7 @@ import {
   saveSalaryMonth, listSalaryMonths,
   saveSalaryProfile, listSalaryProfiles,
   getRecapSent, markRecapSent,
+  getComptaEmails, setComptaEmails, listEnvois, logEnvoi,
 } from "@/lib/salairesRh";
 import { appBaseUrl } from "@/lib/congesNotify";
 import { sendMailAsShared } from "@/lib/graph";
@@ -66,6 +67,11 @@ function buildHeures(
     ferieMin: 0, congesMin: 0, cpJours: 0, maladieJours: 0, absentJours: 0, recupJours: 0,
     weeksWithData: 0, weeksTotal: weekIds.length,
   };
+  // Dates de RÉCUP prise (repos) — dédupliquées : feuille (tag « récup ») + jours
+  // des congés RÉCUP validés (l'auto-répartition récup→CP inscrit la récup en
+  // congé, pas en tag). La récup est prioritaire sur les CP → ces jours partent
+  // en récup, et le détail (récup vs CP) apparaît ainsi sur le document compta.
+  const recupDates = new Set<string>();
   for (const w of weekIds) {
     const e = entries?.get(w);
     if (!e) continue;
@@ -95,18 +101,22 @@ function buildHeures(
         }
       }
     }
-    for (const d of e.days) {
+    const wDates = weekDates(w);
+    e.days.forEach((d, i) => {
       if (d?.tag === "maladie") out.maladieJours += 1;
       else if (d?.tag === "absent") out.absentJours += 1;
-      else if (d?.tag === "recup") out.recupJours += 1;
-    }
+      else if (d?.tag === "recup" && wDates[i]) recupDates.add(wDates[i]);
+    });
   }
-  // CP VALIDÉS tombant dans le mois civil (jours ouvrables, hors dim./fériés).
+  // CP + RÉCUP VALIDÉS tombant dans le mois civil (jours ouvrables, hors dim./fériés).
   const a = `${monthId}-01`, b = monthEndISO(monthId);
   for (const g of conges) {
-    if (g.type !== "cp" || g.status !== "approved" || !rangesOverlap(g.start, g.end, a, b)) continue;
-    out.cpJours += expandOuvrables(g.start > a ? g.start : a, g.end < b ? g.end : b).length;
+    if (g.status !== "approved" || !rangesOverlap(g.start, g.end, a, b)) continue;
+    const from = g.start > a ? g.start : a, to = g.end < b ? g.end : b;
+    if (g.type === "cp") out.cpJours += expandOuvrables(from, to).length;
+    else if (g.type === "recup") for (const dte of expandOuvrables(from, to)) recupDates.add(dte);
   }
+  out.recupJours = recupDates.size;
   return out;
 }
 
@@ -169,8 +179,10 @@ export async function GET(req: NextRequest) {
   if (!isMonthId(month)) return NextResponse.json({ error: "Mois invalide" }, { status: 400 });
 
   try {
-    const [rows, sent] = await Promise.all([buildRows(month), getRecapSent(month)]);
-    return NextResponse.json({ ok: true, month, rows, sent, canEdit: c.canEdit });
+    const [rows, sent, comptaEmails, envois] = await Promise.all([
+      buildRows(month), getRecapSent(month), getComptaEmails(), listEnvois(),
+    ]);
+    return NextResponse.json({ ok: true, month, rows, sent, canEdit: c.canEdit, comptaEmails, envois });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
@@ -183,10 +195,20 @@ export async function POST(req: NextRequest) {
 
   let body: {
     action?: string; month?: string; user?: string; primes?: unknown; frais?: unknown; note?: unknown;
-    password?: unknown; mode?: string; payMin?: unknown;
+    mode?: string; payMin?: unknown; pdfBase64?: unknown; kind?: string; emails?: unknown;
   };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
+
+  // ── Destinataires du cabinet comptable (réglage UI, sans mois) ──
+  if (body.action === "setComptaEmails") {
+    try {
+      const emails = await setComptaEmails(body.emails);
+      return NextResponse.json({ ok: true, comptaEmails: emails });
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
+  }
 
   const month = body.month ?? "";
   if (!isMonthId(month)) return NextResponse.json({ error: "Mois invalide" }, { status: 400 });
@@ -238,13 +260,22 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── ENVOI DU RÉCAP au cabinet comptable (remplace le PDF compta) ──
+  // ── ENVOI AU CABINET : le PDF (généré côté navigateur, base64) est joint au
+  //    mail, envoyé aux destinataires configurés. Chaque envoi est journalisé
+  //    (liste des documents transmis) ; `kind:"rectif"` = rectificatif. ──
   if (body.action === "send") {
     try {
       const from = process.env.CONGES_FROM_ADDRESS || process.env.RELANCE_FROM_ADDRESS;
       if (!from) return NextResponse.json({ error: "Boîte d'envoi non configurée (CONGES_FROM_ADDRESS)" }, { status: 400 });
-      const to = (process.env.COMPTA_EMAIL ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-      const recipients = to.length ? to : ["compta@gervifrais.com"];
+      // Défensif : accepte le base64 pur OU une data-URI « data:…;base64,XXXX ».
+      const pdfBase64 = typeof body.pdfBase64 === "string" ? body.pdfBase64.replace(/^data:[^,]*base64,/, "") : "";
+      if (!pdfBase64) return NextResponse.json({ error: "PDF manquant" }, { status: 400 });
+      const kind = body.kind === "rectif" ? "rectif" : "normal";
+
+      // Destinataires : réglage UI d'abord, repli env COMPTA_EMAIL, puis défaut.
+      const configured = await getComptaEmails();
+      const envTo = (process.env.COMPTA_EMAIL ?? "").split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
+      const recipients = configured.length ? configured : envTo.length ? envTo : ["compta@gervifrais.com"];
 
       const rows = await buildRows(month);
       const recapRows: RecapRow[] = rows
@@ -255,15 +286,19 @@ export async function POST(req: NextRequest) {
           primes: r.salary?.primes ?? [], frais: r.salary?.frais ?? [],
           note: r.salary?.note, missing: r.missing,
         }));
-      if (recapRows.length === 0) return NextResponse.json({ error: "Aucune donnée ce mois-ci" }, { status: 400 });
+      const filename = `elements-salaires-${month}.pdf`;
 
       await sendMailAsShared(from, {
         to: recipients,
-        subject: `💶 Éléments des salaires — ${salaireMonthLabel(month)}`,
+        subject: `💶 ${kind === "rectif" ? "RECTIF · " : ""}Éléments des salaires — ${salaireMonthLabel(month)}`,
         html: recapMailHtml(month, recapRows, appBaseUrl()),
+        attachments: [{ name: filename, base64: pdfBase64, contentType: "application/pdf" }],
       });
-      const sent = await markRecapSent(month, c.email, recipients);
-      return NextResponse.json({ ok: true, month, sent });
+      const [sent, envoi] = await Promise.all([
+        markRecapSent(month, c.email, recipients),
+        logEnvoi({ monthId: month, sentBy: c.email, to: recipients, kind, filename }),
+      ]);
+      return NextResponse.json({ ok: true, month, sent, envoi, recipients });
     } catch (e) {
       return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
     }

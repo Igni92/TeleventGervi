@@ -167,6 +167,18 @@ export interface SalaryHeures {
   weeksTotal: number;
 }
 
+/** Une TRACE d'envoi du document (PDF) au cabinet — la « liste des envois » de
+ *  l'état comptable. `kind` distingue un premier envoi d'une RECTIFICATION. */
+export interface SalaryEnvoi {
+  id: string;
+  monthId: string;         // « YYYY-MM » du document envoyé
+  sentAt: string;          // ISO
+  sentBy: string;          // email de l'expéditeur (admin)
+  to: string[];            // destinataires
+  kind: "normal" | "rectif";
+  filename: string;        // nom du PDF joint
+}
+
 /** Éléments MANQUANTS à compléter avant transmission au cabinet comptable. */
 export function missingElements(
   monthId: string,
