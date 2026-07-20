@@ -142,7 +142,10 @@ export function CarrierTariffEditor({
             {dirty && <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">· non enregistré</span>}
           </p>
           <p className="text-[10.5px] text-muted-foreground truncate pl-5">
-            Code {carrierCode} · {tariff.brackets.length} tranche{tariff.brackets.length > 1 ? "s" : ""} ·{" "}
+            Code {carrierCode}
+            {/* Dépôt FT sans grille propre → grille FAMILLE partagée (l'enregistrer modifie la famille). */}
+            {tariff.carrierCode && tariff.carrierCode !== carrierCode && ` · grille partagée ${tariff.carrierCode}`}
+            {" · "}{tariff.brackets.length} tranche{tariff.brackets.length > 1 ? "s" : ""} ·{" "}
             {tariff.zones.length} zone{tariff.zones.length > 1 ? "s" : ""}
             {!tariffIsUsable(tariff) && " · grille incomplète"}
           </p>

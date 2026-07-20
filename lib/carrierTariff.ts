@@ -359,11 +359,37 @@ function antoineTemplate(carrierCode: string): CarrierTariff {
 }
 
 /** Code Delanchy ? = contient DELANCHY, ou l'un des dépôts « FT » suivis d'un
- *  numéro de département (FT86, FT94…) — Delanchy regroupe tous les FT. */
+ *  numéro de département (FT54, FT86, FT94…) — Delanchy regroupe TOUS les FT. */
 export function isDelanchyCarrierCode(code: string | null | undefined): boolean {
   const c = normCarrier(code);
   if (!c) return false;
   return c.includes("DELANCHY") || /(^|[^A-Z0-9])FT\s*\d+/.test(c);
+}
+
+/**
+ * Grille applicable à un transporteur : la sienne si elle existe, SINON celle
+ * de sa FAMILLE — tous les dépôts FT<n°> (FT54, FT86, FT94…) retombent sur la
+ * grille DELANCHY, les codes contenant ANTOINE sur la grille ANTOINE. Ainsi un
+ * dépôt FT jamais importé est quand même tarifé.
+ */
+export function resolveCarrierTariff(
+  tariffs: CarrierTariffMap | null | undefined,
+  carrierCode: string | null | undefined,
+): CarrierTariff | null {
+  if (!tariffs) return null;
+  const code = normCarrier(carrierCode);
+  if (!code) return null;
+  if (tariffs[code]) return tariffs[code];
+  if (isDelanchyCarrierCode(code)) {
+    if (tariffs.DELANCHY) return tariffs.DELANCHY;
+    for (const [k, t] of Object.entries(tariffs)) if (isDelanchyCarrierCode(k)) return t;
+    return null;
+  }
+  if (code.includes("ANTOINE")) {
+    if (tariffs.ANTOINE) return tariffs.ANTOINE;
+    for (const [k, t] of Object.entries(tariffs)) if (k.includes("ANTOINE")) return t;
+  }
+  return null;
 }
 
 /**

@@ -10,6 +10,7 @@ import { selectCarryoverEntries } from "@/lib/livraisonCarryover";
 import { getClientTournees, type ClientTournee } from "@/lib/clientTournee";
 import { getClientTrclCarriers } from "@/lib/clientCarriers";
 import { isLivraisonRestricted } from "@/lib/permissions";
+import { isDelanchyCarrierCode } from "@/lib/carrierTariff";
 
 export const dynamic = "force-dynamic";
 
@@ -432,7 +433,11 @@ export async function GET(req: NextRequest) {
           }
           return savedTourneeByCard.get(d.CardCode) ?? null;
         })(),
-        carrierName: trspCode ? carrierByCode.get(trspCode) ?? trspCode : null,
+        // Libellé : tous les dépôts FT (FT54/FT86/FT94…) s'affichent « Delanchy »
+        // en préparation — le trspCode réel reste porté par le BL.
+        carrierName: trspCode
+          ? (isDelanchyCarrierCode(trspCode) ? "Delanchy" : carrierByCode.get(trspCode) ?? trspCode)
+          : null,
         clientType: typeByCardCode.get(d.CardCode) ?? null,   // GMS | CHR | EXPORT | null
         prepared,                                             // « faite » (coché) OU vente comptoir d'office
         preparedBy: preparedByDoc.get(d.DocEntry) ?? (comptoir ? "Comptoir" : null), // qui a marqué « faite »
@@ -526,12 +531,15 @@ export async function GET(req: NextRequest) {
     const visibleDocs = restricted ? docs.filter((d) => d.misEnPrep) : docs;
 
     // ── Regroupement par transporteur ──
+    // Demande direction : TOUS les dépôts FT (FT54, FT86, FT94…) sont Delanchy
+    // → un seul groupe DELANCHY en préparation (le BL garde son trspCode réel).
     type Doc = (typeof docs)[number];
     const groups = new Map<string, { code: string | null; name: string; docs: Doc[] }>();
     for (const d of visibleDocs) {
-      const key = d.trspCode ?? "__none__";
-      const name = d.carrierName ?? "Non affecté";
-      const g = groups.get(key) ?? { code: d.trspCode, name, docs: [] };
+      const delanchy = !!d.trspCode && isDelanchyCarrierCode(d.trspCode);
+      const key = delanchy ? "DELANCHY" : d.trspCode ?? "__none__";
+      const name = delanchy ? "Delanchy" : d.carrierName ?? "Non affecté";
+      const g = groups.get(key) ?? { code: delanchy ? "DELANCHY" : d.trspCode, name, docs: [] };
       g.docs.push(d);
       groups.set(key, g);
     }

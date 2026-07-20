@@ -12,7 +12,7 @@ import {
   sanitizeClientPricing,
   type ClientCarrierPricing,
 } from "@/lib/transportCost";
-import { computePositionCost } from "@/lib/carrierTariff";
+import { computePositionCost, resolveCarrierTariff } from "@/lib/carrierTariff";
 import { departementOfZip } from "@/lib/geo/zip";
 
 export const dynamic = "force-dynamic";
@@ -127,7 +127,7 @@ export async function GET() {
     const direct = isDirectCarrier(model, code) || (model.directCarriers.length === 0);
     // Externe avec GRILLE : coût par position (tranche de poids × département
     // du client). Repli : legacy €/kg (client) × kg, ou prix position (direct).
-    const posCost = !direct ? computePositionCost(carrierTariffs[code] ?? null, cli?.dept, kg) : null;
+    const posCost = !direct ? computePositionCost(resolveCarrierTariff(carrierTariffs, code), cli?.dept, kg) : null;
     const cost = posCost ? posCost.total : transportPerKgForCarrier(model, prixPosition, code, pricing) * kg;
 
     totalKg += kg; totalCost += cost;

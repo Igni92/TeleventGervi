@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Truck } from "lucide-react";
 import { normCarrier } from "@/lib/transportCost";
-import type { CarrierTariff, CarrierTariffMap } from "@/lib/carrierTariff";
+import { resolveCarrierTariff, type CarrierTariff, type CarrierTariffMap } from "@/lib/carrierTariff";
 import { CarrierTariffEditor } from "@/components/clients/CarrierTariffEditor";
 import { CarrierTariffImport } from "@/components/transport/CarrierTariffImport";
 
@@ -135,17 +135,21 @@ export function ClientTransportPricing({
           <div className="space-y-1.5">
             {external.map((c) => {
               const k = normCarrier(c.code);
+              // Grille du code exact, sinon celle de sa FAMILLE (FT54/FT86/
+              // FT94… → DELANCHY) : une seule grille partagée par les dépôts.
+              const t0 = resolveCarrierTariff(tariffs, k);
               return (
                 <CarrierTariffEditor
                   // updatedAt dans la clé : un import/enregistrement remonte
                   // l'éditeur avec la grille fraîche (état local sinon figé).
-                  key={`${k}:${tariffs[k]?.updatedAt ?? "vide"}`}
+                  key={`${k}:${t0?.updatedAt ?? "vide"}`}
                   carrierCode={k}
                   carrierName={c.name}
-                  initialTariff={tariffs[k] ?? null}
+                  initialTariff={t0}
                   clientDept={departement}
                   canEdit={canEdit}
-                  onSaved={(t: CarrierTariff) => setTariffs((m) => ({ ...m, [k]: t }))}
+                  onSaved={(t: CarrierTariff) =>
+                    setTariffs((m) => ({ ...m, [normCarrier(t.carrierCode) || k]: t }))}
                 />
               );
             })}
