@@ -192,10 +192,12 @@ export function CarrierTariffEditor({
                   <select
                     className="h-7 rounded-md border border-input bg-background px-1 text-[11px] text-foreground disabled:opacity-60"
                     value={b.unit} disabled={!canEdit} aria-label="Unité de la tranche"
+                    title="€ / position : forfait. € / 100 kg et € / tonne : le coût de la position se CALCULE (prix × poids livré)"
                     onChange={(e) => mut((t) => ({ ...t, brackets: t.brackets.map((x) => x.id === b.id ? { ...x, unit: e.target.value as BracketUnit } : x) }))}
                   >
-                    <option value="position">{BRACKET_UNIT_LABELS.position}</option>
-                    <option value="per100kg">{BRACKET_UNIT_LABELS.per100kg}</option>
+                    {(Object.entries(BRACKET_UNIT_LABELS) as [BracketUnit, string][]).map(([u, label]) => (
+                      <option key={u} value={u}>{label}</option>
+                    ))}
                   </select>
                   {canEdit && (
                     <button type="button" aria-label="Supprimer la tranche"

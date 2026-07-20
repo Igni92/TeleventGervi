@@ -34,12 +34,15 @@ import { normCarrier } from "./transportCost";
 
 /* ─────────────────────────────── Modèle ─────────────────────────────────── */
 
-/** Unité de cotation d'une tranche : forfait position ou prix aux 100 kg. */
-export type BracketUnit = "position" | "per100kg";
+/** Unité de cotation d'une tranche : forfait position, prix aux 100 kg
+ *  (grilles Antoine) ou prix À LA TONNE (Delanchy au-delà de 100 kg — le coût
+ *  de la position se CALCULE alors : prix × kg ÷ 1000). */
+export type BracketUnit = "position" | "per100kg" | "perTonne";
 
 export const BRACKET_UNIT_LABELS: Record<BracketUnit, string> = {
   position: "€ / position",
   per100kg: "€ / 100 kg",
+  perTonne: "€ / tonne",
 };
 
 /** Tranche de poids MODIFIABLE (bornes en kg, maxKg null = au-delà). */
@@ -157,7 +160,9 @@ export function computePositionCost(
   if (!bracket) return null;
   const price = n(zone.prices[bracket.id]);
   if (price <= 0) return null;
-  const base = bracket.unit === "per100kg" ? (price * n(kg)) / 100 : price;
+  const base = bracket.unit === "per100kg" ? (price * n(kg)) / 100
+    : bracket.unit === "perTonne" ? (price * n(kg)) / 1000
+    : price;
   let percentTotal = 0;
   let fixedAmount = 0;
   for (const l of tariff.extras) {
@@ -190,7 +195,7 @@ const MAX_EXTRAS = 20;
 const MAX_DEPTS = 120;
 
 function coerceUnit(v: unknown): BracketUnit {
-  return v === "per100kg" ? "per100kg" : "position";
+  return v === "per100kg" || v === "perTonne" ? v : "position";
 }
 
 /** Normalise une grille entrante (PUT). Ne jette jamais. */
@@ -265,13 +270,15 @@ const zone = (id: string, label: string, departements: string[], prices: Record<
   ({ id, label, departements, prices });
 
 /** Grille DELANCHY — « GERVIFRAIS TARIF 2025 » (tarif par département).
- *  Majoration gasoil PRÉ-REMPLIE à 5 % (valeur du fichier) — à actualiser
- *  chaque mois (barème Delanchy « majoration gasoil du mois en vigueur »). */
+ *  0–100 kg : forfait par position ; 101–500 kg : prix À LA TONNE (le coût de
+ *  la position se calcule : prix × kg ÷ 1000). Majoration gasoil PRÉ-REMPLIE à
+ *  5 % (valeur du fichier) — à actualiser chaque mois (barème Delanchy
+ *  « majoration gasoil du mois en vigueur »). */
 function delanchyTemplate(carrierCode: string): CarrierTariff {
   const B1 = "0-100", B2 = "101-500";
   const brackets: TariffBracket[] = [
     { id: B1, minKg: 0, maxKg: 100, unit: "position" },
-    { id: B2, minKg: 101, maxKg: 500, unit: "position" },
+    { id: B2, minKg: 101, maxKg: 500, unit: "perTonne" },
   ];
   const rows: [string[], number, number][] = [
     [["44", "85"], 47.95, 395.63],

@@ -112,7 +112,9 @@ function parseDelanchy(matrix: CellMatrix): TariffImportResult | null {
     id: `${c.minKg}-${c.maxKg}`,
     minKg: c.minKg,
     maxKg: c.maxKg,
-    unit: "position",
+    // Barème Delanchy : forfait par position jusqu'à 100 kg ; AU-DELÀ le prix
+    // est À LA TONNE (coût de la position = prix × kg ÷ 1000).
+    unit: c.maxKg <= 100 ? "position" : "perTonne",
   }));
 
   // 2) Lignes départements : n° en colonne A, prix en face des tranches.

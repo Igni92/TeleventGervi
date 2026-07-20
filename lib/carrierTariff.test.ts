@@ -79,6 +79,16 @@ describe("computePositionCost", () => {
     expect(c.base).toBeCloseTo(68.04, 2);           // 34,02 × 200 ÷ 100
     expect(c.total).toBeCloseTo(68.04 * 1.05 + 4.62, 2);
   });
+  it("tranche à la tonne : base = prix × kg ÷ 1000 (Delanchy > 100 kg)", () => {
+    const t: CarrierTariff = {
+      ...tariff,
+      brackets: [{ id: "b2", minKg: 101, maxKg: 500, unit: "perTonne" }],
+      zones: [{ id: "z", label: "54", departements: ["54"], prices: { b2: 453 } }],
+      extras: [],
+    };
+    // 453 €/t × 200 kg = 90,60 € la position — PAS 453 € la position.
+    expect(computePositionCost(t, "54", 200)!.total).toBeCloseTo(90.6, 2);
+  });
   it("null si département hors zones, poids hors tranches ou tranche non cotée", () => {
     expect(computePositionCost(tariff, "33", 40)).toBeNull();     // dépt non couvert
     expect(computePositionCost(tariff, "75", 0)).toBeNull();      // pas de poids
@@ -113,12 +123,14 @@ describe("templates fournisseurs", () => {
     for (const code of ["DELANCHY", "FT86", "FT94", "DELANCHY FT86"]) {
       const t = tariffTemplateFor(code)!;
       expect(t).not.toBeNull();
-      expect(t.brackets).toHaveLength(2);
+      expect(t.brackets.map((b) => b.unit)).toEqual(["position", "perTonne"]);
       expect(tariffIsUsable(t)).toBe(true);
       // Dépt 44, 0–100 kg : 47,95 € / position + 5 % gazole + 4,62 € admin.
       const c = computePositionCost(t, "44", 80)!;
       expect(c.base).toBeCloseTo(47.95, 2);
       expect(c.total).toBeCloseTo(47.95 * 1.05 + 4.62, 2);
+      // Dépt 44, 250 kg : 395,63 €/TONNE → 98,91 € la position (pas 395,63 €).
+      expect(computePositionCost(t, "44", 250)!.base).toBeCloseTo(98.91, 2);
     }
   });
   it("ANTOINE → grille distribution 01/2026 (forfaits puis prix aux 100 kg)", () => {
