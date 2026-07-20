@@ -72,10 +72,10 @@ describe("parseTariffMatrix — Delanchy", () => {
   it("détecte le format", () => {
     expect(res.format).toBe("delanchy");
   });
-  it("tranches 0–100 / 101–500 au forfait position", () => {
+  it("tranches : 0–100 forfait position, 101–500 À LA TONNE", () => {
     expect(res.tariff.brackets).toEqual([
       { id: "0-100", minKg: 0, maxKg: 100, unit: "position" },
-      { id: "101-500", minKg: 101, maxKg: 500, unit: "position" },
+      { id: "101-500", minKg: 101, maxKg: 500, unit: "perTonne" },
     ]);
   });
   it("regroupe les départements aux prix identiques, arrondis à 2 décimales", () => {
