@@ -9,8 +9,8 @@ import { getClientTournee, setClientTournee } from "@/lib/clientTournee";
 import { notifyAll } from "@/lib/push";
 import { sap } from "@/lib/sapb1";
 import { mirrorCreatedOrder } from "@/lib/sapMirror";
-import { decrementLocalStock } from "@/lib/stockSync";
-import { getLotMaps, resolveLotForSegment, LOT_PENDING } from "@/lib/lotResolver";
+import { decrementLocalStock, incrementLocalStock } from "@/lib/stockSync";
+import { getLotMaps, resolveLotForSegment, LOT_PENDING, bumpLot } from "@/lib/lotResolver";
 import { getEmAffects } from "@/lib/emAffect";
 import { createBonPrep, markBonPrepTransformed } from "@/lib/bonPrep";
 import { chooseLot, isRealLot } from "@/lib/gervifrais-calc";
@@ -18,7 +18,8 @@ import { colisInfo } from "@/lib/colis";
 import { isPrecommande } from "@/lib/livraison";
 import { isComptoirClient } from "@/lib/segments";
 import { markComptoirDelivered } from "@/lib/inventory";
-import { debitLots, getLedgerFifoLot } from "@/lib/lotLedger";
+import { creditLots, debitLots, getLedgerFifoLot } from "@/lib/lotLedger";
+import { writeAudit } from "@/lib/audit";
 import { heureParis } from "@/lib/paris-time";
 import { getSafeguardsConfig } from "@/lib/safeguardsStore";
 import {
@@ -112,6 +113,11 @@ interface OrderLine {
    *  réception. Sans ce flag, le stock agrégé de l'article (autres magasins)
    *  ferait poser un vrai lot sur une quantité qui n'existe pas. */
   decouvert?: boolean;
+  /** VENTE SOFRUCE uniquement : prix d'ACHAT unitaire (même unité de stock que
+   *  `price`) porté sur l'entrée marchandise créée avant la vente. Absent →
+   *  l'achat reprend le prix de VENTE de la ligne (marge 0, jamais le coût SAP
+   *  par défaut qui serait faux pour un lot bradé). */
+  purchasePrice?: number;
 }
 interface CreateOrderBody {
   clientId: string;
@@ -128,6 +134,12 @@ interface CreateOrderBody {
    *  lots affectés à la main dans l'onglet Bons de commande). Une précommande
    *  (date au-delà du prochain jour livrable) force « COMMANDE » quel que soit ce champ. */
   docKind?: "BL" | "COMMANDE";
+  /** VENTE SOFRUCE (marché) : créer d'abord l'ENTRÉE MARCHANDISE fournisseur
+   *  Sofruce (mêmes articles/quantités/entrepôts, prix = purchasePrice de la
+   *  ligne sinon prix de vente), poser son lot EM sur la vente, puis créer le
+   *  BL. Remplace la double saisie manuelle achat + vente (source des doublons
+   *  d'EM constatés). Incompatible bon de commande / précommande. */
+  venteSofruce?: boolean;
   /** Transformation d'un BON DE PRÉPARATION (export) : présent = créer le BL
    *  pour de vrai (lots posés par ligne) et marquer le bon transformé — le
    *  divert « client EXPORT → bon de préparation » est alors court-circuité. */
@@ -181,6 +193,20 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+    if (l.purchasePrice != null && (!Number.isFinite(l.purchasePrice) || l.purchasePrice < 0)) {
+      return NextResponse.json(
+        { error: `Prix d'achat invalide pour l'article ${l.itemCode} : il doit être un nombre positif ou nul.` },
+        { status: 400 },
+      );
+    }
+  }
+  // ── VENTE SOFRUCE : BL direct uniquement (l'achat crée le stock à l'instant T ;
+  // un bon de commande/précommande ne le consommerait pas → stock gonflé). ──
+  if (body.venteSofruce && (body.docKind === "COMMANDE" || isPrecommande(body.deliveryDate) || body.bonPrepId)) {
+    return NextResponse.json(
+      { error: "Vente Sofruce : uniquement en BL direct (pas de bon de commande ni de précommande)." },
+      { status: 400 },
+    );
   }
   // ── #14 — Validation de la date de livraison (parseable + plage raisonnable) ──
   // On accepte d'hier (−1 j, tolérance fuseau/saisie de la veille au soir) jusqu'à
@@ -351,6 +377,118 @@ export async function POST(req: NextRequest) {
     console.warn("[Order] Pré-validation items échouée:", (e as Error).message);
     // On laisse passer — SAP renverra l'erreur réelle (et le lot retombera sur
     // le seul stock local, comme avant).
+  }
+
+  // ── VENTE SOFRUCE : ENTRÉE MARCHANDISE d'abord, la vente ensuite ─────────
+  // Marché : la marchandise est achetée à Sofruce et revendue dans la foulée
+  // (PERSO / CLASSIC FRUIT / HABIBI…). Une seule saisie côté console : on crée
+  // ici l'EM fournisseur (mêmes articles/quantités/entrepôts), on pose son lot
+  // EM<DocNum> sur chaque ligne de la vente, on crédite stock local + registre —
+  // puis le flux normal crée le BL qui les débite. Si l'EM échoue, la vente
+  // n'est PAS créée (pas de vente sans achat). L'inverse (EM créée puis BL en
+  // échec) est signalé dans l'erreur pour annuler l'EM à la main.
+  let sofruceReceipt: { docNum: number; docEntry: number; lot: string } | null = null;
+  if (body.venteSofruce) {
+    const SOFRUCE_CARDCODE = process.env.GERVIFRAIS_SOFRUCE_CARDCODE?.trim() || "SOFRUCE";
+    // Agrégat par article × entrepôt : les lignes payante + offerte (promo) d'un
+    // même article ne font qu'UNE ligne d'achat. Prix d'achat = purchasePrice
+    // saisi, sinon prix de VENTE de la ligne (marge 0 — jamais le coût SAP par
+    // défaut, faux pour un lot bradé).
+    const agg = new Map<string, { itemCode: string; warehouseCode: string; qty: number; price: number | null }>();
+    for (const l of body.lines) {
+      const whs = l.warehouseCode || "000";
+      const key = `${l.itemCode}|${whs}`;
+      const cur = agg.get(key) ?? { itemCode: l.itemCode, warehouseCode: whs, qty: 0, price: null };
+      cur.qty += l.quantity;
+      const linePA = l.purchasePrice ?? l.price ?? null;
+      if (cur.price == null && linePA != null && linePA > 0) cur.price = linePA;
+      agg.set(key, cur);
+    }
+    const achatLines = [...agg.values()];
+    const emPayload: Record<string, unknown> = {
+      CardCode: SOFRUCE_CARDCODE,
+      DocDate: today,
+      DocDueDate: today,
+      TaxDate: today,
+      Comments: docRef({
+        prefix: "EM", name: session.user?.name, email: session.user?.email,
+        note: `Vente Sofruce — ${client.nom}`,
+      }),
+      DocumentLines: achatLines.map((l) => {
+        const ratio = productMap.get(l.itemCode)?.salesQtyPerPackUnit;
+        const line: Record<string, unknown> = {
+          ItemCode: l.itemCode,
+          Quantity: l.qty,                       // unité de stock SAP (pie/kg) — même base que la vente
+          WarehouseCode: l.warehouseCode,
+        };
+        // « Mbre » colis visible sur le BR quand l'emballage est connu.
+        if (ratio && ratio > 1) line.PackageQuantity = Math.round((l.qty / ratio) * 1000) / 1000;
+        if (l.price != null && l.price > 0) { line.UnitPrice = l.price; line.Price = l.price; }
+        return line;
+      }),
+    };
+    type SapPdn = { DocEntry: number; DocNum: number };
+    let em: SapPdn;
+    try {
+      em = await sap.post<SapPdn>("/PurchaseDeliveryNotes", emPayload);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error("[Order] ❌ Vente Sofruce — achat refusé par SAP:", message);
+      return NextResponse.json(
+        { ok: false, error: `Achat Sofruce refusé par SAP — la vente n'a PAS été créée : ${message}` },
+        { status: 500 },
+      );
+    }
+    const lotCode = `EM${em.DocNum}`;
+    console.log(`[Order] Vente Sofruce — EM ${em.DocNum} créée (${achatLines.length} ligne(s)) → lot ${lotCode}`);
+    // Lot EM<DocNum> + référence définitive sur le BR (2 temps, comme /goods-receipts).
+    try {
+      const refetch = await sap.get<{ DocumentLines: { LineNum: number }[] }>(
+        `/PurchaseDeliveryNotes(${em.DocEntry})?$select=DocumentLines`,
+      );
+      await sap.patch(`PurchaseDeliveryNotes(${em.DocEntry})`, {
+        Comments: docRef({
+          prefix: "EM", docNum: em.DocNum, name: session.user?.name, email: session.user?.email,
+          note: `Vente Sofruce — ${client.nom}`,
+        }),
+        DocumentLines: (refetch.DocumentLines || []).map((l) => ({ LineNum: l.LineNum, U_NoLot: lotCode })),
+      });
+    } catch (e) {
+      console.warn("[Order] Vente Sofruce — PATCH U_NoLot échoué (non-bloquant):", (e as Error).message);
+    }
+    // Cache lots + stock local + registre : la vente qui suit voit l'achat.
+    for (const l of achatLines) bumpLot(l.itemCode, l.warehouseCode, em.DocNum);
+    try {
+      await creditLots(achatLines.map((l) => ({
+        itemCode: l.itemCode, lot: lotCode, qty: l.qty,
+        supplierName: SOFRUCE_CARDCODE, purchasePrice: l.price, currency: "EUR",
+        sourceDocNum: String(em.DocNum), admissionDate: new Date(),
+      })));
+    } catch (e) {
+      console.warn("[Order] Vente Sofruce — crédit registre échoué (non-bloquant):", (e as Error).message);
+    }
+    try {
+      await incrementLocalStock(achatLines.map((l) => ({
+        itemCode: l.itemCode, quantity: l.qty, warehouseCode: l.warehouseCode,
+      })));
+    } catch (e) {
+      console.warn("[Order] Vente Sofruce — stock local non incrémenté (non-bloquant):", (e as Error).message);
+    }
+    // La vente consomme CE lot : posé d'office sur toute ligne sans lot forcé,
+    // et plus aucune ligne « à découvert » (l'achat vient de créer le stock).
+    for (const l of body.lines) {
+      if (!l.lot) l.lot = lotCode;
+      if (l.decouvert) l.decouvert = false;
+    }
+    await writeAudit({
+      session,
+      action: "VENTE_SOFRUCE_ACHAT",
+      entity: "PurchaseDeliveryNote",
+      entityId: String(em.DocNum),
+      summary: `Achat Sofruce EM ${em.DocNum} créé automatiquement (vente ${client.nom})`,
+      details: { lot: lotCode, cardCode: SOFRUCE_CARDCODE, lines: achatLines },
+    });
+    sofruceReceipt = { docNum: em.DocNum, docEntry: em.DocEntry, lot: lotCode };
   }
 
   // Map des noms d'entrepôt humains
@@ -1127,6 +1265,8 @@ export async function POST(req: NextRequest) {
       // true = OFFRE CLIENT (Quotation) créée : à passer en commande au jour de
       // départ depuis l'onglet Bons de commande. false = Commande client (BL).
       offre: isBonCommande,
+      // Vente Sofruce : l'entrée marchandise créée juste avant la vente.
+      sofruce: sofruceReceipt,
       docNum: created.DocNum,
       docEntry: created.DocEntry,
       cardCode,
@@ -1190,7 +1330,15 @@ export async function POST(req: NextRequest) {
     console.error("[Order]    CardCode:", cardCode);
     console.error("[Order]    Payload sent:", JSON.stringify(payload, null, 2));
     return NextResponse.json(
-      { ok: false, error: message, payload: process.env.NODE_ENV === "development" ? payload : undefined },
+      {
+        ok: false,
+        // Vente Sofruce : l'EM est déjà passée — sans ce détail, l'achat resterait
+        // orphelin en silence (doublon de stock, le mal qu'on cherche à éradiquer).
+        error: sofruceReceipt
+          ? `${message} — ⚠️ L'achat Sofruce EM ${sofruceReceipt.docNum} a DÉJÀ été créé : annule-le dans SAP ou recrée la vente sans « Vente Sofruce ».`
+          : message,
+        payload: process.env.NODE_ENV === "development" ? payload : undefined,
+      },
       { status: 500 },
     );
   }
