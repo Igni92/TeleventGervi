@@ -312,8 +312,61 @@ interface GroupEntry { key: string; name: string; prods: Product[]; pinned?: boo
  *   B4 — « colis de X kg » sous le nom produit quand calculable
  *   C4 — densité d'affichage Compact / Normal / Aéré : RÉGLÉE sur /parametres
  *        (localStorage televente:ecran2Density), lue ici + listener storage
+ *   C5 — BROUILLON par client : une commande saisie puis quittée SANS validation
+ *        est conservée (localStorage) — au retour sur le client, le panier
+ *        revient tel quel. Effacé à l'envoi du bon ou après expiration.
  */
 const SHORTCUTS_KEY = "televente:cmd-raccourcis";
+
+/* ── C5 — Brouillon de commande NON VALIDÉE, conservé PAR CLIENT ────────────
+   Sauvegardé en continu pendant la saisie (par poste, localStorage) ; restauré
+   au montage quand on REVIENT sur le client. Supprimé : à l'envoi du bon, quand
+   le panier est vidé à la main, ou passé le TTL (stock/prix trop périmés — le
+   dispo des lignes restaurées est de toute façon rafraîchi sur le stock du
+   jour dès que le catalogue est chargé). JAMAIS en mode MODIFICATION : l'état
+   d'une modif vit sur le BL SAP, pas en brouillon. */
+const DRAFT_PREFIX = "televente:brouillon:";
+const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;   // 24 h — au-delà, prix/promos périmés
+const draftKey = (clientId: string) => `${DRAFT_PREFIX}${clientId}`;
+
+interface OrderDraft {
+  v: 1; savedAt: number;
+  cart: CartLine[]; numAtCard: string; comments: string; deliveryDate: string;
+  bonCommandeManual: boolean; venteSofruce: boolean; sofrucePA: Record<string, string>;
+}
+
+function readDraft(clientId: string): OrderDraft | null {
+  try {
+    const raw = localStorage.getItem(draftKey(clientId));
+    if (!raw) return null;
+    const d = JSON.parse(raw) as OrderDraft;
+    if (d?.v !== 1 || typeof d.savedAt !== "number" || Date.now() - d.savedAt > DRAFT_TTL_MS) return null;
+    if (!Array.isArray(d.cart)) return null;
+    d.cart = d.cart.filter((l) => l && typeof l.itemCode === "string" && typeof l.quantity === "number");
+    return d.cart.length > 0 ? d : null;
+  } catch { return null; }
+}
+
+function clearDraft(clientId: string) {
+  try { localStorage.removeItem(draftKey(clientId)); } catch { /* ignore */ }
+}
+
+/** Purge les brouillons expirés ou illisibles (une fois au montage de l'écran). */
+function pruneDrafts() {
+  try {
+    const now = Date.now();
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith(DRAFT_PREFIX)) continue;
+      try {
+        const d = JSON.parse(localStorage.getItem(k) ?? "");
+        if (typeof d?.savedAt !== "number" || now - d.savedAt > DRAFT_TTL_MS) stale.push(k);
+      } catch { stale.push(k); }
+    }
+    stale.forEach((k) => localStorage.removeItem(k));
+  } catch { /* ignore */ }
+}
 
 /**
  * Raccourcis produits personnalisables (remplacent l'ancien compteur « Promotions »).
@@ -716,11 +769,88 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modifierProp?.docEntry]);
 
-  // ── Reset quand le client change ──
+  // ── C5 — Brouillon par client : reset au changement de client, puis
+  // RESTAURATION de la commande non validée mise en cache pour CE client.
+  // `draftReady` retient la sauvegarde tant que la restauration n'a pas été
+  // tentée (sinon le 1er passage, panier encore vide, effacerait le brouillon).
+  const [draftReady, setDraftReady] = useState(false);
+  // Le dispo mémorisé dans un brouillon peut dater → à rafraîchir sur le stock
+  // du jour dès que le catalogue est chargé (découpe entrepôt / découvert justes).
+  const needAvailRefresh = useRef(false);
+  // Date de livraison restaurée depuis le brouillon → l'effet « date par défaut »
+  // ne doit pas l'écraser (il se déclenche aussi quand clientType arrive après coup).
+  const dateRestored = useRef(false);
+  useEffect(() => { pruneDrafts(); }, []);
   useEffect(() => {
     setCart([]); setNumAtCard(""); setComments(""); setBonCommandeManual(false);
     setVenteSofruce(false); setSofrucePA({});
+    if (!modifierProp) {
+      const d = readDraft(clientId);
+      if (d) {
+        setCart(d.cart);
+        setNumAtCard(typeof d.numAtCard === "string" ? d.numAtCard : "");
+        setComments(typeof d.comments === "string" ? d.comments : "");
+        setBonCommandeManual(d.bonCommandeManual === true);
+        setVenteSofruce(d.venteSofruce === true);
+        setSofrucePA(d.sofrucePA && typeof d.sofrucePA === "object" ? d.sofrucePA : {});
+        needAvailRefresh.current = true;
+        // Date de livraison : reprise seulement si elle n'est pas déjà passée —
+        // sinon on laisse le défaut (J/J+1 selon le type client) se recalculer.
+        const dt = typeof d.deliveryDate === "string" ? new Date(d.deliveryDate) : null;
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        if (dt && !Number.isNaN(dt.getTime()) && dt >= today) {
+          setDeliveryDate(d.deliveryDate);
+          dateRestored.current = true;
+        }
+        toast.info(`${clientName} — commande non validée restaurée (${d.cart.length} ligne${d.cart.length > 1 ? "s" : ""})`, {
+          description: "Saisie quittée sans validation, reprise telle quelle. « Vider » pour repartir de zéro.",
+          action: {
+            label: "Vider",
+            onClick: () => {
+              setCart([]); setNumAtCard(""); setComments(""); setBonCommandeManual(false);
+              setVenteSofruce(false); setSofrucePA({});
+              clearDraft(clientId);
+            },
+          },
+          duration: 8000,
+        });
+      }
+    }
+    setDraftReady(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
+
+  // C5 — Rafraîchit le DISPO des lignes restaurées dès que le catalogue est là
+  // (quantités et prix saisis, eux, ne bougent pas).
+  useEffect(() => {
+    if (!needAvailRefresh.current) return;
+    const all = Object.values(grouped).flat();
+    if (all.length === 0) return;
+    needAvailRefresh.current = false;
+    const byCode = new Map(all.map((p) => [p.itemCode, p]));
+    setCart((cur) => cur.map((l) => {
+      const p = byCode.get(l.itemCode);
+      if (!p) return l;
+      const avail: Record<string, number> = {};
+      for (const w of ["000", "01", "R1"]) avail[w] = Math.max(0, Math.floor(((p.stockByWarehouse[w]?.available ?? 0) / l.packDivisor) * 10) / 10);
+      return { ...l, availByWarehouse: avail };
+    }));
+  }, [grouped]);
+
+  // C5 — Sauvegarde CONTINUE du brouillon (panier + note + réf + date + options).
+  // Panier vidé → brouillon supprimé. Jamais en modification (état sur le BL).
+  useEffect(() => {
+    if (!draftReady || modif || prefilling) return;
+    try {
+      if (cart.length === 0) { localStorage.removeItem(draftKey(clientId)); return; }
+      const d: OrderDraft = {
+        v: 1, savedAt: Date.now(),
+        cart, numAtCard, comments, deliveryDate,
+        bonCommandeManual, venteSofruce, sofrucePA,
+      };
+      localStorage.setItem(draftKey(clientId), JSON.stringify(d));
+    } catch { /* stockage indisponible — best-effort */ }
+  }, [draftReady, modif, prefilling, cart, numAtCard, comments, deliveryDate, bonCommandeManual, venteSofruce, sofrucePA, clientId]);
 
   // ── Date de livraison PAR DÉFAUT — selon le type du client ──
   // GMS / CHR / EXPORT (tournées) : prochaine livraison possible = J+1 (samedi →
@@ -731,6 +861,8 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   // un panier en cours de saisie. Jamais en modification (la date vit sur le BL).
   useEffect(() => {
     if (modifierProp) return;
+    // C5 — date reprise d'un brouillon restauré (et encore valide) : on la garde.
+    if (dateRestored.current) return;
     const seg = (clientType ?? "").trim().toUpperCase();
     const tournee = seg === "GMS" || seg === "CHR" || seg === "EXPORT";
     const day = tournee
@@ -1466,6 +1598,9 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     // Marge masquée → pas de célébration « grosse marge » (elle affiche le montant en grand).
     sendOrderInBackground({ kind: "create", clientName, body: buildOrderBody(buildApiLines(), opts?.safeguardsConfirmed === true), margeNette: hasCostData && !hideMargin ? margeNetteTotal : undefined });
     toast.info(`${clientName} — commande envoyée, création en arrière-plan…`);
+    // C5 — bon envoyé → le brouillon mis en cache n'a plus lieu d'être. Purge
+    // EXPLICITE : l'écran est démonté avant que l'effet de sauvegarde ne repasse.
+    clearDraft(clientId);
     setCart([]); setNumAtCard(""); setComments("");
     onSubmitted?.();
   };
