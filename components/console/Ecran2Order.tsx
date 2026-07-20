@@ -26,6 +26,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { BrandLogo } from "@/components/BrandLogo";
 import { StarRating } from "@/components/ui/star-rating";
 import { LotDetailsDialog } from "./LotDetailsDialog";
+import { SofruceStatementButton } from "./SofruceStatementDialog";
 import { ConsoleLotPicker, type ConsoleLotCandidate } from "./ConsoleLotPicker";
 import { useContextMenu, ContextMenu, ContextMenuItem, ContextMenuLabel } from "@/components/ui/context-menu";
 import { useBrandLogos } from "@/lib/useBrandLogos";
@@ -318,6 +319,12 @@ interface GroupEntry { key: string; name: string; prods: Product[]; pinned?: boo
  */
 const SHORTCUTS_KEY = "televente:cmd-raccourcis";
 
+/** Marge Sofruce PAR DÉFAUT (%) — sans prix d'achat saisi, l'EM part au prix
+ *  de vente − cette marge (vente 1,00 €/kg → achat 0,80 € à 20 %). Modifiable
+ *  dans la pastille à côté du bouton « Vente Sofruce » ; mémorisée par poste. */
+const SOFRUCE_MARGE_KEY = "tv:sofruce-marge";
+const SOFRUCE_MARGE_DEFAULT = 20;
+
 /* ── C5 — Brouillon de commande NON VALIDÉE, conservé PAR CLIENT ────────────
    Sauvegardé en continu pendant la saisie (par poste, localStorage) ; restauré
    au montage quand on REVIENT sur le client. Supprimé : à l'envoi du bon, quand
@@ -593,8 +600,24 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   // Une seule saisie au lieu de deux — supprime les doublons d'EM manuels.
   const [venteSofruce, setVenteSofruce] = useState(false);
   // Prix d'ACHAT unitaire par article (saisie libre, unité de stock = celle du
-  // prix de vente). Vide → l'achat part au prix de vente (marge 0).
+  // prix de vente). Vide → dérivé du prix de vente − la marge Sofruce (ci-dessous).
   const [sofrucePA, setSofrucePA] = useState<Record<string, string>>({});
+  // Marge Sofruce (%) appliquée PAR DÉFAUT quand aucun prix d'achat n'est saisi :
+  // achat = prix de vente × (1 − marge). Persistée par poste ; 20 % d'origine.
+  const [sofruceMargeStr, setSofruceMargeStr] = useState(String(SOFRUCE_MARGE_DEFAULT));
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SOFRUCE_MARGE_KEY);
+      if (raw != null && raw.trim() !== "") setSofruceMargeStr(raw);
+    } catch { /* stockage indisponible */ }
+  }, []);
+  const sofruceMargeNum = Number(sofruceMargeStr.replace(",", ".").trim());
+  const sofruceMargePct = Number.isFinite(sofruceMargeNum) && sofruceMargeNum >= 0 && sofruceMargeNum < 100
+    ? sofruceMargeNum : SOFRUCE_MARGE_DEFAULT;
+  const setSofruceMarge = (v: string) => {
+    setSofruceMargeStr(v);
+    try { localStorage.setItem(SOFRUCE_MARGE_KEY, v); } catch { /* best-effort */ }
+  };
   // Marge MASQUÉE (regard par-dessus l'épaule au marché / poste partagé) :
   // les montants de marge s'affichent en « ••• ». Persisté par poste.
   const [hideMargin, setHideMargin] = useState(false);
@@ -1384,13 +1407,20 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     purchasePrice?: number;
   };
 
-  /** Vente Sofruce — prix d'achat saisi pour un article (null = non renseigné →
-   *  l'achat partira au prix de VENTE, marge 0). Virgule acceptée. */
-  const sofrucePAOf = (itemCode: string): number | null => {
-    const raw = (sofrucePA[itemCode] ?? "").replace(",", ".").trim();
-    if (!raw) return null;
-    const n = Number(raw);
-    return Number.isFinite(n) && n >= 0 ? n : null;
+  /** Vente Sofruce — prix d'ACHAT unitaire d'une ligne : saisi à la main
+   *  (virgule acceptée), sinon DÉRIVÉ du prix de vente − la marge Sofruce
+   *  (vente 1,00 € → achat 0,80 € à 20 %). null si aucun prix de vente —
+   *  l'achat partira alors au prix de vente côté serveur (marge 0). */
+  const sofrucePAOf = (l: CartLine): number | null => {
+    const raw = (sofrucePA[l.itemCode] ?? "").replace(",", ".").trim();
+    if (raw) {
+      const n = Number(raw);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+    if (l.price != null && l.price > 0) {
+      return Math.round(l.price * (1 - sofruceMargePct / 100) * 10000) / 10000;
+    }
+    return null;
   };
 
   /** C2 — En-tête du bon : mention des promos appliquées (uniquement si présentes).
@@ -1460,7 +1490,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
         remainingFree -= freeHere;
         // Vente Sofruce : prix d'achat saisi, reporté sur CHAQUE tronçon de la
         // ligne (le serveur agrège par article × entrepôt pour l'EM).
-        const pa = venteSofruce ? sofrucePAOf(l.itemCode) : null;
+        const pa = venteSofruce ? sofrucePAOf(l) : null;
         if (paidHere > 0) {
           out.push({
             itemCode: l.itemCode,
@@ -2241,7 +2271,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
               <label
                 title={isBonCommande
                   ? "Vente Sofruce : uniquement en BL direct (pas de bon de commande ni de précommande)"
-                  : "Vente Sofruce : à la validation, crée d'abord l'entrée marchandise fournisseur Sofruce (mêmes articles/quantités), puis la vente sur ce lot. Renseigne les prix d'achat dans le bandeau qui s'affiche."}
+                  : `Vente Sofruce : à la validation, crée d'abord l'entrée marchandise fournisseur Sofruce (mêmes articles/quantités), puis la vente sur ce lot. Prix d'achat par défaut = prix de vente − ${sofruceMargePct} % de marge (réglable à côté) ; ajustable article par article dans le bandeau.`}
                 className={`inline-flex items-center gap-1.5 rounded-md border px-2 h-8 text-[11.5px] select-none ${isBonCommande ? "cursor-not-allowed opacity-50" : "cursor-pointer"} ${
                   venteSofruce ? "border-violet-400/60 bg-violet-500/10 text-violet-700 dark:text-violet-300" : "border-border text-muted-foreground hover:text-foreground"
                 }`}
@@ -2252,6 +2282,28 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                 <span className="font-semibold whitespace-nowrap">Vente Sofruce</span>
               </label>
             )}
+            {/* Marge Sofruce PAR DÉFAUT (%) — appliquée quand aucun prix d'achat
+                n'est saisi : achat = vente − marge (1,00 € → 0,80 € à 20 %).
+                Hors du <label> pour ne pas basculer la case en cliquant dedans. */}
+            {!modif && venteSofruce && (
+              <span
+                title={`Marge Sofruce par défaut : sans prix d'achat saisi, l'achat part au prix de vente − ${sofruceMargePct} % (ex. vente 1,00 € → achat ${(1 - sofruceMargePct / 100).toFixed(2).replace(".", ",")} €). Mémorisée sur ce poste.`}
+                className="inline-flex items-center gap-1 h-8 px-2 rounded-md border border-violet-400/60 bg-violet-500/10 text-[11.5px] font-semibold text-violet-700 dark:text-violet-300 select-none"
+              >
+                marge
+                <input
+                  type="text" inputMode="decimal"
+                  value={sofruceMargeStr}
+                  onChange={(e) => setSofruceMarge(e.target.value)}
+                  aria-label="Marge Sofruce par défaut (%)"
+                  className="h-6 w-9 rounded border border-violet-400/50 bg-background px-1 text-right tnum text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500"
+                />
+                %
+              </span>
+            )}
+            {/* État de compte Sofruce (PDF) — relevé des achats de la période,
+                à remettre à Sofruce (ce qu'ils doivent nous facturer). */}
+            {!modif && <SofruceStatementButton />}
             {/* Raccourcis produits personnalisables (ajout direct au panier) */}
             <OrderShortcuts onPick={addByShortcut} />
             {/* Dupliquer la DERNIÈRE commande — ICÔNE SEULE, à droite des raccourcis. */}
@@ -2268,8 +2320,8 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
           </div>
         </div>
         {/* VENTE SOFRUCE — prix d'ACHAT par article (même unité que le prix de
-            vente). Vide = l'achat part au prix de vente (marge 0). L'EM Sofruce
-            est créée à la validation, juste avant la vente. */}
+            vente). Vide = prix de vente − la marge Sofruce par défaut. L'EM
+            Sofruce est créée à la validation, juste avant la vente. */}
         {venteSofruce && !modif && cart.length > 0 && (
           <div className="mb-2 shrink-0 rounded-lg border border-violet-400/50 bg-violet-500/5 px-2.5 py-2">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
@@ -2284,7 +2336,12 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                       type="text" inputMode="decimal"
                       value={sofrucePA[l.itemCode] ?? ""}
                       onChange={(e) => setSofrucePA((prev) => ({ ...prev, [l.itemCode]: e.target.value }))}
-                      placeholder={hints[l.itemCode]?.prixAchat != null ? hints[l.itemCode]!.prixAchat!.toFixed(2) : "= prix vente"}
+                      placeholder={l.price != null && l.price > 0
+                        ? (Math.round(l.price * (1 - sofruceMargePct / 100) * 100) / 100).toFixed(2)
+                        : "= prix vente"}
+                      title={l.price != null && l.price > 0
+                        ? `Défaut : prix de vente ${l.price.toFixed(2)} € − ${sofruceMargePct} % de marge`
+                        : "Sans prix de vente, l'achat partira au prix de vente (marge 0)"}
                       aria-label={`Prix d'achat ${l.itemName}`}
                       className="h-7 w-24 rounded-md border border-border bg-background px-2 text-right tnum"
                     />
@@ -2294,7 +2351,8 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
               ))}
             </div>
             <p className="mt-1 text-[10.5px] text-muted-foreground">
-              Vide = prix de vente (marge 0). À la validation : EM Sofruce puis vente sur son lot.
+              Vide = prix de vente − {sofruceMargePct} % de marge (ex. vente 1,00 € → achat {(1 - sofruceMargePct / 100).toFixed(2).replace(".", ",")} €).
+              À la validation : EM Sofruce puis vente sur son lot.
             </p>
           </div>
         )}
