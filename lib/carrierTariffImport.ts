@@ -26,6 +26,7 @@
 
 import { normCarrier } from "./transportCost";
 import {
+  isDelanchyCarrierCode,
   normDept,
   tariffTemplateFor,
   type CarrierTariff,
@@ -43,8 +44,6 @@ export interface TariffImportResult {
   format: TariffImportFormat;
   /** Grille SANS code transporteur (appliquée ensuite par code — cf. route). */
   tariff: Omit<CarrierTariff, "carrierCode"> & { carrierCode: "" };
-  /** Repères de transporteurs cibles (codes U_TrspCode CONTENANT ces mots). */
-  carrierHints: string[];
   warnings: string[];
 }
 
@@ -163,7 +162,6 @@ function parseDelanchy(matrix: CellMatrix): TariffImportResult | null {
   return {
     format: "delanchy",
     tariff: { carrierCode: "", brackets, zones, extras: dedupeById(extras), updatedAt: null, updatedBy: null },
-    carrierHints: ["DELANCHY", "FT86"],
     warnings,
   };
 }
@@ -253,7 +251,6 @@ function parseAntoine(matrix: CellMatrix): TariffImportResult | null {
   return {
     format: "antoine",
     tariff: { carrierCode: "", brackets, zones, extras: dedupeById(extras), updatedAt: null, updatedBy: null },
-    carrierHints: ["ANTOINE"],
     warnings,
   };
 }
@@ -294,16 +291,20 @@ export function mergeExtraValues(
 }
 
 /**
- * Codes transporteurs cibles pour une grille importée : ceux du catalogue dont
- * le code U_TrspCode contient un des repères (ex. « DELANCHY FT86 » matche
- * DELANCHY et FT86). Repli si aucun : les repères eux-mêmes.
+ * Codes transporteurs cibles pour une grille importée, selon le format :
+ *   • delanchy → tout code contenant DELANCHY ou un dépôt « FT<n°> » (FT86,
+ *     FT94… — Delanchy regroupe tous les FT) ;
+ *   • antoine  → tout code contenant ANTOINE.
+ * Repli si le catalogue ne matche pas : le code générique du format.
  */
-export function matchCarrierCodes(carrierHints: string[], catalogCodes: string[]): { codes: string[]; matched: boolean } {
+export function matchCarrierCodes(format: TariffImportFormat, catalogCodes: string[]): { codes: string[]; matched: boolean } {
+  const matches = (code: string) =>
+    format === "delanchy" ? isDelanchyCarrierCode(code) : code.includes("ANTOINE");
   const codes: string[] = [];
   for (const raw of catalogCodes) {
     const code = normCarrier(raw);
-    if (code && carrierHints.some((h) => code.includes(h)) && !codes.includes(code)) codes.push(code);
+    if (code && matches(code) && !codes.includes(code)) codes.push(code);
   }
   if (codes.length > 0) return { codes, matched: true };
-  return { codes: carrierHints.map(normCarrier), matched: false };
+  return { codes: [format === "delanchy" ? "DELANCHY" : "ANTOINE"], matched: false };
 }

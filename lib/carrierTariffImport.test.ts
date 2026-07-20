@@ -69,9 +69,8 @@ const ANTOINE: CellMatrix = [
 
 describe("parseTariffMatrix — Delanchy", () => {
   const res = parseTariffMatrix(DELANCHY);
-  it("détecte le format et les cibles", () => {
+  it("détecte le format", () => {
     expect(res.format).toBe("delanchy");
-    expect(res.carrierHints).toEqual(["DELANCHY", "FT86"]);
   });
   it("tranches 0–100 / 101–500 au forfait position", () => {
     expect(res.tariff.brackets).toEqual([
@@ -99,7 +98,6 @@ describe("parseTariffMatrix — Antoine", () => {
   const res = parseTariffMatrix(ANTOINE);
   it("détecte le format malgré l'e-mail « antoinedistribution » et la plateforme", () => {
     expect(res.format).toBe("antoine");
-    expect(res.carrierHints).toEqual(["ANTOINE"]);
   });
   it("tranches : forfaits 0–50 / 51–100, puis aux 100 kg", () => {
     expect(res.tariff.brackets.map((b) => [b.id, b.unit])).toEqual([
@@ -157,15 +155,19 @@ describe("mergeExtraValues", () => {
 });
 
 describe("matchCarrierCodes", () => {
-  it("matche les codes du catalogue contenant un repère", () => {
-    expect(matchCarrierCodes(["DELANCHY", "FT86"], ["DELANCHY FT86", "SCACHAP", "Antoine"]))
-      .toEqual({ codes: ["DELANCHY FT86"], matched: true });
-    expect(matchCarrierCodes(["ANTOINE"], ["DELANCHY FT86", "antoine"]))
+  it("delanchy → DELANCHY et TOUS les dépôts FT<n°> (FT86, FT94…)", () => {
+    expect(matchCarrierCodes("delanchy", ["DELANCHY FT86", "FT94", "SOFT86", "SCACHAP", "Antoine"]))
+      .toEqual({ codes: ["DELANCHY FT86", "FT94"], matched: true });
+  });
+  it("antoine → codes contenant ANTOINE", () => {
+    expect(matchCarrierCodes("antoine", ["DELANCHY FT86", "antoine"]))
       .toEqual({ codes: ["ANTOINE"], matched: true });
   });
-  it("repli sur les repères si aucun code ne matche", () => {
-    expect(matchCarrierCodes(["ANTOINE"], ["SCACHAP"]))
+  it("repli sur le code générique si aucun code ne matche", () => {
+    expect(matchCarrierCodes("antoine", ["SCACHAP"]))
       .toEqual({ codes: ["ANTOINE"], matched: false });
+    expect(matchCarrierCodes("delanchy", []))
+      .toEqual({ codes: ["DELANCHY"], matched: false });
   });
 });
 

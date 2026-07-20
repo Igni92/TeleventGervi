@@ -351,15 +351,23 @@ function antoineTemplate(carrierCode: string): CarrierTariff {
   };
 }
 
+/** Code Delanchy ? = contient DELANCHY, ou l'un des dépôts « FT » suivis d'un
+ *  numéro de département (FT86, FT94…) — Delanchy regroupe tous les FT. */
+export function isDelanchyCarrierCode(code: string | null | undefined): boolean {
+  const c = normCarrier(code);
+  if (!c) return false;
+  return c.includes("DELANCHY") || /(^|[^A-Z0-9])FT\s*\d+/.test(c);
+}
+
 /**
  * Modèle pré-rempli pour un transporteur, d'après son code (repère souple :
- * DELANCHY/FT86 → grille Delanchy ; ANTOINE → grille Antoine). null sinon —
- * l'éditeur part alors d'une grille vierge (tranches 0–50 / 51–100 / 101–300).
+ * DELANCHY / FT<n° dépt> → grille Delanchy ; ANTOINE → grille Antoine). null
+ * sinon — l'éditeur part d'une grille vierge (tranches 0–50 / 51–100 / 101–300).
  */
 export function tariffTemplateFor(carrierCode: string): CarrierTariff | null {
   const code = normCarrier(carrierCode);
   if (!code) return null;
-  if (code.includes("DELANCHY") || code.includes("FT86")) return delanchyTemplate(code);
+  if (isDelanchyCarrierCode(code)) return delanchyTemplate(code);
   if (code.includes("ANTOINE")) return antoineTemplate(code);
   return null;
 }

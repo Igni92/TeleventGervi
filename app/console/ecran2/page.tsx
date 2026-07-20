@@ -164,7 +164,7 @@ export default function Ecran2Page() {
       manual={manual != null || dismissed}
       searchMode={searchMode} onSearchModeChange={setSearchMode}
       onPick={pickClient} onClearManual={clearManual}
-      modes={modif ? [] : modes} modeId={modeId} onModeChange={setModeId}
+      modes={modif ? [] : modes} modeId={modeId}
     />
   );
 
@@ -189,6 +189,7 @@ export default function Ecran2Page() {
             key={modif ? `m${modif.docEntry}` : clientId}
             clientId={clientId} clientName={clientName} clientType={info?.type ?? null} stockSharePct={sharePct}
             deliveryModeId={modeId}
+            deliveryModes={modif ? [] : modes} onDeliveryModeChange={setModeId}
             clientHeader={banner}
             modifier={modifier} onExitModif={exitModif} onSubmitted={handleSubmitted}
           />
@@ -233,12 +234,12 @@ function Ecran1Link() {
 
 function ClientBanner({
   clientId, clientName, info, manual, searchMode, onSearchModeChange, onPick, onClearManual,
-  modes, modeId, onModeChange,
+  modes, modeId,
 }: {
   clientId: string | null; clientName: string | null; info: ActiveClientInfo | null;
   manual: boolean; searchMode: SearchMode; onSearchModeChange: (m: SearchMode) => void;
   onPick: (c: SearchClient) => void; onClearManual: () => void;
-  modes: DeliveryMode[]; modeId: string; onModeChange: (id: string) => void;
+  modes: DeliveryMode[]; modeId: string;
 }) {
   // Fetch unique des dernières livraisons (mini-frise à droite du nom + notes).
   // Appelé AVANT tout return conditionnel (règle des hooks) ; no-op si pas de client.
@@ -333,19 +334,21 @@ function ClientBanner({
               {info.type}
             </span>
           )}
-          {/* Compte / mode de livraison — À CÔTÉ DU NOM. N'apparaît que si le
-              client a ≥ 2 comptes (sinon le défaut est appliqué silencieusement). */}
-          {modes.length > 1 && (
-            <select
-              value={modeId}
-              onChange={(e) => onModeChange(e.target.value)}
-              aria-label="Compte / mode de livraison"
-              title="Compte SAP / mode de livraison du bon"
-              className="shrink-0 h-7 max-w-[190px] rounded-md border border-border bg-background text-[12px] font-medium px-1.5"
-            >
-              {modes.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.sapCardCode})</option>)}
-            </select>
-          )}
+          {/* Compte de livraison — le CHOIX se fait désormais DANS le sélecteur
+              transporteur du bon (une seule sélection). Ici : simple rappel
+              visuel quand le bon partira sur un AUTRE compte que le défaut. */}
+          {(() => {
+            const cur = modes.find((m) => m.id === modeId);
+            if (!cur || cur.isDefault) return null;
+            return (
+              <span
+                title="Le bon partira sur ce compte — choix dans le sélecteur transporteur du bon"
+                className="shrink-0 text-[10px] font-bold tracking-wide uppercase px-1.5 py-0.5 rounded bg-brand-500/15 text-brand-700 dark:text-brand-300"
+              >
+                Compte {cur.name} ({cur.sapCardCode})
+              </span>
+            );
+          })()}
         </div>
         {/* Méta légère — incidents, téléphones, mini-frise, retour Écran 1. */}
         <div className="mt-1.5 flex items-center gap-2.5 flex-wrap min-w-0">

@@ -412,31 +412,53 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
         </DialogHeader>
 
         <div className="space-y-4 mt-2">
-          {/* Mode + Date — empilés sur mobile (le champ datetime-local natif a une
-              largeur minimale incompressible qui faisait déborder la modale). */}
+          {/* SÉLECTION UNIQUE transporteur / compte de livraison + Date — le
+              choix « livré sur le compte LPOI / SCACHAP… » vit DANS le même
+              sélecteur que le transporteur (plus de sélection séparée). */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground inline-flex items-center gap-1.5">
-                <Truck className="h-3 w-3" />Mode de livraison
-              </Label>
-              <Select value={modeId} onValueChange={setModeId}>
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Choisir un mode" />
-                </SelectTrigger>
-                <SelectContent>
-                  {modes.length === 0 && (
-                    <div className="px-2 py-1.5 text-[12px] italic text-muted-foreground">
-                      Aucun mode — utilise le code client par défaut
-                    </div>
-                  )}
-                  {modes.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.name} <span className="text-muted-foreground">({m.sapCardCode})</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {(() => {
+              const defaultMode = modes.find((m) => m.isDefault) ?? modes[0];
+              const accountModes = modes.filter((m) => !m.isDefault);
+              const activeAccount = accountModes.find((m) => m.id === modeId) ?? null;
+              const combined = activeAccount ? `m:${activeAccount.id}` : (carrierSap ? `c:${carrierSap}` : "");
+              const onCombined = (v: string) => {
+                if (v.startsWith("m:")) {
+                  setModeId(v.slice(2));
+                } else if (v.startsWith("c:")) {
+                  if (defaultMode) setModeId(defaultMode.id);
+                  setCarrierSap(v.slice(2));
+                }
+              };
+              return (
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground inline-flex items-center gap-1.5">
+                    <Truck className="h-3 w-3" />Transporteur / compte
+                  </Label>
+                  <Select value={combined} onValueChange={onCombined}>
+                    <SelectTrigger className={`h-9 ${!combined ? "border-amber-400/70" : ""}`}>
+                      <SelectValue placeholder="Transporteur ou compte de livraison" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {carriers.length === 0 && accountModes.length === 0 && (
+                        <div className="px-2 py-1.5 text-[12px] italic text-muted-foreground">
+                          Aucun transporteur disponible
+                        </div>
+                      )}
+                      {carriers.map((c) => (
+                        <SelectItem key={c.id} value={`c:${c.sapValue}`}>
+                          {c.name}{c.count ? ` · ${c.count} cde${c.count > 1 ? "s" : ""}` : ""}
+                        </SelectItem>
+                      ))}
+                      {accountModes.map((m) => (
+                        <SelectItem key={m.id} value={`m:${m.id}`}>
+                          Compte {m.name} <span className="text-muted-foreground">({m.sapCardCode})</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              );
+            })()}
             <div className="space-y-1.5">
               <Label className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground inline-flex items-center gap-1.5">
                 <Calendar className="h-3 w-3" />Date de livraison
@@ -450,31 +472,8 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
             </div>
           </div>
 
-          {/* Transporteur + TOURNÉE — obligatoires sur le bon, pré-remplis avec le
-              défaut du client. Bordure ambre tant qu'un choix manque. */}
+          {/* TOURNÉE — obligatoire dès que le transporteur en définit une. */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground inline-flex items-center gap-1.5">
-                <Truck className="h-3 w-3" />Transporteur
-              </Label>
-              <Select value={carrierSap} onValueChange={setCarrierSap}>
-                <SelectTrigger className={`h-9 ${!carrierSap ? "border-amber-400/70" : ""}`}>
-                  <SelectValue placeholder="Choisir un transporteur" />
-                </SelectTrigger>
-                <SelectContent>
-                  {carriers.length === 0 && (
-                    <div className="px-2 py-1.5 text-[12px] italic text-muted-foreground">
-                      Aucun transporteur disponible
-                    </div>
-                  )}
-                  {carriers.map((c) => (
-                    <SelectItem key={c.id} value={c.sapValue}>
-                      {c.name}{c.count ? ` · ${c.count} cde${c.count > 1 ? "s" : ""}` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             <div className="space-y-1.5">
               <Label className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground inline-flex items-center gap-1.5">
                 <Clock className="h-3 w-3" />Tournée
