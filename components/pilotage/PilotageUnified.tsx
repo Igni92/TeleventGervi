@@ -37,14 +37,6 @@ function formatWeight(kg: number): string {
   if (Math.abs(kg) >= 1) return `${Math.round(kg)} kg`;
   return "—";
 }
-/** € très compact pour les cellules de la matrice (1,2M / 850k / 12 €). */
-function formatEuroTiny(v: number): string {
-  const a = Math.abs(v);
-  if (a >= 1_000_000) return `${(v / 1_000_000).toFixed(1).replace(".", ",")}M`;
-  if (a >= 1_000) return `${Math.round(v / 1000)}k`;
-  return `${Math.round(v)}`;
-}
-
 /* Tendance hebdo N vs N-1 lissée — même logique que l'ex-écran 1. */
 function movingAverage(vals: number[], win = 3): number[] {
   const half = Math.floor(win / 2);
@@ -604,44 +596,104 @@ function EmptyHint({ text }: { text: string }) {
   return <li className="text-[11.5px] text-muted-foreground py-2 list-none">{text}</li>;
 }
 
-/** Matrice annuelle COMPACTE — 3 ans × 12 mois, intensité = CA du mois.
- *  Le détail (drill-in, évolutions, segments) vit dans l'overlay plein écran. */
+const MOIS_LONG = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
+/** Styles des 3 années du comparatif (du plus ancien au plus récent). */
+const YEAR_BAR = [
+  { bar: "bg-slate-500/45", dot: "bg-slate-400", text: "text-slate-300" },      // N-2
+  { bar: "bg-brand-500/45", dot: "bg-brand-500/60", text: "text-brand-300" },   // N-1
+  { bar: "bg-brand-500", dot: "bg-brand-500", text: "text-brand-400" },         // N
+];
+
+/** Matrice annuelle VISUELLE — barres mensuelles comparées sur 3 ans
+ *  (N en jaune vif, N-1 atténué, N-2 gris), totaux annuels en légende,
+ *  détail du mois au survol. Le drill-in complet vit dans l'overlay. */
 function CompactMatrix({ matrix }: { matrix: { year: number; months: { ca: number }[]; totalCa: number }[] }) {
-  const years = useMemo(() => [...matrix].sort((a, b) => b.year - a.year).slice(0, 3), [matrix]);
+  const years = useMemo(() => [...matrix].sort((a, b) => a.year - b.year).slice(-3), [matrix]);
+  const [tip, setTip] = useState<{ m: number; left: number; bottom: number } | null>(null);
   const max = Math.max(1, ...years.flatMap((y) => y.months.map((m) => m.ca)));
   if (years.length === 0) {
     return <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">Chargement du rapport annuel…</div>;
   }
+  const styleOf = (i: number) => YEAR_BAR[YEAR_BAR.length - years.length + i] ?? YEAR_BAR[0];
   return (
-    <div className="h-full flex flex-col gap-1 min-h-0">
-      <div className="grid gap-0.5 text-[8.5px] text-muted-foreground tnum shrink-0" style={{ gridTemplateColumns: "34px repeat(12, 1fr) 52px" }}>
-        <div />
-        {MOIS_1L.map((m, i) => <div key={i} className="text-center">{m}</div>)}
-        <div className="text-right pr-0.5">Total</div>
+    <div className="h-full flex flex-col min-h-0">
+      {/* Légende : année + total annuel (gros chiffres, couleur = barre) */}
+      <div className="shrink-0 flex flex-wrap items-baseline gap-x-4 gap-y-0.5 mb-1.5">
+        {years.map((y, i) => (
+          <span key={y.year} className="inline-flex items-baseline gap-1.5">
+            <span className={`h-2 w-2 rounded-[3px] self-center ${styleOf(i).dot}`} />
+            <span className="text-[10px] font-semibold text-muted-foreground tnum">{y.year}</span>
+            <span className={`text-[13px] font-bold tnum ${styleOf(i).text}`}>{formatEuro(y.totalCa, true)}</span>
+          </span>
+        ))}
       </div>
-      {years.map((y) => (
-        <div key={y.year} className="grid gap-0.5 flex-1 min-h-0" style={{ gridTemplateColumns: "34px repeat(12, 1fr) 52px" }}>
-          <div className="text-[10px] text-foreground/70 font-semibold self-center tnum">{y.year}</div>
-          {y.months.map((m, i) => {
-            const t = m.ca / max;
-            return (
-              <div key={i}
-                className="rounded-sm flex items-center justify-center text-[8px] leading-none tnum min-h-0"
-                style={{
-                  backgroundColor: m.ca <= 0 ? "hsl(var(--border) / 0.35)" : `rgba(250, 204, 21, ${0.12 + t * 0.75})`,
-                  color: t > 0.55 ? "rgb(20,20,20)" : "hsl(var(--muted-foreground))",
-                }}
-                title={`${MOIS_1L[i]} ${y.year} — ${formatEuro(m.ca, true)}`}
-              >
-                {m.ca > 0 ? formatEuroTiny(m.ca) : ""}
-              </div>
-            );
-          })}
-          <div className="self-center text-right text-[10px] font-semibold text-foreground tnum pr-0.5">
-            {formatEuro(y.totalCa, true)}
+      {/* Barres groupées par mois — hauteur = CA du mois */}
+      <div className="flex-1 min-h-0 flex items-end gap-[3px]">
+        {MOIS_1L.map((_, m) => (
+          <div
+            key={m}
+            className="flex-1 h-full flex items-end justify-center gap-[2px] rounded-sm hover:bg-secondary/40 transition-colors px-[1px]"
+            onMouseEnter={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setTip({
+                m,
+                left: Math.max(8, Math.min(r.left - 60, window.innerWidth - 190)),
+                bottom: window.innerHeight - r.top + 6,
+              });
+            }}
+            onMouseLeave={() => setTip(null)}
+          >
+            {years.map((y, i) => {
+              const v = y.months[m]?.ca ?? 0;
+              return (
+                <div key={y.year} className="flex-1 max-w-[9px] h-full flex items-end">
+                  <div
+                    className={`w-full rounded-t-[2px] ${styleOf(i).bar}`}
+                    style={{ height: v > 0 ? `${Math.max(3, (v / max) * 100)}%` : "0%" }}
+                  />
+                </div>
+              );
+            })}
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
+      {/* Libellés mois */}
+      <div className="shrink-0 flex gap-[3px] mt-1">
+        {MOIS_1L.map((lbl, m) => (
+          <div key={m} className="flex-1 text-center text-[8.5px] text-muted-foreground">{lbl}</div>
+        ))}
+      </div>
+      {/* Tooltip du mois survolé — N, N-1, N-2 + évolution */}
+      {tip && (() => {
+        const cur = years[years.length - 1]?.months[tip.m]?.ca ?? 0;
+        const prev = years[years.length - 2]?.months[tip.m]?.ca ?? 0;
+        const delta = cur > 0 && prev > 0 ? ((cur / prev - 1) * 100) : null;
+        return (
+          <div
+            className="pointer-events-none fixed z-[55] w-44 rounded-lg border border-border bg-popover shadow-modal p-2.5"
+            style={{ left: tip.left, bottom: tip.bottom }}
+          >
+            <p className="text-[11.5px] font-bold text-foreground mb-1">{MOIS_LONG[tip.m]}</p>
+            {[...years].reverse().map((y, ri) => {
+              const i = years.length - 1 - ri;
+              const v = y.months[tip.m]?.ca ?? 0;
+              return (
+                <div key={y.year} className="flex items-baseline justify-between gap-3 text-[11px] leading-relaxed">
+                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                    <span className={`h-1.5 w-1.5 rounded-full ${styleOf(i).dot}`} />{y.year}
+                  </span>
+                  <span className="font-semibold text-foreground tnum tabular-nums">{v > 0 ? formatEuro(v, true) : "—"}</span>
+                </div>
+              );
+            })}
+            {delta != null && (
+              <p className={`mt-1 text-[10px] font-semibold ${delta >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                {delta >= 0 ? "▲" : "▼"} {Math.abs(delta).toFixed(0)} % vs N-1
+              </p>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

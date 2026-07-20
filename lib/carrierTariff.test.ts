@@ -171,4 +171,9 @@ describe("resolveCarrierTariff — repli FAMILLE", () => {
     expect(resolveCarrierTariff(map, "SOFT86")).toBeNull();
     expect(resolveCarrierTariff(map, null)).toBeNull();
   });
+  it("FARGIER = réseau Delanchy (Delanchy ramasse, Fargier livre l'IDF) → grille DELANCHY", () => {
+    const map = { DELANCHY: delanchy, ANTOINE: antoine };
+    expect(resolveCarrierTariff(map, "FARGIER")).toBe(delanchy);
+    expect(resolveCarrierTariff(map, "TRANSPORTS FARGIER")).toBe(delanchy);
+  });
 });
