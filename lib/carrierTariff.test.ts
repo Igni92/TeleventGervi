@@ -3,6 +3,7 @@ import {
   bracketForWeight,
   computePositionCost,
   normDept,
+  resolveCarrierTariff,
   sanitizeCarrierTariff,
   tariffIsUsable,
   tariffTemplateFor,
@@ -145,5 +146,29 @@ describe("templates fournisseurs", () => {
   it("code inconnu → pas de template (et pas de faux positif FT)", () => {
     expect(tariffTemplateFor("SCACHAP")).toBeNull();
     expect(tariffTemplateFor("SOFT86")).toBeNull();   // « FT86 » précédé d'une lettre ≠ dépôt FT
+  });
+});
+
+describe("resolveCarrierTariff — repli FAMILLE", () => {
+  const delanchy = { ...tariff, carrierCode: "DELANCHY" };
+  const ft86 = { ...tariff, carrierCode: "FT86" };
+  const antoine = { ...tariff, carrierCode: "ANTOINE" };
+  it("code exact prioritaire", () => {
+    expect(resolveCarrierTariff({ DELANCHY: delanchy, FT86: ft86 }, "ft86")).toBe(ft86);
+  });
+  it("tout dépôt FT<n°> sans grille propre retombe sur DELANCHY (FT54, FT94…)", () => {
+    const map = { DELANCHY: delanchy, ANTOINE: antoine };
+    expect(resolveCarrierTariff(map, "FT54")).toBe(delanchy);
+    expect(resolveCarrierTariff(map, "FT94")).toBe(delanchy);
+    expect(resolveCarrierTariff(map, "DELANCHY FT21")).toBe(delanchy);
+    // À défaut de clé DELANCHY, n'importe quelle grille de la famille.
+    expect(resolveCarrierTariff({ FT86: ft86 }, "FT54")).toBe(ft86);
+  });
+  it("famille ANTOINE et codes hors famille", () => {
+    const map = { DELANCHY: delanchy, ANTOINE: antoine };
+    expect(resolveCarrierTariff(map, "ANTOINE RUNGIS")).toBe(antoine);
+    expect(resolveCarrierTariff(map, "SCACHAP")).toBeNull();
+    expect(resolveCarrierTariff(map, "SOFT86")).toBeNull();
+    expect(resolveCarrierTariff(map, null)).toBeNull();
   });
 });

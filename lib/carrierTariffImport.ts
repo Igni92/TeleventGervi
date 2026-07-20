@@ -24,9 +24,7 @@
  * dans la route d'import (exceljs), qui fournit une matrice de cellules.
  */
 
-import { normCarrier } from "./transportCost";
 import {
-  isDelanchyCarrierCode,
   normDept,
   tariffTemplateFor,
   type CarrierTariff,
@@ -293,20 +291,10 @@ export function mergeExtraValues(
 }
 
 /**
- * Codes transporteurs cibles pour une grille importée, selon le format :
- *   • delanchy → tout code contenant DELANCHY ou un dépôt « FT<n°> » (FT86,
- *     FT94… — Delanchy regroupe tous les FT) ;
- *   • antoine  → tout code contenant ANTOINE.
- * Repli si le catalogue ne matche pas : le code générique du format.
+ * Code FAMILLE d'un format importé : la grille est enregistrée UNE SEULE fois
+ * sous ce code, et tous les transporteurs de la famille y retombent au calcul
+ * (resolveCarrierTariff — FT54/FT86/FT94… → DELANCHY, *ANTOINE* → ANTOINE).
  */
-export function matchCarrierCodes(format: TariffImportFormat, catalogCodes: string[]): { codes: string[]; matched: boolean } {
-  const matches = (code: string) =>
-    format === "delanchy" ? isDelanchyCarrierCode(code) : code.includes("ANTOINE");
-  const codes: string[] = [];
-  for (const raw of catalogCodes) {
-    const code = normCarrier(raw);
-    if (code && matches(code) && !codes.includes(code)) codes.push(code);
-  }
-  if (codes.length > 0) return { codes, matched: true };
-  return { codes: [format === "delanchy" ? "DELANCHY" : "ANTOINE"], matched: false };
+export function familyCodeForFormat(format: TariffImportFormat): string {
+  return format === "delanchy" ? "DELANCHY" : "ANTOINE";
 }

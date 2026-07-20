@@ -1,16 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import ExcelJS from "exceljs";
-import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
-import { prisma } from "@/lib/prisma";
 import { getCarrierTariff, setCarrierTariff } from "@/lib/transportCostStore";
 import { normCarrier } from "@/lib/transportCost";
 import { sanitizeCarrierTariff } from "@/lib/carrierTariff";
 import {
   parseTariffMatrix,
   mergeExtraValues,
-  matchCarrierCodes,
+  familyCodeForFormat,
   type CellMatrix,
 } from "@/lib/carrierTariffImport";
 
@@ -25,9 +23,10 @@ export const maxDuration = 60;
  *
  * POST /api/transport/tarifs/import  (multipart/form-data, direction/admin)
  *   file : le .xlsx du transporteur
- *   codes: optionnel, JSON array de codes U_TrspCode cibles — sinon
- *          auto-affectation aux transporteurs du catalogue dont le code
- *          contient DELANCHY/FT86 (format Delanchy) ou ANTOINE.
+ *   codes: optionnel, JSON array de codes U_TrspCode cibles — sinon la grille
+ *          est enregistrée UNE FOIS sous le code FAMILLE (DELANCHY / ANTOINE) ;
+ *          tous les dépôts de la famille (FT54, FT86, FT94…) y retombent au
+ *          calcul via resolveCarrierTariff.
  * → { ok, format, applied, matched, zones, brackets, warnings }
  *
  * Garde-fous : format inconnu ou grille vide → 400, rien n'est écrit. Les
@@ -96,23 +95,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Aucune zone/tranche exploitable dans le fichier — rien n'a été importé." }, { status: 400 });
   }
 
-  // Codes cibles : fournis, sinon auto-affectation depuis le catalogue local.
+  // Codes cibles : fournis, sinon le code FAMILLE unique (une seule grille —
+  // les dépôts FT54/FT86/FT94… la partagent via resolveCarrierTariff).
   let codes: string[] = [];
   const rawCodes = form.get("codes");
   if (typeof rawCodes === "string" && rawCodes.trim()) {
     try { codes = (JSON.parse(rawCodes) as unknown[]).map((c) => normCarrier(String(c ?? ""))).filter(Boolean); } catch { /* ignoré */ }
   }
-  let matched = true;
-  if (codes.length === 0) {
-    let catalog: string[] = [];
-    try {
-      const rows = await prisma.$queryRaw<{ sapValue: string | null }[]>(
-        Prisma.sql`SELECT "sapValue" FROM "Carrier" WHERE "active" = true`,
-      );
-      catalog = rows.map((r) => r.sapValue ?? "").filter(Boolean);
-    } catch { /* catalogue indisponible → repli repères */ }
-    ({ codes, matched } = matchCarrierCodes(parsed.format, catalog));
-  }
+  if (codes.length === 0) codes = [familyCodeForFormat(parsed.format)];
+  const matched = true;
 
   // Application : une grille par code cible (les % reprennent l'existant).
   const nowIso = new Date().toISOString();

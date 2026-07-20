@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseTariffMatrix,
   mergeExtraValues,
-  matchCarrierCodes,
+  familyCodeForFormat,
   type CellMatrix,
 } from "./carrierTariffImport";
 import { computePositionCost, type CarrierTariff } from "./carrierTariff";
@@ -154,20 +154,10 @@ describe("mergeExtraValues", () => {
   });
 });
 
-describe("matchCarrierCodes", () => {
-  it("delanchy → DELANCHY et TOUS les dépôts FT<n°> (FT86, FT94…)", () => {
-    expect(matchCarrierCodes("delanchy", ["DELANCHY FT86", "FT94", "SOFT86", "SCACHAP", "Antoine"]))
-      .toEqual({ codes: ["DELANCHY FT86", "FT94"], matched: true });
-  });
-  it("antoine → codes contenant ANTOINE", () => {
-    expect(matchCarrierCodes("antoine", ["DELANCHY FT86", "antoine"]))
-      .toEqual({ codes: ["ANTOINE"], matched: true });
-  });
-  it("repli sur le code générique si aucun code ne matche", () => {
-    expect(matchCarrierCodes("antoine", ["SCACHAP"]))
-      .toEqual({ codes: ["ANTOINE"], matched: false });
-    expect(matchCarrierCodes("delanchy", []))
-      .toEqual({ codes: ["DELANCHY"], matched: false });
+describe("familyCodeForFormat", () => {
+  it("une seule grille par famille — les dépôts FT y retombent au calcul", () => {
+    expect(familyCodeForFormat("delanchy")).toBe("DELANCHY");
+    expect(familyCodeForFormat("antoine")).toBe("ANTOINE");
   });
 });
 

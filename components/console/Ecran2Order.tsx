@@ -30,7 +30,7 @@ import { useContextMenu, ContextMenu, ContextMenuItem, ContextMenuLabel } from "
 import { useBrandLogos } from "@/lib/useBrandLogos";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
 import { transportPerKgForCarrier, isDirectCarrier, normCarrier, type TransportCostModel, type ClientCarrierPricing } from "@/lib/transportCost";
-import { computePositionCost, type CarrierTariffMap } from "@/lib/carrierTariff";
+import { computePositionCost, resolveCarrierTariff, type CarrierTariffMap } from "@/lib/carrierTariff";
 import { celebrateSale } from "@/components/settings/app-settings";
 
 interface StockEntry { available: number }
@@ -1098,7 +1098,9 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   // tranche de poids du panier, pour le département du client, + majorations %
   // et frais fixes (coût PAR POSITION — cf. lib/carrierTariff). Repli si pas de
   // grille / département / tranche : legacy €/kg du client × poids.
-  const carrierTariff = !carrierIsDirect ? (carrierTariffs[normCarrier(carrierSap)] ?? null) : null;
+  // resolveCarrierTariff : grille du code exact, sinon celle de sa FAMILLE
+  // (tous les dépôts FT<n°> → DELANCHY) — un FT jamais importé reste tarifé.
+  const carrierTariff = !carrierIsDirect ? resolveCarrierTariff(carrierTariffs, carrierSap) : null;
   const positionCost = carrierTariff ? computePositionCost(carrierTariff, clientDept, totalKg) : null;
   const transportPerKgClient = positionCost && totalKg > 0
     ? positionCost.total / totalKg

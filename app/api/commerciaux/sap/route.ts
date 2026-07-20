@@ -13,7 +13,7 @@ import {
   sanitizeClientPricing,
   type ClientCarrierPricing,
 } from "@/lib/transportCost";
-import { computePositionCost } from "@/lib/carrierTariff";
+import { computePositionCost, resolveCarrierTariff } from "@/lib/carrierTariff";
 import { departementOfZip } from "@/lib/geo/zip";
 import { getClientTournees } from "@/lib/clientTournee";
 
@@ -211,7 +211,7 @@ export async function GET() {
       const code = normCarrier(tournees.get(r.card.trim().toUpperCase())?.trspCode);
       if (!code) continue; // transporteur habituel inconnu → pas de déduction
       const direct = isDirectCarrier(model, code) || model.directCarriers.length === 0;
-      const posCost = !direct ? computePositionCost(tariffs[code] ?? null, departementOfZip(r.zip), kg) : null;
+      const posCost = !direct ? computePositionCost(resolveCarrierTariff(tariffs, code), departementOfZip(r.zip), kg) : null;
       const cost = posCost
         ? posCost.total
         : transportPerKgForCarrier(model, prixPosition, code, pricingById.get(r.cid) ?? null) * kg;
