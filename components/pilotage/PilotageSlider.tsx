@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, TrendingUp, FileText, Map as MapIcon, ArrowLeft, Eye, X, Home } from "lucide-react";
+import { ChevronLeft, ChevronRight, TrendingUp, FileText, Map as MapIcon, ArrowLeft, Eye, X, Home, Trophy } from "lucide-react";
 import { PilotageScreen1 } from "./PilotageScreen1";
 import { PilotageScreen2 } from "./PilotageScreen2";
 import { PilotageScreen3 } from "./PilotageScreen3";
@@ -107,6 +107,18 @@ export function PilotageSlider({ viewAs = null }: { viewAs?: string | null } = {
       >
         <ArrowLeft className="h-3.5 w-3.5" />
         Retour au site
+      </Link>
+
+      {/* Palmarès magasins — état de rentabilité par client (page scrollable
+          dédiée, hors slider). Pilotage · direction. */}
+      <Link
+        href="/dashboard/magasins"
+        aria-label="Palmarès des magasins"
+        title="Palmarès des magasins — rentabilité par client"
+        className="absolute right-3 top-2.5 z-40 hidden md:inline-flex items-center gap-1.5 h-8 pl-2.5 pr-3 rounded-full bg-background/85 backdrop-blur-md border border-border shadow-modal text-[11px] font-semibold text-foreground/80 hover:text-foreground hover:bg-background transition-colors"
+      >
+        <Trophy className="h-3.5 w-3.5 text-brand-500" />
+        Palmarès magasins
       </Link>
 
       {/* ── MOBILE : « chiffres clés du jour » — le bento desktop (grille 12×6 +
