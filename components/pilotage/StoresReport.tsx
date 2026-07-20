@@ -34,6 +34,8 @@ interface StoresPayload {
   period: { start: string; end: string };
   segment: Segment;
   prixPositionPerKg: number;
+  /** Direct : coût PAR POSITION (annuel ÷ livraisons), appliqué par facture. */
+  costPerDelivery: number;
   transportConfigured: boolean;
   nbStores: number;
   totals: {
@@ -301,13 +303,15 @@ function Report({ data }: { data: StoresPayload }) {
       {/* Détail complet */}
       <DetailTable stores={stores} configured={data.transportConfigured} />
 
-      <p className="text-[11px] leading-relaxed text-muted-foreground/80 mt-6 max-w-[90ch]">
+      <p className="text-[11px] leading-relaxed text-muted-foreground/80 mt-6 max-w-[92ch]">
         Source : factures SAP (le facturé fait foi), 12&nbsp;mois glissants. La <b>marge brute</b> est calculée
-        ligne à ligne au coût d’entrée marchandise réel. Le <b>coût de livraison</b> est estimé au{" "}
-        <b>prix position</b> ({fmtPerKg(data.prixPositionPerKg)}) × poids livré — c’est un coût moyen de flotte propre
-        (Île-de-France) : l’export est à 0 (transport payé par le client) et les ventes non livrées (Rungis, comptoir)
-        n’en portent pas. La <b>marge nette</b> = marge brute − coût de livraison. Réglages du prix position dans{" "}
-        <Link href="/transport" className="underline underline-offset-2">Coût de transport</Link>.
+        ligne à ligne au coût d’entrée marchandise réel. Le <b>coût de livraison</b> est compté <b>par position,
+        facture par facture</b>, selon le transporteur réel du document (repli : tournée habituelle du client) —
+        livraison <b>directe</b> = coût par position de la flotte ({fmtEur(data.costPerDelivery)}/livraison
+        {data.prixPositionPerKg > 0 ? <> · réf. {fmtPerKg(data.prixPositionPerKg)}</> : null}), transporteur
+        <b> externe</b> = grille par position (département × tranche de poids). Export/enlèvements (transport payé
+        par le client ou transporteur sans tarif) restent à 0. La <b>marge nette</b> = marge brute − coût de
+        livraison. Réglages dans <Link href="/transport" className="underline underline-offset-2">Coût de transport</Link>.
       </p>
     </>
   );

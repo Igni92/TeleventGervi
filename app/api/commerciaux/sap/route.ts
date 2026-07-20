@@ -4,18 +4,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getAccessScope, scopePayload, UNMAPPED_MESSAGE } from "@/lib/permissions";
 import { emailFromInitials } from "@/lib/salespeople";
-import { getTransportModel, listCarrierTariffs } from "@/lib/transportCostStore";
-import {
-  computeTransportMetrics,
-  transportPerKgForCarrier,
-  isDirectCarrier,
-  normCarrier,
-  sanitizeClientPricing,
-  type ClientCarrierPricing,
-} from "@/lib/transportCost";
-import { computePositionCost, resolveCarrierTariff } from "@/lib/carrierTariff";
-import { departementOfZip } from "@/lib/geo/zip";
-import { getClientTournees } from "@/lib/clientTournee";
+import { loadDocTransportContext, docTransportCost, GIFT_LINE_SQL } from "@/lib/transportDoc";
 
 /**
  * GET /api/commerciaux/sap — liste des commerciaux SAP (slpName) actifs sur
@@ -137,28 +126,24 @@ export async function GET() {
       GROUP BY 1`),
   ]);
 
-  // ── PRIME : config (taux + date par commercial) + marge brute du portefeuille ──
+  // ── PRIME : règles direction 07/2026, calculées FACTURE PAR FACTURE ──
+  //   • cadeaux neutralisés (lignes offertes : 0 € / remise 100 %) ;
+  //   • plancher 0 par facture (marge nette négative → ne ronge pas la prime) ;
+  //   • avoirs déduits, base totale jamais < 0 ;
+  //   • transport PAR POSITION via lib/transportDoc (transporteur RÉEL du doc,
+  //     repli tournée habituelle ; direct = coût/position, externe = grille).
+  // MÊME moteur que /api/pilotage/commissions → chiffres identiques partout.
   // Bloc isolé en try/catch → si la table CommercialPrime n'existe pas encore
   // dans un environnement, la liste des commerciaux reste fonctionnelle (prime 0).
   const primeCfg = new Map<string, { rate: number; since: Date }>();
-  const primeMargeMap = new Map<string, number>();      // marge BRUTE (nette d'avoirs)
-  const primeTransportMap = new Map<string, number>();  // coût transport estimé à déduire
+  const primeMargeMap = new Map<string, number>();      // Σ marge corrigée cadeaux − avoirs
+  const primeTransportMap = new Map<string, number>();  // Σ transport estimé (informatif)
+  const primeBaseMap = new Map<string, number>();       // BASE = max(0, Σ max(0, nette) − avoirs)
   try {
-    const [cfgRows, primeInv, primeCn, invKgRows] = await Promise.all([
+    const [cfgRows, primeCn, invRows] = await Promise.all([
       prisma.$queryRaw<{ slp: string; rate: number; since: Date }[]>(Prisma.sql`
         SELECT "slpName" AS slp, "rate"::float AS rate, "since" FROM "CommercialPrime"`),
-      // Marge brute facturée du portefeuille depuis la date de début (par commercial).
-      prisma.$queryRaw<{ slp: string; marge: number }[]>(Prisma.sql`
-        SELECT c."commercial" AS slp, COALESCE(SUM(i."grossProfit"), 0)::float AS marge
-        FROM "SapInvoice" i
-        JOIN "Client" c ON c."code" = i."cardCode"
-        LEFT JOIN "CommercialPrime" p ON p."slpName" = c."commercial"
-        WHERE i."cancelled" = false
-          AND c."commercial" IS NOT NULL AND c."commercial" <> ''
-          AND i."docDate" >= COALESCE(p."since", ${primeDefaultStart})
-          ${slpCond(Prisma.sql`c."commercial"`)}
-        GROUP BY 1`),
-      // Avoirs à soustraire (perte de marge), même fenêtre.
+      // Avoirs à déduire (marge reprise), même fenêtre que les factures.
       prisma.$queryRaw<{ slp: string; marge: number }[]>(Prisma.sql`
         SELECT c."commercial" AS slp, COALESCE(SUM(n."grossProfit"), 0)::float AS marge
         FROM "SapCreditNote" n
@@ -169,53 +154,45 @@ export async function GET() {
           AND n."docDate" >= COALESCE(p."since", ${primeDefaultStart})
           ${slpCond(Prisma.sql`c."commercial"`)}
         GROUP BY 1`),
-      // Poids livré PAR FACTURE (grille par tranches ⇒ le coût dépend du poids
-      // de CHAQUE livraison, pas du cumul) + département/id du client.
-      prisma.$queryRaw<{ slp: string; card: string; cid: string; zip: string | null; kg: number }[]>(Prisma.sql`
+      // PAR FACTURE : marge brute, marge des lignes CADEAUX (à neutraliser),
+      // poids livré, transporteur RÉEL mirroré, département/id du client.
+      prisma.$queryRaw<{
+        slp: string; card: string; cid: string; zip: string | null;
+        trsp: string | null; marge: number; mcad: number; kg: number;
+      }[]>(Prisma.sql`
         SELECT c."commercial" AS slp, i."cardCode" AS card, c."id" AS cid, c."zipCode" AS zip,
+               i."trspCode" AS trsp, COALESCE(i."grossProfit", 0)::float AS marge,
+               COALESCE(SUM(l."grossProfit") FILTER (WHERE ${Prisma.raw(GIFT_LINE_SQL)}), 0)::float AS mcad,
                COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS kg
-        FROM "SapInvoiceLine" l
-        JOIN "SapInvoice" i ON i."docEntry" = l."docEntry"
+        FROM "SapInvoice" i
         JOIN "Client" c ON c."code" = i."cardCode"
         LEFT JOIN "CommercialPrime" pr ON pr."slpName" = c."commercial"
+        LEFT JOIN "SapInvoiceLine" l ON l."docEntry" = i."docEntry"
         LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
         WHERE i."cancelled" = false
           AND c."commercial" IS NOT NULL AND c."commercial" <> ''
           AND i."docDate" >= COALESCE(pr."since", ${primeDefaultStart})
           ${slpCond(Prisma.sql`c."commercial"`)}
-        GROUP BY 1, 2, i."docEntry", 3, 4`),
+        GROUP BY 1, 2, i."docEntry", 3, 4, 5, 6`),
     ]);
     for (const r of cfgRows) primeCfg.set(r.slp, { rate: Number(r.rate), since: new Date(r.since) });
-    const cnMap = new Map(primeCn.map((r) => [r.slp, Number(r.marge)]));
-    for (const r of primeInv) primeMargeMap.set(r.slp, Number(r.marge) - (cnMap.get(r.slp) ?? 0));
 
-    // Coût transport estimé PAR FACTURE : transporteur HABITUEL du client
-    // (tournée mémorisée cltour:) → direct = prix position €/kg × kg ; externe
-    // avec grille = coût par position (département × tranche du poids livré) ;
-    // repli €/kg legacy du client. Transporteur inconnu → 0 (on ne devine pas,
-    // le transport des avoirs n'est pas re-crédité non plus).
-    const model = await getTransportModel();
-    const prixPosition = computeTransportMetrics(model).prixPositionPerKg;
-    const tariffs = await listCarrierTariffs();
-    const pricingById = new Map<string, ClientCarrierPricing>();
-    try {
-      const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: "transportcli:" } } });
-      for (const row of rows) {
-        try { pricingById.set(row.key.slice("transportcli:".length), sanitizeClientPricing(JSON.parse(row.value))); } catch { /* ignore */ }
-      }
-    } catch { /* pas de tarifs legacy */ }
-    const tournees = await getClientTournees([...new Set(invKgRows.map((r) => r.card))]);
-    for (const r of invKgRows) {
-      const kg = Number(r.kg);
-      if (kg <= 0) continue;
-      const code = normCarrier(tournees.get(r.card.trim().toUpperCase())?.trspCode);
-      if (!code) continue; // transporteur habituel inconnu → pas de déduction
-      const direct = isDirectCarrier(model, code) || model.directCarriers.length === 0;
-      const posCost = !direct ? computePositionCost(resolveCarrierTariff(tariffs, code), departementOfZip(r.zip), kg) : null;
-      const cost = posCost
-        ? posCost.total
-        : transportPerKgForCarrier(model, prixPosition, code, pricingById.get(r.cid) ?? null) * kg;
-      if (cost > 0) primeTransportMap.set(r.slp, (primeTransportMap.get(r.slp) ?? 0) + cost);
+    const ctx = await loadDocTransportContext(invRows.map((r) => r.card));
+    const margeMap = new Map<string, number>();   // Σ marge corrigée (factures)
+    const basePosMap = new Map<string, number>(); // Σ max(0, nette facture)
+    for (const r of invRows) {
+      const margeCorr = Number(r.marge) - Number(r.mcad); // cadeaux neutralisés
+      const t = docTransportCost(ctx, { cardCode: r.card, clientId: r.cid, zip: r.zip, kg: Number(r.kg), trspCode: r.trsp });
+      margeMap.set(r.slp, (margeMap.get(r.slp) ?? 0) + margeCorr);
+      if (t.cost > 0) primeTransportMap.set(r.slp, (primeTransportMap.get(r.slp) ?? 0) + t.cost);
+      basePosMap.set(r.slp, (basePosMap.get(r.slp) ?? 0) + Math.max(0, margeCorr - t.cost));
+    }
+    const cnMap = new Map(primeCn.map((r) => [r.slp, Number(r.marge)]));
+    for (const [slp, marge] of margeMap) {
+      const avoirs = cnMap.get(slp) ?? 0;
+      primeMargeMap.set(slp, marge - avoirs);
+      // BASE de prime : Σ max(0, nette) − avoirs, jamais négative (pas de déficit).
+      primeBaseMap.set(slp, Math.max(0, (basePosMap.get(slp) ?? 0) - avoirs));
     }
   } catch { /* table CommercialPrime absente → prime neutre */ }
 
@@ -278,13 +255,13 @@ export async function GET() {
         // Ventes de SES CLIENTS (portefeuille : Client.commercial = lui, quel que
         // soit le vendeur qui a saisi le doc). Net d'avoirs.
         caPortefeuilleYtd: (portInvMap.get(a.slp) ?? 0) - (portCnMap.get(a.slp) ?? 0),
-        // PRIME : taux × marge NETTE TRANSPORT (brute − coût transport estimé),
-        // factures nettes d'avoirs du portefeuille depuis la date de début —
-        // taux + date propres au commercial. Jamais négative.
-        primeMargeBrute: primeMargeMap.get(a.slp) ?? 0,
+        // PRIME : taux × BASE = Σ max(0, marge nette de chaque facture, cadeaux
+        // neutralisés) − avoirs, jamais négative. Transport PAR POSITION
+        // (transporteur réel du doc, repli tournée) — cf. lib/transportDoc.
+        primeMargeBrute: Math.round((primeMargeMap.get(a.slp) ?? 0) * 100) / 100,
         primeTransport: Math.round((primeTransportMap.get(a.slp) ?? 0) * 100) / 100,
-        primeMargeNette: Math.round(((primeMargeMap.get(a.slp) ?? 0) - (primeTransportMap.get(a.slp) ?? 0)) * 100) / 100,
-        prime: Math.max(0, Math.round(((primeMargeMap.get(a.slp) ?? 0) - (primeTransportMap.get(a.slp) ?? 0)) * (primeCfg.get(a.slp)?.rate ?? PRIME_DEFAULT_RATE) * 100) / 100),
+        primeMargeNette: Math.round((primeBaseMap.get(a.slp) ?? 0) * 100) / 100,
+        prime: Math.round((primeBaseMap.get(a.slp) ?? 0) * (primeCfg.get(a.slp)?.rate ?? PRIME_DEFAULT_RATE) * 100) / 100,
         primeRate: primeCfg.get(a.slp)?.rate ?? PRIME_DEFAULT_RATE,
         primeSince: (primeCfg.get(a.slp)?.since ?? primeDefaultStart).toISOString(),
         // Objectifs annuels (0 = non défini) — CA / marge brute / volume kg.

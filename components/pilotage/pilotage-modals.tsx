@@ -306,10 +306,35 @@ interface CommissionDetail {
   slpName: string;
   rate: number;
   since: string;
-  totals: { invoices: number; creditNotes: number; caHt: number; margeBrute: number; transport: number; margeNette: number; prime: number };
+  totals: {
+    invoices: number; creditNotes: number; caHt: number; margeBrute: number;
+    transport: number; cadeauxExclus: number; planchers: number; avoirs: number;
+    margeNette: number; prime: number;
+  };
   truncated: boolean;
-  invoices: { docEntry: number; docNum: number | null; docDate: string; cardName: string | null; cardCode: string; caHt: number; margeBrute: number; kg: number; transport: number; margeNette: number; prime: number }[];
+  invoices: {
+    docEntry: number; docNum: number | null; docDate: string; cardName: string | null; cardCode: string;
+    caHt: number; margeBrute: number; cadeaux: number; kg: number; transport: number;
+    carrier: string | null; mode: "direct" | "grille" | "perkg" | "aucun"; fromDoc: boolean;
+    margeNette: number; plancher: boolean; prime: number;
+  }[];
   creditNotes: { docEntry: number; docNum: number | null; docDate: string; cardName: string | null; cardCode: string; caHt: number; margeBrute: number; prime: number }[];
+}
+
+/** Libellé court du transporteur d'une facture — « comment ça a été livré ». */
+function carrierLabel(f: { carrier: string | null; mode: CommissionDetail["invoices"][number]["mode"]; fromDoc: boolean }): React.ReactNode {
+  if (!f.carrier) return <span className="text-muted-foreground/50">—</span>;
+  const tone = f.mode === "direct" ? "text-emerald-300" : f.mode === "aucun" ? "text-amber-300" : "text-foreground/70";
+  return (
+    <span className={`inline-flex items-center gap-1 ${tone}`} title={
+      (f.fromDoc ? "Transporteur du document (réel)" : "Tournée habituelle du client")
+      + (f.mode === "aucun" ? " — aucun tarif paramétré pour ce transporteur" : "")
+    }>
+      {f.carrier}
+      {!f.fromDoc && <span className="text-[8.5px] text-muted-foreground/70">(hab.)</span>}
+      {f.mode === "aucun" && <span className="text-[8.5px]">⚠ sans tarif</span>}
+    </span>
+  );
 }
 
 export function CommerciauxModal({ onClose }: { onClose: () => void }) {
@@ -408,10 +433,17 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
             {detail && (
               <>
                 <Stat label="Marge brute" v={fmtEurC(detail.totals.margeBrute)} />
-                <Stat label="Transport estimé" v={`− ${fmtEurC(detail.totals.transport)}`} />
-                <Stat label="Marge nette" v={fmtEurC(detail.totals.margeNette)} />
+                {detail.totals.cadeauxExclus > 0 && (
+                  <Stat label="Cadeaux neutralisés" v={fmtEurC(detail.totals.cadeauxExclus)} />
+                )}
+                <Stat label="Transport" v={`− ${fmtEurC(detail.totals.transport)}`} />
+                {detail.totals.avoirs > 0 && <Stat label="Avoirs repris" v={`− ${fmtEurC(detail.totals.avoirs)}`} />}
+                <Stat label="Base retenue" v={fmtEurC(detail.totals.margeNette)} />
                 <Stat label={`Prime (${(detail.rate * 100).toFixed(0)} %)`} v={fmtEur2(detail.totals.prime)} brand />
-                <span className="text-[10.5px] text-muted-foreground">{formatNum(detail.totals.invoices)} factures · {formatNum(detail.totals.creditNotes)} avoirs</span>
+                <span className="text-[10.5px] text-muted-foreground">
+                  {formatNum(detail.totals.invoices)} factures · {formatNum(detail.totals.creditNotes)} avoirs
+                  {detail.totals.planchers > 0 && ` · ${detail.totals.planchers} au plancher`}
+                </span>
               </>
             )}
           </div>
@@ -429,6 +461,7 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
                     <th className="text-right font-semibold px-3 py-2">CA HT</th>
                     <th className="text-right font-semibold px-3 py-2">Marge brute</th>
                     <th className="text-right font-semibold px-3 py-2">Poids</th>
+                    <th className="text-left font-semibold px-2 py-2">Livré par</th>
                     <th className="text-right font-semibold px-3 py-2">Transport</th>
                     <th className="text-right font-semibold px-3 py-2">Marge nette</th>
                     <th className="text-right font-semibold px-3 py-2">Prime</th>
@@ -439,17 +472,26 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
                     <tr key={f.docEntry} className="border-b border-border/40 hover:bg-secondary/30">
                       <td className="px-4 py-1 whitespace-nowrap text-foreground/70">{fmtDate(f.docDate)}</td>
                       <td className="px-2 py-1 text-foreground/70">{f.docNum ?? f.docEntry}</td>
-                      <td className="px-2 py-1 max-w-[200px]"><span className="truncate block font-medium text-foreground" title={f.cardName ?? f.cardCode}>{f.cardName ?? f.cardCode}</span></td>
+                      <td className="px-2 py-1 max-w-[200px]">
+                        <span className="truncate block font-medium text-foreground" title={f.cardName ?? f.cardCode}>{f.cardName ?? f.cardCode}</span>
+                        {f.cadeaux > 0 && (
+                          <span className="text-[9px] text-emerald-300/90 block">🎁 cadeau neutralisé {fmtEur(f.cadeaux)}</span>
+                        )}
+                      </td>
                       <td className="px-3 py-1 text-right whitespace-nowrap text-foreground/80">{fmtEur(f.caHt)}</td>
                       <td className="px-3 py-1 text-right whitespace-nowrap text-foreground/80">{fmtEur(f.margeBrute)}</td>
                       <td className="px-3 py-1 text-right whitespace-nowrap text-foreground/60">{fmtKg(f.kg)}</td>
+                      <td className="px-2 py-1 whitespace-nowrap text-[10.5px]">{carrierLabel(f)}</td>
                       <td className="px-3 py-1 text-right whitespace-nowrap text-foreground/60">{f.transport > 0 ? `− ${fmtEur(f.transport)}` : "—"}</td>
-                      <td className={`px-3 py-1 text-right whitespace-nowrap font-semibold ${f.margeNette < 0 ? "text-rose-300" : "text-foreground"}`}>{fmtEur(f.margeNette)}</td>
+                      <td className={`px-3 py-1 text-right whitespace-nowrap font-semibold ${f.margeNette < 0 ? "text-rose-300" : "text-foreground"}`}>
+                        {fmtEur(f.margeNette)}
+                        {f.plancher && <span className="text-[8.5px] text-muted-foreground block leading-none">plancher → 0</span>}
+                      </td>
                       <td className={`px-3 py-1 text-right whitespace-nowrap font-semibold ${f.prime < 0 ? "text-rose-300" : "text-brand-400"}`}>{fmtEur2(f.prime)}</td>
                     </tr>
                   ))}
                   {detail.creditNotes.length > 0 && (
-                    <tr><td colSpan={9} className="px-4 pt-3 pb-1 text-[10px] uppercase tracking-[0.12em] font-bold text-rose-300/80">Avoirs (marge reprise)</td></tr>
+                    <tr><td colSpan={10} className="px-4 pt-3 pb-1 text-[10px] uppercase tracking-[0.12em] font-bold text-rose-300/80">Avoirs (marge reprise — la base totale ne descend jamais sous 0)</td></tr>
                   )}
                   {detail.creditNotes.map((f) => (
                     <tr key={`cn-${f.docEntry}`} className="border-b border-border/40 hover:bg-secondary/30">
@@ -459,6 +501,7 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
                       <td className="px-3 py-1 text-right whitespace-nowrap text-rose-300/90">− {fmtEur(f.caHt)}</td>
                       <td className="px-3 py-1 text-right whitespace-nowrap text-rose-300/90">− {fmtEur(f.margeBrute)}</td>
                       <td className="px-3 py-1 text-right text-foreground/40">—</td>
+                      <td className="px-2 py-1 text-foreground/40">—</td>
                       <td className="px-3 py-1 text-right text-foreground/40">—</td>
                       <td className="px-3 py-1 text-right whitespace-nowrap text-rose-300/90">− {fmtEur(f.margeBrute)}</td>
                       <td className="px-3 py-1 text-right whitespace-nowrap font-semibold text-rose-300">{fmtEur2(f.prime)}</td>
@@ -471,10 +514,13 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
                   Liste plafonnée aux 400 documents les plus récents — les totaux du bandeau couvrent bien TOUTE la période.
                 </p>
               )}
-              <p className="px-5 pb-4 pt-1 text-[10.5px] text-muted-foreground/80 max-w-[100ch]">
-                Transport estimé par facture : grille par position du transporteur habituel du client (département × tranche
-                de poids), repli prix position flotte propre ; transporteur inconnu = 0. Avoirs : marge reprise, transport non
-                re-crédité — identique au calcul de la prime affichée sur la page Effectif.
+              <p className="px-5 pb-4 pt-1 text-[10.5px] text-muted-foreground/80 max-w-[110ch]">
+                Règles : <b className="text-foreground/80">cadeaux neutralisés</b> (lignes offertes 0 € / remise 100 %),{" "}
+                <b className="text-foreground/80">plancher 0 par facture</b> (une marge nette négative ne ronge pas la prime),{" "}
+                <b className="text-foreground/80">avoirs repris</b> sans jamais passer la base sous 0. Transport <b className="text-foreground/80">par
+                position</b> : transporteur réel du document (repli tournée habituelle) — direct = coût/position de la flotte,
+                externe = grille département × tranche ; « ⚠ sans tarif » = transporteur connu mais aucune grille/€-kg paramétré
+                (à compléter dans Coût de transport). Identique au calcul de la page Effectif.
               </p>
             </div>
           )}

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { getAccessScope, resolvePilotageView, scopePayload } from "@/lib/permissions";
 import { topClients, invoiceWeightByCard } from "@/lib/pilotage";
 import { prisma } from "@/lib/prisma";
 import { grossMarginPct } from "@/lib/margin";
 import { segmentOfGroup, groupCodesForSegment, parseSegment, type ClientSegment } from "@/lib/segments";
-import { getTransportModel } from "@/lib/transportCostStore";
-import { computeTransportMetrics } from "@/lib/transportCost";
+import { loadDocTransportContext, docTransportCost } from "@/lib/transportDoc";
 import { cached, invalidate } from "@/lib/ttlCache";
 
 // Évite le timeout serverless sur les agrégations (cold start Vercel).
@@ -23,9 +23,11 @@ export const maxDuration = 60;
  *   • CA HT (Σ DocTotal) + nb de factures,
  *   • marge BRUTE € (coût EM réel, lib/cogs) + CA produit net (base marge %),
  *   • poids livré (kg),
- *   • COÛT TRANSPORT ESTIMÉ = prix position €/kg × poids (0 pour l'export,
- *     transport payé par le client) — même logique que la marge nette console,
- *     mais AGRÉGÉE au prix position moyen (pas de tarif transporteur par ligne),
+ *   • COÛT TRANSPORT PAR POSITION, facture par facture (lib/transportDoc) :
+ *     transporteur RÉEL du document (U_TrspCode mirroré), repli tournée
+ *     habituelle — direct = coût/position, externe = grille département ×
+ *     tranche de poids. Export/enlèvements (transporteur payé par le client ou
+ *     inconnu) restent à 0,
  *   • MARGE NETTE = marge brute − coût transport (le « vrai » gain du magasin).
  *
  * Périmètre commercial identique au reste du pilotage : un non-admin (ou un
@@ -84,7 +86,7 @@ export async function GET(req: Request) {
     const clients = await topClients(start, end, MAX_STORES, groupCodes, slp);
     const codes = clients.map((c) => c.cardCode);
 
-    const [weightByCard, bps, model] = await Promise.all([
+    const [weightByCard, bps, perDoc] = await Promise.all([
       invoiceWeightByCard(start, end, codes, slp),
       codes.length
         ? prisma.sapBusinessPartner.findMany({
@@ -92,23 +94,42 @@ export async function GET(req: Request) {
             select: { cardCode: true, groupCode: true, groupName: true },
           })
         : Promise.resolve([]),
-      getTransportModel(),
+      // PAR FACTURE : poids livré + transporteur réel + localisation du client
+      // (le coût par position dépend du poids de CHAQUE livraison).
+      codes.length
+        ? prisma.$queryRaw<{ card: string; trsp: string | null; cid: string | null; zip: string | null; kg: number }[]>(Prisma.sql`
+            SELECT i."cardCode" AS card, i."trspCode" AS trsp, cl."id" AS cid, cl."zipCode" AS zip,
+                   COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS kg
+            FROM "SapInvoice" i
+            LEFT JOIN "Client" cl ON cl."code" = i."cardCode"
+            LEFT JOIN "SapInvoiceLine" l ON l."docEntry" = i."docEntry"
+            LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
+            WHERE i."cancelled" = false AND i."docDate" >= ${start} AND i."docDate" < ${end}
+              AND i."cardCode" IN (${Prisma.join(codes)})
+              ${slp ? Prisma.sql`AND i."slpName" = ${slp}` : Prisma.empty}
+            GROUP BY i."docEntry", 1, 2, 3, 4`)
+        : Promise.resolve([]),
     ]);
 
     const groupByCode = new Map(bps.map((b) => [b.cardCode, { groupCode: b.groupCode, groupName: b.groupName }]));
-    const { prixPositionPerKg } = computeTransportMetrics(model);
-    // Transport paramétré = un prix position calculable (kg/an + coûts saisis).
-    const transportConfigured = prixPositionPerKg > 0;
+
+    // Coût transport par POSITION, facture par facture (transporteur réel du
+    // doc → repli tournée habituelle), sommé par magasin.
+    const ctx = await loadDocTransportContext(codes);
+    const transportConfigured = ctx.costPerDelivery > 0 || ctx.prixPositionPerKg > 0;
+    const transportByCard = new Map<string, number>();
+    for (const d of perDoc) {
+      const t = docTransportCost(ctx, { cardCode: d.card, clientId: d.cid, zip: d.zip, kg: Number(d.kg), trspCode: d.trsp });
+      if (t.cost > 0) transportByCard.set(d.card, (transportByCard.get(d.card) ?? 0) + t.cost);
+    }
 
     const stores: StoreRow[] = clients.map((c) => {
       const g = groupByCode.get(c.cardCode);
       const seg = segmentOfGroup(g?.groupName ?? null, g?.groupCode ?? null);
-      // L'export paie son propre transport → coût de service interne nul.
-      // GMS/CHR = livrés en propre → coût position × poids. Les segments non
-      // livrés (Rungis, comptoir, non classés) : pas de tournée → 0.
-      const delivered = seg === "GMS" || seg === "CHR";
       const weightKg = weightByCard.get(c.cardCode) ?? 0;
-      const transportCost = delivered ? prixPositionPerKg * weightKg : 0;
+      const transportCost = Math.round((transportByCard.get(c.cardCode) ?? 0) * 100) / 100;
+      // « delivered » = un coût de livraison interne existe réellement.
+      const delivered = transportCost > 0;
       const marginGross = c.margin;
       const marginNet = marginGross - transportCost;
       return {
@@ -147,7 +168,9 @@ export async function GET(req: Request) {
     return {
       period: { start: start.toISOString(), end: end.toISOString() },
       segment,
-      prixPositionPerKg,
+      prixPositionPerKg: ctx.prixPositionPerKg,
+      /** Direct : coût PAR POSITION (annuel ÷ livraisons) appliqué par facture. */
+      costPerDelivery: ctx.costPerDelivery,
       transportConfigured,
       nbStores: stores.length,
       totals: {

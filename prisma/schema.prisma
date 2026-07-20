@@ -720,6 +720,9 @@ model SapInvoice {
   docTotal    Float     @default(0) // total HT (DocTotal - VatSum)
   vatSum      Float     @default(0)
   grossProfit Float? // marge SAP B1 (calculée à partir des LineCost)
+  // Transporteur RÉEL du document (UDF U_TrspCode, MAJUSCULES) — « par quoi ça
+  // a été livré » : base du coût transport par position (marge nette, primes).
+  trspCode    String?
   cancelled   Boolean   @default(false)
   updateDate  DateTime?
   syncedAt    DateTime  @default(now())
@@ -770,6 +773,7 @@ model SapOrder {
   docTotal    Float     @default(0)
   vatSum      Float     @default(0)
   grossProfit Float?
+  trspCode    String? // transporteur réel du BL (UDF U_TrspCode, MAJUSCULES)
   cancelled   Boolean   @default(false)
   updateDate  DateTime?
   syncedAt    DateTime  @default(now())
@@ -857,6 +861,7 @@ model SapCreditNote {
   // DocEntry de l'Invoice source si traçable (SAP BaseEntry sur la 1ère ligne).
   // Permet d'imputer l'avoir à la facture d'origine côté analytique.
   baseInvoiceEntry Int?
+  trspCode    String? // transporteur réel (UDF U_TrspCode, MAJUSCULES)
   cancelled   Boolean   @default(false)
   updateDate  DateTime?
   syncedAt    DateTime  @default(now())
