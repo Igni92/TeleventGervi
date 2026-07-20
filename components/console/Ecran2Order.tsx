@@ -7,6 +7,7 @@ import {
   Loader2, RefreshCw, ChevronDown, ChevronRight, ChevronUp, Search, Plus, Trash2,
   ShoppingCart, Check, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock, X,
   History, BadgeEuro, ArrowRightLeft, CopyPlus, Boxes, ListPlus, Truck, ShieldAlert,
+  Eye, EyeOff,
 } from "lucide-react";
 import {
   evaluateLineSafeguards, evaluateOrderSafeguards, normalizeSafeguardsConfig, splitViolations,
@@ -141,6 +142,7 @@ function notifyOrderResult(
   json: {
     ok?: boolean; blocked?: boolean; error?: string; docNum?: number;
     totalTTC?: number | null; totalLines?: number; bonPrep?: boolean; offre?: boolean;
+    sofruce?: { docNum: number; lot: string } | null;
   } | null,
 ) {
   const fmt = (n: number | null | undefined) => (n != null ? n.toFixed(2) : "—");
@@ -173,7 +175,9 @@ function notifyOrderResult(
     });
   } else {
     toast.success(`Commande #${json.docNum} créée — ${job.clientName}`, {
-      description: `${fmt(json.totalTTC)} € TTC`,
+      // Vente Sofruce : l'achat (EM) créé juste avant la vente est rappelé ici —
+      // la preuve visible que la double saisie manuelle n'est plus nécessaire.
+      description: `${fmt(json.totalTTC)} € TTC${json.sofruce ? ` · Achat Sofruce EM ${json.sofruce.docNum} créé` : ""}`,
       duration: 10000,
     });
     // Célébration « grosse marge » — no-op si désactivée ou marge < seuil.
@@ -531,6 +535,24 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   // « Bon de commande » : commande créée SANS auto-lot (lots affectés ensuite dans
   // l'onglet dédié). Coché à la main, ou FORCÉ quand la livraison est une précommande.
   const [bonCommandeManual, setBonCommandeManual] = useState(false);
+  // « VENTE SOFRUCE » (marché) : la validation crée d'abord l'ENTRÉE MARCHANDISE
+  // fournisseur Sofruce (mêmes articles/quantités), puis la vente sur son lot EM.
+  // Une seule saisie au lieu de deux — supprime les doublons d'EM manuels.
+  const [venteSofruce, setVenteSofruce] = useState(false);
+  // Prix d'ACHAT unitaire par article (saisie libre, unité de stock = celle du
+  // prix de vente). Vide → l'achat part au prix de vente (marge 0).
+  const [sofrucePA, setSofrucePA] = useState<Record<string, string>>({});
+  // Marge MASQUÉE (regard par-dessus l'épaule au marché / poste partagé) :
+  // les montants de marge s'affichent en « ••• ». Persisté par poste.
+  const [hideMargin, setHideMargin] = useState(false);
+  useEffect(() => {
+    try { setHideMargin(localStorage.getItem("tv:hide-margin") === "1"); } catch { /* stockage indisponible */ }
+  }, []);
+  const toggleHideMargin = () => setHideMargin((v) => {
+    const next = !v;
+    try { localStorage.setItem("tv:hide-margin", next ? "1" : "0"); } catch { /* best-effort */ }
+    return next;
+  });
   const precommande = isPrecommande(deliveryDate);
   // À DÉCOUVERT : au moins un article du panier dépasse le stock détenu. On force
   // alors le BON DE COMMANDE (offre/devis SAP) — il NE RÉSERVE PAS de stock, donc
@@ -541,7 +563,14 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     () => cart.some((l) => (l.quantity + Math.max(0, Math.floor(l.freeUnits ?? 0))) > totalAvailable(l.availByWarehouse ?? {})),
     [cart],
   );
-  const isBonCommande = precommande || bonCommandeManual || hasDecouvert;
+  // Vente Sofruce : le découvert ne force PAS le bon de commande — l'achat créé
+  // au même moment couvre la quantité (le stock naît avec la vente).
+  const isBonCommande = precommande || bonCommandeManual || (hasDecouvert && !venteSofruce);
+  // Vente Sofruce = BL direct uniquement : décochée d'office si le bon passe en
+  // commande/précommande ou en modification (le serveur refuse ces combinaisons).
+  useEffect(() => {
+    if (venteSofruce && (precommande || bonCommandeManual || modifierProp)) setVenteSofruce(false);
+  }, [venteSofruce, precommande, bonCommandeManual, modifierProp]);
   // Lots candidats (EN STOCK TeleVent) par article — chargés pour choisir le lot
   // d'une ligne AVANT l'envoi, UNIQUEMENT sur un bon de commande.
   const [lotCands, setLotCands] = useState<Record<string, { candidates: ConsoleLotCandidate[]; suggested: string | null }>>({});
@@ -690,12 +719,26 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   // ── Reset quand le client change ──
   useEffect(() => {
     setCart([]); setNumAtCard(""); setComments(""); setBonCommandeManual(false);
-    // Défaut = PROCHAINE LIVRAISON POSSIBLE : J+1 (samedi → lundi), puis on saute
-    // dimanches ET jours fériés (avant on posait « demain » en dur, même un
-    // dimanche ou un férié). Heure de tournée par défaut 09:00.
-    const t = new Date(`${nextWorkingDeliveryDay(nextDeliveryDate())}T09:00:00`);
-    setDeliveryDate(formatDateInput(t));
+    setVenteSofruce(false); setSofrucePA({});
   }, [clientId]);
+
+  // ── Date de livraison PAR DÉFAUT — selon le type du client ──
+  // GMS / CHR / EXPORT (tournées) : prochaine livraison possible = J+1 (samedi →
+  // lundi), en sautant dimanches et fériés. TOUT AUTRE client (marché, comptoir,
+  // perso…) : la marchandise part À LA VENTE → livraison le jour même (J), pas
+  // J+1. Effet séparé du reset panier : `clientType` arrive parfois APRÈS le
+  // montage (fetch de la fiche) — on ne veut réajuster QUE la date, jamais vider
+  // un panier en cours de saisie. Jamais en modification (la date vit sur le BL).
+  useEffect(() => {
+    if (modifierProp) return;
+    const seg = (clientType ?? "").trim().toUpperCase();
+    const tournee = seg === "GMS" || seg === "CHR" || seg === "EXPORT";
+    const day = tournee
+      ? nextWorkingDeliveryDay(nextDeliveryDate())
+      : new Date().toLocaleDateString("en-CA"); // J — date murale locale YYYY-MM-DD
+    setDeliveryDate(formatDateInput(new Date(`${day}T09:00:00`)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, clientType]);
 
   // (B3 — transporteurs filtrés par client + tournée : déplacé dans
   //  useTourneeSelection, partagé avec BLDialog. Défaut client pré-sélectionné.)
@@ -1204,6 +1247,18 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     decouvert?: boolean;
     /** Lot choisi à la main (bon de commande) — honoré côté serveur (U_NoLot). */
     lot?: string | null;
+    /** Vente Sofruce : prix d'ACHAT unitaire (même unité que le prix de vente)
+     *  porté sur l'entrée marchandise créée avant la vente. */
+    purchasePrice?: number;
+  };
+
+  /** Vente Sofruce — prix d'achat saisi pour un article (null = non renseigné →
+   *  l'achat partira au prix de VENTE, marge 0). Virgule acceptée. */
+  const sofrucePAOf = (itemCode: string): number | null => {
+    const raw = (sofrucePA[itemCode] ?? "").replace(",", ".").trim();
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : null;
   };
 
   /** C2 — En-tête du bon : mention des promos appliquées (uniquement si présentes).
@@ -1236,6 +1291,8 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     comments: [comments.trim(), buildPromoComment()].filter(Boolean).join(" · ") || undefined,
     // Bon de commande (aucun auto-lot) : coche manuelle ou précommande.
     docKind: isBonCommande ? "COMMANDE" : "BL",
+    // Vente Sofruce : le serveur crée l'ENTRÉE MARCHANDISE Sofruce avant la vente.
+    ...(venteSofruce && !isBonCommande ? { venteSofruce: true } : {}),
     // Garde-fous « Avertir » DÉJÀ confirmés dans le dialogue console → le filet
     // serveur ne redemande pas (les BLOQUANTS, eux, restent infranchissables).
     ...(safeguardsConfirmed ? { confirmSafeguards: true } : {}),
@@ -1269,6 +1326,9 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
         const freeHere = Math.min(remainingFree, c.qty);
         const paidHere = c.qty - freeHere;
         remainingFree -= freeHere;
+        // Vente Sofruce : prix d'achat saisi, reporté sur CHAQUE tronçon de la
+        // ligne (le serveur agrège par article × entrepôt pour l'EM).
+        const pa = venteSofruce ? sofrucePAOf(l.itemCode) : null;
         if (paidHere > 0) {
           out.push({
             itemCode: l.itemCode,
@@ -1279,6 +1339,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
             ...(dPercent != null ? { discountPercent: dPercent } : {}),
             ...(c.decouvert ? { decouvert: true } : {}),
             ...(l.lot ? { lot: l.lot } : {}),
+            ...(pa != null ? { purchasePrice: pa } : {}),
           });
         }
         if (freeHere > 0) {
@@ -1292,6 +1353,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
             discountPercent: 100,
             ...(c.decouvert ? { decouvert: true } : {}),
             ...(l.lot ? { lot: l.lot } : {}),
+            ...(pa != null ? { purchasePrice: pa } : {}),
           });
         }
       }
@@ -1401,7 +1463,8 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     // (pré-remplis avec le défaut client — l'erreur ne sort que par exception).
     const tourneeError = validateTournee();
     if (tourneeError) { toast.error(tourneeError); return; }
-    sendOrderInBackground({ kind: "create", clientName, body: buildOrderBody(buildApiLines(), opts?.safeguardsConfirmed === true), margeNette: hasCostData ? margeNetteTotal : undefined });
+    // Marge masquée → pas de célébration « grosse marge » (elle affiche le montant en grand).
+    sendOrderInBackground({ kind: "create", clientName, body: buildOrderBody(buildApiLines(), opts?.safeguardsConfirmed === true), margeNette: hasCostData && !hideMargin ? margeNetteTotal : undefined });
     toast.info(`${clientName} — commande envoyée, création en arrière-plan…`);
     setCart([]); setNumAtCard(""); setComments("");
     onSubmitted?.();
@@ -2036,6 +2099,24 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
             ) : "Commande"}
           </p>
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* VENTE SOFRUCE (marché) — en haut à droite : un seul geste crée
+                l'ACHAT Sofruce (EM) puis la VENTE sur son lot. Décochée/grisée en
+                bon de commande, précommande ou modification. */}
+            {!modif && (
+              <label
+                title={isBonCommande
+                  ? "Vente Sofruce : uniquement en BL direct (pas de bon de commande ni de précommande)"
+                  : "Vente Sofruce : à la validation, crée d'abord l'entrée marchandise fournisseur Sofruce (mêmes articles/quantités), puis la vente sur ce lot. Renseigne les prix d'achat dans le bandeau qui s'affiche."}
+                className={`inline-flex items-center gap-1.5 rounded-md border px-2 h-8 text-[11.5px] select-none ${isBonCommande ? "cursor-not-allowed opacity-50" : "cursor-pointer"} ${
+                  venteSofruce ? "border-violet-400/60 bg-violet-500/10 text-violet-700 dark:text-violet-300" : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <input type="checkbox" checked={venteSofruce} disabled={isBonCommande}
+                  onChange={(e) => setVenteSofruce(e.target.checked)}
+                  className="h-3.5 w-3.5 accent-violet-600" />
+                <span className="font-semibold whitespace-nowrap">Vente Sofruce</span>
+              </label>
+            )}
             {/* Raccourcis produits personnalisables (ajout direct au panier) */}
             <OrderShortcuts onPick={addByShortcut} />
             {/* Dupliquer la DERNIÈRE commande — ICÔNE SEULE, à droite des raccourcis. */}
@@ -2051,6 +2132,37 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
             )}
           </div>
         </div>
+        {/* VENTE SOFRUCE — prix d'ACHAT par article (même unité que le prix de
+            vente). Vide = l'achat part au prix de vente (marge 0). L'EM Sofruce
+            est créée à la validation, juste avant la vente. */}
+        {venteSofruce && !modif && cart.length > 0 && (
+          <div className="mb-2 shrink-0 rounded-lg border border-violet-400/50 bg-violet-500/5 px-2.5 py-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
+              Achat Sofruce — prix d&apos;achat unitaire
+            </p>
+            <div className="mt-1.5 space-y-1">
+              {cart.map((l) => (
+                <div key={l.itemCode} className="flex items-center justify-between gap-2 text-[12px]">
+                  <span className="min-w-0 truncate text-foreground">{l.itemName}</span>
+                  <span className="inline-flex items-center gap-1 shrink-0">
+                    <input
+                      type="text" inputMode="decimal"
+                      value={sofrucePA[l.itemCode] ?? ""}
+                      onChange={(e) => setSofrucePA((prev) => ({ ...prev, [l.itemCode]: e.target.value }))}
+                      placeholder={hints[l.itemCode]?.prixAchat != null ? hints[l.itemCode]!.prixAchat!.toFixed(2) : "= prix vente"}
+                      aria-label={`Prix d'achat ${l.itemName}`}
+                      className="h-7 w-24 rounded-md border border-border bg-background px-2 text-right tnum"
+                    />
+                    <span className="text-muted-foreground">€</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-1 text-[10.5px] text-muted-foreground">
+              Vide = prix de vente (marge 0). À la validation : EM Sofruce puis vente sur son lot.
+            </p>
+          </div>
+        )}
         <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
           {cart.length === 0 && (
             <p className="text-[14px] text-muted-foreground italic py-4 text-center inline-flex items-center justify-center gap-2 w-full">
@@ -2456,6 +2568,9 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
             const fmtK = (v: number) => `${v.toFixed(3)} €/kg`;
             // Vue /kg : « n.c. » si aucune ligne n'a de poids connu (sinon 0,000 €/kg trompeur).
             const kgTxt = (v: number) => (hasKgData ? fmtK(v) : "n.c.");
+            // Marge MASQUÉE (épaule) : les montants de marge deviennent « ••• ».
+            // Le feu tricolore reste (filet anti-vente à perte, sans chiffre).
+            const m = (txt: string) => (hideMargin ? "•••" : txt);
             const transpTxt = transportPerKgClient > 0 || carrierIsDirect
               ? (isPos ? fmtE(coutTransportTotal) : fmtK(transportPerKgClient))
               : "externe n.c.";
@@ -2470,6 +2585,15 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                   </InfoHint>
                 </span>
                 <div className="flex items-center gap-2">
+                  {/* Masquer la marge (regard par-dessus l'épaule) — persistant par poste. */}
+                  <button
+                    type="button" onClick={toggleHideMargin}
+                    aria-label={hideMargin ? "Afficher la marge" : "Masquer la marge"}
+                    title={hideMargin ? "Afficher la marge" : "Masquer la marge (regard par-dessus l'épaule) — le feu tricolore reste"}
+                    className="inline-flex items-center justify-center h-5 w-5 rounded border border-border/60 text-muted-foreground hover:text-foreground"
+                  >
+                    {hideMargin ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                  </button>
                   <div className="inline-flex rounded-md border border-border/60 overflow-hidden text-[10.5px] font-semibold">
                     <button type="button" onClick={() => setMarginUnit("position")} className={`px-1.5 h-5 ${isPos ? "bg-brand-500/20 text-brand-700 dark:text-brand-300" : "text-muted-foreground hover:text-foreground"}`}>/livr.</button>
                     <button type="button" onClick={() => setMarginUnit("kg")} className={`px-1.5 h-5 ${!isPos ? "bg-brand-500/20 text-brand-700 dark:text-brand-300" : "text-muted-foreground hover:text-foreground"}`}>/kg</button>
@@ -2489,14 +2613,14 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                   {/* Détail : coût transport + marge brute (unité choisie) */}
                   <div className="mt-1.5 flex items-center justify-between gap-2 text-[11.5px] text-muted-foreground">
                     <span>Transport <b className="tnum text-foreground">{transpTxt}</b></span>
-                    <span>Marge brute <b className="tnum text-foreground">{isPos ? fmtE(margeBruteTotal) : kgTxt(margeBruteKg)}</b></span>
+                    <span>Marge brute <b className="tnum text-foreground">{m(isPos ? fmtE(margeBruteTotal) : kgTxt(margeBruteKg))}</b></span>
                   </div>
                   {/* Bas : marge nette en GROS, colorée */}
                   <div className="mt-1 flex items-baseline justify-between gap-2 border-t border-border/40 pt-1">
                     <span className="text-[11px] font-medium text-foreground">{isPos ? "Marge nette livraison" : "Marge nette /kg"}</span>
                     <span className="inline-flex items-baseline gap-1.5">
-                      <span className={`tnum font-extrabold text-[21px] leading-none ${TONE[netTone]}`}>{isPos ? fmtE(margeNetteTotal) : kgTxt(margeNetteKg)}</span>
-                      {(isPos || hasKgData) && <span className={`tnum font-bold text-[13px] ${TONE[netTone]}`}>{margeNettePct.toFixed(1)} %</span>}
+                      <span className={`tnum font-extrabold text-[21px] leading-none ${TONE[netTone]}`}>{m(isPos ? fmtE(margeNetteTotal) : kgTxt(margeNetteKg))}</span>
+                      {(isPos || hasKgData) && !hideMargin && <span className={`tnum font-bold text-[13px] ${TONE[netTone]}`}>{margeNettePct.toFixed(1)} %</span>}
                     </span>
                   </div>
                 </>
@@ -2797,7 +2921,8 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                 {cart.length} article{cart.length > 1 ? "s" : ""} · {fmtKg(totalKg)}
                 {hasCostData && (
                   <span className={`ml-2 font-semibold ${margeNetteTotal < 0 ? "text-rose-600 dark:text-rose-400" : margeNettePct < 10 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                    · marge nette {margeNetteTotal.toFixed(2)} € ({Math.round(margeNettePct)} %)
+                    {/* Marge masquée (épaule) : montant remplacé par « ••• », couleur conservée. */}
+                    · marge nette {hideMargin ? "•••" : `${margeNetteTotal.toFixed(2)} € (${Math.round(margeNettePct)} %)`}
                   </span>
                 )}
               </div>
