@@ -26,6 +26,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { BrandLogo } from "@/components/BrandLogo";
 import { StarRating } from "@/components/ui/star-rating";
 import { LotDetailsDialog } from "./LotDetailsDialog";
+import { SofruceStatementButton } from "./SofruceStatementDialog";
 import { ConsoleLotPicker, type ConsoleLotCandidate } from "./ConsoleLotPicker";
 import { useContextMenu, ContextMenu, ContextMenuItem, ContextMenuLabel } from "@/components/ui/context-menu";
 import { useBrandLogos } from "@/lib/useBrandLogos";
@@ -312,8 +313,67 @@ interface GroupEntry { key: string; name: string; prods: Product[]; pinned?: boo
  *   B4 — « colis de X kg » sous le nom produit quand calculable
  *   C4 — densité d'affichage Compact / Normal / Aéré : RÉGLÉE sur /parametres
  *        (localStorage televente:ecran2Density), lue ici + listener storage
+ *   C5 — BROUILLON par client : une commande saisie puis quittée SANS validation
+ *        est conservée (localStorage) — au retour sur le client, le panier
+ *        revient tel quel. Effacé à l'envoi du bon ou après expiration.
  */
 const SHORTCUTS_KEY = "televente:cmd-raccourcis";
+
+/** Marge Sofruce PAR DÉFAUT (%) — sans prix d'achat saisi, l'EM part au prix
+ *  de vente − cette marge (vente 1,00 €/kg → achat 0,80 € à 20 %). Modifiable
+ *  dans la pastille à côté du bouton « Vente Sofruce » ; mémorisée par poste. */
+const SOFRUCE_MARGE_KEY = "tv:sofruce-marge";
+const SOFRUCE_MARGE_DEFAULT = 20;
+
+/* ── C5 — Brouillon de commande NON VALIDÉE, conservé PAR CLIENT ────────────
+   Sauvegardé en continu pendant la saisie (par poste, localStorage) ; restauré
+   au montage quand on REVIENT sur le client. Supprimé : à l'envoi du bon, quand
+   le panier est vidé à la main, ou passé le TTL (stock/prix trop périmés — le
+   dispo des lignes restaurées est de toute façon rafraîchi sur le stock du
+   jour dès que le catalogue est chargé). JAMAIS en mode MODIFICATION : l'état
+   d'une modif vit sur le BL SAP, pas en brouillon. */
+const DRAFT_PREFIX = "televente:brouillon:";
+const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;   // 24 h — au-delà, prix/promos périmés
+const draftKey = (clientId: string) => `${DRAFT_PREFIX}${clientId}`;
+
+interface OrderDraft {
+  v: 1; savedAt: number;
+  cart: CartLine[]; numAtCard: string; comments: string; deliveryDate: string;
+  bonCommandeManual: boolean; venteSofruce: boolean; sofrucePA: Record<string, string>;
+}
+
+function readDraft(clientId: string): OrderDraft | null {
+  try {
+    const raw = localStorage.getItem(draftKey(clientId));
+    if (!raw) return null;
+    const d = JSON.parse(raw) as OrderDraft;
+    if (d?.v !== 1 || typeof d.savedAt !== "number" || Date.now() - d.savedAt > DRAFT_TTL_MS) return null;
+    if (!Array.isArray(d.cart)) return null;
+    d.cart = d.cart.filter((l) => l && typeof l.itemCode === "string" && typeof l.quantity === "number");
+    return d.cart.length > 0 ? d : null;
+  } catch { return null; }
+}
+
+function clearDraft(clientId: string) {
+  try { localStorage.removeItem(draftKey(clientId)); } catch { /* ignore */ }
+}
+
+/** Purge les brouillons expirés ou illisibles (une fois au montage de l'écran). */
+function pruneDrafts() {
+  try {
+    const now = Date.now();
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith(DRAFT_PREFIX)) continue;
+      try {
+        const d = JSON.parse(localStorage.getItem(k) ?? "");
+        if (typeof d?.savedAt !== "number" || now - d.savedAt > DRAFT_TTL_MS) stale.push(k);
+      } catch { stale.push(k); }
+    }
+    stale.forEach((k) => localStorage.removeItem(k));
+  } catch { /* ignore */ }
+}
 
 /**
  * Raccourcis produits personnalisables (remplacent l'ancien compteur « Promotions »).
@@ -540,8 +600,24 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   // Une seule saisie au lieu de deux — supprime les doublons d'EM manuels.
   const [venteSofruce, setVenteSofruce] = useState(false);
   // Prix d'ACHAT unitaire par article (saisie libre, unité de stock = celle du
-  // prix de vente). Vide → l'achat part au prix de vente (marge 0).
+  // prix de vente). Vide → dérivé du prix de vente − la marge Sofruce (ci-dessous).
   const [sofrucePA, setSofrucePA] = useState<Record<string, string>>({});
+  // Marge Sofruce (%) appliquée PAR DÉFAUT quand aucun prix d'achat n'est saisi :
+  // achat = prix de vente × (1 − marge). Persistée par poste ; 20 % d'origine.
+  const [sofruceMargeStr, setSofruceMargeStr] = useState(String(SOFRUCE_MARGE_DEFAULT));
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SOFRUCE_MARGE_KEY);
+      if (raw != null && raw.trim() !== "") setSofruceMargeStr(raw);
+    } catch { /* stockage indisponible */ }
+  }, []);
+  const sofruceMargeNum = Number(sofruceMargeStr.replace(",", ".").trim());
+  const sofruceMargePct = Number.isFinite(sofruceMargeNum) && sofruceMargeNum >= 0 && sofruceMargeNum < 100
+    ? sofruceMargeNum : SOFRUCE_MARGE_DEFAULT;
+  const setSofruceMarge = (v: string) => {
+    setSofruceMargeStr(v);
+    try { localStorage.setItem(SOFRUCE_MARGE_KEY, v); } catch { /* best-effort */ }
+  };
   // Marge MASQUÉE (regard par-dessus l'épaule au marché / poste partagé) :
   // les montants de marge s'affichent en « ••• ». Persisté par poste.
   const [hideMargin, setHideMargin] = useState(false);
@@ -716,11 +792,88 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modifierProp?.docEntry]);
 
-  // ── Reset quand le client change ──
+  // ── C5 — Brouillon par client : reset au changement de client, puis
+  // RESTAURATION de la commande non validée mise en cache pour CE client.
+  // `draftReady` retient la sauvegarde tant que la restauration n'a pas été
+  // tentée (sinon le 1er passage, panier encore vide, effacerait le brouillon).
+  const [draftReady, setDraftReady] = useState(false);
+  // Le dispo mémorisé dans un brouillon peut dater → à rafraîchir sur le stock
+  // du jour dès que le catalogue est chargé (découpe entrepôt / découvert justes).
+  const needAvailRefresh = useRef(false);
+  // Date de livraison restaurée depuis le brouillon → l'effet « date par défaut »
+  // ne doit pas l'écraser (il se déclenche aussi quand clientType arrive après coup).
+  const dateRestored = useRef(false);
+  useEffect(() => { pruneDrafts(); }, []);
   useEffect(() => {
     setCart([]); setNumAtCard(""); setComments(""); setBonCommandeManual(false);
     setVenteSofruce(false); setSofrucePA({});
+    if (!modifierProp) {
+      const d = readDraft(clientId);
+      if (d) {
+        setCart(d.cart);
+        setNumAtCard(typeof d.numAtCard === "string" ? d.numAtCard : "");
+        setComments(typeof d.comments === "string" ? d.comments : "");
+        setBonCommandeManual(d.bonCommandeManual === true);
+        setVenteSofruce(d.venteSofruce === true);
+        setSofrucePA(d.sofrucePA && typeof d.sofrucePA === "object" ? d.sofrucePA : {});
+        needAvailRefresh.current = true;
+        // Date de livraison : reprise seulement si elle n'est pas déjà passée —
+        // sinon on laisse le défaut (J/J+1 selon le type client) se recalculer.
+        const dt = typeof d.deliveryDate === "string" ? new Date(d.deliveryDate) : null;
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        if (dt && !Number.isNaN(dt.getTime()) && dt >= today) {
+          setDeliveryDate(d.deliveryDate);
+          dateRestored.current = true;
+        }
+        toast.info(`${clientName} — commande non validée restaurée (${d.cart.length} ligne${d.cart.length > 1 ? "s" : ""})`, {
+          description: "Saisie quittée sans validation, reprise telle quelle. « Vider » pour repartir de zéro.",
+          action: {
+            label: "Vider",
+            onClick: () => {
+              setCart([]); setNumAtCard(""); setComments(""); setBonCommandeManual(false);
+              setVenteSofruce(false); setSofrucePA({});
+              clearDraft(clientId);
+            },
+          },
+          duration: 8000,
+        });
+      }
+    }
+    setDraftReady(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
+
+  // C5 — Rafraîchit le DISPO des lignes restaurées dès que le catalogue est là
+  // (quantités et prix saisis, eux, ne bougent pas).
+  useEffect(() => {
+    if (!needAvailRefresh.current) return;
+    const all = Object.values(grouped).flat();
+    if (all.length === 0) return;
+    needAvailRefresh.current = false;
+    const byCode = new Map(all.map((p) => [p.itemCode, p]));
+    setCart((cur) => cur.map((l) => {
+      const p = byCode.get(l.itemCode);
+      if (!p) return l;
+      const avail: Record<string, number> = {};
+      for (const w of ["000", "01", "R1"]) avail[w] = Math.max(0, Math.floor(((p.stockByWarehouse[w]?.available ?? 0) / l.packDivisor) * 10) / 10);
+      return { ...l, availByWarehouse: avail };
+    }));
+  }, [grouped]);
+
+  // C5 — Sauvegarde CONTINUE du brouillon (panier + note + réf + date + options).
+  // Panier vidé → brouillon supprimé. Jamais en modification (état sur le BL).
+  useEffect(() => {
+    if (!draftReady || modif || prefilling) return;
+    try {
+      if (cart.length === 0) { localStorage.removeItem(draftKey(clientId)); return; }
+      const d: OrderDraft = {
+        v: 1, savedAt: Date.now(),
+        cart, numAtCard, comments, deliveryDate,
+        bonCommandeManual, venteSofruce, sofrucePA,
+      };
+      localStorage.setItem(draftKey(clientId), JSON.stringify(d));
+    } catch { /* stockage indisponible — best-effort */ }
+  }, [draftReady, modif, prefilling, cart, numAtCard, comments, deliveryDate, bonCommandeManual, venteSofruce, sofrucePA, clientId]);
 
   // ── Date de livraison PAR DÉFAUT — selon le type du client ──
   // GMS / CHR / EXPORT (tournées) : prochaine livraison possible = J+1 (samedi →
@@ -731,6 +884,8 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   // un panier en cours de saisie. Jamais en modification (la date vit sur le BL).
   useEffect(() => {
     if (modifierProp) return;
+    // C5 — date reprise d'un brouillon restauré (et encore valide) : on la garde.
+    if (dateRestored.current) return;
     const seg = (clientType ?? "").trim().toUpperCase();
     const tournee = seg === "GMS" || seg === "CHR" || seg === "EXPORT";
     const day = tournee
@@ -1252,13 +1407,20 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     purchasePrice?: number;
   };
 
-  /** Vente Sofruce — prix d'achat saisi pour un article (null = non renseigné →
-   *  l'achat partira au prix de VENTE, marge 0). Virgule acceptée. */
-  const sofrucePAOf = (itemCode: string): number | null => {
-    const raw = (sofrucePA[itemCode] ?? "").replace(",", ".").trim();
-    if (!raw) return null;
-    const n = Number(raw);
-    return Number.isFinite(n) && n >= 0 ? n : null;
+  /** Vente Sofruce — prix d'ACHAT unitaire d'une ligne : saisi à la main
+   *  (virgule acceptée), sinon DÉRIVÉ du prix de vente − la marge Sofruce
+   *  (vente 1,00 € → achat 0,80 € à 20 %). null si aucun prix de vente —
+   *  l'achat partira alors au prix de vente côté serveur (marge 0). */
+  const sofrucePAOf = (l: CartLine): number | null => {
+    const raw = (sofrucePA[l.itemCode] ?? "").replace(",", ".").trim();
+    if (raw) {
+      const n = Number(raw);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+    if (l.price != null && l.price > 0) {
+      return Math.round(l.price * (1 - sofruceMargePct / 100) * 10000) / 10000;
+    }
+    return null;
   };
 
   /** C2 — En-tête du bon : mention des promos appliquées (uniquement si présentes).
@@ -1328,7 +1490,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
         remainingFree -= freeHere;
         // Vente Sofruce : prix d'achat saisi, reporté sur CHAQUE tronçon de la
         // ligne (le serveur agrège par article × entrepôt pour l'EM).
-        const pa = venteSofruce ? sofrucePAOf(l.itemCode) : null;
+        const pa = venteSofruce ? sofrucePAOf(l) : null;
         if (paidHere > 0) {
           out.push({
             itemCode: l.itemCode,
@@ -1466,6 +1628,9 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     // Marge masquée → pas de célébration « grosse marge » (elle affiche le montant en grand).
     sendOrderInBackground({ kind: "create", clientName, body: buildOrderBody(buildApiLines(), opts?.safeguardsConfirmed === true), margeNette: hasCostData && !hideMargin ? margeNetteTotal : undefined });
     toast.info(`${clientName} — commande envoyée, création en arrière-plan…`);
+    // C5 — bon envoyé → le brouillon mis en cache n'a plus lieu d'être. Purge
+    // EXPLICITE : l'écran est démonté avant que l'effet de sauvegarde ne repasse.
+    clearDraft(clientId);
     setCart([]); setNumAtCard(""); setComments("");
     onSubmitted?.();
   };
@@ -2106,7 +2271,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
               <label
                 title={isBonCommande
                   ? "Vente Sofruce : uniquement en BL direct (pas de bon de commande ni de précommande)"
-                  : "Vente Sofruce : à la validation, crée d'abord l'entrée marchandise fournisseur Sofruce (mêmes articles/quantités), puis la vente sur ce lot. Renseigne les prix d'achat dans le bandeau qui s'affiche."}
+                  : `Vente Sofruce : à la validation, crée d'abord l'entrée marchandise fournisseur Sofruce (mêmes articles/quantités), puis la vente sur ce lot. Prix d'achat par défaut = prix de vente − ${sofruceMargePct} % de marge (réglable à côté) ; ajustable article par article dans le bandeau.`}
                 className={`inline-flex items-center gap-1.5 rounded-md border px-2 h-8 text-[11.5px] select-none ${isBonCommande ? "cursor-not-allowed opacity-50" : "cursor-pointer"} ${
                   venteSofruce ? "border-violet-400/60 bg-violet-500/10 text-violet-700 dark:text-violet-300" : "border-border text-muted-foreground hover:text-foreground"
                 }`}
@@ -2117,6 +2282,28 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                 <span className="font-semibold whitespace-nowrap">Vente Sofruce</span>
               </label>
             )}
+            {/* Marge Sofruce PAR DÉFAUT (%) — appliquée quand aucun prix d'achat
+                n'est saisi : achat = vente − marge (1,00 € → 0,80 € à 20 %).
+                Hors du <label> pour ne pas basculer la case en cliquant dedans. */}
+            {!modif && venteSofruce && (
+              <span
+                title={`Marge Sofruce par défaut : sans prix d'achat saisi, l'achat part au prix de vente − ${sofruceMargePct} % (ex. vente 1,00 € → achat ${(1 - sofruceMargePct / 100).toFixed(2).replace(".", ",")} €). Mémorisée sur ce poste.`}
+                className="inline-flex items-center gap-1 h-8 px-2 rounded-md border border-violet-400/60 bg-violet-500/10 text-[11.5px] font-semibold text-violet-700 dark:text-violet-300 select-none"
+              >
+                marge
+                <input
+                  type="text" inputMode="decimal"
+                  value={sofruceMargeStr}
+                  onChange={(e) => setSofruceMarge(e.target.value)}
+                  aria-label="Marge Sofruce par défaut (%)"
+                  className="h-6 w-9 rounded border border-violet-400/50 bg-background px-1 text-right tnum text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500"
+                />
+                %
+              </span>
+            )}
+            {/* État de compte Sofruce (PDF) — relevé des achats de la période,
+                à remettre à Sofruce (ce qu'ils doivent nous facturer). */}
+            {!modif && <SofruceStatementButton />}
             {/* Raccourcis produits personnalisables (ajout direct au panier) */}
             <OrderShortcuts onPick={addByShortcut} />
             {/* Dupliquer la DERNIÈRE commande — ICÔNE SEULE, à droite des raccourcis. */}
@@ -2133,8 +2320,8 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
           </div>
         </div>
         {/* VENTE SOFRUCE — prix d'ACHAT par article (même unité que le prix de
-            vente). Vide = l'achat part au prix de vente (marge 0). L'EM Sofruce
-            est créée à la validation, juste avant la vente. */}
+            vente). Vide = prix de vente − la marge Sofruce par défaut. L'EM
+            Sofruce est créée à la validation, juste avant la vente. */}
         {venteSofruce && !modif && cart.length > 0 && (
           <div className="mb-2 shrink-0 rounded-lg border border-violet-400/50 bg-violet-500/5 px-2.5 py-2">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
@@ -2149,7 +2336,12 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                       type="text" inputMode="decimal"
                       value={sofrucePA[l.itemCode] ?? ""}
                       onChange={(e) => setSofrucePA((prev) => ({ ...prev, [l.itemCode]: e.target.value }))}
-                      placeholder={hints[l.itemCode]?.prixAchat != null ? hints[l.itemCode]!.prixAchat!.toFixed(2) : "= prix vente"}
+                      placeholder={l.price != null && l.price > 0
+                        ? (Math.round(l.price * (1 - sofruceMargePct / 100) * 100) / 100).toFixed(2)
+                        : "= prix vente"}
+                      title={l.price != null && l.price > 0
+                        ? `Défaut : prix de vente ${l.price.toFixed(2)} € − ${sofruceMargePct} % de marge`
+                        : "Sans prix de vente, l'achat partira au prix de vente (marge 0)"}
                       aria-label={`Prix d'achat ${l.itemName}`}
                       className="h-7 w-24 rounded-md border border-border bg-background px-2 text-right tnum"
                     />
@@ -2159,7 +2351,8 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
               ))}
             </div>
             <p className="mt-1 text-[10.5px] text-muted-foreground">
-              Vide = prix de vente (marge 0). À la validation : EM Sofruce puis vente sur son lot.
+              Vide = prix de vente − {sofruceMargePct} % de marge (ex. vente 1,00 € → achat {(1 - sofruceMargePct / 100).toFixed(2).replace(".", ",")} €).
+              À la validation : EM Sofruce puis vente sur son lot.
             </p>
           </div>
         )}
