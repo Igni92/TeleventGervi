@@ -150,26 +150,28 @@ export function CarrierTariffEditor({
             {!tariffIsUsable(tariff) && " · grille incomplète"}
           </p>
         </div>
-        <div className="shrink-0 text-right">
+        {/* Résumé client — COMPACT et borné (les libellés de zone importés
+            peuvent être très longs : ils ne s'affichent qu'une fois déplié). */}
+        <div className="shrink-0 max-w-[52%] text-right overflow-hidden">
           {clientDept ? (
             clientZone ? (
               <>
-                <p className="text-[11px] font-semibold text-brand-600 dark:text-brand-400 inline-flex items-center gap-1">
-                  <MapPin className="h-3 w-3" /> Dépt {clientDept} · {clientZone.label || "zone"}
+                <p className="text-[11px] font-semibold text-brand-600 dark:text-brand-400 inline-flex items-center gap-1 whitespace-nowrap">
+                  <MapPin className="h-3 w-3 shrink-0" /> Dépt {clientDept}
                 </p>
                 {preview && (
-                  <p className="text-[10.5px] text-muted-foreground tnum">
+                  <p className="text-[10.5px] text-muted-foreground tnum whitespace-nowrap truncate">
                     ex. 100 kg → {fmtE(preview.total)} € / position
                   </p>
                 )}
               </>
             ) : (
-              <p className="text-[10.5px] text-muted-foreground inline-flex items-center gap-1">
-                <MapPin className="h-3 w-3" /> Dépt {clientDept} hors zones
+              <p className="text-[10.5px] text-muted-foreground inline-flex items-center gap-1 whitespace-nowrap">
+                <MapPin className="h-3 w-3 shrink-0" /> Dépt {clientDept} hors zones
               </p>
             )
           ) : (
-            <p className="text-[10.5px] text-muted-foreground">CP client inconnu</p>
+            <p className="text-[10.5px] text-muted-foreground whitespace-nowrap">CP client inconnu</p>
           )}
         </div>
       </button>
