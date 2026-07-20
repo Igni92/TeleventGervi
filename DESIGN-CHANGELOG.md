@@ -1099,3 +1099,20 @@ Fraise). Audit détaillé : `docs/audit-transformation/audit-suivi-lot.md` §8 L
 Champ `sellable` calculé par `/api/products/[id]/batches` (répartition
 `planLedgerTrim` sur `ProductStock.available`) ; le registre physique est
 inchangé — il continue de servir l'affectation des commandes engagées.
+
+## 🎛️ Pilotage UNIFIÉ — les 3 écrans stats compressés en un seul cockpit (survol = aperçu, clic = plein écran)
+
+> Demande : « refonte onglet statistique complet — tout compresser dans un seul
+> onglet bien compact mais lisible, avec des popups au survol qui s'ouvrent en
+> plein écran au clic : fournisseurs, clients, commerciaux, détail des factures
+> en lien avec les commissions des commerciaux ».
+
+| Avant | Après |
+|-------|-------|
+| `/dashboard` = slider horizontal de 3 écrans (Commercial BL · Annuel comptable · Carte géo) — la vue d'ensemble demandait 3 slides ; pastille « Palmarès magasins » flottante qui chevauchait les contrôles CA HT/Volume/heure. | **Un seul cockpit 12×8 sans scroll** (`PilotageUnified`) : KPI (CA/marge/commandes/panier/appels/conv), évolution hebdo N vs N-1, **matrice annuelle compacte** (3 ans × 12 mois, intensité = CA), tops clients/commerciaux/fournisseurs/zones. Le lien Palmarès est **intégré au header** — plus rien ne flotte. |
+| Le détail (fournisseurs, commissions…) était éclaté entre écrans et pages. | **Survol = popover** de détail (N-1, poids, BL, appels — `position:fixed`, jamais rogné) ; **clic = plein écran** : modale Clients (table triable CA/marges/transport, segments), modale Fournisseurs (achats nets 12 mois), modale **Commerciaux → détail des FACTURES derrière chaque prime** (par facture : CA, marge brute, poids, transport estimé, marge nette, prime ; avoirs repris — nouvel endpoint `/api/pilotage/commissions`). |
+| Rapport annuel et carte accessibles seulement en slidant. | Conservés INTÉGRALEMENT (drill-in mois, évolutions, événements, segments, cartes WebGL) — ouverts en **overlay plein écran** au clic sur leur tuile, chargés à la volée (`next/dynamic`). `/dashboard/ecran2` reste la page autonome du dual-écran physique. |
+
+APIs : `GET /api/pilotage/commissions?slp=` (détail factures × prime, même règle
+que `/api/commerciaux/sap` — transport par grille position du transporteur
+habituel), `GET /api/pilotage/suppliers` (top 40 achats nets 12 mois, direction).

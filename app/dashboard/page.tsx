@@ -1,19 +1,19 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/permissions";
-import { PilotageSlider } from "@/components/pilotage/PilotageSlider";
+import { PilotageUnified } from "@/components/pilotage/PilotageUnified";
 
 export const metadata = { title: "Dashboard — Cockpit" };
 export const dynamic = "force-dynamic";
 
 /**
- * /dashboard — Slider plein écran qui réunit les deux cockpits sur la même URL :
- *   • Écran 1 (par défaut)  = Cockpit commercial (BL, volume, marge ligne par ligne).
- *   • Écran 2 (slide droite) = Rapport annuel comptable (Invoices, CA, marges).
+ * /dashboard — PILOTAGE UNIFIÉ : les 3 anciens écrans (Commercial BL · Rapport
+ * annuel · Carte géo) compressés en un seul cockpit compact, sans slider.
+ * Survol = popover de détail ; clic = plein écran (modales clients/fournisseurs/
+ * commerciaux-commissions, ou les écrans complets conservés en overlay).
  *
- * Navigation : scroll horizontal natif (snap), boutons chevron, flèches clavier ←/→,
- * dots indicateurs. `/dashboard/ecran2` reste accessible comme page autonome pour
- * le mode dual-écran physique.
+ * `/dashboard/ecran2` reste accessible comme page autonome pour le mode
+ * dual-écran physique.
  */
 export default async function DashboardPage(
   props: {
@@ -29,5 +29,5 @@ export default async function DashboardPage(
   const viewAs = admin && typeof searchParams.as === "string" && searchParams.as.trim()
     ? searchParams.as.trim()
     : null;
-  return <PilotageSlider viewAs={viewAs} />;
+  return <PilotageUnified viewAs={viewAs} />;
 }
