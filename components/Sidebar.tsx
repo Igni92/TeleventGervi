@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   LogOut, ChevronsLeft, ChevronsRight, ChevronDown, LayoutDashboard, Users, Briefcase,
   Radio, ShoppingCart, Package, PackagePlus, Factory, Receipt, AlertTriangle,
-  Home, Settings, PackageCheck, ClipboardCheck, Truck, Eye, Store,
+  Home, Settings, PackageCheck, ClipboardCheck, Truck, Eye, Store, Trophy,
   Pencil, Loader2, RotateCcw, FileText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight, Check,
   CalendarDays, Building2, Wallet, Boxes,
 } from "lucide-react";
@@ -129,6 +129,7 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
     label: "Pilotage",
     items: [
       { href: "/dashboard", label: "Statistiques", icon: LayoutDashboard },
+      { href: "/dashboard/magasins", label: "Palmarès magasins", icon: Trophy },
       { href: "/encours", label: "Encours clients", icon: Receipt },
       { href: "/commerciaux", label: "Effectif", icon: Briefcase },
       // Planning congés & récup : calendriers par personne + équipe, compteurs
