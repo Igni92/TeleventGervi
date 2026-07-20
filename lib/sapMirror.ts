@@ -48,6 +48,8 @@ interface SapInvoiceDoc {
   GrossProfit?: number;      // marge SAP (somme lignes)
   Cancelled?: "tYES" | "tNO";
   UpdateDate?: string;
+  /** Transporteur RÉEL du document (UDF livraison) — « par quoi ça a été livré ». */
+  U_TrspCode?: string | null;
   DocumentLines?: SapDocLine[];
 }
 
@@ -85,6 +87,29 @@ const COMMON_SELECT_DOC =
   "DocEntry,DocNum,DocDate,CardCode,CardName,SalesPersonCode,DocTotal,VatSum,Cancelled,UpdateDate";
 const SELECT_DOC_LINES = `$select=${COMMON_SELECT_DOC},DocumentLines`;
 
+// ── U_TrspCode (transporteur réel du document) ────────────────────
+// UDF livraison : présent sur Orders (prouvé — lib/clientCarriers l'interroge),
+// à confirmer entité par entité côté Invoices/CreditNotes. On SONDE une fois
+// par endpoint (`$top=1`) et on mémorise : si le champ n'existe pas, le select
+// retombe sur la version sans U_TrspCode — le sync ne casse JAMAIS pour ça.
+const trspFieldOk = new Map<string, boolean>();
+async function endpointHasTrspCode(endpoint: string): Promise<boolean> {
+  const cached = trspFieldOk.get(endpoint);
+  if (cached !== undefined) return cached;
+  let ok = false;
+  try {
+    await sap.getAll<{ DocEntry: number }>(
+      `${endpoint}?$select=DocEntry,U_TrspCode&$top=1`,
+      { pageSize: 1, maxPages: 1, env: "prod" },
+    );
+    ok = true;
+  } catch {
+    ok = false; // « Property 'U_TrspCode' … is invalid » → champ absent ici
+  }
+  trspFieldOk.set(endpoint, ok);
+  return ok;
+}
+
 // PDN n'a pas SalesPersonCode utile → select trimmed
 const SELECT_PDN_LINES =
   "$select=DocEntry,DocNum,DocDate,CardCode,CardName,DocTotal,Cancelled,UpdateDate,DocumentLines";
@@ -118,7 +143,7 @@ const MAX_SQL_PARAMS = 60_000;  // marge sous la limite Postgres (~65 535 param�
 // des valeurs construites dans pullSalesDocs. `syncedAt` est ajouté en NOW().
 const SALES_HEADER_COLS = [
   "docEntry", "docNum", "docDate", "cardCode", "cardName", "slpName",
-  "docTotal", "vatSum", "grossProfit", "cancelled", "updateDate",
+  "docTotal", "vatSum", "grossProfit", "cancelled", "updateDate", "trspCode",
 ] as const;
 const SALES_LINE_COLS = [
   "docEntry", "lineNum", "itemCode", "itemDescription", "quantity",
@@ -395,7 +420,13 @@ async function pullSalesDocs(
   if (opts.updatedSince) filters.push(`UpdateDate ge ${odataDate(opts.updatedSince)}`);
   const filter = filters.length ? `&$filter=${filters.join(" and ")}` : "";
 
-  const path = `${endpoint}?${SELECT_DOC_LINES}${filter}&$orderby=DocEntry desc`;
+  // Transporteur réel : ajouté au $select seulement si l'entité le porte
+  // (sonde mémorisée — cf. endpointHasTrspCode). Sinon, colonne à NULL.
+  const hasTrsp = await endpointHasTrspCode(endpoint);
+  const select = hasTrsp
+    ? `$select=${COMMON_SELECT_DOC},U_TrspCode,DocumentLines`
+    : SELECT_DOC_LINES;
+  const path = `${endpoint}?${select}${filter}&$orderby=DocEntry desc`;
 
   const docs = dedupeByDocEntry(
     await sap.getAll<SapInvoiceDoc>(path, { pageSize: 100, maxPages: 100, env: "prod" }),
@@ -454,6 +485,8 @@ async function pullSalesDocs(
       d.DocEntry, d.DocNum ?? null, new Date(d.DocDate), d.CardCode, d.CardName ?? null,
       slpName, docTotal - vatSum, vatSum, docGrossProfit,
       d.Cancelled === "tYES", upd,
+      // Transporteur réel du doc (normalisé MAJUSCULES) — null si UDF absent/vide.
+      (d.U_TrspCode ?? "").trim().toUpperCase() || null,
     ];
     return { docEntry: d.DocEntry, header, lines };
   });

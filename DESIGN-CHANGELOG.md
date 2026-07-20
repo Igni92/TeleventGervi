@@ -1116,3 +1116,20 @@ inchangé — il continue de servir l'affectation des commandes engagées.
 APIs : `GET /api/pilotage/commissions?slp=` (détail factures × prime, même règle
 que `/api/commerciaux/sap` — transport par grille position du transporteur
 habituel), `GET /api/pilotage/suppliers` (top 40 achats nets 12 mois, direction).
+
+## 🧮 Prime commerciaux & transport — règles direction + transporteur RÉEL par facture
+
+> Signalements : « les cadeaux (fleurs) ne doivent pas être décomptés, les marges
+> négatives non plus ; avoirs déduits mais jamais de déficit ; il me manque le
+> transport d'Orly et Wattrelos ; le direct est compté bizarrement — vérifie par
+> quoi chaque position a été livrée (direct, Fargier, Delanchy) ».
+
+| Avant | Après |
+|-------|-------|
+| Prime = 5 % × (marge brute SAP − transport), les cadeaux (lignes offertes) et les factures à marge négative RONGEAIENT la base. | **Règles direction** : lignes **cadeaux neutralisées** (article à 0 € / remise 100 %), **plancher 0 par facture** (une vente à perte ne rapporte rien mais ne mange pas les autres), **avoirs repris** mais base totale jamais < 0. Visible facture par facture dans le détail (🎁 cadeau, « plancher → 0 », avoirs). |
+| Transport estimé au transporteur HABITUEL du client (tournée mémorisée) — clients sans tournée (L. Orly, L. Wattrelos…) = 0 silencieux ; livraison directe comptée en €/kg × poids (une grosse position direct coûtait 10× la réalité). | **Transporteur RÉEL par document** : `U_TrspCode` SAP mirroré sur SapInvoice/Order/CreditNote (sonde de sécurité si l'UDF manque sur une entité), repli tournée habituelle. **Direct = coût PAR POSITION** (charges ÷ livraisons ≈ 25 €/arrêt) — plus de €/kg. Externe = grille département × tranche. Transporteur sans tarif → « ⚠ sans tarif » affiché (plus de 0 muet). Base unique `lib/transportDoc` partagée par la page Effectif, le détail commissions et le Palmarès magasins. |
+
+⚠️ Après déploiement : lancer un **backfill du miroir SAP** pour remplir le
+transporteur des documents historiques (sinon repli tournée habituelle) ; et
+créer les grilles/tarifs des transporteurs sans tarif (ex. FARGIER — la grille
+n'existe pas, DELANCHY ne couvre pas les départements 94 et 59).

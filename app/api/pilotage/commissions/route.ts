@@ -3,32 +3,27 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getAccessScope, scopePayload } from "@/lib/permissions";
-import { getTransportModel, listCarrierTariffs } from "@/lib/transportCostStore";
 import {
-  computeTransportMetrics,
-  transportPerKgForCarrier,
-  isDirectCarrier,
-  normCarrier,
-  sanitizeClientPricing,
-  type ClientCarrierPricing,
-} from "@/lib/transportCost";
-import { computePositionCost, resolveCarrierTariff } from "@/lib/carrierTariff";
-import { departementOfZip } from "@/lib/geo/zip";
-import { getClientTournees } from "@/lib/clientTournee";
+  loadDocTransportContext, docTransportCost, GIFT_LINE_SQL,
+  type DocTransportMode,
+} from "@/lib/transportDoc";
 
 /**
  * GET /api/pilotage/commissions?slp=MM
  *
  * DÉTAIL DES FACTURES derrière la PRIME d'un commercial — la preuve du calcul.
  *
- * Même règle que /api/commerciaux/sap (bloc PRIME), mais restituée FACTURE PAR
- * FACTURE au lieu d'un agrégat : pour chaque facture du PORTEFEUILLE du
- * commercial (Client.commercial = lui) depuis sa date de début de prime :
- *   CA HT · marge brute (grossProfit SAP) · poids livré · coût transport estimé
- *   (grille par position du transporteur habituel, repli prix position / €/kg
- *   legacy) · marge nette · prime de la facture (taux × marge nette).
- * Les AVOIRS de la même fenêtre sont listés (perte de marge, transport non
- * re-crédité — aligné sur l'agrégat).
+ * RÈGLES DE PRIME (validées direction, 07/2026) :
+ *   • CADEAUX neutralisés — ligne produit offerte (0 € ou remise 100 %) : sa
+ *     marge SAP (−coût) est retirée de la marge de la facture ;
+ *   • PLANCHER PAR FACTURE — une facture à marge nette NÉGATIVE compte 0 (elle
+ *     ne rapporte rien mais ne ronge pas la prime des autres) ;
+ *   • AVOIRS déduits (marge reprise), mais la base totale ne descend JAMAIS
+ *     sous 0 (pas de « déficit » reporté) ;
+ *   • TRANSPORT par POSITION : transporteur RÉEL du document (U_TrspCode
+ *     mirroré), repli tournée habituelle — direct = coût/position, externe =
+ *     grille département × tranche (lib/transportDoc, partagé avec la page
+ *     Effectif pour des chiffres IDENTIQUES).
  *
  * Droits : un non-admin ne peut demander QUE son propre trigramme.
  */
@@ -47,10 +42,19 @@ interface InvoiceRow {
   cardCode: string;
   cardName: string | null;
   caHt: number;
+  /** Marge brute CORRIGÉE des cadeaux (base du calcul). */
   margeBrute: number;
+  /** Coût des lignes cadeaux neutralisé (≥ 0, informatif). */
+  cadeaux: number;
   kg: number;
   transport: number;
+  /** Transporteur retenu + provenance (doc réel ou tournée habituelle). */
+  carrier: string | null;
+  mode: DocTransportMode;
+  fromDoc: boolean;
   margeNette: number;
+  /** true si la facture est au plancher (marge nette < 0 → prime 0). */
+  plancher: boolean;
   prime: number;
 }
 
@@ -74,17 +78,19 @@ export async function GET(req: Request) {
     if (cfg[0]) { rate = Number(cfg[0].rate); since = new Date(cfg[0].since); }
   } catch { /* table absente → défauts */ }
 
-  // Factures du portefeuille depuis la date de début, avec poids livré par
-  // facture (grille par tranches ⇒ le coût dépend du poids de CHAQUE livraison).
+  // Factures du portefeuille depuis la date de début — par facture : poids
+  // livré, transporteur réel mirroré, et marge des lignes CADEAUX à neutraliser.
   const [invRows, cnRows] = await Promise.all([
     prisma.$queryRaw<{
       de: number; dn: number | null; dd: Date; card: string; name: string | null;
-      total: number; marge: number; cid: string; zip: string | null; kg: number;
+      total: number; marge: number; mcad: number; cid: string; zip: string | null;
+      trsp: string | null; kg: number;
     }[]>(Prisma.sql`
       SELECT i."docEntry" AS de, i."docNum" AS dn, i."docDate" AS dd, i."cardCode" AS card,
              i."cardName" AS name, i."docTotal"::float AS total,
              COALESCE(i."grossProfit", 0)::float AS marge,
-             c."id" AS cid, c."zipCode" AS zip,
+             COALESCE(SUM(l."grossProfit") FILTER (WHERE ${Prisma.raw(GIFT_LINE_SQL)}), 0)::float AS mcad,
+             c."id" AS cid, c."zipCode" AS zip, i."trspCode" AS trsp,
              COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS kg
       FROM "SapInvoice" i
       JOIN "Client" c ON c."code" = i."cardCode"
@@ -106,34 +112,19 @@ export async function GET(req: Request) {
       ORDER BY n."docDate" DESC, n."docEntry" DESC`),
   ]);
 
-  // Résolution transport — identique à /api/commerciaux/sap : transporteur
-  // HABITUEL du client (tournée cltour:) → direct = prix position ; externe =
-  // grille par position (département × tranche) ; repli €/kg legacy ; inconnu = 0.
-  const model = await getTransportModel();
-  const prixPosition = computeTransportMetrics(model).prixPositionPerKg;
-  const tariffs = await listCarrierTariffs();
-  const pricingById = new Map<string, ClientCarrierPricing>();
-  try {
-    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: "transportcli:" } } });
-    for (const row of rows) {
-      try { pricingById.set(row.key.slice("transportcli:".length), sanitizeClientPricing(JSON.parse(row.value))); } catch { /* ignore */ }
-    }
-  } catch { /* pas de tarifs legacy */ }
-  const tournees = await getClientTournees([...new Set(invRows.map((r) => r.card))]);
+  // Contexte transport partagé (modèle direct, grilles, tournées, €/kg legacy).
+  const ctx = await loadDocTransportContext(invRows.map((r) => r.card));
+
+  const r2 = (v: number) => Math.round(v * 100) / 100;
 
   const invoices: InvoiceRow[] = invRows.map((r) => {
     const kg = Number(r.kg);
-    const marge = Number(r.marge);
-    let transport = 0;
-    const code = normCarrier(tournees.get(r.card.trim().toUpperCase())?.trspCode);
-    if (code && kg > 0) {
-      const direct = isDirectCarrier(model, code) || model.directCarriers.length === 0;
-      const posCost = !direct ? computePositionCost(resolveCarrierTariff(tariffs, code), departementOfZip(r.zip), kg) : null;
-      transport = posCost
-        ? posCost.total
-        : transportPerKgForCarrier(model, prixPosition, code, pricingById.get(r.cid) ?? null) * kg;
-    }
-    const margeNette = marge - transport;
+    // Marge corrigée : la marge des lignes cadeaux (négative = −coût) est retirée.
+    const cadeaux = Math.max(0, -Number(r.mcad));
+    const margeBrute = Number(r.marge) - Number(r.mcad);
+    const t = docTransportCost(ctx, { cardCode: r.card, clientId: r.cid, zip: r.zip, kg, trspCode: r.trsp });
+    const margeNette = margeBrute - t.cost;
+    const plancher = margeNette < 0;
     return {
       docEntry: r.de,
       docNum: r.dn,
@@ -141,11 +132,17 @@ export async function GET(req: Request) {
       cardCode: r.card,
       cardName: r.name,
       caHt: Number(r.total),
-      margeBrute: marge,
+      margeBrute: r2(margeBrute),
+      cadeaux: r2(cadeaux),
       kg,
-      transport: Math.round(transport * 100) / 100,
-      margeNette: Math.round(margeNette * 100) / 100,
-      prime: Math.round(margeNette * rate * 100) / 100,
+      transport: r2(t.cost),
+      carrier: t.carrier,
+      mode: t.mode,
+      fromDoc: t.fromDoc,
+      margeNette: r2(margeNette),
+      plancher,
+      // PLANCHER PAR FACTURE : marge nette négative → 0 de prime (pas de malus).
+      prime: r2(Math.max(0, margeNette) * rate),
     };
   });
 
@@ -157,15 +154,19 @@ export async function GET(req: Request) {
     cardName: r.name,
     caHt: Number(r.total),
     margeBrute: Number(r.marge),
-    // Avoir : la marge est REPRISE (transport non re-crédité) → prime négative.
-    prime: -Math.round(Number(r.marge) * rate * 100) / 100,
+    // Avoir : la marge est REPRISE (transport non re-crédité) → prime négative
+    // sur la ligne — mais la BASE TOTALE est plafonnée à 0 (pas de déficit).
+    prime: -r2(Number(r.marge) * rate),
   }));
 
-  // Totaux sur TOUT (même si les listes sont plafonnées à MAX_ROWS).
+  // Totaux — base de prime = Σ max(0, nette facture) − Σ marge avoirs, ≥ 0.
   const margeBrute = invoices.reduce((s, r) => s + r.margeBrute, 0)
     - creditNotes.reduce((s, r) => s + r.margeBrute, 0);
   const transport = invoices.reduce((s, r) => s + r.transport, 0);
-  const margeNette = margeBrute - transport;
+  const cadeauxExclus = invoices.reduce((s, r) => s + r.cadeaux, 0);
+  const basePositive = invoices.reduce((s, r) => s + Math.max(0, r.margeNette), 0);
+  const avoirs = creditNotes.reduce((s, r) => s + r.margeBrute, 0);
+  const base = Math.max(0, basePositive - avoirs);
 
   return NextResponse.json({
     slpName: slp,
@@ -175,11 +176,14 @@ export async function GET(req: Request) {
       invoices: invoices.length,
       creditNotes: creditNotes.length,
       caHt: invoices.reduce((s, r) => s + r.caHt, 0) - creditNotes.reduce((s, r) => s + r.caHt, 0),
-      margeBrute: Math.round(margeBrute * 100) / 100,
-      transport: Math.round(transport * 100) / 100,
-      margeNette: Math.round(margeNette * 100) / 100,
-      // Prime affichée = celle de la liste des commerciaux : jamais négative.
-      prime: Math.max(0, Math.round(margeNette * rate * 100) / 100),
+      margeBrute: r2(margeBrute),
+      transport: r2(transport),
+      cadeauxExclus: r2(cadeauxExclus),
+      planchers: invoices.filter((r) => r.plancher).length,
+      avoirs: r2(avoirs),
+      /** Base de prime (marge nette RETENUE) = Σ max(0, nette) − avoirs, ≥ 0. */
+      margeNette: r2(base),
+      prime: r2(base * rate),
     },
     truncated: invoices.length > MAX_ROWS || creditNotes.length > MAX_ROWS,
     invoices: invoices.slice(0, MAX_ROWS),
