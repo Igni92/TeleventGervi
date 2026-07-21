@@ -16,12 +16,13 @@ import {
   avantageNatureMensuel, missingElements, prorata13e, recapMailHtml, salaireMonthLabel,
   type RecapRow, type SalaryHeures, type SalaryMonthData, type SalaryPrime,
 } from "@/lib/salaires";
-import { commissionsOfMonthByEmail, COMMISSION_PRIME_ID } from "@/lib/commissions";
+import { commissionsForPayslip, COMMISSION_PRIME_ID } from "@/lib/commissions";
 import {
   saveSalaryMonth, listSalaryMonths,
   saveSalaryProfile, listSalaryProfiles,
   getRecapSent, markRecapSent,
   getComptaEmails, setComptaEmails, listEnvois, logEnvoi,
+  getCommissionsPaidThrough, setCommissionsPaidThrough, advanceCommissionsPaidThrough,
 } from "@/lib/salairesRh";
 import { appBaseUrl } from "@/lib/congesNotify";
 import { sendMailAsShared } from "@/lib/graph";
@@ -124,6 +125,10 @@ function buildHeures(
 /** Construit toutes les lignes du mois (partagé GET / envoi du récap). */
 async function buildRows(monthId: string) {
   const weeks = monthWeeks(monthId);
+  // Curseur « commissions déjà réglées jusqu'à » : la paie du mois cumule les
+  // commissions des mois (curseur, monthId]. Vide = rien réglé → rattrapage
+  // complet de l'arriéré sur cette paie (puis mensuel une fois le récap envoyé).
+  const paidThrough = await getCommissionsPaidThrough();
   const [users, byUser, hourProfiles, salProfiles, salMonths, allConges, commissions] = await Promise.all([
     prisma.user.findMany({ select: { name: true, email: true }, orderBy: { name: "asc" } }),
     listAllWeekEntries(),
@@ -131,9 +136,9 @@ async function buildRows(monthId: string) {
     listSalaryProfiles(),
     listSalaryMonths(monthId),
     listAllConges(),
-    // COMMISSIONS DU MOIS par salarié — payées « au fur et à mesure » : ligne
-    // de prime AUTOMATIQUE (jamais persistée, recalculée à chaque lecture).
-    commissionsOfMonthByEmail(monthId),
+    // COMMISSIONS à verser ce mois par salarié — ligne de prime AUTOMATIQUE
+    // (jamais persistée, recalculée à chaque lecture ; rattrapage inclus).
+    commissionsForPayslip(monthId, paidThrough),
   ]);
   const congesByUser = new Map<string, CongeRequest[]>();
   for (const g of allConges) {
@@ -148,12 +153,18 @@ async function buildRows(monthId: string) {
     const com = commissions.get(email);
     const primes = (salary?.primes ?? []).filter((p) => p.id !== COMMISSION_PRIME_ID);
     if (!com) return salary ? { ...salary, primes } : null;
+    // Rattrapage = plus d'un mois cumulé (ex. rien réglé depuis le début).
+    const rattrapage = com.monthsCount > 1;
     const line: SalaryPrime = {
       id: COMMISSION_PRIME_ID,
-      motif: `Commissions ventes (${(com.rate * 100).toFixed(0)} % marge nette)`,
+      motif: rattrapage
+        ? `Commissions ventes — rattrapage ${salaireMonthLabel(com.fromMonth)} → ${salaireMonthLabel(com.toMonth)} (${(com.rate * 100).toFixed(0)} %)`
+        : `Commissions ventes (${(com.rate * 100).toFixed(0)} % marge nette)`,
       montant: com.prime,
       bulletinDe: monthId,
-      note: `Base retenue du mois ${com.base.toFixed(2)} € — calcul automatique, détail dans Pilotage › Commerciaux`,
+      note: rattrapage
+        ? `Cumul de ${com.monthsCount} mois non encore réglés — base retenue ${com.base.toFixed(2)} € ; détail par mois dans Pilotage › Commerciaux`
+        : `Base retenue du mois ${com.base.toFixed(2)} € — calcul automatique, détail dans Pilotage › Commerciaux`,
       auto: true,
     };
     return salary
@@ -205,10 +216,10 @@ export async function GET(req: NextRequest) {
   if (!isMonthId(month)) return NextResponse.json({ error: "Mois invalide" }, { status: 400 });
 
   try {
-    const [rows, sent, comptaEmails, envois] = await Promise.all([
-      buildRows(month), getRecapSent(month), getComptaEmails(), listEnvois(),
+    const [rows, sent, comptaEmails, envois, commissionsPaidThrough] = await Promise.all([
+      buildRows(month), getRecapSent(month), getComptaEmails(), listEnvois(), getCommissionsPaidThrough(),
     ]);
-    return NextResponse.json({ ok: true, month, rows, sent, canEdit: c.canEdit, comptaEmails, envois });
+    return NextResponse.json({ ok: true, month, rows, sent, canEdit: c.canEdit, comptaEmails, envois, commissionsPaidThrough });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
@@ -222,6 +233,7 @@ export async function POST(req: NextRequest) {
   let body: {
     action?: string; month?: string; user?: string; primes?: unknown; frais?: unknown; note?: unknown;
     mode?: string; payMin?: unknown; pdfBase64?: unknown; kind?: string; emails?: unknown;
+    paidThrough?: unknown;
   };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
@@ -231,6 +243,18 @@ export async function POST(req: NextRequest) {
     try {
       const emails = await setComptaEmails(body.emails);
       return NextResponse.json({ ok: true, comptaEmails: emails });
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
+  }
+
+  // ── Curseur « commissions déjà réglées jusqu'à » (réglage UI, sans mois) :
+  //    vide (null) = rien réglé → rattrapage complet sur la prochaine paie. ──
+  if (body.action === "setCommissionsPaidThrough") {
+    try {
+      const v = typeof body.paidThrough === "string" && body.paidThrough ? body.paidThrough : null;
+      const paidThrough = await setCommissionsPaidThrough(v);
+      return NextResponse.json({ ok: true, commissionsPaidThrough: paidThrough });
     } catch (e) {
       return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
     }
@@ -320,11 +344,15 @@ export async function POST(req: NextRequest) {
         html: recapMailHtml(month, recapRows, appBaseUrl()),
         attachments: [{ name: filename, base64: pdfBase64, contentType: "application/pdf" }],
       });
-      const [sent, envoi] = await Promise.all([
+      const [sent, envoi, commissionsPaidThrough] = await Promise.all([
         markRecapSent(month, c.email, recipients),
         logEnvoi({ monthId: month, sentBy: c.email, to: recipients, kind, filename }),
+        // Envoyer le récap = engager la paie du mois → les commissions du mois
+        // (rattrapage inclus) sont réglées : on avance le curseur (jamais en
+        // arrière). Les mois suivants repartent alors au mois-le-mois.
+        advanceCommissionsPaidThrough(month),
       ]);
-      return NextResponse.json({ ok: true, month, sent, envoi, recipients });
+      return NextResponse.json({ ok: true, month, sent, envoi, recipients, commissionsPaidThrough });
     } catch (e) {
       return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
     }

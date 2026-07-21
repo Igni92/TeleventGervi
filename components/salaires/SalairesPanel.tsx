@@ -45,6 +45,8 @@ interface ApiData {
   ok: boolean; month: string; rows: Row[];
   sent: { sentAt: string; sentBy: string; to: string[] } | null;
   canEdit: boolean;
+  /** Dernier mois de commissions déjà réglé (YYYY-MM), null = rien réglé. */
+  commissionsPaidThrough?: string | null;
 }
 
 const eur = (n: number) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(n);
@@ -186,6 +188,10 @@ export function SalairesPanel({ canEdit }: { canEdit: boolean }) {
             <Loader2 className="h-3.5 w-3.5 animate-spin" /> Chargement…
           </p>
         )}
+
+        {/* COMMISSIONS — payées au fil des mois : total du mois + curseur de
+            rattrapage (dernier mois déjà réglé). */}
+        {data && <CommissionsCursor data={data} month={month} canEdit={canEdit} onSaved={load} />}
       </SurfaceCard>
 
       {rows.map((r) => (
@@ -193,6 +199,83 @@ export function SalairesPanel({ canEdit }: { canEdit: boolean }) {
       ))}
       {!loading && rows.length === 0 && (
         <p className="px-1 py-3 text-[12.5px] italic text-muted-foreground">Aucune donnée ce mois-ci.</p>
+      )}
+    </div>
+  );
+}
+
+/* ─────────── Commissions : total du mois + curseur « réglées jusqu'à » ────── */
+
+function CommissionsCursor({ data, month, canEdit, onSaved }: {
+  data: ApiData; month: string; canEdit: boolean; onSaved: () => Promise<void>;
+}) {
+  const [val, setVal] = useState(data.commissionsPaidThrough ?? "");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setVal(data.commissionsPaidThrough ?? ""); }, [data.commissionsPaidThrough]);
+
+  // Total des lignes de commission AUTO présentes sur la paie du mois affiché,
+  // + repère « rattrapage » (motif de la ligne auto).
+  const lines = data.rows
+    .map((r) => (r.salary?.primes ?? []).find((p) => p.id === COMMISSION_PRIME_ID))
+    .filter((p): p is SalaryPrime => !!p);
+  const total = lines.reduce((s, p) => s + p.montant, 0);
+  const rattrapage = lines.some((p) => /rattrapage/i.test(p.motif));
+
+  const save = async (next: string | null) => {
+    setSaving(true);
+    try {
+      const r = await fetch("/api/salaires", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "setCommissionsPaidThrough", paidThrough: next }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) { toast.error(j?.error || "Enregistrement impossible"); return; }
+      toast.success(next ? `Commissions réglées jusqu'à ${monthLabel(next)}.` : "Curseur remis à zéro — tout l'arriéré sera reversé.");
+      await onSaved();
+    } catch { toast.error("Réseau ?"); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="mt-3 rounded-lg border border-brand-500/25 bg-brand-500/[0.05] px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-foreground">
+          <Coins className="h-4 w-4 text-brand-500" /> Commissions de {monthLabel(month)}
+        </span>
+        <span className="tnum text-[13px] font-bold text-foreground">{eur(total)}</span>
+        {rattrapage && (
+          <span className="text-[10.5px] font-semibold text-brand-600 dark:text-brand-300 uppercase tracking-wide">
+            rattrapage arriéré
+          </span>
+        )}
+        <span className="basis-full text-[11px] text-muted-foreground">
+          Ajoutées automatiquement à chaque commercial (5 % de la marge nette), versées mois par mois.{" "}
+          {data.commissionsPaidThrough
+            ? <>Déjà réglées jusqu&apos;à <b>{monthLabel(data.commissionsPaidThrough)}</b>.</>
+            : <>Rien n&apos;a encore été réglé — cette paie <b>rattrape tout l&apos;arriéré</b>.</>}
+        </span>
+      </div>
+      {canEdit && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <label className="text-[10.5px] uppercase tracking-wide font-semibold text-muted-foreground">Réglées jusqu&apos;à</label>
+          <input type="month" value={val} max={month} disabled={saving}
+            onChange={(e) => setVal(e.target.value)}
+            className="h-8 rounded-md border border-border bg-background px-2 text-[12.5px] tnum" />
+          <button type="button" disabled={saving || val === (data.commissionsPaidThrough ?? "")}
+            onClick={() => save(val || null)}
+            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-[12px] font-semibold disabled:opacity-40">
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Enregistrer
+          </button>
+          {data.commissionsPaidThrough && (
+            <button type="button" disabled={saving} onClick={() => { setVal(""); save(null); }}
+              className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border text-[12px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+              Tout reverser
+            </button>
+          )}
+          <span className="basis-full text-[10px] text-muted-foreground">
+            Avancé automatiquement à l&apos;envoi du récap. Ajustez-le si des commissions ont déjà été payées hors application.
+          </span>
+        </div>
       )}
     </div>
   );

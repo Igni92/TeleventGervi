@@ -17,6 +17,7 @@ const MOIS_PREFIX = "salmois:";
 const RECAP_PREFIX = "salrecap:";
 const ENVOI_PREFIX = "salenvoi:";        // salenvoi:<id> → un envoi (PDF) au cabinet
 const COMPTA_EMAILS_KEY = "salcompta:emails";  // destinataires du cabinet (CSV)
+const COMMISSIONS_PAID_KEY = "salcommissions:paidThrough"; // dernier mois de commissions déjà réglé (YYYY-MM)
 
 const emailKey = (email: string) => email.trim().toLowerCase();
 
@@ -193,6 +194,40 @@ export async function markRecapSent(monthId: string, by: string, to: string[]): 
   const value = JSON.stringify(rec);
   await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
   return rec;
+}
+
+/* ─────────── Commissions : dernier mois DÉJÀ RÉGLÉ (curseur de rattrapage) ───
+ * Les commissions sont payées mensuellement. Ce curseur mémorise le dernier
+ * mois dont la commission a été versée : la paie du mois M inclut la somme des
+ * commissions des mois (curseur, M]. Vide = rien n'a jamais été payé → la
+ * prochaine paie rattrape tout l'arriéré depuis le début (lib/commissions).
+ * Avancé automatiquement à l'envoi du récap ; ajustable à la main dans l'UI. */
+const MONTH_RE_STR = /^\d{4}-\d{2}$/;
+
+export async function getCommissionsPaidThrough(): Promise<string | null> {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: COMMISSIONS_PAID_KEY } });
+    const v = (row?.value ?? "").replace(/^"|"$/g, "").trim();
+    return MONTH_RE_STR.test(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fixe le curseur (YYYY-MM, ou null pour « rien réglé »). */
+export async function setCommissionsPaidThrough(month: string | null): Promise<string | null> {
+  const clean = month && MONTH_RE_STR.test(month) ? month : null;
+  const value = JSON.stringify(clean);
+  await prisma.appSetting.upsert({ where: { key: COMMISSIONS_PAID_KEY }, update: { value }, create: { key: COMMISSIONS_PAID_KEY, value } });
+  return clean;
+}
+
+/** Avance le curseur à `month` sans jamais reculer (appelé à l'envoi du récap). */
+export async function advanceCommissionsPaidThrough(month: string): Promise<string | null> {
+  if (!MONTH_RE_STR.test(month)) return getCommissionsPaidThrough();
+  const cur = await getCommissionsPaidThrough();
+  if (cur && cur >= month) return cur; // comparaison lexicographique = chronologique
+  return setCommissionsPaidThrough(month);
 }
 
 /* ─────────── Destinataires du cabinet comptable (CSV, réglable dans l'UI) ──── */

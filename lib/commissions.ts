@@ -25,69 +25,22 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { segmentOfGroup } from "@/lib/segments";
 import { emailFromInitials } from "@/lib/salespeople";
+import { loadDocTransportContext, docTransportCost, GIFT_LINE_SQL } from "@/lib/transportDoc";
 import {
-  loadDocTransportContext, docTransportCost, GIFT_LINE_SQL,
-  type DocTransportMode,
-} from "@/lib/transportDoc";
+  PRIME_DEFAULT_RATE, PRIME_DEFAULT_START, r2, monthOf,
+  primeRateOf, commissionMonths, selectPayslipMonths,
+  type CommissionInvoice, type CommissionCreditNote, type CommissionMonth, type PayslipCommission,
+} from "@/lib/commissionsCalc";
 
-export const PRIME_DEFAULT_RATE = 0.05;
-export const PRIME_DEFAULT_START = new Date(Date.UTC(2025, 10, 1)); // 1ᵉʳ novembre 2025
-
-/** id de la ligne de prime automatique — défini dans lib/salaires (client-safe),
- *  ré-exporté ici pour les consommateurs serveur. */
+// Réexports : les consommateurs importent tout depuis lib/commissions.
+export {
+  PRIME_DEFAULT_RATE, PRIME_DEFAULT_START, primeRateOf, commissionMonths, prevMonth, selectPayslipMonths,
+} from "@/lib/commissionsCalc";
+export type {
+  CommissionInvoice, CommissionCreditNote, CommissionMonth, PayslipCommission,
+} from "@/lib/commissionsCalc";
+/** id de la ligne de prime automatique — défini dans lib/salaires (client-safe). */
 export { COMMISSION_PRIME_ID } from "@/lib/salaires";
-
-export interface CommissionInvoice {
-  slp: string;
-  docEntry: number;
-  docNum: number | null;
-  docDate: Date;
-  /** Mois de rattachement (YYYY-MM, date de facture). */
-  month: string;
-  cardCode: string;
-  cardName: string | null;
-  caHt: number;
-  /** Marge brute CORRIGÉE des cadeaux. */
-  margeBrute: number;
-  /** Coût des lignes cadeaux neutralisé (≥ 0). */
-  cadeaux: number;
-  kg: number;
-  transport: number;
-  carrier: string | null;
-  mode: DocTransportMode;
-  fromDoc: boolean;
-  margeNette: number;
-  plancher: boolean;
-}
-
-export interface CommissionCreditNote {
-  slp: string;
-  docEntry: number;
-  docNum: number | null;
-  docDate: Date;
-  month: string;
-  cardCode: string;
-  cardName: string | null;
-  caHt: number;
-  margeBrute: number;
-}
-
-export interface CommissionMonth {
-  month: string;              // YYYY-MM
-  invoices: number;
-  creditNotes: number;
-  /** Σ max(0, marge nette facture) du mois. */
-  basePositive: number;
-  /** Marge reprise par les avoirs du mois. */
-  avoirs: number;
-  /** Base RETENUE du mois = max(0, basePositive − avoirs). */
-  base: number;
-  /** Prime du mois = taux × base — le montant versé sur le bulletin. */
-  prime: number;
-}
-
-const r2 = (v: number) => Math.round(v * 100) / 100;
-const monthOf = (d: Date) => d.toISOString().slice(0, 7);
 
 /** Config de prime par commercial (table optionnelle → défauts silencieux). */
 export async function loadPrimeConfig(): Promise<Map<string, { rate: number; since: Date }>> {
@@ -98,10 +51,6 @@ export async function loadPrimeConfig(): Promise<Map<string, { rate: number; sin
     for (const r of rows) cfg.set(r.slp, { rate: Number(r.rate), since: new Date(r.since) });
   } catch { /* table absente → défauts */ }
   return cfg;
-}
-
-export function primeRateOf(cfg: Map<string, { rate: number; since: Date }>, slp: string): number {
-  return cfg.get(slp)?.rate ?? PRIME_DEFAULT_RATE;
 }
 
 /**
@@ -207,69 +156,49 @@ export async function commissionData(slpFilter: string | null): Promise<{
 }
 
 /**
- * Découpage MENSUEL (l'unité de paie) pour les documents d'UN commercial —
- * mois triés du plus récent au plus ancien.
+ * COMMISSION À VERSER sur la paie du mois `monthId`, par EMAIL de salarié.
+ *
+ * Payée mensuellement : on cumule la commission des mois de la plage
+ * (curseur, monthId]. `paidThrough` = dernier mois DÉJÀ réglé (null = rien).
+ * Le curseur effectif est borné à `prevMonth(monthId)` : ainsi, même après
+ * avoir marqué le mois courant réglé (envoi/rectif), la paie du mois courant
+ * garde SA propre commission — jamais un rattrapage vidé à tort.
  */
-export function commissionMonths(
-  invoices: CommissionInvoice[],
-  creditNotes: CommissionCreditNote[],
-  rate: number,
-): CommissionMonth[] {
-  const byMonth = new Map<string, { inv: number; cn: number; pos: number; avoirs: number }>();
-  const bucket = (m: string) => {
-    let b = byMonth.get(m);
-    if (!b) { b = { inv: 0, cn: 0, pos: 0, avoirs: 0 }; byMonth.set(m, b); }
-    return b;
-  };
-  for (const f of invoices) {
-    const b = bucket(f.month);
-    b.inv += 1;
-    b.pos += Math.max(0, f.margeNette); // plancher 0 par facture
-  }
-  for (const n of creditNotes) {
-    const b = bucket(n.month);
-    b.cn += 1;
-    b.avoirs += n.margeBrute;
-  }
-  return [...byMonth.entries()]
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([month, b]) => {
-      const base = Math.max(0, b.pos - b.avoirs); // pas de déficit reporté
-      return {
-        month,
-        invoices: b.inv,
-        creditNotes: b.cn,
-        basePositive: r2(b.pos),
-        avoirs: r2(b.avoirs),
-        base: r2(base),
-        prime: r2(base * rate),
-      };
-    });
-}
-
-/**
- * PRIME DU MOIS par EMAIL de salarié — la ligne de prime automatique des
- * éléments de salaires (id COMMISSION_PRIME_ID). Ne renvoie que les
- * commerciaux rattachés à un compte, avec une prime > 0 sur le mois.
- */
-export async function commissionsOfMonthByEmail(monthId: string): Promise<
-  Map<string, { slp: string; rate: number; base: number; prime: number }>
-> {
-  const out = new Map<string, { slp: string; rate: number; base: number; prime: number }>();
+export async function commissionsForPayslip(
+  monthId: string,
+  paidThrough: string | null,
+): Promise<Map<string, PayslipCommission>> {
+  const out = new Map<string, PayslipCommission>();
   try {
     const { cfg, invoices, creditNotes } = await commissionData(null);
-    const slps = new Set(invoices.map((f) => f.slp));
-    for (const n of creditNotes) slps.add(n.slp);
+    const slps = new Set<string>([...invoices.map((f) => f.slp), ...creditNotes.map((n) => n.slp)]);
     for (const slp of slps) {
       const email = emailFromInitials(slp)?.toLowerCase();
       if (!email) continue;
       const rate = primeRateOf(cfg, slp);
-      const m = commissionMonths(
-        invoices.filter((f) => f.slp === slp),
-        creditNotes.filter((n) => n.slp === slp),
-        rate,
-      ).find((x) => x.month === monthId);
-      if (m && m.prime > 0) out.set(email, { slp, rate, base: m.base, prime: m.prime });
+      // Mois de la plage à régler : (curseur, monthId].
+      const months = selectPayslipMonths(
+        commissionMonths(
+          invoices.filter((f) => f.slp === slp),
+          creditNotes.filter((n) => n.slp === slp),
+          rate,
+        ),
+        monthId,
+        paidThrough,
+      );
+      if (months.length === 0) continue;
+      const base = months.reduce((s, m) => s + m.base, 0);
+      const prime = Math.round(months.reduce((s, m) => s + m.prime, 0) * 100) / 100;
+      if (prime <= 0) continue;
+      const sorted = months.map((m) => m.month).sort();
+      out.set(email, {
+        slp, rate,
+        base: Math.round(base * 100) / 100,
+        prime,
+        fromMonth: sorted[0],
+        toMonth: monthId,
+        monthsCount: months.length,
+      });
     }
   } catch { /* moteur indisponible → pas de ligne auto (jamais bloquant pour la paie) */ }
   return out;
