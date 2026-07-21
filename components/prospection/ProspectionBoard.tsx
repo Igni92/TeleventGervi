@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Target, CalendarPlus, Check, X, Phone, MapPin, ChevronRight, ArrowLeft, Plus, Search } from "lucide-react";
+import { Loader2, Target, CalendarPlus, Check, X, Phone, MapPin, ChevronLeft, ChevronRight, ArrowLeft, Plus, Search } from "lucide-react";
 import {
   PIPELINE_STAGES, getStage, nextStage, stageLabel,
   LOST_REASONS, RDV_TYPES, NOTIFY_MINUTES_CHOICES, notifyLabel, DEFAULT_NOTIFY_MINUTES_BEFORE,
@@ -31,6 +31,8 @@ export function ProspectionBoard() {
   const [q, setQ] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
   const [poolOpen, setPoolOpen] = useState(false);
+  const [mobileIdx, setMobileIdx] = useState(0);
+  const stageKeys = PIPELINE_STAGES.map((s) => s.key);
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
@@ -91,10 +93,67 @@ export function ProspectionBoard() {
     if (dragId) { patch(dragId, { stage: stageKey }, `Déplacé vers « ${stageLabel(stageKey)} »`); setDragId(null); }
   }
 
+  /** Déplace un prospect vers l'étape adjacente (−1 précédente, +1 suivante). */
+  function move(id: string, dir: -1 | 1) {
+    const r = rows.find((x) => x.id === id);
+    if (!r) return;
+    const i = stageKeys.indexOf((r.prospectStage ?? "") as (typeof stageKeys)[number]);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= stageKeys.length) return;
+    patch(id, { stage: stageKeys[j] }, `→ ${stageLabel(stageKeys[j])}`);
+  }
+
+  /** Carte prospect partagée (desktop Kanban + mobile). */
+  function card(r: Row, sIdx: number, draggable: boolean) {
+    return (
+      <div key={r.id}
+        draggable={draggable}
+        onDragStart={draggable ? () => setDragId(r.id) : undefined}
+        onDragEnd={draggable ? () => setDragId(null) : undefined}
+        className={`rounded-xl bg-[#11161f] ring-1 transition-[box-shadow,opacity] duration-150 ${
+          selId === r.id ? "ring-brand-500" : "ring-white/[0.07] hover:ring-white/20"
+        } ${dragId === r.id ? "opacity-40" : ""}`}
+      >
+        <button onClick={() => setSelId(r.id)}
+          className="w-full text-left px-3 pt-2.5 pb-2 transition-transform duration-100 active:scale-[0.98]">
+          <div className="flex items-start gap-1.5">
+            <span className="text-[13px] font-semibold text-white/90 leading-snug flex-1">{r.nom}</span>
+            {r.qualifieLabo && <Check className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />}
+          </div>
+          <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+            {r.city && <span className="text-[11px] text-white/45">{r.city}</span>}
+            {r.probaLabo && (
+              <span className={`text-[9.5px] px-1.5 py-0.5 rounded ring-1 ${PROBA_COLOR[r.probaLabo] ?? PROBA_COLOR["À qualifier"]}`}>
+                labo {r.probaLabo.toLowerCase()}
+              </span>
+            )}
+            {r.nextRdvAt && (
+              <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/30">
+                RDV {new Date(r.nextRdvAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}
+              </span>
+            )}
+          </div>
+        </button>
+        {/* Flèches — déplacer d'une étape à l'autre */}
+        <div className="flex items-center gap-1 border-t border-white/[0.06] px-1.5 py-1">
+          <button disabled={sIdx <= 0} onClick={() => move(r.id, -1)} title="Étape précédente"
+            className="h-6 w-6 grid place-items-center rounded-md text-white/45 transition hover:bg-white/[0.06] hover:text-white active:scale-90 disabled:pointer-events-none disabled:opacity-25">
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <span className="flex-1 text-center text-[9.5px] tabular-nums text-white/25">{sIdx + 1}/{stageKeys.length}</span>
+          <button disabled={sIdx >= stageKeys.length - 1} onClick={() => move(r.id, 1)} title="Étape suivante"
+            className="h-6 w-6 grid place-items-center rounded-md text-white/45 transition hover:bg-white/[0.06] hover:text-white active:scale-90 disabled:pointer-events-none disabled:opacity-25">
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-4 p-4 md:p-6">
       {/* Barre d'outils */}
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex items-center gap-2.5 flex-wrap">
         <Link href="/accueil" title="Retour à l'accueil"
           className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 text-[13px] text-white/70 hover:bg-white/[0.08]">
           <ArrowLeft className="h-4 w-4" /> Retour
@@ -123,63 +182,81 @@ export function ProspectionBoard() {
       {loading ? (
         <div className="flex-1 grid place-items-center text-white/50"><Loader2 className="h-6 w-6 animate-spin" /></div>
       ) : (
-      <div className="flex-1 min-h-0 flex gap-3">
-        {/* Colonnes Kanban */}
-        <div className="flex-1 min-w-0 overflow-x-auto">
-          <div className="flex gap-3 h-full min-h-0" style={{ minWidth: PIPELINE_STAGES.length * 240 }}>
-            {PIPELINE_STAGES.map((st) => {
-              const items = byStage(st.key);
-              return (
-                <div key={st.key}
-                  onDragOver={(e) => { if (dragId) e.preventDefault(); }}
-                  onDrop={() => onDrop(st.key)}
-                  className="flex-1 min-w-[224px] flex flex-col rounded-xl bg-white/[0.03] ring-1 ring-white/[0.06]"
-                >
-                  <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06]">
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: st.color }} />
-                    <span className="text-[12.5px] font-semibold text-white/85">{st.label}</span>
-                    <span className="ml-auto text-[11px] text-white/40 tabular-nums">{items.length}</span>
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                    {items.map((r) => (
-                      <button key={r.id} draggable
-                        onDragStart={() => setDragId(r.id)} onDragEnd={() => setDragId(null)}
-                        onClick={() => setSelId(r.id)}
-                        className={`w-full text-left rounded-lg bg-[#11161f] ring-1 px-2.5 py-2 transition-colors hover:ring-brand-500/40 ${
-                          selId === r.id ? "ring-brand-500" : "ring-white/[0.07]"} ${dragId === r.id ? "opacity-40" : ""}`}
-                      >
-                        <div className="flex items-start gap-1.5">
-                          <span className="text-[12.5px] font-semibold text-white/90 leading-tight flex-1">{r.nom}</span>
-                          {r.qualifieLabo && <Check className="h-3.5 w-3.5 text-emerald-400 shrink-0" />}
-                        </div>
-                        <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                          {r.city && <span className="text-[10.5px] text-white/45">{r.city}</span>}
-                          {r.probaLabo && (
-                            <span className={`text-[9.5px] px-1.5 py-0.5 rounded ring-1 ${PROBA_COLOR[r.probaLabo] ?? PROBA_COLOR["À qualifier"]}`}>
-                              labo {r.probaLabo.toLowerCase()}
-                            </span>
-                          )}
-                          {r.nextRdvAt && (
-                            <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/30">
-                              RDV {new Date(r.nextRdvAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}
-                            </span>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                    {items.length === 0 && <p className="text-[11px] text-white/25 italic px-1 py-2">—</p>}
-                  </div>
+      <>
+        {/* ─────────── Desktop — Kanban ─────────── */}
+        <div className="hidden md:flex flex-1 min-h-0 gap-4 overflow-x-auto pb-1">
+          {PIPELINE_STAGES.map((st, sIdx) => {
+            const items = byStage(st.key);
+            return (
+              <div key={st.key}
+                onDragOver={(e) => { if (dragId) e.preventDefault(); }}
+                onDrop={() => onDrop(st.key)}
+                className="flex-1 min-w-[256px] flex flex-col rounded-2xl bg-white/[0.02] ring-1 ring-white/[0.06]"
+              >
+                <div className="flex items-center gap-2 rounded-t-2xl px-3.5 py-2.5" style={{ background: st.color + "1a" }}>
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: st.color }} />
+                  <span className="text-[13px] font-semibold text-white/90">{st.label}</span>
+                  <span className="ml-auto text-[11px] font-medium tabular-nums text-white/50 rounded-full bg-white/[0.06] px-2 py-0.5">{items.length}</span>
                 </div>
-              );
-            })}
-          </div>
+                <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5">
+                  {items.map((r) => card(r, sIdx, true))}
+                  {items.length === 0 && (
+                    <p className="text-[11px] text-white/25 italic text-center py-6">Aucun prospect</p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
-        {/* Panneau fiche + script */}
-        {sel && <FichePanel key={sel.id} row={sel} onClose={() => setSelId(null)} onPatch={patch} onReload={load} />}
-      </div>
+        {/* ─────────── Mobile — une étape à la fois ─────────── */}
+        <div className="md:hidden flex-1 min-h-0 flex flex-col">
+          {(() => {
+            const st = PIPELINE_STAGES[Math.min(mobileIdx, PIPELINE_STAGES.length - 1)];
+            const items = byStage(st.key);
+            return (
+              <>
+                {/* Sélecteur d'étape avec flèches */}
+                <div className="flex items-center gap-2 rounded-2xl px-2 py-2" style={{ background: st.color + "1a" }}>
+                  <button disabled={mobileIdx <= 0} onClick={() => setMobileIdx((i) => Math.max(0, i - 1))}
+                    className="h-10 w-10 grid place-items-center rounded-xl bg-white/[0.06] text-white/80 transition active:scale-90 disabled:opacity-25">
+                    <ChevronLeft className="h-5 w-5" />
+                  </button>
+                  <div className="flex-1 text-center">
+                    <div className="flex items-center justify-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: st.color }} />
+                      <span className="text-[14px] font-bold text-white/90">{st.label}</span>
+                    </div>
+                    <span className="text-[11px] text-white/50">{items.length} prospect{items.length > 1 ? "s" : ""}</span>
+                  </div>
+                  <button disabled={mobileIdx >= PIPELINE_STAGES.length - 1} onClick={() => setMobileIdx((i) => Math.min(PIPELINE_STAGES.length - 1, i + 1))}
+                    className="h-10 w-10 grid place-items-center rounded-xl bg-white/[0.06] text-white/80 transition active:scale-90 disabled:opacity-25">
+                    <ChevronRight className="h-5 w-5" />
+                  </button>
+                </div>
+                {/* Points de progression */}
+                <div className="flex items-center justify-center gap-1.5 py-2.5">
+                  {PIPELINE_STAGES.map((s, i) => (
+                    <button key={s.key} onClick={() => setMobileIdx(i)} aria-label={s.label}
+                      className="h-1.5 rounded-full transition-all duration-200"
+                      style={{ width: i === mobileIdx ? 22 : 7, background: i === mobileIdx ? s.color : "rgba(255,255,255,0.18)" }} />
+                  ))}
+                </div>
+                <div className="flex-1 overflow-y-auto space-y-2.5 pb-1">
+                  {items.map((r) => card(r, mobileIdx, false))}
+                  {items.length === 0 && (
+                    <p className="text-[12px] text-white/30 italic text-center py-10">Aucun prospect à cette étape.</p>
+                  )}
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      </>
       )}
 
+      {/* Fiche prospect — tiroir en superposition (desktop + mobile) */}
+      {sel && <FichePanel key={sel.id} row={sel} onClose={() => setSelId(null)} onPatch={patch} onReload={load} />}
       {poolOpen && <AddProspectsPanel onClose={() => setPoolOpen(false)} onAdded={load} />}
     </div>
   );
@@ -294,7 +371,9 @@ function FichePanel({ row, onClose, onPatch, onReload }: {
   const [rdvOpen, setRdvOpen] = useState(false);
 
   return (
-    <aside className="w-[360px] shrink-0 overflow-y-auto rounded-xl bg-[#0f141c] ring-1 ring-white/[0.08] p-4 space-y-4">
+    <div className="fixed inset-0 z-[70] flex justify-end bg-black/50" onClick={onClose}>
+    <aside onClick={(e) => e.stopPropagation()}
+      className="w-full sm:w-[380px] h-full overflow-y-auto bg-[#0f141c] ring-1 ring-white/[0.08] p-4 space-y-4">
       <div className="flex items-start gap-2">
         <div className="flex-1">
           <h2 className="text-[15px] font-bold text-white/90 leading-tight">{row.nom}</h2>
@@ -358,6 +437,7 @@ function FichePanel({ row, onClose, onPatch, onReload }: {
           className="mt-1.5 text-[12px] px-3 py-1 rounded-lg ring-1 ring-white/10 text-white/70 hover:bg-white/[0.06] disabled:opacity-40">Enregistrer la note</button>
       </div>
     </aside>
+    </div>
   );
 }
 
