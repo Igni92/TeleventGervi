@@ -1157,3 +1157,13 @@ n'existe pas, DELANCHY ne couvre pas les départements 94 et 59).
 Logique pure `lib/commissionsCalc` (`selectPayslipMonths`) testée (rien réglé =
 tout l'arriéré, réglé au mois-1 = mensuel, réglé partiel = cumul, jamais de mois
 futur). `lib/commissions` = requêtes.
+
+## 💶 Commissions : détail de ce qui est payé + trace immuable des versements
+
+> Demande : « il doit pouvoir voir le détail de ce qu'il paie et garder une
+> trace des commissions payées ».
+
+| Avant | Après |
+|-------|-------|
+| La ligne de commission n'affichait qu'un total ; une fois le curseur avancé, aucune trace de ce qui avait été payé. | **Détail « ce qui est payé »** (carte Paie › Commissions, dépliable) : par commercial, mois par mois, avec le montant de chaque mois — plus lien vers le détail facture par facture du Pilotage. **Trace immuable** : à chaque envoi de paie, un snapshot fige qui a été payé, sur quelle période, combien (par mois) — jamais recalculé. |
+| — | Nouvel onglet **« Commissions »** (/salaires) : historique des versements, paie par paie, dépliable (commercial → mois), total cumulé versé. `salcommpaid:<mois>` (AppSetting). Rectif = même période rejouée (cursorBefore mémorisé), la trace reste fidèle. |

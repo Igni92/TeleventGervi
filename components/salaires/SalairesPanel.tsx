@@ -41,13 +41,23 @@ interface Row {
   prorata13: number | null;
   missing: string[];
 }
+interface CommissionMonthLine { month: string; base: number; prime: number; invoices: number; avoirs: number }
+interface CommissionDetail {
+  email: string; slp: string; rate: number; base: number; prime: number;
+  fromMonth: string; toMonth: string; monthsCount: number; months: CommissionMonthLine[];
+}
 interface ApiData {
   ok: boolean; month: string; rows: Row[];
   sent: { sentAt: string; sentBy: string; to: string[] } | null;
   canEdit: boolean;
   /** Dernier mois de commissions déjà réglé (YYYY-MM), null = rien réglé. */
   commissionsPaidThrough?: string | null;
+  /** Détail par commercial de ce qui est réglé sur cette paie. */
+  commissionsDetail?: CommissionDetail[];
 }
+
+const monthFr = (m: string) => new Date(`${m}-01T12:00:00Z`).toLocaleDateString("fr-FR", { month: "short", year: "2-digit" });
+const monthFrLong = (m: string) => new Date(`${m}-01T12:00:00Z`).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
 
 const eur = (n: number) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(n);
 const newId = () => Math.random().toString(36).slice(2, 10);
@@ -55,17 +65,108 @@ const newId = () => Math.random().toString(36).slice(2, 10);
 /* ─────────────── Vue racine : saisie (admin) OU état comptable ────────────── */
 
 export function SalairesView({ canEdit }: { canEdit: boolean }) {
-  const [tab, setTab] = useState<"saisie" | "etat">("saisie");
+  const [tab, setTab] = useState<"saisie" | "etat" | "commissions">("saisie");
   return (
     <div className="mx-auto w-full max-w-4xl space-y-4">
-      {/* Onglets : la SAISIE du mois (ergonomique) / l'ÉTAT comptable (document
-          + envoi PDF au cabinet + liste des envois). */}
+      {/* Onglets : SAISIE du mois · ÉTAT comptable (PDF + envois) · COMMISSIONS
+          (trace des versements). */}
       <div className="inline-flex rounded-lg border border-border bg-secondary/30 p-0.5">
         <TabButton active={tab === "saisie"} onClick={() => setTab("saisie")} icon={<Pencil className="h-3.5 w-3.5" />} label="Saisie du mois" />
         <TabButton active={tab === "etat"} onClick={() => setTab("etat")} icon={<FileSpreadsheet className="h-3.5 w-3.5" />} label="État comptable" />
+        <TabButton active={tab === "commissions"} onClick={() => setTab("commissions")} icon={<Coins className="h-3.5 w-3.5" />} label="Commissions" />
       </div>
-      {tab === "saisie" ? <SalairesPanel canEdit={canEdit} /> : <ComptaStatement />}
+      {tab === "saisie" && <SalairesPanel canEdit={canEdit} />}
+      {tab === "etat" && <ComptaStatement />}
+      {tab === "commissions" && <CommissionsHistory />}
     </div>
+  );
+}
+
+/* ─────────── Trace des commissions versées (archive immuable) ─────────────── */
+
+interface PaidEntry {
+  slp: string; email: string; name: string; rate: number;
+  fromMonth: string; toMonth: string; base: number; amount: number;
+  months: CommissionMonthLine[];
+}
+interface PaidSnapshot {
+  payslipMonth: string; cursorBefore: string | null; sentAt: string; sentBy: string;
+  total: number; entries: PaidEntry[];
+}
+
+function CommissionsHistory() {
+  const [payments, setPayments] = useState<PaidSnapshot[] | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/salaires?view=commissions", { cache: "no-store" })
+      .then((r) => r.json().catch(() => null))
+      .then((j) => { if (!cancelled && j?.ok) setPayments(j.payments ?? []); })
+      .catch(() => { if (!cancelled) setPayments([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const grandTotal = (payments ?? []).reduce((s, p) => s + p.total, 0);
+
+  return (
+    <SurfaceCard accent="brand" title="Commissions versées" icon={<Coins className="h-3.5 w-3.5" />}
+      action={payments && payments.length > 0 ? <span className="text-[12px] text-muted-foreground">Total versé <b className="text-foreground tnum">{eur(grandTotal)}</b></span> : undefined}>
+      <p className="mb-2 text-[11.5px] text-muted-foreground">
+        Trace figée à chaque envoi de paie : ce qui a réellement été payé, à qui, sur quelle période.
+        Non recalculé — c&apos;est l&apos;archive.
+      </p>
+      {payments === null && (
+        <p className="text-[12px] text-muted-foreground inline-flex items-center gap-1.5"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Chargement…</p>
+      )}
+      {payments && payments.length === 0 && (
+        <p className="text-[12.5px] italic text-muted-foreground">Aucune commission encore versée — l&apos;historique se remplit à l&apos;envoi de la paie.</p>
+      )}
+      <div className="space-y-1.5">
+        {(payments ?? []).map((p) => {
+          const isOpen = open === p.payslipMonth;
+          return (
+            <div key={p.payslipMonth} className="rounded-lg border border-border overflow-hidden">
+              <button type="button" onClick={() => setOpen(isOpen ? null : p.payslipMonth)}
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-secondary/40 transition-colors text-left">
+                <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                <span className="font-semibold text-[13px] text-foreground capitalize">Paie de {monthFrLong(p.payslipMonth)}</span>
+                <span className="text-[11px] text-muted-foreground">{p.entries.length} commercial{p.entries.length > 1 ? "aux" : ""} · versé le {new Date(p.sentAt).toLocaleDateString("fr-FR")}</span>
+                <span className="ml-auto tnum text-[14px] font-bold text-foreground">{eur(p.total)}</span>
+              </button>
+              {isOpen && (
+                <div className="px-3 pb-2.5 pt-0.5 space-y-2 border-t border-border bg-secondary/15">
+                  {p.entries.map((e) => (
+                    <div key={e.email} className="pt-1.5">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-[12.5px] font-semibold text-foreground">
+                          {e.name}
+                          {e.fromMonth !== e.toMonth && (
+                            <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
+                              {monthFr(e.fromMonth)} → {monthFr(e.toMonth)} · {(e.rate * 100).toFixed(0)} %
+                            </span>
+                          )}
+                        </span>
+                        <span className="tnum text-[13px] font-bold text-brand-600 dark:text-brand-300">{eur(e.amount)}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {e.months.map((m) => (
+                          <span key={m.month}
+                            title={`${monthFrLong(m.month)} — base ${m.base.toFixed(2)} € · ${m.invoices} fact.${m.avoirs > 0 ? ` · avoirs −${m.avoirs.toFixed(2)} €` : ""}`}
+                            className="inline-flex items-baseline gap-1 rounded border border-border bg-background/60 px-1.5 py-0.5 text-[10.5px] tnum">
+                            <span className="text-muted-foreground">{monthFr(m.month)}</span><b className="text-foreground">{eur(m.prime)}</b>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </SurfaceCard>
   );
 }
 
@@ -211,15 +312,12 @@ function CommissionsCursor({ data, month, canEdit, onSaved }: {
 }) {
   const [val, setVal] = useState(data.commissionsPaidThrough ?? "");
   const [saving, setSaving] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
   useEffect(() => { setVal(data.commissionsPaidThrough ?? ""); }, [data.commissionsPaidThrough]);
 
-  // Total des lignes de commission AUTO présentes sur la paie du mois affiché,
-  // + repère « rattrapage » (motif de la ligne auto).
-  const lines = data.rows
-    .map((r) => (r.salary?.primes ?? []).find((p) => p.id === COMMISSION_PRIME_ID))
-    .filter((p): p is SalaryPrime => !!p);
-  const total = lines.reduce((s, p) => s + p.montant, 0);
-  const rattrapage = lines.some((p) => /rattrapage/i.test(p.motif));
+  const detail = data.commissionsDetail ?? [];
+  const total = detail.reduce((s, d) => s + d.prime, 0);
+  const rattrapage = detail.some((d) => d.monthsCount > 1);
 
   const save = async (next: string | null) => {
     setSaving(true);
@@ -248,6 +346,13 @@ function CommissionsCursor({ data, month, canEdit, onSaved }: {
             rattrapage arriéré
           </span>
         )}
+        {detail.length > 0 && (
+          <button type="button" onClick={() => setShowDetail((v) => !v)}
+            className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-600 dark:text-brand-300 hover:underline">
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showDetail ? "rotate-180" : ""}`} />
+            {showDetail ? "Masquer le détail" : "Voir le détail de ce qui est payé"}
+          </button>
+        )}
         <span className="basis-full text-[11px] text-muted-foreground">
           Ajoutées automatiquement à chaque commercial (5 % de la marge nette), versées mois par mois.{" "}
           {data.commissionsPaidThrough
@@ -255,6 +360,38 @@ function CommissionsCursor({ data, month, canEdit, onSaved }: {
             : <>Rien n&apos;a encore été réglé — cette paie <b>rattrape tout l&apos;arriéré</b>.</>}
         </span>
       </div>
+
+      {/* DÉTAIL de ce qui est payé sur cette paie — par commercial, mois par mois. */}
+      {showDetail && detail.length > 0 && (
+        <div className="mt-2 space-y-2 border-t border-brand-500/20 pt-2">
+          {detail.map((d) => (
+            <div key={d.email}>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[12px] font-semibold text-foreground">
+                  {d.email.split("@")[0]}
+                  {d.monthsCount > 1 && (
+                    <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
+                      rattrapage {monthFr(d.fromMonth)} → {monthFr(d.toMonth)}
+                    </span>
+                  )}
+                </span>
+                <span className="tnum text-[12.5px] font-bold text-foreground">{eur(d.prime)}</span>
+              </div>
+              <div className="mt-0.5 flex flex-wrap gap-1">
+                {d.months.map((m) => (
+                  <span key={m.month}
+                    title={`${monthFrLong(m.month)} — base ${m.base.toFixed(2)} € · ${m.invoices} fact.${m.avoirs > 0 ? ` · avoirs −${m.avoirs.toFixed(2)} €` : ""}`}
+                    className="inline-flex items-baseline gap-1 rounded border border-border bg-background/60 px-1.5 py-0.5 text-[10.5px] tnum">
+                    <span className="text-muted-foreground">{monthFr(m.month)}</span>
+                    <b className="text-foreground">{eur(m.prime)}</b>
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+          <p className="text-[10px] text-muted-foreground">Détail facture par facture dans Pilotage › Commerciaux.</p>
+        </div>
+      )}
       {canEdit && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <label className="text-[10.5px] uppercase tracking-wide font-semibold text-muted-foreground">Réglées jusqu&apos;à</label>

@@ -10,6 +10,7 @@ import { prisma } from "./prisma";
 import {
   VEHICULE_ENERGIES,
   type SalaryEnvoi, type SalaryFrais, type SalaryMonthData, type SalaryPrime, type SalaryProfile, type VehiculeAN,
+  type CommissionPaidSnapshot,
 } from "./salaires";
 
 const PROFIL_PREFIX = "salprofil:";
@@ -18,6 +19,7 @@ const RECAP_PREFIX = "salrecap:";
 const ENVOI_PREFIX = "salenvoi:";        // salenvoi:<id> → un envoi (PDF) au cabinet
 const COMPTA_EMAILS_KEY = "salcompta:emails";  // destinataires du cabinet (CSV)
 const COMMISSIONS_PAID_KEY = "salcommissions:paidThrough"; // dernier mois de commissions déjà réglé (YYYY-MM)
+const COMMPAID_PREFIX = "salcommpaid:";  // salcommpaid:<payslipMonth> → snapshot immuable des commissions versées
 
 const emailKey = (email: string) => email.trim().toLowerCase();
 
@@ -228,6 +230,40 @@ export async function advanceCommissionsPaidThrough(month: string): Promise<stri
   const cur = await getCommissionsPaidThrough();
   if (cur && cur >= month) return cur; // comparaison lexicographique = chronologique
   return setCommissionsPaidThrough(month);
+}
+
+/* ─────────── Trace IMMUABLE des commissions versées (par mois de paie) ─────── */
+
+/** Enregistre (ou remplace, en cas de rectif) le snapshot des commissions
+ *  versées sur la paie d'un mois. Trace permanente, jamais recalculée. */
+export async function saveCommissionPayment(snap: CommissionPaidSnapshot): Promise<void> {
+  if (!MONTH_RE_STR.test(snap.payslipMonth)) return;
+  const key = COMMPAID_PREFIX + snap.payslipMonth;
+  const value = JSON.stringify(snap);
+  await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+}
+
+/** Snapshot d'un mois de paie (null si aucune commission versée ce mois-là). */
+export async function getCommissionPayment(payslipMonth: string): Promise<CommissionPaidSnapshot | null> {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: COMMPAID_PREFIX + payslipMonth } });
+    return row ? (JSON.parse(row.value) as CommissionPaidSnapshot) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Historique complet des commissions versées, mois de paie décroissant. */
+export async function listCommissionPayments(): Promise<CommissionPaidSnapshot[]> {
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: COMMPAID_PREFIX } } });
+    return rows
+      .map((r) => { try { return JSON.parse(r.value) as CommissionPaidSnapshot; } catch { return null; } })
+      .filter((s): s is CommissionPaidSnapshot => !!s && MONTH_RE_STR.test(s.payslipMonth))
+      .sort((a, b) => b.payslipMonth.localeCompare(a.payslipMonth));
+  } catch {
+    return [];
+  }
 }
 
 /* ─────────── Destinataires du cabinet comptable (CSV, réglable dans l'UI) ──── */

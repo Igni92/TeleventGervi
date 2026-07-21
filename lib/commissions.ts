@@ -190,14 +190,18 @@ export async function commissionsForPayslip(
       const base = months.reduce((s, m) => s + m.base, 0);
       const prime = Math.round(months.reduce((s, m) => s + m.prime, 0) * 100) / 100;
       if (prime <= 0) continue;
-      const sorted = months.map((m) => m.month).sort();
+      // Détail mois par mois (ancien → récent) — le « détail de ce qui est payé ».
+      const detail = [...months]
+        .sort((a, b) => a.month.localeCompare(b.month))
+        .map((m) => ({ month: m.month, base: m.base, prime: m.prime, invoices: m.invoices, avoirs: m.avoirs }));
       out.set(email, {
         slp, rate,
         base: Math.round(base * 100) / 100,
         prime,
-        fromMonth: sorted[0],
+        fromMonth: detail[0].month,
         toMonth: monthId,
         monthsCount: months.length,
+        months: detail,
       });
     }
   } catch { /* moteur indisponible → pas de ligne auto (jamais bloquant pour la paie) */ }

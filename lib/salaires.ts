@@ -54,6 +54,33 @@ export interface SalaryPrime {
  *  (lib/commissions), jamais persistée, VERROUILLÉE dans l'UI. */
 export const COMMISSION_PRIME_ID = "commission-auto";
 
+/** Une commission versée à UN commercial sur UNE paie — figée à l'envoi. */
+export interface CommissionPaidEntry {
+  slp: string;
+  email: string;
+  name: string;
+  rate: number;
+  /** Bornes de la période réglée sur cette paie (YYYY-MM). */
+  fromMonth: string;
+  toMonth: string;
+  base: number;
+  amount: number;
+  /** Détail mois par mois figé au moment du versement. */
+  months: { month: string; base: number; prime: number; invoices: number; avoirs: number }[];
+}
+
+/** Snapshot IMMUABLE des commissions payées sur la paie d'UN mois (trace). */
+export interface CommissionPaidSnapshot {
+  /** Mois de la PAIE qui a réglé ces commissions (YYYY-MM). */
+  payslipMonth: string;
+  /** Curseur AVANT ce versement (null = tout l'arriéré) — pour rejouer une rectif. */
+  cursorBefore: string | null;
+  sentAt: string;
+  sentBy: string;
+  total: number;
+  entries: CommissionPaidEntry[];
+}
+
 export interface SalaryFrais {
   id: string;
   motif: string;
