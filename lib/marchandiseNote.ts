@@ -86,6 +86,49 @@ export async function getArticleNotes(itemCodes?: string[]): Promise<Map<string,
   return out;
 }
 
+/** Efface la note d'un LOT précis (met le rating à vide). Best-effort — ne
+ *  touche pas la note COURANTE de l'article (dernier arrivage noté). */
+export async function clearLotNote(itemCode: string, lot: string): Promise<void> {
+  const code = (itemCode ?? "").trim();
+  const cleanLot = (lot ?? "").trim();
+  if (!code || !cleanLot) return;
+  try {
+    await prisma.appSetting.deleteMany({ where: { key: `${LOT_PREFIX}${code}:${cleanLot}` } });
+  } catch { /* table absente → rien à effacer */ }
+}
+
+/**
+ * Notes des LOTS pour une liste de paires (article, lot) — lecture groupée en
+ * UNE requête. Renvoie une Map « `<itemCode>::<lot>` → note (1..5) ». Utile pour
+ * l'historique des EM où chaque ligne a SON lot (« une EM par ligne »).
+ */
+export async function getLotNotesForPairs(
+  pairs: { itemCode: string; lot: string }[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const keys = new Map<string, { itemCode: string; lot: string }>();
+  for (const p of pairs) {
+    const code = (p.itemCode ?? "").trim();
+    const lot = (p.lot ?? "").trim();
+    if (!code || !lot) continue;
+    keys.set(`${LOT_PREFIX}${code}:${lot}`, { itemCode: code, lot });
+  }
+  if (keys.size === 0) return out;
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { in: [...keys.keys()] } } });
+    for (const row of rows) {
+      const meta = keys.get(row.key);
+      if (!meta) continue;
+      try {
+        const v = JSON.parse(row.value) as { rating?: number };
+        const r = sanitizeRating(v?.rating);
+        if (r != null) out.set(`${meta.itemCode}::${meta.lot}`, r);
+      } catch { /* ligne corrompue ignorée */ }
+    }
+  } catch { /* table absente → aucune note */ }
+  return out;
+}
+
 /** Notes des LOTS d'un article (détail des lots). Map lot → note (1..5). */
 export async function getLotNotes(itemCode: string, lots: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();

@@ -10,7 +10,7 @@ import { buildWhsBudget, remainingForItem, pickReceiptWarehouse, consumeBudget }
 import { normalizeEmAffect, setEmAffect } from "@/lib/emAffect";
 import { setEmGroup, getEmGroups } from "@/lib/emGroup";
 import { creditLots, debitLots } from "@/lib/lotLedger";
-import { setMarchandiseNote, sanitizeRating } from "@/lib/marchandiseNote";
+import { setMarchandiseNote, sanitizeRating, getLotNotesForPairs } from "@/lib/marchandiseNote";
 import { convertQuotationToOrder } from "@/lib/quotationConvert";
 import { isDepartureReached } from "@/lib/livraison";
 
@@ -803,6 +803,11 @@ export async function GET(req: NextRequest) {
     // ── Groupes « une EM par ligne » (lib/emGroup) : DocNum → n° du groupe ──
     const groups = await getEmGroups();
 
+    // ── Notes qualité (étoiles) par (article × lot) — une note par PRODUIT par
+    //    EM, posée par l'agréeur. Lecture groupée pour l'affichage/édition. ──
+    const notePairs = listed.flatMap((d) => (d.DocumentLines || []).map((l) => ({ itemCode: l.ItemCode, lot: `EM${d.DocNum}` })));
+    const lotNotes = await getLotNotesForPairs(notePairs);
+
     const mapped = listed.map((d) => {
         const lines = d.DocumentLines || [];
         const totalTTC = d.DocTotal ?? 0;
@@ -857,6 +862,8 @@ export async function GET(req: NextRequest) {
               price: priceBlind ? null : (l.Price ?? null),
               lineTotal: priceBlind ? null : (l.LineTotal ?? null),
               taxPercent: priceBlind ? null : (l.TaxPercentagePerRow ?? null),
+              // Note qualité (étoiles) de l'agréeur pour ce PRODUIT sur SON lot/EM.
+              rating: lotNotes.get(`${l.ItemCode}::EM${d.DocNum}`) ?? null,
               // Désignation décomposée (catalogue local)
               uPays: p?.uPays ?? null,
               uMarque: p?.uMarque ?? null,

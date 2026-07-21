@@ -14,6 +14,7 @@ import { FullscreenPanel } from "@/components/ui/fullscreen-panel";
 import { InfoHint } from "@/components/ui/info-hint";
 import { StatBlock } from "@/components/ui/stat-block";
 import { AnimatedNumber } from "@/components/ui/animated-number";
+import { StarRating } from "@/components/ui/star-rating";
 import { designationProduit } from "@/lib/produit-designation";
 import { fmtJourDate } from "@/lib/date-fr";
 import { eur, eur0, fmtColis } from "@/lib/format";
@@ -32,6 +33,8 @@ type ReceiptLine = {
   pieceQuantity: number; packageQuantity: number | null;
   warehouse?: string;
   price: number | null; lineTotal: number | null; taxPercent: number | null;
+  // Note qualité (étoiles, 1..5) de l'agréeur pour ce produit sur SON lot/EM.
+  rating?: number | null;
   uPays: string | null; uMarque: string | null; uCondi: string | null; frgnName?: string | null;
 };
 type Receipt = {
@@ -780,6 +783,38 @@ function ReceiptDetail({
     } finally { setSavingDlcLots((c) => { const n = new Set(c); n.delete(lot); return n; }); }
   };
 
+  // ── NOTE QUALITÉ (étoiles) — PAR PRODUIT sur SON lot/EM, éditable depuis le
+  //    détail (geste de l'agréeur, ajustable après la réception). Une note par
+  //    EM (« une EM par ligne »). Autorisée même pour l'agréeur « restricted »
+  //    (le serveur vérifie le droit) — elle ne touche pas aux prix. ──
+  const [ratingEdits, setRatingEdits] = useState<Record<string, number | null>>({});
+  useEffect(() => { setRatingEdits({}); }, [receipt.docEntry]);
+  const ratingOf = (l: ReceiptLine): number | null => {
+    const k = lineKey(receipt, l);
+    return ratingEdits[k] !== undefined ? ratingEdits[k] : (l.rating ?? null);
+  };
+  const saveRating = async (l: ReceiptLine, v: number | null) => {
+    const k = lineKey(receipt, l);
+    const lot = lineLot(receipt, l);
+    setRatingEdits((c) => ({ ...c, [k]: v }));   // optimiste
+    try {
+      const res = await fetch("/api/marchandise-notes", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemCode: l.itemCode, lot, rating: v }),
+      });
+      const j = await res.json();
+      if (!res.ok || j.ok === false) {
+        setRatingEdits((c) => { const n = { ...c }; delete n[k]; return n; });  // revert
+        toast.error(j.error || "Note non enregistrée");
+        return;
+      }
+      toast.success(v ? `Note ${v}★ enregistrée — ${l.itemCode} (lot ${lot})` : `Note effacée — ${l.itemCode}`);
+    } catch (e) {
+      setRatingEdits((c) => { const n = { ...c }; delete n[k]; return n; });
+      toast.error((e as Error).message);
+    }
+  };
+
   // Un seul jeu de tailles : le détail ne vit plus qu'en PLEIN ÉCRAN.
   const tbl = "text-[15px]";
   const th = "px-3 py-2.5 text-[11.5px]";
@@ -921,6 +956,13 @@ function ReceiptDetail({
                 <FreshnessBadge dlc={dlcISOOf(lot)} />
                 {savingDlcLots.has(lot) && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
               </div>
+              {/* Note qualité (étoiles) de l'agréeur — par produit / EM, éditable */}
+              {!isVoided(receipt) && !l.cancelled && (
+                <div className="flex items-center gap-2 mt-2 text-[13px]">
+                  <span className="text-muted-foreground shrink-0">Qualité</span>
+                  <StarRating value={ratingOf(l)} onChange={(v) => saveRating(l, v)} size="md" ariaLabel={`Note qualité ${dz.fruit}`} />
+                </div>
+              )}
             </div>
           );
         })}
@@ -948,6 +990,8 @@ function ReceiptDetail({
               <th className={`text-left font-semibold ${th}`}>Variété</th>
               <th className={`text-left font-semibold ${th}`}>Pays</th>
               <th className={`text-left font-semibold w-40 ${th}`}>DLC</th>
+              {/* Note qualité (étoiles) de l'agréeur — par produit / EM */}
+              <th className={`text-left font-semibold w-32 ${th}`}>Qualité</th>
               {!restricted && <th className={`text-right font-semibold w-24 ${th}`}>PU HT</th>}
               {!restricted && <th className={`text-right font-semibold w-24 ${th}`}>Total HT</th>}
             </tr>
@@ -985,6 +1029,12 @@ function ReceiptDetail({
                         : <FreshnessBadge dlc={dlcISOOf(lot)} className="shrink-0" />}
                     </div>
                   </td>
+                  {/* Note qualité (étoiles) de l'agréeur — par produit / EM, éditable */}
+                  <td className={td}>
+                    {isVoided(receipt) || l.cancelled
+                      ? <span className="text-muted-foreground/30 text-[11px]">—</span>
+                      : <StarRating value={ratingOf(l)} onChange={(v) => saveRating(l, v)} size="md" ariaLabel={`Note qualité ${dz.fruit}`} />}
+                  </td>
                   {!restricted && (
                     <td className={`text-right tnum ${td}`}>
                       {canEditPrices && priceEdits[i] ? (
@@ -1009,15 +1059,15 @@ function ReceiptDetail({
           {!restricted && (
             <tfoot>
               <tr className="border-t border-border bg-secondary/30">
-                <td colSpan={9} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total HT</td>
+                <td colSpan={10} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total HT</td>
                 <td colSpan={2} className={`text-right tnum font-semibold text-foreground ${td} ${totVal}`}>{eur(totHT)}</td>
               </tr>
               <tr className="bg-secondary/20">
-                <td colSpan={9} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>TVA</td>
+                <td colSpan={10} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>TVA</td>
                 <td colSpan={2} className={`text-right tnum text-muted-foreground ${td}`}>{eur(totTVA)}</td>
               </tr>
               <tr className="bg-secondary/30 border-t border-border">
-                <td colSpan={9} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total TTC</td>
+                <td colSpan={10} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total TTC</td>
                 <td colSpan={2} className={`text-right tnum font-bold text-foreground ${td} ${totVal}`}>{eur(totTTC)}</td>
               </tr>
             </tfoot>

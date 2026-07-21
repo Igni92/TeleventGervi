@@ -46,7 +46,17 @@ export async function POST(req: NextRequest) {
   // droit : passer une commande fournisseur en entrée marchandise).
   if (!(await requireCanReceivePurchaseOrder(session))) return NextResponse.json({ error: "Réservé à la préparation / l'administration / l'agréeur" }, { status: 403 });
 
-  let body: { docEntry?: number; agreage?: { status?: string; type?: string; note?: string; rating?: number } };
+  let body: {
+    docEntry?: number;
+    agreage?: {
+      status?: string; type?: string; note?: string;
+      // Note qualité (étoiles) de l'agréeur : UNE note PAR PRODUIT (itemCode →
+      // 1..5), chacune posée sur l'EM/lot de ce produit. `rating` (note unique
+      // pour tous les articles) est conservé en repli pour compat.
+      ratings?: Record<string, number>;
+      rating?: number;
+    };
+  };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -189,11 +199,21 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── Note qualité (étoiles) de l'agréeur — posée sur chaque article reçu + SON lot ──
-  const rating = sanitizeRating(body.agreage?.rating);
-  if (rating != null) {
-    const pairs = new Map(createdLines.filter((l) => l.ItemCode).map((l) => [`${l.ItemCode}::${l.lot}`, l]));
-    await Promise.all([...pairs.values()].map((l) => setMarchandiseNote(l.ItemCode, l.lot, rating, me).catch(() => {})));
+  // ── Note qualité (étoiles) de l'agréeur — UNE note PAR PRODUIT, posée sur
+  //    l'EM/lot de ce produit (« une EM par ligne » → une note par EM). L'UI
+  //    envoie `ratings` (itemCode → note) ; repli sur `rating` (note unique
+  //    héritée, appliquée à tous les articles) pour compat. Best-effort. ──
+  const ratingsByItem = body.agreage?.ratings && typeof body.agreage.ratings === "object" ? body.agreage.ratings : null;
+  const flatRating = sanitizeRating(body.agreage?.rating);
+  if (ratingsByItem || flatRating != null) {
+    const seen = new Set<string>();
+    await Promise.all(createdLines.filter((l) => l.ItemCode).map((l) => {
+      const key = `${l.ItemCode}::${l.lot}`;
+      if (seen.has(key)) return Promise.resolve();
+      seen.add(key);
+      const r = ratingsByItem ? sanitizeRating(ratingsByItem[l.ItemCode]) : flatRating;
+      return r != null ? setMarchandiseNote(l.ItemCode, l.lot, r, me).catch(() => {}) : Promise.resolve();
+    }));
   }
 
   // ── Registre des lots : CRÉDIT (réception via commande fournisseur) ──
