@@ -43,6 +43,19 @@ export function ProspectionBoard() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  const [importing, setImporting] = useState(false);
+  async function doImport() {
+    setImporting(true);
+    try {
+      const r = await fetch("/api/prospection/import", { method: "POST" });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || "Échec");
+      toast.success(`Import : ${j.inserted} ajoutés · ${j.already} déjà présents`);
+      load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Échec"); }
+    finally { setImporting(false); }
+  }
+
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return rows;
@@ -91,6 +104,10 @@ export function ProspectionBoard() {
         />
         <button onClick={load} className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-[13px] text-white/80 hover:bg-white/[0.08]">
           Rafraîchir
+        </button>
+        <button onClick={doImport} disabled={importing} title="Importer les prospects GMS IDF pâtisserie (admin)"
+          className="h-9 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 px-3 text-[13px] text-white font-semibold disabled:opacity-60">
+          {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Target className="h-4 w-4" />} Importer les prospects
         </button>
       </div>
 
