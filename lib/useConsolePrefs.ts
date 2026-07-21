@@ -47,7 +47,10 @@ const DEFAULT_COLLAPSED: Record<SectionId, boolean> = {
  * Les outils d'analyse/marge vivent désormais exclusivement sur l'Écran 2.
  */
 const DEFAULT_VISIBLE: Record<SectionId, boolean> = {
-  insights: true,
+  // « Analyse comportementale » masquée par défaut : c'est de l'analyse (8
+  // métriques), pas de la vente — elle encombre la fiche pendant l'appel et
+  // vit déjà sur l'Écran 2. Réactivable en 1 clic (roue « Personnaliser la fiche »).
+  insights: false,
   jours:    true,
   notes:    true,
   history:  true,
