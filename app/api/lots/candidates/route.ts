@@ -12,8 +12,13 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/lots/candidates?items=CODE1,CODE2&segment=EXPORT
  *
- * Candidats de LOTS par article pour l'affectation manuelle. Chaque EM (entrée
- * marchandise) est un lot distinct « EM<DocNum> ». On enrichit chaque lot avec le
+ * Candidats de LOTS par article pour l'affectation manuelle. Deux origines de lot :
+ *   • « EM<DocNum> » — une entrée marchandise (réception fournisseur) ;
+ *   • « OP<NNNNN> » — un ordre de PRODUCTION (produit FABRIQUÉ, cf.
+ *     /api/sap/assembly). Un article dont le stock vient d'une fabrication n'a
+ *     AUCUNE EM : sans ce cas, seul EM_PENDING était proposé. On propose donc
+ *     aussi le lot de fabrication (affect « PROD », étiqueté « Fabrication »).
+ * On enrichit chaque lot avec le
  * REGISTRE local (lib/lotLedger → ProductBatch) qui tient, PAR EM :
  *   • le COLIS RESTANT (quantité restante, crédité à la réception, débité à la vente),
  *   • le FOURNISSEUR et le PRIX d'achat,
@@ -37,7 +42,7 @@ interface Candidate {
   lot: string;
   docNum: number;
   warehouse: string | null;
-  affect: string;
+  affect: string;                 // segment EM (TOUS/EXPORT/GMS/CHR) ou "PROD" (lot de fabrication)
   qty: number;                    // reste (registre) OU stock article×entrepôt (repli), unité SAP
   colis: number | null;           // reste en COLIS (registre uniquement — sinon null)
   fromLedger: boolean;            // true = colis-restant par-EM fiable (registre)
@@ -51,6 +56,11 @@ interface Candidate {
 function docNumOfLot(lot: string): number {
   const m = /^EM(\d+)$/.exec(lot);
   return m ? Number(m[1]) : 0;
+}
+
+/** Lot d'un ordre de PRODUCTION (produit fabriqué, cf. /api/sap/assembly). */
+function isOpLot(lot: string): boolean {
+  return /^OP\d+$/i.test(lot);
 }
 
 export async function GET(req: NextRequest) {
@@ -71,9 +81,13 @@ export async function GET(req: NextRequest) {
       getLotMaps(),
       getEmAffects(),
       getItemStock(items),
-      // Registre des lots (par EM) avec un reste > 0.
+      // Registre des lots (par EM réception OU OP fabrication) avec un reste > 0.
       prisma.productBatch.findMany({
-        where: { product: { itemCode: { in: items } }, quantity: { gt: 0 }, batchNumber: { startsWith: "EM" } },
+        where: {
+          product: { itemCode: { in: items } },
+          quantity: { gt: 0 },
+          OR: [{ batchNumber: { startsWith: "EM" } }, { batchNumber: { startsWith: "OP" } }],
+        },
         select: {
           batchNumber: true, quantity: true,
           purchasePrice: true, currency: true, supplierName: true, admissionDate: true,
@@ -128,20 +142,27 @@ export async function GET(req: NextRequest) {
       for (const lot of ledgerLotsByItem.get(code) ?? []) {
         const r = ledgerByKey.get(`${code}|${lot}`);
         if (!r) continue;
-        const docNum = docNumOfLot(lot);
-        const warehouse = maps.whsOfItemDoc.get(`${code}|${docNum}`) ?? null;
+        // Lot de FABRICATION (OP<NNNNN>) : produit fabriqué, jamais reçu par un
+        // PDN → pas de magasin de réception ni d'affectation segment. On le
+        // vérifie sur le stock TOTAL de l'article (warehouse null) et on
+        // l'étiquette « PROD » (« Fabrication » côté UI). ⚠️ Ne PAS dériver son
+        // docNum via docNumOfLot : la partie numérique d'un OP pourrait entrer en
+        // collision avec un vrai DocNum d'EM dans whsOfItemDoc / affects.
+        const op = isOpLot(lot);
+        const docNum = op ? 0 : docNumOfLot(lot);
+        const warehouse = op ? null : (maps.whsOfItemDoc.get(`${code}|${docNum}`) ?? null);
         if (!lotInStock(stock, code, warehouse)) continue;   // épuisé → non proposé
         byLot.set(lot, {
           lot, docNum, warehouse,
-          affect: affects.get(docNum) ?? "TOUS",
+          affect: op ? "PROD" : (affects.get(docNum) ?? "TOUS"),
           qty: r.quantity,
           colis: toColis(code, r.quantity),
           fromLedger: true,
-          supplierName: r.supplierName ?? maps.docMeta.get(docNum)?.supplier ?? null,
+          supplierName: op ? (r.supplierName ?? null) : (r.supplierName ?? maps.docMeta.get(docNum)?.supplier ?? null),
           purchasePrice: r.purchasePrice ?? null,
           currency: r.currency ?? null,
           rating: notes.get(lot) ?? null,
-          admissionDate: r.admissionDate ? r.admissionDate.toISOString() : (maps.docMeta.get(docNum)?.date ?? null),
+          admissionDate: r.admissionDate ? r.admissionDate.toISOString() : (op ? null : (maps.docMeta.get(docNum)?.date ?? null)),
         });
       }
 

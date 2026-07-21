@@ -47,7 +47,11 @@ interface Bon {
 interface LotCandidate { lot: string; docNum: number; warehouse: string | null; affect: string }
 type Candidates = Record<string, { candidates: LotCandidate[]; suggested: string | null }>;
 
-const AFFECT_LABEL: Record<string, string> = { TOUS: "Tous", EXPORT: "Export", GMS: "GMS", CHR: "CHR" };
+const AFFECT_LABEL: Record<string, string> = { TOUS: "Tous", EXPORT: "Export", GMS: "GMS", CHR: "CHR", PROD: "Fabrication" };
+/** Option « écrire le lot à la main » du sélecteur (valeur sentinelle, jamais un vrai lot). */
+const MANUAL_LOT = "__MANUAL__";
+/** Nettoie une saisie manuelle de lot pour U_NoLot SAP (ASCII court : EM…/OP…/code interne). */
+const cleanManualLot = (v: string) => v.toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 30);
 
 export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
   /** Incrémenté par le parent (« Actualiser » / rechargements) → recharge la liste. */
@@ -61,6 +65,8 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
   const [pendingLot, setPendingLot] = useState("EM_PENDING");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);   // id du bon en cours (BL / suppression)
+  const [manualKey, setManualKey] = useState<string | null>(null);   // `${bon.id}:${idx}` en saisie manuelle
+  const [manualDraft, setManualDraft] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -275,7 +281,17 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
                           <select
                             value={current}
                             disabled={isBusy}
-                            onChange={(e) => setLot(bon, i, e.target.value)}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v === MANUAL_LOT) {
+                                // Ouvre la saisie libre — pré-remplie du lot courant s'il est déjà « à la main ».
+                                setManualKey(`${bon.id}:${i}`);
+                                setManualDraft(current && current !== pendingLot ? current : "");
+                                return;
+                              }
+                              setManualKey((k) => (k === `${bon.id}:${i}` ? null : k));
+                              setLot(bon, i, v);
+                            }}
                             aria-label={`Lot de ${l.itemName ?? l.itemCode}`}
                             className={`h-9 w-full rounded-lg border bg-card px-2.5 text-[12.5px] font-medium focus:outline-none focus:ring-2 focus:ring-violet-500/40 disabled:opacity-60 cursor-pointer ${
                               current ? "border-border text-foreground" : "border-amber-400/60 text-amber-700 dark:text-amber-300"
@@ -294,7 +310,46 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
                             ))}
                             {!hasCurrent && <option value={current}>{current}</option>}
                             <option value={pendingLot}>À découvert — arrivage à venir ({pendingLot})</option>
+                            <option value={MANUAL_LOT}>✏️ Saisir le lot à la main…</option>
                           </select>
+                          {manualKey === `${bon.id}:${i}` && (
+                            <div className="mt-1.5 flex items-center gap-1.5">
+                              <input
+                                autoFocus
+                                type="text"
+                                value={manualDraft}
+                                disabled={isBusy}
+                                onChange={(e) => setManualDraft(cleanManualLot(e.target.value))}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && manualDraft.trim()) {
+                                    e.preventDefault();
+                                    setLot(bon, i, manualDraft.trim());
+                                    setManualKey(null);
+                                  }
+                                  if (e.key === "Escape") { e.preventDefault(); setManualKey(null); }
+                                }}
+                                placeholder="EM23568, OP00042…"
+                                aria-label={`Saisir le lot de ${l.itemName ?? l.itemCode}`}
+                                className="h-8 flex-1 min-w-0 rounded-md border border-border bg-card px-2 text-[12.5px] font-medium tnum focus:outline-none focus:ring-2 focus:ring-violet-500/40 disabled:opacity-60"
+                              />
+                              <button
+                                type="button"
+                                disabled={isBusy || !manualDraft.trim()}
+                                onClick={() => { setLot(bon, i, manualDraft.trim()); setManualKey(null); }}
+                                className="h-8 shrink-0 rounded-md bg-violet-600 px-2.5 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                OK
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setManualKey(null)}
+                                aria-label="Annuler la saisie du lot"
+                                className="h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </li>
                     );
