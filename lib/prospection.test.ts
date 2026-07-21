@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   classifyAccount,
+  classifyByDays,
   isProspect,
   nextStage,
   getStage,
@@ -46,6 +47,14 @@ describe("classifyAccount — séparation CLIENT / PROSPECT", () => {
   it("isProspect est cohérent avec classifyAccount", () => {
     expect(isProspect(daysAgo(30), null, NOW)).toBe(false);
     expect(isProspect(daysAgo(400), null, NOW)).toBe(true);
+  });
+
+  it("classifyByDays applique la même règle sur un nombre de jours", () => {
+    expect(classifyByDays(30, null)).toBe("CLIENT");
+    expect(classifyByDays(400, null)).toBe("PROSPECT");
+    expect(classifyByDays(null, null)).toBe("PROSPECT");
+    expect(classifyByDays(5, "QUALIFICATION")).toBe("PROSPECT");
+    expect(classifyByDays(5, "GAGNE")).toBe("CLIENT");
   });
 });
 

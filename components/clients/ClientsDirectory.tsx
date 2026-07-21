@@ -25,8 +25,9 @@ import Link from "next/link";
 import { toast } from "sonner";
 import {
   Search, Loader2, Users, Phone, ChevronRight, AlertTriangle, PackageX,
-  CalendarClock, UserCheck, Bell, Power, MoreHorizontal, UserPlus, Plus, Radio,
+  CalendarClock, UserCheck, Bell, Power, MoreHorizontal, UserPlus, Plus, Radio, Target,
 } from "lucide-react";
+import { classifyByDays } from "@/lib/prospection";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +52,7 @@ interface PlanClient {
   tel2: string | null;
   joursAppel: string | null;
   activeTelevente: boolean;
+  prospectStage?: string | null;
   openIncidents: number;
   lastOrderDays: number | null;
   lastCallDays: number | null;
@@ -98,6 +100,7 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
   const [type, setType] = useState("");
   const [active, setActive] = useState("");
   const [stale, setStale] = useState("");
+  const [statut, setStatut] = useState("clients"); // clients | prospects | "" (les deux)
   const [todayOnly, setTodayOnly] = useState(false);
   const [incidents, setIncidents] = useState(false);
   const [syncingVendeurs, setSyncingVendeurs] = useState(false);
@@ -144,16 +147,17 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
 
   // Statistiques sur le PORTEFEUILLE complet (ne bougent pas avec les filtres).
   const stats = useMemo(() => {
-    let total = 0, todayCount = 0, stale30 = 0, withIncidents = 0, noVendeur = 0;
+    let total = 0, todayCount = 0, stale30 = 0, withIncidents = 0, noVendeur = 0, clientsN = 0, prospectsN = 0;
     for (const c of clients) {
       total++;
+      if (classifyByDays(c.lastOrderDays, c.prospectStage) === "PROSPECT") prospectsN++; else clientsN++;
       const days = c.joursAppel ? c.joursAppel.split(",").map(Number) : [];
       if (c.activeTelevente && days.includes(today)) todayCount++;
       if (c.activeTelevente && (c.lastOrderDays == null || c.lastOrderDays >= 30)) stale30++;
       if (c.openIncidents > 0) withIncidents++;
       if (c.activeTelevente && !c.vendeur) noVendeur++;
     }
-    return { total, today: todayCount, stale30, withIncidents, noVendeur };
+    return { total, today: todayCount, stale30, withIncidents, noVendeur, clientsN, prospectsN };
   }, [clients, today]);
 
   const filtered = useMemo(() => {
@@ -176,6 +180,9 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
         if (!days.includes(today)) return false;
       }
       if (incidents && c.openIncidents === 0) return false;
+      const kind = classifyByDays(c.lastOrderDays, c.prospectStage);
+      if (statut === "clients" && kind !== "CLIENT") return false;
+      if (statut === "prospects" && kind !== "PROSPECT") return false;
       return true;
     }).sort((a, b) => {
       // Actifs d'abord, puis les plus « en retard » (jamais commandé = urgent) en tête.
@@ -185,13 +192,16 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
       if (da !== db) return db - da;
       return a.nom.localeCompare(b.nom);
     });
-  }, [clients, search, vendeur, commercial, type, active, stale, todayOnly, incidents, today]);
+  }, [clients, search, vendeur, commercial, type, active, stale, statut, todayOnly, incidents, today]);
 
   return (
     <div className="space-y-4">
       {/* Cartes synthèse — cliquables = filtres rapides. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <StatCard icon={Users} label="Clients" value={stats.total} tone="brand" />
+        <StatCard icon={Users} label="Clients" value={stats.clientsN} tone="brand"
+          onClick={() => setStatut(statut === "clients" ? "" : "clients")} active={statut === "clients"} />
+        <StatCard icon={Target} label="Prospects" value={stats.prospectsN} tone="violet"
+          onClick={() => setStatut(statut === "prospects" ? "" : "prospects")} active={statut === "prospects"} />
         <StatCard icon={CalendarClock} label="Programmés auj." value={stats.today} tone="sky"
           onClick={() => setTodayOnly((v) => !v)} active={todayOnly} />
         <StatCard icon={PackageX} label="Sans cde ≥ 30 j" value={stats.stale30} tone="rose"
@@ -213,6 +223,12 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
         <FilterSelect value={type} onChange={setType} placeholder="Type" options={[["", "Tous types"], ["GMS", "GMS"], ["EXPORT", "EXPORT"], ["CHR", "CHR"]]} />
         <FilterSelect value={active} onChange={setActive} placeholder="Activation" options={[["", "Actif + inactif"], ["actifs", "Actifs"], ["inactifs", "À activer"]]} />
         <FilterSelect value={stale} onChange={setStale} placeholder="Sans cde depuis" options={[["", "Toute ancienneté"], ["14", "Sans cde ≥ 14 j"], ["30", "Sans cde ≥ 30 j"], ["60", "Sans cde ≥ 60 j"]]} />
+        <FilterSelect value={statut} onChange={setStatut} placeholder="Statut" options={[["clients", "Clients"], ["prospects", "Prospects"], ["", "Clients + prospects"]]} />
+        {statut === "prospects" && (
+          <Button asChild variant="outline" size="sm" className="gap-1.5">
+            <Link href="/prospection"><Target className="h-4 w-4 text-brand-500" /> Pipeline</Link>
+          </Button>
+        )}
 
         <div className="ml-auto flex items-center gap-2">
           <ViewToggle value={view} onChange={setView} />

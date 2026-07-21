@@ -183,6 +183,20 @@ export function isProspect(
   return classifyAccount(lastOrderAt, prospectStage, now) === "PROSPECT";
 }
 
+/**
+ * Variante à partir du NOMBRE DE JOURS depuis la dernière commande (déjà calculé
+ * côté liste `/plan-appel`, évite de reconstruire une date). `null` = jamais
+ * commandé → PROSPECT.
+ */
+export function classifyByDays(
+  lastOrderDays: number | null | undefined,
+  prospectStage: string | null | undefined,
+): AccountKind {
+  if (prospectStage && prospectStage !== "GAGNE") return "PROSPECT";
+  if (lastOrderDays == null) return "PROSPECT";
+  return lastOrderDays <= PROSPECT_INACTIVITY_DAYS ? "CLIENT" : "PROSPECT";
+}
+
 /* ─────────────────────────── Rendez-vous / RDV ──────────────────────────── */
 
 export type RdvType = "R1_PHYSIQUE" | "APPEL" | "AUTRE";
