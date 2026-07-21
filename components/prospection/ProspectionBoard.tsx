@@ -201,7 +201,18 @@ export function ProspectionBoard() {
                 <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5">
                   {items.map((r) => card(r, sIdx, true))}
                   {items.length === 0 && (
-                    <p className="text-[11px] text-white/25 italic text-center py-6">Aucun prospect</p>
+                    <button onClick={() => setPoolOpen(true)}
+                      className="w-full rounded-xl border border-dashed border-white/[0.12] py-8 text-center text-[12px] text-white/40 transition hover:border-brand-500/40 hover:bg-white/[0.02] hover:text-white/70 active:scale-[0.99]">
+                      <Plus className="mx-auto mb-1 h-4 w-4" />
+                      Ajouter un prospect
+                    </button>
+                  )}
+                  {/* Footer d'ajout permanent sur la 1re étape (point d'entrée) */}
+                  {sIdx === 0 && items.length > 0 && (
+                    <button onClick={() => setPoolOpen(true)}
+                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/[0.12] py-2 text-[12px] text-white/45 transition hover:border-brand-500/40 hover:text-white/75 active:scale-[0.99]">
+                      <Plus className="h-3.5 w-3.5" /> Ajouter un prospect
+                    </button>
                   )}
                 </div>
               </div>
@@ -245,7 +256,18 @@ export function ProspectionBoard() {
                 <div className="flex-1 overflow-y-auto space-y-2.5 pb-1">
                   {items.map((r) => card(r, mobileIdx, false))}
                   {items.length === 0 && (
-                    <p className="text-[12px] text-white/30 italic text-center py-10">Aucun prospect à cette étape.</p>
+                    <button onClick={() => setPoolOpen(true)}
+                      className="w-full rounded-xl border border-dashed border-white/[0.12] py-10 text-center text-[13px] text-white/40 transition active:scale-[0.99]">
+                      <Plus className="mx-auto mb-1.5 h-5 w-5" />
+                      Ajouter un prospect
+                    </button>
+                  )}
+                  {/* Bouton d'ajout permanent sur la 1re étape */}
+                  {mobileIdx === 0 && items.length > 0 && (
+                    <button onClick={() => setPoolOpen(true)}
+                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/[0.12] py-2.5 text-[13px] text-white/45 transition active:scale-[0.99]">
+                      <Plus className="h-4 w-4" /> Ajouter un prospect
+                    </button>
                   )}
                 </div>
               </>
