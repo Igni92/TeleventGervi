@@ -7,6 +7,34 @@ import {
   splitSupp, effectivePaySuppMin, splitStructuralSupp, structuralSuppMin,
   type HoursProfile,
 } from "@/lib/heuresCalc";
+
+/** Détail HEBDOMADAIRE des heures d'un salarié sur le mois (pour la page par
+ *  personne du PDF). Semaines rattachées au mois par leur dimanche, comme
+ *  l'agrégat. Une entrée par semaine, même vide (hasData=false). */
+function buildWeekly(
+  weekIds: string[],
+  entries: Map<string, WeekEntry> | undefined,
+  profile: HoursProfile,
+): SalaryWeek[] {
+  const typDay = typicalDayMinutes(profile);
+  return weekIds.map((w) => {
+    const e = entries?.get(w);
+    const dates = weekDates(w);
+    const c = e ? computeWeek(e.days, profile.weeklyHours, typDay) : null;
+    return {
+      week: w,
+      label: w.replace(/^\d{4}-W/, "S"),
+      from: dates[0] ?? "",
+      to: dates[6] ?? "",
+      totalMin: c?.totalMin ?? 0,
+      contractMin: c?.contractMin ?? 0,
+      suppMin: c ? c.sup25Min + c.sup50Min : 0,
+      ferieMin: c?.ferieMin ?? 0,
+      congesMin: c?.congesMin ?? 0,
+      hasData: !!e,
+    };
+  });
+}
 import { listAllWeekEntries, listProfiles, getProfile, getWeekEntry, saveWeekEntry, type WeekEntry } from "@/lib/heuresRh";
 import { listAllConges } from "@/lib/congesRh";
 import { expandOuvrables, monthEndISO } from "@/lib/planning";
@@ -14,7 +42,7 @@ import { rangesOverlap, type CongeRequest } from "@/lib/conges";
 import { stripOrgSuffix } from "@/lib/userNames";
 import {
   avantageNatureMensuel, missingElements, prorata13e, recapMailHtml, salaireMonthLabel,
-  type RecapRow, type SalaryHeures, type SalaryMonthData, type SalaryPrime,
+  type RecapRow, type SalaryHeures, type SalaryMonthData, type SalaryPrime, type SalaryWeek,
   type CommissionPaidSnapshot, type CommissionPaidEntry,
 } from "@/lib/salaires";
 import { commissionsForPayslip, COMMISSION_PRIME_ID, type PayslipCommission } from "@/lib/commissions";
@@ -152,16 +180,19 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
     if (!com) return salary ? { ...salary, primes } : null;
     // Rattrapage = plus d'un mois cumulé (ex. rien réglé depuis le début).
     const rattrapage = com.monthsCount > 1;
+    const pct = (com.rate * 100).toFixed(0);
+    const shortMonth = (m: string) =>
+      new Date(`${m}-01T12:00:00Z`).toLocaleDateString("fr-FR", { month: "short", year: "numeric" });
     const line: SalaryPrime = {
       id: COMMISSION_PRIME_ID,
       motif: rattrapage
-        ? `Commissions ventes — rattrapage ${salaireMonthLabel(com.fromMonth)} → ${salaireMonthLabel(com.toMonth)} (${(com.rate * 100).toFixed(0)} %)`
-        : `Commissions ventes (${(com.rate * 100).toFixed(0)} % marge nette)`,
+        ? `Commission sur ventes (${pct} %) — rattrapage ${com.monthsCount} mois`
+        : `Commission sur ventes (${pct} % de la marge nette)`,
       montant: com.prime,
       bulletinDe: monthId,
       note: rattrapage
-        ? `Cumul de ${com.monthsCount} mois non encore réglés — base retenue ${com.base.toFixed(2)} € ; détail par mois dans Pilotage › Commerciaux`
-        : `Base retenue du mois ${com.base.toFixed(2)} € — calcul automatique, détail dans Pilotage › Commerciaux`,
+        ? `Période du ${shortMonth(com.fromMonth)} au ${shortMonth(com.toMonth)}, base retenue ${com.base.toFixed(2)} €`
+        : `Base retenue ${com.base.toFixed(2)} €`,
       auto: true,
     };
     return salary
@@ -179,6 +210,8 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
       email,
       name: stripOrgSuffix(rawName) || email,
       heures,
+      // Détail hebdo pour la page par personne du PDF.
+      weeks: buildWeekly(weeks, byUser.get(email), hourProfile),
       salary,
       profile: salProfile,
       anMensuel,

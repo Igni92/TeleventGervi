@@ -15,7 +15,7 @@ import { Loader2, Eye, Send, CalendarDays, Mail, CheckCircle2, Save, FileText } 
 import { monthIdOf, shiftMonth } from "@/lib/heuresCalc";
 import {
   salaireMonthLabel,
-  type SalaryEnvoi, type SalaryHeures, type SalaryMonthData, type SalaryProfile,
+  type SalaryEnvoi, type SalaryHeures, type SalaryMonthData, type SalaryProfile, type SalaryWeek,
 } from "@/lib/salaires";
 import { buildSalairesPdf, type PdfEmploye } from "@/lib/salairesPdfDoc";
 
@@ -23,6 +23,7 @@ interface Row {
   email: string;
   name: string;
   heures: SalaryHeures;
+  weeks?: SalaryWeek[];
   salary: SalaryMonthData | null;
   profile: SalaryProfile | null;
   anMensuel: number;
@@ -55,6 +56,7 @@ const toPdfEmploye = (r: Row): PdfEmploye => ({
   name: r.name, heures: r.heures, anMensuel: r.anMensuel,
   vehicule: r.profile?.vehicule ?? null,
   primes: r.salary?.primes ?? [], frais: r.salary?.frais ?? [], note: r.salary?.note,
+  weeks: r.weeks,
 });
 
 const fmtDate = (iso: string) =>
