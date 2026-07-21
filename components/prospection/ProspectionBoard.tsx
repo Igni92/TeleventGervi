@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Target, CalendarPlus, Check, X, Phone, MapPin, ChevronRight } from "lucide-react";
+import { Loader2, Target, CalendarPlus, Check, X, Phone, MapPin, ChevronRight, ArrowLeft, Plus, Search } from "lucide-react";
 import {
   PIPELINE_STAGES, getStage, nextStage, stageLabel,
   LOST_REASONS, RDV_TYPES, NOTIFY_MINUTES_CHOICES, notifyLabel, DEFAULT_NOTIFY_MINUTES_BEFORE,
@@ -29,6 +30,7 @@ export function ProspectionBoard() {
   const [selId, setSelId] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
+  const [poolOpen, setPoolOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
@@ -93,21 +95,26 @@ export function ProspectionBoard() {
     <div className="flex h-full min-h-0 flex-col gap-3">
       {/* Barre d'outils */}
       <div className="flex items-center gap-3 flex-wrap">
+        <Link href="/accueil" title="Retour à l'accueil"
+          className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 text-[13px] text-white/70 hover:bg-white/[0.08]">
+          <ArrowLeft className="h-4 w-4" /> Retour
+        </Link>
         <div className="flex items-center gap-2 text-white/90">
           <Target className="h-5 w-5 text-brand-400" />
           <h1 className="text-[17px] font-bold">Prospection</h1>
-          <span className="text-white/40 text-[13px]">{rows.length} prospect{rows.length > 1 ? "s" : ""}</span>
+          <span className="text-white/40 text-[13px]">{rows.length} en pipeline</span>
         </div>
         <input
-          value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher un prospect…"
-          className="ml-auto h-9 w-64 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-[13px] text-white placeholder:text-white/35 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrer la pipeline…"
+          className="ml-auto h-9 w-52 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-[13px] text-white placeholder:text-white/35 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
-        <button onClick={load} className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-[13px] text-white/80 hover:bg-white/[0.08]">
-          Rafraîchir
+        <button onClick={() => setPoolOpen(true)}
+          className="h-9 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 px-3 text-[13px] text-white font-semibold">
+          <Plus className="h-4 w-4" /> Ajouter des prospects
         </button>
-        <button onClick={doImport} disabled={importing} title="Importer les prospects GMS IDF pâtisserie (admin)"
-          className="h-9 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 px-3 text-[13px] text-white font-semibold disabled:opacity-60">
-          {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Target className="h-4 w-4" />} Importer les prospects
+        <button onClick={doImport} disabled={importing} title="Recharger le vivier depuis le fichier (admin)"
+          className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 text-[13px] text-white/70 hover:bg-white/[0.08] disabled:opacity-60">
+          {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : "Recharger le vivier"}
         </button>
       </div>
 
@@ -172,6 +179,106 @@ export function ProspectionBoard() {
         {sel && <FichePanel key={sel.id} row={sel} onClose={() => setSelId(null)} onPatch={patch} onReload={load} />}
       </div>
       )}
+
+      {poolOpen && <AddProspectsPanel onClose={() => setPoolOpen(false)} onAdded={load} />}
+    </div>
+  );
+}
+
+type PoolRow = { id: string; code: string; nom: string; city: string | null; zipCode: string | null; probaLabo: string | null };
+
+function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState("proba");
+  const [rows, setRows] = useState<PoolRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [adding, setAdding] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const p = new URLSearchParams({ search, sort, limit: "100" });
+      const r = await fetch(`/api/prospection/pool?${p}`, { cache: "no-store" });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || "Erreur");
+      setRows(j.rows as PoolRow[]); setTotal(j.total ?? 0); setSel(new Set());
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Erreur"); }
+    finally { setLoading(false); }
+  }, [search, sort]);
+  useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
+
+  const toggle = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  async function add(body: Record<string, unknown>, label: string) {
+    setAdding(true);
+    try {
+      const r = await fetch("/api/prospection/pool", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || "Échec");
+      toast.success(`${j.added} prospect${j.added > 1 ? "s" : ""} ajouté${j.added > 1 ? "s" : ""} à la pipeline (${label})`);
+      onAdded(); load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Échec"); }
+    finally { setAdding(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[80] flex justify-end bg-black/50" onClick={onClose}>
+      <aside onClick={(e) => e.stopPropagation()} className="w-[440px] max-w-[92vw] h-full overflow-y-auto bg-[#0f141c] ring-1 ring-white/10 p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-[15px] font-bold text-white/90 flex-1">Ajouter des prospects</h2>
+          <span className="text-[12px] text-white/45">{total} dans le vivier</span>
+          <button onClick={onClose} className="h-7 w-7 grid place-items-center rounded-lg text-white/40 hover:text-white hover:bg-white/[0.06]"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-white/35" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher (nom, ville, CP)…"
+              className="w-full h-9 rounded-lg border border-white/10 bg-white/[0.04] pl-8 pr-3 text-[13px] text-white placeholder:text-white/35 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+          </div>
+          <select value={sort} onChange={(e) => setSort(e.target.value)} className="h-9 rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2">
+            <option value="proba">Proba labo</option>
+            <option value="ville">Ville</option>
+            <option value="nom">Nom</option>
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2 text-[12px]">
+          <button disabled={adding || !sel.size} onClick={() => add({ ids: [...sel] }, "sélection")}
+            className="inline-flex items-center gap-1 rounded-lg bg-brand-600 hover:bg-brand-700 px-3 h-8 text-white font-semibold disabled:opacity-40">
+            <Plus className="h-3.5 w-3.5" /> Ajouter la sélection ({sel.size})
+          </button>
+          <button disabled={adding || !total} onClick={() => add({ all: true, search }, `${total} résultats`)}
+            className="inline-flex items-center gap-1 rounded-lg ring-1 ring-white/10 px-3 h-8 text-white/80 hover:bg-white/[0.06] disabled:opacity-40">
+            Tout ajouter ({total})
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="grid place-items-center py-10 text-white/40"><Loader2 className="h-5 w-5 animate-spin" /></div>
+        ) : (
+          <ul className="space-y-1.5">
+            {rows.map((r) => (
+              <li key={r.id}>
+                <button onClick={() => toggle(r.id)}
+                  className={`w-full text-left rounded-lg px-2.5 py-2 ring-1 flex items-center gap-2 transition-colors ${sel.has(r.id) ? "ring-brand-500 bg-brand-500/10" : "ring-white/[0.07] bg-[#11161f] hover:ring-white/20"}`}>
+                  <span className={`h-4 w-4 shrink-0 rounded grid place-items-center ring-1 ${sel.has(r.id) ? "bg-brand-500 ring-brand-500" : "ring-white/20"}`}>
+                    {sel.has(r.id) && <Check className="h-3 w-3 text-white" />}
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[12.5px] text-white/90 truncate">{r.nom}</span>
+                    <span className="block text-[10.5px] text-white/40">{[r.city, r.zipCode].filter(Boolean).join(" · ")}</span>
+                  </span>
+                  {r.probaLabo && <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-white/[0.06] text-white/60">{r.probaLabo}</span>}
+                </button>
+              </li>
+            ))}
+            {rows.length === 0 && <li className="text-[12px] text-white/35 italic py-6 text-center">Aucun prospect dans le vivier pour cette recherche.</li>}
+            {total > rows.length && <li className="text-[11px] text-white/35 text-center pt-1">{rows.length} affichés sur {total} — affinez la recherche ou « Tout ajouter ».</li>}
+          </ul>
+        )}
+      </aside>
     </div>
   );
 }

@@ -53,7 +53,9 @@ export async function POST() {
       const values = slice
         .map((_, k) => {
           const b = k * 5;
-          return `(gen_random_uuid()::text,$${b + 1},$${b + 2},$${b + 3},$${b + 4},false,'A_CONTACTER',now(),'import-gms-idf-patisserie',$${b + 5},now(),now())`;
+          // prospectStage NULL = dans le VIVIER (cherchable), pas encore dans la
+          // pipeline. On l'ajoute à la pipeline à la demande (search + ajout).
+          return `(gen_random_uuid()::text,$${b + 1},$${b + 2},$${b + 3},$${b + 4},false,NULL,NULL,'import-gms-idf-patisserie',$${b + 5},now(),now())`;
         })
         .join(",");
       const params = slice.flatMap((r) => [r.code, r.nom, r.cp, r.ville, r.proba]);
