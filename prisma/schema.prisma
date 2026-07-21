@@ -1143,3 +1143,86 @@ model ItemShelfLife {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// ════════════════════════════════════════════════════════════════
+//   ANALYTIQUE D'USAGE (audit interne) — « combien de clics / combien de
+//   temps sur chaque écran », + le contexte (appareil, défilement) et les
+//   PROBLÈMES (erreurs JS, rage-clicks, clics morts, interactions lentes).
+//   Alimenté par components/UsageTracker.tsx → POST /api/usage (beacon),
+//   écrit en raw SQL best-effort (cf. lib/usage.ts) — le tracking ne doit
+//   JAMAIS casser une page. Tables créées par migration additive
+//   (prisma/migrations/manual/20260721_usage_analytics.sql, aussi
+//   scripts/ddl-usage-analytics.mjs). Accès raw SQL tant que le client
+//   Prisma n'est pas régénéré (même convention que FavoriteItem / Promo).
+// ════════════════════════════════════════════════════════════════
+
+// UNE ligne par VISITE d'écran — le « fichier » central d'analyse d'usage.
+model UsageScreenView {
+  id               String    @id @default(cuid())
+  sessionId        String // regroupe une « visite » (onglet navigateur), UUID client
+  userId           String? // NULL = non authentifié (ex. écran de connexion)
+  userEmail        String?
+  userName         String?
+  path             String // route (pathname)
+  screen           String? // libellé humain (dérivé de la nav)
+  prevPath         String? // écran précédent (flux de navigation)
+  deviceType       String? // 'mobile' | 'tablet' | 'desktop'
+  os               String?
+  browser          String?
+  browserVersion   String?
+  viewportW        Int?
+  viewportH        Int?
+  screenW          Int?
+  screenH          Int?
+  dpr              Float? // devicePixelRatio
+  connection       String? // effectiveType réseau ('4g', 'wifi'…)
+  lang             String?
+  referrer         String? // hôte referrer (entrée externe)
+  enteredAt        DateTime
+  leftAt           DateTime?
+  durationMs       Int       @default(0) // temps total sur l'écran
+  activeMs         Int       @default(0) // temps au 1er plan (onglet visible)
+  clicks           Int       @default(0)
+  deadClicks       Int       @default(0) // clics hors élément interactif
+  rageClicks       Int       @default(0) // rafales de clics (frustration)
+  keypresses       Int       @default(0)
+  maxScrollPct     Int       @default(0) // profondeur de défilement 0..100
+  scrollableHeight Int?
+  jsErrors         Int       @default(0)
+  slowInteractions Int       @default(0) // interactions au-delà du seuil
+  maxInteractionMs Int? // pire latence d'interaction (INP-like)
+  loadMs           Int? // temps de rendu de l'écran (1re vue)
+  createdAt        DateTime  @default(now())
+
+  @@index([path])
+  @@index([userEmail])
+  @@index([enteredAt])
+  @@index([sessionId])
+  @@index([deviceType])
+}
+
+// Flux d'événements fins — surtout du DIAGNOSTIC (erreurs, rage-clicks,
+// clics morts, interactions lentes, erreurs de ressource…).
+model UsageEvent {
+  id         String   @id @default(cuid())
+  sessionId  String
+  userId     String?
+  userEmail  String?
+  path       String
+  screen     String?
+  // 'click' | 'rage_click' | 'dead_click' | 'error' | 'unhandled_rejection'
+  // | 'resource_error' | 'slow_interaction' | 'scroll_depth' | 'nav' | 'perf'
+  type       String
+  target     String? // sélecteur / libellé / texte de l'élément
+  value      Float? // valeur numérique (latence ms, % scroll…)
+  message    String? // message d'erreur / détail
+  meta       Json? // contexte structuré libre
+  deviceType String?
+  createdAt  DateTime @default(now())
+
+  @@index([type, createdAt])
+  @@index([path])
+  @@index([userEmail])
+  @@index([sessionId])
+  @@index([createdAt])
+}
