@@ -14,8 +14,9 @@ import { rangesOverlap, type CongeRequest } from "@/lib/conges";
 import { stripOrgSuffix } from "@/lib/userNames";
 import {
   avantageNatureMensuel, missingElements, prorata13e, recapMailHtml, salaireMonthLabel,
-  type RecapRow, type SalaryHeures,
+  type RecapRow, type SalaryHeures, type SalaryMonthData, type SalaryPrime,
 } from "@/lib/salaires";
+import { commissionsOfMonthByEmail, COMMISSION_PRIME_ID } from "@/lib/commissions";
 import {
   saveSalaryMonth, listSalaryMonths,
   saveSalaryProfile, listSalaryProfiles,
@@ -123,13 +124,16 @@ function buildHeures(
 /** Construit toutes les lignes du mois (partagé GET / envoi du récap). */
 async function buildRows(monthId: string) {
   const weeks = monthWeeks(monthId);
-  const [users, byUser, hourProfiles, salProfiles, salMonths, allConges] = await Promise.all([
+  const [users, byUser, hourProfiles, salProfiles, salMonths, allConges, commissions] = await Promise.all([
     prisma.user.findMany({ select: { name: true, email: true }, orderBy: { name: "asc" } }),
     listAllWeekEntries(),
     listProfiles(),
     listSalaryProfiles(),
     listSalaryMonths(monthId),
     listAllConges(),
+    // COMMISSIONS DU MOIS par salarié — payées « au fur et à mesure » : ligne
+    // de prime AUTOMATIQUE (jamais persistée, recalculée à chaque lecture).
+    commissionsOfMonthByEmail(monthId),
   ]);
   const congesByUser = new Map<string, CongeRequest[]>();
   for (const g of allConges) {
@@ -137,10 +141,30 @@ async function buildRows(monthId: string) {
     if (list) list.push(g); else congesByUser.set(g.email, [g]);
   }
   const seen = new Set<string>();
+  /** Injecte la ligne de prime COMMISSIONS du mois (id réservé, `auto`) :
+   *  toute version persistée est d'abord retirée (la ligne n'est jamais
+   *  falsifiable — elle suit le calcul, « au fur et à mesure que ça arrive »). */
+  const withCommission = (email: string, salary: SalaryMonthData | null): SalaryMonthData | null => {
+    const com = commissions.get(email);
+    const primes = (salary?.primes ?? []).filter((p) => p.id !== COMMISSION_PRIME_ID);
+    if (!com) return salary ? { ...salary, primes } : null;
+    const line: SalaryPrime = {
+      id: COMMISSION_PRIME_ID,
+      motif: `Commissions ventes (${(com.rate * 100).toFixed(0)} % marge nette)`,
+      montant: com.prime,
+      bulletinDe: monthId,
+      note: `Base retenue du mois ${com.base.toFixed(2)} € — calcul automatique, détail dans Pilotage › Commerciaux`,
+      auto: true,
+    };
+    return salary
+      ? { ...salary, primes: [line, ...primes] }
+      : { primes: [line], frais: [], updatedAt: "", updatedBy: "auto" };
+  };
+
   const build = (email: string, rawName: string) => {
     const hourProfile = hourProfiles.get(email) ?? { weeklyHours: 35, typicalDay: { m1: "06:00", m2: "13:00" } };
     const salProfile = salProfiles.get(email) ?? null;
-    const salary = salMonths.get(email) ?? null;
+    const salary = withCommission(email, salMonths.get(email) ?? null);
     const heures = buildHeures(weeks, byUser.get(email), hourProfile, congesByUser.get(email) ?? [], monthId);
     const anMensuel = avantageNatureMensuel(salProfile?.vehicule);
     return {
@@ -310,7 +334,12 @@ export async function POST(req: NextRequest) {
   const target = (body.user ?? "").trim().toLowerCase();
   if (!target) return NextResponse.json({ error: "Salarié manquant" }, { status: 400 });
   try {
-    const data = await saveSalaryMonth(target, month, { primes: body.primes, frais: body.frais, note: body.note }, c.email);
+    // La ligne COMMISSIONS (id réservé) n'est JAMAIS persistée : recalculée à
+    // chaque lecture — la retirer ici empêche tout doublon ou montant figé.
+    const primes = Array.isArray(body.primes)
+      ? (body.primes as { id?: unknown }[]).filter((p) => p?.id !== COMMISSION_PRIME_ID)
+      : body.primes;
+    const data = await saveSalaryMonth(target, month, { primes, frais: body.frais, note: body.note }, c.email);
     return NextResponse.json({ ok: true, month, user: target, data });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });

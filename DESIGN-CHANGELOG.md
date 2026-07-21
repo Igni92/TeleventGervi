@@ -1133,3 +1133,13 @@ habituel), `GET /api/pilotage/suppliers` (top 40 achats nets 12 mois, direction)
 transporteur des documents historiques (sinon repli tournée habituelle) ; et
 créer les grilles/tarifs des transporteurs sans tarif (ex. FARGIER — la grille
 n'existe pas, DELANCHY ne couvre pas les départements 94 et 59).
+
+## 💶 Commissions PAYÉES MENSUELLEMENT — ligne automatique des éléments de salaires
+
+> Demande : « les commissions doivent être mises sur le salaire et être payées
+> tous les mois au fur et à mesure que ça arrive ».
+
+| Avant | Après |
+|-------|-------|
+| Prime cumulée depuis la date de début, affichée dans Pilotage/Effectif — rien ne partait vers la paie, saisie manuelle si on y pensait. | **L'unité de paie devient LE MOIS** : prime(mois) = taux × max(0, Σ max(0, nette facture du mois) − avoirs du mois). Moteur UNIQUE `lib/commissions` partagé par la page Effectif, le détail Pilotage (échéancier « Prime par mois ») et les Éléments de salaires. |
+| Les éléments du mois n'incluaient pas la prime commerciale. | **Ligne « Commissions ventes (x % marge nette) » AUTOMATIQUE** dans les éléments du mois de chaque commercial : recalculée à chaque lecture (« au fur et à mesure »), VERROUILLÉE dans l'UI (ni éditable ni supprimable), jamais persistée (retirée à la sauvegarde côté serveur — infalsifiable). Part automatiquement dans l'état comptable PDF et le récap email au cabinet. |
