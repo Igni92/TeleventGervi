@@ -297,6 +297,25 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
   // Garde le miroir à jour pour la réconciliation d'activeId dans fetchData.
   manualActiveRef.current = manualActive;
 
+  // Ouverture DIRECTE d'un client via l'URL (?open=CODE) — clic depuis la liste
+  // Clients. On réutilise la recherche globale (chemin testé) pour le résoudre,
+  // puis pickGlobal (le client devient actif, même hors file du jour).
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("open");
+    if (!code) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("open");
+    window.history.replaceState({}, "", url.toString()); // évite la réouverture au refresh
+    fetch(`/api/clients?search=${encodeURIComponent(code)}&limit=5`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        const hits: Parameters<typeof clientFromSearch>[0][] = j?.clients ?? [];
+        const hit = hits.find((h) => (h.code ?? "").toLowerCase() === code.toLowerCase()) ?? hits[0];
+        if (hit) pickGlobal(clientFromSearch(hit));
+      })
+      .catch(() => {});
+  }, [pickGlobal]);
+
   /* ── Diffuse le client actif vers l'écran 2 (mode 2 écrans) ── */
   useEffect(() => {
     broadcastActiveClient({

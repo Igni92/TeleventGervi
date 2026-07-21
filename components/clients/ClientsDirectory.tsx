@@ -314,7 +314,7 @@ function ClientCard({
     <li className={`group relative flex h-full flex-col rounded-2xl border border-border bg-card p-4 shadow-card transition-all duration-200 hover:-translate-y-px hover:shadow-card-hover hover:border-brand-400/50 ${!c.activeTelevente ? "opacity-70" : ""}`}>
       {/* En-tête cliquable → fiche */}
       <div className="flex items-start justify-between gap-2">
-        <Link href={`/clients/${c.id}`} className="min-w-0 flex-1">
+        <Link href={`/console?open=${encodeURIComponent(c.code)}`} title="Ouvrir dans la console d'appels" className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 flex-wrap">
             <p className="truncate text-[14.5px] font-semibold text-foreground group-hover:text-brand-600">{c.nom}</p>
             {!c.activeTelevente && <span className="text-[9px] font-bold uppercase text-amber-600 dark:text-amber-400">inactif</span>}
@@ -466,7 +466,7 @@ function ClientListView({
                 <tr key={c.id} className={`transition-colors hover:bg-secondary/30 ${!c.activeTelevente ? "opacity-60" : ""}`}>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-1.5">
-                      <Link href={`/clients/${c.id}`} className="font-semibold text-foreground hover:text-brand-600 hover:underline underline-offset-2">{c.nom}</Link>
+                      <Link href={`/console?open=${encodeURIComponent(c.code)}`} title="Ouvrir dans la console d'appels" className="font-semibold text-foreground hover:text-brand-600 hover:underline underline-offset-2">{c.nom}</Link>
                       {!c.activeTelevente && <span className="text-[9px] font-bold uppercase text-amber-600 dark:text-amber-400">inactif</span>}
                     </div>
                     <span className="font-mono text-[10.5px] text-muted-foreground">{c.code}</span>
