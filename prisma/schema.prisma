@@ -159,14 +159,70 @@ model Client {
   // travail. Réassignable à la main. Le `commercial` (account manager) reste la
   // source du futur calcul de commission.
   vendeur         String?
+  // ── PROSPECTION (module CRM) — cf. prisma/migrations/manual/20260721_prospection_pipeline.sql.
+  //    prospectStage NULL = hors pipeline. Un prospect prospecté reste rattaché à
+  //    son commercial (prospectOwner) et bascule client à l'étape GAGNE. Colonnes
+  //    lues en $queryRawUnsafe tant que `prisma generate` est bloqué.
+  prospectStage      String? // A_CONTACTER | QUALIFICATION | PRESENTATION | POST_COMMANDE | GAGNE | PERDU
+  prospectStageAt    DateTime?
+  prospectOwner      String? // slpName du commercial prospecteur
+  prospectSource     String? // origine (ex. import GMS IDF pâtisserie)
+  prospectLostReason String? // motif si PERDU
+  probaLabo          String? // Élevée | Moyenne-haute | Moyenne | À qualifier
+  qualifieLabo       Boolean? // labo pâtisserie confirmé ?
   rappels         Rappel[]
   appels          AppelLog[]
   tempAssignments TempAssignment[]
   deliveryModes   ClientDeliveryMode[]
   contacts        Contact[]
   incidents       Incident[]
+  rendezVous      RendezVous[]
+  prospActivities ProspectionActivity[]
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
+}
+
+// Rendez-vous de prospection (agenda) — R1 physique, appels programmés.
+// Notification push `notifyMinutesBefore` avant le RDV (défaut 60 = 1 h, réglable),
+// envoyée par le cron reminders (anti-doublon via `notifiedAt`, comme Rappel).
+model RendezVous {
+  id                  String    @id @default(cuid())
+  clientId            String
+  client              Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  ownerSlp            String? // trigramme du commercial
+  title               String
+  type                String    @default("R1_PHYSIQUE") // R1_PHYSIQUE | APPEL | AUTRE
+  startAt             DateTime
+  endAt               DateTime?
+  location            String?
+  notes               String?
+  notifyMinutesBefore Int       @default(60)
+  notifiedAt          DateTime?
+  status              String    @default("PLANIFIE") // PLANIFIE | FAIT | ANNULE
+  createdBy           String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([startAt])
+  @@index([ownerSlp])
+  @@index([status, startAt])
+  @@index([clientId])
+}
+
+// Timeline d'activité d'un prospect (appel, mail, RDV, note, changement d'étape).
+model ProspectionActivity {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  ownerSlp  String?
+  kind      String // APPEL | MAIL | RDV | NOTE | STAGE
+  fromStage String?
+  toStage   String?
+  note      String?
+  createdBy String?
+  createdAt DateTime @default(now())
+
+  @@index([clientId, createdAt])
 }
 
 // ════════════════════════════════════════════════════════════════

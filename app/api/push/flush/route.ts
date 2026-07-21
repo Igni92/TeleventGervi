@@ -38,7 +38,20 @@ export async function POST() {
     orderBy: { dateRappel: "asc" },
     take: 50,
   });
-  if (due.length === 0) return NextResponse.json({ ok: true, sent: 0, due: 0 });
+  // Rendez-vous dont l'heure de notif (startAt − notifyMinutesBefore) est
+  // atteinte, non notifiés, de l'appelant. Table brute (hors client Prisma typé).
+  type DueRdv = { id: string; title: string; startAt: Date; nom: string | null };
+  const dueRdv = await prisma.$queryRawUnsafe<DueRdv[]>(
+    `SELECT r."id", r."title", r."startAt", c."nom"
+       FROM "RendezVous" r JOIN "Client" c ON c."id" = r."clientId"
+      WHERE r."status" = 'PLANIFIE' AND r."notifiedAt" IS NULL AND r."createdBy" = $1
+        AND (r."startAt" - (r."notifyMinutesBefore" * interval '1 minute')) <= now()
+        AND r."startAt" >= $2
+      ORDER BY r."startAt" ASC LIMIT 50`,
+    email, floor,
+  ).catch(() => [] as DueRdv[]);
+
+  if (due.length === 0 && dueRdv.length === 0) return NextResponse.json({ ok: true, sent: 0, due: 0 });
 
   const subs = await prisma.pushSubscription.findMany({ where: { email } });
 
@@ -61,14 +74,37 @@ export async function POST() {
     }
   }
 
+  for (const r of dueRdv) {
+    const h = new Date(r.startAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    for (const t of subs) {
+      const res = await sendPush(
+        { endpoint: t.endpoint, p256dh: t.p256dh, auth: t.auth },
+        {
+          title: "📅 Rendez-vous prospection",
+          body: `${r.nom ?? "Prospect"} — ${r.title} à ${h}`,
+          url: "/prospection",
+          tag: `rdv-${r.id}`,
+          renotify: true,
+        },
+      );
+      if (res === "ok") sent++;
+      else if (res === "gone") goneEndpoints.push(t.endpoint);
+    }
+  }
+
   // Marque notifiés (même sans abonnement : le bandeau in-app les affiche déjà).
-  await prisma.rappel.updateMany({
+  if (due.length) await prisma.rappel.updateMany({
     where: { id: { in: due.map((r) => r.id) } },
     data: { notifiedAt: now },
   });
+  if (dueRdv.length) {
+    const ids = dueRdv.map((r) => r.id);
+    const ph = ids.map((_, i) => `$${i + 1}`).join(",");
+    await prisma.$executeRawUnsafe(`UPDATE "RendezVous" SET "notifiedAt" = now() WHERE "id" IN (${ph})`, ...ids);
+  }
   if (goneEndpoints.length) {
     await prisma.pushSubscription.deleteMany({ where: { endpoint: { in: goneEndpoints } } });
   }
 
-  return NextResponse.json({ ok: true, due: due.length, sent, cleaned: goneEndpoints.length });
+  return NextResponse.json({ ok: true, due: due.length + dueRdv.length, sent, cleaned: goneEndpoints.length });
 }

@@ -21,7 +21,7 @@ type Row = {
   id: string; code: string; nom: string; type: string | null;
   commercial: string | null; vendeur: string | null;
   tel1: string | null; tel2: string | null; joursAppel: string | null;
-  activeTelevente: boolean;
+  activeTelevente: boolean; prospectStage: string | null;
   last_order: Date | null; openIncidents: number; last_call: Date | null;
 };
 
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
 
   const rows = await prisma.$queryRaw<Row[]>(Prisma.sql`
     SELECT c."id", c."code", c."nom", c."type", c."commercial", c."vendeur",
-           c."tel1", c."tel2", c."joursAppel", c."activeTelevente",
+           c."tel1", c."tel2", c."joursAppel", c."activeTelevente", c."prospectStage",
            lo."last_order",
            COALESCE(inc."open", 0)::int AS "openIncidents",
            lc."last_call"
@@ -98,7 +98,7 @@ export async function GET(req: NextRequest) {
     id: r.id, code: r.code, nom: r.nom, type: r.type,
     commercial: r.commercial, vendeur: r.vendeur,
     tel1: r.tel1, tel2: r.tel2, joursAppel: r.joursAppel,
-    activeTelevente: r.activeTelevente,
+    activeTelevente: r.activeTelevente, prospectStage: r.prospectStage,
     openIncidents: Number(r.openIncidents),
     lastOrderDays: r.last_order ? Math.floor((now - new Date(r.last_order).getTime()) / 86_400_000) : null,
     lastCallDays: r.last_call ? Math.floor((now - new Date(r.last_call).getTime()) / 86_400_000) : null,
