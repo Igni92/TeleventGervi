@@ -49,6 +49,11 @@ export interface SalaryPrime {
   auto?: boolean;
 }
 
+/** id RÉSERVÉ de la ligne « Commissions ventes » AUTOMATIQUE des éléments du
+ *  mois : recalculée à chaque lecture depuis le moteur de commissions
+ *  (lib/commissions), jamais persistée, VERROUILLÉE dans l'UI. */
+export const COMMISSION_PRIME_ID = "commission-auto";
+
 export interface SalaryFrais {
   id: string;
   motif: string;

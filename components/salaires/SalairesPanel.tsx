@@ -25,7 +25,7 @@ import { SurfaceCard } from "@/components/ui/surface-card";
 import { fmtHM, monthIdOf, shiftMonth, monthLabel } from "@/lib/heuresCalc";
 import {
   avantageNatureMensuel, isTreiziemeMonth, prorata13e,
-  VEHICULE_ENERGIES, VEHICULE_ENERGIE_LABEL,
+  VEHICULE_ENERGIES, VEHICULE_ENERGIE_LABEL, COMMISSION_PRIME_ID,
   type SalaryFrais, type SalaryHeures, type SalaryMonthData, type SalaryPrime,
   type SalaryProfile, type VehiculeAN, type VehiculeEnergie,
 } from "@/lib/salaires";
@@ -382,7 +382,19 @@ function EmployeeCard({ row, month, canEdit, onSaved }: {
               </button>
             )}
             <div className="space-y-1.5">
-              {primes.map((p) => (
+              {primes.map((p) => p.id === COMMISSION_PRIME_ID ? (
+                /* Ligne COMMISSIONS automatique — VERROUILLÉE : recalculée chaque
+                   mois depuis le moteur (payée « au fur et à mesure »), jamais
+                   éditable ni supprimable, retirée à la sauvegarde côté serveur. */
+                <div key={p.id} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-brand-500/35 bg-brand-500/[0.06] px-3 py-2">
+                  <Coins className="h-4 w-4 shrink-0 text-brand-500" />
+                  <span className="flex-1 min-w-[140px] text-[12.5px] font-medium text-foreground">{p.motif}</span>
+                  <span className="tnum text-[13px] font-bold text-foreground">{eur(p.montant)}</span>
+                  <span className="basis-full sm:basis-auto text-[10.5px] text-muted-foreground">
+                    auto · recalculée au fil du mois{p.note ? ` — ${p.note}` : ""}
+                  </span>
+                </div>
+              ) : (
                 <div key={p.id} className="flex flex-wrap items-center gap-1.5">
                   <input value={p.motif} disabled={!canEdit} maxLength={80} placeholder="Motif"
                     onChange={(e) => patchPrime(p.id, { motif: e.target.value })}

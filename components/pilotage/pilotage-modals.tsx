@@ -29,6 +29,9 @@ const fmtEur2 = (v: number) =>
 const fmtPct = (v: number) => `${v.toFixed(1)} %`;
 const fmtKg = (v: number) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)} t` : `${formatNum(v)} kg`);
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+/** « 2025-11 » → « novembre 2025 ». */
+const monthLabelFr = (m: string) =>
+  new Date(`${m}-01T12:00:00Z`).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
 
 const SEG_TONE: Record<ClientSegment, string> = {
   GMS: "text-sky-300", CHR: "text-emerald-300", EXPORT: "text-violet-300",
@@ -311,6 +314,11 @@ interface CommissionDetail {
     transport: number; cadeauxExclus: number; planchers: number; avoirs: number;
     margeNette: number; prime: number;
   };
+  /** Échéancier : la prime de chaque mois (versée sur le bulletin du mois). */
+  byMonth: {
+    month: string; invoices: number; creditNotes: number;
+    basePositive: number; avoirs: number; base: number; prime: number;
+  }[];
   truncated: boolean;
   invoices: {
     docEntry: number; docNum: number | null; docDate: string; cardName: string | null; cardCode: string;
@@ -452,6 +460,26 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
           {!detailErr && !detail && <ModalLoading label="Calcul facture par facture…" />}
           {detail && (
             <div className="overflow-auto">
+              {/* ── Échéancier MENSUEL — la prime est payée chaque mois sur le
+                   bulletin (ligne automatique des éléments de salaires). ── */}
+              {detail.byMonth.length > 0 && (
+                <div className="px-5 pt-3">
+                  <p className="text-[10px] uppercase tracking-[0.12em] font-bold text-muted-foreground mb-1.5">
+                    Prime par mois — versée sur le bulletin (Éléments de salaires)
+                  </p>
+                  <div className="flex gap-2 overflow-x-auto pb-2">
+                    {detail.byMonth.map((m) => (
+                      <div key={m.month} className="shrink-0 rounded-lg border border-border bg-secondary/25 px-3 py-2 min-w-[128px]">
+                        <p className="text-[10.5px] font-semibold text-muted-foreground capitalize">{monthLabelFr(m.month)}</p>
+                        <p className="text-[15px] font-bold text-brand-400 tnum tabular-nums leading-tight">{fmtEur2(m.prime)}</p>
+                        <p className="text-[9.5px] text-muted-foreground tnum">
+                          base {fmtEurC(m.base)} · {formatNum(m.invoices)} fact.{m.avoirs > 0 ? ` · avoirs −${fmtEurC(m.avoirs)}` : ""}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <table className="w-full text-[11.5px] tnum tabular-nums">
                 <thead className="sticky top-0 bg-card z-10">
                   <tr className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/80 border-b border-border">
