@@ -10,7 +10,7 @@ import {
   Radio, ShoppingCart, Package, PackagePlus, Factory, Receipt, AlertTriangle,
   Home, Settings, PackageCheck, ClipboardCheck, Truck, Eye, Store,
   Pencil, Loader2, RotateCcw, FileText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight, Check,
-  CalendarDays, Building2, Wallet, Boxes,
+  CalendarDays, Building2, Wallet, Boxes, Target,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -94,6 +94,7 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
       { href: "/console/ecran2", label: "Console de commande", icon: ShoppingCart },
       // Clients & plan d'appel FUSIONNÉS : une seule entrée, onglets in-page.
       { href: "/clients", label: "Clients & plan d'appel", icon: Users, also: ["/plan-appel"] },
+      { href: "/prospection", label: "Prospection", icon: Target },
       { href: "/ventes-du-jour", label: "Ventes du jour", icon: Store },
     ],
   },
