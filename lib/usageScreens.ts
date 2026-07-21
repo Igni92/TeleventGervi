@@ -17,6 +17,8 @@ const SCREEN_PREFIXES: [string, string][] = [
   ["/console", "Console d'appels"],
   ["/plan-appel", "Plan d'appel"],
   ["/clients", "Clients & plan d'appel"],
+  ["/prospection", "Prospection"],
+  ["/rendez-vous", "Rendez-vous"],
   ["/ventes-du-jour", "Ventes du jour"],
   // Entrepôt
   ["/livraisons", "Livraisons du jour"],

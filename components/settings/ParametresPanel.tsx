@@ -6,13 +6,14 @@ import Link from "next/link";
 import {
   Moon, Sun, ZoomIn, Check, Database, Contrast, Tags, ChevronRight, CalendarClock,
   Palette, Glasses, MonitorCog, MousePointerClick, Wand2, BadgePercent, Rows3,
-  ShieldAlert, CloudSun, FileDown,
+  ShieldAlert, CloudSun, FileDown, Activity,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { InfoHint } from "@/components/ui/info-hint";
 import { ShelfLifePanel } from "@/components/settings/ShelfLifePanel";
 import { SafeguardsPanel } from "@/components/settings/SafeguardsPanel";
 import { StatsExportPanel } from "@/components/settings/StatsExportPanel";
+import { UsageAuditPanel } from "@/components/settings/UsageAuditPanel";
 import { ClientImportButton } from "@/components/clients/ClientImportButton";
 import { MirrorBackfillPanel } from "@/components/admin/MirrorBackfillPanel";
 import { ProductsSyncButton } from "@/components/admin/ProductsSyncButton";
@@ -227,6 +228,7 @@ const SECTIONS: SectionDef[] = [
   { id: "lecture",   label: "Confort de lecture",  icon: <Glasses className="h-3.5 w-3.5" /> },
   { id: "console",   label: "Console & catalogue", icon: <MonitorCog className="h-3.5 w-3.5" /> },
   { id: "export",    label: "Export & analyse",    icon: <FileDown className="h-3.5 w-3.5" /> },
+  { id: "usage",     label: "Usage & audit",       icon: <Activity className="h-3.5 w-3.5" />, adminOnly: true },
   { id: "admin",     label: "Administration",      icon: <Database className="h-3.5 w-3.5" />, adminOnly: true },
 ];
 
@@ -731,7 +733,17 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
           </SurfaceCard>
         </section>
 
-        {/* 5 ── ADMINISTRATION (admin) ────────────────────────── */}
+        {/* 5 ── USAGE & AUDIT (admin/direction) ────────────────── */}
+        {/* Analytique d'usage : temps + clics par écran, PC vs mobile, et
+            problèmes (erreurs, rage-clicks, clics morts, lenteurs). Alimenté
+            par components/UsageTracker → /api/usage, lu via /api/usage/report. */}
+        {admin && (
+          <section id="usage" className="scroll-mt-6">
+            <UsageAuditPanel />
+          </section>
+        )}
+
+        {/* 6 ── ADMINISTRATION (admin) ────────────────────────── */}
         {admin && (
           <section id="admin" className="scroll-mt-6 space-y-5">
             <SurfaceCard accent="brand" title="Administration · Données SAP" icon={<Database className="h-3.5 w-3.5" />}>
