@@ -28,9 +28,24 @@ interface ActivityBucket {
 interface ActivityResponse {
   curr?: ActivityBucket;
   prev?: ActivityBucket;
+  /** Bornes de la fenêtre N-1 réellement comparée (même jour de la semaine,
+   *  un an avant) — sert à afficher la DATE exacte du comparatif. */
+  previous?: { start: string; end: string };
   /** Fiabilité : part des lignes du jour effectivement costées (coût hybride
    *  réception/fabrication/SAP) — proche de 100 %. */
   reliability?: number;
+}
+
+/** Date du jour comparé (N-1) en clair : « mardi 22 juillet 2025 ».
+ *  Parsée à midi pour éviter tout décalage de fuseau sur une borne minuit UTC. */
+function formatComparisonDay(iso?: string): string | null {
+  if (!iso) return null;
+  return new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
 }
 
 interface TileDef {
@@ -72,6 +87,7 @@ export function KpiStrip() {
   const { data, state } = useJson<ActivityResponse>("/api/pilotage/activity?g=day", 120_000);
   const curr = data?.curr ?? {};
   const prev = data?.prev;
+  const comparisonDay = formatComparisonDay(data?.previous?.start);
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -103,7 +119,8 @@ export function KpiStrip() {
                   <Delta curr={value} prev={prevValue} size="sm" />
                   {/* Explication du comparatif → derrière le « ? » (masqué mobile). */}
                   <InfoHint label={t.label} size={14}>
-                    Comparé au même jour de l&apos;année précédente (N-1).
+                    Comparé au même jour de la semaine, un an avant
+                    {comparisonDay ? ` (${comparisonDay})` : " (N-1)"}.
                   </InfoHint>
                 </>
               )}
