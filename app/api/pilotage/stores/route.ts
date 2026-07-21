@@ -114,12 +114,19 @@ export async function GET(req: Request) {
     const groupByCode = new Map(bps.map((b) => [b.cardCode, { groupCode: b.groupCode, groupName: b.groupName }]));
 
     // Coût transport par POSITION, facture par facture (transporteur réel du
-    // doc → repli tournée habituelle), sommé par magasin.
+    // doc → repli tournée habituelle ; règle « magasin IDF = direct »), sommé
+    // par magasin.
     const ctx = await loadDocTransportContext(codes);
     const transportConfigured = ctx.costPerDelivery > 0 || ctx.prixPositionPerKg > 0;
+    const segByCard = new Map(
+      bps.map((b) => [b.cardCode, segmentOfGroup(b.groupName, b.groupCode)]),
+    );
     const transportByCard = new Map<string, number>();
     for (const d of perDoc) {
-      const t = docTransportCost(ctx, { cardCode: d.card, clientId: d.cid, zip: d.zip, kg: Number(d.kg), trspCode: d.trsp });
+      const t = docTransportCost(ctx, {
+        cardCode: d.card, clientId: d.cid, zip: d.zip, kg: Number(d.kg),
+        trspCode: d.trsp, segment: segByCard.get(d.card) ?? null,
+      });
       if (t.cost > 0) transportByCard.set(d.card, (transportByCard.get(d.card) ?? 0) + t.cost);
     }
 

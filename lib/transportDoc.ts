@@ -16,7 +16,9 @@
  *   • Externe AVEC grille → coût par position (zone département × tranche kg).
  *   • Externe SANS grille → tarif €/kg saisi pour CE client, sinon 0 (aucun).
  */
-import { prisma } from "@/lib/prisma";
+// ⚠️ Imports STATIQUES = modules PURS uniquement (relatifs, pour vitest) ; les
+// dépendances I/O (prisma, stores) sont chargées dynamiquement DANS
+// loadDocTransportContext — docTransportCost reste testable sans base.
 import {
   computeTransportMetrics,
   isDirectCarrier,
@@ -24,13 +26,24 @@ import {
   sanitizeClientPricing,
   type ClientCarrierPricing,
   type TransportCostModel,
-} from "@/lib/transportCost";
-import { getTransportModel, listCarrierTariffs } from "@/lib/transportCostStore";
-import { computePositionCost, resolveCarrierTariff, type CarrierTariffMap } from "@/lib/carrierTariff";
-import { departementOfZip } from "@/lib/geo/zip";
-import { getClientTournees, type ClientTournee } from "@/lib/clientTournee";
+} from "./transportCost";
+import { computePositionCost, resolveCarrierTariff, type CarrierTariffMap } from "./carrierTariff";
+import { departementOfZip } from "./geo/zip";
+import type { ClientTournee } from "./clientTournee";
+import type { ClientSegment } from "./segments";
 
 export type DocTransportMode = "direct" | "grille" | "perkg" | "aucun";
+
+/* ── RÈGLE TEMPORAIRE (direction, 07/2026) ─────────────────────────
+ * « Pars du principe que les MAGASINS d'Île-de-France sont livrés en DIRECT
+ * tout le temps » : pour un client GMS/CHR dont le département est en IDF, le
+ * coût est TOUJOURS celui d'une position de la flotte propre — quel que soit
+ * le transporteur porté par le document (Fargier assure la fin de parcours du
+ * réseau Delanchy en IDF sans grille dédiée). Les segments non livrés
+ * (RUNGIS / MIN / EXPORT / comptoir) ne sont PAS concernés.
+ * Pour retirer la règle : vider IDF_DIRECT_DEPTS. */
+const IDF_DIRECT_DEPTS = new Set(["75", "77", "78", "91", "92", "93", "94", "95"]);
+const IDF_DIRECT_SEGMENTS = new Set<ClientSegment>(["GMS", "CHR"]);
 
 export interface DocTransportContext {
   model: TransportCostModel;
@@ -47,6 +60,11 @@ export interface DocTransportContext {
 
 /** Charge tout le contexte nécessaire au coût par document (1 fois par requête). */
 export async function loadDocTransportContext(cardCodes: string[]): Promise<DocTransportContext> {
+  const [{ getTransportModel, listCarrierTariffs }, { getClientTournees }, { prisma }] = await Promise.all([
+    import("./transportCostStore"),
+    import("./clientTournee"),
+    import("./prisma"),
+  ]);
   const [model, tariffs, tournees] = await Promise.all([
     getTransportModel(),
     listCarrierTariffs(),
@@ -80,10 +98,14 @@ export interface DocTransportResult {
 }
 
 /** Coût de transport d'UN document (position). `kg ≤ 0` = pas de marchandise
- *  livrée (facture de service/refacturation) → 0, quel que soit le transporteur. */
+ *  livrée (facture de service/refacturation) → 0, quel que soit le transporteur.
+ *  `segment` (groupe SAP du client) active la règle « magasin IDF = direct ». */
 export function docTransportCost(
   ctx: DocTransportContext,
-  doc: { cardCode: string; clientId?: string | null; zip?: string | null; kg: number; trspCode?: string | null },
+  doc: {
+    cardCode: string; clientId?: string | null; zip?: string | null; kg: number;
+    trspCode?: string | null; segment?: ClientSegment | null;
+  },
 ): DocTransportResult {
   const kg = Number.isFinite(doc.kg) ? doc.kg : 0;
   if (kg <= 0) return { cost: 0, carrier: null, mode: "aucun", fromDoc: false };
@@ -91,8 +113,17 @@ export function docTransportCost(
   const docCode = normCarrier(doc.trspCode);
   const tourCode = normCarrier(ctx.tournees.get(doc.cardCode.trim().toUpperCase())?.trspCode);
   const code = docCode || tourCode;
-  if (!code) return { cost: 0, carrier: null, mode: "aucun", fromDoc: false };
   const fromDoc = !!docCode;
+
+  // Règle « MAGASIN IDF = DIRECT tout le temps » — prioritaire sur le
+  // transporteur du document (cf. bloc IDF_DIRECT_DEPTS ci-dessus).
+  const dept = departementOfZip(doc.zip);
+  if (dept && IDF_DIRECT_DEPTS.has(dept) && doc.segment && IDF_DIRECT_SEGMENTS.has(doc.segment)) {
+    const cost = ctx.costPerDelivery > 0 ? ctx.costPerDelivery : ctx.prixPositionPerKg * kg;
+    return { cost, carrier: code || "DIRECT", mode: "direct", fromDoc: true };
+  }
+
+  if (!code) return { cost: 0, carrier: null, mode: "aucun", fromDoc: false };
 
   // Flotte propre → coût PAR POSITION (repli €/kg si nb livraisons non saisi).
   if (isDirectCarrier(ctx.model, code) || ctx.model.directCarriers.length === 0) {
