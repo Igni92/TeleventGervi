@@ -33,6 +33,10 @@ export function ProspectionBoard() {
   const [poolOpen, setPoolOpen] = useState(false);
   const [mobileIdx, setMobileIdx] = useState(0);
   const stageKeys = PIPELINE_STAGES.map((s) => s.key);
+  // Menu contextuel (clic droit) : sur une carte (id) ou une colonne (stageKey).
+  const [menu, setMenu] = useState<
+    { x: number; y: number; kind: "card" | "col"; id?: string; stageKey?: string; view: "root" | "move" | "lost" } | null
+  >(null);
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
@@ -46,6 +50,16 @@ export function ProspectionBoard() {
     } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Ferme le menu contextuel sur Échap / molette / redimensionnement.
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null); };
+    const onScroll = () => setMenu(null);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onScroll);
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("resize", onScroll); };
+  }, [menu]);
 
   const [importing, setImporting] = useState(false);
   async function doImport() {
@@ -93,6 +107,41 @@ export function ProspectionBoard() {
     if (dragId) { patch(dragId, { stage: stageKey }, `Déplacé vers « ${stageLabel(stageKey)} »`); setDragId(null); }
   }
 
+  /** Retire un prospect du pipeline (retour au vivier : prospectStage NULL). */
+  async function removeFromPipeline(id: string, silent = false) {
+    const prev = rows;
+    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, prospectStage: null } : r)));
+    try {
+      const r = await fetch(`/api/prospection/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ remove: true }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || "Échec");
+      if (!silent) toast.success("Prospect retiré du pipeline (remis au vivier)");
+    } catch (e) {
+      setRows(prev);
+      toast.error(e instanceof Error ? e.message : "Échec");
+    }
+  }
+
+  /** Vide une colonne : retire tous ses prospects du pipeline. */
+  async function clearStage(stageKey: string) {
+    const items = byStage(stageKey);
+    if (!items.length) { toast.info("Cette colonne est déjà vide."); return; }
+    const prev = rows;
+    setRows((rs) => rs.map((r) => (r.prospectStage === stageKey ? { ...r, prospectStage: null } : r)));
+    try {
+      const res = await Promise.all(items.map((it) =>
+        fetch(`/api/prospection/${it.id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ remove: true }),
+        })));
+      if (res.some((r) => !r.ok)) throw new Error("Échec partiel");
+      toast.success(`${items.length} prospect${items.length > 1 ? "s" : ""} retiré${items.length > 1 ? "s" : ""} de « ${stageLabel(stageKey)} »`);
+    } catch (e) {
+      setRows(prev);
+      toast.error(e instanceof Error ? e.message : "Échec");
+    }
+  }
+
   /** Déplace un prospect vers l'étape adjacente (−1 précédente, +1 suivante). */
   function move(id: string, dir: -1 | 1) {
     const r = rows.find((x) => x.id === id);
@@ -110,6 +159,7 @@ export function ProspectionBoard() {
         draggable={draggable}
         onDragStart={draggable ? () => setDragId(r.id) : undefined}
         onDragEnd={draggable ? () => setDragId(null) : undefined}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY, kind: "card", id: r.id, view: "root" }); }}
         className={`rounded-xl bg-[#11161f] ring-1 transition-[box-shadow,opacity] duration-150 ${
           selId === r.id ? "ring-brand-500" : "ring-white/[0.07] hover:ring-white/20"
         } ${dragId === r.id ? "opacity-40" : ""}`}
@@ -191,6 +241,7 @@ export function ProspectionBoard() {
               <div key={st.key}
                 onDragOver={(e) => { if (dragId) e.preventDefault(); }}
                 onDrop={() => onDrop(st.key)}
+                onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, kind: "col", stageKey: st.key, view: "root" }); }}
                 className="flex-1 min-w-[256px] flex flex-col rounded-2xl bg-white/[0.02] ring-1 ring-white/[0.06]"
               >
                 <div className="flex items-center gap-2 rounded-t-2xl px-3.5 py-2.5" style={{ background: st.color + "1a" }}>
@@ -228,7 +279,9 @@ export function ProspectionBoard() {
             return (
               <>
                 {/* Sélecteur d'étape avec flèches */}
-                <div className="flex items-center gap-2 rounded-2xl px-2 py-2" style={{ background: st.color + "1a" }}>
+                <div className="flex items-center gap-2 rounded-2xl px-2 py-2" style={{ background: st.color + "1a" }}
+                  onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, kind: "col", stageKey: st.key, view: "root" }); }}>
+
                   <button disabled={mobileIdx <= 0} onClick={() => setMobileIdx((i) => Math.max(0, i - 1))}
                     className="h-10 w-10 grid place-items-center rounded-xl bg-white/[0.06] text-white/80 transition active:scale-90 disabled:opacity-25">
                     <ChevronLeft className="h-5 w-5" />
@@ -280,6 +333,83 @@ export function ProspectionBoard() {
       {/* Fiche prospect — tiroir en superposition (desktop + mobile) */}
       {sel && <FichePanel key={sel.id} row={sel} onClose={() => setSelId(null)} onPatch={patch} onReload={load} />}
       {poolOpen && <AddProspectsPanel onClose={() => setPoolOpen(false)} onAdded={load} />}
+
+      {/* Menu contextuel (clic droit) */}
+      {menu && (() => {
+        const mrow = menu.kind === "card" ? rows.find((r) => r.id === menu.id) ?? null : null;
+        const close = () => setMenu(null);
+        const item =
+          "w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-white/85 hover:bg-white/[0.07] active:scale-[0.985] transition disabled:opacity-30 disabled:pointer-events-none";
+        const left = Math.min(menu.x, (typeof window !== "undefined" ? window.innerWidth : 9999) - 236);
+        const top = Math.min(menu.y, (typeof window !== "undefined" ? window.innerHeight : 9999) - 320);
+        return (
+          <>
+            <div className="fixed inset-0 z-[90]" onClick={close}
+              onContextMenu={(e) => { e.preventDefault(); close(); }} />
+            <div className="fixed z-[91] w-[224px] rounded-xl bg-[#0f141c] p-1 text-white/85 shadow-2xl ring-1 ring-white/10"
+              style={{ left, top }}>
+              {menu.kind === "card" && mrow && (
+                <>
+                  <div className="truncate px-2.5 pb-1.5 pt-1 text-[12px] font-semibold text-white/50">{mrow.nom}</div>
+                  {menu.view === "root" && (
+                    <>
+                      <button className={item} onClick={() => { setSelId(mrow.id); close(); }}>
+                        <Target className="h-4 w-4 text-brand-300" /> Ouvrir la fiche
+                      </button>
+                      <button className={item} onClick={() => setMenu({ ...menu, view: "move" })}>
+                        <ChevronRight className="h-4 w-4 text-white/45" /> Déplacer vers…
+                      </button>
+                      <button className={item} onClick={() => setMenu({ ...menu, view: "lost" })}>
+                        <X className="h-4 w-4 text-rose-400" /> Marquer perdu…
+                      </button>
+                      <div className="my-1 border-t border-white/[0.06]" />
+                      <button className={item} onClick={() => { removeFromPipeline(mrow.id); close(); }}>
+                        <ArrowLeft className="h-4 w-4 text-amber-300" /> Retirer du pipeline
+                      </button>
+                    </>
+                  )}
+                  {menu.view === "move" && (
+                    <>
+                      <button className={`${item} text-white/50`} onClick={() => setMenu({ ...menu, view: "root" })}>
+                        <ChevronLeft className="h-4 w-4" /> Retour
+                      </button>
+                      {PIPELINE_STAGES.map((s) => (
+                        <button key={s.key} disabled={s.key === mrow.prospectStage} className={item}
+                          onClick={() => { patch(mrow.id, { stage: s.key }, `→ ${s.label}`); close(); }}>
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ background: s.color }} /> {s.label}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {menu.view === "lost" && (
+                    <>
+                      <button className={`${item} text-white/50`} onClick={() => setMenu({ ...menu, view: "root" })}>
+                        <ChevronLeft className="h-4 w-4" /> Retour
+                      </button>
+                      {LOST_REASONS.map((m) => (
+                        <button key={m} className={item}
+                          onClick={() => { patch(mrow.id, { stage: "PERDU", lostReason: m }, "Marqué perdu"); close(); }}>
+                          <X className="h-3.5 w-3.5 text-rose-400" /> {m}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </>
+              )}
+              {menu.kind === "col" && menu.stageKey && (
+                <>
+                  <div className="px-2.5 pb-1.5 pt-1 text-[12px] font-semibold text-white/50">
+                    Catégorie « {stageLabel(menu.stageKey)} » · {byStage(menu.stageKey).length}
+                  </div>
+                  <button className={item} onClick={() => { clearStage(menu.stageKey!); close(); }}>
+                    <ArrowLeft className="h-4 w-4 text-amber-300" /> Vider la catégorie (→ vivier)
+                  </button>
+                </>
+              )}
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }
