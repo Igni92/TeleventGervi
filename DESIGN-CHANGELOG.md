@@ -1143,3 +1143,17 @@ n'existe pas, DELANCHY ne couvre pas les départements 94 et 59).
 |-------|-------|
 | Prime cumulée depuis la date de début, affichée dans Pilotage/Effectif — rien ne partait vers la paie, saisie manuelle si on y pensait. | **L'unité de paie devient LE MOIS** : prime(mois) = taux × max(0, Σ max(0, nette facture du mois) − avoirs du mois). Moteur UNIQUE `lib/commissions` partagé par la page Effectif, le détail Pilotage (échéancier « Prime par mois ») et les Éléments de salaires. |
 | Les éléments du mois n'incluaient pas la prime commerciale. | **Ligne « Commissions ventes (x % marge nette) » AUTOMATIQUE** dans les éléments du mois de chaque commercial : recalculée à chaque lecture (« au fur et à mesure »), VERROUILLÉE dans l'UI (ni éditable ni supprimable), jamais persistée (retirée à la sauvegarde côté serveur — infalsifiable). Part automatiquement dans l'état comptable PDF et le récap email au cabinet. |
+
+## 💶 Commissions : rattrapage de l'arriéré sur la prochaine paie, puis mensuel
+
+> Précision : « il ne m'a jamais rien payé pour l'instant donc tu dois tout
+> mettre au paiement sur la prochaine, puis par la suite ce sera par mois ».
+
+| Avant | Après |
+|-------|-------|
+| La ligne auto ne portait que la commission du mois affiché — l'arriéré (nov. 2025 → mois courant), jamais payé, n'apparaissait sur aucune paie. | **Curseur « commissions réglées jusqu'à »** (AppSetting, vide par défaut). La paie du mois M porte la somme des commissions des mois **(curseur, M]** : curseur vide ⇒ la prochaine paie **rattrape tout l'arriéré** ; la ligne s'intitule alors « Commissions ventes — rattrapage nov. 2025 → … ». |
+| — | Le curseur **avance tout seul à l'envoi du récap** (le mois envoyé devient réglé) → les mois suivants repartent **au mois-le-mois**. Réglable à la main dans la carte Paie (bloc « Commissions »), borné au mois précédent pour qu'une rectif ne vide jamais le mois courant. |
+
+Logique pure `lib/commissionsCalc` (`selectPayslipMonths`) testée (rien réglé =
+tout l'arriéré, réglé au mois-1 = mensuel, réglé partiel = cumul, jamais de mois
+futur). `lib/commissions` = requêtes.
