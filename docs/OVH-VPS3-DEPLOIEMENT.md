@@ -52,12 +52,23 @@ cron système (/etc/cron.d/televent) ──▶ 127.0.0.1:3000/api/cron/sap-sync 
 
 ## 2. Provisionnement initial
 
-Sur le VPS fraîchement livré, en **root** :
+Se connecter au VPS (depuis Windows : PowerShell → `ssh ubuntu@IP_DU_VPS`,
+l'utilisateur `ubuntu` correspond à la clé SSH fournie à la commande), puis
+passer root : `sudo -i`.
+
+Le dépôt étant **privé**, créer d'abord un token GitHub en lecture seule :
+GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate new
+token → Repository access : *Only select repositories* → `TeleventGervi` →
+Permissions : **Contents : Read-only**. Puis, en root sur le VPS :
 
 ```bash
-git clone https://github.com/Igni92/TeleventGervi.git /srv/televent/app
+apt-get update && apt-get install -y git
+git clone https://LE_TOKEN@github.com/Igni92/TeleventGervi.git /srv/televent/app
 bash /srv/televent/app/deploy/scripts/setup-vps.sh
 ```
+
+> Le token (lecture seule) reste enregistré dans la config git locale — c'est ce
+> qui permet à `deploy.sh` de faire les `git pull` suivants sans re-saisie.
 
 Le script (idempotent) installe et configure : utilisateur applicatif
 `televent`, pare-feu **ufw** (22/80/443), **fail2ban**, swap 2 Go, **Node 22
