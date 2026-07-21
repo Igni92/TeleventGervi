@@ -16,6 +16,7 @@ import { StatsExportPanel } from "@/components/settings/StatsExportPanel";
 import { ClientImportButton } from "@/components/clients/ClientImportButton";
 import { MirrorBackfillPanel } from "@/components/admin/MirrorBackfillPanel";
 import { ProductsSyncButton } from "@/components/admin/ProductsSyncButton";
+import { MirrorSyncButton } from "@/components/admin/MirrorSyncButton";
 import { useTheme } from "@/components/ThemeProvider";
 import { cn } from "@/lib/utils";
 import {
@@ -751,11 +752,16 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
                 </div>
 
                 <div className="flex flex-col gap-3 py-3">
-                  <div className="min-w-0">
-                    <p className="text-[13.5px] font-semibold text-foreground">Données stats (miroir comptable)</p>
-                    <p className="text-[12px] text-muted-foreground mt-0.5 max-w-xl">
-                      Factures, avoirs, commandes, fournisseurs — alimente pilotage et marges.
-                    </p>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+                    <div className="min-w-0">
+                      <p className="text-[13.5px] font-semibold text-foreground">Données stats (miroir comptable)</p>
+                      <p className="text-[12px] text-muted-foreground mt-0.5 max-w-xl">
+                        Factures, avoirs, commandes, fournisseurs — alimente pilotage et marges.
+                        « Synchroniser maintenant » récupère les tout derniers documents (activité du jour) ;
+                        le tableau ci-dessous réimporte un mois entier.
+                      </p>
+                    </div>
+                    <div className="shrink-0"><MirrorSyncButton /></div>
                   </div>
                   <MirrorBackfillPanel />
                 </div>

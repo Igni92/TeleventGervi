@@ -1,0 +1,60 @@
+name: SAP mirror sync
+
+# Déclencheur planifié de la synchro globale SAP (miroir documents + produits/stock).
+#
+# CONTEXTE — pourquoi ce workflow existe :
+# Le cron NATIF Vercel (`crons` dans vercel.json, */30) a été retiré le 15/07/2026
+# (commit 0f68128) car la cadence 30 min n'est pas autorisée par le plan Vercel
+# courant → Vercel refusait le déploiement PROD. Le repli était un « cron externe »
+# (cron-job.org / EasyCron) ; ce planificateur externe s'est arrêté et la synchro
+# est restée muette ~26 h (miroir figé au 20/07 → « CA du jour » à 0). Ce workflow
+# GitHub Actions, versionné et gratuit, redonne un ordonnanceur FIABLE et visible.
+#
+# Il tape simplement l'endpoint machine déjà en place (auth CRON_SECRET) :
+#   GET /api/cron/sap-sync  →  miroir documents PUIS produits/stock (idempotent).
+#
+# PRÉ-REQUIS (à faire UNE FOIS dans GitHub → Settings) :
+#   • Secret  CRON_SECRET   = la même valeur que la variable d'env Vercel prod.
+#   • (option) Variable SAP_SYNC_URL si l'URL prod diffère du défaut ci-dessous.
+# Les schedules ne tournent QUE sur la branche par défaut (main) une fois mergé.
+
+on:
+  schedule:
+    # Toutes les 30 min (UTC). GitHub peut décaler de quelques minutes sous charge.
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}   # déclenchement manuel depuis l'onglet Actions
+
+concurrency:
+  group: sap-sync
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Trigger SAP global sync
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SAP_SYNC_URL: ${{ vars.SAP_SYNC_URL || 'https://televent.gervifrais.com/api/cron/sap-sync' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::Secret CRON_SECRET manquant — ajoute-le dans Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "→ GET $SAP_SYNC_URL"
+          # --fail : sort en erreur (workflow rouge = alerte) si HTTP >= 400.
+          # --max-time 300 : la synchro peut durer (maxDuration serverless = 300 s).
+          http_code=$(curl --silent --show-error --fail \
+            --max-time 300 \
+            --write-out '%{http_code}' \
+            --output /tmp/sync-response.json \
+            --header "x-cron-secret: $CRON_SECRET" \
+            "$SAP_SYNC_URL") || {
+              echo "::error::Échec de la synchro SAP (curl)."
+              cat /tmp/sync-response.json 2>/dev/null || true
+              exit 1
+            }
+          echo "HTTP $http_code"
+          echo "Réponse :"
+          cat /tmp/sync-response.json 2>/dev/null || true
