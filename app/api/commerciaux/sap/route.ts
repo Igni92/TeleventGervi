@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getAccessScope, scopePayload, UNMAPPED_MESSAGE } from "@/lib/permissions";
 import { emailFromInitials } from "@/lib/salespeople";
+import { segmentOfGroup } from "@/lib/segments";
 import { loadDocTransportContext, docTransportCost, GIFT_LINE_SQL } from "@/lib/transportDoc";
 
 /**
@@ -158,14 +159,17 @@ export async function GET() {
       // poids livré, transporteur RÉEL mirroré, département/id du client.
       prisma.$queryRaw<{
         slp: string; card: string; cid: string; zip: string | null;
-        trsp: string | null; marge: number; mcad: number; kg: number;
+        trsp: string | null; gc: number | null; gn: string | null;
+        marge: number; mcad: number; kg: number;
       }[]>(Prisma.sql`
         SELECT c."commercial" AS slp, i."cardCode" AS card, c."id" AS cid, c."zipCode" AS zip,
-               i."trspCode" AS trsp, COALESCE(i."grossProfit", 0)::float AS marge,
+               i."trspCode" AS trsp, sbp."groupCode" AS gc, sbp."groupName" AS gn,
+               COALESCE(i."grossProfit", 0)::float AS marge,
                COALESCE(SUM(l."grossProfit") FILTER (WHERE ${Prisma.raw(GIFT_LINE_SQL)}), 0)::float AS mcad,
                COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS kg
         FROM "SapInvoice" i
         JOIN "Client" c ON c."code" = i."cardCode"
+        LEFT JOIN "SapBusinessPartner" sbp ON sbp."cardCode" = i."cardCode"
         LEFT JOIN "CommercialPrime" pr ON pr."slpName" = c."commercial"
         LEFT JOIN "SapInvoiceLine" l ON l."docEntry" = i."docEntry"
         LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
@@ -173,7 +177,7 @@ export async function GET() {
           AND c."commercial" IS NOT NULL AND c."commercial" <> ''
           AND i."docDate" >= COALESCE(pr."since", ${primeDefaultStart})
           ${slpCond(Prisma.sql`c."commercial"`)}
-        GROUP BY 1, 2, i."docEntry", 3, 4, 5, 6`),
+        GROUP BY 1, 2, i."docEntry", 3, 4, 5, sbp."cardCode"`),
     ]);
     for (const r of cfgRows) primeCfg.set(r.slp, { rate: Number(r.rate), since: new Date(r.since) });
 
@@ -182,7 +186,10 @@ export async function GET() {
     const basePosMap = new Map<string, number>(); // Σ max(0, nette facture)
     for (const r of invRows) {
       const margeCorr = Number(r.marge) - Number(r.mcad); // cadeaux neutralisés
-      const t = docTransportCost(ctx, { cardCode: r.card, clientId: r.cid, zip: r.zip, kg: Number(r.kg), trspCode: r.trsp });
+      const t = docTransportCost(ctx, {
+        cardCode: r.card, clientId: r.cid, zip: r.zip, kg: Number(r.kg),
+        trspCode: r.trsp, segment: segmentOfGroup(r.gn, r.gc),
+      });
       margeMap.set(r.slp, (margeMap.get(r.slp) ?? 0) + margeCorr);
       if (t.cost > 0) primeTransportMap.set(r.slp, (primeTransportMap.get(r.slp) ?? 0) + t.cost);
       basePosMap.set(r.slp, (basePosMap.get(r.slp) ?? 0) + Math.max(0, margeCorr - t.cost));

@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getAccessScope, scopePayload } from "@/lib/permissions";
+import { segmentOfGroup } from "@/lib/segments";
 import {
   loadDocTransportContext, docTransportCost, GIFT_LINE_SQL,
   type DocTransportMode,
@@ -84,20 +85,22 @@ export async function GET(req: Request) {
     prisma.$queryRaw<{
       de: number; dn: number | null; dd: Date; card: string; name: string | null;
       total: number; marge: number; mcad: number; cid: string; zip: string | null;
-      trsp: string | null; kg: number;
+      trsp: string | null; gc: number | null; gn: string | null; kg: number;
     }[]>(Prisma.sql`
       SELECT i."docEntry" AS de, i."docNum" AS dn, i."docDate" AS dd, i."cardCode" AS card,
              i."cardName" AS name, i."docTotal"::float AS total,
              COALESCE(i."grossProfit", 0)::float AS marge,
              COALESCE(SUM(l."grossProfit") FILTER (WHERE ${Prisma.raw(GIFT_LINE_SQL)}), 0)::float AS mcad,
              c."id" AS cid, c."zipCode" AS zip, i."trspCode" AS trsp,
+             sbp."groupCode" AS gc, sbp."groupName" AS gn,
              COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS kg
       FROM "SapInvoice" i
       JOIN "Client" c ON c."code" = i."cardCode"
+      LEFT JOIN "SapBusinessPartner" sbp ON sbp."cardCode" = i."cardCode"
       LEFT JOIN "SapInvoiceLine" l ON l."docEntry" = i."docEntry"
       LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
       WHERE i."cancelled" = false AND c."commercial" = ${slp} AND i."docDate" >= ${since}
-      GROUP BY i."docEntry", c."id"
+      GROUP BY i."docEntry", c."id", sbp."cardCode"
       ORDER BY i."docDate" DESC, i."docEntry" DESC`),
     prisma.$queryRaw<{
       de: number; dn: number | null; dd: Date; card: string; name: string | null;
@@ -122,7 +125,10 @@ export async function GET(req: Request) {
     // Marge corrigée : la marge des lignes cadeaux (négative = −coût) est retirée.
     const cadeaux = Math.max(0, -Number(r.mcad));
     const margeBrute = Number(r.marge) - Number(r.mcad);
-    const t = docTransportCost(ctx, { cardCode: r.card, clientId: r.cid, zip: r.zip, kg, trspCode: r.trsp });
+    const t = docTransportCost(ctx, {
+      cardCode: r.card, clientId: r.cid, zip: r.zip, kg, trspCode: r.trsp,
+      segment: segmentOfGroup(r.gn, r.gc),
+    });
     const margeNette = margeBrute - t.cost;
     const plancher = margeNette < 0;
     return {
