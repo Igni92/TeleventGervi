@@ -98,6 +98,9 @@ interface Client {
   fallbackHour?: number | null;
   /** Tenté aujourd'hui sans décroché (NRP/répondeur) → à re-tenter plus tard. */
   retryAfterNrp?: boolean;
+  /** Rappel DÛ (heure passée) — le client remonte en tête de file, coloré.
+   *  ISO du rappel dépassé le plus ancien, ou null/absent. */
+  dueReminderAt?: string | null;
 }
 interface DueRappel {
   id: string;
@@ -223,6 +226,21 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  /* ── Rafraîchissement périodique (60 s) ──────────────────────
+     Un rappel dont l'heure arrive PENDANT que la console est ouverte doit
+     remonter en tête tout seul : le serveur ne le sort du snooze qu'une fois
+     l'heure passée, donc on re-fetch régulièrement. Pausé quand l'onglet est
+     masqué (économie) et relancé au retour au premier plan. */
+  useEffect(() => {
+    let id: ReturnType<typeof setInterval> | null = null;
+    const start = () => { if (id == null) id = setInterval(fetchData, 60_000); };
+    const stop = () => { if (id != null) { clearInterval(id); id = null; } };
+    const onVis = () => { if (document.hidden) stop(); else { fetchData(); start(); } };
+    if (!document.hidden) start();
+    document.addEventListener("visibilitychange", onVis);
+    return () => { stop(); document.removeEventListener("visibilitychange", onVis); };
+  }, [fetchData]);
+
   /* ── Recherche de comptes hors file (débouncée) ──────────────
      Même terme que le filtre de file. Un compteur de séquence ignore les
      réponses périmées. /api/clients est authentifié + scopé côté serveur
@@ -345,31 +363,39 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
     // Tri. « priorité » = ordre SERVEUR (valeur × urgence) : on ne re-trie pas,
     // la file arrive déjà priorisée côté API (lib/priority). Les autres modes
     // restent des surcharges manuelles cosmétiques.
-    if (sortBy === "priorite") return q;
-    q.sort((a, b) => {
-      switch (sortBy) {
-        case "name":
-          return a.nom.localeCompare(b.nom, "fr");
-        case "type":
-          return (a.type || "zzz").localeCompare(b.type || "zzz");
-        case "lastOrder": {
-          const da = a.insights?.lastOrderDays ?? 9999;
-          const db = b.insights?.lastOrderDays ?? 9999;
-          return da - db; // most recent first
+    if (sortBy !== "priorite") {
+      q.sort((a, b) => {
+        switch (sortBy) {
+          case "name":
+            return a.nom.localeCompare(b.nom, "fr");
+          case "type":
+            return (a.type || "zzz").localeCompare(b.type || "zzz");
+          case "lastOrder": {
+            const da = a.insights?.lastOrderDays ?? 9999;
+            const db = b.insights?.lastOrderDays ?? 9999;
+            return da - db; // most recent first
+          }
+          case "hour":
+          default: {
+            // Tri par heure optimale d'appel : on privilégie l'heure de DÉCROCHÉ
+            // (recommendedHour), avec repli sur l'heure typique du type (cold-start)
+            // pour ne pas reléguer les clients neufs en fin de file.
+            const ha = a.insights?.recommendedHour ?? a.fallbackHour ?? a.insights?.medianHour ?? 99;
+            const hb = b.insights?.recommendedHour ?? b.fallbackHour ?? b.insights?.medianHour ?? 99;
+            return ha - hb;
+          }
         }
-        case "hour":
-        default: {
-          // Tri par heure optimale d'appel : on privilégie l'heure de DÉCROCHÉ
-          // (recommendedHour), avec repli sur l'heure typique du type (cold-start)
-          // pour ne pas reléguer les clients neufs en fin de file.
-          const ha = a.insights?.recommendedHour ?? a.fallbackHour ?? a.insights?.medianHour ?? 99;
-          const hb = b.insights?.recommendedHour ?? b.fallbackHour ?? b.insights?.medianHour ?? 99;
-          return ha - hb;
-        }
-      }
-    });
+      });
+    }
 
-    return q;
+    // RAPPELS DUS TOUJOURS EN TÊTE — quel que soit le tri choisi (un rappel dont
+    // l'heure est passée est un rendez-vous d'appel : il prime). Le plus ancien
+    // d'abord ; le reste garde son ordre.
+    const due = q.filter((c) => c.dueReminderAt);
+    if (due.length === 0) return q;
+    due.sort((a, b) => (a.dueReminderAt! < b.dueReminderAt! ? -1 : 1));
+    const rest = q.filter((c) => !c.dueReminderAt);
+    return [...due, ...rest];
   }, [data, search, sortBy]);
 
   /* ── Auto-advance to next client in queue ────────────────── */
@@ -1166,6 +1192,14 @@ const QueueRow = React.memo(function QueueRow({
   const isDirect = !!client.tel2;
   // « Fait » → heure de prise de commande (remplace le code dans la file).
   const handledTime = done ? handledTimeLabel(client) : null;
+  // Rappel DÛ (heure passée) → ligne colorée + badge « RAPPEL HH:MM » en tête.
+  const dueReminder = !done && !!client.dueReminderAt;
+  const dueTime = client.dueReminderAt
+    ? new Date(client.dueReminderAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+    : null;
+  const dueNote = dueReminder
+    ? client.rappels.find((r) => new Date(r.dateRappel).getTime() === new Date(client.dueReminderAt!).getTime())?.note
+    : null;
   return (
     <li>
       <button
@@ -1175,6 +1209,8 @@ const QueueRow = React.memo(function QueueRow({
         className={`w-full text-left px-3 py-1.5 border-l-2 transition-colors duration-150 group
           ${active
             ? "bg-brand-50/60 dark:bg-brand-950/30 border-l-brand-500"
+            : dueReminder
+            ? "bg-rose-50 dark:bg-rose-950/40 border-l-rose-500 hover:bg-rose-100/70 dark:hover:bg-rose-950/60"
             : "border-l-transparent hover:bg-secondary/40"}
           ${done ? "opacity-55 hover:opacity-90" : ""}
         `}
@@ -1193,6 +1229,15 @@ const QueueRow = React.memo(function QueueRow({
           }`}>
             {client.nom}
           </p>
+          {/* Rappel DÛ — badge prioritaire, le plus visible de la ligne. */}
+          {dueReminder && (
+            <span
+              className="shrink-0 inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-px rounded bg-rose-600 text-white dark:bg-rose-500"
+              title={`Rappel dû à ${dueTime}${dueNote ? ` — ${dueNote}` : ""}`}
+            >
+              <BellRing className="h-2.5 w-2.5" /> Rappel {dueTime}
+            </span>
+          )}
           {/* « à couvrir » = reprise effective d'un collègue absent (ownerAbsent
               implique claimedFrom). Prioritaire sur le badge "récup." pour ne pas
               doubler l'info. Sinon, pour une reprise sans absence avérée, on

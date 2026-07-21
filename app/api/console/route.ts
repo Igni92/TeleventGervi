@@ -184,6 +184,8 @@ export async function GET() {
     fallbackHour: number | null;
     // Tenté aujourd'hui sans décroché (NRP/répondeur) → à re-tenter plus tard.
     retryAfterNrp: boolean;
+    // Rappel DÛ (heure passée) → remonte en tête de file, coloré (ISO ou null).
+    dueReminderAt: string | null;
   };
 
   // ── Passe 1 : calcule les insights + garde les candidats du jour ──
@@ -193,11 +195,20 @@ export async function GET() {
     calls: { type: string; outcome: string | null; heureAppel: Date }[];
     futureSnooze: boolean;
     preCommandeSnooze: boolean;
+    /** Heure (ISO) du rappel DÛ le plus ancien — null si aucun rappel dépassé. */
+    dueReminderAt: string | null;
   }[] = [];
   for (const c of clients) {
-    if (!c.joursAppel) continue;
-    const days = c.joursAppel.split(",").map(Number);
-    if (!days.includes(todayDay)) continue;
+    // Rappel DÛ = rappel planifié dont l'heure est PASSÉE. Il prime sur le
+    // planning : le client remonte en tête de file même s'il n'est pas
+    // programmé aujourd'hui (l'agent s'est engagé à rappeler à cette heure).
+    const overdue = c.rappels
+      .map((r) => new Date(r.dateRappel))
+      .filter((d) => d.getTime() <= now.getTime())
+      .sort((a, b) => a.getTime() - b.getTime());
+    const dueReminderAt = overdue.length ? overdue[0].toISOString() : null;
+    const scheduledToday = !!c.joursAppel && c.joursAppel.split(",").map(Number).includes(todayDay);
+    if (!scheduledToday && !dueReminderAt) continue;
 
     const calls = calledTodayMap.get(c.id) ?? [];
     const futureSnooze = c.rappels.some((r) => new Date(r.dateRappel) > now);
@@ -211,7 +222,7 @@ export async function GET() {
     const preCommandeSnooze = c.appels.some(
       (a) => a.type === "COMMANDE" && a.scheduledFor && new Date(a.scheduledFor) >= todayEnd,
     );
-    candidates.push({ c, insights: computeInsights(c.appels), calls, futureSnooze, preCommandeSnooze });
+    candidates.push({ c, insights: computeInsights(c.appels), calls, futureSnooze, preCommandeSnooze, dueReminderAt });
   }
 
   // ── Repli par type : heure de décroché typique (médiane des recommendedHour
@@ -232,7 +243,7 @@ export async function GET() {
   // ── Passe 2 : construit la file / les faits ──
   const queue: Enriched[] = [];
   const done: Enriched[] = [];
-  for (const { c, insights, calls, futureSnooze, preCommandeSnooze } of candidates) {
+  for (const { c, insights, calls, futureSnooze, preCommandeSnooze, dueReminderAt } of candidates) {
     const claimedFrom = claimedMap.get(c.id) ?? null;
     const openIncidents = openIncByClient.get(c.id) ?? 0;
     // ── Priorité « valeur × urgence » (audit 07 #43/#44/#48) : cycle de vie
@@ -270,10 +281,15 @@ export async function GET() {
       openIncidents,
       fallbackHour,
       retryAfterNrp,
+      dueReminderAt,
     } as Enriched;
 
     if (hadConnect) done.push(enriched);
+    // Rappel dû sans rappel futur en attente → on le SORT du snooze et on le
+    // met dans la file (il sera floté en tête). Le rappel FUTUR prime toujours
+    // (l'agent a repoussé) → snooze maintenu.
     else if (futureSnooze) continue;
+    else if (dueReminderAt) queue.push(enriched);
     else if (preCommandeSnooze) continue;
     else queue.push(enriched); // inclut les « retry NRP » du jour
   }
@@ -284,6 +300,15 @@ export async function GET() {
   // optimale (médiane) croissante — on appelle d'abord ceux qui décrochent tôt —
   // puis nom, pour un ordre stable et reproductible.
   queue.sort((a, b) => {
+    // RAPPELS DUS EN TÊTE — le plus ancien d'abord (rendez-vous d'appel
+    // dépassé = engagement prioritaire sur le score valeur × urgence).
+    if (a.dueReminderAt || b.dueReminderAt) {
+      if (a.dueReminderAt && b.dueReminderAt) {
+        if (a.dueReminderAt !== b.dueReminderAt) return a.dueReminderAt < b.dueReminderAt ? -1 : 1;
+      } else {
+        return a.dueReminderAt ? -1 : 1;
+      }
+    }
     const ds = b.priority.score - a.priority.score;
     if (Math.abs(ds) > 0.01) return ds;
     // Départage : heure de décroché recommandée (cf. main), repli médiane.

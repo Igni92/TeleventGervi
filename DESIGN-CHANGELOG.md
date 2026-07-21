@@ -1181,3 +1181,17 @@ futur). `lib/commissions` = requêtes.
 
 Détail hebdo calculé côté API (`buildWeekly`, semaines rattachées au mois par
 leur dimanche, comme l'agrégat), porté par la ligne `SalaryWeek`.
+
+## 📞 Console d'appels — rappel DÛ = en tête de file, en couleur
+
+> Demande : « quand je mets un rappel et qu'il est l'heure passée du rappel, on
+> le met en haut de la file en couleur ».
+
+| Avant | Après |
+|-------|-------|
+| Un rappel futur MASQUE le client (snooze) jusqu'à l'heure ; passé l'heure, il réapparaît à sa place de priorité normale, sans signe distinctif. | Dès que l'heure du rappel est **passée**, le client **remonte en tête de file** (avant le score valeur × urgence, le plus ancien rappel d'abord) et sa ligne est **colorée en rose** avec un badge « 🔔 Rappel HH:MM ». Il remonte même s'il n'est **pas programmé aujourd'hui** (un rappel est un rendez-vous d'appel). |
+| Il fallait recharger pour le voir. | La console **se rafraîchit toute seule (60 s, en pause si l'onglet est masqué)** : un rappel qui arrive à échéance pendant l'appel surgit en tête sans action. |
+
+Serveur (`/api/console`) : `dueReminderAt` par client (rappel PLANIFIE dépassé),
+sorti du snooze et floté en tête ; un rappel FUTUR prime toujours (snooze
+maintenu). Client : float identique quel que soit le tri + ligne colorée.
