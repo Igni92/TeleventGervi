@@ -41,6 +41,11 @@ export async function GET(req: NextRequest) {
 
   const sp = req.nextUrl.searchParams;
   const conds: Prisma.Sql[] = [];
+  // Le cockpit d'appel = CLIENTS (et prospects gagnés). Les prospects importés
+  // pour la prospection (prospectSource renseigné, non encore GAGNE) vivent
+  // dans /prospection : sans ça, les 1 000 fiches sans commande (last_order NULL)
+  // passent en tête (ORDER BY … NULLS FIRST) et saturent la LIMIT → 0 client.
+  conds.push(Prisma.sql`(c."prospectSource" IS NULL OR c."prospectStage" = 'GAGNE')`);
   if (!scope.all && scope.slpName) {
     conds.push(Prisma.sql`(c."commercial" = ${scope.slpName} OR c."vendeur" = ${scope.slpName})`);
   }
