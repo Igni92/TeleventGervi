@@ -25,12 +25,14 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
   }
 
   const body = (await req.json().catch(() => ({}))) as {
-    stage?: unknown; qualifieLabo?: unknown; lostReason?: unknown; note?: unknown;
+    stage?: unknown; qualifieLabo?: unknown; lostReason?: unknown; note?: unknown; remove?: unknown;
   };
   const stage = typeof body.stage === "string" ? body.stage : null;
   if (stage && !isValidStage(stage)) {
     return NextResponse.json({ error: "Étape inconnue." }, { status: 400 });
   }
+  // remove = sortir le prospect du pipeline (retour au vivier : prospectStage NULL).
+  const remove = body.remove === true;
 
   const email = session.user.email ?? null;
   const slp = await getOwnSlpName(session);
@@ -47,7 +49,10 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
     // Construction dynamique du UPDATE (uniquement les champs fournis).
     const sets: string[] = [];
     const p: unknown[] = [];
-    if (stage) {
+    if (remove) {
+      sets.push(`"prospectStage" = NULL`);
+      sets.push(`"prospectStageAt" = now()`);
+    } else if (stage) {
       sets.push(`"prospectStage" = $${p.push(stage)}`);
       sets.push(`"prospectStageAt" = now()`);
     }
@@ -74,7 +79,7 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
       `INSERT INTO "ProspectionActivity"
          ("id","clientId","ownerSlp","kind","fromStage","toStage","note","createdBy")
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      randomUUID(), id, slp, stage ? "STAGE" : "NOTE", fromStage, stage, note, email,
+      randomUUID(), id, slp, (stage || remove) ? "STAGE" : "NOTE", fromStage, remove ? null : stage, note, email,
     );
 
     return NextResponse.json({ ok: true, fromStage, toStage: stage ?? fromStage });
