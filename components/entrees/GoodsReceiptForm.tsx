@@ -256,7 +256,7 @@ export function GoodsReceiptForm() {
   const [affect, setAffect] = useState<"TOUS" | "EXPORT" | "GMS" | "CHR">("TOUS");
   const [lines, setLines] = useState<Line[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [lastReceipt, setLastReceipt] = useState<{ docNum: number; lot: string } | null>(null);
+  const [lastReceipt, setLastReceipt] = useState<{ docNum: number; lot: string; emCount?: number } | null>(null);
   // Durées de vie par défaut (jours) → pré-remplit la DLC à l'ajout d'une ligne
   // (= date du jour + jours). Exception article prioritaire sur le défaut du
   // groupe. Réglées dans Paramètres › « Fraîcheur · DLC par défaut ».
@@ -373,36 +373,56 @@ export function GoodsReceiptForm() {
         return;
       }
       const retro = json.retroPatchedLines as number | undefined;
-      toast.success(`BR #${json.docNum} créé — lot ${json.lot}`, {
-        description: retro && retro > 0
-          ? `${lines.length} ligne(s) — stock incrémenté. ${retro} BL ouvert(s) du jour relié(s) à ce lot.`
-          : `${lines.length} ligne(s) — stock incrémenté.`,
-      });
+      const emCount = Array.isArray(json.docNums) ? json.docNums.length : 1;
+      toast.success(
+        emCount > 1
+          ? `EM #${json.docNum} créée — ${emCount} EM SAP, une par ligne (#${(json.docNums as number[]).join(", #")})`
+          : `BR #${json.docNum} créé — lot ${json.lot}`,
+        {
+          description: retro && retro > 0
+            ? `${lines.length} ligne(s) — stock incrémenté. ${retro} BL ouvert(s) du jour relié(s) à ce${emCount > 1 ? "s" : ""} lot${emCount > 1 ? "s" : ""}.`
+            : `${lines.length} ligne(s) — stock incrémenté.`,
+        },
+      );
+      // Échec PARTIEL (une EM par ligne) : certaines lignes n'ont PAS été créées
+      // côté SAP — on l'affiche clairement, elles sont à ressaisir.
+      if (json.partialError) {
+        const missing = Array.isArray(json.failedLines) && json.failedLines.length > 0
+          ? ` Ligne(s) non créée(s) : ${(json.failedLines as string[]).join(", ")} — à ressaisir.`
+          : "";
+        toast.warning(`Réception incomplète : ${json.partialError}.${missing}`, { duration: 12000 });
+      }
 
       // ── DLC (fraîcheur) : best-effort, ne bloque JAMAIS la réception ──
-      // Le n° de lot créé est exposé par l'API : json.lot === "EM<DocNum>"
-      // (cf. app/api/sap/goods-receipts/route.ts → { lot, docNum }). On POST
-      // chaque DLC saisie vers /api/lots/dlc. Une seule DLC par lot (toutes les
-      // lignes de cette EM partagent le même batchNumber) : on dédoublonne par
-      // itemCode et on laisse l'upsert serveur trancher si plusieurs diffèrent.
+      // Avec « une EM par ligne », chaque ligne a SON lot : l'API renvoie
+      // json.lines[] avec { itemCode, lot } (cf. app/api/sap/goods-receipts).
+      // On POST chaque DLC saisie vers /api/lots/dlc sur le lot DE SA ligne
+      // (repli : lot primaire json.lot pour une réponse ancienne).
       const batchNumber: string | undefined =
         typeof json.lot === "string" && json.lot
           ? json.lot
           : (typeof json.docNum === "number" ? `EM${json.docNum}` : undefined);
-      const dlcLines = lines.filter((l) => l.dlc.trim() !== "");
+      const lotByItem = new Map<string, string>();
+      for (const rl of (Array.isArray(json.lines) ? json.lines : []) as { itemCode?: string; lot?: string }[]) {
+        if (rl.itemCode && rl.lot && !lotByItem.has(rl.itemCode)) lotByItem.set(rl.itemCode, rl.lot);
+      }
+      // Ne poste que les DLC des lignes réellement créées côté SAP (échec partiel).
+      const dlcLines = lines.filter((l) => l.dlc.trim() !== "" && (lotByItem.has(l.itemCode) || !json.partialError));
       if (batchNumber && dlcLines.length > 0) {
         const results = await Promise.allSettled(
           dlcLines.map((l) =>
             fetch("/api/lots/dlc", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ batchNumber, itemCode: l.itemCode, expirationDate: l.dlc }),
+              body: JSON.stringify({ batchNumber: lotByItem.get(l.itemCode) ?? batchNumber, itemCode: l.itemCode, expirationDate: l.dlc }),
             }).then((r) => { if (!r.ok) throw new Error(String(r.status)); }),
           ),
         );
         const failed = results.filter((r) => r.status === "rejected").length;
         if (failed === 0) {
-          toast.info(`Fraîcheur enregistrée pour le lot ${batchNumber} (${dlcLines.length} DLC).`);
+          toast.info(emCount > 1
+            ? `Fraîcheur enregistrée (${dlcLines.length} DLC — une par lot de ligne).`
+            : `Fraîcheur enregistrée pour le lot ${batchNumber} (${dlcLines.length} DLC).`);
         } else {
           toast.info(`Réception OK — ${dlcLines.length - failed}/${dlcLines.length} DLC enregistrée(s) (le reste a échoué, sans impact sur l'entrée).`);
         }
@@ -411,7 +431,7 @@ export function GoodsReceiptForm() {
         toast.info("Réception créée, mais le n° de lot n'a pas été renvoyé : DLC non enregistrée(s).");
       }
 
-      setLastReceipt({ docNum: json.docNum, lot: json.lot });
+      setLastReceipt({ docNum: json.docNum, lot: json.lot, emCount });
       idemKeyRef.current = null;   // succès → la prochaine réception aura une nouvelle clé
       reset();
     } catch (e) {
@@ -426,7 +446,11 @@ export function GoodsReceiptForm() {
       {lastReceipt && (
         <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[13px] text-emerald-700 dark:text-emerald-300">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>Dernier BR : <b># {lastReceipt.docNum}</b> · lot <b>{lastReceipt.lot}</b> — propagé au résolveur de lots.</span>
+          <span>
+            Dernier BR : <b># {lastReceipt.docNum}</b> · lot <b>{lastReceipt.lot}</b>
+            {(lastReceipt.emCount ?? 1) > 1 ? <> · <b>{lastReceipt.emCount} EM SAP</b> (une par ligne)</> : null}
+            {" "}— propagé au résolveur de lots.
+          </span>
         </div>
       )}
 

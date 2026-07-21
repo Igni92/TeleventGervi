@@ -8,6 +8,7 @@ import { incrementLocalStock } from "@/lib/stockSync";
 import { bumpLot, LOT_PENDING } from "@/lib/lotResolver";
 import { buildWhsBudget, remainingForItem, pickReceiptWarehouse, consumeBudget } from "@/lib/receiptRetro";
 import { normalizeEmAffect, setEmAffect } from "@/lib/emAffect";
+import { setEmGroup, getEmGroups } from "@/lib/emGroup";
 import { creditLots, debitLots } from "@/lib/lotLedger";
 import { setMarchandiseNote, sanitizeRating } from "@/lib/marchandiseNote";
 import { convertQuotationToOrder } from "@/lib/quotationConvert";
@@ -16,8 +17,15 @@ import { isDepartureReached } from "@/lib/livraison";
 /**
  * POST /api/sap/goods-receipts
  *
- * Crée une ENTRÉE MARCHANDISE (PurchaseDeliveryNote) dans SAP B1,
- * façon Goods Receipt — entrée libre (sans PO), multi-entrepôts par ligne.
+ * Crée une ENTRÉE MARCHANDISE dans SAP B1, façon Goods Receipt — entrée libre
+ * (sans PO), multi-entrepôts par ligne.
+ *
+ * ⚠️ DÉCOUPAGE « UNE EM PAR LIGNE » : chaque ligne saisie devient sa PROPRE
+ * PurchaseDeliveryNote SAP (ex. 10 colis + 40 colis → 2 EM), pour avoir un lot,
+ * une DLC et une annulation PAR article. Les EM du groupe partagent la même
+ * référence (« EM <n° de la 1re> - initiales à heure ») et le même N° BL ;
+ * Télévente les regroupe en UNE SEULE entrée à l'affichage (lib/emGroup), avec
+ * le n° d'EM propre à chaque ligne.
  *
  * Body :
  *   {
@@ -206,32 +214,8 @@ export async function POST(req: NextRequest) {
     const pieceQty = l.packageQuantity * ratio;
     return { ...l, pieceQty, ratio };
   });
-  const documentLines = resolvedLines.map((l) => {
-    const line: Record<string, unknown> = {
-      ItemCode: l.itemCode,
-      Quantity: l.pieceQty,                 // SAP "Qty Totale" en unité d'inventaire (pie)
-      PackageQuantity: l.packageQuantity,   // SAP "Mbre" colis — visible sur le BR
-      WarehouseCode: l.warehouseCode,
-    };
-    if (l.price != null && l.price > 0) {
-      line.UnitPrice = l.price;
-      line.Price = l.price;
-    }
-    return line;
-  });
   const heure = docTime ? docTime.replace(":", "h") : null;
   const note = body.comment?.trim() || null;
-  const payload: Record<string, unknown> = {
-    CardCode: cardCode,
-    DocDate: docDate,
-    DocDueDate: docDate,
-    TaxDate: docDate,
-    // Référence signée « EM <n°> - <initiales> à <heure> ». Le n° d'EM n'existe
-    // qu'après création → provisoire ici (sans n°), patchée avec le DocNum plus bas.
-    Comments: docRef({ prefix: "EM", name: session.user?.name, email: session.user?.email, heure, note }),
-    DocumentLines: documentLines,
-  };
-  if (body.numAtCard?.trim()) payload.NumAtCard = body.numAtCard.trim();
 
   // ── Idempotence : CLAIM atomique juste avant le POST (fenêtre minimale) ──
   if (idemSettingKey) {
@@ -254,75 +238,128 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── POST SAP /PurchaseDeliveryNotes ──
+  // ── POST SAP /PurchaseDeliveryNotes — UNE CRÉATION PAR LIGNE ──
   console.log("[GoodsReceipt] → POST SAP/PurchaseDeliveryNotes — DB:", process.env.SAP_B1_COMPANY_DB);
-  console.log("[GoodsReceipt]   Fournisseur:", cardCode, "| Lignes:", body.lines.length);
+  console.log("[GoodsReceipt]   Fournisseur:", cardCode, "| Lignes:", body.lines.length, "→ 1 EM par ligne");
 
   type SapPdn = { DocEntry: number; DocNum: number; DocTotal?: number };
-  let created: SapPdn;
-  try {
-    created = await sap.post<SapPdn>("/PurchaseDeliveryNotes", payload);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    console.error("[GoodsReceipt] ❌ SAP CREATE FAILED:", message);
-    await releaseIdem();   // échec → on libère la clé pour permettre une vraie relance
-    return NextResponse.json(
-      { ok: false, error: message, payload: process.env.NODE_ENV === "development" ? payload : undefined },
-      { status: 500 },
-    );
+  type ResolvedLine = (typeof resolvedLines)[number];
+  type CreatedDoc = { docEntry: number; docNum: number; lot: string; line: ResolvedLine };
+  const createdDocs: CreatedDoc[] = [];
+  // N° du GROUPE = DocNum de la 1re EM créée : c'est LUI que Télévente affiche
+  // (« EM # <n°> ») et que chaque EM du groupe porte dans sa référence.
+  let groupNum: number | null = null;
+  let createError: string | null = null;
+
+  for (const l of resolvedLines) {
+    const docLine: Record<string, unknown> = {
+      ItemCode: l.itemCode,
+      Quantity: l.pieceQty,                 // SAP "Qty Totale" en unité d'inventaire (pie)
+      PackageQuantity: l.packageQuantity,   // SAP "Mbre" colis — visible sur le BR
+      WarehouseCode: l.warehouseCode,
+    };
+    if (l.price != null && l.price > 0) {
+      docLine.UnitPrice = l.price;
+      docLine.Price = l.price;
+    }
+    const payload: Record<string, unknown> = {
+      CardCode: cardCode,
+      DocDate: docDate,
+      DocDueDate: docDate,
+      TaxDate: docDate,
+      // Référence signée « EM <n° du groupe> - <initiales> à <heure> ». Pour la
+      // 1re EM le n° n'existe qu'après création → provisoire ici, gravée plus
+      // bas ; les suivantes portent le n° du groupe dès la création.
+      Comments: docRef({ prefix: "EM", docNum: groupNum ?? undefined, name: session.user?.name, email: session.user?.email, heure, note }),
+      DocumentLines: [docLine],
+    };
+    if (body.numAtCard?.trim()) payload.NumAtCard = body.numAtCard.trim();
+    try {
+      const created = await sap.post<SapPdn>("/PurchaseDeliveryNotes", payload);
+      if (groupNum == null) groupNum = created.DocNum;
+      createdDocs.push({ docEntry: created.DocEntry, docNum: created.DocNum, lot: `EM${created.DocNum}`, line: l });
+    } catch (e) {
+      // Échec en cours de route : on N'ESSAIE PAS les lignes suivantes — les EM
+      // déjà créées restent valides, l'échec partiel est SIGNALÉ au client.
+      createError = e instanceof Error ? e.message : String(e);
+      console.error(`[GoodsReceipt] ❌ SAP CREATE FAILED (ligne ${l.itemCode}):`, createError);
+      break;
+    }
   }
 
-  const lotCode = `EM${created.DocNum}`;
-  // Mémorise le résultat sur la clé d'idempotence — un retry rejouera CE BR au lieu
-  // d'en créer un second (double crédit évité).
+  if (createdDocs.length === 0) {
+    await releaseIdem();   // rien créé → on libère la clé pour permettre une vraie relance
+    return NextResponse.json({ ok: false, error: createError ?? "Création SAP échouée" }, { status: 500 });
+  }
+
+  // EM « primaire » du groupe (la 1re) : porte le n° affiché dans Télévente et
+  // reste la clé des champs historiques de la réponse (docNum/docEntry/lot).
+  const primary = createdDocs[0];
+  const lotCode = primary.lot;
+  const docNums = createdDocs.map((d) => d.docNum);
+  const failedLines = createError ? resolvedLines.slice(createdDocs.length).map((l) => l.itemCode) : [];
+  // Groupe persisté (AppSetting) : l'historique regroupe ces EM en une seule.
+  if (createdDocs.length > 1) {
+    try { await setEmGroup(primary.docNum, docNums); }
+    catch (e) { console.warn("[GoodsReceipt] Enregistrement du groupe d'EM échoué (non-bloquant):", (e as Error).message); }
+  }
+  // Mémorise le résultat sur la clé d'idempotence — un retry rejouera CE groupe
+  // d'EM au lieu d'en créer un second (double crédit évité). ⚠️ En cas d'échec
+  // PARTIEL on GARDE la clé : une relance aveugle dupliquerait les EM déjà
+  // créées — les lignes manquantes se ressaisissent dans une nouvelle entrée.
   if (idemSettingKey) {
     await prisma.appSetting.update({
       where: { key: idemSettingKey },
-      data: { value: JSON.stringify({ ok: true, docNum: created.DocNum, docEntry: created.DocEntry, lot: lotCode, cardCode }) },
+      data: {
+        value: JSON.stringify({
+          ok: true, docNum: primary.docNum, docEntry: primary.docEntry, lot: lotCode,
+          docNums, docEntries: createdDocs.map((d) => d.docEntry), lots: createdDocs.map((d) => d.lot), cardCode,
+        }),
+      },
     }).catch(() => { /* best-effort */ });
   }
-  console.log("[GoodsReceipt] ✅ SUCCESS — DocNum:", created.DocNum, "| Lot:", lotCode);
+  console.log("[GoodsReceipt] ✅ SUCCESS —", createdDocs.length, "EM créée(s) | Groupe EM", primary.docNum, "| DocNums:", docNums.join(", "));
 
-  // ── PATCH U_NoLot=EM<DocNum> sur chaque ligne ──
-  // (le DocNum n'existe qu'après création — d'où le 2-temps).
-  try {
-    type CreatedLine = { LineNum: number };
-    const refetch = await sap.get<{ DocumentLines: CreatedLine[] }>(
-      `/PurchaseDeliveryNotes(${created.DocEntry})?$select=DocumentLines`,
-    );
-    const patchLines = (refetch.DocumentLines || []).map((l) => ({
-      LineNum: l.LineNum,
-      U_NoLot: lotCode,
-    }));
-    // Grave le n° définitif dans la référence (« EM <DocNum> - <initiales> à
-    // <heure> ») ET pose le lot sur chaque ligne, en un seul PATCH.
-    const patchBody: Record<string, unknown> = {
-      Comments: docRef({ prefix: "EM", docNum: created.DocNum, name: session.user?.name, email: session.user?.email, heure, note }),
-    };
-    if (patchLines.length > 0) patchBody.DocumentLines = patchLines;
-    await sap.patch(`PurchaseDeliveryNotes(${created.DocEntry})`, patchBody);
-  } catch (e) {
-    console.warn("[GoodsReceipt] PATCH U_NoLot / référence échoué (non-bloquant):", (e as Error).message);
+  // ── PATCH par EM : référence gravée (n° du GROUPE) + U_NoLot=EM<DocNum propre> ──
+  // (le n° du groupe n'existe qu'après la 1re création — d'où le 2-temps).
+  for (const d of createdDocs) {
+    try {
+      type CreatedLine = { LineNum: number };
+      const refetch = await sap.get<{ DocumentLines: CreatedLine[] }>(
+        `/PurchaseDeliveryNotes(${d.docEntry})?$select=DocumentLines`,
+      );
+      const patchLines = (refetch.DocumentLines || []).map((l) => ({
+        LineNum: l.LineNum,
+        U_NoLot: d.lot,
+      }));
+      const patchBody: Record<string, unknown> = {
+        Comments: docRef({ prefix: "EM", docNum: primary.docNum, name: session.user?.name, email: session.user?.email, heure, note }),
+      };
+      if (patchLines.length > 0) patchBody.DocumentLines = patchLines;
+      await sap.patch(`PurchaseDeliveryNotes(${d.docEntry})`, patchBody);
+    } catch (e) {
+      console.warn(`[GoodsReceipt] PATCH U_NoLot / référence EM ${d.docNum} échoué (non-bloquant):`, (e as Error).message);
+    }
   }
 
   // ── Cache des lots : injection immédiate pour les Orders qui suivent ──
-  for (const l of body.lines) bumpLot(l.itemCode, l.warehouseCode, created.DocNum);
+  for (const d of createdDocs) bumpLot(d.line.itemCode, d.line.warehouseCode, d.docNum);
 
   // ── REGISTRE DES LOTS : CRÉDIT (réception) ──────────────────────────
-  // Le lot EM<DocNum> naît ici : on mémorise la quantité reçue (pie), le
-  // fournisseur et le prix d'achat. Le stock par lot est ensuite décrémenté à la
-  // vente (cf. /api/sap/orders). Agrégé tous entrepôts (warehouseCode=""), en
-  // unité SAP (pie) — cohérent avec la décrémentation. Best-effort.
+  // Chaque lot EM<DocNum> naît ici (un par ligne) : on mémorise la quantité
+  // reçue (pie), le fournisseur et le prix d'achat. Le stock par lot est ensuite
+  // décrémenté à la vente (cf. /api/sap/orders). Agrégé tous entrepôts
+  // (warehouseCode=""), en unité SAP (pie) — cohérent avec la décrémentation.
   try {
     const admission = new Date(`${docDate}T12:00:00Z`);
-    await creditLots(resolvedLines.map((l) => ({
-      itemCode: l.itemCode,
-      lot: lotCode,
-      qty: l.pieceQty,
+    await creditLots(createdDocs.map((d) => ({
+      itemCode: d.line.itemCode,
+      lot: d.lot,
+      qty: d.line.pieceQty,
       supplierName: bp.CardName?.trim() || cardCode,
-      purchasePrice: l.price ?? null,
+      purchasePrice: d.line.price ?? null,
       currency: "EUR",
-      sourceDocNum: String(created.DocNum),
+      sourceDocNum: String(d.docNum),
       admissionDate: admission,
     })));
   } catch (e) {
@@ -330,23 +367,24 @@ export async function POST(req: NextRequest) {
   }
 
   // ── NOTE QUALITÉ (étoiles) de la marchandise reçue — best-effort ──
-  // Saisie 1..5 par ligne : note du lot + note courante de l'article (console).
+  // Saisie 1..5 par ligne : note du lot PROPRE à la ligne + note courante de l'article.
   try {
     const by = session.user?.name?.trim() || session.user?.email || null;
-    await Promise.all(body.lines.map((l) => {
-      const r = sanitizeRating(l.rating);
-      return r != null ? setMarchandiseNote(l.itemCode, lotCode, r, by) : Promise.resolve();
+    await Promise.all(createdDocs.map((d) => {
+      const r = sanitizeRating(d.line.rating);
+      return r != null ? setMarchandiseNote(d.line.itemCode, d.lot, r, by) : Promise.resolve();
     }));
   } catch (e) {
     console.warn("[GoodsReceipt] Note qualité non enregistrée (non-bloquant):", (e as Error).message);
   }
 
-  // ── Affectation de l'EM (Tous/Export/GMS/CHR) — persistée par DocNum. Pilote
-  //    le choix du lot à la saisie télévente (resolveLotForSegment) et la
-  //    priorité de la propagation rétro ci-dessous. Best-effort. ──
+  // ── Affectation de l'EM (Tous/Export/GMS/CHR) — persistée par DocNum, posée
+  //    sur CHAQUE EM du groupe (le résolveur de lots lit par DocNum). Pilote le
+  //    choix du lot à la saisie télévente (resolveLotForSegment) et la priorité
+  //    de la propagation rétro ci-dessous. Best-effort. ──
   const affect = normalizeEmAffect(body.affect);
   try {
-    await setEmAffect(created.DocNum, affect);
+    await Promise.all(createdDocs.map((d) => setEmAffect(d.docNum, affect)));
   } catch (e) {
     console.warn("[GoodsReceipt] Affectation EM non enregistrée (non-bloquant):", (e as Error).message);
   }
@@ -370,9 +408,13 @@ export async function POST(req: NextRequest) {
   // RÉELLEMENT reçue (sinon la ligne reste sur un magasin sans stock → dispo
   // négatif). Budget PARTAGÉ entre propagation BL (Orders, servis d'abord) et
   // fabrication (InventoryGenExits) : la marchandise reçue couvre les deux.
-  const budget = buildWhsBudget(resolvedLines.map((l) => ({
-    itemCode: l.itemCode, warehouseCode: l.warehouseCode, pieceQty: l.pieceQty,
+  const budget = buildWhsBudget(createdDocs.map((d) => ({
+    itemCode: d.line.itemCode, warehouseCode: d.line.warehouseCode, pieceQty: d.line.pieceQty,
   })));
+  // Lot à poser par ARTICLE : avec « une EM par ligne », chaque article reçu a
+  // SON propre lot (celui de la 1re EM du groupe qui le porte en cas de doublon).
+  const lotByItem = new Map<string, string>();
+  for (const d of createdDocs) if (!lotByItem.has(d.line.itemCode)) lotByItem.set(d.line.itemCode, d.lot);
 
   let retroPatchCount = 0;
   // Débits registre à appliquer une fois les BL patchés : une vente à découvert
@@ -449,21 +491,23 @@ export async function POST(req: NextRequest) {
         // magasin d'origine, sans stock). On garde le magasin courant s'il a reçu.
         const whs = pickReceiptWarehouse(budget, ln.ItemCode, ln.WarehouseCode);
         if (!whs) continue;
+        // Lot de l'ARTICLE (une EM par ligne) — repli sur le lot primaire.
+        const itemLot = lotByItem.get(ln.ItemCode) ?? lotCode;
         // FIFO simple : on accepte le BL si on a au moins la qté demandée, sinon
         // on patch quand même (le BL ne sera couvert que partiellement, mais lot
         // affecté) — TODO : split ligne si on veut être strict.
-        const patch: Record<string, unknown> = { LineNum: ln.LineNum, U_NoLot: lotCode };
+        const patch: Record<string, unknown> = { LineNum: ln.LineNum, U_NoLot: itemLot };
         if (whs !== ln.WarehouseCode) patch.WarehouseCode = whs;
         patchLines.push(patch);
         // La ligne entière est désormais attribuée à ce lot → débit de sa quantité.
-        orderDebits.push({ itemCode: ln.ItemCode, lot: lotCode, qty: ln.Quantity });
+        orderDebits.push({ itemCode: ln.ItemCode, lot: itemLot, qty: ln.Quantity });
         consumeBudget(budget, ln.ItemCode, whs, ln.Quantity);
       }
       if (patchLines.length > 0) {
         await sap.patch(`Orders(${ord.DocEntry})`, { DocumentLines: patchLines });
         retroPatchCount += patchLines.length;
         retroDebits.push(...orderDebits); // débit seulement après PATCH réussi
-        console.log(`[GoodsReceipt] Retro lot ${lotCode} → Order #${ord.DocNum} (${patchLines.length} ligne(s))`);
+        console.log(`[GoodsReceipt] Retro lots du groupe EM ${primary.docNum} → Order #${ord.DocNum} (${patchLines.length} ligne(s))`);
       }
     }
     // Débit registre des ventes à découvert désormais servies par ce lot.
@@ -473,7 +517,7 @@ export async function POST(req: NextRequest) {
     }
     console.log(
       `[GoodsReceipt] Propagation rétro : ${orders.length} commande(s) ouverte(s) depuis le ${retroSince} scannée(s), `
-      + `${retroPatchCount} ligne(s) ${LOT_PENDING} → ${lotCode}`,
+      + `${retroPatchCount} ligne(s) ${LOT_PENDING} → lots du groupe EM ${primary.docNum}`,
     );
   } catch (e) {
     console.warn("[GoodsReceipt] Propagation rétro échouée (non-bloquant):", (e as Error).message);
@@ -514,10 +558,11 @@ export async function POST(req: NextRequest) {
         if (remainingForItem(budget, ln.ItemCode) <= 0) continue;
         const whs = pickReceiptWarehouse(budget, ln.ItemCode, ln.WarehouseCode);
         if (!whs) continue;
-        const patch: Record<string, unknown> = { LineNum: ln.LineNum, U_NoLot: lotCode };
+        const itemLot = lotByItem.get(ln.ItemCode) ?? lotCode;
+        const patch: Record<string, unknown> = { LineNum: ln.LineNum, U_NoLot: itemLot };
         if (whs !== ln.WarehouseCode) patch.WarehouseCode = whs;
         patchLines.push(patch);
-        exitDebits.push({ itemCode: ln.ItemCode, lot: lotCode, qty: ln.Quantity });
+        exitDebits.push({ itemCode: ln.ItemCode, lot: itemLot, qty: ln.Quantity });
         patchedItems.add(ln.ItemCode);
         consumeBudget(budget, ln.ItemCode, whs, ln.Quantity);
       }
@@ -525,7 +570,7 @@ export async function POST(req: NextRequest) {
         await sap.patch(`InventoryGenExits(${exit.DocEntry})`, { DocumentLines: patchLines });
         retroFabricationCount += patchLines.length;
         retroFabDebits.push(...exitDebits); // débit après PATCH réussi
-        console.log(`[GoodsReceipt] Retro lot ${lotCode} → InventoryGenExit #${exit.DocNum} (${patchLines.length} ligne(s))`);
+        console.log(`[GoodsReceipt] Retro lots du groupe EM ${primary.docNum} → InventoryGenExit #${exit.DocNum} (${patchLines.length} ligne(s))`);
       }
     }
     // Débit registre des composants fabriqués désormais servis par ce lot.
@@ -538,6 +583,7 @@ export async function POST(req: NextRequest) {
     // côté SAP, restreint aux runs du jour ("createdAt" >= minuit) — on ne
     // réécrit pas d'anciens runs jamais couverts par une EM.
     for (const itemCode of Array.from(patchedItems)) {
+      const itemLot = lotByItem.get(itemCode) ?? lotCode;
       const updated = await prisma.$executeRawUnsafe(
         `UPDATE "FabricationRunLine" AS rl
             SET "batchNumber" = $1
@@ -546,16 +592,16 @@ export async function POST(req: NextRequest) {
             AND rl."batchNumber" = $2
             AND rl."itemCode" = $3
             AND r."createdAt" >= CURRENT_DATE;`,
-        lotCode, LOT_PENDING, itemCode,
+        itemLot, LOT_PENDING, itemCode,
       );
       if (updated > 0) {
-        console.log(`[GoodsReceipt] FabricationRunLine ${itemCode}: ${updated} ligne(s) ${LOT_PENDING} → ${lotCode}`);
+        console.log(`[GoodsReceipt] FabricationRunLine ${itemCode}: ${updated} ligne(s) ${LOT_PENDING} → ${itemLot}`);
       }
     }
 
     console.log(
       `[GoodsReceipt] Propagation rétro fabrication : ${exits.length} sortie(s) du ${today} scannée(s), `
-      + `${retroFabricationCount} ligne(s) ${LOT_PENDING} → ${lotCode}`,
+      + `${retroFabricationCount} ligne(s) ${LOT_PENDING} → lots du groupe EM ${primary.docNum}`,
     );
   } catch (e) {
     console.warn("[GoodsReceipt] Propagation rétro fabrication échouée (non-bloquant):", (e as Error).message);
@@ -571,7 +617,7 @@ export async function POST(req: NextRequest) {
   // best-effort (jamais bloquant pour la réception).
   let autoConvertCount = 0;
   try {
-    const receivedItems = new Set(resolvedLines.map((l) => l.itemCode));
+    const receivedItems = new Set(createdDocs.map((d) => d.line.itemCode));
     type QLine = { ItemCode?: string; Quantity?: number };
     type QDoc = { DocEntry: number; DocNum: number; DocDueDate: string; Cancelled?: string; DocumentStatus: string; DocumentLines?: QLine[] };
     const quotes = await sap.getAll<QDoc>(
@@ -634,10 +680,10 @@ export async function POST(req: NextRequest) {
   // ProductStock est en unité d'inventaire (pie), donc on incrémente pieceQty
   // (= colis × ratio), pas packageQuantity.
   try {
-    await incrementLocalStock(resolvedLines.map((l) => ({
-      itemCode: l.itemCode,
-      quantity: l.pieceQty,
-      warehouseCode: l.warehouseCode,
+    await incrementLocalStock(createdDocs.map((d) => ({
+      itemCode: d.line.itemCode,
+      quantity: d.line.pieceQty,
+      warehouseCode: d.line.warehouseCode,
     })));
   } catch (e) {
     console.warn("[GoodsReceipt] incrementLocalStock échoué (non-bloquant):", (e as Error).message);
@@ -645,21 +691,32 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    docNum: created.DocNum,
-    docEntry: created.DocEntry,
+    // Champs « historiques » = EM primaire du groupe (n° affiché dans Télévente).
+    docNum: primary.docNum,
+    docEntry: primary.docEntry,
     lot: lotCode,
-    retroPatchedLines: retroPatchCount,        // BL ouverts du jour repris en EM<DocNum>
-    retroFabricationLines: retroFabricationCount, // sorties fabrication du jour reprises en EM<DocNum>
+    // Groupe « une EM par ligne » : toutes les EM SAP réellement créées.
+    docNums,
+    docEntries: createdDocs.map((d) => d.docEntry),
+    lots: createdDocs.map((d) => d.lot),
+    emCount: createdDocs.length,
+    // Échec PARTIEL : lignes NON créées (à ressaisir dans une nouvelle entrée).
+    partialError: createError ?? undefined,
+    failedLines: failedLines.length > 0 ? failedLines : undefined,
+    retroPatchedLines: retroPatchCount,        // BL ouverts du jour repris sur les lots du groupe
+    retroFabricationLines: retroFabricationCount, // sorties fabrication du jour reprises sur les lots du groupe
     autoConvertedBonsCommande: autoConvertCount,  // bons de commande couverts → commandes fermes (auto)
     cardCode,
     db: process.env.SAP_B1_COMPANY_DB,
-    lines: resolvedLines.map((l) => ({
-      itemCode: l.itemCode,
-      packageQuantity: l.packageQuantity,
-      pieceQuantity: l.pieceQty,
-      ratio: l.ratio,
-      warehouse: l.warehouseCode,
-      lot: lotCode,
+    lines: createdDocs.map((d) => ({
+      itemCode: d.line.itemCode,
+      packageQuantity: d.line.packageQuantity,
+      pieceQuantity: d.line.pieceQty,
+      ratio: d.line.ratio,
+      warehouse: d.line.warehouseCode,
+      lot: d.lot,
+      docNum: d.docNum,
+      docEntry: d.docEntry,
     })),
   });
 }
@@ -743,10 +800,10 @@ export async function GET(req: NextRequest) {
       : [];
     const pMap = new Map(products.map((p) => [p.itemCode, p]));
 
-    return NextResponse.json({
-      db: process.env.SAP_B1_COMPANY_DB,
-      count: listed.length,
-      docs: listed.map((d) => {
+    // ── Groupes « une EM par ligne » (lib/emGroup) : DocNum → n° du groupe ──
+    const groups = await getEmGroups();
+
+    const mapped = listed.map((d) => {
         const lines = d.DocumentLines || [];
         const totalTTC = d.DocTotal ?? 0;
         const totalTVA = d.VatSum ?? 0;
@@ -787,6 +844,11 @@ export async function GET(req: NextRequest) {
             const ratio = (p?.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) ? p.salesQtyPerPackUnit : 1;
             return {
               lineNum: l.LineNum,
+              // EM SAP qui PORTE cette ligne (avec « une EM par ligne », chaque
+              // ligne a la sienne — sur une EM historique, celle du document).
+              docEntry: d.DocEntry,
+              docNum: d.DocNum,
+              lot: `EM${d.DocNum}`,
               itemCode: l.ItemCode,
               itemName: l.ItemDescription || p?.itemName || l.ItemCode,
               pieceQuantity: l.Quantity,
@@ -803,7 +865,60 @@ export async function GET(req: NextRequest) {
             };
           }),
         };
-      }),
+      });
+
+    // ── REGROUPEMENT « une EM par ligne » : les EM d'un même groupe s'affichent
+    //    en UNE SEULE entrée (n° du groupe = EM primaire), le n° d'EM propre à
+    //    chaque ligne restant porté par la ligne. Les documents d'annulation SAP
+    //    ne sont jamais membres d'un groupe → ils restent affichés seuls. ──
+    type MappedDoc = (typeof mapped)[number];
+    type OutLine = MappedDoc["lines"][number] & { cancelled?: boolean };
+    const byGroup = new Map<number, MappedDoc[]>();
+    const groupOrder: number[] = [];
+    for (const m of mapped) {
+      const g = groups.get(m.docNum) ?? m.docNum;
+      if (!byGroup.has(g)) { byGroup.set(g, []); groupOrder.push(g); }
+      byGroup.get(g)!.push(m);
+    }
+    const docsOut = groupOrder.map((g) => {
+      const members = byGroup.get(g)!;
+      if (members.length === 1) {
+        const m = members[0];
+        return { ...m, grouped: false, docNums: [m.docNum], docEntries: [m.docEntry], lots: [m.lot], lines: m.lines as OutLine[] };
+      }
+      // Membres par DocNum croissant = ordre de saisie des lignes. L'EM primaire
+      // (n° du groupe) peut être hors fenêtre de pagination → repli sur la 1re.
+      const sorted = [...members].sort((a, b) => a.docNum - b.docNum);
+      const primary = sorted.find((m) => m.docNum === g) ?? sorted[0];
+      // Cumuls sur les membres « vivants » uniquement (une EM du groupe annulée
+      // ne compte plus) — si tout est annulé, on garde les montants pour trace.
+      const live = sorted.filter((m) => !m.cancelled && !m.isCancellation);
+      const base = live.length > 0 ? live : sorted;
+      const sum = (f: (m: MappedDoc) => number) => Math.round(base.reduce((s, m) => s + f(m), 0) * 100) / 100;
+      const cancelled = sorted.every((m) => m.cancelled);
+      return {
+        ...primary,
+        grouped: true,
+        docNums: sorted.map((m) => m.docNum),
+        docEntries: sorted.map((m) => m.docEntry),
+        lots: sorted.map((m) => m.lot),
+        cancelled,
+        cancelledByDocNum: cancelled ? primary.cancelledByDocNum : null,
+        editable: !cancelled && sorted.some((m) => m.editable),
+        total: sum((m) => m.total),
+        totalTTC: sum((m) => m.totalTTC),
+        totalHT: sum((m) => m.totalHT),
+        totalTVA: sum((m) => m.totalTVA),
+        lineCount: sorted.reduce((s, m) => s + m.lineCount, 0),
+        // Chaque ligne garde SON EM (docEntry/docNum/lot) + son état d'annulation.
+        lines: sorted.flatMap((m) => m.lines.map((l) => ({ ...l, cancelled: m.cancelled || m.isCancellation }))) as OutLine[],
+      };
+    });
+
+    return NextResponse.json({
+      db: process.env.SAP_B1_COMPANY_DB,
+      count: docsOut.length,
+      docs: docsOut,
     });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
@@ -817,13 +932,15 @@ export async function GET(req: NextRequest) {
  * (PurchaseDeliveryNote). Permet de renseigner / corriger le n° de BL après coup,
  * depuis la consultation du détail.
  *
- * Body : { docEntry: number, numAtCard: string }
+ * Body : { docEntry: number, docEntries?: number[], numAtCard: string }
+ *   - `docEntries` (groupe « une EM par ligne ») : le n° de BL est posé sur
+ *     TOUTES les EM SAP du groupe — elles partagent la même référence.
  */
 export async function PATCH(req: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  let body: { docEntry?: number; numAtCard?: string };
+  let body: { docEntry?: number; docEntries?: number[]; numAtCard?: string };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -831,11 +948,17 @@ export async function PATCH(req: NextRequest) {
   if (!docEntry || Number.isNaN(docEntry)) {
     return NextResponse.json({ error: "docEntry requis" }, { status: 400 });
   }
+  const entries = Array.isArray(body.docEntries) && body.docEntries.length > 0
+    ? Array.from(new Set(body.docEntries.map(Number).filter((n) => Number.isFinite(n) && n > 0)))
+    : [docEntry];
+  if (!entries.includes(docEntry)) entries.unshift(docEntry);
   const numAtCard = (body.numAtCard ?? "").trim();
 
   try {
-    await sap.patch(`PurchaseDeliveryNotes(${docEntry})`, { NumAtCard: numAtCard });
-    return NextResponse.json({ ok: true, numAtCard });
+    for (const de of entries) {
+      await sap.patch(`PurchaseDeliveryNotes(${de})`, { NumAtCard: numAtCard });
+    }
+    return NextResponse.json({ ok: true, numAtCard, updated: entries.length });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }

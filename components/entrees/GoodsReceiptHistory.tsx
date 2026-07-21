@@ -24,6 +24,10 @@ import {
 
 type ReceiptLine = {
   lineNum: number;
+  // EM SAP qui PORTE cette ligne — avec « une EM par ligne », chaque ligne a la
+  // sienne (lot/DLC/annulation par article) ; EM historique = celle du document.
+  docEntry?: number; docNum?: number; lot?: string;
+  cancelled?: boolean;               // cette EM de ligne est annulée (groupe partiel)
   itemCode: string; itemName?: string;
   pieceQuantity: number; packageQuantity: number | null;
   warehouse?: string;
@@ -32,6 +36,8 @@ type ReceiptLine = {
 };
 type Receipt = {
   docEntry: number; docNum: number; lot: string; docDate: string;
+  // Groupe « une EM par ligne » : toutes les EM SAP regroupées sous cette entrée.
+  grouped?: boolean; docNums?: number[]; docEntries?: number[]; lots?: string[];
   cardCode: string; cardName?: string; numAtCard: string;
   editable?: boolean;
   // Annulations (SAP) : ce doc EST une annulation, ou la réception A ÉTÉ annulée.
@@ -40,6 +46,15 @@ type Receipt = {
   total: number; totalTTC: number; totalHT: number; totalTVA: number;
   comments: string; lineCount: number; lines: ReceiptLine[];
 };
+
+/** DocEntry des EM SAP du groupe (repli : l'entrée seule). */
+const groupEntries = (d: Receipt): number[] =>
+  d.docEntries && d.docEntries.length > 0 ? d.docEntries : [d.docEntry];
+/** Lot d'une ligne — propre à la ligne (une EM par ligne), sinon celui du doc. */
+const lineLot = (d: Receipt, l: ReceiptLine): string => l.lot || d.lot;
+/** Clé UNIQUE d'une ligne dans un groupe (le lineNum seul se répète : chaque EM
+ *  de ligne recommence à 0). */
+const lineKey = (d: Receipt, l: ReceiptLine): string => `${l.docEntry ?? d.docEntry}:${l.lineNum}`;
 
 /** Vrai si la ligne n'est pas une vraie réception « vivante » (annulée ou doc d'annulation). */
 const isVoided = (d: Receipt): boolean => !!d.cancelled || !!d.isCancellation;
@@ -95,8 +110,10 @@ function AgreageBadge({ a, className = "" }: { a: AgreageInfo | null | undefined
   );
 }
 
-/** Édition du prix d'une ligne d'EM (prix unitaire OU total HT forcé). */
-type PriceEdit = { lineNum: number; pieceQuantity: number; price: string; lineTotal: string; forceTotal: boolean };
+/** Édition du prix d'une ligne d'EM (prix unitaire OU total HT forcé).
+ *  `docEntry` = EM SAP qui porte la ligne (groupe « une EM par ligne ») ;
+ *  `key` = clé unique de la ligne (docEntry:lineNum). */
+type PriceEdit = { key: string; docEntry: number; lineNum: number; pieceQuantity: number; price: string; lineTotal: string; forceTotal: boolean };
 const emEffPU = (e: PriceEdit): number | null => {
   if (e.forceTotal) { const t = parseFloat(e.lineTotal); return Number.isFinite(t) && e.pieceQuantity > 0 ? Math.round((t / e.pieceQuantity) * 10000) / 10000 : null; }
   const p = e.price === "" ? null : parseFloat(e.price); return p != null && Number.isFinite(p) ? p : null;
@@ -107,9 +124,11 @@ const emEffTotal = (e: PriceEdit): number | null => {
 };
 /** Signature d'une édition de ligne (pour ne sauver que si ça a réellement changé). */
 const sigOf = (e: PriceEdit) => (e.forceTotal ? `T:${e.lineTotal}` : `P:${e.price}`);
-/** État d'édition initial des prix, dérivé des lignes de l'EM. */
-function toPriceEdits(lines: ReceiptLine[]): PriceEdit[] {
-  return lines.map((l) => ({
+/** État d'édition initial des prix, dérivé des lignes de l'EM (ou du groupe). */
+function toPriceEdits(receipt: Receipt): PriceEdit[] {
+  return receipt.lines.map((l) => ({
+    key: lineKey(receipt, l),
+    docEntry: l.docEntry ?? receipt.docEntry,
     lineNum: l.lineNum, pieceQuantity: l.pieceQuantity,
     price: l.price != null && l.price > 0 ? String(l.price) : "",
     lineTotal: l.lineTotal != null ? String(l.lineTotal) : "",
@@ -275,11 +294,16 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
 
   useEffect(() => { load(); }, [load]);
 
-  // DLC (fraîcheur) : un seul fetch groupé pour TOUS les lots chargés.
-  const allBatches = useMemo(() => docs.map((d) => d.lot).filter(Boolean), [docs]);
+  // DLC (fraîcheur) : un seul fetch groupé pour TOUS les lots chargés — y compris
+  // les lots PAR LIGNE d'un groupe « une EM par ligne ».
+  const allBatches = useMemo(
+    () => docs.flatMap((d) => [d.lot, ...d.lines.map((l) => l.lot ?? "")]).filter(Boolean),
+    [docs],
+  );
   const [dlcMap, mergeDlc] = useDlcMap(allBatches);
 
   // Recherche : fournisseur (code/nom) · code article · numéro (EM / BL) · date.
+  // Un groupe « une EM par ligne » répond aussi aux n° / lots de SES membres.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return docs.filter((d) => {
@@ -288,6 +312,8 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
       const haystack = [
         d.cardCode, d.cardName, d.numAtCard, d.lot,
         `#${d.docNum}`, String(d.docNum),
+        ...(d.docNums ?? []).flatMap((n) => [`#${n}`, String(n)]),
+        ...(d.lots ?? []),
         ...d.lines.flatMap((l) => [l.itemCode, l.itemName]),
       ];
       return haystack.some((h) => (h ?? "").toString().toLowerCase().includes(q));
@@ -461,7 +487,10 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                         <InfoHint label="Références" side="right">
                           <span className="block space-y-0.5">
                             <span className="block">Code SAP : <span className="font-mono">{d.cardCode}</span></span>
-                            <span className="block">Lot : <span className="font-mono">{d.lot || "—"}</span></span>
+                            <span className="block">Lot{(d.lots?.length ?? 0) > 1 ? "s" : ""} : <span className="font-mono">{(d.lots?.length ?? 0) > 1 ? d.lots!.join(", ") : (d.lot || "—")}</span></span>
+                            {d.grouped && (d.docNums?.length ?? 0) > 1 && (
+                              <span className="block">EM SAP : <span className="font-mono">{d.docNums!.map((n) => `#${n}`).join(", ")}</span></span>
+                            )}
                             <span className="block">Réf. BL : <span className="tnum">{d.numAtCard || "—"}</span></span>
                             <span className="block">{d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}</span>
                           </span>
@@ -517,6 +546,11 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
           largeDoc ? (
             <span className="inline-flex items-center gap-2 flex-wrap">
               <span className="font-mono">EM # {largeDoc.docNum}</span>
+              {largeDoc.grouped && (largeDoc.docNums?.length ?? 0) > 1 && (
+                <span className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground ring-1 ring-border">
+                  {largeDoc.docNums!.length} EM SAP · une par ligne
+                </span>
+              )}
               <span className="tnum">· {fmtJourDate(largeDoc.docDate)}</span>
               {largeDoc.lot && <FreshnessBadge dlc={dlcMap[largeDoc.lot]} className="shrink-0" />}
               <CancelBadge d={largeDoc} />
@@ -528,7 +562,7 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
         {largeDoc && (
           <ReceiptDetail
             receipt={largeDoc}
-            dlc={dlcMap[largeDoc.lot]}
+            dlcMap={dlcMap}
             onDlcSaved={mergeDlc}
             incidents={byDoc.get(largeDoc.docEntry) ?? []}
             onIncidentChanged={reloadIncidents}
@@ -550,12 +584,13 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
    directement depuis cette consultation.
    ───────────────────────────────────────────────────────────────── */
 function ReceiptDetail({
-  receipt, dlc, onDlcSaved, incidents, onIncidentChanged, onNumAtCardChange, onModified,
+  receipt, dlcMap, onDlcSaved, incidents, onIncidentChanged, onNumAtCardChange, onModified,
   agreage, restricted = false,
 }: {
   receipt: Receipt;
-  /** DLC (ISO) du lot — `undefined` = pas encore chargée, `null` = non saisie. */
-  dlc?: string | null;
+  /** DLC (ISO) PAR LOT — clé absente = pas encore chargée, `null` = non saisie.
+   *  Avec « une EM par ligne », chaque ligne a son lot donc SA DLC. */
+  dlcMap: Record<string, string | null>;
   /** Remonte la DLC enregistrée pour mise à jour optimiste (batchNumber, ISO|null). */
   onDlcSaved?: (batchNumber: string, iso: string | null) => void;
   incidents: { id: string; type: string | null; note: string | null; resolved: boolean; createdAt: string; createdBy: string | null }[];
@@ -573,48 +608,76 @@ function ReceiptDetail({
   // Annulation de la réception (EM) — uniquement si non clôturée (pas facturée).
   const [cancelConfirm, setCancelConfirm] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  // Retour fournisseur (partiel/total) — colis à retourner par ligne.
+  // Retour fournisseur (partiel/total) — colis à retourner par ligne. Clés par
+  // lineKey : dans un groupe « une EM par ligne », le lineNum seul se répète.
   const [returnOpen, setReturnOpen] = useState(false);
-  const [returnQty, setReturnQty] = useState<Record<number, string>>({});
+  const [returnQty, setReturnQty] = useState<Record<string, string>>({});
   const [returning, setReturning] = useState(false);
   const openReturn = () => {
-    const init: Record<number, string> = {};
-    receipt.lines.forEach((l) => { init[l.lineNum] = String(l.packageQuantity ?? l.pieceQuantity ?? 0); });
+    const init: Record<string, string> = {};
+    receipt.lines.forEach((l) => { init[lineKey(receipt, l)] = String(l.packageQuantity ?? l.pieceQuantity ?? 0); });
     setReturnQty(init);
     setReturnOpen(true);
   };
   const submitReturn = async () => {
-    const lines = receipt.lines
-      .map((l) => ({ lineNum: l.lineNum, packageQuantity: parseFloat(returnQty[l.lineNum] ?? "0") }))
-      .filter((l) => Number.isFinite(l.packageQuantity) && l.packageQuantity > 0);
-    if (lines.length === 0) { toast.error("Indique au moins une quantité à retourner."); return; }
+    // Le retour SAP se crée PAR EM : on regroupe les lignes saisies par l'EM qui
+    // les porte (une seule pour une EM historique, une par ligne pour un groupe).
+    const byDoc = new Map<number, { docNum: number; lines: { lineNum: number; packageQuantity: number }[] }>();
+    for (const l of receipt.lines) {
+      const qty = parseFloat(returnQty[lineKey(receipt, l)] ?? "0");
+      if (!Number.isFinite(qty) || qty <= 0) continue;
+      const de = l.docEntry ?? receipt.docEntry;
+      if (!byDoc.has(de)) byDoc.set(de, { docNum: l.docNum ?? receipt.docNum, lines: [] });
+      byDoc.get(de)!.lines.push({ lineNum: l.lineNum, packageQuantity: qty });
+    }
+    if (byDoc.size === 0) { toast.error("Indique au moins une quantité à retourner."); return; }
     setReturning(true);
     try {
-      const res = await fetch(`/api/sap/goods-receipts/${receipt.docEntry}/return`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines }),
-      });
-      const j = await res.json();
-      if (!res.ok || !j.ok) { toast.error(j.error || "Retour impossible"); return; }
-      toast.success(`Retour fournisseur #${j.docNum} créé depuis l'EM #${receipt.docNum}`);
-      setReturnOpen(false);
-      await onModified?.();
-    } catch (e) { toast.error((e as Error).message); }
-    finally { setReturning(false); }
+      const createdNums: number[] = [];
+      const errors: string[] = [];
+      for (const [de, g] of byDoc) {
+        try {
+          const res = await fetch(`/api/sap/goods-receipts/${de}/return`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: g.lines }),
+          });
+          const j = await res.json();
+          if (!res.ok || !j.ok) { errors.push(`EM #${g.docNum} : ${j.error || "retour impossible"}`); continue; }
+          createdNums.push(j.docNum);
+        } catch (e) { errors.push(`EM #${g.docNum} : ${(e as Error).message}`); }
+      }
+      if (createdNums.length > 0) {
+        toast.success(createdNums.length > 1
+          ? `${createdNums.length} retours fournisseur créés (#${createdNums.join(", #")}) depuis l'EM #${receipt.docNum}`
+          : `Retour fournisseur #${createdNums[0]} créé depuis l'EM #${receipt.docNum}`);
+      }
+      if (errors.length > 0) toast.error(errors.join(" · "));
+      if (createdNums.length > 0) { setReturnOpen(false); await onModified?.(); }
+    } finally { setReturning(false); }
   };
   const cancelReceipt = async () => {
+    // Groupe « une EM par ligne » : annuler l'entrée = annuler TOUTES les EM SAP
+    // du groupe (chacune sort son stock).
     setCancelling(true);
     try {
-      const res = await fetch("/api/sap/goods-receipts/cancel", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docEntry: receipt.docEntry }),
-      });
-      const j = await res.json();
-      if (!res.ok || !j.ok) { toast.error(j.error || "Annulation impossible"); return; }
-      toast.success(`Entrée marchandise #${receipt.docNum} annulée — stock sorti`);
+      const entries = groupEntries(receipt);
+      const errors: string[] = [];
+      for (const de of entries) {
+        try {
+          const res = await fetch("/api/sap/goods-receipts/cancel", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ docEntry: de }),
+          });
+          const j = await res.json();
+          if (!res.ok || !j.ok) errors.push(j.error || `EM (docEntry ${de}) non annulée`);
+        } catch (e) { errors.push((e as Error).message); }
+      }
+      if (errors.length > 0) { toast.error(errors.join(" · ")); return; }
+      toast.success(entries.length > 1
+        ? `Entrée marchandise #${receipt.docNum} annulée (${entries.length} EM SAP) — stock sorti`
+        : `Entrée marchandise #${receipt.docNum} annulée — stock sorti`);
       setCancelConfirm(false);
       await onModified?.();
-    } catch (e) { toast.error((e as Error).message); }
-    finally { setCancelling(false); }
+    } finally { setCancelling(false); }
   };
 
   // Édition des PRIX (prix unitaire / total HT forcé) — la marchandise est entrée,
@@ -623,13 +686,13 @@ function ReceiptDetail({
   // L'agréeur « pur » ne voit ni ne modifie les prix (le serveur renvoie déjà
   // editable=false et des montants nuls — double garde ici).
   const canEditPrices = !restricted && receipt.editable !== false;
-  const [priceEdits, setPriceEdits] = useState<PriceEdit[]>(() => toPriceEdits(receipt.lines));
-  const [savingLines, setSavingLines] = useState<Set<number>>(new Set());
-  const lastSaved = useRef<Map<number, string>>(new Map());
+  const [priceEdits, setPriceEdits] = useState<PriceEdit[]>(() => toPriceEdits(receipt));
+  const [savingLines, setSavingLines] = useState<Set<string>>(new Set());
+  const lastSaved = useRef<Map<string, string>>(new Map());
   useEffect(() => {
-    const edits = toPriceEdits(receipt.lines);
+    const edits = toPriceEdits(receipt);
     setPriceEdits(edits);
-    lastSaved.current = new Map(edits.map((e) => [e.lineNum, sigOf(e)]));
+    lastSaved.current = new Map(edits.map((e) => [e.key, sigOf(e)]));
   }, [receipt]);
   const updatePriceEdit = (i: number, patch: Partial<PriceEdit>) =>
     setPriceEdits((c) => c.map((e, k) => (k === i ? { ...e, ...patch } : e)));
@@ -649,68 +712,72 @@ function ReceiptDetail({
   const totTVA = canEditPrices ? liveTotals.tva : (receipt.totalTVA ?? 0);
   const totTTC = canEditPrices ? liveTotals.ttc : (receipt.totalTTC ?? receipt.total ?? 0);
 
-  // Enregistre les prix quand on quitte une case.
+  // Enregistre les prix quand on quitte une case — vers l'EM SAP qui PORTE la
+  // ligne (groupe « une EM par ligne » : une EM par docEntry de ligne).
   // ⚠️ SAP Service Layer : un PATCH DocumentLines partiel est appliqué de façon
   // POSITIONNELLE (la 1re ligne du tableau), pas par LineNum — envoyer une seule
   // ligne écrasait donc toujours la 1re ligne (bug « seul le 1er prix modifié »).
-  // On transmet TOUT le jeu de lignes (ordre conservé + LineNum) : correct quelle
-  // que soit l'interprétation (positionnelle OU par LineNum) du Service Layer.
+  // On transmet TOUT le jeu de lignes DE CETTE EM (ordre conservé + LineNum) :
+  // correct quelle que soit l'interprétation du Service Layer.
   const saveLine = async (i: number) => {
     const e = priceEdits[i];
     if (!e || !canEditPrices) return;
-    if (lastSaved.current.get(e.lineNum) === sigOf(e)) return;  // cette ligne inchangée → rien
-    const allLines = priceEdits.map((pe) => pe.forceTotal
+    if (lastSaved.current.get(e.key) === sigOf(e)) return;  // cette ligne inchangée → rien
+    const docLines = priceEdits.filter((pe) => pe.docEntry === e.docEntry);
+    const allLines = docLines.map((pe) => pe.forceTotal
       ? { lineNum: pe.lineNum, lineTotal: pe.lineTotal === "" ? undefined : parseFloat(pe.lineTotal) }
       : { lineNum: pe.lineNum, price: pe.price === "" ? undefined : parseFloat(pe.price) });
-    // Optimiste : marque TOUTES les lignes comme sauvées (le PATCH les couvre).
+    // Optimiste : marque les lignes DE CETTE EM comme sauvées (le PATCH les couvre).
     const prevSigs = new Map(lastSaved.current);
-    priceEdits.forEach((pe) => lastSaved.current.set(pe.lineNum, sigOf(pe)));
-    setSavingLines((c) => new Set(c).add(e.lineNum));
+    docLines.forEach((pe) => lastSaved.current.set(pe.key, sigOf(pe)));
+    setSavingLines((c) => new Set(c).add(e.key));
     try {
-      const res = await fetch(`/api/sap/goods-receipts/${receipt.docEntry}/modif`, {
+      const res = await fetch(`/api/sap/goods-receipts/${e.docEntry}/modif`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: allLines }),
       });
       const j = await res.json();
       if (!res.ok || !j.ok) { lastSaved.current = prevSigs; toast.error(j.error || "Erreur SAP"); return; }
     } catch (err) { lastSaved.current = prevSigs; toast.error((err as Error).message); }
-    finally { setSavingLines((c) => { const n = new Set(c); n.delete(e.lineNum); return n; }); }
+    finally { setSavingLines((c) => { const n = new Set(c); n.delete(e.key); return n; }); }
   };
 
-  // ── DLC (fraîcheur) du lot — saisie/édition depuis le détail, sur la ligne ──
-  // La DLC est unique par lot (« EM<docNum> ») : toutes les lignes du détail
-  // pointent donc sur la même échéance. Saisie côté TeleVent (jamais SAP).
-  const [dlcISO, setDlcISO] = useState<string | null | undefined>(dlc);
-  const [savingDlc, setSavingDlc] = useState(false);
-  const lastSavedDlc = useRef<string>(dlc ? dlc.slice(0, 10) : "");
-  useEffect(() => {
-    setDlcISO(dlc);
-    lastSavedDlc.current = dlc ? dlc.slice(0, 10) : "";
-  }, [dlc, receipt.docEntry]);
-  const dlcInputValue = dlcISO ? dlcISO.slice(0, 10) : "";
-  const saveDlc = async (value: string, itemCode: string) => {
-    if (value === lastSavedDlc.current) return;                 // inchangé → rien
-    setSavingDlc(true);
+  // ── DLC (fraîcheur) — PAR LOT, saisie/édition depuis le détail, sur la ligne ──
+  // Avec « une EM par ligne », chaque ligne porte SON lot (« EM<n°> ») donc SA
+  // propre DLC ; sur une EM historique (multi-lignes), toutes les lignes
+  // partagent le lot du document. Saisie côté TeleVent (jamais SAP).
+  const [dlcEdits, setDlcEdits] = useState<Record<string, string>>({});   // lot → "yyyy-mm-dd" en cours d'édition
+  const [savingDlcLots, setSavingDlcLots] = useState<Set<string>>(new Set());
+  useEffect(() => { setDlcEdits({}); }, [receipt.docEntry]);
+  /** Valeur affichée dans l'input date d'un lot (édition en cours sinon valeur connue). */
+  const dlcInputOf = (lot: string): string =>
+    dlcEdits[lot] !== undefined ? dlcEdits[lot] : (dlcMap[lot] ? dlcMap[lot]!.slice(0, 10) : "");
+  /** ISO du lot pour le badge fraîcheur (édition en cours prioritaire). */
+  const dlcISOOf = (lot: string): string | null | undefined =>
+    dlcEdits[lot] !== undefined ? (dlcEdits[lot] ? new Date(dlcEdits[lot]).toISOString() : null) : dlcMap[lot];
+  const saveDlc = async (lot: string, value: string, itemCode: string) => {
+    const prev = dlcMap[lot] ? dlcMap[lot]!.slice(0, 10) : "";
+    if (value === prev) return;                                 // inchangé → rien
+    setSavingDlcLots((c) => new Set(c).add(lot));
     try {
       const res = await fetch("/api/lots/dlc", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ batchNumber: receipt.lot, itemCode, expirationDate: value || null }),
+        body: JSON.stringify({ batchNumber: lot, itemCode, expirationDate: value || null }),
       });
       const j = await res.json();
       if (!res.ok || j.ok === false) {
         // Échec (droits, réseau…) : on revient à la dernière valeur enregistrée.
-        setDlcISO(lastSavedDlc.current ? new Date(lastSavedDlc.current).toISOString() : null);
+        setDlcEdits((c) => { const n = { ...c }; delete n[lot]; return n; });
         toast.error(j.error || "DLC non enregistrée");
         return;
       }
       const iso = value ? new Date(value).toISOString() : null;
-      lastSavedDlc.current = value;
-      setDlcISO(iso);
-      onDlcSaved?.(receipt.lot, iso);
-      toast.success(value ? `DLC du lot ${receipt.lot} enregistrée` : `DLC du lot ${receipt.lot} effacée`);
+      onDlcSaved?.(lot, iso);
+      setDlcEdits((c) => { const n = { ...c }; delete n[lot]; return n; });
+      toast.success(value ? `DLC du lot ${lot} enregistrée` : `DLC du lot ${lot} effacée`);
     } catch (e) {
-      setDlcISO(lastSavedDlc.current ? new Date(lastSavedDlc.current).toISOString() : null);
+      setDlcEdits((c) => { const n = { ...c }; delete n[lot]; return n; });
       toast.error((e as Error).message);
-    } finally { setSavingDlc(false); }
+    } finally { setSavingDlcLots((c) => { const n = new Set(c); n.delete(lot); return n; }); }
   };
 
   // Un seul jeu de tailles : le détail ne vit plus qu'en PLEIN ÉCRAN.
@@ -725,10 +792,12 @@ function ReceiptDetail({
     if (next === (receipt.numAtCard ?? "")) return;
     setSavingBl(true);
     try {
+      // Groupe « une EM par ligne » : le n° de BL est posé sur TOUTES les EM SAP
+      // du groupe (elles partagent la même référence fournisseur).
       const res = await fetch("/api/sap/goods-receipts", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docEntry: receipt.docEntry, numAtCard: next }),
+        body: JSON.stringify({ docEntry: receipt.docEntry, docEntries: groupEntries(receipt), numAtCard: next }),
       });
       const j = await res.json();
       if (!res.ok || j.ok === false) throw new Error(j.error || "Échec");
@@ -802,12 +871,19 @@ function ReceiptDetail({
         {receipt.lines.map((l, i) => {
           const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi, frgnName: l.frgnName });
           const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
+          const lot = lineLot(receipt, l);
           return (
-            <div key={`m-${l.itemCode}-${i}`} className="rounded-lg border border-border bg-card/40 p-3">
+            <div key={`m-${lineKey(receipt, l)}-${i}`} className="rounded-lg border border-border bg-card/40 p-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
-                  <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
+                  <div className="text-[12px] font-mono text-muted-foreground mt-0.5">
+                    {l.itemCode}
+                    {/* n° de l'EM SAP qui porte CETTE ligne (une EM par ligne) */}
+                    {l.docNum != null && (
+                      <span className={`ml-2 ${l.cancelled ? "line-through" : ""}`}>EM {l.docNum}</span>
+                    )}
+                  </div>
                   <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1.5" />
                 </div>
                 {!restricted && (
@@ -832,18 +908,18 @@ function ReceiptDetail({
                   <span>PU {l.price != null ? eur(l.price) : "—"}</span>
                 ))}
               </div>
-              {/* DLC (fraîcheur) du lot — sur la ligne, éditable */}
+              {/* DLC (fraîcheur) du lot DE LA LIGNE — éditable */}
               <div className="flex items-center gap-2 mt-2 text-[13px]">
                 <span className="text-muted-foreground shrink-0">DLC</span>
                 <input
                   type="date"
-                  value={dlcInputValue}
-                  onChange={(e) => setDlcISO(e.target.value ? new Date(e.target.value).toISOString() : null)}
-                  onBlur={(e) => saveDlc(e.target.value, l.itemCode)}
+                  value={dlcInputOf(lot)}
+                  onChange={(e) => setDlcEdits((c) => ({ ...c, [lot]: e.target.value }))}
+                  onBlur={(e) => saveDlc(lot, e.target.value, l.itemCode)}
                   className="h-8 rounded-md border border-input bg-background px-2 text-[12px] tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                 />
-                <FreshnessBadge dlc={dlcISO} />
-                {savingDlc && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+                <FreshnessBadge dlc={dlcISOOf(lot)} />
+                {savingDlcLots.has(lot) && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
               </div>
             </div>
           );
@@ -862,6 +938,8 @@ function ReceiptDetail({
         <table className={`w-full ${tbl}`}>
           <thead className="bg-secondary/40 uppercase tracking-wide text-muted-foreground">
             <tr>
+              {/* n° de l'EM SAP qui porte chaque ligne (une EM par ligne) */}
+              <th className={`text-left font-semibold w-20 ${th}`}>N° EM</th>
               <th className={`text-left font-semibold w-24 ${th}`}>Qté</th>
               <th className={`text-left font-semibold w-28 ${th}`}>Code Article</th>
               <th className={`text-left font-semibold ${th}`}>Fruit</th>
@@ -878,8 +956,13 @@ function ReceiptDetail({
             {receipt.lines.map((l, i) => {
               const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi, frgnName: l.frgnName });
               const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
+              const lot = lineLot(receipt, l);
               return (
-                <tr key={`${l.itemCode}-${i}`} className="border-t border-border/50">
+                <tr key={`${lineKey(receipt, l)}-${i}`} className={`border-t border-border/50 ${l.cancelled ? "opacity-60" : ""}`}>
+                  {/* n° de l'EM SAP qui porte CETTE ligne (une EM par ligne) */}
+                  <td className={`font-mono whitespace-nowrap ${td} ${l.cancelled ? "line-through text-muted-foreground" : ""}`}>
+                    # {l.docNum ?? receipt.docNum}
+                  </td>
                   <td className={`tnum whitespace-nowrap ${td}`}>{fmtColis(l.packageQuantity)} <span className="text-muted-foreground">colis</span></td>
                   <td className={`font-mono ${td}`}>{l.itemCode}</td>
                   <td className={`text-foreground ${td}`}>{dz.fruit}</td>
@@ -888,18 +971,18 @@ function ReceiptDetail({
                   <td className={td}><Chip kind="variete">{dz.variete}</Chip></td>
                   <td className={td}><Chip kind="pays">{dz.pays}</Chip></td>
                   <td className={td}>
-                    {/* DLC (fraîcheur) du lot — sur la ligne, éditable */}
+                    {/* DLC (fraîcheur) du lot DE LA LIGNE — éditable */}
                     <div className="flex items-center gap-1.5">
                       <input
                         type="date"
-                        value={dlcInputValue}
-                        onChange={(e) => setDlcISO(e.target.value ? new Date(e.target.value).toISOString() : null)}
-                        onBlur={(e) => saveDlc(e.target.value, l.itemCode)}
+                        value={dlcInputOf(lot)}
+                        onChange={(e) => setDlcEdits((c) => ({ ...c, [lot]: e.target.value }))}
+                        onBlur={(e) => saveDlc(lot, e.target.value, l.itemCode)}
                         className="h-8 rounded-md border border-input bg-background px-2 text-[12px] tnum focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                       />
-                      {savingDlc
+                      {savingDlcLots.has(lot)
                         ? <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
-                        : <FreshnessBadge dlc={dlcISO} className="shrink-0" />}
+                        : <FreshnessBadge dlc={dlcISOOf(lot)} className="shrink-0" />}
                     </div>
                   </td>
                   {!restricted && (
@@ -913,7 +996,7 @@ function ReceiptDetail({
                     <td className={`text-right tnum font-medium ${td}`}>
                       {canEditPrices && priceEdits[i] ? (
                         <span className="inline-flex items-center justify-end gap-1">
-                          {savingLines.has(priceEdits[i].lineNum) && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+                          {savingLines.has(priceEdits[i].key) && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
                           <NumberInput value={emEffTotal(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { lineTotal: n == null ? "" : String(n), forceTotal: n != null })} onBlur={() => saveLine(i)} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className={`h-8 w-24 text-right ${priceEdits[i].forceTotal ? "ring-1 ring-amber-400" : ""}`} />
                         </span>
                       ) : (lineHT != null ? eur(lineHT) : "—")}
@@ -926,15 +1009,15 @@ function ReceiptDetail({
           {!restricted && (
             <tfoot>
               <tr className="border-t border-border bg-secondary/30">
-                <td colSpan={8} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total HT</td>
+                <td colSpan={9} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total HT</td>
                 <td colSpan={2} className={`text-right tnum font-semibold text-foreground ${td} ${totVal}`}>{eur(totHT)}</td>
               </tr>
               <tr className="bg-secondary/20">
-                <td colSpan={8} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>TVA</td>
+                <td colSpan={9} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>TVA</td>
                 <td colSpan={2} className={`text-right tnum text-muted-foreground ${td}`}>{eur(totTVA)}</td>
               </tr>
               <tr className="bg-secondary/30 border-t border-border">
-                <td colSpan={8} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total TTC</td>
+                <td colSpan={9} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total TTC</td>
                 <td colSpan={2} className={`text-right tnum font-bold text-foreground ${td} ${totVal}`}>{eur(totTTC)}</td>
               </tr>
             </tfoot>
@@ -1025,7 +1108,8 @@ function ReceiptDetail({
               ) : (
                 <span className="inline-flex items-center gap-2">
                   <span className="text-[13.5px] text-foreground">
-                    Annuler l&apos;entrée # {receipt.docNum} ? Le stock entré sera sorti.
+                    Annuler l&apos;entrée # {receipt.docNum}
+                    {groupEntries(receipt).length > 1 ? ` (${groupEntries(receipt).length} EM SAP)` : ""} ? Le stock entré sera sorti.
                   </span>
                   <Button variant="destructive" size="sm" onClick={cancelReceipt} disabled={cancelling}>
                     {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Confirmer
@@ -1062,18 +1146,25 @@ function ReceiptDetail({
             {receipt.lines.map((l) => {
               const maxQ = l.packageQuantity ?? l.pieceQuantity ?? 0;
               const unit = l.packageQuantity != null ? "colis" : "pièces";
+              const k = lineKey(receipt, l);
               // Désignation décomposée (fruit + tags) — même lecture que le détail.
               const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi, frgnName: l.frgnName });
               return (
-                <li key={l.lineNum} className="flex items-start justify-between gap-2.5">
+                <li key={k} className="flex items-start justify-between gap-2.5">
                   <div className="min-w-0 flex-1">
-                    <div className="text-[14px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
+                    <div className="text-[14px] font-semibold text-foreground leading-tight">
+                      {dz.fruit}
+                      {/* EM SAP qui porte la ligne : le retour se crée sur ELLE */}
+                      {l.docNum != null && receipt.grouped && (
+                        <span className="ml-2 font-mono text-[11px] font-medium text-muted-foreground">EM {l.docNum}</span>
+                      )}
+                    </div>
                     <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1" />
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <NumberInput
-                      value={returnQty[l.lineNum] === "" || returnQty[l.lineNum] == null ? null : parseFloat(returnQty[l.lineNum])}
-                      onValueChange={(n) => setReturnQty((c) => ({ ...c, [l.lineNum]: n == null ? "" : String(n) }))}
+                      value={returnQty[k] === "" || returnQty[k] == null ? null : parseFloat(returnQty[k])}
+                      onValueChange={(n) => setReturnQty((c) => ({ ...c, [k]: n == null ? "" : String(n) }))}
                       min={0} max={maxQ} step={1} decimals={2} allowEmpty placeholder="0"
                       className="h-9 w-20 text-right"
                     />

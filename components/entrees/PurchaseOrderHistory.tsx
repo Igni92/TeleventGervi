@@ -144,14 +144,25 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
       });
       const j = await res.json();
       if (!res.ok || j.ok === false) throw new Error(j.error || "Échec");
+      // « Une EM par ligne » : la réception peut créer PLUSIEURS EM SAP (une par
+      // ligne de la commande) — regroupées sous le n° de la première.
+      const emCount = Array.isArray(j.docNums) ? j.docNums.length : 1;
+      const emLabel = emCount > 1
+        ? `entrée marchandise #${j.docNum} créée (${emCount} EM SAP, une par ligne : #${(j.docNums as number[]).join(", #")})`
+        : `entrée marchandise #${j.docNum} créée (lot ${j.lot})`;
       if (agreage.status === "RESERVE") {
         notifyReceptionIncidentsChanged();   // badge sidebar → apparaît tout de suite
         toast.warning(
-          `Réception AVEC RÉSERVE (${agreage.type ?? "Qualité"}) — entrée marchandise #${j.docNum} créée (lot ${j.lot}), incident de réception ouvert`,
+          `Réception AVEC RÉSERVE (${agreage.type ?? "Qualité"}) — ${emLabel}, incident de réception ouvert`,
           { duration: 10000 },
         );
       } else {
-        toast.success(`Réception agréée conforme — entrée marchandise #${j.docNum} créée (lot ${j.lot})`, { duration: 9000 });
+        toast.success(`Réception agréée conforme — ${emLabel}`, { duration: 9000 });
+      }
+      // Échec PARTIEL : les lignes restées ouvertes sur la CF se réceptionnent
+      // en relançant « Réceptionner » (seules les lignes ouvertes sont reprises).
+      if (j.partialError) {
+        toast.warning(`Réception incomplète : ${j.partialError}. Relance la réception pour les lignes restantes.`, { duration: 12000 });
       }
       setLargeEntry(null);
       await load();
