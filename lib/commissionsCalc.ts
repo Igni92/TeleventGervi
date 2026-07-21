@@ -62,6 +62,8 @@ export interface PayslipCommission {
   fromMonth: string;
   toMonth: string;
   monthsCount: number;
+  /** Détail mois par mois de ce qui est réglé sur cette paie (ancien → récent). */
+  months: { month: string; base: number; prime: number; invoices: number; avoirs: number }[];
 }
 
 export function primeRateOf(cfg: Map<string, { rate: number; since: Date }>, slp: string): number {
