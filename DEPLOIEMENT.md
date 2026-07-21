@@ -69,6 +69,36 @@ Positionner `RELANCE_LIVE=1` → les relances partent vers `Client.emailCompta`
 Vercel → onglet **Deployments** → un déploiement précédent → **Promote to
 Production** (rollback instantané). Le tag `v1.0.0` repère la version livrée.
 
+## 8. Synchronisation SAP — ordonnancement des crons
+Le miroir SAP (factures, avoirs, commandes, EM → pilotage & marges) est alimenté
+par un déclencheur **externe** qui appelle, toutes les ~30 min :
+```
+GET https://televent.gervifrais.com/api/cron/sap-sync
+en-tête : x-cron-secret: <CRON_SECRET>
+```
+L'endpoint (auth `CRON_SECRET`, cf. `lib/cronAuth.ts`) enchaîne miroir documents
+puis produits/stock — idempotent, throttle serveur 60 s. Le cron **natif Vercel**
+a été retiré (cadence 30 min non permise par le plan → bloquait les déploiements
+prod) : l'ordonnancement vit donc **hors Vercel**.
+
+**Cible : VPS OVH** (centralise tous les crons du parc). Crontab à poser sur le VPS :
+```cron
+# /etc/cron.d/televent-sync  (secret dans /etc/televent/sync.env → CRON_SECRET=…)
+*/30 * * * *  root  . /etc/televent/sync.env; curl -fsS --max-time 300 \
+  -H "x-cron-secret: $CRON_SECRET" \
+  https://televent.gervifrais.com/api/cron/sap-sync \
+  >> /var/log/televent-sync.log 2>&1
+```
+
+**Dépannage actuel (avant bascule OVH)** : un workflow **GitHub Actions**
+(`.github/workflows/sap-sync.yml`, `*/30` + déclenchement manuel) tape le même
+endpoint. Pré-requis : secret GitHub `CRON_SECRET`. ⚠️ **Quand le VPS OVH prend le
+relais, désactiver ce workflow** (Actions → *SAP mirror sync* → *Disable*) pour ne
+pas déclencher deux fois — sans danger (idempotent + throttle), mais inutile.
+
+En manuel, un admin peut toujours resynchroniser depuis
+*Paramètres → Données stats → **Synchroniser maintenant*** (ou le backfill mensuel).
+
 ## Alternative on-prem (si SAP n'était joignable qu'en interne)
 Sur un serveur Windows/Linux du réseau (qui voit SAP) :
 ```bash

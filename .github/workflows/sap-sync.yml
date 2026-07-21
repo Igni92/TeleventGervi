@@ -13,6 +13,12 @@ name: SAP mirror sync
 # Il tape simplement l'endpoint machine déjà en place (auth CRON_SECRET) :
 #   GET /api/cron/sap-sync  →  miroir documents PUIS produits/stock (idempotent).
 #
+# ⚠️ DÉPANNAGE / TEMPORAIRE : l'ordonnancement cible est un VPS OVH qui
+# centralisera tous les crons du parc (crontab → même endpoint, même en-tête
+# x-cron-secret ; cf. DEPLOIEMENT.md §8). Quand le VPS OVH prend le relais,
+# DÉSACTIVER ce workflow (Actions → SAP mirror sync → Disable) pour ne pas
+# déclencher deux fois — sans danger (idempotent + throttle 60 s), mais inutile.
+#
 # PRÉ-REQUIS (à faire UNE FOIS dans GitHub → Settings) :
 #   • Secret  CRON_SECRET   = la même valeur que la variable d'env Vercel prod.
 #   • (option) Variable SAP_SYNC_URL si l'URL prod diffère du défaut ci-dessous.
