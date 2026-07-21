@@ -1167,3 +1167,17 @@ futur). `lib/commissions` = requêtes.
 |-------|-------|
 | La ligne de commission n'affichait qu'un total ; une fois le curseur avancé, aucune trace de ce qui avait été payé. | **Détail « ce qui est payé »** (carte Paie › Commissions, dépliable) : par commercial, mois par mois, avec le montant de chaque mois — plus lien vers le détail facture par facture du Pilotage. **Trace immuable** : à chaque envoi de paie, un snapshot fige qui a été payé, sur quelle période, combien (par mois) — jamais recalculé. |
 | — | Nouvel onglet **« Commissions »** (/salaires) : historique des versements, paie par paie, dépliable (commercial → mois), total cumulé versé. `salcommpaid:<mois>` (AppSetting). Rectif = même période rejouée (cursorBefore mémorisé), la trace reste fidèle. |
+
+## 🧾 État comptable PDF — une page par personne (heures par semaine) + ligne commission lisible
+
+> Demande : « dans cet état, détaille les heures par semaine effectuées, 1 page
+> par personne ; et la ligne de détail des commissions est trop longue — rends
+> ça le plus lisible et comptable-friendly ».
+
+| Avant | Après |
+|-------|-------|
+| Page 1 = récap équipe + bloc « Détails » fourre-tout ; la ligne commission débordait avec « → » cassé en « ! » et un renvoi « Pilotage › Commerciaux ». | **Page 1 = récap équipe** inchangé ; **puis une PAGE PAR PERSONNE** : tableau des heures **semaine par semaine** (Semaine · Période · Travaillées · dont contrat · dont majorées · Férié · Congés + ligne Total), suivi des **Éléments de paie**. |
+| Ligne commission : « Prime — Commissions ventes — rattrapage novembre 2025 ! juillet 2026 (5 %) : … — Cumul de 9 mois… Pilotage › Commerciaux ». | **Courte et propre** : « Commission sur ventes (5 %) — rattrapage 9 mois : 849,66 € (Période du nov. 2025 au juil. 2026, base retenue 16 993,20 €) ». Plus de flèche cassée (ascii() gère « → »), plus de renvoi outil interne. |
+
+Détail hebdo calculé côté API (`buildWeekly`, semaines rattachées au mois par
+leur dimanche, comme l'agrégat), porté par la ligne `SalaryWeek`.

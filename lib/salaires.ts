@@ -54,6 +54,20 @@ export interface SalaryPrime {
  *  (lib/commissions), jamais persistée, VERROUILLÉE dans l'UI. */
 export const COMMISSION_PRIME_ID = "commission-auto";
 
+/** Détail des heures d'UNE semaine d'un salarié (pour la page par personne). */
+export interface SalaryWeek {
+  week: string;        // "2026-W30"
+  label: string;       // "S30"
+  from: string;        // ISO date (lundi)
+  to: string;          // ISO date (dimanche)
+  totalMin: number;    // heures travaillées
+  contractMin: number; // dont contractuelles
+  suppMin: number;     // dont majorées (25/50 %) brutes
+  ferieMin: number;
+  congesMin: number;
+  hasData: boolean;    // false = semaine sans saisie
+}
+
 /** Une commission versée à UN commercial sur UNE paie — figée à l'envoi. */
 export interface CommissionPaidEntry {
   slp: string;
