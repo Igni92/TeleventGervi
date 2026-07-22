@@ -20,7 +20,7 @@ import {
 import { formatDateInput } from "@/lib/utils";
 import { parseDeliveryDays, defaultDeliveryDate } from "@/lib/deliveryDays";
 import { nextDeliveryDate, nextWorkingDeliveryDay } from "@/lib/livraison";
-import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
+import { splitByWarehouse, totalAvailable, saleableAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
 
 interface DeliveryMode { id: string; name: string; sapCardCode: string; isDefault: boolean }
@@ -226,8 +226,7 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
     const { packDivisor, displayUnit, priceUnit } = unitInfo(p.salesUnit, p.salesQtyPerPackUnit);
     const availByWarehouse: Record<string, number> = {};
     for (const w of ["000", "01", "R1"]) {
-      const a = (p.stockByWarehouse[w]?.available ?? 0) / packDivisor;  // pièces → colis (ou kg)
-      availByWarehouse[w] = Math.floor(a * 10) / 10;
+      availByWarehouse[w] = saleableAvailable(p.stockByWarehouse[w]?.available ?? 0, packDivisor);
     }
     const wh = (["R1", "01", "000"].find((w) => availByWarehouse[w] > 0)) ?? "01";
     setLines((cur) => {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
-import { unitInfo } from "@/lib/gervifrais-calc";
+import { unitInfo, saleableAvailable } from "@/lib/gervifrais-calc";
 
 /**
  * GET /api/sap/orders/last?clientId=xxx
@@ -59,8 +59,8 @@ export async function GET(req: NextRequest) {
       const { packDivisor, displayUnit, priceUnit } = unitInfo(p?.salesUnit, p?.salesQtyPerPackUnit);
       const availByWarehouse: Record<string, number> = {};
       for (const w of ["000", "01", "R1"]) {
-        const a = (p?.stocks.find((s) => s.warehouse === w)?.available ?? 0) / packDivisor;
-        availByWarehouse[w] = Math.floor(a * 10) / 10;
+        const raw = p?.stocks.find((s) => s.warehouse === w)?.available ?? 0;
+        availByWarehouse[w] = saleableAvailable(raw, packDivisor);
       }
       return {
         itemCode: code,

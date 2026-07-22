@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  splitByWarehouse, totalAvailable, computeItfel, computeDdg,
+  splitByWarehouse, totalAvailable, saleableAvailable, computeItfel, computeDdg,
   categoryFromGroupName, resolveCoef, computeSuggestedPrice, personalStock, unitInfo,
   chooseLot, LOT_PENDING,
   LOT_FAMILY_PREFIX, familyLotSentinel, familyOfLot, isLotPending, isRealLot,
@@ -56,6 +56,23 @@ describe("splitByWarehouse — découpe multi-entrepôt", () => {
   });
   it("ignore les dispos négatives (committed > stock)", () => {
     expect(totalAvailable({ "000": 48, "01": -129, R1: 0 })).toBe(48);
+  });
+});
+
+describe("saleableAvailable — le vendable exclut les colis entamés", () => {
+  it("article emballé (colis de 4) : le reliquat sous un colis complet est invendable", () => {
+    // 14,3 kg dispo / 4 kg le colis = 3,575 → un colis a été entamé (0,575 kg
+    // restant) : jamais offert à la vente, seuls les 3 colis ENTIERS le sont.
+    expect(saleableAvailable(14.3, 4)).toBe(3);
+  });
+  it("colis pile (aucun reliquat) → tout le disponible reste vendable", () => {
+    expect(saleableAvailable(16, 4)).toBe(4);
+  });
+  it("sans emballage (packDivisor 1, vente au kg/à la pièce en vrac) → reste fractionnaire", () => {
+    expect(saleableAvailable(14.37, 1)).toBe(14.3);
+  });
+  it("stock négatif (committed > stock) → 0, jamais négatif", () => {
+    expect(saleableAvailable(-5, 4)).toBe(0);
   });
 });
 
