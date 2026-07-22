@@ -180,15 +180,22 @@ export function ProspectionBoard() {
           className="w-full text-left px-3 pt-2.5 pb-2 transition-transform duration-100 active:scale-[0.98]">
           <div className="flex items-start gap-1.5">
             <span className="text-[13px] font-semibold text-white/90 leading-snug flex-1">{r.nom}</span>
-            {r.qualifieLabo && <Check className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />}
           </div>
           <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
             {r.city && <span className="text-[11px] text-white/45">{r.city}</span>}
-            {r.probaLabo && (
+            {/* Labo qualifié → certitude (on n'affiche plus l'estimation de proba).
+                Non qualifié → pas de labo. Inconnu → estimation de proba. */}
+            {r.qualifieLabo === true ? (
+              <span className="text-[9.5px] px-1.5 py-0.5 rounded ring-1 bg-emerald-500/15 text-emerald-300 ring-emerald-500/30 inline-flex items-center gap-0.5">
+                <Check className="h-3 w-3" /> labo confirmé
+              </span>
+            ) : r.qualifieLabo === false ? (
+              <span className="text-[9.5px] px-1.5 py-0.5 rounded ring-1 bg-white/[0.05] text-white/45 ring-white/10">sans labo</span>
+            ) : r.probaLabo ? (
               <span className={`text-[9.5px] px-1.5 py-0.5 rounded ring-1 ${PROBA_COLOR[r.probaLabo] ?? PROBA_COLOR["À qualifier"]}`}>
                 labo {r.probaLabo.toLowerCase()}
               </span>
-            )}
+            ) : null}
             {r.nextRdvAt && (
               <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/30">
                 RDV {new Date(r.nextRdvAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}
