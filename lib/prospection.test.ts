@@ -56,6 +56,21 @@ describe("classifyAccount — séparation CLIENT / PROSPECT", () => {
     expect(classifyByDays(5, "QUALIFICATION")).toBe("PROSPECT");
     expect(classifyByDays(5, "GAGNE")).toBe("CLIENT");
   });
+
+  it("classifyByDays — seuls GMS/EXPORT/CHR deviennent prospect en dormance", () => {
+    // Dormant, segment prospectable → PROSPECT.
+    expect(classifyByDays(400, null, "GMS")).toBe("PROSPECT");
+    expect(classifyByDays(400, null, "EXPORT")).toBe("PROSPECT");
+    expect(classifyByDays(null, null, "CHR")).toBe("PROSPECT");
+    // Dormant mais hors segment (indépendant, marché, grossiste, sans type) → reste CLIENT.
+    expect(classifyByDays(400, null, null)).toBe("CLIENT");
+    expect(classifyByDays(400, null, "MARCHE")).toBe("CLIENT");
+    expect(classifyByDays(null, null, "GROSSISTE")).toBe("CLIENT");
+    // En pipeline actif → PROSPECT quel que soit le type.
+    expect(classifyByDays(5, "QUALIFICATION", "MARCHE")).toBe("PROSPECT");
+    // Récent → CLIENT dans tous les cas.
+    expect(classifyByDays(30, null, "GMS")).toBe("CLIENT");
+  });
 });
 
 describe("pipeline — étapes", () => {
