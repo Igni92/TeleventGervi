@@ -183,16 +183,28 @@ export function isProspect(
   return classifyAccount(lastOrderAt, prospectStage, now) === "PROSPECT";
 }
 
+/** Seuls ces segments basculent en PROSPECT quand ils deviennent dormants. */
+export const PROSPECTABLE_TYPES = new Set(["GMS", "EXPORT", "CHR"]);
+
 /**
  * Variante à partir du NOMBRE DE JOURS depuis la dernière commande (déjà calculé
  * côté liste `/plan-appel`, évite de reconstruire une date). `null` = jamais
- * commandé → PROSPECT.
+ * commandé.
+ *
+ * `type` optionnel : la dormance ne fait basculer en PROSPECT que les segments
+ * prospectables (GMS / EXPORT / CHR). Un compte d'un autre type (indépendant,
+ * marché, grossiste…) reste CLIENT même sans commande depuis +1 an. Un compte
+ * activement en pipeline (prospectStage ≠ GAGNE) reste PROSPECT quel que soit
+ * son type. `type` absent = ancien comportement (pas de restriction).
  */
 export function classifyByDays(
   lastOrderDays: number | null | undefined,
   prospectStage: string | null | undefined,
+  type?: string | null,
 ): AccountKind {
   if (prospectStage && prospectStage !== "GAGNE") return "PROSPECT";
+  // Compte hors segments prospectables → reste client même dormant.
+  if (type !== undefined && !PROSPECTABLE_TYPES.has(type ?? "")) return "CLIENT";
   if (lastOrderDays == null) return "PROSPECT";
   return lastOrderDays <= PROSPECT_INACTIVITY_DAYS ? "CLIENT" : "PROSPECT";
 }

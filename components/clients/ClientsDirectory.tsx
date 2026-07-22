@@ -150,7 +150,7 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
     let total = 0, todayCount = 0, stale30 = 0, withIncidents = 0, noVendeur = 0, clientsN = 0, prospectsN = 0;
     for (const c of clients) {
       total++;
-      if (classifyByDays(c.lastOrderDays, c.prospectStage) === "PROSPECT") prospectsN++; else clientsN++;
+      if (classifyByDays(c.lastOrderDays, c.prospectStage, c.type) === "PROSPECT") prospectsN++; else clientsN++;
       const days = c.joursAppel ? c.joursAppel.split(",").map(Number) : [];
       if (c.activeTelevente && days.includes(today)) todayCount++;
       if (c.activeTelevente && (c.lastOrderDays == null || c.lastOrderDays >= 30)) stale30++;
@@ -180,7 +180,7 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
         if (!days.includes(today)) return false;
       }
       if (incidents && c.openIncidents === 0) return false;
-      const kind = classifyByDays(c.lastOrderDays, c.prospectStage);
+      const kind = classifyByDays(c.lastOrderDays, c.prospectStage, c.type);
       if (statut === "clients" && kind !== "CLIENT") return false;
       if (statut === "prospects" && kind !== "PROSPECT") return false;
       return true;
