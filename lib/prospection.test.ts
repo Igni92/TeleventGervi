@@ -31,9 +31,14 @@ describe("classifyAccount — séparation CLIENT / PROSPECT", () => {
     expect(classifyAccount(undefined, null, NOW)).toBe("PROSPECT");
   });
 
-  it("en pipeline (≠ GAGNE) → PROSPECT même avec commande récente", () => {
-    expect(classifyAccount(daysAgo(5), "QUALIFICATION", NOW)).toBe("PROSPECT");
-    expect(classifyAccount(daysAgo(5), "PRESENTATION", NOW)).toBe("PROSPECT");
+  it("en pipeline (≠ GAGNE) sans commande récente → PROSPECT", () => {
+    expect(classifyAccount(null, "QUALIFICATION", NOW)).toBe("PROSPECT");
+    expect(classifyAccount(daysAgo(400), "PRESENTATION", NOW)).toBe("PROSPECT");
+  });
+
+  it("« BL → client » : commande récente prime sur l'état pipeline", () => {
+    expect(classifyAccount(daysAgo(5), "QUALIFICATION", NOW)).toBe("CLIENT");
+    expect(classifyAccount(daysAgo(5), "PRESENTATION", NOW)).toBe("CLIENT");
   });
 
   it("GAGNE + commande récente → CLIENT", () => {
@@ -53,7 +58,8 @@ describe("classifyAccount — séparation CLIENT / PROSPECT", () => {
     expect(classifyByDays(30, null)).toBe("CLIENT");
     expect(classifyByDays(400, null)).toBe("PROSPECT");
     expect(classifyByDays(null, null)).toBe("PROSPECT");
-    expect(classifyByDays(5, "QUALIFICATION")).toBe("PROSPECT");
+    expect(classifyByDays(400, "QUALIFICATION")).toBe("PROSPECT"); // pipeline sans BL récent
+    expect(classifyByDays(5, "QUALIFICATION")).toBe("CLIENT");     // BL récent → client
     expect(classifyByDays(5, "GAGNE")).toBe("CLIENT");
   });
 
@@ -66,9 +72,10 @@ describe("classifyAccount — séparation CLIENT / PROSPECT", () => {
     expect(classifyByDays(400, null, null)).toBe("CLIENT");
     expect(classifyByDays(400, null, "MARCHE")).toBe("CLIENT");
     expect(classifyByDays(null, null, "GROSSISTE")).toBe("CLIENT");
-    // En pipeline actif → PROSPECT quel que soit le type.
-    expect(classifyByDays(5, "QUALIFICATION", "MARCHE")).toBe("PROSPECT");
-    // Récent → CLIENT dans tous les cas.
+    // En pipeline actif SANS commande récente → PROSPECT (segment prospectable).
+    expect(classifyByDays(400, "QUALIFICATION", "GMS")).toBe("PROSPECT");
+    // « BL → client » : commande récente prime sur tout (même type/pipeline).
+    expect(classifyByDays(5, "QUALIFICATION", "MARCHE")).toBe("CLIENT");
     expect(classifyByDays(30, null, "GMS")).toBe("CLIENT");
   });
 });

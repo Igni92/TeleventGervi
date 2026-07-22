@@ -158,8 +158,8 @@ export type AccountKind = "CLIENT" | "PROSPECT";
 
 /**
  * Classe un compte en CLIENT ou PROSPECT.
- *   • prospectStage renseigné et ≠ GAGNE  → PROSPECT (en cours de travail) ;
- *   • sinon, commande < 1 an               → CLIENT ;
+ *   • commande < 1 an (BL récent)          → CLIENT (« BL → client », prime sur tout) ;
+ *   • sinon, prospectStage renseigné ≠ GAGNE → PROSPECT (en cours de travail) ;
  *   • sinon (aucune commande, ou > 1 an)   → PROSPECT.
  * `now` injectable pour les tests (défaut : maintenant).
  */
@@ -168,11 +168,12 @@ export function classifyAccount(
   prospectStage: string | null | undefined,
   now: Date = new Date(),
 ): AccountKind {
-  if (prospectStage && prospectStage !== "GAGNE") return "PROSPECT";
   const last = lastOrderAt ? new Date(lastOrderAt) : null;
-  if (!last || Number.isNaN(last.getTime())) return "PROSPECT";
-  const days = (now.getTime() - last.getTime()) / 86_400_000;
-  return days <= PROSPECT_INACTIVITY_DAYS ? "CLIENT" : "PROSPECT";
+  const hasDate = last && !Number.isNaN(last.getTime());
+  // Une commande RÉCENTE prime : dès qu'un BL existe (< 1 an), c'est un client.
+  if (hasDate && (now.getTime() - last!.getTime()) / 86_400_000 <= PROSPECT_INACTIVITY_DAYS) return "CLIENT";
+  if (prospectStage && prospectStage !== "GAGNE") return "PROSPECT";
+  return "PROSPECT"; // aucune commande ou dormant > 1 an
 }
 
 export function isProspect(
@@ -202,11 +203,12 @@ export function classifyByDays(
   prospectStage: string | null | undefined,
   type?: string | null,
 ): AccountKind {
+  // « BL → client » : une commande récente (< 1 an) prime sur l'état pipeline.
+  if (lastOrderDays != null && lastOrderDays <= PROSPECT_INACTIVITY_DAYS) return "CLIENT";
   if (prospectStage && prospectStage !== "GAGNE") return "PROSPECT";
   // Compte hors segments prospectables → reste client même dormant.
   if (type !== undefined && !PROSPECTABLE_TYPES.has(type ?? "")) return "CLIENT";
-  if (lastOrderDays == null) return "PROSPECT";
-  return lastOrderDays <= PROSPECT_INACTIVITY_DAYS ? "CLIENT" : "PROSPECT";
+  return "PROSPECT"; // dormant (> 1 an) ou jamais commandé, segment prospectable
 }
 
 /* ─────────────────────────── Rendez-vous / RDV ──────────────────────────── */

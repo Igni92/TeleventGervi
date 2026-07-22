@@ -807,6 +807,18 @@ function FichePanel({ row, onClose, onPatch, onReload }: {
   const next = nextStage(row.prospectStage);
   const [note, setNote] = useState("");
   const [rdvOpen, setRdvOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+
+  async function requestCreation() {
+    setCreating(true);
+    try {
+      const r = await fetch(`/api/prospection/${row.id}/request-creation`, { method: "POST" });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || "Échec");
+      toast.success(j.notified > 0 ? `Notification envoyée (${j.notified}) — client à créer dans SAP` : "Demandé — active les notifications pour être alerté");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Échec"); }
+    finally { setCreating(false); }
+  }
 
   return (
     <div className="fixed inset-0 z-[70] flex justify-end bg-black/50" onClick={onClose}>
@@ -854,6 +866,11 @@ function FichePanel({ row, onClose, onPatch, onReload }: {
             {stageLabel(next)} <ChevronRight className="h-3.5 w-3.5" />
           </button>
         )}
+        <button onClick={requestCreation} disabled={creating}
+          title="Le prospect veut une 1re commande : notifie qu'il faut le créer dans SAP (partenaire)"
+          className="inline-flex items-center gap-1 text-[12.5px] px-3 py-1.5 rounded-lg bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30 hover:bg-amber-500/25 disabled:opacity-50">
+          {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} Client à créer (1re cde)
+        </button>
         <button onClick={() => setRdvOpen((v) => !v)}
           className="inline-flex items-center gap-1 text-[12.5px] px-3 py-1.5 rounded-lg ring-1 ring-white/10 text-white/80 hover:bg-white/[0.06]">
           <CalendarPlus className="h-3.5 w-3.5" /> Rendez-vous
