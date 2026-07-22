@@ -21,9 +21,15 @@ import { getClientTournee } from "@/lib/clientTournee";
  *     alimentée par « Détail livraison » et la création de bon) — sert à
  *     pré-sélectionner la tournée par défaut à la création (useTourneeSelection).
  *
+ * Query optionnelle `?cardCode=` : résout pour CE CardCode plutôt que le code
+ * client de base — un compte de livraison alternatif (ex. « LPOI. » / SCACHAP)
+ * a sa PROPRE affectation SERG_TRCL / historique / tournée mémorisée, un magasin
+ * à part entière, à ne PAS faire hériter du compte direct du même client.
+ * Ignoré (repli code client) si le CardCode fourni n'appartient pas à ce client.
+ *
  * Cache : lib/clientCarriers.ts garde un cache module-level 10 min par CardCode.
  */
-export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
@@ -37,11 +43,23 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
   if (!client) return NextResponse.json({ error: "Client introuvable" }, { status: 404 });
   if (!client.code) return NextResponse.json({ carriers: [], defaultId: null });
 
+  // CardCode à résoudre : celui du compte de livraison demandé (doit appartenir
+  // à CE client), sinon le code client de base.
+  let cardCode = client.code;
+  const requested = req.nextUrl.searchParams.get("cardCode")?.trim();
+  if (requested && requested.toUpperCase() !== client.code.trim().toUpperCase()) {
+    const owns = await prisma.$queryRawUnsafe<{ n: number }[]>(
+      `SELECT COUNT(*)::int AS n FROM "ClientDeliveryMode" WHERE "clientId" = $1 AND "sapCardCode" = $2`,
+      client.id, requested,
+    );
+    if (owns[0]?.n) cardCode = requested;
+  }
+
   // Tournée mémorisée (additif, best-effort) — pré-sélection du défaut au front.
-  const savedTournee = await getClientTournee(client.code).catch(() => null);
+  const savedTournee = await getClientTournee(cardCode).catch(() => null);
 
   try {
-    const result = await getClientCarriers(client.code);
+    const result = await getClientCarriers(cardCode);
     return NextResponse.json({ ...result, savedTournee });
   } catch (e) {
     // Résilience : SAP indisponible → contrat respecté avec liste vide, le front

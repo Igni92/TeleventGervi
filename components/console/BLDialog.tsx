@@ -82,12 +82,15 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
   const [modes, setModes] = useState<DeliveryMode[]>([]);
   const [modeId, setModeId] = useState<string>("");
   // Transporteur + TOURNÉE — obligatoires sur le bon, pré-remplis avec le défaut
-  // du client (SERG_TRCL → mémoire app → tournée unique). Hook partagé (écran 2).
+  // du COMPTE ACTIF (SERG_TRCL → mémoire app → tournée unique), pas forcément le
+  // compte direct du client : un compte alternatif (LPOI. / SCACHAP…) a sa propre
+  // affectation, traitée comme n'importe quel autre magasin. Hook partagé (écran 2).
+  const activeCardCode = modes.find((m) => m.id === modeId)?.sapCardCode;
   const {
     carriers, carrierSap, setCarrierSap,
     tournees, tourneeId, setTourneeId,
     validateTournee, tourneePayload,
-  } = useTourneeSelection(clientId, open);
+  } = useTourneeSelection(clientId, open, activeCardCode);
   const [deliveryDate, setDeliveryDate] = useState<string>("");
   const [comment, setComment] = useState<string>("");
   const [numAtCard, setNumAtCard] = useState<string>("");      // N° de commande client → SAP NumAtCard
