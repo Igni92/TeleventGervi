@@ -69,6 +69,12 @@ const HISTORY_MONTHS = 24;
 // commande (la liste est demandée à chaque ouverture du sélecteur).
 const cache = new Map<string, { at: number; result: ClientCarriersResult }>();
 
+/** "LPOI." (variante SCACHAP) → "LPOI" (client SAP de base). Inchangé si le
+ *  code n'a pas de suffixe point (cf. isDotVariant/foldDotVariant, import SAP). */
+function baseCardCode(cardCode: string): string {
+  return cardCode.trim().replace(/\.+$/, "");
+}
+
 /** "ECOLISE" → "Ecolise" (nom par défaut d'un Carrier créé à la volée). */
 function prettyName(code: string): string {
   const c = code.trim();
@@ -438,6 +444,18 @@ export async function getClientCarriers(cardCode: string): Promise<ClientCarrier
   const trclRows = await fetchTrclRows(cardCode.trim());
   if (trclRows) result = await buildFromTrcl(trclRows);
   if (!result) result = await buildFromHistory(cardCode.trim());
+
+  // Repli code de BASE : une variante SCACHAP ("LPOI.") n'a souvent aucune ligne
+  // SERG_TRCL / historique propre (le client SAP réellement affecté au
+  // transporteur est le code SANS le point) — sans ce repli, un BL parti sur le
+  // compte point n'avait ni transporteur ni tournée par défaut (à saisir à la
+  // main), alors que le même client sur son compte principal en a un.
+  if (result.carriers.length === 0) {
+    const base = baseCardCode(cardCode);
+    if (base && base.toUpperCase() !== key) {
+      result = await getClientCarriers(base);
+    }
+  }
 
   cache.set(key, { at: Date.now(), result });
   return result;
