@@ -437,6 +437,7 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
   const [sort, setSort] = useState("proba");
   const [enseigne, setEnseigne] = useState("");
   const [source, setSource] = useState("");
+  const [format, setFormat] = useState("");
   const [rows, setRows] = useState<PoolRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -449,13 +450,14 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
       const p = new URLSearchParams({ search, sort, limit: "100" });
       if (enseigne) p.set("enseigne", enseigne);
       if (source) p.set("source", source);
+      if (format) p.set("format", format);
       const r = await fetch(`/api/prospection/pool?${p}`, { cache: "no-store" });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error || "Erreur");
       setRows(j.rows as PoolRow[]); setTotal(j.total ?? 0); setSel(new Set());
     } catch (e) { toast.error(e instanceof Error ? e.message : "Erreur"); }
     finally { setLoading(false); }
-  }, [search, sort, enseigne, source]);
+  }, [search, sort, enseigne, source, format]);
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
 
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -492,6 +494,11 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
               <option value="gms">GMS (prospection)</option>
               <option value="ancien">Anciens clients</option>
             </select>
+            <select value={format} onChange={(e) => setFormat(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Format du magasin (proxy taille / labo)">
+              <option value="">Tous formats</option>
+              <option value="Hyper">Hyper (labo probable)</option>
+              <option value="Super">Super</option>
+            </select>
             <select value={enseigne} onChange={(e) => setEnseigne(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Enseigne">
               <option value="">Toutes enseignes</option>
               {ENSEIGNE_CHOICES.map((c) => <option key={c} value={c}>{ENSEIGNE_LABELS[c] ?? c}</option>)}
@@ -510,7 +517,7 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
             className="inline-flex items-center gap-1 rounded-lg bg-brand-600 hover:bg-brand-700 px-3 h-8 text-white font-semibold disabled:opacity-40">
             <Plus className="h-3.5 w-3.5" /> Ajouter la sélection ({sel.size})
           </button>
-          <button disabled={adding || !total} onClick={() => add({ all: true, search, enseigne, source }, `${total} résultats`)}
+          <button disabled={adding || !total} onClick={() => add({ all: true, search, enseigne, source, format }, `${total} résultats`)}
             className="inline-flex items-center gap-1 rounded-lg ring-1 ring-white/10 px-3 h-8 text-white/80 hover:bg-white/[0.06] disabled:opacity-40">
             Tout ajouter ({total})
           </button>
@@ -533,6 +540,9 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
                       <span className="text-[10.5px] text-white/40">{[r.city, r.zipCode].filter(Boolean).join(" · ")}</span>
                       {r.prospectEnseigne && r.prospectEnseigne !== "AUTRE" && (
                         <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/30">{ENSEIGNE_LABELS[r.prospectEnseigne] ?? r.prospectEnseigne}</span>
+                      )}
+                      {r.prospectFormat === "Hyper" && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30">Hyper</span>
                       )}
                       {r.prospectSource === "ancien-client" && (
                         <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30">ancien client</span>

@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
   const sort = sp.get("sort") || "proba";
   const enseigne = (sp.get("enseigne") || "").trim();      // code enseigne (A, ITM, …)
   const source = (sp.get("source") || "").trim();          // 'gms' | 'ancien'
+  const format = (sp.get("format") || "").trim();          // 'Hyper' | 'Super'
   const limit = Math.min(500, Math.max(1, Number(sp.get("limit") || 100)));
 
   const conds: string[] = [`c."prospectStage" IS NULL`, `c."prospectSource" IS NOT NULL`];
@@ -50,6 +51,10 @@ export async function GET(req: NextRequest) {
   if (enseigne) {
     params.push(enseigne);
     conds.push(`c."prospectEnseigne" = $${params.length}`);
+  }
+  if (format === "Hyper" || format === "Super") {
+    params.push(format);
+    conds.push(`c."prospectFormat" = $${params.length}`);
   }
   if (source === "gms") conds.push(`c."prospectSource" = 'import-gms-idf-patisserie'`);
   else if (source === "ancien") conds.push(`c."prospectSource" = 'ancien-client'`);
@@ -90,7 +95,7 @@ export async function POST(req: NextRequest) {
   const scope = await getAccessScope(session);
   const slp = await getOwnSlpName(session);
 
-  const body = (await req.json().catch(() => ({}))) as { ids?: unknown; all?: unknown; search?: unknown; proba?: unknown; enseigne?: unknown; source?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { ids?: unknown; all?: unknown; search?: unknown; proba?: unknown; enseigne?: unknown; source?: unknown; format?: unknown };
 
   // Sélecteur : liste d'ids OU tout le vivier filtré (all + search/proba).
   const conds: string[] = [`"prospectStage" IS NULL`, `"prospectSource" IS NOT NULL`];
@@ -115,6 +120,10 @@ export async function POST(req: NextRequest) {
     }
     if (body.source === "gms") conds.push(`"prospectSource" = 'import-gms-idf-patisserie'`);
     else if (body.source === "ancien") conds.push(`"prospectSource" = 'ancien-client'`);
+    if (body.format === "Hyper" || body.format === "Super") {
+      params.push(body.format);
+      conds.push(`"prospectFormat" = $${params.length}`);
+    }
   } else {
     return NextResponse.json({ error: "Rien à ajouter (ids ou all requis)." }, { status: 400 });
   }
