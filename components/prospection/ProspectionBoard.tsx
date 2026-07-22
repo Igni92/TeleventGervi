@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Target, CalendarPlus, Check, X, Phone, MapPin, ChevronLeft, ChevronRight, ArrowLeft, Plus, Search } from "lucide-react";
+import { Loader2, Target, CalendarPlus, Check, X, Phone, MapPin, ChevronLeft, ChevronRight, ArrowLeft, Plus, Search, BarChart3 } from "lucide-react";
 import {
   PIPELINE_STAGES, getStage, nextStage, stageLabel,
   LOST_REASONS, RDV_TYPES, NOTIFY_MINUTES_CHOICES, notifyLabel, DEFAULT_NOTIFY_MINUTES_BEFORE,
@@ -42,6 +42,7 @@ export function ProspectionBoard() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [overStage, setOverStage] = useState<string | null>(null);
   const [poolOpen, setPoolOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [mobileIdx, setMobileIdx] = useState(0);
   const stageKeys = PIPELINE_STAGES.map((s) => s.key);
   // Menu contextuel (clic droit) : sur une carte (id) ou une colonne (stageKey).
@@ -228,6 +229,10 @@ export function ProspectionBoard() {
           value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrer la pipeline…"
           className="ml-auto h-9 w-52 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-[13px] text-white placeholder:text-white/35 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
+        <button onClick={() => setStatsOpen(true)}
+          className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 text-[13px] text-white/70 hover:bg-white/[0.08]">
+          <BarChart3 className="h-4 w-4" /> Stats
+        </button>
         <button onClick={() => setPoolOpen(true)}
           className="h-9 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 px-3 text-[13px] text-white font-semibold">
           <Plus className="h-4 w-4" /> Ajouter des prospects
@@ -349,6 +354,7 @@ export function ProspectionBoard() {
       {/* Fiche prospect — tiroir en superposition (desktop + mobile) */}
       {sel && <FichePanel key={sel.id} row={sel} onClose={() => setSelId(null)} onPatch={patch} onReload={load} />}
       {poolOpen && <AddProspectsPanel onClose={() => setPoolOpen(false)} onAdded={load} />}
+      {statsOpen && <StatsPanel onClose={() => setStatsOpen(false)} />}
 
       {/* Menu contextuel (clic droit) */}
       {menu && (() => {
@@ -557,6 +563,153 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
             {total > rows.length && <li className="text-[11px] text-white/35 text-center pt-1">{rows.length} affichés sur {total} — affinez la recherche ou « Tout ajouter ».</li>}
           </ul>
         )}
+      </aside>
+    </div>
+  );
+}
+
+type Stats = {
+  kpis: { won: number; lost: number; inPipeline: number; vivier: number; conversion: number | null };
+  funnel: { k: string; n: number }[];
+  lostByReason: { k: string | null; n: number }[];
+  byOwner: { k: string | null; won: number; lost: number; active: number }[];
+  vivierComposition: {
+    byEnseigne: { k: string | null; n: number }[];
+    byFormat: { k: string | null; n: number }[];
+    byProba: { k: string | null; n: number }[];
+    bySource: { k: string | null; n: number }[];
+  };
+};
+
+/** Barre horizontale simple (largeur = valeur / max). */
+function Bar({ label, n, max, color, sub }: { label: string; n: number; max: number; color?: string; sub?: string }) {
+  const pct = max > 0 ? Math.max(3, Math.round((n / max) * 100)) : 0;
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-28 shrink-0 truncate text-[11.5px] text-white/70" title={label}>{label}</span>
+      <span className="relative h-4 flex-1 overflow-hidden rounded bg-white/[0.05]">
+        <span className="absolute inset-y-0 left-0 rounded transition-[width] duration-500" style={{ width: `${pct}%`, background: color ?? "#6366f1" }} />
+      </span>
+      <span className="w-14 shrink-0 text-right text-[11.5px] tabular-nums text-white/80">{n}{sub}</span>
+    </div>
+  );
+}
+
+function StatsPanel({ onClose }: { onClose: () => void }) {
+  const [data, setData] = useState<Stats | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/prospection/stats", { cache: "no-store" });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j?.error || "Erreur");
+        setData(j as Stats);
+      } catch (e) { setErr(e instanceof Error ? e.message : "Erreur"); }
+    })();
+  }, []);
+
+  const KPI = ({ label, value, tone }: { label: string; value: string | number; tone?: string }) => (
+    <div className="flex-1 min-w-[92px] rounded-xl bg-white/[0.03] ring-1 ring-white/[0.06] px-3 py-2.5">
+      <div className={`text-[19px] font-bold ${tone ?? "text-white/90"}`}>{value}</div>
+      <div className="text-[10.5px] uppercase tracking-wide text-white/45">{label}</div>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-[80] flex justify-end bg-black/50" onClick={onClose}>
+      <aside onClick={(e) => e.stopPropagation()} className="w-[520px] max-w-[94vw] h-full overflow-y-auto bg-[#0f141c] ring-1 ring-white/10 p-4 space-y-4">
+        <div className="flex items-center gap-2">
+          <BarChart3 className="h-5 w-5 text-brand-400" />
+          <h2 className="text-[15px] font-bold text-white/90 flex-1">Statistiques de prospection</h2>
+          <button onClick={onClose} className="h-7 w-7 grid place-items-center rounded-lg text-white/40 hover:text-white hover:bg-white/[0.06]"><X className="h-4 w-4" /></button>
+        </div>
+
+        {err && <div className="rounded-lg bg-rose-500/10 text-rose-300 ring-1 ring-rose-500/30 px-3 py-2 text-[13px]">{err}</div>}
+        {!data && !err && <div className="grid place-items-center py-16 text-white/40"><Loader2 className="h-6 w-6 animate-spin" /></div>}
+
+        {data && (() => {
+          const funnelMax = Math.max(1, ...data.funnel.map((f) => f.n));
+          const lostMax = Math.max(1, ...data.lostByReason.map((f) => f.n));
+          const ensMax = Math.max(1, ...data.vivierComposition.byEnseigne.map((f) => f.n));
+          return (
+            <>
+              {/* KPIs */}
+              <div className="flex flex-wrap gap-2">
+                <KPI label="Vivier" value={data.kpis.vivier} />
+                <KPI label="En pipeline" value={data.kpis.inPipeline} tone="text-brand-300" />
+                <KPI label="Gagnés" value={data.kpis.won} tone="text-emerald-300" />
+                <KPI label="Perdus" value={data.kpis.lost} tone="text-rose-300" />
+                <KPI label="Conversion" value={data.kpis.conversion == null ? "—" : `${data.kpis.conversion}%`} tone="text-amber-300" />
+              </div>
+
+              {/* Entonnoir */}
+              <section className="rounded-xl bg-white/[0.02] ring-1 ring-white/[0.06] p-3 space-y-2">
+                <p className="text-[10px] uppercase tracking-wider font-bold text-white/40">Entonnoir</p>
+                {data.funnel.map((f) => (
+                  <Bar key={f.k} label={stageLabel(f.k)} n={f.n} max={funnelMax} color={getStage(f.k)?.color} />
+                ))}
+              </section>
+
+              {/* Perdus par motif */}
+              {data.lostByReason.length > 0 && (
+                <section className="rounded-xl bg-white/[0.02] ring-1 ring-white/[0.06] p-3 space-y-2">
+                  <p className="text-[10px] uppercase tracking-wider font-bold text-white/40">Perdus — motifs</p>
+                  {data.lostByReason.map((f, i) => (
+                    <Bar key={i} label={f.k ?? "Non précisé"} n={f.n} max={lostMax} color="#ef4444" />
+                  ))}
+                </section>
+              )}
+
+              {/* Par commercial */}
+              {data.byOwner.length > 0 && (
+                <section className="rounded-xl bg-white/[0.02] ring-1 ring-white/[0.06] p-3">
+                  <p className="text-[10px] uppercase tracking-wider font-bold text-white/40 mb-2">Par commercial</p>
+                  <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 gap-y-1 text-[12px]">
+                    <span className="text-white/40 text-[10.5px]">Commercial</span>
+                    <span className="text-emerald-300/70 text-[10.5px] text-right">Gagnés</span>
+                    <span className="text-rose-300/70 text-[10.5px] text-right">Perdus</span>
+                    <span className="text-brand-300/70 text-[10.5px] text-right">En cours</span>
+                    {data.byOwner.map((o, i) => (
+                      <div key={i} className="contents">
+                        <span className="text-white/80 truncate">{o.k ?? "Non attribué"}</span>
+                        <span className="text-right tabular-nums text-emerald-300">{o.won}</span>
+                        <span className="text-right tabular-nums text-rose-300">{o.lost}</span>
+                        <span className="text-right tabular-nums text-brand-300">{o.active}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Composition du vivier */}
+              <section className="rounded-xl bg-white/[0.02] ring-1 ring-white/[0.06] p-3 space-y-3">
+                <p className="text-[10px] uppercase tracking-wider font-bold text-white/40">Vivier — composition</p>
+                <div className="space-y-1.5">
+                  {data.vivierComposition.byEnseigne.map((f, i) => (
+                    <Bar key={i} label={ENSEIGNE_LABELS[f.k ?? ""] ?? f.k ?? "—"} n={f.n} max={ensMax} color="#0ea5e9" />
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {data.vivierComposition.byFormat.map((f, i) => (
+                    <span key={i} className="text-[11px] px-2 py-1 rounded-lg bg-white/[0.05] text-white/70">{f.k ?? "—"} : <b className="text-white/90">{f.n}</b></span>
+                  ))}
+                  {data.vivierComposition.byProba.map((f, i) => (
+                    <span key={i} className={`text-[11px] px-2 py-1 rounded-lg ring-1 ${PROBA_COLOR[f.k ?? ""] ?? "bg-white/[0.05] ring-white/10 text-white/70"}`}>{f.k ?? "—"} : <b>{f.n}</b></span>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {data.vivierComposition.bySource.map((f, i) => (
+                    <span key={i} className="text-[11px] px-2 py-1 rounded-lg bg-white/[0.05] text-white/70">
+                      {f.k === "ancien-client" ? "Anciens clients" : f.k === "import-gms-idf-patisserie" ? "GMS" : (f.k ?? "—")} : <b className="text-white/90">{f.n}</b>
+                    </span>
+                  ))}
+                </div>
+              </section>
+            </>
+          );
+        })()}
       </aside>
     </div>
   );
