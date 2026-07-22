@@ -18,7 +18,8 @@ export const dynamic = "force-dynamic";
 
 type PoolRow = {
   id: string; code: string; nom: string; city: string | null; zipCode: string | null;
-  probaLabo: string | null;
+  probaLabo: string | null; prospectEnseigne: string | null; prospectFormat: string | null;
+  prospectSource: string | null;
 };
 
 /** Condition d'accès au vivier : admin → tout ; commercial → non attribué ou à lui. */
@@ -36,6 +37,8 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const search = (sp.get("search") || "").trim();
   const sort = sp.get("sort") || "proba";
+  const enseigne = (sp.get("enseigne") || "").trim();      // code enseigne (A, ITM, …)
+  const source = (sp.get("source") || "").trim();          // 'gms' | 'ancien'
   const limit = Math.min(500, Math.max(1, Number(sp.get("limit") || 100)));
 
   const conds: string[] = [`c."prospectStage" IS NULL`, `c."prospectSource" IS NOT NULL`];
@@ -44,6 +47,12 @@ export async function GET(req: NextRequest) {
     params.push(`%${search}%`);
     conds.push(`(c."nom" ILIKE $${params.length} OR c."city" ILIKE $${params.length} OR c."zipCode" ILIKE $${params.length})`);
   }
+  if (enseigne) {
+    params.push(enseigne);
+    conds.push(`c."prospectEnseigne" = $${params.length}`);
+  }
+  if (source === "gms") conds.push(`c."prospectSource" = 'import-gms-idf-patisserie'`);
+  else if (source === "ancien") conds.push(`c."prospectSource" = 'ancien-client'`);
   if (!scope.all) {
     if (!scope.slpName) return NextResponse.json({ rows: [], total: 0 });
     params.push(scope.slpName);
@@ -52,12 +61,14 @@ export async function GET(req: NextRequest) {
   const order =
     sort === "ville" ? `c."city" ASC NULLS LAST, c."nom" ASC`
     : sort === "nom" ? `c."nom" ASC`
+    : sort === "enseigne" ? `c."prospectEnseigne" ASC NULLS LAST, c."nom" ASC`
     : // proba : Élevée → Moyenne-haute → Moyenne → À qualifier
       `CASE c."probaLabo" WHEN 'Élevée' THEN 0 WHEN 'Moyenne-haute' THEN 1 WHEN 'Moyenne' THEN 2 ELSE 3 END, c."nom" ASC`;
 
   try {
     const rows = await prisma.$queryRawUnsafe<PoolRow[]>(
-      `SELECT c."id", c."code", c."nom", c."city", c."zipCode", c."probaLabo"
+      `SELECT c."id", c."code", c."nom", c."city", c."zipCode", c."probaLabo",
+              c."prospectEnseigne", c."prospectFormat", c."prospectSource"
          FROM "Client" c WHERE ${conds.join(" AND ")}
         ORDER BY ${order} LIMIT ${limit}`,
       ...params,
@@ -79,7 +90,7 @@ export async function POST(req: NextRequest) {
   const scope = await getAccessScope(session);
   const slp = await getOwnSlpName(session);
 
-  const body = (await req.json().catch(() => ({}))) as { ids?: unknown; all?: unknown; search?: unknown; proba?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { ids?: unknown; all?: unknown; search?: unknown; proba?: unknown; enseigne?: unknown; source?: unknown };
 
   // Sélecteur : liste d'ids OU tout le vivier filtré (all + search/proba).
   const conds: string[] = [`"prospectStage" IS NULL`, `"prospectSource" IS NOT NULL`];
@@ -98,6 +109,12 @@ export async function POST(req: NextRequest) {
       params.push(body.proba);
       conds.push(`"probaLabo" = $${params.length}`);
     }
+    if (typeof body.enseigne === "string" && body.enseigne) {
+      params.push(body.enseigne);
+      conds.push(`"prospectEnseigne" = $${params.length}`);
+    }
+    if (body.source === "gms") conds.push(`"prospectSource" = 'import-gms-idf-patisserie'`);
+    else if (body.source === "ancien") conds.push(`"prospectSource" = 'ancien-client'`);
   } else {
     return NextResponse.json({ error: "Rien à ajouter (ids ou all requis)." }, { status: 400 });
   }
