@@ -45,7 +45,10 @@ export async function GET(req: NextRequest) {
   // pour la prospection (prospectSource renseigné, non encore GAGNE) vivent
   // dans /prospection : sans ça, les 1 000 fiches sans commande (last_order NULL)
   // passent en tête (ORDER BY … NULLS FIRST) et saturent la LIMIT → 0 client.
-  conds.push(Prisma.sql`(c."prospectSource" IS NULL OR c."prospectStage" = 'GAGNE')`);
+  // RÈGLE « BL → client » : dès qu'une commande existe (< 365 j), le compte
+  // réintègre le cockpit même s'il porte encore un prospectSource (il redevient
+  // client automatiquement à la 1re commande, sans manip).
+  conds.push(Prisma.sql`(c."prospectSource" IS NULL OR c."prospectStage" = 'GAGNE' OR lo."last_order" >= now() - interval '365 days')`);
   if (!scope.all && scope.slpName) {
     conds.push(Prisma.sql`(c."commercial" = ${scope.slpName} OR c."vendeur" = ${scope.slpName})`);
   }
