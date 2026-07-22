@@ -25,6 +25,19 @@ export function totalAvailable(availByWarehouse: Record<string, number>): number
   return WAREHOUSE_FILL_ORDER.reduce((s, w) => s + Math.max(0, availByWarehouse[w] ?? 0), 0);
 }
 
+/** Stock VENDABLE (console/BL), converti en unité d'affichage (colis/kg).
+ *  Un article emballé en COLIS (packDivisor > 1) n'est proposé qu'en COLIS
+ *  ENTIERS : le reliquat en dessous d'un colis complet vient forcément d'un
+ *  colis déjà ENTAMÉ (ouvert) — invendable tel quel, réservé à la
+ *  transformation (découpe/épluchage, cf. lib/fabrication-optim.ts) et donc
+ *  EXCLU du disponible pour la vente. Sans emballage (packDivisor = 1, vente
+ *  au kg/à la pièce en vrac), le stock reste fractionnaire (précision 0,1). */
+export function saleableAvailable(rawAvailable: number, packDivisor: number): number {
+  const div = packDivisor > 0 ? packDivisor : 1;
+  const colis = Math.max(0, rawAvailable) / div;
+  return div > 1 ? Math.floor(colis) : Math.floor(colis * 10) / 10;
+}
+
 /** Répartit une quantité sur les entrepôts par ordre de puisage (000→01→R1).
  *  Le surplus (sur-vente) part sur un chunk SÉPARÉ marqué `decouvert` (magasin
  *  d'attente 000) : la quantité en stock garde son magasin + son lot, le reste

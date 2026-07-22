@@ -13,7 +13,7 @@ import {
   evaluateLineSafeguards, evaluateOrderSafeguards, normalizeSafeguardsConfig, splitViolations,
   type SafeguardsConfig, type SafeguardViolation,
 } from "@/lib/safeguards";
-import { splitByWarehouse, totalAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
+import { splitByWarehouse, totalAvailable, saleableAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
 import { nextDeliveryDate, nextWorkingDeliveryDay, isPrecommande } from "@/lib/livraison";
 import { familyOf } from "@/lib/familles";
@@ -96,11 +96,13 @@ interface TarifItem { itemCode: string; price: number; note?: string | null }
 
 /* ── C2 — Helpers promo (purs) ─────────────────────────────── */
 
-/** Recalcule les COLIS OFFERTS d'une ligne promo (X_PLUS_Y ou FREE). Dans les
- *  deux cas, les offerts s'AJOUTENT à la quantité saisie (ligne à 0 € sur le bon).
- *  X_PLUS_Y (« 5 achetés + 1 offert ») : pour chaque buyQty commandés → freeQty
- *    offerts en plus → freeUnits = freeQty × floor(qty / buyQty). (Ex. 5 → +1, 10 → +2.)
- *  FREE (« 1 colis offert ») : freeQty offerts dès qu'on commande l'article (sans seuil).
+/** Recalcule les COLIS OFFERTS d'une ligne promo (X_PLUS_Y ou FREE).
+ *  X_PLUS_Y (« 5 achetés + 1 offert ») : l'offert s'AJOUTE à la quantité saisie
+ *    (ligne à 0 € À CÔTÉ de la ligne payante) — pour chaque buyQty commandés →
+ *    freeQty offerts en plus → freeUnits = freeQty × floor(qty / buyQty). (Ex. 5 → +1, 10 → +2.)
+ *  FREE (« colis offert », sans seuil) : PAS d'ajout — le(s) colis déjà saisi(s)
+ *    DEVIENNENT offerts (jusqu'à freeQty). 1 PETALE saisi + promo activée → cette
+ *    unique ligne passe à 100 % de remise, un colis reste un colis sur le bon.
  *  No-op pour les autres lignes — appelé à chaque changement de quantité. */
 function applyPromoFree(line: CartLine): CartLine {
   if (line.freeManual) return line;   // « offert » saisi à la main → on n'écrase pas
@@ -112,9 +114,17 @@ function applyPromoFree(line: CartLine): CartLine {
     return { ...line, freeUnits, discountPercent: 0 };
   }
   if (pr?.kind === "FREE" && pr.freeQty > 0) {
-    return { ...line, freeUnits: qty > 0 ? pr.freeQty : 0, discountPercent: 0 };
+    // Carvé DANS la quantité saisie — jamais plus que ce qui est réellement au panier.
+    const freeUnits = qty > 0 ? Math.min(qty, pr.freeQty) : 0;
+    return { ...line, freeUnits, discountPercent: 0 };
   }
   return line;
+}
+
+/** true si les colis offerts de la ligne s'AJOUTENT à la quantité saisie
+ *  (X_PLUS_Y) plutôt que d'être pris SUR elle (FREE, cf. applyPromoFree). */
+function freeIsAdditive(l: Pick<CartLine, "promo">): boolean {
+  return l.promo?.kind === "X_PLUS_Y";
 }
 
 /** Libellé court du badge promo : « −10 % », « 2,80 € », « 5+1 » ou « +1 offert ». */
@@ -636,7 +646,10 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   // quand la marchandise arrivera (validation auto à la réception). Évite le
   // décalage magasin 000/01 à la source.
   const hasDecouvert = useMemo(
-    () => cart.some((l) => (l.quantity + Math.max(0, Math.floor(l.freeUnits ?? 0))) > totalAvailable(l.availByWarehouse ?? {})),
+    () => cart.some((l) => {
+      const shipped = l.quantity + (freeIsAdditive(l) ? Math.max(0, Math.floor(l.freeUnits ?? 0)) : 0);
+      return shipped > totalAvailable(l.availByWarehouse ?? {});
+    }),
     [cart],
   );
   // Vente Sofruce : le découvert ne force PAS le bon de commande — l'achat créé
@@ -855,7 +868,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
       const p = byCode.get(l.itemCode);
       if (!p) return l;
       const avail: Record<string, number> = {};
-      for (const w of ["000", "01", "R1"]) avail[w] = Math.max(0, Math.floor(((p.stockByWarehouse[w]?.available ?? 0) / l.packDivisor) * 10) / 10);
+      for (const w of ["000", "01", "R1"]) avail[w] = saleableAvailable(p.stockByWarehouse[w]?.available ?? 0, l.packDivisor);
       return { ...l, availByWarehouse: avail };
     }));
   }, [grouped]);
@@ -1064,7 +1077,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   const buildLine = (p: Product, opts?: { quantity?: number; price?: number | null; noPromo?: boolean }): CartLine => {
     const { packDivisor, displayUnit, priceUnit } = unitInfo(p.salesUnit, p.salesQtyPerPackUnit);
     const avail: Record<string, number> = {};
-    for (const w of ["000", "01", "R1"]) avail[w] = Math.max(0, Math.floor(((p.stockByWarehouse[w]?.available ?? 0) / packDivisor) * 10) / 10);
+    for (const w of ["000", "01", "R1"]) avail[w] = saleableAvailable(p.stockByWarehouse[w]?.available ?? 0, packDivisor);
     // Incrément « un colis » : si l'article est vendu au kg, on avance du POIDS
     // d'un colis (ex. 4 kg → 4, 8, 12…) ; sinon d'un colis entier (1).
     // colisWeightKg n'est calculé par unitInfo qu'avec salesItemsPerUnit ; à
@@ -1363,8 +1376,9 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
       const poids = lineWeightKg(l);
       const v = evaluateLineSafeguards(sgConfig, {
         itemCode: l.itemCode, itemName: l.itemName, unit: l.unit,
-        // Volume TOTAL expédié = quantité saisie + colis offerts (promo).
-        quantity: l.quantity + Math.max(0, Math.floor(l.freeUnits ?? 0)),
+        // Volume TOTAL expédié = quantité saisie + colis offerts EN PLUS (X_PLUS_Y
+        // seulement — FREE ne fait que réduire le prix d'une quantité déjà comptée).
+        quantity: l.quantity + (freeIsAdditive(l) ? Math.max(0, Math.floor(l.freeUnits ?? 0)) : 0),
         price: l.price ?? null,
         prixAchat: h?.prixAchat ?? null,
         prixConseille: h?.prixConseille ?? null,
@@ -1463,11 +1477,12 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   const buildApiLines = (lines: CartLine[] = cart): ApiLine[] =>
     lines.flatMap((l) => {
       const kind = l.promo?.kind;
-      // Colis offerts (promo X+Y / offert OU saisis à la main) : EN PLUS de la qté
-      // saisie, en ligne séparée à 0 €. La quantité saisie est entièrement payante.
+      // X_PLUS_Y : les offerts s'AJOUTENT à la qté saisie (ligne 0 € séparée, en
+      // plus de la ligne payante). FREE : les offerts sont PRIS SUR la qté saisie
+      // (« 1 colis offert » = ce colis-là passe à 100 % de remise, pas un de plus).
       const freeUnits = Math.max(0, Math.floor(l.freeUnits ?? 0));
       const paidQty = l.quantity;
-      const totalQty = paidQty + freeUnits;
+      const totalQty = freeIsAdditive(l) ? paidQty + freeUnits : paidQty;
 
       // C2 — PERCENT : le prix panier est NET (déjà remisé) → on renvoie le BRUT
       //   pour que le net SAP retombe sur le prix affiché. Sinon prix plein.
@@ -1480,7 +1495,9 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
 
       // Découpe multi-entrepôt sur la qté TOTALE, puis on carve les colis offerts
       // en tête (mêmes entrepôts) → ligne(s) « offert » à 100 % de remise = 0 €.
-      // Résultat X_PLUS_Y / FREE : 2 lignes (payante + offerte à 0), comme demandé.
+      // X_PLUS_Y : totalQty > qté saisie → ligne payante + ligne offerte séparée.
+      // FREE : totalQty = qté saisie → si tout est offert (freeUnits = totalQty),
+      // UNE SEULE ligne à 100 % de remise (pas de doublon payant + offert).
       const chunks = splitByWarehouse(totalQty, l.availByWarehouse);
       let remainingFree = freeUnits;
       const out: ApiLine[] = [];
@@ -1564,11 +1581,16 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
         const o = l.originalLine;
         const kind = l.promo?.kind;
         if (o) {
-          // Ligne existante → CONSERVÉE (lot préservé). La qté saisie est payante ;
-          // les colis offerts (promo OU saisis à la main) partent en ligne SÉPARÉE à 0 €.
+          // Ligne existante → CONSERVÉE (lot préservé). X_PLUS_Y : la qté saisie
+          // reste entièrement payante, les offerts partent en ligne SÉPARÉE à 0 €.
+          // FREE : les offerts sont PRIS SUR la qté saisie → ligne payante réduite
+          // d'autant (jamais deux lignes pour un seul colis offert).
           const freeColis = Math.max(0, Math.floor(l.freeUnits));
+          const additive = freeIsAdditive(l);
           const qtyChanged = Math.abs(l.quantity - o.qty) > 1e-6;
-          const paidPieces = qtyChanged ? Math.round(l.quantity * l.packDivisor * 1000) / 1000 : o.pieces;
+          const basePieces = qtyChanged ? Math.round(l.quantity * l.packDivisor * 1000) / 1000 : o.pieces;
+          const freePieces = Math.round(freeColis * l.packDivisor * 1000) / 1000;
+          const paidPieces = additive ? basePieces : Math.max(0, Math.round((basePieces - freePieces) * 1000) / 1000);
           // Remise % (PERCENT) portée sur la ligne : prix brut + DiscountPercent.
           let price = l.price;
           let discountPercent: number | undefined;
@@ -1585,14 +1607,16 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
               keep: true, lot: o.lot,
             });
           }
-          // Ligne(s) offerte(s) → nouvelle ligne à 0 € (même article/entrepôt, 100 % remise).
+          // Ligne offerte : X_PLUS_Y → nouvelle ligne à 0 € EN PLUS de la payante
+          // (lot résolu côté serveur). FREE → PORTION de la ligne d'origine, même
+          // lot préservé (o.lot) — ce n'est pas un nouveau colis, juste le même à 0 €.
           if (freeColis > 0) {
             lines.push({
-              itemCode: l.itemCode, quantity: Math.round(freeColis * l.packDivisor * 1000) / 1000,
+              itemCode: l.itemCode, quantity: freePieces,
               ...(o.warehouse ? { warehouseCode: o.warehouse } : {}),
               ...(l.price != null && l.price > 0 ? { price: l.price } : {}),
               discountPercent: 100,
-              keep: false,
+              ...(additive ? { keep: false } : { keep: true, lot: o.lot }),
             });
           }
         } else {
@@ -2576,7 +2600,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                   <span className="ml-auto text-[15px] font-bold tnum">{l.price ? lineHT(l).toFixed(2) : "—"}</span>
                 </div>
                 {/* Colis OFFERTS — lecture seule : non modifiable directement (piloté par
-                    les promotions ; X+Y / FREE l'ajoutent automatiquement). */}
+                    les promotions ; X+Y les ajoute EN PLUS, FREE les prend SUR la qté saisie). */}
                 {l.freeUnits > 0 && (
                   <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-rose-600 dark:text-rose-400">
                     <Gift className="h-3.5 w-3.5 shrink-0" />
@@ -3095,7 +3119,11 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                     <div className="shrink-0 text-right tnum">
                       <p className="text-[16px] sm:text-[17px] font-bold text-foreground">
                         {hasColis ? `${colisCount} colis` : `${baseQty} ${l.priceUnit}`}
-                        {freeColis > 0 && <span className="text-rose-600 dark:text-rose-400"> +{freeColis} off.</span>}
+                        {freeColis > 0 && (
+                          <span className="text-rose-600 dark:text-rose-400">
+                            {freeIsAdditive(l) ? ` +${freeColis} off.` : ` (${freeColis} off.)`}
+                          </span>
+                        )}
                       </p>
                       <p className="text-[12px] text-muted-foreground">
                         {hasColis ? `${baseQty} ${l.priceUnit} · ` : ""}{l.price != null ? `${l.price.toFixed(2)} €/${l.priceUnit}` : "— €"}

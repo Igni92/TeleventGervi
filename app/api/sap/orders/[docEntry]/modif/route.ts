@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { mirrorCreatedOrder, type CreatedOrderForMirror } from "@/lib/sapMirror";
 import { getLotMaps, resolveLotDetailed, LOT_PENDING } from "@/lib/lotResolver";
-import { chooseLot, unitInfo } from "@/lib/gervifrais-calc";
+import { chooseLot, unitInfo, saleableAvailable } from "@/lib/gervifrais-calc";
 import { debitLots, creditLots, isRealLot, getLedgerFifoLot } from "@/lib/lotLedger";
 import { getDeliveryPreparerOne, getDeliveryMiseEnPrepOne } from "@/lib/inventory";
 import { notifyPreparateursPresents } from "@/lib/push";
@@ -112,8 +112,8 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ docEntry
 
     const availByWarehouse: Record<string, number> = {};
     for (const w of ["000", "01", "R1"]) {
-      const a = (p?.stocks.find((s) => s.warehouse === w)?.available ?? 0) / packDivisor;
-      availByWarehouse[w] = Math.floor(a * 10) / 10;
+      const raw = p?.stocks.find((s) => s.warehouse === w)?.available ?? 0;
+      availByWarehouse[w] = saleableAvailable(raw, packDivisor);
     }
 
     // Incrément « un colis » dans l'unité d'affichage (miroir de addToCart côté front).

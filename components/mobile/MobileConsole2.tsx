@@ -23,7 +23,7 @@ import { toast } from "sonner";
 import {
   BadgeEuro, Check, ChevronDown, ChevronUp, Loader2, Minus, Plus, Search, ShoppingCart, Star, Trash2, Truck, X,
 } from "lucide-react";
-import { splitByWarehouse, totalAvailable, unitInfo } from "@/lib/gervifrais-calc";
+import { splitByWarehouse, totalAvailable, saleableAvailable, unitInfo } from "@/lib/gervifrais-calc";
 import { nextDeliveryDate, nextWorkingDeliveryDay, isPrecommande } from "@/lib/livraison";
 import { familyOf } from "@/lib/familles";
 import { priceForArticle, type TarifFruitRow } from "@/lib/tarifFruits";
@@ -80,7 +80,7 @@ interface ProductDisplay {
 function computeDisplay(p: Product): ProductDisplay {
   const { packDivisor, displayUnit, priceUnit } = unitInfo(p.salesUnit, p.salesQtyPerPackUnit);
   const avail: Record<string, number> = {};
-  for (const w of ["000", "01", "R1"]) avail[w] = Math.max(0, Math.floor(((p.stockByWarehouse[w]?.available ?? 0) / packDivisor) * 10) / 10);
+  for (const w of ["000", "01", "R1"]) avail[w] = saleableAvailable(p.stockByWarehouse[w]?.available ?? 0, packDivisor);
   // Incrément « un colis » : article vendu au kg → pas du POIDS d'un colis.
   let colisW = unitInfo(p.salesUnit, p.salesQtyPerPackUnit, p.salesItemsPerUnit ?? null, p.salesUnitWeight).colisWeightKg ?? null;
   if ((colisW == null || colisW <= 0) && displayUnit === "kg") {
