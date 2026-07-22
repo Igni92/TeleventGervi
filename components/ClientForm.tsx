@@ -67,7 +67,7 @@ export function ClientForm({ initialData, mode }: ClientFormProps) {
     defaultValues: {
       code: initialData?.code || "",
       nom: initialData?.nom || "",
-      type: initialData?.type as "EXPORT" | "GMS" | "CHR" | undefined,
+      type: initialData?.type as "EXPORT" | "GMS" | "CHR" | "MARCHE" | "GROSSISTE" | undefined,
       commercial: initialData?.commercial || "",
       tel1: initialData?.tel1 || "",
       tel2: initialData?.tel2 || "",
@@ -172,7 +172,7 @@ export function ClientForm({ initialData, mode }: ClientFormProps) {
           <Select
             value={typeValue || "NONE"}
             onValueChange={(val) =>
-              setValue("type", val === "NONE" ? undefined : (val as "EXPORT" | "GMS" | "CHR"))
+              setValue("type", val === "NONE" ? undefined : (val as "EXPORT" | "GMS" | "CHR" | "MARCHE" | "GROSSISTE"))
             }
           >
             <SelectTrigger className={errors.type ? "border-red-500" : ""}>
@@ -183,6 +183,8 @@ export function ClientForm({ initialData, mode }: ClientFormProps) {
               <SelectItem value="EXPORT">EXPORT</SelectItem>
               <SelectItem value="GMS">GMS</SelectItem>
               <SelectItem value="CHR">CHR</SelectItem>
+              <SelectItem value="MARCHE">MARCHE</SelectItem>
+              <SelectItem value="GROSSISTE">GROSSISTE</SelectItem>
             </SelectContent>
           </Select>
           {errors.type && (

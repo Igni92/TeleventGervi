@@ -49,6 +49,20 @@ function classify(enseigne) {
   return { code: "AUTRE", label: "Indépendant / autre" };
 }
 
+/**
+ * Probabilité de LABO PÂTISSERIE — scoring STRICT (au niveau magasin, la plupart
+ * n'ont PAS de labo) :
+ *   • Élevée      = hypermarché d'une grande enseigne (labo quasi-certain) ;
+ *   • Moyenne     = autre hypermarché (à vérifier) ;
+ *   • À qualifier = tout le reste (supers, convenience, indépendants) → sans labo probable.
+ */
+const HYPER_LABO = new Set(["CARR", "A", "L", "CORA", "CASINO", "GE", "COSTCO"]);
+function scoreProba(type, code) {
+  if (type === "Hyper" && HYPER_LABO.has(code)) return "Élevée";
+  if (type === "Hyper") return "Moyenne";
+  return "À qualifier";
+}
+
 const normAddr = (a) => (a || "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
 
 const data = JSON.parse(readFileSync(SRC, "utf8"));
@@ -60,7 +74,7 @@ for (const p of data) {
   if (seen.has(key)) { dups++; continue; }
   seen.add(key);
   const { code, label } = classify(p.enseigne);
-  out.push({ ...p, enseigneCode: code, enseigneLabel: label });
+  out.push({ ...p, enseigneCode: code, enseigneLabel: label, proba: scoreProba(p.type, code) });
 }
 
 // Réécrit le JSON enrichi + dédoublonné (source unique pour l'app).

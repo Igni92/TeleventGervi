@@ -14,7 +14,7 @@ export const clientSchema = z.object({
     .min(1, "Le nom du client est requis")
     .max(200, "Le nom ne peut pas dépasser 200 caractères"),
   type: z
-    .enum(["EXPORT", "GMS", "CHR"])
+    .enum(["EXPORT", "GMS", "CHR", "MARCHE", "GROSSISTE"])
     .optional()
     .or(z.literal("")),
   commercial: z
@@ -163,7 +163,7 @@ export type AppelLogValues = z.infer<typeof appelLogSchema>;
 
 export const clientQuerySchema = z.object({
   search: z.string().optional(),
-  type: z.enum(["EXPORT", "GMS", "CHR", "ALL"]).optional(),
+  type: z.enum(["EXPORT", "GMS", "CHR", "MARCHE", "GROSSISTE", "ALL"]).optional(),
   commercial: z.string().optional(),
   page: z.coerce.number().min(1).default(1),
   limit: z.coerce.number().min(1).max(100).default(20),
