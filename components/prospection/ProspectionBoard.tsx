@@ -16,6 +16,16 @@ type Row = {
   prospectLostReason: string | null; nextRdvAt: string | null;
 };
 
+/** Libellés courts des codes enseigne (cf. scripts/normalize-prospects.mjs). */
+const ENSEIGNE_LABELS: Record<string, string> = {
+  A: "Auchan", ITM: "Intermarché", U: "Système U", L: "Leclerc", CARR: "Carrefour",
+  MONO: "Monoprix", FP: "Franprix", CASINO: "Casino/Géant", CORA: "Cora", LIDL: "Lidl",
+  ALDI: "Aldi", COSTCO: "Costco", GE: "Grande Épicerie", NATU: "Naturalia", BIO: "Bio",
+  G20: "G20", COCCI: "Coccinelle", PROXI: "Proxi", MF: "Marché Frais", AUTRE: "Indépendant",
+};
+/** Codes proposés dans le filtre (ordre = fréquence approx.). */
+const ENSEIGNE_CHOICES = ["CARR", "ITM", "A", "U", "L", "MONO", "CORA", "CASINO", "GE", "COSTCO", "PROXI", "COCCI", "AUTRE"];
+
 const PROBA_COLOR: Record<string, string> = {
   "Élevée": "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30",
   "Moyenne-haute": "bg-lime-500/15 text-lime-300 ring-lime-500/30",
@@ -30,6 +40,7 @@ export function ProspectionBoard() {
   const [selId, setSelId] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [dragId, setDragId] = useState<string | null>(null);
+  const [overStage, setOverStage] = useState<string | null>(null);
   const [poolOpen, setPoolOpen] = useState(false);
   const [mobileIdx, setMobileIdx] = useState(0);
   const stageKeys = PIPELINE_STAGES.map((s) => s.key);
@@ -158,7 +169,7 @@ export function ProspectionBoard() {
       <div key={r.id}
         draggable={draggable}
         onDragStart={draggable ? () => setDragId(r.id) : undefined}
-        onDragEnd={draggable ? () => setDragId(null) : undefined}
+        onDragEnd={draggable ? () => { setDragId(null); setOverStage(null); } : undefined}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY, kind: "card", id: r.id, view: "root" }); }}
         className={`rounded-xl bg-[#11161f] ring-1 transition-[box-shadow,opacity] duration-150 ${
           selId === r.id ? "ring-brand-500" : "ring-white/[0.07] hover:ring-white/20"
@@ -239,11 +250,16 @@ export function ProspectionBoard() {
             const items = byStage(st.key);
             return (
               <div key={st.key}
-                onDragOver={(e) => { if (dragId) e.preventDefault(); }}
-                onDrop={() => onDrop(st.key)}
+                onDragOver={(e) => { if (dragId) { e.preventDefault(); if (overStage !== st.key) setOverStage(st.key); } }}
+                onDragLeave={(e) => { if (dragId && !e.currentTarget.contains(e.relatedTarget as Node)) setOverStage((s) => (s === st.key ? null : s)); }}
+                onDrop={() => { onDrop(st.key); setOverStage(null); }}
                 onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, kind: "col", stageKey: st.key, view: "root" }); }}
-                className="flex-1 min-w-[256px] flex flex-col rounded-2xl bg-white/[0.02] ring-1 ring-white/[0.06]"
+                className="relative flex-1 min-w-[256px] flex flex-col rounded-2xl bg-white/[0.02] ring-1 ring-white/[0.06]"
               >
+                {/* Surbrillance de dépôt : la colonne survolée s'illumine en jaune. */}
+                {dragId && overStage === st.key && (
+                  <div className="pointer-events-none absolute inset-0 z-20 rounded-2xl bg-amber-400/10 ring-2 ring-amber-400 shadow-[0_0_28px_-4px_rgba(251,191,36,0.55)] transition-opacity duration-150" />
+                )}
                 <div className="flex items-center gap-2 rounded-t-2xl px-3.5 py-2.5" style={{ background: st.color + "1a" }}>
                   <span className="h-2.5 w-2.5 rounded-full" style={{ background: st.color }} />
                   <span className="text-[13px] font-semibold text-white/90">{st.label}</span>
@@ -414,11 +430,13 @@ export function ProspectionBoard() {
   );
 }
 
-type PoolRow = { id: string; code: string; nom: string; city: string | null; zipCode: string | null; probaLabo: string | null };
+type PoolRow = { id: string; code: string; nom: string; city: string | null; zipCode: string | null; probaLabo: string | null; prospectEnseigne: string | null; prospectFormat: string | null; prospectSource: string | null };
 
 function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("proba");
+  const [enseigne, setEnseigne] = useState("");
+  const [source, setSource] = useState("");
   const [rows, setRows] = useState<PoolRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -429,13 +447,15 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
     setLoading(true);
     try {
       const p = new URLSearchParams({ search, sort, limit: "100" });
+      if (enseigne) p.set("enseigne", enseigne);
+      if (source) p.set("source", source);
       const r = await fetch(`/api/prospection/pool?${p}`, { cache: "no-store" });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error || "Erreur");
       setRows(j.rows as PoolRow[]); setTotal(j.total ?? 0); setSel(new Set());
     } catch (e) { toast.error(e instanceof Error ? e.message : "Erreur"); }
     finally { setLoading(false); }
-  }, [search, sort]);
+  }, [search, sort, enseigne, source]);
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
 
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -460,17 +480,29 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
           <span className="text-[12px] text-white/45">{total} dans le vivier</span>
           <button onClick={onClose} className="h-7 w-7 grid place-items-center rounded-lg text-white/40 hover:text-white hover:bg-white/[0.06]"><X className="h-4 w-4" /></button>
         </div>
-        <div className="flex gap-2">
-          <div className="relative flex-1">
+        <div className="space-y-2">
+          <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-white/35" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher (nom, ville, CP)…"
               className="w-full h-9 rounded-lg border border-white/10 bg-white/[0.04] pl-8 pr-3 text-[13px] text-white placeholder:text-white/35 focus:outline-none focus:ring-1 focus:ring-brand-500" />
           </div>
-          <select value={sort} onChange={(e) => setSort(e.target.value)} className="h-9 rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2">
-            <option value="proba">Proba labo</option>
-            <option value="ville">Ville</option>
-            <option value="nom">Nom</option>
-          </select>
+          <div className="flex flex-wrap gap-2">
+            <select value={source} onChange={(e) => setSource(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Origine du prospect">
+              <option value="">Tous types</option>
+              <option value="gms">GMS (prospection)</option>
+              <option value="ancien">Anciens clients</option>
+            </select>
+            <select value={enseigne} onChange={(e) => setEnseigne(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Enseigne">
+              <option value="">Toutes enseignes</option>
+              {ENSEIGNE_CHOICES.map((c) => <option key={c} value={c}>{ENSEIGNE_LABELS[c] ?? c}</option>)}
+            </select>
+            <select value={sort} onChange={(e) => setSort(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Trier par">
+              <option value="proba">Tri : proba labo</option>
+              <option value="enseigne">Tri : enseigne</option>
+              <option value="ville">Tri : ville</option>
+              <option value="nom">Tri : nom</option>
+            </select>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 text-[12px]">
@@ -478,7 +510,7 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
             className="inline-flex items-center gap-1 rounded-lg bg-brand-600 hover:bg-brand-700 px-3 h-8 text-white font-semibold disabled:opacity-40">
             <Plus className="h-3.5 w-3.5" /> Ajouter la sélection ({sel.size})
           </button>
-          <button disabled={adding || !total} onClick={() => add({ all: true, search }, `${total} résultats`)}
+          <button disabled={adding || !total} onClick={() => add({ all: true, search, enseigne, source }, `${total} résultats`)}
             className="inline-flex items-center gap-1 rounded-lg ring-1 ring-white/10 px-3 h-8 text-white/80 hover:bg-white/[0.06] disabled:opacity-40">
             Tout ajouter ({total})
           </button>
@@ -497,9 +529,17 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
                   </span>
                   <span className="flex-1 min-w-0">
                     <span className="block text-[12.5px] text-white/90 truncate">{r.nom}</span>
-                    <span className="block text-[10.5px] text-white/40">{[r.city, r.zipCode].filter(Boolean).join(" · ")}</span>
+                    <span className="mt-0.5 flex items-center gap-1 flex-wrap">
+                      <span className="text-[10.5px] text-white/40">{[r.city, r.zipCode].filter(Boolean).join(" · ")}</span>
+                      {r.prospectEnseigne && r.prospectEnseigne !== "AUTRE" && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/30">{ENSEIGNE_LABELS[r.prospectEnseigne] ?? r.prospectEnseigne}</span>
+                      )}
+                      {r.prospectSource === "ancien-client" && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30">ancien client</span>
+                      )}
+                    </span>
                   </span>
-                  {r.probaLabo && <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-white/[0.06] text-white/60">{r.probaLabo}</span>}
+                  {r.probaLabo && <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-white/[0.06] text-white/60 shrink-0">{r.probaLabo}</span>}
                 </button>
               </li>
             ))}

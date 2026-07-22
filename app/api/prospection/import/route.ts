@@ -17,7 +17,7 @@ import prospects from "@/data/prospects-gms-idf.json";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-type Prospect = { enseigne: string; type: string; ville: string; cp: string; adresse: string; proba: string };
+type Prospect = { enseigne: string; type: string; ville: string; cp: string; adresse: string; proba: string; enseigneCode?: string };
 
 const codeOf = (p: Prospect) =>
   "PRSP" + createHash("md5").update(p.adresse || `${p.enseigne}${p.ville}`).digest("hex").slice(0, 12).toUpperCase();
@@ -31,7 +31,7 @@ export async function POST() {
 
   // Dédoublonnage par code (adresses identiques éventuelles).
   const seen = new Set<string>();
-  const rows: { code: string; nom: string; cp: string; ville: string; proba: string }[] = [];
+  const rows: { code: string; nom: string; cp: string; ville: string; proba: string; enseigne: string; format: string }[] = [];
   for (const p of prospects as Prospect[]) {
     const code = codeOf(p);
     if (seen.has(code)) continue;
@@ -42,6 +42,8 @@ export async function POST() {
       cp: p.cp || "",
       ville: p.ville || "",
       proba: p.proba || "À qualifier",
+      enseigne: p.enseigneCode || "AUTRE",
+      format: p.type || "",
     });
   }
 
@@ -52,15 +54,15 @@ export async function POST() {
       const slice = rows.slice(i, i + BATCH);
       const values = slice
         .map((_, k) => {
-          const b = k * 5;
+          const b = k * 7;
           // prospectStage NULL = dans le VIVIER (cherchable), pas encore dans la
           // pipeline. On l'ajoute à la pipeline à la demande (search + ajout).
-          return `(gen_random_uuid()::text,$${b + 1},$${b + 2},$${b + 3},$${b + 4},false,NULL,NULL,'import-gms-idf-patisserie',$${b + 5},now(),now())`;
+          return `(gen_random_uuid()::text,$${b + 1},$${b + 2},$${b + 3},$${b + 4},false,NULL,NULL,'import-gms-idf-patisserie',$${b + 5},$${b + 6},$${b + 7},now(),now())`;
         })
         .join(",");
-      const params = slice.flatMap((r) => [r.code, r.nom, r.cp, r.ville, r.proba]);
+      const params = slice.flatMap((r) => [r.code, r.nom, r.cp, r.ville, r.proba, r.enseigne, r.format]);
       const n = await prisma.$executeRawUnsafe(
-        `INSERT INTO "Client"(id,code,nom,"zipCode",city,"activeTelevente","prospectStage","prospectStageAt","prospectSource","probaLabo","createdAt","updatedAt")
+        `INSERT INTO "Client"(id,code,nom,"zipCode",city,"activeTelevente","prospectStage","prospectStageAt","prospectSource","probaLabo","prospectEnseigne","prospectFormat","createdAt","updatedAt")
          VALUES ${values} ON CONFLICT (code) DO NOTHING`,
         ...params,
       );
