@@ -558,38 +558,11 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
               <option value="Hyper">Hyper (labo probable)</option>
               <option value="Super">Super</option>
             </select>
-            <div className="relative flex-1 min-w-[110px]">
-              <button type="button" onClick={() => setZoneOpen((v) => !v)}
-                className="h-8 w-full inline-flex items-center gap-1 rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2 justify-between">
-                <span className="truncate">{zones.size ? `${zones.size} dépt${zones.size > 1 ? "s" : ""}` : "Toutes zones"}</span>
-                <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${zoneOpen ? "rotate-90" : ""}`} />
-              </button>
-              {zoneOpen && (
-                <>
-                  <div className="fixed inset-0 z-[85]" onClick={() => setZoneOpen(false)} />
-                  <div className="absolute z-[86] mt-1 w-[220px] max-h-[300px] overflow-y-auto rounded-xl bg-[#0f141c] ring-1 ring-white/10 shadow-2xl p-1.5">
-                    <div className="flex items-center justify-between px-1.5 pb-1.5">
-                      <span className="text-[10.5px] uppercase tracking-wide text-white/40">Départements</span>
-                      {zones.size > 0 && (
-                        <button onClick={() => setZones(new Set())} className="text-[10.5px] text-brand-300 hover:underline">Effacer</button>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-0.5">
-                      {DEPARTEMENTS.map(([code, name]) => {
-                        const on = zones.has(code);
-                        return (
-                          <button key={code} onClick={() => setZones((s) => { const n = new Set(s); n.has(code) ? n.delete(code) : n.add(code); return n; })}
-                            className={`flex items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[11px] transition ${on ? "bg-brand-500/15 text-white" : "text-white/70 hover:bg-white/[0.06]"}`}>
-                            <span className={`h-3 w-3 shrink-0 grid place-items-center rounded-[3px] ring-1 ${on ? "bg-brand-500 ring-brand-500" : "ring-white/25"}`}>{on && <Check className="h-2.5 w-2.5 text-white" />}</span>
-                            <span className="truncate"><b className="text-white/80">{code}</b> {name}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
+            <button type="button" onClick={() => setZoneOpen((v) => !v)}
+              className={`h-8 flex-1 min-w-[110px] inline-flex items-center gap-1 rounded-lg bg-[#11161f] ring-1 text-[12px] px-2 justify-between ${zones.size ? "ring-brand-500/50 text-white" : "ring-white/10 text-white/80"}`}>
+              <span className="truncate">{zones.size ? `${zones.size} dépt${zones.size > 1 ? "s" : ""}` : "Toutes zones"}</span>
+              <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${zoneOpen ? "rotate-90" : ""}`} />
+            </button>
             <select value={enseigne} onChange={(e) => setEnseigne(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Enseigne">
               <option value="">Toutes enseignes</option>
               {ENSEIGNE_CHOICES.map((c) => <option key={c} value={c}>{ENSEIGNE_LABELS[c] ?? c}</option>)}
@@ -602,6 +575,30 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
               <option value="nom">Tri : nom</option>
             </select>
           </div>
+          {/* Sélecteur de départements (multi) — inline, pleine largeur (jamais rogné). */}
+          {zoneOpen && (
+            <div className="rounded-xl bg-[#11161f] ring-1 ring-white/10 p-2">
+              <div className="flex items-center justify-between px-0.5 pb-1.5">
+                <span className="text-[10.5px] uppercase tracking-wide text-white/40">Départements ({zones.size})</span>
+                <div className="flex items-center gap-2">
+                  {zones.size > 0 && <button onClick={() => setZones(new Set())} className="text-[10.5px] text-brand-300 hover:underline">Effacer</button>}
+                  <button onClick={() => setZoneOpen(false)} className="text-[10.5px] text-white/50 hover:text-white">Fermer</button>
+                </div>
+              </div>
+              <div className="max-h-[220px] overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-0.5">
+                {DEPARTEMENTS.map(([code, name]) => {
+                  const on = zones.has(code);
+                  return (
+                    <button key={code} onClick={() => setZones((s) => { const n = new Set(s); n.has(code) ? n.delete(code) : n.add(code); return n; })}
+                      className={`flex items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[11px] transition ${on ? "bg-brand-500/15 text-white" : "text-white/70 hover:bg-white/[0.06]"}`}>
+                      <span className={`h-3 w-3 shrink-0 grid place-items-center rounded-[3px] ring-1 ${on ? "bg-brand-500 ring-brand-500" : "ring-white/25"}`}>{on && <Check className="h-2.5 w-2.5 text-white" />}</span>
+                      <span className="truncate"><b className="text-white/80">{code}</b> {name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2 text-[12px]">
