@@ -40,6 +40,7 @@ export async function GET(req: NextRequest) {
   const enseigne = (sp.get("enseigne") || "").trim();      // code enseigne (A, ITM, …)
   const source = (sp.get("source") || "").trim();          // 'gms' | 'ancien'
   const format = (sp.get("format") || "").trim();          // 'Hyper' | 'Super'
+  const zone = (sp.get("zone") || "").trim().replace(/\D/g, "").slice(0, 3); // département (CP préfixe)
   const limit = Math.min(500, Math.max(1, Number(sp.get("limit") || 100)));
 
   const conds: string[] = [`c."prospectStage" IS NULL`, `c."prospectSource" IS NOT NULL`];
@@ -56,6 +57,10 @@ export async function GET(req: NextRequest) {
     params.push(format);
     conds.push(`c."prospectFormat" = $${params.length}`);
   }
+  if (zone) {
+    params.push(`${zone}%`);
+    conds.push(`REPLACE(c."zipCode", ' ', '') LIKE $${params.length}`);
+  }
   if (source === "gms") conds.push(`c."prospectSource" = 'import-gms-idf-patisserie'`);
   else if (source === "ancien") conds.push(`c."prospectSource" = 'ancien-client'`);
   if (!scope.all) {
@@ -66,6 +71,7 @@ export async function GET(req: NextRequest) {
   const order =
     sort === "ville" ? `c."city" ASC NULLS LAST, c."nom" ASC`
     : sort === "nom" ? `c."nom" ASC`
+    : sort === "zone" ? `REPLACE(c."zipCode", ' ', '') ASC NULLS LAST, c."city" ASC`
     : sort === "enseigne" ? `c."prospectEnseigne" ASC NULLS LAST, c."nom" ASC`
     : // proba : Élevée → Moyenne-haute → Moyenne → À qualifier
       `CASE c."probaLabo" WHEN 'Élevée' THEN 0 WHEN 'Moyenne-haute' THEN 1 WHEN 'Moyenne' THEN 2 ELSE 3 END, c."nom" ASC`;
@@ -95,7 +101,7 @@ export async function POST(req: NextRequest) {
   const scope = await getAccessScope(session);
   const slp = await getOwnSlpName(session);
 
-  const body = (await req.json().catch(() => ({}))) as { ids?: unknown; all?: unknown; search?: unknown; proba?: unknown; enseigne?: unknown; source?: unknown; format?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { ids?: unknown; all?: unknown; search?: unknown; proba?: unknown; enseigne?: unknown; source?: unknown; format?: unknown; zone?: string };
 
   // Sélecteur : liste d'ids OU tout le vivier filtré (all + search/proba).
   const conds: string[] = [`"prospectStage" IS NULL`, `"prospectSource" IS NOT NULL`];
@@ -123,6 +129,10 @@ export async function POST(req: NextRequest) {
     if (body.format === "Hyper" || body.format === "Super") {
       params.push(body.format);
       conds.push(`"prospectFormat" = $${params.length}`);
+    }
+    if (typeof body.zone === "string" && body.zone.replace(/\D/g, "")) {
+      params.push(`${body.zone.replace(/\D/g, "").slice(0, 3)}%`);
+      conds.push(`REPLACE("zipCode", ' ', '') LIKE $${params.length}`);
     }
   } else {
     return NextResponse.json({ error: "Rien à ajouter (ids ou all requis)." }, { status: 400 });
