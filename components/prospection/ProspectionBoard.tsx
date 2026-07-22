@@ -451,6 +451,7 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
   const [enseigne, setEnseigne] = useState("");
   const [source, setSource] = useState("");
   const [format, setFormat] = useState("");
+  const [zone, setZone] = useState("");
   const [rows, setRows] = useState<PoolRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -464,13 +465,14 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
       if (enseigne) p.set("enseigne", enseigne);
       if (source) p.set("source", source);
       if (format) p.set("format", format);
+      if (zone) p.set("zone", zone);
       const r = await fetch(`/api/prospection/pool?${p}`, { cache: "no-store" });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error || "Erreur");
       setRows(j.rows as PoolRow[]); setTotal(j.total ?? 0); setSel(new Set());
     } catch (e) { toast.error(e instanceof Error ? e.message : "Erreur"); }
     finally { setLoading(false); }
-  }, [search, sort, enseigne, source, format]);
+  }, [search, sort, enseigne, source, format, zone]);
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
 
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -512,12 +514,24 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
               <option value="Hyper">Hyper (labo probable)</option>
               <option value="Super">Super</option>
             </select>
+            <select value={zone} onChange={(e) => setZone(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Zone (département)">
+              <option value="">Toutes zones</option>
+              <option value="75">75 · Paris</option>
+              <option value="77">77 · Seine-et-Marne</option>
+              <option value="78">78 · Yvelines</option>
+              <option value="91">91 · Essonne</option>
+              <option value="92">92 · Hauts-de-Seine</option>
+              <option value="93">93 · Seine-St-Denis</option>
+              <option value="94">94 · Val-de-Marne</option>
+              <option value="95">95 · Val-d'Oise</option>
+            </select>
             <select value={enseigne} onChange={(e) => setEnseigne(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Enseigne">
               <option value="">Toutes enseignes</option>
               {ENSEIGNE_CHOICES.map((c) => <option key={c} value={c}>{ENSEIGNE_LABELS[c] ?? c}</option>)}
             </select>
             <select value={sort} onChange={(e) => setSort(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Trier par">
               <option value="proba">Tri : proba labo</option>
+              <option value="zone">Tri : zone (CP)</option>
               <option value="enseigne">Tri : enseigne</option>
               <option value="ville">Tri : ville</option>
               <option value="nom">Tri : nom</option>
@@ -530,7 +544,7 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
             className="inline-flex items-center gap-1 rounded-lg bg-brand-600 hover:bg-brand-700 px-3 h-8 text-white font-semibold disabled:opacity-40">
             <Plus className="h-3.5 w-3.5" /> Ajouter la sélection ({sel.size})
           </button>
-          <button disabled={adding || !total} onClick={() => add({ all: true, search, enseigne, source, format }, `${total} résultats`)}
+          <button disabled={adding || !total} onClick={() => add({ all: true, search, enseigne, source, format, zone }, `${total} résultats`)}
             className="inline-flex items-center gap-1 rounded-lg ring-1 ring-white/10 px-3 h-8 text-white/80 hover:bg-white/[0.06] disabled:opacity-40">
             Tout ajouter ({total})
           </button>
