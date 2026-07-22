@@ -40,7 +40,8 @@ export async function GET(req: NextRequest) {
   const enseigne = (sp.get("enseigne") || "").trim();      // code enseigne (A, ITM, …)
   const source = (sp.get("source") || "").trim();          // 'gms' | 'ancien'
   const format = (sp.get("format") || "").trim();          // 'Hyper' | 'Super'
-  const zone = (sp.get("zone") || "").trim().replace(/\D/g, "").slice(0, 3); // département (CP préfixe)
+  // zone = un ou plusieurs départements (CSV), ex. "59,62,77".
+  const zones = (sp.get("zone") || "").split(",").map((z) => z.trim().toUpperCase().replace(/[^0-9AB]/g, "").slice(0, 3)).filter(Boolean).slice(0, 110);
   const limit = Math.min(500, Math.max(1, Number(sp.get("limit") || 100)));
 
   const conds: string[] = [`c."prospectStage" IS NULL`, `c."prospectSource" IS NOT NULL`];
@@ -57,9 +58,9 @@ export async function GET(req: NextRequest) {
     params.push(format);
     conds.push(`c."prospectFormat" = $${params.length}`);
   }
-  if (zone) {
-    params.push(`${zone}%`);
-    conds.push(`REPLACE(c."zipCode", ' ', '') LIKE $${params.length}`);
+  if (zones.length) {
+    const ors = zones.map((z) => { params.push(`${z}%`); return `REPLACE(c."zipCode", ' ', '') LIKE $${params.length}`; });
+    conds.push(`(${ors.join(" OR ")})`);
   }
   if (source === "gms") conds.push(`c."prospectSource" = 'import-gms-idf-patisserie'`);
   else if (source === "ancien") conds.push(`c."prospectSource" = 'ancien-client'`);
@@ -130,9 +131,12 @@ export async function POST(req: NextRequest) {
       params.push(body.format);
       conds.push(`"prospectFormat" = $${params.length}`);
     }
-    if (typeof body.zone === "string" && body.zone.replace(/\D/g, "")) {
-      params.push(`${body.zone.replace(/\D/g, "").slice(0, 3)}%`);
-      conds.push(`REPLACE("zipCode", ' ', '') LIKE $${params.length}`);
+    if (typeof body.zone === "string" && body.zone.trim()) {
+      const zs = body.zone.split(",").map((z) => z.trim().toUpperCase().replace(/[^0-9AB]/g, "").slice(0, 3)).filter(Boolean).slice(0, 110);
+      if (zs.length) {
+        const ors = zs.map((z) => { params.push(`${z}%`); return `REPLACE("zipCode", ' ', '') LIKE $${params.length}`; });
+        conds.push(`(${ors.join(" OR ")})`);
+      }
     }
   } else {
     return NextResponse.json({ error: "Rien à ajouter (ids ou all requis)." }, { status: 400 });

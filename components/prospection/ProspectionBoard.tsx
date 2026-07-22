@@ -26,6 +26,31 @@ const ENSEIGNE_LABELS: Record<string, string> = {
 /** Codes proposés dans le filtre (ordre = fréquence approx.). */
 const ENSEIGNE_CHOICES = ["CARR", "ITM", "A", "U", "L", "MONO", "CORA", "CASINO", "GE", "COSTCO", "PROXI", "COCCI", "AUTRE"];
 
+/** Départements français (métropole + Corse + DOM) pour le filtre zone. */
+const DEPARTEMENTS: [string, string][] = [
+  ["01", "Ain"], ["02", "Aisne"], ["03", "Allier"], ["04", "Alpes-de-Hte-P."], ["05", "Htes-Alpes"],
+  ["06", "Alpes-Maritimes"], ["07", "Ardèche"], ["08", "Ardennes"], ["09", "Ariège"], ["10", "Aube"],
+  ["11", "Aude"], ["12", "Aveyron"], ["13", "Bouches-du-Rhône"], ["14", "Calvados"], ["15", "Cantal"],
+  ["16", "Charente"], ["17", "Charente-Mar."], ["18", "Cher"], ["19", "Corrèze"], ["2A", "Corse-du-Sud"],
+  ["2B", "Haute-Corse"], ["21", "Côte-d'Or"], ["22", "Côtes-d'Armor"], ["23", "Creuse"], ["24", "Dordogne"],
+  ["25", "Doubs"], ["26", "Drôme"], ["27", "Eure"], ["28", "Eure-et-Loir"], ["29", "Finistère"],
+  ["30", "Gard"], ["31", "Haute-Garonne"], ["32", "Gers"], ["33", "Gironde"], ["34", "Hérault"],
+  ["35", "Ille-et-Vilaine"], ["36", "Indre"], ["37", "Indre-et-Loire"], ["38", "Isère"], ["39", "Jura"],
+  ["40", "Landes"], ["41", "Loir-et-Cher"], ["42", "Loire"], ["43", "Haute-Loire"], ["44", "Loire-Atl."],
+  ["45", "Loiret"], ["46", "Lot"], ["47", "Lot-et-Garonne"], ["48", "Lozère"], ["49", "Maine-et-Loire"],
+  ["50", "Manche"], ["51", "Marne"], ["52", "Haute-Marne"], ["53", "Mayenne"], ["54", "Meurthe-et-M."],
+  ["55", "Meuse"], ["56", "Morbihan"], ["57", "Moselle"], ["58", "Nièvre"], ["59", "Nord"],
+  ["60", "Oise"], ["61", "Orne"], ["62", "Pas-de-Calais"], ["63", "Puy-de-Dôme"], ["64", "Pyrénées-Atl."],
+  ["65", "Htes-Pyrénées"], ["66", "Pyrénées-Or."], ["67", "Bas-Rhin"], ["68", "Haut-Rhin"], ["69", "Rhône"],
+  ["70", "Haute-Saône"], ["71", "Saône-et-Loire"], ["72", "Sarthe"], ["73", "Savoie"], ["74", "Haute-Savoie"],
+  ["75", "Paris"], ["76", "Seine-Mar."], ["77", "Seine-et-Marne"], ["78", "Yvelines"], ["79", "Deux-Sèvres"],
+  ["80", "Somme"], ["81", "Tarn"], ["82", "Tarn-et-Gar."], ["83", "Var"], ["84", "Vaucluse"],
+  ["85", "Vendée"], ["86", "Vienne"], ["87", "Haute-Vienne"], ["88", "Vosges"], ["89", "Yonne"],
+  ["90", "Territoire de Belfort"], ["91", "Essonne"], ["92", "Hauts-de-Seine"], ["93", "Seine-St-Denis"],
+  ["94", "Val-de-Marne"], ["95", "Val-d'Oise"], ["971", "Guadeloupe"], ["972", "Martinique"],
+  ["973", "Guyane"], ["974", "La Réunion"],
+];
+
 const PROBA_COLOR: Record<string, string> = {
   "Élevée": "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30",
   "Moyenne-haute": "bg-lime-500/15 text-lime-300 ring-lime-500/30",
@@ -468,7 +493,9 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
   const [enseigne, setEnseigne] = useState("");
   const [source, setSource] = useState("");
   const [format, setFormat] = useState("");
-  const [zone, setZone] = useState("");
+  const [zones, setZones] = useState<Set<string>>(new Set());
+  const [zoneOpen, setZoneOpen] = useState(false);
+  const zoneCsv = [...zones].join(",");
   const [rows, setRows] = useState<PoolRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -482,14 +509,14 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
       if (enseigne) p.set("enseigne", enseigne);
       if (source) p.set("source", source);
       if (format) p.set("format", format);
-      if (zone) p.set("zone", zone);
+      if (zoneCsv) p.set("zone", zoneCsv);
       const r = await fetch(`/api/prospection/pool?${p}`, { cache: "no-store" });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error || "Erreur");
       setRows(j.rows as PoolRow[]); setTotal(j.total ?? 0); setSel(new Set());
     } catch (e) { toast.error(e instanceof Error ? e.message : "Erreur"); }
     finally { setLoading(false); }
-  }, [search, sort, enseigne, source, format, zone]);
+  }, [search, sort, enseigne, source, format, zoneCsv]);
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
 
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -531,17 +558,38 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
               <option value="Hyper">Hyper (labo probable)</option>
               <option value="Super">Super</option>
             </select>
-            <select value={zone} onChange={(e) => setZone(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Zone (département)">
-              <option value="">Toutes zones</option>
-              <option value="75">75 · Paris</option>
-              <option value="77">77 · Seine-et-Marne</option>
-              <option value="78">78 · Yvelines</option>
-              <option value="91">91 · Essonne</option>
-              <option value="92">92 · Hauts-de-Seine</option>
-              <option value="93">93 · Seine-St-Denis</option>
-              <option value="94">94 · Val-de-Marne</option>
-              <option value="95">95 · Val-d'Oise</option>
-            </select>
+            <div className="relative flex-1 min-w-[110px]">
+              <button type="button" onClick={() => setZoneOpen((v) => !v)}
+                className="h-8 w-full inline-flex items-center gap-1 rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2 justify-between">
+                <span className="truncate">{zones.size ? `${zones.size} dépt${zones.size > 1 ? "s" : ""}` : "Toutes zones"}</span>
+                <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${zoneOpen ? "rotate-90" : ""}`} />
+              </button>
+              {zoneOpen && (
+                <>
+                  <div className="fixed inset-0 z-[85]" onClick={() => setZoneOpen(false)} />
+                  <div className="absolute z-[86] mt-1 w-[220px] max-h-[300px] overflow-y-auto rounded-xl bg-[#0f141c] ring-1 ring-white/10 shadow-2xl p-1.5">
+                    <div className="flex items-center justify-between px-1.5 pb-1.5">
+                      <span className="text-[10.5px] uppercase tracking-wide text-white/40">Départements</span>
+                      {zones.size > 0 && (
+                        <button onClick={() => setZones(new Set())} className="text-[10.5px] text-brand-300 hover:underline">Effacer</button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-0.5">
+                      {DEPARTEMENTS.map(([code, name]) => {
+                        const on = zones.has(code);
+                        return (
+                          <button key={code} onClick={() => setZones((s) => { const n = new Set(s); n.has(code) ? n.delete(code) : n.add(code); return n; })}
+                            className={`flex items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[11px] transition ${on ? "bg-brand-500/15 text-white" : "text-white/70 hover:bg-white/[0.06]"}`}>
+                            <span className={`h-3 w-3 shrink-0 grid place-items-center rounded-[3px] ring-1 ${on ? "bg-brand-500 ring-brand-500" : "ring-white/25"}`}>{on && <Check className="h-2.5 w-2.5 text-white" />}</span>
+                            <span className="truncate"><b className="text-white/80">{code}</b> {name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
             <select value={enseigne} onChange={(e) => setEnseigne(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Enseigne">
               <option value="">Toutes enseignes</option>
               {ENSEIGNE_CHOICES.map((c) => <option key={c} value={c}>{ENSEIGNE_LABELS[c] ?? c}</option>)}
@@ -561,7 +609,7 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
             className="inline-flex items-center gap-1 rounded-lg bg-brand-600 hover:bg-brand-700 px-3 h-8 text-white font-semibold disabled:opacity-40">
             <Plus className="h-3.5 w-3.5" /> Ajouter la sélection ({sel.size})
           </button>
-          <button disabled={adding || !total} onClick={() => add({ all: true, search, enseigne, source, format, zone }, `${total} résultats`)}
+          <button disabled={adding || !total} onClick={() => add({ all: true, search, enseigne, source, format, zone: zoneCsv }, `${total} résultats`)}
             className="inline-flex items-center gap-1 rounded-lg ring-1 ring-white/10 px-3 h-8 text-white/80 hover:bg-white/[0.06] disabled:opacity-40">
             Tout ajouter ({total})
           </button>
