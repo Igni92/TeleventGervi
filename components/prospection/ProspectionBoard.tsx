@@ -86,6 +86,19 @@ export function ProspectionBoard() {
     finally { setImporting(false); }
   }
 
+  const [importingH, setImportingH] = useState(false);
+  async function doImportHypers() {
+    setImportingH(true);
+    try {
+      const r = await fetch("/api/prospection/import-hypers", { method: "POST" });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || "Échec");
+      toast.success(`Hypers France : ${j.inserted} ajoutés · ${j.already} déjà présents`);
+      load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Échec"); }
+    finally { setImportingH(false); }
+  }
+
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return rows;
@@ -243,6 +256,10 @@ export function ProspectionBoard() {
         <button onClick={() => setPoolOpen(true)}
           className="h-9 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 px-3 text-[13px] text-white font-semibold">
           <Plus className="h-4 w-4" /> Ajouter des prospects
+        </button>
+        <button onClick={doImportHypers} disabled={importingH} title="Ajouter tous les hypermarchés de France (province) au vivier — admin"
+          className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 text-[13px] text-white/70 hover:bg-white/[0.08] disabled:opacity-60">
+          {importingH ? <Loader2 className="h-4 w-4 animate-spin" /> : "Importer hypers France"}
         </button>
         <button onClick={doImport} disabled={importing} title="Recharger le vivier depuis le fichier (admin)"
           className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 text-[13px] text-white/70 hover:bg-white/[0.08] disabled:opacity-60">
