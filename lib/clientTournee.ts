@@ -24,10 +24,6 @@ export type ClientTournee = {
 const PREFIX = "cltour:";
 const key = (cardCode: string) => PREFIX + cardCode.trim().toUpperCase();
 
-/** "LPOI." (variante SCACHAP) → "LPOI" (client SAP de base). Inchangé si le
- *  code n'a pas de suffixe point (cf. isDotVariant/foldDotVariant, import SAP). */
-const baseCardCode = (cardCode: string) => cardCode.trim().replace(/\.+$/, "");
-
 function parse(value: string): ClientTournee | null {
   try {
     const o = JSON.parse(value) as Partial<ClientTournee>;
@@ -44,58 +40,22 @@ function parse(value: string): ClientTournee | null {
   }
 }
 
-/**
- * Tournée mémorisée d'un client, ou null.
- * Repli sur le code de BASE si le CardCode est une variante SCACHAP ("LPOI.") sans
- * mémoire propre : c'est le MÊME client / la même tournée de livraison, seul le
- * compte SAP facturé diffère — sans ce repli, la tournée mémorisée sur "LPOI"
- * (compte Direct) n'était jamais reprise pour les BL partis sur "LPOI." (SCACHAP),
- * qui repartaient donc sans tournée (à saisir à la main à chaque fois).
- */
+/** Tournée mémorisée d'un client, ou null. */
 export async function getClientTournee(cardCode: string): Promise<ClientTournee | null> {
-  const row = await prisma.appSetting.findUnique({ where: { key: key(cardCode) } });
-  const own = row ? parse(row.value) : null;
-  if (own) return own;
-  const base = baseCardCode(cardCode);
-  if (base === cardCode.trim()) return null;
-  const baseRow = await prisma.appSetting.findUnique({ where: { key: key(base) } });
-  return baseRow ? parse(baseRow.value) : null;
+  const k = key(cardCode);
+  const row = await prisma.appSetting.findUnique({ where: { key: k } });
+  return row ? parse(row.value) : null;
 }
 
-/** Tournées mémorisées pour plusieurs clients (bulk) → Map(CARDCODE → tournée).
- *  Repli code de base par entrée manquante — cf. getClientTournee. */
+/** Tournées mémorisées pour plusieurs clients (bulk) → Map(CARDCODE → tournée). */
 export async function getClientTournees(cardCodes: string[]): Promise<Map<string, ClientTournee>> {
   const out = new Map<string, ClientTournee>();
-  const wanted = [...new Set(cardCodes.map((c) => c.trim().toUpperCase()).filter(Boolean))];
-  if (!wanted.length) return out;
-  const keys = [...new Set(wanted.map((c) => key(c)))];
+  const keys = [...new Set(cardCodes.map((c) => key(c)))];
+  if (!keys.length) return out;
   const rows = await prisma.appSetting.findMany({ where: { key: { in: keys } } });
-  const byCode = new Map<string, ClientTournee>();
   for (const r of rows) {
     const t = parse(r.value);
-    if (t) byCode.set(r.key.slice(PREFIX.length), t);
-  }
-  const missingBases: string[] = [];
-  for (const code of wanted) {
-    const own = byCode.get(code);
-    if (own) { out.set(code, own); continue; }
-    const base = baseCardCode(code).toUpperCase();
-    if (base !== code) missingBases.push(base);
-  }
-  if (missingBases.length) {
-    const baseKeys = [...new Set(missingBases.map((c) => key(c)))];
-    const baseRows = await prisma.appSetting.findMany({ where: { key: { in: baseKeys } } });
-    const baseByCode = new Map<string, ClientTournee>();
-    for (const r of baseRows) {
-      const t = parse(r.value);
-      if (t) baseByCode.set(r.key.slice(PREFIX.length), t);
-    }
-    for (const code of wanted) {
-      if (out.has(code)) continue;
-      const base = baseCardCode(code).toUpperCase();
-      const t = baseByCode.get(base);
-      if (t) out.set(code, t);
-    }
+    if (t) out.set(r.key.slice(PREFIX.length), t);
   }
   return out;
 }
