@@ -23,9 +23,9 @@ export function nowHM(): string {
  * mais cliquable) qui ouvre le calendrier et reste éditable au clavier.
  *
  * Heure optionnelle : passer `time` + `onTimeChange` ajoute l'heure À CÔTÉ de la
- * date DANS la même case, en points (« LUN 13.07.26 14.30 ») — ex. heure de
- * réception de la marchandise / de prise de commande. Cliquer le segment date
- * ouvre le calendrier, cliquer le segment heure ouvre l'horloge.
+ * date DANS la même case (« LUN 13.07.26 14:30 ») — ex. heure de réception de
+ * la marchandise / de prise de commande. Cliquer le segment date ouvre le
+ * calendrier, cliquer le segment heure ouvre l'horloge.
  */
 export function DateStepper({
   value, onChange, className, time, onTimeChange, timeLabel,
@@ -85,10 +85,10 @@ export function DateStepper({
             className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
           />
         </span>
-        {/* Segment HEURE (optionnel) — « 14.30 » (points, comme la date) */}
+        {/* Segment HEURE (optionnel) — « 14:30 » (deux-points, format horaire standard) */}
         {onTimeChange && (
           <span className="relative inline-flex items-center whitespace-nowrap">
-            <span>{time ? time.replace(":", ".") : "—"}</span>
+            <span>{time || "—"}</span>
             <input
               type="time"
               value={time ?? ""}
