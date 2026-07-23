@@ -39,7 +39,8 @@ export async function GET() {
 
   // Filtre d'accès : admin → tout ; commercial → ses prospects (propriétaire OU
   // commercial OU vendeur = son trigramme). Non mappé → rien.
-  let where = `c."prospectStage" IS NOT NULL`;
+  // Non qualifié (labo = Non) → sorti de la liste active des prospects.
+  let where = `c."prospectStage" IS NOT NULL AND c."qualifieLabo" IS DISTINCT FROM false`;
   const params: unknown[] = [];
   if (!scope.all) {
     if (!scope.slpName) return NextResponse.json({ rows: [], scope: { all: false, slpName: null } });

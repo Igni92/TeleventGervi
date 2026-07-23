@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 type PoolRow = {
   id: string; code: string; nom: string; city: string | null; zipCode: string | null;
   probaLabo: string | null; prospectEnseigne: string | null; prospectFormat: string | null;
-  prospectSource: string | null;
+  prospectSource: string | null; prospectLostReason: string | null;
 };
 
 /** Condition d'accès au vivier : admin → tout ; commercial → non attribué ou à lui. */
@@ -46,6 +46,9 @@ export async function GET(req: NextRequest) {
 
   const conds: string[] = [`c."prospectStage" IS NULL`, `c."prospectSource" IS NOT NULL`];
   const params: unknown[] = [];
+  // Non qualifiés (labo = Non) exclus par défaut ; qualif=non pour les revoir.
+  if ((sp.get("qualif") || "") === "non") conds.push(`c."qualifieLabo" = false`);
+  else conds.push(`c."qualifieLabo" IS DISTINCT FROM false`);
   if (search) {
     params.push(`%${search}%`);
     conds.push(`(c."nom" ILIKE $${params.length} OR c."city" ILIKE $${params.length} OR c."zipCode" ILIKE $${params.length})`);
@@ -80,7 +83,7 @@ export async function GET(req: NextRequest) {
   try {
     const rows = await prisma.$queryRawUnsafe<PoolRow[]>(
       `SELECT c."id", c."code", c."nom", c."city", c."zipCode", c."probaLabo",
-              c."prospectEnseigne", c."prospectFormat", c."prospectSource"
+              c."prospectEnseigne", c."prospectFormat", c."prospectSource", c."prospectLostReason"
          FROM "Client" c WHERE ${conds.join(" AND ")}
         ORDER BY ${order} LIMIT ${limit}`,
       ...params,
@@ -105,7 +108,8 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as { ids?: unknown; all?: unknown; search?: unknown; proba?: unknown; enseigne?: unknown; source?: unknown; format?: unknown; zone?: string };
 
   // Sélecteur : liste d'ids OU tout le vivier filtré (all + search/proba).
-  const conds: string[] = [`"prospectStage" IS NULL`, `"prospectSource" IS NOT NULL`];
+  // On n'ajoute jamais un non qualifié (labo = Non) à la pipeline en masse.
+  const conds: string[] = [`"prospectStage" IS NULL`, `"prospectSource" IS NOT NULL`, `"qualifieLabo" IS DISTINCT FROM false`];
   const params: unknown[] = [];
   if (Array.isArray(body.ids) && body.ids.length) {
     const ids = body.ids.filter((x): x is string => typeof x === "string").slice(0, 2000);

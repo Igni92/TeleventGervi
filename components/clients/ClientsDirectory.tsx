@@ -27,7 +27,7 @@ import { toast } from "sonner";
 import {
   Search, Loader2, Users, Phone, ChevronRight, AlertTriangle, PackageX,
   CalendarClock, UserCheck, Bell, Power, MoreHorizontal, UserPlus, Plus, Radio, Target,
-  BadgeCheck, History,
+  BadgeCheck, History, UserX,
 } from "lucide-react";
 import { classifyByDays } from "@/lib/prospection";
 import { Input } from "@/components/ui/input";
@@ -104,7 +104,7 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
   const [stale, setStale] = useState("");
   const [statut, setStatut] = useState("clients"); // clients | prospects | "" (les deux)
   // Comptes prospection (vivier + pipeline) — hors cockpit, chargés à part.
-  const [prosp, setProsp] = useState<{ prospects: number; qualifies: number; anciens: number } | null>(null);
+  const [prosp, setProsp] = useState<{ prospects: number; qualifies: number; anciens: number; nonqual: number } | null>(null);
   const [todayOnly, setTodayOnly] = useState(false);
   const [incidents, setIncidents] = useState(false);
   const [syncingVendeurs, setSyncingVendeurs] = useState(false);
@@ -219,6 +219,8 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
         <StatCard icon={BadgeCheck} label="Prospects qualifiés" value={prosp?.qualifies ?? "…"} tone="sky"
           onClick={() => router.push("/prospection")} />
         <StatCard icon={History} label="Anciens clients" value={prosp?.anciens ?? "…"} tone="amber"
+          onClick={() => router.push("/prospection")} />
+        <StatCard icon={UserX} label="Non qualifiés" value={prosp?.nonqual ?? "…"} tone="rose"
           onClick={() => router.push("/prospection")} />
         <StatCard icon={CalendarClock} label="Programmés auj." value={stats.today} tone="sky"
           onClick={() => setTodayOnly((v) => !v)} active={todayOnly} />
