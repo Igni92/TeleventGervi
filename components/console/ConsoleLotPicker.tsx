@@ -113,6 +113,7 @@ export function ConsoleLotPicker({
       {open && pos && typeof document !== "undefined" && createPortal(
         <div
           ref={popRef}
+          data-floating-root=""
           style={{ position: "fixed", left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom }}
           className="z-[120] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[60vh] animate-fade-up"
         >
