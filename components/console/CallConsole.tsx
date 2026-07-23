@@ -280,6 +280,18 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Échec");
       toast.success(okMsg);
+      // Retrait OPTIMISTE : désactiver ou réassigner à un autre vendeur fait
+      // toujours quitter LA CONSOLE — inutile d'attendre le round-trip du
+      // fetchData() ci-dessous pour que la ligne disparaisse de la file.
+      setData((cur) => {
+        if (!cur) return cur;
+        return {
+          ...cur,
+          queue: cur.queue.filter((x) => x.id !== client.id),
+          done: cur.done.filter((x) => x.id !== client.id),
+        };
+      });
+      setActiveId((prev) => (prev === client.id ? null : prev));
       fetchData();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Échec de l'opération");
