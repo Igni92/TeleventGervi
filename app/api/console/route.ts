@@ -199,12 +199,15 @@ export async function GET() {
     dueReminderAt: string | null;
   }[] = [];
   for (const c of clients) {
-    // Rappel DÛ = rappel planifié dont l'heure est PASSÉE. Il prime sur le
-    // planning : le client remonte en tête de file même s'il n'est pas
-    // programmé aujourd'hui (l'agent s'est engagé à rappeler à cette heure).
+    // Rappel DÛ = rappel planifié pour AUJOURD'HUI (heure de Paris) dont
+    // l'heure est PASSÉE. Il prime sur le planning : le client remonte en
+    // tête de file même s'il n'est pas programmé aujourd'hui (l'agent s'est
+    // engagé à rappeler à cette heure). Borné à la journée en cours : un
+    // rappel du 22 ne doit plus s'afficher le 23 (il disparaît à minuit,
+    // heure de Paris, comme les autres bornes du jour ci-dessus).
     const overdue = c.rappels
       .map((r) => new Date(r.dateRappel))
-      .filter((d) => d.getTime() <= now.getTime())
+      .filter((d) => d.getTime() <= now.getTime() && d.getTime() >= todayStart.getTime())
       .sort((a, b) => a.getTime() - b.getTime());
     const dueReminderAt = overdue.length ? overdue[0].toISOString() : null;
     const scheduledToday = !!c.joursAppel && c.joursAppel.split(",").map(Number).includes(todayDay);
@@ -333,12 +336,14 @@ export async function GET() {
   const toCover = queue.filter((c) => (c as { ownerAbsent?: boolean }).ownerAbsent).length;
 
   // ── Rappels DUS maintenant (bandeau in-app) ──
-  // Mes rappels planifiés dont l'heure est passée : à traiter tout de suite.
-  // Routés par auteur (createdBy = email de session) — cohérent avec le push.
+  // Mes rappels planifiés pour AUJOURD'HUI dont l'heure est passée : à traiter
+  // tout de suite. Borné à la journée en cours — un rappel du 22 ne doit plus
+  // apparaître le 23. Routés par auteur (createdBy = email de session) —
+  // cohérent avec le push.
   const myEmail = session.user?.email ?? null;
   const dueRappels = myEmail
     ? (await prisma.rappel.findMany({
-        where: { statut: "PLANIFIE", createdBy: myEmail, dateRappel: { lte: now } },
+        where: { statut: "PLANIFIE", createdBy: myEmail, dateRappel: { lte: now, gte: todayStart } },
         include: { client: { select: { id: true, nom: true } } },
         orderBy: { dateRappel: "asc" },
         take: 50,
