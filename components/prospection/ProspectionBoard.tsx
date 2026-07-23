@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Loader2, Target, CalendarPlus, Check, X, Phone, MapPin, ChevronLeft, ChevronRight, ArrowLeft, Plus, Search, BarChart3 } from "lucide-react";
 import {
   PIPELINE_STAGES, getStage, nextStage, stageLabel,
-  LOST_REASONS, RDV_TYPES, NOTIFY_MINUTES_CHOICES, notifyLabel, DEFAULT_NOTIFY_MINUTES_BEFORE,
+  LOST_REASONS, NON_QUAL_REASONS, RDV_TYPES, NOTIFY_MINUTES_CHOICES, notifyLabel, DEFAULT_NOTIFY_MINUTES_BEFORE,
 } from "@/lib/prospection";
 
 type Row = {
@@ -485,7 +485,7 @@ export function ProspectionBoard() {
   );
 }
 
-type PoolRow = { id: string; code: string; nom: string; city: string | null; zipCode: string | null; probaLabo: string | null; prospectEnseigne: string | null; prospectFormat: string | null; prospectSource: string | null };
+type PoolRow = { id: string; code: string; nom: string; city: string | null; zipCode: string | null; probaLabo: string | null; prospectEnseigne: string | null; prospectFormat: string | null; prospectSource: string | null; prospectLostReason: string | null };
 
 function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
   const [search, setSearch] = useState("");
@@ -507,7 +507,8 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
     try {
       const p = new URLSearchParams({ search, sort, limit: "100" });
       if (enseigne) p.set("enseigne", enseigne);
-      if (source) p.set("source", source);
+      if (source === "nonqual") p.set("qualif", "non");   // revue des non qualifiés
+      else if (source) p.set("source", source);
       if (format) p.set("format", format);
       if (zoneCsv) p.set("zone", zoneCsv);
       const r = await fetch(`/api/prospection/pool?${p}`, { cache: "no-store" });
@@ -552,6 +553,7 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
               <option value="">Tous types</option>
               <option value="gms">GMS (prospection)</option>
               <option value="ancien">Anciens clients</option>
+              <option value="nonqual">Non qualifiés (revue)</option>
             </select>
             <select value={format} onChange={(e) => setFormat(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Format du magasin (proxy taille / labo)">
               <option value="">Tous formats</option>
@@ -635,6 +637,9 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
                       )}
                       {r.prospectSource === "ancien-client" && (
                         <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30">ancien client</span>
+                      )}
+                      {r.prospectLostReason && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30">✕ {r.prospectLostReason}</span>
                       )}
                     </span>
                   </span>
@@ -849,13 +854,20 @@ function FichePanel({ row, onClose, onPatch, onReload }: {
         </div>
       )}
 
-      {/* Qualif labo */}
-      <div className="flex items-center gap-2">
+      {/* Qualif labo — « Non qualifié » sort le prospect de la liste (avec motif) */}
+      <div className="flex items-center gap-2 flex-wrap">
         <span className="text-[12px] text-white/60">Labo pâtisserie&nbsp;:</span>
         <button onClick={() => onPatch(row.id, { qualifieLabo: true }, "Qualifié : labo OK")}
-          className={`text-[12px] px-2.5 py-1 rounded-lg ring-1 ${row.qualifieLabo === true ? "bg-emerald-500/20 text-emerald-300 ring-emerald-500/40" : "ring-white/10 text-white/60 hover:bg-white/[0.06]"}`}>Oui</button>
-        <button onClick={() => onPatch(row.id, { qualifieLabo: false }, "Marqué : pas de labo")}
-          className={`text-[12px] px-2.5 py-1 rounded-lg ring-1 ${row.qualifieLabo === false ? "bg-rose-500/20 text-rose-300 ring-rose-500/40" : "ring-white/10 text-white/60 hover:bg-white/[0.06]"}`}>Non</button>
+          className={`text-[12px] px-2.5 py-1 rounded-lg ring-1 ${row.qualifieLabo === true ? "bg-emerald-500/20 text-emerald-300 ring-emerald-500/40" : "ring-white/10 text-white/60 hover:bg-white/[0.06]"}`}>Oui, qualifié</button>
+        <select value="" onChange={(e) => { if (e.target.value) { onPatch(row.id, { qualifieLabo: false, lostReason: e.target.value, remove: true }, "Non qualifié — sorti de la liste"); onClose(); } }}
+          className={`text-[12px] px-2 py-1.5 rounded-lg ring-1 ${row.qualifieLabo === false ? "bg-rose-500/20 text-rose-300 ring-rose-500/40" : "bg-[#11161f] ring-white/10 text-white/70"}`}
+          title="Non qualifié — choisir le motif">
+          <option value="">Non qualifié…</option>
+          {NON_QUAL_REASONS.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        {row.qualifieLabo === false && row.prospectLostReason && (
+          <span className="text-[11px] text-rose-300/80">motif : {row.prospectLostReason}</span>
+        )}
       </div>
 
       {/* Actions d'étape */}

@@ -243,6 +243,21 @@ export const LOST_REASONS = [
 ] as const;
 export type LostReason = (typeof LOST_REASONS)[number];
 
+/**
+ * Motifs de NON-QUALIFICATION (labo = Non). Un prospect non qualifié sort de la
+ * liste active des prospects et rejoint la catégorie « Non qualifiés » avec son
+ * motif. Distinct de « Perdu » (un prospect qualifié mais dont l'affaire échoue).
+ */
+export const NON_QUAL_REASONS = [
+  "Pas de labo pâtisserie",
+  "Pas de rayon concerné",
+  "Ne travaille pas le fruit frais",
+  "Fermé / n'existe plus",
+  "Déjà bien fourni",
+  "Autre",
+] as const;
+export type NonQualReason = (typeof NON_QUAL_REASONS)[number];
+
 /* ─────────────────────────── Proba de labo ──────────────────────────────── */
 
 export const PROBA_LABO = ["Élevée", "Moyenne-haute", "Moyenne", "À qualifier"] as const;
