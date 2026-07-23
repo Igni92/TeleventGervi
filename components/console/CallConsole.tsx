@@ -994,6 +994,7 @@ function ClientContextMenu({
 
   return createPortal(
     <div
+      data-floating-root=""
       className="fixed inset-0 z-[130]"
       onClick={onClose}
       onContextMenu={(e) => { e.preventDefault(); onClose(); }}

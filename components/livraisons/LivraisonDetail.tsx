@@ -3186,6 +3186,7 @@ function LineToolMenu({ docEntry, docNum, pos, onClose, onDone }: {
     <div
       ref={boxRef}
       data-linetool=""
+      data-floating-root=""
       style={{ position: "fixed", left: pos.x, top: pos.y, width: 300 }}
       onContextMenu={(e) => e.preventDefault()}
       // Le popup est rendu dans un portail MAIS reste enfant React de la carte :
@@ -3356,12 +3357,14 @@ function ContextMenu({
   return createPortal(
     <>
       <div
+        data-floating-root=""
         className="fixed inset-0 z-40"
         onClick={onClose}
         onContextMenu={(e) => { e.preventDefault(); onClose(); }}
       />
       <div
         role="menu"
+        data-floating-root=""
         className="fixed z-50 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-lg animate-fade-up"
         style={{ top: menu.y, left: menu.x, minWidth }}
       >

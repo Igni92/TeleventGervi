@@ -47,12 +47,14 @@ export function ContextMenu({
   return createPortal(
     <>
       <div
+        data-floating-root=""
         className="fixed inset-0 z-40"
         onClick={onClose}
         onContextMenu={(e) => { e.preventDefault(); onClose(); }}
       />
       <div
         role="menu"
+        data-floating-root=""
         className="fixed z-50 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-lg animate-fade-up"
         style={{ top: menu.y, left: menu.x, minWidth }}
       >
