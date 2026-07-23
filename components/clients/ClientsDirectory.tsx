@@ -22,10 +22,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Search, Loader2, Users, Phone, ChevronRight, AlertTriangle, PackageX,
   CalendarClock, UserCheck, Bell, Power, MoreHorizontal, UserPlus, Plus, Radio, Target,
+  BadgeCheck, History,
 } from "lucide-react";
 import { classifyByDays } from "@/lib/prospection";
 import { Input } from "@/components/ui/input";
@@ -101,10 +103,21 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
   const [active, setActive] = useState("");
   const [stale, setStale] = useState("");
   const [statut, setStatut] = useState("clients"); // clients | prospects | "" (les deux)
+  // Comptes prospection (vivier + pipeline) — hors cockpit, chargés à part.
+  const [prosp, setProsp] = useState<{ prospects: number; qualifies: number; anciens: number } | null>(null);
   const [todayOnly, setTodayOnly] = useState(false);
   const [incidents, setIncidents] = useState(false);
   const [syncingVendeurs, setSyncingVendeurs] = useState(false);
   const [reminderClient, setReminderClient] = useState<PlanClient | null>(null);
+  const router = useRouter();
+
+  // Tuiles prospection (Prospect / Qualifié / Ancien client) — comptage dédié.
+  useEffect(() => {
+    fetch("/api/prospection/stats", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (j?.tiles) setProsp(j.tiles); })
+      .catch(() => {});
+  }, []);
   const [view, setView] = useViewMode("televent-clients-view");
 
   const today = parisDayOfWeek();
@@ -197,11 +210,16 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
   return (
     <div className="space-y-4">
       {/* Cartes synthèse — cliquables = filtres rapides. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-3">
         <StatCard icon={Users} label="Clients" value={stats.clientsN} tone="brand"
           onClick={() => setStatut(statut === "clients" ? "" : "clients")} active={statut === "clients"} />
-        <StatCard icon={Target} label="Prospects" value={stats.prospectsN} tone="violet"
-          onClick={() => setStatut(statut === "prospects" ? "" : "prospects")} active={statut === "prospects"} />
+        {/* Prospection : comptage dédié (tout l'import), clic → pipeline. */}
+        <StatCard icon={Target} label="Prospects" value={prosp?.prospects ?? "…"} tone="violet"
+          onClick={() => router.push("/prospection")} />
+        <StatCard icon={BadgeCheck} label="Prospects qualifiés" value={prosp?.qualifies ?? "…"} tone="sky"
+          onClick={() => router.push("/prospection")} />
+        <StatCard icon={History} label="Anciens clients" value={prosp?.anciens ?? "…"} tone="amber"
+          onClick={() => router.push("/prospection")} />
         <StatCard icon={CalendarClock} label="Programmés auj." value={stats.today} tone="sky"
           onClick={() => setTodayOnly((v) => !v)} active={todayOnly} />
         <StatCard icon={PackageX} label="Sans cde ≥ 30 j" value={stats.stale30} tone="rose"
@@ -501,7 +519,7 @@ function StatCard({
   icon: Icon, label, value, tone, onClick, active,
 }: {
   icon: React.ComponentType<{ className?: string }>;
-  label: string; value: number; tone: "brand" | "rose" | "amber" | "violet" | "sky";
+  label: string; value: number | string; tone: "brand" | "rose" | "amber" | "violet" | "sky";
   onClick?: () => void; active?: boolean;
 }) {
   const toneCls = {

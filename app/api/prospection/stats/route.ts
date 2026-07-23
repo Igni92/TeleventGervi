@@ -30,7 +30,16 @@ export async function GET() {
   const where = `WHERE ${base}${scopeCond}`;
 
   try {
-    const [funnel, lost, byOwner, byEnseigne, byFormat, byProba, bySource] = await Promise.all([
+    const [tiles, funnel, lost, byOwner, byEnseigne, byFormat, byProba, bySource] = await Promise.all([
+      // Tuiles cockpit /clients : tout l'import = prospect ; qualifié = a passé
+      // l'étape de qualification (labo confirmé OU étape ≥ Qualification).
+      prisma.$queryRawUnsafe<{ prospects: number; qualifies: number; anciens: number }[]>(
+        `SELECT
+           COUNT(*) FILTER (WHERE "prospectStage" IS DISTINCT FROM 'GAGNE')::int AS prospects,
+           COUNT(*) FILTER (WHERE ("qualifieLabo" = true OR "prospectStage" IN ('QUALIFICATION','PRESENTATION','POST_COMMANDE'))
+                              AND "prospectStage" IS DISTINCT FROM 'GAGNE')::int AS qualifies,
+           COUNT(*) FILTER (WHERE "prospectSource" = 'ancien-client' AND "prospectStage" IS DISTINCT FROM 'GAGNE')::int AS anciens
+         FROM "Client" ${where}`),
       prisma.$queryRawUnsafe<Bucket[]>(
         `SELECT "prospectStage" AS k, COUNT(*)::int AS n FROM "Client" ${where} GROUP BY 1`),
       prisma.$queryRawUnsafe<Bucket[]>(
@@ -65,6 +74,7 @@ export async function GET() {
       ok: true,
       scope: scope.all ? "all" : scope.slpName,
       kpis: { won, lost: lostN, inPipeline, vivier, conversion },
+      tiles: { prospects: tiles[0]?.prospects ?? 0, qualifies: tiles[0]?.qualifies ?? 0, anciens: tiles[0]?.anciens ?? 0 },
       funnel: ["A_CONTACTER", "QUALIFICATION", "PRESENTATION", "POST_COMMANDE", "GAGNE"].map((k) => ({ k, n: stageCount(k) })),
       lostByReason: lost,
       byOwner,
