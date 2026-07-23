@@ -26,6 +26,8 @@ type BoardRow = {
   prospectOwner: string | null;
   prospectSource: string | null;
   prospectLostReason: string | null;
+  prospectEnseigne: string | null;
+  prospectFormat: string | null;
   qualifieLabo: boolean | null;
   prospectStageAt: Date | null;
   nextRdvAt: Date | null;
@@ -52,7 +54,7 @@ export async function GET() {
     const rows = await prisma.$queryRawUnsafe<BoardRow[]>(
       `SELECT c."id", c."code", c."nom", c."city", c."zipCode", c."tel1", c."email",
               c."probaLabo", c."prospectStage", c."prospectOwner", c."prospectSource",
-              c."prospectLostReason", c."qualifieLabo", c."prospectStageAt",
+              c."prospectLostReason", c."prospectEnseigne", c."prospectFormat", c."qualifieLabo", c."prospectStageAt",
               (SELECT MIN(r."startAt") FROM "RendezVous" r
                  WHERE r."clientId" = c."id" AND r."status" = 'PLANIFIE'
                    AND r."startAt" >= now()) AS "nextRdvAt"
