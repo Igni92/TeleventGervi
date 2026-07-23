@@ -827,7 +827,7 @@ function FichePanel({ row, onClose, onPatch, onReload }: {
     setCreating(true);
     try {
       const r = await fetch(`/api/prospection/${row.id}/request-creation`, { method: "POST" });
-      const j = await r.json();
+      const j = await r.json().catch(() => null);
       if (!r.ok) throw new Error(j?.error || "Échec");
       toast.success(j.notified > 0 ? `Notification envoyée (${j.notified}) — client à créer dans SAP` : "Demandé — active les notifications pour être alerté");
     } catch (e) { toast.error(e instanceof Error ? e.message : "Échec"); }

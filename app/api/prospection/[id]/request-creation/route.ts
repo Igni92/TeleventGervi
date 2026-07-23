@@ -23,38 +23,43 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     return NextResponse.json({ error: "Accès refusé à ce prospect." }, { status: 403 });
   }
 
-  const rows = await prisma.$queryRawUnsafe<
-    { nom: string; city: string | null; zipCode: string | null; tel1: string | null; code: string; prospectOwner: string | null }[]
-  >(
-    `SELECT "nom","city","zipCode","tel1","code","prospectOwner" FROM "Client" WHERE "id" = $1 LIMIT 1`,
-    id,
-  );
-  if (!rows.length) return NextResponse.json({ error: "Prospect introuvable." }, { status: 404 });
-  const p = rows[0];
+  try {
+    const rows = await prisma.$queryRawUnsafe<
+      { nom: string; city: string | null; zipCode: string | null; tel1: string | null; code: string; prospectOwner: string | null }[]
+    >(
+      `SELECT "nom","city","zipCode","tel1","code","prospectOwner" FROM "Client" WHERE "id" = $1 LIMIT 1`,
+      id,
+    );
+    if (!rows.length) return NextResponse.json({ error: "Prospect introuvable." }, { status: 404 });
+    const p = rows[0];
 
-  const email = session.user.email ?? null;
-  const slp = await getOwnSlpName(session);
-  const lieu = [p.city, p.zipCode].filter(Boolean).join(" ");
-  const tel = p.tel1 ? ` · ${p.tel1}` : "";
+    const email = session.user.email ?? null;
+    const slp = await getOwnSlpName(session);
+    const lieu = [p.city, p.zipCode].filter(Boolean).join(" ");
+    const tel = p.tel1 ? ` · ${p.tel1}` : "";
 
-  // Notification push (best-effort) à toute l'équipe abonnée.
-  const notified = await notifyAll(
-    {
-      title: "🆕 Client à créer dans SAP",
-      body: `${p.nom}${lieu ? " — " + lieu : ""}${tel} veut une 1ʳᵉ commande. Créer le partenaire SAP avant le BL.`,
-      url: "/prospection",
-      tag: `create-client-${p.code}`,
-      renotify: true,
-    },
-    { exceptEmail: email },
-  );
+    // Notification push (best-effort) à toute l'équipe abonnée.
+    const notified = await notifyAll(
+      {
+        title: "🆕 Client à créer dans SAP",
+        body: `${p.nom}${lieu ? " — " + lieu : ""}${tel} veut une 1ʳᵉ commande. Créer le partenaire SAP avant le BL.`,
+        url: "/prospection",
+        tag: `create-client-${p.code}`,
+        renotify: true,
+      },
+      { exceptEmail: email },
+    );
 
-  // Timeline.
-  await prisma.$executeRawUnsafe(
-    `INSERT INTO "ProspectionActivity"("id","clientId","ownerSlp","kind","fromStage","toStage","note","createdBy")
-     VALUES ($1,$2,$3,'NOTE',NULL,NULL,$4,$5)`,
-    randomUUID(), id, slp, "Demande de création du client dans SAP (1ʳᵉ commande).", email,
-  );
+    // Timeline.
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "ProspectionActivity"("id","clientId","ownerSlp","kind","fromStage","toStage","note","createdBy")
+       VALUES ($1,$2,$3,'NOTE',NULL,NULL,$4,$5)`,
+      randomUUID(), id, slp, "Demande de création du client dans SAP (1ʳᵉ commande).", email,
+    );
 
-  return NextResponse.json({ ok: true, notified });
+    return NextResponse.json({ ok: true, notified });
+  } catch (e) {
+    console.error("request-creation failed", e);
+    return NextResponse.json({ error: "Échec de la demande de création." }, { status: 500 });
+  }
 }
