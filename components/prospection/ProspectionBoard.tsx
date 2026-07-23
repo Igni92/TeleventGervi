@@ -14,6 +14,7 @@ type Row = {
   tel1: string | null; email: string | null; probaLabo: string | null;
   prospectStage: string | null; prospectOwner: string | null; qualifieLabo: boolean | null;
   prospectLostReason: string | null; nextRdvAt: string | null;
+  prospectEnseigne: string | null; prospectFormat: string | null;
 };
 
 /** Libellés courts des codes enseigne (cf. scripts/normalize-prospects.mjs). */
@@ -221,6 +222,13 @@ export function ProspectionBoard() {
           </div>
           <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
             {r.city && <span className="text-[11px] text-white/45">{r.city}</span>}
+            {r.prospectEnseigne && r.prospectEnseigne !== "AUTRE" && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/30">{ENSEIGNE_LABELS[r.prospectEnseigne] ?? r.prospectEnseigne}</span>
+            )}
+            {/* Un magasin est TOUJOURS soit Super soit Hyper. */}
+            {r.prospectFormat && (
+              <span className={`text-[9px] px-1.5 py-0.5 rounded ring-1 ${r.prospectFormat === "Hyper" ? "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30" : "bg-slate-500/15 text-slate-300 ring-slate-500/30"}`}>{r.prospectFormat}</span>
+            )}
             {/* Labo qualifié → certitude (on n'affiche plus l'estimation de proba).
                 Non qualifié → pas de labo. Inconnu → estimation de proba. */}
             {r.qualifieLabo === true ? (
@@ -632,8 +640,9 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
                       {r.prospectEnseigne && r.prospectEnseigne !== "AUTRE" && (
                         <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/30">{ENSEIGNE_LABELS[r.prospectEnseigne] ?? r.prospectEnseigne}</span>
                       )}
-                      {r.prospectFormat === "Hyper" && (
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30">Hyper</span>
+                      {/* Un magasin est TOUJOURS soit Super soit Hyper. */}
+                      {r.prospectFormat && (
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded ring-1 ${r.prospectFormat === "Hyper" ? "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30" : "bg-slate-500/15 text-slate-300 ring-slate-500/30"}`}>{r.prospectFormat}</span>
                       )}
                       {r.prospectSource === "ancien-client" && (
                         <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30">ancien client</span>
