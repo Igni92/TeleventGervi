@@ -9,6 +9,10 @@ import { getComptaPasswordHash, verifyComptaPassword } from "@/lib/comptaAuth";
 const ALLOWED_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || "gervifrais.com";
 
 export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
+  // ⚠️ TEMPORAIRE — diagnostic invalid_client (retirer une fois résolu) :
+  // affiche le détail brut renvoyé par Microsoft (code AADSTS précis) dans les
+  // logs serveur au lieu du seul message générique "invalid_client".
+  debug: true,
   adapter: PrismaAdapter(prisma),
   // Derrière le proxy Vercel : on fait confiance à l'en-tête Host transmis
   // (x-forwarded-host) pour construire les URL (callback OAuth, redirections)
