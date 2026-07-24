@@ -25,16 +25,18 @@ export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
       // ici : fournisseur unique de confiance (Entra, emails vérifiés) + login
       // restreint au domaine @gervifrais.com (callback signIn ci-dessous).
       allowDangerousEmailAccountLinking: true,
-      // Pas d'issuer ici — on utilise l'endpoint "common" (tous comptes Microsoft)
-      // La restriction est faite dans le callback signIn ci-dessous
+      // Issuer pointé sur LE tenant Gervifrais (pas l'endpoint générique "common") :
+      // sans ça, l'étape d'autorisation passe par le tenant (via tenant ci-dessous)
+      // mais l'échange du code contre le jeton repart sur "common", ce qui peut être
+      // rejeté (invalid_client) pour une appli single-tenant. Le filtrage par email
+      // reste fait dans le callback signIn ci-dessous (ceinture + bretelles).
+      issuer: `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/v2.0`,
       authorization: {
         params: {
           // Calendars.ReadWrite : rappels télévente (jeton délégué). L'envoi des
           // relances n'utilise PAS ce jeton — il passe par l'identité applicative
           // (permission d'application Mail.Send), donc pas de scope Mail.Send ici.
           scope: "openid profile email offline_access Calendars.ReadWrite User.Read",
-          // Forcer le tenant spécifique au niveau de la requête d'autorisation
-          tenant: process.env.AZURE_TENANT_ID,
         },
       },
     }),
