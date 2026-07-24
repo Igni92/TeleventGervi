@@ -738,13 +738,17 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   // Mode de livraison / compte SAP : géré par le parent (sélecteur dans le
   // bandeau client, à côté du nom) et reçu via `deliveryModeId`.
   // C11/B3 — transporteur + TOURNÉE (ORDR.U_TrspCode / U_TrspHeur), OBLIGATOIRES
-  // sur le bon. Pré-remplis automatiquement avec le défaut du client (SERG_TRCL
-  // → mémoire app → tournée unique) — l'utilisateur ne change que par exception.
+  // sur le bon. Pré-remplis automatiquement avec le défaut du COMPTE ACTIF
+  // (SERG_TRCL → mémoire app → tournée unique) — pas forcément le compte direct
+  // du client : un compte alternatif (LPOI. / SCACHAP…) a sa propre affectation,
+  // traitée comme n'importe quel autre magasin. L'utilisateur ne change que par
+  // exception.
+  const activeCardCode = deliveryModes.find((m) => m.id === deliveryModeId)?.sapCardCode;
   const {
     carriers, carrierSap, setCarrierSap,
     tournees, tourneeId, setTourneeId,
     validateTournee, tourneePayload,
-  } = useTourneeSelection(clientId);
+  } = useTourneeSelection(clientId, true, activeCardCode);
   // #12 — quantités déjà confirmées (par itemCode) : évite de re-demander une
   // confirmation à CHAQUE frappe une fois que l'utilisateur a validé le gros volume.
   const confirmedBigQty = useMemo(() => new Set<string>(), []);
