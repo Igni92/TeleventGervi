@@ -23,7 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   CalendarDays, ChevronLeft, ChevronRight, RotateCcw, Loader2, Send, Check, X,
-  Users, Palmtree, Clock3, SlidersHorizontal, Save, Sun, Lightbulb, Stethoscope, Paperclip, Scale, History,
+  Users, Palmtree, Clock3, SlidersHorizontal, Save, Sun, Lightbulb, Stethoscope, Paperclip,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { InfoHint } from "@/components/ui/info-hint";
@@ -284,9 +284,6 @@ export function PlanningPanel({ isManager, isDirection }: { isManager: boolean; 
           </ul>
         </SurfaceCard>
       )}
-
-      {/* ── ÉQUILIBRAGE (arbitrage récup / CP) — direction & admin ── */}
-      {isManager && <EquilibrageCard onApplied={load} />}
 
       {/* ── CALENDRIER (le mien / celui d'un salarié pour les managers) ── */}
       <SurfaceCard accent="sky"
@@ -859,152 +856,6 @@ function daysBetween(start: string, end: string): string[] {
     d.setUTCDate(d.getUTCDate() + 1);
   }
   return out;
-}
-
-/* ──────────────────── Équilibrage récup / CP (direction) ───────────────────── */
-
-interface EqConversion {
-  congeId: string; status: CongeStatus;
-  recupStart: string; recupEnd: string; cpStart: string | null; cpEnd: string | null;
-  recupContractDays: number; recupDebitMin: number;
-}
-interface EqResult {
-  email: string; name: string;
-  weekOptionChanges: { week: string; suppMin: number; majEquivMin: number }[];
-  conversions: EqConversion[];
-  cpGivenBackDays: number; recupDebitMin: number; suppInvariantOk: boolean;
-}
-interface EqRunLog {
-  runId: string; runAt: string; by: string; source: "cron" | "manual"; dryRun: boolean;
-  results: EqResult[];
-  totals: { employees: number; weeksToRecup: number; cpDaysGivenBack: number; recupDebitMin: number; anomalies: number };
-}
-
-function fmtRunDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
-  } catch { return iso; }
-}
-
-/**
- * ÉQUILIBRAGE récup / CP — arbitrage quotidien (cron 12h) déclenchable à la main.
- * « Prévisualiser » calcule l'aperçu sans rien modifier ; « Équilibrer
- * maintenant » applique et journalise. L'historique (runs cron + manuels) est
- * conservé, jamais une heure supp en moins.
- */
-function EquilibrageCard({ onApplied }: { onApplied: () => Promise<void> }) {
-  const [history, setHistory] = useState<EqRunLog[]>([]);
-  const [preview, setPreview] = useState<EqRunLog | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [showHist, setShowHist] = useState(false);
-
-  const loadHistory = useCallback(async () => {
-    try {
-      const r = await fetch("/api/effectif/heures/equilibrage", { cache: "no-store" });
-      const j = await r.json().catch(() => null);
-      if (j?.ok) setHistory(j.logs ?? []);
-    } catch { /* silencieux */ }
-  }, []);
-  useEffect(() => { loadHistory(); }, [loadHistory]);
-
-  const run = async (dryRun: boolean) => {
-    setBusy(true);
-    try {
-      const r = await fetch("/api/effectif/heures/equilibrage", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dryRun }),
-      });
-      const j = await r.json().catch(() => null);
-      if (!r.ok || !j?.ok) { toast.error(j?.error || "Équilibrage impossible"); return; }
-      const log = j.log as EqRunLog;
-      if (dryRun) {
-        setPreview(log);
-        if (!log.results.length) toast.info("Rien à équilibrer — tout est déjà à jour.");
-      } else {
-        setPreview(null);
-        const t = log.totals;
-        toast.success(t.employees
-          ? `Équilibré : ${t.weeksToRecup} semaine(s) en récup, ${t.cpDaysGivenBack} jour(s) de CP rendus.`
-          : "Rien à équilibrer — tout est déjà à jour.");
-        await Promise.all([loadHistory(), onApplied()]);
-      }
-    } catch { toast.error("Équilibrage impossible — réseau ?"); }
-    finally { setBusy(false); }
-  };
-
-  const t = preview?.totals;
-  return (
-    <SurfaceCard accent="amber" title="Équilibrage récup / CP" icon={<Scale className="h-3.5 w-3.5" />}
-      action={
-        <button type="button" onClick={() => setShowHist((s) => !s)}
-          className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md border border-border text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60">
-          <History className="h-3.5 w-3.5" /> Historique{history.length ? ` (${history.length})` : ""}
-        </button>
-      }>
-      <p className="text-[12px] text-muted-foreground">
-        Passe les heures supp non arbitrées en récup, puis la récup remplace les jours de CP à venir
-        (par journées entières). Automatique chaque jour à 12h — jamais une heure supp en moins.
-      </p>
-
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" onClick={() => run(true)} disabled={busy}
-          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border text-[12.5px] font-semibold text-foreground hover:bg-secondary/60 disabled:opacity-50">
-          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Scale className="h-3.5 w-3.5" />} Prévisualiser
-        </button>
-        <button type="button" onClick={() => run(false)} disabled={busy}
-          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[12.5px] font-semibold disabled:opacity-50">
-          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Équilibrer maintenant
-        </button>
-      </div>
-
-      {preview && (
-        <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-          {t && (t.weeksToRecup || t.cpDaysGivenBack) ? (
-            <>
-              <p className="text-[12.5px] font-semibold text-foreground">
-                Aperçu : {t.weeksToRecup} semaine(s) → récup · {t.cpDaysGivenBack} jour(s) de CP rendus ({fmtHM(t.recupDebitMin)} de récup consommée)
-                {t.anomalies > 0 && <span className="text-red-500"> · ⚠ {t.anomalies} anomalie(s) ignorée(s)</span>}
-              </p>
-              <ul className="mt-2 space-y-1.5">
-                {preview.results.map((r) => (
-                  <li key={r.email} className="text-[12px] text-muted-foreground">
-                    <span className="font-semibold text-foreground">{fullName(r.name)}</span>
-                    {r.weekOptionChanges.length > 0 && <> · {r.weekOptionChanges.length} sem. supp → récup</>}
-                    {r.cpGivenBackDays > 0 && <> · {r.cpGivenBackDays} j CP → récup ({fmtHM(r.recupDebitMin)})</>}
-                    {!r.suppInvariantOk && <span className="text-red-500"> · ⚠ ignoré (écart heures supp)</span>}
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : (
-            <p className="text-[12.5px] text-muted-foreground">Rien à équilibrer — tout est déjà à jour.</p>
-          )}
-        </div>
-      )}
-
-      {showHist && (
-        <div className="mt-3 border-t border-border pt-3">
-          {history.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">Aucun équilibrage enregistré pour l&apos;instant.</p>
-          ) : (
-            <ul className="space-y-1.5 max-h-64 overflow-y-auto">
-              {history.map((h) => (
-                <li key={h.runId} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px]">
-                  <span className="tnum text-foreground font-medium">{fmtRunDate(h.runAt)}</span>
-                  <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ${h.source === "cron" ? "bg-sky-500/15 text-sky-600" : "bg-violet-500/15 text-violet-600"}`}>
-                    {h.source === "cron" ? "auto 12h" : "manuel"}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {h.totals.weeksToRecup} sem→récup · {h.totals.cpDaysGivenBack} j CP rendus · {fmtHM(h.totals.recupDebitMin)}
-                  </span>
-                  {h.totals.anomalies > 0 && <span className="text-red-500">⚠ {h.totals.anomalies}</span>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </SurfaceCard>
-  );
 }
 
 /* ───────────────────────── Réglages employeur (direction) ──────────────────── */

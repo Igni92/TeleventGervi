@@ -27,10 +27,6 @@ MAILTO=""
 # ── Catalogue produits + stock COMPLET (plus lourd) — 2×/h, minutes creuses. ──
 23,53 * * * *  televent  televent-cron-call /api/sap/sync/products
 
-# ── Équilibrage quotidien récup / CP (supp indécises → récup, puis la récup
-#    remplace les jours de CP à venir). Journalisé (rheqlog:). ──
-0 12 * * *  televent  televent-cron-call /api/cron/equilibrage
-
 # ── Sauvegarde PostgreSQL locale (inoffensif si la base n'est pas locale :
 #    le script sort immédiatement). ──
 15 2 * * *  televent  /srv/televent/app/deploy/scripts/backup-db.sh

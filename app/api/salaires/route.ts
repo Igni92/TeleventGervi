@@ -36,7 +36,7 @@ function buildWeekly(
   });
 }
 import { listAllWeekEntries, listUserWeekEntries, listProfiles, getProfile, saveWeekEntry, type WeekEntry } from "@/lib/heuresRh";
-import { buildSuppRecap, planFifoPayout } from "@/lib/heuresRecap";
+import { buildSuppRecap } from "@/lib/heuresRecap";
 import { listAllConges } from "@/lib/congesRh";
 import { expandOuvrables, monthEndISO } from "@/lib/planning";
 import { rangesOverlap, type CongeRequest } from "@/lib/conges";
@@ -296,34 +296,6 @@ export async function POST(req: NextRequest) {
   };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
-
-  // ── PAIEMENT FIFO des heures supp (global, toutes semaines, sans mois) : le
-  //    patron paie `payMajMin` heures MAJORÉES, les semaines LES PLUS ANCIENNES
-  //    d'abord (clôturées) ; la charnière passe en mixte, le reste en récup.
-  //    Jamais d'heure supp perdue (payé + récup = total par semaine). ──
-  if (body.action === "payoutFifo") {
-    const target = (body.user ?? "").trim().toLowerCase();
-    if (!target) return NextResponse.json({ error: "Salarié manquant" }, { status: 400 });
-    const payMajMin = Math.max(0, Math.round(Number(body.payMajMin) || 0));
-    try {
-      const profile = await getProfile(target);
-      const entries = await listUserWeekEntries(target);
-      const plan = planFifoPayout(entries, profile, payMajMin);
-      for (const ch of plan.changes) {
-        const e = entries.get(ch.week);
-        if (!e) continue;
-        await saveWeekEntry(target, ch.week, e.days, c.email, {
-          option: ch.option, paySuppMin: ch.paySuppMin, recupDates: e.recupDates,
-        });
-      }
-      return NextResponse.json({
-        ok: true, user: target,
-        paidMajMin: plan.paidMajMin, leftoverMajMin: plan.leftoverMajMin, closedWeeks: plan.closedWeeks,
-      });
-    } catch (e) {
-      return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
-    }
-  }
 
   // ── Destinataires du cabinet comptable (réglage UI, sans mois) ──
   if (body.action === "setComptaEmails") {

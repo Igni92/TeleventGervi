@@ -1,9 +1,8 @@
 /**
- * RÉCAP HEURES SUPP par semaine + PAIEMENT FIFO — logique PURE (testée hors
- * React/Prisma). Sert l'écran/PDF « récap par personne » et l'action direction
- * « payer X heures supp » (les plus anciennes d'abord).
+ * RÉCAP HEURES SUPP par semaine — logique PURE (testée hors React/Prisma).
+ * Sert l'écran Salaires et le PDF « récap par personne » (lecture seule).
  *
- * Invariant CLÉ (jamais d'heure supp perdue) : pour chaque semaine,
+ * Invariant : pour chaque semaine,
  *   payé (majoré) + récup (majoré) + en attente (majoré) = total majoré arbitrable,
  * et la part STRUCTURELLE (contrat « 42 h » payé) s'ajoute, toujours payée.
  */
@@ -66,74 +65,4 @@ export function buildSuppRecap(
     });
   }
   return out.sort((a, b) => (a.week < b.week ? -1 : a.week > b.week ? 1 : 0));
-}
-
-export interface FifoChange {
-  week: string;
-  option: HeuresOption;
-  paySuppMin?: number;     // option « mixte » : minutes BRUTES payées
-}
-
-export interface FifoPayoutPlan {
-  changes: FifoChange[];       // options à écrire (toutes les semaines supp arbitrables)
-  requestedMajMin: number;     // demandé (majoré)
-  paidMajMin: number;          // réellement affecté au paiement (majoré)
-  leftoverMajMin: number;      // budget non utilisé (pas assez d'heures supp)
-  closedWeeks: string[];       // semaines entièrement payées (clôturées)
-}
-
-/** Convertit un budget MAJORÉ (à payer) en minutes BRUTES à payer sur une
- *  semaine (la part payée consomme la tranche +25 % d'abord, puis +50 %). */
-function majBudgetToBrut(arb25: number, arb50: number, budgetMaj: number): number {
-  const band25Maj = arb25 * 1.25;
-  if (budgetMaj <= band25Maj) return Math.round(budgetMaj / 1.25);
-  const rest = budgetMaj - band25Maj;
-  return arb25 + Math.round(rest / 1.5);
-}
-
-/**
- * PAIEMENT FIFO : paie `budgetMajMin` (heures MAJORÉES) en commençant par les
- * semaines LES PLUS ANCIENNES. Chaque semaine entièrement couverte passe en
- * « paiement » (clôturée) ; la semaine charnière passe en « mixte » ; les
- * suivantes en « récup ». Ré-arbitre donc toutes les semaines supp de façon
- * déterministe — jamais d'heure supp perdue (payé + récup = total, à la semaine).
- */
-export function planFifoPayout(
-  entries: Iterable<[string, { days: (DayHours | undefined)[]; option: HeuresOption | null; paySuppMin?: number | null }]>,
-  profile: HoursProfile,
-  budgetMajMin: number,
-): FifoPayoutPlan {
-  const typDay = typicalDayMinutes(profile);
-  const weeks = [...entries]
-    .map(([week, e]) => ({ week, ...weekSupp(e.days, profile, typDay) }))
-    .filter((w) => w.arbMin > 0)
-    .sort((a, b) => (a.week < b.week ? -1 : a.week > b.week ? 1 : 0));
-
-  let budget = Math.max(0, Math.round(budgetMajMin));
-  const requested = budget;
-  let paid = 0;
-  const changes: FifoChange[] = [];
-  const closedWeeks: string[] = [];
-
-  for (const w of weeks) {
-    if (budget >= w.majMin) {
-      // Semaine entièrement payée → clôturée.
-      changes.push({ week: w.week, option: "paiement" });
-      closedWeeks.push(w.week);
-      budget -= w.majMin;
-      paid += w.majMin;
-    } else if (budget > 0) {
-      // Semaine charnière : paiement partiel → mixte (paySuppMin en brut).
-      const brut = Math.min(w.arbMin, majBudgetToBrut(w.arb25, w.arb50, budget));
-      const s = splitSupp(w.arb25, w.arb50, brut);
-      changes.push({ week: w.week, option: "mixte", paySuppMin: brut });
-      paid += s.payEquivMin;
-      budget = 0;
-    } else {
-      // Budget épuisé → le reste part en récup.
-      changes.push({ week: w.week, option: "recup" });
-    }
-  }
-
-  return { changes, requestedMajMin: requested, paidMajMin: paid, leftoverMajMin: budget, closedWeeks };
 }
