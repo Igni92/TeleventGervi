@@ -14,10 +14,11 @@
  * (La mise en préparation / le suivi de picking vivent dans le Détail livraison.)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Check, Clock, Hash, Loader2, RefreshCw, Search, ShieldAlert, Store, Truck } from "lucide-react";
+import { CalendarDays, Check, Clock, Hash, Loader2, Pencil, RefreshCw, Search, ShieldAlert, Store, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { StatBlock } from "@/components/ui/stat-block";
 import { formatDeliveryDate } from "@/lib/livraison";
+import { BLViewDialog } from "@/components/livraisons/BLViewDialog";
 import type { ApiResp, Doc } from "@/lib/livraisonView";
 import type { SafeguardViolation } from "@/lib/safeguards";
 
@@ -65,6 +66,12 @@ export function VentesDuJour() {
   // du jour (vente à perte, volume inhabituel, doublon…), par docEntry.
   const [alerts, setAlerts] = useState<Record<number, SafeguardViolation[]>>({});
   const today = useMemo(() => parisTodayISO(), []);
+  // BL ouvert dans le dialog (visuel/édition). `edit` = ouverture directe en
+  // modification (clic droit sur la ligne ou bouton stylo).
+  const [blOpen, setBlOpen] = useState<{ docEntry: number; docNum: number; cardName: string; edit: boolean } | null>(null);
+  const openBL = useCallback((d: Doc, edit: boolean) => {
+    setBlOpen({ docEntry: d.docEntry, docNum: d.docNum, cardName: d.cardFullName ?? d.cardName, edit });
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -175,12 +182,23 @@ export function VentesDuJour() {
                 <span className="text-[11px] tnum text-muted-foreground/70">{g.docs.length}</span>
               </div>
               <ul className="divide-y divide-border/60">
-                {g.docs.map((d) => <VenteRow key={d.docEntry} d={d} alerts={alerts[d.docEntry]} />)}
+                {g.docs.map((d) => <VenteRow key={d.docEntry} d={d} alerts={alerts[d.docEntry]} onOpenBL={openBL} />)}
               </ul>
             </div>
           ))
         )}
       </section>
+
+      {/* Visuel / édition d'un BL (clic sur la ligne, clic droit ou stylo). */}
+      <BLViewDialog
+        docEntry={blOpen?.docEntry ?? null}
+        docNum={blOpen?.docNum ?? null}
+        cardName={blOpen?.cardName ?? ""}
+        open={!!blOpen}
+        startEdit={blOpen?.edit ?? false}
+        onOpenChange={(v) => { if (!v) setBlOpen(null); }}
+        onSaved={load}
+      />
     </div>
   );
 }
@@ -218,7 +236,7 @@ function Coche({ done, label, tone }: { done: boolean; label: string; tone: "eme
 
 /** Ligne de vente — un BL (magasin), consultation ; coches préparé + départ.
  *  `alerts` = anomalies garde-fous détectées a posteriori (badge + détail dépliable). */
-function VenteRow({ d, alerts }: { d: Doc; alerts?: SafeguardViolation[] }) {
+function VenteRow({ d, alerts, onOpenBL }: { d: Doc; alerts?: SafeguardViolation[]; onOpenBL: (d: Doc, edit: boolean) => void }) {
   const takenTime = d.takenAt ? d.takenAt.slice(11, 16) : null;
   const [showAlerts, setShowAlerts] = useState(false);
   // N° de commande client (réf. NumAtCard) — éditable ici, enregistré sur le BL SAP.
@@ -248,12 +266,23 @@ function VenteRow({ d, alerts }: { d: Doc; alerts?: SafeguardViolation[] }) {
   const hasBlock = (alerts ?? []).some((a) => a.severity === "block");
 
   return (
-    <li className="flex flex-col gap-1.5 px-4 sm:px-5 py-2.5">
+    <li
+      className="flex flex-col gap-1.5 px-4 sm:px-5 py-2.5"
+      onContextMenu={(e) => { e.preventDefault(); onOpenBL(d, true); }}
+      title="Clic : voir le BL · Clic droit : modifier"
+    >
     <div className="flex flex-col sm:flex-row sm:items-center gap-2">
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-2 min-w-0 text-[13.5px] font-semibold text-foreground">
-          <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate">{d.cardFullName ?? d.cardName}</span>
+          <button
+            type="button"
+            onClick={() => onOpenBL(d, false)}
+            className="flex items-center gap-2 min-w-0 text-left hover:text-brand-600 transition-colors"
+            title="Voir le détail du BL"
+          >
+            <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{d.cardFullName ?? d.cardName}</span>
+          </button>
           {d.clientType && SEGMENT_BADGE[d.clientType] && (
             <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide shrink-0 ${SEGMENT_BADGE[d.clientType]}`}>
               {d.clientType}
@@ -302,6 +331,18 @@ function VenteRow({ d, alerts }: { d: Doc; alerts?: SafeguardViolation[] }) {
       <div className="flex items-center gap-1.5 shrink-0">
         <Coche done={d.prepared || !!d.departed} label="Préparé" tone="emerald" />
         <Coche done={!!d.departed} label="Départ" tone="sky" />
+        {/* Stylo : modifier la commande (BL ouvert uniquement). */}
+        {d.open && (
+          <button
+            type="button"
+            onClick={() => onOpenBL(d, true)}
+            title="Modifier la commande"
+            aria-label={`Modifier le BL ${d.docNum}`}
+            className="inline-flex items-center justify-center h-7 w-7 rounded-lg border border-border text-muted-foreground hover:text-brand-600 hover:border-brand-500/40 transition-colors"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
     </div>
     {/* Détail des anomalies garde-fous (déplié au clic sur le badge). */}
