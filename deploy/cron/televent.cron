@@ -1,0 +1,26 @@
+# TeleVent — crons système (OVH VPS). Source de vérité VERSIONNÉE.
+# Installé automatiquement dans /etc/cron.d/televent par deploy/scripts/deploy.sh.
+# Prérequis : /usr/local/bin/televent-cron-call (posé par deploy.sh) et
+#             CRON_SECRET défini dans /srv/televent/app/.env.
+# Les routes re-vérifient elles-mêmes le secret (isCronAuthorized).
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+MAILTO=""
+
+# ── Synchro globale SAP (miroir documents puis produits+stock, en séquence). ──
+*/30 * * * *  televent  televent-cron-call /api/cron/sap-sync
+
+# ── Synchro incrémentale stock (décalée pour ne pas chevaucher la globale). ──
+7,17,27,37,47,57 * * * *  televent  televent-cron-call /api/sap/sync/delta
+
+# ── Rafraîchissement du stock inventaire. ──
+5,20,35,50 * * * *  televent  televent-cron-call /api/inventaire/refresh-stock
+
+# ── Équilibrage quotidien récup / CP (supp indécises → récup, puis la récup
+#    remplace les jours de CP à venir). Journalisé (rheqlog:). ──
+0 12 * * *  televent  televent-cron-call /api/cron/equilibrage
+
+# ── Sauvegarde PostgreSQL locale (inoffensif si la base n'est pas locale :
+#    le script sort immédiatement). ──
+15 2 * * *  televent  /srv/televent/app/deploy/scripts/backup-db.sh
