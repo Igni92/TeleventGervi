@@ -6,35 +6,39 @@
 #   1) tu modifies le code et/ou deploy/cron/televent.cron
 #   2) tu lances CE script → build + réinstallation du cron + redémarrage
 #
-# Lance-le depuis un terminal vierge :
+# À lancer depuis un terminal vierge (connecté en `ubuntu`, qui a sudo) :
 #   bash /srv/televent/app/deploy/scripts/deploy.sh
-# (fonctionne aussi en `sudo bash …` : npm tourne toujours en tant que televent,
-#  jamais en root, pour ne pas créer d'artefacts root-owned.)
+#
+# Peu importe qui le lance (ubuntu / root / televent) : le BUILD tourne TOUJOURS
+# en tant que `televent` (propriétaire de node_modules/.next) et les tâches
+# SYSTÈME (cron, service) passent par sudo.
 set -euo pipefail
 
 APP_DIR=/srv/televent/app
 APP_USER=televent
-cd "$APP_DIR"
+CURRENT_USER="$(id -un)"
 
-# Tâches système via sudo (ou direct si déjà root) ; build en tant que televent.
-if [ "$(id -u)" = "0" ]; then
-  SUDO=""
-  run_app() { sudo -u "$APP_USER" -H "$@"; }
-else
-  SUDO="sudo"
-  run_app() { "$@"; }
-fi
+# npm/build TOUJOURS en tant que televent (sinon EACCES sur node_modules).
+app_npm() {
+  if [ "$CURRENT_USER" = "$APP_USER" ]; then
+    ( cd "$APP_DIR" && npm "$@" )
+  else
+    sudo -u "$APP_USER" -H bash -lc "cd '$APP_DIR' && npm $*"
+  fi
+}
+# Tâches système : direct si root, sinon sudo.
+if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi
 
-echo "── 1/4 · Dépendances (npm ci) ──"
-run_app npm ci
+echo "── 1/4 · Dépendances (npm ci, en tant que $APP_USER) ──"
+app_npm ci
 
 echo "── 2/4 · Build de production (prisma generate && next build) ──"
-run_app npm run build
+app_npm run build
 
 echo "── 3/4 · Cron (helper + crontab versionné → /etc/cron.d) ──"
 $SUDO install -m 755 "$APP_DIR/deploy/scripts/cron-call.sh" /usr/local/bin/televent-cron-call
 $SUDO install -m 644 "$APP_DIR/deploy/cron/televent.cron"   /etc/cron.d/televent
-if ! grep -q '^CRON_SECRET=' "$APP_DIR/.env" 2>/dev/null; then
+if ! $SUDO grep -q '^CRON_SECRET=' "$APP_DIR/.env" 2>/dev/null; then
   echo "⚠️  CRON_SECRET absent de $APP_DIR/.env → AUCUN cron OVH ne s'authentifiera."
   echo "    Définis-en un (une seule fois) :"
   echo "      echo \"CRON_SECRET=\$(openssl rand -hex 24)\" | sudo tee -a $APP_DIR/.env"
@@ -45,4 +49,4 @@ $SUDO systemctl restart televent
 sleep 3
 $SUDO systemctl --no-pager --lines=5 status televent || true
 
-echo "✅ Déployé : $(git rev-parse --short HEAD) — $(git log -1 --pretty=%s)"
+echo "✅ Déployé : $(git -C "$APP_DIR" rev-parse --short HEAD) — $(git -C "$APP_DIR" log -1 --pretty=%s)"
