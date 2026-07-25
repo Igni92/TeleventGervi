@@ -26,6 +26,7 @@ interface Row {
   heures: SalaryHeures;
   weeks?: SalaryWeek[];
   suppRecap?: SuppWeekRecap[];
+  cet?: { payouts: { majMin: number; monthBulletin: string; note: string }[] };
   salary: SalaryMonthData | null;
   profile: SalaryProfile | null;
   anMensuel: number;
@@ -60,6 +61,7 @@ const toPdfEmploye = (r: Row): PdfEmploye => ({
   primes: r.salary?.primes ?? [], frais: r.salary?.frais ?? [], note: r.salary?.note,
   weeks: r.weeks,
   suppRecap: r.suppRecap,
+  recupPayouts: r.cet?.payouts,
 });
 
 const fmtDate = (iso: string) =>

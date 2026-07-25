@@ -24,6 +24,8 @@ export interface PdfEmploye {
   weeks?: SalaryWeek[];
   /** Récap heures supp par semaine (destination : payé / récup / en attente). */
   suppRecap?: SuppWeekRecap[];
+  /** Paiements pris sur le compteur récup (CET) — filtrés par mois de bulletin. */
+  recupPayouts?: { majMin: number; monthBulletin: string; note: string }[];
 }
 
 const eur = (n: number) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(n);
@@ -52,6 +54,9 @@ function payLines(monthId: string, e: PdfEmploye): string[] {
         ? `${p.motif} : ${eur(p.montant)}${p.note ? `  (${p.note})` : ""}`
         : `Prime — ${p.motif} : ${eur(p.montant)}${p.bulletinDe && p.bulletinDe !== monthId ? ` (bulletin de ${salaireMonthLabel(p.bulletinDe)})` : ""}${p.note ? ` — ${p.note}` : ""}`),
     ...e.frais.map((f: SalaryFrais) => `Frais — ${f.motif} : ${eur(f.montant)}${f.note ? ` — ${f.note}` : ""}`),
+    // Paiement d'heures depuis le compteur récup (CET) sur CE bulletin.
+    ...(e.recupPayouts ?? []).filter((p) => p.monthBulletin === monthId).map((p) =>
+      `Paiement heures supp (compteur recup) : ${hm(p.majMin)} majorees${p.note ? ` — ${p.note}` : ""}`),
     ...(e.vehicule ? [`Avantage en nature — ${e.vehicule.type} : ${eur(e.anMensuel)} / mois`] : []),
     ...(e.note ? [`Note : ${e.note}`] : []),
   ];

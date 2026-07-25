@@ -342,3 +342,80 @@ export async function listEnvois(): Promise<SalaryEnvoi[]> {
     return [];
   }
 }
+
+/* ─────────── Paiements depuis le COMPTEUR RÉCUP (CET) — à la demande ─────────
+ * `salrecuppay:<email>:<id>` → un paiement d'heures MAJORÉES pris sur le compteur
+ * de récup (compte épargne temps). Réduit le solde CET affiché et apparaît en
+ * ligne payée sur le bulletin du mois indiqué. Décision employeur (à la demande
+ * du salarié) — indépendant de l'arbitrage mensuel des heures supp. */
+const RECUPPAY_PREFIX = "salrecuppay:";
+
+export interface RecupPayout {
+  id: string;
+  majMin: number;         // heures MAJORÉES payées depuis le compteur
+  monthBulletin: string;  // YYYY-MM (bulletin sur lequel c'est payé)
+  note: string;
+  createdAt: string;
+  createdBy: string;
+}
+
+function sanitizePayout(v: unknown, id: string): RecupPayout | null {
+  const d = (v ?? {}) as Partial<RecupPayout>;
+  const majMin = Math.max(0, Math.round(Number(d.majMin) || 0));
+  if (majMin <= 0) return null;
+  const mb = typeof d.monthBulletin === "string" && /^\d{4}-\d{2}$/.test(d.monthBulletin) ? d.monthBulletin : "";
+  return {
+    id,
+    majMin,
+    monthBulletin: mb,
+    note: str(d.note, 200),
+    createdAt: typeof d.createdAt === "string" ? d.createdAt : "",
+    createdBy: typeof d.createdBy === "string" ? d.createdBy : "",
+  };
+}
+
+export async function saveRecupPayout(
+  email: string,
+  payout: { id: string; majMin: number; monthBulletin: string; note?: string },
+  by: string,
+): Promise<RecupPayout | null> {
+  const clean = sanitizePayout({ ...payout, createdAt: new Date().toISOString(), createdBy: by }, payout.id);
+  if (!clean) return null;
+  const key = `${RECUPPAY_PREFIX}${emailKey(email)}:${clean.id}`;
+  const value = JSON.stringify(clean);
+  await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+  return clean;
+}
+
+export async function deleteRecupPayout(email: string, id: string): Promise<void> {
+  const key = `${RECUPPAY_PREFIX}${emailKey(email)}:${id}`;
+  await prisma.appSetting.deleteMany({ where: { key } });
+}
+
+export async function listRecupPayouts(email: string): Promise<RecupPayout[]> {
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: `${RECUPPAY_PREFIX}${emailKey(email)}:` } } });
+    return rows
+      .map((r) => sanitizePayout(JSON.parse(r.value), r.key.slice(r.key.lastIndexOf(":") + 1)))
+      .filter((p): p is RecupPayout => !!p)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  } catch { return []; }
+}
+
+/** Tous les paiements CET, par email — pour l'écran Salaires (une passe). */
+export async function listAllRecupPayouts(): Promise<Map<string, RecupPayout[]>> {
+  const out = new Map<string, RecupPayout[]>();
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: RECUPPAY_PREFIX } } });
+    for (const r of rows) {
+      const rest = r.key.slice(RECUPPAY_PREFIX.length);
+      const i = rest.lastIndexOf(":");
+      if (i <= 0) continue;
+      const email = rest.slice(0, i);
+      const p = sanitizePayout(JSON.parse(r.value), rest.slice(i + 1));
+      if (!p) continue;
+      const list = out.get(email); if (list) list.push(p); else out.set(email, [p]);
+    }
+  } catch { /* indisponible */ }
+  return out;
+}

@@ -38,7 +38,7 @@ function buildWeekly(
 import { listAllWeekEntries, listUserWeekEntries, listProfiles, getProfile, saveWeekEntry, type WeekEntry } from "@/lib/heuresRh";
 import { buildSuppRecap } from "@/lib/heuresRecap";
 import { listAllConges } from "@/lib/congesRh";
-import { expandOuvrables, monthEndISO } from "@/lib/planning";
+import { expandOuvrables, monthEndISO, computeRecupCounter } from "@/lib/planning";
 import { rangesOverlap, type CongeRequest } from "@/lib/conges";
 import { stripOrgSuffix } from "@/lib/userNames";
 import {
@@ -54,6 +54,7 @@ import {
   getComptaEmails, setComptaEmails, listEnvois, logEnvoi,
   getCommissionsPaidThrough, setCommissionsPaidThrough, advanceCommissionsPaidThrough,
   saveCommissionPayment, getCommissionPayment, listCommissionPayments,
+  listAllRecupPayouts, saveRecupPayout, deleteRecupPayout,
 } from "@/lib/salairesRh";
 import { appBaseUrl } from "@/lib/congesNotify";
 import { sendMailAsShared } from "@/lib/graph";
@@ -158,14 +159,16 @@ function buildHeures(
  *  `commissions` = commissions à verser ce mois (calculées par l'appelant, pour
  *  être RÉUTILISÉES tel quel dans le détail GET et le snapshot d'archive). */
 async function buildRows(monthId: string, commissions: Map<string, PayslipCommission>) {
-  const [users, byUser, hourProfiles, salProfiles, salMonths, allConges] = await Promise.all([
+  const [users, byUser, hourProfiles, salProfiles, salMonths, allConges, payoutsByUser] = await Promise.all([
     prisma.user.findMany({ select: { name: true, email: true }, orderBy: { name: "asc" } }),
     listAllWeekEntries(),
     listProfiles(),
     listSalaryProfiles(),
     listSalaryMonths(monthId),
     listAllConges(),
+    listAllRecupPayouts(),
   ]);
+  const todayISO = new Date().toISOString().slice(0, 10);
   const congesByUser = new Map<string, CongeRequest[]>();
   for (const g of allConges) {
     const list = congesByUser.get(g.email);
@@ -210,6 +213,16 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
     const attrWeeks = attributedMonthWeeks(monthId, entries ?? new Map());
     const heures = buildHeures(entries, hourProfile, congesByUser.get(email) ?? [], monthId);
     const anMensuel = avantageNatureMensuel(salProfile?.vehicule);
+    // COMPTEUR RÉCUP (CET) : solde acquis (heures supp majorées mises en récup −
+    // récup prise) moins ce qui a déjà été PAYÉ depuis le compteur (à la demande).
+    const cetWeeks = [...(entries ?? new Map<string, WeekEntry>()).entries()]
+      .map(([week, e]) => ({ week, days: e.days, option: e.option, paySuppMin: e.paySuppMin, recupDates: e.recupDates }));
+    const cetExtra = (congesByUser.get(email) ?? [])
+      .filter((c) => c.type === "recup" && c.status === "approved")
+      .flatMap((c) => expandOuvrables(c.start, c.end));
+    const cetCounter = computeRecupCounter(cetWeeks, cetExtra, hourProfile, todayISO);
+    const payouts = payoutsByUser.get(email) ?? [];
+    const paidOutMin = payouts.reduce((s, p) => s + p.majMin, 0);
     return {
       email,
       name: stripOrgSuffix(rawName) || email,
@@ -218,6 +231,13 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
       weeks: buildWeekly(attrWeeks, entries, hourProfile),
       // Récap heures supp par semaine (où part chaque heure : payé/récup/attente).
       suppRecap: buildSuppRecap(entries ?? new Map(), hourProfile),
+      // Compteur récup (CET) : solde net + historique des paiements du compteur.
+      cet: {
+        balanceMin: cetCounter.balanceMin,
+        paidOutMin,
+        netMin: cetCounter.balanceMin - paidOutMin,
+        payouts,
+      },
       salary,
       profile: salProfile,
       anMensuel,
@@ -292,10 +312,42 @@ export async function POST(req: NextRequest) {
   let body: {
     action?: string; month?: string; user?: string; primes?: unknown; frais?: unknown; note?: unknown;
     mode?: string; payMin?: unknown; payMajMin?: unknown; pdfBase64?: unknown; kind?: string; emails?: unknown;
-    paidThrough?: unknown;
+    paidThrough?: unknown; majMin?: unknown; id?: unknown;
   };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
+
+  // ── Payer des heures depuis le COMPTEUR RÉCUP (CET), à la demande du salarié.
+  //    Réduit le solde CET et apparaît en ligne payée sur le bulletin du mois. ──
+  if (body.action === "payRecup") {
+    const target = (body.user ?? "").trim().toLowerCase();
+    if (!target) return NextResponse.json({ error: "Salarié manquant" }, { status: 400 });
+    const majMin = Math.max(0, Math.round(Number(body.majMin) || 0));
+    if (majMin <= 0) return NextResponse.json({ error: "Indiquez les heures à payer." }, { status: 400 });
+    const mb = typeof body.month === "string" && isMonthId(body.month) ? body.month : monthIdOf(new Date());
+    try {
+      const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+      const saved = await saveRecupPayout(target, {
+        id, majMin, monthBulletin: mb, note: typeof body.note === "string" ? body.note : "",
+      }, c.email);
+      return NextResponse.json({ ok: true, payout: saved });
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
+  }
+
+  // ── Annuler un paiement du compteur (le crédit revient sur le CET). ──
+  if (body.action === "unpayRecup") {
+    const target = (body.user ?? "").trim().toLowerCase();
+    const id = (typeof body.id === "string" ? body.id : "").trim();
+    if (!target || !id) return NextResponse.json({ error: "Paramètres manquants" }, { status: 400 });
+    try {
+      await deleteRecupPayout(target, id);
+      return NextResponse.json({ ok: true });
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
+  }
 
   // ── Destinataires du cabinet comptable (réglage UI, sans mois) ──
   if (body.action === "setComptaEmails") {

@@ -43,6 +43,11 @@ interface Row {
   missing: string[];
   /** Récap heures supp par semaine (où part chaque heure : payé/récup/attente). */
   suppRecap?: SuppWeekRecap[];
+  /** Compteur récup (CET) : solde net + paiements déjà pris sur le compteur. */
+  cet?: {
+    balanceMin: number; paidOutMin: number; netMin: number;
+    payouts: { id: string; majMin: number; monthBulletin: string; note: string; createdAt: string; createdBy: string }[];
+  };
 }
 interface CommissionMonthLine { month: string; base: number; prime: number; invoices: number; avoirs: number }
 interface CommissionDetail {
@@ -566,6 +571,84 @@ function SuppRecapView({ row }: { row: Row }) {
   );
 }
 
+/* ───── Compteur récup (CET) + paiement depuis le compteur (à la demande) ───── */
+
+/** « 7h30 » → minutes. Accepte « 7h30 », « 7.5 », « 7,5 », « 7h », « 90m ». */
+function parseHmToMin(v: string): number {
+  const t = v.trim().toLowerCase().replace(",", ".");
+  const hm = /^(\d+)\s*h\s*(\d{1,2})?$/.exec(t);
+  if (hm) return Number(hm[1]) * 60 + (hm[2] ? Number(hm[2]) : 0);
+  const dec = Number(t);
+  return Number.isFinite(dec) && dec > 0 ? Math.round(dec * 60) : 0;
+}
+
+function RecupCetPanel({ row, month, canEdit, onSaved }: { row: Row; month: string; canEdit: boolean; onSaved: () => Promise<void> }) {
+  const cet = row.cet;
+  const [payH, setPayH] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (!cet || (cet.netMin <= 0 && cet.paidOutMin <= 0 && cet.balanceMin <= 0)) return null;
+
+  const post = async (payload: Record<string, unknown>, okMsg: string) => {
+    setBusy(true);
+    try {
+      const r = await fetch("/api/salaires", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) { toast.error(j?.error || "Action impossible"); return; }
+      toast.success(okMsg); setPayH(""); await onSaved();
+    } catch { toast.error("Action impossible — réseau ?"); } finally { setBusy(false); }
+  };
+  const pay = () => {
+    const majMin = parseHmToMin(payH);
+    if (majMin <= 0) { toast.error("Indiquez les heures à payer, ex. 7h30."); return; }
+    if (majMin > cet.netMin) { toast.error(`Le compteur n'a que ${fmtHM(cet.netMin)}.`); return; }
+    post({ action: "payRecup", user: row.email, majMin, month }, `Payé ${fmtHM(majMin)} depuis le compteur — bulletin ${monthFrLong(month)}.`);
+  };
+
+  return (
+    <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
+          <Wallet className="h-3.5 w-3.5" /> Compteur récup (CET)
+        </span>
+        <span className="text-[15px] font-bold tnum text-sky-700 dark:text-sky-300">{fmtHM(cet.netMin)}</span>
+        {cet.paidOutMin > 0 && <span className="text-[11px] text-muted-foreground">dont {fmtHM(cet.paidOutMin)} déjà payées</span>}
+      </div>
+
+      {canEdit && cet.netMin > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-[11.5px] text-muted-foreground">Payer depuis le compteur (à la demande du salarié) :</span>
+          <input value={payH} onChange={(e) => setPayH(e.target.value)} inputMode="decimal"
+            placeholder="ex. 7h30" aria-label="Heures à payer depuis le compteur"
+            className="h-8 w-[80px] rounded-md border border-border bg-background px-2 text-[12.5px] tnum text-center focus:outline-none focus:ring-1 focus:ring-brand-500" />
+          <button type="button" disabled={busy} onClick={pay}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[12.5px] font-semibold disabled:opacity-50">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Coins className="h-4 w-4" />} Payer
+          </button>
+        </div>
+      )}
+
+      {cet.payouts.length > 0 && (
+        <ul className="mt-2 space-y-1 border-t border-border pt-2">
+          {cet.payouts.map((p) => (
+            <li key={p.id} className="flex flex-wrap items-center gap-x-2 text-[11.5px]">
+              <Coins className="h-3 w-3 text-sky-600 shrink-0" />
+              <span className="tnum font-semibold text-foreground">{fmtHM(p.majMin)}</span>
+              <span className="text-muted-foreground">payées sur {monthFr(p.monthBulletin)}</span>
+              {p.note && <span className="italic text-muted-foreground">« {p.note} »</span>}
+              {canEdit && (
+                <button type="button" disabled={busy} onClick={() => post({ action: "unpayRecup", user: row.email, id: p.id }, "Paiement annulé — crédité au compteur.")}
+                  className="ml-auto text-muted-foreground hover:text-rose-600" aria-label="Annuler ce paiement">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /* ───────────── Carte d'un salarié — REPLIABLE (l'en-tête résume) ──────────── */
 
 function EmployeeCard({ row, month, canEdit, onSaved }: {
@@ -654,6 +737,9 @@ function EmployeeCard({ row, month, canEdit, onSaved }: {
           {canEdit && h.suppTotalMin > 0 && (
             <SuppDecision row={row} month={month} onSaved={onSaved} />
           )}
+
+          {/* COMPTEUR RÉCUP (CET) + paiement depuis le compteur (à la demande). */}
+          <RecupCetPanel row={row} month={month} canEdit={canEdit} onSaved={onSaved} />
 
           {/* RÉCAP heures supp par semaine (lecture seule). */}
           {(row.suppRecap?.length ?? 0) > 0 && (
