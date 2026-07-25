@@ -285,8 +285,8 @@ export function PlanningPanel({ isManager, isDirection }: { isManager: boolean; 
         </SurfaceCard>
       )}
 
-      {/* ── ÉQUILIBRAGE (arbitrage récup / CP) — direction ── */}
-      {isDirection && <EquilibrageCard onApplied={load} />}
+      {/* ── ÉQUILIBRAGE (arbitrage récup / CP) — direction & admin ── */}
+      {isManager && <EquilibrageCard onApplied={load} />}
 
       {/* ── CALENDRIER (le mien / celui d'un salarié pour les managers) ── */}
       <SurfaceCard accent="sky"

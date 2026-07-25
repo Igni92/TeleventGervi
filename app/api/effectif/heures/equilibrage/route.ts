@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { isDirection } from "@/lib/permissions";
+import { getAccessScope } from "@/lib/permissions";
 import { runEquilibrage, listEquilibrageLog } from "@/lib/heuresEquilibrageRun";
 
 /**
- * ÉQUILIBRAGE récup / CP — déclenchement MANUEL + historique (direction).
+ * ÉQUILIBRAGE récup / CP — déclenchement MANUEL + historique.
  *
  *   GET                       → historique des runs (cron + manuels)
  *   POST { dryRun: true }     → APERÇU (ne modifie rien) — bouton « prévisualiser »
  *   POST {}                   → APPLIQUE l'équilibrage maintenant + journalise
  *
- * Réservé à la DIRECTION (même porte que les réglages employeur du planning).
- * Le cron quotidien passe, lui, par /api/cron/equilibrage (auth machine).
+ * Réservé aux MANAGERS (admin OU direction — `getAccessScope.all`, même porte
+ * que la vue équipe du planning). Le cron quotidien passe, lui, par
+ * /api/cron/equilibrage (auth machine).
  */
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -21,7 +22,7 @@ async function requireDir() {
   if (!session?.user) return { error: "Non autorisé", status: 401 as const, email: "" };
   const email = (session.user.email ?? "").trim().toLowerCase();
   if (!email) return { error: "Non autorisé", status: 401 as const, email: "" };
-  if (!(await isDirection(session))) return { error: "Réservé à la direction", status: 403 as const, email };
+  if (!(await getAccessScope(session)).all) return { error: "Réservé aux managers", status: 403 as const, email };
   return { email };
 }
 
