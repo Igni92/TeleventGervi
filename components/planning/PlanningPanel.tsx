@@ -23,7 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   CalendarDays, ChevronLeft, ChevronRight, RotateCcw, Loader2, Send, Check, X,
-  Users, Palmtree, Clock3, SlidersHorizontal, Save, Sun, Lightbulb, Stethoscope, Paperclip,
+  Users, Palmtree, Clock3, SlidersHorizontal, Save, Sun, Lightbulb, Stethoscope, Paperclip, Lock,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { InfoHint } from "@/components/ui/info-hint";
@@ -38,7 +38,7 @@ import {
 import { frenchHolidayLabel } from "@/lib/livraison";
 import { eventsByDate } from "@/lib/events";
 import {
-  CONGE_TYPE_LABEL, CONGE_STATUS_LABEL, congeDayCount, congeOrigin, rangesOverlap,
+  CONGE_TYPE_LABEL, CONGE_STATUS_LABEL, congeDayCount, congeOrigin, rangesOverlap, canChangeCongeType,
   type CongeType, type CongeStatus,
 } from "@/lib/conges";
 
@@ -166,6 +166,14 @@ export function PlanningPanel({ isManager, isDirection }: { isManager: boolean; 
   };
   const cancel = async (c: Conge) => {
     if (await post({ action: "cancel", id: c.id, email: c.email })) { toast.success("Annulé."); await load(); }
+  };
+  // Décider/changer APRÈS coup le type d'un jour posé (récup ↔ CP…), tant que ce
+  // n'est pas verrouillé (au plus tard 1 jour avant la prise).
+  const changeType = async (c: Conge, type: CongeType) => {
+    if (c.type === type) return;
+    if (await post({ action: "changeType", id: c.id, email: c.email, type })) {
+      toast.success(`Type mis à jour — ${CONGE_TYPE_LABEL[type]}.`); await load();
+    }
   };
 
   if (!data) {
@@ -311,6 +319,7 @@ export function PlanningPanel({ isManager, isDirection }: { isManager: boolean; 
         <PersonCalendar
           person={person} month={month} todayISO={data.todayISO}
           isSelf={isSelf} isDirection={isDirection} busy={busy}
+          onChangeType={changeType}
           onSubmit={async (payload) => {
             const ok = await post(payload);
             if (ok) {
@@ -437,10 +446,11 @@ function CounterChip({ icon, label, value, hint, tone }: {
 
 const JOURS_COURTS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 
-function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, onSubmit }: {
+function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, onSubmit, onChangeType }: {
   person: PersonPlanning; month: string; todayISO: string;
   isSelf: boolean; isDirection: boolean; busy: boolean;
   onSubmit: (payload: Record<string, unknown>) => Promise<boolean>;
+  onChangeType: (c: Conge, type: CongeType) => Promise<void>;
 }) {
   const grid = useMemo(() => monthGridDays(month), [month]);
   // Événements commerciaux (Noël, 14 juillet, Saint-Valentin…) posés sur la grille.
@@ -736,21 +746,41 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
         </div>
       )}
 
-      {/* MOBILE : détail des congés du mois (les pastilles disent « quoi », cette
-          liste dit « quand & quel statut »). Tap → sélectionne la plage. */}
+      {/* Détail des congés du mois (« quand & quel statut »). On y CHOISIT/change le
+          type récup ↔ CP tant que ce n'est pas verrouillé (au plus tard 1 j avant
+          la prise). Tap sur la ligne → sélectionne la plage. */}
       {monthEvents.length > 0 && (
-        <div className="md:hidden mt-2 space-y-1.5">
-          <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Ce mois-ci</p>
-          {monthEvents.map((c) => (
-            <button key={c.id} type="button"
-              onClick={() => { if (canAct) setSel({ start: c.start, end: c.end }); }}
-              className={`w-full flex items-center gap-2 rounded-lg border border-border px-2.5 py-2 text-left ${canAct ? "active:bg-secondary/40" : "cursor-default"}`}>
-              <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${c.status === "approved" ? TYPE_TONE[c.type].solid : `border-2 border-current ${TYPE_TONE[c.type].text}`}`} />
-              <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${TYPE_TONE[c.type].soft} ${TYPE_TONE[c.type].text}`}>{CONGE_TYPE_LABEL[c.type]}</span>
-              <span className="min-w-0 flex-1 truncate text-[12.5px] tnum text-foreground">{rangeLabel(c)}</span>
-              <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${STATUS_TONE[c.status]}`}>{CONGE_STATUS_LABEL[c.status]}</span>
-            </button>
-          ))}
+        <div className="mt-2 space-y-1.5">
+          <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Congés du mois</p>
+          {monthEvents.map((c) => {
+            const changeable = canAct && canChangeCongeType(c, todayISO) && (c.type === "cp" || c.type === "recup");
+            const lockable = c.type === "cp" || c.type === "recup";
+            return (
+              <div key={c.id} className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-2">
+                <button type="button" onClick={() => { if (canAct) setSel({ start: c.start, end: c.end }); }}
+                  className={`flex min-w-0 flex-1 items-center gap-2 text-left ${canAct ? "hover:opacity-80" : "cursor-default"}`}>
+                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${c.status === "approved" ? TYPE_TONE[c.type].solid : `border-2 border-current ${TYPE_TONE[c.type].text}`}`} />
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] tnum text-foreground">{rangeLabel(c)}</span>
+                  <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${STATUS_TONE[c.status]}`}>{CONGE_STATUS_LABEL[c.status]}</span>
+                </button>
+                {changeable ? (
+                  <span className="inline-flex shrink-0 overflow-hidden rounded-md border border-border" title="Choisir récup ou CP (verrouillé 1 j avant la prise)">
+                    {(["recup", "cp"] as CongeType[]).map((t) => (
+                      <button key={t} type="button" disabled={busy} onClick={() => onChangeType(c, t)}
+                        className={`h-7 px-2 text-[11px] font-semibold ${c.type === t ? `${TYPE_TONE[t].soft} ${TYPE_TONE[t].text}` : "text-muted-foreground hover:bg-secondary/60"}`}>
+                        {t === "recup" ? "Récup" : "CP"}
+                      </button>
+                    ))}
+                  </span>
+                ) : (
+                  <span className={`inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${TYPE_TONE[c.type].soft} ${TYPE_TONE[c.type].text}`}>
+                    {CONGE_TYPE_LABEL[c.type]}
+                    {lockable && <Lock className="h-3 w-3 opacity-70" aria-label="Type verrouillé" />}
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

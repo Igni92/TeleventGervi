@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isCongeType, isIsoDate, congeDayCount, validateConge, rangesOverlap, canDecide,
+  daysBetween, canChangeCongeType,
   CONGE_TYPE_LABEL, type CongeRequest,
 } from "./conges";
 
@@ -52,5 +53,28 @@ describe("conges — helpers purs", () => {
   it("libellés de type présents", () => {
     expect(CONGE_TYPE_LABEL.cp).toMatch(/congés/i);
     expect(CONGE_TYPE_LABEL.rtt).toBe("RTT");
+  });
+});
+
+describe("conges — changement de type verrouillé 1 jour avant", () => {
+  const mk = (status: CongeRequest["status"], start: string): CongeRequest => ({
+    id: "x", email: "a@b.c", name: "A", type: "cp", start, end: start, note: "", status, origin: "salarie", createdAt: "",
+  });
+  it("daysBetween", () => {
+    expect(daysBetween("2026-07-10", "2026-07-12")).toBe(2);
+    expect(daysBetween("2026-07-12", "2026-07-10")).toBe(-2);
+  });
+  it("modifiable si > 1 jour avant (validé ou en attente)", () => {
+    expect(canChangeCongeType(mk("approved", "2026-07-15"), "2026-07-10")).toBe(true);
+    expect(canChangeCongeType(mk("pending", "2026-07-15"), "2026-07-10")).toBe(true);
+  });
+  it("verrouillé la veille et le jour même", () => {
+    expect(canChangeCongeType(mk("approved", "2026-07-11"), "2026-07-10")).toBe(false); // veille
+    expect(canChangeCongeType(mk("approved", "2026-07-10"), "2026-07-10")).toBe(false); // jour même
+    expect(canChangeCongeType(mk("approved", "2026-07-12"), "2026-07-10")).toBe(true);  // 2 jours avant
+  });
+  it("jamais pour un congé refusé/annulé", () => {
+    expect(canChangeCongeType(mk("refused", "2026-08-01"), "2026-07-10")).toBe(false);
+    expect(canChangeCongeType(mk("cancelled", "2026-08-01"), "2026-07-10")).toBe(false);
   });
 });

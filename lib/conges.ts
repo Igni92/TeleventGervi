@@ -110,6 +110,26 @@ export function canRespond(c: CongeRequest | null, email: string): boolean {
     && c.email === email.trim().toLowerCase();
 }
 
+/** Jours pleins entre deux dates ISO (b − a) ; 0 si l'une est invalide. */
+export function daysBetween(aISO: string, bISO: string): number {
+  const a = Date.parse(`${aISO}T12:00:00Z`), b = Date.parse(`${bISO}T12:00:00Z`);
+  if (Number.isNaN(a) || Number.isNaN(b)) return 0;
+  return Math.round((b - a) / 86_400_000);
+}
+
+/** Verrou du TYPE d'un congé : dès qu'il reste ≤ 1 jour avant le début (la veille
+ *  ou le jour même), on ne peut plus changer récup ↔ CP. */
+export const CONGE_TYPE_LOCK_DAYS = 1;
+
+/** Le TYPE d'un congé posé peut-il ENCORE être changé (récup ↔ CP…) ? Oui s'il est
+ *  en attente OU validé ET qu'il reste STRICTEMENT plus d'1 jour avant le début
+ *  (« au plus tard 1 jour avant la prise » → verrouillé dès la veille). */
+export function canChangeCongeType(c: Pick<CongeRequest, "status" | "start"> | null, todayISO: string): boolean {
+  if (!c || (c.status !== "approved" && c.status !== "pending")) return false;
+  if (!isIsoDate(c.start) || !isIsoDate(todayISO)) return false;
+  return daysBetween(todayISO, c.start) > CONGE_TYPE_LOCK_DAYS;
+}
+
 /* ───────── Nettoyage/normalisation (utilisé par la persistance, cf. congesRh) ── */
 
 export function parseConge(v: Partial<CongeRequest>, email: string, id: string): CongeRequest {

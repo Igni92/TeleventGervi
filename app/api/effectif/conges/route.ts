@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { isDirection, directionEmails } from "@/lib/permissions";
 import { notifyEmails } from "@/lib/push";
 import {
-  validateConge, canDecide, canRespond, congeOrigin, congeDayCount, CONGE_TYPE_LABEL,
+  validateConge, canDecide, canRespond, congeOrigin, congeDayCount, canChangeCongeType, isCongeType, CONGE_TYPE_LABEL,
   type CongeRequest, type CongeType,
 } from "@/lib/conges";
 import { saveConge, getConge, listUserConges, listAllConges, saveCongeJustificatif } from "@/lib/congesRh";
@@ -247,6 +247,40 @@ export async function POST(req: NextRequest) {
     }
     await saveConge({ ...cur, status: "cancelled", decidedAt: now, decidedBy: c.email });
     return NextResponse.json({ ok: true });
+  }
+
+  // ── Changer le TYPE d'un congé POSÉ (récup ↔ CP…) — décidé APRÈS la pose,
+  //    modifiable jusqu'au plus tard 1 jour avant la prise (verrouillé ensuite).
+  //    Le salarié le sien, ou la direction. Re-tag automatique si déjà validé. ──
+  if (action === "changeType") {
+    const id = String(body.id ?? "").trim();
+    const email = String(body.email ?? "").trim().toLowerCase() || c.email;
+    const newType = body.type;
+    if (!id) return NextResponse.json({ error: "id manquant" }, { status: 400 });
+    if (!isCongeType(newType)) return NextResponse.json({ error: "Type invalide" }, { status: 400 });
+    if (email !== c.email && !c.isDir) return NextResponse.json({ error: "Réservé à la direction" }, { status: 403 });
+    const cur = await getConge(email, id);
+    if (!cur) return NextResponse.json({ error: "Congé introuvable" }, { status: 404 });
+    const todayISO = new Date().toISOString().slice(0, 10);
+    if (!canChangeCongeType(cur, todayISO)) {
+      return NextResponse.json({ error: "Type verrouillé (moins d'un jour avant la prise) ou congé non modifiable." }, { status: 409 });
+    }
+    if (cur.type === newType) return NextResponse.json({ ok: true, type: newType });
+    const next: CongeRequest = { ...cur, type: newType as CongeType };
+    await saveConge(next);
+    // Congé DÉJÀ validé : on efface les tags de l'ancien type sur les jours du
+    // congé (lun→sam), puis on applique le nouveau type → les compteurs (récup /
+    // CP) se recalculent tout seuls.
+    if (cur.status === "approved") {
+      await tagDaysInWeeks(email, expandOuvrables(cur.start, cur.end), undefined, c.email, isoWeekOfDate, weekDates).catch(() => {});
+      await applyApprovedConge(next, c.email);
+    }
+    notifyEmails([email], {
+      title: "🔄 Type de congé mis à jour",
+      body: `${rangeLabel(next)} → ${CONGE_TYPE_LABEL[next.type]}.`,
+      url: "/planning", tag: `conge-${id}`, renotify: true,
+    }).catch(() => {});
+    return NextResponse.json({ ok: true, type: newType });
   }
 
   return NextResponse.json({ error: "Action inconnue" }, { status: 400 });
