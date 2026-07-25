@@ -353,6 +353,7 @@ function BulkSwapMenu({ pos, onClose, onDone }: {
   return createPortal(
     <div
       ref={boxRef}
+      data-floating-root=""
       style={{ position: "fixed", left: pos.x, top: pos.y, width: 300 }}
       onContextMenu={(e) => e.preventDefault()}
       onMouseDown={(e) => e.stopPropagation()}

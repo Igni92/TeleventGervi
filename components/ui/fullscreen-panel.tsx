@@ -75,6 +75,13 @@ export function FullscreenPanel({
             "duration-200 ease-out",
             className,
           )}
+          // Cf. components/ui/dialog.tsx : les menus/comboboxes maison sont
+          // portalisés dans <body>, hors de cet arbre — sans ceci Radix les
+          // considère "à l'extérieur" et referme tout le panneau au clic.
+          onPointerDownOutside={(e) => {
+            const t = e.detail.originalEvent.target as HTMLElement | null;
+            if (t?.closest("[data-floating-root]")) e.preventDefault();
+          }}
         >
           {/* ── En-tête : retour + titre héros + actions ─────────────── */}
           <header className="shrink-0 border-b border-border bg-card/60 backdrop-blur-sm">

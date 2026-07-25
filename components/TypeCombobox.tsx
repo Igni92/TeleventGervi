@@ -129,6 +129,7 @@ export function TypeCombobox({
       {open && pos && createPortal(
         <div
           ref={panelRef}
+          data-floating-root=""
           style={{ position: "fixed", top: pos.top, left: pos.left, width: Math.max(pos.width, 176), zIndex: 100 }}
           className="rounded-lg border border-border bg-card shadow-modal p-1.5"
         >
