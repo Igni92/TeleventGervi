@@ -18,11 +18,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft, ChevronRight, ChevronDown, RotateCcw, Loader2, Save, Send, Plus, Trash2,
   Wallet, AlertTriangle, Car, Gift, ReceiptText, CheckCircle2, FileSpreadsheet, Pencil,
-  Coins, CalendarCheck, Scale,
+  Coins, CalendarCheck, Scale, ListChecks,
 } from "lucide-react";
 import { toast } from "sonner";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { fmtHM, monthIdOf, shiftMonth, monthLabel } from "@/lib/heuresCalc";
+import type { SuppWeekRecap } from "@/lib/heuresRecap";
 import {
   avantageNatureMensuel, isTreiziemeMonth, prorata13e,
   VEHICULE_ENERGIES, VEHICULE_ENERGIE_LABEL, COMMISSION_PRIME_ID,
@@ -40,6 +41,8 @@ interface Row {
   anMensuel: number;
   prorata13: number | null;
   missing: string[];
+  /** Récap heures supp par semaine (où part chaque heure : payé/récup/attente). */
+  suppRecap?: SuppWeekRecap[];
 }
 interface CommissionMonthLine { month: string; base: number; prime: number; invoices: number; avoirs: number }
 interface CommissionDetail {
@@ -499,6 +502,116 @@ function SuppDecision({ row, month, onSaved }: { row: Row; month: string; onSave
   );
 }
 
+/* ───── Récap heures supp par semaine + PAIEMENT FIFO (toutes semaines) ─────── */
+
+/** « 12h30 » majoré → minutes. Accepte « 12h30 », « 12.5 », « 12,5 », « 7h ». */
+function hToMin(v: string): number {
+  const t = v.trim().toLowerCase().replace(",", ".");
+  const hm = /^(\d+)\s*h\s*(\d{1,2})?$/.exec(t);
+  if (hm) return Number(hm[1]) * 60 + (hm[2] ? Number(hm[2]) : 0);
+  const dec = Number(t);
+  return Number.isFinite(dec) && dec > 0 ? Math.round(dec * 60) : 0;
+}
+
+function SuppRecapFifo({ row, canEdit, onSaved }: { row: Row; canEdit: boolean; onSaved: () => Promise<void> }) {
+  const recap = row.suppRecap ?? [];
+  const [open, setOpen] = useState(false);
+  const [payH, setPayH] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const tot = recap.reduce((a, r) => ({
+    maj: a.maj + r.majMin, pay: a.pay + r.payMajMin + r.structPaidMajMin,
+    recup: a.recup + r.recupMajMin, pending: a.pending + r.pendingMajMin,
+  }), { maj: 0, pay: 0, recup: 0, pending: 0 });
+  // Pool payable FIFO = ce qui n'est pas déjà payé (récup + en attente).
+  const payablePool = tot.recup + tot.pending;
+
+  const payFifo = async () => {
+    const payMajMin = hToMin(payH);
+    if (payMajMin <= 0) { toast.error("Indiquez les heures (majorées) à payer, ex. 7h30."); return; }
+    setBusy(true);
+    try {
+      const r = await fetch("/api/salaires", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "payoutFifo", user: row.email, payMajMin }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) { toast.error(j?.error || "Paiement impossible"); return; }
+      const closed = (j.closedWeeks ?? []).length;
+      toast.success(`Payé ${fmtHM(j.paidMajMin)} — ${closed} semaine(s) clôturée(s)${j.leftoverMajMin > 0 ? ` · ${fmtHM(j.leftoverMajMin)} non affecté (pas assez d'heures)` : ""}.`);
+      setPayH("");
+      await onSaved();
+    } catch { toast.error("Paiement impossible — réseau ?"); }
+    finally { setBusy(false); }
+  };
+
+  const dest = (r: SuppWeekRecap) => {
+    if (r.pendingMajMin > 0) return <span className="text-amber-700 dark:text-amber-300">en attente</span>;
+    if (r.payMajMin === 0 && r.recupMajMin === 0) return <span className="text-muted-foreground">—</span>;
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1">
+        {r.payMajMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">{fmtHM(r.payMajMin)} payé</span>}
+        {r.payMajMin > 0 && r.recupMajMin > 0 && <span className="text-muted-foreground">+</span>}
+        {r.recupMajMin > 0 && <span className="text-sky-700 dark:text-sky-300">{fmtHM(r.recupMajMin)} récup</span>}
+      </span>
+    );
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-secondary/20 p-3">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-1.5 text-left">
+        <ListChecks className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Récap heures supp par semaine</span>
+        <span className="ml-auto text-[11.5px] tnum text-muted-foreground">
+          {fmtHM(tot.maj)} = <b className="text-emerald-700 dark:text-emerald-300">{fmtHM(tot.pay)}</b> payé · <b className="text-sky-700 dark:text-sky-300">{fmtHM(tot.recup)}</b> récup{tot.pending > 0 && <> · <b className="text-amber-700 dark:text-amber-300">{fmtHM(tot.pending)}</b> attente</>}
+        </span>
+        <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wide text-muted-foreground border-b border-border">
+                <th className="py-1 pr-2 font-semibold">Sem.</th>
+                <th className="py-1 px-2 font-semibold">Dates</th>
+                <th className="py-1 px-2 font-semibold text-right">Supp</th>
+                <th className="py-1 px-2 font-semibold text-right">Majoré</th>
+                <th className="py-1 pl-2 font-semibold">Destination</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recap.map((r) => (
+                <tr key={r.week} className="border-b border-border/50">
+                  <td className="py-1 pr-2 tnum font-semibold text-foreground">S{r.weekNum}</td>
+                  <td className="py-1 px-2 tnum text-muted-foreground">{r.from.slice(8)}/{r.from.slice(5, 7)}–{r.to.slice(8)}/{r.to.slice(5, 7)}</td>
+                  <td className="py-1 px-2 tnum text-right">{fmtHM(r.arbMin)}{r.arb50Min > 0 && <span className="text-muted-foreground text-[10px]"> (+50%)</span>}</td>
+                  <td className="py-1 px-2 tnum text-right font-medium text-foreground">{fmtHM(r.majMin)}</td>
+                  <td className="py-1 pl-2 tnum">{dest(r)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {canEdit && payablePool > 0 && (
+            <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
+              <span className="text-[11.5px] text-muted-foreground">Payer (heures majorées, plus anciennes d&apos;abord) :</span>
+              <input value={payH} onChange={(e) => setPayH(e.target.value)} inputMode="decimal"
+                placeholder="ex. 7h30" aria-label="Heures majorées à payer en FIFO"
+                className="h-8 w-[80px] rounded-md border border-border bg-background px-2 text-[12.5px] tnum text-center focus:outline-none focus:ring-1 focus:ring-brand-500" />
+              <button type="button" disabled={busy} onClick={payFifo}
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[12.5px] font-semibold disabled:opacity-50">
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Coins className="h-4 w-4" />} Payer (FIFO)
+              </button>
+              <span className="text-[11px] text-muted-foreground">dispo : {fmtHM(payablePool)}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ───────────── Carte d'un salarié — REPLIABLE (l'en-tête résume) ──────────── */
 
 function EmployeeCard({ row, month, canEdit, onSaved }: {
@@ -586,6 +699,11 @@ function EmployeeCard({ row, month, canEdit, onSaved }: {
           {/* DÉCISION HEURES SUPP — c'est ICI qu'on tranche : payé ou récup. */}
           {canEdit && h.suppTotalMin > 0 && (
             <SuppDecision row={row} month={month} onSaved={onSaved} />
+          )}
+
+          {/* RÉCAP heures supp par semaine + paiement FIFO (toutes semaines). */}
+          {(row.suppRecap?.length ?? 0) > 0 && (
+            <SuppRecapFifo row={row} canEdit={canEdit} onSaved={onSaved} />
           )}
 
           {/* PRIMES */}
