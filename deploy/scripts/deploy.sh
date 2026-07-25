@@ -49,4 +49,6 @@ $SUDO systemctl restart televent
 sleep 3
 $SUDO systemctl --no-pager --lines=5 status televent || true
 
-echo "✅ Déployé : $(git -C "$APP_DIR" rev-parse --short HEAD) — $(git -C "$APP_DIR" log -1 --pretty=%s)"
+# -c safe.directory : le dépôt appartient à televent, on peut le lire depuis ubuntu.
+GIT="git -C $APP_DIR -c safe.directory=$APP_DIR"
+echo "✅ Déployé : $($GIT rev-parse --short HEAD) — $($GIT log -1 --pretty=%s)"
