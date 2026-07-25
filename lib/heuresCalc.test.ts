@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseHM, dayMinutes, computeWeek, fmtHM,
   isoWeekId, isWeekId, weekDates, shiftWeek,
-  isMonthId, shiftMonth, monthWeeks, aggregateMonth,
+  isMonthId, shiftMonth, monthWeeks, aggregateMonth, weekAttributionMonth, attributedMonthWeeks,
   isHeuresOption, HEURES_OPTION_LABEL, isDateInWeek, daysAfterWeek,
   splitSupp, effectivePaySuppMin, DAY_TAGS,
   structuralSuppMin, splitStructuralSupp,
@@ -309,5 +309,34 @@ describe("heuresCalc — heures supp STRUCTURELLES (contrat « 42 h » payé)", 
     expect(st.arb25Min).toBe(8 * 60);
     expect(st.arb50Min).toBe(2 * 60);
     expect(st.arbitrableMin).toBe(10 * 60);
+  });
+});
+
+describe("heuresCalc — affectation mensuelle par dernier jour travaillé", () => {
+  const day = (h: number): DayHours => ({ m1: "06:00", m2: `${String(6 + h).padStart(2, "0")}:00` });
+  // W31 = lundi 27 juil. → dimanche 2 août 2026 (semaine à cheval).
+  const W31 = "2026-W31";
+
+  it("semaine à cheval travaillée lun→ven → mois du dernier jour travaillé (juillet)", () => {
+    const days = [day(7), day(7), day(7), day(7), day(7), {}, {}]; // 27→31 juil.
+    expect(weekAttributionMonth(W31, days)).toBe("2026-07");
+  });
+  it("si on travaille aussi le samedi 1er août → bascule sur août", () => {
+    const days = [day(7), day(7), day(7), day(7), day(7), day(7), {}]; // + sam 01/08
+    expect(weekAttributionMonth(W31, days)).toBe("2026-08");
+  });
+  it("aucune heure saisie → repli sur le dimanche (août)", () => {
+    expect(weekAttributionMonth(W31, [{}, {}, {}, {}, {}, {}, {}])).toBe("2026-08");
+  });
+  it("semaine pleinement dans le mois → ce mois", () => {
+    expect(weekAttributionMonth("2026-W28", [day(7), day(7), day(7), day(7), day(7), {}, {}])).toBe("2026-07");
+  });
+  it("attributedMonthWeeks range la semaine à cheval en juillet, pas en août", () => {
+    const entries = new Map<string, { days: (DayHours | undefined)[] }>([
+      ["2026-W28", { days: [day(7), day(7), day(7), day(7), day(7), {}, {}] }],
+      [W31, { days: [day(7), day(7), day(7), day(7), day(7), {}, {}] }], // lun→ven juil.
+    ]);
+    expect(attributedMonthWeeks("2026-07", entries)).toEqual(["2026-W28", "2026-W31"]);
+    expect(attributedMonthWeeks("2026-08", entries)).toEqual([]);
   });
 });

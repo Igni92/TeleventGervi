@@ -458,6 +458,36 @@ export function monthWeeks(monthId: string): string[] {
   return out;
 }
 
+/** Mois d'AFFECTATION d'une semaine (« YYYY-MM ») = mois de son DERNIER JOUR
+ *  RÉELLEMENT TRAVAILLÉ (heures saisies). Repli : mois du DIMANCHE si la semaine
+ *  n'a aucune heure (semaine de congés/absence — sans heures supp à placer).
+ *
+ *  Les majorations 25/50 restent calculées sur la SEMAINE CIVILE (indivisible) ;
+ *  seule l'affectation au mois de PAIE suit le travail réel. Ainsi une semaine à
+ *  cheval (ex. lun→ven en juillet, dimanche le 2 août) tombe sur JUILLET — payée
+ *  au 10 août, et non repoussée à septembre. */
+export function weekAttributionMonth(weekId: string, days: (DayHours | undefined)[]): string {
+  const dates = weekDates(weekId);
+  if (dates.length !== 7) return "";
+  for (let i = 6; i >= 0; i--) {
+    if (dayMinutes(days[i]) > 0) return dates[i].slice(0, 7);
+  }
+  return dates[6].slice(0, 7); // aucune heure → repli sur le dimanche
+}
+
+/** Parmi les semaines SAISIES (`entries`), celles rattachées au mois `monthId`
+ *  selon le dernier jour travaillé (cf. weekAttributionMonth). Triées. */
+export function attributedMonthWeeks(
+  monthId: string,
+  entries: Iterable<[string, { days: (DayHours | undefined)[] }]>,
+): string[] {
+  const out: string[] = [];
+  for (const [week, e] of entries) {
+    if (isWeekId(week) && weekAttributionMonth(week, e.days) === monthId) out.push(week);
+  }
+  return out.sort();
+}
+
 /** Agrégat MENSUEL : somme des calculs hebdomadaires (les majorations restent
  *  calculées semaine par semaine — on n'additionne que les résultats). */
 export interface MonthCalc {

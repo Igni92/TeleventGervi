@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getAccessScope } from "@/lib/permissions";
 import {
-  computeWeek, isWeekId, isoWeekId, isMonthId, monthWeeks, aggregateMonth,
+  computeWeek, isWeekId, isoWeekId, isMonthId, attributedMonthWeeks, aggregateMonth,
   typicalDayMinutes,
   type HoursProfile,
 } from "@/lib/heuresCalc";
@@ -54,7 +54,6 @@ export async function GET(req: NextRequest) {
   const month = searchParams.get("month");
   if (month != null) {
     if (!isMonthId(month)) return NextResponse.json({ error: "Mois invalide" }, { status: 400 });
-    const weeks = monthWeeks(month);
     try {
       if (all) {
         if (!c.isManager) return NextResponse.json({ error: "Réservé aux managers" }, { status: 403 });
@@ -77,12 +76,12 @@ export async function GET(req: NextRequest) {
           .map((u) => {
             const email = u.email!.trim().toLowerCase();
             seen.add(email);
-            return buildMonthRow(email, u.name || email, weeks, byUser.get(email), profiles.get(email) ?? null, congesByUser.get(email) ?? [], month);
+            return buildMonthRow(email, u.name || email, byUser.get(email), profiles.get(email) ?? null, congesByUser.get(email) ?? [], month);
           });
         for (const [email, entries] of byUser) {
-          if (!seen.has(email)) rows.push(buildMonthRow(email, email, weeks, entries, profiles.get(email) ?? null, congesByUser.get(email) ?? [], month));
+          if (!seen.has(email)) rows.push(buildMonthRow(email, email, entries, profiles.get(email) ?? null, congesByUser.get(email) ?? [], month));
         }
-        return NextResponse.json({ ok: true, month, weeks, rows });
+        return NextResponse.json({ ok: true, month, rows });
       }
       const who = target && target !== c.email ? target : c.email;
       if (who !== c.email && !c.isManager) {
@@ -91,7 +90,7 @@ export async function GET(req: NextRequest) {
       const [entries, profile, conges] = await Promise.all([
         listUserWeekEntries(who), getProfile(who), listUserConges(who),
       ]);
-      const row = buildMonthRow(who, who, weeks, entries, profile, conges, month);
+      const row = buildMonthRow(who, who, entries, profile, conges, month);
       return NextResponse.json({ ok: true, month, user: who, ...row });
     } catch (e) {
       return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
@@ -120,7 +119,6 @@ export async function GET(req: NextRequest) {
 function buildMonthRow(
   email: string,
   name: string,
-  weekIds: string[],
   entries: Map<string, WeekEntry> | undefined,
   profile: HoursProfile | null,
   conges: CongeRequest[],
@@ -128,6 +126,9 @@ function buildMonthRow(
 ) {
   const prof: HoursProfile = profile ?? { weeklyHours: 35, typicalDay: { m1: "06:00", m2: "13:00" } };
   const typDay = typicalDayMinutes(prof);
+  // Semaines rattachées au mois selon le DERNIER JOUR TRAVAILLÉ (paie au 10 du
+  // mois suivant), et non selon le dimanche civil.
+  const weekIds = attributedMonthWeeks(monthId, entries ?? new Map());
   const weeksOut = weekIds.map((w) => {
     const entry = entries?.get(w) ?? null;
     return {

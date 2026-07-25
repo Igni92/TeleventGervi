@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin, isGerantEmail } from "@/lib/permissions";
 import {
-  computeWeek, typicalDayMinutes, isMonthId, monthIdOf, monthWeeks, weekDates,
+  computeWeek, typicalDayMinutes, isMonthId, monthIdOf, attributedMonthWeeks, weekDates,
   splitSupp, effectivePaySuppMin, splitStructuralSupp, structuralSuppMin,
   type HoursProfile,
 } from "@/lib/heuresCalc";
@@ -35,7 +35,7 @@ function buildWeekly(
     };
   });
 }
-import { listAllWeekEntries, listProfiles, getProfile, getWeekEntry, saveWeekEntry, type WeekEntry } from "@/lib/heuresRh";
+import { listAllWeekEntries, listUserWeekEntries, listProfiles, getProfile, saveWeekEntry, type WeekEntry } from "@/lib/heuresRh";
 import { listAllConges } from "@/lib/congesRh";
 import { expandOuvrables, monthEndISO } from "@/lib/planning";
 import { rangesOverlap, type CongeRequest } from "@/lib/conges";
@@ -84,16 +84,17 @@ async function ctx() {
   return { email, canEdit };
 }
 
-/** Résumé HEURES d'un salarié pour le mois (mêmes règles que l'état mensuel :
- *  semaines rattachées au mois de leur dimanche, majorations hebdomadaires). */
+/** Résumé HEURES d'un salarié pour le mois. Les semaines sont rattachées au mois
+ *  de leur DERNIER JOUR TRAVAILLÉ (paie au 10 du mois suivant) ; les majorations
+ *  restent hebdomadaires (cf. attributedMonthWeeks / weekAttributionMonth). */
 function buildHeures(
-  weekIds: string[],
   entries: Map<string, WeekEntry> | undefined,
   profile: HoursProfile,
   conges: CongeRequest[],
   monthId: string,
 ): SalaryHeures {
   const typDay = typicalDayMinutes(profile);
+  const weekIds = attributedMonthWeeks(monthId, entries ?? new Map());
   const out: SalaryHeures = {
     totalMin: 0, contractMin: 0, suppTotalMin: 0, suppPayEquivMin: 0, suppRecupEquivMin: 0, suppSansDecisionMin: 0,
     ferieMin: 0, congesMin: 0, cpJours: 0, maladieJours: 0, absentJours: 0, recupJours: 0,
@@ -156,7 +157,6 @@ function buildHeures(
  *  `commissions` = commissions à verser ce mois (calculées par l'appelant, pour
  *  être RÉUTILISÉES tel quel dans le détail GET et le snapshot d'archive). */
 async function buildRows(monthId: string, commissions: Map<string, PayslipCommission>) {
-  const weeks = monthWeeks(monthId);
   const [users, byUser, hourProfiles, salProfiles, salMonths, allConges] = await Promise.all([
     prisma.user.findMany({ select: { name: true, email: true }, orderBy: { name: "asc" } }),
     listAllWeekEntries(),
@@ -204,14 +204,17 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
     const hourProfile = hourProfiles.get(email) ?? { weeklyHours: 35, typicalDay: { m1: "06:00", m2: "13:00" } };
     const salProfile = salProfiles.get(email) ?? null;
     const salary = withCommission(email, salMonths.get(email) ?? null);
-    const heures = buildHeures(weeks, byUser.get(email), hourProfile, congesByUser.get(email) ?? [], monthId);
+    const entries = byUser.get(email);
+    // Semaines rattachées au mois selon le dernier jour travaillé (paie au 10).
+    const attrWeeks = attributedMonthWeeks(monthId, entries ?? new Map());
+    const heures = buildHeures(entries, hourProfile, congesByUser.get(email) ?? [], monthId);
     const anMensuel = avantageNatureMensuel(salProfile?.vehicule);
     return {
       email,
       name: stripOrgSuffix(rawName) || email,
       heures,
       // Détail hebdo pour la page par personne du PDF.
-      weeks: buildWeekly(weeks, byUser.get(email), hourProfile),
+      weeks: buildWeekly(attrWeeks, entries, hourProfile),
       salary,
       profile: salProfile,
       anMensuel,
@@ -332,8 +335,11 @@ export async function POST(req: NextRequest) {
       const profile = await getProfile(target);
       const typDay = typicalDayMinutes(profile);
       let remaining = mode === "split" ? Math.max(0, Math.round(Number(body.payMin) || 0)) : 0;
-      for (const w of monthWeeks(month)) {
-        const entry = await getWeekEntry(target, w);
+      // Semaines rattachées au mois selon le dernier jour travaillé (même règle
+      // que l'affichage/paie), pas selon le dimanche civil.
+      const targetEntries = await listUserWeekEntries(target);
+      for (const w of attributedMonthWeeks(month, targetEntries)) {
+        const entry = targetEntries.get(w);
         if (!entry) continue;
         const calc = computeWeek(entry.days, profile.weeklyHours, typDay);
         // La décision ne porte que sur les heures supp ARBITRABLES : la part
