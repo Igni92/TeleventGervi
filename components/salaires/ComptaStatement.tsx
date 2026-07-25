@@ -18,12 +18,14 @@ import {
   type SalaryEnvoi, type SalaryHeures, type SalaryMonthData, type SalaryProfile, type SalaryWeek,
 } from "@/lib/salaires";
 import { buildSalairesPdf, type PdfEmploye } from "@/lib/salairesPdfDoc";
+import type { SuppWeekRecap } from "@/lib/heuresRecap";
 
 interface Row {
   email: string;
   name: string;
   heures: SalaryHeures;
   weeks?: SalaryWeek[];
+  suppRecap?: SuppWeekRecap[];
   salary: SalaryMonthData | null;
   profile: SalaryProfile | null;
   anMensuel: number;
@@ -57,6 +59,7 @@ const toPdfEmploye = (r: Row): PdfEmploye => ({
   vehicule: r.profile?.vehicule ?? null,
   primes: r.salary?.primes ?? [], frais: r.salary?.frais ?? [], note: r.salary?.note,
   weeks: r.weeks,
+  suppRecap: r.suppRecap,
 });
 
 const fmtDate = (iso: string) =>

@@ -6,6 +6,7 @@
  * import → il n'alourdit QUE la page /salaires, pas le reste de l'app.
  */
 import { fmtHM } from "./heuresCalc";
+import type { SuppWeekRecap } from "./heuresRecap";
 import {
   salaireMonthLabel, COMMISSION_PRIME_ID,
   type SalaryFrais, type SalaryHeures, type SalaryPrime, type SalaryWeek, type VehiculeAN,
@@ -21,6 +22,8 @@ export interface PdfEmploye {
   note?: string;
   /** Détail hebdomadaire — page par personne. */
   weeks?: SalaryWeek[];
+  /** Récap heures supp par semaine (destination : payé / récup / en attente). */
+  suppRecap?: SuppWeekRecap[];
 }
 
 const eur = (n: number) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(n);
@@ -174,6 +177,43 @@ export async function buildSalairesPdf(monthId: string, employes: PdfEmploye[]):
       bodyStyles: { halign: "right" },
       alternateRowStyles: { fillColor: [247, 248, 250] },
     });
+
+    // ── RÉCAP heures supp : destination de chaque heure (payé / récup / attente) ──
+    const rc = (e.suppRecap ?? []).filter((r) => r.majMin > 0 || r.structPaidMajMin > 0);
+    if (rc.length > 0) {
+      const rsum = (pick: (r: SuppWeekRecap) => number) => rc.reduce((s, r) => s + pick(r), 0);
+      const rBody = rc.map((r) => [
+        ascii(`S${r.weekNum}`),
+        hm(r.arbMin),
+        hm(r.majMin),
+        hm(r.payMajMin + r.structPaidMajMin),
+        hm(r.recupMajMin),
+        hm(r.pendingMajMin),
+      ]);
+      const rTotal = [
+        "Total", hm(rsum((r) => r.arbMin)), hm(rsum((r) => r.majMin)),
+        hm(rsum((r) => r.payMajMin + r.structPaidMajMin)), hm(rsum((r) => r.recupMajMin)), hm(rsum((r) => r.pendingMajMin)),
+      ];
+      const yRecap = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 20;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9.5);
+      doc.setTextColor(17, 24, 39);
+      doc.text("Recap heures supp - destination de chaque heure (majoree)", M, yRecap);
+      autoTable(doc, {
+        startY: yRecap + 8,
+        margin: { left: M, right: M },
+        head: [["Semaine", "Supp", "Majoree", "Payee", "Recup", "En attente"]],
+        body: rBody,
+        foot: [rTotal],
+        theme: "grid",
+        styles: { font: "helvetica", fontSize: 9, cellPadding: 5, textColor: [30, 30, 30], lineColor: [225, 225, 225] },
+        headStyles: { fillColor: [17, 24, 39], textColor: [255, 255, 255], fontStyle: "bold", halign: "right", fontSize: 8.5 },
+        footStyles: { fillColor: [235, 238, 242], textColor: [17, 24, 39], fontStyle: "bold", halign: "right" },
+        columnStyles: { 0: { halign: "left", fontStyle: "bold", cellWidth: 60 } },
+        bodyStyles: { halign: "right" },
+        alternateRowStyles: { fillColor: [247, 248, 250] },
+      });
+    }
 
     // Éléments de paie de la personne (primes / frais / AN / note).
     const lines = payLines(monthId, e);
