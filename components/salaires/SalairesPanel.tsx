@@ -43,9 +43,9 @@ interface Row {
   missing: string[];
   /** Récap heures supp par semaine (où part chaque heure : payé/récup/attente). */
   suppRecap?: SuppWeekRecap[];
-  /** Compteur récup (CET) : solde net + paiements déjà pris sur le compteur. */
+  /** Compteur récup (CET) — vue patron : disponible à payer + paiements passés. */
   cet?: {
-    balanceMin: number; paidOutMin: number; netMin: number;
+    netMin: number; paidOutMin: number;
     payouts: { id: string; majMin: number; monthBulletin: string; note: string; createdAt: string; createdBy: string }[];
   };
 }
@@ -586,7 +586,7 @@ function RecupCetPanel({ row, month, canEdit, onSaved }: { row: Row; month: stri
   const cet = row.cet;
   const [payH, setPayH] = useState("");
   const [busy, setBusy] = useState(false);
-  if (!cet || (cet.netMin <= 0 && cet.paidOutMin <= 0 && cet.balanceMin <= 0)) return null;
+  if (!cet || (cet.netMin <= 0 && cet.paidOutMin <= 0)) return null;
 
   const post = async (payload: Record<string, unknown>, okMsg: string) => {
     setBusy(true);
@@ -608,7 +608,7 @@ function RecupCetPanel({ row, month, canEdit, onSaved }: { row: Row; month: stri
     <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
-          <Wallet className="h-3.5 w-3.5" /> Compteur récup (CET)
+          <Wallet className="h-3.5 w-3.5" /> Compteur récup — disponible à payer
         </span>
         <span className="text-[15px] font-bold tnum text-sky-700 dark:text-sky-300">{fmtHM(cet.netMin)}</span>
         {cet.paidOutMin > 0 && <span className="text-[11px] text-muted-foreground">dont {fmtHM(cet.paidOutMin)} déjà payées</span>}

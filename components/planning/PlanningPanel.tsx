@@ -23,7 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   CalendarDays, ChevronLeft, ChevronRight, RotateCcw, Loader2, Send, Check, X,
-  Users, Palmtree, Clock3, SlidersHorizontal, Save, Sun, Lightbulb, Stethoscope, Paperclip, Lock,
+  Users, Palmtree, Clock3, SlidersHorizontal, Save, Sun, Stethoscope, Paperclip, Lock,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { InfoHint } from "@/components/ui/info-hint";
@@ -32,7 +32,7 @@ import {
   fmtHM, monthIdOf, shiftMonth, monthLabel, type DayTag, DAY_TAG_LABEL,
 } from "@/lib/heuresCalc";
 import {
-  monthGridDays, expandOuvrables, monthEndISO, saturdaysInRange, splitLeaveRecupCp,
+  monthGridDays, monthEndISO,
   resolveCalendarDay, DAY_CATEGORY_LABEL, type DayCategory,
 } from "@/lib/planning";
 import { frenchHolidayLabel } from "@/lib/livraison";
@@ -455,75 +455,71 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
   const grid = useMemo(() => monthGridDays(month), [month]);
   // Événements commerciaux (Noël, 14 juillet, Saint-Valentin…) posés sur la grille.
   const eventMap = useMemo(() => eventsByDate(grid.map((g) => g.date)), [grid]);
-  const [sel, setSel] = useState({ start: "", end: "" });
-  // Le salarié pose ses CONGÉS ; la récup disponible est ensuite consommée
-  // automatiquement en jours ENTIERS (découpe récup + CP à l'envoi, cf. submit).
-  // La direction, elle, propose de la récup par défaut.
+  // SÉLECTION MULTI-JOURS : un ensemble de jours choisis un par un (pas une
+  // plage). On pose ces jours ; le type récup/CP se décide/change ENSUITE (cf.
+  // « Congés du mois »). La direction propose « récup » par défaut.
+  const [selDays, setSelDays] = useState<string[]>([]);
+  const selSet = useMemo(() => new Set(selDays), [selDays]);
   const [type, setType] = useState<CongeType>(isDirection && !isSelf ? "recup" : "cp");
   const [note, setNote] = useState("");
 
-  // ── Sélection de la plage — DEUX gestes qui cohabitent :
-  //    • CLIC début / CLIC fin (souris, doigt, clavier) : 1ʳᵉ touche = jour
-  //      seul ; touche sur un jour POSTÉRIEUR = fin de plage ; sinon on repart.
-  //    • GLISSER — SOURIS UNIQUEMENT (PC) : on maintient et on étire. Au doigt
-  //      il n'y a PAS de glisser : le geste reste réservé au scroll de la page.
+  // ── Sélection MULTI-JOURS — clic/tap sur chaque jour pour l'ajouter/retirer.
+  //    GLISSER (souris) : on « peint » plusieurs jours d'un coup ; le sens
+  //    (ajout ou retrait) est fixé par l'état du 1ᵉʳ jour du geste. Au doigt,
+  //    pas de glisser (réservé au scroll) : on tape chaque jour.
   const canAct = isSelf || isDirection;   // un admin non-direction consulte
   const [dragging, setDragging] = useState(false);
-  const anchorRef = useRef("");     // jour du mousedown souris ("" = pas de geste)
-  const draggedRef = useRef(false); // vrai dès que la souris a couvert un autre jour
-  // Vrai le temps d'un geste SOURIS : le « click » natif qui suit est alors
-  // ignoré (déjà traité au relâchement) — évite une double sélection, sans
-  // dépendre de `pointerType` sur l'évènement click (peu fiable, vieux Safari).
+  const anchorRef = useRef("");      // jour du mousedown souris
+  const paintAddRef = useRef(true);  // le geste souris AJOUTE (true) ou RETIRE (false)
+  const draggedRef = useRef(false);  // vrai dès que la souris a couvert un 2ᵉ jour
   const mouseGestureRef = useRef(false);
 
-  const tapDay = (date: string) => {
+  const toggleDay = (date: string) => {
     if (!canAct) return;
-    setSel((cur) =>
-      !cur.start || cur.end !== cur.start || date < cur.start
-        ? { start: date, end: date }
-        : { start: cur.start, end: date });
+    setSelDays((cur) => (cur.includes(date) ? cur.filter((d) => d !== date) : [...cur, date].sort()));
   };
-  const tapDayRef = useRef(tapDay);
-  tapDayRef.current = tapDay;
-
-  // Glisser SOURIS UNIQUEMENT : on démarre au mousedown, on étire au survol,
-  // on conclut au relâchement. Le clic simple (sans glisser) retombe sur tapDay.
+  const paintDay = (date: string, add: boolean) => {
+    setSelDays((cur) => {
+      const has = cur.includes(date);
+      if (add && !has) return [...cur, date].sort();
+      if (!add && has) return cur.filter((d) => d !== date);
+      return cur;
+    });
+  };
   const beginDrag = (date: string) => {
     if (!canAct) return;
     anchorRef.current = date;
+    paintAddRef.current = !selSet.has(date);   // 1ᵉʳ jour non sélectionné → on ajoute
     draggedRef.current = false;
     mouseGestureRef.current = true;
     setDragging(true);
   };
   const dragOver = (clientX: number, clientY: number) => {
-    const date = document.elementFromPoint(clientX, clientY)
-      ?.closest?.("[data-date]")?.getAttribute("data-date");
+    const date = document.elementFromPoint(clientX, clientY)?.closest?.("[data-date]")?.getAttribute("data-date");
     if (!date || !anchorRef.current) return;
     if (date !== anchorRef.current) draggedRef.current = true;
     if (!draggedRef.current) return;   // pas encore un vrai glisser
-    const a = anchorRef.current;
-    setSel({ start: date < a ? date : a, end: date > a ? date : a });
+    paintDay(anchorRef.current, paintAddRef.current);
+    paintDay(date, paintAddRef.current);
   };
   const endDrag = useCallback(() => {
-    // Souris relâchée SANS avoir couvert d'autre jour = simple CLIC → la
-    // logique « clic début / clic fin » s'applique.
-    if (anchorRef.current && !draggedRef.current) tapDayRef.current(anchorRef.current);
+    // Souris relâchée sans avoir bougé = simple CLIC → on bascule le jour d'ancre.
+    if (anchorRef.current && !draggedRef.current) toggleDay(anchorRef.current);
     anchorRef.current = "";
     draggedRef.current = false;
     setDragging(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // Relâchement HORS de la grille (souris sortie du calendrier) → fin propre.
   useEffect(() => {
     if (!dragging) return;
     window.addEventListener("pointerup", endDrag);
     return () => window.removeEventListener("pointerup", endDrag);
   }, [dragging, endDrag]);
 
-  // Le mois change → la sélection ne pointe plus sur ce qu'on voit : reset.
+  // Le mois change → on repart d'une sélection vide.
   useEffect(() => {
-    setSel({ start: "", end: "" });
+    setSelDays([]);
     setDragging(false);
-    anchorRef.current = "";
     draggedRef.current = false;
     mouseGestureRef.current = false;
   }, [month, person.email]);
@@ -541,9 +537,13 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
     return map;
   }, [person.conges]);
   const recupSet = useMemo(() => new Set(person.recupDates), [person.recupDates]);
-  const inSel = (d: string) => sel.start && d >= sel.start && d <= sel.end;
+  const inSel = (d: string) => selSet.has(d);
 
-  const ouvrables = sel.start ? expandOuvrables(sel.start, sel.end).length : 0;
+  // Jours OUVRABLES sélectionnés (hors dimanches et fériés) — le décompte réel.
+  const ouvrables = useMemo(
+    () => selDays.filter((d) => new Date(`${d}T12:00:00Z`).getUTCDay() !== 0 && !frenchHolidayLabel(d)).length,
+    [selDays],
+  );
   // Direction + type « Maladie » → DÉCLARATION directe (arrêt acté), pas une
   // proposition soumise à l'acceptation du salarié.
   const maladieDeclare = !isSelf && type === "maladie";
@@ -558,21 +558,6 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
     reader.readAsDataURL(file);
   };
 
-  // DÉCOUPE AUTO récup + CP (à l'avantage du salarié) : quand le salarié pose des
-  // CONGÉS PAYÉS et qu'il lui reste de la récup, on consomme d'abord la récup en
-  // JOURS ENTIERS (floor(solde / journée type)), le reste part en CP. Les deux
-  // demandes sont envoyées à la validation. Dimanches/fériés déjà hors décompte.
-  const typDayMin = person.profile.typicalDayMin;
-  // Récup RÉELLEMENT disponible (nette des jours déjà posés/réservés) : la récup
-  // est prioritaire sur les CP, mais on ne réaffecte que ce qui n'est pas déjà bloqué.
-  const recupBalanceMin = person.counters.recup.availableMin;
-  const recupDaysAvail = typDayMin > 0 ? Math.floor(recupBalanceMin / typDayMin) : 0;
-  const autoSplit = isSelf && type === "cp" && !!sel.start && recupDaysAvail >= 1
-    ? splitLeaveRecupCp(sel.start, sel.end, recupDaysAvail)
-    : null;
-  // Samedi(s) restant en CP (jour ouvrable décompté mais non travaillé) — signalé.
-  const cpSaturdays = autoSplit?.cp ? saturdaysInRange(autoSplit.cp.start, autoSplit.cp.end) : [];
-
   // Congés/récup du MOIS affiché (validés + en attente) — liste détaillée sous
   // le calendrier sur mobile (les pastilles disent « quoi », la liste dit
   // « quand & quel statut » sans avoir à ouvrir chaque jour).
@@ -584,27 +569,31 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
   }, [person.conges, month]);
 
   const submit = async () => {
-    if (!sel.start) return;
-    // DÉCOUPE AUTO (salarié, CP, récup entière dispo) : on envoie d'abord la
-    // portion RÉCUP (jours entiers), puis la portion CP restante — deux demandes.
-    if (autoSplit && (autoSplit.recup || autoSplit.cp)) {
-      let ok = true;
-      if (autoSplit.recup) ok = await onSubmit({ action: "request", type: "recup", start: autoSplit.recup.start, end: autoSplit.recup.end, note });
-      if (ok && autoSplit.cp) ok = await onSubmit({ action: "request", type: "cp", start: autoSplit.cp.start, end: autoSplit.cp.end, note });
-      if (ok) { setSel({ start: "", end: "" }); setNote(""); }
-      return;
+    if (selDays.length === 0) return;
+    // Les jours choisis (éventuellement non contigus) sont regroupés en PLAGES
+    // contiguës → une demande par plage. Le type se décide/change ensuite.
+    const sorted = [...selDays].sort();
+    const runs: { start: string; end: string }[] = [];
+    for (const d of sorted) {
+      const last = runs[runs.length - 1];
+      const contigu = last && new Date(`${d}T12:00:00Z`).getTime() - new Date(`${last.end}T12:00:00Z`).getTime() === 86_400_000;
+      if (contigu) last!.end = d; else runs.push({ start: d, end: d });
     }
-    const base = { type, start: sel.start, end: sel.end, note };
-    // ARRÊT MALADIE (direction) = fait acté → DÉCLARÉ directement (validé, sans
-    // boomerang), avec justificatif éventuel. Les autres types restent PROPOSÉS.
-    const ok = isSelf
-      ? await onSubmit({ action: "request", ...base })
-      : await onSubmit({
-          action: type === "maladie" ? "declare" : "propose",
-          email: person.email, name: person.name, ...base,
-          ...(maladieDeclare && justif ? { justificatif: justif.dataUrl, justificatifName: justif.name } : {}),
-        });
-    if (ok) { setSel({ start: "", end: "" }); setNote(""); setJustif(null); }
+    // ARRÊT MALADIE (direction) = fait acté → DÉCLARÉ directement ; sinon
+    // demande (salarié) ou proposition (direction).
+    let ok = true;
+    for (const r of runs) {
+      if (!ok) break;
+      const base = { type, start: r.start, end: r.end, note };
+      ok = isSelf
+        ? await onSubmit({ action: "request", ...base })
+        : await onSubmit({
+            action: type === "maladie" ? "declare" : "propose",
+            email: person.email, name: person.name, ...base,
+            ...(maladieDeclare && justif ? { justificatif: justif.dataUrl, justificatifName: justif.name } : {}),
+          });
+    }
+    if (ok) { setSelDays([]); setNote(""); setJustif(null); }
   };
 
   return (
@@ -652,26 +641,21 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
               pendingTypes: pending.map((c) => c.type),
               tag, recupPosee: hasRecupDot,
             });
-            // Sélection LIÉE : un seul bandeau continu (pas de bordure entre 2
-            // jours). Un calque `-inset-px` déborde d'1 px et masque les traits
-            // de grille entre cellules sélectionnées ; arrondi UNIQUEMENT aux
-            // extrémités de la plage et en début/fin de ligne (lun / dim).
-            // Une plage qui DÉPASSE la grille affichée (fin de sélection sur le
-            // mois suivant — ex. CP à cheval) est refermée proprement au bord
-            // de la grille, sinon le bandeau « fuyait » sans arrondi ni bord.
+            // Sélection MULTI-JOURS : chaque jour choisi est surligné
+            // individuellement (pastille brand encadrée), pas de bandeau de plage.
             const selected = inSel(date);
-            const capL = selected && (date === sel.start || dow === 1 || date === grid[0]?.date);
-            const capR = selected && (date === sel.end || dow === 0 || date === grid[grid.length - 1]?.date);
             return (
               <button
                 key={date} type="button" data-date={date}
-                // Souris : démarre un éventuel glisser (le clic simple retombe
-                // sur tapDay au relâchement). Tactile/clavier : onClick → tapDay,
-                // sauf juste après un geste souris (déjà traité au relâchement).
+                // Souris : démarre un « peindre » (le clic simple = 1 jour toggle
+                // au relâchement via draggedRef). Tactile/clavier : onClick → toggle,
+                // sauf juste après un geste souris ayant déjà peint plusieurs jours.
                 onPointerDown={(e) => { if (e.pointerType === "mouse" && e.button === 0) beginDrag(date); }}
                 onClick={() => {
+                  // Souris : déjà traité au relâchement (endDrag) → on ignore ce
+                  // click natif. Tactile/clavier : bascule le jour.
                   if (mouseGestureRef.current) { mouseGestureRef.current = false; return; }
-                  tapDay(date);
+                  toggleDay(date);
                 }}
                 title={[
                   ferieLabel ? `Férié : ${ferieLabel}` : null,
@@ -688,15 +672,10 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
                   ${!selected && canAct ? "hover:bg-secondary/40" : ""}
                   ${!selected && !canAct ? "cursor-default" : ""}`}
               >
-                {/* Bandeau de sélection continu : fond unique qui déborde d'1 px
-                    pour masquer les traits de grille entre jours sélectionnés
-                    (aucune bordure interne). Liseré haut+bas pour définir la
-                    bande sans jamais séparer deux jours voisins ; arrondi + bord
-                    latéral seulement aux extrémités (début/fin, lundi/dimanche). */}
+                {/* Jour SÉLECTIONNÉ : surlignage individuel (chaque jour choisi à
+                    part, la sélection n'est plus une plage continue). */}
                 {selected && (
-                  <span aria-hidden
-                    className={`pointer-events-none absolute -inset-px z-0 bg-brand-500/25 border-y border-brand-500/60
-                      ${capL ? "rounded-l-lg border-l" : ""} ${capR ? "rounded-r-lg border-r" : ""}`} />
+                  <span aria-hidden className="pointer-events-none absolute inset-0.5 z-0 rounded-md bg-brand-500/25 ring-2 ring-brand-500/70" />
                 )}
 
                 {/* Repère ÉVÉNEMENT (emoji) en haut à droite — Noël, 14 juillet… */}
@@ -757,7 +736,7 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             const lockable = c.type === "cp" || c.type === "recup";
             return (
               <div key={c.id} className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-2">
-                <button type="button" onClick={() => { if (canAct) setSel({ start: c.start, end: c.end }); }}
+                <button type="button" onClick={() => { if (canAct) setSelDays(daysBetween(c.start, c.end)); }}
                   className={`flex min-w-0 flex-1 items-center gap-2 text-left ${canAct ? "hover:opacity-80" : "cursor-default"}`}>
                   <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${c.status === "approved" ? TYPE_TONE[c.type].solid : `border-2 border-current ${TYPE_TONE[c.type].text}`}`} />
                   <span className="min-w-0 flex-1 truncate text-[12.5px] tnum text-foreground">{rangeLabel(c)}</span>
@@ -791,26 +770,10 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             {isSelf ? "Demander (validé par la direction)"
               : maladieDeclare ? "Déclarer un arrêt maladie (enregistré directement)"
               : "Proposer à ce salarié (il accepte ou refuse)"}
-            {/* PC : glisser OU clic début/clic fin. Mobile : clic début/clic fin. */}
             <span className="normal-case font-normal text-muted-foreground/80">
-              <span className="hidden md:inline"> — glissez sur les jours, ou cliquez le 1ᵉʳ puis le dernier</span>
-              <span className="md:hidden"> — touchez le 1ᵉʳ jour puis le dernier</span>
+              {" "}— cliquez ou touchez chaque jour (glissez à la souris pour en sélectionner plusieurs)
             </span>
           </p>
-
-          {/* APERÇU DÉCOUPE AUTO (salarié) : la récup se consomme en jours ENTIERS
-              avant les CP. Deux demandes seront envoyées à la validation. */}
-          {autoSplit && autoSplit.recup && (
-            <div className="mb-2.5 flex items-start gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 p-2.5">
-              <Lightbulb className="h-4 w-4 shrink-0 mt-0.5 text-sky-600 dark:text-sky-400" />
-              <p className="min-w-0 flex-1 text-[12px] text-sky-800 dark:text-sky-200">
-                Ta récup (<b className="font-semibold tnum">{fmtHM(recupBalanceMin)}</b>) couvre <b className="font-semibold">{autoSplit.recupDays} jour{autoSplit.recupDays > 1 ? "s" : ""} entier{autoSplit.recupDays > 1 ? "s" : ""}</b> → à l&apos;envoi&nbsp;:{" "}
-                <b className="font-semibold">{autoSplit.recupDays} j en récup</b>
-                {autoSplit.cp ? <> + <b className="font-semibold">{autoSplit.cpDays} j en CP</b> (2 demandes)</> : <> (tout couvert, tes CP sont préservés)</>}.
-                {cpSaturdays.length > 0 && <span className="opacity-80"> Dont {cpSaturdays.length} samedi{cpSaturdays.length > 1 ? "s" : ""} en CP.</span>}
-              </p>
-            </div>
-          )}
 
           <div className="flex flex-wrap items-end gap-2.5">
             <div>
@@ -820,24 +783,12 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
                 {TYPES.map((t) => <option key={t} value={t}>{CONGE_TYPE_LABEL[t]}</option>)}
               </select>
             </div>
-            <div>
-              <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Du</label>
-              <input type="date" value={sel.start} onChange={(e) => setSel((c) => ({ start: e.target.value, end: !c.end || c.end < e.target.value ? e.target.value : c.end }))}
-                className="h-9 rounded-md border border-border bg-background px-2 text-[13px] tnum focus:outline-none focus:ring-1 focus:ring-brand-500" />
-            </div>
-            <div>
-              <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Au</label>
-              {/* Fin de plage BORNÉE au début : une fin antérieure au début
-                  (saisie clavier, `min` non appliqué partout sur mobile) cassait
-                  le bandeau de sélection — on la ramène au 1er jour. */}
-              <input type="date" value={sel.end} min={sel.start || undefined}
-                onChange={(e) => setSel((c) => {
-                  const v = e.target.value;
-                  if (!c.start) return { start: v, end: v };
-                  return { ...c, end: v && v < c.start ? c.start : v };
-                })}
-                className="h-9 rounded-md border border-border bg-background px-2 text-[13px] tnum focus:outline-none focus:ring-1 focus:ring-brand-500" />
-            </div>
+            {selDays.length > 0 && (
+              <button type="button" onClick={() => setSelDays([])}
+                className="h-9 px-2.5 rounded-md border border-border text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+                Vider ({selDays.length})
+              </button>
+            )}
             <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="Précision (facultatif)"
               className="h-9 flex-1 min-w-[140px] rounded-md border border-border bg-background px-2.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-brand-500" />
             {/* Justificatif (arrêt maladie) : image ou PDF du certificat. */}
@@ -852,7 +803,7 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             {/* Pleine largeur sur mobile (grande cible tactile), inline ≥ sm.
                 Arrêt maladie (déclaration directe) = bouton ambre (fait acté,
                 pas une proposition à négocier). */}
-            <button type="button" onClick={submit} disabled={busy || !sel.start}
+            <button type="button" onClick={submit} disabled={busy || selDays.length === 0}
               className={`w-full sm:w-auto inline-flex items-center justify-center gap-1.5 h-11 sm:h-10 px-4 rounded-lg text-white text-[13px] font-semibold disabled:opacity-50 ${
                 maladieDeclare ? "bg-amber-600 hover:bg-amber-700" : "bg-emerald-600 hover:bg-emerald-700"
               }`}>
@@ -860,9 +811,9 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
               {isSelf ? "Demander" : maladieDeclare ? "Déclarer l'arrêt" : "Proposer"}
             </button>
           </div>
-          {sel.start && (
+          {selDays.length > 0 && (
             <p className="mt-2 text-[11.5px] text-muted-foreground tnum">
-              {rangeLabel({ start: sel.start, end: sel.end })} · <span className="font-semibold text-foreground">{ouvrables}</span> jour{ouvrables > 1 ? "s" : ""} ouvrable{ouvrables > 1 ? "s" : ""} <span className="normal-case">(hors dimanches et fériés)</span>
+              <span className="font-semibold text-foreground">{selDays.length}</span> jour{selDays.length > 1 ? "s" : ""} sélectionné{selDays.length > 1 ? "s" : ""} · <span className="font-semibold text-foreground">{ouvrables}</span> ouvrable{ouvrables > 1 ? "s" : ""} <span className="normal-case">(hors dimanches et fériés)</span>
               {type === "cp" && " — les jours de CP validés comptent comme travaillés (journée type créditée)"}
               {type === "recup" && " — décomptée du compteur seulement si la semaine finit sous le contrat"}
               {maladieDeclare && " — enregistré directement (le salarié est informé, pas sollicité)"}

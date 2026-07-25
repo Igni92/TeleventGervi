@@ -406,6 +406,17 @@ describe("planning — récup : seuls les jours ouvrés (lun→ven) décomptent"
     expect(c.debitMin).toBe(0);                          // samedi gratuit (contrat déjà atteint)
     expect(c.creditMin).toBe(Math.round(4 * 60 * 1.25)); // 4 h supp à +25 % = 5 h créditées
   });
+  it("SCÉNARIO MAXYME : 36h lun→ven + samedi récup → samedi ne débite rien ET rend l'heure au compteur", () => {
+    const P = { weeklyHours: 35, typicalDay: { m1: "06:00", m2: "12:00" } };
+    const day = (h: number): DayHours => ({ m1: "06:00", m2: `${String(6 + h).padStart(2, "0")}:00` });
+    const weeks: CounterWeekInput[] = [ // 4×7h + 8h = 36h, samedi posé en récup
+      { week: "2026-W28", days: [day(7), day(7), day(7), day(7), day(8), {}, {}], option: "recup", recupDates: ["2026-07-11"] },
+    ];
+    const c = computeRecupCounter(weeks, [], P, ASOF);
+    expect(c.debitMin).toBe(0);                          // le samedi ne décompte plus
+    expect(c.creditMin).toBe(Math.round(1 * 60 * 1.25)); // l'heure faite en + revient au compteur (1h15)
+    expect(c.balanceMin).toBe(Math.round(1 * 60 * 1.25));
+  });
   it("Samedi SEUL posé en récup → ne décompte RIEN (jour non travaillé)", () => {
     const c = computeRecupCounter([], ["2026-07-11"], PROFILE, ASOF); // samedi
     expect(c.debitMin).toBe(0);

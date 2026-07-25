@@ -223,6 +223,10 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
     const cetCounter = computeRecupCounter(cetWeeks, cetExtra, hourProfile, todayISO);
     const payouts = payoutsByUser.get(email) ?? [];
     const paidOutMin = payouts.reduce((s, p) => s + p.majMin, 0);
+    // DISPONIBLE À PAYER = solde réel MOINS la récup déjà posée (réservée) MOINS
+    // ce qui a déjà été payé. Le patron ne voit JAMAIS les heures que le salarié
+    // a utilisées pour poser de la récup (elles ne sont pas payables).
+    const availableMin = Math.max(0, cetCounter.availableMin - paidOutMin);
     return {
       email,
       name: stripOrgSuffix(rawName) || email,
@@ -231,11 +235,11 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
       weeks: buildWeekly(attrWeeks, entries, hourProfile),
       // Récap heures supp par semaine (où part chaque heure : payé/récup/attente).
       suppRecap: buildSuppRecap(entries ?? new Map(), hourProfile),
-      // Compteur récup (CET) : solde net + historique des paiements du compteur.
+      // Compteur récup (CET) — vue PATRON : uniquement le DISPONIBLE à payer
+      // (récup déjà posée et paiements exclus). Jamais le brut.
       cet: {
-        balanceMin: cetCounter.balanceMin,
+        netMin: availableMin,
         paidOutMin,
-        netMin: cetCounter.balanceMin - paidOutMin,
         payouts,
       },
       salary,
