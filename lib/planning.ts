@@ -329,18 +329,16 @@ export function computeRecupCounter(
     }
     if (recupDays.size > 0) {
       if (input) {
-        // Semaine SAISIE : le débit se cale sur les HEURES RÉELLES, jamais sur
-        // une « journée type » à l'aveugle. Un jour de récup ramène la semaine
-        // AU CONTRAT (35 h) — depuis l'un OU l'autre côté :
-        //   • semaine en déficit  → il comble le manque (ex. 4 j à 7h15 = 29h00
-        //     + 1 j récup → débit 6h00, pas 7h15) ;
-        //   • semaine déjà AU-DELÀ → il ne consomme QUE le dépassement : une
-        //     journée type de 7h15 × 5 j = 36h15 dépasse déjà les 35 h, donc un
-        //     samedi de récup ne débite que 1h15 (le surplus), pas 7h15.
-        // Débit = min(jours de récup RÉELLEMENT PRIS × journée type, |travaillé −
-        // contrat|). La récup TAGUÉE dans la feuille est déjà créditée au total
-        // par computeWeek (`recupCreditMin`) : on la retire pour retrouver le
-        // travail réel.
+        // Semaine SAISIE : un jour de récup ne coûte QUE ce qui MANQUE pour
+        // atteindre le contrat (35 h). Il ne débite JAMAIS le surplus :
+        //   • travaillé < 35 h → le samedi comble le déficit (ex. 30 h lun→ven
+        //     + samedi récup → débit 5 h seulement, pas 7h15) ;
+        //   • travaillé ≥ 35 h → le contrat est déjà atteint → le samedi (ou tout
+        //     jour posé) coûte 0, et le dépassement reste en HEURES SUPP créditées
+        //     (ex. 39 h lun→ven + samedi récup → débit 0 ET +4 h supp au compteur).
+        // Débit = min(jours de récup RÉELLEMENT PRIS × journée type, DÉFICIT au
+        // contrat). La récup TAGUÉE est déjà créditée au total par computeWeek
+        // (`recupCreditMin`) : on la retire pour retrouver le travail réel.
         //
         // BASCULE EN SURPLUS : un jour POSÉ en récup mais FINALEMENT TRAVAILLÉ
         // (des heures saisies dessus) n'est PAS un repos → il ne débite rien ; ses
@@ -353,8 +351,8 @@ export function computeRecupCounter(
           return idx < 0 || dayMinutes(input.days[idx]) === 0;
         }).length;
         const workedBase = c.totalMin - c.recupCreditMin;   // travail réel + congés + fériés (récup exclue)
-        const deviation = Math.abs(workedBase - c.contractMin);
-        debitMin += Math.min(takenRecupDays * typDay, deviation);
+        const deficit = Math.max(0, c.contractMin - workedBase);   // seul le MANQUE au contrat est débité
+        debitMin += Math.min(takenRecupDays * typDay, deficit);
       } else {
         // Aucune saisie : impossible de mesurer l'écart réel → hypothèse
         // PRUDENTE. On suppose les jours de semaine (lun→ven hors fériés)

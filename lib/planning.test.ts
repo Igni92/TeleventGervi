@@ -376,16 +376,35 @@ describe("planning — récup : seuls les jours ouvrés (lun→ven) décomptent"
     ];
     expect(computeRecupCounter(weeks, [], PROFILE, ASOF).debitMin).toBe(7 * 60);
   });
-  it("MODÈLE MAXYME : Lun→Ven = 36h15 (5 × 7h15) + samedi récup → débite 1h15 (le dépassement), PAS 7h15", () => {
-    // Journée type 7h15 : 5 jours = 36h15, soit +1h15 au-dessus des 35 h. Poser
-    // un samedi de récup ne consomme donc QUE ce dépassement de 1h15.
+  it("MODÈLE MAXYME : Lun→Ven = 36h15 (≥ 35 h) + samedi récup → le samedi coûte 0 (contrat déjà atteint)", () => {
+    // Journée type 7h15 : 5 jours = 36h15 ≥ 35 h → aucun déficit → le samedi de
+    // récup ne débite RIEN (et le +1h15 de dépassement reste en heures supp).
     const MAXYME = { weeklyHours: 35, typicalDay: { m1: "04:45", m2: "12:00" } }; // 7h15/jour
     const d = (): DayHours => ({ m1: "04:45", m2: "12:00" });                     // 7h15
     const weeks: CounterWeekInput[] = [
       { week: "2026-W28", days: [d(), d(), d(), d(), d(), {}, {}], option: null, recupDates: ["2026-07-11"] },
     ];
     const c = computeRecupCounter(weeks, [], MAXYME, ASOF);
-    expect(c.debitMin).toBe(75);   // 1h15, pas 7h15
+    expect(c.debitMin).toBe(0);
+  });
+  it("RÈGLE SAMEDI (déficit) : 30h lun→ven + samedi récup → débite seulement 5h (le manque au contrat)", () => {
+    const P = { weeklyHours: 35, typicalDay: { m1: "06:00", m2: "12:00" } };   // 6h/jour
+    const six = (): DayHours => ({ m1: "06:00", m2: "12:00" });                 // 6h → 5 j = 30 h
+    const weeks: CounterWeekInput[] = [
+      { week: "2026-W28", days: [six(), six(), six(), six(), six(), {}, {}], option: null, recupDates: ["2026-07-11"] },
+    ];
+    const c = computeRecupCounter(weeks, [], P, ASOF);
+    expect(c.debitMin).toBe(5 * 60);   // 35 − 30 = 5 h
+  });
+  it("RÈGLE SAMEDI (surplus) : 39h lun→ven + samedi récup (option récup) → samedi 0 ET +4h supp crédités", () => {
+    const P = { weeklyHours: 35, typicalDay: { m1: "06:00", m2: "12:00" } };
+    const day = (h: number): DayHours => ({ m1: "06:00", m2: `${String(6 + h).padStart(2, "0")}:00` });
+    const weeks: CounterWeekInput[] = [ // 4×8h + 7h = 39h
+      { week: "2026-W28", days: [day(8), day(8), day(8), day(8), day(7), {}, {}], option: "recup", recupDates: ["2026-07-11"] },
+    ];
+    const c = computeRecupCounter(weeks, [], P, ASOF);
+    expect(c.debitMin).toBe(0);                          // samedi gratuit (contrat déjà atteint)
+    expect(c.creditMin).toBe(Math.round(4 * 60 * 1.25)); // 4 h supp à +25 % = 5 h créditées
   });
   it("Samedi SEUL posé en récup → ne décompte RIEN (jour non travaillé)", () => {
     const c = computeRecupCounter([], ["2026-07-11"], PROFILE, ASOF); // samedi
