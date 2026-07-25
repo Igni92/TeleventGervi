@@ -3,19 +3,29 @@
 # Prérequis : /usr/local/bin/televent-cron-call (posé par deploy.sh) et
 #             CRON_SECRET défini dans /srv/televent/app/.env.
 # Les routes re-vérifient elles-mêmes le secret (isCronAuthorized).
+#
+# NB : le crontab OVH est désormais l'UNIQUE ordonnanceur. Le workflow GitHub
+# Actions (.github/workflows/sap-sync.yml) qui appelait /api/cron/sap-sync doit
+# être DÉSACTIVÉ (son secret ne correspond plus au CRON_SECRET local) — sinon il
+# échoue en 403 sans effet.
 
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 MAILTO=""
 
-# ── Synchro globale SAP (miroir documents puis produits+stock, en séquence). ──
-*/30 * * * *  televent  televent-cron-call /api/cron/sap-sync
+# ── Ventes / documents SAP (factures, commandes, BL, réceptions) = RÉSULTATS DU
+#    MOIS EN COURS. Toutes les 10 min. ──
+0,10,20,30,40,50 * * * *  televent  televent-cron-call /api/sap/sync/mirror
 
-# ── Synchro incrémentale stock (décalée pour ne pas chevaucher la globale). ──
-7,17,27,37,47,57 * * * *  televent  televent-cron-call /api/sap/sync/delta
+# ── Stock SAP incrémental (léger) — toutes les 10 min, décalé de 5 min du miroir
+#    pour ne pas cogner le pooler en même temps. ──
+5,15,25,35,45,55 * * * *  televent  televent-cron-call /api/sap/sync/delta
 
-# ── Rafraîchissement du stock inventaire. ──
-5,20,35,50 * * * *  televent  televent-cron-call /api/inventaire/refresh-stock
+# ── Rafraîchissement du stock inventaire (vue locale) — toutes les 15 min, décalé. ──
+3,18,33,48 * * * *  televent  televent-cron-call /api/inventaire/refresh-stock
+
+# ── Catalogue produits + stock COMPLET (plus lourd) — 2×/h, minutes creuses. ──
+23,53 * * * *  televent  televent-cron-call /api/sap/sync/products
 
 # ── Équilibrage quotidien récup / CP (supp indécises → récup, puis la récup
 #    remplace les jours de CP à venir). Journalisé (rheqlog:). ──
