@@ -38,7 +38,7 @@ function buildWeekly(
 import { listAllWeekEntries, listUserWeekEntries, listProfiles, getProfile, saveWeekEntry, type WeekEntry } from "@/lib/heuresRh";
 import { buildSuppRecap } from "@/lib/heuresRecap";
 import { listAllConges } from "@/lib/congesRh";
-import { expandOuvrables, monthEndISO, computeRecupCounter } from "@/lib/planning";
+import { expandOuvrables, monthEndISO, computeRecupCounter, computeCpCounter, cpConfigOf } from "@/lib/planning";
 import { rangesOverlap, type CongeRequest } from "@/lib/conges";
 import { stripOrgSuffix } from "@/lib/userNames";
 import {
@@ -227,6 +227,8 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
     // ce qui a déjà été payé. Le patron ne voit JAMAIS les heures que le salarié
     // a utilisées pour poser de la récup (elles ne sont pas payables).
     const availableMin = Math.max(0, cetCounter.availableMin - paidOutMin);
+    // SOLDE DE TOUT COMPTE (départ) : soldes restants CP (jours) + récup (heures).
+    const cpCounter = computeCpCounter(cpConfigOf(hourProfile), congesByUser.get(email) ?? [], todayISO);
     return {
       email,
       name: stripOrgSuffix(rawName) || email,
@@ -241,6 +243,13 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
         netMin: availableMin,
         paidOutMin,
         payouts,
+      },
+      // Solde de tout compte (départ salarié) : CP restants + récup restante.
+      stc: {
+        cpBalanceDays: cpCounter.balanceDays,
+        cpAllowanceDays: cpCounter.allowanceDays,
+        cpTakenDays: cpCounter.takenDays,
+        recupNetMin: availableMin,
       },
       salary,
       profile: salProfile,
