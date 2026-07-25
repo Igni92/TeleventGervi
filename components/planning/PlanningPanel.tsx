@@ -473,6 +473,17 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
   const paintAddRef = useRef(true);  // le geste souris AJOUTE (true) ou RETIRE (false)
   const draggedRef = useRef(false);  // vrai dès que la souris a couvert un 2ᵉ jour
   const mouseGestureRef = useRef(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Cliquer AILLEURS (hors calendrier + formulaire) → on vide la sélection.
+  useEffect(() => {
+    if (selDays.length === 0) return;
+    const onDown = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setSelDays([]);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [selDays.length]);
 
   const toggleDay = (date: string) => {
     if (!canAct) return;
@@ -544,6 +555,17 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
     () => selDays.filter((d) => new Date(`${d}T12:00:00Z`).getUTCDay() !== 0 && !frenchHolidayLabel(d)).length,
     [selDays],
   );
+  // PLAFOND RÉCUP : on ne peut poser que ce que contient le COMPTEUR (CET,
+  // incrémenté en fin de mois) — nombre de journées ENTIÈRES dispo. Seuls les
+  // jours de CONTRAT (lun→ven) débitent le CET ; les SAMEDIS sont gratuits.
+  const typDayMin = person.profile.typicalDayMin;
+  const recupDaysAvail = typDayMin > 0 ? Math.floor(person.counters.recup.availableMin / typDayMin) : 0;
+  const selContractDays = useMemo(
+    () => selDays.filter((d) => { const dow = new Date(`${d}T12:00:00Z`).getUTCDay(); return dow >= 1 && dow <= 5 && !frenchHolidayLabel(d); }).length,
+    [selDays],
+  );
+  // Le salarié ne peut pas poser plus de récup (jours de contrat) que son CET.
+  const overRecup = isSelf && type === "recup" && selContractDays > recupDaysAvail;
   // Direction + type « Maladie » → DÉCLARATION directe (arrêt acté), pas une
   // proposition soumise à l'acceptation du salarié.
   const maladieDeclare = !isSelf && type === "maladie";
@@ -569,7 +591,7 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
   }, [person.conges, month]);
 
   const submit = async () => {
-    if (selDays.length === 0) return;
+    if (selDays.length === 0 || overRecup) return;
     // Les jours choisis (éventuellement non contigus) sont regroupés en PLAGES
     // contiguës → une demande par plage. Le type se décide/change ensuite.
     const sorted = [...selDays].sort();
@@ -597,7 +619,7 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
   };
 
   return (
-    <div>
+    <div ref={rootRef}>
       {/* Grille mensuelle — responsive : cellules centrées façon appli mobile
           (numéro + pastilles), barres pleines sur desktop. */}
       <div className="rounded-lg border border-border overflow-hidden">
@@ -778,10 +800,24 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
           <div className="flex flex-wrap items-end gap-2.5">
             <div>
               <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Type</label>
-              <select value={type} onChange={(e) => setType(e.target.value as CongeType)}
-                className="h-9 rounded-md border border-border bg-background px-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-brand-500">
-                {TYPES.map((t) => <option key={t} value={t}>{CONGE_TYPE_LABEL[t]}</option>)}
-              </select>
+              <div className="flex items-center gap-1.5">
+                {/* Bascule RÉCUP ↔ CP (les jours sélectionnés). */}
+                <span className="inline-flex overflow-hidden rounded-md border border-border">
+                  {(["recup", "cp"] as CongeType[]).map((t) => (
+                    <button key={t} type="button" onClick={() => setType(t)}
+                      className={`h-9 px-3 text-[12.5px] font-semibold ${type === t ? `${TYPE_TONE[t].soft} ${TYPE_TONE[t].text}` : "text-muted-foreground hover:bg-secondary/60"}`}>
+                      {t === "recup" ? "Récup" : "CP"}
+                    </button>
+                  ))}
+                </span>
+                {/* Autres types (RTT, maladie, sans solde…) — surtout la direction. */}
+                <select value={type === "recup" || type === "cp" ? "" : type}
+                  onChange={(e) => { if (e.target.value) setType(e.target.value as CongeType); }}
+                  className="h-9 rounded-md border border-border bg-background px-2 text-[12.5px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-brand-500">
+                  <option value="">Autre…</option>
+                  {TYPES.filter((t) => t !== "recup" && t !== "cp").map((t) => <option key={t} value={t}>{CONGE_TYPE_LABEL[t]}</option>)}
+                </select>
+              </div>
             </div>
             {selDays.length > 0 && (
               <button type="button" onClick={() => setSelDays([])}
@@ -803,7 +839,7 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
             {/* Pleine largeur sur mobile (grande cible tactile), inline ≥ sm.
                 Arrêt maladie (déclaration directe) = bouton ambre (fait acté,
                 pas une proposition à négocier). */}
-            <button type="button" onClick={submit} disabled={busy || selDays.length === 0}
+            <button type="button" onClick={submit} disabled={busy || selDays.length === 0 || overRecup}
               className={`w-full sm:w-auto inline-flex items-center justify-center gap-1.5 h-11 sm:h-10 px-4 rounded-lg text-white text-[13px] font-semibold disabled:opacity-50 ${
                 maladieDeclare ? "bg-amber-600 hover:bg-amber-700" : "bg-emerald-600 hover:bg-emerald-700"
               }`}>
@@ -811,6 +847,13 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
               {isSelf ? "Demander" : maladieDeclare ? "Déclarer l'arrêt" : "Proposer"}
             </button>
           </div>
+          {/* Plafond récup : on ne peut poser que ce que contient le CET. */}
+          {isSelf && type === "recup" && (
+            <p className={`mt-2 text-[11.5px] tnum ${overRecup ? "text-rose-600 font-semibold" : "text-muted-foreground"}`}>
+              Récup posable : <b>{selContractDays}</b>/<b>{recupDaysAvail}</b> jour(s) — pris sur ton compteur (CET), les samedis sont gratuits.
+              {overRecup && ` Tu ne peux pas dépasser ${recupDaysAvail} jour(s) de récup.`}
+            </p>
+          )}
           {selDays.length > 0 && (
             <p className="mt-2 text-[11.5px] text-muted-foreground tnum">
               <span className="font-semibold text-foreground">{selDays.length}</span> jour{selDays.length > 1 ? "s" : ""} sélectionné{selDays.length > 1 ? "s" : ""} · <span className="font-semibold text-foreground">{ouvrables}</span> ouvrable{ouvrables > 1 ? "s" : ""} <span className="normal-case">(hors dimanches et fériés)</span>
