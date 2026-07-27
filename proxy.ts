@@ -11,6 +11,19 @@ export default auth((req) => {
     return NextResponse.next();
   }
 
+  // Requêtes MACHINE (crons OVH) sur /api : un `x-cron-secret` (ou
+  // `Authorization: Bearer <CRON_SECRET>`) valide laisse passer — la route
+  // re-vérifie elle-même via isCronAuthorized. SANS ça, un cron sans session
+  // était redirigé vers /login (307) et ne tournait jamais (synchro SAP/stock à
+  // l'arrêt → l'accueil ne se met plus à jour).
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && pathname.startsWith("/api")) {
+    const bearer = req.headers.get("authorization");
+    if (req.headers.get("x-cron-secret") === cronSecret || bearer === `Bearer ${cronSecret}`) {
+      return NextResponse.next();
+    }
+  }
+
   // Origine RÉELLE de la requête derrière le proxy Vercel. On n'utilise pas
   // req.url (ni NEXTAUTH_URL) qui peut pointer vers http://localhost:3000 si la
   // variable d'env a été écrasée — x-forwarded-host/proto reflètent toujours le
