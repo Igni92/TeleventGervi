@@ -9,9 +9,7 @@
  *
  * DIRECTION : un calendrier PAR PERSONNE (sélecteur) + le calendrier d'ÉQUIPE
  * (une ligne par salarié) ; propose congés/récup au vu des compteurs, valide
- * les demandes, règle le solde CP annuel et le PLAFOND de récup (les heures
- * au-delà partent au paiement sur le bulletin du mois suivant — reporté sur
- * l'état compta).
+ * les demandes et règle le solde CP annuel.
  *
  * Le circuit fait BOOMERANG : salarié demande → direction valide ; direction
  * propose → salarié accepte. Une fois validé, le jour s'inscrit dans la
@@ -23,7 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   CalendarDays, ChevronLeft, ChevronRight, RotateCcw, Loader2, Send, Check, X,
-  Users, Palmtree, Clock3, SlidersHorizontal, Save, Sun, Stethoscope, Paperclip, Lock,
+  Users, Palmtree, Clock3, SlidersHorizontal, Save, Stethoscope, Paperclip, Lock,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { InfoHint } from "@/components/ui/info-hint";
@@ -314,7 +312,7 @@ export function PlanningPanel({ isManager, isDirection }: { isManager: boolean; 
         )}
 
         {/* COMPTEURS au-dessus du calendrier : CP + récup (l'exigence clé). */}
-        <CounterBar person={person} isManager={isManager} />
+        <CounterBar person={person} />
 
         <PersonCalendar
           person={person} month={month} todayISO={data.todayISO}
@@ -333,7 +331,7 @@ export function PlanningPanel({ isManager, isDirection }: { isManager: boolean; 
           }}
         />
 
-        {/* Réglages EMPLOYEUR : solde CP annuel + plafond de récup. */}
+        {/* Réglages EMPLOYEUR : solde CP annuel + initiales (calendrier équipe). */}
         {isDirection && !isSelf && (
           <EmployerSettings person={person} onSaved={load} />
         )}
@@ -383,8 +381,8 @@ function monthTitleShort(monthId: string): string {
 
 /* ─────────────────── Compteurs (au-dessus de chaque calendrier) ────────────── */
 
-function CounterBar({ person, isManager }: { person: PersonPlanning; isManager: boolean }) {
-  const { cp, recup, capMin, excessMin } = person.counters;
+function CounterBar({ person }: { person: PersonPlanning }) {
+  const { cp, recup } = person.counters;
   return (
     <div className="mb-3 flex flex-wrap items-stretch gap-2">
       <CounterChip icon={<Palmtree className="h-3.5 w-3.5" />} tone="violet"
@@ -392,28 +390,13 @@ function CounterBar({ person, isManager }: { person: PersonPlanning; isManager: 
         value={cp.balanceDays == null ? `${cp.takenDays} j pris` : `${cp.balanceDays} j restants`}
         hint={cp.balanceDays == null
           ? "Solde CP non défini par l'employeur"
-          : cp.accrual
-            ? `${cp.allowanceDays} j acquis (+2,5/mois) · ${cp.takenDays} j pris${cp.pendingDays ? ` · ${cp.pendingDays} j en attente` : ""} — cumul depuis le ${fmtD(cp.period.start)}`
-            : `${cp.takenDays} j pris${cp.pendingDays ? ` · ${cp.pendingDays} j en attente` : ""} — période ${fmtD(cp.period.start)} → ${fmtD(cp.period.end)}`} />
+          : `${cp.allowanceDays} j acquis · ${cp.takenDays} j pris${cp.pendingDays ? ` · ${cp.pendingDays} en attente` : ""}`} />
       <CounterChip icon={<Clock3 className="h-3.5 w-3.5" />} tone="sky"
         label="Récup disponible"
         value={fmtHM(recup.availableMin)}
         hint={recup.reservedMin > 0
-          ? `${fmtHM(recup.balanceMin)} acquises − ${fmtHM(recup.reservedMin)} réservées (${recup.plannedDates.length} j posé(s) à venir, bloqués d'avance) · ajusté au réel une fois la semaine passée`
-          : `${fmtHM(recup.creditMin)} acquises (majorées +25/+50 %) · ${fmtHM(recup.debitMin)} prises`} />
-      {capMin != null && (
-        <CounterChip icon={<SlidersHorizontal className="h-3.5 w-3.5" />} tone={excessMin > 0 ? "rose" : "muted"}
-          label="Plafond récup"
-          value={fmtHM(capMin)}
-          hint={excessMin > 0
-            ? `Dépassé de ${fmtHM(excessMin)} → payé sur le bulletin du mois suivant`
-            : "Au-delà du plafond, les heures supp partent au paiement (M+1)"} />
-      )}
-      {excessMin > 0 && isManager && (
-        <CounterChip icon={<Sun className="h-3.5 w-3.5" />} tone="rose"
-          label="À payer M+1" value={fmtHM(excessMin)}
-          hint="Reporté sur l'état mensuel envoyé à la compta" />
-      )}
+          ? `${fmtHM(recup.balanceMin)} au compteur · ${fmtHM(recup.reservedMin)} déjà posés à venir`
+          : "Heures supp mises en récup, encore disponibles à poser ou à payer"} />
     </div>
   );
 }
@@ -880,14 +863,12 @@ function daysBetween(start: string, end: string): string[] {
 
 function EmployerSettings({ person, onSaved }: { person: PersonPlanning; onSaved: () => Promise<void> }) {
   const [cp, setCp] = useState<string>(person.profile.cpAllowanceDays?.toString() ?? "");
-  const [cap, setCap] = useState<string>(person.profile.recupCapHours?.toString() ?? "");
   const [initials, setInitials] = useState<string>(person.profile.initials ?? "");
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     setCp(person.profile.cpAllowanceDays?.toString() ?? "");
-    setCap(person.profile.recupCapHours?.toString() ?? "");
     setInitials(person.profile.initials ?? "");
-  }, [person.email, person.profile.cpAllowanceDays, person.profile.recupCapHours, person.profile.initials]);
+  }, [person.email, person.profile.cpAllowanceDays, person.profile.initials]);
 
   const save = async () => {
     setSaving(true);
@@ -897,7 +878,6 @@ function EmployerSettings({ person, onSaved }: { person: PersonPlanning; onSaved
         body: JSON.stringify({
           user: person.email,
           cpAllowanceDays: cp === "" ? null : Number(cp),
-          recupCapHours: cap === "" ? null : Number(cap),
           initials: initials.trim() || null,
         }),
       });
@@ -921,11 +901,6 @@ function EmployerSettings({ person, onSaved }: { person: PersonPlanning; onSaved
             className="h-9 w-[110px] rounded-md border border-border bg-background px-2 text-[13.5px] tnum font-semibold focus:outline-none focus:ring-1 focus:ring-brand-500" />
         </div>
         <div>
-          <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Plafond récup (heures)</label>
-          <input type="number" min={0} max={1000} step={0.5} value={cap} onChange={(e) => setCap(e.target.value)} placeholder="ex. 14"
-            className="h-9 w-[110px] rounded-md border border-border bg-background px-2 text-[13.5px] tnum font-semibold focus:outline-none focus:ring-1 focus:ring-brand-500" />
-        </div>
-        <div>
           <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Initiales (3 max)</label>
           <input type="text" maxLength={3} value={initials}
             onChange={(e) => setInitials(e.target.value.toUpperCase())}
@@ -938,10 +913,6 @@ function EmployerSettings({ person, onSaved }: { person: PersonPlanning; onSaved
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Enregistrer
         </button>
       </div>
-      <p className="mt-2 text-[11px] text-muted-foreground">
-        Au-delà du plafond, les heures de récup partent au <b className="font-semibold">paiement des heures supp
-        sur le bulletin du mois suivant</b> — reporté automatiquement sur l&apos;état mensuel envoyé à la compta.
-      </p>
     </div>
   );
 }
