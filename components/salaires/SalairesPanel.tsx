@@ -52,7 +52,7 @@ interface Row {
    *  majorées dues (récup brute non payée + heures supp jamais arbitrées). */
   stc?: {
     cpBalanceDays: number | null; cpAllowanceDays: number | null; cpTakenDays: number;
-    recupNetMin: number; recupOwedMin: number; pendingSuppMin: number; totalSuppMin: number;
+    recupNetMin: number; recupOwedMin: number; totalSuppMin: number;
   };
 }
 interface CommissionMonthLine { month: string; base: number; prime: number; invoices: number; avoirs: number }
@@ -449,7 +449,6 @@ function SuppDecision({ row, month, onSaved }: { row: Row; month: string; onSave
   const [payH, setPayH] = useState("");
   const [busy, setBusy] = useState<null | "pay" | "recup" | "split">(null);
 
-  const decided = h.suppSansDecisionMin === 0;
   const apply = async (mode: "pay" | "recup" | "split") => {
     const payMin = mode === "split" ? payInputToMin(payH, h.suppTotalMin) : 0;
     if (mode === "split" && payMin <= 0) { toast.error("Indiquez le nombre d'heures à payer."); return; }
@@ -470,20 +469,16 @@ function SuppDecision({ row, month, onSaved }: { row: Row; month: string; onSave
 
   const btn = "inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg text-[12.5px] font-semibold transition-colors disabled:opacity-50";
   return (
-    <div className={`rounded-lg border p-3 ${decided ? "border-border bg-secondary/20" : "border-amber-500/40 bg-amber-500/10"}`}>
+    <div className="rounded-lg border border-border bg-secondary/20 p-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
           <Scale className="h-3.5 w-3.5" /> Heures supp du mois
         </span>
         <span className="text-[13px] font-bold tnum text-foreground">{fmtHM(h.suppTotalMin)}</span>
-        {decided ? (
-          <span className="flex flex-wrap gap-x-3 text-[11.5px] tnum">
-            {h.suppPayEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Payées <b>{fmtHM(h.suppPayEquivMin)}</b></span>}
-            {h.suppRecupEquivMin > 0 && <span className="text-sky-700 dark:text-sky-300">Récup <b>{fmtHM(h.suppRecupEquivMin)}</b></span>}
-          </span>
-        ) : (
-          <span className="text-[11.5px] font-semibold text-amber-700 dark:text-amber-300">à trancher : payer ou récup ?</span>
-        )}
+        <span className="flex flex-wrap gap-x-3 text-[11.5px] tnum">
+          {h.suppPayEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Payées <b>{fmtHM(h.suppPayEquivMin)}</b></span>}
+          {h.suppRecupEquivMin > 0 && <span className="text-sky-700 dark:text-sky-300">Récup <b>{fmtHM(h.suppRecupEquivMin)}</b></span>}
+        </span>
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -507,7 +502,7 @@ function SuppDecision({ row, month, onSaved }: { row: Row; month: string; onSave
         </span>
       </div>
       <p className="mt-1.5 text-[11px] text-muted-foreground">
-        La part payée part sur le bulletin (équiv. majoré +25/+50 %) ; le reste crédite le compteur de récup.
+        Par défaut, tout ce qui n&apos;est pas payé va en récup. La part payée part sur le bulletin (équiv. majoré +25/+50 %).
       </p>
     </div>
   );
@@ -521,11 +516,10 @@ function SuppRecapView({ row }: { row: Row }) {
 
   const tot = recap.reduce((a, r) => ({
     maj: a.maj + r.majMin, pay: a.pay + r.payMajMin + r.structPaidMajMin,
-    recup: a.recup + r.recupMajMin, pending: a.pending + r.pendingMajMin,
-  }), { maj: 0, pay: 0, recup: 0, pending: 0 });
+    recup: a.recup + r.recupMajMin,
+  }), { maj: 0, pay: 0, recup: 0 });
 
   const dest = (r: SuppWeekRecap) => {
-    if (r.pendingMajMin > 0) return <span className="text-amber-700 dark:text-amber-300">en attente</span>;
     if (r.payMajMin === 0 && r.recupMajMin === 0) return <span className="text-muted-foreground">—</span>;
     return (
       <span className="inline-flex flex-wrap items-center gap-1">
@@ -542,7 +536,7 @@ function SuppRecapView({ row }: { row: Row }) {
         <ListChecks className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Récap heures supp par semaine</span>
         <span className="ml-auto text-[11.5px] tnum text-muted-foreground">
-          {fmtHM(tot.maj)} = <b className="text-emerald-700 dark:text-emerald-300">{fmtHM(tot.pay)}</b> payé · <b className="text-sky-700 dark:text-sky-300">{fmtHM(tot.recup)}</b> récup{tot.pending > 0 && <> · <b className="text-amber-700 dark:text-amber-300">{fmtHM(tot.pending)}</b> attente</>}
+          {fmtHM(tot.maj)} = <b className="text-emerald-700 dark:text-emerald-300">{fmtHM(tot.pay)}</b> payé · <b className="text-sky-700 dark:text-sky-300">{fmtHM(tot.recup)}</b> récup
         </span>
         <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
@@ -711,7 +705,7 @@ function EmployeeCard({ row, month, canEdit, onSaved }: {
           <span className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11.5px] tnum text-muted-foreground">
             <span>Heures <b className="text-foreground">{fmtHM(h.totalMin)}</b></span>
             {h.suppPayEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Supp payées <b>{fmtHM(h.suppPayEquivMin)}</b></span>}
-            {h.suppSansDecisionMin > 0 && <span className="font-semibold text-rose-600 dark:text-rose-400">Supp sans décision</span>}
+            {h.suppRecupEquivMin > 0 && <span className="text-sky-700 dark:text-sky-300">Supp → récup <b>{fmtHM(h.suppRecupEquivMin)}</b></span>}
             {primesTotal > 0 && <span className="hidden sm:inline">Primes <b className="text-foreground">{eur(primesTotal)}</b></span>}
             {row.anMensuel > 0 && <span className="hidden sm:inline">AN <b className="text-foreground">{eur(row.anMensuel)}</b></span>}
           </span>
@@ -731,7 +725,6 @@ function EmployeeCard({ row, month, canEdit, onSaved }: {
             <span className="text-muted-foreground">Heures <b className="text-foreground">{fmtHM(h.totalMin)}</b> <span className="opacity-70">({h.weeksWithData}/{h.weeksTotal} sem.)</span></span>
             {h.suppPayEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Supp payées <b>{fmtHM(h.suppPayEquivMin)}</b></span>}
             {h.suppRecupEquivMin > 0 && <span className="text-sky-700 dark:text-sky-300">Supp → récup <b>{fmtHM(h.suppRecupEquivMin)}</b></span>}
-            {h.suppSansDecisionMin > 0 && <span className="font-semibold text-rose-600 dark:text-rose-400">Supp SANS décision {fmtHM(h.suppSansDecisionMin)}</span>}
             {h.ferieMin > 0 && <span className="text-orange-700 dark:text-orange-300">Férié <b>{fmtHM(h.ferieMin)}</b></span>}
             {h.cpJours > 0 && <span className="text-violet-700 dark:text-violet-300">CP <b>{h.cpJours} j</b></span>}
             {h.recupJours > 0 && <span className="text-sky-700 dark:text-sky-300">Récup prise <b>{h.recupJours} j</b></span>}
@@ -756,13 +749,9 @@ function EmployeeCard({ row, month, canEdit, onSaved }: {
                 {row.stc.cpBalanceDays != null && (
                   <span className="text-muted-foreground">CP restants : <b className="tnum text-foreground">{row.stc.cpBalanceDays} j</b>{row.stc.cpAllowanceDays != null && <span className="opacity-70"> (sur {row.stc.cpAllowanceDays}, {row.stc.cpTakenDays} pris)</span>}</span>
                 )}
-                <span className="text-muted-foreground">Heures supp à payer : <b className="tnum text-foreground">{fmtHM(row.stc.totalSuppMin)}</b>
-                  {(row.stc.pendingSuppMin > 0 || row.stc.recupOwedMin > 0) && (
-                    <span className="opacity-70"> (dont récup {fmtHM(row.stc.recupOwedMin)}{row.stc.pendingSuppMin > 0 ? ` + non décidées ${fmtHM(row.stc.pendingSuppMin)}` : ""})</span>
-                  )}
-                </span>
+                <span className="text-muted-foreground">Récup à payer : <b className="tnum text-foreground">{fmtHM(row.stc.totalSuppMin)}</b></span>
               </div>
-              <p className="mt-1 text-[10.5px] text-muted-foreground">Soldes en temps (CP à indemniser + toutes les heures supp majorées dues, y compris celles jamais arbitrées). La conversion en € se fait sur la base du taux horaire du salarié.</p>
+              <p className="mt-1 text-[10.5px] text-muted-foreground">Soldes en temps (CP à indemniser + récup acquise non payée). La conversion en € se fait sur la base du taux horaire du salarié.</p>
             </div>
           )}
 

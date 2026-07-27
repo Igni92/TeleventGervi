@@ -13,7 +13,7 @@ const VEH: VehiculeAN = {
 
 const HEURES: SalaryHeures = {
   totalMin: 151 * 60 + 40, contractMin: 151 * 60 + 40,
-  suppTotalMin: 0, suppPayEquivMin: 0, suppRecupEquivMin: 0, suppSansDecisionMin: 0,
+  suppTotalMin: 0, suppPayEquivMin: 0, suppRecupEquivMin: 0,
   ferieMin: 0, congesMin: 0, cpJours: 0, maladieJours: 0, absentJours: 0, recupJours: 0,
   weeksWithData: 4, weeksTotal: 4,
 };
@@ -65,12 +65,11 @@ describe("salaires — 13e mois (½ juin, ½ décembre, prorata CDI)", () => {
 });
 
 describe("salaires — éléments manquants (rappel avant transmission)", () => {
-  it("heures incomplètes + supp sans décision signalées", () => {
+  it("heures incomplètes signalées", () => {
     const m = missingElements("2026-07", null, null, {
-      ...HEURES, weeksWithData: 3, suppSansDecisionMin: 90,
+      ...HEURES, weeksWithData: 3,
     });
     expect(m.some((x) => /3\/4 semaines/.test(x))).toBe(true);
-    expect(m.some((x) => /sans décision/.test(x))).toBe(true);
   });
   it("13e mois à saisir en juin quand la fiche l'active, avec date CDI requise", () => {
     const m = missingElements("2026-06", { treizieme: true, cdiDate: null }, { primes: [], frais: [], updatedAt: "", updatedBy: "" }, HEURES);

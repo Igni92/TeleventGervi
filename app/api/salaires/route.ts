@@ -98,7 +98,7 @@ function buildHeures(
   const typDay = typicalDayMinutes(profile);
   const weekIds = attributedMonthWeeks(monthId, entries ?? new Map());
   const out: SalaryHeures = {
-    totalMin: 0, contractMin: 0, suppTotalMin: 0, suppPayEquivMin: 0, suppRecupEquivMin: 0, suppSansDecisionMin: 0,
+    totalMin: 0, contractMin: 0, suppTotalMin: 0, suppPayEquivMin: 0, suppRecupEquivMin: 0,
     ferieMin: 0, congesMin: 0, cpJours: 0, maladieJours: 0, absentJours: 0, recupJours: 0,
     weeksWithData: 0, weeksTotal: weekIds.length,
   };
@@ -119,21 +119,16 @@ function buildHeures(
     const supp = c.sup25Min + c.sup50Min;
     if (supp > 0) {
       out.suppTotalMin += supp;
-      // Heures supp STRUCTURELLES (contrat « 42 h ») : payées d'office, jamais
-      // arbitrées ni comptées « sans décision ». Seul le dépassement au-delà de
-      // `paidWeeklyHours` part au choix récup/paiement.
+      // Heures supp STRUCTURELLES (contrat « 42 h ») : payées d'office. Le reste
+      // (arbitrable) part au PAIEMENT si l'employeur le décide, SINON en récup
+      // (option nulle = récup par défaut). Plus de « sans décision ».
       const st = splitStructuralSupp(c.sup25Min, c.sup50Min, structuralSuppMin(profile));
       out.suppPayEquivMin += st.structEquivMin;
-      const arbitrable = st.arbitrableMin;
-      if (arbitrable > 0) {
-        if (e.option) {
-          const pay = effectivePaySuppMin(e.option, e.paySuppMin, arbitrable);
-          const s = splitSupp(st.arb25Min, st.arb50Min, pay);
-          out.suppPayEquivMin += s.payEquivMin;
-          out.suppRecupEquivMin += s.recupEquivMin;
-        } else {
-          out.suppSansDecisionMin += arbitrable;
-        }
+      if (st.arbitrableMin > 0) {
+        const pay = effectivePaySuppMin(e.option, e.paySuppMin, st.arbitrableMin); // null → 0
+        const s = splitSupp(st.arb25Min, st.arb50Min, pay);
+        out.suppPayEquivMin += s.payEquivMin;
+        out.suppRecupEquivMin += s.recupEquivMin;
       }
     }
     const wDates = weekDates(w);
@@ -231,15 +226,13 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
     const availableMin = Math.max(0, cetCounter.availableMin - paidOutMin);
     // Récap heures supp par semaine (où part chaque heure : payé/récup/attente).
     const recap = buildSuppRecap(entries ?? new Map(), hourProfile);
-    // SOLDE DE TOUT COMPTE (départ) : soldes restants CP (jours) + TOUTES les
-    // heures supp majorées encore dues au salarié :
-    //   • récup ACQUISE brute non encore payée (balance − payé) — au départ, même
-    //     la récup posée d'avance/réservée est due (les jours ne seront pas pris) ;
-    //   • heures supp jamais arbitrées (option nulle) : ni payées ni en récup →
-    //     elles doivent être payées au solde, sinon perdues.
+    // SOLDE DE TOUT COMPTE (départ) : CP restants (jours) + récup DUE (heures).
+    // Toute heure supp non payée étant déjà créditée en récup (option nulle =
+    // récup), le solde de récup acquis (balance − déjà payé) EST le total dû —
+    // plus rien « en attente » à récupérer à part. Au départ, même la récup posée
+    // d'avance est due (les jours ne seront pas pris) → on prend le brut (balance).
     const cpCounter = computeCpCounter(cpConfigOf(hourProfile), congesByUser.get(email) ?? [], todayISO);
     const recupOwedMin = Math.max(0, cetCounter.balanceMin - paidOutMin);
-    const pendingSuppMin = recap.reduce((s, r) => s + r.pendingMajMin, 0);
     return {
       email,
       name: stripOrgSuffix(rawName) || email,
@@ -254,16 +247,15 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
         paidOutMin,
         payouts,
       },
-      // Solde de tout compte (départ salarié) : CP restants + récup brute due +
-      // heures supp non décidées → total des heures supp majorées à solder.
+      // Solde de tout compte (départ salarié) : CP restants + récup due (= toutes
+      // les heures supp majorées non payées, déjà au compteur).
       stc: {
         cpBalanceDays: cpCounter.balanceDays,
         cpAllowanceDays: cpCounter.allowanceDays,
         cpTakenDays: cpCounter.takenDays,
         recupNetMin: availableMin,
         recupOwedMin,
-        pendingSuppMin,
-        totalSuppMin: recupOwedMin + pendingSuppMin,
+        totalSuppMin: recupOwedMin,
       },
       salary,
       profile: salProfile,

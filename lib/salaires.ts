@@ -201,8 +201,7 @@ export interface SalaryHeures {
   contractMin: number;
   suppTotalMin: number;      // total des heures supp BRUTES du mois (à arbitrer)
   suppPayEquivMin: number;   // supp À PAYER (équiv. majoré, décision employeur)
-  suppRecupEquivMin: number; // supp laissées en RÉCUP (équiv. majoré, décision)
-  suppSansDecisionMin: number; // supp SANS décision (bloquant avant envoi)
+  suppRecupEquivMin: number; // supp en RÉCUP (équiv. majoré ; défaut si non payé)
   ferieMin: number;          // journées types de fériés (toujours payées)
   congesMin: number;         // journées types créditées (CP validés)
   cpJours: number;           // jours ouvrables de CP validés dans le mois
@@ -235,9 +234,6 @@ export function missingElements(
   const out: string[] = [];
   if (heures && heures.weeksWithData < heures.weeksTotal) {
     out.push(`Heures incomplètes (${heures.weeksWithData}/${heures.weeksTotal} semaines saisies)`);
-  }
-  if (heures && heures.suppSansDecisionMin > 0) {
-    out.push("Heures supp sans décision (payer / récup) — à trancher dans l'état mensuel");
   }
   if (profile?.treizieme && isTreiziemeMonth(monthId)) {
     const has13e = (data?.primes ?? []).some((p) => /13e|13è|treizi/i.test(p.motif));

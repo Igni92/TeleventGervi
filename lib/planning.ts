@@ -366,11 +366,12 @@ export function computeRecupCounter(
     // contrat, samedi gratuit si 35 h faites, semaine pleine plafonnée au contrat.
     const cost = recupDebitOfWeek(input, recupDays, dates, profile, typDay);
     if (done) {
-      // CRÉDIT (repos compensateur MAJORÉ, +25/+50 inclus) : seulement pour les
-      // semaines PASSÉES dont l'employeur a choisi « récup »/« mixte ». La part
-      // STRUCTURELLE (contrat « 42 h ») est toujours payée, jamais créditée.
-      // Recalcul rétroactif : bascule paiement→récup revalorisée automatiquement.
-      if (input?.option === "recup" || input?.option === "mixte") {
+      // CRÉDIT (repos compensateur MAJORÉ, +25/+50 inclus) : TOUTE heure supp que
+      // l'employeur ne PAIE PAS part en récup — donc sauf option « paiement ». Pas
+      // de décision (option nulle) = récup par défaut : le solde s'incrémente de
+      // toutes les heures supp non payées. La part STRUCTURELLE (« 42 h ») reste
+      // toujours payée, jamais créditée. Recalcul rétroactif automatique.
+      if (input && input.option !== "paiement") {
         const c = computeWeek(input.days, profile.weeklyHours, typDay);
         const st = splitStructuralSupp(c.sup25Min, c.sup50Min, structuralSuppMin(profile));
         const payMin = effectivePaySuppMin(input.option, input.paySuppMin, st.arbitrableMin);

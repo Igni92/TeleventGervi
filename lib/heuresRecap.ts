@@ -3,8 +3,9 @@
  * Sert l'écran Salaires et le PDF « récap par personne » (lecture seule).
  *
  * Invariant : pour chaque semaine,
- *   payé (majoré) + récup (majoré) + en attente (majoré) = total majoré arbitrable,
+ *   payé (majoré) + récup (majoré) = total majoré arbitrable,
  * et la part STRUCTURELLE (contrat « 42 h » payé) s'ajoute, toujours payée.
+ * Tout ce qui n'est pas explicitement PAYÉ part en récup (option nulle = récup).
  */
 import {
   computeWeek, typicalDayMinutes, weekDates, weekAttributionMonth,
@@ -25,8 +26,7 @@ export interface SuppWeekRecap {
   structPaidMajMin: number;// part STRUCTURELLE (toujours payée), majorée
   option: HeuresOption | null;
   payMajMin: number;       // majoré PAYÉ (part arbitrable) selon l'option
-  recupMajMin: number;     // majoré en RÉCUP
-  pendingMajMin: number;   // majoré NON ENCORE arbitré (option nulle)
+  recupMajMin: number;     // majoré en RÉCUP (tout ce qui n'est pas payé)
 }
 
 /** Une semaine a-t-elle des heures supp (arbitrables ou structurelles) ? */
@@ -47,6 +47,7 @@ export function buildSuppRecap(
   for (const [week, e] of entries) {
     const { arb25, arb50, arbMin, majMin, structMaj } = weekSupp(e.days, profile, typDay);
     if (arbMin <= 0 && structMaj <= 0) continue;
+    // Tout ce qui n'est pas payé part en récup : option nulle → pay 0 → tout récup.
     const pay = effectivePaySuppMin(e.option, e.paySuppMin, arbMin);
     const s = splitSupp(arb25, arb50, pay);
     const dates = weekDates(week);
@@ -59,9 +60,8 @@ export function buildSuppRecap(
       arb25Min: arb25, arb50Min: arb50, arbMin, majMin,
       structPaidMajMin: structMaj,
       option: e.option,
-      payMajMin: e.option ? s.payEquivMin : 0,
-      recupMajMin: e.option ? s.recupEquivMin : 0,
-      pendingMajMin: e.option ? 0 : majMin,
+      payMajMin: s.payEquivMin,
+      recupMajMin: s.recupEquivMin,
     });
   }
   return out.sort((a, b) => (a.week < b.week ? -1 : a.week > b.week ? 1 : 0));

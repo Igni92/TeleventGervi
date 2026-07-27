@@ -183,7 +183,7 @@ export async function buildSalairesPdf(monthId: string, employes: PdfEmploye[]):
       alternateRowStyles: { fillColor: [247, 248, 250] },
     });
 
-    // ── RÉCAP heures supp : destination de chaque heure (payé / récup / attente) ──
+    // ── RÉCAP heures supp : destination de chaque heure (payé / récup) ──
     const rc = (e.suppRecap ?? []).filter((r) => r.majMin > 0 || r.structPaidMajMin > 0);
     if (rc.length > 0) {
       const rsum = (pick: (r: SuppWeekRecap) => number) => rc.reduce((s, r) => s + pick(r), 0);
@@ -193,11 +193,10 @@ export async function buildSalairesPdf(monthId: string, employes: PdfEmploye[]):
         hm(r.majMin),
         hm(r.payMajMin + r.structPaidMajMin),
         hm(r.recupMajMin),
-        hm(r.pendingMajMin),
       ]);
       const rTotal = [
         "Total", hm(rsum((r) => r.arbMin)), hm(rsum((r) => r.majMin)),
-        hm(rsum((r) => r.payMajMin + r.structPaidMajMin)), hm(rsum((r) => r.recupMajMin)), hm(rsum((r) => r.pendingMajMin)),
+        hm(rsum((r) => r.payMajMin + r.structPaidMajMin)), hm(rsum((r) => r.recupMajMin)),
       ];
       const yRecap = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 20;
       doc.setFont("helvetica", "bold");
@@ -207,7 +206,7 @@ export async function buildSalairesPdf(monthId: string, employes: PdfEmploye[]):
       autoTable(doc, {
         startY: yRecap + 8,
         margin: { left: M, right: M },
-        head: [["Semaine", "Supp", "Majoree", "Payee", "Recup", "En attente"]],
+        head: [["Semaine", "Supp", "Majoree", "Payee", "Recup"]],
         body: rBody,
         foot: [rTotal],
         theme: "grid",
