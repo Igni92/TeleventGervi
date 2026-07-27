@@ -4,33 +4,50 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin, isGerantEmail } from "@/lib/permissions";
 import {
   computeWeek, typicalDayMinutes, isMonthId, monthIdOf, attributedMonthWeeks, weekDates,
-  splitSupp, effectivePaySuppMin, splitStructuralSupp, structuralSuppMin,
+  splitSupp, effectivePaySuppMin, splitStructuralSupp, structuralSuppMin, dayMinutes,
   type HoursProfile,
 } from "@/lib/heuresCalc";
 
 /** Détail HEBDOMADAIRE des heures d'un salarié sur le mois (pour la page par
- *  personne du PDF). Semaines rattachées au mois par leur dimanche, comme
- *  l'agrégat. Une entrée par semaine, même vide (hasData=false). */
+ *  personne du PDF). Les heures affichées par semaine ne comptent que les JOURS
+ *  DU MOIS CIVIL (une semaine à cheval n'affiche que sa portion du mois → le
+ *  total reconcilie avec l'agrégat) ; les heures SUPP restent à la semaine
+ *  entière (majorations hebdomadaires). Une entrée par semaine, même vide. */
 function buildWeekly(
   weekIds: string[],
   entries: Map<string, WeekEntry> | undefined,
   profile: HoursProfile,
+  monthId: string,
 ): SalaryWeek[] {
   const typDay = typicalDayMinutes(profile);
+  const a = `${monthId}-01`, b = monthEndISO(monthId);
   return weekIds.map((w) => {
     const e = entries?.get(w);
     const dates = weekDates(w);
     const c = e ? computeWeek(e.days, profile.weeklyHours, typDay) : null;
+    // Heures/jours : uniquement la portion DANS le mois civil.
+    let totalMin = 0, contractMin = 0, ferieMin = 0, congesMin = 0;
+    if (c && e) {
+      dates.forEach((dt, i) => {
+        if (!dt || dt < a || dt > b) return;
+        totalMin += c.dayMin[i];
+        const dow = new Date(`${dt}T12:00:00Z`).getUTCDay();
+        if (dow >= 1 && dow <= 5) contractMin += typDay;
+        const d = e.days[i];
+        if (dayMinutes(d) === 0 && d?.tag === "conges") congesMin += typDay;
+        else if (dayMinutes(d) === 0 && d?.tag === "ferie") ferieMin += typDay;
+      });
+    }
     return {
       week: w,
       label: w.replace(/^\d{4}-W/, "S"),
       from: dates[0] ?? "",
       to: dates[6] ?? "",
-      totalMin: c?.totalMin ?? 0,
-      contractMin: c?.contractMin ?? 0,
-      suppMin: c ? c.sup25Min + c.sup50Min : 0,
-      ferieMin: c?.ferieMin ?? 0,
-      congesMin: c?.congesMin ?? 0,
+      totalMin,
+      contractMin,
+      suppMin: c ? c.sup25Min + c.sup50Min : 0,   // supp = semaine ENTIÈRE (hebdo)
+      ferieMin,
+      congesMin,
       hasData: !!e,
     };
   });
@@ -86,9 +103,13 @@ async function ctx() {
   return { email, canEdit };
 }
 
-/** Résumé HEURES d'un salarié pour le mois. Les semaines sont rattachées au mois
- *  de leur DERNIER JOUR TRAVAILLÉ (paie au 10 du mois suivant) ; les majorations
- *  restent hebdomadaires (cf. attributedMonthWeeks / weekAttributionMonth). */
+/** Résumé HEURES d'un salarié pour le mois. DEUX bases distinctes :
+ *  • les HEURES TRAVAILLÉES et les jours (CP, maladie…) sont comptés PAR JOUR du
+ *    MOIS CIVIL — une semaine à cheval ne compte QUE ses jours du mois (le total
+ *    ne déborde pas sur les mois voisins) ;
+ *  • les HEURES SUPP, indivisibles (majorations à la semaine civile), sont
+ *    rattachées à la semaine par son DERNIER JOUR TRAVAILLÉ (paie au 10).
+ *  Cf. attributedMonthWeeks / weekAttributionMonth. */
 function buildHeures(
   entries: Map<string, WeekEntry> | undefined,
   profile: HoursProfile,
@@ -96,50 +117,59 @@ function buildHeures(
   monthId: string,
 ): SalaryHeures {
   const typDay = typicalDayMinutes(profile);
-  const weekIds = attributedMonthWeeks(monthId, entries ?? new Map());
+  const a = `${monthId}-01`, b = monthEndISO(monthId);
+  const map = entries ?? new Map<string, WeekEntry>();
+
+  // ── HEURES SUPP : par SEMAINE attribuée au mois (dernier jour travaillé) ──
+  const attrWeeks = attributedMonthWeeks(monthId, map);
   const out: SalaryHeures = {
     totalMin: 0, contractMin: 0, suppTotalMin: 0, suppPayEquivMin: 0, suppRecupEquivMin: 0,
     ferieMin: 0, congesMin: 0, cpJours: 0, maladieJours: 0, absentJours: 0, recupJours: 0,
-    weeksWithData: 0, weeksTotal: weekIds.length,
+    weeksWithData: 0, weeksTotal: attrWeeks.length,
   };
-  // Dates de RÉCUP prise (repos) — dédupliquées : feuille (tag « récup ») + jours
-  // des congés RÉCUP validés (l'auto-répartition récup→CP inscrit la récup en
-  // congé, pas en tag). La récup est prioritaire sur les CP → ces jours partent
-  // en récup, et le détail (récup vs CP) apparaît ainsi sur le document compta.
-  const recupDates = new Set<string>();
-  for (const w of weekIds) {
-    const e = entries?.get(w);
+  for (const w of attrWeeks) {
+    const e = map.get(w);
     if (!e) continue;
     out.weeksWithData += 1;
     const c = computeWeek(e.days, profile.weeklyHours, typDay);
-    out.totalMin += c.totalMin;
-    out.contractMin += c.contractMin;
-    out.ferieMin += c.ferieMin;
-    out.congesMin += c.congesMin;
     const supp = c.sup25Min + c.sup50Min;
-    if (supp > 0) {
-      out.suppTotalMin += supp;
-      // Heures supp STRUCTURELLES (contrat « 42 h ») : payées d'office. Le reste
-      // (arbitrable) part au PAIEMENT si l'employeur le décide, SINON en récup
-      // (option nulle = récup par défaut). Plus de « sans décision ».
-      const st = splitStructuralSupp(c.sup25Min, c.sup50Min, structuralSuppMin(profile));
-      out.suppPayEquivMin += st.structEquivMin;
-      if (st.arbitrableMin > 0) {
-        const pay = effectivePaySuppMin(e.option, e.paySuppMin, st.arbitrableMin); // null → 0
-        const s = splitSupp(st.arb25Min, st.arb50Min, pay);
-        out.suppPayEquivMin += s.payEquivMin;
-        out.suppRecupEquivMin += s.recupEquivMin;
-      }
+    if (supp <= 0) continue;
+    out.suppTotalMin += supp;
+    // Structurelle (contrat « 42 h ») payée d'office ; le reste part au paiement
+    // si décidé, SINON en récup (option nulle = récup).
+    const st = splitStructuralSupp(c.sup25Min, c.sup50Min, structuralSuppMin(profile));
+    out.suppPayEquivMin += st.structEquivMin;
+    if (st.arbitrableMin > 0) {
+      const pay = effectivePaySuppMin(e.option, e.paySuppMin, st.arbitrableMin); // null → 0
+      const s = splitSupp(st.arb25Min, st.arb50Min, pay);
+      out.suppPayEquivMin += s.payEquivMin;
+      out.suppRecupEquivMin += s.recupEquivMin;
     }
-    const wDates = weekDates(w);
-    e.days.forEach((d, i) => {
-      if (d?.tag === "maladie") out.maladieJours += 1;
-      else if (d?.tag === "absent") out.absentJours += 1;
-      else if (d?.tag === "recup" && wDates[i]) recupDates.add(wDates[i]);
+  }
+
+  // ── HEURES TRAVAILLÉES + jours : comptés PAR JOUR du MOIS CIVIL (pas la
+  //    semaine entière). Chaque jour = travail réel + crédit congé/férié/récup. ──
+  const recupDates = new Set<string>();
+  for (const [week, e] of map) {
+    const c = computeWeek(e.days, profile.weeklyHours, typDay);
+    const dts = weekDates(week);
+    dts.forEach((dt, i) => {
+      if (!dt || dt < a || dt > b) return;   // hors mois civil
+      out.totalMin += c.dayMin[i];           // worked + crédit congé/férié/récup du jour
+      const dow = new Date(`${dt}T12:00:00Z`).getUTCDay();
+      if (dow >= 1 && dow <= 5) out.contractMin += typDay;   // jours de contrat du mois
+      const d = e.days[i];
+      if (dayMinutes(d) === 0) {
+        if (d?.tag === "conges") out.congesMin += typDay;
+        else if (d?.tag === "ferie") out.ferieMin += typDay;
+        else if (d?.tag === "maladie") out.maladieJours += 1;
+        else if (d?.tag === "absent") out.absentJours += 1;
+        else if (d?.tag === "recup") recupDates.add(dt);
+      }
     });
   }
-  // CP + RÉCUP VALIDÉS tombant dans le mois civil (jours ouvrables, hors dim./fériés).
-  const a = `${monthId}-01`, b = monthEndISO(monthId);
+
+  // ── CP + RÉCUP VALIDÉS tombant dans le mois civil (jours ouvrables) ──
   for (const g of conges) {
     if (g.status !== "approved" || !rangesOverlap(g.start, g.end, a, b)) continue;
     const from = g.start > a ? g.start : a, to = g.end < b ? g.end : b;
@@ -238,7 +268,7 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
       name: stripOrgSuffix(rawName) || email,
       heures,
       // Détail hebdo pour la page par personne du PDF.
-      weeks: buildWeekly(attrWeeks, entries, hourProfile),
+      weeks: buildWeekly(attrWeeks, entries, hourProfile, monthId),
       suppRecap: recap,
       // Compteur récup (CET) — vue PATRON : uniquement le DISPONIBLE à payer
       // (récup déjà posée et paiements exclus). Jamais le brut.
