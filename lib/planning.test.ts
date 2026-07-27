@@ -219,17 +219,24 @@ describe("planning — compteur CP (période 1er juin → 31 mai)", () => {
     expect(cpPeriodOf("2026-07-11")).toEqual({ start: "2026-06-01", end: "2027-05-31" });
     expect(cpPeriodOf("2026-03-01")).toEqual({ start: "2025-06-01", end: "2026-05-31" });
   });
-  it("jours ouvrables décomptés (dimanche gratuit), pending séparé", () => {
+  it("jours de contrat décomptés (samedi ET dimanche gratuits), pending séparé", () => {
     const conges = [
-      { type: "cp" as const, status: "approved" as const, start: "2026-07-06", end: "2026-07-12" }, // 6 ouvrables
-      { type: "cp" as const, status: "pending" as const, start: "2026-08-03", end: "2026-08-04" },  // 2 ouvrables
+      { type: "cp" as const, status: "approved" as const, start: "2026-07-06", end: "2026-07-12" }, // 5 j contrat (sam+dim gratuits)
+      { type: "cp" as const, status: "pending" as const, start: "2026-08-03", end: "2026-08-04" },  // 2 j contrat
       { type: "recup" as const, status: "approved" as const, start: "2026-07-20", end: "2026-07-20" }, // ignoré (pas CP)
       { type: "cp" as const, status: "approved" as const, start: "2026-04-01", end: "2026-04-02" }, // hors période
     ];
     const c = computeCpCounter(25, conges, "2026-07-11");
-    expect(c.takenDays).toBe(6);
+    expect(c.takenDays).toBe(5);
     expect(c.pendingDays).toBe(2);
-    expect(c.balanceDays).toBe(19);
+    expect(c.balanceDays).toBe(20);
+  });
+  it("un samedi seul posé en CP ne consomme AUCUN jour (samedi = toujours supp)", () => {
+    const c = computeCpCounter(25, [
+      { type: "cp" as const, status: "approved" as const, start: "2026-07-11", end: "2026-07-11" }, // samedi
+    ], "2026-07-20");
+    expect(c.takenDays).toBe(0);
+    expect(c.balanceDays).toBe(25);
   });
   it("solde non défini par l'employeur → balance null", () => {
     const c = computeCpCounter(null, [], "2026-07-11");
@@ -540,6 +547,18 @@ describe("planning — récup : réserve à la pose + bascule en surplus si trav
     expect(c.reservedMin).toBe(7 * 60);      // 1 j posé × journée type (7 h) bloqué d'avance
     expect(c.availableMin).toBe(0);          // max(0, 5h − 7h)
     expect(c.plannedDates).toEqual(["2026-07-17"]);
+  });
+
+  it("RÉSERVE : un SAMEDI posé à venir ne réserve RIEN (toujours supp / gratuit)", () => {
+    // Même acquis (5 h) mais le jour posé est un SAMEDI (18/07) → aucune réserve.
+    const weeks: CounterWeekInput[] = [
+      { week: "2026-W27", days: [day(8), day(8), day(8), day(8), day(7)], option: "recup" },
+    ];
+    const c = computeRecupCounter(weeks, ["2026-07-18"], PROFILE, "2026-07-13");
+    expect(c.balanceMin).toBe(5 * 60);
+    expect(c.reservedMin).toBe(0);           // samedi hors contrat → non réservé
+    expect(c.availableMin).toBe(5 * 60);     // tout le solde reste disponible
+    expect(c.plannedDates).toEqual(["2026-07-18"]);
   });
 
   it("BASCULE EN SURPLUS : un jour posé en récup mais FINALEMENT TRAVAILLÉ ne débite rien", () => {

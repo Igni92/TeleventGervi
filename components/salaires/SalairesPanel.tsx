@@ -48,8 +48,12 @@ interface Row {
     netMin: number; paidOutMin: number;
     payouts: { id: string; majMin: number; monthBulletin: string; note: string; createdAt: string; createdBy: string }[];
   };
-  /** Solde de tout compte (si départ) : CP restants + récup restante. */
-  stc?: { cpBalanceDays: number | null; cpAllowanceDays: number | null; cpTakenDays: number; recupNetMin: number };
+  /** Solde de tout compte (si départ) : CP restants + toutes les heures supp
+   *  majorées dues (récup brute non payée + heures supp jamais arbitrées). */
+  stc?: {
+    cpBalanceDays: number | null; cpAllowanceDays: number | null; cpTakenDays: number;
+    recupNetMin: number; recupOwedMin: number; pendingSuppMin: number; totalSuppMin: number;
+  };
 }
 interface CommissionMonthLine { month: string; base: number; prime: number; invoices: number; avoirs: number }
 interface CommissionDetail {
@@ -743,17 +747,22 @@ function EmployeeCard({ row, month, canEdit, onSaved }: {
           {/* COMPTEUR RÉCUP (CET) + paiement depuis le compteur (à la demande). */}
           <RecupCetPanel row={row} month={month} canEdit={canEdit} onSaved={onSaved} />
 
-          {/* SOLDE DE TOUT COMPTE (départ) : soldes restants CP + récup. */}
-          {row.stc && (row.stc.cpBalanceDays != null || row.stc.recupNetMin > 0) && (
+          {/* SOLDE DE TOUT COMPTE (départ) : CP restants + toutes les heures supp
+              majorées dues (récup brute non payée + heures jamais arbitrées). */}
+          {row.stc && (row.stc.cpBalanceDays != null || row.stc.totalSuppMin > 0) && (
             <div className="rounded-lg border border-border bg-secondary/20 p-2.5">
               <span className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Solde de tout compte (en cas de départ aujourd&apos;hui)</span>
               <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[12.5px]">
                 {row.stc.cpBalanceDays != null && (
                   <span className="text-muted-foreground">CP restants : <b className="tnum text-foreground">{row.stc.cpBalanceDays} j</b>{row.stc.cpAllowanceDays != null && <span className="opacity-70"> (sur {row.stc.cpAllowanceDays}, {row.stc.cpTakenDays} pris)</span>}</span>
                 )}
-                <span className="text-muted-foreground">Récup restante : <b className="tnum text-foreground">{fmtHM(row.stc.recupNetMin)}</b></span>
+                <span className="text-muted-foreground">Heures supp à payer : <b className="tnum text-foreground">{fmtHM(row.stc.totalSuppMin)}</b>
+                  {(row.stc.pendingSuppMin > 0 || row.stc.recupOwedMin > 0) && (
+                    <span className="opacity-70"> (dont récup {fmtHM(row.stc.recupOwedMin)}{row.stc.pendingSuppMin > 0 ? ` + non décidées ${fmtHM(row.stc.pendingSuppMin)}` : ""})</span>
+                  )}
+                </span>
               </div>
-              <p className="mt-1 text-[10.5px] text-muted-foreground">Soldes en temps (CP à indemniser + récup due). La conversion en € se fait sur la base du taux horaire du salarié.</p>
+              <p className="mt-1 text-[10.5px] text-muted-foreground">Soldes en temps (CP à indemniser + toutes les heures supp majorées dues, y compris celles jamais arbitrées). La conversion en € se fait sur la base du taux horaire du salarié.</p>
             </div>
           )}
 

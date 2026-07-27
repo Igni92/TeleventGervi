@@ -38,6 +38,14 @@ import { frenchHolidayLabel } from "./livraison";
 /** « YYYY-MM-DD » → Date UTC midi (aucune dérive de fuseau). */
 const atNoon = (iso: string) => new Date(`${iso}T12:00:00Z`);
 
+/** Jour de CONTRAT (lun→ven, hors férié) ? Le SAMEDI est toujours de la supp
+ *  (non contractuel) : il ne consomme donc ni CP, ni une journée type de récup
+ *  réservée d'avance ; un férié chômé non plus. */
+const isContractDayISO = (iso: string) => {
+  const dow = atNoon(iso).getUTCDay();
+  return dow >= 1 && dow <= 5 && !frenchHolidayLabel(iso);
+};
+
 /** Semaine ISO d'une date ISO (« 2026-07-13 » → « 2026-W29 »). */
 export function isoWeekOfDate(dateISO: string): string {
   const d = atNoon(dateISO);
@@ -72,6 +80,13 @@ export function expandSemaine(start: string, end: string): string[] {
     const dow = atNoon(d).getUTCDay();
     return dow >= 1 && dow <= 5;
   });
+}
+
+/** Jours de CONTRAT (lun→ven, hors fériés) d'une plage — BASE DE DÉCOMPTE DES
+ *  CONGÉS PAYÉS. Le samedi étant toujours de la supp (non contractuel), il ne
+ *  consomme PAS de CP ; un jour férié chômé non plus. À l'avantage du salarié. */
+export function expandContractDays(start: string, end: string): string[] {
+  return expandDates(start, end).filter(isContractDayISO);
 }
 
 /** SAMEDIS (hors fériés) d'une plage. Un CP est décompté en jours ouvrables
@@ -359,19 +374,16 @@ export function computeRecupCounter(
         // travaillés au contrat ; seul un jour de récup posé sur un jour de
         // contrat crée alors un déficit d'une journée type. Un samedi posé seul
         // (jour hors contrat) ne crée aucun déficit → ne décompte rien.
-        const isContractDay = (d: string) => {
-          const dow = atNoon(d).getUTCDay();
-          return dow >= 1 && dow <= 5 && !frenchHolidayLabel(d);
-        };
-        debitMin += [...recupDays].filter(isContractDay).length * typDay;
+        debitMin += [...recupDays].filter(isContractDayISO).length * typDay;
       }
     }
   }
-  // RÉSERVE À LA POSE : chaque jour posé à venir bloque une journée type d'avance
-  // (le pire cas), même s'il ne coûtera au final que le déficit réel. Le solde
-  // RÉELLEMENT disponible à poser en tient compte, sans jamais passer sous 0.
+  // RÉSERVE À LA POSE : chaque jour de CONTRAT posé à venir bloque une journée
+  // type d'avance (le pire cas), même s'il ne coûtera au final que le déficit
+  // réel. Les SAMEDIS posés ne réservent RIEN (toujours supp / gratuits) : ils
+  // ne bloquent donc pas de récup disponible. Solde disponible borné ≥ 0.
   const balanceMin = creditMin - debitMin;
-  const reservedMin = plannedDates.length * typDay;
+  const reservedMin = plannedDates.filter(isContractDayISO).length * typDay;
   const availableMin = Math.max(0, balanceMin - reservedMin);
   return { creditMin, debitMin, balanceMin, plannedDates: plannedDates.sort(), reservedMin, availableMin };
 }
@@ -403,12 +415,13 @@ export interface CpCounter {
   accrual: boolean;              // true = cumul permanent (2,5 j/mois, sans période)
 }
 
-/** Jours ouvrables (lun→sam) d'un congé TOMBANT dans la période. */
-function ouvrablesInPeriod(c: Pick<CongeRequest, "start" | "end">, p: CpPeriod): number {
+/** Jours de CONTRAT (lun→ven hors fériés) d'un congé TOMBANT dans la période —
+ *  décompte des CP (le samedi ne consomme pas de CP : toujours supp). */
+function contractDaysInPeriod(c: Pick<CongeRequest, "start" | "end">, p: CpPeriod): number {
   if (!rangesOverlap(c.start, c.end, p.start, p.end)) return 0;
   const start = c.start > p.start ? c.start : p.start;
   const end = c.end < p.end ? c.end : p.end;
-  return expandOuvrables(start, end).length;
+  return expandContractDays(start, end).length;
 }
 
 /** Index de mois d'une date ISO (année × 12 + mois) — écart = mois entiers. */
@@ -468,7 +481,7 @@ export function computeCpCounter(
     for (const c of conges) {
       if (c.type !== "cp" || c.end < anchor) continue;       // congé entièrement avant l'ancrage → ignoré
       const from = c.start > anchor ? c.start : anchor;
-      const n = expandOuvrables(from, c.end).length;
+      const n = expandContractDays(from, c.end).length;
       if (c.status === "approved") takenDays += n;
       else if (c.status === "pending") pendingDays += n;
     }
@@ -487,8 +500,8 @@ export function computeCpCounter(
   let takenDays = 0, pendingDays = 0;
   for (const c of conges) {
     if (c.type !== "cp") continue;
-    if (c.status === "approved") takenDays += ouvrablesInPeriod(c, period);
-    else if (c.status === "pending") pendingDays += ouvrablesInPeriod(c, period);
+    if (c.status === "approved") takenDays += contractDaysInPeriod(c, period);
+    else if (c.status === "pending") pendingDays += contractDaysInPeriod(c, period);
   }
   const allowance = config.allowanceDays == null || !Number.isFinite(config.allowanceDays) ? null : config.allowanceDays;
   return {

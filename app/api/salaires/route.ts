@@ -38,7 +38,7 @@ function buildWeekly(
 import { listAllWeekEntries, listUserWeekEntries, listProfiles, getProfile, saveWeekEntry, type WeekEntry } from "@/lib/heuresRh";
 import { buildSuppRecap } from "@/lib/heuresRecap";
 import { listAllConges } from "@/lib/congesRh";
-import { expandOuvrables, monthEndISO, computeRecupCounter, computeCpCounter, cpConfigOf } from "@/lib/planning";
+import { expandOuvrables, expandContractDays, monthEndISO, computeRecupCounter, computeCpCounter, cpConfigOf } from "@/lib/planning";
 import { rangesOverlap, type CongeRequest } from "@/lib/conges";
 import { stripOrgSuffix } from "@/lib/userNames";
 import {
@@ -148,7 +148,9 @@ function buildHeures(
   for (const g of conges) {
     if (g.status !== "approved" || !rangesOverlap(g.start, g.end, a, b)) continue;
     const from = g.start > a ? g.start : a, to = g.end < b ? g.end : b;
-    if (g.type === "cp") out.cpJours += expandOuvrables(from, to).length;
+    // CP décompté en jours de CONTRAT (lun→ven hors fériés) : le samedi ne
+    // consomme pas de CP (toujours supp). La récup, elle, peut tomber un samedi.
+    if (g.type === "cp") out.cpJours += expandContractDays(from, to).length;
     else if (g.type === "recup") for (const dte of expandOuvrables(from, to)) recupDates.add(dte);
   }
   out.recupJours = recupDates.size;
@@ -227,16 +229,24 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
     // ce qui a déjà été payé. Le patron ne voit JAMAIS les heures que le salarié
     // a utilisées pour poser de la récup (elles ne sont pas payables).
     const availableMin = Math.max(0, cetCounter.availableMin - paidOutMin);
-    // SOLDE DE TOUT COMPTE (départ) : soldes restants CP (jours) + récup (heures).
+    // Récap heures supp par semaine (où part chaque heure : payé/récup/attente).
+    const recap = buildSuppRecap(entries ?? new Map(), hourProfile);
+    // SOLDE DE TOUT COMPTE (départ) : soldes restants CP (jours) + TOUTES les
+    // heures supp majorées encore dues au salarié :
+    //   • récup ACQUISE brute non encore payée (balance − payé) — au départ, même
+    //     la récup posée d'avance/réservée est due (les jours ne seront pas pris) ;
+    //   • heures supp jamais arbitrées (option nulle) : ni payées ni en récup →
+    //     elles doivent être payées au solde, sinon perdues.
     const cpCounter = computeCpCounter(cpConfigOf(hourProfile), congesByUser.get(email) ?? [], todayISO);
+    const recupOwedMin = Math.max(0, cetCounter.balanceMin - paidOutMin);
+    const pendingSuppMin = recap.reduce((s, r) => s + r.pendingMajMin, 0);
     return {
       email,
       name: stripOrgSuffix(rawName) || email,
       heures,
       // Détail hebdo pour la page par personne du PDF.
       weeks: buildWeekly(attrWeeks, entries, hourProfile),
-      // Récap heures supp par semaine (où part chaque heure : payé/récup/attente).
-      suppRecap: buildSuppRecap(entries ?? new Map(), hourProfile),
+      suppRecap: recap,
       // Compteur récup (CET) — vue PATRON : uniquement le DISPONIBLE à payer
       // (récup déjà posée et paiements exclus). Jamais le brut.
       cet: {
@@ -244,12 +254,16 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
         paidOutMin,
         payouts,
       },
-      // Solde de tout compte (départ salarié) : CP restants + récup restante.
+      // Solde de tout compte (départ salarié) : CP restants + récup brute due +
+      // heures supp non décidées → total des heures supp majorées à solder.
       stc: {
         cpBalanceDays: cpCounter.balanceDays,
         cpAllowanceDays: cpCounter.allowanceDays,
         cpTakenDays: cpCounter.takenDays,
         recupNetMin: availableMin,
+        recupOwedMin,
+        pendingSuppMin,
+        totalSuppMin: recupOwedMin + pendingSuppMin,
       },
       salary,
       profile: salProfile,
