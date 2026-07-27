@@ -14,9 +14,14 @@
  * (La mise en préparation / le suivi de picking vivent dans le Détail livraison.)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Check, Clock, Hash, Loader2, RefreshCw, Search, ShieldAlert, Store, Truck } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { CalendarDays, Check, Clock, Hash, Loader2, Pencil, RefreshCw, Search, ShieldAlert, Store, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { StatBlock } from "@/components/ui/stat-block";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { DesignationChips } from "@/components/entrees/DesignationChips";
+import { broadcastActiveClient } from "@/lib/consoleSync";
 import { formatDeliveryDate } from "@/lib/livraison";
 import type { ApiResp, Doc } from "@/lib/livraisonView";
 import type { SafeguardViolation } from "@/lib/safeguards";
@@ -33,7 +38,17 @@ function shortDate(iso: string): string {
   });
 }
 
+const DOW_ABBR = ["DIM", "LUN", "MAR", "MER", "JEU", "VEN", "SAM"];
+/** « LUN 27.07.26 » compact — modale de détail BL (en-tête). */
+function blDateLabel(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  return `${DOW_ABBR[dt.getUTCDay()]} ${p2(d)}.${p2(m)}.${String(y).slice(-2)}`;
+}
+
 const eur = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+const eur2 = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** Même palette de segments que le Détail livraison (SEG_UI de LivraisonDetail). */
 const SEGMENT_BADGE: Record<string, string> = {
@@ -221,6 +236,9 @@ function Coche({ done, label, tone }: { done: boolean; label: string; tone: "eme
 function VenteRow({ d, alerts }: { d: Doc; alerts?: SafeguardViolation[] }) {
   const takenTime = d.takenAt ? d.takenAt.slice(11, 16) : null;
   const [showAlerts, setShowAlerts] = useState(false);
+  // Détail BL (modale plein écran mobile) — toutes les lignes sont déjà en main
+  // (mêmes données que la liste), pas d'appel réseau supplémentaire.
+  const [detailOpen, setDetailOpen] = useState(false);
   // N° de commande client (réf. NumAtCard) — éditable ici, enregistré sur le BL SAP.
   const [num, setNum] = useState(d.numAtCard ?? "");
   const [saving, setSaving] = useState(false);
@@ -250,7 +268,14 @@ function VenteRow({ d, alerts }: { d: Doc; alerts?: SafeguardViolation[] }) {
   return (
     <li className="flex flex-col gap-1.5 px-4 sm:px-5 py-2.5">
     <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-      <div className="min-w-0 flex-1">
+      <div
+        className="min-w-0 flex-1 cursor-pointer"
+        role="button"
+        tabIndex={0}
+        onClick={() => setDetailOpen(true)}
+        onKeyDown={(e) => { if (e.key === "Enter") setDetailOpen(true); }}
+        title={`Voir le détail du BL #${d.docNum}`}
+      >
         <p className="flex items-center gap-2 min-w-0 text-[13.5px] font-semibold text-foreground">
           <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate">{d.cardFullName ?? d.cardName}</span>
@@ -263,7 +288,7 @@ function VenteRow({ d, alerts }: { d: Doc; alerts?: SafeguardViolation[] }) {
           {(alerts?.length ?? 0) > 0 && (
             <button
               type="button"
-              onClick={() => setShowAlerts((v) => !v)}
+              onClick={(e) => { e.stopPropagation(); setShowAlerts((v) => !v); }}
               title="Anomalies garde-fous — cliquer pour le détail"
               className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide shrink-0 ${
                 hasBlock
@@ -318,6 +343,90 @@ function VenteRow({ d, alerts }: { d: Doc; alerts?: SafeguardViolation[] }) {
         ))}
       </ul>
     )}
+    <BLDetailDialog doc={d} open={detailOpen} onOpenChange={setDetailOpen} />
     </li>
+  );
+}
+
+/** Détail compact d'un BL — plein écran par défaut (mobile), boîte centrée à
+ *  partir de `sm`. Une ligne par article (colis · désignation · code · prix ·
+ *  total) + tags désignation ; « Modifier » relance la saisie sur l'Écran 2. */
+function BLDetailDialog({ doc: d, open, onOpenChange }: { doc: Doc; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const router = useRouter();
+  const [modifBusy, setModifBusy] = useState(false);
+
+  const startModif = useCallback(async () => {
+    setModifBusy(true);
+    try {
+      const r = await fetch(`/api/clients/resolve?code=${encodeURIComponent(d.cardCode)}`);
+      const j = await r.json().catch(() => null);
+      if (!j?.id) {
+        toast.error("Client introuvable en télévente — modification impossible depuis ici.");
+        return;
+      }
+      broadcastActiveClient({
+        clientId: j.id,
+        clientName: d.cardName,
+        stockSharePct: 100,
+        client: null,
+        modif: { docEntry: d.docEntry, docNum: d.docNum },
+      });
+      onOpenChange(false);
+      router.push("/console/ecran2");
+    } catch {
+      toast.error("Échec du chargement de la modification.");
+    } finally {
+      setModifBusy(false);
+    }
+  }, [d.cardCode, d.cardName, d.docEntry, d.docNum, onOpenChange, router]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {/* Plein écran par défaut (mobile) ; boîte centrée classique à partir de `sm`. */}
+      <DialogContent
+        className="fixed inset-0 top-0 left-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 flex flex-col gap-3 overflow-y-auto rounded-none p-4 sm:inset-auto sm:left-[50%] sm:top-[50%] sm:h-auto sm:max-h-[90vh] sm:w-[calc(100%-1.5rem)] sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:p-6"
+      >
+        <DialogHeader className="text-left shrink-0">
+          <DialogTitle className="flex items-center justify-between gap-2 pr-6 text-[15px]">
+            <span className="truncate">{d.cardName}</span>
+            <span className={`inline-flex items-center gap-1.5 text-[11.5px] font-semibold shrink-0 ${d.open ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
+              <span className={`h-2 w-2 rounded-full shrink-0 ${d.open ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
+              {d.open ? "BL modifiable" : "BL clôturé"}
+            </span>
+          </DialogTitle>
+          <DialogDescription className="text-[12.5px] text-muted-foreground">
+            BL {d.docNum} du {blDateLabel(d.dueDate)}
+          </DialogDescription>
+        </DialogHeader>
+
+        <ul className="flex-1 divide-y divide-border/60 min-h-0">
+          {d.lines.map((l) => (
+            <li key={l.itemCode} className="py-2.5">
+              <div className="flex items-baseline gap-2 text-[13px]">
+                <span className="w-7 shrink-0 text-right font-bold tnum">{l.colis.toLocaleString("fr-FR")}</span>
+                <span className="min-w-0 flex-1 truncate font-semibold text-foreground">{l.itemName}</span>
+                <span className="shrink-0 text-muted-foreground">{l.itemCode}</span>
+                <span className="shrink-0 tnum">{l.price != null ? eur2.format(l.price) : "—"}</span>
+                <span className="shrink-0 font-bold tnum">{l.lineTotal != null ? eur2.format(l.lineTotal) : "—"}</span>
+              </div>
+              <DesignationChips marque={l.marque} condt={l.condt} calibre={l.calibre} variete={l.variete} pays={l.pays} className="ml-9 mt-1" />
+            </li>
+          ))}
+        </ul>
+
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border/60 pt-3">
+          <span className="text-[13px] font-semibold">
+            Total HT <b className="tnum">{eur2.format(d.totalHT)}</b>
+          </span>
+          {d.open && (
+            <Button type="button" variant="warning" size="sm" onClick={startModif} disabled={modifBusy}
+              title={`Modifier le BL # ${d.docNum} (sur l'Écran 2)`}>
+              {modifBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" />}
+              Modifier
+            </Button>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

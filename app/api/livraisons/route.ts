@@ -364,6 +364,7 @@ export async function GET(req: NextRequest) {
           unit: p?.salesUnit ?? null,   // unité de vente (PIE, KG, COLIS…) — bon imprimé
           colisRaw,
           weightRaw,
+          lineTotalRaw: l.LineTotal ?? 0,
           colis: Math.round(colisRaw * 10) / 10,
           weightKg: Math.round(weightRaw * 10) / 10,
           warehouse: l.WarehouseCode ?? null,
@@ -386,16 +387,20 @@ export async function GET(req: NextRequest) {
         g.quantity += l.quantity;
         g.colisRaw += l.colisRaw;
         g.weightRaw += l.weightRaw;
+        g.lineTotalRaw += l.lineTotalRaw;
       }
       const mergedLines = [...mergedByItem.values()].map((l) => ({
         ...l,
         colis: Math.round(l.colisRaw * 10) / 10,
         weightKg: Math.round(l.weightRaw * 10) / 10,
+        lineTotal: Math.round(l.lineTotalRaw * 100) / 100,
+        // Prix unitaire HT = LineTotal ÷ quantité (même unité que Quantity — kg/pie).
+        price: l.quantity > 0 ? Math.round((l.lineTotalRaw / l.quantity) * 100) / 100 : null,
       }));
       const colis = mergedLines.reduce((s, l) => s + l.colisRaw, 0);
       const weightKg = mergedLines.reduce((s, l) => s + l.weightRaw, 0);
       // Lignes émises SANS les champs bruts (sommation serveur uniquement).
-      const outLines = mergedLines.map(({ colisRaw: _c, weightRaw: _w, ...rest }) => rest);
+      const outLines = mergedLines.map(({ colisRaw: _c, weightRaw: _w, lineTotalRaw: _lt, ...rest }) => rest);
       const trspCode = d.U_TrspCode?.trim() || null;
       // Vente comptoir (client hors GMS/CHR/EXPORT) → « faite » + « départ » d'office.
       // On force les deux états quel que soit le marqueur persistant : la marchandise
