@@ -286,11 +286,15 @@ export interface RecupCounter {
 
 /**
  * Coût en récup d'UNE semaine = ce qui serait DÉBITÉ si la semaine se terminait
- * maintenant, avec les heures actuellement saisies. Un jour de récup ne coûte
- * que le DÉFICIT au contrat (règle du samedi : gratuit si les 35 h sont déjà
- * faites ; une semaine PLEINE coûte au plus le contrat, pas 5 × journée type).
- * Sert AUSSI bien au débit (semaine passée) qu'à la RÉSERVE (semaine à venir) —
- * une seule règle → recalcul cohérent dès que le salarié actualise ses heures.
+ * maintenant. RÈGLE (maxyme) : le salarié fait TOUJOURS sa SEMAINE TYPE — chaque
+ * jour ouvré (lun→SAMEDI) compte comme travaillé par défaut : heures saisies si
+ * présentes, sinon une JOURNÉE TYPE. Un jour posé en récup et laissé VIDE est
+ * « pris » (candidat au débit) ; s'il porte des heures, il bascule en surplus.
+ * Le débit = min(jours pris × journée type, DÉFICIT au contrat) → un jour de
+ * récup est GRATUIT dès que le reste de la semaine atteint 35 h (n'importe quel
+ * jour, pas seulement le samedi) ; une récup ne coûte que si l'on pose ASSEZ de
+ * jours pour passer sous le contrat. Sert au DÉBIT (semaine passée) ET à la
+ * RÉSERVE (semaine à venir) — recalcul cohérent à chaque saisie.
  */
 function recupDebitOfWeek(
   input: CounterWeekInput | null,
@@ -301,22 +305,23 @@ function recupDebitOfWeek(
 ): number {
   if (recupDays.size === 0) return 0;
   const contractMin = Math.max(0, Math.round((profile.weeklyHours || 0) * 60));
-  if (input) {
-    // Semaine saisie : seul le MANQUE au contrat est débité. Un jour de récup
-    // TRAVAILLÉ (heures saisies) n'est pas pris → il ne compte pas ; les jours
-    // laissés vides comblent le déficit, sans jamais dépasser le contrat.
-    const c = computeWeek(input.days, profile.weeklyHours, typDay);
-    const takenRecupDays = [...recupDays].filter((d) => {
-      const idx = dates.indexOf(d);
-      return idx < 0 || dayMinutes(input.days[idx]) === 0;
-    }).length;
-    const workedBase = c.totalMin - c.recupCreditMin;   // travail réel + congés + fériés (récup exclue)
-    const deficit = Math.max(0, c.contractMin - workedBase);
-    return Math.min(takenRecupDays * typDay, deficit);
+  let workedBase = 0;   // travaillé (réel OU semaine type supposée) hors récup pris
+  let taken = 0;        // jours de récup RÉELLEMENT pris (posés + laissés vides)
+  for (let i = 0; i <= 5; i++) {   // lundi → SAMEDI (dimanche exclu)
+    const date = dates[i];
+    if (!date) continue;
+    const entered = input ? dayMinutes(input.days[i]) : 0;
+    const tag = input?.days[i]?.tag;
+    // Jour posé en récup ET vide = repos réellement pris.
+    if (recupDays.has(date) && entered === 0) { taken += 1; continue; }
+    // Sinon il compte comme TRAVAILLÉ : heures saisies, sinon journée type
+    // (semaine type par défaut). Absent/maladie = non travaillé (0).
+    if (entered > 0) workedBase += entered;
+    else if (tag === "absent" || tag === "maladie") { /* non travaillé */ }
+    else workedBase += typDay;
   }
-  // Aucune saisie : hypothèse prudente — jours de CONTRAT posés × journée type
-  // (samedi hors contrat = gratuit), borné au contrat de la semaine.
-  return Math.min([...recupDays].filter(isContractDayISO).length * typDay, contractMin);
+  const deficit = Math.max(0, contractMin - workedBase);
+  return Math.min(taken * typDay, deficit);
 }
 
 /**
