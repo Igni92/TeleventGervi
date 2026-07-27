@@ -280,8 +280,43 @@ export interface RecupCounter {
   debitMin: number;       // récup réellement déduite (au passage des semaines)
   balanceMin: number;     // solde ACQUIS (firme) = crédit − débit des semaines passées
   plannedDates: string[]; // jours de récup posés PAS ENCORE décomptés (à venir)
-  reservedMin: number;    // RÉSERVE provisoire des jours posés à venir (1 journée type/jour) — bloquée d'avance
+  reservedMin: number;    // RÉSERVE provisoire des jours posés à venir = ce que coûterait la récup si la semaine finissait maintenant
   availableMin: number;   // solde RÉELLEMENT disponible à poser = balance − réserve (borné ≥ 0)
+}
+
+/**
+ * Coût en récup d'UNE semaine = ce qui serait DÉBITÉ si la semaine se terminait
+ * maintenant, avec les heures actuellement saisies. Un jour de récup ne coûte
+ * que le DÉFICIT au contrat (règle du samedi : gratuit si les 35 h sont déjà
+ * faites ; une semaine PLEINE coûte au plus le contrat, pas 5 × journée type).
+ * Sert AUSSI bien au débit (semaine passée) qu'à la RÉSERVE (semaine à venir) —
+ * une seule règle → recalcul cohérent dès que le salarié actualise ses heures.
+ */
+function recupDebitOfWeek(
+  input: CounterWeekInput | null,
+  recupDays: Set<string>,
+  dates: string[],
+  profile: Pick<HoursProfile, "weeklyHours" | "typicalDay" | "paidWeeklyHours">,
+  typDay: number,
+): number {
+  if (recupDays.size === 0) return 0;
+  const contractMin = Math.max(0, Math.round((profile.weeklyHours || 0) * 60));
+  if (input) {
+    // Semaine saisie : seul le MANQUE au contrat est débité. Un jour de récup
+    // TRAVAILLÉ (heures saisies) n'est pas pris → il ne compte pas ; les jours
+    // laissés vides comblent le déficit, sans jamais dépasser le contrat.
+    const c = computeWeek(input.days, profile.weeklyHours, typDay);
+    const takenRecupDays = [...recupDays].filter((d) => {
+      const idx = dates.indexOf(d);
+      return idx < 0 || dayMinutes(input.days[idx]) === 0;
+    }).length;
+    const workedBase = c.totalMin - c.recupCreditMin;   // travail réel + congés + fériés (récup exclue)
+    const deficit = Math.max(0, c.contractMin - workedBase);
+    return Math.min(takenRecupDays * typDay, deficit);
+  }
+  // Aucune saisie : hypothèse prudente — jours de CONTRAT posés × journée type
+  // (samedi hors contrat = gratuit), borné au contrat de la semaine.
+  return Math.min([...recupDays].filter(isContractDayISO).length * typDay, contractMin);
 }
 
 /**
@@ -317,82 +352,41 @@ export function computeRecupCounter(
   }
   for (const d of extraRecupDates) if (isIsoDate(d)) slot(isoWeekOfDate(d)).recupDays.add(d);
 
-  let creditMin = 0, debitMin = 0;
+  let creditMin = 0, debitMin = 0, reservedMin = 0;
   const plannedDates: string[] = [];
   for (const [week, { input, recupDays }] of byWeek) {
     const dates = weekDates(week);
     const done = dates.length === 7 && dates[6] < asOfISO;   // semaine passée
-    if (!done) {
-      // Jours de récup posés PAS ENCORE pris → réservés d'avance. MAIS un jour
-      // sur lequel des HEURES sont déjà saisies ne sera pas pris en récup
-      // (bascule en surplus) : on ne le réserve pas. Ainsi, dès que le salarié
-      // saisit/actualise ses heures sur une semaine où il avait posé de la
-      // récup, le disponible se libère immédiatement (recalcul à chaque lecture).
+    // Coût de la récup de la semaine (même règle passé/futur) : déficit au
+    // contrat, samedi gratuit si 35 h faites, semaine pleine plafonnée au contrat.
+    const cost = recupDebitOfWeek(input, recupDays, dates, profile, typDay);
+    if (done) {
+      // CRÉDIT (repos compensateur MAJORÉ, +25/+50 inclus) : seulement pour les
+      // semaines PASSÉES dont l'employeur a choisi « récup »/« mixte ». La part
+      // STRUCTURELLE (contrat « 42 h ») est toujours payée, jamais créditée.
+      // Recalcul rétroactif : bascule paiement→récup revalorisée automatiquement.
+      if (input?.option === "recup" || input?.option === "mixte") {
+        const c = computeWeek(input.days, profile.weeklyHours, typDay);
+        const st = splitStructuralSupp(c.sup25Min, c.sup50Min, structuralSuppMin(profile));
+        const payMin = effectivePaySuppMin(input.option, input.paySuppMin, st.arbitrableMin);
+        creditMin += splitSupp(st.arb25Min, st.arb50Min, payMin).recupEquivMin;
+      }
+      debitMin += cost;
+    } else {
+      // RÉSERVE = ce que coûterait la récup posée SI la semaine finissait
+      // maintenant (même calcul que le débit). Un samedi posé compte tant que la
+      // semaine reste sous 35 h ; dès que les heures saisies atteignent le
+      // contrat, il ne coûte plus rien (recalcul immédiat à chaque actualisation).
+      reservedMin += cost;
+      // Dates affichées : jours posés pas encore pris (heures non saisies).
       for (const d of recupDays) {
         const idx = input ? dates.indexOf(d) : -1;
         const worked = input != null && idx >= 0 && dayMinutes(input.days[idx]) > 0;
         if (!worked) plannedDates.push(d);
       }
-      continue;
-    }
-    if (input?.option === "recup" || input?.option === "mixte") {
-      const c = computeWeek(input.days, profile.weeklyHours, typDay);
-      // Repos compensateur de remplacement : on crédite les heures MAJORÉES
-      // (+25 %/+50 % inclus), pas les heures brutes — 8 h supp à +25 % =
-      // 10 h de récup. Option « mixte » : seule la part NON payée est créditée
-      // (la part payée part sur le bulletin). Rétroactif : le compteur est
-      // recalculé depuis les saisies, donc la récup déjà acquise est
-      // revalorisée (ou reprise si l'employeur bascule au paiement)
-      // automatiquement.
-      // Seule la part ARBITRABLE peut partir en récup ; les heures supp
-      // STRUCTURELLES (contrat « 42 h » payé) sont toujours payées, jamais
-      // créditées au compteur.
-      const st = splitStructuralSupp(c.sup25Min, c.sup50Min, structuralSuppMin(profile));
-      const payMin = effectivePaySuppMin(input.option, input.paySuppMin, st.arbitrableMin);
-      creditMin += splitSupp(st.arb25Min, st.arb50Min, payMin).recupEquivMin;
-    }
-    if (recupDays.size > 0) {
-      if (input) {
-        // Semaine SAISIE : un jour de récup ne coûte QUE ce qui MANQUE pour
-        // atteindre le contrat (35 h). Il ne débite JAMAIS le surplus :
-        //   • travaillé < 35 h → le samedi comble le déficit (ex. 30 h lun→ven
-        //     + samedi récup → débit 5 h seulement, pas 7h15) ;
-        //   • travaillé ≥ 35 h → le contrat est déjà atteint → le samedi (ou tout
-        //     jour posé) coûte 0, et le dépassement reste en HEURES SUPP créditées
-        //     (ex. 39 h lun→ven + samedi récup → débit 0 ET +4 h supp au compteur).
-        // Débit = min(jours de récup RÉELLEMENT PRIS × journée type, DÉFICIT au
-        // contrat). La récup TAGUÉE est déjà créditée au total par computeWeek
-        // (`recupCreditMin`) : on la retire pour retrouver le travail réel.
-        //
-        // BASCULE EN SURPLUS : un jour POSÉ en récup mais FINALEMENT TRAVAILLÉ
-        // (des heures saisies dessus) n'est PAS un repos → il ne débite rien ; ses
-        // heures gonflent le total et repartent en surplus (crédité si l'option
-        // de la semaine est « récup »). On ne compte donc que les jours posés
-        // laissés VIDES (réellement pris).
-        const c = computeWeek(input.days, profile.weeklyHours, typDay);
-        const takenRecupDays = [...recupDays].filter((d) => {
-          const idx = dates.indexOf(d);
-          return idx < 0 || dayMinutes(input.days[idx]) === 0;
-        }).length;
-        const workedBase = c.totalMin - c.recupCreditMin;   // travail réel + congés + fériés (récup exclue)
-        const deficit = Math.max(0, c.contractMin - workedBase);   // seul le MANQUE au contrat est débité
-        debitMin += Math.min(takenRecupDays * typDay, deficit);
-      } else {
-        // Aucune saisie : impossible de mesurer l'écart réel → hypothèse
-        // PRUDENTE. On suppose les jours de semaine (lun→ven hors fériés)
-        // travaillés au contrat ; seul un jour de récup posé sur un jour de
-        // contrat crée alors un déficit d'une journée type. Un samedi posé seul
-        // (jour hors contrat) ne crée aucun déficit → ne décompte rien.
-        debitMin += [...recupDays].filter(isContractDayISO).length * typDay;
-      }
     }
   }
-  // RÉSERVE À LA POSE : chaque jour de CONTRAT posé à venir bloque une journée
-  // type d'avance (le pire cas), même s'il ne coûtera au final que le déficit
-  // réel. Les SAMEDIS posés ne réservent RIEN (toujours supp / gratuits) : ils
-  // ne bloquent donc pas de récup disponible. Solde disponible borné ≥ 0.
   const balanceMin = creditMin - debitMin;
-  const reservedMin = plannedDates.filter(isContractDayISO).length * typDay;
   const availableMin = Math.max(0, balanceMin - reservedMin);
   return { creditMin, debitMin, balanceMin, plannedDates: plannedDates.sort(), reservedMin, availableMin };
 }

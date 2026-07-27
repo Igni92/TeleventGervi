@@ -549,16 +549,39 @@ describe("planning — récup : réserve à la pose + bascule en surplus si trav
     expect(c.plannedDates).toEqual(["2026-07-17"]);
   });
 
-  it("RÉSERVE : un SAMEDI posé à venir ne réserve RIEN (toujours supp / gratuit)", () => {
-    // Même acquis (5 h) mais le jour posé est un SAMEDI (18/07) → aucune réserve.
+  it("RÉSERVE : un SAMEDI posé sans aucune saisie ne réserve RIEN (semaine supposée faite)", () => {
+    // Samedi 18/07 posé, AUCUNE saisie sur sa semaine → hypothèse : les 35 h
+    // seront faites → le samedi est gratuit → réserve nulle.
     const weeks: CounterWeekInput[] = [
       { week: "2026-W27", days: [day(8), day(8), day(8), day(8), day(7)], option: "recup" },
     ];
     const c = computeRecupCounter(weeks, ["2026-07-18"], PROFILE, "2026-07-13");
     expect(c.balanceMin).toBe(5 * 60);
-    expect(c.reservedMin).toBe(0);           // samedi hors contrat → non réservé
-    expect(c.availableMin).toBe(5 * 60);     // tout le solde reste disponible
+    expect(c.reservedMin).toBe(0);           // samedi + semaine supposée faite → 0
+    expect(c.availableMin).toBe(5 * 60);
     expect(c.plannedDates).toEqual(["2026-07-18"]);
+  });
+
+  it("RÉSERVE : une SEMAINE PLEINE de récup coûte le contrat (35 h), pas 5 × journée type", () => {
+    // Journée type 7h15 → 5 × 7h15 = 36h15, mais une semaine pleine plafonne à 35 h.
+    const P = { weeklyHours: 35, typicalDay: { m1: "06:00", m2: "13:15" } };
+    const r = { tag: "recup" as const };
+    const weeks: CounterWeekInput[] = [
+      { week: "2026-W29", days: [r, r, r, r, r, {}, {}], option: null }, // lun→ven récup, à venir
+    ];
+    const c = computeRecupCounter(weeks, [], P, "2026-07-13");
+    expect(c.reservedMin).toBe(35 * 60);     // contrat de la semaine, PAS 36h15
+  });
+
+  it("RÉSERVE : un samedi posé COMPTE tant que la semaine est vide, 0 dès que 35 h saisies", () => {
+    const P = { weeklyHours: 35, typicalDay: { m1: "06:00", m2: "13:15" } };
+    // (a) Samedi posé récup + lun→ven VIDES (saisie existante) → il comble le déficit → 7h15.
+    const vide: CounterWeekInput = { week: "2026-W29", days: [{}, {}, {}, {}, {}, { tag: "recup" }, {}], option: null };
+    expect(computeRecupCounter([vide], [], P, "2026-07-13").reservedMin).toBe(7 * 60 + 15);
+    // (b) Mêmes données mais lun→ven saisis à 7 h (35 h faites) → samedi gratuit → 0.
+    const w = { m1: "06:00", m2: "13:00" }; // 7 h
+    const plein: CounterWeekInput = { week: "2026-W29", days: [w, w, w, w, w, { tag: "recup" }, {}], option: null };
+    expect(computeRecupCounter([plein], [], P, "2026-07-13").reservedMin).toBe(0);
   });
 
   it("RÉSERVE : un jour posé en récup mais DÉJÀ TRAVAILLÉ (heures saisies) n'est plus réservé", () => {
