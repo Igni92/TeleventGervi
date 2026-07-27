@@ -323,7 +323,16 @@ export function computeRecupCounter(
     const dates = weekDates(week);
     const done = dates.length === 7 && dates[6] < asOfISO;   // semaine passée
     if (!done) {
-      plannedDates.push(...recupDays);
+      // Jours de récup posés PAS ENCORE pris → réservés d'avance. MAIS un jour
+      // sur lequel des HEURES sont déjà saisies ne sera pas pris en récup
+      // (bascule en surplus) : on ne le réserve pas. Ainsi, dès que le salarié
+      // saisit/actualise ses heures sur une semaine où il avait posé de la
+      // récup, le disponible se libère immédiatement (recalcul à chaque lecture).
+      for (const d of recupDays) {
+        const idx = input ? dates.indexOf(d) : -1;
+        const worked = input != null && idx >= 0 && dayMinutes(input.days[idx]) > 0;
+        if (!worked) plannedDates.push(d);
+      }
       continue;
     }
     if (input?.option === "recup" || input?.option === "mixte") {

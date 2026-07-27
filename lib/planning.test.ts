@@ -561,6 +561,18 @@ describe("planning — récup : réserve à la pose + bascule en surplus si trav
     expect(c.plannedDates).toEqual(["2026-07-18"]);
   });
 
+  it("RÉSERVE : un jour posé en récup mais DÉJÀ TRAVAILLÉ (heures saisies) n'est plus réservé", () => {
+    // W27 passée : +5 h acquises. W29 (à venir) : vendredi posé en récup MAIS
+    // des heures y sont saisies → il ne sera pas pris en récup → non réservé.
+    const weeks: CounterWeekInput[] = [
+      { week: "2026-W27", days: [day(8), day(8), day(8), day(8), day(7)], option: "recup" },
+      { week: "2026-W29", days: [{}, {}, {}, {}, { ...day(8), tag: "recup" }, {}, {}], option: null },
+    ];
+    const c = computeRecupCounter(weeks, [], PROFILE, "2026-07-13");
+    expect(c.reservedMin).toBe(0);         // le vendredi travaillé n'est plus bloqué
+    expect(c.availableMin).toBe(5 * 60);   // tout le solde acquis reste disponible
+  });
+
   it("BASCULE EN SURPLUS : un jour posé en récup mais FINALEMENT TRAVAILLÉ ne débite rien", () => {
     // W27 : Lun→Ven 7 h (35 h) + samedi 04/07 posé en récup MAIS travaillé 4 h → 39 h.
     // Le samedi n'est plus un repos → 0 récup débitée (ses heures repartent en surplus).
