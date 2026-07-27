@@ -1739,7 +1739,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     });
 
   // ── TRANSLATION d'article (menu clic droit) : remplace l'article par un
-  //    autre en CONSERVANT la quantité et le prix. ──
+  //    autre en CONSERVANT le nombre de colis et le prix. ──
   const [swapFor, setSwapFor] = useState<number | null>(null);
   const [swapQuery, setSwapQuery] = useState("");
   const swapResults = useMemo(() => {
@@ -1761,12 +1761,23 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
       const cible = cur[swapFor];
       if (!cible) return cur;
       const next = cur.slice();
-      // Quantité + prix CONSERVÉS ; promo non ré-appliquée. En modification,
+      // Colis + prix CONSERVÉS ; promo non ré-appliquée. En modification,
       // l'ancienne ligne du BL est remplacée (nouvel article = nouvelle ligne).
-      next[swapFor] = buildLine(p, { quantity: cible.quantity, price: cible.price, noPromo: true });
+      // On conserve le NOMBRE DE COLIS, pas le poids brut (`quantity`) : un
+      // colis ne pèse pas forcément pareil d'un article à l'autre (ex. 8×500g
+      // vs 1×1kg) — préserver le poids aurait silencieusement changé le nombre
+      // de colis affiché (56 colis → 14 colis pour un conditionnement 4× plus lourd).
+      const oldBaseUnitsPerColis = Math.round(cible.stepColis * cible.packDivisor * 1000) / 1000;
+      const oldColisCount = oldBaseUnitsPerColis > 1 ? cible.quantity / cible.stepColis : cible.quantity;
+      const built = buildLine(p, { price: cible.price, noPromo: true });
+      const newBaseUnitsPerColis = Math.round(built.stepColis * built.packDivisor * 1000) / 1000;
+      const newQuantity = newBaseUnitsPerColis > 1
+        ? Math.round(oldColisCount * built.stepColis * 1000) / 1000
+        : oldColisCount;
+      next[swapFor] = { ...built, quantity: newQuantity };
       return next;
     });
-    toast.success(`${old.itemName} → ${p.itemName}`, { description: "Quantité et prix conservés." });
+    toast.success(`${old.itemName} → ${p.itemName}`, { description: "Colis et prix conservés." });
     setSwapFor(null);
     setSwapQuery("");
   };
