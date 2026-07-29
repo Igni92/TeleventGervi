@@ -15,6 +15,7 @@ import { getEmAffects } from "@/lib/emAffect";
 import { createBonPrep, markBonPrepTransformed } from "@/lib/bonPrep";
 import { chooseLot, isRealLot } from "@/lib/gervifrais-calc";
 import { colisInfo } from "@/lib/colis";
+import { getRecentOrders } from "@/lib/accueilData";
 import { isPrecommande } from "@/lib/livraison";
 import { isComptoirClient } from "@/lib/segments";
 import { markComptoirDelivered } from "@/lib/inventory";
@@ -1358,6 +1359,18 @@ export async function GET(req: NextRequest) {
   const last = Math.min(50, parseInt(searchParams.get("last") || "10"));
   const clientId = searchParams.get("clientId");
   const cardCodeParam = searchParams.get("cardCode");
+
+  // LISTE GLOBALE (accueil « Dernières commandes ») — aucun code client : servie
+  // depuis le MIROIR mis en cache (aucun aller-retour SAP au chargement). La
+  // recherche par code client, elle, reste en direct SAP (chemin ci-dessous).
+  if (!cardCodeParam && !clientId) {
+    try {
+      const docs = await getRecentOrders(last);
+      return NextResponse.json({ db: process.env.SAP_B1_COMPANY_DB, cardCodes: [], count: docs.length, docs });
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    }
+  }
 
   // Résout l'ensemble des CardCodes SAP du client (code principal + modes de livraison)
   let cardCodes: string[] = [];

@@ -14,6 +14,7 @@ import {
 } from "@/lib/sapMirror";
 import { annualWindowStart } from "@/lib/pilotage-time";
 import { invalidate } from "@/lib/ttlCache";
+import { warmAccueil } from "@/lib/accueilData";
 import { isCronAuthorized } from "@/lib/cronAuth";
 
 // Pull de 5 entités + BP (pagination SAP) → peut dépasser le défaut serverless.
@@ -140,6 +141,12 @@ async function runMirrorSync() {
     // on garde le cache (la plupart des ticks ne ramènent aucun doc).
     if (inv.pulled || ord.pulled || pdn.pulled || cn.pulled || pret.pulled) {
       invalidate("pilotage:");
+      // …puis RE-CHAUFFE aussitôt TOUT le chemin de lancement de l'accueil (KPI
+      // du jour, poids par famille, dernières commandes) : le cron paie le
+      // recalcul, jamais l'humain. Sans ça, le PREMIER utilisateur après ce tick
+      // déclenchait le gros recalcul à froid → « l'app charge en boucle ».
+      // Best-effort : n'échoue jamais la synchro.
+      await warmAccueil();
     }
 
     return NextResponse.json({
