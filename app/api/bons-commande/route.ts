@@ -35,6 +35,8 @@ type SapLine = {
   Quantity?: number;
   WarehouseCode?: string;
   U_NoLot?: string;
+  Price?: number;
+  LineTotal?: number;
 };
 type SapOrderDoc = {
   DocEntry: number;
@@ -71,6 +73,8 @@ interface PrepLine {
   itemCode: string; itemName: string; quantity: number; colis: number;
   warehouse: string | null; marque: string | null; condt: string | null; pays: string | null;
   variete: string | null; uvc: string | null; calibre: string | null;
+  /** Prix unitaire HT (LineTotal SAP ÷ quantité) et total HT — null si indisponible. */
+  price: number | null; lineTotal: number | null;
   lot: string; pending: boolean; candidates: LotCandidate[]; suggested: string | null;
   familyTarget: { key: string; label: string } | null;
 }
@@ -220,7 +224,7 @@ export async function GET() {
     const buildPrepLines = (docLines: SapLine[], segment: string | null): { lines: PrepLine[]; pendingCount: number; colis: number } => {
       const byItem = new Map<string, { itemCode: string; itemName: string; quantity: number; colisRaw: number;
         warehouse: string | null; marque: string | null; condt: string | null; pays: string | null;
-        variete: string | null; uvc: string | null; calibre: string | null;
+        variete: string | null; uvc: string | null; calibre: string | null; lineTotalRaw: number;
         lot: string; pending: boolean; familyKey: string | null }>();
       for (const l of docLines) {
         const p = pMap.get(l.ItemCode);
@@ -240,6 +244,7 @@ export async function GET() {
             warehouse: l.WarehouseCode ?? null,
             marque: p?.uMarque ?? null, condt: p?.uCondi ?? null, pays: p?.uPays ?? null,
             variete: p?.frgnName ?? null, uvc: p?.uUvc ?? null, calibre: calibreByItem.get(l.ItemCode) ?? null,
+            lineTotalRaw: l.LineTotal ?? 0,
             // On PRÉSERVE le sentinel famille tel quel (rappel affiché) ; sinon
             // EM_PENDING générique pour une ligne à découvert, ou le vrai lot.
             lot: linePending ? (famValid ? rawLot : LOT_PENDING) : rawLot,
@@ -249,6 +254,7 @@ export async function GET() {
         } else {
           g.quantity += qty;
           g.colisRaw += qty / (unitsPerColis(l.ItemCode) || 1);
+          g.lineTotalRaw += l.LineTotal ?? 0;
           if (linePending) {
             g.pending = true;
             // Une famille portée par n'importe quelle ligne de l'article prime sur
@@ -265,6 +271,8 @@ export async function GET() {
           quantity: l.quantity, colis: Math.round(l.colisRaw * 10) / 10,
           warehouse: l.warehouse, marque: l.marque, condt: l.condt, pays: l.pays,
           variete: l.variete, uvc: l.uvc, calibre: l.calibre,
+          lineTotal: Math.round(l.lineTotalRaw * 100) / 100,
+          price: l.quantity > 0 ? Math.round((l.lineTotalRaw / l.quantity) * 100) / 100 : null,
           lot: l.lot, pending: l.pending, candidates, suggested,
           familyTarget: l.familyKey ? { key: l.familyKey, label: FAMILY_LABEL.get(l.familyKey)! } : null,
         };

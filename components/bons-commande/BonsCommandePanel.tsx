@@ -21,6 +21,7 @@ import { printOrderRecap, type PrintLine, type PrintDoc } from "@/components/liv
 import { displayPersonName } from "@/lib/userNames";
 import { broadcastActiveClient } from "@/lib/consoleSync";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
+import { eur } from "@/lib/format";
 import { FRUIT_FAMILIES } from "@/lib/familles";
 import { familyLotSentinel, familyOfLot } from "@/lib/gervifrais-calc";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,8 @@ interface BonLine {
   itemCode: string; itemName: string; quantity: number; colis: number;
   warehouse: string | null; marque: string | null; condt: string | null; pays: string | null;
   variete: string | null; uvc: string | null; calibre: string | null;
+  /** Prix unitaire HT et total HT de la ligne — null si indisponible. */
+  price: number | null; lineTotal: number | null;
   lot: string; pending: boolean; candidates: LotCandidate[]; suggested: string | null;
   /** Tag « produit » à préciser plus tard (fruit) — rappel, pas d'auto-affectation. */
   familyTarget: FamilyTarget | null;
@@ -656,18 +659,21 @@ function LotAssignList({ lines, keyPrefix, busyLine, onPick }: {
         return (
           <li key={l.itemCode} className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-3">
             <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-2 flex-wrap">
-                <span className="text-[15px] font-semibold text-foreground truncate">{l.itemName}</span>
-                <span className="text-[12px] text-muted-foreground tnum shrink-0">
-                  {l.colis} colis{l.warehouse ? ` · mag. ${l.warehouse}` : ""}
-                </span>
-                {l.familyTarget && (
-                  <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 shrink-0">
-                    <Grape className="h-3 w-3" /> {l.familyTarget.label} — à préciser
-                  </span>
-                )}
+              {/* Colis + article + magasin + PU + total HT — sur UNE SEULE ligne */}
+              <div className="flex items-baseline gap-2">
+                <span className="text-[15px] font-bold tnum text-foreground shrink-0">{l.colis}</span>
+                <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground">{l.itemName}</span>
+                {l.warehouse && <span className="shrink-0 text-[12px] text-muted-foreground tnum">mag {l.warehouse}</span>}
+                <span className="shrink-0 tnum text-muted-foreground">{l.price != null ? eur(l.price) : "—"}</span>
+                <span className="shrink-0 text-[15px] font-bold tnum text-foreground">{l.lineTotal != null ? eur(l.lineTotal) : "—"}</span>
               </div>
-              <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} size="md" className="mt-1" />
+              <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
+              {l.familyTarget && (
+                <span className="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300">
+                  <Grape className="h-3 w-3" /> {l.familyTarget.label} — à préciser
+                </span>
+              )}
+              <DesignationChips marque={l.marque} condt={l.condt} variete={l.variete} calibre={l.calibre} pays={l.pays} size="md" className="mt-1" />
             </div>
             <LotCell line={l} current={current} isBusy={isBusy} onPick={(v) => onPick(l.itemCode, v)} />
           </li>
