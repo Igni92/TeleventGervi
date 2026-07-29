@@ -715,19 +715,26 @@ function LotCell({ line, current, isBusy, onPick }: {
 
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (triggerRef.current?.contains(t) || popRef.current?.contains(t)) return;
+    // `composedPath()` (le trajet RÉEL de l'évènement) plutôt que `.contains()` sur
+    // `e.target` : plus fiable pour un déclencheur + un popup portés en portail
+    // séparé (insensible à un nœud déplacé/retiré entre la capture et le check).
+    // `pointerdown` (pas `mousedown`) pour matcher exactement l'évènement écouté
+    // par Radix (le Dialog/FullscreenPanel englobant) — mêmes garanties tactile
+    // que souris, un seul type d'évènement à raisonner.
+    const onDown = (e: PointerEvent) => {
+      const path = e.composedPath();
+      if (triggerRef.current && path.includes(triggerRef.current)) return;
+      if (popRef.current && path.includes(popRef.current)) return;
       closeMenu();
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeMenu(); };
     const reflow = () => place();
-    document.addEventListener("mousedown", onDown);
+    document.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);
     window.addEventListener("scroll", reflow, true);
     window.addEventListener("resize", reflow);
     return () => {
-      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("pointerdown", onDown);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("scroll", reflow, true);
       window.removeEventListener("resize", reflow);
