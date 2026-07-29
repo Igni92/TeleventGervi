@@ -16,6 +16,7 @@ import { StatBlock } from "@/components/ui/stat-block";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
 import { fmtJourDate } from "@/lib/date-fr";
+import { heureFromDocRef, creatorFromDocRef } from "@/lib/docLabel";
 import { eur, eur0, fmtColis } from "@/lib/format";
 import { DesignationChips } from "./DesignationChips";
 import { INCIDENT_TYPES, notifyReceptionIncidentsChanged } from "./ReceptionIncidents";
@@ -45,14 +46,6 @@ type ReceiveAgreage = { status: "CONFORME" | "RESERVE"; type?: string; note?: st
 
 /** Date « jour + date » unifiée des états SAP : « VEN 10.07.26 ». */
 const fmtDate = fmtJourDate;
-
-/** Heure « HHhMM » de prise de commande, extraite du commentaire SAP
- *  (« CF 2709 - JMG à 13h10 » ou l'ancien « … · Commande à 13h10 »). */
-function heureFromComments(comments?: string | null): string | null {
-  if (!comments) return null;
-  const matches = comments.match(/\d{1,2}h\d{2}/g);
-  return matches ? matches[matches.length - 1] : null;
-}
 
 function StatusBadge({ open, cancelled, large }: { open: boolean; cancelled?: boolean; large?: boolean }) {
   const tone = cancelled
@@ -233,7 +226,10 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
         {/* Mobile : cartes — tap ouvre le détail plein écran */}
         {filtered.length > 0 && (
           <div className="md:hidden space-y-2.5">
-            {filtered.map((d) => (
+            {filtered.map((d) => {
+              const heure = heureFromDocRef(d.comments);
+              const creator = creatorFromDocRef(d.comments);
+              return (
               <button
                 key={d.docEntry}
                 type="button"
@@ -246,8 +242,8 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                   <div className="text-[16px] font-semibold text-foreground truncate">
                     {d.cardName || d.cardCode}
                   </div>
-                  <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
-                    Livraison {fmtDate(d.dueDate)}
+                  <div className="text-[13px] text-foreground mt-0.5 tnum">
+                    {fmtDate(d.dueDate)}{heure ? `  ${heure}` : ""}{creator ? ` par ${creator}` : ""}
                   </div>
                   <div className="mt-1">
                     {isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}
@@ -256,14 +252,15 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                 <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
                   {!restricted && (
                     <div>
-                      <span className="font-display text-[18px] font-bold tnum text-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
+                      <span className="font-display text-[16px] tnum text-muted-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
                       <span className="ml-1 text-[11px] text-muted-foreground">HT</span>
                     </div>
                   )}
                   <ChevronRight className="h-5 w-5 text-muted-foreground/50" />
                 </div>
               </button>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -297,7 +294,7 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                         <InfoHint label="Détails commande" side="right">
                           <span className="block space-y-0.5">
                             <span className="block">Code SAP : <span className="font-mono">{d.cardCode}</span></span>
-                            <span className="block">Commandée le {fmtDate(d.docDate)}{heureFromComments(d.comments) ? ` à ${heureFromComments(d.comments)}` : ""}</span>
+                            <span className="block">Commandée le {fmtDate(d.docDate)}{heureFromDocRef(d.comments) ? ` à ${heureFromDocRef(d.comments)}` : ""}</span>
                             {d.numAtCard && <span className="block">Réf. : <span className="tnum">{d.numAtCard}</span></span>}
                             <span className="block">{d.lineCount} ligne{d.lineCount > 1 ? "s" : ""}</span>
                           </span>
@@ -683,7 +680,7 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
           <span className="font-mono font-semibold">{po.cardCode}</span>
         </span>
         <span className="text-[14px] text-muted-foreground tnum">
-          Commandée {fmtDate(po.docDate)}{heureFromComments(po.comments) ? ` à ${heureFromComments(po.comments)}` : ""}
+          Commandée {fmtDate(po.docDate)}{heureFromDocRef(po.comments) ? ` à ${heureFromDocRef(po.comments)}` : ""}
         </span>
         {po.numAtCard && <span className="text-[14px] text-muted-foreground">{po.numAtCard}</span>}
       </div>
