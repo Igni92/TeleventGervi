@@ -64,19 +64,23 @@ export function ConsoleLotPicker({
 
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (triggerRef.current?.contains(t) || popRef.current?.contains(t)) return;
+    // `composedPath()` plutôt que `.contains()` sur `e.target` (plus fiable pour
+    // déclencheur + popup en portail séparé) ; `pointerdown` pour matcher
+    // l'évènement écouté par Radix (Dialog/FullscreenPanel englobant).
+    const onDown = (e: PointerEvent) => {
+      const path = e.composedPath();
+      if (triggerRef.current && path.includes(triggerRef.current)) return;
+      if (popRef.current && path.includes(popRef.current)) return;
       closeMenu();
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeMenu(); };
     const reflow = () => place();
-    document.addEventListener("mousedown", onDown);
+    document.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);
     window.addEventListener("scroll", reflow, true);
     window.addEventListener("resize", reflow);
     return () => {
-      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("pointerdown", onDown);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("scroll", reflow, true);
       window.removeEventListener("resize", reflow);

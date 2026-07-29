@@ -54,19 +54,23 @@ export function TypeCombobox({
   const openMenu = () => { reposition(); setOpen(true); };
 
   // Ferme au clic extérieur (bouton OU menu portalisé) + repositionne au scroll.
+  // `composedPath()` plutôt que `.contains()` sur `e.target` (plus fiable pour un
+  // déclencheur + un panneau en portail séparé) ; `pointerdown` pour matcher
+  // l'évènement écouté par Radix (Dialog/FullscreenPanel englobant).
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (btnRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+    const onDown = (e: PointerEvent) => {
+      const path = e.composedPath();
+      if (btnRef.current && path.includes(btnRef.current)) return;
+      if (panelRef.current && path.includes(panelRef.current)) return;
       setOpen(false);
     };
     const onScroll = () => reposition();
-    document.addEventListener("mousedown", onDown);
+    document.addEventListener("pointerdown", onDown);
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onScroll);
     return () => {
-      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("pointerdown", onDown);
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onScroll);
     };
