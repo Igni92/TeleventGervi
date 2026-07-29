@@ -111,7 +111,7 @@ export function FullscreenPanel({
                   </h2>
                 </DialogPrimitive.Title>
                 {subtitle && (
-                  <div className="mt-0.5 truncate text-[12.5px] text-muted-foreground">
+                  <div className="mt-0.5 truncate text-[12.5px] text-foreground">
                     {subtitle}
                   </div>
                 )}
