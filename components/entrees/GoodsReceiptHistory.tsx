@@ -30,6 +30,8 @@ type ReceiptLine = {
   warehouse?: string;
   price: number | null; lineTotal: number | null; taxPercent: number | null;
   uPays: string | null; uMarque: string | null; uCondi: string | null; frgnName?: string | null;
+  /** U_GER_CALIBRE SAP, lu en direct (best-effort) — précision produit. */
+  calibre?: string | null;
 };
 type Receipt = {
   docEntry: number; docNum: number; lot: string; docDate: string;
@@ -92,6 +94,19 @@ function AgreageBadge({ a, className = "" }: { a: AgreageInfo | null | undefined
       className={`inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-700 dark:text-emerald-300 ${className}`}
     >
       <PackageCheck className="h-3 w-3" /> Agréée
+    </span>
+  );
+}
+
+/** Statut de ligne par défaut quand il n'y a PAS d'agréage (EM libre, sans
+ *  passage par une commande fournisseur) — « Reçu » générique. */
+function ReceivedBadge({ className = "" }: { className?: string }) {
+  return (
+    <span
+      title="Entrée marchandise reçue (sans commande fournisseur / agréage)"
+      className={`inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-[10.5px] font-semibold text-sky-700 dark:text-sky-300 ${className}`}
+    >
+      <PackageCheck className="h-3 w-3" /> Reçu
     </span>
   );
 }
@@ -807,34 +822,30 @@ function ReceiptDetail({
           const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
           return (
             <div key={`m-${l.itemCode}-${i}`} className="rounded-lg border border-border bg-card/40 p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
-                  <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-                  <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1.5" />
-                </div>
-                {!restricted && (
-                  <div className="text-right shrink-0">
-                    {canEditPrices && priceEdits[i] ? (
-                      <NumberInput value={emEffTotal(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { lineTotal: n == null ? "" : String(n), forceTotal: n != null })} onBlur={() => saveLine(i)} min={0} step={0.01} decimals={2} allowEmpty placeholder="Total HT" className={`h-9 w-28 text-right ${priceEdits[i].forceTotal ? "ring-1 ring-amber-400" : ""}`} />
-                    ) : (
-                      <>
-                        <div className="text-[15px] font-bold tnum text-foreground">{lineHT != null ? eur(lineHT) : "—"}</div>
-                        <div className="text-[11px] text-muted-foreground">HT</div>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center gap-2 mt-2 text-[13px] text-muted-foreground tnum">
-                <span className="text-foreground font-medium">{fmtColis(l.packageQuantity)} colis</span>
-                {!restricted && <span>·</span>}
+              {/* Quantité + article + PU + Total HT — sur UNE SEULE ligne */}
+              <div className="flex items-baseline gap-2">
+                <span className="text-[15px] font-bold tnum text-foreground shrink-0">{fmtColis(l.packageQuantity)}</span>
+                <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</span>
                 {!restricted && (canEditPrices && priceEdits[i] ? (
-                  <span className="inline-flex items-center gap-1">PU <NumberInput value={emEffPU(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { price: n == null ? "" : String(n), forceTotal: false, lineTotal: "" })} onBlur={() => saveLine(i)} min={0} step={0.01} decimals={2} allowEmpty placeholder="—" className="h-8 w-20 text-right" /></span>
+                  <NumberInput value={emEffPU(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { price: n == null ? "" : String(n), forceTotal: false, lineTotal: "" })} onBlur={() => saveLine(i)} min={0} step={0.01} decimals={2} allowEmpty placeholder="PU" className="h-8 w-20 shrink-0 text-right" />
                 ) : (
-                  <span>PU {l.price != null ? eur(l.price) : "—"}</span>
+                  <span className="shrink-0 tnum text-muted-foreground">{l.price != null ? eur(l.price) : "—"}</span>
+                ))}
+                {!restricted && (canEditPrices && priceEdits[i] ? (
+                  <NumberInput value={emEffTotal(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { lineTotal: n == null ? "" : String(n), forceTotal: n != null })} onBlur={() => saveLine(i)} min={0} step={0.01} decimals={2} allowEmpty placeholder="Total HT" className={`h-9 w-28 shrink-0 text-right ${priceEdits[i].forceTotal ? "ring-1 ring-amber-400" : ""}`} />
+                ) : (
+                  <span className="shrink-0 text-[15px] font-bold tnum text-foreground">{lineHT != null ? eur(lineHT) : "—"}</span>
                 ))}
               </div>
+              <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
+              <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} calibre={l.calibre} className="mt-1.5" />
+              {/* Statut de la ligne : Agréée (venue d'une Cde Fournisseur, avec
+                  contrôle qualité) sinon Reçu (EM libre, générique). */}
+              {!isVoided(receipt) && (
+                <div className="mt-1.5">
+                  {agreage ? <AgreageBadge a={agreage} /> : <ReceivedBadge />}
+                </div>
+              )}
               {/* DLC (fraîcheur) du lot — sur la ligne, éditable */}
               <div className="flex items-center gap-2 mt-2 text-[13px]">
                 <span className="text-muted-foreground shrink-0">DLC</span>

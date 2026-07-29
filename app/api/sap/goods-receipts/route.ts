@@ -743,6 +743,25 @@ export async function GET(req: NextRequest) {
       : [];
     const pMap = new Map(products.map((p) => [p.itemCode, p]));
 
+    // Calibre (U_GER_CALIBRE) — pas synchronisé en local, lu EN DIRECT sur SAP
+    // Items par lot (même repli que /api/livraisons : best-effort, jamais bloquant).
+    const calibreByCode: Record<string, string> = {};
+    const calChunks: string[][] = [];
+    for (let i = 0; i < itemCodes.length; i += 20) calChunks.push(itemCodes.slice(i, i + 20));
+    await Promise.all(calChunks.map(async (chunk) => {
+      try {
+        const or = chunk.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
+        const items = await sap.getAll<{ ItemCode: string; U_GER_CALIBRE?: string | null }>(
+          `Items?$select=ItemCode,U_GER_CALIBRE&$filter=${encodeURIComponent(`(${or})`)}`,
+          { pageSize: 50, maxPages: 2 },
+        );
+        for (const it of items) {
+          const c = (it.U_GER_CALIBRE ?? "").trim();
+          if (c) calibreByCode[it.ItemCode] = c;
+        }
+      } catch { /* lot en échec → pas de calibre pour ces articles */ }
+    }));
+
     return NextResponse.json({
       db: process.env.SAP_B1_COMPANY_DB,
       count: listed.length,
@@ -800,6 +819,7 @@ export async function GET(req: NextRequest) {
               uMarque: p?.uMarque ?? null,
               uCondi: p?.uCondi ?? null,
               frgnName: p?.frgnName ?? null,
+              calibre: calibreByCode[l.ItemCode] ?? null,
             };
           }),
         };
