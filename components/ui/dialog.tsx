@@ -28,7 +28,7 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, onPointerDownOutside, ...props }, ref) => (
+>(({ className, children, onPointerDownOutside, onFocusOutside, onInteractOutside, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
@@ -47,10 +47,27 @@ const DialogContent = React.forwardRef<
       // voit un clic dedans comme un clic EXTÉRIEUR et ferme toute la modale avant
       // même que le bouton cliqué ne reçoive son propre onClick (l'option ne se
       // sélectionne jamais, la modale se ferme à la place).
+      //
+      // Le clic ne suffit pas : sélectionner un bouton/input dans ce portail lui
+      // donne le FOCUS, qui est LUI AUSSI hors de l'arbre DOM du Dialog. En mode
+      // modal, Radix referme aussi sur un focus « sorti » (onFocusOutside,
+      // indépendant de onPointerDownOutside) — sans ce second garde-fou, la
+      // modale se refermait encore au clic sur une option focusable, même une
+      // fois le clic lui-même neutralisé ci-dessus.
       onPointerDownOutside={(e) => {
         const t = e.detail.originalEvent.target as HTMLElement | null;
         if (t?.closest("[data-floating-root]")) { e.preventDefault(); return; }
         onPointerDownOutside?.(e);
+      }}
+      onFocusOutside={(e) => {
+        const t = e.detail.originalEvent.target as HTMLElement | null;
+        if (t?.closest("[data-floating-root]")) { e.preventDefault(); return; }
+        onFocusOutside?.(e);
+      }}
+      onInteractOutside={(e) => {
+        const t = e.detail.originalEvent.target as HTMLElement | null;
+        if (t?.closest("[data-floating-root]")) { e.preventDefault(); return; }
+        onInteractOutside?.(e);
       }}
       {...props}
     >
