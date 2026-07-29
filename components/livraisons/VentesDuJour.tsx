@@ -15,14 +15,13 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarDays, Check, Clock, Hash, Loader2, Pencil, RefreshCw, Search, ShieldAlert, Store, Truck } from "lucide-react";
+import { CalendarDays, Check, Clock, Hash, Inbox, Loader2, Pencil, RefreshCw, Search, ShieldAlert, Store, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { StatBlock } from "@/components/ui/stat-block";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { broadcastActiveClient } from "@/lib/consoleSync";
-import { formatDeliveryDate } from "@/lib/livraison";
 import type { ApiResp, Doc } from "@/lib/livraisonView";
 import type { SafeguardViolation } from "@/lib/safeguards";
 
@@ -45,6 +44,13 @@ function blDateLabel(iso: string): string {
   const dt = new Date(Date.UTC(y, m - 1, d));
   const p2 = (n: number) => String(n).padStart(2, "0");
   return `${DOW_ABBR[dt.getUTCDay()]} ${p2(d)}.${p2(m)}.${String(y).slice(-2)}`;
+}
+/** « Vente(s) du MER 29.07.26 à 5h17 » — en-tête de la carte, heure courante
+ *  (rendu au moment du chargement/rafraîchissement). */
+function venteHeaderLabel(iso: string): string {
+  const now = new Date();
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  return `Vente(s) du ${blDateLabel(iso)} à ${now.getHours()}h${p2(now.getMinutes())}`;
 }
 
 const eur = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
@@ -104,6 +110,12 @@ export function VentesDuJour() {
   useEffect(() => { load(); }, [load]);
 
   const needle = q.trim().toLowerCase();
+  // Total NON filtré (ignore la recherche) — distingue « aucune vente saisie
+  // aujourd'hui » (état B) de « la recherche ne matche rien » (texte discret).
+  const allDocsCount = useMemo(
+    () => toGroups(data).reduce((s, g) => s + g.docs.length, 0),
+    [data],
+  );
   const groups = useMemo(() => {
     const base = toGroups(data);
     if (!needle) return base;
@@ -146,15 +158,20 @@ export function VentesDuJour() {
         </button>
       </div>
 
-      {/* Synthèse du jour */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-        <Stat label="Ventes saisies" value={docs.length.toString()} />
-        <Stat label="CA HT" value={eur.format(ca)} />
-        <Stat label="Préparées" value={`${prepared}/${docs.length}`} tone="emerald" />
-        <Stat label="Parties" value={`${departed}/${docs.length}`} tone="sky" />
-        {/* Garde-fous (Paramètres) : ventes du jour présentant ≥ 1 anomalie. */}
-        <Stat label="Alertes garde-fous" value={alerted.toString()} tone={alerted > 0 ? "amber" : undefined} />
-      </div>
+      {/* Synthèse du jour — masquée pendant la mise à jour et quand il n'y a
+          aucune vente saisie (états A/B : le gros message prend toute la place).
+          Basé sur le total NON filtré : une recherche sans résultat ne doit pas
+          faire disparaître les compteurs (juste les repasser à 0). */}
+      {!loading && allDocsCount > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          <Stat label="Ventes saisies" value={docs.length.toString()} />
+          <Stat label="CA HT" value={eur.format(ca)} />
+          <Stat label="Préparées" value={`${prepared}/${docs.length}`} tone="emerald" />
+          <Stat label="Parties" value={`${departed}/${docs.length}`} tone="sky" />
+          {/* Garde-fous (Paramètres) : ventes du jour présentant ≥ 1 anomalie. */}
+          <Stat label="Alertes garde-fous" value={alerted.toString()} tone={alerted > 0 ? "amber" : undefined} />
+        </div>
+      )}
 
       <section className="rounded-2xl border border-border bg-card overflow-hidden">
         <div className="flex items-center gap-2.5 px-4 sm:px-5 py-3 border-b border-border bg-secondary/30">
@@ -163,25 +180,30 @@ export function VentesDuJour() {
           </span>
           <div className="min-w-0">
             <p className="text-[13.5px] font-semibold text-foreground leading-tight">
-              Ventes saisies aujourd&apos;hui{data?.date ? ` — ${formatDeliveryDate(data.date)}` : ""}
+              {venteHeaderLabel(data?.date ?? today)}
             </p>
-            <p className="text-[11px] text-muted-foreground">
-              {loading && !data
-                ? "Chargement…"
-                : `${docs.length} vente${docs.length > 1 ? "s" : ""} · ${eur.format(ca)} HT · groupées par transporteur`}
-            </p>
+            {!loading && allDocsCount > 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                {`${docs.length} vente${docs.length > 1 ? "s" : ""} · ${eur.format(ca)} HT · groupées par transporteur`}
+              </p>
+            )}
           </div>
         </div>
 
-        {loading && !data ? (
-          <div className="flex items-center gap-2 px-5 py-4 text-[13px] text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Chargement des ventes…
-          </div>
+        {loading ? (
+          // A — mise à jour en cours : pas de compteurs, message plein cadre.
+          <BigStateMessage icon={Loader2} spin text="Mise à jour en cours" />
+        ) : allDocsCount === 0 ? (
+          // B — aucune vente saisie aujourd'hui : pas de compteurs, message plein cadre.
+          <BigStateMessage icon={Inbox} text="Aucune vente pour le moment" />
         ) : groups.length === 0 ? (
+          // Recherche active sans résultat (des ventes existent, filtrées à 0) — cas
+          // distinct de « B » : garde le texte discret existant.
           <p className="px-5 py-6 text-[13px] text-muted-foreground text-center">
-            Aucune vente saisie aujourd&apos;hui{needle ? " pour cette recherche" : ""}.
+            Aucune vente saisie aujourd&apos;hui pour cette recherche.
           </p>
         ) : (
+          // C — des ventes : tout s'affiche normalement.
           groups.map((g) => (
             <div key={g.key}>
               <div className="flex items-center gap-2 px-4 sm:px-5 py-1.5 bg-secondary/20 border-y border-border/60">
@@ -196,6 +218,23 @@ export function VentesDuJour() {
           ))
         )}
       </section>
+    </div>
+  );
+}
+
+/** Gros message plein cadre (états A « mise à jour » / B « aucune vente ») —
+ *  compteurs masqués, texte blanc pur en surgras + liseré blanc, lisible sur
+ *  fond sombre dédié (indépendant du thème clair/sombre de l'appli). */
+function BigStateMessage({ icon: Icon, text, spin }: { icon: typeof Loader2; text: string; spin?: boolean }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 px-5 py-16 bg-gradient-to-br from-slate-900 to-slate-800">
+      <Icon className={`h-7 w-7 text-white/80 ${spin ? "animate-spin" : ""}`} />
+      <p
+        className="text-[20px] sm:text-[22px] font-extrabold text-white text-center tracking-tight"
+        style={{ WebkitTextStroke: "0.6px #fff" }}
+      >
+        {text}
+      </p>
     </div>
   );
 }
