@@ -126,7 +126,7 @@ export function PromosAccueil() {
 
       {promosQ.state === "ok" && promos.length === 0 && recentes.length === 0 && (
         <p className="text-[12px] text-muted-foreground py-2 text-center">
-          Aucune promotion en cours — lancez-en une depuis la page Promos.
+          Aucune promotion en cours — lancez-en une depuis la page Promo.
         </p>
       )}
 

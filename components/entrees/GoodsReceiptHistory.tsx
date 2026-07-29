@@ -16,6 +16,7 @@ import { StatBlock } from "@/components/ui/stat-block";
 import { AnimatedNumber } from "@/components/ui/animated-number";
 import { designationProduit } from "@/lib/produit-designation";
 import { fmtJourDate } from "@/lib/date-fr";
+import { heureFromDocRef, creatorFromDocRef } from "@/lib/docLabel";
 import { eur, eur0, fmtColis } from "@/lib/format";
 import { DesignationChips, Chip } from "./DesignationChips";
 import {
@@ -383,6 +384,8 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
           <div className="md:hidden space-y-2.5">
             {filtered.map((d) => {
               const openIncidents = (byDoc.get(d.docEntry) ?? []).filter((i) => !i.resolved);
+              const heure = heureFromDocRef(d.comments);
+              const creator = creatorFromDocRef(d.comments);
               return (
                 <button
                   key={d.docEntry}
@@ -396,8 +399,8 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                     <div className={`text-[16px] font-semibold truncate ${isVoided(d) ? "line-through text-muted-foreground" : "text-foreground"}`}>
                       {d.cardName || d.cardCode}
                     </div>
-                    <div className="text-[13px] text-muted-foreground mt-0.5 tnum">
-                      {fmtJourDate(d.docDate)}
+                    <div className={`text-[13px] mt-0.5 tnum ${isVoided(d) ? "text-muted-foreground" : "text-foreground"}`}>
+                      {fmtJourDate(d.docDate)}{heure ? `  ${heure}` : ""}{creator ? ` par ${creator}` : ""}
                     </div>
                     <span className="inline-flex items-center gap-1.5 flex-wrap mt-1">
                       <CancelBadge d={d} />
@@ -407,7 +410,7 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                   <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
                     {!restricted && (
                       <div>
-                        <span className="font-display text-[18px] font-bold tnum text-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
+                        <span className="font-display text-[16px] tnum text-muted-foreground leading-none">{eur(d.totalHT ?? 0)}</span>
                         <span className="ml-1 text-[11px] text-muted-foreground">HT</span>
                       </div>
                     )}

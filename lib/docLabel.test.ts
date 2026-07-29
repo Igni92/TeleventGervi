@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { userInitials, docLabel, docRef } from "./docLabel";
+import { userInitials, docLabel, docRef, heureFromDocRef, creatorFromDocRef } from "./docLabel";
 
 describe("userInitials", () => {
   it("prend la 1re lettre des 2 premiers mots, en majuscules", () => {
@@ -47,5 +47,27 @@ describe("docRef — référence signée d'une pièce SAP", () => {
 describe("docLabel — ancien libellé (conservé pour les BL/offres par défaut)", () => {
   it("« <TYPE> - Televent : <initiales> »", () => {
     expect(docLabel("BL", "Maxyme MANDINE")).toBe("BL - Televent : MM");
+  });
+});
+
+describe("heureFromDocRef / creatorFromDocRef — lecture d'une référence signée", () => {
+  it("extrait l'heure signée", () => {
+    expect(heureFromDocRef("CF 2709 - MM à 13h10")).toBe("13h10");
+    expect(heureFromDocRef("EM 22350 - MM")).toBeNull();
+    expect(heureFromDocRef(null)).toBeNull();
+  });
+
+  it("résout le trigramme signataire vers le prénom du commercial", () => {
+    expect(creatorFromDocRef("CF 2709 - MM à 13h10")).toBe("Maxyme");
+    expect(creatorFromDocRef("EM 22350 - JMG à 14h30")).toBe("Jean-Michel");
+  });
+
+  it("retombe sur le trigramme brut si le compte n'est pas un commercial reconnu", () => {
+    expect(creatorFromDocRef("CF 2709 - HV à 08h00")).toBe("HV");
+  });
+
+  it("null si aucune signature", () => {
+    expect(creatorFromDocRef(null)).toBeNull();
+    expect(creatorFromDocRef("")).toBeNull();
   });
 });
