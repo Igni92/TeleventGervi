@@ -13,6 +13,10 @@ import { isLivraisonRestricted } from "@/lib/permissions";
 import { isDelanchyCarrierCode } from "@/lib/carrierTariff";
 
 export const dynamic = "force-dynamic";
+// Écran interrogeant SAP : sans plafond explicite, un SAP lent dépassait la durée
+// par défaut de la fonction, qui mourait SANS réponse — côté front, un « chargement »
+// perpétuel au lieu d'une erreur affichable.
+export const maxDuration = 60;
 
 /**
  * ISO local de la PRISE de la commande dans le système (création SAP) :

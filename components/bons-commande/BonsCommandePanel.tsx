@@ -77,6 +77,9 @@ export function BonsCommandePanel() {
   const [docs, setDocs] = useState<BonDoc[] | null>(null);
   const [offres, setOffres] = useState<OffreDoc[] | null>(null);
   const [loading, setLoading] = useState(false);
+  // Message d'échec du chargement (timeout SAP, erreur serveur) — affiché avec un
+  // bouton de reprise, plutôt qu'un spinner qui tourne sans fin.
+  const [loadError, setLoadError] = useState<string | null>(null);
   // Détail = PLEIN ÉCRAN (plus d'accordéon inline) : un seul bon / une seule
   // offre ouverte à la fois, dérivés de l'état (si le doc sort de la liste,
   // le panneau se ferme tout seul).
@@ -115,12 +118,23 @@ export function BonsCommandePanel() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const r = await fetch("/api/bons-commande", { cache: "no-store" });
+      // Garde-fou de temps : si SAP ne répond pas, la requête était capable de
+      // pendre jusqu'à la mort de la fonction — l'écran restait alors bloqué sur
+      // « Chargement… » sans jamais rien afficher. On coupe et on explique.
+      const r = await fetch("/api/bons-commande", { cache: "no-store", signal: AbortSignal.timeout(45_000) });
       const j = await r.json().catch(() => null);
-      setDocs(j?.ok ? (j.docs ?? []) : []);
-      setOffres(j?.ok ? (j.offres ?? []) : []);
-    } catch {
+      if (!j?.ok) throw new Error(j?.error || `Réponse inattendue du serveur (${r.status})`);
+      setDocs(j.docs ?? []);
+      setOffres(j.offres ?? []);
+    } catch (e) {
+      const timedOut = e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError");
+      setLoadError(timedOut
+        ? "SAP met trop de temps à répondre. Réessaie dans un instant."
+        : `Chargement impossible${e instanceof Error && e.message ? ` — ${e.message}` : ""}`);
+      // Sort de l'état « chargement » (null) pour ne JAMAIS laisser un spinner
+      // éternel ; les données déjà affichées sont conservées si on en avait.
       setDocs((prev) => prev ?? []);
       setOffres((prev) => prev ?? []);
     } finally {
@@ -309,7 +323,8 @@ export function BonsCommandePanel() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-[12.5px] text-muted-foreground">
-          {docs === null ? "Chargement…"
+          {loadError ? <span className="text-amber-600 dark:text-amber-400 font-medium">{loadError}</span>
+            : docs === null ? "Chargement…"
             : count === 0 ? "Aucune commande en attente de lot."
             : `${count} commande${count > 1 ? "s" : ""} à traiter : choisis, par article, le lot réellement en stock.`}
         </p>
@@ -798,7 +813,14 @@ function LotCell({ line, current, isBusy, onPick }: {
           ref={popRef}
           data-floating-root=""
           style={{ position: "fixed", left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom }}
-          className="z-[100] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[70vh] animate-fade-up"
+          // `pointer-events-auto` OBLIGATOIRE : ce menu s'ouvre AU-DESSUS d'un
+          // FullscreenPanel (Radix Dialog modal), qui pose `pointer-events:none`
+          // sur <body> — dont ce popup hérite (porté dans <body>). Sans ça les
+          // clics TRAVERSENT le popup (il n'est pas cible d'évènement) : l'option
+          // ne reçoit jamais son onClick, et le pointerdown atterrit sur le
+          // panneau derrière → vu comme un « clic dehors » → le menu se referme
+          // à chaque clic intérieur.
+          className="pointer-events-auto z-[100] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[70vh] animate-fade-up"
         >
           <div className="overflow-y-auto py-1 min-h-0" onMouseLeave={() => setHovered(null)}>
             <button type="button" onMouseEnter={() => setHovered(null)} onClick={() => pick("")}

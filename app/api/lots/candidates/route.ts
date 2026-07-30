@@ -8,6 +8,10 @@ import { getLotNotes } from "@/lib/marchandiseNote";
 import { colisInfo } from "@/lib/colis";
 
 export const dynamic = "force-dynamic";
+// Écran interrogeant SAP : sans plafond explicite, un SAP lent dépassait la durée
+// par défaut de la fonction, qui mourait SANS réponse — côté front, un « chargement »
+// perpétuel au lieu d'une erreur affichable.
+export const maxDuration = 60;
 
 /**
  * GET /api/lots/candidates?items=CODE1,CODE2&segment=EXPORT
