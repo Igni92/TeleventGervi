@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { floatingPortalTarget } from "@/lib/floatingPortal";
 import { ChevronDown, Boxes, CheckCircle2, AlertTriangle, Star, Truck, BadgeEuro } from "lucide-react";
 import { StarRating } from "@/components/ui/star-rating";
 
@@ -204,7 +205,10 @@ export function ConsoleLotPicker({
             {manual && <p className="mt-1 text-[10.5px] text-muted-foreground">Affecter le lot <span className="font-semibold text-foreground">EM{manual}</span></p>}
           </div>
         </div>,
-        document.body,
+        // Porté DANS le Dialog quand il y en a un : sinon le piège à focus du
+        // Dialog rapatrie le focus et le champ devient inutilisable (cf.
+        // lib/floatingPortal.ts).
+        floatingPortalTarget(triggerRef.current),
       )}
     </div>
   );

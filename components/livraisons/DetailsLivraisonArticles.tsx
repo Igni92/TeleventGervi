@@ -12,6 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
+import { floatingPortalTarget } from "@/lib/floatingPortal";
 import { Loader2, RefreshCw, Search, Package, Boxes, Truck, Printer, ArrowRight, Replace, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { formatDeliveryDate, nextDeliveryDate } from "@/lib/livraison";
@@ -432,7 +433,9 @@ function BulkSwapMenu({ pos, onClose, onDone }: {
         </>
       )}
     </div>,
-    document.body,
+    // Porté DANS le Dialog : sinon son piège à focus rapatrie le focus et ce
+    // champ de recherche (autoFocus) est inutilisable — cf. lib/floatingPortal.ts.
+    floatingPortalTarget(boxRef.current),
   );
 }
 

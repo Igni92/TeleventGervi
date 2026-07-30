@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
+import { floatingPortalTarget } from "@/lib/floatingPortal";
 import { ChevronDown, Plus, X, Check } from "lucide-react";
 import { toast } from "sonner";
 
@@ -186,7 +187,10 @@ export function TypeCombobox({
             )}
           </ul>
         </div>,
-        document.body,
+        // Porté DANS le Dialog quand il y en a un : sinon le piège à focus du
+        // Dialog rapatrie le focus et le champ devient inutilisable (cf.
+        // lib/floatingPortal.ts).
+        floatingPortalTarget(btnRef.current),
       )}
     </div>
   );

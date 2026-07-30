@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { floatingPortalTarget } from "@/lib/floatingPortal";
 import { useRouter } from "next/navigation";
 import {
   PackageCheck, ChevronDown, RefreshCw, Loader2, CheckCircle2, Sparkles,
@@ -920,7 +921,9 @@ function LotCell({ line, current, isBusy, onPick }: {
             )}
           </div>
         </div>,
-        document.body,
+        // Porté DANS le Dialog quand il y en a un : sinon le piège à focus du
+        // Dialog rapatrie le focus et le champ « n° d'entrée » est inutilisable.
+        floatingPortalTarget(triggerRef.current),
       )}
     </div>
   );
