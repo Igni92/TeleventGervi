@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
@@ -225,8 +225,14 @@ export function ProductsTable() {
     }
   }, [fetchProducts, fetchLastSync]);
 
-  // Initial + manual refetch on filter change
-  useEffect(() => { fetchProducts(); }, [fetchProducts]);
+  // Chargement initial + refetch sur les filtres NON TEXTUELS.
+  //
+  // ⚠️ Ne PAS dépendre de `fetchProducts` : sa fonction se recrée à chaque
+  // changement de `search`, donc cet effet partait à CHAQUE FRAPPE — en plus de
+  // l'effet debouncé plus bas. La recherche déclenchait ainsi deux requêtes par
+  // caractère et le debounce ne servait à rien. La saisie est gérée uniquement
+  // par l'effet debouncé ; ici on ne réagit qu'à la pagination et aux filtres.
+  useEffect(() => { fetchProducts(); }, [page, inStockOnly, selectedGroups, sort]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { fetchLastSync(); }, [fetchLastSync]);
   useEffect(() => { fetchGroups(); }, [fetchGroups]);
   useEffect(() => { fetchPoDues(); }, [fetchPoDues]);
@@ -238,8 +244,11 @@ export function ProductsTable() {
   // Clic sur un en-tête → bascule asc/desc/défaut (et revient page 1 via l'effet ci-dessus).
   const toggleSort = (key: string) => setSort((cur) => nextSort(cur, key));
 
-  // Debounced search
+  // Recherche debouncée. Le garde-fou de montage évite de relancer 350 ms après
+  // l'arrivée sur l'écran la requête que l'effet ci-dessus vient déjà de faire.
+  const searchDebounceReady = useRef(false);
   useEffect(() => {
+    if (!searchDebounceReady.current) { searchDebounceReady.current = true; return; }
     const t = setTimeout(() => fetchProducts(), 350);
     return () => clearTimeout(t);
   }, [search]); // eslint-disable-line react-hooks/exhaustive-deps
