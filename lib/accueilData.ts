@@ -19,7 +19,10 @@ import { warmActivity } from "@/lib/pilotageActivity";
  * (`warmActivity`), ré-chauffés ici aussi via `warmAccueil`.
  */
 
-const TTL_MS = 5 * 60_000;
+// Aligné sur PILOTAGE_ACTIVITY_TTL_MS : doit couvrir l'intervalle du cron
+// miroir (10 min), sinon le cache est froid une fois sur deux. Fraîcheur assurée
+// par `invalidate("pilotage:")` au tick, pas par l'expiration.
+const TTL_MS = 15 * 60_000;
 
 const POIDS_FAMILLES_KEY = "pilotage:poids-familles:day";
 const recentOrdersKey = (limit: number) => `pilotage:orders:recent:${limit}`;

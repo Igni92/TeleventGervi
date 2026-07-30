@@ -20,7 +20,13 @@ import { cached, invalidate } from "@/lib/ttlCache";
 
 // Cache court par périmètre+granularité ; le tick mirror purge "pilotage:" dès
 // que de nouveaux docs arrivent puis re-remplit — ce TTL n'est qu'un filet.
-export const PILOTAGE_ACTIVITY_TTL_MS = 5 * 60_000;
+// TTL > période du cron (10 min). À 5 min, le cache expirait AVANT le tick
+// suivant : une fois sur deux, la personne qui ouvrait l'accueil repayait le
+// recalcul complet à froid — c'est la queue haute mesurée (p95 5,2 s, max 15 s)
+// que le préchauffage était justement censé supprimer. La fraîcheur ne vient pas
+// du TTL mais de `invalidate("pilotage:")` au tick miroir ; le TTL n'est qu'un
+// filet, il doit donc couvrir l'intervalle entre deux ticks.
+export const PILOTAGE_ACTIVITY_TTL_MS = 15 * 60_000;
 
 export function activityCacheKey(slp: string | null, g: Granularity): string {
   return `pilotage:activity:${slp ?? "ALL"}:${g}`;

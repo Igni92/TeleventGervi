@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { getSuggestedPrices } from "@/lib/gerviPricing";
+import { cached } from "@/lib/ttlCache";
 
 /**
  * GET /api/sap/prices?clientId=xxx&items=A,B,C
@@ -32,8 +33,16 @@ export async function GET(req: NextRequest) {
     }
     if (cardCode) {
       try {
-        const bp = await sap.get<{ GroupCode?: number }>(`BusinessPartners('${encodeURIComponent(cardCode)}')?$select=GroupCode`, { env: "prod" });
-        group = bp.GroupCode ?? null;
+        // L'écran 2 demande les prix par tranches de 40 articles : pour un
+        // catalogue complet, cette route est appelée des dizaines de fois
+        // d'affilée AVEC LE MÊME cardCode, et chaque appel re-demandait le
+        // groupe à SAP. Or le groupe tarifaire d'un client est du référentiel :
+        // on le garde 10 min, ce qui ramène N appels à 1.
+        const cc = cardCode;
+        group = await cached(`sap:bpgroup:${cc}`, 10 * 60_000, async () => {
+          const bp = await sap.get<{ GroupCode?: number }>(`BusinessPartners('${encodeURIComponent(cc)}')?$select=GroupCode`, { env: "prod" });
+          return bp.GroupCode ?? null;
+        });
       } catch { /* group null → coef défaut 1.5 */ }
     }
   }

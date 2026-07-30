@@ -1040,16 +1040,60 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     finally { setLoading(false); }
   }, [clientId, includeOutOfStock]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /**
+   * Prix conseillés — chargés par tranches de 40 articles.
+   *
+   * Deux défauts se cumulaient sur un catalogue complet (~3000 articles, soit
+   * 75 tranches) :
+   *   • les tranches partaient EN SÉRIE (`for` + `await`), donc 75 allers-retours
+   *     bout à bout avant d'avoir tous les prix ;
+   *   • chaque réponse appelait `setHints`, soit 75 re-rendus COMPLETS de cet
+   *     écran et de sa liste — le fil principal restait saturé pendant tout le
+   *     chargement, d'où les clics sans effet et les rafales de clics mesurés.
+   *
+   * On lance donc quelques tranches de front (le client SAP a son propre
+   * portillon côté serveur : inutile d'en envoyer davantage, elles feraient la
+   * queue) et on n'applique les prix que par PAQUETS, au plus une fois par
+   * FLUSH_MS — la liste se remplit visiblement, sans re-rendre 75 fois.
+   */
   const loadHints = useCallback(async (codes: string[]) => {
-    for (let i = 0; i < codes.length; i += 40) {
-      const slice = codes.slice(i, i + 40);
-      try {
-        const params = new URLSearchParams({ clientId, items: slice.join(",") });
-        const res = await fetch(`/api/sap/prices?${params}`);
-        const json = await res.json();
-        if (json.prices) setHints((cur) => ({ ...cur, ...json.prices }));
-      } catch { /* prix optionnel */ }
-    }
+    const slices: string[][] = [];
+    for (let i = 0; i < codes.length; i += 40) slices.push(codes.slice(i, i + 40));
+    if (slices.length === 0) return;
+
+    const CONCURRENCY = 4;
+    const FLUSH_MS = 250;
+    let buffer: Record<string, Hint> = {};
+    let lastFlush = Date.now();
+    const flush = () => {
+      if (Object.keys(buffer).length === 0) return;
+      const batch = buffer;
+      buffer = {};
+      lastFlush = Date.now();
+      setHints((cur) => ({ ...cur, ...batch }));
+    };
+
+    let next = 0;
+    const worker = async () => {
+      for (;;) {
+        const idx = next++;
+        if (idx >= slices.length) return;
+        try {
+          const params = new URLSearchParams({ clientId, items: slices[idx].join(",") });
+          const res = await fetch(`/api/sap/prices?${params}`);
+          const json = await res.json();
+          if (json.prices) {
+            buffer = { ...buffer, ...json.prices };
+            if (Date.now() - lastFlush >= FLUSH_MS) flush();
+          }
+        } catch { /* prix optionnel */ }
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, slices.length) }, () => worker()),
+    );
+    flush(); // le reliquat, quoi qu'il arrive
   }, [clientId]);
 
   useEffect(() => { loadStock(); }, [loadStock]);
