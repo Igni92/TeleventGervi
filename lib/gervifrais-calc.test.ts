@@ -38,20 +38,22 @@ describe("splitByWarehouse — découpe multi-entrepôt", () => {
   it("sur-vente → surplus sur ligne SÉPARÉE à découvert (jamais fusionné)", () => {
     expect(splitByWarehouse(10, { "000": 4, "01": 0, R1: 0 })).toEqual([
       { warehouse: "000", qty: 4 },
-      { warehouse: "000", qty: 6, decouvert: true },
+      { warehouse: "01", qty: 6, decouvert: true },
     ]);
   });
-  it("sur-vente avec stock en 01 → le stock reste en 01, le surplus part en 000 à découvert", () => {
-    // Régression « magasins négatifs » : le surplus ne doit plus gonfler la
-    // ligne 01 (01 passait à −5), il attend en 000 sans lot.
+  it("sur-vente avec stock en 01 → 2 lignes DISTINCTES en 01 (stock + découvert)", () => {
+    // Régression « magasins négatifs » : le surplus ne doit jamais être FUSIONNÉ
+    // dans la ligne de stock (01 passait à −5 sur une seule ligne). Il reste une
+    // ligne à part, marquée `decouvert` — désormais en 01 comme la ligne de
+    // stock, puisque plus rien ne rapatriait les lignes laissées en 000.
     expect(splitByWarehouse(10, { "000": 0, "01": 5, R1: 0 })).toEqual([
       { warehouse: "01", qty: 5 },
-      { warehouse: "000", qty: 5, decouvert: true },
+      { warehouse: "01", qty: 5, decouvert: true },
     ]);
   });
-  it("aucun stock → tout à découvert sur 000", () => {
+  it("aucun stock → tout à découvert sur 01", () => {
     expect(splitByWarehouse(5, { "000": 0, "01": 0, R1: 0 })).toEqual([
-      { warehouse: "000", qty: 5, decouvert: true },
+      { warehouse: "01", qty: 5, decouvert: true },
     ]);
   });
   it("ignore les dispos négatives (committed > stock)", () => {

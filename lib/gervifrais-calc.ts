@@ -10,7 +10,27 @@ export const WAREHOUSE_FILL_ORDER = ["000", "01", "R1"];
 /** Magasin d'ATTENTE des quantités vendues à découvert (000 = « A/C - A/D »).
  *  La ligne y stationne sans lot (EM_PENDING) jusqu'à la réception, qui pose le
  *  vrai lot ET déplace la ligne vers le magasin de réception (receiptRetro). */
-export const DECOUVERT_WAREHOUSE = "000";
+/**
+ * Magasin des lignes À DÉCOUVERT (vendu au-delà du stock détenu).
+ *
+ * C'était « 000 », pensé comme magasin D'ATTENTE : la ligne y patientait sans
+ * lot jusqu'à la réception, pour ne pas faire passer le stock de 01 en négatif.
+ * Sauf que la contrepartie n'a jamais existé — AUCUN code ne fait repasser ces
+ * lignes de 000 à 01 une fois la marchandise reçue. Résultat : elles restaient
+ * en 000 indéfiniment et il fallait les corriger à la main, à chaque fois.
+ *
+ * On les crée donc directement en 01, le magasin de travail (déjà le défaut
+ * partout ailleurs : lib/inventoryAdjust.ts, lib/stockSync.ts). Un état correct
+ * en permanence vaut mieux qu'un état « propre » qui exige une reprise manuelle
+ * que personne ne fait.
+ *
+ * ⚠️ Conséquence assumée : le disponible de 01 reflète désormais la sur-vente et
+ * peut afficher un négatif. Ce n'est PAS le retour du bug « magasins négatifs »
+ * corrigé auparavant : celui-là venait de la FUSION du surplus dans la ligne de
+ * stock. Le surplus reste ici une ligne SÉPARÉE marquée `decouvert` — quantité
+ * en stock et sur-vente restent distinctes, avec leur lot propre.
+ */
+export const DECOUVERT_WAREHOUSE = "01";
 
 export type WarehouseChunk = {
   warehouse: string;
@@ -39,9 +59,9 @@ export function saleableAvailable(rawAvailable: number, packDivisor: number): nu
 }
 
 /** Répartit une quantité sur les entrepôts par ordre de puisage (000→01→R1).
- *  Le surplus (sur-vente) part sur un chunk SÉPARÉ marqué `decouvert` (magasin
- *  d'attente 000) : la quantité en stock garde son magasin + son lot, le reste
- *  attend la réception sans lot. */
+ *  Le surplus (sur-vente) part sur un chunk SÉPARÉ marqué `decouvert`, en 01
+ *  (cf. DECOUVERT_WAREHOUSE) : la quantité en stock garde son magasin + son lot,
+ *  le reste attend la réception sans lot, sur une ligne à part. */
 export function splitByWarehouse(
   qty: number,
   availByWarehouse: Record<string, number>,
