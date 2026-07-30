@@ -8,7 +8,8 @@
  *   - TLS bypass conditionally via SAP_B1_TLS_INSECURE=1 (dev only — never use in prod)
  *   - Typed helpers: get, post, patch, delete (return typed JSON via generics)
  *   - OData pagination helper: getAll<T>(path) follows @odata.nextLink until exhausted
- *   - Per-call timeout (default 30s) with AbortController
+ *   - Per-call timeout (default 90s) with AbortController
+ *   - Global concurrency gate (SAP_MAX_CONCURRENCY, default 3) — cf. withSapSlot
  *
  * Usage
  * -----
@@ -73,11 +74,57 @@ async function loadEnvFromDb(): Promise<void> {
   envLoaded = true;
 }
 
+/**
+ * PORTILLON DE CONCURRENCE SAP — un seul goulot pour TOUT l'applicatif.
+ *
+ * Le Service Layer encaisse mal les rafales. Or une vingtaine d'appelants (scan
+ * de lots, /api/livraisons, bons-commande, sync stock...) lançaient des
+ * `Promise.all` NON BORNÉS — jusqu'à 8 pages de 200 documents d'un coup.
+ * Mesuré en prod le 30/07/2026 : 7 pages sur 8 en timeout à 25 s, scan de lots
+ * retombé à 200 réceptions au lieu de 1500, et des maps de lots PARTIELLES
+ * servies pendant tout le TTL (10 min).
+ *
+ * Plutôt que de borner les ~25 sites d'appel un par un (et d'oublier le
+ * prochain), on borne ICI : chaque requête prend un jeton, les autres font la
+ * queue. Le débit total ne baisse pas — SAP ne va pas plus vite parce qu'on lui
+ * crie dessus — mais on échange des échecs simultanés contre une attente
+ * ordonnée qui, elle, aboutit.
+ *
+ * Réglable par SAP_MAX_CONCURRENCY (défaut 3).
+ */
+const MAX_CONCURRENCY = Math.max(1, Number(process.env.SAP_MAX_CONCURRENCY ?? 3) || 3);
+
+let sapActive = 0;
+const sapWaiters: Array<() => void> = [];
+
+/** Exécute `fn` en tenant un jeton de concurrence SAP (toujours rendu).
+ *
+ * ⚠️ Pris AUTOUR de rawRequest uniquement : le temps d'attente en file ne
+ * consomme donc PAS le budget `timeoutMs` de l'appel (le minuteur ne démarre
+ * qu'une fois le jeton obtenu). `login()` appelle rawRequest en direct, hors
+ * portillon : aucun interblocage quand un 401 déclenche un re-login. */
+async function withSapSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (sapActive >= MAX_CONCURRENCY) {
+    await new Promise<void>((resolve) => sapWaiters.push(resolve));
+  }
+  sapActive++;
+  try {
+    return await fn();
+  } finally {
+    sapActive--;
+    const next = sapWaiters.shift();
+    if (next) next();
+  }
+}
+
 // HTTPS agent — keepalive for connection reuse, optional TLS bypass for self-signed
 const agent = new https.Agent({
   rejectUnauthorized: !INSECURE,
   keepAlive: true,
   timeout: 90_000,
+  // Aligné sur le portillon : sans plafond, l'agent ouvrait autant de sockets
+  // que d'appels simultanés (défaut Node : Infinity).
+  maxSockets: MAX_CONCURRENCY,
 });
 
 // ── Session state (une session par environnement) ─────────────
@@ -247,7 +294,7 @@ async function call<T>(path: string, opts: SapRequestOptions = {}): Promise<T> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (attempt > 0) await sleep(RETRY_DELAYS_MS[attempt - 1]);
     try {
-      res = await rawRequest<T>(env, path, opts);
+      res = await withSapSlot(() => rawRequest<T>(env, path, opts));
     } catch (e) {
       // Erreur réseau (rejet de la promesse) : retry si transitoire, sinon propage.
       lastNetError = e;
@@ -268,7 +315,7 @@ async function call<T>(path: string, opts: SapRequestOptions = {}): Promise<T> {
   if (res.status === 401 && !opts.noRetry) {
     sessions[env] = null;
     await login(env);
-    res = await rawRequest<T>(env, path, opts);
+    res = await withSapSlot(() => rawRequest<T>(env, path, opts));
   }
 
   if (res.status >= 400) {

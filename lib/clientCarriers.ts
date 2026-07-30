@@ -212,17 +212,45 @@ async function getAllTrclRowsByCard(): Promise<Map<string, TrclRow[]> | null> {
 }
 
 /**
+ * Résultat CONSTRUIT par client, mémoïsé.
+ *
+ * `buildFromTrcl` n'est pas gratuit : il enchaîne des `ensureCarrier` (lectures
+ * Prisma SÉQUENTIELLES) pour chaque code transporteur du client. Or
+ * /api/livraisons l'appelait pour TOUS les clients du jour À CHAQUE requête —
+ * la vue SAP était bien en cache, mais sa mise en forme était intégralement
+ * recalculée à chaque affichage de l'écran (≈ C × codes requêtes Prisma).
+ *
+ * Le cache est estampillé avec la date du cache de la vue source (`at`) : quand
+ * la vue est rechargée (TTL 30 min), les résultats dérivés sont automatiquement
+ * périmés — pas de purge à tenir à jour.
+ */
+let builtCache: { at: number; byCard: Map<string, ClientCarrierStat[] | null> } | null = null;
+
+/**
  * Transporteurs/tournées d'un client depuis SERG_TRCL UNIQUEMENT (vue v2), SANS
  * fallback histogramme. Lit la vue COMPLÈTE en cache (1 requête pour toute la
- * journée). null si la vue est illisible ou le client absent.
+ * journée), puis met en cache la mise en forme par client. null si la vue est
+ * illisible ou le client absent.
  */
 export async function getClientTrclCarriers(cardCode: string): Promise<ClientCarrierStat[] | null> {
   const byCard = await getAllTrclRowsByCard();
   if (!byCard) return null;
-  const rows = byCard.get(cardCode.trim().toUpperCase());
-  if (!rows || rows.length === 0) return null;
-  const res = await buildFromTrcl(rows);
-  return res ? res.carriers : null;
+  const key = cardCode.trim().toUpperCase();
+
+  // Le cache dérivé suit la version de la vue source.
+  const stamp = allTrclCache?.at ?? 0;
+  if (!builtCache || builtCache.at !== stamp) builtCache = { at: stamp, byCard: new Map() };
+  const hit = builtCache.byCard.get(key);
+  if (hit !== undefined) return hit;
+
+  const rows = byCard.get(key);
+  let out: ClientCarrierStat[] | null = null;
+  if (rows && rows.length > 0) {
+    const res = await buildFromTrcl(rows);
+    out = res ? res.carriers : null;
+  }
+  builtCache.byCard.set(key, out);
+  return out;
 }
 
 /* ─────────────────── Fallback : histogramme Orders 24 mois ──────────────── */

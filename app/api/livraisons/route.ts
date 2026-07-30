@@ -13,6 +13,19 @@ import { isLivraisonRestricted } from "@/lib/permissions";
 import { isDelanchyCarrierCode } from "@/lib/carrierTariff";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Niveau de `$select` retenu pour les Orders — MÉMORISÉ AU NIVEAU MODULE.
+ *
+ * Les champs custom (U_TrspCode/U_TrspHeur) et l'heure de prise (CreationTime,
+ * sinon DocTime) n'existent pas sur toutes les versions du Service Layer : on
+ * sonde du plus riche au plus pauvre. Déclarée DANS le handler (bug d'origine),
+ * cette mémorisation était remise à zéro à chaque requête : si le SL rejetait le
+ * niveau 0, CHAQUE ouverture de l'écran re-payait 1 à 3 allers-retours SAP voués
+ * à l'échec — multipliés par le nombre de pages de commandes ET par chaque
+ * tranche de report. Hissée ici, la sonde n'est payée qu'une fois par process.
+ */
+let ordersSelIdx = 0;
 // Écran interrogeant SAP : sans plafond explicite, un SAP lent dépassait la durée
 // par défaut de la fonction, qui mourait SANS réponse — côté front, un « chargement »
 // perpétuel au lieu d'une erreur affichable.
@@ -138,19 +151,18 @@ export async function GET(req: NextRequest) {
       ",U_TrspCode,U_TrspHeur",
       "",
     ];
-    // Dès qu'un niveau de $select marche on le MÉMORISE (`selIdx`) : les requêtes
-    // de report (mêmes champs, d'autres DocEntry) ne re-sondent plus les champs
-    // custom absents.
-    let selIdx = 0;
+    // Dès qu'un niveau de $select marche on le MÉMORISE (`ordersSelIdx`, portée
+    // module) : ni les requêtes de report, ni les requêtes SUIVANTES ne re-sondent
+    // les champs custom absents.
     const fetchOrders = async (expr: string): Promise<SapOrderListed[]> => {
       const f = encodeURIComponent(expr);
-      for (let i = selIdx; i < EXTRA_SELECTS.length; i++) {
+      for (let i = ordersSelIdx; i < EXTRA_SELECTS.length; i++) {
         try {
           const r = await sap.getAll<SapOrderListed>(
             `Orders?$select=${BASE_SELECT}${EXTRA_SELECTS[i]}&$filter=${f}&$orderby=CardName asc`,
             { pageSize: 200, maxPages: 20 },
           );
-          selIdx = i;                                   // ce niveau marche → on le garde
+          ordersSelIdx = i;                             // ce niveau marche → on le garde (inter-requêtes)
           return r;
         } catch (e) {
           if (i === EXTRA_SELECTS.length - 1) throw e;   // plus aucun repli → vraie erreur

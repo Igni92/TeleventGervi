@@ -66,6 +66,14 @@ function pushDoc(map: Map<string, number[]>, key: string, docNum: number): void 
 export const LOT_PENDING = LOT_PENDING_PURE;
 
 const TTL_MS = 10 * 60 * 1000;
+/**
+ * TTL RÉDUIT quand le scan est revenu incomplet (pages en échec). Servir des maps
+ * partielles pendant 10 min, c'est résoudre les lots sur une fraction des
+ * réceptions — le 30/07/2026, 56 articles connus au lieu de 280, soit des
+ * affectations de lot erronées pendant tout le palier. On garde le partiel (mieux
+ * que rien, et ça évite de marteler SAP), mais on retente vite.
+ */
+const PARTIAL_TTL_MS = 60 * 1000;
 // Profondeur de scan : ~1500 PDN ≈ 4-6 semaines de réceptions. Au-delà, un article
 // sans réception récente part en EM_PENDING (réécrit à sa prochaine EM) — plus
 // honnête que l'ancien fallback aveugle EM0000 (10 BL touchés sur 7 j, cf. diag).
@@ -100,7 +108,8 @@ function emptyMaps(): LotMaps {
 
 /** Renvoie les maps (cache 10 min). Scanne les ~1500 derniers PDN au refresh. */
 export async function getLotMaps(): Promise<LotMaps> {
-  if (cache && Date.now() - cache.at < TTL_MS) return cache.maps;
+  const ttl = cache?.partial ? PARTIAL_TTL_MS : TTL_MS;
+  if (cache && Date.now() - cache.at < ttl) return cache.maps;
   // Un scan déjà lancé ? On s'y raccroche au lieu d'en démarrer un second.
   if (inflight) return inflight;
   inflight = scanLotMaps().finally(() => { inflight = null; });
@@ -114,6 +123,7 @@ async function scanLotMaps(): Promise<LotMaps> {
 
   let scanned = 0;
   let partial = false;
+  let failedPages = 0;
   const t0 = Date.now();
   // DocNum de la dernière EM AVEC magasin par article (pour byItemWarehouse).
   const bestWhsDoc = new Map<string, number>();
@@ -148,6 +158,7 @@ async function scanLotMaps(): Promise<LotMaps> {
       // Une page en échec ne condamne pas le scan : les autres restent exploitables
       // (maps partielles → le TTL re-tentera un scan complet).
       partial = true;
+      failedPages++;
       console.warn("[lotResolver] Page PurchaseDeliveryNotes en échec:", (res.reason as Error)?.message);
       continue;
     }
@@ -189,7 +200,8 @@ async function scanLotMaps(): Promise<LotMaps> {
   cache = { at: Date.now(), maps, partial };
   console.log(
     `[lotResolver] Maps rafraîchies: ${scanned} PDN scannés en ${Date.now() - t0} ms — ` +
-    `${maps.byItem.size} items, ${maps.byItemWhs.size} couples item×entrepôt${partial ? " (PARTIEL)" : ""}`,
+    `${maps.byItem.size} items, ${maps.byItemWhs.size} couples item×entrepôt` +
+    (partial ? ` (PARTIEL — ${failedPages}/${pageCount} pages en échec, re-scan dans ${PARTIAL_TTL_MS / 1000}s)` : ""),
   );
   return maps;
 }
