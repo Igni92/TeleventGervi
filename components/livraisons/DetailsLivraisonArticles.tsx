@@ -324,12 +324,17 @@ function BulkSwapMenu({ pos, onClose, onDone }: {
     return () => clearTimeout(h);
   }, [query]);
 
+  // `composedPath()` plutôt que `.contains()` sur `e.target` (plus fiable pour un
+  // panneau en portail séparé) ; `pointerdown` pour matcher l'évènement écouté
+  // par Radix (Dialog/FullscreenPanel englobant).
   useEffect(() => {
-    const onDown = (e: MouseEvent) => { if (!running && boxRef.current && !boxRef.current.contains(e.target as Node)) onClose(); };
+    const onDown = (e: PointerEvent) => {
+      if (!running && boxRef.current && !e.composedPath().includes(boxRef.current)) onClose();
+    };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !running) onClose(); };
-    document.addEventListener("mousedown", onDown);
+    document.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
+    return () => { document.removeEventListener("pointerdown", onDown); window.removeEventListener("keydown", onKey); };
   }, [onClose, running]);
 
   async function run(p: BulkProduct) {
@@ -358,7 +363,11 @@ function BulkSwapMenu({ pos, onClose, onDone }: {
       onContextMenu={(e) => e.preventDefault()}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
-      className="z-[130] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[360px] animate-fade-up"
+      // `pointer-events-auto` OBLIGATOIRE quand ce panneau s'ouvre au-dessus d'un
+      // Dialog/FullscreenPanel Radix (modal) : Radix pose `pointer-events:none` sur
+      // <body>, dont ce popup hérite (porté dans <body>) — les clics le
+      // traverseraient et son détecteur de « clic dehors » le refermerait.
+      className="pointer-events-auto z-[130] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[360px] animate-fade-up"
     >
       <div className="shrink-0 px-3 py-2 border-b border-border bg-secondary/30">
         <p className="text-[11px] font-semibold text-foreground inline-flex items-center gap-1.5">

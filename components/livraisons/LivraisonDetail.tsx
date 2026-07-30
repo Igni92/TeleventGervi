@@ -3098,13 +3098,17 @@ function LineToolMenu({ docEntry, docNum, pos, onClose, onDone }: {
     return () => clearTimeout(h);
   }, [query, mode]);
 
-  // Fermeture : clic hors zone / Escape.
+  // Fermeture : clic hors zone / Escape. `composedPath()` plutôt que `.contains()`
+  // sur `e.target` (plus fiable pour un panneau en portail séparé) ; `pointerdown`
+  // pour matcher l'évènement écouté par Radix (Dialog englobant).
   useEffect(() => {
-    const onDown = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) onClose(); };
+    const onDown = (e: PointerEvent) => {
+      if (boxRef.current && !e.composedPath().includes(boxRef.current)) onClose();
+    };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("mousedown", onDown);
+    document.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
+    return () => { document.removeEventListener("pointerdown", onDown); window.removeEventListener("keydown", onKey); };
   }, [onClose]);
 
   // Charge les lignes du bon (via l'endpoint de modif) pour reconstruction.

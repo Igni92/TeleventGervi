@@ -21,6 +21,7 @@ import { printOrderRecap, type PrintLine, type PrintDoc } from "@/components/liv
 import { displayPersonName } from "@/lib/userNames";
 import { broadcastActiveClient } from "@/lib/consoleSync";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
+import { eur } from "@/lib/format";
 import { FRUIT_FAMILIES } from "@/lib/familles";
 import { familyLotSentinel, familyOfLot } from "@/lib/gervifrais-calc";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,8 @@ interface BonLine {
   itemCode: string; itemName: string; quantity: number; colis: number;
   warehouse: string | null; marque: string | null; condt: string | null; pays: string | null;
   variete: string | null; uvc: string | null; calibre: string | null;
+  /** Prix unitaire HT et total HT de la ligne — null si indisponible. */
+  price: number | null; lineTotal: number | null;
   lot: string; pending: boolean; candidates: LotCandidate[]; suggested: string | null;
   /** Tag « produit » à préciser plus tard (fruit) — rappel, pas d'auto-affectation. */
   familyTarget: FamilyTarget | null;
@@ -74,6 +77,9 @@ export function BonsCommandePanel() {
   const [docs, setDocs] = useState<BonDoc[] | null>(null);
   const [offres, setOffres] = useState<OffreDoc[] | null>(null);
   const [loading, setLoading] = useState(false);
+  // Message d'échec du chargement (timeout SAP, erreur serveur) — affiché avec un
+  // bouton de reprise, plutôt qu'un spinner qui tourne sans fin.
+  const [loadError, setLoadError] = useState<string | null>(null);
   // Détail = PLEIN ÉCRAN (plus d'accordéon inline) : un seul bon / une seule
   // offre ouverte à la fois, dérivés de l'état (si le doc sort de la liste,
   // le panneau se ferme tout seul).
@@ -112,12 +118,23 @@ export function BonsCommandePanel() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const r = await fetch("/api/bons-commande", { cache: "no-store" });
+      // Garde-fou de temps : si SAP ne répond pas, la requête était capable de
+      // pendre jusqu'à la mort de la fonction — l'écran restait alors bloqué sur
+      // « Chargement… » sans jamais rien afficher. On coupe et on explique.
+      const r = await fetch("/api/bons-commande", { cache: "no-store", signal: AbortSignal.timeout(45_000) });
       const j = await r.json().catch(() => null);
-      setDocs(j?.ok ? (j.docs ?? []) : []);
-      setOffres(j?.ok ? (j.offres ?? []) : []);
-    } catch {
+      if (!j?.ok) throw new Error(j?.error || `Réponse inattendue du serveur (${r.status})`);
+      setDocs(j.docs ?? []);
+      setOffres(j.offres ?? []);
+    } catch (e) {
+      const timedOut = e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError");
+      setLoadError(timedOut
+        ? "SAP met trop de temps à répondre. Réessaie dans un instant."
+        : `Chargement impossible${e instanceof Error && e.message ? ` — ${e.message}` : ""}`);
+      // Sort de l'état « chargement » (null) pour ne JAMAIS laisser un spinner
+      // éternel ; les données déjà affichées sont conservées si on en avait.
       setDocs((prev) => prev ?? []);
       setOffres((prev) => prev ?? []);
     } finally {
@@ -306,7 +323,8 @@ export function BonsCommandePanel() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-[12.5px] text-muted-foreground">
-          {docs === null ? "Chargement…"
+          {loadError ? <span className="text-amber-600 dark:text-amber-400 font-medium">{loadError}</span>
+            : docs === null ? "Chargement…"
             : count === 0 ? "Aucune commande en attente de lot."
             : `${count} commande${count > 1 ? "s" : ""} à traiter : choisis, par article, le lot réellement en stock.`}
         </p>
@@ -656,18 +674,21 @@ function LotAssignList({ lines, keyPrefix, busyLine, onPick }: {
         return (
           <li key={l.itemCode} className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-3">
             <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-2 flex-wrap">
-                <span className="text-[15px] font-semibold text-foreground truncate">{l.itemName}</span>
-                <span className="text-[12px] text-muted-foreground tnum shrink-0">
-                  {l.colis} colis{l.warehouse ? ` · mag. ${l.warehouse}` : ""}
-                </span>
-                {l.familyTarget && (
-                  <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 shrink-0">
-                    <Grape className="h-3 w-3" /> {l.familyTarget.label} — à préciser
-                  </span>
-                )}
+              {/* Colis + article + magasin + PU + total HT — sur UNE SEULE ligne */}
+              <div className="flex items-baseline gap-2">
+                <span className="text-[15px] font-bold tnum text-foreground shrink-0">{l.colis}</span>
+                <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground">{l.itemName}</span>
+                {l.warehouse && <span className="shrink-0 text-[12px] text-muted-foreground tnum">mag {l.warehouse}</span>}
+                <span className="shrink-0 tnum text-muted-foreground">{l.price != null ? eur(l.price) : "—"}</span>
+                <span className="shrink-0 text-[15px] font-bold tnum text-foreground">{l.lineTotal != null ? eur(l.lineTotal) : "—"}</span>
               </div>
-              <DesignationChips marque={l.marque} condt={l.condt} pays={l.pays} size="md" className="mt-1" />
+              <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
+              {l.familyTarget && (
+                <span className="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300">
+                  <Grape className="h-3 w-3" /> {l.familyTarget.label} — à préciser
+                </span>
+              )}
+              <DesignationChips marque={l.marque} condt={l.condt} variete={l.variete} calibre={l.calibre} pays={l.pays} size="md" className="mt-1" />
             </div>
             <LotCell line={l} current={current} isBusy={isBusy} onPick={(v) => onPick(l.itemCode, v)} />
           </li>
@@ -709,19 +730,26 @@ function LotCell({ line, current, isBusy, onPick }: {
 
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (triggerRef.current?.contains(t) || popRef.current?.contains(t)) return;
+    // `composedPath()` (le trajet RÉEL de l'évènement) plutôt que `.contains()` sur
+    // `e.target` : plus fiable pour un déclencheur + un popup portés en portail
+    // séparé (insensible à un nœud déplacé/retiré entre la capture et le check).
+    // `pointerdown` (pas `mousedown`) pour matcher exactement l'évènement écouté
+    // par Radix (le Dialog/FullscreenPanel englobant) — mêmes garanties tactile
+    // que souris, un seul type d'évènement à raisonner.
+    const onDown = (e: PointerEvent) => {
+      const path = e.composedPath();
+      if (triggerRef.current && path.includes(triggerRef.current)) return;
+      if (popRef.current && path.includes(popRef.current)) return;
       closeMenu();
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeMenu(); };
     const reflow = () => place();
-    document.addEventListener("mousedown", onDown);
+    document.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);
     window.addEventListener("scroll", reflow, true);
     window.addEventListener("resize", reflow);
     return () => {
-      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("pointerdown", onDown);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("scroll", reflow, true);
       window.removeEventListener("resize", reflow);
@@ -785,7 +813,14 @@ function LotCell({ line, current, isBusy, onPick }: {
           ref={popRef}
           data-floating-root=""
           style={{ position: "fixed", left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom }}
-          className="z-[100] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[70vh] animate-fade-up"
+          // `pointer-events-auto` OBLIGATOIRE : ce menu s'ouvre AU-DESSUS d'un
+          // FullscreenPanel (Radix Dialog modal), qui pose `pointer-events:none`
+          // sur <body> — dont ce popup hérite (porté dans <body>). Sans ça les
+          // clics TRAVERSENT le popup (il n'est pas cible d'évènement) : l'option
+          // ne reçoit jamais son onClick, et le pointerdown atterrit sur le
+          // panneau derrière → vu comme un « clic dehors » → le menu se referme
+          // à chaque clic intérieur.
+          className="pointer-events-auto z-[100] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[70vh] animate-fade-up"
         >
           <div className="overflow-y-auto py-1 min-h-0" onMouseLeave={() => setHovered(null)}>
             <button type="button" onMouseEnter={() => setHovered(null)} onClick={() => pick("")}

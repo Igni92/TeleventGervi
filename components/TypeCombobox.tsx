@@ -54,19 +54,23 @@ export function TypeCombobox({
   const openMenu = () => { reposition(); setOpen(true); };
 
   // Ferme au clic extérieur (bouton OU menu portalisé) + repositionne au scroll.
+  // `composedPath()` plutôt que `.contains()` sur `e.target` (plus fiable pour un
+  // déclencheur + un panneau en portail séparé) ; `pointerdown` pour matcher
+  // l'évènement écouté par Radix (Dialog/FullscreenPanel englobant).
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (btnRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+    const onDown = (e: PointerEvent) => {
+      const path = e.composedPath();
+      if (btnRef.current && path.includes(btnRef.current)) return;
+      if (panelRef.current && path.includes(panelRef.current)) return;
       setOpen(false);
     };
     const onScroll = () => reposition();
-    document.addEventListener("mousedown", onDown);
+    document.addEventListener("pointerdown", onDown);
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onScroll);
     return () => {
-      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("pointerdown", onDown);
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onScroll);
     };
@@ -131,7 +135,11 @@ export function TypeCombobox({
           ref={panelRef}
           data-floating-root=""
           style={{ position: "fixed", top: pos.top, left: pos.left, width: Math.max(pos.width, 176), zIndex: 100 }}
-          className="rounded-lg border border-border bg-card shadow-modal p-1.5"
+          // `pointer-events-auto` OBLIGATOIRE quand ce menu s'ouvre au-dessus d'un
+          // Dialog/FullscreenPanel Radix (modal) : Radix pose `pointer-events:none`
+          // sur <body>, dont ce panneau hérite (porté dans <body>) — les clics le
+          // traverseraient et son détecteur de « clic dehors » le refermerait.
+          className="pointer-events-auto rounded-lg border border-border bg-card shadow-modal p-1.5"
         >
           <input
             autoFocus

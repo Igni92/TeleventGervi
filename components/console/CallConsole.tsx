@@ -995,7 +995,11 @@ function ClientContextMenu({
   return createPortal(
     <div
       data-floating-root=""
-      className="fixed inset-0 z-[130]"
+      // `pointer-events-auto` OBLIGATOIRE quand ce menu s'ouvre au-dessus d'un
+      // Dialog Radix (modal) : Radix pose `pointer-events:none` sur <body>, dont
+      // ce portail hérite — les clics traverseraient le menu (items sans onClick)
+      // et le fond ne pourrait plus le fermer.
+      className="pointer-events-auto fixed inset-0 z-[130]"
       onClick={onClose}
       onContextMenu={(e) => { e.preventDefault(); onClose(); }}
     >

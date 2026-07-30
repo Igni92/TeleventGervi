@@ -30,6 +30,11 @@ import {
 import { getClientOrderStats, hasOrderOnDay, resolveClientCardCodes } from "@/lib/clientOrderStats";
 import { getSuggestedPrices, type SuggestedPrice } from "@/lib/gerviPricing";
 
+// Route interrogeant SAP / agrégeant beaucoup de données : sans plafond explicite,
+// un backend lent dépassait la durée par défaut de la fonction, qui mourait SANS
+// réponse — côté front, un « chargement » perpétuel au lieu d'une erreur affichable.
+export const maxDuration = 60;
+
 /** Copie de config avec certaines règles FORCÉES à off — permet d'évaluer les
  *  règles de PRIX par ligne saisie et les règles de VOLUME par ARTICLE agrégé
  *  (le front découpe une même quantité en plusieurs lignes par entrepôt : un

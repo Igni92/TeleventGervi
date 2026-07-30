@@ -5,6 +5,11 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { isAgreeur, requirePreparateurOrAdmin } from "@/lib/permissions";
 
+// Route interrogeant SAP / agrégeant beaucoup de données : sans plafond explicite,
+// un backend lent dépassait la durée par défaut de la fonction, qui mourait SANS
+// réponse — côté front, un « chargement » perpétuel au lieu d'une erreur affichable.
+export const maxDuration = 60;
+
 const WHITELIST_WHS = new Set(["000", "01", "R1"]);
 
 /**

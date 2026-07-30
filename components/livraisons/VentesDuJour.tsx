@@ -14,10 +14,14 @@
  * (La mise en préparation / le suivi de picking vivent dans le Détail livraison.)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Check, Clock, Hash, Loader2, Pencil, RefreshCw, Search, ShieldAlert, Store, Truck } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { CalendarDays, Check, Clock, Hash, Inbox, Loader2, Pencil, RefreshCw, Search, ShieldAlert, Store, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { StatBlock } from "@/components/ui/stat-block";
-import { formatDeliveryDate } from "@/lib/livraison";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { DesignationChips } from "@/components/entrees/DesignationChips";
+import { broadcastActiveClient } from "@/lib/consoleSync";
 import { BLViewDialog } from "@/components/livraisons/BLViewDialog";
 import type { ApiResp, Doc } from "@/lib/livraisonView";
 import type { SafeguardViolation } from "@/lib/safeguards";
@@ -34,7 +38,24 @@ function shortDate(iso: string): string {
   });
 }
 
+const DOW_ABBR = ["DIM", "LUN", "MAR", "MER", "JEU", "VEN", "SAM"];
+/** « LUN 27.07.26 » compact — modale de détail BL (en-tête). */
+function blDateLabel(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  return `${DOW_ABBR[dt.getUTCDay()]} ${p2(d)}.${p2(m)}.${String(y).slice(-2)}`;
+}
+/** « Vente(s) du MER 29.07.26 à 5h17 » — en-tête de la carte, heure courante
+ *  (rendu au moment du chargement/rafraîchissement). */
+function venteHeaderLabel(iso: string): string {
+  const now = new Date();
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  return `Vente(s) du ${blDateLabel(iso)} à ${now.getHours()}h${p2(now.getMinutes())}`;
+}
+
 const eur = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+const eur2 = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** Même palette de segments que le Détail livraison (SEG_UI de LivraisonDetail). */
 const SEGMENT_BADGE: Record<string, string> = {
@@ -96,6 +117,12 @@ export function VentesDuJour() {
   useEffect(() => { load(); }, [load]);
 
   const needle = q.trim().toLowerCase();
+  // Total NON filtré (ignore la recherche) — distingue « aucune vente saisie
+  // aujourd'hui » (état B) de « la recherche ne matche rien » (texte discret).
+  const allDocsCount = useMemo(
+    () => toGroups(data).reduce((s, g) => s + g.docs.length, 0),
+    [data],
+  );
   const groups = useMemo(() => {
     const base = toGroups(data);
     if (!needle) return base;
@@ -138,15 +165,20 @@ export function VentesDuJour() {
         </button>
       </div>
 
-      {/* Synthèse du jour */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-        <Stat label="Ventes saisies" value={docs.length.toString()} />
-        <Stat label="CA HT" value={eur.format(ca)} />
-        <Stat label="Préparées" value={`${prepared}/${docs.length}`} tone="emerald" />
-        <Stat label="Parties" value={`${departed}/${docs.length}`} tone="sky" />
-        {/* Garde-fous (Paramètres) : ventes du jour présentant ≥ 1 anomalie. */}
-        <Stat label="Alertes garde-fous" value={alerted.toString()} tone={alerted > 0 ? "amber" : undefined} />
-      </div>
+      {/* Synthèse du jour — masquée pendant la mise à jour et quand il n'y a
+          aucune vente saisie (états A/B : le gros message prend toute la place).
+          Basé sur le total NON filtré : une recherche sans résultat ne doit pas
+          faire disparaître les compteurs (juste les repasser à 0). */}
+      {!loading && allDocsCount > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          <Stat label="Ventes saisies" value={docs.length.toString()} />
+          <Stat label="CA HT" value={eur.format(ca)} />
+          <Stat label="Préparées" value={`${prepared}/${docs.length}`} tone="emerald" />
+          <Stat label="Parties" value={`${departed}/${docs.length}`} tone="sky" />
+          {/* Garde-fous (Paramètres) : ventes du jour présentant ≥ 1 anomalie. */}
+          <Stat label="Alertes garde-fous" value={alerted.toString()} tone={alerted > 0 ? "amber" : undefined} />
+        </div>
+      )}
 
       <section className="rounded-2xl border border-border bg-card overflow-hidden">
         <div className="flex items-center gap-2.5 px-4 sm:px-5 py-3 border-b border-border bg-secondary/30">
@@ -155,25 +187,30 @@ export function VentesDuJour() {
           </span>
           <div className="min-w-0">
             <p className="text-[13.5px] font-semibold text-foreground leading-tight">
-              Ventes saisies aujourd&apos;hui{data?.date ? ` — ${formatDeliveryDate(data.date)}` : ""}
+              {venteHeaderLabel(data?.date ?? today)}
             </p>
-            <p className="text-[11px] text-muted-foreground">
-              {loading && !data
-                ? "Chargement…"
-                : `${docs.length} vente${docs.length > 1 ? "s" : ""} · ${eur.format(ca)} HT · groupées par transporteur`}
-            </p>
+            {!loading && allDocsCount > 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                {`${docs.length} vente${docs.length > 1 ? "s" : ""} · ${eur.format(ca)} HT · groupées par transporteur`}
+              </p>
+            )}
           </div>
         </div>
 
-        {loading && !data ? (
-          <div className="flex items-center gap-2 px-5 py-4 text-[13px] text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Chargement des ventes…
-          </div>
+        {loading ? (
+          // A — mise à jour en cours : pas de compteurs, message plein cadre.
+          <BigStateMessage icon={Loader2} spin text="Mise à jour en cours" />
+        ) : allDocsCount === 0 ? (
+          // B — aucune vente saisie aujourd'hui : pas de compteurs, message plein cadre.
+          <BigStateMessage icon={Inbox} text="Aucune vente pour le moment" />
         ) : groups.length === 0 ? (
+          // Recherche active sans résultat (des ventes existent, filtrées à 0) — cas
+          // distinct de « B » : garde le texte discret existant.
           <p className="px-5 py-6 text-[13px] text-muted-foreground text-center">
-            Aucune vente saisie aujourd&apos;hui{needle ? " pour cette recherche" : ""}.
+            Aucune vente saisie aujourd&apos;hui pour cette recherche.
           </p>
         ) : (
+          // C — des ventes : tout s'affiche normalement.
           groups.map((g) => (
             <div key={g.key}>
               <div className="flex items-center gap-2 px-4 sm:px-5 py-1.5 bg-secondary/20 border-y border-border/60">
@@ -199,6 +236,23 @@ export function VentesDuJour() {
         onOpenChange={(v) => { if (!v) setBlOpen(null); }}
         onSaved={load}
       />
+    </div>
+  );
+}
+
+/** Gros message plein cadre (états A « mise à jour » / B « aucune vente ») —
+ *  compteurs masqués, texte blanc pur en surgras + liseré blanc, lisible sur
+ *  fond sombre dédié (indépendant du thème clair/sombre de l'appli). */
+function BigStateMessage({ icon: Icon, text, spin }: { icon: typeof Loader2; text: string; spin?: boolean }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 px-5 py-16 bg-gradient-to-br from-slate-900 to-slate-800">
+      <Icon className={`h-7 w-7 text-white/80 ${spin ? "animate-spin" : ""}`} />
+      <p
+        className="text-[20px] sm:text-[22px] font-extrabold text-white text-center tracking-tight"
+        style={{ WebkitTextStroke: "0.6px #fff" }}
+      >
+        {text}
+      </p>
     </div>
   );
 }
@@ -239,6 +293,9 @@ function Coche({ done, label, tone }: { done: boolean; label: string; tone: "eme
 function VenteRow({ d, alerts, onOpenBL }: { d: Doc; alerts?: SafeguardViolation[]; onOpenBL: (d: Doc, edit: boolean) => void }) {
   const takenTime = d.takenAt ? d.takenAt.slice(11, 16) : null;
   const [showAlerts, setShowAlerts] = useState(false);
+  // Détail BL (modale plein écran mobile) — toutes les lignes sont déjà en main
+  // (mêmes données que la liste), pas d'appel réseau supplémentaire.
+  const [detailOpen, setDetailOpen] = useState(false);
   // N° de commande client (réf. NumAtCard) — éditable ici, enregistré sur le BL SAP.
   const [num, setNum] = useState(d.numAtCard ?? "");
   const [saving, setSaving] = useState(false);
@@ -272,7 +329,14 @@ function VenteRow({ d, alerts, onOpenBL }: { d: Doc; alerts?: SafeguardViolation
       title="Clic : voir le BL · Clic droit : modifier"
     >
     <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-      <div className="min-w-0 flex-1">
+      <div
+        className="min-w-0 flex-1 cursor-pointer"
+        role="button"
+        tabIndex={0}
+        onClick={() => setDetailOpen(true)}
+        onKeyDown={(e) => { if (e.key === "Enter") setDetailOpen(true); }}
+        title={`Voir le détail du BL #${d.docNum}`}
+      >
         <p className="flex items-center gap-2 min-w-0 text-[13.5px] font-semibold text-foreground">
           <button
             type="button"
@@ -292,7 +356,7 @@ function VenteRow({ d, alerts, onOpenBL }: { d: Doc; alerts?: SafeguardViolation
           {(alerts?.length ?? 0) > 0 && (
             <button
               type="button"
-              onClick={() => setShowAlerts((v) => !v)}
+              onClick={(e) => { e.stopPropagation(); setShowAlerts((v) => !v); }}
               title="Anomalies garde-fous — cliquer pour le détail"
               className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide shrink-0 ${
                 hasBlock
@@ -359,6 +423,90 @@ function VenteRow({ d, alerts, onOpenBL }: { d: Doc; alerts?: SafeguardViolation
         ))}
       </ul>
     )}
+    <BLDetailDialog doc={d} open={detailOpen} onOpenChange={setDetailOpen} />
     </li>
+  );
+}
+
+/** Détail compact d'un BL — plein écran par défaut (mobile), boîte centrée à
+ *  partir de `sm`. Une ligne par article (colis · désignation · code · prix ·
+ *  total) + tags désignation ; « Modifier » relance la saisie sur l'Écran 2. */
+function BLDetailDialog({ doc: d, open, onOpenChange }: { doc: Doc; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const router = useRouter();
+  const [modifBusy, setModifBusy] = useState(false);
+
+  const startModif = useCallback(async () => {
+    setModifBusy(true);
+    try {
+      const r = await fetch(`/api/clients/resolve?code=${encodeURIComponent(d.cardCode)}`);
+      const j = await r.json().catch(() => null);
+      if (!j?.id) {
+        toast.error("Client introuvable en télévente — modification impossible depuis ici.");
+        return;
+      }
+      broadcastActiveClient({
+        clientId: j.id,
+        clientName: d.cardName,
+        stockSharePct: 100,
+        client: null,
+        modif: { docEntry: d.docEntry, docNum: d.docNum },
+      });
+      onOpenChange(false);
+      router.push("/console/ecran2");
+    } catch {
+      toast.error("Échec du chargement de la modification.");
+    } finally {
+      setModifBusy(false);
+    }
+  }, [d.cardCode, d.cardName, d.docEntry, d.docNum, onOpenChange, router]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {/* Plein écran par défaut (mobile) ; boîte centrée classique à partir de `sm`. */}
+      <DialogContent
+        className="fixed inset-0 top-0 left-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 flex flex-col gap-3 overflow-y-auto rounded-none p-4 sm:inset-auto sm:left-[50%] sm:top-[50%] sm:h-auto sm:max-h-[90vh] sm:w-[calc(100%-1.5rem)] sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:p-6"
+      >
+        <DialogHeader className="text-left shrink-0">
+          <DialogTitle className="flex items-center justify-between gap-2 pr-6 text-[15px]">
+            <span className="truncate">{d.cardName}</span>
+            <span className={`inline-flex items-center gap-1.5 text-[11.5px] font-semibold shrink-0 ${d.open ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
+              <span className={`h-2 w-2 rounded-full shrink-0 ${d.open ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
+              {d.open ? "BL modifiable" : "BL clôturé"}
+            </span>
+          </DialogTitle>
+          <DialogDescription className="text-[12.5px] text-muted-foreground">
+            BL {d.docNum} du {blDateLabel(d.dueDate)}
+          </DialogDescription>
+        </DialogHeader>
+
+        <ul className="flex-1 divide-y divide-border/60 min-h-0">
+          {d.lines.map((l) => (
+            <li key={l.itemCode} className="py-2.5">
+              <div className="flex items-baseline gap-2 text-[13px]">
+                <span className="w-7 shrink-0 text-right font-bold tnum">{l.colis.toLocaleString("fr-FR")}</span>
+                <span className="min-w-0 flex-1 truncate font-semibold text-foreground">{l.itemName}</span>
+                <span className="shrink-0 text-muted-foreground">{l.itemCode}</span>
+                <span className="shrink-0 tnum">{l.price != null ? eur2.format(l.price) : "—"}</span>
+                <span className="shrink-0 font-bold tnum">{l.lineTotal != null ? eur2.format(l.lineTotal) : "—"}</span>
+              </div>
+              <DesignationChips marque={l.marque} condt={l.condt} calibre={l.calibre} variete={l.variete} pays={l.pays} className="ml-9 mt-1" />
+            </li>
+          ))}
+        </ul>
+
+        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border/60 pt-3">
+          <span className="text-[13px] font-semibold">
+            Total HT <b className="tnum">{eur2.format(d.totalHT)}</b>
+          </span>
+          {d.open && (
+            <Button type="button" variant="warning" size="sm" onClick={startModif} disabled={modifBusy}
+              title={`Modifier le BL # ${d.docNum} (sur l'Écran 2)`}>
+              {modifBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" />}
+              Modifier
+            </Button>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

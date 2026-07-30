@@ -23,6 +23,9 @@ export async function GET() {
     const filter = "DocumentStatus eq 'bost_Open' and Cancelled eq 'tNO'";
     const res = await sap.get<{ value: { DocDueDate?: string }[] }>(
       `Quotations?$select=DocDueDate&$top=200&$filter=${encodeURIComponent(filter)}`,
+      // ⚠️ Sans le header Prefer, ce Service Layer plafonne la page à 20 documents
+      // quel que soit le $top : la pastille SOUS-COMPTAIT dès la 21ᵉ offre.
+      { headers: { Prefer: "odata.maxpagesize=200" } },
     );
     const count = (res.value ?? []).filter((q) => q.DocDueDate && isDepartureReached(q.DocDueDate)).length;
     return NextResponse.json({ count });

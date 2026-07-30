@@ -64,19 +64,23 @@ export function ConsoleLotPicker({
 
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (triggerRef.current?.contains(t) || popRef.current?.contains(t)) return;
+    // `composedPath()` plutôt que `.contains()` sur `e.target` (plus fiable pour
+    // déclencheur + popup en portail séparé) ; `pointerdown` pour matcher
+    // l'évènement écouté par Radix (Dialog/FullscreenPanel englobant).
+    const onDown = (e: PointerEvent) => {
+      const path = e.composedPath();
+      if (triggerRef.current && path.includes(triggerRef.current)) return;
+      if (popRef.current && path.includes(popRef.current)) return;
       closeMenu();
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeMenu(); };
     const reflow = () => place();
-    document.addEventListener("mousedown", onDown);
+    document.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);
     window.addEventListener("scroll", reflow, true);
     window.addEventListener("resize", reflow);
     return () => {
-      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("pointerdown", onDown);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("scroll", reflow, true);
       window.removeEventListener("resize", reflow);
@@ -115,7 +119,11 @@ export function ConsoleLotPicker({
           ref={popRef}
           data-floating-root=""
           style={{ position: "fixed", left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom }}
-          className="z-[120] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[60vh] animate-fade-up"
+          // `pointer-events-auto` OBLIGATOIRE quand ce menu s'ouvre au-dessus d'un
+          // Dialog/FullscreenPanel Radix (modal) : Radix pose `pointer-events:none`
+          // sur <body>, dont ce popup hérite (porté dans <body>) — les clics le
+          // traverseraient et son détecteur de « clic dehors » le refermerait.
+          className="pointer-events-auto z-[120] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[60vh] animate-fade-up"
         >
           <p className="shrink-0 px-3 pt-2 pb-1 text-[9.5px] uppercase tracking-wider text-muted-foreground font-semibold border-b border-border/60">
             Lots — ordre FIFO (plus ancien d&apos;abord)

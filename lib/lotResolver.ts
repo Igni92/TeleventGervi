@@ -73,6 +73,22 @@ const MAX_DOCS = 1500;
 const PAGE_SIZE = 200;
 
 let cache: { at: number; maps: LotMaps; partial: boolean } | null = null;
+/**
+ * Scan EN COURS, partagé. Sans lui, N requêtes concurrentes arrivant sur un cache
+ * froid (démarrage d'instance, ou expiration du TTL au moment d'un pic) lançaient
+ * CHACUNE un scan complet des ~1500 réceptions : SAP se faisait marteler et
+ * toutes les requêtes ralentissaient ensemble — l'écran « chargeait à l'infini »
+ * précisément quand plusieurs personnes l'ouvraient en même temps. Les appels
+ * concurrents attendent désormais le même scan.
+ */
+let inflight: Promise<LotMaps> | null = null;
+/**
+ * Budget par page. Le défaut de `sapb1` (90 s) dépasse la durée de vie des routes
+ * interactives : une page lente tuait la fonction avant toute réponse. Ici on
+ * échoue vite, et `Promise.allSettled` conserve les pages abouties (maps
+ * partielles) plutôt que de tout perdre.
+ */
+const PAGE_TIMEOUT_MS = 25_000;
 
 function emptyMaps(): LotMaps {
   return {
@@ -85,7 +101,13 @@ function emptyMaps(): LotMaps {
 /** Renvoie les maps (cache 10 min). Scanne les ~1500 derniers PDN au refresh. */
 export async function getLotMaps(): Promise<LotMaps> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.maps;
+  // Un scan déjà lancé ? On s'y raccroche au lieu d'en démarrer un second.
+  if (inflight) return inflight;
+  inflight = scanLotMaps().finally(() => { inflight = null; });
+  return inflight;
+}
 
+async function scanLotMaps(): Promise<LotMaps> {
   const maps = emptyMaps();
   type PdnLine = { ItemCode: string; WarehouseCode?: string };
   type Pdn = { DocNum: number; DocDate?: string; CardName?: string; DocumentLines?: PdnLine[] };
@@ -95,56 +117,72 @@ export async function getLotMaps(): Promise<LotMaps> {
   const t0 = Date.now();
   // DocNum de la dernière EM AVEC magasin par article (pour byItemWarehouse).
   const bestWhsDoc = new Map<string, number>();
-  try {
-    let skip = 0;
-    while (skip < MAX_DOCS) {
+
+  // Pagination PARALLÈLE : les offsets sont connus d'avance ($orderby DocNum desc,
+  // pages fixes de PAGE_SIZE), donc inutile d'attendre une page pour demander la
+  // suivante. L'ancienne boucle séquentielle enchaînait jusqu'à MAX_DOCS/PAGE_SIZE
+  // allers-retours SAP (8 pages × ~1-3 s) SUR LE CHEMIN CRITIQUE de tout écran qui
+  // résout des lots (bons de commande, console, livraisons) : au refresh du cache
+  // (TTL 10 min, et à froid sur chaque instance serverless) l'écran restait en
+  // « chargement » des dizaines de secondes, jusqu'au timeout.
+  //
+  // Sûr vis-à-vis de l'ordre : `pushDoc` insère en ordre DÉCROISSANT trié et
+  // plafonne la queue, et les autres maps gardent le DocNum MAX — le résultat est
+  // donc identique quel que soit l'ordre d'ingestion des pages. On ingère malgré
+  // tout dans l'ordre des offsets (Promise.allSettled préserve l'ordre) pour que
+  // `docMeta` (premier gagnant) reste sur le doc le plus récent, comme avant.
+  const pageCount = Math.ceil(MAX_DOCS / PAGE_SIZE);
+  const settled = await Promise.allSettled(
+    Array.from({ length: pageCount }, (_, i) =>
       // ⚠️ Header Prefer obligatoire : sans lui le SL renvoie 20 docs max par page
       // (l'ancien $top=50 faisait 25 allers-retours pour 500 docs).
-      const r = await sap.get<{ value: Pdn[] }>(
-        `PurchaseDeliveryNotes?$top=${PAGE_SIZE}&$skip=${skip}&$orderby=DocNum desc&$select=DocNum,DocDate,CardName,DocumentLines`,
-        { headers: { Prefer: `odata.maxpagesize=${PAGE_SIZE}` } },
-      );
-      const docs = r.value || [];
-      if (docs.length === 0) break;
-      for (const d of docs) {
-        // Métadonnées EM (date de réception + fournisseur) pour le libellé au survol.
-        if (!maps.docMeta.has(d.DocNum)) {
-          maps.docMeta.set(d.DocNum, { date: d.DocDate ? d.DocDate.slice(0, 10) : null, supplier: d.CardName ?? null });
+      sap.get<{ value: Pdn[] }>(
+        `PurchaseDeliveryNotes?$top=${PAGE_SIZE}&$skip=${i * PAGE_SIZE}&$orderby=DocNum desc&$select=DocNum,DocDate,CardName,DocumentLines`,
+        { headers: { Prefer: `odata.maxpagesize=${PAGE_SIZE}` }, timeoutMs: PAGE_TIMEOUT_MS },
+      ),
+    ),
+  );
+
+  for (const res of settled) {
+    if (res.status === "rejected") {
+      // Une page en échec ne condamne pas le scan : les autres restent exploitables
+      // (maps partielles → le TTL re-tentera un scan complet).
+      partial = true;
+      console.warn("[lotResolver] Page PurchaseDeliveryNotes en échec:", (res.reason as Error)?.message);
+      continue;
+    }
+    const docs = res.value.value || [];
+    for (const d of docs) {
+      // Métadonnées EM (date de réception + fournisseur) pour le libellé au survol.
+      if (!maps.docMeta.has(d.DocNum)) {
+        maps.docMeta.set(d.DocNum, { date: d.DocDate ? d.DocDate.slice(0, 10) : null, supplier: d.CardName ?? null });
+      }
+      for (const l of (d.DocumentLines || [])) {
+        if (!l.ItemCode) continue;
+        if (!maps.byItem.has(l.ItemCode) || d.DocNum > maps.byItem.get(l.ItemCode)!) {
+          maps.byItem.set(l.ItemCode, d.DocNum);
         }
-        for (const l of (d.DocumentLines || [])) {
-          if (!l.ItemCode) continue;
-          if (!maps.byItem.has(l.ItemCode) || d.DocNum > maps.byItem.get(l.ItemCode)!) {
-            maps.byItem.set(l.ItemCode, d.DocNum);
+        pushDoc(maps.byItemList, l.ItemCode, d.DocNum);
+        if (l.WarehouseCode) {
+          const key = `${l.ItemCode}|${l.WarehouseCode}`;
+          if (!maps.byItemWhs.has(key) || d.DocNum > maps.byItemWhs.get(key)!) {
+            maps.byItemWhs.set(key, d.DocNum);
           }
-          pushDoc(maps.byItemList, l.ItemCode, d.DocNum);
-          if (l.WarehouseCode) {
-            const key = `${l.ItemCode}|${l.WarehouseCode}`;
-            if (!maps.byItemWhs.has(key) || d.DocNum > maps.byItemWhs.get(key)!) {
-              maps.byItemWhs.set(key, d.DocNum);
-            }
-            pushDoc(maps.byItemWhsList, key, d.DocNum);
-            maps.whsOfItemDoc.set(`${l.ItemCode}|${d.DocNum}`, l.WarehouseCode);
-            // Magasin de la dernière EM (avec magasin) de l'article → repli "item".
-            if (d.DocNum > (bestWhsDoc.get(l.ItemCode) ?? -1)) {
-              bestWhsDoc.set(l.ItemCode, d.DocNum);
-              maps.byItemWarehouse.set(l.ItemCode, l.WarehouseCode);
-            }
+          pushDoc(maps.byItemWhsList, key, d.DocNum);
+          maps.whsOfItemDoc.set(`${l.ItemCode}|${d.DocNum}`, l.WarehouseCode);
+          // Magasin de la dernière EM (avec magasin) de l'article → repli "item".
+          if (d.DocNum > (bestWhsDoc.get(l.ItemCode) ?? -1)) {
+            bestWhsDoc.set(l.ItemCode, d.DocNum);
+            maps.byItemWarehouse.set(l.ItemCode, l.WarehouseCode);
           }
         }
       }
-      scanned += docs.length;
-      skip += docs.length;
-      if (docs.length < PAGE_SIZE) break;   // dernière page atteinte
     }
-  } catch (err) {
-    partial = true;
-    console.warn(
-      `[lotResolver] Scan PurchaseDeliveryNotes interrompu après ${scanned} docs:`,
-      (err as Error).message,
-    );
-    // Échec total ET ancien cache encore là → on garde l'ancien (mieux que vide).
-    if (scanned === 0 && cache) return cache.maps;
+    scanned += docs.length;
   }
+
+  // Échec TOTAL ET ancien cache encore là → on garde l'ancien (mieux que vide).
+  if (scanned === 0 && partial && cache) return cache.maps;
 
   // On cache même un scan partiel (mieux que de re-marteler SAP à chaque commande
   // et de retomber sur des maps vides) — le TTL re-tentera un scan complet.

@@ -78,7 +78,23 @@ export function FullscreenPanel({
           // Cf. components/ui/dialog.tsx : les menus/comboboxes maison sont
           // portalisés dans <body>, hors de cet arbre — sans ceci Radix les
           // considère "à l'extérieur" et referme tout le panneau au clic.
+          //
+          // Le clic seul ne suffit pas : sélectionner une option focusable (bouton,
+          // champ) dans ce portail lui donne le FOCUS, lui aussi hors de l'arbre du
+          // Dialog — en mode modal, Radix referme AUSSI sur un focus « sorti »
+          // (onFocusOutside, déclenché indépendamment de onPointerDownOutside). Sans
+          // ce second garde-fou, le panneau se refermait encore au clic sur une
+          // option du sélecteur de lot (Bons de commande / Offres), la commande
+          // fournisseur ou l'entrée marchandise, même le clic neutralisé ci-dessus.
           onPointerDownOutside={(e) => {
+            const t = e.detail.originalEvent.target as HTMLElement | null;
+            if (t?.closest("[data-floating-root]")) e.preventDefault();
+          }}
+          onFocusOutside={(e) => {
+            const t = e.detail.originalEvent.target as HTMLElement | null;
+            if (t?.closest("[data-floating-root]")) e.preventDefault();
+          }}
+          onInteractOutside={(e) => {
             const t = e.detail.originalEvent.target as HTMLElement | null;
             if (t?.closest("[data-floating-root]")) e.preventDefault();
           }}
@@ -111,7 +127,7 @@ export function FullscreenPanel({
                   </h2>
                 </DialogPrimitive.Title>
                 {subtitle && (
-                  <div className="mt-0.5 truncate text-[12.5px] text-muted-foreground">
+                  <div className="mt-0.5 truncate text-[12.5px] text-foreground">
                     {subtitle}
                   </div>
                 )}

@@ -116,7 +116,13 @@ function rawRequest<T = unknown>(env: SapEnv, path: string, opts: SapRequestOpti
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort();
-      reject(new Error(`SAP request timeout after ${timeoutMs}ms: ${path}`));
+      // `isTimeout` : marqueur explicite pour que le retry NE rejoue PAS cet appel.
+      // Le budget de temps a déjà été consommé en entier ; le rejouer 4 fois
+      // multipliait la latence par 4 (jusqu'à ~6 min pour UN appel) au lieu
+      // d'échouer franchement — cf. isTransientNetworkError.
+      const err = new Error(`SAP request timeout after ${timeoutMs}ms: ${path}`);
+      (err as Error & { isTimeout?: boolean }).isTimeout = true;
+      reject(err);
     }, timeoutMs);
 
     const req = https.request(
@@ -202,6 +208,12 @@ const TRANSIENT_NET_CODES = new Set(["ECONNRESET", "ETIMEDOUT", "EPIPE", "ECONNR
 /** Vrai si l'erreur réseau (rejet de rawRequest) est transitoire et mérite un retry. */
 function isTransientNetworkError(e: unknown): boolean {
   if (!e || typeof e !== "object") return false;
+  // NOTRE propre timeout (cf. rawRequest) n'est PAS transitoire : le budget de
+  // temps a déjà été consommé intégralement. Le rejouer multipliait la latence
+  // par le nombre de tentatives (90 s → ~6 min pour un seul appel) et faisait
+  // mourir la fonction au lieu de rendre une erreur exploitable. Un vrai
+  // ETIMEDOUT socket (code, ci-dessous) reste lui légitimement rejoué.
+  if ((e as { isTimeout?: boolean }).isTimeout) return false;
   const code = (e as { code?: string }).code;
   if (code && TRANSIENT_NET_CODES.has(code)) return true;
   const msg = (e as { message?: string }).message ?? "";

@@ -29,6 +29,10 @@ export interface Line {
   pays?: string | null;
   variete?: string | null;     // frgnName SAP (variété) — précision produit
   calibre?: string | null;     // U_GER_CALIBRE SAP — précision produit (préparation)
+  /** Prix unitaire HT (SAP LineTotal ÷ quantité) — null si non disponible. */
+  price?: number | null;
+  /** Montant HT de la ligne (SAP LineTotal, cumulé si lignes fusionnées). */
+  lineTotal?: number | null;
 }
 
 export interface Doc {

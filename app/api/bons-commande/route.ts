@@ -14,6 +14,12 @@ import { FRUIT_FAMILIES } from "@/lib/familles";
 import { isDepartureReached } from "@/lib/livraison";
 
 export const dynamic = "force-dynamic";
+// Cet écran interroge SAP (offres + commandes + calibre + cartes de lots). Sans
+// plafond explicite, un SAP lent faisait dépasser la durée par défaut de la
+// fonction et la requête mourait SANS réponse → l'écran restait en « chargement »
+// indéfiniment. Avec un plafond assumé, le dépassement remonte une erreur que le
+// front peut afficher.
+export const maxDuration = 60;
 
 /**
  * Onglet « BONS DE COMMANDE » — commandes créées SANS auto-lot (choix explicite,
@@ -35,6 +41,8 @@ type SapLine = {
   Quantity?: number;
   WarehouseCode?: string;
   U_NoLot?: string;
+  Price?: number;
+  LineTotal?: number;
 };
 type SapOrderDoc = {
   DocEntry: number;
@@ -71,6 +79,8 @@ interface PrepLine {
   itemCode: string; itemName: string; quantity: number; colis: number;
   warehouse: string | null; marque: string | null; condt: string | null; pays: string | null;
   variete: string | null; uvc: string | null; calibre: string | null;
+  /** Prix unitaire HT (LineTotal SAP ÷ quantité) et total HT — null si indisponible. */
+  price: number | null; lineTotal: number | null;
   lot: string; pending: boolean; candidates: LotCandidate[]; suggested: string | null;
   familyTarget: { key: string; label: string } | null;
 }
@@ -98,6 +108,10 @@ async function loadOffresRaw(): Promise<SapOrderDoc[]> {
       `Quotations?$orderby=DocDueDate asc&$top=100`
       + `&$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,NumAtCard,DocumentStatus,Cancelled,DocumentLines`
       + `&$filter=${encodeURIComponent("DocumentStatus eq 'bost_Open' and Cancelled eq 'tNO'")}`,
+      // ⚠️ Header Prefer obligatoire : sans lui ce Service Layer plafonne la page à
+      // 20 documents, quel que soit le $top. Les offres au-delà de la 20ᵉ étaient
+      // donc simplement INVISIBLES dans l'onglet (et dans la pastille de comptage).
+      { headers: { Prefer: "odata.maxpagesize=100" } },
     );
     return res.value ?? [];
   } catch (e) {
@@ -116,71 +130,88 @@ export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  const marks = await listBonCommandeDocEntries();
-  const markInfo = new Map(marks.map((m) => [m.docEntry, m]));
-  const docEntries = marks.map((m) => m.docEntry);
-
   try {
-    // Offres client (Quotations) en attente + commandes marquées « lots à affecter ».
-    // On charge les deux jeux BRUTS d'abord, puis on calcule stock/cartes de lots
-    // UNE fois pour l'union des articles (offres ⋃ commandes).
-    const offresRaw = await loadOffresRaw();
+    // ── PHASE 1 — marques « bon de commande » (DB) + offres client (SAP) ──
+    // Strictement indépendants : chargés EN PARALLÈLE (avant, deux attentes
+    // enchaînées ouvraient le chemin critique de cet écran).
+    const [marks, offresRaw] = await Promise.all([listBonCommandeDocEntries(), loadOffresRaw()]);
+    const markInfo = new Map(marks.map((m) => [m.docEntry, m]));
+    const docEntries = marks.map((m) => m.docEntry);
 
+    // ── PHASE 2 — commandes marquées, par paquets de 20 DocEntry EN PARALLÈLE ──
+    // Les paquets ne dépendent pas les uns des autres : les enchaîner ajoutait un
+    // aller-retour SAP complet par paquet. Un paquet en échec ne condamne plus la
+    // réponse entière (les autres commandes restent affichées).
     const CHUNK = 20;
-    const fetched: SapOrderDoc[] = [];
-    for (let i = 0; i < docEntries.length; i += CHUNK) {
-      const slice = docEntries.slice(i, i + CHUNK);
+    const orderChunks: number[][] = [];
+    for (let i = 0; i < docEntries.length; i += CHUNK) orderChunks.push(docEntries.slice(i, i + CHUNK));
+    const orderPages = await Promise.all(orderChunks.map((slice) => {
       const filter = slice.map((n) => `DocEntry eq ${n}`).join(" or ");
-      const res = await sap.get<{ value: SapOrderDoc[] }>(
+      return sap.get<{ value: SapOrderDoc[] }>(
         `Orders?$filter=${encodeURIComponent(filter)}`
         + `&$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocumentStatus,Cancelled,DocumentLines`,
-      );
-      for (const d of res.value ?? []) fetched.push(d);
-    }
+      )
+        .then((r) => r.value ?? [])
+        .catch((e) => {
+          console.warn("[BonCommande] Paquet de commandes en échec:", (e as Error).message);
+          return [] as SapOrderDoc[];
+        });
+    }));
     // On ne garde que les commandes vivantes (non annulées).
-    const live = fetched.filter((d) => d.Cancelled !== "tYES");
+    const live = orderPages.flat().filter((d) => d.Cancelled !== "tYES");
 
     // Union des articles (offres + commandes) → produits, calibre, stock, lots.
     const allDocs = [...offresRaw, ...live];
     const itemCodes = Array.from(new Set(allDocs.flatMap((d) => (d.DocumentLines ?? []).map((l) => l.ItemCode))));
-    const pMap = new Map<string, ProductInfo>();
-    if (itemCodes.length > 0) {
-      const prods = await prisma.product.findMany({
-        where: { itemCode: { in: itemCodes } },
-        select: { itemCode: true, itemName: true, salesUnit: true, salesUnitWeight: true,
-                  salesQtyPerPackUnit: true, uMarque: true, uCondi: true, uPays: true, uUvc: true, frgnName: true },
-      });
-      for (const p of prods) pMap.set(p.itemCode, p);
-    }
-    // Calibre (U_GER_CALIBRE) — champ SAP LIVE (hors miroir Product), pour le
-    // libellé détaillé au survol. Lots de 20 ; un lot en échec = calibre absent.
-    const calibreByItem = new Map<string, string>();
-    for (let i = 0; i < itemCodes.length; i += 20) {
-      const slice = itemCodes.slice(i, i + 20);
-      const filter = "(" + slice.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ") + ")";
-      try {
-        const r = await sap.get<{ value: { ItemCode: string; U_GER_CALIBRE?: string | null }[] }>(
+    // Segment client par CardCode (union offres + commandes).
+    const cardCodes = Array.from(new Set(allDocs.map((d) => d.CardCode)));
+
+    // ── PHASE 3 — tous les référentiels EN PARALLÈLE ──
+    // Produits (DB), segments client (DB), calibre (SAP, par paquets parallèles),
+    // cartes de lots, affectations EM et stock physique ne dépendent QUE de
+    // itemCodes/cardCodes : plus aucune raison de les enchaîner. Avant, la
+    // pire configuration alignait ~15-25 allers-retours SAP en série — de quoi
+    // dépasser la limite de durée de la fonction, d'où l'écran qui « charge à
+    // l'infini » sans jamais afficher d'erreur.
+    const calChunks: string[][] = [];
+    for (let i = 0; i < itemCodes.length; i += 20) calChunks.push(itemCodes.slice(i, i + 20));
+    const [prods, clients, calPages, maps, affects, stock] = await Promise.all([
+      itemCodes.length
+        ? prisma.product.findMany({
+            where: { itemCode: { in: itemCodes } },
+            select: { itemCode: true, itemName: true, salesUnit: true, salesUnitWeight: true,
+                      salesQtyPerPackUnit: true, uMarque: true, uCondi: true, uPays: true, uUvc: true, frgnName: true },
+          })
+        : Promise.resolve([]),
+      cardCodes.length
+        ? prisma.client.findMany({ where: { code: { in: cardCodes } }, select: { code: true, type: true } })
+        : Promise.resolve([]),
+      // Calibre (U_GER_CALIBRE) — champ SAP LIVE (hors miroir Product), pour le
+      // libellé détaillé au survol. Paquet en échec = calibre absent, jamais bloquant.
+      Promise.all(calChunks.map((slice) => {
+        const filter = "(" + slice.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ") + ")";
+        return sap.get<{ value: { ItemCode: string; U_GER_CALIBRE?: string | null }[] }>(
           `Items?$select=ItemCode,U_GER_CALIBRE&$filter=${encodeURIComponent(filter)}&$top=50`,
-        );
-        for (const it of r.value || []) if (it.U_GER_CALIBRE) calibreByItem.set(it.ItemCode, it.U_GER_CALIBRE);
-      } catch { /* lot en échec → pas de calibre pour ces articles */ }
+        )
+          .then((r) => r.value ?? [])
+          .catch(() => [] as { ItemCode: string; U_GER_CALIBRE?: string | null }[]);
+      })),
+      getLotMaps(), getEmAffects(), getItemStock(itemCodes),
+    ]);
+
+    const pMap = new Map<string, ProductInfo>();
+    for (const p of prods) pMap.set(p.itemCode, p);
+    const typeByCard = new Map<string, string | null>();
+    for (const c of clients) typeByCard.set(c.code, c.type);
+    const calibreByItem = new Map<string, string>();
+    for (const page of calPages) {
+      for (const it of page) if (it.U_GER_CALIBRE) calibreByItem.set(it.ItemCode, it.U_GER_CALIBRE);
     }
     const unitsPerColis = (code: string) => {
       const p = pMap.get(code);
       return p ? colisInfo(p).unitsPerColis || 1 : 1;
     };
-
-    // Segment client par CardCode (union offres + commandes).
-    const cardCodes = Array.from(new Set(allDocs.map((d) => d.CardCode)));
-    const typeByCard = new Map<string, string | null>();
-    if (cardCodes.length > 0) {
-      const clients = await prisma.client.findMany({ where: { code: { in: cardCodes } }, select: { code: true, type: true } });
-      for (const c of clients) typeByCard.set(c.code, c.type);
-    }
     const segmentOf = (cardCode: string) => (typeByCard.get(cardCode) ?? "").trim().toUpperCase() || null;
-
-    // Cartes de lots + affectations EM + stock physique par article (une fois).
-    const [maps, affects, stock] = await Promise.all([getLotMaps(), getEmAffects(), getItemStock(itemCodes)]);
     // Libellé lisible d'une EM (au survol) : « Reçu le jj/mm/aaaa · Fournisseur ».
     const emLabel = (dn: number): string => {
       const meta = maps.docMeta.get(dn);
@@ -220,7 +251,7 @@ export async function GET() {
     const buildPrepLines = (docLines: SapLine[], segment: string | null): { lines: PrepLine[]; pendingCount: number; colis: number } => {
       const byItem = new Map<string, { itemCode: string; itemName: string; quantity: number; colisRaw: number;
         warehouse: string | null; marque: string | null; condt: string | null; pays: string | null;
-        variete: string | null; uvc: string | null; calibre: string | null;
+        variete: string | null; uvc: string | null; calibre: string | null; lineTotalRaw: number;
         lot: string; pending: boolean; familyKey: string | null }>();
       for (const l of docLines) {
         const p = pMap.get(l.ItemCode);
@@ -240,6 +271,7 @@ export async function GET() {
             warehouse: l.WarehouseCode ?? null,
             marque: p?.uMarque ?? null, condt: p?.uCondi ?? null, pays: p?.uPays ?? null,
             variete: p?.frgnName ?? null, uvc: p?.uUvc ?? null, calibre: calibreByItem.get(l.ItemCode) ?? null,
+            lineTotalRaw: l.LineTotal ?? 0,
             // On PRÉSERVE le sentinel famille tel quel (rappel affiché) ; sinon
             // EM_PENDING générique pour une ligne à découvert, ou le vrai lot.
             lot: linePending ? (famValid ? rawLot : LOT_PENDING) : rawLot,
@@ -249,6 +281,7 @@ export async function GET() {
         } else {
           g.quantity += qty;
           g.colisRaw += qty / (unitsPerColis(l.ItemCode) || 1);
+          g.lineTotalRaw += l.LineTotal ?? 0;
           if (linePending) {
             g.pending = true;
             // Une famille portée par n'importe quelle ligne de l'article prime sur
@@ -265,6 +298,8 @@ export async function GET() {
           quantity: l.quantity, colis: Math.round(l.colisRaw * 10) / 10,
           warehouse: l.warehouse, marque: l.marque, condt: l.condt, pays: l.pays,
           variete: l.variete, uvc: l.uvc, calibre: l.calibre,
+          lineTotal: Math.round(l.lineTotalRaw * 100) / 100,
+          price: l.quantity > 0 ? Math.round((l.lineTotalRaw / l.quantity) * 100) / 100 : null,
           lot: l.lot, pending: l.pending, candidates, suggested,
           familyTarget: l.familyKey ? { key: l.familyKey, label: FAMILY_LABEL.get(l.familyKey)! } : null,
         };

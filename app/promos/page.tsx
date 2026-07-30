@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { PromosManager } from "@/components/promos/PromosManager";
 import { PageHeader } from "@/components/ui/page-header";
 
-export const metadata = { title: "Promos" };
+export const metadata = { title: "Promo" };
 export const dynamic = "force-dynamic";
 
 export default async function PromosPage() {
@@ -13,7 +13,7 @@ export default async function PromosPage() {
     <div className="space-y-8 animate-fade-up">
       <PageHeader
         kicker="Animation commerciale · Console Écran 2"
-        title="Promos"
+        title="Promo"
         help={
           <>
             Les promos <b>actives</b> s&apos;affichent en badge sur la liste stock de

@@ -1,3 +1,5 @@
+import { displayNameFromSlp } from "./salespeople";
+
 /**
  * Initiales de l'utilisateur connecté pour signer les documents SAP.
  * « Maxyme MANDINE - Gervifrais » → « MM ». On prend la 1re lettre des deux
@@ -41,4 +43,22 @@ export function docRef(opts: {
   const base = `${opts.prefix}${num} - ${ini}${opts.heure ? ` à ${opts.heure}` : ""}`;
   const note = opts.note?.trim();
   return note ? `${base} · ${note}` : base;
+}
+
+/** Heure signée dans une référence documentaire SAP (« … à 13h10 » → « 13h10 »),
+ *  la dernière trouvée (au cas où une note libre en contiendrait une autre). */
+export function heureFromDocRef(comments?: string | null): string | null {
+  if (!comments) return null;
+  const matches = comments.match(/\d{1,2}h\d{2}/g);
+  return matches ? matches[matches.length - 1] : null;
+}
+
+/** Prénom du signataire d'une référence documentaire SAP (« CF 2709 - MM à
+ *  13h10 » → « Maxyme »). Repli sur le trigramme brut si le compte n'est pas
+ *  un commercial reconnu (jamais de perte) ; null si aucune signature. */
+export function creatorFromDocRef(comments?: string | null): string | null {
+  if (!comments) return null;
+  const m = comments.match(/-\s*([A-Za-zÀ-ÖØ-öø-ÿ]{2,5})(?=\s|·|$)/);
+  if (!m) return null;
+  return displayNameFromSlp(m[1]) ?? m[1];
 }

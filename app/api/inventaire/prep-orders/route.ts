@@ -7,6 +7,10 @@ import { segmentOfGroup } from "@/lib/segments";
 import { getDeliveryStatuses } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
+// Écran interrogeant SAP : sans plafond explicite, un SAP lent dépassait la durée
+// par défaut de la fonction, qui mourait SANS réponse — côté front, un « chargement »
+// perpétuel au lieu d'une erreur affichable.
+export const maxDuration = 60;
 
 /**
  * GET /api/inventaire/prep-orders

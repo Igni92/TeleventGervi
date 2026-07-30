@@ -10,7 +10,9 @@ import { NumberInput } from "@/components/ui/number-input";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
-import { composePriceLabel, fmtPrix, promoTags, storeTypeLabel } from "@/components/promos/promo-utils";
+import { composePriceLabel, fmtPrix, storeTypeLabel } from "@/components/promos/promo-utils";
+import { designationProduit } from "@/lib/produit-designation";
+import { DesignationChips } from "@/components/entrees/DesignationChips";
 
 /**
  * Gestion des promos articles (C2) — liste + création + désactivation/suppression.
@@ -130,7 +132,7 @@ export function PromosManager() {
     <div className="panel p-4">
       <div className="flex items-center justify-between gap-2 mb-3">
         <p className="kicker inline-flex items-center gap-1.5">
-          <BadgePercent className="h-3 w-3" /> Promos en cours
+          <BadgePercent className="h-3 w-3" /> Promo en cours
           {!loading && <span className="text-muted-foreground/60 font-normal normal-case tracking-normal">({promos.length})</span>}
         </p>
         <div className="flex items-center gap-1.5">
@@ -154,84 +156,86 @@ export function PromosManager() {
           Aucune promo. Crée la première — elle apparaîtra en badge sur la liste stock de l&apos;Écran 2.
         </p>
       ) : (
-        <ul className="divide-y divide-border/50">
+        <ul className="space-y-2">
           {promos.map((p) => {
             const active = p.active ?? true;
             const debut = fmtDate(p.startsAt);
             const fin = fmtDate(p.endsAt);
+            const dz = designationProduit({
+              itemName: p.itemName, uPays: p.pays, uMarque: p.marque, uCondi: p.condi, uVariete: p.variete,
+            });
+            // Cible magasin : uniquement affichée si RESTREINTE (Export/GMS/CHR) —
+            // « tous les magasins » (storeType vide) ne porte plus de badge.
+            const storeChip = p.storeType === "EXPORT" ? "bg-violet-500/20 text-violet-300 ring-violet-400/40"
+              : p.storeType === "GMS" ? "bg-blue-500/20 text-blue-300 ring-blue-400/40"
+              : p.storeType === "CHR" ? "bg-emerald-500/20 text-emerald-300 ring-emerald-400/40"
+              : null;
             return (
-              <li key={p.id} className={`flex items-center gap-3 py-2.5 ${active ? "" : "opacity-55"}`}>
-                {/* Type — chip vif assorti au badge de l'Écran 2 */}
-                <span className="inline-flex h-[24px] min-w-[64px] justify-center items-center px-2 rounded-[5px] text-[13px] font-bold shrink-0 bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-400/70 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/60">
+              // Bloc fond NOIR PUR par promo — encre blanche pour rester lisible
+              // quel que soit le thème clair/sombre de l'appli. `dark` forcé
+              // (Tailwind darkMode:"class") pour que les composants partagés
+              // (chips) prennent leur variante contrastée sur fond noir, même
+              // si le thème global de l'appli est resté clair.
+              <li key={p.id} className={`dark rounded-xl bg-black p-3.5 ${active ? "" : "opacity-55"}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    {/* Article — même décomposition que les autres écrans (Cde
+                        Fournisseur, Entrée marchandise) : fruit + tags + code. */}
+                    <p className="text-[14.5px] font-semibold text-white truncate leading-tight">
+                      {p.label?.trim() || dz.fruit}
+                    </p>
+                    <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1" />
+                    <p className="flex items-center gap-1.5 text-[11px] font-mono text-white/60 mt-1">
+                      {p.itemCode}
+                      <span className="text-white/30">●</span>
+                      {(debut || fin) ? (
+                        <span className="font-sans text-white/70">{debut ?? "…"} → {fin ?? "…"}</span>
+                      ) : (
+                        <span className="font-sans text-emerald-400">permanent</span>
+                      )}
+                      {storeChip && (
+                        <span
+                          title={`S'applique aux magasins : ${storeTypeLabel(p.storeType)}`}
+                          className={`inline-flex items-center gap-1 h-[19px] px-1.5 rounded-[4px] text-[10.5px] font-bold uppercase tracking-wide ring-1 ring-inset ${storeChip}`}>
+                          <Store className="h-2.5 w-2.5" />
+                          {storeTypeLabel(p.storeType)}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {!active && (
+                      <span className="text-[10px] uppercase tracking-wide font-bold text-white/50">
+                        Inactive
+                      </span>
+                    )}
+                    <button type="button" onClick={() => toggleActive(p)}
+                      title={active ? "Désactiver (disparaît de l'Écran 2)" : "Réactiver"}
+                      className={`h-8 w-8 inline-flex items-center justify-center rounded-md border transition-colors shrink-0 ${
+                        active
+                          ? "border-emerald-400/50 text-emerald-400 hover:bg-emerald-950/40"
+                          : "border-white/20 text-white/50 hover:text-white"
+                      }`}>
+                      <Power className="h-4 w-4" />
+                    </button>
+                    <button type="button" onClick={() => remove(p)}
+                      title={armedDeleteId === p.id ? "Clique à nouveau pour confirmer" : "Supprimer"}
+                      className={`h-8 inline-flex items-center gap-1 px-2 rounded-md border transition-colors shrink-0 text-[11.5px] font-semibold ${
+                        armedDeleteId === p.id
+                          ? "border-rose-500 bg-rose-950/40 text-rose-300"
+                          : "border-white/20 text-white/50 hover:text-rose-400 hover:border-rose-400/60"
+                      }`}>
+                      <Trash2 className="h-4 w-4" />
+                      {armedDeleteId === p.id && "Confirmer ?"}
+                    </button>
+                  </div>
+                </div>
+                {/* Détail de la promo — déplacé de gauche vers BAS */}
+                <span className="mt-2.5 inline-flex h-[24px] min-w-[64px] justify-center items-center px-2 rounded-[5px] text-[13px] font-bold bg-rose-500/20 text-rose-300 ring-1 ring-inset ring-rose-400/40">
                   {(p.kind === "X_PLUS_Y" || p.kind === "FREE") && <Gift className="h-3 w-3 mr-1" />}
                   {p.kind === "PRICE" && <Tag className="h-3 w-3 mr-1" />}
                   {promoBadge(p)}
                 </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <p className="text-[14.5px] font-semibold text-foreground truncate leading-tight">
-                      {p.label?.trim() || p.itemName || p.itemCode}
-                    </p>
-                    {/* Cible : type de magasin (Export / GMS / CHR) ou tous */}
-                    <span
-                      title={`S'applique aux magasins : ${storeTypeLabel(p.storeType)}`}
-                      className={`inline-flex items-center gap-1 h-[19px] px-1.5 rounded-[4px] text-[10.5px] font-bold uppercase tracking-wide shrink-0 ring-1 ring-inset ${
-                        p.storeType === "EXPORT" ? "bg-violet-100 text-violet-700 ring-violet-300/70 dark:bg-violet-950/50 dark:text-violet-300 dark:ring-violet-400/40"
-                        : p.storeType === "GMS" ? "bg-blue-100 text-blue-700 ring-blue-300/70 dark:bg-blue-950/50 dark:text-blue-300 dark:ring-blue-400/40"
-                        : p.storeType === "CHR" ? "bg-emerald-100 text-emerald-700 ring-emerald-300/70 dark:bg-emerald-950/50 dark:text-emerald-300 dark:ring-emerald-400/40"
-                        : "bg-secondary text-muted-foreground ring-border"
-                      }`}>
-                      <Store className="h-2.5 w-2.5" />
-                      {storeTypeLabel(p.storeType)}
-                    </span>
-                  </div>
-                  {/* Tags produit (conditionnement · pays · marque · variété) */}
-                  {promoTags(p).length > 0 && (
-                    <div className="flex flex-wrap items-center gap-1 mt-1">
-                      {promoTags(p).map((t) => (
-                        <span key={t} className="inline-flex items-center h-[17px] px-1.5 rounded-[4px] bg-secondary/70 text-[10.5px] font-medium text-muted-foreground">
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  <p className="text-[11px] font-mono text-muted-foreground/70 truncate mt-0.5">
-                    {p.itemCode}
-                    {(debut || fin) ? (
-                      <span className="font-sans text-muted-foreground/80">
-                        {" "}· {debut ?? "…"} → {fin ?? "…"}
-                      </span>
-                    ) : (
-                      <span className="font-sans text-emerald-600/80 dark:text-emerald-400/80">
-                        {" "}· permanente
-                      </span>
-                    )}
-                  </p>
-                </div>
-                {!active && (
-                  <span className="text-[10px] uppercase tracking-wide font-bold text-muted-foreground shrink-0">
-                    Inactive
-                  </span>
-                )}
-                <button type="button" onClick={() => toggleActive(p)}
-                  title={active ? "Désactiver (disparaît de l'Écran 2)" : "Réactiver"}
-                  className={`h-8 w-8 inline-flex items-center justify-center rounded-md border transition-colors shrink-0 ${
-                    active
-                      ? "border-emerald-400/50 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
-                      : "border-border text-muted-foreground hover:text-foreground"
-                  }`}>
-                  <Power className="h-4 w-4" />
-                </button>
-                <button type="button" onClick={() => remove(p)}
-                  title={armedDeleteId === p.id ? "Clique à nouveau pour confirmer" : "Supprimer"}
-                  className={`h-8 inline-flex items-center gap-1 px-2 rounded-md border transition-colors shrink-0 text-[11.5px] font-semibold ${
-                    armedDeleteId === p.id
-                      ? "border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
-                      : "border-border text-muted-foreground/60 hover:text-rose-500 hover:border-rose-400/60"
-                  }`}>
-                  <Trash2 className="h-4 w-4" />
-                  {armedDeleteId === p.id && "Confirmer ?"}
-                </button>
               </li>
             );
           })}
