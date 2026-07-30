@@ -90,9 +90,17 @@ async function loadEnvFromDb(): Promise<void> {
  * crie dessus — mais on échange des échecs simultanés contre une attente
  * ordonnée qui, elle, aboutit.
  *
- * Réglable par SAP_MAX_CONCURRENCY (défaut 3).
+ * Valeur par défaut = 5, choisie sur mesure et non au doigt mouillé : le
+ * rafraîchissement de stock (lib/stockSync.ts) tourne depuis toujours à 5
+ * requêtes de front et boucle 104 articles en ~850 ms sans jamais échouer.
+ * Descendre plus bas RALENTIRAIT un travail qui se porte bien. Ce qui casse SAP,
+ * ce n'est pas la concurrence en soi mais la concurrence sur des requêtes
+ * LOURDES (200 documents avec leurs lignes) : ce cas-là se borne à la source,
+ * au plus près de l'appelant (cf. lib/lotResolver.ts).
+ *
+ * Réglable par SAP_MAX_CONCURRENCY (défaut 5).
  */
-const MAX_CONCURRENCY = Math.max(1, Number(process.env.SAP_MAX_CONCURRENCY ?? 3) || 3);
+const MAX_CONCURRENCY = Math.max(1, Number(process.env.SAP_MAX_CONCURRENCY ?? 5) || 5);
 
 let sapActive = 0;
 const sapWaiters: Array<() => void> = [];

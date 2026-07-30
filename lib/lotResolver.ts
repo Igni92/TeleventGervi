@@ -142,16 +142,36 @@ async function scanLotMaps(): Promise<LotMaps> {
   // tout dans l'ordre des offsets (Promise.allSettled préserve l'ordre) pour que
   // `docMeta` (premier gagnant) reste sur le doc le plus récent, comme avant.
   const pageCount = Math.ceil(MAX_DOCS / PAGE_SIZE);
-  const settled = await Promise.allSettled(
-    Array.from({ length: pageCount }, (_, i) =>
-      // ⚠️ Header Prefer obligatoire : sans lui le SL renvoie 20 docs max par page
-      // (l'ancien $top=50 faisait 25 allers-retours pour 500 docs).
-      sap.get<{ value: Pdn[] }>(
-        `PurchaseDeliveryNotes?$top=${PAGE_SIZE}&$skip=${i * PAGE_SIZE}&$orderby=DocNum desc&$select=DocNum,DocDate,CardName,DocumentLines`,
-        { headers: { Prefer: `odata.maxpagesize=${PAGE_SIZE}` }, timeoutMs: PAGE_TIMEOUT_MS },
+
+  // Concurrence VOLONTAIREMENT BASSE. Ces pages sont les requêtes les plus
+  // lourdes de l'application : 200 documents AVEC toutes leurs lignes chacun.
+  // Lancer les 8 d'un coup a été mesuré en prod le 30/07/2026 — 7 pages sur 8
+  // en timeout à 25 s, scan retombé à 200 documents sur 1500. Le portillon
+  // global du client SAP (5) protège l'applicatif dans son ensemble, mais il
+  // reste trop permissif POUR CE CAS : on borne donc ici, au plus près.
+  // Deux pages de front restent ~2 fois plus rapides que l'ancienne boucle
+  // séquentielle, sans mettre le Service Layer à genoux.
+  const PAGE_CONCURRENCY = 2;
+  const fetchPage = (i: number) =>
+    // ⚠️ Header Prefer obligatoire : sans lui le SL renvoie 20 docs max par page
+    // (l'ancien $top=50 faisait 25 allers-retours pour 500 docs).
+    sap.get<{ value: Pdn[] }>(
+      `PurchaseDeliveryNotes?$top=${PAGE_SIZE}&$skip=${i * PAGE_SIZE}&$orderby=DocNum desc&$select=DocNum,DocDate,CardName,DocumentLines`,
+      { headers: { Prefer: `odata.maxpagesize=${PAGE_SIZE}` }, timeoutMs: PAGE_TIMEOUT_MS },
+    );
+
+  // Résultats rangés PAR OFFSET (et non par ordre d'arrivée) : `docMeta` garde
+  // le premier gagnant, donc l'ingestion doit rester dans l'ordre des pages.
+  const settled: PromiseSettledResult<{ value: Pdn[] }>[] = [];
+  for (let start = 0; start < pageCount; start += PAGE_CONCURRENCY) {
+    const wave = await Promise.allSettled(
+      Array.from(
+        { length: Math.min(PAGE_CONCURRENCY, pageCount - start) },
+        (_, k) => fetchPage(start + k),
       ),
-    ),
-  );
+    );
+    settled.push(...wave);
+  }
 
   for (const res of settled) {
     if (res.status === "rejected") {
