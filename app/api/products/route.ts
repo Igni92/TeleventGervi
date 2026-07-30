@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+// Route interrogeant SAP / agrégeant beaucoup de données : sans plafond explicite,
+// un backend lent dépassait la durée par défaut de la fonction, qui mourait SANS
+// réponse — côté front, un « chargement » perpétuel au lieu d'une erreur affichable.
+export const maxDuration = 60;
+
 /**
  * GET /api/products
  *

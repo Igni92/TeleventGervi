@@ -119,7 +119,11 @@ export function ConsoleLotPicker({
           ref={popRef}
           data-floating-root=""
           style={{ position: "fixed", left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom }}
-          className="z-[120] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[60vh] animate-fade-up"
+          // `pointer-events-auto` OBLIGATOIRE quand ce menu s'ouvre au-dessus d'un
+          // Dialog/FullscreenPanel Radix (modal) : Radix pose `pointer-events:none`
+          // sur <body>, dont ce popup hérite (porté dans <body>) — les clics le
+          // traverseraient et son détecteur de « clic dehors » le refermerait.
+          className="pointer-events-auto z-[120] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[60vh] animate-fade-up"
         >
           <p className="shrink-0 px-3 pt-2 pb-1 text-[9.5px] uppercase tracking-wider text-muted-foreground font-semibold border-b border-border/60">
             Lots — ordre FIFO (plus ancien d&apos;abord)

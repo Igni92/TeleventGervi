@@ -8,6 +8,11 @@ import { caByClientCode } from "@/lib/clientRevenue";
 import { getAccessScope, getOwnSlpName } from "@/lib/permissions";
 import { parisStartOfDay, parisEndOfDay, parisDayOfWeek } from "@/lib/paris-time";
 
+// Route interrogeant SAP / agrégeant beaucoup de données : sans plafond explicite,
+// un backend lent dépassait la durée par défaut de la fonction, qui mourait SANS
+// réponse — côté front, un « chargement » perpétuel au lieu d'une erreur affichable.
+export const maxDuration = 60;
+
 /**
  * GET /api/console
  *

@@ -46,16 +46,21 @@ export function ContextMenu({
   if (!menu || typeof document === "undefined") return null;
   return createPortal(
     <>
+      {/* `pointer-events-auto` OBLIGATOIRE sur les DEUX couches : ouvert au-dessus
+          d'un Dialog/FullscreenPanel Radix (modal), Radix pose
+          `pointer-events:none` sur <body> — dont ce portail hérite. Sans ça les
+          clics traversent le menu (les items ne reçoivent jamais leur onClick) et
+          le fond ne peut plus fermer le menu. */}
       <div
         data-floating-root=""
-        className="fixed inset-0 z-40"
+        className="pointer-events-auto fixed inset-0 z-40"
         onClick={onClose}
         onContextMenu={(e) => { e.preventDefault(); onClose(); }}
       />
       <div
         role="menu"
         data-floating-root=""
-        className="fixed z-50 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-lg animate-fade-up"
+        className="pointer-events-auto fixed z-50 overflow-hidden rounded-lg border border-border bg-card py-1 shadow-lg animate-fade-up"
         style={{ top: menu.y, left: menu.x, minWidth }}
       >
         {header}

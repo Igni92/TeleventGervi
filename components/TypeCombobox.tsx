@@ -135,7 +135,11 @@ export function TypeCombobox({
           ref={panelRef}
           data-floating-root=""
           style={{ position: "fixed", top: pos.top, left: pos.left, width: Math.max(pos.width, 176), zIndex: 100 }}
-          className="rounded-lg border border-border bg-card shadow-modal p-1.5"
+          // `pointer-events-auto` OBLIGATOIRE quand ce menu s'ouvre au-dessus d'un
+          // Dialog/FullscreenPanel Radix (modal) : Radix pose `pointer-events:none`
+          // sur <body>, dont ce panneau hérite (porté dans <body>) — les clics le
+          // traverseraient et son détecteur de « clic dehors » le refermerait.
+          className="pointer-events-auto rounded-lg border border-border bg-card shadow-modal p-1.5"
         >
           <input
             autoFocus

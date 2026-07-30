@@ -50,7 +50,10 @@ function LogoLightbox({ src, marque, onClose }: { src: string; marque?: string |
       // son propre fond) est vu comme un clic EXTÉRIEUR par le Dialog parent et
       // le referme aussi (cf. components/ui/dialog.tsx).
       data-floating-root=""
-      className="fixed inset-0 z-[120] flex flex-col items-center justify-center gap-3 bg-black/70 backdrop-blur-sm p-6 animate-fade-up"
+      // `pointer-events-auto` OBLIGATOIRE : ouvert au-dessus d'un Dialog Radix
+      // (modal), Radix pose `pointer-events:none` sur <body> — dont ce portail
+      // hérite. Sans ça, ni la croix ni le fond ne peuvent fermer la lightbox.
+      className="pointer-events-auto fixed inset-0 z-[120] flex flex-col items-center justify-center gap-3 bg-black/70 backdrop-blur-sm p-6 animate-fade-up"
       role="dialog"
       aria-modal="true"
       aria-label={marque ? `Logo ${marque}` : "Logo"}
