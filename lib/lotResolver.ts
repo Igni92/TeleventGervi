@@ -65,7 +65,17 @@ function pushDoc(map: Map<string, number[]>, key: string, docNum: number): void 
  */
 export const LOT_PENDING = LOT_PENDING_PURE;
 
-const TTL_MS = 10 * 60 * 1000;
+/**
+ * TTL VOLONTAIREMENT SUPÉRIEUR à la période du cron miroir (10 min).
+ *
+ * À 10 min, le cache expirait pile entre deux ticks : la première personne à
+ * ouvrir un écran qui résout des lots (bons de commande, console, livraisons)
+ * repayait le scan des 1500 réceptions — 7 à 15 s d'attente, toutes les 10 min,
+ * et c'est ce qui donnait « les bons de commande chargent super longtemps ».
+ * Le cron rafraîchit maintenant toutes les 10 min (cf. warmLotMaps) et la
+ * fenêtre de validité est plus large : un humain ne tombe plus jamais à froid.
+ */
+const TTL_MS = 20 * 60 * 1000;
 /**
  * TTL RÉDUIT quand le scan est revenu incomplet (pages en échec). Servir des maps
  * partielles pendant 10 min, c'est résoudre les lots sur une fraction des
@@ -106,14 +116,31 @@ function emptyMaps(): LotMaps {
   };
 }
 
-/** Renvoie les maps (cache 10 min). Scanne les ~1500 derniers PDN au refresh. */
-export async function getLotMaps(): Promise<LotMaps> {
+/** Renvoie les maps (cache TTL_MS). Scanne les ~1500 derniers PDN au refresh. */
+export async function getLotMaps(opts?: { force?: boolean }): Promise<LotMaps> {
   const ttl = cache?.partial ? PARTIAL_TTL_MS : TTL_MS;
-  if (cache && Date.now() - cache.at < ttl) return cache.maps;
+  if (!opts?.force && cache && Date.now() - cache.at < ttl) return cache.maps;
   // Un scan déjà lancé ? On s'y raccroche au lieu d'en démarrer un second.
   if (inflight) return inflight;
   inflight = scanLotMaps().finally(() => { inflight = null; });
   return inflight;
+}
+
+/**
+ * PRÉCHAUFFAGE — appelé par le cron miroir à chaque tick.
+ *
+ * Même principe que `warmAccueil` : le scan des réceptions coûte le même prix
+ * qu'avant (une fois toutes les 10 min), mais c'est le cron qui le paie et non
+ * la personne qui ouvre l'écran. `force` remet le compteur de fraîcheur à zéro
+ * pour que la fenêtre de validité couvre toujours l'intervalle jusqu'au tick
+ * suivant. Best-effort : ne fait jamais échouer la synchro.
+ */
+export async function warmLotMaps(): Promise<void> {
+  try {
+    await getLotMaps({ force: true });
+  } catch (e) {
+    console.warn("[lotResolver] préchauffage échoué:", (e as Error).message);
+  }
 }
 
 async function scanLotMaps(): Promise<LotMaps> {

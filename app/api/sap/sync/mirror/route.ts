@@ -15,6 +15,7 @@ import {
 import { annualWindowStart } from "@/lib/pilotage-time";
 import { invalidate } from "@/lib/ttlCache";
 import { warmAccueil } from "@/lib/accueilData";
+import { warmLotMaps } from "@/lib/lotResolver";
 import { isCronAuthorized } from "@/lib/cronAuth";
 
 // Pull de 5 entités + BP (pagination SAP) → peut dépasser le défaut serverless.
@@ -148,6 +149,14 @@ async function runMirrorSync() {
       // Best-effort : n'échoue jamais la synchro.
       await warmAccueil();
     }
+
+    // Maps de lots : préchauffées à CHAQUE tick, y compris quand rien de neuf
+    // n'est entré. Leur fraîcheur ne dépend pas que des nouveaux documents mais
+    // aussi de l'expiration du TTL : sans ce rafraîchissement régulier, la
+    // première personne à ouvrir les bons de commande / la console après
+    // expiration repayait le scan des 1500 réceptions (7 à 15 s). Coût SAP
+    // inchangé (même fréquence qu'avant), mais payé ici et non par un humain.
+    await warmLotMaps();
 
     return NextResponse.json({
       ok: true,
