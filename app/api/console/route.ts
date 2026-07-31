@@ -33,6 +33,13 @@ export async function GET() {
   const todayStart = parisStartOfDay(now);
   const todayEnd = parisEndOfDay(now);
   const todayDay = parisDayOfWeek(now); // 0=dim..6=sam, en heure de Paris
+  // Début de la VEILLE (heure de Paris) — sert au snooze « À demain » : un client
+  // marqué « À demain » HIER ne doit PAS revenir dans la file AUJOURD'HUI (« le
+  // lendemain »). Pour le commercial, « À demain » = coup de fil passé / client
+  // traité, PAS « rappelle-le demain ». Il reprend son planning normal ensuite.
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const yesterdayStart = parisStartOfDay(yesterday);
 
   // Today's temp assignments for me (clients I've claimed from other commercials)
   const myClaims = session.user.id
@@ -200,6 +207,8 @@ export async function GET() {
     calls: { type: string; outcome: string | null; heureAppel: Date }[];
     futureSnooze: boolean;
     preCommandeSnooze: boolean;
+    /** Marqué « À demain » hier → masqué aujourd'hui (le lendemain). */
+    demainSnooze: boolean;
     /** Heure (ISO) du rappel DÛ le plus ancien — null si aucun rappel dépassé. */
     dueReminderAt: string | null;
   }[] = [];
@@ -227,7 +236,16 @@ export async function GET() {
     const preCommandeSnooze = c.appels.some(
       (a) => a.type === "COMMANDE" && a.scheduledFor && new Date(a.scheduledFor) >= todayEnd,
     );
-    candidates.push({ c, insights: computeInsights(c.appels), calls, futureSnooze, preCommandeSnooze, dueReminderAt });
+    // Snooze « À demain » : le client a été marqué « À demain » HIER (log DEMAIN
+    // daté de la veille). « À demain » signifie « je l'ai eu au téléphone / traité,
+    // ne me le represente pas demain » → on le masque le lendemain, puis il reprend
+    // son planning `joursAppel` normal (les jours suivants, ce log n'est plus « la
+    // veille » et ne le masque plus). Un rappel FUTUR ou DÛ explicite prime (géré
+    // avant/après dans le routage) : l'engagement d'appel garde toujours la main.
+    const demainSnooze = c.appels.some(
+      (a) => a.type === "DEMAIN" && a.heureAppel >= yesterdayStart && a.heureAppel < todayStart,
+    );
+    candidates.push({ c, insights: computeInsights(c.appels), calls, futureSnooze, preCommandeSnooze, demainSnooze, dueReminderAt });
   }
 
   // ── Repli par type : heure de décroché typique (médiane des recommendedHour
@@ -248,7 +266,7 @@ export async function GET() {
   // ── Passe 2 : construit la file / les faits ──
   const queue: Enriched[] = [];
   const done: Enriched[] = [];
-  for (const { c, insights, calls, futureSnooze, preCommandeSnooze, dueReminderAt } of candidates) {
+  for (const { c, insights, calls, futureSnooze, preCommandeSnooze, demainSnooze, dueReminderAt } of candidates) {
     const claimedFrom = claimedMap.get(c.id) ?? null;
     const openIncidents = openIncByClient.get(c.id) ?? 0;
     // ── Priorité « valeur × urgence » (audit 07 #43/#44/#48) : cycle de vie
@@ -296,6 +314,7 @@ export async function GET() {
     else if (futureSnooze) continue;
     else if (dueReminderAt) queue.push(enriched);
     else if (preCommandeSnooze) continue;
+    else if (demainSnooze) continue; // marqué « À demain » hier → pas de retour le lendemain
     else queue.push(enriched); // inclut les « retry NRP » du jour
   }
 
