@@ -2551,6 +2551,9 @@ const OrderRow = memo(function OrderRow({
               <tr>
                 <th className="text-center font-semibold px-2 py-1.5 w-14 whitespace-nowrap">Colis</th>
                 <th className="text-left font-semibold px-3 py-1.5">Article</th>
+                {/* Lot saisissable en direct : le n° d'entrée (EM) se corrige ici,
+                    sans passer par le menu de ligne. */}
+                <th className="text-left font-semibold px-3 py-1.5 w-[120px] whitespace-nowrap">Lot</th>
                 <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Qté</th>
                 <th className="text-right font-semibold px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">kg</th>
               </tr>
@@ -2594,6 +2597,17 @@ const OrderRow = memo(function OrderRow({
                         <DesignationChips marque={l.marque} condt={l.condt} calibre={l.calibre} variete={l.variete} pays={l.pays} size="md" className="mt-1" />
                       </div>
                     </div>
+                  </td>
+                  <td className="px-3 py-1.5 align-middle">
+                    <LotCellInput
+                      docEntry={doc.docEntry}
+                      docNum={doc.docNum}
+                      itemCode={l.itemCode}
+                      itemName={l.itemName}
+                      lot={l.lot}
+                      disabled={!doc.open}
+                      onDone={onReload}
+                    />
                   </td>
                   <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell align-middle">{fmtNum(l.quantity)}</td>
                   <td className="px-3 py-1.5 text-right tnum text-muted-foreground hidden sm:table-cell align-middle">{fmtNum(l.weightKg)}</td>
@@ -3048,6 +3062,105 @@ interface LotCand {
 const LOT_AFFECT_LABEL: Record<string, string> = { TOUS: "Tous", EXPORT: "Export", GMS: "GMS", CHR: "CHR" };
 const fmtColisLot = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1).replace(".", ","));
 
+/** Normalise une saisie de lot : « 23568 » → « EM23568 ». Une saisie déjà
+ *  préfixée (EM…) ou un sentinel (EM_PENDING, EM_FAM:…) est conservé tel quel. */
+export function normalizeLotInput(raw: string): string {
+  const v = raw.trim().toUpperCase();
+  if (!v) return "";
+  return /^\d+$/.test(v) ? `EM${v}` : v;
+}
+
+/**
+ * Pose `lot` sur TOUTES les lignes de `itemCode` d'un bon, en réécrivant le
+ * document (les autres lignes sont conservées à l'identique). `warehouse` non
+ * null aligne le magasin sur celui du lot ; null garde celui de la ligne.
+ *
+ * Partagé par le menu de ligne (clic droit) et la colonne « Lot » éditable du
+ * tableau, pour que les deux chemins appliquent EXACTEMENT les mêmes garde-fous
+ * (article introuvable, ligne déjà livrée → lot verrouillé).
+ */
+async function applyLotChange(
+  docEntry: number, itemCode: string, lot: string, warehouse: string | null,
+): Promise<void> {
+  const g = await fetch(`/api/sap/orders/${docEntry}/modif`, { cache: "no-store" }).then((r) => r.json());
+  // L'endpoint renvoie `cartLines` (pas `lines`) — sinon changement de lot et
+  // échange d'article échouaient toujours (« Chargement du bon impossible »).
+  if (!g?.ok || !Array.isArray(g.cartLines)) throw new Error(g?.error || "Chargement du bon impossible");
+  const src = g.cartLines as SwapSrcLine[];
+  const targets = src.filter((l) => l.itemCode === itemCode);
+  if (targets.length === 0) throw new Error("Article introuvable sur ce bon");
+  if (targets.some((l) => l.closed)) throw new Error("Article déjà livré — lot verrouillé");
+  const lines = src.map((l) => l.itemCode === itemCode
+    ? { itemCode: l.itemCode, quantity: l.qtyPieces, warehouseCode: (warehouse ?? l.warehouse) ?? undefined, price: l.price ?? undefined, keep: true, lot }
+    : { itemCode: l.itemCode, quantity: l.qtyPieces, warehouseCode: l.warehouse ?? undefined, price: l.price ?? undefined, keep: true, lot: l.lot ?? undefined });
+  const res = await fetch(`/api/sap/orders/${docEntry}/modif`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines }),
+  }).then((r) => r.json());
+  if (!res?.ok) throw new Error(res?.error || "Échec du changement de lot");
+}
+
+/** Champ « Lot » éditable d'une ligne du tableau — saisie directe du n° d'entrée
+ *  (EM), sans passer par le menu. Enregistre à la validation (Entrée / sortie du
+ *  champ) et seulement si la valeur a changé. */
+function LotCellInput({ docEntry, docNum, itemCode, itemName, lot, disabled, onDone }: {
+  docEntry: number; docNum: number; itemCode: string; itemName: string;
+  lot: string | null | undefined; disabled: boolean; onDone: () => void;
+}) {
+  const [value, setValue] = useState(lot ?? "");
+  const [saving, setSaving] = useState(false);
+  const savedRef = useRef(lot ?? "");
+  // Le bon est rechargé après enregistrement : on resynchronise sur la valeur
+  // serveur (et on ne piétine pas une saisie en cours).
+  useEffect(() => {
+    if (saving) return;
+    savedRef.current = lot ?? "";
+    setValue(lot ?? "");
+  }, [lot, saving]);
+
+  const commit = async () => {
+    const next = normalizeLotInput(value);
+    if (next === savedRef.current) { setValue(savedRef.current); return; }
+    if (!next) { setValue(savedRef.current); return; }   // vider ne supprime pas un lot
+    setSaving(true);
+    try {
+      await applyLotChange(docEntry, itemCode, next, null);
+      savedRef.current = next;
+      setValue(next);
+      toast.success(`Lot → ${next}`, { description: `BL n°${docNum} · ${itemName}` });
+      onDone();
+    } catch (e) {
+      setValue(savedRef.current);   // échec → on remet la valeur d'origine
+      toast.error(e instanceof Error ? e.message : "Échec du changement de lot");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          if (e.key === "Escape") { setValue(savedRef.current); (e.target as HTMLInputElement).blur(); }
+        }}
+        // Le tableau est sous un menu contextuel (clic droit = menu de ligne) :
+        // sans ça, un clic droit dans le champ ouvrirait le menu au lieu de la
+        // correction de texte native.
+        onContextMenu={(e) => e.stopPropagation()}
+        disabled={disabled || saving}
+        placeholder="n° EM"
+        aria-label={`Lot de ${itemName}`}
+        title={disabled ? "Bon clôturé — lot non modifiable" : "Saisir le n° d'entrée (EM) puis Entrée"}
+        className="h-7 w-[104px] rounded-md border border-border bg-card px-1.5 text-[11.5px] font-mono tnum text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-50"
+      />
+      {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />}
+    </span>
+  );
+}
+
 function LineToolMenu({ docEntry, docNum, pos, onClose, onDone }: {
   docEntry: number;
   docNum: number;
@@ -3127,17 +3240,9 @@ function LineToolMenu({ docEntry, docNum, pos, onClose, onDone }: {
     if (lotBusy || busy) return;
     setLotBusy(lot);
     try {
-      const src = await loadSrc();
-      const targets = src.filter((l) => l.itemCode === pos.oldCode);
-      if (targets.length === 0) throw new Error("Article introuvable sur ce bon");
-      if (targets.some((l) => l.closed)) throw new Error("Article déjà livré — lot verrouillé");
-      const lines = src.map((l) => l.itemCode === pos.oldCode
-        ? { itemCode: l.itemCode, quantity: l.qtyPieces, warehouseCode: (warehouse ?? l.warehouse) ?? undefined, price: l.price ?? undefined, keep: true, lot }
-        : { itemCode: l.itemCode, quantity: l.qtyPieces, warehouseCode: l.warehouse ?? undefined, price: l.price ?? undefined, keep: true, lot: l.lot ?? undefined });
-      const res = await fetch(`/api/sap/orders/${docEntry}/modif`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines }),
-      }).then((r) => r.json());
-      if (!res?.ok) throw new Error(res?.error || "Échec du changement de lot");
+      // Logique partagée avec la colonne « Lot » éditable du tableau, pour que
+      // les deux chemins appliquent les mêmes garde-fous (cf. applyLotChange).
+      await applyLotChange(docEntry, pos.oldCode, lot, warehouse);
       toast.success(`Lot → ${lot}`, { description: `BL n°${docNum} · ${pos.oldName}` });
       onDone();
       onClose();

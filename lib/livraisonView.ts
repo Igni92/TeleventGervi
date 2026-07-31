@@ -33,6 +33,9 @@ export interface Line {
   price?: number | null;
   /** Montant HT de la ligne (SAP LineTotal, cumulé si lignes fusionnées). */
   lineTotal?: number | null;
+  /** Lot affecté (SAP U_NoLot) : « EM<DocNum> », ou un sentinel « en attente »
+   *  (EM_PENDING / EM_FAM:<fruit>). Éditable en direct sur le Détail livraison. */
+  lot?: string | null;
 }
 
 export interface Doc {
