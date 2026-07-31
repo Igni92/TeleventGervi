@@ -15,6 +15,9 @@ import {
 } from "@/lib/safeguards";
 import { splitByWarehouse, totalAvailable, saleableAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
+// Depuis `lib/freshness` (pur) et NON `lib/lotDlc` (qui importe Prisma et
+// embarquerait le client Prisma dans le bundle navigateur).
+import { freshnessLabel, isDlcSoon } from "@/lib/freshness";
 import { nextDeliveryDate, nextWorkingDeliveryDay, isPrecommande } from "@/lib/livraison";
 import { familyOf } from "@/lib/familles";
 import { priceForArticle, type TarifFruitRow } from "@/lib/tarifFruits";
@@ -44,6 +47,8 @@ interface Product {
   // Détails métier (Gervifrais U_*) — sortis du grisé pour décision rapide en appel
   uMarque: string | null; uPays: string | null; uCondi: string | null; uUvc: string | null;
   frgnName?: string | null;                 // variété (SAP FrgnName)
+  /** DLC la plus proche encore à venir sur cet article (ISO) — null si aucune. */
+  dlc?: string | null;
   stockByWarehouse: Record<string, StockEntry>;
 }
 interface Hint {
@@ -2071,6 +2076,10 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                       const calibre = calibreRaw ? `cal. ${calibreRaw}` : null;
                       const variete = cleanTag(p.frgnName);                  // variété (FrgnName)
                       const pays    = cleanTag(p.uPays ?? h?.pays);
+                      // Alerte fraîcheur : DLC la plus proche encore à venir sur cet
+                      // article (API produits). Affichée UNIQUEMENT si elle est proche
+                      // (≤ 3 j) — sinon ce serait du bruit sur tout le catalogue.
+                      const dlcWarn = isDlcSoon(p.dlc) ? freshnessLabel(p.dlc ? new Date(p.dlc) : null) : null;
                       const isFav   = favorites.has(p.itemCode);          // C1
                       // C2 — plus de badge promo sur la liste stock : la remise
                       // auto au panier reste (cf. addToCart), le récap vit dans
@@ -2147,6 +2156,21 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                               {/* Tags espacés (gap-1.5) ; le CODE ARTICLE n'apparaît plus
                                   sur la ligne (clic droit « Détails » pour le lot/DLC). */}
                               <span className="mt-0.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap min-w-0">
+                                {/* DLC PROCHE — en TÊTE des chips : c'est l'info qui doit
+                                    arrêter l'œil du vendeur avant qu'il n'engage la vente. */}
+                                {dlcWarn && (
+                                  <span
+                                    title={`Marchandise en stock dont la date limite est proche (${dlcWarn.label})`}
+                                    className={`${chipCls} shrink-0 inline-flex items-center gap-1 ${
+                                      dlcWarn.tone === "red"
+                                        ? "bg-rose-100 text-rose-800 ring-1 ring-inset ring-rose-400/60 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/50"
+                                        : "bg-amber-100 text-amber-900 ring-1 ring-inset ring-amber-400/60 dark:bg-amber-500/30 dark:text-amber-50 dark:ring-amber-400/50"
+                                    }`}
+                                  >
+                                    <AlertTriangle className="h-3 w-3 shrink-0" />
+                                    {dlcWarn.label}
+                                  </span>
+                                )}
                                 {marque && <span className={`${chipCls} shrink-0 bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100 dark:ring-1 dark:ring-inset dark:ring-violet-400/50`}>{marque}</span>}
                                 {condi && <span className={`${chipCls} shrink-0 bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100 dark:ring-1 dark:ring-inset dark:ring-sky-400/50`}>{condi}</span>}
                                 {calibre && <span className={`${chipCls} shrink-0 bg-teal-100 text-teal-800 dark:bg-teal-500/30 dark:text-teal-100 dark:ring-1 dark:ring-inset dark:ring-teal-400/50`}>{calibre}</span>}

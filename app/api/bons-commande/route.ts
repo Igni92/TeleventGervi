@@ -609,6 +609,32 @@ export async function POST(req: NextRequest) {
             console.log(`[BonCommande] Conversion #${order.DocNum} : ${patchLines.length} ligne(s) à lot ÉPUISÉ remises en attente.`);
           }
         }
+
+        // ── DÉBIT du registre pour les lots CONSERVÉS (fuite corrigée) ──
+        // Affecter un lot sur une OFFRE ne débite volontairement pas (l'offre
+        // n'engage rien) : le commentaire de l'affectation renvoie le débit « à la
+        // COMMANDE ». Mais la commande était créée ICI, par POST direct — sans
+        // jamais appeler debitLots. Résultat : un lot affecté puis converti gardait
+        // TOUT son solde au registre alors que la marchandise partait. Ces soldes
+        // fantômes s'accumulaient sur les vieux lots et, le tri étant FIFO par date
+        // d'admission, ressortaient EN PREMIER à l'affectation suivante — d'où des
+        // produits mis sur des lots très anciens, déjà écoulés.
+        // Les lignes remises en EM_PENDING juste au-dessus sont exclues : elles
+        // seront débitées lors de leur ré-affectation (chemin PATCH, wasAllPending).
+        const toDebit = (conv.DocumentLines ?? [])
+          .map((l) => ({
+            itemCode: l.ItemCode,
+            lot: (l.U_NoLot ?? "").trim(),
+            qty: l.Quantity ?? 0,
+          }))
+          .filter((x) => x.itemCode && isRealLot(x.lot) && !depleted.has(x.lot) && x.qty > 0);
+        if (toDebit.length > 0) {
+          try {
+            await debitLots(toDebit);
+          } catch (e) {
+            console.warn("[BonCommande] Débit registre à la conversion échoué (non-bloquant):", (e as Error).message);
+          }
+        }
       }
     } catch (e) {
       console.warn("[BonCommande] Re-validation stock à la conversion échouée (non-bloquant):", (e as Error).message);

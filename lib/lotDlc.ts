@@ -9,7 +9,11 @@
  * Modèle Prisma associé : `LotDlc` (batchNumber unique, expirationDate nullable).
  */
 import { prisma } from "@/lib/prisma";
-import { parisStartOfDay } from "@/lib/paris-time";
+
+// Logique PURE (seuils, libellé) déportée dans `lib/freshness.ts` : ce module-ci
+// importe Prisma, donc il est inutilisable depuis un composant client. On
+// ré-exporte pour ne rien casser chez les appelants serveur existants.
+export { freshnessLabel, daysUntilDlc, isDlcSoon, DLC_SOON_DAYS, type FreshnessTone } from "@/lib/freshness";
 
 /**
  * DLC connues pour un lot de numéros de lot. Renvoie une Map indexée par
@@ -44,34 +48,3 @@ export async function setDlc(input: {
   });
 }
 
-export type FreshnessTone = "green" | "amber" | "red" | "muted";
-
-/** Nombre de jours « pleins » (heure de Paris) entre aujourd'hui et la DLC. */
-function daysUntil(expirationDate: Date): number {
-  const today = parisStartOfDay().getTime();
-  const due = parisStartOfDay(expirationDate).getTime();
-  return Math.round((due - today) / 86_400_000);
-}
-
-/**
- * Étiquette + ton d'une DLC pour l'affichage :
- *   - `null`/absent → « DLC non saisie » (muted)
- *   - > 3 j         → vert
- *   - 1 à 3 j       → ambre
- *   - ≤ 0 j         → rouge (périmée ou expire aujourd'hui)
- * Le libellé indique l'échéance relative : « DLC J-3 » (dans 3 j), « DLC J+0 »
- * (aujourd'hui), « DLC J+2 » (périmée depuis 2 j).
- */
-export function freshnessLabel(
-  expirationDate: Date | null | undefined,
-): { label: string; tone: FreshnessTone } {
-  if (!expirationDate) return { label: "DLC non saisie", tone: "muted" };
-  const d = expirationDate instanceof Date ? expirationDate : new Date(expirationDate);
-  if (Number.isNaN(d.getTime())) return { label: "DLC non saisie", tone: "muted" };
-
-  const days = daysUntil(d);
-  // J-… = jours restants ; J+… = jours de dépassement (périmé).
-  const rel = days > 0 ? `J-${days}` : `J+${Math.abs(days)}`;
-  const tone: FreshnessTone = days > 3 ? "green" : days >= 1 ? "amber" : "red";
-  return { label: `DLC ${rel}`, tone };
-}
