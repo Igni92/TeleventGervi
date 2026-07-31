@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Clock3, ChevronLeft, ChevronRight, Loader2, Save, Printer, Wand2,
-  CalendarDays, RotateCcw, Plus, Minus, Coins, CalendarCheck,
+  CalendarDays, RotateCcw, Plus, Minus,
   Users, Scale,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -530,12 +530,11 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           <>
             {/* MOBILE (< md) : une carte par semaine + carte total. */}
             <div className="md:hidden space-y-2">
-              {myMonth.weeks.map(({ week: w, calc: c, option: o, recupDates: rd }) => (
+              {myMonth.weeks.map(({ week: w, calc: c }) => (
                 <div key={w} className={`rounded-lg border border-border p-3 ${c ? "" : "opacity-60"}`}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="min-w-0 flex-1 inline-flex items-center gap-1.5">
                       <span className="min-w-0 truncate text-[12.5px] font-semibold text-foreground">{weekLabel(w)}</span>
-                      {o && c && c.sup25Min + c.sup50Min > 0 && <OptionChip option={o} recupDates={rd} />}
                     </span>
                     <span className="text-[13.5px] font-bold tnum text-foreground shrink-0">{c ? fmtHM(c.totalMin) : <span className="text-[11px] font-normal italic text-muted-foreground">non saisi</span>}</span>
                   </div>
@@ -548,7 +547,6 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                       {c.sup50Min > 0 && <span className="text-muted-foreground">+50 % <b className="text-foreground">{fmtHM(c.sup50Min)}</b></span>}
                       {c.majEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Équiv. payé <b>{fmtHM(c.majEquivMin)}</b></span>}
                       {(c.ferieMin ?? 0) > 0 && <span className="text-orange-600 dark:text-orange-400">Férié <b>{fmtHM(c.ferieMin)}</b></span>}
-                      {c.recupMin > 0 && <span className="text-sky-600 dark:text-sky-400">Récup <b>{fmtHM(c.recupMin)}</b></span>}
                     </div>
                   )}
                 </div>
@@ -564,7 +562,6 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                   {myMonth.total.sup50Min > 0 && <span className="text-muted-foreground">+50 % <b className="text-foreground">{fmtHM(myMonth.total.sup50Min)}</b></span>}
                   {myMonth.total.majEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Équiv. payé <b>{fmtHM(myMonth.total.majEquivMin)}</b></span>}
                   {(myMonth.total.ferieMin ?? 0) > 0 && <span className="text-orange-600 dark:text-orange-400">Férié <b>{fmtHM(myMonth.total.ferieMin)}</b></span>}
-                  {myMonth.total.recupMin > 0 && <span className="text-sky-600 dark:text-sky-400">Récup <b>{fmtHM(myMonth.total.recupMin)}</b></span>}
                 </div>
               </div>
             </div>
@@ -580,17 +577,15 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                     <th className="text-right font-semibold px-2 py-2">+25 %</th>
                     <th className="text-right font-semibold px-2 py-2">+50 %</th>
                     <th className="text-right font-semibold px-2 py-2">Équiv. payé</th>
-                    <th className="text-right font-semibold px-2 py-2">Férié</th>
-                    <th className="text-right font-semibold px-3 py-2">Récup</th>
+                    <th className="text-right font-semibold px-3 py-2">Férié</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
-                  {myMonth.weeks.map(({ week: w, calc: c, option: o, recupDates: rd }) => (
+                  {myMonth.weeks.map(({ week: w, calc: c }) => (
                     <tr key={w} className={c ? "" : "opacity-55"}>
                       <td className="px-3 py-1.5 whitespace-nowrap">
                         <span className="inline-flex items-center gap-2">
                           {weekLabel(w)}
-                          {o && c && c.sup25Min + c.sup50Min > 0 && <OptionChip option={o} recupDates={rd} />}
                         </span>
                       </td>
                       <td className="px-2 py-1.5 text-right tnum font-semibold">{c ? fmtHM(c.totalMin) : <span className="italic text-muted-foreground">non saisi</span>}</td>
@@ -598,8 +593,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                       <td className="px-2 py-1.5 text-right tnum">{c && c.sup25Min > 0 ? fmtHM(c.sup25Min) : "—"}</td>
                       <td className="px-2 py-1.5 text-right tnum">{c && c.sup50Min > 0 ? fmtHM(c.sup50Min) : "—"}</td>
                       <td className="px-2 py-1.5 text-right tnum font-semibold text-emerald-700 dark:text-emerald-300">{c && c.majEquivMin > 0 ? fmtHM(c.majEquivMin) : "—"}</td>
-                      <td className="px-2 py-1.5 text-right tnum text-orange-600 dark:text-orange-400">{c && (c.ferieMin ?? 0) > 0 ? fmtHM(c.ferieMin) : "—"}</td>
-                      <td className="px-3 py-1.5 text-right tnum">{c && c.recupMin > 0 ? fmtHM(c.recupMin) : "—"}</td>
+                      <td className="px-3 py-1.5 text-right tnum text-orange-600 dark:text-orange-400">{c && (c.ferieMin ?? 0) > 0 ? fmtHM(c.ferieMin) : "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -611,8 +605,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                     <td className="px-2 py-2 text-right tnum">{fmtHM(myMonth.total.sup25Min)}</td>
                     <td className="px-2 py-2 text-right tnum">{fmtHM(myMonth.total.sup50Min)}</td>
                     <td className="px-2 py-2 text-right tnum text-emerald-700 dark:text-emerald-300">{fmtHM(myMonth.total.majEquivMin)}</td>
-                    <td className="px-2 py-2 text-right tnum text-orange-600 dark:text-orange-400">{fmtHM(myMonth.total.ferieMin)}</td>
-                    <td className="px-3 py-2 text-right tnum">{fmtHM(myMonth.total.recupMin)}</td>
+                    <td className="px-3 py-2 text-right tnum text-orange-600 dark:text-orange-400">{fmtHM(myMonth.total.ferieMin)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -668,13 +661,6 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                         {row.total.sup50Min > 0 && <span className="text-muted-foreground">+50 % <b className="text-foreground">{fmtHM(row.total.sup50Min)}</b></span>}
                         {row.total.majEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Équiv. payé <b>{fmtHM(row.total.majEquivMin)}</b></span>}
                         {(row.total.ferieMin ?? 0) > 0 && <span className="text-orange-600 dark:text-orange-400">Férié <b>{fmtHM(row.total.ferieMin)}</b></span>}
-                        {row.total.recupMin > 0 && <span className="text-sky-600 dark:text-sky-400">Récup <b>{fmtHM(row.total.recupMin)}</b></span>}
-                        {row.recap && <span className="text-muted-foreground">Solde récup <b className="text-foreground">{fmtHM(row.recap.recupBalanceMin)}</b></span>}
-                        {(row.recap?.excessMin ?? 0) > 0 && (
-                          <span className="text-rose-600 dark:text-rose-400 font-semibold" title="Heures de récup au-delà du plafond — payées sur le bulletin du mois suivant">
-                            Payé M+1 <b>{fmtHM(row.recap!.excessMin)}</b>
-                          </span>
-                        )}
                       </div>
                     </div>
                   ))}
@@ -697,8 +683,6 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                         <th className="text-right font-semibold px-2 py-2">+50 %</th>
                         <th className="text-right font-semibold px-2 py-2">Équiv. payé</th>
                         <th className="text-right font-semibold px-2 py-2">Férié</th>
-                        <th className="text-right font-semibold px-2 py-2">Récup</th>
-                        <th className="text-right font-semibold px-2 py-2" title="Heures de récup au-delà du plafond employeur — payées sur le bulletin du mois suivant">Payé M+1</th>
                         <th className="text-right font-semibold px-3 py-2">PDF</th>
                       </tr>
                     </thead>
@@ -719,10 +703,6 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                           <td className="px-2 py-2 text-right tnum">{row.total.sup50Min > 0 ? fmtHM(row.total.sup50Min) : "—"}</td>
                           <td className="px-2 py-2 text-right tnum font-semibold text-emerald-700 dark:text-emerald-300">{row.total.majEquivMin > 0 ? fmtHM(row.total.majEquivMin) : "—"}</td>
                           <td className="px-2 py-2 text-right tnum text-orange-600 dark:text-orange-400">{(row.total.ferieMin ?? 0) > 0 ? fmtHM(row.total.ferieMin) : "—"}</td>
-                          <td className="px-2 py-2 text-right tnum">{row.total.recupMin > 0 ? fmtHM(row.total.recupMin) : "—"}</td>
-                          <td className={`px-2 py-2 text-right tnum font-semibold ${(row.recap?.excessMin ?? 0) > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>
-                            {(row.recap?.excessMin ?? 0) > 0 ? fmtHM(row.recap!.excessMin) : "—"}
-                          </td>
                           <td className="px-3 py-2 text-right">
                             <button type="button" onClick={() => printMonthOne(row)} disabled={row.total.weeksWithData === 0}
                               title="État mensuel PDF de cet employé"
@@ -733,7 +713,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                         </tr>
                       ))}
                       {(teamMonth ?? []).length === 0 && (
-                        <tr><td colSpan={12} className="px-3 py-4 text-[12.5px] italic text-muted-foreground">Aucun compte.</td></tr>
+                        <tr><td colSpan={10} className="px-3 py-4 text-[12.5px] italic text-muted-foreground">Aucun compte.</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -860,28 +840,6 @@ function TagChip({ tag, active, disabled, onClick }: { tag: DayTag; active: bool
   );
 }
 
-/** Pastille compacte de l'option retenue (état mensuel à l'écran). */
-function OptionChip({ option, recupDates }: { option: HeuresOption; recupDates?: string[] }) {
-  const n = recupDates?.filter(Boolean).length ?? 0;
-  if (option === "mixte") {
-    return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300">
-        <Scale className="h-3 w-3" /> Mixte
-        {n > 0 && <span className="font-normal opacity-80">· {n} j</span>}
-      </span>
-    );
-  }
-  const isRecup = option === "recup";
-  return (
-    <span className={`inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-semibold ${
-      isRecup ? "bg-sky-500/15 text-sky-700 dark:text-sky-300" : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-    }`}>
-      {isRecup ? <CalendarCheck className="h-3 w-3" /> : <Coins className="h-3 w-3" />}
-      {isRecup ? "Récup" : "Payé"}
-      {isRecup && n > 0 && <span className="font-normal opacity-80">· {n} j</span>}
-    </span>
-  );
-}
 
 function Badge({ label, value, tone }: { label: string; value: string; tone: "foreground" | "muted" | "amber" | "rose" | "emerald" | "sky" | "violet" | "orange" }) {
   // Recette CANONIQUE du design system (bg /12 + ring /25 + variante sombre).

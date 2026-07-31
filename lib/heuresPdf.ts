@@ -7,8 +7,7 @@
  * quand il y a plusieurs employés, d'une PAGE DE SYNTHÈSE équipe.
  */
 import {
-  fmtHM, weekLabel, aggregateMonth, monthLabel, splitSupp, effectivePaySuppMin,
-  splitStructuralSupp, structuralSuppMin,
+  fmtHM, weekLabel, aggregateMonth, monthLabel,
   type HoursProfile, type WeekCalc, type HeuresOption,
 } from "./heuresCalc";
 import type { MonthRecap } from "./planning";
@@ -17,39 +16,6 @@ import type { MonthRecap } from "./planning";
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-/** « 2026-07-08 » → « 08/07 » (état imprimé, compact). */
-const fmtDateShort = (iso: string) =>
-  new Date(`${iso}T12:00:00Z`).toLocaleDateString("fr-FR", { timeZone: "UTC", day: "2-digit", month: "2-digit" });
-
-/** Ligne « option retenue » placée sous le libellé de semaine sur l'état
- *  (récupération + dates posées, paiement des heures supp, ou partage mixte
- *  « X payées / Y en récup » posé depuis le détail compta pré-PDF). */
-function optionLine(
-  option: HeuresOption | null | undefined,
-  recupDates: string[] | undefined,
-  calc?: WeekCalc | null,
-  paySuppMin?: number | null,
-  structFloorMin = 0,
-): string {
-  const ds = (recupDates ?? []).filter(Boolean);
-  const dsSuffix = ds.length ? ` — ${esc(ds.map(fmtDateShort).join(", "))}` : "";
-  // Part STRUCTURELLE (contrat « 42 h ») : payée d'office, hors arbitrage.
-  const st = calc ? splitStructuralSupp(calc.sup25Min, calc.sup50Min, structFloorMin) : null;
-  const structLine = st && st.structEquivMin > 0
-    ? `<div class="opt paie">▪ ${fmtHM(st.struct25Min + st.struct50Min)} payées d'office (contrat, équiv. ${fmtHM(st.structEquivMin)})</div>`
-    : "";
-  const arbitrable = st ? st.arbitrableMin : (calc ? calc.sup25Min + calc.sup50Min : 0);
-  if (option === "recup") {
-    return `${structLine}<div class="opt recup">▪ Récupération${dsSuffix || " (jours à poser)"}</div>`;
-  }
-  if (option === "paiement") return `${structLine}<div class="opt paie">▪ Paiement des heures supp.</div>`;
-  if (option === "mixte" && st) {
-    const split = splitSupp(st.arb25Min, st.arb50Min, effectivePaySuppMin("mixte", paySuppMin, arbitrable));
-    return `${structLine}<div class="opt paie">▪ Paiement partiel : ${fmtHM(split.payMin)} payées (équiv. ${fmtHM(split.payEquivMin)})</div>`
-      + `<div class="opt recup">▪ ${fmtHM(split.recupMin)} en récup (équiv. ${fmtHM(split.recupEquivMin)})${dsSuffix}</div>`;
-  }
-  return structLine;
-}
 
 /* ───────────────────────── État MENSUEL (compta / paie) ─────────────────────
  * Une page par employé : tableau des SEMAINES du mois (les majorations restent
@@ -72,32 +38,22 @@ export interface MoisEmploye {
   recap?: MonthRecap | null;
 }
 
-/** Bloc « compteurs » sous le tableau : la donnée que la compta attend pour le
- *  bulletin du mois SUIVANT (heures supp au-delà du plafond de récup → payées). */
+/** Bloc « compteurs CP » sous le tableau. Les CONGÉS PAYÉS sont un compteur à
+ *  part, sans rapport avec les heures supp (désormais toutes payées ce mois —
+ *  plus de solde récup ni de report M+1). null si CP non paramétrés. */
 function recapBlock(recap: MonthRecap | null | undefined): string {
-  if (!recap) return "";
-  const cap = recap.recupCapMin == null ? "—" : fmtHM(recap.recupCapMin);
-  const cp = recap.cpBalanceDays == null
-    ? "—"
-    : `${recap.cpBalanceDays} j`;
-  const excess = recap.excessMin > 0
-    ? `<div class="pay"><span class="k">À PAYER sur le bulletin du mois suivant</span><span class="v">${fmtHM(recap.excessMin)}</span></div>`
-    : "";
+  if (!recap || recap.cpBalanceDays == null) return "";
   return `
-    <div class="recap recap5">
-      <div><p class="k">Solde récup (fin de mois)</p><p class="v">${fmtHM(recap.recupBalanceMin)}</p></div>
-      <div><p class="k">Plafond récup</p><p class="v">${cap}</p></div>
-      <div><p class="k">Au-delà du plafond → payé M+1</p><p class="v${recap.excessMin > 0 ? " alert" : ""}">${fmtHM(recap.excessMin)}</p></div>
+    <div class="recap" style="grid-template-columns: repeat(2, 1fr)">
       <div><p class="k">CP pris (période)</p><p class="v">${recap.cpTakenDays} j</p></div>
-      <div><p class="k">Solde CP</p><p class="v">${cp}</p></div>
-    </div>
-    ${excess}`;
+      <div><p class="k">Solde CP</p><p class="v">${recap.cpBalanceDays} j</p></div>
+    </div>`;
 }
 
-function moisRows(weeks: MoisEmploye["weeks"], structFloorMin = 0): string {
-  return weeks.map(({ week, calc, option, paySuppMin, recupDates }) => `
+function moisRows(weeks: MoisEmploye["weeks"]): string {
+  return weeks.map(({ week, calc }) => `
     <tr${calc ? "" : ' class="vide"'}>
-      <td class="jour">${esc(weekLabel(week))}${calc && calc.sup25Min + calc.sup50Min > 0 ? optionLine(option, recupDates, calc, paySuppMin, structFloorMin) : ""}</td>
+      <td class="jour">${esc(weekLabel(week))}</td>
       <td class="num">${calc ? fmtHM(calc.contractMin) : "—"}</td>
       <td class="num">${calc ? fmtHM(calc.totalMin) : "non saisi"}</td>
       <td class="num">${calc ? fmtHM(calc.deltaMin) : "—"}</td>
@@ -105,16 +61,16 @@ function moisRows(weeks: MoisEmploye["weeks"], structFloorMin = 0): string {
       <td class="num">${calc && calc.sup50Min > 0 ? fmtHM(calc.sup50Min) : "—"}</td>
       <td class="num total">${calc && calc.majEquivMin > 0 ? fmtHM(calc.majEquivMin) : "—"}</td>
       <td class="num">${calc && (calc.ferieMin ?? 0) > 0 ? fmtHM(calc.ferieMin) : "—"}</td>
-      <td class="num">${calc && calc.recupMin > 0 ? fmtHM(calc.recupMin) : "—"}</td>
     </tr>`).join("");
 }
 
 function moisEmployePage(f: MoisEmploye, monthId: string): string {
   const total = aggregateMonth(f.weeks.map((w) => w.calc));
-  const structFloor = structuralSuppMin(f.profile);
-  const pay = payEquivDecided(f.weeks, structFloor);
+  // « Tout payé » : TOUTES les heures supp du mois sont payées (plus de mise en
+  // récup ni de report) → « à payer » = équivalent majoré total du mois.
+  const pay = total.majEquivMin;
   const payLine = pay > 0
-    ? `<div class="pay pay-ok"><span class="k">Heures supp À PAYER ce mois (équiv. majoré, décision employeur)</span><span class="v">${fmtHM(pay)}</span></div>`
+    ? `<div class="pay pay-ok"><span class="k">Heures supp À PAYER ce mois (équiv. majoré — toutes payées)</span><span class="v">${fmtHM(pay)}</span></div>`
     : "";
   // Jours fériés : TOUJOURS payés (jamais en récup), détaillés à part pour la paie.
   const ferieLine = total.ferieMin > 0
@@ -136,10 +92,10 @@ function moisEmployePage(f: MoisEmploye, monthId: string): string {
       <thead>
         <tr>
           <th>Semaine</th><th class="num">Contrat</th><th class="num">Total</th><th class="num">Écart</th>
-          <th class="num">Supp +25 %</th><th class="num">Supp +50 %</th><th class="num">Équiv. payé</th><th class="num">Férié</th><th class="num">Récup</th>
+          <th class="num">Supp +25 %</th><th class="num">Supp +50 %</th><th class="num">À payer (équiv.)</th><th class="num">Férié</th>
         </tr>
       </thead>
-      <tbody>${moisRows(f.weeks, structFloor)}</tbody>
+      <tbody>${moisRows(f.weeks)}</tbody>
       <tfoot>
         <tr>
           <td class="label">Total du mois</td>
@@ -150,7 +106,6 @@ function moisEmployePage(f: MoisEmploye, monthId: string): string {
           <td class="num">${fmtHM(total.sup50Min)}</td>
           <td class="num total">${fmtHM(total.majEquivMin)}</td>
           <td class="num">${fmtHM(total.ferieMin)}</td>
-          <td class="num">${fmtHM(total.recupMin)}</td>
         </tr>
       </tfoot>
     </table>
@@ -162,17 +117,12 @@ function moisEmployePage(f: MoisEmploye, monthId: string): string {
     <p class="legende">Les heures supplémentaires sont calculées PAR SEMAINE CIVILE (majorations légales :
     +25 % les 8 premières heures au-delà du contrat, +50 % ensuite) puis totalisées sur le mois.
     Une semaine à cheval sur deux mois est rattachée au mois où elle se termine (dimanche).
-    « Équiv. payé » = heures supp converties en heures payées (×1,25 / ×1,5) — donnée paie.
+    « À payer (équiv.) » = TOUTES les heures supp du mois converties en heures payées (×1,25 / ×1,5) :
+    elles sont INTÉGRALEMENT PAYÉES ce mois (plus de mise en récupération ni de report) — donnée paie.
     Un jour de CONGÉS validé est compté comme TRAVAILLÉ (journée type créditée — il ne crée jamais de
     déficit). Un JOUR FÉRIÉ chômé est DÛ : une journée type est créditée (colonne « Férié »), incluse
-    dans le total et TOUJOURS PAYÉE — jamais transformée en récup ; les majorations d'heures supp ne
-    portent que sur le dépassement réellement TRAVAILLÉ (hors crédit férié).
-    La récup posée n'est déduite du compteur qu'au passage de la semaine, et seulement si le
-    contrat n'y est pas atteint. Les heures de récup AU-DELÀ du plafond fixé par l'employeur partent au
-    PAIEMENT sur le bulletin du mois suivant (ligne « payé M+1 » ci-dessus).
-    L'option retenue pour les heures supp (récupération en jours, paiement, ou partage « paiement
-    partiel + récup » posé depuis le détail compta) est indiquée sous chaque semaine concernée —
-    seule la part « payées » part sur le bulletin, le reste crédite le compteur de récup.</p>
+    dans le total et TOUJOURS PAYÉE ; les majorations d'heures supp ne portent que sur le dépassement
+    réellement TRAVAILLÉ (hors crédit férié).</p>
 
     <div class="signatures">
       <div><p>Signature de l'employé</p></div>
@@ -181,26 +131,10 @@ function moisEmployePage(f: MoisEmploye, monthId: string): string {
   </section>`;
 }
 
-/** Équivalent majoré des heures supp À PAYER ce mois : part STRUCTURELLE (contrat
- *  « 42 h », payée d'office chaque semaine) + part ARBITRABLE dont le paiement a
- *  été décidé (paiement intégral, ou part payée du mixte). */
-function payEquivDecided(weeks: MoisEmploye["weeks"], structFloorMin = 0): number {
-  let out = 0;
-  for (const { calc, option, paySuppMin } of weeks) {
-    if (!calc) continue;
-    const st = splitStructuralSupp(calc.sup25Min, calc.sup50Min, structFloorMin);
-    out += st.structEquivMin;   // structurel : toujours payé
-    if (st.arbitrableMin <= 0 || (option !== "paiement" && option !== "mixte")) continue;
-    out += splitSupp(st.arb25Min, st.arb50Min, effectivePaySuppMin(option, paySuppMin, st.arbitrableMin)).payEquivMin;
-  }
-  return out;
-}
-
 function moisSynthesePage(feuilles: MoisEmploye[], monthId: string): string {
   const rows = feuilles.map((f) => {
     const t = aggregateMonth(f.weeks.map((w) => w.calc));
-    const excess = f.recap?.excessMin ?? 0;
-    const pay = payEquivDecided(f.weeks, structuralSuppMin(f.profile));
+    const pay = t.majEquivMin; // tout payé : équiv. majoré de TOUTES les heures supp
     return `
       <tr>
         <td>${esc(f.name)}</td>
@@ -212,9 +146,6 @@ function moisSynthesePage(feuilles: MoisEmploye[], monthId: string): string {
         <td class="num">${fmtHM(t.sup50Min)}</td>
         <td class="num total">${pay > 0 ? fmtHM(pay) : "—"}</td>
         <td class="num">${t.ferieMin > 0 ? fmtHM(t.ferieMin) : "—"}</td>
-        <td class="num">${fmtHM(t.recupMin)}</td>
-        <td class="num">${f.recap ? fmtHM(f.recap.recupBalanceMin) : "—"}</td>
-        <td class="num${excess > 0 ? " alert" : ""}">${excess > 0 ? fmtHM(excess) : "—"}</td>
       </tr>`;
   }).join("");
   return `
@@ -230,18 +161,16 @@ function moisSynthesePage(feuilles: MoisEmploye[], monthId: string): string {
       <thead>
         <tr>
           <th>Employé</th><th class="num">Semaines</th><th class="num">Contrat</th><th class="num">Total</th><th class="num">Écart</th>
-          <th class="num">Supp +25 %</th><th class="num">Supp +50 %</th><th class="num">À payer (supp)</th><th class="num">Férié</th><th class="num">Récup</th>
-          <th class="num">Solde récup</th><th class="num">Payé M+1</th>
+          <th class="num">Supp +25 %</th><th class="num">Supp +50 %</th><th class="num">À payer (supp)</th><th class="num">Férié</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
     <p class="legende">Heures supp calculées par semaine civile puis totalisées ; semaine à cheval rattachée au
-    mois de son dimanche. « À payer (supp) » = équivalent MAJORÉ des heures supp dont le paiement a été décidé
-    (paiement intégral ou part payée d'un partage « mixte ») — le reste crédite le compteur de récup.
-    « Férié » = journées types créditées pour les jours fériés chômés — incluses dans le total et TOUJOURS
-    payées (jamais en récup ; les majorations ne portent que sur le dépassement travaillé). « Payé M+1 » = heures de récup AU-DELÀ du plafond fixé par l'employeur, à payer
-    sur le bulletin du mois suivant. Un état détaillé par employé suit (à signer).</p>
+    mois de son dimanche. « À payer (supp) » = équivalent MAJORÉ de TOUTES les heures supp du mois — elles sont
+    intégralement payées ce mois (plus de mise en récupération ni de report). « Férié » = journées types créditées
+    pour les jours fériés chômés — incluses dans le total et TOUJOURS payées (les majorations ne portent que sur
+    le dépassement travaillé). Un état détaillé par employé suit (à signer).</p>
   </section>`;
 }
 
