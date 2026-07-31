@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { parisStartOfDay } from "@/lib/paris-time";
 
 // Route interrogeant SAP / agrégeant beaucoup de données : sans plafond explicite,
 // un backend lent dépassait la durée par défaut de la fonction, qui mourait SANS
@@ -93,6 +94,32 @@ export async function GET(req: NextRequest) {
     prisma.product.count({ where }),
   ]);
 
+  // ── DLC la plus PROCHE par article (alerte fraîcheur à la vente) ──
+  // Rattachée à l'ARTICLE (LotDlc.itemCode, indexé), pas au lot qui sera
+  // finalement expédié : l'affectation de lot se joue plus tard, et la question
+  // du vendeur est « ce produit a-t-il de la marchandise qui périme bientôt ? ».
+  // On ignore les DLC DÉPASSÉES : ces lots sont écoulés ou retirés, les
+  // remonter piquerait de rouge des articles parfaitement sains.
+  const dlcByItem = new Map<string, Date>();
+  const itemCodes = items.map((p) => p.itemCode);
+  if (itemCodes.length > 0) {
+    try {
+      const rows = await prisma.lotDlc.findMany({
+        where: {
+          itemCode: { in: itemCodes },
+          expirationDate: { gte: parisStartOfDay() },
+        },
+        select: { itemCode: true, expirationDate: true },
+        orderBy: { expirationDate: "asc" },   // la 1re vue par article = la plus proche
+      });
+      for (const r of rows) {
+        if (r.itemCode && r.expirationDate && !dlcByItem.has(r.itemCode)) {
+          dlcByItem.set(r.itemCode, r.expirationDate);
+        }
+      }
+    } catch { /* fraîcheur best-effort : jamais bloquant pour la liste stock */ }
+  }
+
   // Reshape: each product gets a `stockByWarehouse` map for easier UI use.
   // Cast temporary pour les U_* fields tant que Prisma generate est bloqué.
   const products = items.map((rawP) => {
@@ -136,6 +163,8 @@ export async function GET(req: NextRequest) {
       uUvc: p.uUvc,
       frgnName: p.frgnName,                 // = variété
       uNbBarqColis: p.uNbBarqColis,
+      // DLC la plus proche encore à venir sur cet article (null si aucune saisie).
+      dlc: dlcByItem.get(p.itemCode)?.toISOString() ?? null,
       stockByWarehouse,
     };
   });
