@@ -99,12 +99,17 @@ function AgreageBadge({ a, className = "" }: { a: AgreageInfo | null | undefined
 }
 
 /** Statut de ligne par défaut quand il n'y a PAS d'agréage (EM libre, sans
- *  passage par une commande fournisseur) — « Reçu » générique. */
+ *  passage par une commande fournisseur) — « Reçu » générique.
+ *
+ *  ENCRE PLEINE (pas de couleur) : le VERT est réservé à l'agréage réel, celui
+ *  posé au passage Cde Fournisseur → EM. Une EM saisie en direct n'a pas subi
+ *  le contrôle qualité ; la distinguer par la couleur évite de lire « vert »
+ *  (donc « agréé conforme ») là où personne n'a rien contrôlé. */
 function ReceivedBadge({ className = "" }: { className?: string }) {
   return (
     <span
       title="Entrée marchandise reçue (sans commande fournisseur / agréage)"
-      className={`inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-[10.5px] font-semibold text-sky-700 dark:text-sky-300 ${className}`}
+      className={`inline-flex items-center gap-1 rounded-full bg-foreground/10 px-2 py-0.5 text-[10.5px] font-semibold text-foreground ${className}`}
     >
       <PackageCheck className="h-3 w-3" /> Reçu
     </span>

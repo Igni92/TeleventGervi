@@ -16,6 +16,14 @@ import type { MonthRecap } from "./planning";
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+/** « 33h00 à 25 % + 8h08 à 50 % » — n'affiche que les tranches non nulles. */
+function fmtTranches(min25: number, min50: number): string {
+  const parts: string[] = [];
+  if (min25 > 0) parts.push(`${fmtHM(min25)} à 25 %`);
+  if (min50 > 0) parts.push(`${fmtHM(min50)} à 50 %`);
+  return parts.join(" + ");
+}
+
 
 /* ───────────────────────── État MENSUEL (compta / paie) ─────────────────────
  * Une page par employé : tableau des SEMAINES du mois (les majorations restent
@@ -69,8 +77,13 @@ function moisEmployePage(f: MoisEmploye, monthId: string): string {
   // « Tout payé » : TOUTES les heures supp du mois sont payées (plus de mise en
   // récup ni de report) → « à payer » = équivalent majoré total du mois.
   const pay = total.majEquivMin;
+  // Détail PAR TRANCHE, en heures BRUTES : c'est ce qui se saisit sur le bulletin
+  // de paie (les supp s'y déclarent par taux de majoration, pas en équivalent).
+  // « Tout payé » rend le découpage direct : aucune part ne partant en récup, les
+  // heures à payer SONT les heures supp du mois, tranche par tranche.
+  // L'équivalent majoré reste rappelé dans le libellé pour le recoupement.
   const payLine = pay > 0
-    ? `<div class="pay pay-ok"><span class="k">Heures supp À PAYER ce mois (équiv. majoré — toutes payées)</span><span class="v">${fmtHM(pay)}</span></div>`
+    ? `<div class="pay pay-ok"><span class="k">Heures supp À PAYER ce mois (toutes payées — équiv. majoré ${fmtHM(pay)})</span><span class="v">${fmtTranches(total.sup25Min, total.sup50Min)}</span></div>`
     : "";
   // Jours fériés : TOUJOURS payés (jamais en récup), détaillés à part pour la paie.
   const ferieLine = total.ferieMin > 0
