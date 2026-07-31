@@ -27,19 +27,20 @@ import {
   type ClientCarrierPricing,
   type TransportCostModel,
 } from "./transportCost";
-import { computePositionCost, resolveCarrierTariff, type CarrierTariffMap } from "./carrierTariff";
+import { computePositionCost, resolveCarrierTariff, isDelanchyCarrierCode, type CarrierTariffMap } from "./carrierTariff";
 import { departementOfZip } from "./geo/zip";
 import type { ClientTournee } from "./clientTournee";
 import type { ClientSegment } from "./segments";
 
 export type DocTransportMode = "direct" | "grille" | "perkg" | "aucun";
 
-/* ── RÈGLE TEMPORAIRE (direction, 07/2026) ─────────────────────────
- * « Pars du principe que les MAGASINS d'Île-de-France sont livrés en DIRECT
- * tout le temps » : pour un client GMS/CHR dont le département est en IDF, le
- * coût est TOUJOURS celui d'une position de la flotte propre — quel que soit
- * le transporteur porté par le document (Fargier assure la fin de parcours du
- * réseau Delanchy en IDF sans grille dédiée). Les segments non livrés
+/* ── RÈGLE (direction, 07/2026) ─────────────────────────
+ * Les MAGASINS d'Île-de-France (client GMS/CHR dont le département est en IDF)
+ * sont livrés en DIRECT : le coût est celui d'une position de la flotte propre —
+ * SAUF quand le transporteur du document est du réseau DELANCHY/FARGIER. Fargier
+ * assure la fin de parcours du réseau Delanchy en IDF, et ses envois sont tarifés
+ * sur la GRILLE DELANCHY (la feuille importée), PAS au coût flotte (les tarifs
+ * Fargier = ceux de la feuille Delanchy). Les segments non livrés
  * (RUNGIS / MIN / EXPORT / comptoir) ne sont PAS concernés.
  * Pour retirer la règle : vider IDF_DIRECT_DEPTS. */
 const IDF_DIRECT_DEPTS = new Set(["75", "77", "78", "91", "92", "93", "94", "95"]);
@@ -115,10 +116,14 @@ export function docTransportCost(
   const code = docCode || tourCode;
   const fromDoc = !!docCode;
 
-  // Règle « MAGASIN IDF = DIRECT tout le temps » — prioritaire sur le
-  // transporteur du document (cf. bloc IDF_DIRECT_DEPTS ci-dessus).
+  // Règle « MAGASIN IDF = DIRECT » — SAUF réseau DELANCHY/FARGIER, qui est tarifé
+  // sur la grille Delanchy (les tarifs Fargier = la feuille Delanchy) : on laisse
+  // alors le calcul retomber sur la grille plus bas (cf. IDF_DIRECT_DEPTS ci-dessus).
   const dept = departementOfZip(doc.zip);
-  if (dept && IDF_DIRECT_DEPTS.has(dept) && doc.segment && IDF_DIRECT_SEGMENTS.has(doc.segment)) {
+  if (
+    dept && IDF_DIRECT_DEPTS.has(dept) && doc.segment && IDF_DIRECT_SEGMENTS.has(doc.segment)
+    && !isDelanchyCarrierCode(code)
+  ) {
     const cost = ctx.costPerDelivery > 0 ? ctx.costPerDelivery : ctx.prixPositionPerKg * kg;
     return { cost, carrier: code || "DIRECT", mode: "direct", fromDoc: true };
   }

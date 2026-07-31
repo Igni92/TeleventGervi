@@ -15,6 +15,20 @@ const antoine: CarrierTariff = {
   updatedBy: null,
 };
 
+/** Grille DELANCHY de test : zone IDF, forfait 0-100 puis aux 100 kg. Fargier
+ *  (réseau Delanchy) doit se tarifer dessus, y compris en IDF. */
+const delanchy: CarrierTariff = {
+  carrierCode: "DELANCHY",
+  brackets: [
+    { id: "d1", minKg: 0, maxKg: 100, unit: "position" },
+    { id: "d2", minKg: 101, maxKg: 1000, unit: "per100kg" },
+  ],
+  zones: [{ id: "z1", label: "IDF", departements: ["75", "77", "78", "91", "92", "93", "94", "95"], prices: { d1: 32, d2: 25 } }],
+  extras: [],
+  updatedAt: null,
+  updatedBy: null,
+};
+
 const ctx: DocTransportContext = {
   model: {
     costs: [], deliveriesPerYear: 1427, kgPerYear: 84434,
@@ -22,18 +36,19 @@ const ctx: DocTransportContext = {
   },
   costPerDelivery: 25.25,
   prixPositionPerKg: 0.427,
-  tariffs: { ANTOINE: antoine },
+  tariffs: { ANTOINE: antoine, DELANCHY: delanchy },
   tournees: new Map([["LWAT", { trspCode: "ANTOINE", heure: null, nom: null, des: null, lineId: null }]]),
   pricingById: new Map(),
 };
 
 describe("docTransportCost", () => {
-  it("magasin IDF (GMS/CHR) = DIRECT au coût par position, quel que soit le transporteur", () => {
-    // Orly (94) en FARGIER → règle IDF : coût position flotte, pas la grille.
+  it("magasin IDF (GMS/CHR) = DIRECT au coût position — SAUF réseau Delanchy/Fargier (grille Delanchy)", () => {
+    // Orly (94) en FARGIER → réseau Delanchy : tarifé sur la GRILLE DELANCHY
+    // (la feuille), PAS au coût flotte. 40 kg → forfait 0-100 = 32 €.
     const t = docTransportCost(ctx, { cardCode: "LORLY", zip: "94 310", kg: 40, trspCode: "FARGIER", segment: "GMS" });
-    expect(t.mode).toBe("direct");
-    expect(t.cost).toBeCloseTo(25.25);
-    // …même sans transporteur du tout.
+    expect(t.mode).toBe("grille");
+    expect(t.cost).toBeCloseTo(32);
+    // …mais SANS transporteur identifié, la règle IDF « direct » s'applique toujours.
     const t2 = docTransportCost(ctx, { cardCode: "XIDF", zip: "77100", kg: 40, segment: "CHR" });
     expect(t2.mode).toBe("direct");
     expect(t2.cost).toBeCloseTo(25.25);
