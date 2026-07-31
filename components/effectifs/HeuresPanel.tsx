@@ -45,7 +45,7 @@ interface MonthRow {
   email: string;
   name: string;
   profile: HoursProfile | null;
-  weeks: { week: string; calc: WeekCalc | null; option?: HeuresOption | null; paySuppMin?: number | null; recupDates?: string[] }[];
+  weeks: { week: string; calc: WeekCalc | null; days?: DayHours[] | null; option?: HeuresOption | null; paySuppMin?: number | null; recupDates?: string[] }[];
   total: MonthCalc;
   recap?: MonthRecap | null;
 }

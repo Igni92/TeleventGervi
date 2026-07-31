@@ -7,8 +7,9 @@
  * quand il y a plusieurs employés, d'une PAGE DE SYNTHÈSE équipe.
  */
 import {
-  fmtHM, weekLabel, aggregateMonth, monthLabel,
-  type HoursProfile, type WeekCalc, type HeuresOption,
+  fmtHM, weekLabel, aggregateMonth, monthLabel, weekDates, dayMinutes,
+  JOURS_SEMAINE, DAY_TAG_LABEL,
+  type HoursProfile, type WeekCalc, type HeuresOption, type DayHours,
 } from "./heuresCalc";
 import type { MonthRecap } from "./planning";
 
@@ -37,6 +38,8 @@ export interface MoisEmploye {
   weeks: {
     week: string;
     calc: WeekCalc | null;
+    /** Saisie BRUTE Lun→Dim — alimente le DÉTAIL JOUR PAR JOUR de l'état. */
+    days?: DayHours[] | null;
     option?: HeuresOption | null;   // choix compta reporté sur l'état
     paySuppMin?: number | null;     // part payée (option « mixte »)
     recupDates?: string[];          // dates de récup (options « recup »/« mixte »)
@@ -56,6 +59,114 @@ function recapBlock(recap: MonthRecap | null | undefined): string {
       <div><p class="k">CP pris (période)</p><p class="v">${recap.cpTakenDays} j</p></div>
       <div><p class="k">Solde CP</p><p class="v">${recap.cpBalanceDays} j</p></div>
     </div>`;
+}
+
+/* ─────────────────────── DÉTAIL JOUR PAR JOUR du mois ──────────────────────
+ * Le tableau des semaines dit COMBIEN ; il ne dit pas QUELS JOURS. Pour la
+ * compta comme pour le salarié qui signe, c'est le jour qui fait foi : quel
+ * jour a été travaillé, lequel était en récup, en CP, en maladie, férié.
+ * D'où ce second tableau, une ligne par jour du mois, sous le récapitulatif
+ * hebdomadaire. */
+
+const dJour = (iso: string) =>
+  new Date(`${iso}T12:00:00Z`).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+
+/** Plage horaire lisible : « 04:45 → 12:00 », les deux demi-journées si saisies. */
+function plage(d: DayHours | undefined): string {
+  if (!d) return "";
+  const parts: string[] = [];
+  if (d.m1 && d.m2) parts.push(`${d.m1} → ${d.m2}`);
+  if (d.a1 && d.a2) parts.push(`${d.a1} → ${d.a2}`);
+  return parts.join("  ·  ");
+}
+
+/** Teinte du tag — récup en bleu, absence/maladie en rouge, comme à l'écran. */
+function tagClass(tag: string | undefined): string {
+  if (tag === "recup") return "opt recup";
+  if (tag === "conges" || tag === "ferie") return "opt paie";
+  if (tag === "absent" || tag === "maladie") return "opt";
+  return "opt";
+}
+
+/**
+ * Une ligne par JOUR du mois, toutes semaines confondues, triées par date.
+ * On ne garde QUE les jours réellement rattachés au `monthId` : une semaine à
+ * cheval sur deux mois est rattachée en entier à un mois pour les majorations
+ * (règle légale, calcul hebdomadaire), mais imprimer ici les jours de l'autre
+ * mois ferait un état qui ne correspond à aucun bulletin.
+ */
+function detailJoursRows(weeks: MoisEmploye["weeks"], monthId: string): string {
+  type Ligne = { date: string; d: DayHours | undefined; min: number };
+  const lignes: Ligne[] = [];
+  for (const w of weeks) {
+    const dates = weekDates(w.week);
+    for (let i = 0; i < 7; i++) {
+      const date = dates[i];
+      if (!date || !date.startsWith(monthId)) continue;
+      const d = w.days?.[i];
+      // `calc.dayMin` inclut les CRÉDITS (congé, férié, récup posée) ; la saisie
+      // brute ne les connaît pas. On prend le calcul quand il existe.
+      const min = w.calc?.dayMin?.[i] ?? dayMinutes(d);
+      lignes.push({ date, d, min });
+    }
+  }
+  lignes.sort((a, b) => a.date.localeCompare(b.date));
+  if (lignes.length === 0) return "";
+
+  return lignes.map(({ date, d, min }) => {
+    const jourIdx = (new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7; // Lun=0
+    const tag = d?.tag;
+    const h = plage(d);
+    const credit = !h && min > 0; // journée créditée (CP / férié / récup posée)
+    return `
+    <tr${min === 0 && !tag ? ' class="vide"' : ""}>
+      <td class="jour">${esc(JOURS_SEMAINE[jourIdx] ?? "")}<span class="date">${dJour(date)}</span></td>
+      <td>${h ? esc(h) : (credit ? "<i>journée créditée</i>" : "—")}</td>
+      <td class="num total">${min > 0 ? fmtHM(min) : "—"}</td>
+      <td>${tag ? `<span class="${tagClass(tag)}">${esc(DAY_TAG_LABEL[tag] ?? tag)}</span>` : "—"}</td>
+      <td class="note">${d?.note ? esc(d.note) : ""}</td>
+    </tr>`;
+  }).join("");
+}
+
+/** Compte les jours du mois par TAG (jours travaillés, récup, CP, maladie…) —
+ *  le résumé que cherche la compta avant même de lire le détail. */
+function compteJours(weeks: MoisEmploye["weeks"], monthId: string): {
+  travailles: number; recup: number; conges: number; maladie: number; absent: number; ferie: number;
+} {
+  const out = { travailles: 0, recup: 0, conges: 0, maladie: 0, absent: 0, ferie: 0 };
+  for (const w of weeks) {
+    const dates = weekDates(w.week);
+    for (let i = 0; i < 7; i++) {
+      const date = dates[i];
+      if (!date || !date.startsWith(monthId)) continue;
+      const d = w.days?.[i];
+      const worked = dayMinutes(d) > 0;
+      // Un jour AVEC heures saisies est travaillé, quel que soit son tag : le
+      // tag « Présent » n'est pas toujours posé, et une demi-journée de récup
+      // suivie d'une matinée travaillée reste du temps de travail.
+      if (worked) out.travailles++;
+      else if (d?.tag === "recup") out.recup++;
+      else if (d?.tag === "conges") out.conges++;
+      else if (d?.tag === "maladie") out.maladie++;
+      else if (d?.tag === "ferie") out.ferie++;
+      else if (d?.tag === "absent") out.absent++;
+    }
+  }
+  return out;
+}
+
+/** Bloc « jours du mois » — n'affiche que les catégories non vides (hors jours
+ *  travaillés, toujours montrés). */
+function joursBlock(weeks: MoisEmploye["weeks"], monthId: string): string {
+  const c = compteJours(weeks, monthId);
+  const cases: string[] = [`<div><p class="k">Jours travaillés</p><p class="v">${c.travailles} j</p></div>`];
+  if (c.recup > 0)   cases.push(`<div><p class="k">Récupération</p><p class="v">${c.recup} j</p></div>`);
+  if (c.conges > 0)  cases.push(`<div><p class="k">Congés payés</p><p class="v">${c.conges} j</p></div>`);
+  if (c.ferie > 0)   cases.push(`<div><p class="k">Fériés chômés</p><p class="v">${c.ferie} j</p></div>`);
+  if (c.maladie > 0) cases.push(`<div><p class="k">Maladie</p><p class="v">${c.maladie} j</p></div>`);
+  if (c.absent > 0)  cases.push(`<div><p class="k">Absence</p><p class="v alert">${c.absent} j</p></div>`);
+  return `<div class="recap" style="grid-template-columns: repeat(${cases.length}, 1fr)">${cases.join("")}</div>`;
 }
 
 function moisRows(weeks: MoisEmploye["weeks"]): string {
@@ -86,6 +197,9 @@ function moisEmployePage(f: MoisEmploye, monthId: string): string {
     ? `<div class="pay pay-ok"><span class="k">Heures supp À PAYER ce mois (toutes payées — équiv. majoré ${fmtHM(pay)})</span><span class="v">${fmtTranches(total.sup25Min, total.sup50Min)}</span></div>`
     : "";
   // Jours fériés : TOUJOURS payés (jamais en récup), détaillés à part pour la paie.
+  // Détail jour par jour — vide si aucune saisie brute n'est remontée (états
+  // anciens, ou employé sans semaine saisie) : on n'imprime pas un tableau creux.
+  const detailJours = detailJoursRows(f.weeks, monthId);
   const ferieLine = total.ferieMin > 0
     ? `<div class="pay pay-ok"><span class="k">Jours fériés — journée type due, TOUJOURS PAYÉE</span><span class="v">${fmtHM(total.ferieMin)}</span></div>`
     : "";
@@ -125,7 +239,21 @@ function moisEmployePage(f: MoisEmploye, monthId: string): string {
 
     ${ferieLine}
     ${payLine}
+    ${joursBlock(f.weeks, monthId)}
     ${recapBlock(f.recap)}
+
+    ${detailJours ? `
+    <h2 style="font-size:13px;text-transform:uppercase;letter-spacing:1.2px;margin:16px 0 8px">
+      Détail jour par jour — ${esc(monthLabel(monthId))}
+    </h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Jour</th><th>Horaires</th><th class="num">Total</th><th>Nature</th><th>Note</th>
+        </tr>
+      </thead>
+      <tbody>${detailJours}</tbody>
+    </table>` : ""}
 
     <p class="legende">Les heures supplémentaires sont calculées PAR SEMAINE CIVILE (majorations légales :
     +25 % les 8 premières heures au-delà du contrat, +50 % ensuite) puis totalisées sur le mois.

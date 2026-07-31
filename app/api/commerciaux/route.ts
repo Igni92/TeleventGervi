@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { requireAdmin, requireStrictAdmin } from "@/lib/permissions";
+import { ADMIN_EMAILS, requireAdmin, requireStrictAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { parisStartOfDay } from "@/lib/paris-time";
 import { writeAudit } from "@/lib/audit";
@@ -108,4 +108,64 @@ export async function PATCH(req: NextRequest) {
   }
 
   return NextResponse.json({ ok: true });
+}
+
+/**
+ * DELETE /api/commerciaux  { userId }
+ *
+ * SUPPRIME un compte de l'équipe. Irréversible : Account, Session et Presence
+ * partent en cascade (le salarié est déconnecté et devra se reconnecter, ce qui
+ * recréera un compte VIERGE — donc sans rôle, bloqué sur /bienvenue).
+ *
+ * GARDE-FOUS — une suppression de compte est une action à sens unique :
+ *   • ADMIN STRICT seulement : la direction gère les rôles, pas les comptes ;
+ *   • jamais un email ADMIN_EMAILS (bootstrap) → anti-lock-out ;
+ *   • jamais SOI-MÊME → on ne se retire pas ses propres accès par mégarde.
+ *
+ * Ce qui est délibérément CONSERVÉ : l'historique métier rattaché par email ou
+ * par trigramme (heures, salaires, commissions, journaux d'audit) ne vit pas
+ * dans la table User. Supprimer le compte retire l'ACCÈS, pas les traces —
+ * c'est ce qu'on veut pour la paie et la traçabilité.
+ */
+export async function DELETE(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await requireStrictAdmin(session))) {
+    return NextResponse.json({ error: "Seul un administrateur peut supprimer un compte" }, { status: 403 });
+  }
+
+  let body: { userId?: string };
+  try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
+  if (!body.userId) return NextResponse.json({ error: "userId requis" }, { status: 400 });
+
+  const target = await prisma.user.findUnique({
+    where: { id: body.userId },
+    select: { id: true, name: true, email: true },
+  });
+  if (!target) return NextResponse.json({ error: "Compte introuvable" }, { status: 404 });
+
+  const email = (target.email ?? "").toLowerCase();
+  if (ADMIN_EMAILS.some((a) => a.toLowerCase() === email)) {
+    return NextResponse.json({ error: "Ce compte administrateur ne peut pas être supprimé." }, { status: 400 });
+  }
+  if (target.id === session.user.id) {
+    return NextResponse.json({ error: "Vous ne pouvez pas supprimer votre propre compte." }, { status: 400 });
+  }
+
+  // Trace AVANT la suppression : après, il ne reste plus rien à nommer.
+  await writeAudit({
+    session, action: "USER_DELETE", entity: "User", entityId: target.id,
+    summary: `Suppression du compte ${target.name ?? target.email ?? target.id}`,
+    details: { email: target.email },
+  });
+
+  // Le rattachement commercial vit hors du client Prisma typé : sans ce ménage,
+  // un compte recréé au même email retrouverait son périmètre — et donc un accès
+  // que personne ne lui aurait réattribué.
+  try {
+    await prisma.$executeRawUnsafe(`DELETE FROM "UserCommercial" WHERE LOWER("email") = LOWER($1)`, target.email ?? "");
+  } catch { /* table absente → rien à nettoyer */ }
+
+  await prisma.user.delete({ where: { id: target.id } });
+  return NextResponse.json({ ok: true, deleted: target.name ?? target.email });
 }

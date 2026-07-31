@@ -134,6 +134,10 @@ function buildMonthRow(
     return {
       week: w,
       calc: entry ? computeWeek(entry.days, prof.weeklyHours, typDay) : null,
+      // Saisie BRUTE Lun→Dim (horaires + tag + note) : c'est ce qui permet à
+      // l'état PDF de détailler le mois JOUR PAR JOUR (travaillé, récup, CP…)
+      // et pas seulement une ligne par semaine.
+      days: entry?.days ?? null,
       option: entry?.option ?? null,          // choix compta reporté sur l'état
       paySuppMin: entry?.paySuppMin,          // part payée (option « mixte »)
       recupDates: entry?.recupDates,          // dates de récup (options « recup »/« mixte »)
