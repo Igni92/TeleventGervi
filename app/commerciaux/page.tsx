@@ -6,6 +6,7 @@ import { CommercialCard } from "@/components/commerciaux/CommercialCard";
 import { EffectifsPreviewBar } from "@/components/role-preview/EffectifsPreviewBar";
 import { CommerciauxSapList } from "./CommerciauxSapList";
 import { HeuresPanel } from "@/components/effectifs/HeuresPanel";
+import { CommissionsPanel } from "@/components/effectifs/CommissionsPanel";
 import { PageHeader } from "@/components/ui/page-header";
 
 export const metadata = { title: "Effectifs | Gervi" };
@@ -167,6 +168,11 @@ export default async function CommerciauxPage() {
       />
 
       <CommerciauxSapList />
+
+      {/* ── État des commissions mois par mois, avec le trait de la dernière
+             échéance réglée (l'API borne au périmètre : un commercial ne voit
+             que la sienne). ── */}
+      <CommissionsPanel />
 
       {/* ── Gestion horaire hebdomadaire : chaque employé saisit ses heures ;
              les managers voient l'équipe et sortent les feuilles PDF (compta). ── */}
