@@ -115,6 +115,9 @@ export async function GET(req: NextRequest) {
     Quantity: number;
     WarehouseCode?: string;
     LineTotal?: number;
+    /** Lot affecté. Pas besoin de l'ajouter au $select : `DocumentLines` est
+     *  sélectionné en entier, le Service Layer renvoie donc déjà les UDF. */
+    U_NoLot?: string;
   };
   type SapOrderListed = {
     DocEntry: number;
@@ -390,6 +393,10 @@ export async function GET(req: NextRequest) {
           pays: p?.uPays ?? null,
           variete: p?.frgnName ?? null,
           calibre: calibreByCode[l.ItemCode] ?? null,
+          // Lot affecté — édité en direct depuis le Détail livraison. À la fusion
+          // de deux lignes d'un même article, on garde celui de la première : les
+          // lignes d'un même article sont affectées ensemble, elles le partagent.
+          lot: (l.U_NoLot ?? "").trim() || null,
         };
       });
       // Fusion des lignes d'un MÊME article (ex. ligne gratuite en plus de la
