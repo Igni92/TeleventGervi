@@ -42,7 +42,7 @@ type Line = {
   marque: string | null;                       // désignation : marque
   condt: string | null;                        // désignation : conditionnement
   variete: string | null;                      // désignation : variété (FrgnName)
-  dlc: string;                                  // DLC optionnelle (fraîcheur) — "" si non saisie (YYYY-MM-DD)
+  dlc: string;                                  // DDM optionnelle (fraîcheur) — "" si non saisie (YYYY-MM-DD)
   note: number | null;                          // note qualité 1..5 (étoiles) — null si non notée
 };
 
@@ -257,9 +257,9 @@ export function GoodsReceiptForm() {
   const [lines, setLines] = useState<Line[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [lastReceipt, setLastReceipt] = useState<{ docNum: number; lot: string } | null>(null);
-  // Durées de vie par défaut (jours) → pré-remplit la DLC à l'ajout d'une ligne
+  // Durées de vie par défaut (jours) → pré-remplit la DDM à l'ajout d'une ligne
   // (= date du jour + jours). Exception article prioritaire sur le défaut du
-  // groupe. Réglées dans Paramètres › « Fraîcheur · DLC par défaut ».
+  // groupe. Réglées dans Paramètres › « Fraîcheur · DDM par défaut ».
   const [shelfLife, setShelfLife] = useState<Record<string, number>>({});
   const [groupDays, setGroupDays] = useState<Record<string, number>>({});
   useEffect(() => {
@@ -290,7 +290,7 @@ export function GoodsReceiptForm() {
         return cur;
       }
       const ratio = (p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) ? p.salesQtyPerPackUnit : 1;
-      // DLC par défaut : exception article si définie, sinon défaut du groupe de fruits.
+      // DDM par défaut : exception article si définie, sinon défaut du groupe de fruits.
       const sl = shelfLife[p.itemCode] ?? groupDays[freshnessGroupKey(p.itemName)];
       return [...cur, {
         itemCode: p.itemCode,
@@ -379,10 +379,10 @@ export function GoodsReceiptForm() {
           : `${lines.length} ligne(s) — stock incrémenté.`,
       });
 
-      // ── DLC (fraîcheur) : best-effort, ne bloque JAMAIS la réception ──
+      // ── DDM (fraîcheur) : best-effort, ne bloque JAMAIS la réception ──
       // Le n° de lot créé est exposé par l'API : json.lot === "EM<DocNum>"
       // (cf. app/api/sap/goods-receipts/route.ts → { lot, docNum }). On POST
-      // chaque DLC saisie vers /api/lots/dlc. Une seule DLC par lot (toutes les
+      // chaque DDM saisie vers /api/lots/dlc. Une seule DDM par lot (toutes les
       // lignes de cette EM partagent le même batchNumber) : on dédoublonne par
       // itemCode et on laisse l'upsert serveur trancher si plusieurs diffèrent.
       const batchNumber: string | undefined =
@@ -402,13 +402,13 @@ export function GoodsReceiptForm() {
         );
         const failed = results.filter((r) => r.status === "rejected").length;
         if (failed === 0) {
-          toast.info(`Fraîcheur enregistrée pour le lot ${batchNumber} (${dlcLines.length} DLC).`);
+          toast.info(`Fraîcheur enregistrée pour le lot ${batchNumber} (${dlcLines.length} DDM).`);
         } else {
-          toast.info(`Réception OK — ${dlcLines.length - failed}/${dlcLines.length} DLC enregistrée(s) (le reste a échoué, sans impact sur l'entrée).`);
+          toast.info(`Réception OK — ${dlcLines.length - failed}/${dlcLines.length} DDM enregistrée(s) (le reste a échoué, sans impact sur l'entrée).`);
         }
       } else if (!batchNumber && dlcLines.length > 0) {
         // Cas théorique : la réponse n'expose pas le lot → on n'enregistre pas à l'aveugle.
-        toast.info("Réception créée, mais le n° de lot n'a pas été renvoyé : DLC non enregistrée(s).");
+        toast.info("Réception créée, mais le n° de lot n'a pas été renvoyé : DDM non enregistrée(s).");
       }
 
       setLastReceipt({ docNum: json.docNum, lot: json.lot });
@@ -543,7 +543,7 @@ export function GoodsReceiptForm() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">DLC (optionnel)</label>
+                    <label className="block text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">DDM (optionnel)</label>
                     <input
                       type="date"
                       value={l.dlc}
@@ -589,7 +589,7 @@ export function GoodsReceiptForm() {
                 <th className="text-left px-2 py-2 font-semibold">Variété</th>
                 <th className="text-left px-2 py-2 font-semibold">Pays</th>
                 <th className="text-left px-2 py-2 font-semibold w-36">Entrepôt</th>
-                <th className="text-left px-2 py-2 font-semibold w-36">DLC</th>
+                <th className="text-left px-2 py-2 font-semibold w-36">DDM</th>
                 <th className="text-right px-2 py-2 font-semibold w-24">Prix /pie HT</th>
                 <th className="text-right px-2 py-2 font-semibold w-24">Total HT</th>
                 <th className="w-8" />

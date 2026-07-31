@@ -1,5 +1,5 @@
 /**
- * Groupes de fraîcheur — 7 familles pour la DLC par défaut (réglage Paramètres).
+ * Groupes de fraîcheur — 7 familles pour la DDM par défaut (réglage Paramètres).
  * Fonction PURE (aucune dépendance Prisma) → importable côté client ET serveur.
  * Classification par le NOM de l'article (cohérente avec lib/familles `familyOf`,
  * + Kiwi, + « Autres » pour tout le reste).

@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 
 /**
  * Durée de vie par défaut (en JOURS) par article — réglée dans les Paramètres.
- * Sert à pré-remplir la DLC à la réception (date de réception + days). Côté
+ * Sert à pré-remplir la DDM à la réception (date de réception + days). Côté
  * TeleVent uniquement (ne touche pas SAP).
  */
 export async function getShelfLifeMap(): Promise<Record<string, number>> {

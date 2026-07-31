@@ -10,7 +10,7 @@ import { resolveLotForSegment, type LotMaps } from "./lotResolver";
  *
  * RÈGLE MÉTIER : on ne propose / n'affecte QUE les lots RÉELLEMENT PRÉSENTS EN
  * STOCK. Un lot épuisé (entrepôt sans stock) ne doit jamais remonter, même si un
- * registre garde un reliquat. La DLC n'entre PAS en compte.
+ * registre garde un reliquat. La DDM n'entre PAS en compte.
  *
  * Chaque bloc `CAUSE` fige un comportement défectueux (garde-fou anti-régression),
  * `RÈGLE` prouve le comportement attendu (stock).

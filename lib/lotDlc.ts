@@ -1,7 +1,7 @@
 /**
- * Fraîcheur / DLC des lots — fondation **côté TeleVent uniquement**.
+ * Fraîcheur / DDM des lots — fondation **côté TeleVent uniquement**.
  *
- * La DLC (date limite de consommation) n'existe PAS dans SAP : elle est saisie
+ * La DDM (date limite de consommation) n'existe PAS dans SAP : elle est saisie
  * et stockée ici, rattachée au numéro de lot « EM<DocNum> » d'un bon de
  * réception. On ne touche JAMAIS à la sélection de lot expédié (lib/lotResolver) :
  * cette couche ne sert qu'à RENDRE VISIBLE et SAISISSABLE la fraîcheur.
@@ -13,11 +13,11 @@ import { prisma } from "@/lib/prisma";
 // Logique PURE (seuils, libellé) déportée dans `lib/freshness.ts` : ce module-ci
 // importe Prisma, donc il est inutilisable depuis un composant client. On
 // ré-exporte pour ne rien casser chez les appelants serveur existants.
-export { freshnessLabel, daysUntilDlc, isDlcSoon, DLC_SOON_DAYS, type FreshnessTone } from "@/lib/freshness";
+export { freshnessLabel, daysUntilDdm, isDdmSoon, DDM_SOON_DAYS, type FreshnessTone } from "@/lib/freshness";
 
 /**
- * DLC connues pour un lot de numéros de lot. Renvoie une Map indexée par
- * batchNumber → date d'expiration (ou `null` si la DLC n'a pas été saisie).
+ * DDM connues pour un lot de numéros de lot. Renvoie une Map indexée par
+ * batchNumber → date d'expiration (ou `null` si la DDM n'a pas été saisie).
  * Les batchNumbers inconnus sont absents de la Map (pas de clé).
  */
 export async function getDlcMap(batchNumbers: string[]): Promise<Map<string, Date | null>> {
@@ -30,7 +30,7 @@ export async function getDlcMap(batchNumbers: string[]): Promise<Map<string, Dat
   return new Map(rows.map((r) => [r.batchNumber, r.expirationDate ?? null]));
 }
 
-/** Saisie / mise à jour de la DLC d'un lot (upsert sur `batchNumber`). */
+/** Saisie / mise à jour de la DDM d'un lot (upsert sur `batchNumber`). */
 export async function setDlc(input: {
   batchNumber: string;
   itemCode?: string | null;

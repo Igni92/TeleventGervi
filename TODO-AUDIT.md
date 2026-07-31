@@ -57,7 +57,7 @@
 
 - [ ] 🟠 🛠️ **Données métier** (côté SAP/process, pas du code) :
   - ✅ **Mapping** réconcilié : `UserCommercial` = AG/JMG/MM seulement (CM & autres retirés). Reste : **compléter `vendeur`** sur les fiches clients (sinon file console vide hors MM) — donnée SAP/process.
-  - 280/339 sans `type` ; 5,1 % CA produit sans `lineCost` ; 19 produits sans poids ; `ProductBatch` vide (DLC/FIFO).
+  - 280/339 sans `type` ; 5,1 % CA produit sans `lineCost` ; 19 produits sans poids ; `ProductBatch` vide (DDM/FIFO).
 - [x] ✅ Migration **Next 16 / React 19** faite (cf. Lot 8) — reste à valider en runtime (auth/SSO Microsoft, rendu visx).
 - [ ] 🟡 🛠️ **RGPD** : durée de conservation `AppelLog`, journalisation accès PII, registre sous-traitants (Supabase UE, Microsoft, SAP), base légale + droit d'accès/effacement.
 

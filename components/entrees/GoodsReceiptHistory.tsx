@@ -165,11 +165,11 @@ const isToday = (s?: string): boolean => {
   return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
 };
 /* ─────────────────────────────────────────────────────────────────
-   Fraîcheur / DLC des lots — version CLIENT.
+   Fraîcheur / DDM des lots — version CLIENT.
    ⚠️ `lib/lotDlc.ts` importe `@/lib/prisma` au niveau module : l'importer ici
    (composant client) embarquerait Prisma dans le bundle navigateur. On
    ré-implémente donc `freshnessLabel` à l'identique (mêmes seuils, mêmes
-   libellés « DLC J-x / J+x », jour de Paris), purement côté client.
+   libellés « DDM J-x / J+x », jour de Paris), purement côté client.
    ───────────────────────────────────────────────────────────────── */
 type FreshnessTone = "green" | "amber" | "red" | "muted";
 
@@ -181,21 +181,21 @@ const parisDayMs = (ref: Date = new Date()): number => {
   return Date.UTC(y, m - 1, d);
 };
 
-/** Jours « pleins » (heure de Paris) entre aujourd'hui et la DLC. */
+/** Jours « pleins » (heure de Paris) entre aujourd'hui et la DDM. */
 const daysUntil = (expiration: Date): number =>
   Math.round((parisDayMs(expiration) - parisDayMs()) / 86_400_000);
 
-/** Étiquette + ton d'une DLC — miroir de `lib/lotDlc.freshnessLabel`. */
+/** Étiquette + ton d'une DDM — miroir de `lib/lotDlc.freshnessLabel`. */
 const freshnessLabel = (
   expiration: Date | null | undefined,
 ): { label: string; tone: FreshnessTone } => {
-  if (!expiration) return { label: "DLC non saisie", tone: "muted" };
+  if (!expiration) return { label: "DDM non saisie", tone: "muted" };
   const d = expiration instanceof Date ? expiration : new Date(expiration);
-  if (Number.isNaN(d.getTime())) return { label: "DLC non saisie", tone: "muted" };
+  if (Number.isNaN(d.getTime())) return { label: "DDM non saisie", tone: "muted" };
   const days = daysUntil(d);
   const rel = days > 0 ? `J-${days}` : `J+${Math.abs(days)}`;
   const tone: FreshnessTone = days > 3 ? "green" : days >= 1 ? "amber" : "red";
-  return { label: `DLC ${rel}`, tone };
+  return { label: `DDM ${rel}`, tone };
 };
 
 /** Classes Tailwind d'un badge fraîcheur selon le ton. */
@@ -208,7 +208,7 @@ const FRESHNESS_TONE: Record<FreshnessTone, string> = {
 
 /** Petit badge fraîcheur (lecture seule). `dlc === undefined` → pas encore chargé. */
 function FreshnessBadge({ dlc, className = "" }: { dlc: string | null | undefined; className?: string }) {
-  if (dlc === undefined) return null; // DLC pas encore récupérée (ou endpoint HS) → rien
+  if (dlc === undefined) return null; // DDM pas encore récupérée (ou endpoint HS) → rien
   const { label, tone } = freshnessLabel(dlc ? new Date(dlc) : null);
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${FRESHNESS_TONE[tone]} ${className}`}>
@@ -218,7 +218,7 @@ function FreshnessBadge({ dlc, className = "" }: { dlc: string | null | undefine
 }
 
 /**
- * Récupère en UN appel groupé les DLC d'une liste de lots (« EM<DocNum> »).
+ * Récupère en UN appel groupé les DDM d'une liste de lots (« EM<DocNum> »).
  * Défensif : endpoint HS / non-OK → Map vide (aucun badge, jamais d'erreur).
  * Renvoie batchNumber → ISO|null (clé absente si non encore connue).
  */
@@ -242,7 +242,7 @@ function useDlcMap(
     })();
     return () => { cancel = true; };
   }, [key]);
-  // Mise à jour optimiste après saisie d'une DLC dans le détail (évite un refetch).
+  // Mise à jour optimiste après saisie d'une DDM dans le détail (évite un refetch).
   const merge = useCallback((batchNumber: string, iso: string | null) => {
     setDlc((c) => ({ ...c, [batchNumber]: iso }));
   }, []);
@@ -263,7 +263,7 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
   const { incidents, loading: incLoading, reload: reloadIncidents, byDoc } = useReceptionIncidents();
   // Agréages des EM listées (contrôle qualité) — un fetch groupé par chargement.
   // Clé = liste des docEntry (stable) : une édition LOCALE de docs (prix, n° BL,
-  // DLC…) remappe le tableau sans changer les entrées → pas de re-fetch inutile.
+  // DDM…) remappe le tableau sans changer les entrées → pas de re-fetch inutile.
   const [agreages, setAgreages] = useState<Record<number, AgreageInfo>>({});
   const agreageKey = useMemo(
     () => docs.filter((d) => !isVoided(d)).map((d) => d.docEntry).join(","),
@@ -296,7 +296,7 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
 
   useEffect(() => { load(); }, [load]);
 
-  // DLC (fraîcheur) : un seul fetch groupé pour TOUS les lots chargés.
+  // DDM (fraîcheur) : un seul fetch groupé pour TOUS les lots chargés.
   const allBatches = useMemo(() => docs.map((d) => d.lot).filter(Boolean), [docs]);
   const [dlcMap, mergeDlc] = useDlcMap(allBatches);
 
@@ -577,9 +577,9 @@ function ReceiptDetail({
   agreage, restricted = false,
 }: {
   receipt: Receipt;
-  /** DLC (ISO) du lot — `undefined` = pas encore chargée, `null` = non saisie. */
+  /** DDM (ISO) du lot — `undefined` = pas encore chargée, `null` = non saisie. */
   dlc?: string | null;
-  /** Remonte la DLC enregistrée pour mise à jour optimiste (batchNumber, ISO|null). */
+  /** Remonte la DDM enregistrée pour mise à jour optimiste (batchNumber, ISO|null). */
   onDlcSaved?: (batchNumber: string, iso: string | null) => void;
   incidents: { id: string; type: string | null; note: string | null; resolved: boolean; createdAt: string; createdBy: string | null }[];
   onIncidentChanged: () => void;
@@ -699,8 +699,8 @@ function ReceiptDetail({
     finally { setSavingLines((c) => { const n = new Set(c); n.delete(e.lineNum); return n; }); }
   };
 
-  // ── DLC (fraîcheur) du lot — saisie/édition depuis le détail, sur la ligne ──
-  // La DLC est unique par lot (« EM<docNum> ») : toutes les lignes du détail
+  // ── DDM (fraîcheur) du lot — saisie/édition depuis le détail, sur la ligne ──
+  // La DDM est unique par lot (« EM<docNum> ») : toutes les lignes du détail
   // pointent donc sur la même échéance. Saisie côté TeleVent (jamais SAP).
   const [dlcISO, setDlcISO] = useState<string | null | undefined>(dlc);
   const [savingDlc, setSavingDlc] = useState(false);
@@ -722,14 +722,14 @@ function ReceiptDetail({
       if (!res.ok || j.ok === false) {
         // Échec (droits, réseau…) : on revient à la dernière valeur enregistrée.
         setDlcISO(lastSavedDlc.current ? new Date(lastSavedDlc.current).toISOString() : null);
-        toast.error(j.error || "DLC non enregistrée");
+        toast.error(j.error || "DDM non enregistrée");
         return;
       }
       const iso = value ? new Date(value).toISOString() : null;
       lastSavedDlc.current = value;
       setDlcISO(iso);
       onDlcSaved?.(receipt.lot, iso);
-      toast.success(value ? `DLC du lot ${receipt.lot} enregistrée` : `DLC du lot ${receipt.lot} effacée`);
+      toast.success(value ? `DDM du lot ${receipt.lot} enregistrée` : `DDM du lot ${receipt.lot} effacée`);
     } catch (e) {
       setDlcISO(lastSavedDlc.current ? new Date(lastSavedDlc.current).toISOString() : null);
       toast.error((e as Error).message);
@@ -851,9 +851,9 @@ function ReceiptDetail({
                   {agreage ? <AgreageBadge a={agreage} /> : <ReceivedBadge />}
                 </div>
               )}
-              {/* DLC (fraîcheur) du lot — sur la ligne, éditable */}
+              {/* DDM (fraîcheur) du lot — sur la ligne, éditable */}
               <div className="flex items-center gap-2 mt-2 text-[13px]">
-                <span className="text-muted-foreground shrink-0">DLC</span>
+                <span className="text-muted-foreground shrink-0">DDM</span>
                 <input
                   type="date"
                   value={dlcInputValue}
@@ -888,7 +888,7 @@ function ReceiptDetail({
               <th className={`text-left font-semibold ${th}`}>Condt</th>
               <th className={`text-left font-semibold ${th}`}>Variété</th>
               <th className={`text-left font-semibold ${th}`}>Pays</th>
-              <th className={`text-left font-semibold w-40 ${th}`}>DLC</th>
+              <th className={`text-left font-semibold w-40 ${th}`}>DDM</th>
               {!restricted && <th className={`text-right font-semibold w-24 ${th}`}>PU HT</th>}
               {!restricted && <th className={`text-right font-semibold w-24 ${th}`}>Total HT</th>}
             </tr>
@@ -907,7 +907,7 @@ function ReceiptDetail({
                   <td className={td}><Chip kind="variete">{dz.variete}</Chip></td>
                   <td className={td}><Chip kind="pays">{dz.pays}</Chip></td>
                   <td className={td}>
-                    {/* DLC (fraîcheur) du lot — sur la ligne, éditable */}
+                    {/* DDM (fraîcheur) du lot — sur la ligne, éditable */}
                     <div className="flex items-center gap-1.5">
                       <input
                         type="date"

@@ -445,7 +445,7 @@ export async function POST(req: NextRequest) {
  *   – `reconcileLedgerToPhysical()` (l'écrêtage du registre de lots sur le stock
  *     SAP réel) ne s'exécutait PLUS → les vieux lots gardaient des soldes
  *     fantômes et ressortaient en tête du tri FIFO ;
- *   – le catalogue produits et `BatchNumberDetails` (dates d'admission / DLC)
+ *   – le catalogue produits et `BatchNumberDetails` (dates d'admission / DDM)
  *     n'étaient plus rafraîchis.
  * Les trois autres routes du crontab (sync/mirror, sync/delta,
  * inventaire/refresh-stock) authentifient bien le cron en GET : celle-ci était

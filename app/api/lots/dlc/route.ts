@@ -4,7 +4,7 @@ import { requirePreparateurOrAdmin } from "@/lib/permissions";
 import { getDlcMap, setDlc } from "@/lib/lotDlc";
 
 /**
- * DLC (fraîcheur) des lots — côté TeleVent uniquement (#1/#6).
+ * DDM (fraîcheur) des lots — côté TeleVent uniquement (#1/#6).
  *
  * GET  /api/lots/dlc?batches=EM14878,EM14879 → { dlc: { [batchNumber]: ISO|null } }
  * POST /api/lots/dlc  { batchNumber, itemCode?, expirationDate } → upsert
@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
   if (body.expirationDate) {
     const d = new Date(body.expirationDate);
     if (Number.isNaN(d.getTime())) {
-      return NextResponse.json({ error: "Date de DLC invalide" }, { status: 400 });
+      return NextResponse.json({ error: "Date de DDM invalide" }, { status: 400 });
     }
     expirationDate = d;
   }

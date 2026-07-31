@@ -50,7 +50,7 @@ describe("pendingLotItems — lignes SANS lot réel (garde-fou de départ)", () 
   });
 });
 
-describe("realLotLines — lignes à VRAI lot EM<DocNum> (contrôle DLC au départ)", () => {
+describe("realLotLines — lignes à VRAI lot EM<DocNum> (contrôle DDM au départ)", () => {
   it("ne garde que les vrais lots, fusionnés par article×lot", () => {
     const lines: RawLotLine[] = [
       { itemCode: "A", itemName: "Art A", quantity: 4, U_NoLot: "EM22948" },

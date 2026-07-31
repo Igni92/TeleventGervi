@@ -17,7 +17,7 @@ import { splitByWarehouse, totalAvailable, saleableAvailable, personalStock, uni
 import { formatDateInput } from "@/lib/utils";
 // Depuis `lib/freshness` (pur) et NON `lib/lotDlc` (qui importe Prisma et
 // embarquerait le client Prisma dans le bundle navigateur).
-import { freshnessLabel, isDlcSoon } from "@/lib/freshness";
+import { freshnessLabel, isDdmSoon } from "@/lib/freshness";
 import { nextDeliveryDate, nextWorkingDeliveryDay, isPrecommande } from "@/lib/livraison";
 import { familyOf } from "@/lib/familles";
 import { priceForArticle, type TarifFruitRow } from "@/lib/tarifFruits";
@@ -47,7 +47,7 @@ interface Product {
   // Détails métier (Gervifrais U_*) — sortis du grisé pour décision rapide en appel
   uMarque: string | null; uPays: string | null; uCondi: string | null; uUvc: string | null;
   frgnName?: string | null;                 // variété (SAP FrgnName)
-  /** DLC la plus proche encore à venir sur cet article (ISO) — null si aucune. */
+  /** DDM la plus proche encore à venir sur cet article (ISO) — null si aucune. */
   dlc?: string | null;
   stockByWarehouse: Record<string, StockEntry>;
 }
@@ -2076,10 +2076,10 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                       const calibre = calibreRaw ? `cal. ${calibreRaw}` : null;
                       const variete = cleanTag(p.frgnName);                  // variété (FrgnName)
                       const pays    = cleanTag(p.uPays ?? h?.pays);
-                      // Alerte fraîcheur : DLC la plus proche encore à venir sur cet
+                      // Alerte fraîcheur : DDM la plus proche encore à venir sur cet
                       // article (API produits). Affichée UNIQUEMENT si elle est proche
                       // (≤ 3 j) — sinon ce serait du bruit sur tout le catalogue.
-                      const dlcWarn = isDlcSoon(p.dlc) ? freshnessLabel(p.dlc ? new Date(p.dlc) : null) : null;
+                      const dlcWarn = isDdmSoon(p.dlc) ? freshnessLabel(p.dlc ? new Date(p.dlc) : null) : null;
                       const isFav   = favorites.has(p.itemCode);          // C1
                       // C2 — plus de badge promo sur la liste stock : la remise
                       // auto au panier reste (cf. addToCart), le récap vit dans
@@ -2154,9 +2154,9 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                                 {notes[p.itemCode] ? <StarRating value={notes[p.itemCode]} size="sm" className="shrink-0" /> : null}
                               </span>
                               {/* Tags espacés (gap-1.5) ; le CODE ARTICLE n'apparaît plus
-                                  sur la ligne (clic droit « Détails » pour le lot/DLC). */}
+                                  sur la ligne (clic droit « Détails » pour le lot/DDM). */}
                               <span className="mt-0.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap min-w-0">
-                                {/* DLC PROCHE — en TÊTE des chips : c'est l'info qui doit
+                                {/* DDM PROCHE — en TÊTE des chips : c'est l'info qui doit
                                     arrêter l'œil du vendeur avant qu'il n'engage la vente. */}
                                 {dlcWarn && (
                                   <span

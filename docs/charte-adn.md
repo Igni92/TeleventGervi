@@ -32,7 +32,7 @@ Quatre traits, dans cet ordre :
 
 - **Couleurs sémantiques (réservées, jamais décoratives)** :
   - **Succès / fraîcheur OK** : vert.
-  - **Attention / DLC proche / encours** : jaune-or (l'ancien primaire, recyclé ici à sa juste place).
+  - **Attention / DDM proche / encours** : jaune-or (l'ancien primaire, recyclé ici à sa juste place).
   - **Erreur / danger / rupture** : rouge sémantique `--destructive: 0 72% 51%` — à **distinguer visuellement** du rouge-fraise de marque (saturation/teinte différentes) pour ne pas confondre « marque » et « danger ».
 
 - **Arbitrage tranché par l'audit** : **supprimer de la barre le switcher 3 colorimétries** (or / agrume / fraise). Une marque ne peut pas avoir trois identités. Au mieux, réglage admin avec un défaut imposé. Purger les **résidus indigo / purple** (indicateur de page actif présent sur 100 % des écrans) au profit des tokens `--brand-*`.

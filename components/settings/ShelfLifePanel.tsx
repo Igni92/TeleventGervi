@@ -12,7 +12,7 @@ type Hit = { itemCode: string; itemName: string };
  * Réglage des durées de vie par défaut (en JOURS) :
  *   - PAR GROUPE de fruits (Fraises / Framboises / … / Autres) — la base ;
  *   - PAR ARTICLE (exceptions) — déroge au groupe pour un article précis.
- * À la réception, la DLC se pré-remplit à « date du jour + jours » (article si
+ * À la réception, la DDM se pré-remplit à « date du jour + jours » (article si
  * défini, sinon groupe), modifiable ligne par ligne.
  */
 export function ShelfLifePanel() {
@@ -134,7 +134,7 @@ export function ShelfLifePanel() {
       {/* ── Par GROUPE de fruits ── */}
       <div className="space-y-2">
         <p className="text-[12px] text-muted-foreground">
-          Durée de vie par défaut (en <b>jours</b>) par groupe. À la réception, la DLC se pré-remplit à{" "}
+          Durée de vie par défaut (en <b>jours</b>) par groupe. À la réception, la DDM se pré-remplit à{" "}
           <b>date du jour + jours du groupe</b> (modifiable par ligne). Laisse vide pour ne rien pré-remplir.
         </p>
         {loading ? (
