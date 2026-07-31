@@ -431,8 +431,29 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/** GET /api/sap/sync/products → last sync info */
-export async function GET() {
+/**
+ * GET /api/sap/sync/products
+ *   • appelé par le CRON (en-tête x-cron-secret) → DÉCLENCHE la synchro (même
+ *     travail que le POST) ;
+ *   • sinon (session utilisateur) → renvoie l'état de la dernière synchro.
+ *
+ * ⚠️ RÉGRESSION CORRIGÉE ICI. L'ordonnanceur (deploy/cron/televent.cron) appelle
+ * cette route via `cron-call.sh`, qui fait un `curl` SANS -X → donc un **GET**.
+ * Or seul le POST déclenchait le travail, et ce GET exigeait une session : le
+ * cron recevait **401 à chaque passage** (`curl -f` → échec silencieux).
+ * Conséquences, invisibles car sans erreur applicative :
+ *   – `reconcileLedgerToPhysical()` (l'écrêtage du registre de lots sur le stock
+ *     SAP réel) ne s'exécutait PLUS → les vieux lots gardaient des soldes
+ *     fantômes et ressortaient en tête du tri FIFO ;
+ *   – le catalogue produits et `BatchNumberDetails` (dates d'admission / DLC)
+ *     n'étaient plus rafraîchis.
+ * Les trois autres routes du crontab (sync/mirror, sync/delta,
+ * inventaire/refresh-stock) authentifient bien le cron en GET : celle-ci était
+ * la seule à ne pas le faire. On s'aligne.
+ */
+export async function GET(req: NextRequest) {
+  if (isCronAuthorized(req)) return POST(req);
+
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
