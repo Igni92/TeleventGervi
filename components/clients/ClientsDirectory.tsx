@@ -27,7 +27,7 @@ import { toast } from "sonner";
 import {
   Search, Loader2, Users, Phone, ChevronRight, AlertTriangle, PackageX,
   CalendarClock, UserCheck, Bell, Power, MoreHorizontal, UserPlus, Plus, Radio, Target,
-  BadgeCheck, History, UserX,
+  BadgeCheck, History, UserX, CheckSquare,
 } from "lucide-react";
 import { classifyByDays } from "@/lib/prospection";
 import { Input } from "@/components/ui/input";
@@ -55,6 +55,8 @@ interface PlanClient {
   joursAppel: string | null;
   activeTelevente: boolean;
   prospectStage?: string | null;
+  /** Qualification labo : false = écarté d'office (pas de labo pâtisserie). */
+  qualifieLabo?: boolean | null;
   openIncidents: number;
   lastOrderDays: number | null;
   lastCallDays: number | null;
@@ -109,6 +111,10 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
   const [incidents, setIncidents] = useState(false);
   const [syncingVendeurs, setSyncingVendeurs] = useState(false);
   const [reminderClient, setReminderClient] = useState<PlanClient | null>(null);
+  // Sélection EN SÉRIE (vue liste) : réaffecter un portefeuille ou disqualifier
+  // un paquet de magasins se fait par dizaines de lignes, pas une par une.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
   const router = useRouter();
 
   // Tuiles prospection (Prospect / Qualifié / Ancien client) — comptage dédié.
@@ -145,6 +151,34 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Échec");
     } catch (e) { toast.error(e instanceof Error ? e.message : "Échec de l'assignation"); fetchData(); }
   }, [fetchData]);
+
+  /** Action EN SÉRIE sur la sélection — une seule requête pour tout le lot. */
+  const bulk = useCallback(async (
+    patch: Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTelevente" | "qualifieLabo">>,
+    label: string,
+  ) => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const r = await fetch("/api/clients/bulk-assign", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, ...patch }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error || "Échec");
+      // `skipped` = comptes hors périmètre, écartés côté serveur. Le taire
+      // laisserait croire que tout est passé.
+      toast.success(
+        `${label} · ${j.updated ?? 0} compte(s)`
+        + (j.skipped ? ` — ${j.skipped} ignoré(s) (hors périmètre)` : ""),
+      );
+      setSelected(new Set());
+      fetchData();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Échec de l'action groupée");
+    } finally { setBulkBusy(false); }
+  }, [selected, fetchData]);
 
   const syncVendeurs = useCallback(async () => {
     setSyncingVendeurs(true);
@@ -206,6 +240,18 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
       return a.nom.localeCompare(b.nom);
     });
   }, [clients, search, vendeur, commercial, type, active, stale, statut, todayOnly, incidents, today]);
+
+  // La sélection ne survit PAS à un changement de filtre : agir sur des lignes
+  // devenues invisibles serait la meilleure façon de réassigner un portefeuille
+  // par erreur. On élague sur ce qui reste affiché.
+  useEffect(() => {
+    setSelected((cur) => {
+      if (cur.size === 0) return cur;
+      const visible = new Set(filtered.map((c) => c.id));
+      const next = new Set([...cur].filter((id) => visible.has(id)));
+      return next.size === cur.size ? cur : next;
+    });
+  }, [filtered]);
 
   return (
     <div className="space-y-4">
@@ -303,7 +349,21 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
           ))}
         </ul>
       ) : (
-        <ClientListView clients={filtered} today={today} canManage={canManage} onAssign={assign} onReminder={setReminderClient} />
+        <>
+          {canManage && selected.size > 0 && (
+            <BulkBar
+              count={selected.size}
+              busy={bulkBusy}
+              onClear={() => setSelected(new Set())}
+              onBulk={bulk}
+            />
+          )}
+          <ClientListView
+            clients={filtered} today={today} canManage={canManage}
+            onAssign={assign} onReminder={setReminderClient}
+            selected={selected} onSelectedChange={setSelected}
+          />
+        </>
       )}
 
       {reminderClient && (
@@ -453,19 +513,70 @@ function ClientActionsMenu({
 
 /** Vue LISTE classique (tableau compact) du portefeuille clients. */
 function ClientListView({
-  clients, today, canManage, onAssign, onReminder,
+  clients, today, canManage, onAssign, onReminder, selected, onSelectedChange,
 }: {
   clients: PlanClient[]; today: number; canManage: boolean;
   onAssign: (id: string, patch: Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTelevente">>) => void;
   onReminder: (c: PlanClient) => void;
+  selected: Set<string>;
+  onSelectedChange: (next: Set<string>) => void;
 }) {
   const dash = <span className="text-muted-foreground/40">—</span>;
+  // Ancre de la dernière case cochée — support du Maj+clic (sélection de PLAGE),
+  // le geste qui rend « en série » praticable sur 200 lignes.
+  const [anchor, setAnchor] = useState<string | null>(null);
+
+  const allVisible = clients.length > 0 && clients.every((c) => selected.has(c.id));
+  const someVisible = clients.some((c) => selected.has(c.id));
+
+  const toggleAll = () => {
+    onSelectedChange(allVisible ? new Set() : new Set(clients.map((c) => c.id)));
+    setAnchor(null);
+  };
+
+  const toggleOne = (id: string, shift: boolean) => {
+    const next = new Set(selected);
+    if (shift && anchor) {
+      // Plage anchor → id : on ALIGNE toute la plage sur l'état visé, plutôt
+      // que d'inverser ligne à ligne (sinon un Maj+clic décoche des lignes
+      // déjà cochées au milieu de la plage).
+      const from = clients.findIndex((c) => c.id === anchor);
+      const to = clients.findIndex((c) => c.id === id);
+      if (from !== -1 && to !== -1) {
+        const [a, b] = from < to ? [from, to] : [to, from];
+        const turnOn = !selected.has(id);
+        for (let i = a; i <= b; i++) {
+          if (turnOn) next.add(clients[i].id); else next.delete(clients[i].id);
+        }
+        onSelectedChange(next);
+        setAnchor(id);
+        return;
+      }
+    }
+    if (next.has(id)) next.delete(id); else next.add(id);
+    onSelectedChange(next);
+    setAnchor(id);
+  };
+
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
       <div className="overflow-x-auto">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+              {canManage && (
+                <th className="pl-3 pr-1 py-2.5 w-9">
+                  <input
+                    type="checkbox"
+                    checked={allVisible}
+                    ref={(el) => { if (el) el.indeterminate = someVisible && !allVisible; }}
+                    onChange={toggleAll}
+                    aria-label={allVisible ? "Tout désélectionner" : "Tout sélectionner"}
+                    title={allVisible ? "Tout désélectionner" : `Sélectionner les ${clients.length} lignes affichées`}
+                    className="h-3.5 w-3.5 cursor-pointer accent-brand-500 align-middle"
+                  />
+                </th>
+              )}
               <th className="px-3 py-2.5 text-left font-semibold">Client</th>
               <th className="px-3 py-2.5 text-left font-semibold">Type</th>
               {canManage && <th className="px-3 py-2.5 text-left font-semibold">Vendeur</th>}
@@ -482,12 +593,28 @@ function ClientListView({
               const tel = firstTel(c);
               const vNorm = c.vendeur ? normalizeSlp(c.vendeur) : null;
               const cNorm = c.commercial ? normalizeSlp(c.commercial) : null;
+              const isSel = selected.has(c.id);
               return (
-                <tr key={c.id} className={`transition-colors hover:bg-secondary/30 ${!c.activeTelevente ? "opacity-60" : ""}`}>
+                <tr key={c.id} className={`transition-colors ${isSel ? "bg-brand-500/10" : "hover:bg-secondary/30"} ${!c.activeTelevente ? "opacity-60" : ""}`}>
+                  {canManage && (
+                    <td className="pl-3 pr-1 py-2">
+                      <input
+                        type="checkbox"
+                        checked={isSel}
+                        onChange={() => { /* piloté par onClick pour capter la touche Maj */ }}
+                        onClick={(e) => toggleOne(c.id, e.shiftKey)}
+                        aria-label={`Sélectionner ${c.nom}`}
+                        className="h-3.5 w-3.5 cursor-pointer accent-brand-500 align-middle"
+                      />
+                    </td>
+                  )}
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-1.5">
                       <Link href={`/console?open=${encodeURIComponent(c.code)}`} title="Ouvrir dans la console d'appels" className="font-semibold text-foreground hover:text-brand-600 hover:underline underline-offset-2">{c.nom}</Link>
                       {!c.activeTelevente && <span className="text-[9px] font-bold uppercase text-amber-600 dark:text-amber-400">inactif</span>}
+                      {c.qualifieLabo === false && (
+                        <span className="text-[9px] font-bold uppercase text-rose-600 dark:text-rose-400" title="Marqué non qualifié (pas de labo pâtisserie)">non qualifié</span>
+                      )}
                     </div>
                     <span className="font-mono text-[10.5px] text-muted-foreground">{c.code}</span>
                   </td>
@@ -514,6 +641,95 @@ function ClientListView({
         </table>
       </div>
     </div>
+  );
+}
+
+/** Barre d'actions EN SÉRIE — n'apparaît qu'avec une sélection. Les actions
+ *  reprennent exactement celles du menu par ligne, appliquées au lot. */
+function BulkBar({
+  count, busy, onClear, onBulk,
+}: {
+  count: number;
+  busy: boolean;
+  onClear: () => void;
+  onBulk: (
+    patch: Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTelevente" | "qualifieLabo">>,
+    label: string,
+  ) => void;
+}) {
+  return (
+    <div className="sticky top-2 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-brand-500/40 bg-card/95 px-3 py-2 shadow-card backdrop-blur">
+      <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-foreground">
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-500" /> : <CheckSquare className="h-3.5 w-3.5 text-brand-500" />}
+        {count} sélectionné{count > 1 ? "s" : ""}
+      </span>
+
+      <span className="mx-1 h-4 w-px bg-border" />
+
+      <BulkMenu label="Vendeur" icon={<UserCheck className="h-3.5 w-3.5" />} disabled={busy}
+        onPick={(v) => onBulk({ vendeur: v }, v ? `Vendeur ${displayNameFromSlp(v) ?? v}` : "Vendeur retiré")} />
+      <BulkMenu label="Commercial" icon={<Users className="h-3.5 w-3.5" />} disabled={busy}
+        onPick={(v) => onBulk({ commercial: v }, v ? `Commercial ${displayNameFromSlp(v) ?? v}` : "Commercial retiré")} />
+
+      <span className="mx-1 h-4 w-px bg-border" />
+
+      <Button variant="outline" size="sm" disabled={busy} className="gap-1.5 h-8"
+        onClick={() => onBulk({ activeTelevente: true }, "Activés en télévente")}>
+        <Power className="h-3.5 w-3.5" /> Activer
+      </Button>
+      <Button variant="outline" size="sm" disabled={busy} className="gap-1.5 h-8"
+        onClick={() => onBulk({ activeTelevente: false }, "Désactivés en télévente")}>
+        <Power className="h-3.5 w-3.5" /> Désactiver
+      </Button>
+
+      <span className="mx-1 h-4 w-px bg-border" />
+
+      {/* Qualification en série : écarter d'office les magasins sans labo. */}
+      <Button variant="outline" size="sm" disabled={busy}
+        className="gap-1.5 h-8 border-rose-500/40 text-rose-600 hover:bg-rose-500/10 dark:text-rose-300"
+        onClick={() => onBulk({ qualifieLabo: false }, "Marqués non qualifiés")}>
+        <UserX className="h-3.5 w-3.5" /> Non qualifié
+      </Button>
+      <Button variant="outline" size="sm" disabled={busy}
+        className="gap-1.5 h-8 border-emerald-500/40 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
+        onClick={() => onBulk({ qualifieLabo: true }, "Marqués qualifiés")}>
+        <BadgeCheck className="h-3.5 w-3.5" /> Qualifié
+      </Button>
+
+      <button type="button" onClick={onClear} disabled={busy}
+        className="ml-auto text-[12px] font-medium text-muted-foreground hover:text-foreground">
+        Annuler la sélection
+      </button>
+    </div>
+  );
+}
+
+/** Petit menu « choisir un trigramme » (vendeur ou commercial) pour le lot. */
+function BulkMenu({
+  label, icon, disabled, onPick,
+}: { label: string; icon: React.ReactNode; disabled: boolean; onPick: (v: string | null) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" disabled={disabled} className="gap-1.5 h-8">
+          {icon} {label}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-52">
+        <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground">
+          Affecter · {label}
+        </DropdownMenuLabel>
+        {VENDEURS.map((v) => (
+          <DropdownMenuItem key={v} onClick={() => onPick(v)} className="cursor-pointer text-[13px]">
+            {displayNameFromSlp(v) ?? v}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => onPick(null)} className="cursor-pointer text-[13px] text-muted-foreground">
+          Retirer
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

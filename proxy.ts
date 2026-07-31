@@ -44,6 +44,26 @@ export default auth((req) => {
     return NextResponse.redirect(loginUrl);
   }
 
+  // ── COMPTE CONNECTÉ MAIS PAS ENCORE HABILITÉ ────────────────────────────
+  // Se connecter ne demande qu'une adresse @gervifrais.com : toute recrue
+  // obtient une session à son premier login. Tant qu'AUCUN rôle ne lui a été
+  // attribué (cf. lib/auth : rôle explicite ou rattachement commercial), elle
+  // n'atteint QUE l'écran de bienvenue — ni page, ni API.
+  //
+  // Placé AVANT la redirection hors /login : sinon un compte non habilité
+  // rebondirait de /login vers /clients puis vers /bienvenue à chaque fois.
+  // /api/auth reste ouvert (sans lui, plus de session ni de déconnexion).
+  const provisioned = req.auth?.user?.provisioned !== false;
+  if (req.auth && !provisioned) {
+    const open = ["/bienvenue", "/api/auth", "/login"].some((p) => pathname.startsWith(p));
+    if (!open) return NextResponse.redirect(new URL("/bienvenue", origin));
+    return NextResponse.next();
+  }
+  // Habilité : l'écran de bienvenue n'a plus lieu d'être.
+  if (req.auth && provisioned && pathname.startsWith("/bienvenue")) {
+    return NextResponse.redirect(new URL("/clients", origin));
+  }
+
   // Redirect authenticated users away from login page
   if (req.auth && pathname === "/login") {
     return NextResponse.redirect(new URL("/clients", origin));

@@ -3,6 +3,7 @@ import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import { ADMIN_EMAILS } from "@/lib/permissions";
+import { isRestrictedPreparateur } from "@/lib/preparateur";
 
 const ALLOWED_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || "gervifrais.com";
 
@@ -80,17 +81,49 @@ export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
         typeof token.rolesAt !== "number" || Date.now() - token.rolesAt > ROLES_TTL_MS;
       if (email && (user?.email || rolesStale)) {
         try {
-          const rows = await prisma.$queryRawUnsafe<{ isLivreur: boolean | null; isAgreeur: boolean | null; isAdmin: boolean | null; isDirection: boolean | null }[]>(
-            `SELECT "isLivreur", "isAgreeur", "isAdmin", "isDirection" FROM "User" WHERE LOWER("email") = LOWER($1) LIMIT 1`,
+          const rows = await prisma.$queryRawUnsafe<{
+            isLivreur: boolean | null; isAgreeur: boolean | null; isAdmin: boolean | null;
+            isDirection: boolean | null; isPreparateur: boolean | null; slpName: string | null;
+          }[]>(
+            `SELECT u."isLivreur", u."isAgreeur", u."isAdmin", u."isDirection", u."isPreparateur",
+                    uc."slpName" AS "slpName"
+               FROM "User" u
+               LEFT JOIN "UserCommercial" uc ON LOWER(uc."email") = LOWER(u."email")
+              WHERE LOWER(u."email") = LOWER($1) LIMIT 1`,
             email,
           );
           const r = rows[0];
-          const privileged = !!r?.isAdmin || !!r?.isDirection
-            || ADMIN_EMAILS.some((a) => a.toLowerCase() === email.toLowerCase());
+          const bootstrap = ADMIN_EMAILS.some((a) => a.toLowerCase() === email.toLowerCase());
+          const privileged = !!r?.isAdmin || !!r?.isDirection || bootstrap;
           token.isLivreur = !privileged && !!r?.isLivreur;
           token.isAgreeur = !privileged && !!r?.isAgreeur;
+
+          // ── COMPTE PAS ENCORE HABILITÉ ────────────────────────────────────
+          // Le domaine @gervifrais.com suffit à se connecter : n'importe quelle
+          // recrue obtient donc une session dès son premier login. Sans ce
+          // verrou elle atterrissait avec un accès COMPLET, car `isCommercial`
+          // vaut `true` PAR DÉFAUT en base — ce flag ne peut donc pas servir de
+          // preuve d'habilitation.
+          //
+          // Habilité = au moins un rôle EXPLICITEMENT posé (admin, direction,
+          // préparateur, livreur, agréeur) OU un rattachement commercial
+          // (UserCommercial.slpName), qui est ce qui rend un commercial
+          // réellement opérant. Tout le reste → écran de bienvenue seul.
+          //
+          // isRestrictedPreparateur (liste d'emails, hors base) est vérifié
+          // aussi : un préparateur désigné par email est habilité même si le
+          // flag base n'a jamais été coché.
+          token.provisioned = privileged
+            || !!r?.isPreparateur || !!r?.isLivreur || !!r?.isAgreeur
+            || !!r?.slpName
+            || isRestrictedPreparateur(email);
           token.rolesAt = Date.now();
-        } catch { /* colonne absente / base indispo → pas de verrou (login OK) */ }
+        } catch {
+          // Colonne absente / base indisponible → on NE POSE AUCUN verrou (login
+          // OK). Volontairement permissif : un incident base ne doit pas
+          // enfermer toute l'entreprise sur l'écran de bienvenue.
+          token.provisioned = true;
+        }
       }
       return token;
     },
@@ -106,6 +139,10 @@ export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
         if (token.sub) session.user.id = token.sub;
         session.user.isLivreur = token.isLivreur === true;
         session.user.isAgreeur = token.isAgreeur === true;
+        // `!== false` : un jeton émis AVANT ce champ (session déjà ouverte, PWA
+        // gardée des semaines) n'a pas la clé — on ne l'enferme pas d'office,
+        // le TTL des rôles la posera à la prochaine résolution.
+        session.user.provisioned = token.provisioned !== false;
       }
       return session;
     },
@@ -153,6 +190,9 @@ declare module "next-auth/jwt" {
     expiresAt?: number;
     isLivreur?: boolean;
     isAgreeur?: boolean;
+    /** Compte HABILITÉ : au moins un rôle posé ou un rattachement commercial.
+     *  Faux = accès au seul écran de bienvenue (cf. proxy.ts). */
+    provisioned?: boolean;
     /** Dernière résolution des rôles en base (epoch ms) — pilote le TTL. */
     rolesAt?: number;
   }
@@ -164,6 +204,8 @@ declare module "next-auth" {
     user: {
       isLivreur?: boolean;
       isAgreeur?: boolean;
+      /** Faux = compte connecté mais sans aucun rôle attribué. */
+      provisioned?: boolean;
     } & DefaultSession["user"];
   }
 }
