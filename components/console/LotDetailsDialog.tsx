@@ -10,7 +10,7 @@ import { StarRating } from "@/components/ui/star-rating";
 /**
  * Détail des LOTS d'un article — ouvert au clic droit sur une ligne de la console.
  * Source : table locale ProductBatch (rapide, aucun appel SAP) via
- * /api/products/[id]/batches?inStock=1 (lots dont la DLC n'est pas dépassée),
+ * /api/products/[id]/batches?inStock=1 (lots dont la DDM n'est pas dépassée),
  * triés FEFO. Le stock PAR LOT est tenu par TeleVent (registre lib/lotLedger) :
  * crédité à la réception (quantité + fournisseur + prix d'achat), décrémenté à la
  * vente — quand la valeur est là, on affiche la quantité restante, le fournisseur
@@ -84,7 +84,7 @@ export function LotDetailsDialog({ item, onClose }: Props) {
 
   // Article suivi au registre ? → seuls les lots RESTANT À VENDRE sont listés
   // (un lot vendu disparaît). Article non suivi (aucune quantité) → tous les
-  // lots restent affichés pour la DLC (démarrage à froid honnête).
+  // lots restent affichés pour la DDM (démarrage à froid honnête).
   const tracked = batches.some((b) => b.quantity > 0);
   const visible = tracked ? batches.filter((b) => sellableOf(b) > 0 || isLocked(b.status)) : batches;
   // Lots AVEC restant à vendre en tête, puis l'ordre FEFO renvoyé par l'API.
@@ -145,8 +145,8 @@ export function LotDetailsDialog({ item, onClose }: Props) {
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11.5px] text-muted-foreground tnum">
                     {d
-                      ? <span className="inline-flex items-center gap-1"><CalendarClock className="h-3 w-3" /> DLC {d}</span>
-                      : <span className="italic">DLC non renseignée</span>}
+                      ? <span className="inline-flex items-center gap-1"><CalendarClock className="h-3 w-3" /> DDM {d}</span>
+                      : <span className="italic">DDM non renseignée</span>}
                     {b.supplierName && <span className="inline-flex items-center gap-1 min-w-0"><Truck className="h-3 w-3 shrink-0" /> <span className="truncate">{b.supplierName}</span></span>}
                     {b.purchasePrice != null && b.purchasePrice > 0 && (
                       <span className="inline-flex items-center gap-1"><BadgeEuro className="h-3 w-3" /> {b.purchasePrice.toFixed(2)} €{b.currency && b.currency !== "EUR" ? ` ${b.currency}` : ""}</span>

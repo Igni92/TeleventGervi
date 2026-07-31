@@ -629,7 +629,7 @@ model ProductBatch {
   status          String? // bdsStatus_Released | _Locked | ...
   admissionDate   DateTime? // date d'entrée en système
   manufactureDate DateTime? // date de fabrication
-  expirationDate  DateTime? // DLC
+  expirationDate  DateTime? // DDM
   // Prix d'achat : enrichi via PurchaseDeliveryNotes lookup (peut être null)
   purchasePrice   Float?
   currency        String? // ex. "EUR"
@@ -1097,7 +1097,7 @@ model RelanceLog {
 }
 
 // ════════════════════════════════════════════════════════════════
-//   CRM — Lot 2 : journal d'audit + DLC côté TeleVent
+//   CRM — Lot 2 : journal d'audit + DDM côté TeleVent
 // ════════════════════════════════════════════════════════════════
 
 // Journal d'audit applicatif (#8) — trace les actions sensibles
@@ -1118,13 +1118,18 @@ model AuditLog {
   @@index([action])
 }
 
-// DLC saisie côté TeleVent par lot (#1/#6) — NE touche PAS SAP, et survit
+// DDM saisie côté TeleVent par lot (#1/#6) — NE touche PAS SAP, et survit
 // donc à la synchro miroir (qui écrase ProductBatch). Clé = n° de lot (EM<docNum>).
+//
+// Le modèle garde son nom historique `LotDlc` : c'est le nom de la TABLE en
+// base. Le renommer imposerait une migration sur la prod pour un gain nul —
+// aucun utilisateur ne voit ce nom. Partout ailleurs le terme est DDM (date de
+// durabilité minimale), qui est le terme correct pour des fruits et légumes.
 model LotDlc {
   id             String    @id @default(cuid())
   batchNumber    String    @unique // ex. "EM14878"
   itemCode       String?
-  expirationDate DateTime? // DLC
+  expirationDate DateTime? // DDM
   createdBy      String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -1134,7 +1139,7 @@ model LotDlc {
 }
 
 // Durée de vie par défaut (en JOURS) par article — réglée dans les Paramètres.
-// Sert à pré-remplir la DLC à la réception (date de réception + days). Côté
+// Sert à pré-remplir la DDM à la réception (date de réception + days). Côté
 // TeleVent uniquement (ne touche pas SAP, survit à la synchro produits).
 model ItemShelfLife {
   itemCode  String   @id

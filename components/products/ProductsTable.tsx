@@ -792,7 +792,7 @@ function BatchList({
             <th className="text-right py-1.5 px-2">Qté</th>
             <th className="text-left py-1.5 px-2">Entré</th>
             <th className="text-left py-1.5 px-2">Fabriqué</th>
-            <th className="text-left py-1.5 px-2">DLC</th>
+            <th className="text-left py-1.5 px-2">DDM</th>
             <th className="text-right py-1.5 px-2">Prix achat</th>
             <th className="text-left py-1.5 px-2">BR</th>
           </tr>

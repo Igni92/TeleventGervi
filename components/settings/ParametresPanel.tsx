@@ -37,7 +37,7 @@ import {
  *   2. Confort de lecture — zoom, densité, contraste de survol
  *   3. Console & catalogue — logos de marque, bandeau promotions
  *   4. Export & analyse   — export JSON de l'onglet Stats (analyse Claude)
- *   5. Administration     — DLC par défaut, synchronisations SAP (admin)
+ *   5. Administration     — DDM par défaut, synchronisations SAP (admin)
  *
  * Persistance inchangée : localStorage via writeSetting (SETTING_KEYS) +
  * ThemeProvider (`tv-theme`). Tous les consommateurs réagissent à chaud.
@@ -797,7 +797,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
               <SafeguardsPanel />
             </SurfaceCard>
 
-            <SurfaceCard accent="brand" title="Fraîcheur · DLC par défaut" icon={<CalendarClock className="h-3.5 w-3.5" />}>
+            <SurfaceCard accent="brand" title="Fraîcheur · DDM par défaut" icon={<CalendarClock className="h-3.5 w-3.5" />}>
               <ShelfLifePanel />
             </SurfaceCard>
           </section>

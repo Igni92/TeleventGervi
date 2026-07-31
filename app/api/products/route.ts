@@ -94,11 +94,11 @@ export async function GET(req: NextRequest) {
     prisma.product.count({ where }),
   ]);
 
-  // ── DLC la plus PROCHE par article (alerte fraîcheur à la vente) ──
+  // ── DDM la plus PROCHE par article (alerte fraîcheur à la vente) ──
   // Rattachée à l'ARTICLE (LotDlc.itemCode, indexé), pas au lot qui sera
   // finalement expédié : l'affectation de lot se joue plus tard, et la question
   // du vendeur est « ce produit a-t-il de la marchandise qui périme bientôt ? ».
-  // On ignore les DLC DÉPASSÉES : ces lots sont écoulés ou retirés, les
+  // On ignore les DDM DÉPASSÉES : ces lots sont écoulés ou retirés, les
   // remonter piquerait de rouge des articles parfaitement sains.
   const dlcByItem = new Map<string, Date>();
   const itemCodes = items.map((p) => p.itemCode);
@@ -163,7 +163,7 @@ export async function GET(req: NextRequest) {
       uUvc: p.uUvc,
       frgnName: p.frgnName,                 // = variété
       uNbBarqColis: p.uNbBarqColis,
-      // DLC la plus proche encore à venir sur cet article (null si aucune saisie).
+      // DDM la plus proche encore à venir sur cet article (null si aucune saisie).
       dlc: dlcByItem.get(p.itemCode)?.toISOString() ?? null,
       stockByWarehouse,
     };

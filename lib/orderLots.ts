@@ -63,7 +63,7 @@ export function pendingLotItems(lines: RawLotLine[]): PendingLotItem[] {
   return [...byItem.values()];
 }
 
-/** Une ligne d'un BL portant un VRAI lot EM<DocNum> (pour un contrôle DLC en aval). */
+/** Une ligne d'un BL portant un VRAI lot EM<DocNum> (pour un contrôle DDM en aval). */
 export interface RealLotLine {
   itemCode: string;
   itemName: string | null;
@@ -91,7 +91,7 @@ export interface OrderLotStatus {
   docNum: number | null;
   /** Articles encore sans lot réel (vide ⇒ commande entièrement tracée). */
   pending: PendingLotItem[];
-  /** Lignes à vrai lot EM<DocNum> — pour un contrôle DLC (péremption) en aval. */
+  /** Lignes à vrai lot EM<DocNum> — pour un contrôle DDM (péremption) en aval. */
   resolved: RealLotLine[];
   allResolved: boolean;
   /** true si l'on n'a PAS pu lire le BL dans SAP (on ne bloque alors pas à tort). */

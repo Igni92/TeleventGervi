@@ -313,7 +313,7 @@ export function ArticleFiche({ id, canEdit }: { id: string; canEdit: boolean }) 
         </SectionCard>
 
         {/* Lots en stock (lecture seule) */}
-        <SectionCard accent="amber" title="Lots en stock" subtitle="Lots valables (DLC) · prix & fournisseur d'entrée" icon={<Wheat />}>
+        <SectionCard accent="amber" title="Lots en stock" subtitle="Lots valables (DDM) · prix & fournisseur d'entrée" icon={<Wheat />}>
           {batches.length === 0 ? (
             <p className="text-[12.5px] italic text-muted-foreground">Aucun lot enregistré pour cet article.</p>
           ) : (
@@ -323,7 +323,7 @@ export function ArticleFiche({ id, canEdit }: { id: string; canEdit: boolean }) 
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-[12.5px] font-semibold">{b.batchNumber}</span>
                     {b.expirationDate && (
-                      <span className="text-[11.5px] text-muted-foreground">DLC {fmtDate(b.expirationDate)}</span>
+                      <span className="text-[11.5px] text-muted-foreground">DDM {fmtDate(b.expirationDate)}</span>
                     )}
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11.5px] text-muted-foreground">

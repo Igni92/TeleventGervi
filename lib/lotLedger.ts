@@ -19,7 +19,7 @@
  * Clé unique : (productId, batchNumber="EM<DocNum>", warehouseCode="") — UN lot =
  * UNE ligne, quantité AGRÉGÉE tous entrepôts (cohérent avec la synchro, qui pose
  * warehouseCode=""). La synchro produits n'écrit JAMAIS `quantity` (elle ne fait
- * qu'alimenter DLC/statut/prix/fournisseur), donc ce registre n'est pas écrasé.
+ * qu'alimenter DDM/statut/prix/fournisseur), donc ce registre n'est pas écrasé.
  *
  * ⚠️ TOUT est best-effort : une erreur de registre NE DOIT JAMAIS bloquer une
  * vente ni une réception. Les appelants encapsulent déjà dans un try/catch.

@@ -6,7 +6,7 @@ import { setShelfLife, removeShelfLife, getGroupShelfLife, setGroupDays } from "
 import { FRESHNESS_GROUPS } from "@/lib/freshnessGroups";
 
 /**
- * Durée de vie par défaut (jours) par article (#1/#6 — pré-remplissage DLC).
+ * Durée de vie par défaut (jours) par article (#1/#6 — pré-remplissage DDM).
  *
  * GET  → { items: [{ itemCode, itemName, days }] } (durées configurées)
  * POST { itemCode, days } → upsert ; days ≤ 0 → suppression. Écriture gatée

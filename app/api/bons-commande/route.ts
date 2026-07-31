@@ -574,7 +574,7 @@ export async function POST(req: NextRequest) {
     // entièrement affectée, DISPARAÎT de la file (pendingCount=0) → le lot épuisé
     // partirait sans jamais être revu. On remet donc en EM_PENDING toute ligne
     // dont le lot n'est PLUS EN STOCK (registre à 0) : elle revient dans la file
-    // (à ré-affecter un lot présent) ET sera bloquée au départ. La DLC n'entre pas
+    // (à ré-affecter un lot présent) ET sera bloquée au départ. La DDM n'entre pas
     // en compte — seule la présence en stock décide.
     try {
       const conv = await sap.get<SapOrderDoc>(`Orders(${order.DocEntry})?$select=DocEntry,DocumentLines`);

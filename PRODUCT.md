@@ -31,7 +31,7 @@ Le même écran doit rassurer la Direction (>50 ans, faible aisance, zéro surpr
 
 - **DIRECTION** (>50 ans, décideur, faible aisance) — veut comprendre en moins de 3 s « va-t-on bien ? », être rassurée, ne jamais avoir peur de tout dérégler.
 - **COMMERCIAL** (~20 ans) — veut enchaîner les appels sans friction et faire son CA du jour, sur une file priorisée par enjeu (pas par heure).
-- **PRÉPARATEUR** (terrain / entrepôt) — veut recevoir juste, préparer sans erreur (lot + DLC), et signaler un problème au point de constat.
+- **PRÉPARATEUR** (terrain / entrepôt) — veut recevoir juste, préparer sans erreur (lot + DDM), et signaler un problème au point de constat.
 - **ADMINISTRATEUR** (config, sync, droits) — veut tenir la cohérence SAP, gérer les droits et ne rien casser, avec un journal de qui a fait quoi.
 
 ---
@@ -43,7 +43,7 @@ Le même écran doit rassurer la Direction (>50 ans, faible aisance, zéro surpr
 - Le **CA/commercial/jour vs objectif** (`CommercialObjectif`) donne le cap quotidien : un cap pour le commercial, un « gagne-t-on ? » immédiat pour la Direction.
 - Le **taux de reprise** (clients passés « en retard » qui re-commandent) mesure la promesse n°1 du produit : on ne perd pas le portefeuille.
 
-Le CA seul mesurerait l'activité ; le couple CA + reprise mesure la **santé du portefeuille**, qui est la vraie raison d'être de TeleVent. Métriques secondaires de pilotage : % du portefeuille en état « actif », taux de réactivation des endormis, DSO (recouvrement), % de réceptions fruits frais avec DLC saisie.
+Le CA seul mesurerait l'activité ; le couple CA + reprise mesure la **santé du portefeuille**, qui est la vraie raison d'être de TeleVent. Métriques secondaires de pilotage : % du portefeuille en état « actif », taux de réactivation des endormis, DSO (recouvrement), % de réceptions fruits frais avec DDM saisie.
 
 ---
 
@@ -54,7 +54,7 @@ Le CA seul mesurerait l'activité ; le couple CA + reprise mesure la **santé du
 1. **Chaque écran répond à : « quelle est la prochaine action ? »** — si un écran ne fait que montrer des données sans dire quoi faire, il n'est pas fini.
 2. **Prioriser par valeur × urgence**, jamais par heure ou par ordre alphabétique — un gros compte qui décroche passe avant un petit, toujours.
 3. **« En retard » se mesure au rythme propre du client** — un CHR quotidien à J+3 ≠ un export mensuel à J+45. Pas de seuil fixe (le `> 7 jours` codé en dur est une erreur connue).
-4. **Outiller la fraîcheur de bout en bout** — DLC saisie à la réception, FIFO réel au picking, badge fraîcheur à la vente, lot + DLC sur le bon de préparation. C'est le différenciateur n°1 du métier.
+4. **Outiller la fraîcheur de bout en bout** — DDM saisie à la réception, FIFO réel au picking, badge fraîcheur à la vente, lot + DDM sur le bon de préparation. C'est le différenciateur n°1 du métier.
 5. **Rassurer la Direction par défaut** — vouvoiement sur les écrans transverses, contraste AA tenu, vocabulaire stable, disposition figée (pas de fiche réorganisable qui détruit la mémoire spatiale), filet runtime (jamais de page d'erreur brute).
 6. **Tracer toute action engageante** — qui a annulé un BL, modifié un prix, supprimé un client, basculé la base SAP. Pas de preuve = pas de confiance.
 7. **« SAP fait foi »** — chaque écran miroir l'affiche, avec la fraîcheur de synchro, pour résoudre l'angoisse « lequel a raison ? ».
@@ -66,7 +66,7 @@ Le CA seul mesurerait l'activité ; le couple CA + reprise mesure la **santé du
 3. **Ne pas ajouter de modules de pure consultation** read-only à faible valeur (risque ERP-bis) — surveiller, ne pas étendre.
 4. **Ne pas multiplier les options de personnalisation** (réorganisation, renommage, 3 colorimétries, 8 réglages) : sur un poste partagé, le réglage du matin s'impose à l'après-midi. Un défaut sobre et stable, pas un atelier de configuration.
 5. **Ne pas exposer une action engageante sans garde-fou** — quantité aberrante, double-clic (double-BL), suppression de client, relance sur facture en litige : toujours confirmer, valider, borner.
-6. **Ne pas inventer la donnée métier manquante** (DLC, vendeur, type) — la collecter à la source (process SAP / réception), pas la deviner dans le code.
+6. **Ne pas inventer la donnée métier manquante** (DDM, vendeur, type) — la collecter à la source (process SAP / réception), pas la deviner dans le code.
 
 ---
 

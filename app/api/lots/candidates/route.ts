@@ -142,7 +142,7 @@ export async function GET(req: NextRequest) {
       //    présents dans le stock. Si l'entrepôt de réception du lot n'a plus de
       //    stock physique (article×entrepôt), le lot est épuisé et n'est PAS
       //    proposé — même si le registre garde un reliquat (dérive possible). La
-      //    DLC n'entre pas en compte.
+      //    DDM n'entre pas en compte.
       for (const lot of ledgerLotsByItem.get(code) ?? []) {
         const r = ledgerByKey.get(`${code}|${lot}`);
         if (!r) continue;
