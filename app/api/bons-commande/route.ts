@@ -471,6 +471,25 @@ export async function POST(req: NextRequest) {
   const docEntry = Number(body.docEntry);
   if (!Number.isInteger(docEntry) || docEntry <= 0) return NextResponse.json({ error: "docEntry invalide" }, { status: 400 });
 
+  // ── Retirer une COMMANDE de la liste (lever le marqueur) ─────
+  // Cas des commandes FACTURÉES / clôturées qu'on ne peut plus solder par
+  // l'affectation de lots (SAP refuse le PATCH d'une commande close) : sans ça
+  // elles restent épinglées à vie dans l'onglet. On lève simplement le marqueur
+  // `livcommande:<docEntry>` (AppSetting) → la commande sort de l'onglet.
+  // ⚠️ AUCUNE modification SAP : la commande ET sa facture ne sont PAS touchées.
+  if (body.action === "unmark") {
+    try {
+      const by = session.user?.name?.trim() || session.user?.email || "";
+      await setDeliveryBonCommande(docEntry, false, by);
+      console.log(`[BonCommande] Commande docEntry ${docEntry} retirée de la liste (marqueur levé) par ${by || "?"}.`);
+      return NextResponse.json({ ok: true, unmarked: true, docEntry });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error(`[BonCommande] Retrait commande ${docEntry} échoué:`, message);
+      return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    }
+  }
+
   // ── Supprimer une offre ──────────────────────────────────────
   // ⚠️ SAP n'autorise pas DELETE sur un devis (« action not supported for this
   // object »). On l'ANNULE via l'action Service Layer `Cancel` ; à défaut on la

@@ -315,6 +315,34 @@ export function BonsCommandePanel() {
     }
   }, []);
 
+  // Retire une COMMANDE de la liste (lève le marqueur « bon de commande ») SANS
+  // toucher SAP — pour les commandes déjà FACTURÉES / clôturées, qu'on ne peut
+  // plus solder par l'affectation de lots (SAP refuse le PATCH) et qui restaient
+  // donc épinglées à vie dans l'onglet.
+  const unmarkBon = useCallback(async (doc: BonDoc) => {
+    if (!window.confirm(
+      `Retirer le bon de commande n°${doc.docNum} (${doc.cardName}) de la liste ?\n\n`
+      + "La commande et sa facture dans SAP ne sont PAS supprimées — on enlève seulement "
+      + "ce bon de la liste des lots à affecter (utile quand la commande est déjà facturée)."
+    )) return;
+    setDeletingId(doc.docEntry);
+    try {
+      const r = await fetch("/api/bons-commande", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "unmark", docEntry: doc.docEntry }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) { toast.error(j?.error || "Échec du retrait du bon de commande"); return; }
+      setDocs((prev) => prev?.filter((d) => d.docEntry !== doc.docEntry) ?? prev);
+      setOpenBonId(null);
+      toast.success(`Bon de commande n°${doc.docNum} retiré de la liste`);
+    } catch {
+      toast.error("Réseau injoignable — bon non retiré");
+    } finally {
+      setDeletingId(null);
+    }
+  }, []);
+
   const count = docs?.length ?? 0;
   const dueCount = (offres ?? []).filter((o) => o.due).length;
   const openBon = openBonId != null ? (docs ?? []).find((d) => d.docEntry === openBonId) ?? null : null;
@@ -627,6 +655,15 @@ export function BonsCommandePanel() {
               <Button variant="outline" size="icon" onClick={() => printPrep(openBon)}
                 title="Imprimer le bon de commande pour la préparation (articles, colis, lots)" aria-label="Imprimer">
                 <Printer className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline" size="sm"
+                onClick={() => unmarkBon(openBon)}
+                disabled={deletingId === openBon.docEntry}
+                className="text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300"
+                title="Retirer ce bon de la liste (commande déjà facturée / clôturée) — n'affecte PAS la commande ni la facture dans SAP"
+              >
+                {deletingId === openBon.docEntry ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Retirer de la liste
               </Button>
             </>
           ) : undefined
