@@ -4,8 +4,9 @@ import { useState } from "react";
 import { toast } from "sonner";
 import {
   ChevronDown, Mail, ArrowRight, Loader2, Users,
-  Building2, Globe, Store, Check, X, Percent, Lock, Eye, Trash2, UserMinus,
+  Building2, Globe, Store, Check, X, Percent, Lock, Eye, Trash2, UserMinus, ArrowLeftRight,
 } from "lucide-react";
+import { TransferClientsDialog } from "@/components/commerciaux/TransferClientsDialog";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRolePreview } from "@/components/role-preview/RolePreviewProvider";
@@ -50,11 +51,20 @@ interface Props {
   isAgreeur?: boolean;
   /** Le SPECTATEUR est-il admin strict ? Seul lui peut (dé)cocher le rôle Admin. */
   canEditAdmin?: boolean;
+  /** Trigramme de l'utilisateur CONNECTÉ (destination des bascules « chez moi »). */
+  myTrigramme?: string | null;
+  /** Nom de l'utilisateur connecté (libellés de la popup de transfert). */
+  myName?: string | null;
+  /** Le spectateur peut-il transférer des clients (réaffectation) ? = admin. */
+  canTransfer?: boolean;
+  /** Trigramme FIABLE de CETTE carte (vendeur A), pour la bascule. */
+  transferTrig?: string | null;
   /** Retire la carte de la liste après suppression du compte. */
   onDeleted?: (userId: string) => void;
 }
 
-export function CommercialCard({ userId, name, commercialKey, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false, isPreparateur = false, isCommercial = true, isDirection = false, isLivreur = false, isAgreeur = false, canEditAdmin = false, onDeleted }: Props) {
+export function CommercialCard({ userId, name, commercialKey, email, counts, isMe, present = true, stockSharePct = 100, isAdmin = false, isBootstrapAdmin = false, isPreparateur = false, isCommercial = true, isDirection = false, isLivreur = false, isAgreeur = false, canEditAdmin = false, myTrigramme, myName, canTransfer = false, transferTrig, onDeleted }: Props) {
+  const [transferOpen, setTransferOpen] = useState(false);
   const [claiming, setClaiming] = useState<string | null>(null);
   const [isPresent, setIsPresent] = useState(present);
   const [share, setShare] = useState(stockSharePct);
@@ -357,6 +367,18 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
           <ArrowRight className="h-3 w-3" />
         </Link>
 
+        {!isMe && canTransfer && myTrigramme && transferTrig && myTrigramme !== transferTrig && (
+          <button
+            type="button"
+            onClick={() => setTransferOpen(true)}
+            title={`Transférer des clients (vendeur télévente) entre ${displayName} et vous`}
+            className="hidden md:inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[11.5px] font-medium border border-border text-muted-foreground hover:text-foreground hover:border-foreground/40 transition-colors"
+          >
+            <ArrowLeftRight className="h-3 w-3" />
+            Transférer
+          </button>
+        )}
+
         {!isMe && counts.ALL > 0 && (
           <div className="hidden md:block">
           <DropdownMenu>
@@ -444,6 +466,17 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
           </button>
         )}
       </div>
+
+      {canTransfer && myTrigramme && transferTrig && (
+        <TransferClientsDialog
+          open={transferOpen}
+          onOpenChange={setTransferOpen}
+          aTrig={transferTrig}
+          aName={displayName}
+          bTrig={myTrigramme}
+          bName={myName || "Moi"}
+        />
+      )}
     </div>
   );
 }

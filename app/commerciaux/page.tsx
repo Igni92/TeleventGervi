@@ -1,8 +1,9 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getAccessScope, requireStrictAdmin, ADMIN_EMAILS } from "@/lib/permissions";
+import { getAccessScope, getOwnSlpName, requireStrictAdmin, ADMIN_EMAILS } from "@/lib/permissions";
 import { CommercialCard } from "@/components/commerciaux/CommercialCard";
+import { normalizeSlp } from "@/lib/salespeople";
 import { EffectifsPreviewBar } from "@/components/role-preview/EffectifsPreviewBar";
 import { CommerciauxSapList } from "./CommerciauxSapList";
 import { HeuresPanel } from "@/components/effectifs/HeuresPanel";
@@ -22,6 +23,10 @@ export default async function CommerciauxPage() {
   const scope = await getAccessScope(session);
   const isManager = scope.all;
   const strictAdmin = await requireStrictAdmin(session);
+  // Trigramme de l'utilisateur connecté = destination des bascules « chez moi »
+  // dans la popup de transfert (réservée aux managers, cf. canTransfer).
+  const myTrigramme = isManager ? await getOwnSlpName(session) : null;
+  const myName = session.user?.name ?? null;
 
   // ── Section équipe (admin/direction) : comptes connectés + présence + rôles ──
   let teamSection: React.ReactNode = null;
@@ -101,6 +106,10 @@ export default async function CommerciauxPage() {
             const key = countMap.has(trig) ? trig : (countMap.has(name) ? name : trig);
             const counts = countMap.get(key) ?? { ALL: 0, CHR: 0, GMS: 0, EXPORT: 0, OTHER: 0 };
             const isBootstrapAdmin = !!user.email && bootstrapAdmins.has(user.email.toLowerCase());
+            // Trigramme FIABLE pour la bascule vendeur (le `key` dérivé des
+            // initiales échoue sur les noms composés/suffixés : « Jean-Michel
+            // GUNSLAY » → JMGG). normalizeSlp mappe email/nom → MM/JMG/AG.
+            const transferTrig = normalizeSlp(user.email) ?? normalizeSlp(name) ?? (countMap.has(trig) ? trig : null);
             return (
               <CommercialCard
                 key={user.id}
@@ -120,6 +129,10 @@ export default async function CommerciauxPage() {
                 isLivreur={livByUser.get(user.id) ?? false}
                 isAgreeur={agrByUser.get(user.id) ?? false}
                 canEditAdmin={strictAdmin}
+                canTransfer={isManager}
+                transferTrig={transferTrig}
+                myTrigramme={myTrigramme}
+                myName={myName}
               />
             );
           })}

@@ -27,6 +27,10 @@ MAILTO=""
 # ── Catalogue produits + stock COMPLET (plus lourd) — 2×/h, minutes creuses. ──
 23,53 * * * *  televent  televent-cron-call /api/sap/sync/products
 
+# ── Retour automatique des bascules vendeur temporaires (congés) arrivées à
+#    échéance : chaque matin, les clients reviennent à leur titulaire. ──
+20 3 * * *  televent  televent-cron-call /api/vendeur-reassign/revert
+
 # ── Sauvegarde PostgreSQL locale (inoffensif si la base n'est pas locale :
 #    le script sort immédiatement). ──
 15 2 * * *  televent  /srv/televent/app/deploy/scripts/backup-db.sh
