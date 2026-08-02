@@ -185,7 +185,7 @@ export default async function CommerciauxPage() {
       {/* ── État des commissions mois par mois, avec le trait de la dernière
              échéance réglée (l'API borne au périmètre : un commercial ne voit
              que la sienne). ── */}
-      <CommissionsPanel />
+      <CommissionsPanel isManager={isManager} />
 
       {/* ── Gestion horaire hebdomadaire : chaque employé saisit ses heures ;
              les managers voient l'équipe et sortent les feuilles PDF (compta). ── */}

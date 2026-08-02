@@ -11,6 +11,7 @@ import {
   VEHICULE_ENERGIES,
   type SalaryEnvoi, type SalaryFrais, type SalaryMonthData, type SalaryPrime, type SalaryProfile, type VehiculeAN,
   type CommissionPaidSnapshot,
+  type CommissionPayout,
 } from "./salaires";
 
 const PROFIL_PREFIX = "salprofil:";
@@ -264,6 +265,75 @@ export async function listCommissionPayments(): Promise<CommissionPaidSnapshot[]
   } catch {
     return [];
   }
+}
+
+/* ─── Relevé des VERSEMENTS de commissions en euros (saisis par la direction) ──
+ * Registre libre : chaque versement = un montant en € daté, rattaché à un
+ * commercial (trigramme canonique). Une clé AppSetting par versement, comme les
+ * paiements CET (`salrecuppay:`). Sert à suivre Dû cumulé − Payé cumulé = Solde,
+ * pour ne rien perdre ni surpayer — indépendant du curseur mensuel `paidThrough`
+ * et des snapshots de paie (qui restent la trace envoyée au cabinet). */
+const COMMPAYOUT_PREFIX = "commpayout:";
+
+function sanitizeCommPayout(v: unknown, id: string): CommissionPayout | null {
+  const d = (v ?? {}) as Partial<CommissionPayout>;
+  const amount = Math.round((Number(d.amount) || 0) * 100) / 100;
+  if (!(amount > 0)) return null;
+  const date = typeof d.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.date) ? d.date : "";
+  return {
+    id,
+    amount,
+    date,
+    note: str(d.note, 200),
+    by: typeof d.by === "string" ? d.by : "",
+    at: typeof d.at === "string" ? d.at : "",
+  };
+}
+
+export async function saveCommissionPayout(
+  slp: string,
+  payout: { id: string; amount: number; date: string; note?: string },
+  by: string,
+): Promise<CommissionPayout | null> {
+  const clean = sanitizeCommPayout({ ...payout, by, at: new Date().toISOString() }, payout.id);
+  if (!clean) return null;
+  const key = `${COMMPAYOUT_PREFIX}${slp}:${clean.id}`;
+  const value = JSON.stringify(clean);
+  await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+  return clean;
+}
+
+export async function deleteCommissionPayout(slp: string, id: string): Promise<void> {
+  await prisma.appSetting.deleteMany({ where: { key: `${COMMPAYOUT_PREFIX}${slp}:${id}` } });
+}
+
+export async function listCommissionPayouts(slp: string): Promise<CommissionPayout[]> {
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: `${COMMPAYOUT_PREFIX}${slp}:` } } });
+    return rows
+      .map((r) => sanitizeCommPayout(JSON.parse(r.value), r.key.slice(r.key.lastIndexOf(":") + 1)))
+      .filter((p): p is CommissionPayout => !!p)
+      .sort((a, b) => (a.date < b.date ? 1 : -1));
+  } catch { return []; }
+}
+
+/** Tous les versements de commission, par trigramme — pour l'état (une passe). */
+export async function listAllCommissionPayouts(): Promise<Map<string, CommissionPayout[]>> {
+  const out = new Map<string, CommissionPayout[]>();
+  try {
+    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: COMMPAYOUT_PREFIX } } });
+    for (const r of rows) {
+      const rest = r.key.slice(COMMPAYOUT_PREFIX.length);
+      const i = rest.lastIndexOf(":");
+      if (i <= 0) continue;
+      const slp = rest.slice(0, i);
+      const p = sanitizeCommPayout(JSON.parse(r.value), rest.slice(i + 1));
+      if (!p) continue;
+      const list = out.get(slp); if (list) list.push(p); else out.set(slp, [p]);
+    }
+    for (const list of out.values()) list.sort((a, b) => (a.date < b.date ? 1 : -1));
+  } catch { /* indisponible */ }
+  return out;
 }
 
 /* ─────────── Destinataires du cabinet comptable (CSV, réglable dans l'UI) ──── */

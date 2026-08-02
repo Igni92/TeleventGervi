@@ -83,6 +83,28 @@ export interface CommissionPaidEntry {
   months: { month: string; base: number; prime: number; invoices: number; avoirs: number }[];
 }
 
+/**
+ * Un VERSEMENT de commission en euros, saisi à la main par la direction.
+ *
+ * Registre libre (indépendant du curseur mensuel `paidThrough` et des snapshots
+ * de paie) : la direction note ce qu'elle a RÉELLEMENT payé, en €, à un
+ * commercial. Sert à suivre Dû cumulé − Payé cumulé = Solde, pour ne rien
+ * perdre ni surpayer.
+ */
+export interface CommissionPayout {
+  id: string;
+  /** Montant versé, en euros. */
+  amount: number;
+  /** Date du versement (YYYY-MM-DD). */
+  date: string;
+  /** Note libre (ex. « juin + juillet »). */
+  note: string;
+  /** Auteur de la saisie. */
+  by: string;
+  /** Horodatage de la saisie (ISO). */
+  at: string;
+}
+
 /** Snapshot IMMUABLE des commissions payées sur la paie d'UN mois (trace). */
 export interface CommissionPaidSnapshot {
   /** Mois de la PAIE qui a réglé ces commissions (YYYY-MM). */
