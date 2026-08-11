@@ -70,49 +70,42 @@ Vercel → onglet **Deployments** → un déploiement précédent → **Promote 
 Production** (rollback instantané). Le tag `v1.0.0` repère la version livrée.
 
 ## 8. Synchronisation SAP — ordonnancement des crons
-Le miroir SAP (factures, avoirs, commandes, EM → pilotage & marges) est alimenté
-par un déclencheur **externe** qui appelle, toutes les ~30 min :
-```
-GET https://televent.gervifrais.com/api/cron/sap-sync
-en-tête : x-cron-secret: <CRON_SECRET>
-```
-L'endpoint (auth `CRON_SECRET`, cf. `lib/cronAuth.ts`) enchaîne miroir documents
-puis produits/stock — idempotent, throttle serveur 60 s. Le cron **natif Vercel**
-a été retiré (cadence 30 min non permise par le plan → bloquait les déploiements
-prod) : l'ordonnancement vit donc **hors Vercel**.
+Le miroir SAP (factures, avoirs, commandes, EM → pilotage & marges), le stock et
+le catalogue produits sont alimentés par les **crons système du VPS**, seul et
+unique ordonnanceur depuis la sortie de Vercel.
 
-**Cible : VPS OVH** (centralise tous les crons du parc). Crontab à poser sur le VPS :
-```cron
-# /etc/cron.d/televent-sync  (secret dans /etc/televent/sync.env → CRON_SECRET=…)
-*/30 * * * *  root  . /etc/televent/sync.env; curl -fsS --max-time 300 \
-  -H "x-cron-secret: $CRON_SECRET" \
-  https://televent.gervifrais.com/api/cron/sap-sync \
-  >> /var/log/televent-sync.log 2>&1
+Source de vérité **versionnée** : `deploy/cron/televent.cron`, installé dans
+`/etc/cron.d/televent` par `deploy/scripts/deploy.sh` (idempotent). Chaque ligne
+passe par le helper `/usr/local/bin/televent-cron-call`
+(`deploy/scripts/cron-call.sh`), qui lit `CRON_SECRET` dans
+`/srv/televent/app/.env` et appelle Next.js **en local** (`127.0.0.1:3000`, sans
+passer par nginx), en-tête `x-cron-secret` ; les routes re-vérifient le secret
+(`lib/cronAuth.ts`). Cadence : miroir documents toutes les 10 min, delta stock
+toutes les 10 min (décalé de 5), stock inventaire tous les 1/4 h, catalogue
+produits 2×/h, sauvegarde base à 02h15.
+
+**Modifier une planification** = éditer `deploy/cron/televent.cron` puis relancer
+`deploy/scripts/deploy.sh` sur le VPS. Ne jamais éditer `/etc/cron.d/televent`
+à la main : le déploiement suivant l'écrase.
+
+**Dépannage** (sur le VPS) :
+```bash
+journalctl -t 'televent-cron*' --since '2 hours ago'   # sorties JSON des routes
+sudo cat /etc/cron.d/televent                          # crontab réellement installé
+televent-cron-call /api/sap/sync/mirror                # déclenchement manuel
+grep -c '^CRON_SECRET=' /srv/televent/app/.env         # doit renvoyer 1
 ```
+Sans `CRON_SECRET` dans le `.env`, le helper refuse l'appel (message explicite)
+et **aucune** synchro ne tourne : c'est le premier point à vérifier si le miroir
+se fige (« CA du jour » à 0, stock périmé).
 
-**Dépannage actuel (avant bascule OVH)** : un workflow **GitHub Actions**
-(`.github/workflows/sap-sync.yml`, `*/30` + déclenchement manuel) tape le même
-endpoint. Pré-requis : secret GitHub `CRON_SECRET`. ⚠️ **Quand le VPS OVH prend le
-relais, désactiver ce workflow** (Actions → *SAP mirror sync* → *Disable*) pour ne
-pas déclencher deux fois — sans danger (idempotent + throttle), mais inutile.
-
-> **⚠️ À FAIRE — le secret n'existe pas encore côté GitHub.** Depuis la création
-> du workflow (09/08/2026) *tous* les runs échouent à la première ligne
-> (`Secret CRON_SECRET manquant`) : la synchro n'a donc jamais été déclenchée
-> par GitHub. Correctif, une seule fois :
-> 1. Vercel → projet → *Settings* → *Environment Variables* → copier la valeur
->    de `CRON_SECRET` (environnement **Production**).
-> 2. GitHub → *Settings* → *Secrets and variables* → *Actions* →
->    *New repository secret* → nom **`CRON_SECRET`** (exactement), valeur collée.
-> 3. Actions → *SAP mirror sync* → *Run workflow* pour vérifier tout de suite :
->    le run doit afficher `HTTP 200` puis `✅ Synchro SAP OK`.
->
-> Diagnostic d'un run rouge, d'un coup d'œil : `Secret CRON_SECRET manquant`
-> = secret absent ; `Secret CRON_SECRET invalide` (redirection 307 vers /login)
-> = valeur différente de celle de Vercel prod ; `3 tentatives infructueuses`
-> = prod injoignable / erreur 5xx. Un run **jaune** (`Synchro SAP partielle`,
-> HTTP 207) signale qu'une des deux étapes a échoué : sans danger, rattrapé au
-> créneau suivant, mais à surveiller s'il se répète.
+**Historique — GitHub Actions supprimé.** Un workflow `.github/workflows/sap-sync.yml`
+(`*/30` → `/api/cron/sap-sync`) avait servi d'ordonnanceur de secours à l'époque
+Vercel. Il a été retiré : le secret `CRON_SECRET` n'a jamais existé côté GitHub,
+donc il échouait à **chaque** exécution (267 runs rouges d'affilée) sans rien
+synchroniser, et il ferait doublon avec le crontab du VPS. L'endpoint
+`/api/cron/sap-sync` (miroir + produits enchaînés) reste en place et reste
+appelable depuis n'importe quel déclencheur externe portant le bon secret.
 
 En manuel, un admin peut toujours resynchroniser depuis
 *Paramètres → Données stats → **Synchroniser maintenant*** (ou le backfill mensuel).
