@@ -16,6 +16,24 @@ export function formatDate(date: Date | string): string {
   }).format(d);
 }
 
+/** Abréviations FR des jours, indexées comme `Date.getDay()` (0 = dimanche). */
+const JOURS_ABBR = ["DIM", "LUN", "MAR", "MER", "JEU", "VEN", "SAM"] as const;
+
+/**
+ * Date d'un rappel programmé, format compact « JEU 12.08.26 10:00 ».
+ * Le jour de la semaine est déduit de la date : il suit toute modification.
+ */
+export function formatRappelDate(date: Date | string): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return "—";
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return (
+    `${JOURS_ABBR[d.getDay()]} ` +
+    `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${pad(d.getFullYear() % 100)} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  );
+}
+
 export function formatRelative(date: Date | string | null | undefined): string {
   if (!date) return "—";
   const d = typeof date === "string" ? new Date(date) : date;

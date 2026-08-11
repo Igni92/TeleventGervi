@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { rappelSchema, type RappelFormValues } from "@/lib/validations";
-import { formatDate, formatDateInput } from "@/lib/utils";
+import { formatDateInput, formatRappelDate } from "@/lib/utils";
 import { formatPhoneDisplay } from "@/lib/phone";
 
 interface Rappel {
@@ -81,6 +81,7 @@ export function ReminderModal({
     register,
     handleSubmit,
     reset,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<RappelFormValues>({
     resolver: zodResolver(rappelSchema),
@@ -90,6 +91,8 @@ export function ReminderModal({
       note: "",
     },
   });
+
+  const dateRappelValue = watch("dateRappel");
 
   const loadRappels = async () => {
     try {
@@ -116,7 +119,9 @@ export function ReminderModal({
         throw new Error(error.error || "Erreur lors de la création du rappel");
       }
 
-      toast.success("Rappel créé et ajouté à votre calendrier Microsoft");
+      toast.success(
+        `Rappel ${formatRappelDate(data.dateRappel)} · ajouté à votre calendrier Microsoft`
+      );
       reset({ clientId: client.id, dateRappel: "", note: "" });
       await loadRappels();
       onReminderCreated?.();
@@ -197,6 +202,11 @@ export function ReminderModal({
               {...register("dateRappel")}
               className={errors.dateRappel ? "border-red-500" : ""}
             />
+            {dateRappelValue && !errors.dateRappel && (
+              <p className="text-sm font-semibold tabular-nums text-brand-600 dark:text-brand-400">
+                {formatRappelDate(dateRappelValue)}
+              </p>
+            )}
             {errors.dateRappel && (
               <p className="text-sm text-red-500">{errors.dateRappel.message}</p>
             )}
@@ -251,7 +261,7 @@ export function ReminderModal({
                           {statutLabel[rappel.statut] || rappel.statut}
                         </Badge>
                         <span className="text-xs text-muted-foreground">
-                          {formatDate(rappel.dateRappel)}
+                          {formatRappelDate(rappel.dateRappel)}
                         </span>
                       </div>
                       {rappel.note && (

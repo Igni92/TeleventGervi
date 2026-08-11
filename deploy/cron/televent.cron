@@ -4,10 +4,10 @@
 #             CRON_SECRET défini dans /srv/televent/app/.env.
 # Les routes re-vérifient elles-mêmes le secret (isCronAuthorized).
 #
-# NB : le crontab OVH est désormais l'UNIQUE ordonnanceur. Le workflow GitHub
-# Actions (.github/workflows/sap-sync.yml) qui appelait /api/cron/sap-sync doit
-# être DÉSACTIVÉ (son secret ne correspond plus au CRON_SECRET local) — sinon il
-# échoue en 403 sans effet.
+# NB : ce crontab est l'UNIQUE ordonnanceur. Le workflow GitHub Actions
+# (.github/workflows/sap-sync.yml) qui appelait /api/cron/sap-sync a été
+# SUPPRIMÉ : son secret n'a jamais existé côté GitHub (tous ses runs échouaient)
+# et il ferait doublon ici. Ne pas le recréer.
 
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
