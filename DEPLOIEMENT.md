@@ -96,6 +96,24 @@ endpoint. Pré-requis : secret GitHub `CRON_SECRET`. ⚠️ **Quand le VPS OVH p
 relais, désactiver ce workflow** (Actions → *SAP mirror sync* → *Disable*) pour ne
 pas déclencher deux fois — sans danger (idempotent + throttle), mais inutile.
 
+> **⚠️ À FAIRE — le secret n'existe pas encore côté GitHub.** Depuis la création
+> du workflow (09/08/2026) *tous* les runs échouent à la première ligne
+> (`Secret CRON_SECRET manquant`) : la synchro n'a donc jamais été déclenchée
+> par GitHub. Correctif, une seule fois :
+> 1. Vercel → projet → *Settings* → *Environment Variables* → copier la valeur
+>    de `CRON_SECRET` (environnement **Production**).
+> 2. GitHub → *Settings* → *Secrets and variables* → *Actions* →
+>    *New repository secret* → nom **`CRON_SECRET`** (exactement), valeur collée.
+> 3. Actions → *SAP mirror sync* → *Run workflow* pour vérifier tout de suite :
+>    le run doit afficher `HTTP 200` puis `✅ Synchro SAP OK`.
+>
+> Diagnostic d'un run rouge, d'un coup d'œil : `Secret CRON_SECRET manquant`
+> = secret absent ; `Secret CRON_SECRET invalide` (redirection 307 vers /login)
+> = valeur différente de celle de Vercel prod ; `3 tentatives infructueuses`
+> = prod injoignable / erreur 5xx. Un run **jaune** (`Synchro SAP partielle`,
+> HTTP 207) signale qu'une des deux étapes a échoué : sans danger, rattrapé au
+> créneau suivant, mais à surveiller s'il se répète.
+
 En manuel, un admin peut toujours resynchroniser depuis
 *Paramètres → Données stats → **Synchroniser maintenant*** (ou le backfill mensuel).
 

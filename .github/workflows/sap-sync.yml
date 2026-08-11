@@ -21,6 +21,10 @@ name: SAP mirror sync
 #
 # PRÉ-REQUIS (à faire UNE FOIS dans GitHub → Settings) :
 #   • Secret  CRON_SECRET   = la même valeur que la variable d'env Vercel prod.
+#     Settings → Secrets and variables → Actions → New repository secret.
+#     SANS lui le job s'arrête tout de suite : c'est la cause des échecs en
+#     série constatés depuis la mise en place du workflow (09/08/2026) — le
+#     secret n'avait jamais été créé, donc la synchro n'a JAMAIS tourné ici.
 #   • (option) Variable SAP_SYNC_URL si l'URL prod diffère du défaut ci-dessous.
 # Les schedules ne tournent QUE sur la branche par défaut (main) une fois mergé.
 
@@ -37,30 +41,78 @@ concurrency:
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # 3 tentatives × 300 s + pauses : large de quoi encaisser un pic de lenteur.
+    timeout-minutes: 20
     steps:
       - name: Trigger SAP global sync
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           SAP_SYNC_URL: ${{ vars.SAP_SYNC_URL || 'https://televent.gervifrais.com/api/cron/sap-sync' }}
         run: |
-          if [ -z "$CRON_SECRET" ]; then
-            echo "::error::Secret CRON_SECRET manquant — ajoute-le dans Settings → Secrets and variables → Actions."
+          set -uo pipefail
+
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "::error title=Secret CRON_SECRET manquant::Ajoute-le dans Settings → Secrets and variables → Actions → New repository secret (nom exact : CRON_SECRET, valeur = variable d'env CRON_SECRET du projet Vercel PROD). Sans lui la synchro SAP ne tourne pas."
             exit 1
           fi
-          echo "→ GET $SAP_SYNC_URL"
-          # --fail : sort en erreur (workflow rouge = alerte) si HTTP >= 400.
-          # --max-time 300 : la synchro peut durer (maxDuration serverless = 300 s).
-          http_code=$(curl --silent --show-error --fail \
-            --max-time 300 \
-            --write-out '%{http_code}' \
-            --output /tmp/sync-response.json \
-            --header "x-cron-secret: $CRON_SECRET" \
-            "$SAP_SYNC_URL") || {
-              echo "::error::Échec de la synchro SAP (curl)."
-              cat /tmp/sync-response.json 2>/dev/null || true
+
+          # On NE met PAS --fail : sur une erreur HTTP curl n'écrirait alors
+          # aucun corps de réponse → plus rien à diagnostiquer dans le log.
+          # On NE suit PAS les redirections (pas de -L) : un secret invalide est
+          # renvoyé par le middleware sur /login en 307 ; en le suivant on
+          # récupérerait un 200 (page de login) et le job passerait au VERT en
+          # n'ayant rien synchronisé. Ici tout 3xx = auth refusée = échec.
+          attempt=1
+          max_attempts=3
+          while :; do
+            echo "→ tentative ${attempt}/${max_attempts} : GET ${SAP_SYNC_URL}"
+            http_code=$(curl --silent --show-error \
+              --max-time 300 \
+              --write-out '%{http_code}' \
+              --output /tmp/sync-response.json \
+              --header "x-cron-secret: ${CRON_SECRET}" \
+              "${SAP_SYNC_URL}") || http_code="000"
+
+            echo "HTTP ${http_code}"
+            echo "Réponse (tronquée) :"
+            head -c 4000 /tmp/sync-response.json 2>/dev/null || true
+            echo
+
+            case "${http_code}" in
+              200)
+                echo "✅ Synchro SAP OK (miroir documents + produits/stock)."
+                exit 0
+                ;;
+              207)
+                # L'endpoint renvoie 207 quand UNE des deux synchros a échoué.
+                # L'autre est passée et tout est idempotent → on retentera dans
+                # 30 min : avertissement visible, mais pas d'alerte rouge.
+                echo "::warning title=Synchro SAP partielle::Une des deux étapes (miroir / produits) a échoué — détail dans la réponse ci-dessus. Nouvelle tentative au prochain créneau."
+                exit 0
+                ;;
+              301|302|303|307|308)
+                # Redirigé vers /login : le secret envoyé ne correspond pas à
+                # CRON_SECRET côté Vercel. Réessayer n'y changerait rien.
+                echo "::error title=Secret CRON_SECRET invalide::La requête a été redirigée vers /login (HTTP ${http_code}) : la valeur du secret GitHub ne correspond pas à la variable CRON_SECRET du projet Vercel PROD. Mets les deux valeurs à l'identique."
+                exit 1
+                ;;
+              401|403)
+                echo "::error title=Authentification refusée (HTTP ${http_code})::Vérifie que le secret GitHub CRON_SECRET est identique à la variable d'env CRON_SECRET de Vercel PROD."
+                exit 1
+                ;;
+              404)
+                echo "::error title=Endpoint introuvable (404)::${SAP_SYNC_URL} ne répond pas — vérifie la variable SAP_SYNC_URL / le domaine de production."
+                exit 1
+                ;;
+            esac
+
+            # Reste : 000 (réseau, DNS, timeout) et 5xx → transitoire, on retente.
+            if [ "${attempt}" -ge "${max_attempts}" ]; then
+              echo "::error title=Échec de la synchro SAP::${max_attempts} tentatives infructueuses (dernier code HTTP ${http_code})."
               exit 1
-            }
-          echo "HTTP $http_code"
-          echo "Réponse :"
-          cat /tmp/sync-response.json 2>/dev/null || true
+            fi
+            pause=$((attempt * 30))
+            echo "Échec transitoire (HTTP ${http_code}) — nouvelle tentative dans ${pause} s."
+            sleep "${pause}"
+            attempt=$((attempt + 1))
+          done
