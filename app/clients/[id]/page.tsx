@@ -21,7 +21,7 @@ import { SectionCard } from "@/components/clients/SectionCard";
 import { TarifFruitsEditor } from "@/components/clients/TarifFruitsEditor";
 import { Calendar, CalendarClock, CalendarDays, Clock, Sprout, TrendingUp, Receipt, Truck, UserRound, MapPin, Grape, Coins } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatRappelDate } from "@/lib/utils";
 import { requireAdmin, isLivreur } from "@/lib/permissions";
 import { ReceptionSlots } from "@/components/clients/ReceptionSlots";
 import { ClientTransportPricing } from "@/components/clients/ClientTransportPricing";
@@ -179,7 +179,7 @@ export default async function ClientDetailPage(props: { params: Promise<{ id: st
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant={statutVariant[rappel.statut] || "outline"}>{statutLabel[rappel.statut] || rappel.statut}</Badge>
-                      <span className="text-[12px] text-muted-foreground tabular-nums">{formatDate(rappel.dateRappel)}</span>
+                      <span className="text-[12px] text-muted-foreground tabular-nums">{formatRappelDate(rappel.dateRappel)}</span>
                       {rappel.msEventId && (
                         <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 dark:text-brand-400">
                           <CalendarClock className="h-3 w-3" /> Agenda

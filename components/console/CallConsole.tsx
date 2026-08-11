@@ -52,7 +52,7 @@ import {
 } from "@/components/ui/dialog";
 import { InfoTip } from "@/components/ui/info-tip";
 import { InfoHint } from "@/components/ui/info-hint";
-import { formatDate, formatDateInput, formatRelative } from "@/lib/utils";
+import { formatDate, formatDateInput, formatRappelDate, formatRelative } from "@/lib/utils";
 import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
 import { motion } from "framer-motion";
 import { AnimatedNumber } from "@/components/ui/animated-number";
@@ -1548,7 +1548,7 @@ function ActiveClient({
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 bg-brand-100 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300">
                   {r.statut === "PLANIFIE" ? "à venir" : r.statut.toLowerCase()}
                 </span>
-                <span className="text-foreground/80 tnum">{formatDate(r.dateRappel)}</span>
+                <span className="text-foreground/80 tnum">{formatRappelDate(r.dateRappel)}</span>
                 {r.note && <span className="text-muted-foreground truncate flex-1 italic">— {r.note}</span>}
               </li>
             ))}
@@ -2639,7 +2639,7 @@ function RappelDialog({
         body: JSON.stringify({ clientId: client.id, dateRappel: date, note: note || undefined }),
       });
       if (!res.ok) throw new Error();
-      toast.success("Rappel créé · ajouté au calendrier Microsoft");
+      toast.success(`Rappel ${formatRappelDate(date)} · ajouté au calendrier Microsoft`);
       onOpenChange(false);
       onCreated();
     } catch {
@@ -2671,6 +2671,11 @@ function RappelDialog({
               value={date}
               onChange={(e) => setDate(e.target.value)}
             />
+            {date && (
+              <p className="text-[12px] font-semibold tnum text-brand-600 dark:text-brand-400">
+                {formatRappelDate(date)}
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="rnote">Note (facultatif)</Label>
