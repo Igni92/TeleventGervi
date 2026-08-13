@@ -107,6 +107,11 @@ export interface ApiResp {
   /** Stock PHYSIQUE détenu (QuantityOnStock, tous entrepôts) par article du jour
    *  — base de l'écran Manquants (« faire d'abord avec ce qu'on a »). */
   onHandStocks?: Record<string, number>;
+  /** État PARTIEL : au moins un lot de stock SAP a échoué (certains articles sont
+   *  sans stock fiable). L'UI affiche un bandeau non bloquant « données partielles ». */
+  partial?: boolean;
+  /** Nombre de lots SAP tombés en échec (source du `partial`). */
+  failedChunks?: number;
   error?: string;
 }
 

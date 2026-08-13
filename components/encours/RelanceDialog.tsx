@@ -121,11 +121,17 @@ export function RelanceDialog({
       const j = await r.json();
       if (!r.ok || !j.ok) { toast.error(j.error || "Envoi impossible"); return; }
       setSentLevel(level); // verrouille le bouton pour ce niveau (anti-doublon UI)
-      toast.success(
-        j.recipient?.testMode
-          ? `Relance ${level} envoyée (test) → ${j.recipient.to}`
-          : `Relance ${level} envoyée → ${j.recipient?.to}`,
-      );
+      if (j.warning) {
+        // Mail parti mais journalisation KO : l'anti-doublon n'est pas enregistré.
+        // Avertissement persistant pour éviter un renvoi (doublon) par l'opérateur.
+        toast.warning(j.warning, { duration: Infinity });
+      } else {
+        toast.success(
+          j.recipient?.testMode
+            ? `Relance ${level} envoyée (test) → ${j.recipient.to}`
+            : `Relance ${level} envoyée → ${j.recipient?.to}`,
+        );
+      }
       loadLogs();
       onSent?.();
     } catch (e) {

@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowDown, ArrowUp, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight,
-  Loader2, PackageX, RefreshCw, ShoppingCart, Truck,
+  Loader2, PackageX, RefreshCw, ShoppingCart, TriangleAlert, Truck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { addDaysISO, formatDeliveryDate, frenchHolidayLabel, nextDeliveryDate } from "@/lib/livraison";
@@ -133,6 +133,18 @@ export function Manquants() {
           <span className="hidden sm:inline">Actualiser</span>
         </button>
       </div>
+
+      {/* ── Données partielles : au moins un lot de stock SAP a échoué ── */}
+      {data?.partial && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-amber-400/50 bg-amber-50 dark:bg-amber-900/15 px-4 py-3 text-[12.5px] text-amber-800 dark:text-amber-100">
+          <TriangleAlert className="h-4 w-4 mt-0.5 shrink-0 text-amber-500 dark:text-amber-400" />
+          <span>
+            <b>Données partielles</b> — le stock de certains articles n’a pas pu être lu
+            {data.failedChunks ? <> ({data.failedChunks} lot{data.failedChunks > 1 ? "s" : ""} en échec)</> : null}.
+            Des manquants peuvent être <b>sous-estimés</b> : réactualise dans un instant.
+          </span>
+        </div>
+      )}
 
       {/* ── Contenu ── */}
       {loading && !data ? (

@@ -50,6 +50,10 @@ interface EncoursData {
   company: string;
   totals: { encours: number; encaisse: number; avoirsAttribues: number; overdueTotal: number; b3045: number; b4590: number; b90: number; invoices: number; clients: number };
   clients: ClientEncours[];
+  /** État PARTIEL : au moins un lot de soldes/avoirs SAP a échoué — les encours de
+   *  certains clients manquent. Bandeau non bloquant (chiffres sous-estimés). */
+  partial?: boolean;
+  failedChunks?: number;
 }
 
 type SortKey = "cardName" | "encours" | "countOpen" | "b3045" | "b4590" | "b90" | "countLate";
@@ -313,6 +317,18 @@ export function Encours() {
         <Kpi icon={Clock} tone="rose" label="Retard 45-90 j" value={data ? eur(data.totals.b4590) : "—"} />
         <Kpi icon={Flame} tone="rose" label="Retard > 90 j" value={data ? eur(data.totals.b90) : "—"} />
       </div>
+
+      {/* Données partielles : au moins un lot de soldes/avoirs SAP a échoué */}
+      {data?.partial && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-amber-400/50 bg-amber-50 dark:bg-amber-900/15 px-4 py-3 text-[12.5px] text-amber-800 dark:text-amber-100">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-amber-500 dark:text-amber-400" />
+          <span>
+            <b>Données partielles</b> — les soldes de certains clients n’ont pas pu être lus dans SAP
+            {data.failedChunks ? <> ({data.failedChunks} lot{data.failedChunks > 1 ? "s" : ""} en échec)</> : null}.
+            Les encours affichés sont <b>sous-estimés</b> : réactualise dans un instant.
+          </span>
+        </div>
+      )}
 
       {/* Barre d'outils */}
       <div className="flex flex-wrap items-center gap-2">

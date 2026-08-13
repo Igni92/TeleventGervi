@@ -26,7 +26,7 @@ interface BreakdownResp {
   ok: boolean;
   window: string;
   prixPositionPerKg: number;
-  totals: { deliveries: number; kg: number; cost: number };
+  totals: { deliveries: number; kg: number; cost: number; unpriced: number };
   carriers: CarrierRow[];
   clients: ClientRow[];
   truncated: boolean;
@@ -126,6 +126,11 @@ export function TransportBreakdown({ metrics, isManager }: { metrics: TransportC
             <MiniStat label="Poids livré" value={fmtKg(data.totals.kg)} />
             <MiniStat label="Coût transport imputé" value={fmtEur(data.totals.cost)} tone="amber" />
           </div>
+          {data.totals.unpriced > 0 && (
+            <p className="text-[11px] text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
+              <AlertTriangle className="h-3 w-3" /> {fmtInt(data.totals.unpriced)} position(s) sans tarif — coût transport non calculé (comptées 0 €).
+            </p>
+          )}
           {data.truncated && (
             <p className="text-[11px] text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
               <AlertTriangle className="h-3 w-3" /> Résultat plafonné (beaucoup de BL) — chiffres partiels.

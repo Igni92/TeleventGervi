@@ -40,7 +40,7 @@ interface StoresPayload {
   nbStores: number;
   totals: {
     ca: number; caProductNet: number; weightKg: number; marginGross: number;
-    transportCost: number; marginNet: number; marginGrossPct: number;
+    transportCost: number; transportUnpriced: number; marginNet: number; marginGrossPct: number;
     marginNetPct: number; transportPctMargin: number | null;
   };
   stores: StoreRow[];
@@ -224,6 +224,20 @@ function Report({ data }: { data: StoresPayload }) {
         <Kpi label="Marge nette moyenne" value={fmtPct(totals.marginNetPct)}
              hint={`marge brute ${totals.marginGrossPct.toFixed(1)} %`} />
       </div>
+
+      {/* Bandeau : positions livrées sans tarif applicable (coût transport sous-estimé) */}
+      {data.transportConfigured && totals.transportUnpriced > 0 && (
+        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-[12.5px] text-amber-100">
+          <TriangleAlert className="h-4 w-4 mt-0.5 shrink-0 text-amber-300" />
+          <span>
+            <b>{formatNum(totals.transportUnpriced)} position(s) sans tarif</b> — coût transport non calculé
+            (comptées 0 €). La marge nette est <b>sur-estimée</b> pour ces magasins.{" "}
+            <Link href="/transport" className="underline underline-offset-2 font-semibold hover:text-white">
+              Compléter les tarifs transporteurs →
+            </Link>
+          </span>
+        </div>
+      )}
 
       {/* Bandeau : transport non configuré */}
       {!data.transportConfigured && (
