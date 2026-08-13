@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getAccessScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import { sap } from "@/lib/sapb1";
 import { netEncours } from "@/lib/encours-net";
 import { attributeAvoirs, type CreditNoteRef } from "@/lib/encours-avoirs";
@@ -393,11 +394,17 @@ async function computeEncours(allowed: Set<string> | null) {
 
   // Lien fiche : id local par code (quand le client existe en base).
   const codes = aggregated.map((c) => c.cardCode);
+  // relanceActive lue en RAW SQL (colonne db-push, client Prisma possiblement en
+  // retard — même convention que la fiche Compta). COALESCE → true par défaut.
   const locals = codes.length
-    ? await prisma.client.findMany({ where: { code: { in: codes } }, select: { id: true, code: true, emailCompta: true } })
+    ? await prisma.$queryRaw<{ id: string; code: string; emailCompta: string | null; relanceActive: boolean }[]>(Prisma.sql`
+        SELECT "id", "code", "emailCompta", COALESCE("relanceActive", true) AS "relanceActive"
+        FROM "Client" WHERE "code" IN (${Prisma.join(codes)});
+      `)
     : [];
   const idByCode = new Map(locals.map((l) => [l.code, l.id]));
   const emailComptaByCode = new Map(locals.map((l) => [l.code, l.emailCompta]));
+  const relanceActiveByCode = new Map(locals.map((l) => [l.code, l.relanceActive]));
 
   return {
     ok: true,
@@ -424,6 +431,9 @@ async function computeEncours(allowed: Set<string> | null) {
       cardName: c.cardName,
       clientId: idByCode.get(c.cardCode) ?? null,
       emailCompta: emailComptaByCode.get(c.cardCode) ?? null,
+      // Relances activées pour ce client ? (défaut true ; false = décoché). Un
+      // client sans fiche locale (jamais importé) reste true par défaut.
+      relanceActive: relanceActiveByCode.get(c.cardCode) ?? true,
       // Précision complète (cents). Encours = NET ; brut, encaissé et avoirs en plus.
       encours: Math.round(c.encours * 100) / 100,
       brut: Math.round(c.brut * 100) / 100,

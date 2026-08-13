@@ -25,6 +25,10 @@ export interface RelanceInvoice {
   balance: number;
   /** Jours par rapport à l'échéance (négatif = avant échéance). */
   overdueDays: number;
+  /** true = facture de SERVICE (aucune ligne produit : prestation/location/
+   *  déchet) → relance à retraiter et personnaliser manuellement. false/absent =
+   *  facture d'ARTICLE (négoce classique) → relance automatique. */
+  isService?: boolean;
 }
 
 /** Coordonnées du tiers pour l'en-tête / les formules. */
@@ -47,6 +51,16 @@ export interface RelanceTotals {
   principal: number;
   penalites: number;
   ifr: number;
+  /** Nombre de factures ENCORE DUES après imputation = nombre de positions
+   *  touchées par l'indemnité forfaitaire de 40 € (ifr = nbFacturesDues × ifrParFacture). */
+  nbFacturesDues: number;
+  /** Montant forfaitaire unitaire appliqué (€, = params.ifrParFacture ; 40 par défaut). */
+  ifrParFacture: number;
+  /** Nombre de factures de SERVICE dans la relance (à personnaliser à la main). */
+  nbServiceInvoices: number;
+  /** true = TOUTES les factures de la relance sont des factures de service →
+   *  l'envoi automatique doit être bloqué (courrier à rédiger manuellement). */
+  serviceOnly: boolean;
   total: number;
 }
 
@@ -109,7 +123,17 @@ export function overdueDaysFor(dueDate: Date | null, ref: Date = new Date()): nu
   return Math.floor((a - b) / 86_400_000);
 }
 
-/** Pénalités de retard d'une facture (0 si taux non paramétré). */
+/**
+ * Pénalités de retard d'UNE facture (0 si taux non paramétré).
+ *
+ * Convention habituelle (créances commerciales) : intérêts = principal × taux
+ * ANNUEL × (jours de retard / 365) — le taux annuel est donc appliqué AU PRORATA
+ * du délai réel de paiement de CETTE facture, jamais en année pleine ni sur un
+ * total agrégé. `annualRate` = taux légal EN VIGUEUR × multiplicateur CGV
+ * (« 5 × le taux légal »). Chaque facture a son propre `overdueDays` : le total
+ * des pénalités est la SOMME de ces montants par facture (cf. buildRelanceContext),
+ * jamais un calcul unique sur le principal cumulé.
+ */
 export function computePenalty(balance: number, overdueDays: number, annualRate: number): number {
   if (annualRate <= 0 || overdueDays <= 0 || balance <= 0) return 0;
   return round2(balance * annualRate * (overdueDays / 365));
@@ -239,6 +263,12 @@ export function buildRelanceContext(args: {
   const ifr = round2(params.ifrParFacture * nbFacturesDues);
   const total = round2(principal + penalites + ifr);
 
+  // Séparation SERVICE / ARTICLE : les relances de factures de service doivent
+  // être retraitées à la main. On compte celles présentes dans la relance et on
+  // signale le cas « 100 % service » (l'appelant bloque alors l'envoi auto).
+  const nbServiceInvoices = invoices.reduce((n, i) => n + (i.isService ? 1 : 0), 0);
+  const serviceOnly = nbServiceInvoices > 0 && nbServiceInvoices === invoices.length;
+
   const hasDeduction = encaissementsNonAffectes > 0.005;
 
   const fields: Record<string, string> = {
@@ -260,6 +290,12 @@ export function buildRelanceContext(args: {
     TauxPenalites: params.tauxPenalitesLabel,
     MontantPenalites: formatEUR(penalites),
     IndemniteForfaitaire: formatEUR(ifr),
+    // Détail de l'indemnité forfaitaire : nombre de factures concernées × 40 €.
+    NbFacturesIFR: String(nbFacturesDues),
+    IfrParFacture: formatEUR(params.ifrParFacture),
+    // Libellé « (N facture(s) × 40,00 €) » — TOUJOURS le nombre de positions
+    // touchées par le forfait (demande direction : le marquer dans le courrier).
+    DetailIFR: `(${nbFacturesDues} facture${nbFacturesDues > 1 ? "s" : ""} × ${formatEUR(params.ifrParFacture)})`,
     TotalDu: formatEUR(total),
     DateMiseEnDemeure: formatDateFR(dateMiseEnDemeure ?? null),
     // Clause d'ouverture R5 : évite « mise en demeure du — » si aucune R4 n'est
@@ -285,7 +321,7 @@ export function buildRelanceContext(args: {
     fields,
     invoices,
     primary,
-    totals: { nbFactures, openTotal, encaissementsNonAffectes, principal, penalites, ifr, total },
+    totals: { nbFactures, openTotal, encaissementsNonAffectes, principal, penalites, ifr, nbFacturesDues, ifrParFacture: params.ifrParFacture, nbServiceInvoices, serviceOnly, total },
     avoirsByInvoice,
     avoirsNonImputes,
     avoirsNonImputesTotal,

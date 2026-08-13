@@ -38,6 +38,21 @@ interface OpenInvoice {
   CardName?: string;
   DocTotal?: number;
   PaidToDate?: number;
+  /** Lignes — sert à distinguer une facture de SERVICE (prestation/location/
+   *  déchet : aucune ligne avec ItemCode) d'une facture d'ARTICLE (négoce). */
+  DocumentLines?: { ItemCode?: string | null; LineTotal?: number }[];
+}
+
+/**
+ * Facture de SERVICE = aucune ligne « produit » (aucun ItemCode). Prestation,
+ * location, refacturation, déchet… Ces relances doivent être retraitées et
+ * personnalisées à la main (le modèle automatique, orienté négoce, ne convient
+ * pas). Une facture d'ARTICLE a au moins une ligne avec ItemCode → relance auto.
+ * Lignes absentes/inconnues → considérée ARTICLE (on ne bloque pas par défaut).
+ */
+function isServiceInvoice(lines: OpenInvoice["DocumentLines"]): boolean {
+  if (!lines || lines.length === 0) return false;
+  return !lines.some((l) => typeof l.ItemCode === "string" && l.ItemCode.trim() !== "");
 }
 interface CreditNoteDoc {
   DocEntry: number;
@@ -52,6 +67,9 @@ export interface RelancePackage {
   cardName: string;
   clientId: string | null;
   clientEmailCompta: string | null;
+  /** Relances activées pour ce client ? (false = décoché dans Encours → à ne pas
+   *  relancer). L'aperçu reste consultable ; l'ENVOI est bloqué côté route. */
+  relanceActive: boolean;
   level: RelanceCode;
   channel: string;
   /** Boîte expéditrice (boîte partagée — identité applicative). */
@@ -91,7 +109,7 @@ export async function buildRelancePackage(
 
   // 1) Factures ouvertes du client (live SAP, base réelle) — solde = DocTotal − PaidToDate.
   const invs = await sap.getAll<OpenInvoice>(
-    "Invoices?$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,PaidToDate"
+    "Invoices?$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,PaidToDate,DocumentLines"
       + `&$filter=CardCode eq '${cardCode}' and DocumentStatus eq 'bost_Open' and Cancelled eq 'tNO'`,
     { pageSize: 200, maxPages: 50, env: "prod" },
   );
@@ -112,6 +130,7 @@ export async function buildRelancePackage(
       docTotal: inv.DocTotal ?? 0,
       balance,
       overdueDays: overdueDaysFor(dueDate, now),
+      isService: isServiceInvoice(inv.DocumentLines),
     });
   }
   if (all.length === 0) {
@@ -219,11 +238,23 @@ export async function buildRelancePackage(
   const clientEmailCompta = client?.emailCompta?.trim() || null;
   const recipient = resolveRecipient(clientEmailCompta);
 
+  // Activation des relances (colonne db-push → lue en RAW SQL, client Prisma
+  // possiblement en retard). Absente / client inconnu → true (défaut).
+  let relanceActive = true;
+  if (client?.id) {
+    try {
+      const rows = await prisma.$queryRaw<{ relanceActive: boolean }[]>`
+        SELECT COALESCE("relanceActive", true) AS "relanceActive" FROM "Client" WHERE "id" = ${client.id} LIMIT 1;`;
+      relanceActive = rows[0]?.relanceActive ?? true;
+    } catch { /* colonne absente → true */ }
+  }
+
   return {
     cardCode,
     cardName,
     clientId: client?.id ?? null,
     clientEmailCompta,
+    relanceActive,
     level,
     channel: lvl.canal,
     from: fromAddress(),

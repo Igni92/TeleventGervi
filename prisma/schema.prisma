@@ -154,6 +154,11 @@ model Client {
   // que s'il est activé. Auto-activé à l'import SAP si U_Actif='O' ; sinon
   // activation manuelle (et tout nouveau client arrive inactif).
   activeTelevente Boolean              @default(false)
+  // Activation des RELANCES : décoché → ce client ne reçoit aucune relance
+  // (case à cocher dans la liste Encours). Défaut true. Colonne ajoutée en raw
+  // SQL (cf. scripts/ddl-client-relance-active.mjs) — lue/écrite en $queryRaw
+  // tant que le client Prisma n'est pas régénéré (même convention qu'activeTelevente).
+  relanceActive   Boolean              @default(true)
   // VENDEUR (≠ commercial assigné) : celui qui réalise concrètement les ventes,
   // déduit du dernier BL/commande SAP. Non commissionné — sert au routage du
   // travail. Réassignable à la main. Le `commercial` (account manager) reste la

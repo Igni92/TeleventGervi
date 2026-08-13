@@ -53,7 +53,7 @@ describe("renderRelance — modèles R0→R5 (NT-2026-RC-01 §5)", () => {
   it("R3 affiche le décompte (principal / pénalités / IFR / total)", () => {
     const out = renderRelance("R3", ctx);
     expect(out.text).toContain("Principal restant dû : 6 020,00 €"); // 4820 + 1200
-    expect(out.text).toContain("Indemnité forfaitaire de recouvrement : 80,00 €"); // 40 × 2
+    expect(out.text).toContain("Indemnité forfaitaire de recouvrement (2 factures × 40,00 €) : 80,00 €"); // 40 × 2
     expect(out.text).toContain("Total dû à ce jour : 6 100,00 €"); // 6020 + 0 + 80
     // Sans encaissement à déduire, pas de ligne de déduction.
     expect(out.text).not.toContain("Règlements et avoirs");

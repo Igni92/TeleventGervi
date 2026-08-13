@@ -16,7 +16,8 @@
  * à l'import de DEFAULT_RELANCE_PARAMS (même convention que lib/sapb1.ts).
  */
 
-import { legalRateForDate } from "./legalRate";
+import { legalRateFromTable } from "./legalRate";
+import { getLegalRateTable } from "./bdfLegalRate";
 
 export interface RelanceParams {
   /** Libellé du taux affiché dans le courrier — GÉNÉRÉ (« 5 × le taux d'intérêt légal (13,75 %) »). */
@@ -75,9 +76,13 @@ const KEYS: Record<string, keyof RelanceParams> = {
  */
 export async function getRelanceParams(): Promise<RelanceParams> {
   const params: RelanceParams = { ...DEFAULT_RELANCE_PARAMS };
-  // Taux légal AUTOMATIQUE = celui en vigueur ce semestre (table officielle).
+  // Taux légal AUTOMATIQUE = celui EN VIGUEUR à la date du jour (= au moment de la
+  // relance), récupéré via l'API Banque de France (série IFRLEGAL_PROF), mis en
+  // cache et fusionné sur la table de repli. Best-effort : une panne réseau/API
+  // retombe silencieusement sur le cache/repli (ne bloque jamais la relance).
   // Une clé AppSetting `relance_taux_interet_legal` explicite le surcharge ensuite.
-  const auto = legalRateForDate(new Date());
+  const table = await getLegalRateTable();
+  const auto = legalRateFromTable(new Date(), table);
   if (auto != null) params.tauxInteretLegal = auto;
   try {
     const { prisma } = await import("@/lib/prisma");

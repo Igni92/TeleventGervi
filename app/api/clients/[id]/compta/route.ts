@@ -22,11 +22,13 @@ type ComptaRow = {
   emailCompta: string | null;
   emailReception: string | null;
   adresseFacturation: string | null;
+  relanceActive: boolean;
 };
 
 async function readCompta(clientId: string): Promise<ComptaRow | null> {
   const rows = await prisma.$queryRaw<ComptaRow[]>(Prisma.sql`
-    SELECT "emailCompta", "emailReception", "adresseFacturation"
+    SELECT "emailCompta", "emailReception", "adresseFacturation",
+           COALESCE("relanceActive", true) AS "relanceActive"
     FROM "Client"
     WHERE "id" = ${clientId}
     LIMIT 1;
@@ -70,6 +72,8 @@ const PatchSchema = z.object({
   emailCompta: emailListSchema.nullable().optional(),
   emailReception: z.string().trim().email("Email invalide").or(z.literal("")).nullable().optional(),
   adresseFacturation: z.string().trim().max(2000, "Trop long").nullable().optional(),
+  // Activation des relances pour ce client (case à cocher liste Encours).
+  relanceActive: z.boolean().optional(),
 });
 
 export async function PATCH(req: Request, props: { params: Promise<{ id: string }> }) {
@@ -93,6 +97,7 @@ export async function PATCH(req: Request, props: { params: Promise<{ id: string 
   if (parsed.data.emailCompta !== undefined) sets.push(Prisma.sql`"emailCompta" = ${norm(parsed.data.emailCompta)}`);
   if (parsed.data.emailReception !== undefined) sets.push(Prisma.sql`"emailReception" = ${norm(parsed.data.emailReception)}`);
   if (parsed.data.adresseFacturation !== undefined) sets.push(Prisma.sql`"adresseFacturation" = ${norm(parsed.data.adresseFacturation)}`);
+  if (parsed.data.relanceActive !== undefined) sets.push(Prisma.sql`"relanceActive" = ${parsed.data.relanceActive}`);
 
   if (sets.length > 0) {
     const result = await prisma.$executeRaw(Prisma.sql`

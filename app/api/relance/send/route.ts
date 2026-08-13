@@ -68,6 +68,30 @@ export async function POST(req: NextRequest) {
   const { totals } = pkg.context;
   const sentBy = session.user.email ?? null;
 
+  // Relances désactivées pour ce client (case décochée dans Encours) : on refuse
+  // l'envoi (défense en profondeur — l'UI masque déjà le bouton).
+  if (!pkg.relanceActive) {
+    return NextResponse.json(
+      { ok: false, error: "Les relances sont désactivées pour ce client (case « Relance » décochée)." },
+      { status: 422 },
+    );
+  }
+
+  // Séparation SERVICE / ARTICLE : une relance ne portant QUE sur des factures de
+  // service (prestation/location/déchet) doit être retraitée et personnalisée à
+  // la main — le modèle automatique, orienté négoce, ne convient pas. On refuse
+  // donc l'envoi automatique (l'opérateur rédige un courrier dédié).
+  if (totals.serviceOnly) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "Relance de facture(s) de service uniquement : à retraiter et personnaliser manuellement — l'envoi automatique est désactivé pour ce cas.",
+      },
+      { status: 422 },
+    );
+  }
+
   // ⚠️ TEMPORAIRE (demande direction) : toute relance MANUELLE — et ce chemin
   // l'est par définition — est redirigée vers m.mandine@gervifrais.com le temps
   // de la mise au point. Le destinataire CLIENT réel reste tracé dans

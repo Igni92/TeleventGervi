@@ -45,6 +45,8 @@ interface ClientEncours {
   countLate: number;
   maxOverdueDays: number;
   invoices: InvoiceLine[];
+  /** Relances activées pour ce client ? (case à cocher ; false = ne pas relancer). */
+  relanceActive: boolean;
 }
 interface EncoursData {
   company: string;
@@ -74,7 +76,7 @@ function useDebounced<T>(v: T, ms: number): T {
 
 /** Ligne mémoïsée : la recherche/tri ne re-rend QUE les lignes dont les props
  *  changent (avant : toute la liste re-rendait à chaque frappe). */
-const EncoursRow = memo(function EncoursRow({ c, onSelect, onEditCompta }: { c: ClientEncours; onSelect: (c: ClientEncours) => void; onEditCompta: (c: ClientEncours) => void }) {
+const EncoursRow = memo(function EncoursRow({ c, onSelect, onEditCompta, onToggleRelance }: { c: ClientEncours; onSelect: (c: ClientEncours) => void; onEditCompta: (c: ClientEncours) => void; onToggleRelance: (c: ClientEncours, next: boolean) => void }) {
   return (
     <tr className="hover:bg-secondary/30 transition-colors cursor-pointer" onClick={() => onSelect(c)}>
       <td className="px-3 py-2">
@@ -95,6 +97,18 @@ const EncoursRow = memo(function EncoursRow({ c, onSelect, onEditCompta }: { c: 
       <td className="px-3 py-2 text-right tnum">{c.countLate > 0 ? <span className="font-semibold text-rose-600 dark:text-rose-400">{c.countLate}</span> : <span className="text-muted-foreground/40">—</span>}</td>
       <td className="px-3 py-2 text-center">
         <ComptaBadge c={c} onEdit={onEditCompta} />
+      </td>
+      <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+        {/* Activer / désactiver les relances pour ce client (décoché = ne pas relancer). */}
+        <input
+          type="checkbox"
+          checked={c.relanceActive}
+          disabled={!c.clientId}
+          onChange={(e) => onToggleRelance(c, e.target.checked)}
+          title={c.clientId ? (c.relanceActive ? "Relances activées — décocher pour ne plus relancer" : "Relances désactivées pour ce client") : "Client non importé — non modifiable"}
+          aria-label={`Relances ${c.relanceActive ? "activées" : "désactivées"} pour ${c.cardName}`}
+          className="h-4 w-4 cursor-pointer accent-brand-600 disabled:opacity-40 disabled:cursor-not-allowed"
+        />
       </td>
       <td className="px-2 py-2 text-right">
         <span className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground"><ExternalLink className="h-3.5 w-3.5" /></span>
@@ -293,6 +307,32 @@ export function Encours() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  // Active / désactive les relances d'un client. Mise à jour OPTIMISTE (réponse
+  // instantanée), rollback + toast si le PATCH échoue.
+  const toggleRelance = useCallback(async (c: ClientEncours, next: boolean) => {
+    if (!c.clientId) return;
+    setData((prev) => prev && ({
+      ...prev,
+      clients: prev.clients.map((x) => x.cardCode === c.cardCode ? { ...x, relanceActive: next } : x),
+    }));
+    try {
+      const r = await fetch(`/api/clients/${c.clientId}/compta`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ relanceActive: next }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Échec de l'enregistrement");
+      toast.success(next ? `Relances réactivées — ${c.cardName}` : `Relances désactivées — ${c.cardName}`);
+    } catch (e) {
+      // rollback
+      setData((prev) => prev && ({
+        ...prev,
+        clients: prev.clients.map((x) => x.cardCode === c.cardCode ? { ...x, relanceActive: !next } : x),
+      }));
+      toast.error((e as Error).message);
+    }
+  }, []);
+
   const debSearch = useDebounced(search, 250);
   const rows = useMemo(() => {
     if (!data) return [];
@@ -414,16 +454,17 @@ export function Encours() {
                 <SortTh label="> 90 j" k="b90" sort={sort} onSort={onSort} align="right" />
                 <SortTh label="Fact. retard" k="countLate" sort={sort} onSort={onSort} align="right" />
                 <th className="px-3 py-2.5 font-semibold text-center uppercase tracking-wider">Email compta</th>
+                <th className="px-3 py-2.5 font-semibold text-center uppercase tracking-wider" title="Décocher pour ne plus relancer ce client">Relance</th>
                 <th className="w-8" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
               {loading ? (
-                <tr><td colSpan={9} className="h-32 text-center"><Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></td></tr>
+                <tr><td colSpan={10} className="h-32 text-center"><Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={9} className="h-32 text-center text-muted-foreground">Aucun encours 🎉</td></tr>
+                <tr><td colSpan={10} className="h-32 text-center text-muted-foreground">Aucun encours 🎉</td></tr>
               ) : rows.map((c) => (
-                <EncoursRow key={c.cardCode} c={c} onSelect={setDrill} onEditCompta={setCompta} />
+                <EncoursRow key={c.cardCode} c={c} onSelect={setDrill} onEditCompta={setCompta} onToggleRelance={toggleRelance} />
               ))}
             </tbody>
           </table>

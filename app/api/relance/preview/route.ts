@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
       recommande: pkg.rendered.recommande,
       recipient: pkg.recipient,
       clientEmailCompta: pkg.clientEmailCompta,
+      relanceActive: pkg.relanceActive,
       totals: pkg.context.totals,
       invoices: pkg.context.invoices.map((i) => ({
         docEntry: i.docEntry,
@@ -54,6 +55,7 @@ export async function POST(req: NextRequest) {
         dueDate: i.dueDate?.toISOString() ?? null,
         balance: i.balance,
         overdueDays: i.overdueDays,
+        isService: !!i.isService,
       })),
     });
   } catch (e) {

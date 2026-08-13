@@ -63,7 +63,7 @@ Total dû à ce jour : {{TotalDu}}
 
 {{ParagrapheAvoirsFaveur}}
 
-Nous vous remercions de bien vouloir régulariser cette situation sous {{DelaiReponse}}. À défaut, et conformément à nos conditions générales de vente, des pénalités de retard ainsi qu'une indemnité forfaitaire de recouvrement de 40 € par facture deviendront exigibles de plein droit.
+Nous vous remercions de bien vouloir régulariser cette situation sous {{DelaiReponse}}. À défaut, et conformément à nos conditions générales de vente, des pénalités de retard ainsi qu'une indemnité forfaitaire de recouvrement de {{IfrParFacture}} par facture (soit {{NbFacturesIFR}} facture(s) concernée(s) à ce jour) deviendront exigibles de plein droit.
 
 Dans cette attente, je vous prie d'agréer, {{Civilite}}, l'expression de mes salutations distinguées.
 
@@ -84,7 +84,7 @@ ${TABLE_TOKEN}
 {{LigneDeduction}}
 Principal restant dû : {{MontantRestantDu}}
 Pénalités de retard ({{TauxPenalites}}) : {{MontantPenalites}}
-Indemnité forfaitaire de recouvrement : {{IndemniteForfaitaire}}
+Indemnité forfaitaire de recouvrement {{DetailIFR}} : {{IndemniteForfaitaire}}
 Total dû à ce jour : {{TotalDu}}
 
 {{ParagrapheAvoirsFaveur}}
@@ -111,7 +111,7 @@ ${TABLE_TOKEN}
 {{LigneDeduction}}
 Principal restant dû : {{MontantRestantDu}}
 Pénalités de retard ({{TauxPenalites}}) : {{MontantPenalites}}
-Indemnité forfaitaire de recouvrement : {{IndemniteForfaitaire}}
+Indemnité forfaitaire de recouvrement {{DetailIFR}} : {{IndemniteForfaitaire}}
 Total dû à ce jour : {{TotalDu}}
 
 {{ParagrapheAvoirsFaveur}}

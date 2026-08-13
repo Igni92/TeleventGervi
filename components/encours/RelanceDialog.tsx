@@ -20,6 +20,14 @@ interface PreviewTotals {
   principal: number;
   penalites: number;
   ifr: number;
+  /** Nombre de factures touchées par l'indemnité forfaitaire (40 € chacune). */
+  nbFacturesDues: number;
+  /** Montant forfaitaire unitaire (€) appliqué par facture due. */
+  ifrParFacture: number;
+  /** Nombre de factures de SERVICE (à personnaliser à la main). */
+  nbServiceInvoices: number;
+  /** true = relance 100 % service → envoi auto bloqué (courrier manuel). */
+  serviceOnly: boolean;
   total: number;
 }
 interface PreviewData {
@@ -31,6 +39,8 @@ interface PreviewData {
   recommande: boolean;
   recipient: PreviewRecipient;
   clientEmailCompta: string | null;
+  /** Relances activées pour ce client ? false → envoi bloqué (case décochée). */
+  relanceActive?: boolean;
   totals: PreviewTotals;
 }
 interface RelanceLogRow {
@@ -230,7 +240,13 @@ export function RelanceDialog({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[12px]">
                 <Stat label={`Principal net (${preview.totals.nbFactures} fact.)`} value={eur(preview.totals.principal)} />
                 <Stat label="Pénalités" value={eur(preview.totals.penalites)} hint={preview.totals.penalites === 0 ? "taux CGV non paramétré" : undefined} />
-                <Stat label="Indemnité forfait." value={eur(preview.totals.ifr)} />
+                <Stat
+                  label="Indemnité forfait."
+                  value={eur(preview.totals.ifr)}
+                  hint={preview.totals.nbFacturesDues > 0
+                    ? `${preview.totals.nbFacturesDues} facture${preview.totals.nbFacturesDues > 1 ? "s" : ""} × ${eur(preview.totals.ifrParFacture)}`
+                    : undefined}
+                />
                 <Stat label="Total dû" value={eur(preview.totals.total)} strong />
               </div>
               {preview.totals.encaissementsNonAffectes > 0 && (
@@ -239,6 +255,22 @@ export function RelanceDialog({
                   <b className="text-emerald-600 dark:text-emerald-400">−{eur(preview.totals.encaissementsNonAffectes)}</b> = principal net{" "}
                   <b className="text-foreground">{eur(preview.totals.principal)}</b> (solde compte tiers).
                 </p>
+              )}
+              {preview.totals.nbServiceInvoices > 0 && (
+                <div className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-[12px] ${
+                  preview.totals.serviceOnly
+                    ? "border-rose-400/50 bg-rose-50 dark:bg-rose-950/25 text-rose-800 dark:text-rose-200"
+                    : "border-amber-400/50 bg-amber-50 dark:bg-amber-950/25 text-amber-800 dark:text-amber-200"
+                }`}>
+                  <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <span>
+                    <b>{preview.totals.nbServiceInvoices} facture{preview.totals.nbServiceInvoices > 1 ? "s" : ""} de service</b>{" "}
+                    (prestation / location / déchet) dans cette relance —{" "}
+                    {preview.totals.serviceOnly
+                      ? <>à <b>retraiter et personnaliser manuellement</b> : l’envoi automatique est désactivé.</>
+                      : <>ces factures demandent un <b>courrier personnalisé</b> ; le modèle automatique convient aux factures d’article.</>}
+                  </span>
+                </div>
               )}
             </>
           ) : (
@@ -280,11 +312,12 @@ export function RelanceDialog({
           <button
             type="button"
             onClick={send}
-            disabled={sending || loading || !preview || sentLevel === level}
+            disabled={sending || loading || !preview || sentLevel === level || !!preview?.totals.serviceOnly || preview?.relanceActive === false}
+            title={preview?.relanceActive === false ? "Relances désactivées pour ce client" : preview?.totals.serviceOnly ? "Relance 100 % service : à envoyer manuellement" : undefined}
             className="inline-flex items-center gap-2 h-9 px-4 rounded-md bg-brand-600 text-white text-[13px] font-semibold hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
           >
             {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            {sentLevel === level ? "Envoyé ✓" : preview?.recipient.testMode ? "Envoyer (test)" : "Envoyer"}
+            {sentLevel === level ? "Envoyé ✓" : preview?.relanceActive === false ? "Relances désactivées" : preview?.totals.serviceOnly ? "Envoi manuel requis" : preview?.recipient.testMode ? "Envoyer (test)" : "Envoyer"}
           </button>
         </footer>
       </div>
