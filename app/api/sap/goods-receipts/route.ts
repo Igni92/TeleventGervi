@@ -168,13 +168,19 @@ export async function POST(req: NextRequest) {
       chunks.push(uniqueCodes.slice(i, i + VALIDATE_CHUNK));
     }
     const found = new Set<string>();
+    // Audit 2026-08-13 (#4) : lecture via sap.getAll (et non sap.get). sap.get
+    // n'ajoute PAS l'en-tête Prefer:odata.maxpagesize → le Service Layer plafonne
+    // la réponse à 20 lignes quel que soit $top, donc au-delà de 20 itemCodes dans
+    // un paquet (VALIDATE_CHUNK=40) les articles réels absents du résultat tronqué
+    // étaient déclarés « inexistants dans SAP » à tort. getAll pose Prefer et suit
+    // @odata.nextLink → tout le paquet est réellement lu.
     const results = await Promise.all(
       chunks.map((chunk) => {
         const filter = chunk.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
-        return sap.get<{ value: { ItemCode: string }[] }>(`Items?$select=ItemCode&$filter=${filter}`);
+        return sap.getAll<{ ItemCode: string }>(`Items?$select=ItemCode&$filter=${filter}`);
       }),
     );
-    for (const res of results) for (const it of res.value ?? []) found.add(it.ItemCode);
+    for (const res of results) for (const it of res) found.add(it.ItemCode);
     const missing = uniqueCodes.filter((c) => !found.has(c));
     if (missing.length > 0) {
       return NextResponse.json({
@@ -706,7 +712,12 @@ export async function GET(req: NextRequest) {
       NumAtCard?: string; DocTotal?: number; VatSum?: number; Comments?: string;
       DocumentStatus?: string; Cancelled?: string; DocumentLines?: ListedLine[];
     };
-    const docs = await sap.get<{ value: SapPdnListed[] }>(
+    // Audit 2026-08-13 (#6) : lecture via sap.getAll (et non sap.get). sap.get
+    // n'ajoute PAS Prefer:odata.maxpagesize → le Service Layer plafonne à 20 docs
+    // quel que soit $top, donc l'historique n'affichait au plus que 20 EM et le
+    // `count` renvoyé était faux (20 = plafond, pas le vrai nombre demandé). getAll
+    // pose Prefer (page 500) : $top=`last` (≤50) redevient la vraie limite.
+    const docs = await sap.getAll<SapPdnListed>(
       `PurchaseDeliveryNotes?$top=${last}&$orderby=DocEntry desc`
       + `&$select=DocEntry,DocNum,DocDate,CardCode,CardName,NumAtCard,DocTotal,VatSum,Comments,DocumentStatus,Cancelled,DocumentLines`,
     );
@@ -717,7 +728,7 @@ export async function GET(req: NextRequest) {
     // BaseType = 20 (oPurchaseDeliveryNotes). La réception d'origine, elle, porte
     // Cancelled = tYES. On relie les deux pour pouvoir les marquer dans l'UI.
     const PDN_OBJTYPE = 20;
-    const listed = docs.value || [];
+    const listed = docs;   // getAll renvoie directement le tableau `value` déjà paginé
     const byEntry = new Map(listed.map((d) => [d.DocEntry, d]));
     const cancelBaseEntryOf = (d: SapPdnListed): number | null => {
       for (const l of d.DocumentLines || []) {
@@ -732,10 +743,42 @@ export async function GET(req: NextRequest) {
       if (be != null) cancellationByBaseEntry.set(be, d);
     }
 
+    // ── Détection des RETOURS (PurchaseReturns) référençant ces EM ──
+    // Un retour fournisseur = doc PurchaseReturns dont les lignes pointent l'EM
+    // d'origine (BaseType=20, BaseEntry, BaseLine). Le Service Layer rejette les
+    // filtres lambda sur DocumentLines (cf. plus bas) → on récupère les derniers
+    // retours et on matche en JS sur l'ensemble des EM listées. Somme des pie
+    // retournées par (EM, ligne) → l'UI barre la ligne (total) ou l'annote (partiel).
+    const listedEntries = new Set(listed.map((d) => d.DocEntry));
+    const returnedByLine = new Map<string, number>();
+    try {
+      type RetLine = { BaseType?: number; BaseEntry?: number; BaseLine?: number; Quantity?: number };
+      type Ret = { DocEntry: number; Cancelled?: string; DocumentLines?: RetLine[] };
+      // Audit 2026-08-13 (#6) : lecture via sap.getAll (et non sap.get). Sans
+      // Prefer:odata.maxpagesize, le Service Layer ne renvoyait que 20 retours
+      // même avec $top=100 → un retour au-delà du 20e n'était pas rattaché à son
+      // EM (ligne non barrée/annotée dans l'historique). getAll pose Prefer et
+      // suit la pagination : les 100 derniers retours sont réellement lus.
+      const rets = await sap.getAll<Ret>(
+        `PurchaseReturns?$top=100&$orderby=DocEntry desc&$select=DocEntry,Cancelled,DocumentLines`,
+      );
+      for (const r of rets) {
+        if (r.Cancelled === "tYES") continue;
+        for (const rl of r.DocumentLines || []) {
+          if (Number(rl.BaseType) !== PDN_OBJTYPE || rl.BaseEntry == null || rl.BaseLine == null) continue;
+          if (!listedEntries.has(rl.BaseEntry)) continue;
+          const key = `${rl.BaseEntry}:${rl.BaseLine}`;
+          returnedByLine.set(key, (returnedByLine.get(key) ?? 0) + (Number(rl.Quantity) || 0));
+        }
+      }
+    } catch (e) {
+      console.warn("[goods-receipts GET] retours non chargés (non-bloquant):", (e as Error).message);
+    }
+
     // Enrichissement local : désignation complète (Fruit/Pays/Marque/Condt) +
     // ratio colis pour reconstituer la quantité « type condt » dans le détail.
     const itemCodes = Array.from(
-      new Set((docs.value || []).flatMap((d) => (d.DocumentLines || []).map((l) => l.ItemCode))),
+      new Set(listed.flatMap((d) => (d.DocumentLines || []).map((l) => l.ItemCode))),
     );
     const products = itemCodes.length
       ? await prisma.product.findMany({
@@ -809,6 +852,7 @@ export async function GET(req: NextRequest) {
           lines: lines.map((l) => {
             const p = pMap.get(l.ItemCode);
             const ratio = (p?.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) ? p.salesQtyPerPackUnit : 1;
+            const returnedPieces = returnedByLine.get(`${d.DocEntry}:${l.LineNum}`) ?? 0;
             return {
               lineNum: l.LineNum,
               itemCode: l.ItemCode,
@@ -825,6 +869,9 @@ export async function GET(req: NextRequest) {
               uCondi: p?.uCondi ?? null,
               frgnName: p?.frgnName ?? null,
               calibre: calibreByCode[l.ItemCode] ?? null,
+              // Retour fournisseur : pie retournées + équivalent colis (0 = rien retourné).
+              returnedPieces,
+              returnedPackages: returnedPieces > 0 ? (ratio > 1 ? returnedPieces / ratio : returnedPieces) : 0,
             };
           }),
         };

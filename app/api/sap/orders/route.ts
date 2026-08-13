@@ -356,16 +356,22 @@ export async function POST(req: NextRequest) {
       chunks.push(uniqueCodes.slice(i, i + VALIDATE_CHUNK));
     }
     const found = new Set<string>();
+    // Audit 2026-08-13 (#4) : lecture via sap.getAll (et non sap.get). sap.get
+    // n'ajoute PAS l'en-tête Prefer:odata.maxpagesize → le Service Layer plafonne
+    // la réponse à 20 lignes quel que soit $top, donc au-delà de 20 itemCodes dans
+    // un paquet (VALIDATE_CHUNK=40) les articles absents du résultat tronqué
+    // étaient déclarés « inexistants dans SAP » à tort (400 bloquant la commande).
+    // getAll pose Prefer et suit @odata.nextLink → tout le paquet est lu.
     const results = await Promise.all(
       chunks.map((chunk) => {
         const filter = chunk.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
-        return sap.get<{ value: { ItemCode: string; QuantityOnStock?: number }[] }>(
+        return sap.getAll<{ ItemCode: string; QuantityOnStock?: number }>(
           `Items?$select=ItemCode,QuantityOnStock&$filter=${filter}`,
         );
       }),
     );
     for (const res of results) {
-      for (const it of res.value ?? []) {
+      for (const it of res) {
         found.add(it.ItemCode);
         if (typeof it.QuantityOnStock === "number") sapStockByItem.set(it.ItemCode, it.QuantityOnStock);
       }
@@ -1402,14 +1408,17 @@ export async function GET(req: NextRequest) {
     const filter = cardCodes.length > 0
       ? "&$filter=" + encodeURIComponent(cardCodes.map((c) => `CardCode eq '${c.replace(/'/g, "''")}'`).join(" or "))
       : "";
-    const docs = await sap.get<{ value: SapOrderListed[] }>(
+    // Audit 2026-08-13 (#6) : sap.getAll (Prefer:odata.maxpagesize + @odata.nextLink) au
+    // lieu de sap.get, qui plafonnait la liste à 20 documents quel que soit $top —
+    // l'historique des commandes d'un client chargé (>20 BL) était tronqué en silence.
+    const docs = await sap.getAll<SapOrderListed>(
       `Orders?$top=${last}&$orderby=DocEntry desc`
       + `&$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,VatSum,DocumentStatus,Comments,NumAtCard,DocumentLines`
       + filter,
     );
 
     // Poids net par commande = Σ(quantité_inventaire × poids unitaire) — depuis la DB.
-    const allItemCodes = Array.from(new Set((docs.value || []).flatMap((d) => (d.DocumentLines || []).map((l) => l.ItemCode))));
+    const allItemCodes = Array.from(new Set(docs.flatMap((d) => (d.DocumentLines || []).map((l) => l.ItemCode))));
     const weightByItem = new Map<string, number>();
     // unités de base par colis (diviseur EXACT) — cf. colisInfo (lib/colis).
     const unitsPerColisByItem = new Map<string, number>();
@@ -1439,10 +1448,10 @@ export async function GET(req: NextRequest) {
       try {
         type Inv = { DocEntry: number; DocNum: number; DocumentLines?: { BaseType?: number; BaseEntry?: number }[] };
         const invFilter = cardCodes.map((c) => `CardCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
-        const inv = await sap.get<{ value: Inv[] }>(
+        const inv = await sap.getAll<Inv>(
           `Invoices?$top=60&$orderby=DocEntry desc&$select=DocEntry,DocNum,DocumentLines&$filter=${encodeURIComponent(invFilter)}`,
         );
-        for (const f of (inv.value || [])) {
+        for (const f of inv) {
           for (const l of (f.DocumentLines || [])) {
             if (l.BaseType === 17 && l.BaseEntry != null && !invoiceByOrder.has(l.BaseEntry)) {
               invoiceByOrder.set(l.BaseEntry, { docNum: f.DocNum, docEntry: f.DocEntry });
@@ -1455,8 +1464,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       db: process.env.SAP_B1_COMPANY_DB,
       cardCodes,
-      count: docs.value?.length || 0,
-      docs: (docs.value || []).map((d) => ({
+      count: docs.length,
+      docs: docs.map((d) => ({
         docEntry: d.DocEntry,
         docNum: d.DocNum,
         docDate: d.DocDate,

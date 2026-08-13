@@ -12,7 +12,10 @@ const invoices: RelanceInvoice[] = [
 const ctx = buildRelanceContext({
   client: { cardCode: "C1", raisonSociale: "SARL LES DÉLICES", civilite: "Monsieur" },
   invoices,
-  params: DEFAULT_RELANCE_PARAMS,
+  // Pénalités neutralisées : ce test vérifie l'AFFICHAGE du décompte (principal / IFR /
+  // total), pas le taux de pénalités (couvert par fields.test.ts). Même convention que
+  // fields.test.ts depuis que le défaut est passé à 5× le taux légal (13,75 %).
+  params: { ...DEFAULT_RELANCE_PARAMS, penaliteTauxAnnuel: 0 },
   dateMiseEnDemeure: new Date("2026-05-30T08:00:00Z"),
 });
 
@@ -51,7 +54,7 @@ describe("renderRelance — modèles R0→R5 (NT-2026-RC-01 §5)", () => {
     const out = renderRelance("R3", ctx);
     expect(out.text).toContain("Principal restant dû : 6 020,00 €"); // 4820 + 1200
     expect(out.text).toContain("Indemnité forfaitaire de recouvrement : 80,00 €"); // 40 × 2
-    expect(out.text).toContain("Total dû : 6 100,00 €"); // 6020 + 0 + 80
+    expect(out.text).toContain("Total dû à ce jour : 6 100,00 €"); // 6020 + 0 + 80
     // Sans encaissement à déduire, pas de ligne de déduction.
     expect(out.text).not.toContain("Règlements et avoirs");
   });

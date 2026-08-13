@@ -7,6 +7,7 @@ import { emailFromInitials } from "@/lib/salespeople";
 import {
   commissionData, commissionMonths, primeRateOf,
   PRIME_DEFAULT_RATE, PRIME_DEFAULT_START,
+  type PrimeConfig,
 } from "@/lib/commissions";
 
 /**
@@ -133,7 +134,7 @@ export async function GET() {
   //   (ligne automatique des éléments de salaires). Règles par facture :
   //   cadeaux neutralisés, plancher 0, avoirs repris sans déficit, transport
   //   par position. Bloc isolé en try/catch → moteur indisponible = prime 0.
-  const primeCfg = new Map<string, { rate: number; since: Date }>();
+  const primeCfg = new Map<string, PrimeConfig>();
   const primeMargeMap = new Map<string, number>();      // Σ marge corrigée cadeaux − avoirs
   const primeTransportMap = new Map<string, number>();  // Σ transport estimé (informatif)
   const primeBaseMap = new Map<string, number>();       // Σ des bases MENSUELLES retenues
@@ -219,6 +220,8 @@ export async function GET() {
         prime: Math.round((primeBaseMap.get(a.slp) ?? 0) * (primeCfg.get(a.slp)?.rate ?? PRIME_DEFAULT_RATE) * 100) / 100,
         primeRate: primeCfg.get(a.slp)?.rate ?? PRIME_DEFAULT_RATE,
         primeSince: (primeCfg.get(a.slp)?.since ?? PRIME_DEFAULT_START).toISOString(),
+        // Seuil de poids livré cumulé/client avant commission (0 = aucun).
+        primeSeuilKg: primeCfg.get(a.slp)?.seuilKg ?? 0,
         // Objectifs annuels (0 = non défini) — CA / marge brute / volume kg.
         objectifCa: obj?.ca ?? 0,
         objectifMarge: obj?.marge ?? 0,

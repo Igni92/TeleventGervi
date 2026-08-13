@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { PromoBanner } from "@/components/promos/PromoBanner";
 import { MobileTiles } from "@/components/mobile/MobileTiles";
 import { KpiStrip } from "./KpiStrip";
-import { PoidsFamilles } from "./PoidsFamilles";
+import { SecondScreenButton } from "./SecondScreenButton";
 import { DernieresCommandes } from "./DernieresCommandes";
 import { PromosAccueil } from "./PromosAccueil";
 
@@ -75,26 +74,24 @@ export function AccueilHub() {
   const firstName = (session?.user?.name ?? "").trim().split(/\s+/)[0] || null;
 
   return (
-    <div className="keep-bricks space-y-4 animate-fade-up max-sm:py-3">
-      {/* La météo est TOUT EN HAUT, sur la même ligne que la bannière
-          événements — rendue par la coquille (TopStrip), pas par l'accueil. */}
-      <HubHeader firstName={firstName} />
+    <div className="keep-bricks flex flex-col gap-3 animate-fade-up max-sm:py-3">
+      {/* ── Haut : bouton « 2ᵉ écran » EN HAUT À GAUCHE, puis salutation + horloge ── */}
+      <div className="flex items-center gap-4">
+        <SecondScreenButton />
+        <div className="min-w-0 flex-1"><HubHeader firstName={firstName} /></div>
+      </div>
 
-      {/* ── Bandeau promotions ── */}
-      <PromoBanner context="accueil" />
-
-      {/* ── MOBILE : lanceur en tuiles (4 axes) — écran volontairement différent du bureau ── */}
+      {/* ── MOBILE : lanceur en tuiles (4 axes) ── */}
       <MobileTiles className="md:hidden touch:!block" />
 
-      {/* ── BUREAU : KPI + poids par fruit + bento ── */}
-      <div className="hidden md:block touch:!hidden space-y-4">
+      {/* ── BUREAU : KPI (avec bulles de survol) + commandes + promotions ── */}
+      <div className="hidden md:flex touch:!hidden flex-col gap-3">
         <KpiStrip />
-        <PoidsFamilles />
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-          <div className="lg:col-span-7 space-y-4 min-w-0">
+          <div className="lg:col-span-7 min-w-0">
             <DernieresCommandes />
           </div>
-          <div className="lg:col-span-5 space-y-4 min-w-0">
+          <div className="lg:col-span-5 min-w-0">
             <PromosAccueil />
           </div>
         </div>

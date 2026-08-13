@@ -20,6 +20,13 @@ export async function GET() {
     const families = await getPoidsFamilles();
     return NextResponse.json({ ok: true, families });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e), families: [] });
+    // Audit 2026-08-13 (#16) : sur exception on renvoie un vrai HTTP 500 (et non
+    // un 200 { ok:false, familles vides }). Le front (useJson) ne bascule en état
+    // 'error' que sur un statut non-2xx et IGNORE le champ `ok` → un 200 à zéros
+    // s'affichait comme une matinée calme (fruits à 0 kg) au lieu d'une panne.
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : String(e), families: [] },
+      { status: 500 },
+    );
   }
 }

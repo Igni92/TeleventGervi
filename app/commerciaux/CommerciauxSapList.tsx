@@ -47,6 +47,8 @@ interface CommercialSap {
   primeRate: number;
   /** Date de début de la période de prime (ISO). */
   primeSince: string;
+  /** Seuil de poids livré cumulé/client avant commission (kg, 0 = aucun). */
+  primeSeuilKg: number;
   objectifCa: number;
   objectifMarge: number;
   objectifVolume: number;
@@ -380,9 +382,10 @@ function ObjectifModal({
   const [ca, setCa] = useState(c.objectifCa);
   const [marge, setMarge] = useState(c.objectifMarge);
   const [volume, setVolume] = useState(c.objectifVolume);
-  // Prime : taux saisi en % (5 = 5 %) + date de début (yyyy-mm-dd).
+  // Prime : taux saisi en % (5 = 5 %) + date de début (yyyy-mm-dd) + seuil kg.
   const [primeRatePct, setPrimeRatePct] = useState(Math.round(c.primeRate * 1000) / 10);
   const [primeSince, setPrimeSince] = useState(c.primeSince.slice(0, 10));
+  const [primeSeuilKg, setPrimeSeuilKg] = useState(c.primeSeuilKg);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -415,6 +418,7 @@ function ObjectifModal({
           slpName: c.slpName,
           rate: Math.max(0, Math.min(1, primeRatePct / 100)),
           since: new Date(`${primeSince}T00:00:00Z`).toISOString(),
+          seuilKg: Math.max(0, Math.round(primeSeuilKg) || 0),
         }),
       });
       if (!rp.ok) throw new Error();
@@ -494,6 +498,18 @@ function ObjectifModal({
                     onChange={(e) => setPrimeSince(e.target.value)}
                     className="mt-1 w-full h-8 px-2 rounded-md bg-secondary/60 text-foreground focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none"
                   />
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Seuil de commission (kg / client)</span>
+                  <input
+                    type="number" min={0} step={50}
+                    value={primeSeuilKg || 0}
+                    onChange={(e) => setPrimeSeuilKg(parseFloat(e.target.value) || 0)}
+                    className="mt-1 w-full h-8 px-2 rounded-md bg-secondary/60 text-right tnum text-foreground focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none"
+                  />
+                  <span className="mt-1 block text-[10px] text-muted-foreground">
+                    Un client n&apos;est commissionné qu&apos;au-delà de ce poids livré cumulé (depuis la date ci-dessus) ; au franchissement, toutes ses factures basculent. 0 = aucun seuil.
+                  </span>
                 </label>
               </div>
             )}

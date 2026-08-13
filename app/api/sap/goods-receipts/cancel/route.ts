@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { requirePreparateurOrAdmin } from "@/lib/permissions";
 import { sap } from "@/lib/sapb1";
 import { writeAudit } from "@/lib/audit";
+import { applyInventoryDelta } from "@/lib/stockSync";
 
 /**
  * POST /api/sap/goods-receipts/cancel
@@ -29,10 +30,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "docEntry requis" }, { status: 400 });
   }
 
-  type Pdn = { DocNum: number; DocumentStatus?: string; Cancelled?: string };
+  // Audit 2026-08-13 (#13) : on lit aussi DocumentLines (article/qté/entrepôt) — il
+  // faut décrémenter le miroir local après l'annulation, symétriquement à
+  // l'incrément posé à la création de l'EM (cf. plus bas).
+  type PdnLine = { ItemCode?: string; Quantity?: number; WarehouseCode?: string };
+  type Pdn = { DocNum: number; DocumentStatus?: string; Cancelled?: string; DocumentLines?: PdnLine[] };
   let pdn: Pdn;
   try {
-    pdn = await sap.get<Pdn>(`PurchaseDeliveryNotes(${docEntry})?$select=DocNum,DocumentStatus,Cancelled`);
+    pdn = await sap.get<Pdn>(`PurchaseDeliveryNotes(${docEntry})?$select=DocNum,DocumentStatus,Cancelled,DocumentLines`);
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: `Entrée marchandise introuvable : ${e instanceof Error ? e.message : ""}` },
@@ -52,6 +57,20 @@ export async function POST(req: NextRequest) {
   try {
     await sap.post(`PurchaseDeliveryNotes(${docEntry})/Cancel`, undefined);
     console.log(`[EM] Annulée — DocEntry ${docEntry} (DB ${process.env.SAP_B1_COMPANY_DB})`);
+    // Audit 2026-08-13 (#13) : décrément local symétrique de l'incrément posé à la
+    // création de l'EM (incrementLocalStock). Sans lui, le miroir ProductStock restait
+    // gonflé du stock annulé jusqu'au prochain polling SAP (sur-stock fantôme ~30 min).
+    // applyInventoryDelta touche le stock RÉEL (inStock/available) — approprié car
+    // l'annulation SORT vraiment la marchandise. Quantity est déjà en unité
+    // d'inventaire (pie), même base que l'incrément. Clampé ≥ 0, best-effort.
+    try {
+      const deltas = (pdn.DocumentLines || [])
+        .filter((l) => l.ItemCode && Number.isFinite(l.Quantity) && (l.Quantity ?? 0) > 0)
+        .map((l) => ({ itemCode: l.ItemCode!, deltaUnits: -(l.Quantity as number), warehouseCode: l.WarehouseCode }));
+      if (deltas.length > 0) await applyInventoryDelta(deltas);
+    } catch (e) {
+      console.warn(`[EM] Cancel(${docEntry}) — décrément stock local échoué (non-bloquant):`, (e as Error).message);
+    }
     await writeAudit({
       session,
       action: "EM_CANCEL",

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { requirePreparateurOrAdmin } from "@/lib/permissions";
 import { sap } from "@/lib/sapb1";
 import { debitLots } from "@/lib/lotLedger";
+import { applyInventoryDelta } from "@/lib/stockSync";
 
 /**
  * POST /api/sap/goods-receipts/[docEntry]/return
@@ -65,6 +66,13 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
   // on débitera le registre par lot (miroir du crédit posé à la réception).
   const returnLot = `EM${pdn.DocNum}`;
   const returnDebits: { itemCode: string; lot: string; qty: number }[] = [];
+  // Audit 2026-08-13 (#13) : deltas d'inventaire local à appliquer après le retour.
+  // La création d'EM appelle incrementLocalStock (inStock += / available +=) ; le
+  // retour (PurchaseReturns) sortait la marchandise dans SAP mais ne touchait QUE
+  // le registre par lot, laissant le miroir ProductStock gonflé (~30 min, jusqu'au
+  // prochain polling SAP) → sur-stock fantôme. On collecte ici le delta NÉGATIF
+  // par article/entrepôt pour le décrémenter symétriquement (cf. plus bas).
+  const returnStockDeltas: { itemCode: string; deltaUnits: number; warehouseCode?: string }[] = [];
   for (const w of wanted) {
     const src = lineByNum.get(w.lineNum);
     if (!src) return NextResponse.json({ error: `Ligne ${w.lineNum} introuvable sur l'EM.` }, { status: 400 });
@@ -85,7 +93,12 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
       Quantity: retPieces,
       ...(pkg ? { PackageQuantity: w.packageQuantity } : {}),
     });
-    if (src.ItemCode) returnDebits.push({ itemCode: src.ItemCode, lot: returnLot, qty: retPieces });
+    if (src.ItemCode) {
+      returnDebits.push({ itemCode: src.ItemCode, lot: returnLot, qty: retPieces });
+      // Audit 2026-08-13 (#13) : delta local négatif symétrique de l'incrément
+      // posé à la création de l'EM (même unité d'inventaire = pie, même entrepôt).
+      returnStockDeltas.push({ itemCode: src.ItemCode, deltaUnits: -retPieces, warehouseCode: src.WarehouseCode });
+    }
   }
   if (DocumentLines.length === 0) {
     return NextResponse.json({ error: "Aucune ligne valide à retourner." }, { status: 400 });
@@ -101,6 +114,16 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
     if (returnDebits.length > 0) {
       try { await debitLots(returnDebits); }
       catch (e) { console.warn("[Retour] Débit registre lot échoué (non-bloquant):", (e as Error).message); }
+    }
+    // Audit 2026-08-13 (#13) : décrément local symétrique de l'incrément posé à la
+    // création de l'EM. Sans lui, le miroir ProductStock restait sur-évalué jusqu'au
+    // prochain polling SAP (sur-stock fantôme ~30 min). applyInventoryDelta touche le
+    // stock RÉEL (inStock/available) — bon choix ici car le retour SORT vraiment de la
+    // marchandise (≠ decrementLocalStock qui ne modélise qu'une réservation via
+    // committed). Clampé ≥ 0 côté helper, best-effort (jamais bloquant).
+    if (returnStockDeltas.length > 0) {
+      try { await applyInventoryDelta(returnStockDeltas); }
+      catch (e) { console.warn("[Retour] Décrément stock local échoué (non-bloquant):", (e as Error).message); }
     }
     return NextResponse.json({ ok: true, docEntry: created.DocEntry, docNum: created.DocNum, fromDocNum: pdn.DocNum, lines: DocumentLines.length });
   } catch (e) {

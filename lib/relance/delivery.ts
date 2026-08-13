@@ -28,23 +28,44 @@ export function isLive(): boolean {
 }
 
 export interface ResolvedRecipient {
-  /** Destinataire EFFECTIF de l'envoi. */
+  /** Destinataire EFFECTIF de l'envoi (forme lisible, joint par « , » si plusieurs). */
   to: string;
-  /** Destinataire réel (email compta du client) qui serait visé hors test. */
+  /**
+   * Destinataire(s) EFFECTIF(S) de l'envoi, en liste (à passer à Graph
+   * toRecipients). En mode test = [boîte de test] ; en live = TOUS les emails
+   * compta configurés pour le client.
+   */
+  toList: string[];
+  /** Destinataire réel (email(s) compta du client, joint par « , ») visé hors test. */
   intendedTo: string | null;
   /** true = envoi redirigé vers la boîte de test. */
   testMode: boolean;
 }
 
 /**
+ * Sépare une chaîne d'emails compta (« a@x, b@y ; c@z ») en liste nettoyée.
+ * Le champ Client.emailCompta stocke DÉSORMAIS plusieurs adresses (séparées par
+ * « , »). Tolère aussi le point-virgule et les espaces superflus.
+ */
+export function splitEmails(raw: string | null | undefined): string[] {
+  return (raw ?? "")
+    .split(/[,;]+/)
+    .map((e) => e.trim())
+    .filter(Boolean);
+}
+
+/**
  * Résout le destinataire effectif. En mode test (défaut), redirige vers la boîte
- * de test ; en mode live, écrit au client (et retombe sur la boîte de test si le
- * client n'a aucun email connu, pour ne jamais échouer silencieusement).
+ * de test ; en mode live, écrit au client — à TOUS ses emails compta (et retombe
+ * sur la boîte de test si le client n'a aucun email connu, pour ne jamais échouer
+ * silencieusement).
  */
 export function resolveRecipient(clientEmail: string | null | undefined): ResolvedRecipient {
-  const intendedTo = clientEmail?.trim() || null;
-  if (isLive() && intendedTo) {
-    return { to: intendedTo, intendedTo, testMode: false };
+  const emails = splitEmails(clientEmail);
+  const intendedTo = emails.length ? emails.join(", ") : null;
+  if (isLive() && emails.length) {
+    return { to: intendedTo!, toList: emails, intendedTo, testMode: false };
   }
-  return { to: testRecipient(), intendedTo, testMode: true };
+  const test = testRecipient();
+  return { to: test, toList: [test], intendedTo, testMode: true };
 }

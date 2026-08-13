@@ -225,6 +225,7 @@ export function ComptaStatement() {
               </button>
             </div>
           </div>
+
           {data?.sent && (
             <p className="inline-flex items-center gap-1.5 text-[11.5px] text-emerald-700 dark:text-emerald-300">
               <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> Dernier envoi le {fmtDate(data.sent.sentAt)} — {data.sent.to.join(", ")}

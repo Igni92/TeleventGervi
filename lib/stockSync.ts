@@ -72,6 +72,18 @@ export async function refreshInStockMirror(): Promise<{ refreshed: number; total
 
   const sapMs = Date.now() - t0;
 
+  // Audit 2026-08-13 (#5) — GARDE-FOU RETOUR VIDE : un retour SAP vide ne signifie
+  // JAMAIS « tout le catalogue est épuisé ». Il peut trahir une panne silencieuse
+  // (getAllParallel qui rend [] quand /$count donne NaN, page vide, filtre KO…).
+  // Sans ce garde, sapCodeSet serait vide → l'étape 4 (dépletion) classerait TOUS
+  // les articles du miroir comme épuisés et remettrait leur stock 000/01/R1 à 0,
+  // tout en renvoyant ok:true. On sort donc AVANT toute écriture : rien à
+  // rafraîchir, rien à mettre à zéro (on préserve le stock existant).
+  if (sapItems.length === 0) {
+    console.warn("[stockSync] refreshInStockMirror : retour SAP vide — dépletion ANNULÉE (aucune remise à zéro), stock miroir préservé.");
+    return { refreshed: 0, total: 0, sapMs, dbMs: 0 };
+  }
+
   // 2. Résoudre les ids produits du miroir pour les codes SAP renvoyés.
   const sapCodes = sapItems.map((it) => it.ItemCode);
   const sapCodeSet = new Set(sapCodes);
@@ -193,8 +205,12 @@ export async function refreshItemStocks(itemCodes: string[]): Promise<number> {
     const waves = await Promise.all(wave.map(async (codes) => {
       const filter = codes.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
       try {
+        // Audit 2026-08-13 (#17) — lecture de RÉFÉRENCE : on épingle env:"prod"
+        // pour ne jamais écrire des stocks TEST dans ProductStock si le badge SAP
+        // est resté basculé sur TEST (le stock est la source de vérité prod).
         const r = await sap.get<{ value: SapItem[] }>(
           `Items?$top=${codes.length}&$select=ItemCode,QuantityOnStock,ItemWarehouseInfoCollection&$filter=${encodeURIComponent(filter)}`,
+          { env: "prod" },
         );
         return r.value ?? [];
       } catch (e) {
@@ -221,8 +237,10 @@ export async function refreshItemStocks(itemCodes: string[]): Promise<number> {
       const batch = missed.slice(i, i + PER_ITEM_CONC);
       await Promise.all(batch.map(async (code) => {
         try {
+          // Audit 2026-08-13 (#17) — même exigence prod que le batch ci-dessus.
           const it = await sap.get<SapItem>(
             `Items('${encodeURIComponent(code)}')?$select=ItemCode,QuantityOnStock,ItemWarehouseInfoCollection`,
+            { env: "prod" },
           );
           if (await upsertItem(it)) updated++;
         } catch (e) {

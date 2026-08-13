@@ -15,11 +15,15 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Wallet, Loader2, Printer, Plus, Trash2, Check } from "lucide-react";
+import { Wallet, Loader2, Printer, Plus, Trash2, Check, ChevronDown, Sliders, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
-import { printEtatCommissions, type CommissionPdfCommercial } from "@/lib/commissionsPdf";
+import { printEtatCommissions, printDetailCommissions, type CommissionPdfCommercial, type CommissionDetail } from "@/lib/commissionsPdf";
+import {
+  CommissionRulesEditor, ClientProgress, describeRule,
+  type Rule, type Progress,
+} from "@/components/effectifs/CommissionRulesEditor";
 
 interface Payout { id: string; amount: number; date: string; note: string; by: string; at: string; }
 interface Commercial extends CommissionPdfCommercial {
@@ -27,10 +31,13 @@ interface Commercial extends CommissionPdfCommercial {
   dueCumul: number;
   paidLedger: number;
   solde: number;
+  seuilKg: number;
+  rules: Rule[];
+  hasCustomRules: boolean;
+  progress: Progress[];
 }
 interface Payload {
   ok: boolean;
-  paidThrough: string | null;
   lastPayment: { payslipMonth: string; sentAt: string; sentBy: string; total: number } | null;
   commerciaux: Commercial[];
   canEdit?: boolean;
@@ -63,7 +70,7 @@ export function CommissionsPanel({ isManager = false }: { isManager?: boolean })
 
   const print = () => {
     if (!data?.commerciaux.length) return;
-    const ok = printEtatCommissions(data.commerciaux, data.paidThrough, new Date());
+    const ok = printEtatCommissions(data.commerciaux, new Date());
     if (!ok) toast.error("Impression bloquée par le navigateur — autorisez les fenêtres surgissantes.");
   };
 
@@ -135,6 +142,23 @@ function CommercialLedger({ c, canEdit, onChanged }: { c: Commercial; canEdit: b
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [panel, setPanel] = useState<null | "progress" | "rules" | "detail">(null);
+  const [detFrom, setDetFrom] = useState(c.since.slice(0, 10));
+  const [detTo, setDetTo] = useState(todayISO());
+  const [detLoading, setDetLoading] = useState(false);
+
+  const printDetail = async () => {
+    setDetLoading(true);
+    try {
+      const p = new URLSearchParams({ slp: c.slp, from: detFrom, to: detTo });
+      const r = await fetch(`/api/effectif/commissions/detail?${p}`, { cache: "no-store" });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error ?? "Échec");
+      const ok = printDetailCommissions(j as CommissionDetail);
+      if (!ok) toast.error("Impression bloquée par le navigateur — autorisez les fenêtres surgissantes.");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Échec"); }
+    finally { setDetLoading(false); }
+  };
 
   const add = async () => {
     const val = Math.round((parseFloat(amount.replace(",", ".")) || 0) * 100) / 100;
@@ -182,6 +206,52 @@ function CommercialLedger({ c, canEdit, onChanged }: { c: Commercial; canEdit: b
           <SoldeChip solde={c.solde} small />
         </div>
       </div>
+
+      {/* Règles de commission + avancement clients. */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 pt-2">
+        <span className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground" title={c.rules.map(describeRule).join(" · ")}>
+          {c.rules.length ? c.rules.map(describeRule).join("  ·  ") : "Aucune règle"}
+          {!c.hasCustomRules && <span className="ml-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">(défaut)</span>}
+        </span>
+        <button type="button"
+          onClick={() => setPanel(panel === "progress" ? null : "progress")}
+          className={`inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] transition-colors ${panel === "progress" ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-secondary/60"}`}>
+          <TrendingUp className="h-3.5 w-3.5" /> Avancement
+          <ChevronDown className={`h-3 w-3 transition-transform ${panel === "progress" ? "rotate-180" : ""}`} />
+        </button>
+        {canEdit && (
+          <button type="button"
+            onClick={() => setPanel(panel === "rules" ? null : "rules")}
+            className={`inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] transition-colors ${panel === "rules" ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-secondary/60"}`}>
+            <Sliders className="h-3.5 w-3.5" /> Règles
+            <ChevronDown className={`h-3 w-3 transition-transform ${panel === "rules" ? "rotate-180" : ""}`} />
+          </button>
+        )}
+        <button type="button"
+          onClick={() => setPanel(panel === "detail" ? null : "detail")}
+          className={`inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] transition-colors ${panel === "detail" ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-secondary/60"}`}>
+          <Printer className="h-3.5 w-3.5" /> PDF détaillé
+          <ChevronDown className={`h-3 w-3 transition-transform ${panel === "detail" ? "rotate-180" : ""}`} />
+        </button>
+      </div>
+      {panel === "progress" && <ClientProgress progress={c.progress} />}
+      {panel === "rules" && canEdit && (
+        <CommissionRulesEditor slp={c.slp} initial={c.rules} hasCustom={c.hasCustomRules} onSaved={onChanged} />
+      )}
+      {panel === "detail" && (
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px]">
+          <span className="text-muted-foreground">Détail ligne à ligne (par BL, par mois) du</span>
+          <input type="date" value={detFrom} onChange={(e) => setDetFrom(e.target.value)}
+            className="h-7 rounded-md border border-border bg-background px-2 tnum focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          <span className="text-muted-foreground">au</span>
+          <input type="date" value={detTo} onChange={(e) => setDetTo(e.target.value)}
+            className="h-7 rounded-md border border-border bg-background px-2 tnum focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          <button type="button" onClick={printDetail} disabled={detLoading}
+            className="inline-flex h-7 items-center gap-1.5 rounded-md bg-brand-600 px-3 font-semibold text-white hover:bg-brand-700 disabled:opacity-60">
+            {detLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />} Générer le PDF
+          </button>
+        </div>
+      )}
 
       {/* Relevé des versements. */}
       {c.payouts.length > 0 && (

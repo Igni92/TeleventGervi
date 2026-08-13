@@ -25,7 +25,12 @@ export async function POST() {
       SELECT DISTINCT ON (o."cardCode") o."cardCode", o."slpName" AS "slp"
       FROM "SapOrder" o
       WHERE o."cancelled" = false AND o."slpName" IS NOT NULL
-      ORDER BY o."cardCode", o."docDate" DESC
+      -- Audit 2026-08-13 (#12) : docDate est une date pure (minuit), donc plusieurs
+      -- BL du même client à la date la plus récente sont à ÉGALITÉ ; sans départage,
+      -- le DISTINCT ON retient un BL arbitraire → vendeur (commission + visibilité)
+      -- tiré au hasard, variable d'une resync à l'autre. On départage par docEntry
+      -- DESC (dernier BL saisi = convention déjà utilisée ailleurs) → déterministe.
+      ORDER BY o."cardCode", o."docDate" DESC, o."docEntry" DESC
     ) sub
     WHERE sub."cardCode" = c."code"
       AND c."type" IS DISTINCT FROM 'GMS'   -- GMS gardés sur leur vendeur par défaut (MM)

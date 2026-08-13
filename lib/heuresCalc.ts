@@ -199,8 +199,14 @@ export function computeWeek(
   }
   const totalMin = baseTotalMin + recupCreditMin;
   const deltaMin = totalMin - contractMin;
-  // Dépassement TRAVAILLÉ = dépassement total − part férié (forcément payée).
-  const supMin = Math.max(0, Math.max(0, deltaMin) - ferieMin);
+  // Dépassement TRAVAILLÉ = dépassement total − part férié − part congés (toutes
+  // deux CRÉDITÉES d'une journée type mais payées telles quelles, jamais majorées).
+  // Audit 2026-08-13 (#3) : on soustrayait bien le crédit férié mais PAS le crédit
+  // congés (`congesMin`). Un jour de CP/RTT, crédité au total au même titre qu'un
+  // férié, gonflait alors les heures supp majorées 25/50 — un congé validé ne doit
+  // JAMAIS générer d'heures supp. On l'exclut donc du dépassement arbitrable,
+  // exactement comme le férié.
+  const supMin = Math.max(0, Math.max(0, deltaMin) - ferieMin - congesMin);
   const sup25Min = Math.min(supMin, SUP25_BAND_MIN);
   const sup50Min = Math.max(0, supMin - SUP25_BAND_MIN);
   const recupMin = Math.max(0, -deltaMin);
@@ -245,6 +251,10 @@ export interface SuppSplit {
   recupMin: number;      // minutes de supp (brutes) laissées en RÉCUP
   payEquivMin: number;   // équivalent PAYÉ majoré de la part payée (×1,25 / ×1,5)
   recupEquivMin: number; // équivalent MAJORÉ crédité au compteur de récup
+  /** Détail BRUT de la part PAYÉE par tranche (la part payée consomme d'abord
+   *  la tranche +25 %, puis la +50 %). pay25Min + pay50Min = payMin. */
+  pay25Min: number;      // minutes BRUTES payées dans la tranche +25 %
+  pay50Min: number;      // minutes BRUTES payées dans la tranche +50 %
 }
 
 /**
@@ -267,6 +277,8 @@ export function splitSupp(sup25Min: number, sup50Min: number, paySuppMin: number
     recupMin: totalSupp - payMin,
     payEquivMin,
     recupEquivMin: majEquivMin - payEquivMin,
+    pay25Min: pay25,
+    pay50Min: pay50,
   };
 }
 

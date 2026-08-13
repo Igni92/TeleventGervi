@@ -56,7 +56,8 @@ const CONGE_TYPE_COMPACT: Record<CongeType, string> = {
   sans_solde: "Sans solde.",
   maladie: "Maladie.",
   recup: "Récup.",
-  autre: "Absence.",
+  absence: "Absence.",
+  autre: "Autre.",
 };
 
 /** « 2026-08-22 » → « SAM 22.08.26 » (date compacte des libellés de réception). */

@@ -1055,6 +1055,7 @@ model CommercialPrime {
   slpName   String   @id // trigramme SAP (MM/JMG/AG)
   rate      Float    @default(0.05) // taux de prime (0.05 = 5 %)
   since     DateTime @default(now()) // début de la période de prime
+  seuilKg   Float    @default(0) // seuil de poids livré cumulé/client avant commission (0 = aucun)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

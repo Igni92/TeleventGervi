@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { getAccessScope, resolvePilotageView } from "@/lib/permissions";
 import { weeklyInvoiceSeries } from "@/lib/pilotage";
 import { isoWeek } from "@/lib/iso-week";
+import { parisCivilParts } from "@/lib/pilotage-time";
+import { parisEndOfDay, parisStartOfDay } from "@/lib/paris-time";
 import { groupCodesForSegment, parseSegment } from "@/lib/segments";
 import { cached, invalidate } from "@/lib/ttlCache";
 
@@ -37,14 +39,21 @@ export async function GET(req: Request) {
 
   const payload = await cached(cacheKey, 120_000, async () => {
     const now = new Date();
-    const from = new Date(now.getFullYear() - 1, 0, 1); // 1er janv N-1
-    const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1); // inclut aujourd'hui
+    // Audit 2026-08-13 (#21) : année/semaine courantes dérivées en Europe/Paris —
+    // `now.getFullYear()` et `isoWeek(now)` lisaient l'UTC du serveur, donc entre
+    // minuit et 02h heure de Paris le 1er janvier la fenêtre et le marqueur de
+    // semaine courante basculaient un an trop tard.
+    const { year, month, day } = parisCivilParts(now);
+    const from = parisStartOfDay(new Date(Date.UTC(year - 1, 0, 1))); // 1er janv N-1 (Paris)
+    const to = parisEndOfDay(now); // inclut aujourd'hui (borne haute = minuit Paris demain)
 
     const weeks = await weeklyInvoiceSeries(from, to, groupCodesForSegment(segment), slp);
-    const cur = isoWeek(now);
+    // isoWeek lit les getters LOCAUX : on lui passe la date CIVILE de Paris (midi
+    // UTC pour éviter tout effet de bord) → n° de semaine ISO en heure française.
+    const cur = isoWeek(new Date(Date.UTC(year, month - 1, day, 12)));
 
     return {
-      currentYear: now.getFullYear(),
+      currentYear: year,
       currentIsoYear: cur.year,
       currentWeek: cur.week,
       weeks,

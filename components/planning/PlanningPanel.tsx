@@ -47,16 +47,19 @@ interface Conge {
   start: string; end: string; note: string; status: CongeStatus;
   origin?: "salarie" | "direction"; createdAt: string;
   justificatifName?: string;   // arrêt maladie : nom du fichier attaché
+  justified?: boolean;         // absence (direction) : justifiée ou non
 }
 interface PersonPlanning {
   email: string;
   name: string;
   profile: { weeklyHours: number; cpAllowanceDays: number | null; recupCapHours: number | null; typicalDayMin: number; initials?: string | null };
   counters: {
-    recup: { creditMin: number; debitMin: number; balanceMin: number; plannedDates: string[]; reservedMin: number; availableMin: number };
+    recup: { creditMin: number; debitMin: number; balanceMin: number; plannedDates: string[]; reservedMin: number; availableMin: number; avail25Min?: number; avail50Min?: number };
     cp: { allowanceDays: number | null; takenDays: number; pendingDays: number; balanceDays: number | null; period: { start: string; end: string }; accrual: boolean };
     capMin: number | null;
     excessMin: number;
+    /** Heures supp À PAYER du mois (brut par tranche) — semaines terminées. */
+    suppAPayer?: { min25: number; min50: number };
   };
   conges: Conge[];
   recupDates: string[];
@@ -75,6 +78,7 @@ const TYPE_TONE: Record<CongeType, { solid: string; soft: string; text: string }
   rtt:        { solid: "bg-fuchsia-500", soft: "bg-fuchsia-500/15", text: "text-fuchsia-700 dark:text-fuchsia-300" },
   recup:      { solid: "bg-sky-500", soft: "bg-sky-500/15", text: "text-sky-700 dark:text-sky-300" },
   maladie:    { solid: "bg-amber-500", soft: "bg-amber-500/15", text: "text-amber-700 dark:text-amber-300" },
+  absence:    { solid: "bg-rose-500", soft: "bg-rose-500/15", text: "text-rose-700 dark:text-rose-300" },
   sans_solde: { solid: "bg-zinc-400", soft: "bg-zinc-400/15", text: "text-zinc-600 dark:text-zinc-300" },
   autre:      { solid: "bg-zinc-400", soft: "bg-zinc-400/15", text: "text-zinc-600 dark:text-zinc-300" },
 };
@@ -101,7 +105,7 @@ const STATUS_TONE: Record<CongeStatus, string> = {
   cancelled: "bg-secondary text-muted-foreground",
 };
 
-const TYPES: CongeType[] = ["cp", "rtt", "recup", "sans_solde", "maladie", "autre"];
+const TYPES: CongeType[] = ["cp", "rtt", "recup", "sans_solde", "maladie", "absence", "autre"];
 const fmtD = (iso: string) => (iso ? new Date(`${iso}T12:00:00Z`).toLocaleDateString("fr-FR", { timeZone: "UTC", day: "2-digit", month: "2-digit" }) : "—");
 const rangeLabel = (c: { start: string; end: string }) => (c.start === c.end ? fmtD(c.start) : `${fmtD(c.start)} → ${fmtD(c.end)}`);
 /** Nom affiché : sans le suffixe « - Gervifrais » des comptes Microsoft. */
@@ -322,7 +326,9 @@ export function PlanningPanel({ isManager, isDirection }: { isManager: boolean; 
             const ok = await post(payload);
             if (ok) {
               toast.success(
-                payload.action === "declare" ? "Arrêt maladie enregistré — le salarié en est informé."
+                payload.action === "declare"
+                  ? (payload.type === "absence" ? "Absence enregistrée — le salarié en est informé."
+                     : "Arrêt maladie enregistré — le salarié en est informé.")
                 : payload.action === "propose" ? "Proposition envoyée au salarié — il accepte ou refuse."
                 : "Demande envoyée à la direction.");
               await load();
@@ -383,32 +389,56 @@ function monthTitleShort(monthId: string): string {
 
 function CounterBar({ person }: { person: PersonPlanning }) {
   const { cp, recup } = person.counters;
+  const a25 = recup.avail25Min ?? 0;
+  const a50 = recup.avail50Min ?? 0;
+  // Layout en TIERS : Congés payés = 1/3 (centré) ; « Récup ou heures supp » =
+  // 2/3, scindé en 2 colonnes (récup 1/3 | heures supp 1/3). Les heures supp sont
+  // le BRUT par taux (25/50) du choix « faire payer » plutôt que laisser en récup.
+  const cpValue = cp.balanceDays == null ? `${cp.takenDays} j pris` : `${cp.balanceDays} j restants`;
+  const cpHint = cp.balanceDays == null
+    ? "Solde CP non défini par l'employeur"
+    : `${cp.allowanceDays} j acquis · ${cp.takenDays} j pris${cp.pendingDays ? ` · ${cp.pendingDays} en attente` : ""}`;
   return (
-    <div className="mb-3 flex flex-wrap items-stretch gap-2">
-      <CounterChip icon={<Palmtree className="h-3.5 w-3.5" />} tone="violet"
-        label="Congés payés"
-        value={cp.balanceDays == null ? `${cp.takenDays} j pris` : `${cp.balanceDays} j restants`}
-        hint={cp.balanceDays == null
-          ? "Solde CP non défini par l'employeur"
-          : `${cp.allowanceDays} j acquis · ${cp.takenDays} j pris${cp.pendingDays ? ` · ${cp.pendingDays} en attente` : ""}`} />
-      <CounterChip icon={<Clock3 className="h-3.5 w-3.5" />} tone="sky"
-        label="Récup disponible"
-        value={fmtHM(recup.availableMin)}
-        hint={recup.reservedMin > 0
-          ? `${fmtHM(recup.balanceMin)} au compteur · ${fmtHM(recup.reservedMin)} déjà posés à venir`
-          : "Heures supp mises en récup, encore disponibles à poser ou à payer"} />
+    <div className="mb-3 grid grid-cols-3 gap-2 items-stretch">
+      {/* Congés payés — 1/3, centré */}
+      <div title={cpHint}
+        className="flex flex-col items-center justify-center rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-center text-violet-700 dark:text-violet-300">
+        <p className="inline-flex items-center gap-1.5 text-[9.5px] uppercase tracking-[0.12em] font-semibold opacity-80">
+          <Palmtree className="h-3.5 w-3.5" /> Congés payés
+        </p>
+        <p className="font-display text-[20px] font-bold tabular-nums leading-tight text-foreground">{cpValue}</p>
+      </div>
+      {/* Récup ou heures supp — 2/3, deux colonnes internes (récup | heures supp) */}
+      <div className="col-span-2 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sky-700 dark:text-sky-300">
+        <p className="flex items-center gap-1.5 text-[9.5px] uppercase tracking-[0.12em] font-semibold opacity-80">
+          <Clock3 className="h-3.5 w-3.5" /> Récup ou heures supp
+        </p>
+        <div className="mt-1 grid grid-cols-2 gap-2">
+          <div className="flex flex-col">
+            <span className="text-[10px] uppercase tracking-wide font-semibold opacity-70">Récup</span>
+            <span className="font-display text-[20px] font-bold tabular-nums leading-tight text-foreground">{fmtHM(recup.availableMin)}</span>
+          </div>
+          <div className="flex flex-col border-l border-sky-500/25 pl-3">
+            <span className="text-[10px] uppercase tracking-wide font-semibold opacity-70">Heures supp</span>
+            <span className="text-[14px] tabular-nums font-semibold text-foreground leading-snug">{fmtHM(a25)} à 25 %</span>
+            <span className="text-[14px] tabular-nums font-semibold text-foreground leading-snug">{fmtHM(a50)} à 50 %</span>
+          </div>
+        </div>
+        <p className="mt-1 text-[10px] opacity-70">Au choix : laisser en récup, ou faire payer les heures supp.</p>
+      </div>
     </div>
   );
 }
 
 function CounterChip({ icon, label, value, hint, tone }: {
   icon: React.ReactNode; label: string; value: string; hint?: string;
-  tone: "violet" | "sky" | "rose" | "muted";
+  tone: "violet" | "sky" | "rose" | "muted" | "emerald";
 }) {
   const tones: Record<string, string> = {
     violet: "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300",
     sky: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
     rose: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+    emerald: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
     muted: "border-border bg-secondary/30 text-muted-foreground",
   };
   // Hiérarchie (redesign) : la VALEUR est l'info importante (héros display) ;
@@ -537,11 +567,20 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
     () => rangeDays.filter((d) => { const dow = new Date(`${d}T12:00:00Z`).getUTCDay(); return dow >= 1 && dow <= 5 && !frenchHolidayLabel(d); }).length,
     [rangeDays],
   );
-  // Le salarié ne peut pas poser plus de récup (jours de contrat) que son CET.
-  const overRecup = isSelf && type === "recup" && selContractDays > recupDaysAvail;
+  // ARBITRAGE RÉCUP→CP : le salarié PEUT poser plus de récup que son compteur.
+  // Les jours de contrat au-delà du CET basculent automatiquement en CP à la pose
+  // (côté serveur, cf. /api/effectif/conges). On n'interdit plus la pose : on
+  // INFORME simplement du nombre de jours qui partiront en CP.
+  const recupExceeds = isSelf && type === "recup" && selContractDays > recupDaysAvail;
+  const cpFallbackDays = recupExceeds ? selContractDays - recupDaysAvail : 0;
   // Direction + type « Maladie » → DÉCLARATION directe (arrêt acté), pas une
   // proposition soumise à l'acceptation du salarié.
   const maladieDeclare = !isSelf && type === "maladie";
+  // Direction + « Absence » → DÉCLARATION directe (fait acté), avec un statut
+  // JUSTIFIÉE / NON JUSTIFIÉE que la direction pose.
+  const absenceDeclare = !isSelf && type === "absence";
+  const [absJustified, setAbsJustified] = useState(true);
+  const directDeclare = maladieDeclare || absenceDeclare;
   // Justificatif d'arrêt maladie (image/PDF) — lu en data-URL côté client.
   const [justif, setJustif] = useState<{ name: string; dataUrl: string } | null>(null);
   const pickJustif = (file: File | null) => {
@@ -564,16 +603,17 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
   }, [person.conges, month]);
 
   const submit = async () => {
-    if (!sel.start || overRecup) return;
+    if (!sel.start) return;
     const base = { type, start: sel.start, end: sel.end || sel.start, note };
     // ARRÊT MALADIE (direction) = fait acté → DÉCLARÉ directement ; sinon
     // demande (salarié) ou proposition (direction).
     const ok = isSelf
       ? await onSubmit({ action: "request", ...base })
       : await onSubmit({
-          action: type === "maladie" ? "declare" : "propose",
+          action: directDeclare ? "declare" : "propose",
           email: person.email, name: person.name, ...base,
           ...(maladieDeclare && justif ? { justificatif: justif.dataUrl, justificatifName: justif.name } : {}),
+          ...(absenceDeclare ? { justified: absJustified } : {}),
         });
     if (ok) { setSel({ start: "", end: "" }); setNote(""); setJustif(null); }
   };
@@ -643,7 +683,9 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
                 }}
                 title={[
                   ferieLabel ? `Férié : ${ferieLabel}` : null,
-                  ...approved.map((c) => `${CONGE_TYPE_LABEL[c.type]} (validé)`),
+                  ...approved.map((c) => c.type === "absence"
+                    ? `Absence ${c.justified ? "justifiée" : "non justifiée"}${c.note ? ` — ${c.note}` : ""}`
+                    : `${CONGE_TYPE_LABEL[c.type]} (validé)`),
                   ...pending.map((c) => `${CONGE_TYPE_LABEL[c.type]} (en attente)`),
                   hasRecupDot ? "Récup posée" : null,
                   tag ? `Feuille d'heures : ${DAY_TAG_LABEL[tag]}` : null,
@@ -687,7 +729,8 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
 
                 {/* PASTILLE allongée + lisible : libellé de la catégorie du jour. */}
                 {resolved.category && (
-                  <DayPill category={resolved.category} pending={resolved.pending} planned={resolved.planned} />
+                  <DayPill category={resolved.category} pending={resolved.pending} planned={resolved.planned}
+                    absenceJustified={resolved.category === "absent" ? approved.find((c) => c.type === "absence")?.justified : undefined} />
                 )}
               </button>
             );
@@ -741,6 +784,11 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
                 ) : (
                   <span className={`inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${TYPE_TONE[c.type].soft} ${TYPE_TONE[c.type].text}`}>
                     {CONGE_TYPE_LABEL[c.type]}
+                    {c.type === "absence" && c.justified != null && (
+                      <span className={c.justified ? "text-emerald-700 dark:text-emerald-300" : "text-rose-700 dark:text-rose-300"}>
+                        · {c.justified ? "justifiée" : "non justifiée"}
+                      </span>
+                    )}
                     {lockable && <Lock className="h-3 w-3 opacity-70" aria-label="Type verrouillé" />}
                   </span>
                 )}
@@ -813,22 +861,37 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
                   onChange={(e) => pickJustif(e.target.files?.[0] ?? null)} />
               </label>
             )}
+            {/* Absence (direction) : statut JUSTIFIÉE / NON JUSTIFIÉE. */}
+            {absenceDeclare && (
+              <span className="inline-flex overflow-hidden rounded-md border border-border" role="group" aria-label="Absence justifiée ?">
+                <button type="button" onClick={() => setAbsJustified(true)}
+                  className={`h-9 px-3 text-[12.5px] font-semibold ${absJustified ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : "text-muted-foreground hover:bg-secondary/60"}`}>
+                  Justifiée
+                </button>
+                <button type="button" onClick={() => setAbsJustified(false)}
+                  className={`h-9 px-3 text-[12.5px] font-semibold ${!absJustified ? "bg-rose-500/15 text-rose-700 dark:text-rose-300" : "text-muted-foreground hover:bg-secondary/60"}`}>
+                  Non justifiée
+                </button>
+              </span>
+            )}
             {/* Pleine largeur sur mobile (grande cible tactile), inline ≥ sm.
                 Arrêt maladie (déclaration directe) = bouton ambre (fait acté,
                 pas une proposition à négocier). */}
-            <button type="button" onClick={submit} disabled={busy || !sel.start || overRecup}
+            <button type="button" onClick={submit} disabled={busy || !sel.start}
               className={`w-full sm:w-auto inline-flex items-center justify-center gap-1.5 h-11 sm:h-10 px-4 rounded-lg text-white text-[13px] font-semibold disabled:opacity-50 ${
-                maladieDeclare ? "bg-amber-600 hover:bg-amber-700" : "bg-emerald-600 hover:bg-emerald-700"
+                maladieDeclare ? "bg-amber-600 hover:bg-amber-700"
+                  : absenceDeclare ? "bg-rose-600 hover:bg-rose-700"
+                  : "bg-emerald-600 hover:bg-emerald-700"
               }`}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : maladieDeclare ? <Stethoscope className="h-4 w-4" /> : <Send className="h-4 w-4" />}
-              {isSelf ? "Demander" : maladieDeclare ? "Déclarer l'arrêt" : "Proposer"}
+              {isSelf ? "Demander" : maladieDeclare ? "Déclarer l'arrêt" : absenceDeclare ? "Déclarer l'absence" : "Proposer"}
             </button>
           </div>
-          {/* Plafond récup : on ne peut poser que ce que contient le CET. */}
+          {/* Arbitrage récup→CP : les jours au-delà du CET basculent en CP à la pose. */}
           {isSelf && type === "recup" && (
-            <p className={`mt-2 text-[11.5px] tnum ${overRecup ? "text-rose-600 font-semibold" : "text-muted-foreground"}`}>
-              Récup posable : <b>{selContractDays}</b>/<b>{recupDaysAvail}</b> jour(s) — pris sur ton compteur (CET), les samedis sont gratuits.
-              {overRecup && ` Tu ne peux pas dépasser ${recupDaysAvail} jour(s) de récup.`}
+            <p className={`mt-2 text-[11.5px] tnum ${recupExceeds ? "text-amber-600 dark:text-amber-400 font-semibold" : "text-muted-foreground"}`}>
+              Récup posable : <b>{selContractDays}</b> jour(s) demandés / <b>{recupDaysAvail}</b> au compteur (CET) — les samedis sont gratuits.
+              {recupExceeds && ` Récup insuffisante : ${cpFallbackDays} jour(s) au-delà seront posés en CP.`}
             </p>
           )}
           {sel.start && (
@@ -1065,8 +1128,15 @@ const CAT_SHORT: Record<DayCategory, string> = {
  *  était illisible sur fond noir). La PRÉSENCE (état normal, tous les jours
  *  ouvrés) est un carré arrondi au cadre vert, sans texte (centre noir/blanc
  *  selon le thème). */
-function DayPill({ category, pending, planned }: { category: DayCategory; pending: boolean; planned: boolean }) {
-  const tone = CAT_TONE[category];
+function DayPill({ category, pending, planned, absenceJustified }: { category: DayCategory; pending: boolean; planned: boolean; absenceJustified?: boolean }) {
+  // Absence JUSTIFIÉE (déclarée par la direction) → teinte NEUTRE (zinc, « excusée »)
+  // au lieu du rose « absent » (réservé aux absences NON justifiées / non couvertes).
+  const justAbs = category === "absent" && absenceJustified === true;
+  const tone = justAbs
+    ? { solid: "bg-zinc-400", soft: "bg-zinc-400/15", text: "text-zinc-600 dark:text-zinc-300", border: "border-zinc-400/45" }
+    : CAT_TONE[category];
+  const fullLabel = justAbs ? "Absence justifiée" : DAY_CATEGORY_LABEL[category];
+  const shortLabel = justAbs ? "Abs. ✓" : CAT_SHORT[category];
   const dashed = pending || planned;
   // PRÉSENCE (état normal, tous les jours ouvrés) : un CARRÉ ARRONDI au cadre
   // vert épais, centre vide (noir en sombre / blanc en clair). Repère discret et
@@ -1085,11 +1155,11 @@ function DayPill({ category, pending, planned }: { category: DayCategory; pendin
     : `${tone.solid} font-bold text-zinc-950`;
   return (
     <span
-      title={DAY_CATEGORY_LABEL[category]}
+      title={fullLabel}
       className={`relative z-10 block w-full max-w-[76px] md:max-w-none truncate rounded-md px-1 py-[3px] text-center text-[10px] md:text-[11px] leading-tight tracking-tight transition-colors ${cls}`}
     >
-      <span className="md:hidden">{CAT_SHORT[category]}</span>
-      <span className="hidden md:inline">{DAY_CATEGORY_LABEL[category]}{planned && !pending ? " ·" : ""}</span>
+      <span className="md:hidden">{shortLabel}</span>
+      <span className="hidden md:inline">{fullLabel}{planned && !pending ? " ·" : ""}</span>
     </span>
   );
 }

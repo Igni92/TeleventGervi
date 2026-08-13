@@ -14,11 +14,11 @@
  * L'app RAPPELLE les éléments manquants avant transmission ; le récapitulatif
  * part par email au cabinet comptable en un clic.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft, ChevronRight, ChevronDown, RotateCcw, Loader2, Save, Send, Plus, Trash2,
   Wallet, AlertTriangle, Car, Gift, ReceiptText, CheckCircle2, FileSpreadsheet, Pencil,
-  Coins, CalendarCheck, Scale, ListChecks,
+  Coins, CalendarCheck, Scale, ListChecks, FileDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { SurfaceCard } from "@/components/ui/surface-card";
@@ -31,6 +31,10 @@ import {
   type SalaryProfile, type VehiculeAN, type VehiculeEnergie,
 } from "@/lib/salaires";
 import { ComptaStatement } from "./ComptaStatement";
+import {
+  printEtatCommissions, printDetailCommissions,
+  type CommissionPdfCommercial, type CommissionDetail as PdfCommissionDetail,
+} from "@/lib/commissionsPdf";
 
 interface Row {
   email: string;
@@ -43,9 +47,12 @@ interface Row {
   missing: string[];
   /** Récap heures supp par semaine (où part chaque heure : payé/récup/attente). */
   suppRecap?: SuppWeekRecap[];
-  /** Compteur récup (CET) — vue patron : disponible à payer + paiements passés. */
+  /** Compteur récup (CET) — vue patron : disponible à payer + paiements passés.
+   *  brut25Min/brut50Min = détail BRUT par tranche des heures mises en récup
+   *  (informatif : brut25×1,25 + brut50×1,5 = équivalent récup majoré). */
   cet?: {
     netMin: number; paidOutMin: number;
+    brut25Min?: number; brut50Min?: number;
     payouts: { id: string; majMin: number; monthBulletin: string; note: string; createdAt: string; createdBy: string }[];
   };
   /** Solde de tout compte (si départ) : CP restants + toutes les heures supp
@@ -59,14 +66,14 @@ interface CommissionMonthLine { month: string; base: number; prime: number; invo
 interface CommissionDetail {
   email: string; slp: string; rate: number; base: number; prime: number;
   fromMonth: string; toMonth: string; monthsCount: number; months: CommissionMonthLine[];
+  /** Dû cumulé (Σ primes depuis le début) / versé (Σ versements €) / écart (dû − payé, ±). */
+  due: number; paid: number; ecart: number;
 }
 interface ApiData {
   ok: boolean; month: string; rows: Row[];
   sent: { sentAt: string; sentBy: string; to: string[] } | null;
   canEdit: boolean;
-  /** Dernier mois de commissions déjà réglé (YYYY-MM), null = rien réglé. */
-  commissionsPaidThrough?: string | null;
-  /** Détail par commercial de ce qui est réglé sur cette paie. */
+  /** Solde de commission par commercial : dû / payé / écart. */
   commissionsDetail?: CommissionDetail[];
 }
 
@@ -304,9 +311,9 @@ export function SalairesPanel({ canEdit }: { canEdit: boolean }) {
           </p>
         )}
 
-        {/* COMMISSIONS — payées au fil des mois : total du mois + curseur de
-            rattrapage (dernier mois déjà réglé). */}
-        {data && <CommissionsCursor data={data} month={month} canEdit={canEdit} onSaved={load} />}
+        {/* COMMISSIONS — suivi EN MONTANTS : dû cumulé / versé / écart (±) par
+            commercial. Plus de curseur « réglé jusqu'à ». */}
+        {data && <CommissionsSummary data={data} />}
       </SurfaceCard>
 
       {rows.map((r) => (
@@ -319,115 +326,118 @@ export function SalairesPanel({ canEdit }: { canEdit: boolean }) {
   );
 }
 
-/* ─────────── Commissions : total du mois + curseur « réglées jusqu'à » ────── */
+/* Commissions : suivi en montants (du cumule / verse / ecart), par commercial. */
 
-function CommissionsCursor({ data, month, canEdit, onSaved }: {
-  data: ApiData; month: string; canEdit: boolean; onSaved: () => Promise<void>;
-}) {
-  const [val, setVal] = useState(data.commissionsPaidThrough ?? "");
-  const [saving, setSaving] = useState(false);
-  const [showDetail, setShowDetail] = useState(false);
-  useEffect(() => { setVal(data.commissionsPaidThrough ?? ""); }, [data.commissionsPaidThrough]);
+function CommissionsSummary({ data }: { data: ApiData }) {
+  const [openDetail, setOpenDetail] = useState<string | null>(null);
+  const detail = (data.commissionsDetail ?? []).filter((d) => d.due > 0 || d.paid > 0);
+  if (detail.length === 0) return null;
+  const totDue = Math.round(detail.reduce((s, d) => s + d.due, 0) * 100) / 100;
+  const totPaid = Math.round(detail.reduce((s, d) => s + d.paid, 0) * 100) / 100;
+  const totEcart = Math.round((totDue - totPaid) * 100) / 100;
 
-  const detail = data.commissionsDetail ?? [];
-  const total = detail.reduce((s, d) => s + d.prime, 0);
-  const rattrapage = detail.some((d) => d.monthsCount > 1);
-
-  const save = async (next: string | null) => {
-    setSaving(true);
+  // PDF de vérification PAR PERSONNE — données lourdes chargées à la demande
+  // depuis /api/effectif/commissions (mêmes chiffres que la page Effectif).
+  const [busy, setBusy] = useState<string | null>(null);
+  const commsRef = useRef<Map<string, CommissionPdfCommercial> | null>(null);
+  const loadComms = async (): Promise<Map<string, CommissionPdfCommercial>> => {
+    if (commsRef.current) return commsRef.current;
+    const r = await fetch("/api/effectif/commissions", { cache: "no-store" });
+    const j = await r.json().catch(() => null);
+    const list = (j?.commerciaux ?? []) as (CommissionPdfCommercial & { slp: string })[];
+    const map = new Map(list.map((c) => [c.slp, c]));
+    commsRef.current = map;
+    return map;
+  };
+  const printMois = async (slp: string) => {
+    setBusy(`mois:${slp}`);
     try {
-      const r = await fetch("/api/salaires", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "setCommissionsPaidThrough", paidThrough: next }),
-      });
+      const c = (await loadComms()).get(slp);
+      if (!c) { toast.info("Aucune donnée de commission pour cette personne."); return; }
+      if (!printEtatCommissions([c], new Date())) toast.error("PDF bloqué — autorisez les pop-ups.");
+    } catch { toast.error("Génération du PDF impossible."); }
+    finally { setBusy(null); }
+  };
+  const printFactures = async (slp: string) => {
+    setBusy(`fact:${slp}`);
+    try {
+      const to = new Date().toISOString().slice(0, 10);
+      const r = await fetch(`/api/effectif/commissions/detail?slp=${encodeURIComponent(slp)}&from=2025-11-01&to=${to}`, { cache: "no-store" });
       const j = await r.json().catch(() => null);
-      if (!r.ok || !j?.ok) { toast.error(j?.error || "Enregistrement impossible"); return; }
-      toast.success(next ? `Commissions réglées jusqu'à ${monthLabel(next)}.` : "Curseur remis à zéro — tout l'arriéré sera reversé.");
-      await onSaved();
-    } catch { toast.error("Réseau ?"); }
-    finally { setSaving(false); }
+      if (!j || !Array.isArray(j.lines)) { toast.error("Détail indisponible."); return; }
+      if (!printDetailCommissions(j as PdfCommissionDetail)) toast.error("PDF bloqué — autorisez les pop-ups.");
+    } catch { toast.error("Génération du PDF impossible."); }
+    finally { setBusy(null); }
   };
 
   return (
     <div className="mt-3 rounded-lg border border-brand-500/25 bg-brand-500/[0.05] px-3 py-2.5">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-foreground">
-          <Coins className="h-4 w-4 text-brand-500" /> Commissions de {monthLabel(month)}
+          <Coins className="h-4 w-4 text-brand-500" /> Commissions — du / paye / ecart
         </span>
-        <span className="tnum text-[13px] font-bold text-foreground">{eur(total)}</span>
-        {rattrapage && (
-          <span className="text-[10.5px] font-semibold text-brand-600 dark:text-brand-300 uppercase tracking-wide">
-            rattrapage arriéré
+        <span className="ml-auto inline-flex items-baseline gap-2 tnum text-[12px]">
+          <span className="text-muted-foreground">Du {eur(totDue)}</span>
+          <span className="text-muted-foreground">Paye {eur(totPaid)}</span>
+          <span className={`font-bold ${totEcart < 0 ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>
+            Ecart {eur(totEcart)}
           </span>
-        )}
-        {detail.length > 0 && (
-          <button type="button" onClick={() => setShowDetail((v) => !v)}
-            className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-600 dark:text-brand-300 hover:underline">
-            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showDetail ? "rotate-180" : ""}`} />
-            {showDetail ? "Masquer le détail" : "Voir le détail de ce qui est payé"}
-          </button>
-        )}
-        <span className="basis-full text-[11px] text-muted-foreground">
-          Ajoutées automatiquement à chaque commercial (5 % de la marge nette), versées mois par mois.{" "}
-          {data.commissionsPaidThrough
-            ? <>Déjà réglées jusqu&apos;à <b>{monthLabel(data.commissionsPaidThrough)}</b>.</>
-            : <>Rien n&apos;a encore été réglé — cette paie <b>rattrape tout l&apos;arriéré</b>.</>}
         </span>
       </div>
 
-      {/* DÉTAIL de ce qui est payé sur cette paie — par commercial, mois par mois. */}
-      {showDetail && detail.length > 0 && (
-        <div className="mt-2 space-y-2 border-t border-brand-500/20 pt-2">
-          {detail.map((d) => (
+      <div className="mt-2 space-y-1.5 border-t border-brand-500/20 pt-2">
+        {detail.map((d) => {
+          const over = d.ecart < 0;
+          return (
             <div key={d.email}>
               <div className="flex items-baseline justify-between gap-2">
-                <span className="text-[12px] font-semibold text-foreground">
-                  {d.email.split("@")[0]}
-                  {d.monthsCount > 1 && (
-                    <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
-                      rattrapage {monthFr(d.fromMonth)} → {monthFr(d.toMonth)}
-                    </span>
-                  )}
+                <span className="text-[12px] font-semibold text-foreground">{d.email.split("@")[0]}</span>
+                <span className={`tnum text-[12.5px] font-bold ${over ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>
+                  {over ? "Trop-paye " : "Reste du "}{eur(Math.abs(d.ecart))}
                 </span>
-                <span className="tnum text-[12.5px] font-bold text-foreground">{eur(d.prime)}</span>
               </div>
-              <div className="mt-0.5 flex flex-wrap gap-1">
-                {d.months.map((m) => (
-                  <span key={m.month}
-                    title={`${monthFrLong(m.month)} — base ${m.base.toFixed(2)} € · ${m.invoices} fact.${m.avoirs > 0 ? ` · avoirs −${m.avoirs.toFixed(2)} €` : ""}`}
-                    className="inline-flex items-baseline gap-1 rounded border border-border bg-background/60 px-1.5 py-0.5 text-[10.5px] tnum">
-                    <span className="text-muted-foreground">{monthFr(m.month)}</span>
-                    <b className="text-foreground">{eur(m.prime)}</b>
-                  </span>
-                ))}
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground tnum">
+                <span>Du {eur(d.due)}</span>
+                <span aria-hidden>&middot;</span>
+                <span>Paye {eur(d.paid)}</span>
+                {d.months.length > 0 && (
+                  <button type="button" onClick={() => setOpenDetail((v) => (v === d.email ? null : d.email))}
+                    className="inline-flex items-center gap-1 font-semibold text-brand-600 dark:text-brand-300 hover:underline">
+                    <ChevronDown className={`h-3.5 w-3.5 transition-transform ${openDetail === d.email ? "rotate-180" : ""}`} />
+                    detail par mois
+                  </button>
+                )}
+                <span aria-hidden>&middot;</span>
+                <button type="button" onClick={() => printMois(d.slp)} disabled={busy != null}
+                  className="inline-flex items-center gap-1 font-semibold text-brand-600 dark:text-brand-300 hover:underline disabled:opacity-50">
+                  {busy === `mois:${d.slp}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileDown className="h-3 w-3" />} PDF mois
+                </button>
+                <button type="button" onClick={() => printFactures(d.slp)} disabled={busy != null}
+                  className="inline-flex items-center gap-1 font-semibold text-brand-600 dark:text-brand-300 hover:underline disabled:opacity-50">
+                  {busy === `fact:${d.slp}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileDown className="h-3 w-3" />} PDF factures
+                </button>
               </div>
+              {openDetail === d.email && d.months.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {d.months.map((m) => (
+                    <span key={m.month}
+                      title={`${monthFrLong(m.month)} base ${m.base.toFixed(2)} EUR - ${m.invoices} fact.`}
+                      className="inline-flex items-baseline gap-1 rounded border border-border bg-background/60 px-1.5 py-0.5 text-[10.5px] tnum">
+                      <span className="text-muted-foreground">{monthFr(m.month)}</span>
+                      <b className="text-foreground">{eur(m.prime)}</b>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
-          ))}
-          <p className="text-[10px] text-muted-foreground">Détail facture par facture dans Pilotage › Commerciaux.</p>
-        </div>
-      )}
-      {canEdit && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <label className="text-[10.5px] uppercase tracking-wide font-semibold text-muted-foreground">Réglées jusqu&apos;à</label>
-          <input type="month" value={val} max={month} disabled={saving}
-            onChange={(e) => setVal(e.target.value)}
-            className="h-8 rounded-md border border-border bg-background px-2 text-[12.5px] tnum" />
-          <button type="button" disabled={saving || val === (data.commissionsPaidThrough ?? "")}
-            onClick={() => save(val || null)}
-            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md bg-brand-600 hover:bg-brand-700 text-white text-[12px] font-semibold disabled:opacity-40">
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Enregistrer
-          </button>
-          {data.commissionsPaidThrough && (
-            <button type="button" disabled={saving} onClick={() => { setVal(""); save(null); }}
-              className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border text-[12px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60">
-              Tout reverser
-            </button>
-          )}
-          <span className="basis-full text-[10px] text-muted-foreground">
-            Avancé automatiquement à l&apos;envoi du récap. Ajustez-le si des commissions ont déjà été payées hors application.
-          </span>
-        </div>
-      )}
+          );
+        })}
+      </div>
+
+      <p className="mt-1.5 text-[10px] text-muted-foreground">
+        Du = commissions calculees depuis le 1er nov. 2025. Paye = versements saisis dans Pilotage &rsaquo; Commerciaux.
+        Ecart &plusmn; = reste a regler. La ligne du bulletin porte l&apos;ecart (jamais negatif).
+      </p>
     </div>
   );
 }
@@ -614,6 +624,18 @@ function RecupCetPanel({ row, month, canEdit, onSaved }: { row: Row; month: stri
         {cet.paidOutMin > 0 && <span className="text-[11px] text-muted-foreground">dont {fmtHM(cet.paidOutMin)} déjà payées</span>}
       </div>
 
+      {/* DÉTAIL PAR TAUX (brut) du CET — le stock acquis au mois fini, ventilé
+          25 %/50 % en heures BRUTES, + son équivalent récup majoré. Informatif. */}
+      {((cet.brut25Min ?? 0) > 0 || (cet.brut50Min ?? 0) > 0) && (
+        <p className="mt-1.5 text-[11.5px] text-muted-foreground tnum">
+          Détail brut :{" "}
+          {(cet.brut25Min ?? 0) > 0 && <span className="font-semibold text-foreground">{fmtHM(cet.brut25Min ?? 0)} à 25 %</span>}
+          {(cet.brut25Min ?? 0) > 0 && (cet.brut50Min ?? 0) > 0 && " · "}
+          {(cet.brut50Min ?? 0) > 0 && <span className="font-semibold text-foreground">{fmtHM(cet.brut50Min ?? 0)} à 50 %</span>}
+          {" "}→ {fmtHM(Math.round((cet.brut25Min ?? 0) * 1.25 + (cet.brut50Min ?? 0) * 1.5))} de récup majorée
+        </p>
+      )}
+
       {canEdit && cet.netMin > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <span className="text-[11.5px] text-muted-foreground">Payer depuis le compteur (à la demande du salarié) :</span>
@@ -783,7 +805,7 @@ function EmployeeCard({ row, month, canEdit, onSaved }: {
                   <span className="flex-1 min-w-[140px] text-[12.5px] font-medium text-foreground">{p.motif}</span>
                   <span className="tnum text-[13px] font-bold text-foreground">{eur(p.montant)}</span>
                   <span className="basis-full sm:basis-auto text-[10.5px] text-muted-foreground">
-                    auto · recalculée au fil du mois{p.note ? ` — ${p.note}` : ""}
+                    auto · reste dû à ce jour{p.note ? ` — ${p.note}` : ""}
                   </span>
                 </div>
               ) : (

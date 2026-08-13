@@ -6,6 +6,10 @@ import { sap } from "@/lib/sapb1";
 import { netEncours } from "@/lib/encours-net";
 import { attributeAvoirs, type CreditNoteRef } from "@/lib/encours-avoirs";
 import { cached, invalidate } from "@/lib/ttlCache";
+// Audit 2026-08-13 (#21-encours) : bornes de JOUR Europe/Paris pour le calcul du
+// retard (le serveur tourne en UTC ; sans ça, les tranches d'ancienneté peuvent
+// basculer selon l'heure d'exécution). Même logique que overdueDaysFor (relance).
+import { parisStartOfDay } from "@/lib/paris-time";
 
 /**
  * GET /api/encours — état des encours clients (factures dues), AU NET.
@@ -18,15 +22,17 @@ import { cached, invalidate } from "@/lib/ttlCache";
  * grand livre), alloué aux tranches d'ancienneté les plus anciennes d'abord
  * (cf. lib/encours-net). On ne compte donc jamais du déjà payé.
  *
- * ⚠️ Conditions de paiement = 30 jours → une facture n'est « en retard » que
- * **passé 30 jours** au-delà de l'échéance. Paliers : >30j / >45j / >90j.
+ * ⚠️ Une facture est « en retard » DÈS que l'échéance (DocDueDate) est dépassée :
+ * l'échéance SAP inclut déjà le délai de paiement (30 j), on n'ajoute donc AUCUNE
+ * grâce supplémentaire (sinon double compte). Paliers d'ancienneté de retard
+ * (jours écoulés depuis l'échéance) : ≤ 45 j / 45-90 j / > 90 j.
  */
 export const dynamic = "force-dynamic";
 // Agrégation SAP lourde (toutes les factures ouvertes + soldes clients, paginés).
 // Évite un timeout au seuil court par défaut des fonctions serverless.
 export const maxDuration = 60;
 
-const GRACE_DAYS = 30; // tolérance avant de considérer "en retard"
+const GRACE_DAYS = 0; // en retard dès le dépassement de l'échéance (DocDueDate)
 const ENCOURS_TTL_MS = 60_000; // cache court par périmètre (reloads quasi instantanés ; ?refresh=1 force)
 
 interface OpenInvoice {
@@ -76,6 +82,7 @@ interface ClientEncours {
   cardCode: string;
   cardName: string;
   clientId: string | null;
+  emailCompta: string | null; // destinataire(s) des relances (joint par « , ») — best-effort
   encours: number;     // NET dû (= brut − encaissé − avoirs attribués) — INCHANGÉ
   brut: number;        // somme des factures ouvertes (avant déduction)
   // Déduction globale (brut − net) scindée en DEUX postes distincts :
@@ -85,6 +92,11 @@ interface ClientEncours {
   //     → le net total ne change pas.
   encaisse: number;        // paiements + avoirs NON affectés (déduit en ligne)
   avoirsAttribues: number; // avoirs rattachés à une facture (déduit par facture)
+  // Avoirs EN FAVEUR du client non imputés à une facture ouverte (ligne bleue) :
+  // à déduire d'une facture ultérieure. Peuplé seulement quand les avoirs sont
+  // chargés (bulk = ENCOURS_AVOIRS_BULK, ou via l'endpoint lazy /avoirs).
+  avoirsNonImputes: AttributedAvoir[];
+  avoirsNonImputesTotal: number;
   countOpen: number;   // nb factures avec solde dû
   // Paliers de retard EXCLUSIFS, au BRUT : on garde le solde brut des factures
   // pour le classement par ancienneté (cohérent avec l'historique). Les avoirs
@@ -122,7 +134,7 @@ async function fetchOpenInvoices(): Promise<OpenInvoice[]> {
  * TOUS les tiers SAP. Paquets parallèles ; best-effort (un paquet KO n'empêche
  * pas les autres → ces clients retombent simplement sur le brut).
  */
-async function fetchBalances(cardCodes: string[]): Promise<Map<string, number>> {
+async function fetchBalances(cardCodes: string[]): Promise<{ map: Map<string, number>; failedChunks: number }> {
   const map = new Map<string, number>();
   const CHUNK = 40;
   const chunks: string[][] = [];
@@ -135,18 +147,25 @@ async function fetchBalances(cardCodes: string[]): Promise<Map<string, number>> 
           `BusinessPartners?$select=CardCode,CurrentAccountBalance&$filter=${filter}`,
           { pageSize: 100, maxPages: 2, env: "prod" },
         )
+        // Audit 2026-08-13 (#14) : on ne renvoie plus [] « silencieux » sur un
+        // paquet KO. Un paquet en échec laisse ses clients sans solde (repli sur
+        // le brut) ; sans signalement, la réponse affichait ok:true en masquant
+        // que du déjà-payé n'a pas été déduit. On renvoie `null` pour COMPTER le
+        // paquet échoué et propager un état partiel à l'appelant.
         .catch((e) => {
           console.error("[encours] lecture d'un paquet de soldes échouée (repli brut partiel):", e);
-          return [] as BpBalance[];
+          return null;
         });
     }),
   );
+  let failedChunks = 0;
   for (const arr of results) {
+    if (arr === null) { failedChunks++; continue; }
     for (const b of arr) {
       if (typeof b.CurrentAccountBalance === "number") map.set(b.CardCode, b.CurrentAccountBalance);
     }
   }
-  return map;
+  return { map, failedChunks };
 }
 
 /**
@@ -162,9 +181,9 @@ async function fetchBalances(cardCodes: string[]): Promise<Map<string, number>> 
  * garde-fou anti double-comptage de lib/encours-avoirs plafonne l'attribution
  * par l'« encaissé » réel, donc lire tous les avoirs récents est sans risque.
  */
-async function fetchCreditNotes(cardCodes: string[]): Promise<Map<string, CreditNoteRef[]>> {
+async function fetchCreditNotes(cardCodes: string[]): Promise<{ byClient: Map<string, CreditNoteRef[]>; failedChunks: number }> {
   const byClient = new Map<string, CreditNoteRef[]>();
-  if (cardCodes.length === 0) return byClient;
+  if (cardCodes.length === 0) return { byClient, failedChunks: 0 };
   const CHUNK = 30; // plus petit : on tire les DocumentLines (payload plus lourd)
   const chunks: string[][] = [];
   for (let i = 0; i < cardCodes.length; i += CHUNK) chunks.push(cardCodes.slice(i, i + CHUNK));
@@ -179,13 +198,18 @@ async function fetchCreditNotes(cardCodes: string[]): Promise<Map<string, Credit
           `CreditNotes?$select=DocEntry,DocNum,DocDate,CardCode,DocTotal,DocumentLines&$filter=${filter}`,
           { pageSize: 100, maxPages: 5, env: "prod" },
         )
+        // Audit 2026-08-13 (#14) : idem soldes — un paquet d'avoirs KO n'est plus
+        // avalé en silence. On renvoie `null` pour le compter (les clients du
+        // paquet retombent sur le comportement sans avoir attribué).
         .catch((e) => {
           console.error("[encours] lecture d'un paquet d'avoirs échouée (avoirs ignorés):", e);
-          return [] as CreditNoteDoc[];
+          return null;
         });
     }),
   );
+  let failedChunks = 0;
   for (const arr of results) {
+    if (arr === null) { failedChunks++; continue; }
     for (const d of arr) {
       // 1ère ligne pointant une facture (BaseType=13) → facture d'origine.
       let baseInvoiceEntry: number | null = null;
@@ -203,7 +227,7 @@ async function fetchCreditNotes(cardCodes: string[]): Promise<Map<string, Credit
       byClient.set(d.CardCode, list);
     }
   }
-  return byClient;
+  return { byClient, failedChunks };
 }
 
 export async function GET(req: Request) {
@@ -252,7 +276,7 @@ async function computeEncours(allowed: Set<string> | null) {
   }
   // Soldes compte + avoirs (avec lien facture d'origine) pour les mêmes clients,
   // en parallèle.
-  const [cabByCode, creditNotesByCode] = await Promise.all([
+  const [balancesResult, creditNotesResult] = await Promise.all([
     fetchBalances([...neededCodes]),
     // ⚠️ PERF : la lecture EN MASSE des avoirs (CreditNotes + DocumentLines pour
     // tous les clients) faisait dépasser le timeout Vercel (504 → écran vide).
@@ -260,23 +284,35 @@ async function computeEncours(allowed: Set<string> | null) {
     // du détail (chantier « avoirs lazy »). Opt-in explicite par flag d'env.
     process.env.ENCOURS_AVOIRS_BULK === "1"
       ? fetchCreditNotes([...neededCodes])
-      : Promise.resolve(new Map<string, CreditNoteRef[]>()),
+      : Promise.resolve({ byClient: new Map<string, CreditNoteRef[]>(), failedChunks: 0 }),
   ]);
+  const cabByCode = balancesResult.map;
+  const creditNotesByCode = creditNotesResult.byClient;
+  // Audit 2026-08-13 (#14) : total des paquets SAP (soldes + avoirs) tombés en
+  // échec → propagé en `partial`/`failedChunks` dans la réponse (l'UI n'est pas
+  // dans mon périmètre : elle devra afficher un bandeau « données partielles »).
+  const failedChunks = balancesResult.failedChunks + creditNotesResult.failedChunks;
 
-  const now = Date.now();
+  // Audit 2026-08-13 (#21-encours) : « aujourd'hui » = début de journée Paris (et
+  // non l'instant UTC), pour aligner le calcul du retard sur overdueDaysFor.
+  const nowParis = parisStartOfDay().getTime();
   const byClient = new Map<string, ClientEncours>();
 
   for (const inv of invs) {
     if (allowed && !allowed.has(inv.CardCode)) continue; // hors périmètre commercial
     const bal = (inv.DocTotal ?? 0) - (inv.PaidToDate ?? 0);
     if (bal <= 0.01) continue; // soldée (arrondi)
-    const due = inv.DocDueDate ? new Date(inv.DocDueDate).getTime() : null;
-    const overdueDays = due ? Math.max(0, Math.floor((now - due) / 86_400_000)) : 0;
+    // Audit 2026-08-13 (#21-encours) : bornes de JOUR Paris des deux côtés (jour
+    // courant ET échéance), au lieu d'un delta UTC brut qui décalait le nombre de
+    // jours — et donc la tranche d'ancienneté — selon l'heure d'exécution.
+    const due = inv.DocDueDate ? parisStartOfDay(new Date(inv.DocDueDate)).getTime() : null;
+    const overdueDays = due !== null ? Math.max(0, Math.floor((nowParis - due) / 86_400_000)) : 0;
     const late = overdueDays > GRACE_DAYS; // en retard seulement passé 30 j
 
     const e = byClient.get(inv.CardCode) ?? {
-      cardCode: inv.CardCode, cardName: inv.CardName ?? inv.CardCode, clientId: null,
-      encours: 0, brut: 0, encaisse: 0, avoirsAttribues: 0, countOpen: 0,
+      cardCode: inv.CardCode, cardName: inv.CardName ?? inv.CardCode, clientId: null, emailCompta: null,
+      encours: 0, brut: 0, encaisse: 0, avoirsAttribues: 0,
+      avoirsNonImputes: [] as AttributedAvoir[], avoirsNonImputesTotal: 0, countOpen: 0,
       b3045: 0, b4590: 0, b90: 0,
       countLate: 0, maxOverdueDays: 0, invoices: [] as InvoiceLine[],
     };
@@ -285,7 +321,7 @@ async function computeEncours(allowed: Set<string> | null) {
     // Tranches EXCLUSIVES : la facture ne tombe que dans une seule.
     if (overdueDays > 90) e.b90 += bal;
     else if (overdueDays > 45) e.b4590 += bal;
-    else if (overdueDays > 30) e.b3045 += bal;
+    else if (overdueDays > GRACE_DAYS) e.b3045 += bal;   // 0 < retard ≤ 45 j
     if (late) { e.countLate++; e.maxOverdueDays = Math.max(e.maxOverdueDays, overdueDays); }
     e.invoices.push({
       docEntry: inv.DocEntry,
@@ -325,7 +361,13 @@ async function computeEncours(allowed: Set<string> | null) {
       encaisse,
     );
     e.avoirsAttribues = attr.attributedTotal;
-    e.encaisse = Math.round((encaisse - attr.attributedTotal) * 100) / 100;
+    // Avoirs en faveur (non imputés, bleus) : sortis eux aussi du sac « encaisse »
+    // → l'« encaisse » résiduel affiché ne reste QUE les règlements.
+    e.avoirsNonImputes = attr.unattributed.map((a) => ({
+      docEntry: a.docEntry, docNum: a.docNum, docDate: a.docDate, amount: Math.round(a.amount * 100) / 100,
+    }));
+    e.avoirsNonImputesTotal = Math.round(attr.unattributed.reduce((s, a) => s + a.amount, 0) * 100) / 100;
+    e.encaisse = Math.round((encaisse - attr.attributedTotal - e.avoirsNonImputesTotal) * 100) / 100;
     for (const inv of e.invoices) {
       const list = attr.byInvoice.get(inv.docEntry);
       if (!list || list.length === 0) continue;
@@ -344,6 +386,7 @@ async function computeEncours(allowed: Set<string> | null) {
   const totalEncours = aggregated.reduce((s, c) => s + c.encours, 0);
   const totalEncaisse = aggregated.reduce((s, c) => s + c.encaisse, 0);
   const totalAvoirs = aggregated.reduce((s, c) => s + c.avoirsAttribues, 0);
+  const totalAvoirsNonImputes = aggregated.reduce((s, c) => s + c.avoirsNonImputesTotal, 0);
   const tot3045 = aggregated.reduce((s, c) => s + c.b3045, 0);
   const tot4590 = aggregated.reduce((s, c) => s + c.b4590, 0);
   const tot90 = aggregated.reduce((s, c) => s + c.b90, 0);
@@ -351,17 +394,24 @@ async function computeEncours(allowed: Set<string> | null) {
   // Lien fiche : id local par code (quand le client existe en base).
   const codes = aggregated.map((c) => c.cardCode);
   const locals = codes.length
-    ? await prisma.client.findMany({ where: { code: { in: codes } }, select: { id: true, code: true } })
+    ? await prisma.client.findMany({ where: { code: { in: codes } }, select: { id: true, code: true, emailCompta: true } })
     : [];
   const idByCode = new Map(locals.map((l) => [l.code, l.id]));
+  const emailComptaByCode = new Map(locals.map((l) => [l.code, l.emailCompta]));
 
   return {
     ok: true,
     company: sap.getEnvironment().prodCompany,
+    // Audit 2026-08-13 (#14) : état PARTIEL explicite. `partial=true` = au moins un
+    // paquet SAP (soldes compte et/ou avoirs) a échoué → certains clients sont au
+    // brut sans déduction de l'encaissé. La réponse n'est plus « ok » silencieux.
+    partial: failedChunks > 0,
+    failedChunks,
     totals: {
       encours: Math.round(totalEncours),
       encaisse: Math.round(totalEncaisse),
       avoirsAttribues: Math.round(totalAvoirs),
+      avoirsNonImputes: Math.round(totalAvoirsNonImputes),
       overdueTotal: Math.round(tot3045 + tot4590 + tot90),
       b3045: Math.round(tot3045),
       b4590: Math.round(tot4590),
@@ -373,11 +423,14 @@ async function computeEncours(allowed: Set<string> | null) {
       cardCode: c.cardCode,
       cardName: c.cardName,
       clientId: idByCode.get(c.cardCode) ?? null,
+      emailCompta: emailComptaByCode.get(c.cardCode) ?? null,
       // Précision complète (cents). Encours = NET ; brut, encaissé et avoirs en plus.
       encours: Math.round(c.encours * 100) / 100,
       brut: Math.round(c.brut * 100) / 100,
       encaisse: Math.round(c.encaisse * 100) / 100,
       avoirsAttribues: Math.round(c.avoirsAttribues * 100) / 100,
+      avoirsNonImputes: c.avoirsNonImputes,
+      avoirsNonImputesTotal: Math.round(c.avoirsNonImputesTotal * 100) / 100,
       countOpen: c.countOpen,
       b3045: Math.round(c.b3045 * 100) / 100,
       b4590: Math.round(c.b4590 * 100) / 100,

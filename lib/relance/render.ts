@@ -41,6 +41,8 @@ Cordialement,
 
 Sauf règlement croisé avec le présent message, nous constatons que la facture {{NumFacture}} du {{DateFacture}}, d'un montant de {{MontantRestantDu}}, demeure impayée à ce jour, son échéance étant intervenue le {{DateEcheance}} (soit {{JoursRetard}} jours de retard).
 
+Total dû à ce jour : {{TotalDu}}
+
 Nous vous remercions de bien vouloir procéder à son règlement sous {{DelaiReponse}}. Si un différend motive ce retard, nous vous invitons à nous contacter sans délai afin d'y remédier ensemble.
 
 Cordialement,
@@ -56,6 +58,10 @@ Malgré notre précédent rappel, nous n'avons pas enregistré le règlement de 
 ${TABLE_TOKEN}
 
 soit un total de {{MontantRestantDu}} restant dû.
+
+Total dû à ce jour : {{TotalDu}}
+
+{{ParagrapheAvoirsFaveur}}
 
 Nous vous remercions de bien vouloir régulariser cette situation sous {{DelaiReponse}}. À défaut, et conformément à nos conditions générales de vente, des pénalités de retard ainsi qu'une indemnité forfaitaire de recouvrement de 40 € par facture deviendront exigibles de plein droit.
 
@@ -79,7 +85,9 @@ ${TABLE_TOKEN}
 Principal restant dû : {{MontantRestantDu}}
 Pénalités de retard ({{TauxPenalites}}) : {{MontantPenalites}}
 Indemnité forfaitaire de recouvrement : {{IndemniteForfaitaire}}
-Total dû : {{TotalDu}}
+Total dû à ce jour : {{TotalDu}}
+
+{{ParagrapheAvoirsFaveur}}
 
 Nous vous demandons de bien vouloir régler ce montant sous {{DelaiReponse}}. À défaut de règlement dans ce délai, nous serions contraints de vous adresser une mise en demeure par lettre recommandée avec accusé de réception, préalable à toute action en recouvrement.
 
@@ -104,7 +112,9 @@ ${TABLE_TOKEN}
 Principal restant dû : {{MontantRestantDu}}
 Pénalités de retard ({{TauxPenalites}}) : {{MontantPenalites}}
 Indemnité forfaitaire de recouvrement : {{IndemniteForfaitaire}}
-Total dû : {{TotalDu}}
+Total dû à ce jour : {{TotalDu}}
+
+{{ParagrapheAvoirsFaveur}}
 
 Ces sommes sont exigibles de plein droit. Nous vous mettons en demeure de nous en régler le montant intégral dans un délai de {{DelaiReponse}} à compter de la réception de la présente.
 
@@ -125,6 +135,8 @@ Dans cette attente, je vous prie d'agréer, {{Civilite}}, l'expression de mes sa
 {{RappelMiseEnDemeure}} votre compte présente à ce jour un solde exigible de {{TotalDu}}, détaillé comme suit :
 
 ${TABLE_TOKEN}
+
+{{ParagrapheAvoirsFaveur}}
 
 Avant d'engager la procédure contentieuse, et dans un esprit de règlement amiable, nous vous proposons le protocole d'accord ci-joint, prévoyant un règlement échelonné assorti d'une clause résolutoire.
 
@@ -154,23 +166,34 @@ function escapeHtml(s: string): string {
 }
 
 function tableHtml(ctx: RelanceContext): string {
-  const rows = invoiceRows(ctx.invoices)
-    .map(
-      (r) => `      <tr>
+  const withAvoirs = ctx.avoirsByInvoice.size > 0;
+  const rows = invoiceRows(ctx.invoices, ctx.avoirsByInvoice)
+    .map((r) => {
+      const base = `      <tr>
         <td style="padding:6px 10px;border:1px solid #d8dee9;font-family:monospace;">${escapeHtml(r.num)}</td>
         <td style="padding:6px 10px;border:1px solid #d8dee9;">${escapeHtml(r.date)}</td>
         <td style="padding:6px 10px;border:1px solid #d8dee9;">${escapeHtml(r.echeance)}</td>
-        <td style="padding:6px 10px;border:1px solid #d8dee9;text-align:right;white-space:nowrap;">${escapeHtml(r.montant)}</td>
-      </tr>`,
-    )
+        <td style="padding:6px 10px;border:1px solid #d8dee9;text-align:right;white-space:nowrap;">${escapeHtml(r.montant)}</td>`;
+      if (!r.avoir) return `${base}\n      </tr>`;
+      return `${base}
+        <td style="padding:6px 10px;border:1px solid #d8dee9;text-align:right;white-space:nowrap;color:#7c3aed;">${escapeHtml(r.avoir)}</td>
+        <td style="padding:6px 10px;border:1px solid #d8dee9;text-align:right;white-space:nowrap;font-weight:600;">${escapeHtml(r.net ?? "")}</td>
+      </tr>`;
+    })
     .join("\n");
+  const extraHead = withAvoirs
+    ? `
+          <th style="padding:6px 10px;border:1px solid #d8dee9;text-align:right;">Avoir imputé</th>
+          <th style="padding:6px 10px;border:1px solid #d8dee9;text-align:right;">Net dû</th>`
+    : "";
+  const montantHead = withAvoirs ? "Montant (brut)" : "Montant dû";
   return `    <table style="border-collapse:collapse;font-size:13px;margin:4px 0;">
       <thead>
         <tr style="background:#f0f2f6;">
           <th style="padding:6px 10px;border:1px solid #d8dee9;text-align:left;">N° facture</th>
           <th style="padding:6px 10px;border:1px solid #d8dee9;text-align:left;">Date</th>
           <th style="padding:6px 10px;border:1px solid #d8dee9;text-align:left;">Échéance</th>
-          <th style="padding:6px 10px;border:1px solid #d8dee9;text-align:right;">Montant dû</th>
+          <th style="padding:6px 10px;border:1px solid #d8dee9;text-align:right;">${montantHead}</th>${extraHead}
         </tr>
       </thead>
       <tbody>
@@ -180,8 +203,12 @@ ${rows}
 }
 
 function tableText(ctx: RelanceContext): string {
-  return invoiceRows(ctx.invoices)
-    .map((r) => `  - Facture ${r.num} du ${r.date}, échéance ${r.echeance} : ${r.montant}`)
+  return invoiceRows(ctx.invoices, ctx.avoirsByInvoice)
+    .map((r) =>
+      r.avoir && r.avoir !== "—"
+        ? `  - Facture ${r.num} du ${r.date}, échéance ${r.echeance} : ${r.montant} (avoir imputé ${r.avoir} → net ${r.net})`
+        : `  - Facture ${r.num} du ${r.date}, échéance ${r.echeance} : ${r.montant}`,
+    )
     .join("\n");
 }
 

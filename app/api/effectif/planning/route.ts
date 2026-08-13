@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { getAccessScope, isDirection } from "@/lib/permissions";
 import {
   DEFAULT_PROFILE, isMonthId, monthIdOf, typicalDayMinutes, weekDates,
+  computeWeek, attributedMonthWeeks, splitStructuralSupp, structuralSuppMin,
+  effectivePaySuppMin, splitSupp,
   type DayTag, type HoursProfile,
 } from "@/lib/heuresCalc";
 import {
@@ -72,6 +74,37 @@ function buildPerson(
   const cp = computeCpCounter(cpConfigOf(profile), conges, todayISO);
   const capMin = profile.recupCapHours == null ? null : Math.round(profile.recupCapHours * 60);
 
+  // ── HEURES SUPP « À PAYER » (détail 25/50 BRUT) ──────────────────────────
+  // 3ᵉ carré du planning. Calculé UNIQUEMENT sur les semaines TERMINÉES
+  // (dimanche < aujourd'hui — « mois fini », même borne que le crédit récup)
+  // RATTACHÉES au mois affiché (dernier jour travaillé → paie au 10). Pour
+  // chaque semaine : part STRUCTURELLE (contrat « 42 h ») TOUJOURS payée + part
+  // ARBITRABLE que l'employeur a décidé de PAYER (option « paiement »/« mixte » ;
+  // option nulle/« recup » = rien à payer, tout part en récup). Brut par tranche
+  // (25 % = 8 premières heures au-delà du contrat, puis 50 %) — mêmes briques
+  // que buildHeures (app/api/salaires). Additif : n'entre pas dans le solde récup.
+  const typDay = typicalDayMinutes(profile);
+  const structFloor = structuralSuppMin(profile);
+  const suppAPayer = { min25: 0, min50: 0 };
+  for (const w of attributedMonthWeeks(monthId, entries)) {
+    const e = entries.get(w);
+    if (!e) continue;
+    const dates = weekDates(w);
+    if (!(dates.length === 7 && dates[6] < todayISO)) continue;   // semaine terminée seulement
+    const cw = computeWeek(e.days, profile.weeklyHours, typDay);
+    if (cw.sup25Min + cw.sup50Min <= 0) continue;
+    const st = splitStructuralSupp(cw.sup25Min, cw.sup50Min, structFloor);
+    // Structurelle : payée d'office (brut par tranche).
+    suppAPayer.min25 += st.struct25Min;
+    suppAPayer.min50 += st.struct50Min;
+    if (st.arbitrableMin > 0) {
+      const pay = effectivePaySuppMin(e.option, e.paySuppMin, st.arbitrableMin);
+      const s = splitSupp(st.arb25Min, st.arb50Min, pay);
+      suppAPayer.min25 += s.pay25Min;
+      suppAPayer.min50 += s.pay50Min;
+    }
+  }
+
   // Grille du mois : tags jour par jour (issus des saisies) + récup posées.
   const grid = monthGridDays(monthId);
   const gridStart = grid[0]?.date ?? `${monthId}-01`;
@@ -101,10 +134,18 @@ function buildPerson(
       initials: profile.initials ?? null,
     },
     counters: {
-      recup: { creditMin: recup.creditMin, debitMin: recup.debitMin, balanceMin: recup.balanceMin, plannedDates: recup.plannedDates, reservedMin: recup.reservedMin, availableMin: recup.availableMin },
+      recup: {
+        creditMin: recup.creditMin, debitMin: recup.debitMin, balanceMin: recup.balanceMin,
+        plannedDates: recup.plannedDates, reservedMin: recup.reservedMin, availableMin: recup.availableMin,
+        // Heures supp à payer DISPONIBLES par taux (brut, net des récup prises) :
+        // 0 h à 25 % / X h à 50 %… — cf. computeRecupCounter (consommation oldest-first).
+        avail25Min: recup.avail25Min, avail50Min: recup.avail50Min,
+      },
       cp,
       capMin,
       excessMin: recupCapExcessMin(recup.balanceMin, profile.recupCapHours),
+      // Heures supp À PAYER du mois (brut par tranche) — semaines terminées.
+      suppAPayer,
     },
     // Congés visibles : ceux qui touchent la grille du mois + toute demande
     // encore en attente (elle doit rester actionnable où qu'elle tombe).
@@ -121,7 +162,12 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const month = searchParams.get("month") ?? monthIdOf(new Date());
   if (!isMonthId(month)) return NextResponse.json({ error: "Mois invalide" }, { status: 400 });
-  const todayISO = new Date().toISOString().slice(0, 10);
+  // Audit 2026-08-13 (#19) : « aujourd'hui » doit suivre le fuseau Europe/Paris.
+  // Le serveur tourne en UTC — au petit matin (avant 01h/02h Paris) la date UTC
+  // vise encore la VEILLE, si bien que les compteurs récup/CP et le découpage des
+  // semaines « terminées » (dimanche < todayISO) porteraient sur le mauvais jour.
+  // Date murale Paris « YYYY-MM-DD » (en-CA), comme app/api/effectif/heures.
+  const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Paris" });
 
   try {
     if (c.isManager) {

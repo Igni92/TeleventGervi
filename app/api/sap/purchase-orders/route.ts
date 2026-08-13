@@ -153,7 +153,12 @@ export async function GET(req: NextRequest) {
       Cancelled?: string;             // tYES | tNO — commande annulée
       DocumentLines?: ListedLine[];
     };
-    const docs = await sap.get<{ value: SapPoListed[] }>(
+    // Audit 2026-08-13 (#6) : lecture via sap.getAll (et non sap.get). sap.get
+    // n'ajoute PAS Prefer:odata.maxpagesize → le Service Layer plafonne à 20 docs
+    // quel que soit $top, donc l'historique des commandes fournisseurs n'affichait
+    // au plus que 20 CF et le `count` renvoyé était faux. getAll pose Prefer (page
+    // 500) : $top=`last` (≤50) redevient la vraie limite.
+    const docs = await sap.getAll<SapPoListed>(
       `PurchaseOrders?$top=${last}&$orderby=DocEntry desc`
       + `&$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,NumAtCard,DocTotal,VatSum,Comments,DocumentStatus,Cancelled,DocumentLines`,
     );
@@ -161,7 +166,7 @@ export async function GET(req: NextRequest) {
     // Enrichissement local : désignation complète (Fruit/Pays/Marque/Condt) +
     // ratio colis pour reconstituer la quantité « type condt » dans le détail.
     const itemCodes = Array.from(
-      new Set((docs.value || []).flatMap((d) => (d.DocumentLines || []).map((l) => l.ItemCode))),
+      new Set(docs.flatMap((d) => (d.DocumentLines || []).map((l) => l.ItemCode))),
     );
     const products = itemCodes.length
       ? await prisma.product.findMany({
@@ -176,8 +181,8 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       db: process.env.SAP_B1_COMPANY_DB,
-      count: docs.value?.length || 0,
-      docs: (docs.value || []).map((d) => {
+      count: docs.length,
+      docs: docs.map((d) => {
         const lines = d.DocumentLines || [];
         const totalTTC = d.DocTotal ?? 0;
         const totalTVA = d.VatSum ?? 0;

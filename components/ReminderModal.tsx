@@ -21,6 +21,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { rappelSchema, type RappelFormValues } from "@/lib/validations";
 import { formatDateInput, formatRappelDate } from "@/lib/utils";
+import { RappelDateField } from "@/components/RappelDateField";
 import { formatPhoneDisplay } from "@/lib/phone";
 
 interface Rappel {
@@ -77,17 +78,26 @@ export function ReminderModal({
   // Min datetime: now + 5 minutes
   const minDateTime = formatDateInput(new Date(Date.now() + 5 * 60 * 1000));
 
+  // Défaut : rappel du jour → heure actuelle + 1 (pré-rempli via defaultValues,
+  // donc futur et sans validation « doit être dans le futur » à l'ouverture).
+  const defaultRappel = () => {
+    const t = new Date();
+    t.setHours(Math.min(t.getHours() + 1, 23), 0, 0, 0);
+    return formatDateInput(t);
+  };
+
   const {
     register,
     handleSubmit,
     reset,
     watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<RappelFormValues>({
     resolver: zodResolver(rappelSchema),
     defaultValues: {
       clientId: client.id,
-      dateRappel: "",
+      dateRappel: defaultRappel(),
       note: "",
     },
   });
@@ -122,7 +132,7 @@ export function ReminderModal({
       toast.success(
         `Rappel ${formatRappelDate(data.dateRappel)} · ajouté à votre calendrier Microsoft`
       );
-      reset({ clientId: client.id, dateRappel: "", note: "" });
+      reset({ clientId: client.id, dateRappel: defaultRappel(), note: "" });
       await loadRappels();
       onReminderCreated?.();
     } catch (error: unknown) {
@@ -195,18 +205,15 @@ export function ReminderModal({
             <Label htmlFor="dateRappel">
               Date et heure du rappel <span className="text-red-500">*</span>
             </Label>
-            <Input
+            {/* Saisie libre au clavier (« 17 » + Entrée → 17 du mois courant à 5h)
+                ou sélecteur natif via l'icône ; la case affiche « MAR 17.08.26 05:00 ». */}
+            <RappelDateField
               id="dateRappel"
-              type="datetime-local"
+              value={dateRappelValue}
+              onChange={(v) => setValue("dateRappel", v, { shouldValidate: true, shouldDirty: true })}
               min={minDateTime}
-              {...register("dateRappel")}
-              className={errors.dateRappel ? "border-red-500" : ""}
+              invalid={!!errors.dateRappel}
             />
-            {dateRappelValue && !errors.dateRappel && (
-              <p className="text-sm font-semibold tabular-nums text-brand-600 dark:text-brand-400">
-                {formatRappelDate(dateRappelValue)}
-              </p>
-            )}
             {errors.dateRappel && (
               <p className="text-sm text-red-500">{errors.dateRappel.message}</p>
             )}

@@ -254,6 +254,7 @@ export const NON_QUAL_REASONS = [
   "Ne travaille pas le fruit frais",
   "Fermé / n'existe plus",
   "Déjà bien fourni",
+  "Déjà client (autre compte)",
   "Autre",
 ] as const;
 export type NonQualReason = (typeof NON_QUAL_REASONS)[number];

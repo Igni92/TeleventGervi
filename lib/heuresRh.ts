@@ -287,17 +287,54 @@ export async function tagDaysInWeeks(
     if (list) list.push(d); else byWeek.set(w, [d]);
   }
   for (const [weekId, ds] of byWeek) {
-    const cur = await getWeekEntry(email, weekId);
-    const days = cur ? [...cur.days] : Array.from({ length: 7 }, () => ({} as DayHours));
+    const key = `${WEEK_PREFIX}${emailKey(email)}:${weekId}`;
     const weekDays = weekDatesOf(weekId);
-    let changed = false;
-    for (const d of ds) {
-      const idx = weekDays.indexOf(d);
-      if (idx < 0) continue;
-      if (days[idx]?.tag !== tag) { days[idx] = { ...days[idx], tag }; changed = true; }
+    // Audit 2026-08-13 (#22) : tagDaysInWeeks lisait la semaine puis réécrivait
+    // tout le JSON via un upsert AVEUGLE. Or le POST /heures salarié fait AUSSI un
+    // read-modify-write sur la même clé (rhsem:<email>:<week>) → « dernière
+    // écriture gagne » : un tag posé par le boomerang, ou une saisie du salarié,
+    // pouvait être écrasé en silence. On rend CETTE écriture atomique par
+    // compare-and-swap : on relit la valeur BRUTE juste avant d'écrire et on
+    // n'écrit QUE si elle n'a pas bougé (updateMany filtré sur l'ancienne valeur
+    // → une seule ligne touchée) ; sinon on relit la version fraîche et on
+    // ré-applique le tag. AppSetting n'a pas de colonne de version : la valeur
+    // JSON elle-même sert de jeton de concurrence.
+    let settled = false;
+    for (let attempt = 0; attempt < 5 && !settled; attempt++) {
+      const row = await prisma.appSetting.findUnique({ where: { key } });
+      let cur: WeekEntry | null = null;
+      if (row) {
+        try { const v = JSON.parse(row.value) as Partial<WeekEntry>; cur = parseEntry(v, v.updatedAt ?? "", v.updatedBy ?? ""); }
+        catch { cur = null; } // ligne corrompue → on repart d'une semaine vide (comportement historique)
+      }
+      const days = cur ? [...cur.days] : Array.from({ length: 7 }, () => ({} as DayHours));
+      let changed = false;
+      for (const d of ds) {
+        const idx = weekDays.indexOf(d);
+        if (idx < 0) continue;
+        if (days[idx]?.tag !== tag) { days[idx] = { ...days[idx], tag }; changed = true; }
+      }
+      if (!changed) { settled = true; break; } // déjà au bon tag → rien à écrire
+      const entry = parseEntry(
+        { days, option: cur?.option ?? null, paySuppMin: cur?.paySuppMin, recupDates: cur?.recupDates },
+        new Date().toISOString(), by,
+      );
+      const value = JSON.stringify(entry);
+      if (!row) {
+        // Aucune ligne : la création atomique (unicité de `key`) fait office de CAS.
+        try { await prisma.appSetting.create({ data: { key, value } }); settled = true; }
+        catch { /* créée entre-temps par un autre écrivain → on relit et on ré-applique */ }
+        continue;
+      }
+      // Ligne existante : on n'écrase QUE si la valeur brute n'a pas changé depuis la lecture.
+      const res = await prisma.appSetting.updateMany({ where: { key, value: row.value }, data: { value } });
+      if (res.count === 1) settled = true; // CAS réussie ; res.count === 0 → on retente
     }
-    if (!changed) continue;
-    await saveWeekEntry(email, weekId, days, by, { option: cur?.option ?? null, paySuppMin: cur?.paySuppMin, recupDates: cur?.recupDates });
+    if (!settled) {
+      // Contention extrême (5 essais perdus) : on NE clobber PAS en silence, on
+      // rend l'échec VISIBLE plutôt que de risquer une perte de saisie.
+      console.error(`[heuresRh] tagDaysInWeeks: CAS échouée après 5 essais pour ${key} (tag « ${tag} » non posé)`);
+    }
   }
 }
 

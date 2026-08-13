@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
   // droit : passer une commande fournisseur en entrée marchandise).
   if (!(await requireCanReceivePurchaseOrder(session))) return NextResponse.json({ error: "Réservé à la préparation / l'administration / l'agréeur" }, { status: 403 });
 
-  let body: { docEntry?: number; agreage?: { status?: string; type?: string; note?: string; rating?: number } };
+  let body: { docEntry?: number; agreage?: { status?: string; type?: string; note?: string; rating?: number; lines?: { itemCode?: string; rating?: number }[] } };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -149,11 +149,21 @@ export async function POST(req: NextRequest) {
     console.warn("[POReceive] PATCH U_NoLot / référence échoué (non-bloquant):", (e as Error).message);
   }
 
-  // ── Note qualité (étoiles) de l'agréeur — posée sur chaque article reçu + le lot ──
-  const rating = sanitizeRating(body.agreage?.rating);
-  if (rating != null) {
-    const codes = [...new Set(createdLines.map((l) => l.ItemCode).filter((c): c is string => !!c))];
-    await Promise.all(codes.map((code) => setMarchandiseNote(code, lotCode, rating, me).catch(() => {})));
+  // ── Note qualité (étoiles) de l'agréeur — PAR LIGNE (article) si fournie,
+  //    sinon repli sur une note globale appliquée à tous les articles reçus. ──
+  const perLine = Array.isArray(body.agreage?.lines) ? body.agreage!.lines! : [];
+  if (perLine.length > 0) {
+    await Promise.all(perLine.map((ln) => {
+      const r = sanitizeRating(ln?.rating);
+      const code = typeof ln?.itemCode === "string" ? ln.itemCode.trim() : "";
+      return r != null && code ? setMarchandiseNote(code, lotCode, r, me).catch(() => {}) : Promise.resolve();
+    }));
+  } else {
+    const rating = sanitizeRating(body.agreage?.rating);
+    if (rating != null) {
+      const codes = [...new Set(createdLines.map((l) => l.ItemCode).filter((c): c is string => !!c))];
+      await Promise.all(codes.map((code) => setMarchandiseNote(code, lotCode, rating, me).catch(() => {})));
+    }
   }
 
   // ── Registre des lots : CRÉDIT (réception via commande fournisseur) ──

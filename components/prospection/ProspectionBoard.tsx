@@ -509,6 +509,8 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
   const [loading, setLoading] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
+  // Ligne dont la croix « retirer » a ouvert le mini-menu de motif.
+  const [removeId, setRemoveId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -529,6 +531,31 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
 
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  // Retrait rapide du vivier : on marque le prospect NON qualifié avec un motif
+  // (déjà client ailleurs, pas qualifié…). Réversible — il rejoint « Non qualifiés
+  // (revue) », il n'est PAS supprimé. Optimiste : la ligne disparaît aussitôt,
+  // restaurée si le PATCH échoue. Trace laissée dans la timeline (note).
+  async function disqualify(id: string, reason: string) {
+    setRemoveId(null);
+    const prev = rows;
+    setRows((rs) => rs.filter((x) => x.id !== id));
+    setTotal((t) => Math.max(0, t - 1));
+    setSel((s) => { if (!s.has(id)) return s; const n = new Set(s); n.delete(id); return n; });
+    try {
+      const r = await fetch(`/api/prospection/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ qualifieLabo: false, lostReason: reason, note: `Retiré du vivier — ${reason}` }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error || "Échec");
+      toast.success(`Retiré du vivier — ${reason}`);
+    } catch (e) {
+      setRows(prev); setTotal((t) => t + 1);   // rollback
+      toast.error(e instanceof Error ? e.message : "Échec");
+    }
+  }
 
   async function add(body: Record<string, unknown>, label: string) {
     setAdding(true);
@@ -627,9 +654,9 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
         ) : (
           <ul className="space-y-1.5">
             {rows.map((r) => (
-              <li key={r.id}>
+              <li key={r.id} className="relative">
                 <button onClick={() => toggle(r.id)}
-                  className={`w-full text-left rounded-lg px-2.5 py-2 ring-1 flex items-center gap-2 transition-colors ${sel.has(r.id) ? "ring-brand-500 bg-brand-500/10" : "ring-white/[0.07] bg-[#11161f] hover:ring-white/20"}`}>
+                  className={`w-full text-left rounded-lg px-2.5 py-2 pr-9 ring-1 flex items-center gap-2 transition-colors ${sel.has(r.id) ? "ring-brand-500 bg-brand-500/10" : "ring-white/[0.07] bg-[#11161f] hover:ring-white/20"}`}>
                   <span className={`h-4 w-4 shrink-0 rounded grid place-items-center ring-1 ${sel.has(r.id) ? "bg-brand-500 ring-brand-500" : "ring-white/20"}`}>
                     {sel.has(r.id) && <Check className="h-3 w-3 text-white" />}
                   </span>
@@ -654,6 +681,27 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
                   </span>
                   {r.probaLabo && <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-white/[0.06] text-white/60 shrink-0">{r.probaLabo}</span>}
                 </button>
+                {/* Croix « retirer du vivier » — motif rapide (pas qualifié / déjà
+                    client ailleurs). Masquée dans la revue des non qualifiés
+                    (ils y sont déjà). Sibling du bouton de sélection : un bouton
+                    imbriqué dans un bouton est invalide. */}
+                {source !== "nonqual" && (
+                  <button type="button" title="Retirer du vivier (non qualifié / déjà client)"
+                    onClick={(e) => { e.stopPropagation(); setRemoveId((v) => (v === r.id ? null : r.id)); }}
+                    className={`absolute top-1.5 right-1.5 h-6 w-6 grid place-items-center rounded-md transition-colors ${removeId === r.id ? "text-rose-300 bg-rose-500/15" : "text-white/25 hover:text-rose-300 hover:bg-rose-500/10"}`}>
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {removeId === r.id && (
+                  <div onClick={(e) => e.stopPropagation()}
+                    className="absolute z-20 right-1.5 top-9 w-56 rounded-lg bg-[#151b26] ring-1 ring-white/10 p-1 shadow-xl">
+                    <p className="px-2 py-1 text-[10px] uppercase tracking-wide text-white/40">Retirer du vivier — motif</p>
+                    <button onClick={() => disqualify(r.id, "Pas qualifié")}
+                      className="w-full text-left px-2 py-1.5 rounded-md text-[12px] text-white/80 hover:bg-white/[0.06]">Pas qualifié</button>
+                    <button onClick={() => disqualify(r.id, "Déjà client (autre compte)")}
+                      className="w-full text-left px-2 py-1.5 rounded-md text-[12px] text-white/80 hover:bg-white/[0.06]">Déjà client (autre compte)</button>
+                  </div>
+                )}
               </li>
             ))}
             {rows.length === 0 && <li className="text-[12px] text-white/35 italic py-6 text-center">Aucun prospect dans le vivier pour cette recherche.</li>}

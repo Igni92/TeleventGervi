@@ -8,7 +8,7 @@
  */
 const emailKey = (e: string) => e.trim().toLowerCase();
 
-export type CongeType = "cp" | "rtt" | "sans_solde" | "maladie" | "recup" | "autre";
+export type CongeType = "cp" | "rtt" | "sans_solde" | "maladie" | "recup" | "autre" | "absence";
 export type CongeStatus = "pending" | "approved" | "refused" | "cancelled";
 
 export const CONGE_TYPE_LABEL: Record<CongeType, string> = {
@@ -18,6 +18,7 @@ export const CONGE_TYPE_LABEL: Record<CongeType, string> = {
   maladie: "Maladie",
   recup: "Récupération",
   autre: "Autre",
+  absence: "Absence",
 };
 
 export const CONGE_STATUS_LABEL: Record<CongeStatus, string> = {
@@ -52,6 +53,9 @@ export interface CongeRequest {
   /** Nom du fichier justificatif attaché (arrêt maladie), s'il existe — le
    *  fichier lui-même vit à part (AppSetting `congejustif:…`, cf. congesRh). */
   justificatifName?: string;
+  /** Absence (type "absence") déclarée par la direction : JUSTIFIÉE ou non.
+   *  `undefined` pour les autres types. */
+  justified?: boolean;
 }
 
 /* ─────────────────────────── Logique PURE ─────────────────────────────────── */
@@ -59,7 +63,7 @@ export interface CongeRequest {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function isCongeType(v: unknown): v is CongeType {
-  return v === "cp" || v === "rtt" || v === "sans_solde" || v === "maladie" || v === "recup" || v === "autre";
+  return v === "cp" || v === "rtt" || v === "sans_solde" || v === "maladie" || v === "recup" || v === "autre" || v === "absence";
 }
 
 /** Date « YYYY-MM-DD » réelle (rejette 2026-02-30…). */
@@ -151,5 +155,6 @@ export function parseConge(v: Partial<CongeRequest>, email: string, id: string):
     decisionNote: typeof v.decisionNote === "string" ? v.decisionNote.slice(0, 500) : undefined,
     justificatifName: typeof v.justificatifName === "string" && v.justificatifName.trim()
       ? v.justificatifName.trim().slice(0, 160) : undefined,
+    justified: typeof v.justified === "boolean" ? v.justified : undefined,
   };
 }

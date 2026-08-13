@@ -72,11 +72,11 @@ describe("buildRelanceContext", () => {
     expect(ctx.fields.MontantRestantDu).toBe("3 000,00 €");
   });
 
-  it("total dû = principal + pénalités + IFR ; pénalités 0 par défaut", () => {
+  it("total dû = principal + pénalités + IFR ; sans taux → pénalités 0", () => {
     const ctx = buildRelanceContext({
       client: { cardCode: "C1", raisonSociale: "SARL LES DÉLICES" },
       invoices: [inv({ balance: 4820, overdueDays: 23 })],
-      params: DEFAULT_RELANCE_PARAMS,
+      params: { ...DEFAULT_RELANCE_PARAMS, penaliteTauxAnnuel: 0 },
     });
     expect(ctx.totals.penalites).toBe(0);
     expect(ctx.totals.total).toBe(4860); // 4820 + 0 + 40
@@ -125,7 +125,7 @@ describe("buildRelanceContext", () => {
         inv({ docEntry: 1, balance: 100000, overdueDays: 40 }),
         inv({ docEntry: 2, balance: 70413.91, overdueDays: 30 }),
       ],
-      params: DEFAULT_RELANCE_PARAMS,
+      params: { ...DEFAULT_RELANCE_PARAMS, penaliteTauxAnnuel: 0 },
       currentAccountBalance: 84988.43,
     });
     expect(ctx.totals.openTotal).toBeCloseTo(170413.91, 2);

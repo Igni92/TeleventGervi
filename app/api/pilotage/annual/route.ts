@@ -7,7 +7,8 @@ import {
   invoiceWeightByCard, pdnWeightByCard, invoiceWeightBySlp,
 } from "@/lib/pilotage";
 import { groupCodesForSegment, parseSegment } from "@/lib/segments";
-import { ANNUAL_MATRIX_YEARS_BACK } from "@/lib/pilotage-time";
+import { ANNUAL_MATRIX_YEARS_BACK, parisCivilParts } from "@/lib/pilotage-time";
+import { parisStartOfDay } from "@/lib/paris-time";
 import { cached, invalidate } from "@/lib/ttlCache";
 
 // Évite le timeout serverless sur les agrégations (cold start Vercel).
@@ -59,8 +60,13 @@ export async function GET(req: Request) {
   const payload = await cached(cacheKey, WEEK_MS, async () => {
     const groupCodes = groupCodesForSegment(segment);
     const now = new Date();
-    const yearStart = new Date(now.getFullYear(), 0, 1);
-    const yearEnd = new Date(now.getFullYear() + 1, 0, 1);
+    // Audit 2026-08-13 (#21) : année courante dérivée en Europe/Paris —
+    // `now.getFullYear()` lisait l'UTC du serveur, si bien qu'entre minuit et 02h
+    // heure de Paris le 1er janvier le rapport annuel affichait encore l'année
+    // écoulée (bornes + `currentYear`).
+    const { year } = parisCivilParts(now);
+    const yearStart = parisStartOfDay(new Date(Date.UTC(year, 0, 1)));
+    const yearEnd = parisStartOfDay(new Date(Date.UTC(year + 1, 0, 1)));
 
     const [matrix, clients, suppliers, salespersons] = await Promise.all([
       annualMatrix(years, groupCodes, slp),
@@ -76,7 +82,7 @@ export async function GET(req: Request) {
     ]);
 
     return {
-      currentYear: now.getFullYear(),
+      currentYear: year,
       matrix,
       clients: clients.map((c) => ({ ...c, weightKg: weightByClient.get(c.cardCode) ?? 0 })),
       suppliers: suppliers.map((s) => ({ ...s, weightKg: weightByVendor.get(s.cardCode) ?? 0 })),

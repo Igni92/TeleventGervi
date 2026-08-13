@@ -37,6 +37,17 @@ async function ctx() {
   return { email, name: session.user.name?.trim() || email, isDir: await isDirection(session) };
 }
 
+/** Mois « à faire valider » par défaut, ancré sur la date MURALE Europe/Paris.
+ *  Audit 2026-08-13 (#19) : `monthToValidate` s'appuie sur `monthIdOf` (getters
+ *  de mois du serveur, UTC). Au 1er du mois avant 01h/02h Paris, `new Date()`
+ *  côté UTC vise encore le mois PRÉCÉDENT → la validation cible alors un mois de
+ *  trop tôt. On ancre sur la date murale Paris (midi UTC de ce jour-là → le mois
+ *  correct via les getters) avant d'appliquer le décalage « mois − 1 ». */
+function defaultMonthToValidate(): string {
+  const parisTodayISO = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Paris" });
+  return monthToValidate(new Date(`${parisTodayISO}T12:00:00Z`));
+}
+
 /** Comptes qui NE sont PAS des salariés horaires (admins + direction) — exclus
  *  de la liste « à faire valider ». */
 async function nonEmployeeEmails(): Promise<Set<string>> {
@@ -63,7 +74,7 @@ export async function GET(req: NextRequest) {
   const c = await ctx();
   if (!c) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  const month = new URL(req.url).searchParams.get("month") || monthToValidate(new Date());
+  const month = new URL(req.url).searchParams.get("month") || defaultMonthToValidate();
   if (!isMonthId(month)) return NextResponse.json({ error: "Mois invalide" }, { status: 400 });
 
   const mine = await getValidation(c.email, month);
@@ -112,7 +123,7 @@ export async function POST(req: NextRequest) {
   try { body = await req.json(); } catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
   const action = body.action as ValidAction | undefined;
-  const month = (typeof body.month === "string" && body.month) || monthToValidate(new Date());
+  const month = (typeof body.month === "string" && body.month) || defaultMonthToValidate();
   if (!isMonthId(month)) return NextResponse.json({ error: "Mois invalide" }, { status: 400 });
   const now = new Date().toISOString();
   const mName = monthLabel(month);

@@ -318,6 +318,11 @@ export async function GET(req: NextRequest) {
         // Calibre (U_GER_CALIBRE) — LU EN DIRECT sur SAP Items (pas synchronisé en
         // local) pour l'afficher en tag de PRÉPARATION. Best-effort par lot.
         const cal: Record<string, string> = {};
+        // Audit 2026-08-13 (#14) : nb de lots de stock tombés en échec. Avant, un
+        // lot KO était avalé en silence (catch vide) → ces articles restaient SANS
+        // stock (ni « manquant » ni « en stock ») et la réponse renvoyait ok:true
+        // sans le signaler. On compte les lots échoués pour propager un état partiel.
+        let failedChunks = 0;
         const chunks: string[][] = [];
         for (let i = 0; i < allItemCodes.length; i += 20) chunks.push(allItemCodes.slice(i, i + 20));
         await Promise.all(chunks.map(async (chunk) => {
@@ -340,14 +345,21 @@ export async function GET(req: NextRequest) {
               const c = (it.U_GER_CALIBRE ?? "").trim();
               if (c) cal[it.ItemCode] = c;
             }
-          } catch { /* lot en échec → pas de stock pour ces articles */ }
+          } catch (e) {
+            // Audit 2026-08-13 (#14) : lot en échec → pas de stock pour ces
+            // articles, mais on le COMPTE (plus de catch muet) pour le remonter.
+            failedChunks++;
+            console.error("[livraisons] lecture d'un lot de stock échouée (articles sans stock):", e);
+          }
         }));
-        return { neg, onHand, cal };
+        return { neg, onHand, cal, failedChunks };
       })(),
     ]);
     const negativeStocks = stockInfo.neg;
     const onHandStocks = stockInfo.onHand;
     const calibreByCode = stockInfo.cal;
+    // Audit 2026-08-13 (#14) : nb de lots de stock KO → état partiel dans la réponse.
+    const stockFailedChunks = stockInfo.failedChunks;
     const typeByCardCode = clientMeta.types;
     const nameByCardCode = clientMeta.names;
     const comptoirByCardCode = clientMeta.comptoir;
@@ -606,6 +618,11 @@ export async function GET(req: NextRequest) {
       ok: true,
       date: primaryDate,
       mode,
+      // Audit 2026-08-13 (#14) : état PARTIEL explicite. `partial=true` = au moins
+      // un lot de stock SAP a échoué → certains articles n'ont ni « manquant » ni
+      // stock détenu fiable. L'affichage côté UI est hors périmètre (à traiter).
+      partial: stockFailedChunks > 0,
+      failedChunks: stockFailedChunks,
       holiday: mode === "due" ? frenchHolidayLabel(date) : null,
       count: visibleDocs.length,
       totals,

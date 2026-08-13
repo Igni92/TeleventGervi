@@ -109,7 +109,15 @@ export function normDept(raw: string | null | undefined): string {
 
 /** Tranche applicable à un poids : la première (triée) dont maxKg couvre kg.
  *  Les bornes basses ne créent pas de trous : 0–50 puis 51–100 → 50,5 kg tombe
- *  dans la 2ᵉ tranche. Poids au-delà de la dernière borne → null (hors grille). */
+ *  dans la 2ᵉ tranche. Poids au-delà de la dernière borne → null (hors grille).
+ *
+ *  Audit 2026-08-13 (#1) — POURQUOI ne pas prolonger la dernière tranche : les
+ *  grilles plafonnent (Delanchy 500 kg) et le €/tonne au-delà n'est PAS garanti
+ *  contractuellement (au-delà = cotation spécifique). On refuse donc d'inventer
+ *  un tarif de repli : `null` = « hors barème », que les consommateurs DOIVENT
+ *  rendre visible (cf. docTransportCost → `unpriced`), jamais retomber à 0 € muet.
+ *  judgmentCall direction : prolonger la dernière tranche si (et seulement si) la
+ *  cotation au poids reste valable au-delà de la borne haute. */
 export function bracketForWeight(brackets: TariffBracket[], kg: number): TariffBracket | null {
   const w = n(kg);
   if (w <= 0 || !brackets.length) return null;
@@ -120,7 +128,13 @@ export function bracketForWeight(brackets: TariffBracket[], kg: number): TariffB
   return null;
 }
 
-/** Zone couvrant un département (première zone qui le liste). */
+/** Zone couvrant un département (première zone qui le liste).
+ *  Audit 2026-08-13 (#1) — département hors de toute zone → `null` = « hors
+ *  barème ». Cas concret : la feuille DELANCHY n'a AUCUNE zone IDF alors que la
+ *  règle IDF y route Delanchy/Fargier ; la position devient alors non tarifée et
+ *  doit être signalée (docTransportCost → `unpriced`), pas facturée 0 € en
+ *  silence. Correction métier possible (judgmentCall) : ajouter les départements
+ *  IDF à la grille Delanchy. */
 export function zoneForDepartement(zones: TariffZone[], dept: string | null | undefined): TariffZone | null {
   const d = normDept(dept);
   if (!d) return null;
@@ -147,6 +161,12 @@ export interface PositionCostDetail {
 /**
  * Coût d'UNE POSITION (une livraison) : `null` si la grille ne couvre pas ce
  * département / ce poids (le poids doit être > 0 et une tranche cotée > 0).
+ *
+ * Audit 2026-08-13 (#1) — `null` NE SIGNIFIE JAMAIS « gratuit » : c'est « hors
+ * barème / non tarifé ». Signature conservée (utilisée aussi côté client :
+ * CarrierTariffEditor, Ecran2Order) ; c'est aux consommateurs de coût réel
+ * (docTransportCost, breakdown, pilotage/stores) de surfacer ce cas au lieu de
+ * le sommer comme 0 € — voir le drapeau `unpriced` de DocTransportResult.
  */
 export function computePositionCost(
   tariff: CarrierTariff | null | undefined,

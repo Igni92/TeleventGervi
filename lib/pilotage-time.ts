@@ -3,7 +3,25 @@
  * Prisma) pour rester testables dans vitest sans alias `@/`.
  */
 
+// Audit 2026-08-13 (#21) : import RELATIF (pas d'alias `@/`) pour préserver la
+// testabilité vitest de ce module. `paris-time` est lui-même 100 % `Intl` sans
+// dépendance → sûr à importer ici.
+import { parisStartOfDay, parisEndOfDay, parisDayOfWeek } from "./paris-time";
+
 export type Granularity = "day" | "week" | "month" | "year";
+
+/**
+ * Audit 2026-08-13 (#21) — année/mois/jour CIVILS à Europe/Paris pour un instant.
+ * Le serveur tourne en UTC : `Date.getFullYear()/getMonth()` renverraient la
+ * date UTC, décalée d'1–2 h par rapport à l'heure murale française → « le mois »
+ * (ou l'année, le 1er janvier) basculait trop tôt. On lit la date française.
+ */
+export function parisCivilParts(ref: Date = new Date()): { year: number; month: number; day: number } {
+  const [y, m, d] = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(ref).split("-").map(Number);
+  return { year: y, month: m, day: d };
+}
 
 /**
  * Nombre d'années d'historique affichées par le rapport annuel (Écran 2) EN PLUS
@@ -29,28 +47,52 @@ export function annualWindowStart(
   return new Date(ref.getFullYear() - yearsBack, 0, 1);
 }
 
-/** Bornes [start, end[ pour la granularité demandée, ancrée sur `ref` (today par défaut). */
+/**
+ * Bornes [start, end[ pour la granularité demandée, ancrée sur `ref` (today par
+ * défaut) — TOUJOURS en Europe/Paris.
+ *
+ * Audit 2026-08-13 (#21) : l'ancienne version bornait via `new Date()` +
+ * `setHours(0,0,0,0)` + getters/setters LOCAUX = UTC en prod. Résultat : « le
+ * jour » basculait à 01h/02h heure de Paris, donc le soir les KPI « vendu
+ * aujourd'hui » (accueil) et les vues jour/semaine/mois du pilotage lisaient la
+ * mauvaise fenêtre. On borne désormais en heure française (parisStartOfDay/
+ * parisEndOfDay + date civile Paris pour mois/année/semaine).
+ */
 export function periodBounds(g: Granularity, ref = new Date()): { start: Date; end: Date } {
-  const d = new Date(ref);
-  d.setHours(0, 0, 0, 0);
-  let start: Date;
-  let end: Date;
+  const DAY_MS = 24 * 3600_000;
 
   if (g === "day") {
-    start = d;
-    end = new Date(d); end.setDate(d.getDate() + 1);
-  } else if (g === "week") {
-    const dow = d.getDay();
-    start = new Date(d);
-    start.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
-    end = new Date(start); end.setDate(start.getDate() + 7);
-  } else if (g === "month") {
-    start = new Date(d.getFullYear(), d.getMonth(), 1);
-    end = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-  } else {
-    start = new Date(d.getFullYear(), 0, 1);
-    end = new Date(d.getFullYear() + 1, 0, 1);
+    // Jour de Paris : minuit → minuit du lendemain (parisEndOfDay absorbe les
+    // jours de 23 h/25 h des changements d'heure).
+    return { start: parisStartOfDay(ref), end: parisEndOfDay(ref) };
   }
+
+  if (g === "week") {
+    // Lundi 00:00 Paris de la semaine contenant `ref`, jusqu'au lundi suivant.
+    // On part du début du jour Paris puis on décale de N jours (+DAY_MS × N)
+    // re-normalisés par parisStartOfDay → insensible aux changements d'heure.
+    const dow = parisDayOfWeek(ref);                 // 0 = dimanche … 6 = samedi
+    const toMonday = dow === 0 ? -6 : 1 - dow;
+    const startOfToday = parisStartOfDay(ref);
+    const start = parisStartOfDay(new Date(startOfToday.getTime() + toMonday * DAY_MS));
+    const end = parisStartOfDay(new Date(start.getTime() + 7 * DAY_MS));
+    return { start, end };
+  }
+
+  if (g === "month") {
+    const { year, month } = parisCivilParts(ref);
+    // 1er du mois à 00:00 Paris : minuit UTC le 1er tombe toujours le 1er à Paris
+    // (Paris ≥ UTC+1) → parisStartOfDay le recale sur minuit heure française.
+    const start = parisStartOfDay(new Date(Date.UTC(year, month - 1, 1)));
+    const nm = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 };
+    const end = parisStartOfDay(new Date(Date.UTC(nm.y, nm.m - 1, 1)));
+    return { start, end };
+  }
+
+  // year — 1er janvier 00:00 Paris → 1er janvier suivant.
+  const { year } = parisCivilParts(ref);
+  const start = parisStartOfDay(new Date(Date.UTC(year, 0, 1)));
+  const end = parisStartOfDay(new Date(Date.UTC(year + 1, 0, 1)));
   return { start, end };
 }
 
@@ -81,8 +123,11 @@ export function previousYearBounds(
 
   if (g === "day") {
     // Aligne sur le même jour de la semaine que b.start ; delta dans ]-4, +3].
-    const targetDow = b.start.getDay();
-    const currentDow = refMinus1.getDay();
+    // Audit 2026-08-13 (#21) : DoW lu en Europe/Paris — `b.start` est désormais
+    // un instant « minuit Paris » (≈ 22 h/23 h UTC la veille) ; `getDay()` en
+    // prod UTC renverrait le jour de la VEILLE et casserait l'alignement YoY.
+    const targetDow = parisDayOfWeek(b.start);
+    const currentDow = parisDayOfWeek(refMinus1);
     let delta = targetDow - currentDow;
     if (delta > 3) delta -= 7;
     if (delta < -3) delta += 7;

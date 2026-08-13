@@ -3,17 +3,13 @@ import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
-import { getTransportModel, listCarrierTariffs } from "@/lib/transportCostStore";
-import {
-  computeTransportMetrics,
-  transportPerKgForCarrier,
-  isDirectCarrier,
-  normCarrier,
-  sanitizeClientPricing,
-  type ClientCarrierPricing,
-} from "@/lib/transportCost";
-import { computePositionCost, resolveCarrierTariff } from "@/lib/carrierTariff";
-import { departementOfZip } from "@/lib/geo/zip";
+import { computeTransportMetrics, normCarrier } from "@/lib/transportCost";
+// Audit 2026-08-13 (#8) — MÊME décision de coût que le pilotage magasins :
+// docTransportCost porte la règle « magasin IDF = direct » (sauf Delanchy/Fargier)
+// et la cascade grille → €/kg → signalé. On l'appelle ici au lieu de dupliquer la
+// grille externe (qui divergeait : pas de règle IDF, pas de repli tournée).
+import { loadDocTransportContext, docTransportCost } from "@/lib/transportDoc";
+import { segmentOfGroup } from "@/lib/segments";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -53,10 +49,6 @@ export async function GET() {
     return NextResponse.json({ error: "Réservé à la direction / aux administrateurs" }, { status: 403 });
   }
 
-  const model = await getTransportModel();
-  const metrics = computeTransportMetrics(model);
-  const prixPosition = metrics.prixPositionPerKg;
-
   // Fenêtre 12 mois glissants (DocDueDate).
   const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
   const now = new Date();
@@ -93,54 +85,64 @@ export async function GET() {
     for (const p of prods) weightByCode.set(p.itemCode, p.salesUnitWeight ?? 0);
   }
 
-  // Fiches clients (CardCode → id/nom/type/département) + tarifs legacy par
-  // client + GRILLES par transporteur (coût par position — lib/carrierTariff).
+  // Fiches clients (CardCode → id/nom/code postal) + segment SAP (règle IDF).
+  // Audit 2026-08-13 (#8) — on garde le CODE POSTAL BRUT (pas le département) et
+  // le SEGMENT (groupe SAP), car docTransportCost en a besoin pour la règle
+  // « magasin IDF = direct » ; le coût lui-même est délégué (contexte ci-dessous).
   const cardCodes = [...new Set(live.map((o) => o.CardCode).filter((c): c is string => !!c))];
-  const clientByCard = new Map<string, { id: string; nom: string; type: string | null; dept: string | null }>();
+  const clientByCard = new Map<string, { id: string; nom: string; zip: string | null }>();
+  const segByCard = new Map<string, ReturnType<typeof segmentOfGroup>>();
   if (cardCodes.length) {
-    const clients = await prisma.client.findMany({ where: { code: { in: cardCodes } }, select: { id: true, code: true, nom: true, type: true, zipCode: true } });
-    for (const c of clients) clientByCard.set(c.code, { id: c.id, nom: c.nom, type: c.type, dept: departementOfZip(c.zipCode) });
+    const [clients, bps] = await Promise.all([
+      prisma.client.findMany({ where: { code: { in: cardCodes } }, select: { id: true, code: true, nom: true, zipCode: true } }),
+      prisma.sapBusinessPartner.findMany({ where: { cardCode: { in: cardCodes } }, select: { cardCode: true, groupCode: true, groupName: true } }),
+    ]);
+    for (const c of clients) clientByCard.set(c.code, { id: c.id, nom: c.nom, zip: c.zipCode });
+    for (const b of bps) segByCard.set(b.cardCode, segmentOfGroup(b.groupName, b.groupCode));
   }
-  const pricingById = new Map<string, ClientCarrierPricing>();
-  try {
-    const rows = await prisma.appSetting.findMany({ where: { key: { startsWith: "transportcli:" } } });
-    for (const row of rows) {
-      const id = row.key.slice("transportcli:".length);
-      try { pricingById.set(id, sanitizeClientPricing(JSON.parse(row.value))); } catch { /* ignore */ }
-    }
-  } catch { /* pas de tarifs */ }
-  const carrierTariffs = await listCarrierTariffs();
+
+  // Contexte de coût PARTAGÉ avec le pilotage magasins (modèle direction, grilles
+  // transporteurs, tournées habituelles, tarifs €/kg client) — une seule source.
+  const ctx = await loadDocTransportContext(cardCodes);
+  const metrics = computeTransportMetrics(ctx.model);
+  const prixPosition = ctx.prixPositionPerKg;
 
   // Agrégation.
-  type CarrierAgg = { code: string; deliveries: number; kg: number; cost: number; direct: boolean };
-  type ClientAgg = { cardCode: string; name: string; deliveries: number; kg: number; cost: number; directKg: number; extKg: number };
+  type CarrierAgg = { code: string; deliveries: number; kg: number; cost: number; direct: boolean; unpriced: number };
+  type ClientAgg = { cardCode: string; name: string; deliveries: number; kg: number; cost: number; directKg: number; extKg: number; unpriced: number };
   const byCarrier = new Map<string, CarrierAgg>();
   const byClient = new Map<string, ClientAgg>();
-  let totalKg = 0, totalCost = 0;
+  let totalKg = 0, totalCost = 0, totalUnpriced = 0;
 
   for (const o of live) {
     const code = normCarrier(o.U_TrspCode) || "(AUCUN)";
     const kg = (o.DocumentLines ?? []).reduce((s, l) => s + (l.Quantity || 0) * (weightByCode.get(l.ItemCode ?? "") ?? 0), 0);
     const card = o.CardCode ?? "";
     const cli = card ? clientByCard.get(card) : undefined;
-    const pricing = cli ? pricingById.get(cli.id) ?? null : null;
-    const direct = isDirectCarrier(model, code) || (model.directCarriers.length === 0);
-    // Externe avec GRILLE : coût par position (tranche de poids × département
-    // du client). Repli : legacy €/kg (client) × kg, ou prix position (direct).
-    const posCost = !direct ? computePositionCost(resolveCarrierTariff(carrierTariffs, code), cli?.dept, kg) : null;
-    const cost = posCost ? posCost.total : transportPerKgForCarrier(model, prixPosition, code, pricing) * kg;
+    // Audit 2026-08-13 (#8) — décision de coût déléguée à docTransportCost (règle
+    // IDF-direct, grille, repli €/kg, tournée habituelle) : MÊME euro que le
+    // pilotage magasins pour un BL donné. `direct` vient donc du mode retenu.
+    const t = docTransportCost(ctx, {
+      cardCode: card, clientId: cli?.id ?? null, zip: cli?.zip ?? null, kg,
+      trspCode: o.U_TrspCode, segment: card ? segByCard.get(card) ?? null : null,
+    });
+    const cost = t.cost;
+    const direct = t.mode === "direct";
 
     totalKg += kg; totalCost += cost;
+    if (t.unpriced) totalUnpriced += 1; // Audit 2026-08-13 (#1) — position sans tarif applicable.
 
-    const c = byCarrier.get(code) ?? { code, deliveries: 0, kg: 0, cost: 0, direct };
+    const c = byCarrier.get(code) ?? { code, deliveries: 0, kg: 0, cost: 0, direct, unpriced: 0 };
     c.deliveries += 1; c.kg += kg; c.cost += cost;
+    if (t.unpriced) c.unpriced += 1;
     byCarrier.set(code, c);
 
     if (card) {
       const name = cli?.nom ?? o.CardName ?? card;
-      const cl = byClient.get(card) ?? { cardCode: card, name, deliveries: 0, kg: 0, cost: 0, directKg: 0, extKg: 0 };
+      const cl = byClient.get(card) ?? { cardCode: card, name, deliveries: 0, kg: 0, cost: 0, directKg: 0, extKg: 0, unpriced: 0 };
       cl.deliveries += 1; cl.kg += kg; cl.cost += cost;
       if (direct) cl.directKg += kg; else cl.extKg += kg;
+      if (t.unpriced) cl.unpriced += 1;
       byClient.set(card, cl);
     }
   }
@@ -160,7 +162,10 @@ export async function GET() {
     window: "12 mois glissants",
     prixPositionPerKg: r3(prixPosition),
     annualCost: r2(metrics.annualCost),
-    totals: { deliveries: live.length, kg: r2(totalKg), cost: r2(totalCost) },
+    // Audit 2026-08-13 (#1) — `unpriced` = nb de positions livrées par un
+    // transporteur connu SANS tarif applicable (leur coût 0 est un trou de
+    // paramétrage, pas une gratuité) : à afficher pour ne pas sous-évaluer le coût.
+    totals: { deliveries: live.length, kg: r2(totalKg), cost: r2(totalCost), unpriced: totalUnpriced },
     carriers,
     clients,
     truncated,

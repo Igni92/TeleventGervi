@@ -27,6 +27,7 @@ import { isRestrictedPreparateur } from "@/lib/preparateur";
  *  la direction et les préparateurs sont désignés en base depuis l'écran Effectifs. */
 export const ADMIN_EMAILS = [
   "m.mandine@gervifrais.com",
+  "e.gunslay@gervifrais.com",
 ] as const;
 
 /** Message UI standard pour un compte non relié à un commercial. */

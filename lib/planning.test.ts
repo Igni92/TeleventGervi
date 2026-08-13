@@ -122,6 +122,20 @@ describe("planning — compteur récup (décompte au passage de la semaine)", ()
     expect(c.creditMin).toBe(5 * 60);   // 4 h supp, toutes à +25 % → 5 h de récup
     expect(c.debitMin).toBe(0);
     expect(c.balanceMin).toBe(5 * 60);
+    // Détail BRUT par tranche : 4 h à +25 %, rien à +50 % ; recompose le majoré.
+    expect(c.credit25Min).toBe(4 * 60);
+    expect(c.credit50Min).toBe(0);
+    expect(Math.round(c.credit25Min * 1.25 + c.credit50Min * 1.5)).toBe(c.creditMin);
+  });
+
+  it("détail brut par tranche : semaine à 45 h → 8 h à +25 % + 2 h à +50 %", () => {
+    const weeks: CounterWeekInput[] = [
+      { week: "2026-W27", days: [day(9), day(9), day(9), day(9), day(9)], option: "recup" },
+    ];
+    const c = computeRecupCounter(weeks, [], PROFILE, ASOF);
+    expect(c.credit25Min).toBe(8 * 60);
+    expect(c.credit50Min).toBe(2 * 60);
+    expect(Math.round(c.credit25Min * 1.25 + c.credit50Min * 1.5)).toBe(c.creditMin);
   });
 
   it("pas de crédit tant que la semaine n'est pas passée", () => {

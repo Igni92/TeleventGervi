@@ -86,8 +86,13 @@ async function runDeltaSync() {
     // base vient du sync produits ; le delta ne sert qu'à suivre les
     // changements récents. `refreshItemStocks` repull le stock LIVE de l'article.
     const LOOKBACK = 500;
+    // Audit 2026-08-13 (#17) — lectures de RÉFÉRENCE épinglées sur env:"prod"
+    // (comme toutes les autres routes de référence). Sans ça, la synchro delta
+    // lisait l'environnement ACTIF (AppSetting.sap_env) : si le badge SAP est resté
+    // basculé sur TEST et oublié, le delta écrirait des DocEntry / stocks TEST dans
+    // ProductStock (miroir censé refléter la prod). On fige donc prod ici.
     const latest = (coll: string) =>
-      sap.getAll<Doc>(`${coll}?$orderby=DocEntry desc&$select=DocEntry`, { pageSize: 1, maxPages: 1 });
+      sap.getAll<Doc>(`${coll}?$orderby=DocEntry desc&$select=DocEntry`, { pageSize: 1, maxPages: 1, env: "prod" });
     const [latestOrders, latestPdns] = await Promise.all([latest("Orders"), latest("PurchaseDeliveryNotes")]);
     const maxOrderNow = latestOrders[0]?.DocEntry ?? cursor.lastOrderDocEntry;
     const maxPdnNow = latestPdns[0]?.DocEntry ?? cursor.lastPdnDocEntry;
@@ -103,9 +108,11 @@ async function runDeltaSync() {
       + `&$orderby=DocEntry asc`
       + `&$select=DocEntry,DocumentLines`;   // DocumentLines en $select, PAS d'$expand (ce SL ne le supporte pas)
 
+    // Audit 2026-08-13 (#17) — Orders / PurchaseDeliveryNotes en env:"prod" : même
+    // raison que les lectures `latest` ci-dessus (jamais de docs TEST dans le miroir).
     const [orders, pdns] = await Promise.all([
-      sap.getAll<Doc>(orderPath, { pageSize: 100, maxPages: 5 }),
-      sap.getAll<Doc>(pdnPath, { pageSize: 100, maxPages: 5 }),
+      sap.getAll<Doc>(orderPath, { pageSize: 100, maxPages: 5, env: "prod" }),
+      sap.getAll<Doc>(pdnPath, { pageSize: 100, maxPages: 5, env: "prod" }),
     ]);
 
     const touched = new Set<string>();

@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Loader2, RefreshCw, Euro, AlertTriangle, Clock, Flame, Search, ExternalLink, X, Send } from "lucide-react";
+import { Loader2, RefreshCw, Euro, AlertTriangle, Clock, Flame, Search, ExternalLink, X, Send, Mail, Plus, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { StatBlock } from "@/components/ui/stat-block";
 import { ClientLink } from "@/components/ClientLink";
@@ -31,12 +31,15 @@ interface ClientEncours {
   cardCode: string;
   cardName: string;
   clientId: string | null;
+  emailCompta: string | null; // destinataire(s) des relances (joint par « , »)
   encours: number;          // NET (paiements + avoirs déduits)
   brut: number;             // somme des factures (avant déduction)
   encaisse: number;         // paiements + avoirs NON affectés (déduit en ligne)
   avoirsAttribues: number;  // avoirs rattachés à une facture (déduit par facture)
+  avoirsNonImputes: AttributedAvoir[]; // avoirs en faveur du client, non imputés (bleu)
+  avoirsNonImputesTotal: number;
   countOpen: number;
-  b3045: number; // 30-45 j (brut)
+  b3045: number; // ≤ 45 j de retard (brut)
   b4590: number; // 45-90 j (brut)
   b90: number;   // > 90 j (brut)
   countLate: number;
@@ -67,7 +70,7 @@ function useDebounced<T>(v: T, ms: number): T {
 
 /** Ligne mémoïsée : la recherche/tri ne re-rend QUE les lignes dont les props
  *  changent (avant : toute la liste re-rendait à chaque frappe). */
-const EncoursRow = memo(function EncoursRow({ c, onSelect }: { c: ClientEncours; onSelect: (c: ClientEncours) => void }) {
+const EncoursRow = memo(function EncoursRow({ c, onSelect, onEditCompta }: { c: ClientEncours; onSelect: (c: ClientEncours) => void; onEditCompta: (c: ClientEncours) => void }) {
   return (
     <tr className="hover:bg-secondary/30 transition-colors cursor-pointer" onClick={() => onSelect(c)}>
       <td className="px-3 py-2">
@@ -86,6 +89,9 @@ const EncoursRow = memo(function EncoursRow({ c, onSelect }: { c: ClientEncours;
       <td className="px-3 py-2 text-right tnum">{c.b4590 > 0 ? <span className="font-semibold text-rose-500 dark:text-rose-400">{eur(c.b4590)}</span> : <span className="text-muted-foreground/40">—</span>}</td>
       <td className="px-3 py-2 text-right tnum">{c.b90 > 0 ? <span className="font-bold text-rose-600 dark:text-rose-400">{eur(c.b90)}</span> : <span className="text-muted-foreground/40">—</span>}</td>
       <td className="px-3 py-2 text-right tnum">{c.countLate > 0 ? <span className="font-semibold text-rose-600 dark:text-rose-400">{c.countLate}</span> : <span className="text-muted-foreground/40">—</span>}</td>
+      <td className="px-3 py-2 text-center">
+        <ComptaBadge c={c} onEdit={onEditCompta} />
+      </td>
       <td className="px-2 py-2 text-right">
         <span className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground"><ExternalLink className="h-3.5 w-3.5" /></span>
       </td>
@@ -94,6 +100,170 @@ const EncoursRow = memo(function EncoursRow({ c, onSelect }: { c: ClientEncours;
 });
 EncoursRow.displayName = "EncoursRow";
 
+/** Sépare la chaîne emailCompta (« a@x, b@y ») en liste nettoyée. */
+function splitComptaEmails(raw: string | null | undefined): string[] {
+  return (raw ?? "").split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
+}
+
+/** Indicateur Oui/Non cliquable → ouvre la popup d'édition des emails compta.
+ *  Rendu en <span role="button"> (et non <button>) pour rester valide dans la
+ *  carte mobile, elle-même un <button>. Stoppe la propagation pour ne pas ouvrir
+ *  la modale de détail de la ligne. */
+function ComptaBadge({ c, onEdit }: { c: ClientEncours; onEdit: (c: ClientEncours) => void }) {
+  const emails = splitComptaEmails(c.emailCompta);
+  const has = emails.length > 0;
+  const open = (e: React.SyntheticEvent) => { e.stopPropagation(); onEdit(c); };
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={open}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(e); } }}
+      title={has ? emails.join(", ") : "Aucun email compta — cliquer pour ajouter"}
+      className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-[11.5px] font-semibold cursor-pointer transition-colors ${
+        has
+          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20"
+          : "bg-secondary text-muted-foreground hover:bg-secondary/70"
+      }`}
+    >
+      <Mail className="h-3 w-3" />
+      {has ? (emails.length > 1 ? `Oui · ${emails.length}` : "Oui") : "Non"}
+    </span>
+  );
+}
+
+/** Popup d'édition des emails compta (destinataires des relances). Un ou
+ *  PLUSIEURS emails (liste d'inputs « + ajouter »). Enregistre via
+ *  PATCH /api/clients/[id]/compta (stockage joint « , » + push SAP U_ComptaE).
+ *  clientId absent (pas de fiche locale) → édition désactivée avec message. */
+function ComptaEmailsModal({ client, onClose, onSaved }: { client: ClientEncours; onClose: () => void; onSaved: () => void }) {
+  const disabled = !client.clientId;
+  const [emails, setEmails] = useState<string[]>(() => {
+    const list = splitComptaEmails(client.emailCompta);
+    return list.length ? list : [""];
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+
+  const setAt = (i: number, v: string) => setEmails((prev) => prev.map((e, idx) => (idx === i ? v : e)));
+  const addRow = () => setEmails((prev) => [...prev, ""]);
+  const removeRow = (i: number) => setEmails((prev) => (prev.length <= 1 ? [""] : prev.filter((_, idx) => idx !== i)));
+
+  const save = useCallback(async () => {
+    if (disabled || !client.clientId) return;
+    const cleaned = emails.map((e) => e.trim()).filter(Boolean);
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const bad = cleaned.find((e) => !emailRe.test(e));
+    if (bad) { toast.error(`Email invalide : ${bad}`); return; }
+    setSaving(true);
+    try {
+      const r = await fetch(`/api/clients/${client.clientId}/compta`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emailCompta: cleaned.join(", ") }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) { toast.error(j.error || "Enregistrement impossible"); return; }
+      toast.success(cleaned.length ? "Destinataire(s) compta enregistré(s)." : "Email compta effacé.");
+      onSaved();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }, [disabled, client.clientId, emails, onSaved]);
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <header className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-border">
+          <div className="min-w-0">
+            <h2 className="text-[16px] font-semibold tracking-tight text-foreground truncate flex items-center gap-2">
+              <Mail className="h-4 w-4 text-brand-600 dark:text-brand-400" /> Email(s) compta
+            </h2>
+            <p className="text-[11.5px] text-muted-foreground truncate">
+              <span className="font-mono">{client.cardCode}</span> · {client.cardName}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-secondary rounded-md text-muted-foreground"><X className="h-4 w-4" /></button>
+        </header>
+
+        <div className="px-5 py-4 space-y-3">
+          {disabled ? (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-400/60 bg-amber-50 dark:bg-amber-950/25 px-3 py-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+              <p className="text-[12px] text-amber-800 dark:text-amber-200">
+                Aucune fiche client locale pour ce débiteur — impossible d&apos;enregistrer un email compta ici.
+              </p>
+            </div>
+          ) : (
+            <>
+              <p className="text-[12px] text-muted-foreground">
+                Destinataire(s) des relances (envoyées depuis <b className="font-mono">compta@gervifrais.com</b>). Un ou plusieurs emails.
+              </p>
+              <div className="space-y-2">
+                {emails.map((email, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setAt(i, e.target.value)}
+                      placeholder="compta@client.fr"
+                      className="flex-1"
+                      autoFocus={i === 0}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeRow(i)}
+                      title="Retirer"
+                      className="p-2 rounded-md text-muted-foreground hover:text-rose-600 hover:bg-secondary"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={addRow}
+                className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-brand-600 dark:text-brand-400 hover:underline"
+              >
+                <Plus className="h-3.5 w-3.5" /> Ajouter un email
+              </button>
+            </>
+          )}
+        </div>
+
+        <footer className="shrink-0 flex items-center justify-end gap-2 px-5 py-3 border-t border-border">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-9 px-3 rounded-md border border-border text-[12.5px] font-semibold text-muted-foreground hover:text-foreground"
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={disabled || saving}
+            className="inline-flex items-center gap-2 h-9 px-4 rounded-md bg-brand-600 text-white text-[13px] font-semibold hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Enregistrer
+          </button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export function Encours() {
   const [data, setData] = useState<EncoursData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -101,6 +271,7 @@ export function Encours() {
   const [search, setSearch] = useState("");
   const [drill, setDrill] = useState<ClientEncours | null>(null);
   const [relance, setRelance] = useState<ClientEncours | null>(null);
+  const [compta, setCompta] = useState<ClientEncours | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "encours", dir: "desc" });
   const onSort = useCallback((key: SortKey) => {
     setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "cardName" ? "asc" : "desc" }));
@@ -138,7 +309,7 @@ export function Encours() {
       {/* KPIs — paiement à 30 j ; tranches de retard EXCLUSIVES */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Kpi icon={Euro} tone="brand" label="Encours total" value={data ? eur(data.totals.encours) : "—"} />
-        <Kpi icon={AlertTriangle} tone="amber" label="Retard 30-45 j" value={data ? eur(data.totals.b3045) : "—"} />
+        <Kpi icon={AlertTriangle} tone="amber" label="Retard ≤ 45 j" value={data ? eur(data.totals.b3045) : "—"} />
         <Kpi icon={Clock} tone="rose" label="Retard 45-90 j" value={data ? eur(data.totals.b4590) : "—"} />
         <Kpi icon={Flame} tone="rose" label="Retard > 90 j" value={data ? eur(data.totals.b90) : "—"} />
       </div>
@@ -205,6 +376,10 @@ export function Encours() {
                 </span>
               </div>
             )}
+            <div className="flex items-center gap-2 mt-2.5">
+              <span className="text-[11.5px] text-muted-foreground">Email compta</span>
+              <ComptaBadge c={c} onEdit={setCompta} />
+            </div>
           </button>
         ))}
       </div>
@@ -218,20 +393,21 @@ export function Encours() {
                 <SortTh label="Client" k="cardName" sort={sort} onSort={onSort} align="left" />
                 <SortTh label="Encours net" k="encours" sort={sort} onSort={onSort} align="right" />
                 <SortTh label="Nb fact." k="countOpen" sort={sort} onSort={onSort} align="right" />
-                <SortTh label="Retard 30-45 j" k="b3045" sort={sort} onSort={onSort} align="right" />
+                <SortTh label="Retard ≤ 45 j" k="b3045" sort={sort} onSort={onSort} align="right" />
                 <SortTh label="45-90 j" k="b4590" sort={sort} onSort={onSort} align="right" />
                 <SortTh label="> 90 j" k="b90" sort={sort} onSort={onSort} align="right" />
                 <SortTh label="Fact. retard" k="countLate" sort={sort} onSort={onSort} align="right" />
+                <th className="px-3 py-2.5 font-semibold text-center uppercase tracking-wider">Email compta</th>
                 <th className="w-8" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
               {loading ? (
-                <tr><td colSpan={8} className="h-32 text-center"><Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></td></tr>
+                <tr><td colSpan={9} className="h-32 text-center"><Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={8} className="h-32 text-center text-muted-foreground">Aucun encours 🎉</td></tr>
+                <tr><td colSpan={9} className="h-32 text-center text-muted-foreground">Aucun encours 🎉</td></tr>
               ) : rows.map((c) => (
-                <EncoursRow key={c.cardCode} c={c} onSelect={setDrill} />
+                <EncoursRow key={c.cardCode} c={c} onSelect={setDrill} onEditCompta={setCompta} />
               ))}
             </tbody>
           </table>
@@ -261,17 +437,67 @@ export function Encours() {
           onSent={load}
         />
       )}
+      {compta && (
+        <ComptaEmailsModal
+          client={compta}
+          onClose={() => setCompta(null)}
+          onSaved={() => { setCompta(null); load(); }}
+        />
+      )}
     </div>
   );
 }
 
+/** Enrichissement AVOIRS renvoyé par /api/encours/avoirs (chargé à l'ouverture). */
+interface LazyAvoirs {
+  encaisse: number;
+  avoirsAttribues: number;
+  avoirsNonImputes: AttributedAvoir[];
+  avoirsNonImputesTotal: number;
+  invoices: { docEntry: number; avoirs: AttributedAvoir[]; avoirsTotal: number; net: number }[];
+}
+
 /* ── Détail des factures d'un client ─────────────────────── */
-function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; onClose: () => void; onRelance: (c: ClientEncours) => void }) {
+function InvoicesModal({ client: base, onClose, onRelance }: { client: ClientEncours; onClose: () => void; onRelance: (c: ClientEncours) => void }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
+
+  // Avoirs chargés LAZY (par client) à l'ouverture — jamais bloquant : en cas
+  // d'échec on garde les données de base (aucun avoir affiché).
+  const [av, setAv] = useState<LazyAvoirs | null>(null);
+  const [loadingAv, setLoadingAv] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    setAv(null);
+    setLoadingAv(true);
+    fetch(`/api/encours/avoirs?cardCode=${encodeURIComponent(base.cardCode)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => { if (alive && j?.ok) setAv(j as LazyAvoirs); })
+      .catch(() => { /* silencieux : la modale reste utilisable sans les avoirs */ })
+      .finally(() => { if (alive) setLoadingAv(false); });
+    return () => { alive = false; };
+  }, [base.cardCode]);
+
+  // Vue fusionnée : le NET ne bouge pas ; on ventile la déduction (règlements /
+  // avoirs imputés / avoirs en faveur) et on rattache les avoirs aux factures.
+  const client: ClientEncours = useMemo(() => {
+    if (!av) return base;
+    const byEntry = new Map(av.invoices.map((i) => [i.docEntry, i]));
+    return {
+      ...base,
+      encaisse: av.encaisse,
+      avoirsAttribues: av.avoirsAttribues,
+      avoirsNonImputes: av.avoirsNonImputes,
+      avoirsNonImputesTotal: av.avoirsNonImputesTotal,
+      invoices: base.invoices.map((inv) => {
+        const e = byEntry.get(inv.docEntry);
+        return e ? { ...inv, avoirs: e.avoirs, avoirsTotal: e.avoirsTotal, net: e.net } : inv;
+      }),
+    };
+  }, [base, av]);
 
   if (typeof document === "undefined") return null;
 
@@ -286,6 +512,7 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
             <p className="text-[12px] text-muted-foreground">
               <span className="font-mono">{client.cardCode}</span> · encours net <b className="text-foreground">{eurExact(client.encours)}</b>
               {" · "}{client.countOpen} facture(s){client.countLate > 0 && <> · <span className="text-rose-600 dark:text-rose-400 font-semibold">{client.countLate} en retard</span></>}
+              {loadingAv && <> · <span className="inline-flex items-center gap-1 text-sky-600 dark:text-sky-400"><Loader2 className="h-3 w-3 animate-spin" /> chargement factures &amp; avoirs…</span></>}
             </p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -309,14 +536,17 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
             sont maintenant DISTINGUÉS. Les avoirs rattachés à une facture sont
             affichés sous leur facture (case dédiée) ; ce qui reste en global =
             paiements + avoirs non affectés à une facture précise. */}
-        {(client.encaisse > 0 || client.avoirsAttribues > 0) && (
+        {(client.encaisse > 0 || client.avoirsAttribues > 0 || client.avoirsNonImputesTotal > 0) && (
           <div className="shrink-0 px-5 py-2 text-[12px] border-b border-border bg-emerald-50/40 dark:bg-emerald-950/15 text-foreground">
             Factures (brut) <b>{eurExact(client.brut)}</b>
             {client.encaisse > 0 && (
               <> − encaissements <b className="text-emerald-600 dark:text-emerald-400">{eurExact(client.encaisse)}</b></>
             )}
             {client.avoirsAttribues > 0 && (
-              <> − avoirs <b className="text-violet-600 dark:text-violet-400">{eurExact(client.avoirsAttribues)}</b></>
+              <> − avoirs imputés <b className="text-violet-600 dark:text-violet-400">{eurExact(client.avoirsAttribues)}</b></>
+            )}
+            {client.avoirsNonImputesTotal > 0 && (
+              <> − avoirs en faveur <b className="text-sky-600 dark:text-sky-400">{eurExact(client.avoirsNonImputesTotal)}</b></>
             )}
             {" = net dû "}<b>{eurExact(client.encours)}</b>
           </div>
@@ -324,12 +554,35 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
 
         {/* Résumé paliers (au brut) */}
         <div className="shrink-0 grid grid-cols-1 sm:grid-cols-3 gap-2 px-5 py-3 border-b border-border">
-          <MiniStat label="Retard 30-45 j" value={eurOrDash(client.b3045)} tone="amber" />
+          <MiniStat label="Retard ≤ 45 j" value={eurOrDash(client.b3045)} tone="amber" />
           <MiniStat label="Retard 45-90 j" value={eurOrDash(client.b4590)} tone="rose" />
           <MiniStat label="Retard > 90 j" value={eurOrDash(client.b90)} tone="rose" />
         </div>
 
         <div className="flex-1 overflow-auto">
+          {/* Avoirs EN FAVEUR du client, non imputés à une facture (bleu) : nous les
+              lui devons ; ils viendront en déduction d'une facture ultérieure. */}
+          {client.avoirsNonImputes.length > 0 && (
+            <div className="px-4 py-3 border-b border-sky-200 dark:border-sky-900/60 bg-sky-50/60 dark:bg-sky-950/20">
+              <p className="text-[11.5px] font-semibold text-sky-700 dark:text-sky-300 uppercase tracking-wide">
+                Avoirs en faveur du client — à déduire d'une prochaine facture
+              </p>
+              <ul className="mt-1.5 space-y-1">
+                {client.avoirsNonImputes.map((av) => (
+                  <li key={av.docEntry} className="flex items-center justify-between gap-2 text-[12.5px] text-sky-700 dark:text-sky-300">
+                    <span>AV {av.docNum ?? av.docEntry}{av.docDate && <span className="text-muted-foreground"> · {frDate(av.docDate)}</span>}</span>
+                    <span className="tnum font-semibold">{eurExact(av.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+              {client.avoirsNonImputes.length > 1 && (
+                <div className="mt-1.5 pt-1.5 border-t border-sky-200/70 dark:border-sky-900/60 flex items-center justify-between text-[12.5px] font-bold text-sky-800 dark:text-sky-200">
+                  <span>Total en faveur</span>
+                  <span className="tnum">{eurExact(client.avoirsNonImputesTotal)}</span>
+                </div>
+              )}
+            </div>
+          )}
           {(client.encaisse > 0 || client.avoirsAttribues > 0) && (
             <p className="px-4 py-2 text-[11.5px] text-muted-foreground border-b border-border bg-secondary/20">
               Chaque facture montre son <b>solde brut</b>, ses <b>avoirs rattachés</b> (en retrait) puis son <b>total net</b>.
@@ -339,7 +592,7 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
           {/* ── MOBILE : cartes par facture (le tableau 5 colonnes débordait) ── */}
           <div className="md:hidden p-3 space-y-2.5">
             {client.invoices.map((inv) => {
-              const late = inv.overdueDays > 30;
+              const late = inv.overdueDays > 0;   // en retard dès l'échéance dépassée (comme les totaux)
               const hasAvoirs = inv.avoirs.length > 0;
               return (
                 <div key={inv.docEntry} className={`rounded-xl border p-3 ${late ? "border-rose-300 dark:border-rose-800 bg-rose-50/40 dark:bg-rose-950/15" : "border-border bg-card"}`}>
@@ -352,8 +605,8 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
                     </div>
                     <div className="text-right shrink-0">
                       <div className="font-bold tnum text-[16px] text-foreground">{eurExact(inv.balance)}</div>
-                      {inv.overdueDays > 30
-                        ? <div className={`text-[12px] font-semibold ${inv.overdueDays >= 90 ? "text-rose-600 dark:text-rose-400" : inv.overdueDays >= 45 ? "text-rose-500 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"}`}>{inv.overdueDays} j de retard</div>
+                      {inv.overdueDays > 0
+                        ? <div className={`text-[12px] font-semibold ${inv.overdueDays > 90 ? "text-rose-600 dark:text-rose-400" : inv.overdueDays > 45 ? "text-rose-500 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"}`}>{inv.overdueDays} j de retard</div>
                         : <div className="text-[12px] text-muted-foreground/60">à jour</div>}
                     </div>
                   </div>
@@ -389,7 +642,7 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
             </thead>
             {/* Une « case » par facture (tbody) : facture + avoirs en retrait + TOTAL. */}
             {client.invoices.map((inv) => {
-              const late = inv.overdueDays > 30;
+              const late = inv.overdueDays > 0;   // en retard dès l'échéance dépassée (comme les totaux)
               const hasAvoirs = inv.avoirs.length > 0;
               return (
                 <tbody key={inv.docEntry} className="border-b-2 border-border/70">
@@ -400,8 +653,8 @@ function InvoicesModal({ client, onClose, onRelance }: { client: ClientEncours; 
                     <td className="px-4 pt-2 pb-1 text-muted-foreground">{frDate(inv.dueDate)}</td>
                     <td className="px-4 pt-2 pb-1 text-right font-semibold tnum text-foreground">{eurExact(inv.balance)}</td>
                     <td className="px-4 pt-2 pb-1 text-right tnum">
-                      {inv.overdueDays > 30
-                        ? <span className={`font-semibold ${inv.overdueDays >= 90 ? "text-rose-600 dark:text-rose-400" : inv.overdueDays >= 45 ? "text-rose-500 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"}`}>{inv.overdueDays} j</span>
+                      {inv.overdueDays > 0
+                        ? <span className={`font-semibold ${inv.overdueDays > 90 ? "text-rose-600 dark:text-rose-400" : inv.overdueDays > 45 ? "text-rose-500 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"}`}>{inv.overdueDays} j</span>
                         : <span className="text-muted-foreground/50">à jour</span>}
                     </td>
                   </tr>

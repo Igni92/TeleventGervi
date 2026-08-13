@@ -32,6 +32,9 @@ type ReceiptLine = {
   uPays: string | null; uMarque: string | null; uCondi: string | null; frgnName?: string | null;
   /** U_GER_CALIBRE SAP, lu en direct (best-effort) — précision produit. */
   calibre?: string | null;
+  /** Retour fournisseur : quantité retournée (pie) + équivalent colis. 0 = rien retourné. */
+  returnedPieces?: number;
+  returnedPackages?: number;
 };
 type Receipt = {
   docEntry: number; docNum: number; lot: string; docDate: string;
@@ -115,6 +118,29 @@ function ReceivedBadge({ className = "" }: { className?: string }) {
     </span>
   );
 }
+
+/** Badge « retour fournisseur » sur une ligne d'EM : rouge si retour TOTAL,
+ *  ambre « N colis retournés » si partiel. Rend `null` si rien n'est retourné. */
+function ReturnedBadge({ line, className = "" }: { line: ReceiptLine; className?: string }) {
+  const returned = line.returnedPieces ?? 0;
+  if (returned <= 1e-6) return null;
+  const full = returned >= (line.pieceQuantity ?? 0) - 1e-6;
+  return full ? (
+    <span title="Ligne entièrement retournée au fournisseur"
+      className={`inline-flex items-center gap-1 rounded-full border border-rose-400/50 bg-rose-500/10 px-2 py-0.5 text-[10.5px] font-semibold text-rose-700 dark:text-rose-300 ${className}`}>
+      <Undo2 className="h-3 w-3" /> Retourné
+    </span>
+  ) : (
+    <span title="Retour partiel au fournisseur"
+      className={`inline-flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-500/10 px-2 py-0.5 text-[10.5px] font-semibold text-amber-700 dark:text-amber-300 ${className}`}>
+      <Undo2 className="h-3 w-3" /> {fmtColis(line.returnedPackages ?? 0)} colis retournés
+    </span>
+  );
+}
+
+/** Ligne d'EM entièrement retournée → à barrer (comme une annulation). */
+const isLineFullyReturned = (l: ReceiptLine): boolean =>
+  (l.returnedPieces ?? 0) > 1e-6 && (l.returnedPieces ?? 0) >= (l.pieceQuantity ?? 0) - 1e-6;
 
 /** Édition du prix d'une ligne d'EM (prix unitaire OU total HT forcé). */
 type PriceEdit = { lineNum: number; pieceQuantity: number; price: string; lineTotal: string; forceTotal: boolean };
@@ -825,12 +851,13 @@ function ReceiptDetail({
         {receipt.lines.map((l, i) => {
           const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi, frgnName: l.frgnName });
           const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
+          const struck = isVoided(receipt) || isLineFullyReturned(l);
           return (
-            <div key={`m-${l.itemCode}-${i}`} className="rounded-lg border border-border bg-card/40 p-3">
+            <div key={`m-${l.itemCode}-${i}`} className={`rounded-lg border p-3 ${isLineFullyReturned(l) ? "border-rose-400/40 bg-rose-50/40 dark:bg-rose-950/20" : "border-border bg-card/40"}`}>
               {/* Quantité + article + PU + Total HT — sur UNE SEULE ligne */}
               <div className="flex items-baseline gap-2">
-                <span className="text-[15px] font-bold tnum text-foreground shrink-0">{fmtColis(l.packageQuantity)}</span>
-                <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground leading-tight">{dz.fruit}</span>
+                <span className={`text-[15px] font-bold tnum shrink-0 ${struck ? "line-through text-muted-foreground" : "text-foreground"}`}>{fmtColis(l.packageQuantity)}</span>
+                <span className={`min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight ${struck ? "line-through text-muted-foreground" : "text-foreground"}`}>{dz.fruit}</span>
                 {!restricted && (canEditPrices && priceEdits[i] ? (
                   <NumberInput value={emEffPU(priceEdits[i])} onValueChange={(n) => updatePriceEdit(i, { price: n == null ? "" : String(n), forceTotal: false, lineTotal: "" })} onBlur={() => saveLine(i)} min={0} step={0.01} decimals={2} allowEmpty placeholder="PU" className="h-8 w-20 shrink-0 text-right" />
                 ) : (
@@ -847,8 +874,9 @@ function ReceiptDetail({
               {/* Statut de la ligne : Agréée (venue d'une Cde Fournisseur, avec
                   contrôle qualité) sinon Reçu (EM libre, générique). */}
               {!isVoided(receipt) && (
-                <div className="mt-1.5">
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   {agreage ? <AgreageBadge a={agreage} /> : <ReceivedBadge />}
+                  <ReturnedBadge line={l} />
                 </div>
               )}
               {/* DDM (fraîcheur) du lot — sur la ligne, éditable */}
@@ -898,10 +926,13 @@ function ReceiptDetail({
               const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi, frgnName: l.frgnName });
               const lineHT = l.lineTotal ?? (l.price != null ? l.price * l.pieceQuantity : null);
               return (
-                <tr key={`${l.itemCode}-${i}`} className="border-t border-border/50">
-                  <td className={`tnum whitespace-nowrap ${td}`}>{fmtColis(l.packageQuantity)} <span className="text-muted-foreground">colis</span></td>
+                <tr key={`${l.itemCode}-${i}`} className={`border-t border-border/50 ${isLineFullyReturned(l) ? "bg-rose-50/40 dark:bg-rose-950/20" : ""}`}>
+                  <td className={`tnum whitespace-nowrap ${td} ${(isVoided(receipt) || isLineFullyReturned(l)) ? "line-through text-muted-foreground" : ""}`}>{fmtColis(l.packageQuantity)} <span className="text-muted-foreground">colis</span></td>
                   <td className={`font-mono ${td}`}>{l.itemCode}</td>
-                  <td className={`text-foreground ${td}`}>{dz.fruit}</td>
+                  <td className={`${td} ${(isVoided(receipt) || isLineFullyReturned(l)) ? "line-through text-muted-foreground" : "text-foreground"}`}>
+                    {dz.fruit}
+                    <ReturnedBadge line={l} className="ml-2 align-middle" />
+                  </td>
                   <td className={td}><Chip kind="marque">{dz.marque}</Chip></td>
                   <td className={td}><Chip kind="condt">{dz.condt}</Chip></td>
                   <td className={td}><Chip kind="variete">{dz.variete}</Chip></td>

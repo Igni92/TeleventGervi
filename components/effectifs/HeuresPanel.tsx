@@ -53,6 +53,12 @@ interface MonthRow {
 export function HeuresPanel({ isManager }: { isManager: boolean }) {
   const [week, setWeek] = useState(() => isoWeekId(new Date()));
   const dates = useMemo(() => weekDates(week), [week]);
+  // Un SALARIÉ saisit ses heures AU JOUR LE JOUR : il ne peut plus modifier un
+  // jour PASSÉ (aujourd'hui et les jours à venir restent éditables). Un manager
+  // (direction/admin) garde le droit de corriger a posteriori. « Aujourd'hui » en
+  // heure de Paris pour éviter tout décalage minuit UTC.
+  const todayISO = useMemo(() => new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Paris" }), []);
+  const locked = (i: number) => !isManager && !!dates[i] && dates[i] < todayISO;
   // Libellés des jours fériés de la semaine (« Fête nationale »…), par jour.
   const feries = useMemo(() => dates.map((d) => (d ? frenchHolidayLabel(d) : null)), [dates]);
 
@@ -105,6 +111,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
   const calc = useMemo(() => computeWeek(days, profile.weeklyHours, typDayMin), [days, profile.weeklyHours, typDayMin]);
 
   const setDay = (i: number, patch: Partial<DayHours>) => {
+    if (locked(i)) return;   // jour passé verrouillé pour un salarié
     setDays((cur) => cur.map((d, k) => (k === i ? { ...d, ...patch } : d)));
     setDirty(true);
   };
@@ -112,6 +119,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
   // Tag du jour (Présent / Absent / Congés / Récup / Maladie) — un seul par
   // jour, re-cliquer le tag actif le retire.
   const setTag = (i: number, tag: DayTag) => {
+    if (locked(i)) return;   // jour passé verrouillé pour un salarié
     setDays((cur) => cur.map((d, k) => (k === i ? { ...d, tag: d?.tag === tag ? undefined : tag } : d)));
     setDirty(true);
   };
@@ -369,16 +377,16 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-11 shrink-0 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Matin</span>
-                <input type="time" disabled={loading} value={days[i]?.m1 ?? ""} onChange={(e) => setDay(i, { m1: e.target.value })} className={timeCardCls} aria-label={`${jour} matin début`} />
+                <input type="time" disabled={loading || locked(i)} value={days[i]?.m1 ?? ""} onChange={(e) => setDay(i, { m1: e.target.value })} className={timeCardCls} aria-label={`${jour} matin début`} />
                 <span className="text-muted-foreground text-[11px] shrink-0">→</span>
-                <input type="time" disabled={loading} value={days[i]?.m2 ?? ""} onChange={(e) => setDay(i, { m2: e.target.value })} className={timeCardCls} aria-label={`${jour} matin fin`} />
+                <input type="time" disabled={loading || locked(i)} value={days[i]?.m2 ?? ""} onChange={(e) => setDay(i, { m2: e.target.value })} className={timeCardCls} aria-label={`${jour} matin fin`} />
               </div>
               {showAfternoon && (
                 <div className="flex items-center gap-1.5 mt-2">
                   <span className="w-11 shrink-0 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">A-midi</span>
-                  <input type="time" disabled={loading} value={days[i]?.a1 ?? ""} onChange={(e) => setDay(i, { a1: e.target.value })} className={timeCardCls} aria-label={`${jour} après-midi début`} />
+                  <input type="time" disabled={loading || locked(i)} value={days[i]?.a1 ?? ""} onChange={(e) => setDay(i, { a1: e.target.value })} className={timeCardCls} aria-label={`${jour} après-midi début`} />
                   <span className="text-muted-foreground text-[11px] shrink-0">→</span>
-                  <input type="time" disabled={loading} value={days[i]?.a2 ?? ""} onChange={(e) => setDay(i, { a2: e.target.value })} className={timeCardCls} aria-label={`${jour} après-midi fin`} />
+                  <input type="time" disabled={loading || locked(i)} value={days[i]?.a2 ?? ""} onChange={(e) => setDay(i, { a2: e.target.value })} className={timeCardCls} aria-label={`${jour} après-midi fin`} />
                 </div>
               )}
               {/* Tags du jour (remplacent la note libre sur mobile) : Présent /
@@ -386,7 +394,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                   journée type (le CP compte comme travaillé). */}
               <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label={`${jour} tag`}>
                 {DAY_TAGS.map((t) => (
-                  <TagChip key={t} tag={t} active={days[i]?.tag === t} disabled={loading} onClick={() => setTag(i, t)} />
+                  <TagChip key={t} tag={t} active={days[i]?.tag === t} disabled={loading || locked(i)} onClick={() => setTag(i, t)} />
                 ))}
               </div>
               {days[i]?.tag === "conges" && !dayHasHours(days[i]) && typDayMin > 0 && (
@@ -434,10 +442,10 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                       </span>
                     )}
                   </td>
-                  <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.m1 ?? ""} onChange={(e) => setDay(i, { m1: e.target.value })} className={timeCls} aria-label={`${jour} matin début`} /></td>
-                  <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.m2 ?? ""} onChange={(e) => setDay(i, { m2: e.target.value })} className={timeCls} aria-label={`${jour} matin fin`} /></td>
-                  {showAfternoon && <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.a1 ?? ""} onChange={(e) => setDay(i, { a1: e.target.value })} className={timeCls} aria-label={`${jour} après-midi début`} /></td>}
-                  {showAfternoon && <td className="px-2 py-1.5"><input type="time" disabled={loading} value={days[i]?.a2 ?? ""} onChange={(e) => setDay(i, { a2: e.target.value })} className={timeCls} aria-label={`${jour} après-midi fin`} /></td>}
+                  <td className="px-2 py-1.5"><input type="time" disabled={loading || locked(i)} value={days[i]?.m1 ?? ""} onChange={(e) => setDay(i, { m1: e.target.value })} className={timeCls} aria-label={`${jour} matin début`} /></td>
+                  <td className="px-2 py-1.5"><input type="time" disabled={loading || locked(i)} value={days[i]?.m2 ?? ""} onChange={(e) => setDay(i, { m2: e.target.value })} className={timeCls} aria-label={`${jour} matin fin`} /></td>
+                  {showAfternoon && <td className="px-2 py-1.5"><input type="time" disabled={loading || locked(i)} value={days[i]?.a1 ?? ""} onChange={(e) => setDay(i, { a1: e.target.value })} className={timeCls} aria-label={`${jour} après-midi début`} /></td>}
+                  {showAfternoon && <td className="px-2 py-1.5"><input type="time" disabled={loading || locked(i)} value={days[i]?.a2 ?? ""} onChange={(e) => setDay(i, { a2: e.target.value })} className={timeCls} aria-label={`${jour} après-midi fin`} /></td>}
                   <td className="px-3 py-1.5 text-right tnum font-bold">
                     {calc.dayMin[i] > 0 ? fmtHM(calc.dayMin[i]) : "—"}
                     {days[i]?.tag === "conges" && !dayHasHours(days[i]) && typDayMin > 0 && (
@@ -448,7 +456,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                     )}
                   </td>
                   <td className="px-2 py-1.5">
-                    <select value={days[i]?.tag ?? ""} disabled={loading} aria-label={`${jour} tag`}
+                    <select value={days[i]?.tag ?? ""} disabled={loading || locked(i)} aria-label={`${jour} tag`}
                       onChange={(e) => setDay(i, { tag: (e.target.value || undefined) as DayTag | undefined })}
                       className="h-9 w-[110px] rounded-md border border-border bg-background px-1.5 text-[12px] focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">
                       <option value="">—</option>
@@ -456,7 +464,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                     </select>
                   </td>
                   <td className="px-3 py-1.5">
-                    <input value={days[i]?.note ?? ""} disabled={loading} maxLength={80}
+                    <input value={days[i]?.note ?? ""} disabled={loading || locked(i)} maxLength={80}
                       onChange={(e) => setDay(i, { note: e.target.value })}
                       placeholder=""
                       aria-label={`${jour} note`}
@@ -467,6 +475,12 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
             </tbody>
           </table>
         </div>
+
+        {!isManager && (
+          <p className="mt-2 text-[11.5px] text-muted-foreground">
+            Saisie au jour le jour : les jours <b>passés</b> ne sont plus modifiables.
+          </p>
+        )}
 
         {/* Totaux + actions */}
         <div className="mt-3 flex flex-wrap items-center gap-2">

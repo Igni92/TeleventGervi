@@ -31,6 +31,7 @@ import { BLDialog } from "@/components/console/BLDialog";
 import { NotificationsBell } from "@/components/console/NotificationsBell";
 import { SapOrderHistory } from "@/components/console/SapOrderHistory";
 import { SapGroupBadge } from "@/components/clients/SapGroupBadge";
+import { RappelDateField } from "@/components/RappelDateField";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -2618,11 +2619,8 @@ function RappelDialog({
 
   useEffect(() => {
     if (open) {
-      // default to tomorrow 10:00
-      const t = new Date();
-      t.setDate(t.getDate() + 1);
-      t.setHours(10, 0, 0, 0);
-      setDate(formatDateInput(t));
+      // Défaut = aujourd'hui à 5h (posé par RappelDateField quand la valeur est vide).
+      setDate("");
       setNote("");
     }
   }, [open]);
@@ -2665,17 +2663,9 @@ function RappelDialog({
         <div className="space-y-4 mt-2">
           <div className="space-y-2">
             <Label htmlFor="rdate">Date et heure</Label>
-            <Input
-              id="rdate" type="datetime-local"
-              min={minDateTime}
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
-            {date && (
-              <p className="text-[12px] font-semibold tnum text-brand-600 dark:text-brand-400">
-                {formatRappelDate(date)}
-              </p>
-            )}
+            {/* Saisie libre au clavier (« 17 » + Entrée → 17 du mois courant à 5h)
+                ou sélecteur natif via l'icône ; la case affiche « MAR 17.08.26 05:00 ». */}
+            <RappelDateField id="rdate" value={date} onChange={setDate} min={minDateTime} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="rnote">Note (facultatif)</Label>

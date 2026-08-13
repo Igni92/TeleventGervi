@@ -42,7 +42,13 @@ type PurchaseOrder = {
 
 /** Agréage porté par la réception (cf. lib/agreage) : conforme, ou avec réserve.
  *  Les types de réserve = INCIDENT_TYPES (mêmes types que les incidents de réception). */
-type ReceiveAgreage = { status: "CONFORME" | "RESERVE"; type?: string; note?: string; rating?: number | null };
+type ReceiveAgreage = {
+  status: "CONFORME" | "RESERVE";
+  type?: string; note?: string;
+  rating?: number | null;
+  /** Note qualité PAR ARTICLE (agréage ligne par ligne). */
+  lines?: { itemCode: string; rating: number }[];
+};
 
 /** Date « jour + date » unifiée des états SAP : « VEN 10.07.26 ». */
 const fmtDate = fmtJourDate;
@@ -363,14 +369,20 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
   restricted?: boolean;
 }) {
   const [confirm, setConfirm] = useState(false);
-  // Agréage de la réception (contrôle qualité) : conforme par défaut ; « avec
-  // réserve » exige un type + une note (la réserve ouvre un incident).
-  const [agreeStatus, setAgreeStatus] = useState<"CONFORME" | "RESERVE">("CONFORME");
-  const [reserveType, setReserveType] = useState<string>(INCIDENT_TYPES[0]);
-  const [reserveNote, setReserveNote] = useState("");
-  // Note qualité (étoiles) de la marchandise reçue — posée par l'agréeur.
-  const [qualityRating, setQualityRating] = useState<number | null>(null);
-  const reserveIncomplete = agreeStatus === "RESERVE" && !reserveNote.trim();
+  // Agréage PAR ARTICLE (ligne par ligne) : chaque ligne ouverte porte sa note
+  // qualité (étoiles, facultative) ; « Refuser » retire l'article de la commande
+  // et ouvre un incident de réception (réserve : type + note obligatoires).
+  type LineAgr = { rating: number | null; refused: boolean; reserveType: string; reserveNote: string };
+  const [lineAgr, setLineAgr] = useState<Record<number, LineAgr>>({});
+  const [processing, setProcessing] = useState(false);
+  const getLA = (i: number): LineAgr => lineAgr[i] ?? { rating: null, refused: false, reserveType: INCIDENT_TYPES[0] as string, reserveNote: "" };
+  const setLA = (i: number, patch: Partial<LineAgr>) => setLineAgr((c) => ({ ...c, [i]: { ...getLA(i), ...patch } }));
+  // Lignes RÉCEPTIONNABLES = lignes encore ouvertes (index conservé pour l'état).
+  const openLineIdx = po.lines.map((l, i) => ({ l, i })).filter(({ l }) => l.open);
+  const refusedIdx = openLineIdx.filter(({ i }) => getLA(i).refused);
+  const keptIdx = openLineIdx.filter(({ i }) => !getLA(i).refused);
+  const reserveIncomplete = refusedIdx.some(({ i }) => !getLA(i).reserveNote.trim());
+  const nothingKept = keptIdx.length === 0;
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editLines, setEditLines] = useState<EditLine[]>([]);
@@ -455,6 +467,65 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
       await onModified();
     } catch (e) { toast.error((e as Error).message); }
     finally { setSaving(false); }
+  };
+
+  // Ligne de commande → charge utile /modif (garde qté colis, entrepôt, prix/total forcé).
+  const modifLineOf = (l: PoLine) => {
+    const whs = (["000", "01", "R1"] as const).find((w) => w === l.warehouse) ?? "01";
+    const base = { itemCode: l.itemCode, packageQuantity: l.packageQuantity ?? 0, warehouseCode: whs };
+    const forceTotal = (l.price == null || l.price <= 0) && l.lineTotal != null && l.lineTotal > 0;
+    return forceTotal
+      ? { ...base, lineTotal: l.lineTotal as number }
+      : { ...base, price: l.price != null && l.price > 0 ? l.price : undefined };
+  };
+
+  // Validation de la réception : ouvre un incident par ligne refusée, retire ces
+  // lignes de la commande (/modif), puis réceptionne le reste avec les notes/ligne.
+  const doReceive = async () => {
+    if (reserveIncomplete) { toast.error("Décris la réserve de chaque ligne refusée."); return; }
+    if (nothingKept) { toast.error("Toutes les lignes sont refusées — rien à réceptionner."); return; }
+    setProcessing(true);
+    try {
+      if (refusedIdx.length > 0) {
+        // a) un incident de réception par article refusé (réserve).
+        for (const { l, i } of refusedIdx) {
+          const la = getLA(i);
+          const r = await fetch("/api/entrees/incidents", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              docNum: po.docNum, cardCode: po.cardCode, cardName: po.cardName,
+              itemCode: l.itemCode, type: la.reserveType, note: la.reserveNote.trim(),
+            }),
+          });
+          if (!r.ok) { const j = await r.json().catch(() => null); throw new Error(j?.error || `Incident non créé (${l.itemCode})`); }
+        }
+        // b) retire les lignes refusées de la commande (ne garde que les retenues).
+        const rm = await fetch(`/api/sap/purchase-orders/${po.docEntry}/modif`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lines: keptIdx.map(({ l }) => modifLineOf(l)) }),
+        });
+        const jm = await rm.json().catch(() => null);
+        if (!rm.ok || !jm?.ok) throw new Error(jm?.error || "Retrait des lignes refusées impossible");
+        notifyReceptionIncidentsChanged();
+        toast.warning(
+          `${refusedIdx.length} article(s) refusé(s) et retiré(s) de la commande — incident(s) de réception ouvert(s).`,
+          { duration: 8000 },
+        );
+      }
+      // c) réception des lignes RETENUES (= marchandise acceptée → EM conforme),
+      //    avec la note qualité par article. Les réserves des lignes refusées
+      //    vivent déjà dans leurs propres incidents (pas de doublon global ici).
+      onReceive(po.docEntry, {
+        status: "CONFORME",
+        lines: keptIdx
+          .map(({ l, i }) => ({ itemCode: l.itemCode, rating: getLA(i).rating }))
+          .filter((x): x is { itemCode: string; rating: number } => x.rating != null),
+      });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setProcessing(false);
+    }
   };
 
   // ── Mode ÉDITION (commande pas encore réceptionnée) ──
@@ -579,92 +650,87 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
           ) : (
             <div className="space-y-2.5">
               <p className="text-[13px] text-foreground">
-                Créer l&apos;entrée marchandise pour cette commande&nbsp;? La commande sera clôturée
-                et le stock incrémenté.
+                Entrée marchandise <b>article par article</b> — note qualité (facultative) et
+                « Refuser » par ligne. La commande sera clôturée et le stock incrémenté.
               </p>
-              {/* ── Agréage de la marchandise reçue (contrôle qualité) ── */}
               <div className="space-y-2">
-                <p className="text-[10.5px] uppercase tracking-wide font-semibold text-muted-foreground">Agréage de la marchandise</p>
-                {/* Note qualité (étoiles) — posée par l'agréeur, appliquée aux articles reçus. */}
-                <div className="flex items-center gap-2">
-                  <span className="text-[12px] text-muted-foreground">Note qualité</span>
-                  <StarRating value={qualityRating} onChange={setQualityRating} size="md" ariaLabel="Note qualité de la marchandise reçue" />
-                </div>
-                <div className="flex items-center gap-2 flex-wrap" role="radiogroup" aria-label="Agréage de la marchandise">
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={agreeStatus === "CONFORME"}
-                    onClick={() => setAgreeStatus("CONFORME")}
-                    className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border text-[12.5px] font-semibold transition-colors ${
-                      agreeStatus === "CONFORME"
-                        ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-                        : "border-border text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <PackageCheck className="h-3.5 w-3.5" /> Conforme
-                  </button>
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={agreeStatus === "RESERVE"}
-                    onClick={() => setAgreeStatus("RESERVE")}
-                    className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border text-[12.5px] font-semibold transition-colors ${
-                      agreeStatus === "RESERVE"
-                        ? "border-amber-500/60 bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                        : "border-border text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <AlertTriangle className="h-3.5 w-3.5" /> Avec réserve
-                  </button>
-                </div>
-                {agreeStatus === "RESERVE" && (
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {INCIDENT_TYPES.map((t) => (
-                        <button
-                          key={t}
-                          type="button"
-                          onClick={() => setReserveType(t)}
-                          className={`h-8 px-2.5 rounded-lg border text-[11.5px] font-semibold transition-colors ${
-                            reserveType === t
-                              ? "border-amber-500/60 bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                              : "border-border text-muted-foreground hover:text-foreground"
-                          }`}
-                        >
-                          {t}
-                        </button>
-                      ))}
+                {openLineIdx.map(({ l, i }) => {
+                  const la = getLA(i);
+                  const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi, frgnName: l.frgnName });
+                  return (
+                    <div key={`agr-${l.itemCode}-${i}`} className={`rounded-lg border p-2.5 ${la.refused ? "border-rose-400/60 bg-rose-50/50 dark:bg-rose-950/20" : "border-border bg-card/40"}`}>
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="min-w-0">
+                          <span className={`text-[13.5px] font-semibold ${la.refused ? "line-through text-muted-foreground" : "text-foreground"}`}>{dz.fruit}</span>
+                          <span className="ml-1.5 font-mono text-[11px] text-muted-foreground">{l.itemCode}</span>
+                          <span className="ml-1.5 text-[12px] tnum text-muted-foreground">{fmtColis(l.packageQuantity)} colis</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {!la.refused && (
+                            <StarRating value={la.rating} onChange={(v) => setLA(i, { rating: v })} size="sm" ariaLabel={`Note qualité ${dz.fruit}`} />
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setLA(i, { refused: !la.refused })}
+                            className={`inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border text-[11.5px] font-semibold transition-colors ${
+                              la.refused
+                                ? "border-rose-500/60 bg-rose-500/15 text-rose-700 dark:text-rose-300"
+                                : "border-border text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400"
+                            }`}
+                          >
+                            {la.refused ? "Rétablir" : <><Trash2 className="h-3.5 w-3.5" /> Refuser</>}
+                          </button>
+                        </div>
+                      </div>
+                      {la.refused && (
+                        <div className="mt-2 space-y-1.5">
+                          <div className="flex flex-wrap gap-1.5">
+                            {INCIDENT_TYPES.map((t) => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => setLA(i, { reserveType: t })}
+                                className={`h-7 px-2.5 rounded-lg border text-[11px] font-semibold transition-colors ${
+                                  la.reserveType === t
+                                    ? "border-amber-500/60 bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                                    : "border-border text-muted-foreground hover:text-foreground"
+                                }`}
+                              >
+                                {t}
+                              </button>
+                            ))}
+                          </div>
+                          <textarea
+                            value={la.reserveNote}
+                            onChange={(e) => setLA(i, { reserveNote: e.target.value })}
+                            rows={2}
+                            placeholder="Motif de la réserve (obligatoire) — ex. 12 colis abîmés, +9 °C…"
+                            aria-label={`Réserve ${l.itemCode}`}
+                            className="w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-ring/40"
+                          />
+                        </div>
+                      )}
                     </div>
-                    <textarea
-                      value={reserveNote}
-                      onChange={(e) => setReserveNote(e.target.value)}
-                      rows={2}
-                      placeholder="Décris la réserve (obligatoire) — ex. 12 colis abîmés, température +9 °C…"
-                      aria-label="Note de réserve"
-                      className="w-full rounded-lg border border-border bg-card px-2.5 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring/40"
-                    />
-                    <p className="text-[11px] text-muted-foreground">
-                      La réserve est enregistrée sur l&apos;entrée marchandise et <b>ouvre un incident de réception</b> (litige fournisseur).
-                    </p>
-                  </div>
-                )}
+                  );
+                })}
               </div>
+              <p className="text-[11px] text-muted-foreground">
+                Une note d&apos;étoiles par article (facultative). <b>Refuser</b> retire l&apos;article de la
+                commande et <b>ouvre un incident de réception</b> (réserve, litige fournisseur).
+              </p>
               <div className="flex items-center gap-2">
                 <Button
                   size="lg"
-                  onClick={() => onReceive(po.docEntry, {
-                    status: agreeStatus,
-                    ...(agreeStatus === "RESERVE" ? { type: reserveType, note: reserveNote.trim() } : {}),
-                    ...(qualityRating ? { rating: qualityRating } : {}),
-                  })}
-                  disabled={receiving || reserveIncomplete}
-                  title={reserveIncomplete ? "Décris la réserve avant de confirmer" : undefined}
+                  onClick={doReceive}
+                  disabled={receiving || processing || reserveIncomplete || nothingKept}
+                  title={reserveIncomplete ? "Décris la réserve des lignes refusées" : nothingKept ? "Toutes les lignes sont refusées" : undefined}
                 >
-                  {receiving ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageCheck className="h-4 w-4" />}
-                  {agreeStatus === "RESERVE" ? "Réceptionner avec réserve" : "Confirmer la réception"}
+                  {(receiving || processing) ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageCheck className="h-4 w-4" />}
+                  {refusedIdx.length > 0
+                    ? `Réceptionner ${keptIdx.length} article(s) · ${refusedIdx.length} refusé(s)`
+                    : "Confirmer la réception"}
                 </Button>
-                <Button variant="outline" size="lg" onClick={() => setConfirm(false)} disabled={receiving}>
+                <Button variant="outline" size="lg" onClick={() => setConfirm(false)} disabled={receiving || processing}>
                   Annuler
                 </Button>
               </div>

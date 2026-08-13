@@ -16,10 +16,17 @@
  * à l'import de DEFAULT_RELANCE_PARAMS (même convention que lib/sapb1.ts).
  */
 
+import { legalRateForDate } from "./legalRate";
+
 export interface RelanceParams {
-  /** Libellé du taux affiché dans le courrier (ex. « 3 × le taux d'intérêt légal »). */
+  /** Libellé du taux affiché dans le courrier — GÉNÉRÉ (« 5 × le taux d'intérêt légal (13,75 %) »). */
   tauxPenalitesLabel: string;
-  /** Taux ANNUEL des pénalités, en fraction (0,15 = 15 %). 0 = non configuré. */
+  /** Taux d'intérêt LÉGAL annuel (fraction) — publié par la Banque de France chaque
+   *  semestre (créances professionnelles / « autres cas »). Récupéré automatiquement. */
+  tauxInteretLegal: number;
+  /** Multiplicateur CGV appliqué au taux légal (clause « 5 × le taux d'intérêt légal »). */
+  penaliteMultiplier: number;
+  /** Taux ANNUEL des pénalités appliqué = tauxInteretLegal × penaliteMultiplier (DÉRIVÉ). */
   penaliteTauxAnnuel: number;
   /** Indemnité forfaitaire de recouvrement par facture (€). Forfait légal = 40. */
   ifrParFacture: number;
@@ -34,8 +41,14 @@ export interface RelanceParams {
 }
 
 export const DEFAULT_RELANCE_PARAMS: RelanceParams = {
-  tauxPenalitesLabel: "3 × le taux d'intérêt légal",
-  penaliteTauxAnnuel: 0,
+  // Pénalités = 5 × le taux d'intérêt légal (clause CGV). Le taux légal est
+  // récupéré chaque semestre auprès de la Banque de France (cf. lib/relance/legalRate) ;
+  // défaut = S2 2026 (2,75 %). penaliteTauxAnnuel et le libellé sont RECALCULÉS
+  // dans getRelanceParams à partir de tauxInteretLegal × penaliteMultiplier.
+  tauxPenalitesLabel: "5 × le taux d'intérêt légal",
+  tauxInteretLegal: 0.0275,
+  penaliteMultiplier: 5,
+  penaliteTauxAnnuel: 0.1375,
   ifrParFacture: 40,
   delaiReponse: "8 jours",
   signataire: "La Direction",
@@ -45,8 +58,10 @@ export const DEFAULT_RELANCE_PARAMS: RelanceParams = {
 
 /** Clés AppSetting ↔ champ de RelanceParams. */
 const KEYS: Record<string, keyof RelanceParams> = {
-  relance_taux_penalites_label: "tauxPenalitesLabel",
-  relance_penalite_taux_annuel: "penaliteTauxAnnuel",
+  // Taux légal (auto, Banque de France) + multiplicateur CGV. Le taux appliqué
+  // (penaliteTauxAnnuel) et le libellé sont DÉRIVÉS, donc pas chargés directement.
+  relance_taux_interet_legal: "tauxInteretLegal",
+  relance_penalite_multiplier: "penaliteMultiplier",
   relance_ifr_par_facture: "ifrParFacture",
   relance_delai_reponse: "delaiReponse",
   relance_signataire: "signataire",
@@ -60,6 +75,10 @@ const KEYS: Record<string, keyof RelanceParams> = {
  */
 export async function getRelanceParams(): Promise<RelanceParams> {
   const params: RelanceParams = { ...DEFAULT_RELANCE_PARAMS };
+  // Taux légal AUTOMATIQUE = celui en vigueur ce semestre (table officielle).
+  // Une clé AppSetting `relance_taux_interet_legal` explicite le surcharge ensuite.
+  const auto = legalRateForDate(new Date());
+  if (auto != null) params.tauxInteretLegal = auto;
   try {
     const { prisma } = await import("@/lib/prisma");
     const rows = await prisma.appSetting.findMany({
@@ -69,7 +88,7 @@ export async function getRelanceParams(): Promise<RelanceParams> {
     for (const { key, value } of rows) {
       const field = KEYS[key];
       if (!field || value == null || value === "") continue;
-      if (field === "penaliteTauxAnnuel" || field === "ifrParFacture") {
+      if (field === "tauxInteretLegal" || field === "penaliteMultiplier" || field === "ifrParFacture") {
         const n = Number(value.replace(",", "."));
         if (Number.isFinite(n)) (params[field] as number) = n;
       } else {
@@ -79,5 +98,9 @@ export async function getRelanceParams(): Promise<RelanceParams> {
   } catch {
     /* DB indispo → défauts */
   }
+  // Taux appliqué + libellé DÉRIVÉS : pénalités = taux légal × multiplicateur CGV.
+  params.penaliteTauxAnnuel = Math.round(params.tauxInteretLegal * params.penaliteMultiplier * 1e6) / 1e6;
+  const pct = (params.penaliteTauxAnnuel * 100).toFixed(2).replace(/\.?0+$/, "").replace(".", ",");
+  params.tauxPenalitesLabel = `${params.penaliteMultiplier} × le taux d'intérêt légal (${pct} %)`;
   return params;
 }

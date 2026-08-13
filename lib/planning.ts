@@ -249,10 +249,14 @@ export function resolveCalendarDay(input: {
 }): CalendarDayResolved {
   const { dow, inMonth, ferieLabel, approvedTypes = [], pendingTypes = [], tag, recupPosee } = input;
 
+  // Le type de congé « absence » (déclaré par la direction) s'affiche avec la
+  // pastille « absent » (rose) — DayCategory n'a pas d'entrée « absence ».
+  const catOf = (t: CongeType): DayCategory => (t === "absence" ? "absent" : (t as DayCategory));
+
   if (ferieLabel) return { category: "ferie", pending: false, planned: false, ferieLabel };
-  if (approvedTypes.length) return { category: approvedTypes[0] as DayCategory, pending: false, planned: false, ferieLabel: null };
+  if (approvedTypes.length) return { category: catOf(approvedTypes[0]), pending: false, planned: false, ferieLabel: null };
   if (tag) return { category: tagToCategory(tag), pending: false, planned: false, ferieLabel: null };
-  if (pendingTypes.length) return { category: pendingTypes[0] as DayCategory, pending: true, planned: false, ferieLabel: null };
+  if (pendingTypes.length) return { category: catOf(pendingTypes[0]), pending: true, planned: false, ferieLabel: null };
   if (recupPosee) return { category: "recup", pending: false, planned: true, ferieLabel: null };
 
   // PRÉSENT PAR DÉFAUT : jour travaillé (lundi→SAMEDI) du mois, rien d'autre posé.
@@ -282,6 +286,16 @@ export interface RecupCounter {
   plannedDates: string[]; // jours de récup posés PAS ENCORE décomptés (à venir)
   reservedMin: number;    // RÉSERVE provisoire des jours posés à venir = ce que coûterait la récup si la semaine finissait maintenant
   availableMin: number;   // solde RÉELLEMENT disponible à poser = balance − réserve (borné ≥ 0)
+  /** DÉTAIL BRUT par tranche des heures supp MISES EN RÉCUP (avant majoration),
+   *  cumulé sur les semaines TERMINÉES. Informatif (CET) : credit25*1,25 +
+   *  credit50*1,5 = creditMin. N'intervient PAS dans le solde. */
+  credit25Min: number;    // brut mis en récup dans la tranche +25 %
+  credit50Min: number;    // brut mis en récup dans la tranche +50 %
+  /** DISPONIBLE BRUT par tranche = credit25/50 NET des récup prises/réservées,
+   *  consommées des semaines les plus ANCIENNES d'abord (juin @25 % soldé avant
+   *  juillet @50 %). C'est le « heures supp à payer » réel, par taux. */
+  avail25Min: number;
+  avail50Min: number;
 }
 
 /**
@@ -358,6 +372,7 @@ export function computeRecupCounter(
   for (const d of extraRecupDates) if (isIsoDate(d)) slot(isoWeekOfDate(d)).recupDays.add(d);
 
   let creditMin = 0, debitMin = 0, reservedMin = 0;
+  let credit25Min = 0, credit50Min = 0;
   const plannedDates: string[] = [];
   for (const [week, { input, recupDays }] of byWeek) {
     const dates = weekDates(week);
@@ -375,7 +390,13 @@ export function computeRecupCounter(
         const c = computeWeek(input.days, profile.weeklyHours, typDay);
         const st = splitStructuralSupp(c.sup25Min, c.sup50Min, structuralSuppMin(profile));
         const payMin = effectivePaySuppMin(input.option, input.paySuppMin, st.arbitrableMin);
-        creditMin += splitSupp(st.arb25Min, st.arb50Min, payMin).recupEquivMin;
+        const sp = splitSupp(st.arb25Min, st.arb50Min, payMin);
+        creditMin += sp.recupEquivMin;
+        // Brut mis en récup par tranche = arbitrable − part payée (par tranche).
+        const raw25 = Math.max(0, st.arb25Min - sp.pay25Min);
+        const raw50 = Math.max(0, st.arb50Min - sp.pay50Min);
+        credit25Min += raw25;
+        credit50Min += raw50;
       }
       debitMin += cost;
     } else {
@@ -394,7 +415,24 @@ export function computeRecupCounter(
   }
   const balanceMin = creditMin - debitMin;
   const availableMin = Math.max(0, balanceMin - reservedMin);
-  return { creditMin, debitMin, balanceMin, plannedDates: plannedDates.sort(), reservedMin, availableMin };
+
+  // DISPONIBLE PAR TAUX (brut) : la récup PRISE/RÉSERVÉE consomme d'ABORD les
+  // heures à +25 % (on garde les +50 %, plus favorables au salarié). Montant à
+  // retirer = creditMin − availableMin (en MAJORÉ = débit + réserve). Ce qui
+  // reste par tranche = le vrai « heures supp à payer » (ex. 0 h à 25 % / 3h20 à 50 %).
+  const consumeMaj = creditMin - availableMin;
+  const maj25 = credit25Min * 1.25;
+  let avail25Min: number, avail50Min: number;
+  if (consumeMaj >= maj25) {
+    avail25Min = 0;
+    const remain50Maj = Math.max(0, credit50Min * 1.5 - (consumeMaj - maj25));
+    avail50Min = Math.round(remain50Maj / 1.5);
+  } else {
+    avail25Min = Math.round((maj25 - consumeMaj) / 1.25);
+    avail50Min = credit50Min;
+  }
+
+  return { creditMin, debitMin, balanceMin, plannedDates: plannedDates.sort(), reservedMin, availableMin, credit25Min, credit50Min, avail25Min, avail50Min };
 }
 
 /** Excédent du compteur AU-DELÀ du plafond employeur (minutes) — part au

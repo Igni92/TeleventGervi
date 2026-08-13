@@ -47,8 +47,27 @@ export async function GET(_: Request, props: { params: Promise<{ id: string }> }
   return NextResponse.json({ ok: true, ...row });
 }
 
+/**
+ * emailCompta accepte DÉSORMAIS plusieurs adresses (les destinataires des
+ * relances), séparées par virgule ou point-virgule. Chaque adresse est validée
+ * individuellement ; on rejette dès qu'une seule est invalide. Stockage = chaîne
+ * normalisée jointe par « , » (poussée telle quelle sur SAP U_ComptaE). "" → efface.
+ */
+const emailListSchema = z.string().trim().transform((raw, ctx) => {
+  const parts = raw.split(/[,;]+/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return ""; // vidé → effacement (norm() → null)
+  const single = z.string().email();
+  for (const p of parts) {
+    if (!single.safeParse(p).success) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Email invalide : ${p}` });
+      return z.NEVER;
+    }
+  }
+  return parts.join(", ");
+});
+
 const PatchSchema = z.object({
-  emailCompta: z.string().trim().email("Email invalide").or(z.literal("")).nullable().optional(),
+  emailCompta: emailListSchema.nullable().optional(),
   emailReception: z.string().trim().email("Email invalide").or(z.literal("")).nullable().optional(),
   adresseFacturation: z.string().trim().max(2000, "Trop long").nullable().optional(),
 });

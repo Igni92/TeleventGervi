@@ -66,4 +66,30 @@ describe("attributeAvoirs — rattachement avoir → facture sans double-comptag
     expect(r.attributedTotal).toBe(0);
     expect(r.unattributedTotal).toBe(300);
   });
+
+  it("avoir non imputé DANS le budget → listé « en faveur » (bleu)", () => {
+    const r = attributeAvoirs([inv(100, 1000)], [cn(200, 300, null)], /* encaisse */ 300);
+    expect(r.attributedTotal).toBe(0);
+    expect(r.unattributed).toEqual([{ docEntry: 200, docNum: 200, docDate: null, amount: 300 }]);
+  });
+
+  it("avoir non imputé AU-DELÀ du budget → PAS listé en faveur (déjà consommé)", () => {
+    // Budget nul (aucun encaissé) : l'avoir non imputable n'est pas un crédit en
+    // faveur (il a impacté une facture soldée / un remboursement).
+    const r = attributeAvoirs([inv(100, 1000)], [cn(200, 300, null)], 0);
+    expect(r.unattributed).toEqual([]);
+    expect(r.unattributedTotal).toBe(300); // reste dans le total brut non affecté
+  });
+
+  it("le budget « en faveur » est ce qui RESTE après attribution", () => {
+    // Encaisse 400 : 300 imputés à la facture, il reste 100 de budget pour
+    // couvrir l'avoir en faveur (200 non imputé → plafonné à 100).
+    const r = attributeAvoirs(
+      [inv(100, 1000)],
+      [cn(200, 300, 100), cn(210, 200, null)],
+      /* encaisse */ 400,
+    );
+    expect(r.attributedTotal).toBe(300);
+    expect(r.unattributed).toEqual([{ docEntry: 210, docNum: 210, docDate: null, amount: 100 }]);
+  });
 });

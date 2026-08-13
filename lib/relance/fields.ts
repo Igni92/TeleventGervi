@@ -10,6 +10,7 @@
  *   - Total dû = principal + pénalités + IFR.
  */
 import { parisStartOfDay } from "../paris-time";
+import { attributeAvoirs, type CreditNoteRef } from "../encours-avoirs";
 import type { RelanceParams } from "./params";
 
 /** Facture concernée par une relance (sous-ensemble des champs SAP utiles). */
@@ -49,6 +50,16 @@ export interface RelanceTotals {
   total: number;
 }
 
+/** Un avoir en faveur du client, non imputé, prêt à afficher dans le courrier. */
+export interface RelanceAvoirEnFaveur {
+  /** N° d'avoir affichable (DocNum, sinon DocEntry). */
+  num: string;
+  /** Date FR (« jj/mm/aaaa »), « — » si absente. */
+  date: string;
+  /** Montant de l'avoir en faveur (positif). */
+  montant: number;
+}
+
 export interface RelanceContext {
   /** Champs scalaires {{Champ}} → valeur formatée FR, prêts à fusionner. */
   fields: Record<string, string>;
@@ -57,6 +68,12 @@ export interface RelanceContext {
   /** Facture de référence (la plus en retard) — utilisée par R0/R1 (mono-facture). */
   primary: RelanceInvoice;
   totals: RelanceTotals;
+  /** Avoir IMPUTÉ (positif) par docEntry de facture — colonne « Avoir » du tableau. */
+  avoirsByInvoice: Map<number, number>;
+  /** Avoirs EN FAVEUR du client, non imputés (à déduire d'une facture ultérieure). */
+  avoirsNonImputes: RelanceAvoirEnFaveur[];
+  /** Total des avoirs en faveur non imputés. */
+  avoirsNonImputesTotal: number;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -130,6 +147,13 @@ export function buildRelanceContext(args: {
    * affecté. Absent (mono-facture R0/R1) → on s'en tient au solde de la facture.
    */
   currentAccountBalance?: number | null;
+  /**
+   * Avoirs (CreditNotes SAP) du client, avec lien facture d'origine si traçable.
+   * Fournis pour les relances multi-factures : permet d'afficher, par facture,
+   * l'avoir IMPUTÉ, et de lister à part les avoirs EN FAVEUR non imputés. Absent
+   * → aucun avoir n'est mentionné (compatibilité : rendu strictement inchangé).
+   */
+  creditNotes?: CreditNoteRef[] | null;
 }): RelanceContext {
   const { client, invoices, params, dateMiseEnDemeure } = args;
   if (invoices.length === 0) throw new Error("Aucune facture à relancer.");
@@ -144,10 +168,75 @@ export function buildRelanceContext(args: {
   const principal = cab == null ? openTotal : round2(Math.max(0, Math.min(openTotal, cab)));
   const encaissementsNonAffectes = round2(openTotal - principal);
 
+  // Ventilation des avoirs (même logique que l'encours : lien BaseType=13,
+  // plafond anti double-comptage = encaissements non affectés). Les avoirs
+  // imputés s'affichent par facture ; les avoirs « en faveur » (non imputés) sont
+  // listés à part et mentionnés dans le courrier.
+  const avoirAttr =
+    args.creditNotes && args.creditNotes.length
+      ? attributeAvoirs(
+          invoices.map((i) => ({ docEntry: i.docEntry, balance: i.balance })),
+          args.creditNotes,
+          encaissementsNonAffectes,
+        )
+      : null;
+  const avoirsByInvoice = new Map<number, number>();
+  if (avoirAttr) {
+    for (const [entry, list] of avoirAttr.byInvoice) {
+      avoirsByInvoice.set(entry, round2(list.reduce((s, a) => s + a.amount, 0)));
+    }
+  }
+  const avoirsNonImputes: RelanceAvoirEnFaveur[] = avoirAttr
+    ? avoirAttr.unattributed.map((a) => ({
+        num: a.docNum != null ? String(a.docNum) : String(a.docEntry),
+        date: formatDateFR(a.docDate ? new Date(a.docDate) : null),
+        montant: round2(a.amount),
+      }))
+    : [];
+  const avoirsNonImputesTotal = round2(avoirsNonImputes.reduce((s, a) => s + a.montant, 0));
+
+  // Audit 2026-08-13 (#7) : pénalités et IFR ne doivent porter que sur le NET
+  // réellement dû. Avant, les pénalités étaient sommées sur le solde BRUT de
+  // CHAQUE facture et l'IFR = ifrParFacture × nombre TOTAL de factures ouvertes
+  // (y compris celles soldées par un règlement/avoir non encore lettré) → dû
+  // surévalué dès qu'un paiement traînait non affecté. Correctif : on IMPUTE les
+  // encaissements non affectés (= openTotal − principal, part NON déjà attribuée
+  // à une facture via un avoir) sur les factures, d'abord les plus anciennes ;
+  // pénalités et IFR ne comptent alors que les factures encore dues après
+  // imputation. Somme des nets ≡ principal → cohérent avec le total affiché.
+  // ⚠️ judgmentCall (règle d'imputation) : l'ordre « la plus ancienne d'abord »
+  // (overdueDays décroissant) est un choix conservateur — solder d'abord les
+  // créances les plus vieilles maximise les pénalités restantes. Une imputation
+  // « la plus récente d'abord » minorerait pénalités et IFR. À trancher par la
+  // direction / le conseil (clause CGV).
+  const avoirsAttribuesTotal = round2([...avoirsByInvoice.values()].reduce((s, v) => s + v, 0));
+  let resteAImputer = round2(Math.max(0, encaissementsNonAffectes - avoirsAttribuesTotal));
+  const netDuParFacture = new Map<number, number>();
+  // Factures des plus anciennes (les plus en retard) aux plus récentes.
+  const parAnciennete = [...invoices].sort((a, b) => b.overdueDays - a.overdueDays);
+  for (const inv of parAnciennete) {
+    // Net de départ = solde brut − avoir déjà imputé à CETTE facture.
+    let net = round2(Math.max(0, inv.balance - (avoirsByInvoice.get(inv.docEntry) ?? 0)));
+    if (resteAImputer > 0 && net > 0) {
+      const impute = Math.min(resteAImputer, net);
+      net = round2(net - impute);
+      resteAImputer = round2(resteAImputer - impute);
+    }
+    netDuParFacture.set(inv.docEntry, net);
+  }
   const penalites = round2(
-    invoices.reduce((s, i) => s + computePenalty(i.balance, i.overdueDays, params.penaliteTauxAnnuel), 0),
+    invoices.reduce(
+      (s, i) => s + computePenalty(netDuParFacture.get(i.docEntry) ?? 0, i.overdueDays, params.penaliteTauxAnnuel),
+      0,
+    ),
   );
-  const ifr = round2(params.ifrParFacture * nbFactures);
+  // IFR = ifrParFacture × nombre de factures ENCORE DUES après imputation (et non
+  // le nombre total de factures ouvertes).
+  const nbFacturesDues = invoices.reduce(
+    (n, i) => n + ((netDuParFacture.get(i.docEntry) ?? 0) > 0.005 ? 1 : 0),
+    0,
+  );
+  const ifr = round2(params.ifrParFacture * nbFacturesDues);
   const total = round2(principal + penalites + ifr);
 
   const hasDeduction = encaissementsNonAffectes > 0.005;
@@ -182,6 +271,14 @@ export function buildRelanceContext(args: {
     Signataire: params.signataire,
     FonctionSignataire: params.fonctionSignataire,
     Societe: params.societe,
+    // Mention (facultative) des avoirs en faveur du client non imputés. Vide si
+    // aucun → le bloc de paragraphe est supprimé au rendu (lignes vides filtrées).
+    ParagrapheAvoirsFaveur:
+      avoirsNonImputesTotal > 0.005
+        ? `Nous vous signalons par ailleurs que votre compte enregistre à ce jour des avoirs en votre faveur, non encore imputés, pour un montant total de ${formatEUR(avoirsNonImputesTotal)}` +
+          (avoirsNonImputes.length ? ` (avoir${avoirsNonImputes.length > 1 ? "s" : ""} n° ${avoirsNonImputes.map((a) => a.num).join(", ")})` : "") +
+          `. Ceux-ci viendront en déduction d'une prochaine facture.`
+        : "",
   };
 
   return {
@@ -189,20 +286,43 @@ export function buildRelanceContext(args: {
     invoices,
     primary,
     totals: { nbFactures, openTotal, encaissementsNonAffectes, principal, penalites, ifr, total },
+    avoirsByInvoice,
+    avoirsNonImputes,
+    avoirsNonImputesTotal,
   };
 }
 
-/** Lignes du tableau multi-factures (pour le rendu HTML / texte). */
-export function invoiceRows(invoices: RelanceInvoice[]): {
+/**
+ * Lignes du tableau multi-factures (pour le rendu HTML / texte).
+ *
+ * `montant` = solde BRUT de la facture (jamais le net). Si `avoirsByInvoice` est
+ * fourni ET qu'au moins une facture porte un avoir imputé, chaque ligne expose
+ * aussi `avoir` (montant imputé, ou « — ») et `net` (brut − avoir) : le tableau
+ * peut alors afficher les colonnes « Avoir imputé » / « Net dû ». Sans avoir, ces
+ * champs restent absents et le tableau garde ses 4 colonnes d'origine.
+ */
+export function invoiceRows(
+  invoices: RelanceInvoice[],
+  avoirsByInvoice?: Map<number, number>,
+): {
   num: string;
   date: string;
   echeance: string;
   montant: string;
+  avoir?: string;
+  net?: string;
 }[] {
-  return invoices.map((inv) => ({
-    num: invoiceLabel(inv),
-    date: formatDateFR(inv.docDate),
-    echeance: formatDateFR(inv.dueDate),
-    montant: formatEUR(inv.balance),
-  }));
+  const hasAvoirs = !!avoirsByInvoice && [...avoirsByInvoice.values()].some((v) => v > 0.005);
+  return invoices.map((inv) => {
+    const base = {
+      num: invoiceLabel(inv),
+      date: formatDateFR(inv.docDate),
+      echeance: formatDateFR(inv.dueDate),
+      montant: formatEUR(inv.balance),
+    };
+    if (!hasAvoirs) return base;
+    const av = avoirsByInvoice!.get(inv.docEntry) ?? 0;
+    const net = round2(Math.max(0, inv.balance - av));
+    return { ...base, avoir: av > 0.005 ? `-${formatEUR(av)}` : "—", net: formatEUR(net) };
+  });
 }

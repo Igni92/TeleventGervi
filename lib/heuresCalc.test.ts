@@ -249,6 +249,10 @@ describe("heuresCalc — splitSupp (partage paiement / récup, option « mixte �
     const s = splitSupp(SUP25, SUP50, 9 * 60);          // 8 h à +25 % + 1 h à +50 %
     expect(s.payEquivMin).toBe(Math.round(8 * 60 * 1.25 + 60 * 1.5));   // 11h30
     expect(s.recupEquivMin).toBe(90);                   // 1 h restante à +50 %
+    // Détail BRUT de la part payée : 8 h en +25 %, 1 h en +50 % (pay25+pay50=payMin).
+    expect(s.pay25Min).toBe(8 * 60);
+    expect(s.pay50Min).toBe(60);
+    expect(s.pay25Min + s.pay50Min).toBe(s.payMin);
   });
 
   it("les équivalents se complètent EXACTEMENT (payé + récup = majoré total)", () => {

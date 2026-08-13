@@ -464,10 +464,21 @@ export async function getClientCarriers(cardCode: string): Promise<ClientCarrier
   let result: ClientCarriersResult | null = null;
 
   const trclRows = await fetchTrclRows(cardCode.trim());
+  // Audit 2026-08-13 (#18) : fetchTrclRows renvoie `null` en cas d'ÉCHEC TRANSITOIRE
+  // (Service Layer momentanément indisponible), distinct de `[]` (client réellement
+  // absent de TRCL, source de vérité). Sans distinction, on figeait 10 min un
+  // fallback histogramme né d'un simple hoquet SAP → transporteur/tournée = null sur
+  // tous les BL créés pendant ce laps, alors que SAP est déjà revenu.
+  const trclFailed = trclRows === null;
   if (trclRows) result = await buildFromTrcl(trclRows);
   if (!result) result = await buildFromHistory(cardCode.trim());
 
-  cache.set(key, { at: Date.now(), result });
+  // On ne met PAS en cache un fallback issu d'un échec transitoire : la reprise SAP
+  // est ainsi prise en compte au prochain appel. Le cache légitime (client vraiment
+  // absent de TRCL → source "history" alors que la lecture a RÉUSSI) est conservé.
+  if (!(trclFailed && result.source === "history")) {
+    cache.set(key, { at: Date.now(), result });
+  }
   return result;
 }
 

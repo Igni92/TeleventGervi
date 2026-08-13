@@ -1,7 +1,12 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { periodBounds } from "@/lib/pilotage-time";
 import { familyOf, FRUIT_FAMILIES } from "@/lib/familles";
 import { colisInfo } from "@/lib/colis";
+import {
+  freshCogsOrderFromSql, FAB_COST_LATERAL, COGS_FRESH_RECEPTION_DAYS,
+  COGS_MARGIN_HYBRID, COGS_COSTED_HYBRID,
+} from "@/lib/cogs";
 import { cached, invalidate } from "@/lib/ttlCache";
 import { warmActivity } from "@/lib/pilotageActivity";
 
@@ -25,6 +30,8 @@ import { warmActivity } from "@/lib/pilotageActivity";
 const TTL_MS = 15 * 60_000;
 
 const POIDS_FAMILLES_KEY = "pilotage:poids-familles:day";
+const MARGE_KG_KEY = "pilotage:marge-kg:day";
+const VENTILATION_KEY = "pilotage:ventilation:day";
 const recentOrdersKey = (limit: number) => `pilotage:orders:recent:${limit}`;
 
 export interface FamilyWeight {
@@ -66,6 +73,133 @@ export async function getPoidsFamilles(): Promise<FamilyWeight[]> {
       if (!FRUIT_FAMILIES.some((f) => f.key === k) && v.weightKg > 0) families.push(v);
     }
     return families;
+  });
+}
+
+/* ─────── Ventilation du jour : CA + poids par famille, et par commande ────── */
+
+export interface FamilyVent { key: string; label: string; weightKg: number; caEur: number }
+export interface OrderVent { docNum: number | null; cardName: string | null; weightKg: number; caEur: number }
+export interface VentilationJour {
+  totals: { weightKg: number; caEur: number; ordersCount: number };
+  families: FamilyVent[];
+  orders: OrderVent[];
+}
+
+/**
+ * Ventilation des ventes du jour (SapOrder) : CA HT + poids par FAMILLE de fruit,
+ * et par COMMANDE. Sert aux bulles de survol des KPI (part du volume / du CA).
+ * Poids ligne = quantité × poids unitaire ; CA ligne = lineTotal HT.
+ */
+export async function getVentilationJour(): Promise<VentilationJour> {
+  return cached(VENTILATION_KEY, TTL_MS, async () => {
+    const { start, end } = periodBounds("day");
+    const [famRows, ordRows] = await Promise.all([
+      prisma.$queryRaw<{ name: string | null; grp: string | null; w: number; ca: number }[]>`
+        SELECT p."itemName" AS name, p."groupName" AS grp,
+               COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS w,
+               COALESCE(SUM(l."lineTotal"), 0)::float AS ca
+        FROM "SapOrder" o
+        JOIN "SapOrderLine" l ON l."docEntry" = o."docEntry"
+        JOIN "Product" p ON p."itemCode" = l."itemCode"
+        WHERE o."cancelled" = false AND l."isService" = false
+          AND o."docDate" >= ${start} AND o."docDate" < ${end}
+        GROUP BY p."itemName", p."groupName"`,
+      prisma.$queryRaw<{ dn: number | null; card: string | null; w: number; ca: number }[]>`
+        SELECT o."docNum" AS dn, o."cardName" AS card,
+               COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS w,
+               COALESCE(SUM(l."lineTotal"), 0)::float AS ca
+        FROM "SapOrder" o
+        JOIN "SapOrderLine" l ON l."docEntry" = o."docEntry"
+        JOIN "Product" p ON p."itemCode" = l."itemCode"
+        WHERE o."cancelled" = false AND l."isService" = false
+          AND o."docDate" >= ${start} AND o."docDate" < ${end}
+        GROUP BY o."docEntry", o."docNum", o."cardName"`,
+    ]);
+
+    const byFamily = new Map<string, FamilyVent>();
+    let totW = 0, totCa = 0;
+    for (const r of famRows) {
+      const fam = familyOf(r.name, r.grp);
+      const cur = byFamily.get(fam.key) ?? { key: fam.key, label: fam.label, weightKg: 0, caEur: 0 };
+      cur.weightKg += Number(r.w) || 0;
+      cur.caEur += Number(r.ca) || 0;
+      byFamily.set(fam.key, cur);
+      totW += Number(r.w) || 0;
+      totCa += Number(r.ca) || 0;
+    }
+    const families = [...byFamily.values()].filter((f) => f.weightKg > 0 || f.caEur > 0);
+
+    const orders: OrderVent[] = ordRows
+      .map((r) => ({ docNum: r.dn, cardName: r.card, weightKg: Number(r.w) || 0, caEur: Number(r.ca) || 0 }))
+      .sort((a, b) => b.caEur - a.caEur);
+
+    return { totals: { weightKg: totW, caEur: totCa, ordersCount: orders.length }, families, orders };
+  });
+}
+
+/* ─────────────── Marge / kg du jour (flat + détail par famille) ──────────── */
+
+export interface FamilyMarge {
+  key: string;
+  label: string;
+  weightKg: number;
+  margeEur: number;
+  /** Marge € par kg vendu (0 si aucun poids). */
+  margeKg: number;
+}
+export interface MargeKgDay {
+  overall: { weightKg: number; margeEur: number; margeKg: number };
+  families: FamilyMarge[];
+}
+
+/**
+ * Marge € PAR KG vendue aujourd'hui — globale + ventilée par FAMILLE de fruit.
+ *
+ * Audit 2026-08-13 (#9) : l'ancien calcul était FAUX à deux titres —
+ *   1. le POIDS était sommé sur TOUTES les lignes, mais la MARGE seulement sur
+ *      les lignes ayant un coût EM (barquettes/kits sans réception d'achat →
+ *      poids au dénominateur SANS marge au numérateur ⇒ €/kg artificiellement bas) ;
+ *   2. le coût venait de la DERNIÈRE réception EM sans plafond de fraîcheur ni
+ *      repli — exactement le calcul que lib/cogs documente comme faux (un coût
+ *      d'hiver appliqué à une vente d'été sur de la fraise saisonnière).
+ * On aligne donc sur le CHEMIN HYBRIDE de référence (cf. aggregateActivity) :
+ * réception RÉCENTE (≤ COGS_FRESH_RECEPTION_DAYS ≈ 21 j) → repli fabrication →
+ * repli coût SAP de la ligne. Et on somme POIDS et MARGE sur le MÊME jeu de
+ * lignes COSTÉES (FILTER COGS_COSTED_HYBRID) : plus de poids « nu » au
+ * dénominateur. Mis en cache (préfixe `pilotage:`).
+ */
+export async function getMargeKgFamilles(): Promise<MargeKgDay> {
+  return cached(MARGE_KG_KEY, TTL_MS, async () => {
+    const { start, end } = periodBounds("day");
+    // Alias imposés par lib/cogs : l = SapOrderLine, i = SapOrder, cogs/fab = LATERAL.
+    const rows = await prisma.$queryRaw<{ name: string | null; grp: string | null; w: number; marge: number }[]>(Prisma.sql`
+      SELECT p."itemName" AS name, p."groupName" AS grp,
+             COALESCE(SUM((l."quantity" * COALESCE(p."salesUnitWeight", 0))
+                          FILTER (WHERE ${COGS_COSTED_HYBRID})), 0)::float AS w,
+             COALESCE(SUM(${COGS_MARGIN_HYBRID}), 0)::float AS marge
+      FROM ${freshCogsOrderFromSql(COGS_FRESH_RECEPTION_DAYS)} ${FAB_COST_LATERAL}
+      LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
+      WHERE i."cancelled" = false AND l."isService" = false
+        AND i."docDate" >= ${start} AND i."docDate" < ${end}
+      GROUP BY p."itemName", p."groupName"`);
+
+    const byFamily = new Map<string, FamilyMarge>();
+    let totW = 0, totM = 0;
+    for (const r of rows) {
+      const fam = familyOf(r.name, r.grp);
+      const cur = byFamily.get(fam.key) ?? { key: fam.key, label: fam.label, weightKg: 0, margeEur: 0, margeKg: 0 };
+      cur.weightKg += Number(r.w) || 0;
+      cur.margeEur += Number(r.marge) || 0;
+      byFamily.set(fam.key, cur);
+      totW += Number(r.w) || 0;
+      totM += Number(r.marge) || 0;
+    }
+    const families = [...byFamily.values()]
+      .map((f) => ({ ...f, margeKg: f.weightKg > 0 ? f.margeEur / f.weightKg : 0 }))
+      .filter((f) => f.weightKg > 0)
+      .sort((a, b) => b.margeKg - a.margeKg);
+    return { overall: { weightKg: totW, margeEur: totM, margeKg: totW > 0 ? totM / totW : 0 }, families };
   });
 }
 
@@ -159,6 +293,20 @@ export async function warmAccueil(): Promise<void> {
     await getPoidsFamilles();
   } catch (e) {
     console.error("[warmAccueil] poids-familles", e instanceof Error ? e.message : String(e));
+  }
+
+  invalidate(MARGE_KG_KEY);
+  try {
+    await getMargeKgFamilles();
+  } catch (e) {
+    console.error("[warmAccueil] marge-kg", e instanceof Error ? e.message : String(e));
+  }
+
+  invalidate(VENTILATION_KEY);
+  try {
+    await getVentilationJour();
+  } catch (e) {
+    console.error("[warmAccueil] ventilation", e instanceof Error ? e.message : String(e));
   }
 
   invalidate(recentOrdersKey(WARM_RECENT_ORDERS));

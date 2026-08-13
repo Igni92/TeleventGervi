@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getAccessScope } from "@/lib/permissions";
 import {
   computeWeek, isWeekId, isoWeekId, isMonthId, attributedMonthWeeks, aggregateMonth,
-  typicalDayMinutes,
+  typicalDayMinutes, weekDates,
   type HoursProfile,
 } from "@/lib/heuresCalc";
 import {
@@ -174,13 +174,20 @@ export async function POST(req: NextRequest) {
 
   try {
     // Le choix récup / paiement est une décision de l'EMPLOYEUR : un non-manager
-    // ne peut pas le poser ni le modifier. On conserve alors la décision déjà
-    // enregistrée, quelle que soit la charge utile envoyée.
+    // ne peut pas le poser ni le modifier. ET il saisit AU JOUR LE JOUR : il ne
+    // peut plus modifier un jour PASSÉ → pour tout jour dont la date est
+    // antérieure à aujourd'hui (Paris), on REPART de la version stockée, quelle
+    // que soit la charge utile. Un manager (direction/admin) n'est pas bridé.
     let opt: { option?: unknown; paySuppMin?: unknown; recupDates?: unknown } =
       { option: body.option, paySuppMin: body.paySuppMin, recupDates: body.recupDates };
+    let days: unknown = body.days;
     if (!c.isManager) {
       const existing = await getWeekEntry(target, week);
       opt = { option: existing?.option ?? null, paySuppMin: existing?.paySuppMin, recupDates: existing?.recupDates };
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Paris" });
+      const wd = weekDates(week);
+      const stored = existing?.days ?? [];
+      days = sanitizeDays(body.days).map((d, i) => (wd[i] && wd[i] < today ? (stored[i] ?? {}) : d));
     }
 
     // RECALCUL anti-« récup fantôme » : la récup ne concerne QUE des heures supp.
@@ -190,10 +197,10 @@ export async function POST(req: NextRequest) {
     // récup pour des heures en réalité travaillées).
     const profile = await getProfile(target);
     const typDay = typicalDayMinutes(profile);
-    const calc = computeWeek(sanitizeDays(body.days), profile.weeklyHours, typDay);
+    const calc = computeWeek(sanitizeDays(days), profile.weeklyHours, typDay);
     if (calc.sup25Min + calc.sup50Min === 0) opt = { option: null, paySuppMin: undefined, recupDates: undefined };
 
-    const entry = await saveWeekEntry(target, week, body.days, c.email, opt);
+    const entry = await saveWeekEntry(target, week, days, c.email, opt);
     return NextResponse.json({ ok: true, week, user: target, entry, calc: computeWeek(entry.days, profile.weeklyHours, typDay) });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });

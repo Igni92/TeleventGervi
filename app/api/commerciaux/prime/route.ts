@@ -5,13 +5,14 @@ import { prisma } from "@/lib/prisma";
 
 /**
  * PUT /api/commerciaux/prime
- *   Body: { slpName: string, rate?: number, since?: string }
+ *   Body: { slpName: string, rate?: number, since?: string, seuilKg?: number }
  *
  * Paramètre la PRIME d'un commercial (trigramme) : taux (fraction, 0–1, ex.
- * 0.05 = 5 %) et/ou date de début. Réservé aux admins. La prime réalisée est
- * calculée dans /api/commerciaux/sap (rate × marge brute du portefeuille,
- * factures nettes d'avoirs, depuis `since`). Upsert raw SQL (table hors client
- * Prisma typé — cf. migration additive « commercial_prime »).
+ * 0.05 = 5 %), date de début, et/ou seuil de poids livré cumulé/client (kg,
+ * 0 = aucun). Réservé aux admins. La prime réalisée est calculée dans
+ * /api/commerciaux/sap (rate × marge brute du portefeuille, factures nettes
+ * d'avoirs, depuis `since`, clients au-dessus de `seuilKg`). Upsert raw SQL
+ * (table hors client Prisma typé — cf. migration additive « commercial_prime »).
  */
 
 export async function PUT(req: NextRequest) {
@@ -27,6 +28,7 @@ export async function PUT(req: NextRequest) {
 
   let rate: number | null = null;
   let since: Date | null = null;
+  let seuilKg: number | null = null;
 
   if (body.rate !== undefined && body.rate !== null) {
     const n = Number(body.rate);
@@ -40,9 +42,14 @@ export async function PUT(req: NextRequest) {
     if (Number.isNaN(d.getTime())) return NextResponse.json({ error: "since invalide (date attendue)" }, { status: 400 });
     since = d;
   }
+  if (body.seuilKg !== undefined && body.seuilKg !== null) {
+    const n = Number(body.seuilKg);
+    if (!Number.isFinite(n) || n < 0) return NextResponse.json({ error: "seuilKg invalide (kg ≥ 0)" }, { status: 400 });
+    seuilKg = Math.round(n);
+  }
 
-  if (rate === null && since === null) {
-    return NextResponse.json({ error: "rate et/ou since requis" }, { status: 400 });
+  if (rate === null && since === null && seuilKg === null) {
+    return NextResponse.json({ error: "rate, since et/ou seuilKg requis" }, { status: 400 });
   }
 
   // INSERT (défauts pour les champs absents) + ON CONFLICT qui ne met à jour QUE
@@ -50,16 +57,18 @@ export async function PUT(req: NextRequest) {
   const values: unknown[] = [slpName];
   let rateExpr = "0.05";                                  // défaut si nouveau + non fourni
   let sinceExpr = "TIMESTAMP '2025-11-01 00:00:00'";
+  let seuilExpr = "0";
   const updates: string[] = [];
   if (rate !== null) { values.push(rate); rateExpr = `$${values.length}`; updates.push(`"rate" = EXCLUDED."rate"`); }
   if (since !== null) { values.push(since); sinceExpr = `$${values.length}`; updates.push(`"since" = EXCLUDED."since"`); }
+  if (seuilKg !== null) { values.push(seuilKg); seuilExpr = `$${values.length}`; updates.push(`"seuilKg" = EXCLUDED."seuilKg"`); }
 
   await prisma.$executeRawUnsafe(
-    `INSERT INTO "CommercialPrime" ("slpName", "rate", "since", "updatedAt")
-     VALUES ($1, ${rateExpr}, ${sinceExpr}, NOW())
+    `INSERT INTO "CommercialPrime" ("slpName", "rate", "since", "seuilKg", "updatedAt")
+     VALUES ($1, ${rateExpr}, ${sinceExpr}, ${seuilExpr}, NOW())
      ON CONFLICT ("slpName") DO UPDATE SET ${updates.join(", ")}, "updatedAt" = NOW()`,
     ...values,
   );
 
-  return NextResponse.json({ ok: true, slpName, ...(rate !== null ? { rate } : {}), ...(since !== null ? { since: since.toISOString() } : {}) });
+  return NextResponse.json({ ok: true, slpName, ...(rate !== null ? { rate } : {}), ...(since !== null ? { since: since.toISOString() } : {}), ...(seuilKg !== null ? { seuilKg } : {}) });
 }

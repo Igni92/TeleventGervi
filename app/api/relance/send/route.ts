@@ -68,6 +68,16 @@ export async function POST(req: NextRequest) {
   const { totals } = pkg.context;
   const sentBy = session.user.email ?? null;
 
+  // ⚠️ TEMPORAIRE (demande direction) : toute relance MANUELLE — et ce chemin
+  // l'est par définition — est redirigée vers m.mandine@gervifrais.com le temps
+  // de la mise au point. Le destinataire CLIENT réel reste tracé dans
+  // `intendedTo`. → Retirer ce bloc (et remettre pkg.recipient.*) pour rétablir
+  // l'envoi normal au client.
+  const MANUAL_RELANCE_TO = "m.mandine@gervifrais.com";
+  const effectiveTo = MANUAL_RELANCE_TO;
+  const effectiveIntendedTo = pkg.recipient.intendedTo ?? pkg.recipient.to;
+  const effectiveTestMode = true; // redirigé → n'atteint pas le client réel
+
   // Pièces jointes : PDF des factures (si un service de rendu est configuré).
   // En cas d'échec on N'ENVOIE PAS (une relance « facture jointe » sans la pièce
   // serait trompeuse) — l'opérateur réessaie ou désactive le service.
@@ -87,7 +97,7 @@ export async function POST(req: NextRequest) {
 
   try {
     await sendMailAsShared(pkg.from, {
-      to: pkg.recipient.to,
+      to: effectiveTo,
       subject: pkg.rendered.subject,
       html: pkg.rendered.html,
       attachments,
@@ -98,8 +108,8 @@ export async function POST(req: NextRequest) {
     await prisma.relanceLog.create({
       data: {
         cardCode, clientId: pkg.clientId, level, channel: pkg.channel,
-        subject: pkg.rendered.subject, recipient: pkg.recipient.to,
-        intendedTo: pkg.recipient.intendedTo, testMode: pkg.recipient.testMode,
+        subject: pkg.rendered.subject, recipient: effectiveTo,
+        intendedTo: effectiveIntendedTo, testMode: effectiveTestMode,
         docEntries, docNums,
         montantPrincipal: totals.principal, montantPenalites: totals.penalites,
         montantIfr: totals.ifr, montantTotal: totals.total,
@@ -109,17 +119,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: `Envoi depuis ${pkg.from} échoué : ${msg}` }, { status: 502 });
   }
 
-  const log = await prisma.relanceLog.create({
-    data: {
-      cardCode, clientId: pkg.clientId, level, channel: pkg.channel,
-      subject: pkg.rendered.subject, recipient: pkg.recipient.to,
-      intendedTo: pkg.recipient.intendedTo, testMode: pkg.recipient.testMode,
-      docEntries, docNums,
-      montantPrincipal: totals.principal, montantPenalites: totals.penalites,
-      montantIfr: totals.ifr, montantTotal: totals.total,
-      status: "ENVOYE", sentBy,
-    },
-  });
+  // Audit 2026-08-13 (#23) : le mail EST déjà parti. L'insert du log 'ENVOYE'
+  // n'était PAS protégé (contrairement au 'ECHEC') : un échec d'insert faisait
+  // lever un 500, l'opérateur voyait une erreur et recliquait → 2e courrier
+  // (l'anti-doublon repose sur l'existence de cette ligne < 2 min, justement
+  // perdue). On entoure donc l'insert d'un try/catch : on journalise l'échec et on
+  // répond quand même ok (mail parti) en signalant que le renvoi est à éviter.
+  let logId: string | null = null;
+  let logWarning: string | undefined;
+  try {
+    const log = await prisma.relanceLog.create({
+      data: {
+        cardCode, clientId: pkg.clientId, level, channel: pkg.channel,
+        subject: pkg.rendered.subject, recipient: effectiveTo,
+        intendedTo: effectiveIntendedTo, testMode: effectiveTestMode,
+        docEntries, docNums,
+        montantPrincipal: totals.principal, montantPenalites: totals.penalites,
+        montantIfr: totals.ifr, montantTotal: totals.total,
+        status: "ENVOYE", sentBy,
+      },
+    });
+    logId = log.id;
+  } catch (logErr) {
+    console.error("[relance/send] journalisation ENVOYE impossible (mail déjà parti):", logErr);
+    logWarning =
+      "Courrier envoyé, mais la journalisation a échoué : l'anti-doublon n'a pas été enregistré — NE PAS renvoyer cette relance.";
+  }
 
-  return NextResponse.json({ ok: true, logId: log.id, from: pkg.from, recipient: pkg.recipient, level });
+  return NextResponse.json({
+    ok: true, logId, from: pkg.from, level,
+    recipient: { to: effectiveTo, intendedTo: effectiveIntendedTo, testMode: effectiveTestMode },
+    ...(logWarning ? { warning: logWarning } : {}),
+  });
 }

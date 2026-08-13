@@ -16,6 +16,7 @@ import {
   type RelanceContext,
   type RelanceInvoice,
 } from "./fields";
+import type { CreditNoteRef } from "@/lib/encours-avoirs";
 import { getLevel, type RelanceCode } from "./levels";
 import { renderRelance, type RenderedRelance } from "./render";
 import { resolveRecipient, fromAddress, type ResolvedRecipient } from "./delivery";
@@ -37,6 +38,13 @@ interface OpenInvoice {
   CardName?: string;
   DocTotal?: number;
   PaidToDate?: number;
+}
+interface CreditNoteDoc {
+  DocEntry: number;
+  DocNum?: number;
+  DocDate?: string;
+  DocTotal?: number;
+  DocumentLines?: { BaseType?: number; BaseEntry?: number }[];
 }
 
 export interface RelancePackage {
@@ -116,7 +124,7 @@ export async function buildRelancePackage(
   // 3) Fiche locale (email compta, contact, adresse) + date de mise en demeure (R5)
   //    + solde NET du compte tiers (pour soustraire l'encaissé sur les relances
   //    multi-factures = relances « compte »).
-  const [client, params, lastR4, bp] = await Promise.all([
+  const [client, params, lastR4, bp, creditNoteDocs] = await Promise.all([
     prisma.client.findUnique({
       where: { code: cardCode },
       select: {
@@ -142,12 +150,52 @@ export async function buildRelancePackage(
             `BusinessPartners('${cardCode}')?$select=CurrentAccountBalance`,
             { env: "prod" },
           )
-          .catch(() => null)
+          // Audit 2026-08-13 (#15) : NE PLUS avaler l'échec en `null`. Avant, une
+          // lecture KO du solde net du compte tiers faisait retomber le principal
+          // au BRUT (openTotal) SANS aucune alerte, et la relance multi-factures
+          // (mise en demeure) partait quand même avec un montant potentiellement
+          // surévalué (encaissé non lettré non déduit). On propage donc l'erreur
+          // pour BLOQUER l'émission (l'appelant la mappe en 502) : mieux vaut
+          // refuser d'émettre qu'envoyer un montant faux dans un courrier à portée
+          // juridique. (mono-facture R0/R1 : pas concerné, on garde `null`.)
+          .catch((e) => {
+            const msg = e instanceof Error ? e.message : String(e);
+            throw new Error(
+              `Solde compte tiers (CurrentAccountBalance) illisible pour ${cardCode} — relance multi-factures bloquée (risque de surévaluation du dû) : ${msg}`,
+            );
+          })
       : Promise.resolve(null),
+    // Avoirs du client (multi-factures uniquement) : lien facture d'origine via
+    // BaseType=13 → BaseEntry. Best-effort : un échec n'empêche pas la relance
+    // (le courrier omet simplement la mention des avoirs).
+    lvl.multiInvoice
+      ? sap
+          .getAll<CreditNoteDoc>(
+            "CreditNotes?$select=DocEntry,DocNum,DocDate,DocTotal,DocumentLines"
+              + `&$filter=Cancelled eq 'tNO' and CardCode eq '${cardCode}'`,
+            { pageSize: 100, maxPages: 10, env: "prod" },
+          )
+          .catch(() => [] as CreditNoteDoc[])
+      : Promise.resolve([] as CreditNoteDoc[]),
   ]);
 
   const currentAccountBalance =
     lvl.multiInvoice && bp && typeof bp.CurrentAccountBalance === "number" ? bp.CurrentAccountBalance : null;
+
+  // Avoirs → réf. d'attribution (montant positif + lien facture si traçable).
+  const creditNotes: CreditNoteRef[] = creditNoteDocs.map((d) => {
+    let baseInvoiceEntry: number | null = null;
+    for (const l of d.DocumentLines ?? []) {
+      if (l.BaseType === 13 && l.BaseEntry != null) { baseInvoiceEntry = l.BaseEntry; break; }
+    }
+    return {
+      docEntry: d.DocEntry,
+      docNum: d.DocNum ?? null,
+      docDate: d.DocDate ?? null,
+      amount: Math.abs(d.DocTotal ?? 0),
+      baseInvoiceEntry,
+    };
+  });
 
   const context = buildRelanceContext({
     client: {
@@ -160,6 +208,7 @@ export async function buildRelancePackage(
     params,
     dateMiseEnDemeure: lastR4?.sentAt ?? null,
     currentAccountBalance,
+    creditNotes,
   });
 
   const rendered = renderRelance(level, context);

@@ -90,6 +90,17 @@ export interface AvoirAttribution {
    * affectés » distincte des paiements.
    */
   unattributedTotal: number;
+  /**
+   * Avoirs NON imputés à une facture ouverte, MAIS couverts par l'encaissé
+   * restant (= vrais crédits EN FAVEUR du client, à afficher en bleu / à
+   * déduire d'une prochaine facture). Chaque entrée = un avoir (ou son reliquat
+   * non imputé) plafonné cumulativement par le budget restant (encaisse −
+   * attribué) : on n'affiche jamais plus d'avoir « en faveur » que ce que la
+   * mise au net a réellement retiré. Les avoirs au-delà du budget (déjà
+   * consommés ailleurs — remboursés, ou lettrés contre une facture soldée)
+   * restent dans `unattributedTotal` mais N'apparaissent PAS ici.
+   */
+  unattributed: AttributedCreditNote[];
 }
 
 /**
@@ -113,6 +124,13 @@ export function attributeAvoirs(
   let budget = Math.max(0, round2(encaisse));
   let attributedTotal = 0;
   let unattributedTotal = 0;
+  // Reliquats non imputés (avoir entier ou reliquat), dans l'ordre — on les
+  // plafonnera par le budget RESTANT après attribution (cf. plus bas).
+  const unattributedRaw: AttributedCreditNote[] = [];
+  const pushUnattr = (cn: CreditNoteRef, amount: number) => {
+    unattributedTotal = round2(unattributedTotal + amount);
+    unattributedRaw.push({ docEntry: cn.docEntry, docNum: cn.docNum, docDate: cn.docDate, amount });
+  };
 
   // Ordre stable & déterministe : avoir le plus ANCIEN d'abord (DocEntry croît
   // avec le temps dans SAP). Garantit un affichage reproductible.
@@ -128,13 +146,13 @@ export function attributeAvoirs(
     // Rattachable seulement si : lien présent + facture encore ouverte + il
     // reste du solde sur la facture + il reste du budget anti double-comptage.
     if (targetEntry == null || invBalance == null || invBalance <= 0.01 || budget <= 0.01) {
-      unattributedTotal = round2(unattributedTotal + amount);
+      pushUnattr(cn, amount);
       continue;
     }
 
     const applied = round2(Math.min(amount, invBalance, budget));
     if (applied <= 0.01) {
-      unattributedTotal = round2(unattributedTotal + amount);
+      pushUnattr(cn, amount);
       continue;
     }
 
@@ -149,8 +167,23 @@ export function attributeAvoirs(
     // Reliquat d'avoir non absorbé (avoir > solde facture, ou > budget) → reste
     // dans le sac global (il aura impacté une autre facture ou un règlement).
     const leftover = round2(amount - applied);
-    if (leftover > 0.01) unattributedTotal = round2(unattributedTotal + leftover);
+    if (leftover > 0.01) pushUnattr(cn, leftover);
   }
 
-  return { byInvoice, attributedTotal, unattributedTotal };
+  // Avoirs « en faveur du client » à afficher : les reliquats non imputés,
+  // plafonnés cumulativement par le budget qui RESTE après attribution (= la
+  // part de l'encaissé qui n'a pas été expliquée par des avoirs ré-imputés).
+  // Au-delà, ce sont des règlements ou des avoirs déjà consommés → on n'affiche
+  // pas (garde-fou anti double-comptage, cohérent avec `attributedTotal`).
+  let budgetForFavor = Math.max(0, round2(budget));
+  const unattributed: AttributedCreditNote[] = [];
+  for (const u of unattributedRaw) {
+    if (budgetForFavor <= 0.01) break;
+    const shown = round2(Math.min(u.amount, budgetForFavor));
+    if (shown <= 0.01) continue;
+    unattributed.push({ ...u, amount: shown });
+    budgetForFavor = round2(budgetForFavor - shown);
+  }
+
+  return { byInvoice, attributedTotal, unattributedTotal, unattributed };
 }

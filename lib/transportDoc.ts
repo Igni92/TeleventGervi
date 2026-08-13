@@ -96,6 +96,14 @@ export interface DocTransportResult {
   mode: DocTransportMode;
   /** true si le transporteur vient du DOCUMENT (réel), false = tournée habituelle. */
   fromDoc: boolean;
+  /** Audit 2026-08-13 (#1) — true = livraison avec un TRANSPORTEUR CONNU mais
+   *  AUCUN tarif applicable (grille hors barème dépt/poids, ou pas de tarif
+   *  saisi) : le coût 0 est un TROU DE PARAMÉTRAGE, pas une gratuité. Les
+   *  rapports doivent le compter/afficher au lieu de l'agréger comme 0 € muet
+   *  (cas typique : Delanchy/Fargier en IDF, absent de la grille Delanchy ;
+   *  poids au-delà de la dernière tranche). false quand le coût est réel OU
+   *  qu'aucun transporteur n'est identifié (rien à tarifer). */
+  unpriced: boolean;
 }
 
 /** Coût de transport d'UN document (position). `kg ≤ 0` = pas de marchandise
@@ -109,7 +117,7 @@ export function docTransportCost(
   },
 ): DocTransportResult {
   const kg = Number.isFinite(doc.kg) ? doc.kg : 0;
-  if (kg <= 0) return { cost: 0, carrier: null, mode: "aucun", fromDoc: false };
+  if (kg <= 0) return { cost: 0, carrier: null, mode: "aucun", fromDoc: false, unpriced: false };
 
   const docCode = normCarrier(doc.trspCode);
   const tourCode = normCarrier(ctx.tournees.get(doc.cardCode.trim().toUpperCase())?.trspCode);
@@ -125,27 +133,33 @@ export function docTransportCost(
     && !isDelanchyCarrierCode(code)
   ) {
     const cost = ctx.costPerDelivery > 0 ? ctx.costPerDelivery : ctx.prixPositionPerKg * kg;
-    return { cost, carrier: code || "DIRECT", mode: "direct", fromDoc: true };
+    return { cost, carrier: code || "DIRECT", mode: "direct", fromDoc: true, unpriced: false };
   }
 
-  if (!code) return { cost: 0, carrier: null, mode: "aucun", fromDoc: false };
+  // Aucun transporteur identifié (ni doc, ni tournée) : on ne devine pas — ce
+  // n'est pas un trou de grille, donc pas `unpriced` (rien à tarifer).
+  if (!code) return { cost: 0, carrier: null, mode: "aucun", fromDoc: false, unpriced: false };
 
   // Flotte propre → coût PAR POSITION (repli €/kg si nb livraisons non saisi).
   if (isDirectCarrier(ctx.model, code) || ctx.model.directCarriers.length === 0) {
     const cost = ctx.costPerDelivery > 0 ? ctx.costPerDelivery : ctx.prixPositionPerKg * kg;
-    return { cost, carrier: code, mode: "direct", fromDoc };
+    return { cost, carrier: code, mode: "direct", fromDoc, unpriced: false };
   }
 
   // Externe : grille par position (département × tranche de poids).
   const pos = computePositionCost(resolveCarrierTariff(ctx.tariffs, code), departementOfZip(doc.zip), kg);
-  if (pos) return { cost: pos.total, carrier: code, mode: "grille", fromDoc };
+  if (pos) return { cost: pos.total, carrier: code, mode: "grille", fromDoc, unpriced: false };
 
   // Repli : tarif €/kg saisi pour ce client et ce transporteur.
   const perKg = doc.clientId ? ctx.pricingById.get(doc.clientId)?.[code] : undefined;
-  if (perKg && perKg > 0) return { cost: perKg * kg, carrier: code, mode: "perkg", fromDoc };
+  if (perKg && perKg > 0) return { cost: perKg * kg, carrier: code, mode: "perkg", fromDoc, unpriced: false };
 
-  // Transporteur connu mais AUCUN tarif applicable → 0 signalé (à paramétrer).
-  return { cost: 0, carrier: code, mode: "aucun", fromDoc };
+  // Audit 2026-08-13 (#1) — Transporteur CONNU mais aucun tarif applicable
+  // (grille hors barème dépt/poids — ex. Delanchy/Fargier en IDF, absents de la
+  // grille Delanchy ; ou poids > dernière tranche — ou aucun €/kg saisi). Le
+  // coût 0 est ici un TROU DE PARAMÉTRAGE : on le SIGNALE (`unpriced`) pour que
+  // les rapports le remontent au lieu de le sommer comme 0 € silencieux.
+  return { cost: 0, carrier: code, mode: "aucun", fromDoc, unpriced: true };
 }
 
 /* ── Règle CADEAUX (prime commerciale) ─────────────────────────────

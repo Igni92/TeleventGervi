@@ -63,14 +63,13 @@ import {
   type RecapRow, type SalaryHeures, type SalaryMonthData, type SalaryPrime, type SalaryWeek,
   type CommissionPaidSnapshot, type CommissionPaidEntry,
 } from "@/lib/salaires";
-import { commissionsForPayslip, COMMISSION_PRIME_ID, type PayslipCommission } from "@/lib/commissions";
+import { commissionBalances, COMMISSION_PRIME_ID, type PayslipCommission } from "@/lib/commissions";
 import {
   saveSalaryMonth, listSalaryMonths,
   saveSalaryProfile, listSalaryProfiles,
   getRecapSent, markRecapSent,
   getComptaEmails, setComptaEmails, listEnvois, logEnvoi,
-  getCommissionsPaidThrough, setCommissionsPaidThrough, advanceCommissionsPaidThrough,
-  saveCommissionPayment, getCommissionPayment, listCommissionPayments,
+  saveCommissionPayment, listCommissionPayments,
   listAllRecupPayouts, saveRecupPayout, deleteRecupPayout,
 } from "@/lib/salairesRh";
 import { appBaseUrl } from "@/lib/congesNotify";
@@ -208,22 +207,17 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
   const withCommission = (email: string, salary: SalaryMonthData | null): SalaryMonthData | null => {
     const com = commissions.get(email);
     const primes = (salary?.primes ?? []).filter((p) => p.id !== COMMISSION_PRIME_ID);
-    if (!com) return salary ? { ...salary, primes } : null;
-    // Rattrapage = plus d'un mois cumulé (ex. rien réglé depuis le début).
-    const rattrapage = com.monthsCount > 1;
+    // Montant porté au bulletin = l'ÉCART (reste dû à ce jour). Jamais négatif :
+    // un trop-payé (écart < 0) ne se reprend pas ici, il se règle au solde de
+    // tout compte. Écart ≤ 0 → aucune ligne (déjà soldé).
+    if (!com || com.ecart <= 0) return salary ? { ...salary, primes } : null;
     const pct = (com.rate * 100).toFixed(0);
-    const shortMonth = (m: string) =>
-      new Date(`${m}-01T12:00:00Z`).toLocaleDateString("fr-FR", { month: "short", year: "numeric" });
     const line: SalaryPrime = {
       id: COMMISSION_PRIME_ID,
-      motif: rattrapage
-        ? `Commission sur ventes (${pct} %) — rattrapage ${com.monthsCount} mois`
-        : `Commission sur ventes (${pct} % de la marge nette)`,
-      montant: com.prime,
+      motif: `Commission sur ventes (${pct} %) — reste dû à ce jour`,
+      montant: com.ecart,
       bulletinDe: monthId,
-      note: rattrapage
-        ? `Période du ${shortMonth(com.fromMonth)} au ${shortMonth(com.toMonth)}, base retenue ${com.base.toFixed(2)} €`
-        : `Base retenue ${com.base.toFixed(2)} €`,
+      note: `Dû cumulé ${com.due.toFixed(2)} € − déjà versé ${com.paid.toFixed(2)} €`,
       auto: true,
     };
     return salary
@@ -276,6 +270,11 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
         netMin: availableMin,
         paidOutMin,
         payouts,
+        // Détail BRUT par tranche de ce qui est mis en récup (CET) — informatif :
+        // brut25×1,25 + brut50×1,5 = crédit majoré du compteur. N'entre pas dans
+        // le calcul du solde (netMin reste la vue « disponible à payer »).
+        brut25Min: cetCounter.credit25Min,
+        brut50Min: cetCounter.credit50Min,
       },
       // Solde de tout compte (départ salarié) : CP restants + récup due (= toutes
       // les heures supp majorées non payées, déjà au compteur).
@@ -332,21 +331,21 @@ export async function GET(req: NextRequest) {
   if (!isMonthId(month)) return NextResponse.json({ error: "Mois invalide" }, { status: 400 });
 
   try {
-    // Curseur + commissions du mois (rattrapage inclus) — calculés une fois,
-    // réutilisés pour les lignes de paie ET le détail « ce qui est payé ».
-    const paidThrough = await getCommissionsPaidThrough();
-    const commissions = await commissionsForPayslip(month, paidThrough);
+    // Solde de commission par salarié (dû cumulé / versé / écart) — calculé une
+    // fois, réutilisé pour les lignes de paie ET le bloc Dû/Payé/Écart.
+    const commissions = await commissionBalances();
     const [rows, sent, comptaEmails, envois] = await Promise.all([
       buildRows(month, commissions), getRecapSent(month), getComptaEmails(), listEnvois(),
     ]);
-    // Détail par salarié (sérialisable) — alimente l'aperçu « ce que je paie ».
+    // Détail par salarié (sérialisable) — alimente le bloc Dû/Payé/Écart.
     const commissionsDetail = [...commissions.entries()].map(([email, c]) => ({
       email, slp: c.slp, rate: c.rate, base: c.base, prime: c.prime,
       fromMonth: c.fromMonth, toMonth: c.toMonth, monthsCount: c.monthsCount, months: c.months,
+      due: c.due, paid: c.paid, ecart: c.ecart,
     }));
     return NextResponse.json({
       ok: true, month, rows, sent, canEdit: c.canEdit, comptaEmails, envois,
-      commissionsPaidThrough: paidThrough, commissionsDetail,
+      commissionsDetail,
     });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
@@ -403,18 +402,6 @@ export async function POST(req: NextRequest) {
     try {
       const emails = await setComptaEmails(body.emails);
       return NextResponse.json({ ok: true, comptaEmails: emails });
-    } catch (e) {
-      return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
-    }
-  }
-
-  // ── Curseur « commissions déjà réglées jusqu'à » (réglage UI, sans mois) :
-  //    vide (null) = rien réglé → rattrapage complet sur la prochaine paie. ──
-  if (body.action === "setCommissionsPaidThrough") {
-    try {
-      const v = typeof body.paidThrough === "string" && body.paidThrough ? body.paidThrough : null;
-      const paidThrough = await setCommissionsPaidThrough(v);
-      return NextResponse.json({ ok: true, commissionsPaidThrough: paidThrough });
     } catch (e) {
       return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
     }
@@ -490,13 +477,9 @@ export async function POST(req: NextRequest) {
       const envTo = (process.env.COMPTA_EMAIL ?? "").split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean);
       const recipients = configured.length ? configured : envTo.length ? envTo : ["compta@gervifrais.com"];
 
-      // Commissions réglées PAR CETTE PAIE : plage (cursorBefore, month]. En
-      // rectif, on rejoue la MÊME plage que le 1ᵉʳ envoi (snapshot.cursorBefore)
-      // pour que la trace reste fidèle, jamais réduite au seul mois courant.
-      const prevSnap = await getCommissionPayment(month);
-      const cursorNow = await getCommissionsPaidThrough();
-      const cursorBefore = prevSnap ? prevSnap.cursorBefore : cursorNow;
-      const commissions = await commissionsForPayslip(month, cursorBefore);
+      // État des commissions À CE JOUR (dû cumulé / versé / écart) par salarié :
+      // le bulletin porte l'écart (reste dû), jamais un trop-payé.
+      const commissions = await commissionBalances();
 
       const rows = await buildRows(month, commissions);
       const recapRows: RecapRow[] = rows
@@ -516,31 +499,32 @@ export async function POST(req: NextRequest) {
         attachments: [{ name: filename, base64: pdfBase64, contentType: "application/pdf" }],
       });
 
-      // TRACE : snapshot immuable des commissions versées sur cette paie.
+      // TRACE : snapshot immuable de l'état des commissions à l'envoi. On ne
+      // fige que les commerciaux avec un RESTE DÛ (écart > 0) ; base = dû cumulé,
+      // amount = écart (le montant porté au bulletin / envoyé au cabinet).
       const nameByEmail = new Map(rows.map((r) => [r.email, r.name]));
-      const entries: CommissionPaidEntry[] = [...commissions.entries()].map(([email, com]) => ({
-        slp: com.slp, email, name: nameByEmail.get(email) ?? email, rate: com.rate,
-        fromMonth: com.fromMonth, toMonth: com.toMonth, base: com.base, amount: com.prime,
-        months: com.months,
-      }));
+      const entries: CommissionPaidEntry[] = [...commissions.entries()]
+        .filter(([, com]) => com.ecart > 0)
+        .map(([email, com]) => ({
+          slp: com.slp, email, name: nameByEmail.get(email) ?? email, rate: com.rate,
+          fromMonth: com.fromMonth, toMonth: com.toMonth, base: com.due, amount: com.ecart,
+          months: com.months,
+        }));
       const snapshot: CommissionPaidSnapshot = {
         payslipMonth: month,
-        cursorBefore: cursorBefore ?? null,
+        cursorBefore: null,
         sentAt: new Date().toISOString(),
         sentBy: c.email,
         total: Math.round(entries.reduce((s, e) => s + e.amount, 0) * 100) / 100,
         entries,
       };
 
-      const [sent, envoi, commissionsPaidThrough] = await Promise.all([
+      const [sent, envoi] = await Promise.all([
         markRecapSent(month, c.email, recipients),
         logEnvoi({ monthId: month, sentBy: c.email, to: recipients, kind, filename }),
-        // Envoyer le récap = engager la paie du mois → commissions réglées : on
-        // avance le curseur (jamais en arrière) → ensuite mois-le-mois.
-        advanceCommissionsPaidThrough(month),
         saveCommissionPayment(snapshot),
       ]);
-      return NextResponse.json({ ok: true, month, sent, envoi, recipients, commissionsPaidThrough });
+      return NextResponse.json({ ok: true, month, sent, envoi, recipients });
     } catch (e) {
       return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
     }

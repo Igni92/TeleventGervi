@@ -101,8 +101,18 @@ export async function POST() {
     const villeCode = cityNorm(p.ville).replace(/ /g, "").slice(0, 11);
     let code = MULTI.has(letter) ? `${letter} ${villeCode}` : `${letter}${villeCode}`;
     code = code.slice(0, 15);
+    // Audit 2026-08-13 (#20) : quand `base` fait déjà 15 car., `${base}${++k}`.slice(0,15)
+    // TRONQUE le suffixe → le code reste égal à `base`, la condition de collision ne
+    // devient jamais fausse → boucle infinie (timeout 120 s puis 500). On tronque `base`
+    // à (15 − longueur du suffixe) AVANT d'ajouter le suffixe (celui-ci survit au slice),
+    // et on borne le compteur par sécurité (garde-fou anti-boucle : au-delà, on laisse
+    // le code tel quel — l'INSERT ... ON CONFLICT DO NOTHING absorbe une collision résiduelle).
     let base = code, k = 1;
-    while (usedCodes.has(code.toUpperCase()) || batchCodes.has(code.toUpperCase())) code = `${base}${++k}`.slice(0, 15);
+    while (usedCodes.has(code.toUpperCase()) || batchCodes.has(code.toUpperCase())) {
+      const suffix = String(++k);
+      code = `${base.slice(0, Math.max(0, 15 - suffix.length))}${suffix}`;
+      if (k >= 10000) break;
+    }
     batchCodes.add(code.toUpperCase());
 
     rows.push({

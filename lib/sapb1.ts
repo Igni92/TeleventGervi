@@ -319,8 +319,21 @@ async function call<T>(path: string, opts: SapRequestOptions = {}): Promise<T> {
   // res est défini si on sort sans throw ; garde-fou défensif.
   if (!res) throw (lastNetError instanceof Error ? lastNetError : new Error("SAP request failed (no response)"));
 
-  // 401 → session expirée → re-login + retry une fois (logique inchangée).
-  if (res.status === 401 && !opts.noRetry) {
+  // 401 OU 403 → session invalide → re-login + retry une fois.
+  //
+  // Le Service Layer B1 est LOAD-BALANCÉ (cookie ROUTEID=.nodeN dans la réponse
+  // de Login). Quand la session expire (30 min d'inactivité) OU que le nœud
+  // épinglé par ROUTEID est recyclé, cette version du SL répond **403** — et non
+  // 401 — au cookie B1SESSION devenu invalide. On ne gérait que le 401 : un 403
+  // remontait donc jusqu'à l'appelant (route → 500) et l'app restait BLOQUÉE sur
+  // 403 jusqu'au prochain redémarrage (la session en mémoire ne se réinitialise
+  // jamais toute seule). Symptôme observé le 13/08 : miroir figé depuis la veille
+  // 13h50, commandes du matin absentes de l'état alors qu'elles étaient dans SAP.
+  //
+  // Re-login = nouveau B1SESSION + nouveau ROUTEID → l'app se répare seule. Le
+  // réessai est UNIQUE (pas de récursion : login() est en noRetry) : un vrai 403
+  // de permission re-tombera en 403 et sera propagé normalement ci-dessous.
+  if ((res.status === 401 || res.status === 403) && !opts.noRetry) {
     sessions[env] = null;
     await login(env);
     res = await withSapSlot(() => rawRequest<T>(env, path, opts));
@@ -403,8 +416,17 @@ export const sap = {
   ): Promise<T[]> {
     const { pageSize = 500, maxPages = 50, env } = opts;
     const totalStr = await call<string | number>(countPath, { env });
-    const total = typeof totalStr === "number" ? totalStr : parseInt(String(totalStr));
-    if (!total || total === 0) return [];
+    const total = typeof totalStr === "number" ? totalStr : parseInt(String(totalStr), 10);
+    // Audit 2026-08-13 (#5b) : un $count NON numérique (réponse vide/malformée du Service
+    // Layer — typiquement session périmée ou nœud load-balancé recyclé) donnait NaN, que
+    // l'ancien `!total` confondait avec 0 → retour [] EN SILENCE. En aval,
+    // refreshInStockMirror prenait ce [] pour « tout épuisé » et remettait le stock à 0.
+    // On LÈVE désormais : une panne masquée en succès redevient une vraie erreur. Un vrai 0
+    // (collection réellement vide) reste un [] légitime.
+    if (Number.isNaN(total)) {
+      throw new Error(`SAP getAllParallel: $count non numérique pour ${countPath} (reçu: ${JSON.stringify(totalStr)})`);
+    }
+    if (total === 0) return [];
     const pageCount = Math.min(Math.ceil(total / pageSize), maxPages);
     const pages = await Promise.all(
       Array.from({ length: pageCount }, (_, i) => {

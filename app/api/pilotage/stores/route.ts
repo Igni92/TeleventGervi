@@ -54,6 +54,10 @@ interface StoreRow {
   marginGross: number;
   marginGrossPct: number;
   transportCost: number;
+  /** Audit 2026-08-13 (#1) — nb de factures livrées par un transporteur CONNU
+   *  mais sans tarif applicable (grille hors barème / non paramétré). > 0 = le
+   *  coût transport du magasin est SOUS-ESTIMÉ (des positions comptées 0 €). */
+  transportUnpriced: number;
   /** Part du CA (HT) absorbée par le transport. */
   transportPctCa: number;
   /** Part de la marge BRUTE absorbée par le transport (null si marge ≤ 0). */
@@ -122,12 +126,17 @@ export async function GET(req: Request) {
       bps.map((b) => [b.cardCode, segmentOfGroup(b.groupName, b.groupCode)]),
     );
     const transportByCard = new Map<string, number>();
+    // Audit 2026-08-13 (#1) — compte des positions à transporteur connu mais sans
+    // tarif applicable : le coût 0 correspondant est un TROU (grille hors barème),
+    // remonté ici pour ne pas sous-estimer le transport en silence.
+    const unpricedByCard = new Map<string, number>();
     for (const d of perDoc) {
       const t = docTransportCost(ctx, {
         cardCode: d.card, clientId: d.cid, zip: d.zip, kg: Number(d.kg),
         trspCode: d.trsp, segment: segByCard.get(d.card) ?? null,
       });
       if (t.cost > 0) transportByCard.set(d.card, (transportByCard.get(d.card) ?? 0) + t.cost);
+      if (t.unpriced) unpricedByCard.set(d.card, (unpricedByCard.get(d.card) ?? 0) + 1);
     }
 
     const stores: StoreRow[] = clients.map((c) => {
@@ -151,6 +160,7 @@ export async function GET(req: Request) {
         marginGross,
         marginGrossPct: grossMarginPct(marginGross, c.caProductNet),
         transportCost,
+        transportUnpriced: unpricedByCard.get(c.cardCode) ?? 0,
         transportPctCa: c.ca > 0 ? (transportCost / c.ca) * 100 : 0,
         transportPctMargin: marginGross > 0 ? (transportCost / marginGross) * 100 : null,
         marginNet,
@@ -166,10 +176,11 @@ export async function GET(req: Request) {
         t.weightKg += s.weightKg;
         t.marginGross += s.marginGross;
         t.transportCost += s.transportCost;
+        t.transportUnpriced += s.transportUnpriced;
         t.marginNet += s.marginNet;
         return t;
       },
-      { ca: 0, caProductNet: 0, weightKg: 0, marginGross: 0, transportCost: 0, marginNet: 0 },
+      { ca: 0, caProductNet: 0, weightKg: 0, marginGross: 0, transportCost: 0, transportUnpriced: 0, marginNet: 0 },
     );
 
     return {

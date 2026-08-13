@@ -10,6 +10,17 @@ export const PRIME_DEFAULT_START = new Date(Date.UTC(2025, 10, 1)); // 1ᵉʳ no
 export const r2 = (v: number) => Math.round(v * 100) / 100;
 export const monthOf = (d: Date) => d.toISOString().slice(0, 7);
 
+/**
+ * Config de prime par commercial. `seuilKg` = poids livré cumulé (kg) qu'un
+ * client doit atteindre — depuis `since` — avant que ses factures soient
+ * commissionnées (0 = aucun seuil). Voir la porte dans lib/commissions.
+ */
+export interface PrimeConfig {
+  rate: number;
+  since: Date;
+  seuilKg: number;
+}
+
 export type DocTransportMode = "direct" | "grille" | "perkg" | "aucun";
 
 export interface CommissionInvoice {
@@ -30,6 +41,9 @@ export interface CommissionInvoice {
   fromDoc: boolean;
   margeNette: number;
   plancher: boolean;
+  /** Coût estimé (médiane basse article/famille) substitué aux coûts manquants,
+   *  déjà déduit de margeBrute/margeNette. 0 = aucune correction (facture saine). */
+  costEstimated: number;
 }
 
 export interface CommissionCreditNote {
@@ -58,15 +72,23 @@ export interface PayslipCommission {
   slp: string;
   rate: number;
   base: number;
+  /** Reste À PAYER = écart (dû cumulé − versé). Négatif = trop-payé. Cette valeur
+   *  est aussi le montant porté sur le bulletin (0 si négatif, cf. withCommission). */
   prime: number;
   fromMonth: string;
   toMonth: string;
   monthsCount: number;
-  /** Détail mois par mois de ce qui est réglé sur cette paie (ancien → récent). */
+  /** Détail mois par mois (ancien → récent). */
   months: { month: string; base: number; prime: number; invoices: number; avoirs: number }[];
+  /** Total DÛ cumulé = Σ des primes mensuelles (depuis le début, sans curseur). */
+  due: number;
+  /** Total VERSÉ = Σ des versements € saisis par la direction. */
+  paid: number;
+  /** Écart = dû − payé (positif = reste dû, négatif = trop-payé). */
+  ecart: number;
 }
 
-export function primeRateOf(cfg: Map<string, { rate: number; since: Date }>, slp: string): number {
+export function primeRateOf(cfg: Map<string, PrimeConfig>, slp: string): number {
   return cfg.get(slp)?.rate ?? PRIME_DEFAULT_RATE;
 }
 
