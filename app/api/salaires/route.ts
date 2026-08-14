@@ -55,7 +55,7 @@ function buildWeekly(
 import { listAllWeekEntries, listUserWeekEntries, listProfiles, getProfile, saveWeekEntry, type WeekEntry } from "@/lib/heuresRh";
 import { buildSuppRecap } from "@/lib/heuresRecap";
 import { listAllConges } from "@/lib/congesRh";
-import { expandOuvrables, expandContractDays, monthEndISO, computeRecupCounter, computeCpCounter, cpConfigOf } from "@/lib/planning";
+import { expandOuvrables, monthEndISO, computeRecupCounter, computeCpCounter, cpConfigOf, countCpDays } from "@/lib/planning";
 import { rangesOverlap, type CongeRequest } from "@/lib/conges";
 import { stripOrgSuffix } from "@/lib/userNames";
 import {
@@ -172,11 +172,13 @@ function buildHeures(
   for (const g of conges) {
     if (g.status !== "approved" || !rangesOverlap(g.start, g.end, a, b)) continue;
     const from = g.start > a ? g.start : a, to = g.end < b ? g.end : b;
-    // CP décompté en jours de CONTRAT (lun→ven hors fériés) : le samedi ne
-    // consomme pas de CP (toujours supp). La récup, elle, peut tomber un samedi.
-    if (g.type === "cp") out.cpJours += expandContractDays(from, to).length;
-    else if (g.type === "recup") for (const dte of expandOuvrables(from, to)) recupDates.add(dte);
+    // La récup peut tomber un samedi (jour ouvrable).
+    if (g.type === "recup") for (const dte of expandOuvrables(from, to)) recupDates.add(dte);
   }
+  // CP du mois civil, PLAFONNÉS par les heures de chaque semaine : un congé sur
+  // une semaine déjà à ≥ 35 h ne consomme pas de CP (décompte lun→ven, samedi
+  // toujours en supp). Même règle que le solde CP (computeCpCounter).
+  out.cpJours = countCpDays(conges, a, b, { weeks: map, profile }).taken;
   out.recupJours = recupDates.size;
   return out;
 }
@@ -255,7 +257,10 @@ async function buildRows(monthId: string, commissions: Map<string, PayslipCommis
     // récup), le solde de récup acquis (balance − déjà payé) EST le total dû —
     // plus rien « en attente » à récupérer à part. Au départ, même la récup posée
     // d'avance est due (les jours ne seront pas pris) → on prend le brut (balance).
-    const cpCounter = computeCpCounter(cpConfigOf(hourProfile), congesByUser.get(email) ?? [], todayISO);
+    const cpCounter = computeCpCounter(cpConfigOf(hourProfile), congesByUser.get(email) ?? [], todayISO, {
+      weeks: entries ?? new Map(),
+      profile: hourProfile,
+    });
     const recupOwedMin = Math.max(0, cetCounter.balanceMin - paidOutMin);
     return {
       email,

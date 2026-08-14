@@ -263,6 +263,35 @@ describe("planning — compteur CP (période 1er juin → 31 mai)", () => {
   });
 });
 
+describe("planning — CP plafonnés par les heures de la semaine (règle direction 08/2026)", () => {
+  const wk = isoWeekOfDate("2026-07-06"); // semaine du lundi 6 juillet
+  const cp = (start: string, end: string, status: "approved" | "pending" = "approved") =>
+    ({ type: "cp" as const, status, start, end });
+
+  it("congé sur une semaine ≥ 35 h → 0 CP consommé (couvert par les heures faites)", () => {
+    // Lundi en CP ; mar→ven travaillés 9 h (36 h) + samedi journée type → ≥ 35 h.
+    const weeks = new Map([[wk, { days: [day(0), day(9), day(9), day(9), day(9), day(0), day(0)] as DayHours[] }]]);
+    // day(0) = 06:00→06:00 = 0 h (jour vide) ; day(9) = 9 h.
+    const c = computeCpCounter(25, [cp("2026-07-06", "2026-07-06")], "2026-07-20", { weeks, profile: PROFILE });
+    expect(c.takenDays).toBe(0);
+    expect(c.balanceDays).toBe(25);
+  });
+
+  it("congés sur une semaine sous 35 h → comblent SEULEMENT le déficit à 35 h", () => {
+    // Lun+mar en CP ; mer→sam sans heures → journée type (4 × 7 h = 28 h) →
+    // déficit 7 h = 1 jour. Des 2 CP posés, 1 comble le déficit, 1 reste gratuit.
+    const weeks = new Map([[wk, { days: [day(0), day(0), day(0), day(0), day(0), day(0), day(0)] as DayHours[] }]]);
+    const c = computeCpCounter(25, [cp("2026-07-06", "2026-07-07")], "2026-07-20", { weeks, profile: PROFILE });
+    expect(c.takenDays).toBe(1);
+    expect(c.balanceDays).toBe(24);
+  });
+
+  it("sans feuilles d'heures (pas de gating) → décompte historique inchangé", () => {
+    const c = computeCpCounter(25, [cp("2026-07-06", "2026-07-06")], "2026-07-20");
+    expect(c.takenDays).toBe(1); // 1 jour de contrat, non plafonné
+  });
+});
+
 describe("planning — récap mensuel (état compta)", () => {
   it("monthEndISO / dayAfter", () => {
     expect(monthEndISO("2026-07")).toBe("2026-07-31");

@@ -71,7 +71,11 @@ function buildPerson(
     .flatMap((c) => expandOuvrables(c.start, c.end));
 
   const recup = computeRecupCounter(weeks, extraRecup, profile, todayISO);
-  const cp = computeCpCounter(cpConfigOf(profile), conges, todayISO);
+  // CP plafonnés par les heures de la semaine (congé sur semaine ≥ 35 h = gratuit).
+  const cp = computeCpCounter(cpConfigOf(profile), conges, todayISO, {
+    weeks: new Map(weeks.map((w) => [w.week, { days: w.days }])),
+    profile,
+  });
   const capMin = profile.recupCapHours == null ? null : Math.round(profile.recupCapHours * 60);
 
   // ── HEURES SUPP « À PAYER » (détail 25/50 BRUT) ──────────────────────────

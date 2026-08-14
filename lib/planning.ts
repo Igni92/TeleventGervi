@@ -462,19 +462,111 @@ export interface CpCounter {
   accrual: boolean;              // true = cumul permanent (2,5 j/mois, sans période)
 }
 
-/** Jours de CONTRAT (lun→ven hors fériés) d'un congé TOMBANT dans la période —
- *  décompte des CP (le samedi ne consomme pas de CP : toujours supp). */
-function contractDaysInPeriod(c: Pick<CongeRequest, "start" | "end">, p: CpPeriod): number {
-  if (!rangesOverlap(c.start, c.end, p.start, p.end)) return 0;
-  const start = c.start > p.start ? c.start : p.start;
-  const end = c.end < p.end ? c.end : p.end;
-  return expandContractDays(start, end).length;
-}
-
 /** Index de mois d'une date ISO (année × 12 + mois) — écart = mois entiers. */
 function monthIndexOf(dateISO: string): number {
   const d = atNoon(dateISO);
   return d.getUTCFullYear() * 12 + d.getUTCMonth();
+}
+
+/**
+ * Contexte de « plafonnement » de la consommation des CP par les heures de la
+ * semaine (règle direction 08/2026, alignée sur la récup) : un jour de CONGÉ ne
+ * consomme un jour de CP que si sa SEMAINE tombe SOUS le contrat (35 h) ; sur une
+ * semaine déjà à 35 h ou plus (heures travaillées + jours de présence supposés),
+ * le congé est GRATUIT — le repos est couvert par les heures faites, pas par le
+ * solde de CP. `weeks` = feuilles d'heures par identifiant de semaine ISO.
+ */
+export interface CpGating {
+  weeks: Map<string, Pick<CounterWeekInput, "days">>;
+  profile: Pick<HoursProfile, "weeklyHours" | "typicalDay" | "paidWeeklyHours">;
+}
+
+/**
+ * Jours de CP RÉELLEMENT consommés dans UNE semaine, plafonnés au déficit à 35 h
+ * (mirror de recupDebitOfWeek, mais en JOURS). Chaque jour ouvré non posé en
+ * congé compte comme travaillé (heures saisies, sinon journée type ; absent/
+ * maladie = 0) — samedi inclus. Les congés APPROUVÉS comblent le déficit d'abord,
+ * les congés EN ATTENTE ensuite (sur ce qu'il reste). 0 si la semaine ≥ 35 h.
+ */
+function cpConsumedInWeek(
+  entry: Pick<CounterWeekInput, "days"> | null,
+  weekId: string,
+  approved: Set<string>,
+  pending: Set<string>,
+  profile: Pick<HoursProfile, "weeklyHours" | "typicalDay" | "paidWeeklyHours">,
+  typDay: number,
+): { approved: number; pending: number } {
+  const dates = weekDates(weekId);
+  const contractMin = Math.max(0, Math.round((profile.weeklyHours || 0) * 60));
+  let workedBase = 0;
+  let takenApproved = 0;
+  let takenPending = 0;
+  for (let i = 0; i <= 5; i++) {   // lundi → SAMEDI (dimanche exclu)
+    const date = dates[i];
+    if (!date) continue;
+    if (approved.has(date)) { takenApproved += 1; continue; }
+    if (pending.has(date)) { takenPending += 1; continue; }
+    const entered = entry ? dayMinutes(entry.days[i]) : 0;
+    const tag = entry?.days[i]?.tag;
+    if (entered > 0) workedBase += entered;
+    else if (tag === "absent" || tag === "maladie") { /* non travaillé */ }
+    else workedBase += typDay;   // semaine type par défaut
+  }
+  const deficit = Math.max(0, contractMin - workedBase);
+  const approvedMin = Math.min(takenApproved * typDay, deficit);
+  const pendingMin = Math.min(takenPending * typDay, Math.max(0, deficit - approvedMin));
+  return typDay > 0
+    ? { approved: approvedMin / typDay, pending: pendingMin / typDay }
+    : { approved: 0, pending: 0 };
+}
+
+/**
+ * Compte les jours de CP (approuvés / en attente) dans [boundStart, boundEnd].
+ * Sans `gating` : total des jours de contrat (comportement historique). Avec
+ * `gating` : plafonné aux heures de chaque semaine (cf. cpConsumedInWeek) — un
+ * congé sur une semaine à ≥ 35 h ne consomme pas de CP.
+ */
+export function countCpDays(
+  conges: Pick<CongeRequest, "type" | "status" | "start" | "end">[],
+  boundStart: string,
+  boundEnd: string,
+  gating: CpGating | null,
+): { taken: number; pending: number } {
+  const approvedByWeek = new Map<string, Set<string>>();
+  const pendingByWeek = new Map<string, Set<string>>();
+  const add = (map: Map<string, Set<string>>, dates: string[]) => {
+    for (const d of dates) {
+      const w = isoWeekOfDate(d);
+      let s = map.get(w);
+      if (!s) { s = new Set(); map.set(w, s); }
+      s.add(d);
+    }
+  };
+  let taken = 0;
+  let pending = 0;
+  for (const c of conges) {
+    if (c.type !== "cp") continue;
+    if (c.end < boundStart || c.start > boundEnd) continue;
+    const from = c.start > boundStart ? c.start : boundStart;
+    const to = c.end < boundEnd ? c.end : boundEnd;
+    const dates = expandContractDays(from, to);
+    if (c.status === "approved") { taken += dates.length; add(approvedByWeek, dates); }
+    else if (c.status === "pending") { pending += dates.length; add(pendingByWeek, dates); }
+  }
+  if (!gating) return { taken, pending };
+  const typDay = typicalDayMinutes(gating.profile);
+  let gTaken = 0;
+  let gPending = 0;
+  for (const w of new Set([...approvedByWeek.keys(), ...pendingByWeek.keys()])) {
+    const r = cpConsumedInWeek(
+      gating.weeks.get(w) ?? null, w,
+      approvedByWeek.get(w) ?? new Set(), pendingByWeek.get(w) ?? new Set(),
+      gating.profile, typDay,
+    );
+    gTaken += r.approved;
+    gPending += r.pending;
+  }
+  return { taken: Math.round(gTaken * 100) / 100, pending: Math.round(gPending * 100) / 100 };
 }
 
 /** Cadence d'acquisition par défaut : 2,5 jours ouvrables / mois (légal FR). */
@@ -512,6 +604,7 @@ export function computeCpCounter(
   cfg: CpConfig | number | null | undefined,
   conges: Pick<CongeRequest, "type" | "status" | "start" | "end">[],
   asOfISO: string,
+  gating?: CpGating | null,
 ): CpCounter {
   // Rétro-compat : un nombre/null passé directement = solde annuel (repli).
   const config: CpConfig = typeof cfg === "object" && cfg !== null ? cfg : { allowanceDays: cfg ?? null };
@@ -524,14 +617,8 @@ export function computeCpCounter(
     const base = config.anchorDays != null && Number.isFinite(config.anchorDays) ? config.anchorDays : 0;
     const months = Math.max(0, monthIndexOf(asOfISO) - monthIndexOf(anchor));
     const acquired = Math.round((base + rate * months) * 100) / 100;
-    let takenDays = 0, pendingDays = 0;
-    for (const c of conges) {
-      if (c.type !== "cp" || c.end < anchor) continue;       // congé entièrement avant l'ancrage → ignoré
-      const from = c.start > anchor ? c.start : anchor;
-      const n = expandContractDays(from, c.end).length;
-      if (c.status === "approved") takenDays += n;
-      else if (c.status === "pending") pendingDays += n;
-    }
+    // Pas de borne haute (les CP validés futurs réservent déjà le solde).
+    const { taken: takenDays, pending: pendingDays } = countCpDays(conges, anchor, "9999-12-31", gating ?? null);
     return {
       allowanceDays: acquired,
       takenDays,
@@ -544,12 +631,7 @@ export function computeCpCounter(
 
   // ── REPLI : période de référence 1er juin → 31 mai ──
   const period = cpPeriodOf(asOfISO);
-  let takenDays = 0, pendingDays = 0;
-  for (const c of conges) {
-    if (c.type !== "cp") continue;
-    if (c.status === "approved") takenDays += contractDaysInPeriod(c, period);
-    else if (c.status === "pending") pendingDays += contractDaysInPeriod(c, period);
-  }
+  const { taken: takenDays, pending: pendingDays } = countCpDays(conges, period.start, period.end, gating ?? null);
   const allowance = config.allowanceDays == null || !Number.isFinite(config.allowanceDays) ? null : config.allowanceDays;
   return {
     allowanceDays: allowance,
@@ -603,7 +685,10 @@ export function computeMonthRecap(
 ): MonthRecap {
   const end = monthEndISO(monthId);
   const counter = computeRecupCounter(weeks, extraRecupDates, profile, dayAfter(end));
-  const cp = computeCpCounter(cpConfigOf(profile), conges, end);
+  // CP plafonnés par les heures de chaque semaine (un congé sur une semaine ≥ 35 h
+  // ne consomme pas de CP) — mêmes feuilles d'heures que la récup.
+  const cpGating: CpGating = { weeks: new Map(weeks.map((w) => [w.week, { days: w.days }])), profile };
+  const cp = computeCpCounter(cpConfigOf(profile), conges, end, cpGating);
   const capMin = profile.recupCapHours == null ? null : Math.round(profile.recupCapHours * 60);
   // Demandes de récup PAS ENCORE validées : comptées en jours de contrat
   // (lun→ven hors fériés — les seuls qui débiteront le compteur).
