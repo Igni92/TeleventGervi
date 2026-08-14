@@ -1170,3 +1170,124 @@ html[data-skin="apple"][data-ui="touch"] .surface,
 html[data-skin="apple"][data-ui="touch"] .surface-card { border-radius: 1.1rem; }
 /* Sur mobile, la feuille de modale glisse du bas et occupe la largeur (style iOS). */
 html[data-skin="apple"][data-ui="touch"] .app-sheet { border-radius: 1.4rem; }
+
+/* ═══════════════ PASSE PROFONDE — synthèse audit par zone (3 agents) ═══════════
+   Calme les accents décoratifs restants, uniformise pilules/rayons/densité et
+   corrige les contrôles non-Apple, recoin par recoin. Tout scopé [data-skin=apple].
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── GLOBAL — micro-pilules de statut/segment teintées → wash token + pilule ── */
+html[data-skin="apple"] [class*="bg-amber-100"],
+html[data-skin="apple"] [class*="bg-orange-100"] { background: hsl(var(--warning) / .12) !important; color: hsl(var(--warning)) !important; }
+html[data-skin="apple"] [class*="bg-rose-100"] { background: hsl(var(--destructive) / .12) !important; color: hsl(var(--destructive)) !important; }
+html[data-skin="apple"] [class*="bg-emerald-100"],
+html[data-skin="apple"] [class*="bg-teal-100"] { background: hsl(var(--success) / .13) !important; color: hsl(var(--success)) !important; }
+html[data-skin="apple"] [class*="bg-sky-100"],
+html[data-skin="apple"] [class*="bg-blue-100"] { background: hsl(var(--info) / .12) !important; color: hsl(var(--info)) !important; }
+html[data-skin="apple"] [class*="bg-violet-100"],
+html[data-skin="apple"] [class*="bg-purple-100"] { background: hsl(235 60% 56% / .12) !important; color: hsl(235 55% 56%) !important; }
+html[data-skin="apple"] [class*="bg-slate-200"] { background: hsl(var(--muted)) !important; color: hsl(var(--muted-foreground)) !important; }
+html[data-skin="apple"] [class*="bg-amber-100"],
+html[data-skin="apple"] [class*="bg-orange-100"],
+html[data-skin="apple"] [class*="bg-rose-100"],
+html[data-skin="apple"] [class*="bg-emerald-100"],
+html[data-skin="apple"] [class*="bg-teal-100"],
+html[data-skin="apple"] [class*="bg-sky-100"],
+html[data-skin="apple"] [class*="bg-blue-100"],
+html[data-skin="apple"] [class*="bg-violet-100"],
+html[data-skin="apple"] [class*="bg-purple-100"] { border-radius: 999px !important; letter-spacing: .01em !important; }
+/* Badges/washes /12 · /15 semi-transparents → token équivalent (garde le sens). */
+html[data-skin="apple"] [class*="bg-rose-500/1"] { background: hsl(var(--destructive) / .12) !important; }
+html[data-skin="apple"] [class*="bg-emerald-500/1"] { background: hsl(var(--success) / .13) !important; }
+html[data-skin="apple"] [class*="bg-amber-500/1"] { background: hsl(var(--warning) / .12) !important; }
+html[data-skin="apple"] [class*="bg-rose-600"] { background: hsl(var(--destructive)) !important; }
+
+/* ── GLOBAL — textes décoratifs colorés → tokens sémantiques (hue calme) ── */
+html[data-skin="apple"] [class*="text-emerald-6"],
+html[data-skin="apple"] [class*="text-emerald-4"] { color: hsl(var(--success)) !important; }
+html[data-skin="apple"] [class*="text-rose-6"],
+html[data-skin="apple"] [class*="text-rose-4"] { color: hsl(var(--destructive)) !important; }
+html[data-skin="apple"] [class*="text-sky-6"],
+html[data-skin="apple"] [class*="text-sky-4"] { color: hsl(var(--info)) !important; }
+
+/* ── GLOBAL — lueurs or (glow) des CTA non couvertes plus haut → ombre neutre ── */
+html[data-skin="apple"] [class*="rgba(250,204,21"] { box-shadow: var(--shadow-card) !important; }
+
+/* ── GLOBAL — segment actif (aria-pressed / fill or) → pastille neutre surélevée ── */
+html[data-skin="apple"] button[aria-pressed="true"] {
+  background: hsl(var(--card)) !important; color: hsl(var(--foreground)) !important;
+  border-color: hsl(var(--border)) !important; box-shadow: 0 1px 3px rgba(0,0,0,.14) !important;
+}
+html[data-skin="apple"] button.bg-brand-50.text-brand-700 {
+  background: hsl(var(--card)) !important; border-color: hsl(var(--border)) !important;
+  color: hsl(var(--foreground)) !important; box-shadow: 0 1px 3px rgba(0,0,0,.14) !important;
+}
+
+/* ── GLOBAL — CTA or : encre foncée + rayon Apple ; rayons boutons/liens unifiés ── */
+html[data-skin="apple"] button.bg-brand-600 { background: hsl(var(--primary)) !important; color: hsl(var(--primary-foreground)) !important; border-radius: 10px; }
+html[data-skin="apple"] button.bg-brand-600:hover { filter: brightness(.96); }
+html[data-skin="apple"] button.rounded-md, html[data-skin="apple"] a.rounded-md { border-radius: 10px; }
+html[data-skin="apple"] select.border-border { border-radius: 10px; background: hsl(var(--secondary) / .6) !important; border-color: hsl(var(--border)) !important; }
+
+/* ── GLOBAL — cases à cocher : accent unique ; toggle relance → switch iOS ── */
+html[data-skin="apple"] input[type="checkbox"] { accent-color: hsl(var(--primary)); }
+html[data-skin="apple"] input[type="checkbox"].accent-brand-600 {
+  appearance: none; -webkit-appearance: none; width: 36px; height: 22px; border-radius: 999px;
+  background: hsl(var(--muted-foreground) / .32); position: relative; cursor: pointer; vertical-align: middle;
+  transition: background-color .22s cubic-bezier(.23,1,.32,1);
+}
+html[data-skin="apple"] input[type="checkbox"].accent-brand-600::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .22s cubic-bezier(.23,1,.32,1);
+}
+html[data-skin="apple"] input[type="checkbox"].accent-brand-600:checked { background: hsl(var(--success)); }
+html[data-skin="apple"] input[type="checkbox"].accent-brand-600:checked::after { transform: translateX(14px); }
+html[data-skin="apple"] input[type="checkbox"].accent-brand-600:disabled { opacity: .4; }
+
+/* ── GLOBAL — densité des tableaux + hairlines nets ── */
+html[data-skin="apple"] table td, html[data-skin="apple"] table th { padding-top: .5rem; padding-bottom: .5rem; }
+html[data-skin="apple"] [class*="divide-border/40"] > * + *,
+html[data-skin="apple"] [class*="divide-border/50"] > * + * { border-color: hsl(var(--border)) !important; }
+html[data-skin="apple"] [class*="border-border/70"] { border-color: hsl(var(--border) / .5) !important; }
+
+/* ── GLOBAL — tracking des micro-eyebrows restants ── */
+html[data-skin="apple"] [class*="tracking-[0.12em]"],
+html[data-skin="apple"] [class*="tracking-[0.08em]"],
+html[data-skin="apple"] [class*="tracking-[0.06em]"] { letter-spacing: .03em !important; }
+
+/* ── CONSOLE — le verre nuit aux 3 panneaux denses (perf + contraste) : opaque ── */
+html[data-skin="apple"] .panel[class*="max-h-[75vh]"] {
+  background: hsl(var(--card)) !important; backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important; border-color: hsl(var(--border)) !important;
+}
+
+/* ── ENCOURS/CLIENTS — modales hand-rolled → scrim léger + feuille verre ── */
+html[data-skin="apple"] .fixed.inset-0[class*="bg-black/60"] { background: rgba(10,12,20,.36) !important; backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+html[data-skin="apple"] .bg-card.rounded-xl.shadow-2xl {
+  background: var(--glass) !important; border-color: var(--glass-brd) !important; border-radius: 1.15rem;
+  box-shadow: var(--shadow-modal) !important; backdrop-filter: blur(34px) saturate(180%); -webkit-backdrop-filter: blur(34px) saturate(180%);
+}
+
+/* ── ACCUEIL (.keep-bricks) — accents décoratifs restants ── */
+html[data-skin="apple"] .keep-bricks [class*="bg-amber-500/"],
+html[data-skin="apple"] .keep-bricks [class*="border-amber-500/"] { background: hsl(var(--secondary) / .6) !important; border-color: hsl(var(--border)) !important; }
+html[data-skin="apple"] .keep-bricks [class*="text-amber-6"],
+html[data-skin="apple"] .keep-bricks [class*="text-amber-4"] { color: hsl(var(--primary)) !important; }
+html[data-skin="apple"] .keep-bricks [class*="text-[#0b1018]"] { background: hsl(var(--primary)) !important; color: hsl(var(--primary-foreground)) !important; }
+html[data-skin="apple"] .keep-bricks [class*="text-sky-6"],
+html[data-skin="apple"] .keep-bricks [class*="text-sky-4"] { color: hsl(var(--foreground)) !important; }
+html[data-skin="apple"] .keep-bricks [class*="bg-sky-500/10"] { background: hsl(var(--secondary) / .7) !important; }
+html[data-skin="apple"] .keep-bricks input[class*="bg-background"] { border-radius: 10px; background: hsl(var(--secondary) / .6) !important; border-color: hsl(var(--border)) !important; }
+html[data-skin="apple"] .keep-bricks [class*="border-brand-500/40"] { border-width: 1px !important; border-color: hsl(var(--primary) / .35) !important; border-radius: var(--radius) !important; background: hsl(var(--primary) / .10) !important; }
+/* Météo : pastille condition à plat + libellés jours */
+html[data-skin="apple"] section[aria-label="Météo"] span[class*="ring-inset"] { background: hsl(var(--secondary) / .55) !important; box-shadow: inset 0 0 0 1px hsl(var(--border) / .7) !important; }
+
+/* ── LIVRAISONS — slab slate + dégradés brand décoratifs ── */
+html[data-skin="apple"] [class*="from-slate-900"] { background: hsl(var(--secondary)) !important; }
+html[data-skin="apple"] [class*="from-slate-900"] p { color: hsl(var(--foreground)) !important; -webkit-text-stroke: 0 !important; }
+html[data-skin="apple"] [class*="from-brand-500/20"] { background: hsl(var(--primary) / .12) !important; }
+html[data-skin="apple"] [class*="ring-violet-500/20"] { --tw-ring-color: hsl(var(--border)) !important; }
+html[data-skin="apple"] [class*="drop-shadow-[0_0_18px_rgba(16,185,129"] { filter: none !important; }
+
+/* ── CLIENTS — bord de survol or → neutre ── */
+html[data-skin="apple"] [class*="hover:border-brand-400/50"]:hover { border-color: hsl(var(--border)) !important; }
