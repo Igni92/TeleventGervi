@@ -147,6 +147,20 @@ Dans cette attente, je vous prie d'agréer, {{Civilite}}, l'expression de mes sa
 {{Signataire}}
 {{FonctionSignataire}} — {{Societe}}`,
   },
+  RS: {
+    subject: "Factures de service à traiter — {{RaisonSociale}}",
+    body: `Message interne (comptabilité).
+
+Factures de SERVICE en attente de règlement pour {{RaisonSociale}} — location, prestation, palettes, destruction. À RETRAITER et PERSONNALISER avant tout envoi au client (le modèle négoce ne s'applique pas) :
+
+${TABLE_TOKEN}
+
+Total dû à ce jour : {{TotalDu}}
+
+{{ParagrapheAvoirsFaveur}}
+
+À traiter par la comptabilité.`,
+  },
 };
 
 const RECOMMANDE_NOTE = "Lettre recommandée avec accusé de réception";

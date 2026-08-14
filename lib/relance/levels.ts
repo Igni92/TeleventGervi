@@ -10,7 +10,7 @@
  * exclue côté SAP) et gelée en cas de litige déclaré (cf. /api/relance).
  */
 
-export type RelanceCode = "R0" | "R1" | "R2" | "R3" | "R4" | "R5";
+export type RelanceCode = "R0" | "R1" | "R2" | "R3" | "R4" | "R5" | "RS";
 
 export interface RelanceLevel {
   code: RelanceCode;
@@ -31,6 +31,10 @@ export interface RelanceLevel {
   multiInvoice: boolean;
   /** Le courrier comporte le décompte pénalités / IFR / total dû (R3+). */
   showBreakdown: boolean;
+  /** Relance des FACTURES DE SERVICE (DocType SAP) uniquement — hors échelle
+   *  R0→R5 (qui ne portent que sur les articles). Adressée par défaut à la
+   *  comptabilité (compta@gervifrais.com) pour retraitement manuel. */
+  serviceOnly?: boolean;
 }
 
 /** Les 6 niveaux, ordonnés du moins au plus ferme. */
@@ -41,6 +45,9 @@ export const RELANCE_LEVELS: readonly RelanceLevel[] = [
   { code: "R3", libelle: "Relance avant mise en demeure", triggerDays: 35, declenchement: "J+35", canal: "Email + courrier", tonalite: "Très ferme", multiInvoice: true, showBreakdown: true },
   { code: "R4", libelle: "Mise en demeure", triggerDays: 45, declenchement: "J+45", canal: "LRAR", tonalite: "Formel (juridique)", multiInvoice: true, showBreakdown: true },
   { code: "R5", libelle: "Dernier avis avant contentieux", triggerDays: 60, declenchement: "J+60", canal: "LRAR + protocole", tonalite: "Comminatoire", multiInvoice: true, showBreakdown: true },
+  // Hors échelle : relance des factures de SERVICE (location, prestation, palettes,
+  // destruction — DocType SAP). Adressée à la compta pour retraitement manuel.
+  { code: "RS", libelle: "Factures de service (compta)", triggerDays: 0, declenchement: "sur demande", canal: "Email interne (compta)", tonalite: "Interne", multiInvoice: true, showBreakdown: false, serviceOnly: true },
 ] as const;
 
 const BY_CODE = new Map(RELANCE_LEVELS.map((l) => [l.code, l]));
@@ -67,6 +74,7 @@ export function isRelanceCode(v: unknown): v is RelanceCode {
 export function suggestLevel(overdueDays: number): RelanceCode | null {
   let suggested: RelanceCode | null = null;
   for (const l of RELANCE_LEVELS) {
+    if (l.serviceOnly) continue; // RS = hors échelle (factures de service, sur demande)
     if (overdueDays >= l.triggerDays) suggested = l.code;
   }
   return suggested;

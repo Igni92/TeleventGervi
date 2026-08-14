@@ -284,19 +284,13 @@ export function RelanceDialog({
                   </span>
                 </div>
               )}
-              {preview.totals.nbServiceInvoices > 0 && (
-                <div className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-[12px] ${
-                  preview.totals.serviceOnly
-                    ? "border-rose-400/50 bg-rose-50 dark:bg-rose-950/25 text-rose-800 dark:text-rose-200"
-                    : "border-amber-400/50 bg-amber-50 dark:bg-amber-950/25 text-amber-800 dark:text-amber-200"
-                }`}>
+              {meta.serviceOnly && (
+                <div className="flex items-start gap-2 rounded-lg border border-violet-400/50 bg-violet-50 dark:bg-violet-950/25 px-3 py-2 text-[12px] text-violet-800 dark:text-violet-200">
                   <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                   <span>
-                    <b>{preview.totals.nbServiceInvoices} facture{preview.totals.nbServiceInvoices > 1 ? "s" : ""} de service</b>{" "}
-                    (prestation / location / déchet) dans cette relance —{" "}
-                    {preview.totals.serviceOnly
-                      ? <>à <b>retraiter et personnaliser manuellement</b> : l’envoi automatique est désactivé.</>
-                      : <>ces factures demandent un <b>courrier personnalisé</b> ; le modèle automatique convient aux factures d’article.</>}
+                    <b>Relance de factures de service</b> (location / prestation / palettes / destruction) —{" "}
+                    courrier <b>interne</b>, envoyé à la <b>comptabilité</b> ({preview.recipient.to}) pour retraitement et
+                    personnalisation avant tout envoi au client.
                   </span>
                 </div>
               )}
@@ -340,12 +334,12 @@ export function RelanceDialog({
           <button
             type="button"
             onClick={send}
-            disabled={sending || loading || !preview || sentLevel === level || !!preview?.totals.serviceOnly || preview?.relanceActive === false}
-            title={preview?.relanceActive === false ? "Relances désactivées pour ce client" : preview?.totals.serviceOnly ? "Relance 100 % service : à envoyer manuellement" : undefined}
+            disabled={sending || loading || !preview || sentLevel === level || preview?.relanceActive === false}
+            title={preview?.relanceActive === false ? "Relances désactivées pour ce client" : undefined}
             className="inline-flex items-center gap-2 h-9 px-4 rounded-md bg-brand-600 text-white text-[13px] font-semibold hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
           >
             {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            {sentLevel === level ? "Envoyé ✓" : preview?.relanceActive === false ? "Relances désactivées" : preview?.totals.serviceOnly ? "Envoi manuel requis" : preview?.recipient.testMode ? "Envoyer (test)" : "Envoyer"}
+            {sentLevel === level ? "Envoyé ✓" : preview?.relanceActive === false ? "Relances désactivées" : meta.serviceOnly ? "Envoyer à la compta" : preview?.recipient.testMode ? "Envoyer (test)" : "Envoyer"}
           </button>
         </footer>
       </div>

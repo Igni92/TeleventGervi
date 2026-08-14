@@ -77,20 +77,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Séparation SERVICE / ARTICLE : une relance ne portant QUE sur des factures de
-  // service (prestation/location/déchet) doit être retraitée et personnalisée à
-  // la main — le modèle automatique, orienté négoce, ne convient pas. On refuse
-  // donc l'envoi automatique (l'opérateur rédige un courrier dédié).
-  if (totals.serviceOnly) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          "Relance de facture(s) de service uniquement : à retraiter et personnaliser manuellement — l'envoi automatique est désactivé pour ce cas.",
-      },
-      { status: 422 },
-    );
-  }
+  // Les factures de SERVICE sont désormais EXCLUES des relances normales (R0→R5)
+  // et traitées par le niveau dédié « RS » (courrier interne → compta). Plus de
+  // blocage ici (RS est un envoi légitime, vers la compta).
 
   // Destinataire EFFECTIF = résolu selon les réglages MODIFIABLES dans l'app
   // (Paramètres → Administration) : en mode test (défaut), la boîte de test

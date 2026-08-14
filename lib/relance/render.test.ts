@@ -89,7 +89,7 @@ describe("renderRelance — modèles R0→R5 (NT-2026-RC-01 §5)", () => {
     expect(out.text).not.toMatch(/\{\{/);
   });
 
-  it("expose un modèle pour chacun des 6 niveaux", () => {
-    expect(Object.keys(TEMPLATES).sort()).toEqual(["R0", "R1", "R2", "R3", "R4", "R5"]);
+  it("expose un modèle pour chacun des niveaux (R0→R5 + RS service)", () => {
+    expect(Object.keys(TEMPLATES).sort()).toEqual(["R0", "R1", "R2", "R3", "R4", "R5", "RS"]);
   });
 });
