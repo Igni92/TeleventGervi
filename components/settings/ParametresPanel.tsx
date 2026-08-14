@@ -28,6 +28,7 @@ import {
   UI_ZOOM_VALUES, UI_ZOOM_DEFAULT, applyUiZoom, type UiZoomValue,
   CELEBRATION_MARGIN_DEFAULT, readCelebrationStyle, type CelebrationStyle, CELEBRATION_EVENT,
   applyAccentPos, ACCENT_POS_DEFAULT, ACCENT_POSITIONS, type AccentPos,
+  applySkin, SKIN_DEFAULT, type Skin,
   METEO_ZONE_DEFAULT,
 } from "@/components/settings/app-settings";
 
@@ -294,6 +295,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
   const [clickFx, setClickFx] = useState<ClickFx>("sparks");
   const [clickDelay, setClickDelay] = useState<string>("0");
   const [accentPos, setAccentPos] = useState<AccentPos>(ACCENT_POS_DEFAULT);
+  const [skin, setSkin] = useState<Skin>(SKIN_DEFAULT);
   const [promoAnim, setPromoAnim] = useState<"on" | "off">("on");
   const [promoNotifs, setPromoNotifs] = useState<"on" | "off">("on");
   // Bandeau météo de l'accueil (visibilité + zone/ville).
@@ -329,6 +331,7 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
 
     setClickFx(readClickFx(readSetting(SETTING_KEYS.clickSparks, "sparks")));
     setClickDelay(readClickDelay(readSetting(SETTING_KEYS.clickSparksDelay, "0")));
+    setSkin(readSetting(SETTING_KEYS.skin, SKIN_DEFAULT) === "apple" ? "apple" : "classic");
     const ap = readAccentPos(readSetting(SETTING_KEYS.accentPos, ACCENT_POS_DEFAULT));
     setAccentPos(ap); applyAccentPos(ap); // resync idempotent
 
@@ -406,6 +409,20 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
         <section id="apparence" className="scroll-mt-6">
           <SurfaceCard accent="brand" title="Apparence" icon={<Palette className="h-3.5 w-3.5" />}>
             <div className="divide-y divide-border/50">
+              <SettingRow
+                title="Style d'interface"
+                desc="« Apple » = refonte minimaliste (surfaces froides, police SF, verre, hiérarchie forte). « Classique » = thème actuel. Réversible à tout moment, réglé par poste."
+              >
+                <SegmentToggle
+                  ariaLabel="Style d'interface"
+                  value={skin}
+                  onChange={(v) => { setSkin(v); writeSetting(SETTING_KEYS.skin, v); applySkin(v); }}
+                  options={[
+                    { id: "classic", label: "Classique" },
+                    { id: "apple",   label: "Apple" },
+                  ]}
+                />
+              </SettingRow>
               <SettingRow
                 title="Thème"
                 desc="Sombre recommandé pour l'usage deux écrans en télévente."
