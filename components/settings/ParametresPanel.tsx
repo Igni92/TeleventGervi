@@ -6,12 +6,13 @@ import Link from "next/link";
 import {
   Moon, Sun, ZoomIn, Check, Database, Contrast, Tags, ChevronRight, CalendarClock,
   Palette, Glasses, MonitorCog, MousePointerClick, Wand2, BadgePercent, Rows3,
-  ShieldAlert, CloudSun, FileDown, Activity,
+  ShieldAlert, CloudSun, FileDown, Activity, TimerReset,
 } from "lucide-react";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { InfoHint } from "@/components/ui/info-hint";
 import { ShelfLifePanel } from "@/components/settings/ShelfLifePanel";
 import { SafeguardsPanel } from "@/components/settings/SafeguardsPanel";
+import { CronStatusPanel } from "@/components/settings/CronStatusPanel";
 import { StatsExportPanel } from "@/components/settings/StatsExportPanel";
 import { UsageAuditPanel } from "@/components/settings/UsageAuditPanel";
 import { ClientImportButton } from "@/components/clients/ClientImportButton";
@@ -799,6 +800,10 @@ export function ParametresPanel({ admin = false, userKey = null }: { admin?: boo
 
             <SurfaceCard accent="brand" title="Fraîcheur · DDM par défaut" icon={<CalendarClock className="h-3.5 w-3.5" />}>
               <ShelfLifePanel />
+            </SurfaceCard>
+
+            <SurfaceCard accent="brand" title="Tâches planifiées (cron)" icon={<TimerReset className="h-3.5 w-3.5" />}>
+              <CronStatusPanel />
             </SurfaceCard>
           </section>
         )}

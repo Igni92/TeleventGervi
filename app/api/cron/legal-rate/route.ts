@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isCronAuthorized } from "@/lib/cronAuth";
 import { refreshBdfLegalRates } from "@/lib/relance/bdfLegalRate";
+import { recordCronRun } from "@/lib/cronStatus";
 
 /**
  * GET /api/cron/legal-rate — rafraîchit le TAUX D'INTÉRÊT LÉGAL depuis l'API
@@ -21,12 +22,16 @@ export async function GET(req: NextRequest) {
   if (!isCronAuthorized(req)) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   }
+  const t0 = Date.now();
   const rates = await refreshBdfLegalRates();
   const semesters = Object.keys(rates).sort();
-  return NextResponse.json({
-    ok: true,
-    nbSemestres: semesters.length,
-    dernier: semesters[semesters.length - 1] ?? null,
-    tauxDernier: semesters.length ? rates[semesters[semesters.length - 1]] : null,
-  });
+  const dernier = semesters[semesters.length - 1] ?? null;
+  const tauxDernier = dernier ? rates[dernier] : null;
+  await recordCronRun(
+    "legal-rate",
+    semesters.length > 0,
+    dernier ? `${semesters.length} semestres · dernier ${dernier} = ${((tauxDernier ?? 0) * 100).toFixed(2)} %` : "aucun taux",
+    Date.now() - t0,
+  );
+  return NextResponse.json({ ok: true, nbSemestres: semesters.length, dernier, tauxDernier });
 }
