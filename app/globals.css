@@ -1078,8 +1078,44 @@ html[data-skin="apple"] ::-webkit-scrollbar-thumb { background: rgba(120,124,138
 html[data-skin="apple"] button:active { transform: scale(0.97); }
 html[data-skin="apple"] button { transition: transform .16s cubic-bezier(.23,1,.32,1), background-color .18s, filter .18s; }
 
+/* ── SIDEBAR (bureau) : verre neutre au lieu du bleu-nuit codé en dur ── */
+html[data-skin="apple"] .app-sidebar {
+  background: var(--glass) !important;
+  border-inline-end: 1px solid var(--glass-brd) !important;
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+}
+/* Le texte de la sidebar est codé en white/opacity → on le repasse en tokens
+   pour qu'il reste lisible sur le verre clair. */
+html[data-skin="apple"] .app-sidebar [class*="text-white"] { color: hsl(var(--foreground)) !important; }
+html[data-skin="apple"] .app-sidebar [class*="text-white/55"],
+html[data-skin="apple"] .app-sidebar [class*="text-white/70"] { color: hsl(var(--muted-foreground)) !important; }
+/* Séparateur vertical dégradé or → hairline discret. */
+html[data-skin="apple"] .app-sidebar .bg-gradient-to-b { background: transparent !important; }
+
+/* ── BOUTONS : à plat (retrait de l'ombre colorée + du « nudge » au survol) ── */
+html[data-skin="apple"] .btn-nudge { animation: none !important; box-shadow: none !important; }
+html[data-skin="apple"] .btn-nudge:hover { filter: none !important; }
+
+/* ── MODALES : scrim léger flouté + feuille en verre (fini le black/80) ── */
+html[data-skin="apple"] .app-scrim {
+  background: rgba(10,12,20,.36) !important;
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+html[data-skin="apple"] .app-sheet {
+  background: var(--glass) !important;
+  border-color: var(--glass-brd) !important;
+  backdrop-filter: blur(34px) saturate(180%);
+  -webkit-backdrop-filter: blur(34px) saturate(180%);
+  border-radius: 1.15rem;
+  box-shadow: var(--shadow-modal);
+}
+
 /* ── MOBILE (téléphone/tablette, data-ui="touch") : cibles plus grandes, coins
       plus doux, chrome plein écran — un traitement distinct du bureau. ── */
 html[data-skin="apple"][data-ui="touch"] { --radius: 0.9rem; }
 html[data-skin="apple"][data-ui="touch"] .surface,
 html[data-skin="apple"][data-ui="touch"] .surface-card { border-radius: 1.1rem; }
+/* Sur mobile, la feuille de modale glisse du bas et occupe la largeur (style iOS). */
+html[data-skin="apple"][data-ui="touch"] .app-sheet { border-radius: 1.4rem; }
