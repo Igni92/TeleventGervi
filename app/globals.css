@@ -1112,6 +1112,57 @@ html[data-skin="apple"] .app-sheet {
   box-shadow: var(--shadow-modal);
 }
 
+/* ── CHAMPS (input/select/textarea) : rempli discret, rayon aligné, focus calme ── */
+html[data-skin="apple"] .border-input {
+  border-radius: 10px;
+  background: hsl(var(--secondary) / 0.6) !important;
+  border-color: hsl(var(--border)) !important;
+}
+html[data-skin="apple"] .border-input:focus-visible,
+html[data-skin="apple"] .border-input:focus-within {
+  background: hsl(var(--card)) !important;
+}
+
+/* ── POPOVERS / MENUS / SELECT : verre (au lieu d'un aplat popover) ── */
+html[data-skin="apple"] .bg-popover {
+  background: var(--glass) !important;
+  backdrop-filter: blur(26px) saturate(180%);
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
+  border-color: var(--glass-brd) !important;
+}
+
+/* ── BADGES : pilule uniforme, tracking normal ── */
+html[data-skin="apple"] .app-badge { border-radius: 999px; letter-spacing: 0; padding-inline: 0.55rem; }
+
+/* ── EYEBROWS / kicker : tracking Apple (fini le 0.18em industriel) ── */
+html[data-skin="apple"] .kicker,
+html[data-skin="apple"] [class*="tracking-[0.18em]"],
+html[data-skin="apple"] [class*="tracking-[0.16em]"],
+html[data-skin="apple"] [class*="tracking-[0.14em]"] { letter-spacing: 0.045em !important; }
+
+/* ── HIÉRARCHIE : titres display en semibold-forward, tracking serré (SF) ── */
+html[data-skin="apple"] .font-display { font-weight: 700; letter-spacing: -0.022em; }
+html[data-skin="apple"] h1, html[data-skin="apple"] h2 { letter-spacing: -0.02em; }
+
+/* ── SIDEBAR : neutraliser la lueur or de la pastille active + les accents brand ── */
+html[data-skin="apple"] .app-sidebar [style*="box-shadow"] { box-shadow: none !important; }
+html[data-skin="apple"] .app-sidebar [class*="via-brand"],
+html[data-skin="apple"] .app-sidebar [class*="from-brand"] { background: transparent !important; }
+html[data-skin="apple"] .app-sidebar [class*="bg-brand-500/2"],
+html[data-skin="apple"] .app-sidebar [class*="bg-white/[0.08]"] { background: var(--accent-soft, hsl(var(--primary)/0.14)) !important; }
+
+/* ── SEGMENTED (SegmentToggle / ViewToggle) : segment actif = pastille neutre
+      surélevée (fini le remplissage or + glow jaune). ── */
+html[data-skin="apple"] [class*="shadow-[0_0_10px_rgba(250,204,21"],
+html[data-skin="apple"] [class*="shadow-[0_0_12px_rgba(250,204,21"] {
+  box-shadow: 0 1px 3px rgba(0,0,0,.14) !important;
+  background: hsl(var(--card)) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+/* ── FOCUS : anneau accent net et cohérent partout ── */
+html[data-skin="apple"] :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+
 /* ── MOBILE (téléphone/tablette, data-ui="touch") : cibles plus grandes, coins
       plus doux, chrome plein écran — un traitement distinct du bureau. ── */
 html[data-skin="apple"][data-ui="touch"] { --radius: 0.9rem; }
