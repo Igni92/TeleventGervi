@@ -49,6 +49,14 @@ export async function POST(req: NextRequest) {
       relanceActive: pkg.relanceActive,
       rate: pkg.context.rate,
       totals: pkg.context.totals,
+      // Avoirs : imputés (déduits des factures) + en faveur non imputés (à déduire
+      // d'une facture future) — pour les rendre VISIBLES dans le récap TeleVent,
+      // pas seulement dans le corps du courrier.
+      avoirs: {
+        imputesTotal: [...pkg.context.avoirsByInvoice.values()].reduce((s, v) => s + v, 0),
+        enFaveurTotal: pkg.context.avoirsNonImputesTotal,
+        enFaveur: pkg.context.avoirsNonImputes,
+      },
       invoices: pkg.context.invoices.map((i) => ({
         docEntry: i.docEntry,
         docNum: i.docNum,

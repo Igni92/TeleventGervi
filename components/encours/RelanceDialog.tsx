@@ -43,6 +43,12 @@ interface PreviewData {
   relanceActive?: boolean;
   /** Taux appliqué (case « Taux » du récap). */
   rate?: { legalPct: string; appliedPct: string; multiplier: number; label: string };
+  /** Avoirs du client — imputés (déduits) et en faveur (non imputés). */
+  avoirs?: {
+    imputesTotal: number;
+    enFaveurTotal: number;
+    enFaveur: { num: string; date: string; montant: number }[];
+  };
   totals: PreviewTotals;
 }
 interface RelanceLogRow {
@@ -264,6 +270,19 @@ export function RelanceDialog({
                   <b className="text-emerald-600 dark:text-emerald-400">−{eur(preview.totals.encaissementsNonAffectes)}</b> = principal net{" "}
                   <b className="text-foreground">{eur(preview.totals.principal)}</b> (solde compte tiers).
                 </p>
+              )}
+              {preview.avoirs && (preview.avoirs.imputesTotal > 0.005 || preview.avoirs.enFaveurTotal > 0.005) && (
+                <div className="flex items-start gap-2 rounded-lg border border-violet-400/40 bg-violet-50 dark:bg-violet-950/25 px-3 py-2 text-[12px] text-violet-800 dark:text-violet-200">
+                  <span className="font-semibold">Avoirs</span>
+                  <span>
+                    {preview.avoirs.imputesTotal > 0.005 && <>Imputé sur les factures : <b>{eur(preview.avoirs.imputesTotal)}</b>. </>}
+                    {preview.avoirs.enFaveurTotal > 0.005 && (
+                      <>En faveur du client (non imputé) : <b>{eur(preview.avoirs.enFaveurTotal)}</b>
+                        {preview.avoirs.enFaveur.length > 0 && <> — n° {preview.avoirs.enFaveur.map((a) => a.num).join(", ")}</>}.
+                      </>
+                    )}
+                  </span>
+                </div>
               )}
               {preview.totals.nbServiceInvoices > 0 && (
                 <div className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-[12px] ${
