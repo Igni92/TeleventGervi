@@ -60,12 +60,17 @@ export function splitEmails(raw: string | null | undefined): string[] {
  * sur la boîte de test si le client n'a aucun email connu, pour ne jamais échouer
  * silencieusement).
  */
-export function resolveRecipient(clientEmail: string | null | undefined): ResolvedRecipient {
+export function resolveRecipient(
+  clientEmail: string | null | undefined,
+  opts?: { live?: boolean; testRecipient?: string },
+): ResolvedRecipient {
   const emails = splitEmails(clientEmail);
   const intendedTo = emails.length ? emails.join(", ") : null;
-  if (isLive() && emails.length) {
+  // `opts` (réglages modifiables dans l'app) prime sur l'env ; repli sur l'env.
+  const live = opts?.live ?? isLive();
+  if (live && emails.length) {
     return { to: intendedTo!, toList: emails, intendedTo, testMode: false };
   }
-  const test = testRecipient();
+  const test = opts?.testRecipient?.trim() || testRecipient();
   return { to: test, toList: [test], intendedTo, testMode: true };
 }

@@ -92,15 +92,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ⚠️ TEMPORAIRE (demande direction) : toute relance MANUELLE — et ce chemin
-  // l'est par définition — est redirigée vers m.mandine@gervifrais.com le temps
-  // de la mise au point. Le destinataire CLIENT réel reste tracé dans
-  // `intendedTo`. → Retirer ce bloc (et remettre pkg.recipient.*) pour rétablir
-  // l'envoi normal au client.
-  const MANUAL_RELANCE_TO = "m.mandine@gervifrais.com";
-  const effectiveTo = MANUAL_RELANCE_TO;
+  // Destinataire EFFECTIF = résolu selon les réglages MODIFIABLES dans l'app
+  // (Paramètres → Administration) : en mode test (défaut), la boîte de test
+  // configurable ; en mode live, les emails compta du client. Le destinataire
+  // CLIENT réel reste tracé dans `intendedTo`.
+  const effectiveTo = pkg.recipient.to;
   const effectiveIntendedTo = pkg.recipient.intendedTo ?? pkg.recipient.to;
-  const effectiveTestMode = true; // redirigé → n'atteint pas le client réel
+  const effectiveTestMode = pkg.recipient.testMode;
 
   // Pièces jointes : PDF des factures (si un service de rendu est configuré).
   // En cas d'échec on N'ENVOIE PAS (une relance « facture jointe » sans la pièce

@@ -220,6 +220,17 @@ function rawRequest<T = unknown>(env: SapEnv, path: string, opts: SapRequestOpti
 async function login(env: SapEnv): Promise<void> {
   if (loginInflight[env]) return loginInflight[env] as Promise<void>;
   loginInflight[env] = (async () => {
+    // Identifiants EFFECTIFS : surcharge modifiable dans l'app (AppSetting), avec
+    // REPLI sur l'env — vider la surcharge rétablit GERMM (cf. integrationSettings).
+    // Best-effort : si la lecture AppSetting échoue, on garde l'env (SAP ne casse pas).
+    let user = CFG[env].user;
+    let pass = CFG[env].pass;
+    try {
+      const { getSapCredentialOverride } = await import("@/lib/integrationSettings");
+      const ov = await getSapCredentialOverride();
+      if (ov.user) user = ov.user;
+      if (ov.pass) pass = ov.pass;
+    } catch { /* pas de surcharge → identifiants env */ }
     const res = await rawRequest<{
       SessionId?: string;
       SessionTimeout?: number;
@@ -227,7 +238,7 @@ async function login(env: SapEnv): Promise<void> {
       error?: { code: number; message: { value: string } };
     }>(env, "Login", {
       method: "POST",
-      body: { CompanyDB: CFG[env].company, UserName: CFG[env].user, Password: CFG[env].pass },
+      body: { CompanyDB: CFG[env].company, UserName: user, Password: pass },
       noRetry: true,
     });
     if (res.status !== 200) {
