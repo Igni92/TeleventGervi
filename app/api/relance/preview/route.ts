@@ -47,6 +47,7 @@ export async function POST(req: NextRequest) {
       recipient: pkg.recipient,
       clientEmailCompta: pkg.clientEmailCompta,
       relanceActive: pkg.relanceActive,
+      rate: pkg.context.rate,
       totals: pkg.context.totals,
       invoices: pkg.context.invoices.map((i) => ({
         docEntry: i.docEntry,

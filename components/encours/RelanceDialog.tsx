@@ -41,6 +41,8 @@ interface PreviewData {
   clientEmailCompta: string | null;
   /** Relances activées pour ce client ? false → envoi bloqué (case décochée). */
   relanceActive?: boolean;
+  /** Taux appliqué (case « Taux » du récap). */
+  rate?: { legalPct: string; appliedPct: string; multiplier: number; label: string };
   totals: PreviewTotals;
 }
 interface RelanceLogRow {
@@ -237,8 +239,15 @@ export function RelanceDialog({
                 />
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[12px]">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 text-[12px]">
                 <Stat label={`Principal net (${preview.totals.nbFactures} fact.)`} value={eur(preview.totals.principal)} />
+                {preview.rate && (
+                  <Stat
+                    label="Taux appliqué"
+                    value={preview.rate.appliedPct}
+                    hint={`${preview.rate.multiplier} × taux légal ${preview.rate.legalPct}`}
+                  />
+                )}
                 <Stat label="Pénalités" value={eur(preview.totals.penalites)} hint={preview.totals.penalites === 0 ? "taux CGV non paramétré" : undefined} />
                 <Stat
                   label="Indemnité forfait."

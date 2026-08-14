@@ -74,6 +74,42 @@ export interface RelanceAvoirEnFaveur {
   montant: number;
 }
 
+/** Une ligne du tableau détaillé de relance (une facture due). Montants formatés
+ *  FR, prêts au rendu. Pénalité et IFR sont propres à CETTE facture ; la somme
+ *  des lignes = les totaux du courrier. */
+export interface RelanceTableRow {
+  /** N° de facture (DocNum, sinon DocEntry). */
+  num: string;
+  /** Date de facture FR. */
+  date: string;
+  /** Montant TTC restant dû sur la facture (net d'avoirs imputés). */
+  montantTTC: string;
+  /** Jours de retard (≥ 0). */
+  joursRetard: string;
+  /** Pénalité de retard de la facture = montant × (taux légal × 5) × jours/365. */
+  penalite: string;
+  /** Indemnité forfaitaire de la facture (40 €). */
+  ifr: string;
+  /** Total dû TTC de la facture = montant + pénalité + IFR. */
+  totalDu: string;
+}
+
+/** Taux d'intérêt appliqué à la relance (pour affichage « case Taux »). */
+export interface RelanceRateInfo {
+  /** Taux d'intérêt LÉGAL annuel en vigueur (fraction, ex. 0.0275). */
+  legal: number;
+  /** Multiplicateur CGV (ex. 5). */
+  multiplier: number;
+  /** Taux ANNUEL appliqué = legal × multiplier (fraction, ex. 0.1375). */
+  applied: number;
+  /** Taux légal formaté « 2,75 % ». */
+  legalPct: string;
+  /** Taux appliqué formaté « 13,75 % ». */
+  appliedPct: string;
+  /** Libellé complet « 5 × le taux d'intérêt légal (13,75 %) ». */
+  label: string;
+}
+
 export interface RelanceContext {
   /** Champs scalaires {{Champ}} → valeur formatée FR, prêts à fusionner. */
   fields: Record<string, string>;
@@ -81,6 +117,11 @@ export interface RelanceContext {
   invoices: RelanceInvoice[];
   /** Facture de référence (la plus en retard) — utilisée par R0/R1 (mono-facture). */
   primary: RelanceInvoice;
+  /** Tableau détaillé par facture DUE (N°, date, montant TTC, retard, pénalité,
+   *  IFR, total dû) — alimente {{TableauFactures}} des R2→R5. */
+  tableRows: RelanceTableRow[];
+  /** Taux appliqué (case « Taux » de l'aperçu + libellé du courrier). */
+  rate: RelanceRateInfo;
   totals: RelanceTotals;
   /** Avoir IMPUTÉ (positif) par docEntry de facture — colonne « Avoir » du tableau. */
   avoirsByInvoice: Map<number, number>;
@@ -269,6 +310,38 @@ export function buildRelanceContext(args: {
   const nbServiceInvoices = invoices.reduce((n, i) => n + (i.isService ? 1 : 0), 0);
   const serviceOnly = nbServiceInvoices > 0 && nbServiceInvoices === invoices.length;
 
+  // Taux appliqué (case « Taux » de l'aperçu). Pénalités = taux légal × multiplicateur CGV.
+  const fmtPct = (r: number) =>
+    `${(r * 100).toFixed(2).replace(/\.?0+$/, "").replace(".", ",")} %`;
+  const rate: RelanceRateInfo = {
+    legal: params.tauxInteretLegal,
+    multiplier: params.penaliteMultiplier,
+    applied: params.penaliteTauxAnnuel,
+    legalPct: fmtPct(params.tauxInteretLegal),
+    appliedPct: fmtPct(params.penaliteTauxAnnuel),
+    label: params.tauxPenalitesLabel,
+  };
+
+  // Tableau détaillé par FACTURE DUE (net > 0 après imputation avoirs), de la
+  // plus ancienne à la plus récente. Pénalité et IFR par facture ⇒ Σ lignes =
+  // totaux (pénalités, IFR, total dû). Montant = net TTC réellement réclamé.
+  const tableRows: RelanceTableRow[] = [];
+  for (const inv of parAnciennete) {
+    const net = netDuParFacture.get(inv.docEntry) ?? 0;
+    if (net <= 0.005) continue;
+    const pen = computePenalty(net, inv.overdueDays, params.penaliteTauxAnnuel);
+    const rowIfr = params.ifrParFacture;
+    tableRows.push({
+      num: invoiceLabel(inv),
+      date: formatDateFR(inv.docDate),
+      montantTTC: formatEUR(net),
+      joursRetard: String(Math.max(0, inv.overdueDays)),
+      penalite: formatEUR(pen),
+      ifr: formatEUR(rowIfr),
+      totalDu: formatEUR(round2(net + pen + rowIfr)),
+    });
+  }
+
   const hasDeduction = encaissementsNonAffectes > 0.005;
 
   const fields: Record<string, string> = {
@@ -321,6 +394,8 @@ export function buildRelanceContext(args: {
     fields,
     invoices,
     primary,
+    tableRows,
+    rate,
     totals: { nbFactures, openTotal, encaissementsNonAffectes, principal, penalites, ifr, nbFacturesDues, ifrParFacture: params.ifrParFacture, nbServiceInvoices, serviceOnly, total },
     avoirsByInvoice,
     avoirsNonImputes,

@@ -9,7 +9,7 @@
  * Sortie : { subject, html, text } prête pour Graph (sendMailAsShared, HTML).
  */
 import type { RelanceCode } from "./levels";
-import { type RelanceContext, invoiceRows } from "./fields";
+import { type RelanceContext, formatEUR } from "./fields";
 
 interface Template {
   subject: string;
@@ -165,51 +165,69 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
+/** Cellule d'en-tête / de corps. */
+const TH = (align: string) =>
+  `padding:6px 10px;border:1px solid #d8dee9;text-align:${align};`;
+const TD = (align: string, extra = "") =>
+  `padding:6px 10px;border:1px solid #d8dee9;text-align:${align};white-space:nowrap;${extra}`;
+
+/**
+ * Tableau détaillé des factures dues (R2→R5). Colonnes : N° facture · Date ·
+ * Montant TTC · Jours de retard · Pénalité (montant × taux légal × 5, au prorata
+ * des jours) · Indemnité forfaitaire (40 €) · Total dû TTC. Ligne de total en pied.
+ */
 function tableHtml(ctx: RelanceContext): string {
-  const withAvoirs = ctx.avoirsByInvoice.size > 0;
-  const rows = invoiceRows(ctx.invoices, ctx.avoirsByInvoice)
-    .map((r) => {
-      const base = `      <tr>
-        <td style="padding:6px 10px;border:1px solid #d8dee9;font-family:monospace;">${escapeHtml(r.num)}</td>
-        <td style="padding:6px 10px;border:1px solid #d8dee9;">${escapeHtml(r.date)}</td>
-        <td style="padding:6px 10px;border:1px solid #d8dee9;">${escapeHtml(r.echeance)}</td>
-        <td style="padding:6px 10px;border:1px solid #d8dee9;text-align:right;white-space:nowrap;">${escapeHtml(r.montant)}</td>`;
-      if (!r.avoir) return `${base}\n      </tr>`;
-      return `${base}
-        <td style="padding:6px 10px;border:1px solid #d8dee9;text-align:right;white-space:nowrap;color:#7c3aed;">${escapeHtml(r.avoir)}</td>
-        <td style="padding:6px 10px;border:1px solid #d8dee9;text-align:right;white-space:nowrap;font-weight:600;">${escapeHtml(r.net ?? "")}</td>
-      </tr>`;
-    })
+  const rows = ctx.tableRows
+    .map(
+      (r) => `      <tr>
+        <td style="${TD("left", "font-family:monospace;")}">${escapeHtml(r.num)}</td>
+        <td style="${TD("left")}">${escapeHtml(r.date)}</td>
+        <td style="${TD("right")}">${escapeHtml(r.montantTTC)}</td>
+        <td style="${TD("right")}">${escapeHtml(r.joursRetard)} j</td>
+        <td style="${TD("right")}">${escapeHtml(r.penalite)}</td>
+        <td style="${TD("right")}">${escapeHtml(r.ifr)}</td>
+        <td style="${TD("right", "font-weight:600;")}">${escapeHtml(r.totalDu)}</td>
+      </tr>`,
+    )
     .join("\n");
-  const extraHead = withAvoirs
-    ? `
-          <th style="padding:6px 10px;border:1px solid #d8dee9;text-align:right;">Avoir imputé</th>
-          <th style="padding:6px 10px;border:1px solid #d8dee9;text-align:right;">Net dû</th>`
-    : "";
-  const montantHead = withAvoirs ? "Montant (brut)" : "Montant dû";
+  const t = ctx.totals;
+  const footer = `      <tr style="background:#f0f2f6;font-weight:600;">
+        <td style="${TD("left")}" colspan="2">Total (${t.nbFacturesDues} facture${t.nbFacturesDues > 1 ? "s" : ""})</td>
+        <td style="${TD("right")}">${escapeHtml(formatEUR(t.principal))}</td>
+        <td style="${TD("right")}"></td>
+        <td style="${TD("right")}">${escapeHtml(formatEUR(t.penalites))}</td>
+        <td style="${TD("right")}">${escapeHtml(formatEUR(t.ifr))}</td>
+        <td style="${TD("right")}">${escapeHtml(formatEUR(t.total))}</td>
+      </tr>`;
   return `    <table style="border-collapse:collapse;font-size:13px;margin:4px 0;">
       <thead>
         <tr style="background:#f0f2f6;">
-          <th style="padding:6px 10px;border:1px solid #d8dee9;text-align:left;">N° facture</th>
-          <th style="padding:6px 10px;border:1px solid #d8dee9;text-align:left;">Date</th>
-          <th style="padding:6px 10px;border:1px solid #d8dee9;text-align:left;">Échéance</th>
-          <th style="padding:6px 10px;border:1px solid #d8dee9;text-align:right;">${montantHead}</th>${extraHead}
+          <th style="${TH("left")}">N° facture</th>
+          <th style="${TH("left")}">Date</th>
+          <th style="${TH("right")}">Montant TTC</th>
+          <th style="${TH("right")}">Jours de retard</th>
+          <th style="${TH("right")}">Pénalité</th>
+          <th style="${TH("right")}">Indemnité forfaitaire</th>
+          <th style="${TH("right")}">Total dû TTC</th>
         </tr>
       </thead>
       <tbody>
 ${rows}
+${footer}
       </tbody>
     </table>`;
 }
 
 function tableText(ctx: RelanceContext): string {
-  return invoiceRows(ctx.invoices, ctx.avoirsByInvoice)
-    .map((r) =>
-      r.avoir && r.avoir !== "—"
-        ? `  - Facture ${r.num} du ${r.date}, échéance ${r.echeance} : ${r.montant} (avoir imputé ${r.avoir} → net ${r.net})`
-        : `  - Facture ${r.num} du ${r.date}, échéance ${r.echeance} : ${r.montant}`,
-    )
-    .join("\n");
+  const lines = ctx.tableRows.map(
+    (r) =>
+      `  - Facture ${r.num} du ${r.date} — Montant TTC ${r.montantTTC}, ${r.joursRetard} j de retard, pénalité ${r.penalite}, indemnité forfaitaire ${r.ifr} → total dû ${r.totalDu}`,
+  );
+  const t = ctx.totals;
+  lines.push(
+    `  = Total (${t.nbFacturesDues} facture${t.nbFacturesDues > 1 ? "s" : ""}) : principal ${formatEUR(t.principal)}, pénalités ${formatEUR(t.penalites)}, indemnité ${formatEUR(t.ifr)} → ${formatEUR(t.total)}`,
+  );
+  return lines.join("\n");
 }
 
 export interface RenderedRelance {
