@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isCronAuthorized } from "@/lib/cronAuth";
-import { recordCronRun } from "@/lib/cronStatus";
 
 /**
  * GET /api/cron/sap-sync — CRON UNIQUE « synchro globale SAP ».
@@ -45,22 +44,11 @@ export async function GET(req: NextRequest) {
   }
   const secret = process.env.CRON_SECRET as string; // garanti non vide par isCronAuthorized
   const origin = req.nextUrl.origin;
-  const t0 = Date.now();
 
   // 1) Documents/réceptions d'abord (coût des ventes), puis 2) produits/stock.
   const mirror = await call(`${origin}/api/sap/sync/mirror`, { method: "GET" }, secret);
   const products = await call(`${origin}/api/sap/sync/products`, { method: "POST" }, secret);
 
   const ok = mirror.ok && products.ok;
-  // Journalise l'exécution pour l'écran « État des tâches planifiées » (les logs
-  // OS du cron n'atteignent pas journald sur ce VPS).
-  await recordCronRun(
-    "sap-sync",
-    ok,
-    ok
-      ? "Miroir + produits/stock synchronisés."
-      : `miroir ${mirror.ok ? "ok" : `KO(${mirror.status})`} · produits ${products.ok ? "ok" : `KO(${products.status})`}`,
-    Date.now() - t0,
-  );
   return NextResponse.json({ ok, mirror, products }, { status: ok ? 200 : 207 });
 }

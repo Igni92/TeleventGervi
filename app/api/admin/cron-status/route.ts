@@ -18,15 +18,18 @@ export async function GET() {
   }
 
   const runs = await listCronRuns();
+  const nowMs = Date.now();
   const crons = KNOWN_CRONS.map((c) => {
-    const run = runs.get(c.name) ?? null;
+    const run = runs.get(c.route) ?? null;
+    const ageMs = run ? nowMs - new Date(run.lastRun).getTime() : null;
+    // État : jamais exécuté / échec / en retard (pas passé dans sa fenêtre) / OK.
+    const state = !run ? "never" : run.ok === false ? "fail" : (ageMs != null && ageMs > c.staleAfterMs) ? "stale" : "ok";
     return {
-      name: c.name,
+      route: c.route,
       label: c.label,
       cadence: c.cadence,
-      path: c.path,
+      state,
       lastRun: run?.lastRun ?? null,
-      ok: run?.ok ?? null,
       durationMs: run?.durationMs ?? null,
       detail: run?.detail ?? null,
     };

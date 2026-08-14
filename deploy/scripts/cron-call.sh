@@ -36,10 +36,32 @@ fi
 # -m 900 : certaines routes (miroir SAP) sont longues ; -f : code retour ≠ 0 si
 # HTTP >= 400. 2>&1 : le message d'erreur de curl (connexion refusée, timeout…)
 # doit finir dans le journal, sinon un service à l'arrêt reste invisible.
+START="$(date +%s%3N 2>/dev/null || date +%s)"
 OUT="$(curl -fsS -m 900 -H "x-cron-secret: ${SECRET}" "${BASE_URL}${ROUTE}" 2>&1)"
 RC=$?
+END="$(date +%s%3N 2>/dev/null || date +%s)"
+MS=$(( END - START ))
+
+# Journalise l'exécution DANS L'APP (écran « État des tâches planifiées ») —
+# succès comme échec. On ne journalise PAS l'appel de journalisation lui-même
+# (/api/cron/record) pour éviter la récursion. Best-effort, ne bloque jamais.
+record_run() {
+  case "$ROUTE" in
+    /api/cron/record*) return 0 ;;
+  esac
+  local ok="$1" detail="$2"
+  curl -fsS -m 30 -G "${BASE_URL}/api/cron/record" \
+    -H "x-cron-secret: ${SECRET}" \
+    --data-urlencode "route=${ROUTE}" \
+    --data-urlencode "ok=${ok}" \
+    --data-urlencode "ms=${MS}" \
+    --data-urlencode "detail=${detail}" >/dev/null 2>&1 || true
+}
+
 if [ "$RC" -ne 0 ]; then
+  record_run 0 "curl rc=${RC} : $(printf '%s' "$OUT" | tail -c 200)"
   fail "ECHEC (curl rc=${RC}) sur ${BASE_URL}${ROUTE} : $(printf '%s' "$OUT" | tail -c 400)"
 fi
 
+record_run 1 "$(printf '%s' "$OUT" | head -c 200)"
 logger -t "$TAG" "$(printf '%s' "$OUT" | head -c 2000)"
