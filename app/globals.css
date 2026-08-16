@@ -1113,13 +1113,13 @@ html[data-skin="apple"] .app-sheet {
 }
 
 /* ── CHAMPS (input/select/textarea) : rempli discret, rayon aligné, focus calme ── */
-html[data-skin="apple"] .border-input {
+html[data-skin="apple"] [class~="border-input"] {
   border-radius: 10px;
   background: hsl(var(--secondary) / 0.6) !important;
   border-color: hsl(var(--border)) !important;
 }
-html[data-skin="apple"] .border-input:focus-visible,
-html[data-skin="apple"] .border-input:focus-within {
+html[data-skin="apple"] [class~="border-input"]:focus-visible,
+html[data-skin="apple"] [class~="border-input"]:focus-within {
   background: hsl(var(--card)) !important;
 }
 
@@ -1227,7 +1227,7 @@ html[data-skin="apple"] button.bg-brand-50.text-brand-700 {
 html[data-skin="apple"] button.bg-brand-600 { background: hsl(var(--primary)) !important; color: hsl(var(--primary-foreground)) !important; border-radius: 10px; }
 html[data-skin="apple"] button.bg-brand-600:hover { filter: brightness(.96); }
 html[data-skin="apple"] button.rounded-md, html[data-skin="apple"] a.rounded-md { border-radius: 10px; }
-html[data-skin="apple"] select.border-border { border-radius: 10px; background: hsl(var(--secondary) / .6) !important; border-color: hsl(var(--border)) !important; }
+html[data-skin="apple"] select[class~="border-border"] { border-radius: 10px; background: hsl(var(--secondary) / .6) !important; border-color: hsl(var(--border)) !important; }
 
 /* ── GLOBAL — cases à cocher : accent unique ; toggle relance → switch iOS ── */
 html[data-skin="apple"] input[type="checkbox"] { accent-color: hsl(var(--primary)); }
@@ -1864,7 +1864,7 @@ html[data-skin="apple"] .panel li[class*="bg-black"] [class*="bg-emerald-500/20"
   background: hsl(var(--secondary) / .7) !important; color: hsl(var(--muted-foreground)) !important;
   --tw-ring-color: hsl(var(--border)) !important; border-radius: 999px; letter-spacing: .02em !important;
 }
-html[data-skin="apple"] .app-sheet input.border-border,
+html[data-skin="apple"] .app-sheet input[class~="border-border"],
 html[data-skin="apple"] .app-sheet input[type="date"] {
   background: hsl(var(--secondary) / .5) !important; border-color: hsl(var(--border)) !important; border-radius: 10px;
 }
