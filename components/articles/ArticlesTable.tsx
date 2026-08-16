@@ -98,6 +98,7 @@ export function ArticlesTable() {
         <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
           <button
             type="button"
+            aria-pressed={inStockOnly}
             onClick={() => setInStockOnly(true)}
             className={`px-3 h-8 rounded-md text-[12.5px] font-medium transition-colors ${inStockOnly ? "bg-brand-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"}`}
           >
@@ -105,6 +106,7 @@ export function ArticlesTable() {
           </button>
           <button
             type="button"
+            aria-pressed={!inStockOnly}
             onClick={() => setInStockOnly(false)}
             className={`px-3 h-8 rounded-md text-[12.5px] font-medium transition-colors ${!inStockOnly ? "bg-brand-500 text-white shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"}`}
           >

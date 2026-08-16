@@ -13,6 +13,7 @@ import {
 import { composePriceLabel, fmtPrix, storeTypeLabel } from "@/components/promos/promo-utils";
 import { designationProduit } from "@/lib/produit-designation";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
+import { useIsApple } from "@/lib/useSkin";
 
 /**
  * Gestion des promos articles (C2) — liste + création + désactivation/suppression.
@@ -79,6 +80,7 @@ function fmtDate(s: string | null | undefined): string | null {
 }
 
 export function PromosManager() {
+  const isApple = useIsApple();
   const [promos, setPromos] = useState<Promo[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
@@ -176,7 +178,7 @@ export function PromosManager() {
               // (Tailwind darkMode:"class") pour que les composants partagés
               // (chips) prennent leur variante contrastée sur fond noir, même
               // si le thème global de l'appli est resté clair.
-              <li key={p.id} className={`dark rounded-xl bg-black p-3.5 ${active ? "" : "opacity-55"}`}>
+              <li key={p.id} className={`rounded-xl p-3.5 ${isApple ? "border border-border bg-card" : "dark bg-black"} ${active ? "" : "opacity-55"}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     {/* Article — même décomposition que les autres écrans (Cde
