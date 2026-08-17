@@ -28,6 +28,8 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const docType = searchParams.get("docType")?.trim();
   const docNum = searchParams.get("docNum")?.trim();
+  const docEntryRaw = searchParams.get("docEntry")?.trim();
+  const docEntry = docEntryRaw && /^\d+$/.test(docEntryRaw) ? Number(docEntryRaw) : null;
   const clientId = searchParams.get("clientId")?.trim();
 
   const isAdmin = await requireAdmin(session);
@@ -46,10 +48,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, docs: docs.map(pick) });
   }
 
-  // Recherche ciblée par type + n°.
-  if (docType && docNum) {
+  // Recherche ciblée par type + (docEntry SAP stable OU n° imprimé).
+  if (docType && (docNum || docEntry != null)) {
+    const ors: { docEntry?: number; docNum?: string }[] = [];
+    if (docEntry != null) ors.push({ docEntry });
+    if (docNum) ors.push({ docNum });
     const doc = await prisma.archivedDocument.findFirst({
-      where: { docType, docNum },
+      where: { docType, OR: ors },
       orderBy: { receivedAt: "desc" },
     });
     if (!doc) return NextResponse.json({ ok: true, doc: null });

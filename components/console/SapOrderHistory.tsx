@@ -344,12 +344,12 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-y border-border/50 py-2.5">
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">BL</span>
-                  <DocumentActions docType="BL" docNum={detail.docNum} />
+                  <DocumentActions docType="BL" docNum={detail.docNum} docEntry={detail.docEntry} />
                 </div>
                 {detail.invoiceNum && (
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Facture</span>
-                    <DocumentActions docType="FACTURE" docNum={detail.invoiceNum} />
+                    <DocumentActions docType="FACTURE" docNum={detail.invoiceNum} docEntry={detail.invoiceEntry} />
                   </div>
                 )}
               </div>

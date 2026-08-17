@@ -32,10 +32,12 @@ interface Prep {
 }
 
 export function DocumentActions({
-  docType, docNum, className,
+  docType, docNum, docEntry, className,
 }: {
   docType: "BL" | "FACTURE" | "AVOIR" | string;
   docNum: string | number | null | undefined;
+  /** DocEntry SAP — jointure stable (préféré au n° imprimé qui peut différer). */
+  docEntry?: number | null;
   className?: string;
 }) {
   const [doc, setDoc] = useState<FoundDoc | null | "none">(null); // null = chargement
@@ -50,15 +52,18 @@ export function DocumentActions({
   const numStr = docNum != null ? String(docNum) : "";
 
   useEffect(() => {
-    if (!numStr) { setDoc("none"); return; }
+    if (!numStr && docEntry == null) { setDoc("none"); return; }
     let cancelled = false;
     setDoc(null);
-    fetch(`/api/archive/lookup?docType=${encodeURIComponent(docType)}&docNum=${encodeURIComponent(numStr)}`, { cache: "no-store" })
+    const q = new URLSearchParams({ docType });
+    if (numStr) q.set("docNum", numStr);
+    if (docEntry != null) q.set("docEntry", String(docEntry));
+    fetch(`/api/archive/lookup?${q.toString()}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((j) => { if (!cancelled) setDoc(j?.doc ?? "none"); })
       .catch(() => { if (!cancelled) setDoc("none"); });
     return () => { cancelled = true; };
-  }, [docType, numStr]);
+  }, [docType, numStr, docEntry]);
 
   const openEmail = useCallback(async () => {
     if (doc === null || doc === "none") return;
