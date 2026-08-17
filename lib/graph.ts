@@ -310,9 +310,11 @@ export async function listMessageFileAttachments(
   mailbox: string,
   messageId: string,
 ): Promise<GraphAttachmentMeta[]> {
+  // NB : NE PAS mettre @odata.type dans $select — Graph renvoie alors une liste
+  // VIDE. @odata.type est de toute façon inclus d'office (type polymorphe).
   const url =
     `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}` +
-    `/attachments?$select=id,name,contentType,size,@odata.type`;
+    `/attachments?$select=id,name,contentType,size`;
   const page: { value: (GraphAttachmentMeta & { "@odata.type"?: string })[] } = await graphGet(url);
   return (page.value ?? []).map((a) => ({
     id: a.id,
