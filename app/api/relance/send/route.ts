@@ -4,7 +4,8 @@ import { getAccessScope, cardCodeInScope } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { isRelanceCode } from "@/lib/relance/levels";
 import { buildRelancePackage, RelanceInputError } from "@/lib/relance/server";
-import { invoicePdfEnabled, fetchInvoicePdf, type InvoicePdf } from "@/lib/relance/invoicePdf";
+import { type InvoicePdf } from "@/lib/relance/invoicePdf";
+import { invoiceAttachment } from "@/lib/relance/archivedInvoicePdf";
 import { sendMailAsShared } from "@/lib/graph";
 
 /**
@@ -89,21 +90,24 @@ export async function POST(req: NextRequest) {
   const effectiveIntendedTo = pkg.recipient.intendedTo ?? pkg.recipient.to;
   const effectiveTestMode = pkg.recipient.testMode;
 
-  // Pièces jointes : PDF des factures (si un service de rendu est configuré).
-  // En cas d'échec on N'ENVOIE PAS (une relance « facture jointe » sans la pièce
-  // serait trompeuse) — l'opérateur réessaie ou désactive le service.
+  // Pièces jointes : PDF des factures EN RETARD UNIQUEMENT. On n'attache pas les
+  // factures dues mais non encore échues (overdueDays <= 0) — seules les factures
+  // effectivement en retard justifient un document joint. Source : PDF archivé
+  // (boîte factures-archive@) en priorité, sinon service Crystal.
+  // En cas d'échec du repli Crystal on N'ENVOIE PAS (facture « jointe » sans la
+  // pièce = trompeur) — l'opérateur réessaie ou désactive le service.
+  const overdueInvoices = pkg.context.invoices.filter((i) => i.overdueDays > 0);
   let attachments: InvoicePdf[] | undefined;
-  if (invoicePdfEnabled()) {
-    try {
-      attachments = (
-        await Promise.all(pkg.context.invoices.map((i) => fetchInvoicePdf(i.docEntry, i.docNum)))
-      ).filter((a): a is InvoicePdf => a !== null);
-    } catch (e) {
-      return NextResponse.json(
-        { ok: false, error: e instanceof Error ? e.message : String(e) },
-        { status: 502 },
-      );
-    }
+  try {
+    attachments = (
+      await Promise.all(overdueInvoices.map((i) => invoiceAttachment(i.docEntry, i.docNum)))
+    ).filter((a): a is InvoicePdf => a !== null);
+    if (attachments.length === 0) attachments = undefined;
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : String(e) },
+      { status: 502 },
+    );
   }
 
   try {

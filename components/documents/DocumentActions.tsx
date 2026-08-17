@@ -32,15 +32,21 @@ interface Prep {
 }
 
 export function DocumentActions({
-  docType, docNum, docEntry, className,
+  docType, docNum, docEntry, preloaded, hideWhenMissing, compact, className,
 }: {
   docType: "BL" | "FACTURE" | "AVOIR" | string;
   docNum: string | number | null | undefined;
   /** DocEntry SAP — jointure stable (préféré au n° imprimé qui peut différer). */
   docEntry?: number | null;
+  /** Doc déjà connu (évite le lookup) — pour les listes qui ont déjà la donnée. */
+  preloaded?: FoundDoc | null;
+  /** true = ne rien afficher si aucun PDF archivé (au lieu de « non archivé »). */
+  hideWhenMissing?: boolean;
+  /** true = boutons icône seule (compact, pour les lignes serrées). */
+  compact?: boolean;
   className?: string;
 }) {
-  const [doc, setDoc] = useState<FoundDoc | null | "none">(null); // null = chargement
+  const [doc, setDoc] = useState<FoundDoc | null | "none">(preloaded ?? null); // null = chargement
   const [emailOpen, setEmailOpen] = useState(false);
   const [prep, setPrep] = useState<Prep | null>(null);
   const [prepLoading, setPrepLoading] = useState(false);
@@ -52,6 +58,7 @@ export function DocumentActions({
   const numStr = docNum != null ? String(docNum) : "";
 
   useEffect(() => {
+    if (preloaded !== undefined) { setDoc(preloaded ?? "none"); return; }
     if (!numStr && docEntry == null) { setDoc("none"); return; }
     let cancelled = false;
     setDoc(null);
@@ -63,7 +70,7 @@ export function DocumentActions({
       .then((j) => { if (!cancelled) setDoc(j?.doc ?? "none"); })
       .catch(() => { if (!cancelled) setDoc("none"); });
     return () => { cancelled = true; };
-  }, [docType, numStr, docEntry]);
+  }, [preloaded, docType, numStr, docEntry]);
 
   const openEmail = useCallback(async () => {
     if (doc === null || doc === "none") return;
@@ -113,6 +120,7 @@ export function DocumentActions({
   }
   // Pas de PDF archivé.
   if (doc === "none") {
+    if (hideWhenMissing) return null;
     return (
       <span className={`inline-flex items-center gap-1 text-[11px] text-muted-foreground/40 ${className ?? ""}`} title="Aucun PDF archivé pour ce document">
         <FileText className="h-3.5 w-3.5" /> non archivé
@@ -120,24 +128,26 @@ export function DocumentActions({
     );
   }
 
+  const btn = `inline-flex items-center gap-1 h-7 rounded-lg border border-border bg-card text-[11.5px] font-medium text-foreground hover:bg-secondary/60 transition-colors ${compact ? "px-1.5" : "px-2"}`;
   return (
-    <span className={`inline-flex items-center gap-1.5 ${className ?? ""}`}>
+    <span className={`inline-flex items-center gap-1.5 ${className ?? ""}`} onClick={(e) => e.stopPropagation()}>
       <button
         type="button"
         onClick={() => window.open(`/api/archive/${doc.id}/pdf`, "_blank", "noopener")}
-        className="inline-flex items-center gap-1 h-7 px-2 rounded-lg border border-border bg-card text-[11.5px] font-medium text-foreground hover:bg-secondary/60 transition-colors"
+        className={btn}
         title="Visualiser le PDF"
       >
-        <FileText className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" /> PDF
-        <ExternalLink className="h-3 w-3 text-muted-foreground/50" />
+        <FileText className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" />
+        {!compact && <>PDF <ExternalLink className="h-3 w-3 text-muted-foreground/50" /></>}
       </button>
       <button
         type="button"
         onClick={openEmail}
-        className="inline-flex items-center gap-1 h-7 px-2 rounded-lg border border-border bg-card text-[11.5px] font-medium text-foreground hover:bg-secondary/60 transition-colors"
+        className={btn}
         title={doc.lastSentAt ? `Déjà envoyé le ${new Date(doc.lastSentAt).toLocaleString("fr-FR")}` : "Envoyer au client"}
       >
-        <Send className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" /> Envoyer
+        <Send className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" />
+        {!compact && "Envoyer"}
         {doc.lastSentAt && <CheckCircle2 className="h-3 w-3 text-emerald-500" />}
       </button>
 

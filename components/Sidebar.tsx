@@ -10,7 +10,7 @@ import {
   Radio, ShoppingCart, Package, PackagePlus, Factory, Receipt, AlertTriangle,
   Home, Settings, PackageCheck, ClipboardCheck, Truck, Eye, Store, Trophy,
   Pencil, Loader2, RotateCcw, FileText, GripVertical, FolderPlus, Plus, Trash2, ChevronUp, CornerDownRight, Check,
-  CalendarDays, Building2, Wallet, Boxes, Target,
+  CalendarDays, Building2, Wallet, Boxes, Target, Archive,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -133,6 +133,7 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
       { href: "/dashboard", label: "Statistiques", icon: LayoutDashboard },
       { href: "/dashboard/magasins", label: "Palmarès magasins", icon: Trophy },
       { href: "/encours", label: "Encours clients", icon: Receipt },
+      { href: "/etat-documentaire", label: "État documentaire", icon: Archive },
       { href: "/transport", label: "Coût de transport", icon: Truck },
     ],
   },

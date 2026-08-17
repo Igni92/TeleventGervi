@@ -193,12 +193,12 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
     const closed = o.status === "bost_Close";
     const nbInc = incCount(o.docEntry);
     return (
-      <li key={o.docEntry}>
+      <li key={o.docEntry} className="flex items-center gap-1.5">
         <button
           type="button"
           onClick={() => openDetail(o)}
           title={`Ouvrir le BL # ${o.docNum}`}
-          className="w-full flex items-center gap-2 py-1.5 -mx-1 px-1 rounded-md hover:bg-secondary/50 transition-colors text-left group"
+          className="flex-1 min-w-0 flex items-center gap-2 py-1.5 -ml-1 px-1 rounded-md hover:bg-secondary/50 transition-colors text-left group"
         >
           <span className={`shrink-0 inline-flex items-center justify-center h-5 w-10 rounded text-[10px] font-semibold tnum ${closed ? "bg-muted text-muted-foreground" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"}`} title={closed ? "Clôturé/annulé" : "Ouvert"}>
             {closed ? <PackageCheck className="h-3 w-3" /> : <PackageOpen className="h-3 w-3" />}
@@ -226,6 +226,8 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
           <span className="w-[70px] shrink-0 text-right font-bold tnum text-[12px] text-foreground">{fmt(o.total)} €</span>
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40 group-hover:text-foreground transition-colors" />
         </button>
+        {/* PDF / Envoi directement sur la ligne (BL archivé) — pas besoin d'ouvrir. */}
+        <DocumentActions compact hideWhenMissing docType="BL" docNum={o.docNum} docEntry={o.docEntry} className="shrink-0" />
       </li>
     );
   };
