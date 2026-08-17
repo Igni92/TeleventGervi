@@ -1898,7 +1898,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
               type="button"
               onClick={onExitModif}
               title="Quitter la modification et revenir à la saisie normale (synchro écran 1)"
-              className="inline-flex shrink-0 items-center gap-1 h-[26px] px-2 rounded bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-semibold active:scale-[0.98] transition-colors"
+              className="inline-flex shrink-0 items-center gap-1 h-[26px] px-2 rounded bg-amber-500 hover:bg-amber-600 text-on-accent text-[11px] font-semibold active:scale-[0.98] transition-colors"
             >
               <X className="h-3 w-3" /> Quitter
             </button>
@@ -3136,7 +3136,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
               Corriger
             </Button>
             <Button
-              className="bg-amber-600 hover:bg-amber-700 text-white"
+              className="bg-amber-600 hover:bg-amber-700 text-on-accent"
               onClick={() => { setSgConfirmOpen(false); submit({ safeguardsConfirmed: true }); }}
             >
               Valider quand même

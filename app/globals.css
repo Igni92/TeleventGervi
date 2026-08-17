@@ -419,6 +419,12 @@
   /* Tabular numerics opt-in (already on body, but explicit on data cells) */
   .tnum { font-variant-numeric: tabular-nums; }
 
+  /* Texte sur un fond ACCENT clair (jaune/or brand, ambre vif). Le jaune est une
+     couleur claire : le texte doit être SOMBRE, jamais blanc — et ce, dans les
+     deux modes (le fond accent ne s'inverse pas). Méthode normalisée sur tout le
+     site : remplacer `text-white` par `text-on-accent` sur ces fonds. */
+  .text-on-accent { color: hsl(var(--primary-foreground)); }
+
   /* Soft-glow accent dot (used in stat lists) */
   .dot-accent {
     box-shadow: 0 0 0 3px hsl(var(--background)),

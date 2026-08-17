@@ -925,7 +925,7 @@ function LotCell({ line, current, isBusy, onPick }: {
                 type="button"
                 disabled={!manual}
                 onClick={() => manual && pick(`EM${manual}`)}
-                className="h-7 shrink-0 rounded-r-md border border-l-0 border-brand-500 bg-brand-500 px-2.5 text-[12px] font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand-600"
+                className="h-7 shrink-0 rounded-r-md border border-l-0 border-brand-500 bg-brand-500 px-2.5 text-[12px] font-semibold text-on-accent disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand-600"
               >
                 OK
               </button>

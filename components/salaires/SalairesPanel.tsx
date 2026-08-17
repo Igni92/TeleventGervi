@@ -299,7 +299,7 @@ export function SalairesPanel({ canEdit }: { canEdit: boolean }) {
           )}
           {canEdit && (
             <button type="button" onClick={sendRecap} disabled={sending || loading || rows.length === 0}
-              className="w-full sm:w-auto sm:ml-auto inline-flex items-center justify-center gap-1.5 h-10 px-4 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[13px] font-semibold disabled:opacity-50">
+              className="w-full sm:w-auto sm:ml-auto inline-flex items-center justify-center gap-1.5 h-10 px-4 rounded-lg bg-amber-600 hover:bg-amber-700 text-on-accent text-[13px] font-semibold disabled:opacity-50">
               {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               {data?.sent ? "Renvoyer au comptable" : "Envoyer au comptable"}
             </button>

@@ -529,7 +529,7 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
             {isManager && (
               <button type="button" onClick={printMonthAll} disabled={monthLoading}
                 title="État mensuel de toute l'équipe (synthèse + un état signable par employé) — le document à envoyer à la compta pour la paie"
-                className="ml-1 inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[12.5px] font-semibold disabled:opacity-50 shrink-0">
+                className="ml-1 inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-on-accent text-[12.5px] font-semibold disabled:opacity-50 shrink-0">
                 <Printer className="h-4 w-4 shrink-0" /> PDF <span className="hidden sm:inline">compta (tous)</span>
               </button>
             )}

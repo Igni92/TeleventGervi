@@ -582,7 +582,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
           type="button"
           onClick={releaseAllVentes}
           disabled={releasingAll}
-          className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[12.5px] font-semibold disabled:opacity-50 active:scale-95 transition-all"
+          className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-on-accent text-[12.5px] font-semibold disabled:opacity-50 active:scale-95 transition-all"
         >
           {releasingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           Tout mettre en préparation ({statusCounts.ventes})
@@ -785,7 +785,7 @@ function DatePanel({
           <button
             type="button"
             onClick={onReport}
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-amber-500 text-white text-[12px] font-semibold hover:bg-amber-600 active:scale-95 transition-colors shrink-0 self-start sm:self-auto"
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-amber-500 text-on-accent text-[12px] font-semibold hover:bg-amber-600 active:scale-95 transition-colors shrink-0 self-start sm:self-auto"
           >
             <ChevronRight className="h-3.5 w-3.5" />
             Reporter au prochain jour ouvré
@@ -2263,7 +2263,7 @@ const OrderRow = memo(function OrderRow({
             onClick={releaseToPrep}
             disabled={savingRelease}
             title="Mettre ce magasin en préparation — il devient visible pour l'entrepôt (À préparer)"
-            className="inline-flex shrink-0 flex-1 sm:flex-none items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-[12px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 active:scale-95 bg-amber-600 hover:bg-amber-700 text-white"
+            className="inline-flex shrink-0 flex-1 sm:flex-none items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-[12px] font-bold uppercase tracking-wide transition-colors disabled:opacity-60 active:scale-95 bg-amber-600 hover:bg-amber-700 text-on-accent"
           >
             {savingRelease ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             {/* Libellé complet partout : sur mobile le bouton occupe sa propre
@@ -3373,7 +3373,7 @@ function LineToolMenu({ docEntry, docNum, pos, onClose, onDone }: {
               type="button"
               disabled={!manual || lotBusy != null}
               onClick={() => manual && runLotChange(`EM${manual}`, null)}
-              className="h-7 shrink-0 rounded-r-md border border-l-0 border-brand-500 bg-brand-500 px-2.5 text-[12px] font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand-600"
+              className="h-7 shrink-0 rounded-r-md border border-l-0 border-brand-500 bg-brand-500 px-2.5 text-[12px] font-semibold text-on-accent disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand-600"
             >
               {lotBusy === `EM${manual}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "OK"}
             </button>
