@@ -59,38 +59,50 @@ describe("computePenalty", () => {
 });
 
 describe("buildRelanceContext", () => {
-  it("IFR = 40 € PAR facture (et non une fois par client) — §7", () => {
+  it("IFR = 40 € PAR facture en retard ≥ 31 j (et non une fois par client) — §7", () => {
     const ctx = buildRelanceContext({
       client: { cardCode: "C1", raisonSociale: "SARL LES DÉLICES" },
-      invoices: [inv({ docEntry: 1, balance: 1000 }), inv({ docEntry: 2, balance: 2000 })],
+      invoices: [inv({ docEntry: 1, balance: 1000, overdueDays: 40 }), inv({ docEntry: 2, balance: 2000, overdueDays: 40 })],
       params: DEFAULT_RELANCE_PARAMS,
     });
     expect(ctx.totals.nbFactures).toBe(2);
-    expect(ctx.totals.ifr).toBe(80); // 40 × 2
+    expect(ctx.totals.nbFacturesIFR).toBe(2);
+    expect(ctx.totals.ifr).toBe(80); // 40 × 2 (les deux ≥ 31 j)
     expect(ctx.totals.principal).toBe(3000);
     expect(ctx.fields.IndemniteForfaitaire).toBe("80,00 €");
     expect(ctx.fields.MontantRestantDu).toBe("3 000,00 €");
   });
 
+  it("IFR NON exigible avant le 31ᵉ jour de retard", () => {
+    const ctx = buildRelanceContext({
+      client: { cardCode: "C1", raisonSociale: "X" },
+      invoices: [inv({ docEntry: 1, balance: 1000, overdueDays: 30 }), inv({ docEntry: 2, balance: 2000, overdueDays: 31 })],
+      params: DEFAULT_RELANCE_PARAMS,
+    });
+    expect(ctx.totals.nbFacturesIFR).toBe(1); // seule la facture à 31 j
+    expect(ctx.totals.ifr).toBe(40);
+  });
+
   it("total dû = principal + pénalités + IFR ; sans taux → pénalités 0", () => {
     const ctx = buildRelanceContext({
       client: { cardCode: "C1", raisonSociale: "SARL LES DÉLICES" },
-      invoices: [inv({ balance: 4820, overdueDays: 23 })],
+      invoices: [inv({ balance: 4820, overdueDays: 40 })],
       params: { ...DEFAULT_RELANCE_PARAMS, penaliteTauxAnnuel: 0 },
     });
     expect(ctx.totals.penalites).toBe(0);
-    expect(ctx.totals.total).toBe(4860); // 4820 + 0 + 40
+    expect(ctx.totals.total).toBe(4860); // 4820 + 0 + 40 (≥ 31 j)
     expect(ctx.fields.TotalDu).toBe("4 860,00 €");
   });
 
-  it("calcule les pénalités quand un taux est paramétré", () => {
+  it("calcule les pénalités quand un taux est paramétré (IFR 0 si < 31 j)", () => {
     const ctx = buildRelanceContext({
       client: { cardCode: "C1", raisonSociale: "X" },
       invoices: [inv({ balance: 4820, overdueDays: 23 })],
       params: { ...DEFAULT_RELANCE_PARAMS, penaliteTauxAnnuel: 0.1505 },
     });
     expect(ctx.totals.penalites).toBeCloseTo(45.71, 2);
-    expect(ctx.totals.total).toBeCloseTo(4820 + 45.71 + 40, 2);
+    expect(ctx.totals.ifr).toBe(0); // 23 j < 31 j
+    expect(ctx.totals.total).toBeCloseTo(4820 + 45.71, 2);
   });
 
   it("retient la facture la plus en retard comme référence (R0/R1)", () => {
@@ -123,7 +135,7 @@ describe("buildRelanceContext", () => {
       client: { cardCode: "FANTASY", raisonSociale: "FANTASY PVT." },
       invoices: [
         inv({ docEntry: 1, balance: 100000, overdueDays: 40 }),
-        inv({ docEntry: 2, balance: 70413.91, overdueDays: 30 }),
+        inv({ docEntry: 2, balance: 70413.91, overdueDays: 31 }),
       ],
       params: { ...DEFAULT_RELANCE_PARAMS, penaliteTauxAnnuel: 0 },
       currentAccountBalance: 84988.43,

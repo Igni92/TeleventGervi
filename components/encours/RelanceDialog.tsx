@@ -20,8 +20,10 @@ interface PreviewTotals {
   principal: number;
   penalites: number;
   ifr: number;
-  /** Nombre de factures touchées par l'indemnité forfaitaire (40 € chacune). */
+  /** Nombre de factures encore dues (net > 0). */
   nbFacturesDues: number;
+  /** Nombre de factures touchées par l'indemnité forfaitaire (retard ≥ 31 j). */
+  nbFacturesIFR: number;
   /** Montant forfaitaire unitaire (€) appliqué par facture due. */
   ifrParFacture: number;
   /** Nombre de factures de SERVICE (à personnaliser à la main). */
@@ -258,9 +260,9 @@ export function RelanceDialog({
                 <Stat
                   label="Indemnité forfait."
                   value={eur(preview.totals.ifr)}
-                  hint={preview.totals.nbFacturesDues > 0
-                    ? `${preview.totals.nbFacturesDues} facture${preview.totals.nbFacturesDues > 1 ? "s" : ""} × ${eur(preview.totals.ifrParFacture)}`
-                    : undefined}
+                  hint={preview.totals.nbFacturesIFR > 0
+                    ? `${preview.totals.nbFacturesIFR} facture${preview.totals.nbFacturesIFR > 1 ? "s" : ""} en retard ≥ 31 j × ${eur(preview.totals.ifrParFacture)}`
+                    : "aucune facture ≥ 31 j de retard"}
                 />
                 <Stat label="Total dû" value={eur(preview.totals.total)} strong />
               </div>

@@ -6,7 +6,7 @@ import { RELANCE_LEVELS } from "./levels";
 
 const invoices: RelanceInvoice[] = [
   { docEntry: 1, docNum: 457, docDate: new Date("2026-04-12T08:00:00Z"), dueDate: new Date("2026-05-12T08:00:00Z"), docTotal: 4820, balance: 4820, overdueDays: 35 },
-  { docEntry: 2, docNum: 461, docDate: new Date("2026-04-20T08:00:00Z"), dueDate: new Date("2026-05-20T08:00:00Z"), docTotal: 1200, balance: 1200, overdueDays: 27 },
+  { docEntry: 2, docNum: 461, docDate: new Date("2026-04-20T08:00:00Z"), dueDate: new Date("2026-05-20T08:00:00Z"), docTotal: 1200, balance: 1200, overdueDays: 35 },
 ];
 
 const ctx = buildRelanceContext({

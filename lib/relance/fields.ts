@@ -51,9 +51,12 @@ export interface RelanceTotals {
   principal: number;
   penalites: number;
   ifr: number;
-  /** Nombre de factures ENCORE DUES après imputation = nombre de positions
-   *  touchées par l'indemnité forfaitaire de 40 € (ifr = nbFacturesDues × ifrParFacture). */
+  /** Nombre de factures ENCORE DUES après imputation (net > 0) — pour l'affichage
+   *  du total du tableau. */
   nbFacturesDues: number;
+  /** Nombre de factures touchées par l'indemnité forfaitaire de 40 € = dues ET
+   *  en retard d'au moins 31 j (ifr = nbFacturesIFR × ifrParFacture). */
+  nbFacturesIFR: number;
   /** Montant forfaitaire unitaire appliqué (€, = params.ifrParFacture ; 40 par défaut). */
   ifrParFacture: number;
   /** Nombre de factures de SERVICE dans la relance (à personnaliser à la main). */
@@ -180,6 +183,13 @@ export function computePenalty(balance: number, overdueDays: number, annualRate:
   return round2(balance * annualRate * (overdueDays / 365));
 }
 
+/**
+ * Seuil de retard (en jours) à partir duquel l'indemnité forfaitaire de
+ * recouvrement (40 €) est exigible. Règle Gervifrais : à partir du 31ᵉ jour de
+ * retard — une facture à 0 (ou < 31) jour de retard n'en génère PAS.
+ */
+export const IFR_SEUIL_JOURS = 31;
+
 /** N° de facture affichable (DocNum si présent, sinon DocEntry). */
 function invoiceLabel(inv: RelanceInvoice): string {
   return inv.docNum != null ? String(inv.docNum) : String(inv.docEntry);
@@ -295,13 +305,18 @@ export function buildRelanceContext(args: {
       0,
     ),
   );
-  // IFR = ifrParFacture × nombre de factures ENCORE DUES après imputation (et non
-  // le nombre total de factures ouvertes).
+  // Factures encore dues après imputation (net > 0) — sert au décompte affiché.
   const nbFacturesDues = invoices.reduce(
     (n, i) => n + ((netDuParFacture.get(i.docEntry) ?? 0) > 0.005 ? 1 : 0),
     0,
   );
-  const ifr = round2(params.ifrParFacture * nbFacturesDues);
+  // IFR (40 €) : UNIQUEMENT les factures dont le retard atteint le seuil légal
+  // (≥ 31 j) ET encore dues. Une facture à 0 (ou < 31) jour de retard n'en a pas.
+  const nbFacturesIFR = invoices.reduce(
+    (n, i) => n + (i.overdueDays >= IFR_SEUIL_JOURS && (netDuParFacture.get(i.docEntry) ?? 0) > 0.005 ? 1 : 0),
+    0,
+  );
+  const ifr = round2(params.ifrParFacture * nbFacturesIFR);
   const total = round2(principal + penalites + ifr);
 
   // Séparation SERVICE / ARTICLE : les relances de factures de service doivent
@@ -330,7 +345,7 @@ export function buildRelanceContext(args: {
     const net = netDuParFacture.get(inv.docEntry) ?? 0;
     if (net <= 0.005) continue;
     const pen = computePenalty(net, inv.overdueDays, params.penaliteTauxAnnuel);
-    const rowIfr = params.ifrParFacture;
+    const rowIfr = inv.overdueDays >= IFR_SEUIL_JOURS ? params.ifrParFacture : 0;
     tableRows.push({
       num: invoiceLabel(inv),
       date: formatDateFR(inv.docDate),
@@ -364,11 +379,11 @@ export function buildRelanceContext(args: {
     MontantPenalites: formatEUR(penalites),
     IndemniteForfaitaire: formatEUR(ifr),
     // Détail de l'indemnité forfaitaire : nombre de factures concernées × 40 €.
-    NbFacturesIFR: String(nbFacturesDues),
+    NbFacturesIFR: String(nbFacturesIFR),
     IfrParFacture: formatEUR(params.ifrParFacture),
-    // Libellé « (N facture(s) × 40,00 €) » — TOUJOURS le nombre de positions
-    // touchées par le forfait (demande direction : le marquer dans le courrier).
-    DetailIFR: `(${nbFacturesDues} facture${nbFacturesDues > 1 ? "s" : ""} × ${formatEUR(params.ifrParFacture)})`,
+    // Libellé « (N facture(s) × 40,00 €) » — nombre de positions RÉELLEMENT
+    // touchées par le forfait (retard ≥ 31 j).
+    DetailIFR: `(${nbFacturesIFR} facture${nbFacturesIFR > 1 ? "s" : ""} × ${formatEUR(params.ifrParFacture)})`,
     TotalDu: formatEUR(total),
     DateMiseEnDemeure: formatDateFR(dateMiseEnDemeure ?? null),
     // Clause d'ouverture R5 : évite « mise en demeure du — » si aucune R4 n'est
@@ -396,7 +411,7 @@ export function buildRelanceContext(args: {
     primary,
     tableRows,
     rate,
-    totals: { nbFactures, openTotal, encaissementsNonAffectes, principal, penalites, ifr, nbFacturesDues, ifrParFacture: params.ifrParFacture, nbServiceInvoices, serviceOnly, total },
+    totals: { nbFactures, openTotal, encaissementsNonAffectes, principal, penalites, ifr, nbFacturesDues, nbFacturesIFR, ifrParFacture: params.ifrParFacture, nbServiceInvoices, serviceOnly, total },
     avoirsByInvoice,
     avoirsNonImputes,
     avoirsNonImputesTotal,
