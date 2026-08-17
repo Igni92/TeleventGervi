@@ -10,11 +10,12 @@ import { sap } from "@/lib/sapb1";
  * Petites stats "habitudes d'achat" affichées dans le bandeau en haut de la
  * fiche client (console télévente) :
  *   - lastOrderDate : DocDate de la dernière livraison SAP (BL — tous CardCodes du client)
- *   - topProducts   : top 3 FAMILLES de fruit, agrégées sur les 10 dernières
- *                     commandes, classées par **poids MÉDIAN par commande**
- *                     (« quand ils en prennent, ils en prennent combien » —
- *                     ratio poids/commande sur la médiane, plus robuste que le
- *                     cumul qui favorise ce qu'ils commandent le plus souvent).
+ *   - topProducts   : top 3 FAMILLES de fruit, classées par **poids MÉDIAN par
+ *                     commande** sur une fenêtre **saisonnière** (commandes du
+ *                     mois courant ±1, année en cours + même période l'an passé).
+ *                     « Quand ils en prennent à cette saison, ils en prennent
+ *                     combien » — plus robuste que le cumul et tient compte de
+ *                     la saisonnalité des fruits.
  *
  * Tolère SAP indisponible : retourne { lastOrderDate: null, topProducts: [] }.
  */
@@ -46,14 +47,33 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
   try {
     type Line = { ItemCode: string; ItemDescription?: string; Quantity: number };
     type Ord = { DocEntry: number; DocDate: string; DocumentLines?: Line[] };
-    const filter = cardCodes.map((c) => `CardCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
+    const cardFilter = cardCodes.map((c) => `CardCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
+    // Fenêtre ~14 mois : couvre l'année en cours ET la même période l'an dernier
+    // (saisonnalité des fruits — on ne se fie pas juste aux 10 dernières cdes).
+    const since = new Date();
+    since.setMonth(since.getMonth() - 14);
+    const sinceStr = since.toISOString().slice(0, 10);
+    const filter = `(${cardFilter}) and DocDate ge '${sinceStr}'`;
     const r = await sap.get<{ value: Ord[] }>(
-      `Orders?$top=10&$orderby=DocEntry desc&$select=DocEntry,DocDate,DocumentLines&$filter=${encodeURIComponent(filter)}`,
+      `Orders?$top=300&$orderby=DocDate desc&$select=DocEntry,DocDate,DocumentLines&$filter=${encodeURIComponent(filter)}`,
     );
-    const orders = r.value ?? [];
+    const allOrders = r.value ?? [];
 
-    // Date de la dernière commande
-    const lastOrderDate = orders[0]?.DocDate ?? null;
+    // Date de la dernière livraison (BL le plus récent)
+    const lastOrderDate = allOrders[0]?.DocDate ?? null;
+
+    // ── Sélection SAISONNIÈRE pour la médiane ──
+    // On veut « ce qu'ils prennent à CETTE période de l'année », pas « les 10
+    // dernières commandes » (biaisé par la saison courante d'achat). On garde
+    // les commandes dont le mois est à ±1 du mois courant, TOUTES ANNÉES
+    // confondues → l'année en cours + la même période l'an dernier.
+    const nowMonth = new Date().getMonth();
+    const monthDist = (a: number, b: number) => { const d = Math.abs(a - b) % 12; return Math.min(d, 12 - d); };
+    const seasonal = allOrders.filter(
+      (o) => o.DocDate && monthDist(new Date(o.DocDate).getMonth(), nowMonth) <= 1,
+    );
+    // Repli : trop peu de commandes en saison → les 10 dernières (comportement d'avant).
+    const orders = seasonal.length >= 3 ? seasonal : allOrders.slice(0, 10);
 
     // Enrichit les noms + poids unitaire depuis la DB (plus propre que ItemDescription SAP)
     const allCodes = Array.from(new Set(

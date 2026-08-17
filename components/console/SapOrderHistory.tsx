@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, PackageCheck, PackageOpen, Ban, FileText,
-  ChevronRight, AlertTriangle, Plus, Check, Trash2, Search, X, Boxes, Scale,
+  ChevronRight, AlertTriangle, Plus, Check, Trash2, Search, X, Boxes, Scale, History,
 } from "lucide-react";
 import { TypeCombobox } from "@/components/TypeCombobox";
 import { Button } from "@/components/ui/button";
@@ -52,12 +52,14 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
   const [incNote, setIncNote] = useState("");
   // BL ouvert dans la fenêtre de détail (remplace le dépliage en ligne).
   const [detailEntry, setDetailEntry] = useState<number | null>(null);
+  // Pop-up « tout l'historique » (la fiche n'affiche que les 3 derniers BL).
+  const [listOpen, setListOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
       const [o, inc] = await Promise.all([
-        fetch(`/api/sap/orders?clientId=${encodeURIComponent(activeId)}&last=12`).then((r) => r.json()),
+        fetch(`/api/sap/orders?clientId=${encodeURIComponent(activeId)}&last=24`).then((r) => r.json()),
         fetch(`/api/incidents?clientId=${encodeURIComponent(activeId)}`).then((r) => r.json()),
       ]);
       if (o.ok === false) throw new Error(o.error || "Erreur SAP");
@@ -101,6 +103,7 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
   // Ouvre le détail d'un BL (charge les lignes si besoin).
   const detail = detailEntry != null ? orders.find((o) => o.docEntry === detailEntry) ?? null : null;
   const openDetail = async (o: SapOrder) => {
+    setListOpen(false); // ferme la pop-up « tout l'historique » si ouverte
     setDetailEntry(o.docEntry); setShowInvoice(false);
     if (!lines[o.docEntry]) await fetchLines(o.docEntry);
   };
@@ -172,6 +175,60 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
 
   const detailClosed = detail?.status === "bost_Close";
 
+  // En-tête de colonnes (icônes une seule fois) — réutilisé fiche + pop-up.
+  const colHeader = (
+    <div className="flex items-center gap-2 pb-1.5 mb-0.5 border-b border-border/60 text-muted-foreground">
+      <span className="w-10 shrink-0" />
+      <span className="flex-1 min-w-0" />
+      <span className="w-12 shrink-0 flex items-center justify-center"><Boxes className="h-4 w-4" /><InfoHint label="Colis" size={14} className="ml-1">Nombre de colis</InfoHint></span>
+      <span className="w-16 shrink-0 flex items-center justify-center"><Scale className="h-4 w-4" /><InfoHint label="Poids" size={14} className="ml-1">Poids (kg)</InfoHint></span>
+      <span className="w-[70px] shrink-0" />
+      <span className="w-4 shrink-0" />
+    </div>
+  );
+
+  // Ligne BL cliquable — réutilisée dans la fiche (3 derniers) et la pop-up.
+  const orderRow = (o: SapOrder) => {
+    const closed = o.status === "bost_Close";
+    const nbInc = incCount(o.docEntry);
+    return (
+      <li key={o.docEntry}>
+        <button
+          type="button"
+          onClick={() => openDetail(o)}
+          title={`Ouvrir le BL # ${o.docNum}`}
+          className="w-full flex items-center gap-2 py-1.5 -mx-1 px-1 rounded-md hover:bg-secondary/50 transition-colors text-left group"
+        >
+          <span className={`shrink-0 inline-flex items-center justify-center h-5 w-10 rounded text-[10px] font-semibold tnum ${closed ? "bg-muted text-muted-foreground" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"}`} title={closed ? "Clôturé/annulé" : "Ouvert"}>
+            {closed ? <PackageCheck className="h-3 w-3" /> : <PackageOpen className="h-3 w-3" />}
+          </span>
+          <span className="min-w-0 flex-1 flex items-baseline gap-1.5">
+            <span className="text-[12.5px] font-semibold text-foreground shrink-0"># {o.docNum}</span>
+            <span className="text-[11px] text-muted-foreground tnum shrink-0">{fmtDate(o.docDate)}</span>
+            {nbInc > 0 && (
+              <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] px-1 py-px rounded bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300" title={`${nbInc} incident(s)`}>
+                <AlertTriangle className="h-2.5 w-2.5" />{nbInc}
+              </span>
+            )}
+            {o.invoiceNum && (
+              <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] px-1 py-px rounded bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300" title="Facture liée">
+                <FileText className="h-2.5 w-2.5" />{o.invoiceNum}
+              </span>
+            )}
+          </span>
+          <span className="w-12 shrink-0 flex justify-center">
+            {o.colis != null && o.colis > 0 ? <span className={TAG}>{fmtColis(o.colis)}</span> : <span className="text-muted-foreground/40 text-[11px]">—</span>}
+          </span>
+          <span className="w-16 shrink-0 flex justify-center">
+            {o.weightKg != null && o.weightKg > 0 ? <span className={TAG}>{o.weightKg} kg</span> : <span className="text-muted-foreground/40 text-[11px]">—</span>}
+          </span>
+          <span className="w-[70px] shrink-0 text-right font-bold tnum text-[12px] text-foreground">{fmt(o.total)} €</span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40 group-hover:text-foreground transition-colors" />
+        </button>
+      </li>
+    );
+  };
+
   return (
     <div>
       {/* ── Recherche par code client (autre compte) + rafraîchir ── */}
@@ -215,59 +272,39 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
 
       {orders.length > 0 && (
         <>
-          {/* En-tête de colonnes : icônes une seule fois (façon accueil) */}
-          <div className="flex items-center gap-2 pb-1.5 mb-0.5 border-b border-border/60 text-muted-foreground">
-            <span className="w-10 shrink-0" />
-            <span className="flex-1 min-w-0" />
-            <span className="w-12 shrink-0 flex items-center justify-center"><Boxes className="h-4 w-4" /><InfoHint label="Colis" size={14} className="ml-1">Nombre de colis</InfoHint></span>
-            <span className="w-16 shrink-0 flex items-center justify-center"><Scale className="h-4 w-4" /><InfoHint label="Poids" size={14} className="ml-1">Poids (kg)</InfoHint></span>
-            <span className="w-[70px] shrink-0" />
-            <span className="w-4 shrink-0" />
-          </div>
+          {colHeader}
           <ul className="divide-y divide-border/60">
-            {orders.map((o) => {
-              const closed = o.status === "bost_Close";
-              const nbInc = incCount(o.docEntry);
-              return (
-                <li key={o.docEntry}>
-                  <button
-                    type="button"
-                    onClick={() => openDetail(o)}
-                    title={`Ouvrir le BL # ${o.docNum}`}
-                    className="w-full flex items-center gap-2 py-1.5 -mx-1 px-1 rounded-md hover:bg-secondary/50 transition-colors text-left group"
-                  >
-                    <span className={`shrink-0 inline-flex items-center justify-center h-5 w-10 rounded text-[10px] font-semibold tnum ${closed ? "bg-muted text-muted-foreground" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"}`} title={closed ? "Clôturé/annulé" : "Ouvert"}>
-                      {closed ? <PackageCheck className="h-3 w-3" /> : <PackageOpen className="h-3 w-3" />}
-                    </span>
-                    <span className="min-w-0 flex-1 flex items-baseline gap-1.5">
-                      <span className="text-[12.5px] font-semibold text-foreground shrink-0"># {o.docNum}</span>
-                      <span className="text-[11px] text-muted-foreground tnum shrink-0">{fmtDate(o.docDate)}</span>
-                      {nbInc > 0 && (
-                        <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] px-1 py-px rounded bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300" title={`${nbInc} incident(s)`}>
-                          <AlertTriangle className="h-2.5 w-2.5" />{nbInc}
-                        </span>
-                      )}
-                      {o.invoiceNum && (
-                        <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] px-1 py-px rounded bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300" title="Facture liée">
-                          <FileText className="h-2.5 w-2.5" />{o.invoiceNum}
-                        </span>
-                      )}
-                    </span>
-                    <span className="w-12 shrink-0 flex justify-center">
-                      {o.colis != null && o.colis > 0 ? <span className={TAG}>{fmtColis(o.colis)}</span> : <span className="text-muted-foreground/40 text-[11px]">—</span>}
-                    </span>
-                    <span className="w-16 shrink-0 flex justify-center">
-                      {o.weightKg != null && o.weightKg > 0 ? <span className={TAG}>{o.weightKg} kg</span> : <span className="text-muted-foreground/40 text-[11px]">—</span>}
-                    </span>
-                    <span className="w-[70px] shrink-0 text-right font-bold tnum text-[12px] text-foreground">{fmt(o.total)} €</span>
-                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40 group-hover:text-foreground transition-colors" />
-                  </button>
-                </li>
-              );
-            })}
+            {orders.slice(0, 3).map(orderRow)}
           </ul>
+          {orders.length > 3 && (
+            <button
+              type="button"
+              onClick={() => setListOpen(true)}
+              className="mt-1.5 inline-flex items-center gap-1.5 text-[11.5px] font-medium text-brand-600 dark:text-brand-400 hover:underline underline-offset-2"
+            >
+              <History className="h-3.5 w-3.5" />
+              Voir tout l&apos;historique ({orders.length})
+            </button>
+          )}
         </>
       )}
+
+      {/* ── Pop-up « tout l'historique » (au-delà des 3 derniers) ── */}
+      <Dialog open={listOpen} onOpenChange={setListOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <History className="h-5 w-5 text-brand-600 dark:text-brand-400" />
+              Historique des commandes{search ? ` · ${search.code}` : ""}
+            </DialogTitle>
+            <DialogDescription className="sr-only">Liste complète des bons de livraison du client.</DialogDescription>
+          </DialogHeader>
+          {colHeader}
+          <ul className="divide-y divide-border/60">
+            {orders.map(orderRow)}
+          </ul>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Détail du BL (façon accueil) + ACTIONS conservées ── */}
       <Dialog open={!!detail} onOpenChange={(o) => { if (!o) { setDetailEntry(null); setShowInvoice(false); } }}>

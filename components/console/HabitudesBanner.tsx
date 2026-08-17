@@ -18,11 +18,13 @@ interface Props {
   ordersCount?: number;
 }
 
-/** Tons des 3 pastilles — hiérarchie forte, rang 1 = accent principal (or). */
+/** Tons des 3 pastilles — hiérarchie forte, rang 1 = accent principal (or).
+ *  Le fond est teinté (visuel) mais le TEXTE reste en foreground (noir sur
+ *  clair, blanc sur sombre) pour un contraste correct — pas de texte coloré. */
 const TONES = [
-  { pill: "border-brand-500/35 bg-brand-500/12", name: "text-brand-700 dark:text-brand-300" },
-  { pill: "border-emerald-500/35 bg-emerald-500/12", name: "text-emerald-700 dark:text-emerald-300" },
-  { pill: "border-sky-500/35 bg-sky-500/12", name: "text-sky-700 dark:text-sky-300" },
+  "border-brand-500/40 bg-brand-500/12",
+  "border-emerald-500/40 bg-emerald-500/12",
+  "border-sky-500/40 bg-sky-500/12",
 ] as const;
 
 const fmtKg = (kg: number) => (kg < 10 ? kg.toFixed(1).replace(".", ",") : String(Math.round(kg)));
@@ -104,19 +106,20 @@ export function HabitudesBanner({ clientId, lastCallOrder, ordersCount }: Props)
               const tone = TONES[i] ?? TONES[TONES.length - 1];
               const kg = p.weightKg ?? 0;
               const showWeight = kg > 0;
+              const nb = `${p.orderCount} cde${p.orderCount > 1 ? "s" : ""}`;
               return (
                 <div
                   key={p.itemCode}
-                  className={`rounded-xl border ${tone.pill} px-2 py-2 text-center min-w-0`}
-                  title={`${p.itemName} — ${showWeight ? `${fmtKg(kg)} kg médian / commande` : `${p.orderCount} cde${p.orderCount > 1 ? "s" : ""}`} sur 10 cdes`}
+                  className={`rounded-xl border ${tone} px-2 py-2 text-center min-w-0`}
+                  title={`${p.itemName} — ${showWeight ? `${fmtKg(kg)} kg médian / commande` : nb} (médiane saisonnière sur ${nb})`}
                 >
-                  <p className={`text-[11px] font-semibold truncate ${tone.name}`}>{p.itemName}</p>
+                  <p className="text-[11px] font-semibold truncate text-foreground">{p.itemName}</p>
                   {showWeight ? (
                     <>
                       <p className="text-[19px] font-bold text-foreground tnum leading-none mt-0.5">
                         {fmtKg(kg)}<span className="text-[11px] font-semibold ml-0.5">kg</span>
                       </p>
-                      <p className="text-[8.5px] uppercase tracking-[0.1em] text-muted-foreground/70 mt-0.5">/ cde</p>
+                      <p className="text-[8.5px] uppercase tracking-[0.1em] text-foreground/55 mt-0.5">/ cde</p>
                     </>
                   ) : (
                     <p className="text-[15px] font-bold text-foreground tnum leading-tight mt-1">
