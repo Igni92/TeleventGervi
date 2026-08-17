@@ -3,7 +3,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
-import { getRelanceEmailSettings, getSapCredentialOverride, INTEGRATION_KEYS } from "@/lib/integrationSettings";
+import { getRelanceEmailSettings, getSapCredentialOverride, getArchiveSettings, INTEGRATION_KEYS } from "@/lib/integrationSettings";
 
 /**
  * GET / PATCH /api/admin/integration-settings — réglages d'intégration
@@ -20,6 +20,7 @@ export const dynamic = "force-dynamic";
 async function currentState() {
   const email = await getRelanceEmailSettings();
   const sap = await getSapCredentialOverride();
+  const archive = await getArchiveSettings();
   return {
     from: email.from,
     testRecipient: email.testRecipient,
@@ -28,6 +29,11 @@ async function currentState() {
     sapUser: sap.user ?? process.env.SAP_B1_USERNAME ?? "",
     sapUserIsOverride: sap.user != null,
     sapPassIsSet: sap.pass != null,
+    // Archive documents
+    archiveEnabled: archive.enabled,
+    archiveMailbox: archive.mailbox,
+    archiveEmailSubject: archive.subjectTemplate,
+    archiveEmailBody: archive.bodyTemplate,
   };
 }
 
@@ -46,6 +52,10 @@ const PatchSchema = z.object({
   live: z.boolean().optional(),
   sapUser: z.string().trim().max(100).optional(),
   sapPass: z.string().max(200).optional(),
+  archiveEnabled: z.boolean().optional(),
+  archiveMailbox: z.string().trim().email("Boîte d'archive invalide").or(z.literal("")).optional(),
+  archiveEmailSubject: z.string().max(300).optional(),
+  archiveEmailBody: z.string().max(4000).optional(),
 });
 
 /** Upsert (valeur non vide) ou suppression (valeur vide) d'une clé AppSetting. */
@@ -75,6 +85,10 @@ export async function PATCH(req: Request) {
   if (d.sapUser !== undefined) await setOrClear(INTEGRATION_KEYS.sapUser, d.sapUser);
   // Mot de passe : n'écrase que si une valeur est fournie ; "" = effacer la surcharge.
   if (d.sapPass !== undefined) await setOrClear(INTEGRATION_KEYS.sapPass, d.sapPass);
+  if (d.archiveEnabled !== undefined) await setOrClear(INTEGRATION_KEYS.archiveEnabled, d.archiveEnabled ? "1" : "0");
+  if (d.archiveMailbox !== undefined) await setOrClear(INTEGRATION_KEYS.archiveMailbox, d.archiveMailbox);
+  if (d.archiveEmailSubject !== undefined) await setOrClear(INTEGRATION_KEYS.archiveEmailSubject, d.archiveEmailSubject);
+  if (d.archiveEmailBody !== undefined) await setOrClear(INTEGRATION_KEYS.archiveEmailBody, d.archiveEmailBody);
 
   return NextResponse.json({ ok: true, ...(await currentState()) });
 }

@@ -7,6 +7,7 @@ import {
   ChevronRight, AlertTriangle, Plus, Check, Trash2, Search, X, Boxes, Scale, History,
 } from "lucide-react";
 import { TypeCombobox } from "@/components/TypeCombobox";
+import { DocumentActions } from "@/components/documents/DocumentActions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { InfoHint } from "@/components/ui/info-hint";
@@ -336,6 +337,20 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
                     className="ml-auto inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-rose-400/50 text-rose-600 dark:text-rose-400 text-[12.5px] font-semibold hover:bg-rose-500/10 transition-colors disabled:opacity-50">
                     {busy === detail.docEntry ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Annuler le BL
                   </button>
+                )}
+              </div>
+
+              {/* PDF archivés : BL + facture liée (voir / envoyer au client) */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-y border-border/50 py-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">BL</span>
+                  <DocumentActions docType="BL" docNum={detail.docNum} />
+                </div>
+                {detail.invoiceNum && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Facture</span>
+                    <DocumentActions docType="FACTURE" docNum={detail.invoiceNum} />
+                  </div>
                 )}
               </div>
 

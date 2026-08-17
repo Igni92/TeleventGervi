@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Save, Mail, KeyRound, AlertTriangle } from "lucide-react";
+import { Loader2, Save, Mail, KeyRound, AlertTriangle, Archive } from "lucide-react";
 
 interface State {
   from: string;
@@ -11,6 +11,10 @@ interface State {
   sapUser: string;
   sapUserIsOverride: boolean;
   sapPassIsSet: boolean;
+  archiveEnabled: boolean;
+  archiveMailbox: string;
+  archiveEmailSubject: string;
+  archiveEmailBody: string;
 }
 
 const inputCls =
@@ -56,6 +60,10 @@ export function IntegrationSettingsPanel() {
         testRecipient: s.testRecipient,
         live: s.live,
         sapUser: s.sapUser,
+        archiveEnabled: s.archiveEnabled,
+        archiveMailbox: s.archiveMailbox,
+        archiveEmailSubject: s.archiveEmailSubject,
+        archiveEmailBody: s.archiveEmailBody,
       };
       if (sapPass !== "") body.sapPass = sapPass; // n'envoie le mot de passe que s'il est saisi
       const r = await fetch("/api/admin/integration-settings", {
@@ -122,6 +130,39 @@ export function IntegrationSettingsPanel() {
             <input className={inputCls} type="password" value={sapPass} onChange={(e) => setSapPass(e.target.value)} placeholder={s.sapPassIsSet ? "•••••••• (inchangé)" : "•••••••• (env)"} autoComplete="new-password" />
           </Field>
         </div>
+      </div>
+
+      {/* ── Archive des documents (boîte factures-archive@) ── */}
+      <div className="space-y-3 border-t border-border/60 pt-4">
+        <div className="flex items-center gap-2">
+          <Archive className="h-4 w-4 text-brand-500" />
+          <h4 className="text-[13px] font-bold text-foreground">Archive des documents (BL, avoirs, factures)</h4>
+        </div>
+        <div className="flex items-start gap-2 rounded-lg border border-amber-400/50 bg-amber-50 dark:bg-amber-950/25 px-3 py-2 text-[11.5px] text-amber-800 dark:text-amber-200">
+          <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <span>La récupération nécessite la permission d&apos;application <b>Mail.Read</b> sur la boîte (consentement admin Azure). Activez la synchro seulement une fois cette permission accordée.</span>
+        </div>
+        <label className="flex items-start gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5 cursor-pointer">
+          <input type="checkbox" checked={s.archiveEnabled} onChange={(e) => setS({ ...s, archiveEnabled: e.target.checked })} className="h-4 w-4 mt-0.5 accent-brand-600" />
+          <span className="text-[12.5px]">
+            <b className="text-foreground">Activer la synchro de la boîte</b>
+            <span className="text-muted-foreground"> — récupère les PDF toutes les 30 min et les indexe par client. Désactivée par défaut.</span>
+          </span>
+        </label>
+        <Field label="Boîte d'archive" hint="Boîte partagée où arrivent les PDF envoyés aux clients.">
+          <input className={inputCls} type="email" value={s.archiveMailbox} onChange={(e) => setS({ ...s, archiveMailbox: e.target.value })} placeholder="factures-archive@gervifrais.com" />
+        </Field>
+        <Field label="Objet de l'e-mail au client" hint="Variables : {{type}} {{num}} {{date}} {{client}}.">
+          <input className={inputCls} value={s.archiveEmailSubject} onChange={(e) => setS({ ...s, archiveEmailSubject: e.target.value })} placeholder="{{type}} n°{{num}} — Gervifrais" />
+        </Field>
+        <Field label="Message (modèle par défaut, modifiable à chaque envoi)" hint="Variables : {{type}} {{num}} {{date}} {{client}}.">
+          <textarea
+            className={inputCls + " h-28 py-2 resize-y leading-relaxed"}
+            value={s.archiveEmailBody}
+            onChange={(e) => setS({ ...s, archiveEmailBody: e.target.value })}
+            placeholder="Bonjour,&#10;&#10;Veuillez trouver ci-joint votre {{type}} n°{{num}}…"
+          />
+        </Field>
       </div>
 
       <div className="flex justify-end">

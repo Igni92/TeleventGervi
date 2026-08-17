@@ -183,6 +183,7 @@ model Client {
   incidents       Incident[]
   rendezVous      RendezVous[]
   prospActivities ProspectionActivity[]
+  archivedDocuments ArchivedDocument[]
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
 }
@@ -601,6 +602,50 @@ model AppSetting {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
+}
+
+// Archive des PDF (BL, avoirs, factures) récupérés de la boîte partagée
+// factures-archive@gervifrais.com. Le FICHIER est stocké sur le VPS
+// (storage/archive/...) ; ce modèle en est l'INDEX rapide (par client + type).
+// Rattachement au client via le n° de document lu dans le nom/objet, résolu
+// sur le miroir SAP (SapInvoice/SapOrder/SapCreditNote → cardCode).
+model ArchivedDocument {
+  id                String    @id @default(cuid())
+  // "BL" | "FACTURE" | "AVOIR" | "AUTRE"
+  docType           String
+  // N° de document SAP (chaîne — tolérant aux préfixes), null si illisible.
+  docNum            String?
+  // Résolution SAP (si le n° a matché le miroir).
+  docEntry          Int?
+  cardCode          String? // SAP CardCode du client
+  clientId          String? // FK Client résolue
+  client            Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  docDate           DateTime? // date du document (miroir SAP si résolu)
+  // true = rattaché à un client (clientId non nul). false = à revoir.
+  matched           Boolean   @default(false)
+
+  // Fichier sur disque.
+  fileName          String // nom d'origine de la pièce jointe
+  filePath          String // chemin RELATIF sous la racine d'archive
+  sizeBytes         Int      @default(0)
+
+  // Traçabilité / déduplication de la source Graph.
+  graphMessageId    String
+  graphAttachmentId String
+  mailSubject       String?
+  receivedAt        DateTime // date de réception du mail
+
+  // Envoi au client.
+  lastSentAt        DateTime?
+  lastSentTo        String?
+
+  createdAt         DateTime  @default(now())
+
+  @@unique([graphMessageId, graphAttachmentId])
+  @@index([clientId, docType])
+  @@index([cardCode, docType])
+  @@index([docType, docNum])
+  @@index([receivedAt])
 }
 
 // Stock par entrepôt. On ne synchronise que les entrepôts utiles pour Gervifrais :

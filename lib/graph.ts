@@ -244,3 +244,98 @@ export async function sendMailAsShared(from: string, input: SendMailInput): Prom
     throw new Error(`Graph sendMail (${from}) error: ${res.status} - ${JSON.stringify(error)}`);
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// LECTURE d'une boîte partagée (permission d'APPLICATION `Mail.Read`) — sert à
+// l'archivage des PDF (BL/avoirs/factures) de factures-archive@gervifrais.com.
+// Requiert la permission Mail.Read (consentement admin, idéalement restreinte à
+// cette boîte par une ApplicationAccessPolicy — comme Mail.Send).
+// Erreurs explicites : 403 = Mail.Read non accordée ou boîte hors policy.
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface GraphMessageHead {
+  id: string;
+  subject: string | null;
+  receivedDateTime: string; // ISO
+}
+
+export interface GraphAttachmentMeta {
+  id: string;
+  name: string;
+  contentType: string | null;
+  size: number;
+  isFile: boolean;
+}
+
+async function graphGet<T>(url: string): Promise<T> {
+  const token = await getAppGraphToken();
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(`Graph GET ${url.replace(/https:\/\/graph\.microsoft\.com\/v1\.0/, "")} error: ${res.status} - ${JSON.stringify(error).slice(0, 300)}`);
+  }
+  return (await res.json()) as T;
+}
+
+/**
+ * Liste les messages d'une boîte AYANT des pièces jointes, reçus depuis `sinceISO`
+ * (défaut : pas de borne). Suit la pagination Graph jusqu'à `max` messages.
+ */
+export async function listMailboxMessagesWithAttachments(
+  mailbox: string,
+  sinceISO?: string,
+  max = 400,
+): Promise<GraphMessageHead[]> {
+  const filters = ["hasAttachments eq true"];
+  if (sinceISO) filters.push(`receivedDateTime ge ${sinceISO}`);
+  // NB : on encode à la main (espaces → %20). URLSearchParams encode l'espace en
+  // « + », que le moteur OData de Graph peut mal interpréter dans $filter/$orderby.
+  const q =
+    `$filter=${encodeURIComponent(filters.join(" and "))}` +
+    `&$orderby=${encodeURIComponent("receivedDateTime desc")}` +
+    `&$select=id,subject,receivedDateTime&$top=50`;
+  let url: string | null =
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?${q}`;
+  const out: GraphMessageHead[] = [];
+  while (url && out.length < max) {
+    const page: { value: GraphMessageHead[]; "@odata.nextLink"?: string } = await graphGet(url);
+    out.push(...(page.value ?? []));
+    url = page["@odata.nextLink"] ?? null;
+  }
+  return out.slice(0, max);
+}
+
+/** Métadonnées des pièces jointes FICHIER d'un message (sans le contenu). */
+export async function listMessageFileAttachments(
+  mailbox: string,
+  messageId: string,
+): Promise<GraphAttachmentMeta[]> {
+  const url =
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}` +
+    `/attachments?$select=id,name,contentType,size,@odata.type`;
+  const page: { value: (GraphAttachmentMeta & { "@odata.type"?: string })[] } = await graphGet(url);
+  return (page.value ?? []).map((a) => ({
+    id: a.id,
+    name: a.name,
+    contentType: a.contentType ?? null,
+    size: a.size ?? 0,
+    isFile: (a["@odata.type"] ?? "").includes("fileAttachment"),
+  }));
+}
+
+/**
+ * Récupère le contenu d'une pièce jointe fichier en base64 (Graph renvoie
+ * `contentBytes` pour un fileAttachment).
+ */
+export async function getAttachmentBase64(
+  mailbox: string,
+  messageId: string,
+  attachmentId: string,
+): Promise<string> {
+  const url =
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}` +
+    `/attachments/${encodeURIComponent(attachmentId)}`;
+  const att: { contentBytes?: string } = await graphGet(url);
+  if (!att.contentBytes) throw new Error("Pièce jointe sans contentBytes (pas un fichier ?)");
+  return att.contentBytes;
+}

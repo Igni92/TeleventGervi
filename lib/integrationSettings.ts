@@ -19,7 +19,44 @@ const KEYS = {
   live: "relance_live",
   sapUser: "sap_login_user",
   sapPass: "sap_login_password",
+  // Archive des documents (boîte partagée + modèle d'e-mail d'envoi au client)
+  archiveEnabled: "archive_enabled",
+  archiveMailbox: "archive_mailbox",
+  archiveEmailSubject: "archive_email_subject",
+  archiveEmailBody: "archive_email_body",
 } as const;
+
+/** Boîte partagée archivant les PDF (BL/avoirs/factures) envoyés aux clients. */
+export const DEFAULT_ARCHIVE_MAILBOX = "factures-archive@gervifrais.com";
+
+/** Modèle d'e-mail par défaut d'envoi d'un document au client. Placeholders :
+ *  {{client}} {{type}} {{num}} {{date}}. Éditable en Paramètres. */
+export const DEFAULT_ARCHIVE_SUBJECT = "{{type}} n°{{num}} — Gervifrais";
+export const DEFAULT_ARCHIVE_BODY =
+  "Bonjour,\n\n" +
+  "Veuillez trouver ci-joint votre {{type}} n°{{num}} du {{date}}.\n\n" +
+  "En vous souhaitant bonne réception,\n" +
+  "Le service comptabilité — Gervifrais";
+
+export interface ArchiveSettings {
+  /** true = la synchro boîte est active (à activer une fois Mail.Read accordée). */
+  enabled: boolean;
+  mailbox: string;
+  subjectTemplate: string;
+  bodyTemplate: string;
+}
+
+/** Réglages archive effectifs (AppSetting > défaut codé). */
+export async function getArchiveSettings(): Promise<ArchiveSettings> {
+  const s = await readSettings([KEYS.archiveEnabled, KEYS.archiveMailbox, KEYS.archiveEmailSubject, KEYS.archiveEmailBody]);
+  const enabledOverride = s.get(KEYS.archiveEnabled);
+  return {
+    enabled: enabledOverride != null ? enabledOverride === "1" : process.env.ARCHIVE_ENABLED === "1",
+    mailbox: s.get(KEYS.archiveMailbox)?.trim() || process.env.ARCHIVE_MAILBOX?.trim() || DEFAULT_ARCHIVE_MAILBOX,
+    subjectTemplate: s.get(KEYS.archiveEmailSubject) || DEFAULT_ARCHIVE_SUBJECT,
+    bodyTemplate: s.get(KEYS.archiveEmailBody) || DEFAULT_ARCHIVE_BODY,
+  };
+}
 
 /** Lit plusieurs AppSetting d'un coup (best-effort → Map vide si DB indispo). */
 async function readSettings(keys: string[]): Promise<Map<string, string>> {

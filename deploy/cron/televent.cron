@@ -36,6 +36,11 @@ MAILTO=""
 #    de façon paresseuse — ce cron garantit juste sa présence en base. ──
 40 4 * * *  televent  televent-cron-call /api/cron/legal-rate
 
+# ── Archive des documents : récupère les PDF (BL/avoirs/factures) de la boîte
+#    partagée factures-archive@ et les indexe. No-op tant que l'archive n'est pas
+#    activée (Paramètres) / Mail.Read non accordée. Toutes les 30 min. ──
+7,37 * * * *  televent  televent-cron-call /api/cron/archive-sync
+
 # ── Sauvegarde PostgreSQL locale (inoffensif si la base n'est pas locale :
 #    le script sort immédiatement). ──
 15 2 * * *  televent  /srv/televent/app/deploy/scripts/backup-db.sh
