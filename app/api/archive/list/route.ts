@@ -20,13 +20,18 @@ export async function GET(req: NextRequest) {
   const q = searchParams.get("q")?.trim() || "";
   const type = searchParams.get("type")?.trim().toUpperCase();
   const onlyMatched = searchParams.get("matched") === "1";
+  const clientId = searchParams.get("clientId")?.trim();
+  const noClient = searchParams.get("noClient") === "1"; // dossier « non rattachés »
   const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1);
-  const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "40", 10) || 40));
+  const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") || "40", 10) || 40));
 
   const ids = await clientIdsInScope(await getAccessScope(session)); // null = admin (tout)
 
   const where: Prisma.ArchivedDocumentWhereInput = {};
   if (ids) where.clientId = { in: ids };
+  // Filtre dossier : un client précis, ou les non rattachés (admin only côté scope).
+  if (clientId) where.clientId = ids ? (ids.includes(clientId) ? clientId : "__denied__") : clientId;
+  else if (noClient) where.clientId = null;
   if (type && ["BL", "FACTURE", "AVOIR", "AUTRE"].includes(type)) where.docType = type;
   if (onlyMatched) where.matched = true;
   if (q) {

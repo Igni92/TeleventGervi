@@ -10,6 +10,7 @@ import {
 } from "@/lib/graph";
 import { matchDocument } from "@/lib/archive/match";
 import { savePdf } from "@/lib/archive/storage";
+import { resolveInvoiceEntries } from "@/lib/archive/dossier";
 
 /**
  * Synchro de la boîte partagée factures-archive@ → archive locale des PDF.
@@ -98,6 +99,8 @@ export async function GET(req: NextRequest) {
               docType: match.docType,
               docNum: match.docNum,
               docEntry: match.docEntry,
+              // Une facture est son propre pivot de dossier → dossier lié instantané.
+              invoiceEntry: match.docType === "FACTURE" ? match.docEntry : null,
               cardCode: match.cardCode,
               clientId: match.clientId,
               docDate: match.docDate,
@@ -140,7 +143,11 @@ export async function GET(req: NextRequest) {
       create: { key: LAST_SYNC_KEY, value: nowISO },
     });
 
-    return NextResponse.json({ ok: true, examines, neuf, doublons, nonResolus, supprimes, erreurs });
+    // Backfill des pivots de dossier (BL/avoirs → facture) pour un « dossier lié »
+    // 100 % local ensuite. Best-effort, plafonné (le reste au prochain passage).
+    const dossier = await resolveInvoiceEntries().catch(() => ({ resolved: 0, remaining: -1 }));
+
+    return NextResponse.json({ ok: true, examines, neuf, doublons, nonResolus, supprimes, erreurs, dossierResolus: dossier.resolved, dossierRestants: dossier.remaining });
   } catch (e) {
     // Échec dur (souvent : Mail.ReadWrite non accordée → 403). Visible dans l'état des crons.
     return NextResponse.json(

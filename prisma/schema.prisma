@@ -617,6 +617,10 @@ model ArchivedDocument {
   docNum            String?
   // Résolution SAP (si le n° a matché le miroir).
   docEntry          Int?
+  // Pivot du DOSSIER (BL → Facture → Avoir) : DocEntry de la FACTURE centrale.
+  // Précalculé (liens SAP BaseType 17/13) → le « dossier lié » est un simple
+  // lookup local (WHERE invoiceEntry = …), instantané, sans requête SAP.
+  invoiceEntry      Int?
   cardCode          String? // SAP CardCode du client
   clientId          String? // FK Client résolue
   client            Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
@@ -645,6 +649,7 @@ model ArchivedDocument {
   @@index([clientId, docType])
   @@index([cardCode, docType])
   @@index([docType, docNum])
+  @@index([invoiceEntry])
   @@index([receivedAt])
 }
 

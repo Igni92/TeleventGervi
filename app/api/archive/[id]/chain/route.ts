@@ -5,27 +5,37 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 
 /**
- * GET /api/archive/[id]/chain — dossier lié d'un document : BL → Facture → Avoir.
+ * GET /api/archive/[id]/chain — dossier lié : BL → Facture → Avoir.
  *
- * Les liens vivent dans SAP (DocumentLines.BaseType/BaseEntry), pas dans le miroir :
- *   - ligne de FACTURE BaseType=17 → BaseEntry = DocEntry de la COMMANDE (BL)
- *   - ligne d'AVOIR   BaseType=13 → BaseEntry = DocEntry de la FACTURE
- * On résout à la volée (best-effort : si SAP indispo → chain:null), puis on relie
- * chaque maillon à son PDF archivé (ArchivedDocument) quand il existe.
+ * RAPIDE : le lien est pré-calculé en base (invoiceEntry = facture centrale, cf.
+ * lib/archive/dossier). Le dossier est alors un simple lookup LOCAL. Si le pivot
+ * n'est pas encore connu (nouveau doc pas encore backfillé), on le résout à la
+ * volée via SAP — borné par un timeout pour ne JAMAIS tourner en boucle.
  */
 export const dynamic = "force-dynamic";
 
 type Line = { BaseType?: number; BaseEntry?: number };
-type Doc = { DocEntry: number; DocNum?: number | null; DocumentLines?: Line[] };
+type Doc = { DocEntry: number; DocumentLines?: Line[] };
 
-async function archived(docType: string, docEntry: number | null) {
-  if (docEntry == null) return null;
-  const d = await prisma.archivedDocument.findFirst({
-    where: { docType, docEntry },
-    orderBy: { receivedAt: "desc" },
-    select: { id: true, docNum: true, fileName: true, lastSentAt: true },
-  }).catch(() => null);
-  return d;
+/** Résout le pivot (facture centrale) d'un doc via SAP — borné 9 s. */
+async function resolveHubLive(docType: string, docEntry: number, cardCode: string): Promise<number | null> {
+  const timeout = new Promise<number | null>((res) => setTimeout(() => res(null), 9000));
+  const work = (async (): Promise<number | null> => {
+    if (docType === "FACTURE") return docEntry;
+    const esc = cardCode.replace(/'/g, "''");
+    if (docType === "BL") {
+      const invoices = await sap.getAll<Doc>(`Invoices?$select=DocEntry,DocumentLines&$filter=${encodeURIComponent(`CardCode eq '${esc}'`)}`, { maxPages: 8 });
+      for (const f of invoices) for (const l of f.DocumentLines ?? []) if (l.BaseType === 17 && l.BaseEntry === docEntry) return f.DocEntry;
+      return null;
+    }
+    if (docType === "AVOIR") {
+      const cn = await sap.get<Doc>(`CreditNotes(${docEntry})?$select=DocEntry,DocumentLines`);
+      for (const l of cn.DocumentLines ?? []) if (l.BaseType === 13 && l.BaseEntry != null) return l.BaseEntry;
+      return null;
+    }
+    return null;
+  })().catch(() => null);
+  return Promise.race([work, timeout]);
 }
 
 export async function GET(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
@@ -38,55 +48,36 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
   const allowed = (await requireAdmin(session)) || (doc.clientId ? await clientInScope(await getAccessScope(session), doc.clientId) : false);
   if (!allowed) return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
 
-  if (!doc.cardCode || doc.docEntry == null) {
-    return NextResponse.json({ ok: true, chain: null, reason: "document non résolu à SAP" });
+  // Pivot du dossier : local si connu, sinon résolu à la volée (borné) et mémorisé.
+  let hub = doc.invoiceEntry ?? null;
+  if (hub == null && doc.docEntry != null && doc.cardCode) {
+    hub = await resolveHubLive(doc.docType, doc.docEntry, doc.cardCode);
+    if (hub != null) await prisma.archivedDocument.update({ where: { id: doc.id }, data: { invoiceEntry: hub } }).catch(() => {});
   }
+  if (hub == null) return NextResponse.json({ ok: true, chain: null, reason: "dossier non résolu" });
 
-  try {
-    const cc = doc.cardCode.replace(/'/g, "''");
-    const [invoices, creditNotes] = await Promise.all([
-      sap.getAll<Doc>(`Invoices?$select=DocEntry,DocNum,DocumentLines&$filter=${encodeURIComponent(`CardCode eq '${cc}'`)}`, { maxPages: 6 }),
-      sap.getAll<Doc>(`CreditNotes?$select=DocEntry,DocNum,DocumentLines&$filter=${encodeURIComponent(`CardCode eq '${cc}'`)}`, { maxPages: 6 }),
-    ]);
-    const invByEntry = new Map(invoices.map((f) => [f.DocEntry, f]));
-    const invByOrder = new Map<number, Doc>();
-    for (const f of invoices) for (const l of f.DocumentLines ?? []) if (l.BaseType === 17 && l.BaseEntry != null && !invByOrder.has(l.BaseEntry)) invByOrder.set(l.BaseEntry, f);
+  // Lookup LOCAL de tout le dossier (instantané).
+  const rows = await prisma.archivedDocument.findMany({
+    where: { invoiceEntry: hub },
+    orderBy: { receivedAt: "desc" },
+    select: { id: true, docType: true, docNum: true, docEntry: true, fileName: true, lastSentAt: true },
+  });
+  const node = (r: (typeof rows)[number]) => ({
+    docEntry: r.docEntry ?? 0,
+    docNum: r.docNum,
+    archived: { id: r.id, fileName: r.fileName, lastSentAt: r.lastSentAt },
+  });
+  const bl = rows.find((r) => r.docType === "BL");
+  const facture = rows.find((r) => r.docType === "FACTURE");
+  const avoirs = rows.filter((r) => r.docType === "AVOIR");
 
-    let invoiceEntry: number | null = null;
-    let orderEntry: number | null = null;
-    if (doc.docType === "FACTURE") invoiceEntry = doc.docEntry;
-    else if (doc.docType === "BL") { orderEntry = doc.docEntry; invoiceEntry = invByOrder.get(doc.docEntry)?.DocEntry ?? null; }
-    else if (doc.docType === "AVOIR") {
-      const cn = creditNotes.find((c) => c.DocEntry === doc.docEntry);
-      for (const l of cn?.DocumentLines ?? []) if (l.BaseType === 13 && l.BaseEntry != null) { invoiceEntry = l.BaseEntry; break; }
-    }
-    // Commande (BL) depuis la facture centrale.
-    if (invoiceEntry != null && orderEntry == null) {
-      for (const l of invByEntry.get(invoiceEntry)?.DocumentLines ?? []) if (l.BaseType === 17 && l.BaseEntry != null) { orderEntry = l.BaseEntry; break; }
-    }
-    // Avoirs rattachés à la facture centrale.
-    const avoirDocs: Doc[] = [];
-    if (invoiceEntry != null) for (const c of creditNotes) for (const l of c.DocumentLines ?? []) if (l.BaseType === 13 && l.BaseEntry === invoiceEntry) { avoirDocs.push(c); break; }
-
-    // Numéros de document.
-    const invoiceDocNum = invoiceEntry != null ? invByEntry.get(invoiceEntry)?.DocNum ?? null : null;
-    const orderDocNum = orderEntry != null
-      ? (await prisma.sapOrder.findUnique({ where: { docEntry: orderEntry }, select: { docNum: true } }).catch(() => null))?.docNum ?? null
-      : null;
-
-    const [blArch, factArch, avoirArch] = await Promise.all([
-      archived("BL", orderEntry),
-      archived("FACTURE", invoiceEntry),
-      Promise.all(avoirDocs.map((a) => archived("AVOIR", a.DocEntry))),
-    ]);
-
-    const chain = {
-      bl: orderEntry != null ? { docEntry: orderEntry, docNum: orderDocNum ?? blArch?.docNum ?? null, archived: blArch } : null,
-      facture: invoiceEntry != null ? { docEntry: invoiceEntry, docNum: invoiceDocNum ?? factArch?.docNum ?? null, archived: factArch } : null,
-      avoirs: avoirDocs.map((a, i) => ({ docEntry: a.DocEntry, docNum: a.DocNum ?? avoirArch[i]?.docNum ?? null, archived: avoirArch[i] })),
-    };
-    return NextResponse.json({ ok: true, chain, current: doc.docType });
-  } catch (e) {
-    return NextResponse.json({ ok: true, chain: null, reason: e instanceof Error ? e.message : "SAP indisponible" });
-  }
+  return NextResponse.json({
+    ok: true,
+    current: doc.docType,
+    chain: {
+      bl: bl ? node(bl) : null,
+      facture: facture ? node(facture) : null,
+      avoirs: avoirs.map(node),
+    },
+  });
 }
