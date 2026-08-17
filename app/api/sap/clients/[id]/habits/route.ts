@@ -139,11 +139,25 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
       return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
     };
 
-    // Top 3 familles — classement par **poids médian par commande** puis nb de cdes.
-    const top = Array.from(agg.values())
-      .map((a) => ({ ...a, medianKg: median(a.perOrderKg) }))
-      .sort((a, b) => (b.medianKg - a.medianKg) || (b.count - a.count))
-      .slice(0, 3);
+    // Top 3 familles — classement par **poids médian par commande**, MAIS parmi
+    // les familles RÉGULIÈRES uniquement. Sans ce garde-fou, une famille commandée
+    // 1-2 fois avec une grosse commande (ex. cassis 36 kg en one-shot) obtient une
+    // médiane élevée et squatte le top — alors qu'elle n'est pas régulière.
+    // On exige donc un nombre minimal de commandes contenant la famille ; si moins
+    // de 3 familles atteignent ce seuil, on le relâche progressivement.
+    const nOrders = orders.length;
+    const values = Array.from(agg.values()).map((a) => ({ ...a, medianKg: median(a.perOrderKg) }));
+    const byRank = (a: typeof values[number], b: typeof values[number]) =>
+      (b.medianKg - a.medianKg) || (b.count - a.count);
+    // Seuils de régularité, du plus strict au plus permissif (~30 % des commandes,
+    // au moins 3), puis 2, puis 1 (repli = ancien comportement si peu de données).
+    const thresholds = [Math.max(3, Math.round(nOrders * 0.3)), 3, 2, 1];
+    let top = values.slice().sort(byRank).slice(0, 3);
+    for (const th of thresholds) {
+      const eligible = values.filter((v) => v.count >= th).sort(byRank);
+      top = eligible.slice(0, 3);
+      if (eligible.length >= 3) break;
+    }
 
     return NextResponse.json({
       lastOrderDate,
