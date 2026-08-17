@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 
 /** GET /api/sap/invoices/[docEntry] → contenu d'une facture (lecture seule). */
-type Line = { ItemCode: string; ItemDescription?: string; Quantity: number; Price?: number; LineTotal?: number; MeasureUnit?: string; WarehouseCode?: string };
+type Line = { LineNum?: number; ItemCode: string; ItemDescription?: string; Quantity: number; Price?: number; LineTotal?: number; MeasureUnit?: string; WarehouseCode?: string };
 type Invoice = { DocEntry: number; DocNum: number; DocDate: string; DocTotal?: number; VatSum?: number; DocumentStatus?: string; DocumentLines: Line[] };
 
 export async function GET(_req: NextRequest, props: { params: Promise<{ docEntry: string }> }) {
@@ -23,6 +23,7 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ docEntry
       docEntry: o.DocEntry, docNum: o.DocNum, docDate: o.DocDate,
       total: o.DocTotal ?? 0, totalHT: (o.DocTotal ?? 0) - (o.VatSum ?? 0), status: o.DocumentStatus,
       lines: (o.DocumentLines || []).map((l) => ({
+        lineNum: l.LineNum,
         itemCode: l.ItemCode, itemName: l.ItemDescription, quantity: l.Quantity,
         price: l.Price ?? 0, lineTotal: l.LineTotal ?? 0, unit: l.MeasureUnit, warehouse: l.WarehouseCode,
       })),

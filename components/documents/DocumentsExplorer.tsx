@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Search, Loader2, Workflow, ArrowDown, Folder, FolderOpen, ChevronLeft, Inbox, Eye, CheckCircle2, ArrowDownAZ, CalendarClock } from "lucide-react";
 import { DocumentActions } from "@/components/documents/DocumentActions";
+import { DocumentsKanban } from "@/components/documents/DocumentsKanban";
 import { PdfPreviewDialog } from "@/components/documents/PdfPreviewDialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { formatDate } from "@/lib/utils";
@@ -53,6 +54,7 @@ export function DocumentsExplorer() {
 
   const [docs, setDocs] = useState<Doc[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
+  const [clientView, setClientView] = useState<"dossiers" | "kanban">("dossiers");
   const [preview, setPreview] = useState<{ id: string; fileName: string } | null>(null);
 
   // Dossier lié (BL → Facture → Avoir)
@@ -178,20 +180,26 @@ export function DocumentsExplorer() {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2.5">
-            <div className="inline-flex rounded-lg border border-border bg-card p-0.5" title="Trier les dossiers">
-              <button type="button" onClick={() => setSort("date")} className={`inline-flex items-center gap-1 px-2.5 h-8 rounded-md text-[12px] font-medium transition-colors ${sort === "date" ? "bg-brand-500 text-on-accent shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-                <CalendarClock className="h-3.5 w-3.5" /> Date
-              </button>
-              <button type="button" onClick={() => setSort("num")} className={`inline-flex items-center gap-1 px-2.5 h-8 rounded-md text-[12px] font-medium transition-colors ${sort === "num" ? "bg-brand-500 text-on-accent shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-                <ArrowDownAZ className="h-3.5 w-3.5" /> N°
-              </button>
+            <div className="inline-flex rounded-lg border border-border bg-card p-0.5" title="Affichage">
+              <button type="button" onClick={() => setClientView("dossiers")} className={`px-2.5 h-8 rounded-md text-[12px] font-medium transition-colors ${clientView === "dossiers" ? "bg-brand-500 text-on-accent shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Dossiers</button>
+              <button type="button" onClick={() => setClientView("kanban")} className={`px-2.5 h-8 rounded-md text-[12px] font-medium transition-colors ${clientView === "kanban" ? "bg-brand-500 text-on-accent shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Kanban</button>
             </div>
+            {clientView === "dossiers" && (
+              <div className="inline-flex rounded-lg border border-border bg-card p-0.5" title="Trier les dossiers">
+                <button type="button" onClick={() => setSort("date")} className={`inline-flex items-center gap-1 px-2.5 h-8 rounded-md text-[12px] font-medium transition-colors ${sort === "date" ? "bg-brand-500 text-on-accent shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                  <CalendarClock className="h-3.5 w-3.5" /> Date
+                </button>
+                <button type="button" onClick={() => setSort("num")} className={`inline-flex items-center gap-1 px-2.5 h-8 rounded-md text-[12px] font-medium transition-colors ${sort === "num" ? "bg-brand-500 text-on-accent shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                  <ArrowDownAZ className="h-3.5 w-3.5" /> N°
+                </button>
+              </div>
+            )}
             <span className="text-[12px] text-muted-foreground tnum whitespace-nowrap">{dossiers.length} dossier{dossiers.length > 1 ? "s" : ""}</span>
           </div>
         </div>
 
         {/* En-tête de colonnes du dossier */}
-        {dossiers.length > 0 && (
+        {clientView === "dossiers" && dossiers.length > 0 && (
           <div className="hidden sm:grid grid-cols-3 gap-2.5 px-2.5 text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground/70">
             <span>Bon de livraison</span><span>Facture</span><span>Avoir</span>
           </div>
@@ -199,6 +207,8 @@ export function DocumentsExplorer() {
 
         {docsLoading ? (
           <div className="flex items-center justify-center py-16"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+        ) : clientView === "kanban" ? (
+          <DocumentsKanban docs={docs} onChanged={() => { if (open) loadDocs(open); }} />
         ) : dossiers.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border bg-card/50 py-14 text-center text-[13px] text-muted-foreground">Aucun document.</div>
         ) : (
