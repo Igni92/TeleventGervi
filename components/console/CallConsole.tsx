@@ -7,7 +7,7 @@ import {
   Search, Phone, ShoppingCart, Clock, BellRing, CheckCircle2,
   ChevronRight,
   Loader2, Calendar, Sparkles, ArrowUpDown,
-  StickyNote, History, User, TrendingUp, TrendingDown, Minus,
+  StickyNote, History, PhoneCall, User, TrendingUp, TrendingDown, Minus,
   MessageSquare, AlertTriangle, Settings, Mail, ArrowUpRight, Star, Ban, Send,
 } from "lucide-react";
 import { createPortal } from "react-dom";
@@ -65,6 +65,8 @@ import { DUR, EASE } from "@/lib/motion";
 interface AppelLog {
   id: string;
   type: "COMMANDE" | "DEMAIN";
+  /** Issue fine loguée avec l'appel (NRP, REFUS, REPONDEUR, RAPPELE, LITIGE…). */
+  outcome?: string | null;
   note: string | null;
   heureAppel: string;
   scheduledFor?: string | null;
@@ -1540,6 +1542,16 @@ function ActiveClient({
       );
     },
 
+    appels: () =>
+      client.appels.length > 0 ? (
+        <Block icon={PhoneCall} label="Historique des appels" info={{
+          label: "Historique des appels",
+          content: <>Journal des issues d&apos;appel (commande, à demain, pas de réponse, refus…).<br/>Les 3 derniers sont affichés ; « voir plus » charge tout l&apos;historique.</>,
+        }} {...collapseProps("appels")}>
+          <AppelsJournal clientId={client.id} appels={client.appels} />
+        </Block>
+      ) : null,
+
     rappels: () =>
       client.rappels.length > 0 ? (
         <Block icon={BellRing} label="Rappels planifiés" {...collapseProps("rappels")}>
@@ -1559,7 +1571,7 @@ function ActiveClient({
   };
 
   return (
-    <div key={client.id} className="animate-client-swap space-y-7">
+    <div key={client.id} className="animate-client-swap space-y-5">
       {/* ── Claimed banner ── */}
       {client.claimedFrom && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-purple-50 dark:bg-purple-950/30 border border-purple-200/60 dark:border-purple-500/30 text-[12px]">
@@ -1780,10 +1792,10 @@ function NotesCluster({
     setEditingEmail(false);
   }, [client.id, client.email]);
 
-  // Notes COMMANDE non vides — historique compilé (plus récentes en tête)
-  const commandeNotes = client.appels.filter(
-    (a) => a.type === "COMMANDE" && a.note && a.note.trim(),
-  );
+  // Dernière note d'appel (tous types) — les appels sont triés du + récent
+  // au + ancien, donc le premier avec une note est le dernier saisi. Une seule
+  // est conservée : la suivante « écrase » l'affichage.
+  const lastNote = client.appels.find((a) => a.note && a.note.trim());
 
   return (
     <div className="space-y-3.5">
@@ -1853,26 +1865,21 @@ function NotesCluster({
         initialName={client.sapGroupName}
       />
 
-      {/* ── Historique compilé (notes laissées sur les commandes) ── */}
-      {commandeNotes.length > 0 && (
+      {/* ── Dernière note d'appel (une seule, écrasée à chaque appel) ── */}
+      {lastNote && (
         <div className="space-y-1.5">
           <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
             <MessageSquare className="h-3 w-3" />
-            Historique notes commandes
-            <span className="text-muted-foreground/60 font-normal normal-case tracking-normal">
-              ({commandeNotes.length})
-            </span>
+            Dernière note d&apos;appel
           </div>
-          <ul className="space-y-1 max-h-32 overflow-y-auto pr-1">
-            {commandeNotes.slice(0, 8).map((a) => (
-              <li key={a.id} className="flex items-baseline gap-1.5 text-[11.5px]">
-                <span className="text-muted-foreground/70 tnum text-[10.5px] shrink-0">
-                  {formatDate(a.heureAppel)}
-                </span>
-                <span className="text-foreground/80 truncate">— {a.note}</span>
-              </li>
-            ))}
-          </ul>
+          <div className="rounded-lg border border-border bg-secondary/30 px-2.5 py-2">
+            <p className="text-[10.5px] tnum text-muted-foreground/80 mb-0.5">
+              {formatDate(lastNote.heureAppel)}
+            </p>
+            <p className="text-[12.5px] leading-snug text-foreground/90 whitespace-pre-wrap break-words">
+              « {lastNote.note} »
+            </p>
+          </div>
         </div>
       )}
 
@@ -2293,6 +2300,93 @@ function Block({
       )}
       {!collapsed && <div className="pl-3.5">{children}</div>}
     </section>
+  );
+}
+
+/** Libellé + couleur d'une issue d'appel (pastille du journal). */
+function appelBadge(a: AppelLog): { text: string; cls: string } {
+  if (a.type === "COMMANDE")
+    return { text: "Commande", cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" };
+  switch (a.outcome) {
+    case "NRP":       return { text: "Pas de réponse", cls: "bg-secondary text-muted-foreground" };
+    case "REPONDEUR": return { text: "Répondeur",      cls: "bg-secondary text-muted-foreground" };
+    case "REFUS":     return { text: "Refus",          cls: "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300" };
+    case "LITIGE":    return { text: "Litige",         cls: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" };
+    case "RAPPELE":   return { text: "Rappellera",     cls: "bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300" };
+    default:          return { text: "À demain",       cls: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" };
+  }
+}
+
+/**
+ * Journal des appels — les 3 derniers par défaut ; « voir plus » charge tout
+ * l'historique du client (/api/appels?clientId). Chaque ligne : pastille
+ * d'issue + date/heure + note (le cas échéant).
+ */
+function AppelsJournal({ clientId, appels }: { clientId: string; appels: AppelLog[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const [full, setFull] = useState<AppelLog[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const seeMore = async () => {
+    if (full) { setExpanded(true); return; }
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/appels?clientId=${encodeURIComponent(clientId)}`, { cache: "no-store" });
+      const j = await res.json();
+      setFull(Array.isArray(j) ? (j as AppelLog[]) : []);
+      setExpanded(true);
+    } catch {
+      // Repli : au moins ce qui est déjà chargé.
+      setFull(appels);
+      setExpanded(true);
+    } finally { setLoading(false); }
+  };
+
+  const rows = expanded ? (full ?? appels) : appels.slice(0, 3);
+  const hasMore = !expanded && appels.length > 3;
+
+  return (
+    <div className="space-y-1.5">
+      <ul className="space-y-1.5">
+        {rows.map((a) => {
+          const b = appelBadge(a);
+          return (
+            <li key={a.id} className="flex items-baseline gap-2 text-[12px]">
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 ${b.cls}`}>
+                {b.text}
+              </span>
+              <span className="text-foreground/80 tnum text-[11px] shrink-0" title={formatDate(a.heureAppel)}>
+                {formatRelative(a.heureAppel)}
+              </span>
+              {a.note && (
+                <span className="text-muted-foreground italic truncate flex-1 min-w-0">— {a.note}</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {hasMore && (
+        <button
+          type="button"
+          onClick={seeMore}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-brand-600 dark:text-brand-400 hover:underline underline-offset-2 disabled:opacity-50"
+        >
+          {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          Voir tout l&apos;historique
+        </button>
+      )}
+      {expanded && (full ?? appels).length > 3 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-muted-foreground hover:text-foreground"
+        >
+          <ChevronDown className="h-3.5 w-3.5 rotate-180" />
+          Réduire
+        </button>
+      )}
+    </div>
   );
 }
 

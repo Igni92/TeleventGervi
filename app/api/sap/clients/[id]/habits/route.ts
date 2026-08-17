@@ -9,10 +9,12 @@ import { sap } from "@/lib/sapb1";
  *
  * Petites stats "habitudes d'achat" affichées dans le bandeau en haut de la
  * fiche client (console télévente) :
- *   - lastOrderDate : DocDate de la dernière commande SAP (tous CardCodes du client)
- *   - topProducts   : top 3 articles, agrégés sur les 10 dernières commandes,
- *                     classés par nombre de commandes contenant l'article (desc),
- *                     puis par quantité cumulée (en pièces).
+ *   - lastOrderDate : DocDate de la dernière livraison SAP (BL — tous CardCodes du client)
+ *   - topProducts   : top 3 FAMILLES de fruit, agrégées sur les 10 dernières
+ *                     commandes, classées par **poids MÉDIAN par commande**
+ *                     (« quand ils en prennent, ils en prennent combien » —
+ *                     ratio poids/commande sur la médiane, plus robuste que le
+ *                     cumul qui favorise ce qu'ils commandent le plus souvent).
  *
  * Tolère SAP indisponible : retourne { lastOrderDate: null, topProducts: [] }.
  */
@@ -84,29 +86,43 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
       return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
     };
 
-    type Agg = { key: string; label: string; count: number; qty: number; weightKg: number };
+    // Agrégation : 1 valeur de poids PAR (famille, commande) — le poids cumulé
+    // de la famille sur cette commande. On garde la liste des poids-par-commande
+    // pour en tirer la MÉDIANE (et non le cumul).
+    type Agg = { key: string; label: string; count: number; perOrderKg: number[] };
     const agg = new Map<string, Agg>();
     for (const o of orders) {
-      const seen = new Set<string>();
+      const kgThisOrder = new Map<string, number>();
+      const labelThisOrder = new Map<string, string>();
       for (const l of (o.DocumentLines ?? [])) {
         if (!l.ItemCode) continue;
         const name = nameMap.get(l.ItemCode) || l.ItemDescription || l.ItemCode;
         const key = familyKey(name);
         if (!key) continue;
-        const cur = agg.get(key) ?? { key, label: familyLabel(name), count: 0, qty: 0, weightKg: 0 };
         const qty = l.Quantity || 0;
-        cur.qty += qty;
-        cur.weightKg += qty * (weightMap.get(l.ItemCode) ?? 0);
-        if (!seen.has(key)) { cur.count += 1; seen.add(key); }
+        kgThisOrder.set(key, (kgThisOrder.get(key) ?? 0) + qty * (weightMap.get(l.ItemCode) ?? 0));
+        if (!labelThisOrder.has(key)) labelThisOrder.set(key, familyLabel(name));
+      }
+      for (const [key, kg] of kgThisOrder) {
+        const cur = agg.get(key) ?? { key, label: labelThisOrder.get(key)!, count: 0, perOrderKg: [] };
+        cur.count += 1;
+        cur.perOrderKg.push(kg);
         agg.set(key, cur);
       }
     }
 
-    // Top 3 familles — classement par **poids cumulé** (kg) puis nb de cdes.
-    // Le commercial veut savoir « ce qu'ils achètent en volume », pas
-    // « combien de fois ils l'ont commandé ».
+    /** Médiane d'une série (0 si vide) — robuste aux commandes exceptionnelles. */
+    const median = (xs: number[]) => {
+      if (xs.length === 0) return 0;
+      const s = [...xs].sort((a, b) => a - b);
+      const m = Math.floor(s.length / 2);
+      return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    };
+
+    // Top 3 familles — classement par **poids médian par commande** puis nb de cdes.
     const top = Array.from(agg.values())
-      .sort((a, b) => (b.weightKg - a.weightKg) || (b.count - a.count))
+      .map((a) => ({ ...a, medianKg: median(a.perOrderKg) }))
+      .sort((a, b) => (b.medianKg - a.medianKg) || (b.count - a.count))
       .slice(0, 3);
 
     return NextResponse.json({
@@ -116,7 +132,7 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ id: stri
         itemCode: t.key,
         itemName: t.label,
         orderCount: t.count,
-        weightKg: Math.round(t.weightKg * 10) / 10, // 1 décimale
+        weightKg: Math.round(t.medianKg * 10) / 10, // poids MÉDIAN /commande, 1 décimale
       })),
     });
   } catch (e) {

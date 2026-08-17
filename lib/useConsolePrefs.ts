@@ -16,6 +16,7 @@ export type SectionId =
   | "jours"
   | "notes"
   | "history"
+  | "appels"
   | "rappels";
 
 export const SECTION_LABELS: Record<SectionId, string> = {
@@ -23,6 +24,7 @@ export const SECTION_LABELS: Record<SectionId, string> = {
   jours:    "Jours d'appel",
   notes:    "Notes client",
   history:  "Historique commandes",
+  appels:   "Historique des appels",
   rappels:  "Rappels planifiés",
 };
 
@@ -39,6 +41,7 @@ const DEFAULT_COLLAPSED: Record<SectionId, boolean> = {
   jours:    true,
   notes:    false,
   history:  false,
+  appels:   false,
   rappels:  true,
 };
 
@@ -54,11 +57,12 @@ const DEFAULT_VISIBLE: Record<SectionId, boolean> = {
   jours:    true,
   notes:    true,
   history:  true,
+  appels:   true,
   rappels:  true,
 };
 
 const DEFAULT_ORDER: SectionPref[] = (
-  ["insights", "jours", "notes", "history", "rappels"] as SectionId[]
+  ["insights", "jours", "notes", "history", "appels", "rappels"] as SectionId[]
 ).map((id) => ({ id, visible: DEFAULT_VISIBLE[id], collapsed: DEFAULT_COLLAPSED[id] }));
 
 /** SectionIds legacy fusionnés en `history` lors de la migration localStorage. */
