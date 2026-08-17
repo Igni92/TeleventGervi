@@ -286,16 +286,16 @@ export async function listMailboxMessagesWithAttachments(
   sinceISO?: string,
   max = 400,
 ): Promise<GraphMessageHead[]> {
-  const filters = ["hasAttachments eq true"];
-  if (sinceISO) filters.push(`receivedDateTime ge ${sinceISO}`);
-  // NB : on encode à la main (espaces → %20). URLSearchParams encode l'espace en
-  // « + », que le moteur OData de Graph peut mal interpréter dans $filter/$orderby.
-  const q =
-    `$filter=${encodeURIComponent(filters.join(" and "))}` +
-    `&$orderby=${encodeURIComponent("receivedDateTime desc")}` +
-    `&$select=id,subject,receivedDateTime&$top=50`;
+  // On filtre UNIQUEMENT sur receivedDateTime (propriété indexée) + tri sur la
+  // même propriété : combiner `hasAttachments eq true` avec un intervalle de date
+  // + tri déclenche « InefficientFilter » (400) côté Graph. On repère donc les
+  // pièces jointes message par message (listMessageFileAttachments).
+  // NB : encodage manuel (espaces → %20) — URLSearchParams met « + » que l'OData
+  // de Graph interprète mal dans $filter/$orderby.
+  const parts = [`$orderby=${encodeURIComponent("receivedDateTime desc")}`, "$select=id,subject,receivedDateTime", "$top=50"];
+  if (sinceISO) parts.unshift(`$filter=${encodeURIComponent(`receivedDateTime ge ${sinceISO}`)}`);
   let url: string | null =
-    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?${q}`;
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages?${parts.join("&")}`;
   const out: GraphMessageHead[] = [];
   while (url && out.length < max) {
     const page: { value: GraphMessageHead[]; "@odata.nextLink"?: string } = await graphGet(url);
