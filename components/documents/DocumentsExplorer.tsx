@@ -17,12 +17,11 @@ interface FolderRow {
   lastReceivedAt: string | null;
 }
 
-const CLIENT_TYPES = [
-  { key: "", label: "Tous types" },
-  { key: "GMS", label: "GMS" },
-  { key: "EXPORT", label: "Export" },
-  { key: "CHR", label: "CHR" },
-] as const;
+/** Libellés lisibles des types clients (le reste est capitalisé automatiquement). */
+const CLIENT_TYPE_LABEL: Record<string, string> = {
+  GMS: "GMS", CHR: "CHR", EXPORT: "Export", MARCHE: "Marché", GROSSISTE: "Grossiste",
+};
+const clientTypeLabel = (t: string) => CLIENT_TYPE_LABEL[t] ?? (t.charAt(0) + t.slice(1).toLowerCase());
 interface Doc {
   id: string; docType: string; docNum: string | null; docEntry: number | null; invoiceEntry: number | null;
   fileName: string; clientNom: string | null; cardCode: string | null;
@@ -49,6 +48,7 @@ export function DocumentsExplorer() {
   const [clientType, setClientType] = useState("");
   const [sort, setSort] = useState<"date" | "num">("date");
   const [folders, setFolders] = useState<FolderRow[] | null>(null);
+  const [availableTypes, setAvailableTypes] = useState<string[]>([]);
   const [totalDocs, setTotalDocs] = useState(0);
 
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -80,6 +80,7 @@ export function DocumentsExplorer() {
       if (clientType) p.set("clientType", clientType);
       const j = await fetch(`/api/archive/folders?${p}`, { cache: "no-store" }).then((r) => r.json());
       setFolders(j.folders ?? []);
+      if (Array.isArray(j.availableTypes) && j.availableTypes.length) setAvailableTypes(j.availableTypes);
       setTotalDocs(j.totalDocs ?? 0);
     } catch { setFolders([]); }
   }, [q, clientType]);
@@ -230,18 +231,21 @@ export function DocumentsExplorer() {
             className="h-10 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-brand-500/40"
           />
         </div>
-        <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
-          {CLIENT_TYPES.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setClientType(t.key)}
-              className={`px-2.5 h-8 rounded-md text-[12px] font-medium transition-colors ${clientType === t.key ? "bg-brand-500 text-on-accent shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        {availableTypes.length > 0 && (
+          <div className="inline-flex flex-wrap rounded-lg border border-border bg-card p-0.5">
+            <button type="button" onClick={() => setClientType("")} className={`px-2.5 h-8 rounded-md text-[12px] font-medium transition-colors ${clientType === "" ? "bg-brand-500 text-on-accent shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Tous</button>
+            {availableTypes.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setClientType(t)}
+                className={`px-2.5 h-8 rounded-md text-[12px] font-medium transition-colors ${clientType === t ? "bg-brand-500 text-on-accent shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                {clientTypeLabel(t)}
+              </button>
+            ))}
+          </div>
+        )}
         {folders && <span className="text-[12px] text-muted-foreground tnum whitespace-nowrap">{folders.length} client{folders.length > 1 ? "s" : ""} · {totalDocs} doc{totalDocs > 1 ? "s" : ""}</span>}
       </div>
 
@@ -275,7 +279,7 @@ export function DocumentsExplorer() {
                           {f.clientNom ?? "Non rattachés"}
                         </p>
                         {f.clientType && (
-                          <span className="shrink-0 inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-secondary text-muted-foreground">{f.clientType}</span>
+                          <span className="shrink-0 inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-secondary text-muted-foreground">{clientTypeLabel(f.clientType)}</span>
                         )}
                       </div>
                       {f.cardCode && <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">{f.cardCode}</p>}

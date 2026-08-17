@@ -17,12 +17,12 @@ export async function GET(req: NextRequest) {
 
   const sp = new URL(req.url).searchParams;
   const q = sp.get("q")?.trim() || "";
-  const clientType = sp.get("clientType")?.trim().toUpperCase(); // GMS | EXPORT | CHR
+  const clientType = sp.get("clientType")?.trim().toUpperCase();
   const ids = await clientIdsInScope(await getAccessScope(session));
 
   const where: Prisma.ArchivedDocumentWhereInput = {};
   if (ids) where.clientId = { in: ids };
-  if (clientType && ["GMS", "EXPORT", "CHR"].includes(clientType)) where.client = { type: clientType };
+  if (clientType) where.client = { type: clientType };
   if (q) {
     where.OR = [
       { client: { nom: { contains: q, mode: "insensitive" } } },
@@ -69,5 +69,13 @@ export async function GET(req: NextRequest) {
     return (a.clientNom ?? "").localeCompare(b.clientNom ?? "");
   });
 
-  return NextResponse.json({ ok: true, folders, totalDocs: folders.reduce((s, f) => s + f.total, 0) });
+  // Types clients RÉELLEMENT présents dans l'archive (pour un filtre dynamique).
+  const typeRows = await prisma.client.findMany({
+    where: { archivedDocuments: { some: {} }, type: { not: null }, ...(ids ? { id: { in: ids } } : {}) },
+    select: { type: true },
+    distinct: ["type"],
+  }).catch(() => [] as { type: string | null }[]);
+  const availableTypes = typeRows.map((r) => r.type).filter((t): t is string => !!t).sort();
+
+  return NextResponse.json({ ok: true, folders, availableTypes, totalDocs: folders.reduce((s, f) => s + f.total, 0) });
 }
