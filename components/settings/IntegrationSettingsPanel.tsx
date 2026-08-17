@@ -12,6 +12,7 @@ interface State {
   sapUserIsOverride: boolean;
   sapPassIsSet: boolean;
   archiveEnabled: boolean;
+  archiveDeleteAfter: boolean;
   archiveMailbox: string;
   archiveEmailSubject: string;
   archiveEmailBody: string;
@@ -61,6 +62,7 @@ export function IntegrationSettingsPanel() {
         live: s.live,
         sapUser: s.sapUser,
         archiveEnabled: s.archiveEnabled,
+        archiveDeleteAfter: s.archiveDeleteAfter,
         archiveMailbox: s.archiveMailbox,
         archiveEmailSubject: s.archiveEmailSubject,
         archiveEmailBody: s.archiveEmailBody,
@@ -140,13 +142,20 @@ export function IntegrationSettingsPanel() {
         </div>
         <div className="flex items-start gap-2 rounded-lg border border-amber-400/50 bg-amber-50 dark:bg-amber-950/25 px-3 py-2 text-[11.5px] text-amber-800 dark:text-amber-200">
           <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-          <span>La récupération nécessite la permission d&apos;application <b>Mail.Read</b> sur la boîte (consentement admin Azure). Activez la synchro seulement une fois cette permission accordée.</span>
+          <span>Nécessite la permission d&apos;application <b>Mail.ReadWrite</b> sur la boîte (consentement admin Azure) — lecture des PDF <i>et</i> suppression des mails traités. Activez la synchro seulement une fois cette permission accordée.</span>
         </div>
         <label className="flex items-start gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5 cursor-pointer">
           <input type="checkbox" checked={s.archiveEnabled} onChange={(e) => setS({ ...s, archiveEnabled: e.target.checked })} className="h-4 w-4 mt-0.5 accent-brand-600" />
           <span className="text-[12.5px]">
             <b className="text-foreground">Activer la synchro de la boîte</b>
             <span className="text-muted-foreground"> — récupère les PDF toutes les 30 min et les indexe par client. Désactivée par défaut.</span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5 cursor-pointer">
+          <input type="checkbox" checked={s.archiveDeleteAfter} onChange={(e) => setS({ ...s, archiveDeleteAfter: e.target.checked })} className="h-4 w-4 mt-0.5 accent-brand-600" />
+          <span className="text-[12.5px]">
+            <b className="text-foreground">Supprimer le mail après archivage</b>
+            <span className="text-muted-foreground"> — vide la boîte : chaque mail est supprimé une fois tous ses PDF récupérés (activé par défaut).</span>
           </span>
         </label>
         <Field label="Boîte d'archive" hint="Boîte partagée où arrivent les PDF envoyés aux clients.">

@@ -339,3 +339,20 @@ export async function getAttachmentBase64(
   if (!att.contentBytes) throw new Error("Pièce jointe sans contentBytes (pas un fichier ?)");
   return att.contentBytes;
 }
+
+/**
+ * Supprime un message de la boîte (→ Éléments supprimés). Requiert la permission
+ * d'APPLICATION `Mail.ReadWrite` (et non le simple Mail.Read). Utilisé pour vider
+ * la boîte d'archive une fois les pièces jointes récupérées.
+ */
+export async function deleteMailboxMessage(mailbox: string, messageId: string): Promise<void> {
+  const token = await getAppGraphToken();
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok && res.status !== 404) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(`Graph DELETE message error: ${res.status} - ${JSON.stringify(error).slice(0, 300)}`);
+  }
+}

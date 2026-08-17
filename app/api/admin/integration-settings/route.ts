@@ -31,6 +31,7 @@ async function currentState() {
     sapPassIsSet: sap.pass != null,
     // Archive documents
     archiveEnabled: archive.enabled,
+    archiveDeleteAfter: archive.deleteAfter,
     archiveMailbox: archive.mailbox,
     archiveEmailSubject: archive.subjectTemplate,
     archiveEmailBody: archive.bodyTemplate,
@@ -53,6 +54,7 @@ const PatchSchema = z.object({
   sapUser: z.string().trim().max(100).optional(),
   sapPass: z.string().max(200).optional(),
   archiveEnabled: z.boolean().optional(),
+  archiveDeleteAfter: z.boolean().optional(),
   archiveMailbox: z.string().trim().email("Boîte d'archive invalide").or(z.literal("")).optional(),
   archiveEmailSubject: z.string().max(300).optional(),
   archiveEmailBody: z.string().max(4000).optional(),
@@ -86,6 +88,7 @@ export async function PATCH(req: Request) {
   // Mot de passe : n'écrase que si une valeur est fournie ; "" = effacer la surcharge.
   if (d.sapPass !== undefined) await setOrClear(INTEGRATION_KEYS.sapPass, d.sapPass);
   if (d.archiveEnabled !== undefined) await setOrClear(INTEGRATION_KEYS.archiveEnabled, d.archiveEnabled ? "1" : "0");
+  if (d.archiveDeleteAfter !== undefined) await setOrClear(INTEGRATION_KEYS.archiveDeleteAfter, d.archiveDeleteAfter ? "1" : "0");
   if (d.archiveMailbox !== undefined) await setOrClear(INTEGRATION_KEYS.archiveMailbox, d.archiveMailbox);
   if (d.archiveEmailSubject !== undefined) await setOrClear(INTEGRATION_KEYS.archiveEmailSubject, d.archiveEmailSubject);
   if (d.archiveEmailBody !== undefined) await setOrClear(INTEGRATION_KEYS.archiveEmailBody, d.archiveEmailBody);

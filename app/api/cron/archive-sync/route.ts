@@ -6,6 +6,7 @@ import {
   listMailboxMessagesWithAttachments,
   listMessageFileAttachments,
   getAttachmentBase64,
+  deleteMailboxMessage,
 } from "@/lib/graph";
 import { matchDocument } from "@/lib/archive/match";
 import { savePdf } from "@/lib/archive/storage";
@@ -49,7 +50,7 @@ export async function GET(req: NextRequest) {
   }
   const sinceISO = since.toISOString();
 
-  let examines = 0, neuf = 0, doublons = 0, nonResolus = 0, erreurs = 0;
+  let examines = 0, neuf = 0, doublons = 0, nonResolus = 0, erreurs = 0, supprimes = 0;
 
   try {
     const messages = await listMailboxMessagesWithAttachments(settings.mailbox, sinceISO);
@@ -61,10 +62,14 @@ export async function GET(req: NextRequest) {
         erreurs++;
         continue;
       }
+      // Suivi par MESSAGE : on ne supprime le mail que si TOUS ses PDF sont
+      // traités (archivés ou déjà présents) et qu'aucun n'a échoué.
+      let msgPdf = 0, msgOk = 0;
       for (const a of atts) {
         const isPdf = a.isFile && ((a.contentType ?? "").toLowerCase().includes("pdf") || /\.pdf$/i.test(a.name));
         if (!isPdf) continue;
         examines++;
+        msgPdf++;
 
         const exists = await prisma.archivedDocument
           .findUnique({
@@ -72,7 +77,7 @@ export async function GET(req: NextRequest) {
             select: { id: true },
           })
           .catch(() => null);
-        if (exists) { doublons++; continue; }
+        if (exists) { doublons++; msgOk++; continue; }
 
         try {
           const b64 = await getAttachmentBase64(settings.mailbox, m.id, a.id);
@@ -107,7 +112,20 @@ export async function GET(req: NextRequest) {
             },
           });
           neuf++;
+          msgOk++;
           if (!match.matched) nonResolus++;
+        } catch {
+          erreurs++;
+        }
+      }
+
+      // Vider la boîte : suppression du mail une fois TOUS ses PDF traités.
+      // (Si la suppression échoue, le mail reste et sera retenté — la dédup
+      // évite tout ré-archivage.)
+      if (settings.deleteAfter && msgPdf > 0 && msgOk === msgPdf) {
+        try {
+          await deleteMailboxMessage(settings.mailbox, m.id);
+          supprimes++;
         } catch {
           erreurs++;
         }
@@ -122,11 +140,11 @@ export async function GET(req: NextRequest) {
       create: { key: LAST_SYNC_KEY, value: nowISO },
     });
 
-    return NextResponse.json({ ok: true, examines, neuf, doublons, nonResolus, erreurs });
+    return NextResponse.json({ ok: true, examines, neuf, doublons, nonResolus, supprimes, erreurs });
   } catch (e) {
-    // Échec dur (souvent : Mail.Read non accordée → 403). Visible dans l'état des crons.
+    // Échec dur (souvent : Mail.ReadWrite non accordée → 403). Visible dans l'état des crons.
     return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : String(e), examines, neuf, doublons, nonResolus, erreurs },
+      { ok: false, error: e instanceof Error ? e.message : String(e), examines, neuf, doublons, nonResolus, supprimes, erreurs },
       { status: 500 },
     );
   }

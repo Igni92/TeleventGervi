@@ -21,6 +21,7 @@ const KEYS = {
   sapPass: "sap_login_password",
   // Archive des documents (boîte partagée + modèle d'e-mail d'envoi au client)
   archiveEnabled: "archive_enabled",
+  archiveDeleteAfter: "archive_delete_after",
   archiveMailbox: "archive_mailbox",
   archiveEmailSubject: "archive_email_subject",
   archiveEmailBody: "archive_email_body",
@@ -39,8 +40,10 @@ export const DEFAULT_ARCHIVE_BODY =
   "Le service comptabilité — Gervifrais";
 
 export interface ArchiveSettings {
-  /** true = la synchro boîte est active (à activer une fois Mail.Read accordée). */
+  /** true = la synchro boîte est active (à activer une fois Mail.ReadWrite accordée). */
   enabled: boolean;
+  /** true = supprimer le mail de la boîte une fois ses PDF archivés (Mail.ReadWrite). */
+  deleteAfter: boolean;
   mailbox: string;
   subjectTemplate: string;
   bodyTemplate: string;
@@ -48,10 +51,14 @@ export interface ArchiveSettings {
 
 /** Réglages archive effectifs (AppSetting > défaut codé). */
 export async function getArchiveSettings(): Promise<ArchiveSettings> {
-  const s = await readSettings([KEYS.archiveEnabled, KEYS.archiveMailbox, KEYS.archiveEmailSubject, KEYS.archiveEmailBody]);
+  const s = await readSettings([KEYS.archiveEnabled, KEYS.archiveDeleteAfter, KEYS.archiveMailbox, KEYS.archiveEmailSubject, KEYS.archiveEmailBody]);
   const enabledOverride = s.get(KEYS.archiveEnabled);
+  const deleteOverride = s.get(KEYS.archiveDeleteAfter);
   return {
     enabled: enabledOverride != null ? enabledOverride === "1" : process.env.ARCHIVE_ENABLED === "1",
+    // Suppression du mail après archivage : ACTIVÉE par défaut (le but de la boîte
+    // est d'être vidée). Désactivable via l'AppSetting (valeur "0").
+    deleteAfter: deleteOverride != null ? deleteOverride === "1" : process.env.ARCHIVE_DELETE_AFTER !== "0",
     mailbox: s.get(KEYS.archiveMailbox)?.trim() || process.env.ARCHIVE_MAILBOX?.trim() || DEFAULT_ARCHIVE_MAILBOX,
     subjectTemplate: s.get(KEYS.archiveEmailSubject) || DEFAULT_ARCHIVE_SUBJECT,
     bodyTemplate: s.get(KEYS.archiveEmailBody) || DEFAULT_ARCHIVE_BODY,
