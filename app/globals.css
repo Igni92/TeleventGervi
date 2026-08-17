@@ -950,12 +950,17 @@ html[data-reduce-anim="1"] .promo-marquee-track {
 .maplibregl-canvas:focus { outline: none; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SKIN « APPLE » — refonte minimaliste OPT-IN (data-skin="apple" sur <html>).
-   100 % réversible : tout est scopé sous [data-skin="apple"], le thème CLASSIQUE
+   SKIN « APPLE » — réécrit de zéro (data-skin="apple" sur <html>).
+   100 % réversible : tout est scopé sous [data-skin="apple"] ; le thème CLASSIQUE
    au-dessus n'est jamais touché. Bascule dans Paramètres → Apparence.
-   Principe : surfaces froides near-white / near-black, police SYSTÈME (vrai SF
-   sur Apple), ombres neutres discrètes, un seul accent (or), voile d'ambiance
-   flouté pour le verre. Placé HORS @layer → prime sur les tokens de base.
+
+   Philosophie : coder comme pour macOS / iPadOS / iOS. L'appli est pilotée par
+   des TOKENS (--background, --card, --popover, --border…) → il suffit de les
+   redéfinir « à la Apple » pour re-thémer l'essentiel. On ajoute ensuite quelques
+   règles ciblées : police système (SF), canvas plat, séparateurs hairline, ombres
+   neutres douces, et surtout des SURFACES FLOTTANTES OPAQUES (menus, popovers,
+   dialogs) — plus AUCUN verre/backdrop-filter, qui provoquait des artefacts de
+   transparence. Un seul accent : l'or de la marque. Placé HORS @layer → prime.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Police système (vrai SF Pro sur Mac/iPad/iPhone, repli soigné ailleurs) ── */
@@ -968,1052 +973,182 @@ html[data-skin="apple"] textarea {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
     "Inter", "Segoe UI", Roboto, system-ui, sans-serif;
 }
+html[data-skin="apple"] body { letter-spacing: -0.006em; -webkit-font-smoothing: antialiased; }
 html[data-skin="apple"] .font-display { letter-spacing: -0.021em; }
-html[data-skin="apple"] body { letter-spacing: -0.006em; }
 
-/* ── LIGHT — neutres froids Apple (hue 240), or conservé comme accent unique ── */
+/* ── LIGHT — palette système iOS/macOS (gris froids), or conservé en accent ── */
 html[data-skin="apple"] {
-  --background:        240 20% 96%;
-  --foreground:        240 6% 10%;
+  --background:        240 24% 96.5%;   /* systemGray6 ~#F2F2F7 */
+  --foreground:        240 6% 10%;      /* label ~#1c1c1e */
   --card:              0 0% 100%;
   --card-foreground:   240 6% 10%;
   --popover:           0 0% 100%;
   --popover-foreground:240 6% 10%;
-  --primary:           42 92% 45%;
-  --primary-foreground:240 8% 10%;
-  --secondary:         240 18% 93.5%;
-  --secondary-foreground: 240 6% 12%;
+  --secondary:         240 18% 93%;
+  --secondary-foreground: 240 6% 10%;
   --muted:             240 18% 93.5%;
-  --muted-foreground:  240 4% 42%;
-  --accent:            240 18% 93.5%;
-  --accent-foreground: 240 6% 12%;
-  --destructive:       3 78% 52%;
+  --muted-foreground:  240 4% 44%;      /* secondary label */
+  --accent:            240 18% 93%;
+  --accent-foreground: 240 6% 10%;
+  --destructive:       3 100% 47%;      /* systemRed */
   --destructive-foreground: 0 0% 100%;
-  --border:            240 10% 88%;
-  --input:             240 10% 84%;
+  --border:            240 10% 88%;     /* separator */
+  --input:             240 10% 85%;
+  --primary:           42 92% 45%;      /* or marque */
+  --primary-foreground: 240 8% 12%;
   --ring:              42 92% 45%;
-  --radius:            0.75rem;
-  --success: 142 68% 37%;
-  --warning: 33 88% 43%;
-  --info:    211 100% 45%;
-  /* Ombres NEUTRES froides discrètes (fini le sépia), 2 couches, sans anneau. */
-  --shadow-card:       0 1px 2px rgba(17,20,32,.05), 0 6px 22px rgba(17,20,32,.05);
-  --shadow-card-hover: 0 2px 6px rgba(17,20,32,.07), 0 12px 34px rgba(17,20,32,.09);
-  --shadow-nav:        0 1px 0 rgba(17,20,32,.06);
-  --shadow-modal:      0 12px 40px rgba(17,20,32,.16), 0 30px 70px rgba(17,20,32,.12);
-  /* Verre + voile d'ambiance (mesh) — teintes de la marque, très diffuses. */
-  --glass:      rgba(255,255,255,.62);
-  --glass-brd:  rgba(255,255,255,.7);
-  --mesh-a: rgba(230,178,40,.28);
-  --mesh-b: rgba(120,170,255,.18);
-  --mesh-c: rgba(255,150,120,.12);
+  --radius:            0.75rem;         /* 12px */
+
+  /* Ombres NEUTRES et douces (jamais sépia) — élévation discrète façon Apple. */
+  --shadow-card:
+    0 0 0 0.5px rgba(0,0,0,0.05),
+    0 1px 2px rgba(0,0,0,0.05),
+    0 6px 16px rgba(0,0,0,0.05);
+  --shadow-card-hover:
+    0 0 0 0.5px rgba(0,0,0,0.07),
+    0 6px 16px rgba(0,0,0,0.08),
+    0 16px 34px rgba(0,0,0,0.10);
+  --shadow-nav:
+    0 0.5px 0 rgba(0,0,0,0.04),
+    0 1px 14px rgba(0,0,0,0.06);
+  --shadow-modal:
+    0 0 0 0.5px rgba(0,0,0,0.07),
+    0 16px 50px rgba(0,0,0,0.18),
+    0 36px 70px rgba(0,0,0,0.14);
 }
 
-/* ── DARK — near-black en calques (Apple), jaune vif conservé ── */
+/* ── DARK — near-black + surfaces surélevées (iOS/macOS sombre) ── */
 html[data-skin="apple"].dark {
-  --background:        240 6% 4%;
-  --foreground:        0 0% 100%;
-  --card:              240 5% 11%;
-  --card-foreground:   0 0% 100%;
-  --popover:           240 4% 15%;
-  --popover-foreground:0 0% 100%;
-  --primary:           47 97% 55%;
-  --primary-foreground:240 8% 10%;
-  --secondary:         240 4% 16%;
-  --secondary-foreground: 0 0% 100%;
-  --muted:             240 4% 16%;
-  --muted-foreground:  240 5% 66%;
-  --accent:            240 4% 16%;
-  --accent-foreground: 0 0% 100%;
-  --destructive:       5 100% 61%;
-  --border:            240 4% 22%;
-  --input:             240 4% 22%;
-  --ring:              47 97% 55%;
-  --success: 142 65% 55%;
-  --warning: 40 96% 54%;
-  --info:    211 100% 62%;
-  --shadow-card:       0 1px 2px rgba(0,0,0,.4), 0 8px 30px rgba(0,0,0,.45);
-  --shadow-card-hover: 0 2px 6px rgba(0,0,0,.45), 0 14px 40px rgba(0,0,0,.55);
-  --shadow-nav:        0 1px 0 rgba(255,255,255,.06);
-  --shadow-modal:      0 16px 50px rgba(0,0,0,.6), 0 34px 80px rgba(0,0,0,.45);
-  --glass:      rgba(28,29,33,.55);
-  --glass-brd:  rgba(255,255,255,.09);
-  --mesh-a: rgba(245,197,24,.16);
-  --mesh-b: rgba(70,120,220,.18);
-  --mesh-c: rgba(220,90,70,.10);
+  --background:        240 6% 6.5%;     /* ~#0f0f11 */
+  --foreground:        0 0% 98%;
+  --card:              240 6% 11%;      /* elevated ~#1c1c1e */
+  --card-foreground:   0 0% 98%;
+  --popover:           240 6% 13.5%;    /* ~#212123 */
+  --popover-foreground:0 0% 98%;
+  --secondary:         240 5% 17%;
+  --secondary-foreground: 0 0% 98%;
+  --muted:             240 5% 17%;
+  --muted-foreground:  240 5% 64%;
+  --accent:            240 5% 17%;
+  --accent-foreground: 0 0% 98%;
+  --destructive:       3 100% 61%;      /* systemRed dark */
+  --destructive-foreground: 0 0% 100%;
+  --border:            240 5% 21%;
+  --input:             240 5% 23%;
+  --primary:           45 96% 56%;      /* or vif */
+  --primary-foreground: 240 8% 10%;
+  --ring:              45 96% 56%;
+
+  --shadow-card:
+    0 0 0 0.5px rgba(255,255,255,0.06),
+    0 1px 2px rgba(0,0,0,0.5),
+    0 6px 18px rgba(0,0,0,0.45);
+  --shadow-card-hover:
+    0 0 0 0.5px rgba(255,255,255,0.08),
+    0 8px 22px rgba(0,0,0,0.55),
+    0 20px 44px rgba(0,0,0,0.5);
+  --shadow-nav:
+    0 0.5px 0 rgba(255,255,255,0.05),
+    0 2px 18px rgba(0,0,0,0.6);
+  --shadow-modal:
+    0 0 0 0.5px rgba(255,255,255,0.08),
+    0 20px 64px rgba(0,0,0,0.72),
+    0 44px 88px rgba(0,0,0,0.6);
 }
 
-/* ── Voile d'ambiance flouté DERRIÈRE le contenu (matière pour le verre) ──
-   La couleur de fond passe sur <html>, le body devient transparent, et un calque
-   fixe en z-index:-1 porte le mesh : il se peint entre le fond et le contenu,
-   jamais par-dessus. Le grain (body::before, z-index 9999) est neutralisé. */
+/* ── Canvas PLAT — on coupe le voile d'ambiance du thème classique ── */
 html[data-skin="apple"] { background-color: hsl(var(--background)); }
 html[data-skin="apple"] body { background: transparent; }
-html[data-skin="apple"] body::before { display: none !important; }
-html[data-skin="apple"] body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background-image:
-    radial-gradient(46vw 42vw at 80% -8%, var(--mesh-a), transparent 62%),
-    radial-gradient(42vw 40vw at -8% 42%, var(--mesh-b), transparent 62%),
-    radial-gradient(36vw 34vw at 42% 110%, var(--mesh-c), transparent 62%);
-  filter: blur(48px) saturate(135%);
-}
+html[data-skin="apple"] body::before,
+html[data-skin="apple"] body::after { display: none !important; content: none !important; }
 
-/* ── Verre sur le CHROME (nav, modales, popovers, cartes de surface) ── */
+html[data-skin="apple"] ::selection { background: hsl(var(--primary) / 0.26); }
+
+/* ── Surfaces : cartes/panneaux OPAQUES, filet hairline, ombre douce.
+      Mood minimaliste : on retire rails d'accent et glows décoratifs. ── */
 html[data-skin="apple"] .surface,
 html[data-skin="apple"] .panel,
 html[data-skin="apple"] .surface-card {
-  background: var(--glass);
-  border-color: var(--glass-brd);
-  backdrop-filter: blur(26px) saturate(180%);
-  -webkit-backdrop-filter: blur(26px) saturate(180%);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  box-shadow: var(--shadow-card);
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
-/* Accent-bar coloré des cartes → retiré (Apple : hiérarchie par le titre, pas un rail). */
 html[data-skin="apple"] .sc-accent { border-inline-start-width: 0 !important; box-shadow: none !important; }
-/* ::selection neutre plutôt qu'or. */
-html[data-skin="apple"] ::selection { background: hsl(var(--foreground) / 0.12); }
-/* Scrollbar froide. */
-html[data-skin="apple"] * { scrollbar-color: rgba(120,124,138,.5) transparent; }
-html[data-skin="apple"] ::-webkit-scrollbar-thumb { background: rgba(120,124,138,.5); }
-
-/* ── Boutons : plats + feedback au clic (skill design d'interaction) ── */
-html[data-skin="apple"] button:active { transform: scale(0.97); }
-html[data-skin="apple"] button { transition: transform .16s cubic-bezier(.23,1,.32,1), background-color .18s, filter .18s; }
-
-/* ── SIDEBAR (bureau) : verre neutre au lieu du bleu-nuit codé en dur ── */
-html[data-skin="apple"] .app-sidebar {
-  background: var(--glass) !important;
-  border-inline-end: 1px solid var(--glass-brd) !important;
-  backdrop-filter: blur(30px) saturate(180%);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
-}
-/* Le texte de la sidebar est codé en white/opacity → on le repasse en tokens
-   pour qu'il reste lisible sur le verre clair. */
-html[data-skin="apple"] .app-sidebar [class*="text-white"] { color: hsl(var(--foreground)) !important; }
-html[data-skin="apple"] .app-sidebar [class*="text-white/55"],
-html[data-skin="apple"] .app-sidebar [class*="text-white/70"] { color: hsl(var(--muted-foreground)) !important; }
-/* Séparateur vertical dégradé or → hairline discret. */
-html[data-skin="apple"] .app-sidebar .bg-gradient-to-b { background: transparent !important; }
-
-/* ── BOUTONS : à plat (retrait de l'ombre colorée + du « nudge » au survol) ── */
+html[data-skin="apple"] .dot-accent { box-shadow: none !important; }
 html[data-skin="apple"] .btn-nudge { animation: none !important; box-shadow: none !important; }
 html[data-skin="apple"] .btn-nudge:hover { filter: none !important; }
+html[data-skin="apple"] .hairline { background: hsl(var(--border)); }
 
-/* ── MODALES : scrim léger flouté + feuille en verre (fini le black/80) ── */
-html[data-skin="apple"] .app-scrim {
-  background: rgba(10,12,20,.36) !important;
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
-}
-html[data-skin="apple"] .app-sheet {
-  background: var(--glass) !important;
-  border-color: var(--glass-brd) !important;
-  backdrop-filter: blur(34px) saturate(180%);
-  -webkit-backdrop-filter: blur(34px) saturate(180%);
-  border-radius: 1.15rem;
+/* ── SURFACES FLOTTANTES = 100 % OPAQUES (le correctif clé) ──
+      Menus, popovers, sélecteurs, tooltips, dialogs, feuilles : fond plein,
+      aucun backdrop-filter (fini les artefacts « verre »), filet + ombre nette. */
+html[data-skin="apple"] .bg-popover,
+html[data-skin="apple"] .app-sheet,
+html[data-skin="apple"] [role="menu"],
+html[data-skin="apple"] [role="listbox"],
+html[data-skin="apple"] [role="dialog"],
+html[data-skin="apple"] [role="tooltip"],
+html[data-skin="apple"] [data-radix-popper-content-wrapper] > * {
+  background-color: hsl(var(--popover)) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid hsl(var(--border));
   box-shadow: var(--shadow-modal);
+  border-radius: 14px;
+}
+/* Voile derrière un dialog/feuille : simple assombrissement, SANS flou. */
+html[data-skin="apple"] .app-scrim {
+  background: rgba(0,0,0,0.38) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
-/* ── CHAMPS (input/select/textarea) : rempli discret, rayon aligné, focus calme ── */
+/* ── Champs : coins arrondis Apple + anneau de focus accent (3,5px) ── */
+html[data-skin="apple"] input,
+html[data-skin="apple"] textarea,
+html[data-skin="apple"] select,
 html[data-skin="apple"] [class~="border-input"] {
-  border-radius: 10px;
-  background: hsl(var(--secondary) / 0.6) !important;
-  border-color: hsl(var(--border)) !important;
+  border-radius: 9px;
 }
+html[data-skin="apple"] input:focus-visible,
+html[data-skin="apple"] textarea:focus-visible,
+html[data-skin="apple"] select:focus-visible,
 html[data-skin="apple"] [class~="border-input"]:focus-visible,
 html[data-skin="apple"] [class~="border-input"]:focus-within {
-  background: hsl(var(--card)) !important;
+  border-color: hsl(var(--ring)) !important;
+  box-shadow: 0 0 0 3.5px hsl(var(--ring) / 0.25) !important;
+  outline: none !important;
 }
 
-/* ── POPOVERS / MENUS / SELECT : verre (au lieu d'un aplat popover) ── */
-html[data-skin="apple"] .bg-popover {
-  background: var(--glass) !important;
-  backdrop-filter: blur(26px) saturate(180%);
-  -webkit-backdrop-filter: blur(26px) saturate(180%);
-  border-color: var(--glass-brd) !important;
-}
-
-/* ── BADGES : pilule uniforme, tracking normal ── */
+/* ── Badges pilule ── */
 html[data-skin="apple"] .app-badge { border-radius: 999px; letter-spacing: 0; padding-inline: 0.55rem; }
 
-/* ── EYEBROWS / kicker : tracking Apple (fini le 0.18em industriel) ── */
-html[data-skin="apple"] .kicker,
-html[data-skin="apple"] [class*="tracking-[0.18em]"],
-html[data-skin="apple"] [class*="tracking-[0.16em]"],
-html[data-skin="apple"] [class*="tracking-[0.14em]"] { letter-spacing: 0.045em !important; }
+/* ── Boutons : réponse tactile Apple (léger enfoncement, transition fluide) ── */
+html[data-skin="apple"] button {
+  transition: transform .18s cubic-bezier(.22,1,.36,1), background-color .18s, filter .18s, box-shadow .18s, border-color .18s;
+}
+html[data-skin="apple"] button:active { transform: scale(0.98); }
 
-/* ── HIÉRARCHIE : titres display en semibold-forward, tracking serré (SF) ── */
-html[data-skin="apple"] .font-display { font-weight: 700; letter-spacing: -0.022em; }
-html[data-skin="apple"] h1, html[data-skin="apple"] h2 { letter-spacing: -0.02em; }
+/* ── Barres de défilement fines façon Apple ── */
+html[data-skin="apple"] * { scrollbar-width: thin; scrollbar-color: rgba(140,140,146,.5) transparent; }
+html[data-skin="apple"] ::-webkit-scrollbar { width: 9px; height: 9px; }
+html[data-skin="apple"] ::-webkit-scrollbar-thumb {
+  background: rgba(140,140,146,.45);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+html[data-skin="apple"] ::-webkit-scrollbar-thumb:hover { background: rgba(140,140,146,.7); background-clip: padding-box; }
 
-/* ── SIDEBAR : neutraliser la lueur or de la pastille active + les accents brand ── */
-html[data-skin="apple"] .app-sidebar [style*="box-shadow"] { box-shadow: none !important; }
-html[data-skin="apple"] .app-sidebar [class*="via-brand"],
-html[data-skin="apple"] .app-sidebar [class*="from-brand"] { background: transparent !important; }
-html[data-skin="apple"] .app-sidebar [class*="bg-brand-500/2"],
-html[data-skin="apple"] .app-sidebar [class*="bg-white/[0.08]"] { background: var(--accent-soft, hsl(var(--primary)/0.14)) !important; }
+/* ── Tactile (iPhone/iPad) : cibles un peu plus généreuses, défilement inertiel ── */
+html[data-skin="apple"][data-ui="touch"] button,
+html[data-skin="apple"][data-ui="touch"] [role="button"] { -webkit-tap-highlight-color: transparent; }
+html[data-skin="apple"][data-ui="touch"] .overflow-y-auto,
+html[data-skin="apple"][data-ui="touch"] .overflow-auto { -webkit-overflow-scrolling: touch; }
 
-/* ── SEGMENTED (SegmentToggle / ViewToggle) : segment actif = pastille neutre
-      surélevée (fini le remplissage or + glow jaune). ── */
-html[data-skin="apple"] [class*="shadow-[0_0_10px_rgba(250,204,21"],
-html[data-skin="apple"] [class*="shadow-[0_0_12px_rgba(250,204,21"] {
-  box-shadow: 0 1px 3px rgba(0,0,0,.14) !important;
-  background: hsl(var(--card)) !important;
-  color: hsl(var(--foreground)) !important;
+/* ── Respect de « réduire les animations » ── */
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="apple"] button:active { transform: none; }
 }
-
-/* ── FOCUS : anneau accent net et cohérent partout ── */
-html[data-skin="apple"] :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
-
-/* ── MOBILE (téléphone/tablette, data-ui="touch") : cibles plus grandes, coins
-      plus doux, chrome plein écran — un traitement distinct du bureau. ── */
-html[data-skin="apple"][data-ui="touch"] { --radius: 0.9rem; }
-html[data-skin="apple"][data-ui="touch"] .surface,
-html[data-skin="apple"][data-ui="touch"] .surface-card { border-radius: 1.1rem; }
-/* Sur mobile, la feuille de modale glisse du bas et occupe la largeur (style iOS). */
-html[data-skin="apple"][data-ui="touch"] .app-sheet { border-radius: 1.4rem; }
-
-/* ═══════════════ PASSE PROFONDE — synthèse audit par zone (3 agents) ═══════════
-   Calme les accents décoratifs restants, uniformise pilules/rayons/densité et
-   corrige les contrôles non-Apple, recoin par recoin. Tout scopé [data-skin=apple].
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-/* ── GLOBAL — micro-pilules de statut/segment teintées → wash token + pilule ── */
-html[data-skin="apple"] [class*="bg-amber-100"],
-html[data-skin="apple"] [class*="bg-orange-100"] { background: hsl(var(--warning) / .12) !important; color: hsl(var(--warning)) !important; }
-html[data-skin="apple"] [class*="bg-rose-100"] { background: hsl(var(--destructive) / .12) !important; color: hsl(var(--destructive)) !important; }
-html[data-skin="apple"] [class*="bg-emerald-100"],
-html[data-skin="apple"] [class*="bg-teal-100"] { background: hsl(var(--success) / .13) !important; color: hsl(var(--success)) !important; }
-html[data-skin="apple"] [class*="bg-sky-100"],
-html[data-skin="apple"] [class*="bg-blue-100"] { background: hsl(var(--info) / .12) !important; color: hsl(var(--info)) !important; }
-html[data-skin="apple"] [class*="bg-violet-100"],
-html[data-skin="apple"] [class*="bg-purple-100"] { background: hsl(235 60% 56% / .12) !important; color: hsl(235 55% 56%) !important; }
-html[data-skin="apple"] [class*="bg-slate-200"] { background: hsl(var(--muted)) !important; color: hsl(var(--muted-foreground)) !important; }
-html[data-skin="apple"] [class*="bg-amber-100"],
-html[data-skin="apple"] [class*="bg-orange-100"],
-html[data-skin="apple"] [class*="bg-rose-100"],
-html[data-skin="apple"] [class*="bg-emerald-100"],
-html[data-skin="apple"] [class*="bg-teal-100"],
-html[data-skin="apple"] [class*="bg-sky-100"],
-html[data-skin="apple"] [class*="bg-blue-100"],
-html[data-skin="apple"] [class*="bg-violet-100"],
-html[data-skin="apple"] [class*="bg-purple-100"] { border-radius: 999px !important; letter-spacing: .01em !important; }
-/* Badges/washes /12 · /15 semi-transparents → token équivalent (garde le sens). */
-html[data-skin="apple"] [class*="bg-rose-500/1"] { background: hsl(var(--destructive) / .12) !important; }
-html[data-skin="apple"] [class*="bg-emerald-500/1"] { background: hsl(var(--success) / .13) !important; }
-html[data-skin="apple"] [class*="bg-amber-500/1"] { background: hsl(var(--warning) / .12) !important; }
-html[data-skin="apple"] [class*="bg-rose-600"] { background: hsl(var(--destructive)) !important; }
-
-/* ── GLOBAL — textes décoratifs colorés → tokens sémantiques (hue calme) ── */
-html[data-skin="apple"] [class*="text-emerald-6"],
-html[data-skin="apple"] [class*="text-emerald-4"] { color: hsl(var(--success)) !important; }
-html[data-skin="apple"] [class*="text-rose-6"],
-html[data-skin="apple"] [class*="text-rose-4"] { color: hsl(var(--destructive)) !important; }
-html[data-skin="apple"] [class*="text-sky-6"],
-html[data-skin="apple"] [class*="text-sky-4"] { color: hsl(var(--info)) !important; }
-
-/* ── GLOBAL — lueurs or (glow) des CTA non couvertes plus haut → ombre neutre ── */
-html[data-skin="apple"] [class*="rgba(250,204,21"] { box-shadow: var(--shadow-card) !important; }
-
-/* ── GLOBAL — segment actif (aria-pressed / fill or) → pastille neutre surélevée ── */
-html[data-skin="apple"] button[aria-pressed="true"] {
-  background: hsl(var(--card)) !important; color: hsl(var(--foreground)) !important;
-  border-color: hsl(var(--border)) !important; box-shadow: 0 1px 3px rgba(0,0,0,.14) !important;
-}
-html[data-skin="apple"] button.bg-brand-50.text-brand-700 {
-  background: hsl(var(--card)) !important; border-color: hsl(var(--border)) !important;
-  color: hsl(var(--foreground)) !important; box-shadow: 0 1px 3px rgba(0,0,0,.14) !important;
-}
-
-/* ── GLOBAL — CTA or : encre foncée + rayon Apple ; rayons boutons/liens unifiés ── */
-html[data-skin="apple"] button.bg-brand-600 { background: hsl(var(--primary)) !important; color: hsl(var(--primary-foreground)) !important; border-radius: 10px; }
-html[data-skin="apple"] button.bg-brand-600:hover { filter: brightness(.96); }
-html[data-skin="apple"] button.rounded-md, html[data-skin="apple"] a.rounded-md { border-radius: 10px; }
-html[data-skin="apple"] select[class~="border-border"] { border-radius: 10px; background: hsl(var(--secondary) / .6) !important; border-color: hsl(var(--border)) !important; }
-
-/* ── GLOBAL — cases à cocher : accent unique ; toggle relance → switch iOS ── */
-html[data-skin="apple"] input[type="checkbox"] { accent-color: hsl(var(--primary)); }
-html[data-skin="apple"] input[type="checkbox"].accent-brand-600 {
-  appearance: none; -webkit-appearance: none; width: 36px; height: 22px; border-radius: 999px;
-  background: hsl(var(--muted-foreground) / .32); position: relative; cursor: pointer; vertical-align: middle;
-  transition: background-color .22s cubic-bezier(.23,1,.32,1);
-}
-html[data-skin="apple"] input[type="checkbox"].accent-brand-600::after {
-  content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
-  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .22s cubic-bezier(.23,1,.32,1);
-}
-html[data-skin="apple"] input[type="checkbox"].accent-brand-600:checked { background: hsl(var(--success)); }
-html[data-skin="apple"] input[type="checkbox"].accent-brand-600:checked::after { transform: translateX(14px); }
-html[data-skin="apple"] input[type="checkbox"].accent-brand-600:disabled { opacity: .4; }
-
-/* ── GLOBAL — densité des tableaux + hairlines nets ── */
-html[data-skin="apple"] table td, html[data-skin="apple"] table th { padding-top: .5rem; padding-bottom: .5rem; }
-html[data-skin="apple"] [class*="divide-border/40"] > * + *,
-html[data-skin="apple"] [class*="divide-border/50"] > * + * { border-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] [class*="border-border/70"] { border-color: hsl(var(--border) / .5) !important; }
-
-/* ── GLOBAL — tracking des micro-eyebrows restants ── */
-html[data-skin="apple"] [class*="tracking-[0.12em]"],
-html[data-skin="apple"] [class*="tracking-[0.08em]"],
-html[data-skin="apple"] [class*="tracking-[0.06em]"] { letter-spacing: .03em !important; }
-
-/* ── CONSOLE — le verre nuit aux 3 panneaux denses (perf + contraste) : opaque ── */
-html[data-skin="apple"] .panel[class*="max-h-[75vh]"] {
-  background: hsl(var(--card)) !important; backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important; border-color: hsl(var(--border)) !important;
-}
-
-/* ── ENCOURS/CLIENTS — modales hand-rolled → scrim léger + feuille verre ── */
-html[data-skin="apple"] .fixed.inset-0[class*="bg-black/60"] { background: rgba(10,12,20,.36) !important; backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
-html[data-skin="apple"] .bg-card.rounded-xl.shadow-2xl {
-  background: var(--glass) !important; border-color: var(--glass-brd) !important; border-radius: 1.15rem;
-  box-shadow: var(--shadow-modal) !important; backdrop-filter: blur(34px) saturate(180%); -webkit-backdrop-filter: blur(34px) saturate(180%);
-}
-
-/* ── ACCUEIL (.keep-bricks) — accents décoratifs restants ── */
-html[data-skin="apple"] .keep-bricks [class*="bg-amber-500/"],
-html[data-skin="apple"] .keep-bricks [class*="border-amber-500/"] { background: hsl(var(--secondary) / .6) !important; border-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] .keep-bricks [class*="text-amber-6"],
-html[data-skin="apple"] .keep-bricks [class*="text-amber-4"] { color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] .keep-bricks [class*="text-[#0b1018]"] { background: hsl(var(--primary)) !important; color: hsl(var(--primary-foreground)) !important; }
-html[data-skin="apple"] .keep-bricks [class*="text-sky-6"],
-html[data-skin="apple"] .keep-bricks [class*="text-sky-4"] { color: hsl(var(--foreground)) !important; }
-html[data-skin="apple"] .keep-bricks [class*="bg-sky-500/10"] { background: hsl(var(--secondary) / .7) !important; }
-html[data-skin="apple"] .keep-bricks input[class*="bg-background"] { border-radius: 10px; background: hsl(var(--secondary) / .6) !important; border-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] .keep-bricks [class*="border-brand-500/40"] { border-width: 1px !important; border-color: hsl(var(--primary) / .35) !important; border-radius: var(--radius) !important; background: hsl(var(--primary) / .10) !important; }
-/* Météo : pastille condition à plat + libellés jours */
-html[data-skin="apple"] section[aria-label="Météo"] span[class*="ring-inset"] { background: hsl(var(--secondary) / .55) !important; box-shadow: inset 0 0 0 1px hsl(var(--border) / .7) !important; }
-
-/* ── LIVRAISONS — slab slate + dégradés brand décoratifs ── */
-html[data-skin="apple"] [class*="from-slate-900"] { background: hsl(var(--secondary)) !important; }
-html[data-skin="apple"] [class*="from-slate-900"] p { color: hsl(var(--foreground)) !important; -webkit-text-stroke: 0 !important; }
-html[data-skin="apple"] [class*="from-brand-500/20"] { background: hsl(var(--primary) / .12) !important; }
-html[data-skin="apple"] [class*="ring-violet-500/20"] { --tw-ring-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] [class*="drop-shadow-[0_0_18px_rgba(16,185,129"] { filter: none !important; }
-
-/* ── CLIENTS — bord de survol or → neutre ── */
-html[data-skin="apple"] [class*="hover:border-brand-400/50"]:hover { border-color: hsl(var(--border)) !important; }
-
-
-/* ══════════════════════════════════════════════════════════════════════════
-   SKIN « APPLE » — FUSION 20 ÉCRANS (à coller en fin du bloc SKIN « APPLE »)
-   GLOBAL d'abord (mappings app-wide dédupliqués), puis ZONES (1 hook / écran).
-   Déjà traité par le skin global amont (947-1293) : non répété ici.
-   ══════════════════════════════════════════════════════════════════════════ */
-
-/* ═══════════════════════ GLOBAL — sémantique app-wide ═══════════════════════ */
-/* Texte sémantique, dédupliqué de ~10 écrans (valeur identique partout).       */
-html[data-skin="apple"] [class*="text-emerald-7"],
-html[data-skin="apple"] [class*="text-emerald-5"],
-html[data-skin="apple"] [class*="text-emerald-3"] { color: hsl(var(--success)) !important; }
-html[data-skin="apple"] [class*="text-rose-7"],
-html[data-skin="apple"] [class*="text-rose-5"],
-html[data-skin="apple"] [class*="text-rose-3"],
-html[data-skin="apple"] [class*="text-rose-2"] { color: hsl(var(--destructive)) !important; }
-html[data-skin="apple"] [class*="text-amber-8"],
-html[data-skin="apple"] [class*="text-amber-7"],
-html[data-skin="apple"] [class*="text-amber-6"],
-html[data-skin="apple"] [class*="text-amber-5"],
-html[data-skin="apple"] [class*="text-amber-4"],
-html[data-skin="apple"] [class*="text-amber-3"],
-html[data-skin="apple"] [class*="text-amber-2"],
-html[data-skin="apple"] [class*="text-amber-1"] { color: hsl(var(--warning)) !important; }
-html[data-skin="apple"] [class*="text-sky-7"],
-html[data-skin="apple"] [class*="text-sky-3"] { color: hsl(var(--info)) !important; }
-html[data-skin="apple"] [class*="text-orange-7"],
-html[data-skin="apple"] [class*="text-orange-6"],
-html[data-skin="apple"] [class*="text-orange-4"],
-html[data-skin="apple"] [class*="text-orange-3"] { color: hsl(var(--warning)) !important; }
-
-/* Numéraux tabulaires resserrés (fabrication, heures, salaires…).              */
-html[data-skin="apple"] .tnum { font-variant-numeric: tabular-nums; letter-spacing: -0.012em; }
-
-/* Hairlines de séparation non couvertes par le global amont (/40,/50,/70).     */
-html[data-skin="apple"] [class*="divide-border/60"] > * + * { border-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] [class*="border-border/60"] { border-color: hsl(var(--border) / .5) !important; }
-html[data-skin="apple"] [class*="border-border/50"] { border-color: hsl(var(--border) / .6) !important; }
-
-/* États vides pointillés → hairline plein (plan-appel, transport, fournisseurs). */
-html[data-skin="apple"] [class*="border-dashed"] {
-  border-style: solid !important;
-  border-color: hsl(var(--border) / .6) !important;
-}
-
-/* ═══════════════════════════════ ZONES ═══════════════════════════════ */
-
-/* ── ÉCRAN dashboard-stats (/dashboard → PilotageUnified + bento) ── */
-html[data-skin="apple"] section.bg-card.rounded-xl {
-  background: hsl(var(--card)) !important;
-  border-color: hsl(var(--border)) !important;
-  border-radius: var(--radius) !important;
-  box-shadow: var(--shadow-card);
-}
-html[data-skin="apple"] section.bg-card.rounded-xl.cursor-pointer:hover {
-  box-shadow: var(--shadow-card-hover) !important;
-  border-color: hsl(var(--border)) !important;
-}
-html[data-skin="apple"] [class*="hover:border-brand-500/40"]:hover { border-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] section[class*="border-l-4"] {
-  border-left-width: 1px !important;
-  border-left-color: hsl(var(--border)) !important;
-}
-html[data-skin="apple"] [class*="bg-brand-500/15"],
-html[data-skin="apple"] [class*="bg-violet-500/15"],
-html[data-skin="apple"] [class*="bg-sky-500/15"],
-html[data-skin="apple"] [class*="bg-amber-500/15"] { background: hsl(var(--primary) / .16) !important; }
-html[data-skin="apple"] [class*="bg-slate-500/45"],
-html[data-skin="apple"] [class*="bg-slate-400"] { background: hsl(var(--muted-foreground) / .5) !important; }
-html[data-skin="apple"] [class*="text-slate-300"],
-html[data-skin="apple"] [class*="text-brand-300"] { color: hsl(var(--muted-foreground)) !important; }
-html[data-skin="apple"] [class*="text-brand-400"] { color: hsl(var(--primary)) !important; }
-/* Hints décoratifs de popover (violet non globalisé) → muted. */
-html[data-skin="apple"] [class*="text-violet-3"] { color: hsl(var(--muted-foreground)) !important; }
-/* Bannière « voir comme » (bg-violet-600) → matière info. */
-html[data-skin="apple"] [class*="bg-violet-600"] { background: hsl(var(--info)) !important; }
-
-/* ── ÉCRAN dashboard-magasins (/dashboard/magasins → StoresReport) ── */
-html[data-skin="apple"] .rounded-2xl.bg-card,
-html[data-skin="apple"] .rounded-xl.bg-card {
-  border-radius: var(--radius) !important;
-  border-color: hsl(var(--border) / .8) !important;
-  box-shadow: var(--shadow-card);
-}
-html[data-skin="apple"] [class*="border-l-brand-500"],
-html[data-skin="apple"] [class*="border-l-sky-500"],
-html[data-skin="apple"] [class*="border-l-emerald-500"],
-html[data-skin="apple"] [class*="border-l-amber-500"],
-html[data-skin="apple"] [class*="border-l-rose-500"] {
-  border-inline-start-width: 1px !important;
-  border-inline-start-color: hsl(var(--border) / .8) !important;
-}
-html[data-skin="apple"] [class*="text-brand-4"]  { color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="text-violet-3"] { color: hsl(235 55% 56%) !important; }
-html[data-skin="apple"] [class*="bg-sky-400"]     { background: hsl(var(--info)) !important; }
-html[data-skin="apple"] [class*="bg-emerald-400"] { background: hsl(var(--success)) !important; }
-html[data-skin="apple"] [class*="bg-amber-400"]   { background: hsl(var(--warning)) !important; }
-html[data-skin="apple"] [class*="bg-violet-400"]  { background: hsl(235 55% 56%) !important; }
-html[data-skin="apple"] [class*="bg-brand-500"] { background: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="bg-slate-300"],
-html[data-skin="apple"] [class*="bg-amber-700"] {
-  background: hsl(var(--secondary)) !important;
-  color: hsl(var(--foreground)) !important;
-}
-html[data-skin="apple"] [class*="ring-brand-500/6"] { --tw-ring-color: hsl(var(--primary) / .45) !important; }
-html[data-skin="apple"] [class*="ring-slate-300/4"],
-html[data-skin="apple"] [class*="ring-amber-700/5"] { --tw-ring-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] [class*="bg-brand-500/2"],
-html[data-skin="apple"] [class*="bg-sky-500/2"],
-html[data-skin="apple"] [class*="bg-emerald-500/2"],
-html[data-skin="apple"] [class*="bg-amber-500/2"] { background: hsl(var(--foreground) / .06) !important; }
-html[data-skin="apple"] [class*="bg-rose-500/2"]   { background: hsl(var(--destructive) / .10) !important; }
-html[data-skin="apple"] [class*="border-amber-500/4"] { border-color: hsl(var(--warning) / .45) !important; }
-html[data-skin="apple"] [class*="border-rose-500/4"]  { border-color: hsl(var(--destructive) / .45) !important; }
-html[data-skin="apple"] [class*="text-amber-100"] a:hover { color: hsl(var(--foreground)) !important; }
-
-/* ── ÉCRAN clients-fiche (/clients/[id] → FicheHeader, SectionCard…) ── */
-html[data-skin="apple"] header svg[class*="opacity-[0.13]"] { display: none !important; }
-html[data-skin="apple"] header [class*="linear-gradient(hsl(var(--foreground)/0.05)"] { display: none !important; }
-html[data-skin="apple"] header [class*="bg-brand-500/12"] { display: none !important; }
-html[data-skin="apple"] header [class*="via-brand-400/55"] { background: transparent !important; }
-html[data-skin="apple"] header .bg-gradient-to-b[class*="from-brand-400"] {
-  background: hsl(var(--primary)) !important; width: 3px !important;
-}
-html[data-skin="apple"] header .signal-bar { display: none !important; }
-html[data-skin="apple"] header .bg-gradient-to-br[class*="from-brand-400"] { background: hsl(var(--primary)) !important; }
-html[data-skin="apple"] header [class*="shadow-[0_8px_24px_-8px"] { box-shadow: none !important; }
-html[data-skin="apple"] header [class*="bg-emerald-500"][class*="animate-soft-pulse"] {
-  background: hsl(var(--success)) !important; animation: none !important;
-}
-html[data-skin="apple"] header [class*="rounded-2xl"][class*="bg-card"] { border-radius: 18px; }
-html[data-skin="apple"] .surface-card [class*="h-[3px]"][class*="bg-gradient-to-r"] { display: none !important; }
-html[data-skin="apple"] .surface-card [class*="radial-gradient(hsl(var(--foreground)/0.025)"] { display: none !important; }
-html[data-skin="apple"] .surface-card [class*="bg-brand-500/12"],
-html[data-skin="apple"] .surface-card [class*="bg-emerald-500/12"],
-html[data-skin="apple"] .surface-card [class*="bg-rose-500/12"],
-html[data-skin="apple"] .surface-card [class*="bg-violet-500/12"],
-html[data-skin="apple"] .surface-card [class*="bg-amber-500/12"],
-html[data-skin="apple"] .surface-card [class*="bg-sky-500/12"],
-html[data-skin="apple"] .surface-card [class*="bg-slate-500/10"] {
-  background: hsl(var(--secondary)) !important;
-  color: hsl(var(--muted-foreground)) !important;
-}
-html[data-skin="apple"] .surface-card [class*="ring-brand-500/20"],
-html[data-skin="apple"] .surface-card [class*="ring-emerald-500/20"],
-html[data-skin="apple"] .surface-card [class*="ring-rose-500/20"],
-html[data-skin="apple"] .surface-card [class*="ring-violet-500/20"],
-html[data-skin="apple"] .surface-card [class*="ring-amber-500/20"],
-html[data-skin="apple"] .surface-card [class*="ring-sky-500/20"],
-html[data-skin="apple"] .surface-card [class*="ring-slate-500/20"] { --tw-ring-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] .surface-card .dot-accent { display: none !important; }
-html[data-skin="apple"] .surface-card[class*="rounded-2xl"] { border-radius: 18px; }
-html[data-skin="apple"] .surface-card [class*="bg-card/40"] {
-  border-radius: 12px; border-color: hsl(var(--border)) !important;
-}
-html[data-skin="apple"] .surface-card [class*="text-[18px]"][class*="tabular-nums"] {
-  letter-spacing: -0.02em; font-weight: 640;
-}
-/* LifecycleBadge — washes -50/-100 non couverts par le global. */
-html[data-skin="apple"] [class*="bg-emerald-50"] { background: hsl(var(--success) / .13) !important; }
-html[data-skin="apple"] [class*="bg-amber-50"]   { background: hsl(var(--warning) / .12) !important; }
-html[data-skin="apple"] [class*="bg-orange-50"]  { background: hsl(var(--warning) / .12) !important; }
-html[data-skin="apple"] [class*="bg-rose-50"]    { background: hsl(var(--destructive) / .12) !important; }
-html[data-skin="apple"] [class*="bg-sky-50"]     { background: hsl(var(--info) / .12) !important; }
-html[data-skin="apple"] [class*="bg-slate-100"]  { background: hsl(var(--muted)) !important; }
-html[data-skin="apple"] [class*="text-slate-600"] { color: hsl(var(--muted-foreground)) !important; }
-html[data-skin="apple"] [class*="ring-emerald-200"] { --tw-ring-color: hsl(var(--success) / .3) !important; }
-html[data-skin="apple"] [class*="ring-amber-200"]   { --tw-ring-color: hsl(var(--warning) / .3) !important; }
-html[data-skin="apple"] [class*="ring-orange-200"]  { --tw-ring-color: hsl(var(--warning) / .3) !important; }
-html[data-skin="apple"] [class*="ring-rose-200"]    { --tw-ring-color: hsl(var(--destructive) / .3) !important; }
-html[data-skin="apple"] [class*="ring-sky-200"]     { --tw-ring-color: hsl(var(--info) / .3) !important; }
-html[data-skin="apple"] [class*="ring-slate-200"]   { --tw-ring-color: hsl(var(--border)) !important; }
-/* FamillesVsGroupe — pilules delta orange/emerald 500. */
-html[data-skin="apple"] [class*="bg-orange-500/10"]  { background: hsl(var(--warning) / .12) !important; }
-html[data-skin="apple"] [class*="text-orange-500"]   { color: hsl(var(--warning)) !important; }
-html[data-skin="apple"] [class*="ring-orange-500/20"]{ --tw-ring-color: hsl(var(--warning) / .3) !important; }
-html[data-skin="apple"] [class*="text-emerald-500"]  { color: hsl(var(--success)) !important; }
-html[data-skin="apple"] [class*="ring-emerald-500/20"] { --tw-ring-color: hsl(var(--success) / .3) !important; }
-/* Rappels « Agenda » brand → muted ; ClientTabs souligné → primary. */
-html[data-skin="apple"] [class*="text-brand-600"],
-html[data-skin="apple"] [class*="text-brand-400"] { color: hsl(var(--muted-foreground)) !important; }
-html[data-skin="apple"] [role="tablist"] [class*="after:bg-brand-500"]::after { background: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [role="tablist"] [class*="bg-brand-500"] { background: hsl(var(--primary)) !important; }
-
-/* ── ÉCRAN commerciaux (/commerciaux liste + fiche [slp]) ── */
-html[data-skin="apple"] span[class*="from-brand-500"][class*="rounded-full"],
-html[data-skin="apple"] div[class*="from-brand-500"][class*="rounded-full"] {
-  background: hsl(var(--secondary)) !important;
-  color: hsl(var(--foreground)) !important;
-  box-shadow: inset 0 0 0 1px hsl(var(--border) / .8) !important;
-}
-html[data-skin="apple"] [class*="border-l-brand-500"] {
-  border-left-color: hsl(var(--border)) !important;
-  border-left-width: 1px !important;
-  box-shadow: var(--shadow-card);
-}
-html[data-skin="apple"] button[aria-current][class*="bg-brand-500"] { background: hsl(var(--foreground)) !important; }
-html[data-skin="apple"] a[class*="bg-violet-100"][class*="text-violet-700"] {
-  background: hsl(var(--secondary)) !important; color: hsl(var(--muted-foreground)) !important; border-radius: 10px !important;
-}
-html[data-skin="apple"] button[class*="bg-brand-100"] {
-  background: hsl(var(--secondary)) !important; color: hsl(var(--foreground)) !important; border-radius: 10px !important;
-}
-html[data-skin="apple"] span[class*="bg-brand-600"] {
-  background: hsl(var(--primary)) !important; border-color: hsl(var(--primary)) !important; color: hsl(var(--primary-foreground)) !important;
-}
-html[data-skin="apple"] [class*="ring-emerald-300"],
-html[data-skin="apple"] [class*="ring-emerald-500/30"] { --tw-ring-color: hsl(var(--success) / .3) !important; }
-html[data-skin="apple"] [class*="bg-secondary/70"] > [class*="bg-emerald-500"] { background: hsl(var(--success)) !important; }
-html[data-skin="apple"] [class*="bg-secondary/70"] > [class*="bg-brand-500"]   { background: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="bg-secondary/70"] > [class*="bg-amber-500"]   { background: hsl(var(--warning)) !important; }
-html[data-skin="apple"] [class*="bg-secondary/60"] > [class*="bg-amber-500"] { background: hsl(var(--foreground) / .25) !important; }
-html[data-skin="apple"] [class*="decoration-brand-500"] { text-decoration-color: hsl(var(--foreground) / .4) !important; }
-html[data-skin="apple"] [class*="border-amber-200"],
-html[data-skin="apple"] [class*="border-amber-300"],
-html[data-skin="apple"] [class*="border-amber-500/30"] { border-color: hsl(var(--warning) / .28) !important; }
-html[data-skin="apple"] .fixed.inset-0[class*="bg-black/45"] {
-  background: rgba(10,12,20,.36) !important; backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
-}
-html[data-skin="apple"] .bg-card.rounded-2xl.shadow-2xl {
-  background: var(--glass) !important; border-color: var(--glass-brd) !important;
-  box-shadow: var(--shadow-modal) !important;
-  backdrop-filter: blur(34px) saturate(180%); -webkit-backdrop-filter: blur(34px) saturate(180%);
-}
-html[data-skin="apple"] input.rounded-md { border-radius: 10px; }
-
-/* ── ÉCRAN articles-catalogue (/articles + /articles/[id]) ── */
-html[data-skin="apple"] button[class*="bg-brand-500"][class*="text-white"] {
-  background: hsl(var(--card)) !important; color: hsl(var(--foreground)) !important;
-  box-shadow: 0 1px 3px rgba(0,0,0,.14) !important;
-}
-html[data-skin="apple"] .group:hover [class*="group-hover:text-brand-600"] { color: hsl(var(--foreground)) !important; }
-html[data-skin="apple"] .group:hover [class*="group-hover:text-brand-500"] { color: hsl(var(--muted-foreground)) !important; }
-html[data-skin="apple"] span[class*="text-[10.5px]"][class*="ring-1"] {
-  background: hsl(var(--secondary)) !important; color: hsl(var(--muted-foreground)) !important;
-  box-shadow: inset 0 0 0 1px hsl(var(--border) / .7) !important; border-radius: 999px !important; font-weight: 600 !important;
-}
-html[data-skin="apple"] [class*="hover:text-brand-600"]:hover { color: hsl(var(--foreground)) !important; }
-html[data-skin="apple"] table[class*="text-[13px]"] td,
-html[data-skin="apple"] table[class*="text-[13px]"] th { padding-top: .625rem !important; padding-bottom: .625rem !important; }
-html[data-skin="apple"] span[class*="h-12"][class*="rounded-2xl"][class*="bg-brand-500/12"] {
-  background: hsl(var(--primary) / .12) !important; color: hsl(var(--primary)) !important;
-  box-shadow: inset 0 0 0 1px hsl(var(--primary) / .28) !important;
-}
-html[data-skin="apple"] span[aria-hidden][class*="h-[3px]"][class*="bg-gradient-to-r"] { display: none !important; }
-html[data-skin="apple"] span[class*="h-9"][class*="rounded-xl"][class*="ring-1"] {
-  background: hsl(var(--secondary)) !important; color: hsl(var(--foreground)) !important;
-  box-shadow: inset 0 0 0 1px hsl(var(--border) / .6) !important;
-}
-html[data-skin="apple"] .dot-accent {
-  box-shadow: 0 0 0 2px hsl(var(--card)) !important; background: hsl(var(--muted-foreground) / .5) !important;
-}
-html[data-skin="apple"] span[class*="h-6"][class*="w-6"][class*="rounded-md"][class*="ring-1"] {
-  background: hsl(var(--secondary)) !important; color: hsl(var(--foreground)) !important;
-  box-shadow: inset 0 0 0 1px hsl(var(--border) / .6) !important;
-}
-html[data-skin="apple"] [class*="border-amber-400/50"] { border-color: hsl(var(--warning) / .4) !important; }
-html[data-skin="apple"] [class*="text-[18px]"][class*="font-bold"] { letter-spacing: -.02em !important; }
-html[data-skin="apple"] select[class*="focus:ring-brand-500"]:focus { --tw-ring-color: hsl(var(--ring)) !important; }
-html[data-skin="apple"] [class*="bg-card/95"][class*="backdrop-blur"] {
-  background: var(--glass) !important; border-color: var(--glass-brd) !important; box-shadow: var(--shadow-modal) !important;
-  backdrop-filter: blur(28px) saturate(180%) !important; -webkit-backdrop-filter: blur(28px) saturate(180%) !important;
-}
-
-/* ── ÉCRAN products (/products → ProductsTable) ── */
-html[data-skin="apple"] [class*="rgba(79,70,229"] { box-shadow: none !important; }
-html[data-skin="apple"] [class*="border-l-brand-500"] {
-  background: var(--glass) !important; border-color: var(--glass-brd) !important;
-  border-left-width: 1px !important; border-left-color: var(--glass-brd) !important;
-  backdrop-filter: blur(26px) saturate(180%); -webkit-backdrop-filter: blur(26px) saturate(180%);
-  box-shadow: var(--shadow-card);
-}
-html[data-skin="apple"] thead tr[class*="bg-slate-50"],
-html[data-skin="apple"] thead th[class*="bg-slate-50"] {
-  background: hsl(var(--secondary) / .82) !important;
-  backdrop-filter: blur(12px) saturate(180%); -webkit-backdrop-filter: blur(12px) saturate(180%);
-  border-color: hsl(var(--border)) !important;
-}
-html[data-skin="apple"] table[class*="text-[12.5px]"] > tbody > tr > td { padding-top: .66rem !important; padding-bottom: .66rem !important; }
-html[data-skin="apple"] span[class*="h-4"][class*="bg-brand-600"] {
-  background: hsl(var(--foreground)) !important; border-color: hsl(var(--foreground)) !important;
-}
-html[data-skin="apple"] [class*="border-slate-300"],
-html[data-skin="apple"] [class*="border-slate-600"] { border-color: hsl(var(--input)) !important; }
-html[data-skin="apple"] [class*="text-brand-500"] { color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="hover:border-brand-500/50"]:hover { border-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] [class*="ring-brand-500"] { --tw-ring-color: hsl(var(--ring)) !important; }
-html[data-skin="apple"] [class*="bg-rose-50/40"],
-html[data-skin="apple"] [class*="bg-rose-950/15"] { background: hsl(var(--destructive) / .06) !important; }
-html[data-skin="apple"] [class*="bg-card"][class*="rounded-2xl"][class*="shadow-2xl"] {
-  background: var(--glass) !important; border-color: var(--glass-brd) !important;
-  backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%);
-  box-shadow: var(--shadow-modal) !important;
-}
-
-/* ── ÉCRAN inventaire (/inventaire) ── */
-html[data-skin="apple"] .bg-card[class*="rounded-t-2xl"] {
-  background: var(--glass) !important; border: 1px solid var(--glass-brd) !important; box-shadow: var(--shadow-modal) !important;
-  backdrop-filter: blur(26px) saturate(180%); -webkit-backdrop-filter: blur(26px) saturate(180%);
-}
-html[data-skin="apple"] [class*="bg-rose-500/25"],
-html[data-skin="apple"] [class*="bg-amber-500/25"],
-html[data-skin="apple"] [class*="bg-emerald-500/25"],
-html[data-skin="apple"] [class*="bg-sky-500/25"],
-html[data-skin="apple"] [class*="bg-violet-500/25"],
-html[data-skin="apple"] [class*="bg-teal-500/25"],
-html[data-skin="apple"] [class*="bg-fuchsia-500/25"] {
-  background: hsl(var(--secondary)) !important; color: hsl(var(--muted-foreground)) !important;
-}
-html[data-skin="apple"] [class*="bg-brand-500"][class*="rounded-full"] { background: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="bg-brand-500/15"] { background: hsl(var(--primary) / .14) !important; color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="text-brand-6"],
-html[data-skin="apple"] [class*="text-brand-3"] { color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="bg-violet-500/15"] { background: hsl(var(--secondary)) !important; color: hsl(var(--muted-foreground)) !important; }
-html[data-skin="apple"] [class*="bg-amber-500"][class*="border-amber-500"] {
-  background: hsl(var(--primary)) !important; border-color: hsl(var(--primary)) !important; color: hsl(var(--primary-foreground)) !important;
-}
-html[data-skin="apple"] [class*="bg-amber-50"][class*="transition-colors"] { background: hsl(var(--primary) / .08) !important; }
-html[data-skin="apple"] [class*="bg-rose-50/"] { background: hsl(var(--destructive) / .08) !important; }
-html[data-skin="apple"] [class*="hover:border-brand-400"]:hover { border-color: hsl(var(--foreground) / .18) !important; }
-html[data-skin="apple"] .group:hover [class*="group-hover:text-brand-500"] { color: hsl(var(--foreground)) !important; }
-html[data-skin="apple"] [class*="text-[34px]"],
-html[data-skin="apple"] [class*="text-[30px]"],
-html[data-skin="apple"] [class*="text-[28px]"],
-html[data-skin="apple"] [class*="text-[22px]"] { letter-spacing: -0.02em; }
-
-/* ── ÉCRAN fabrication (/fabrication) ── */
-html[data-skin="apple"] p[class*="text-violet-6"],
-html[data-skin="apple"] p[class*="text-violet-3"] { color: hsl(var(--foreground)) !important; }
-html[data-skin="apple"] button[class*="text-violet-6"],
-html[data-skin="apple"] button[class*="text-violet-3"] { color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="border-emerald-500/4"] { border-color: hsl(var(--success) / .35) !important; }
-html[data-skin="apple"] [class*="bg-brand-500"]   { background-color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="bg-brand-500/1"] { background-color: hsl(var(--primary) / .10) !important; }
-html[data-skin="apple"] [class*="border-brand-500"] { border-color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="ring-brand-500"] { --tw-ring-color: hsl(var(--primary) / .45) !important; }
-html[data-skin="apple"] span[class*="border-brand-500"][class*="bg-brand-500"] {
-  box-shadow: inset 0 0 0 3px hsl(var(--card)) !important; border-width: 1px !important;
-}
-html[data-skin="apple"] [class*="bg-violet-500/1"]  { background-color: hsl(var(--primary) / .10) !important; }
-html[data-skin="apple"] [class*="border-violet-400"] { border-color: hsl(var(--primary) / .40) !important; }
-html[data-skin="apple"] input[type="checkbox"][class*="accent-rose-5"] { accent-color: hsl(var(--destructive)) !important; }
-html[data-skin="apple"] [class*="bg-secondary/40"] { background-color: hsl(var(--secondary) / .5) !important; }
-html[data-skin="apple"] [class*="bg-secondary/30"] { background-color: hsl(var(--secondary) / .4) !important; }
-
-/* ── ÉCRAN entrees-receptions (/entrees) ── */
-html[data-skin="apple"] [class*="bg-violet-100"][class*="text-violet-800"],
-html[data-skin="apple"] [class*="bg-sky-100"][class*="text-sky-800"],
-html[data-skin="apple"] [class*="bg-teal-100"][class*="text-teal-800"],
-html[data-skin="apple"] [class*="bg-rose-100"][class*="text-rose-800"],
-html[data-skin="apple"] [class*="bg-amber-100"][class*="text-amber-800"] {
-  background: hsl(var(--secondary) / .75) !important; color: hsl(var(--muted-foreground)) !important;
-  box-shadow: inset 0 0 0 1px hsl(var(--border) / .6); border-radius: 6px !important; letter-spacing: 0 !important;
-}
-html[data-skin="apple"] [class*="border-emerald-500/40"] { border-color: hsl(var(--success) / .4) !important; }
-html[data-skin="apple"] [class*="border-rose-400/50"],
-html[data-skin="apple"] [class*="border-rose-400/40"],
-html[data-skin="apple"] [class*="border-rose-300/60"] { border-color: hsl(var(--destructive) / .4) !important; }
-html[data-skin="apple"] [class*="border-amber-400/50"],
-html[data-skin="apple"] [class*="border-amber-500/30"] { border-color: hsl(var(--warning) / .4) !important; }
-html[data-skin="apple"] [class*="border-sky-400/50"] { border-color: hsl(var(--info) / .4) !important; }
-html[data-skin="apple"] [class*="bg-amber-500/[0.04]"] { background: hsl(var(--warning) / .06) !important; }
-html[data-skin="apple"] [class*="bg-sky-50/60"] { background: hsl(var(--info) / .07) !important; }
-html[data-skin="apple"] [class*="bg-rose-50/40"] { background: hsl(var(--destructive) / .07) !important; }
-html[data-skin="apple"] [class*="ring-amber-400"] { --tw-ring-color: hsl(var(--warning) / .55) !important; }
-html[data-skin="apple"] [class*="ring-brand-500"]:focus,
-html[data-skin="apple"] [class*="ring-brand-500"]:focus-visible { --tw-ring-color: hsl(var(--ring) / .5) !important; }
-html[data-skin="apple"] [class*="ring-amber-500"]:focus,
-html[data-skin="apple"] [class*="ring-amber-500"]:focus-visible { --tw-ring-color: hsl(var(--warning) / .5) !important; }
-html[data-skin="apple"] button[class*="bg-sky-600"] {
-  background: hsl(var(--info)) !important; color: #fff !important; border-radius: 10px !important; box-shadow: none !important;
-}
-html[data-skin="apple"] button[class*="bg-sky-600"]:hover { filter: brightness(.96); }
-html[data-skin="apple"] button[class*="bg-emerald-500"][class*="border-emerald-500"] {
-  background: hsl(var(--success)) !important; border-color: hsl(var(--success)) !important;
-}
-
-/* ── ÉCRAN fournisseurs (/fournisseurs + [id] + new) ── */
-html[data-skin="apple"] div[class*="rounded-lg"][class*="bg-card"][class*="p-0.5"]:has(> button[class*="bg-brand-500"]) {
-  background: hsl(var(--secondary) / .55) !important; border-color: hsl(var(--border)) !important;
-}
-html[data-skin="apple"] div[class*="rounded-lg"][class*="bg-card"][class*="p-0.5"] > button[class*="bg-brand-500"] {
-  background: hsl(var(--card)) !important; color: hsl(var(--foreground)) !important; box-shadow: 0 1px 3px rgba(0,0,0,.14) !important;
-}
-html[data-skin="apple"] [class*="ring-emerald-500/2"] { --tw-ring-color: hsl(var(--success) / .28) !important; }
-html[data-skin="apple"] [class*="bg-brand-500/12"],
-html[data-skin="apple"] [class*="bg-brand-500/10"] { background: hsl(var(--primary) / .12) !important; color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="ring-brand-500/2"] { --tw-ring-color: hsl(var(--primary) / .22) !important; }
-html[data-skin="apple"] [class*="bg-violet-500/1"] { background: hsl(var(--primary) / .12) !important; }
-html[data-skin="apple"] [class*="text-violet-6"],
-html[data-skin="apple"] [class*="text-violet-4"] { color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="ring-violet-500/2"] { --tw-ring-color: hsl(var(--primary) / .22) !important; }
-html[data-skin="apple"] [class*="hover:border-brand-400"]:hover { border-color: hsl(var(--primary) / .40) !important; }
-html[data-skin="apple"] .group:hover [class*="group-hover:text-brand-500"] { color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] a[class*="hover:text-brand-6"]:hover { color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="from-brand-400"][class*="to-brand-600"] { background: hsl(var(--primary) / .30) !important; height: 2px !important; }
-html[data-skin="apple"] thead tr[class*="uppercase"] { letter-spacing: .025em !important; }
-html[data-skin="apple"] [class*="hover:bg-rose-50"]:hover { background: hsl(var(--destructive) / .10) !important; }
-html[data-skin="apple"] [class*="hover:bg-rose-950"]:hover { background: hsl(var(--destructive) / .14) !important; }
-
-/* ── ÉCRAN commandes-fournisseurs (Cde fournisseur · Bons de commande) ── */
-html[data-skin="apple"] [class*="bg-rose-500/15"],
-html[data-skin="apple"] [class*="bg-amber-500/15"],
-html[data-skin="apple"] [class*="bg-emerald-500/15"] { border-radius: 999px !important; }
-html[data-skin="apple"] [class*="border-emerald-500"] { border-color: hsl(var(--success) / .30) !important; }
-html[data-skin="apple"] [class*="border-amber-500"]   { border-color: hsl(var(--warning) / .30) !important; }
-html[data-skin="apple"] [class*="border-rose-500"]    { border-color: hsl(var(--destructive) / .30) !important; }
-html[data-skin="apple"] [class*="border-amber-400"]   { border-color: hsl(var(--warning) / .30) !important; }
-html[data-skin="apple"] [class*="border-rose-400"]    { border-color: hsl(var(--destructive) / .30) !important; }
-html[data-skin="apple"] [class*="border-rose-300"]    { border-color: hsl(var(--destructive) / .25) !important; }
-html[data-skin="apple"] [class*="bg-amber-50/"]  { background: hsl(var(--warning) / .09) !important; }
-html[data-skin="apple"] [class*="bg-amber-950/"] { background: hsl(var(--warning) / .14) !important; }
-html[data-skin="apple"] [class*="bg-rose-50/"]   { background: hsl(var(--destructive) / .08) !important; }
-html[data-skin="apple"] [class*="bg-rose-950/"]  { background: hsl(var(--destructive) / .14) !important; }
-html[data-skin="apple"] tr[class*="bg-violet-50"] { background: hsl(var(--primary) / .07) !important; }
-html[data-skin="apple"] [class*="hover:text-violet-6"]:hover,
-html[data-skin="apple"] [class*="hover:text-violet-4"]:hover { color: hsl(var(--foreground)) !important; }
-html[data-skin="apple"] [class*="bg-card/40"] { background: hsl(var(--secondary) / .5) !important; }
-html[data-skin="apple"] [class*="rounded-lg"][class*="overflow-x-auto"] { border-radius: var(--radius) !important; }
-
-/* ── ÉCRAN heures (/heures → HeuresPanel + CongesPanel) ── */
-html[data-skin="apple"] button[class*="bg-emerald-600"],
-html[data-skin="apple"] button[class*="bg-amber-600"] {
-  background: hsl(var(--primary)) !important; color: hsl(var(--primary-foreground)) !important; border-radius: 10px; box-shadow: none !important;
-}
-html[data-skin="apple"] button[class*="bg-emerald-600"]:hover,
-html[data-skin="apple"] button[class*="bg-amber-600"]:hover { background: hsl(var(--primary)) !important; filter: brightness(.96); }
-html[data-skin="apple"] [class*="text-violet-7"],
-html[data-skin="apple"] [class*="text-violet-3"] { color: hsl(235 55% 56%) !important; }
-html[data-skin="apple"] [class*="text-brand-7"],
-html[data-skin="apple"] [class*="text-brand-3"] { color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="bg-orange-500/1"] { background: hsl(var(--warning) / .12) !important; }
-html[data-skin="apple"] [class*="bg-sky-500/1"]    { background: hsl(var(--info) / .12) !important; }
-html[data-skin="apple"] [class*="bg-violet-500/1"] { background: hsl(235 55% 56% / .12) !important; }
-html[data-skin="apple"] [class*="ring-violet-500/2"] { --tw-ring-color: hsl(235 55% 56% / .25) !important; }
-html[data-skin="apple"] [class*="ring-orange-500/2"] { --tw-ring-color: hsl(var(--warning) / .25) !important; }
-html[data-skin="apple"] [class*="bg-amber-500/[0.06]"] { background: hsl(var(--secondary) / .5) !important; }
-html[data-skin="apple"] [class*="border-amber-500/3"],
-html[data-skin="apple"] [class*="border-amber-500/2"] { border-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] [class*="border-emerald-500/5"] { border-color: hsl(var(--success) / .4) !important; }
-html[data-skin="apple"] [class*="border-rose-500/5"]    { border-color: hsl(var(--destructive) / .4) !important; }
-html[data-skin="apple"] [class*="border-violet-500/5"]  { border-color: hsl(235 55% 56% / .4) !important; }
-html[data-skin="apple"] [class*="border-sky-500/5"]     { border-color: hsl(var(--info) / .4) !important; }
-html[data-skin="apple"] [class*="border-amber-500/5"]   { border-color: hsl(var(--warning) / .4) !important; }
-html[data-skin="apple"] [class*="border-orange-500/5"]  { border-color: hsl(var(--warning) / .4) !important; }
-html[data-skin="apple"] input[class*="border-border"] {
-  border-radius: 10px; background: hsl(var(--secondary) / .5) !important; border-color: hsl(var(--border)) !important;
-}
-html[data-skin="apple"] [class*="border-t-2"] { border-top-width: 1px !important; }
-html[data-skin="apple"] [class*="border-2"]   { border-width: 1px !important; }
-
-/* ── ÉCRAN planning (/planning → PlanningPanel) ── */
-html[data-skin="apple"] [class*="bg-violet-500/10"],
-html[data-skin="apple"] [class*="bg-sky-500/10"] {
-  background: hsl(var(--secondary) / .5) !important; border-color: hsl(var(--border)) !important; color: hsl(var(--muted-foreground)) !important;
-}
-html[data-skin="apple"].dark [class*="bg-violet-500/10"],
-html[data-skin="apple"].dark [class*="bg-sky-500/10"] { color: hsl(var(--muted-foreground)) !important; }
-html[data-skin="apple"] [class*="border-sky-500/25"] { border-color: hsl(var(--border) / .7) !important; }
-html[data-skin="apple"] [class*="bg-violet-500/5"] { background: hsl(var(--secondary) / .35) !important; }
-html[data-skin="apple"] [class*="border-violet-500/30"],
-html[data-skin="apple"] [class*="border-sky-500/30"] { border-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] button[class*="bg-emerald-600"] {
-  background: hsl(var(--primary)) !important; color: hsl(var(--primary-foreground)) !important; border-radius: 10px;
-}
-html[data-skin="apple"] button[class*="bg-emerald-600"]:hover { background: hsl(var(--primary)) !important; filter: brightness(.96); }
-html[data-skin="apple"] button[class*="bg-amber-600"] { background: hsl(var(--warning)) !important; color: #fff !important; border-radius: 10px; }
-html[data-skin="apple"] button[class*="bg-amber-600"]:hover { background: hsl(var(--warning)) !important; filter: brightness(.96); }
-html[data-skin="apple"] button[class*="bg-rose-600"] { color: #fff !important; border-radius: 10px; }
-html[data-skin="apple"] button[class*="bg-rose-600"]:hover { background: hsl(var(--destructive)) !important; filter: brightness(.96); }
-html[data-skin="apple"] span[class*="overflow-hidden"][class*="rounded-md"][class*="border-border"] {
-  background: hsl(var(--secondary) / .6) !important; border-color: hsl(var(--border)) !important; border-radius: 10px; padding: 2px; gap: 2px;
-}
-html[data-skin="apple"] span[class*="overflow-hidden"][class*="rounded-md"][class*="border-border"] > button { border-radius: 8px; }
-html[data-skin="apple"] button[class*="bg-sky-500/15"],
-html[data-skin="apple"] button[class*="bg-violet-500/15"],
-html[data-skin="apple"] button[class*="bg-emerald-500/15"],
-html[data-skin="apple"] button[class*="bg-rose-500/15"] {
-  background: hsl(var(--card)) !important; color: hsl(var(--foreground)) !important; box-shadow: 0 1px 2px rgba(0,0,0,.16) !important;
-}
-html[data-skin="apple"] table td[class*="px-0.5"],
-html[data-skin="apple"] table th[class*="px-0.5"] { padding-top: 2px !important; padding-bottom: 2px !important; }
-html[data-skin="apple"] a[class*="text-sky-7"] { color: hsl(var(--info)) !important; }
-html[data-skin="apple"] [class*="text-violet-6"] { color: hsl(235 50% 55%) !important; }
-
-/* ── ÉCRAN salaires (/salaires → SalairesPanel + ComptaStatement) ── */
-html[data-skin="apple"] [class*="bg-card"][class*="rounded-xl"]:not(.surface-card) {
-  border-color: hsl(var(--border)); border-radius: var(--radius);
-  box-shadow: 0 1px 2px hsl(var(--foreground) / 0.05), 0 0 0 0.5px hsl(var(--border) / 0.5);
-}
-html[data-skin="apple"] [class*="bg-amber-600"] { background-color: hsl(var(--primary)) !important; color: #1c1c1e !important; }
-html[data-skin="apple"] [class*="hover:bg-amber-700"]:hover { background-color: hsl(var(--primary)) !important; filter: brightness(0.94); }
-html[data-skin="apple"] [class*="bg-emerald-600"] { background-color: hsl(var(--success)) !important; }
-html[data-skin="apple"] [class*="hover:bg-emerald-700"]:hover { background-color: hsl(var(--success)) !important; filter: brightness(0.94); }
-html[data-skin="apple"] [class*="bg-sky-600"] { background-color: hsl(var(--info)) !important; }
-html[data-skin="apple"] [class*="hover:bg-sky-700"]:hover { background-color: hsl(var(--info)) !important; filter: brightness(0.94); }
-html[data-skin="apple"] [class*="bg-brand-500"] { background-color: hsl(var(--secondary) / 0.45) !important; }
-html[data-skin="apple"] [class*="border-brand-500"] { border-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] [class*="bg-sky-500/5"] { background-color: hsl(var(--secondary) / 0.35) !important; }
-html[data-skin="apple"] [class*="border-sky-500/30"] { border-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] [class*="bg-amber-500"] { background-color: hsl(var(--warning) / 0.1) !important; }
-html[data-skin="apple"] [class*="border-amber-500"] { border-color: hsl(var(--warning) / 0.3) !important; }
-html[data-skin="apple"] [class*="bg-orange-500"] { background-color: hsl(var(--warning) / 0.12) !important; }
-html[data-skin="apple"] [class*="bg-violet-500/10"] { background-color: hsl(var(--secondary) / 0.5) !important; }
-html[data-skin="apple"] [class*="border-violet-500/40"] { border-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] [class*="hover:bg-violet-500/20"]:hover { background-color: hsl(var(--secondary) / 0.8) !important; }
-html[data-skin="apple"] input[type="checkbox"][class*="accent-emerald-600"] {
-  -webkit-appearance: none; appearance: none; box-sizing: border-box; flex: none; cursor: pointer; border: none;
-  width: 2.05rem !important; height: 1.22rem !important; border-radius: 999px;
-  background-color: hsl(var(--muted-foreground) / 0.32);
-  background-image: radial-gradient(circle at center, #fff 42%, transparent 46%);
-  background-repeat: no-repeat; background-size: 1.02rem 1.02rem; background-position: 0.1rem center;
-  transition: background-color .2s ease, background-position .2s cubic-bezier(.23,1,.32,1);
-}
-html[data-skin="apple"] input[type="checkbox"][class*="accent-emerald-600"]:checked {
-  background-color: hsl(var(--primary)); background-position: calc(100% - 0.1rem) center;
-}
-html[data-skin="apple"] input[type="checkbox"][class*="accent-emerald-600"]:focus-visible {
-  outline: 2px solid hsl(var(--primary) / 0.5); outline-offset: 2px;
-}
-html[data-skin="apple"] [class*="bg-background/60"] { border-radius: calc(var(--radius) * 0.5); }
-
-/* ── ÉCRAN transport (/transport) ── */
-html[data-skin="apple"] [class*="rounded-2xl"][class*="bg-card"] {
-  border-color: hsl(var(--border) / .7) !important; box-shadow: var(--shadow-card); border-radius: var(--radius);
-}
-html[data-skin="apple"] [class*="text-[30px]"][class*="text-brand-600"] { color: hsl(var(--primary)) !important; letter-spacing: -0.022em; }
-html[data-skin="apple"] [class*="text-[30px]"],
-html[data-skin="apple"] [class*="text-[22px]"],
-html[data-skin="apple"] [class*="text-[19px]"],
-html[data-skin="apple"] [class*="text-[18px]"],
-html[data-skin="apple"] [class*="text-[16px]"] { letter-spacing: -0.02em; }
-html[data-skin="apple"] [class*="text-brand-500"],
-html[data-skin="apple"] [class*="text-[9px]"][class*="text-brand-600"] { color: hsl(var(--muted-foreground)) !important; }
-html[data-skin="apple"] [class*="bg-amber-50"] { background: hsl(var(--warning) / .10) !important; }
-html[data-skin="apple"] [class*="bg-amber-950"] { background: hsl(var(--warning) / .14) !important; }
-html[data-skin="apple"] [class*="ring-amber-300"],
-html[data-skin="apple"] [class*="ring-amber-500"] { --tw-ring-color: hsl(var(--warning) / .30) !important; }
-html[data-skin="apple"] button[class*="hover:text-rose-600"] { color: hsl(var(--muted-foreground)) !important; }
-html[data-skin="apple"] button[class*="hover:text-rose-600"]:hover {
-  color: hsl(var(--destructive)) !important; background: hsl(var(--destructive) / .12) !important;
-}
-html[data-skin="apple"] [class*="hover:bg-rose-50"]:hover { background: hsl(var(--destructive) / .12) !important; }
-html[data-skin="apple"] input[class*="rounded-md"],
-html[data-skin="apple"] select[class*="rounded-md"] { border-radius: 10px; }
-
-/* ── ÉCRAN promos (/promos → PromosManager + CreatePromoDialog) ── */
-html[data-skin="apple"] .panel ul > li[class*="bg-black"] {
-  background: hsl(var(--card)) !important; border: 1px solid hsl(var(--border)); border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.05);
-}
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="text-white"] { color: hsl(var(--foreground)) !important; }
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="text-white/50"],
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="text-white/60"],
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="text-white/70"] { color: hsl(var(--muted-foreground)) !important; }
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="text-white/30"] { color: hsl(var(--muted-foreground) / .4) !important; }
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="hover:text-white"]:hover { color: hsl(var(--foreground)) !important; }
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="border-white/20"] { border-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="border-emerald-400/50"] { border-color: hsl(var(--success) / .5) !important; }
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="hover:bg-emerald-950/40"]:hover { background: hsl(var(--success) / .12) !important; }
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="border-rose-500"] { border-color: hsl(var(--destructive)) !important; }
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="bg-rose-950/40"] { background: hsl(var(--destructive) / .12) !important; }
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="hover:border-rose-400/60"]:hover { border-color: hsl(var(--destructive) / .5) !important; }
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="bg-rose-500/20"] {
-  background: hsl(var(--destructive) / .12) !important; color: hsl(var(--destructive)) !important;
-  --tw-ring-color: hsl(var(--destructive) / .28) !important; border-radius: 999px;
-}
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="bg-violet-500/20"],
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="bg-blue-500/20"],
-html[data-skin="apple"] .panel li[class*="bg-black"] [class*="bg-emerald-500/20"] {
-  background: hsl(var(--secondary) / .7) !important; color: hsl(var(--muted-foreground)) !important;
-  --tw-ring-color: hsl(var(--border)) !important; border-radius: 999px; letter-spacing: .02em !important;
-}
-html[data-skin="apple"] .app-sheet input[class~="border-border"],
-html[data-skin="apple"] .app-sheet input[type="date"] {
-  background: hsl(var(--secondary) / .5) !important; border-color: hsl(var(--border)) !important; border-radius: 10px;
-}
-html[data-skin="apple"] .app-sheet ul[class*="shadow-modal"] { border-radius: 12px; border-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] .app-sheet [class*="text-rose-500"] { color: hsl(var(--destructive)) !important; }
-
-/* ── ÉCRAN prospection (/prospection → ProspectionBoard) ── */
-html[data-skin="apple"] [class*="bg-[#11161f]"] {
-  background: hsl(var(--card)) !important; border-color: hsl(var(--border)) !important; --tw-ring-color: hsl(var(--border)) !important; border-radius: 12px;
-}
-html[data-skin="apple"] [class*="bg-[#0f141c]"] {
-  background: var(--glass) !important; border-color: var(--glass-brd) !important; --tw-ring-color: var(--glass-brd) !important;
-  backdrop-filter: blur(30px) saturate(180%); -webkit-backdrop-filter: blur(30px) saturate(180%);
-}
-html[data-skin="apple"] [class*="bg-[#151b26]"] {
-  background: var(--glass) !important; border-color: var(--glass-brd) !important; --tw-ring-color: var(--glass-brd) !important;
-  backdrop-filter: blur(26px) saturate(180%); -webkit-backdrop-filter: blur(26px) saturate(180%); border-radius: 12px;
-}
-html[data-skin="apple"] .fixed.inset-0[class*="bg-black/50"] {
-  background: rgba(10,12,20,.36) !important; backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
-}
-html[data-skin="apple"] [class*="ring-brand-500"] { --tw-ring-color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="focus:ring-brand-500"]:focus { --tw-ring-color: hsl(var(--ring)) !important; }
-html[data-skin="apple"] [class*="bg-brand-500"] { background: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="bg-brand-500/1"] { background: hsl(var(--primary) / .14) !important; }
-html[data-skin="apple"] [class*="text-brand-3"],
-html[data-skin="apple"] [class*="text-brand-4"] { color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="border-brand-500/40"] { border-color: hsl(var(--primary) / .4) !important; }
-html[data-skin="apple"] [class*="hover:border-brand-500/40"]:hover { border-color: hsl(var(--primary) / .45) !important; }
-html[data-skin="apple"] [class*="bg-sky-500/1"],
-html[data-skin="apple"] [class*="bg-slate-500/1"] { background: hsl(var(--muted)) !important; }
-html[data-skin="apple"] [class*="text-slate-3"] { color: hsl(var(--muted-foreground)) !important; }
-html[data-skin="apple"] [class*="ring-sky-500/30"],
-html[data-skin="apple"] [class*="ring-slate-500/30"] { --tw-ring-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] [class*="ring-emerald-500/3"],
-html[data-skin="apple"] [class*="ring-emerald-500/4"] { --tw-ring-color: hsl(var(--success) / .3) !important; }
-html[data-skin="apple"] [class*="bg-lime-500/1"] { background: hsl(var(--success) / .13) !important; }
-html[data-skin="apple"] [class*="text-lime-3"] { color: hsl(var(--success)) !important; }
-html[data-skin="apple"] [class*="ring-lime-500/30"] { --tw-ring-color: hsl(var(--success) / .3) !important; }
-html[data-skin="apple"] [class*="ring-amber-500/3"] { --tw-ring-color: hsl(var(--warning) / .3) !important; }
-html[data-skin="apple"] [class*="bg-violet-500/1"] { background: hsl(235 60% 56% / .12) !important; }
-html[data-skin="apple"] [class*="text-violet-3"] { color: hsl(235 55% 60%) !important; }
-html[data-skin="apple"] [class*="ring-violet-500/30"] { --tw-ring-color: hsl(235 55% 56% / .3) !important; }
-html[data-skin="apple"] [class*="bg-rose-500/1"],
-html[data-skin="apple"] [class*="bg-rose-500/2"] { background: hsl(var(--destructive) / .12) !important; }
-html[data-skin="apple"] [class*="ring-rose-500/3"],
-html[data-skin="apple"] [class*="ring-rose-500/4"] { --tw-ring-color: hsl(var(--destructive) / .3) !important; }
-html[data-skin="apple"] button[class*="bg-violet-6"],
-html[data-skin="apple"] button[class*="bg-violet-7"] {
-  background: hsl(var(--primary)) !important; color: hsl(var(--primary-foreground)) !important; border-radius: 10px;
-}
-html[data-skin="apple"] button[class*="bg-violet-6"]:hover { filter: brightness(.96); }
-html[data-skin="apple"] [class*="rounded-t-2xl"] { background: hsl(var(--secondary) / .5) !important; }
-html[data-skin="apple"] [class*="ring-amber-400"] { --tw-ring-color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="bg-amber-400/10"] { background: hsl(var(--primary) / .08) !important; }
-html[data-skin="apple"] [class*="rgba(251,191,36"] { box-shadow: var(--shadow-card) !important; }
-html[data-skin="apple"] [class*="transition-[width]"] { background: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="text-[19px]"] {
-  font-size: 22px !important; letter-spacing: -.02em; font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1;
-}
-html[data-skin="apple"] [class*="uppercase"][class*="tracking-wide"],
-html[data-skin="apple"] [class*="uppercase"][class*="tracking-wider"] { letter-spacing: .04em !important; }
-
-/* ── ÉCRAN parametres (/parametres → ParametresPanel) ── */
-html[data-skin="apple"] [role="radiogroup"] {
-  background: hsl(var(--secondary) / .55) !important; box-shadow: inset 0 0 0 1px hsl(var(--border) / .7);
-  border-radius: 9px !important; gap: 0 !important; padding: 2px !important;
-}
-html[data-skin="apple"] [role="radiogroup"] button { border-radius: 7px !important; font-weight: 590 !important; letter-spacing: -0.01em; }
-html[data-skin="apple"] [role="radiogroup"] button[aria-checked="true"] {
-  background: hsl(var(--card)) !important; color: hsl(var(--foreground)) !important;
-  box-shadow: 0 1px 2px rgba(17,20,32,.16), 0 2px 6px rgba(17,20,32,.08) !important;
-}
-html[data-skin="apple"].dark [role="radiogroup"] button[aria-checked="true"] {
-  background: hsl(240 5% 27%) !important; box-shadow: 0 1px 2px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.35) !important;
-}
-html[data-skin="apple"] [class*="inset_2px_0_0_0_hsl"] { box-shadow: none !important; }
-html[data-skin="apple"] [class*="bg-brand-500/12"] { background: hsl(var(--foreground) / .06) !important; }
-html[data-skin="apple"] [class*="bg-brand-500/15"] { background: hsl(var(--primary) / .13) !important; }
-html[data-skin="apple"] [class*="hover:bg-brand-500/25"]:hover { background: hsl(var(--primary) / .2) !important; }
-html[data-skin="apple"] [class*="ring-brand-500/40"] { --tw-ring-color: hsl(var(--primary) / .32) !important; }
-html[data-skin="apple"] [class*="text-brand-700"],
-html[data-skin="apple"] [class*="text-brand-300"] { color: hsl(var(--foreground)) !important; }
-html[data-skin="apple"] [class*="text-brand-600"],
-html[data-skin="apple"] [class*="text-brand-400"] { color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] input[type="range"][class*="accent-brand-500"] { accent-color: hsl(var(--primary)); }
-html[data-skin="apple"] [class*="focus-within:ring-brand-500/60"] {
-  background: hsl(var(--card)) !important; --tw-ring-color: hsl(var(--input)) !important;
-}
-html[data-skin="apple"] [class*="focus-within:ring-brand-500/60"]:focus-within {
-  --tw-ring-color: hsl(var(--ring) / .55) !important; outline: 3px solid hsl(var(--ring) / .16); outline-offset: 1px;
-}
-html[data-skin="apple"] [class*="border-border/40"] { border-color: hsl(var(--border)) !important; }
-
-/* ── ÉCRAN plan-appel (/plan-appel → CallConsole, rail file/fiche/actions) ── */
-html[data-skin="apple"] [class*="min-w-[116px]"] { border-left-width: 1px !important; border-left-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] [class*="min-w-[116px]"] p[class*="text-[30px]"] { color: hsl(var(--foreground)) !important; }
-html[data-skin="apple"] .panel [class*="border-l-2"] { box-shadow: inset 0 -1px 0 hsl(var(--border) / .5); }
-html[data-skin="apple"] [class*="bg-orange-50 "] { background: hsl(var(--warning) / .12) !important; }
-html[data-skin="apple"] [class*="bg-rose-50 "]   { background: hsl(var(--destructive) / .12) !important; }
-html[data-skin="apple"] [class*="bg-blue-50 "]   { background: hsl(var(--info) / .10) !important; }
-html[data-skin="apple"] [class*="bg-purple-50 "] { background: hsl(var(--secondary) / .6) !important; }
-html[data-skin="apple"] [class*="bg-brand-50/"],
-html[data-skin="apple"] [class*="bg-brand-50 "]  { background: hsl(var(--primary) / .10) !important; }
-html[data-skin="apple"] [class*="bg-amber-50"]:hover { background: hsl(var(--warning) / .12) !important; }
-html[data-skin="apple"] [class*="border-orange-2"],
-html[data-skin="apple"] [class*="border-orange-5"],
-html[data-skin="apple"] [class*="border-blue-2"],
-html[data-skin="apple"] [class*="border-blue-5"],
-html[data-skin="apple"] [class*="border-purple-2"],
-html[data-skin="apple"] [class*="border-purple-5"],
-html[data-skin="apple"] [class*="border-amber-3"],
-html[data-skin="apple"] [class*="border-amber-5"] { border-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] [class*="text-blue-"]   { color: hsl(var(--info)) !important; }
-html[data-skin="apple"] [class*="text-purple-"] { color: hsl(235 55% 56%) !important; }
-html[data-skin="apple"] [class*="bg-orange-500"] { background: hsl(var(--warning)) !important; }
-html[data-skin="apple"] [class*="bg-purple-500"] { background: hsl(235 55% 56%) !important; }
-html[data-skin="apple"] span[class*="bg-brand-600"] { background: hsl(var(--primary)) !important; color: hsl(var(--primary-foreground)) !important; }
-html[data-skin="apple"] svg[class*="opacity-[0.10]"] { color: hsl(var(--muted-foreground)) !important; opacity: .05 !important; }
-html[data-skin="apple"] [class*="rounded-md"][class*="bg-card"] { border-radius: var(--radius) !important; }
-
-/* ── ÉCRAN console-hub (/console → CallConsole stat strip + file) ── */
-html[data-skin="apple"] [class*="border-l-4"] { border-left-width: 1px !important; }
-html[data-skin="apple"] [class*="border-l-brand-500"],
-html[data-skin="apple"] [class*="border-l-emerald-500"],
-html[data-skin="apple"] [class*="border-l-amber-500"],
-html[data-skin="apple"] [class*="border-l-violet-500"] { border-left-color: hsl(var(--border)) !important; }
-html[data-skin="apple"] p[class*="text-[30px]"][class*="tnum"] { color: hsl(var(--foreground)) !important; letter-spacing: -0.02em; }
-html[data-skin="apple"] [class*="text-brand-6"],
-html[data-skin="apple"] [class*="text-brand-4"] { color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="bg-brand-500"] { background-color: hsl(var(--primary)) !important; }
-html[data-skin="apple"] [class*="w-0.5"][class*="bg-brand-500"] { background-color: hsl(var(--muted-foreground) / .35) !important; }
-html[data-skin="apple"] .dot-accent { box-shadow: 0 0 0 3px hsl(var(--background)) !important; }
-html[data-skin="apple"] [class*="bg-brand-50/60"] { background-color: hsl(var(--primary) / .09) !important; }
-html[data-skin="apple"] [class*="bg-rose-50"] { background-color: hsl(var(--destructive) / .08) !important; }
-html[data-skin="apple"] [class*="border-l-rose-500"] { border-left-color: hsl(var(--destructive)) !important; }
-html[data-skin="apple"] [class*="text-brand-4"][class*="opacity-[0.10]"] { color: hsl(var(--muted-foreground)) !important; }
-html[data-skin="apple"] [class*="ring-emerald-500/30"] { --tw-ring-color: hsl(var(--success) / .3) !important; }
-html[data-skin="apple"] [class*="bg-rose-600"] { border-radius: 999px !important; }
-html[data-skin="apple"] [class*="bg-orange-500"] { background-color: hsl(var(--warning)) !important; }
-html[data-skin="apple"] [class*="bg-purple-500"] { background-color: hsl(235 55% 56%) !important; }
-html[data-skin="apple"] [class*="text-purple-9"] { color: hsl(235 55% 56%) !important; }
-html[data-skin="apple"] [class*="text-blue-6"],
-html[data-skin="apple"] [class*="text-blue-9"] { color: hsl(var(--info)) !important; }
-html[data-skin="apple"] [class*="text-[26px]"] { letter-spacing: -0.021em; }
-html[data-skin="apple"] [class*="text-[22px]"][class*="font-mono"] { letter-spacing: -0.01em; }
