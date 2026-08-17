@@ -46,7 +46,8 @@ import {
  *                 donnée), Bons de commande, Stock, Inventaire, Fabrication
  *   ACHATS      — Commandes fournisseurs → Entrées marchandises (flux CF → EM,
  *                 replié par défaut : moins quotidien sur poste télévente)
- *   PILOTAGE    — Statistiques, Encours clients, Équipe commerciale
+ *   PILOTAGE    — CHIFFRABLE : Statistiques, Palmarès magasins, Encours, Transport
+ *   RESSOURCES HUMAINES — L'HUMAIN : Effectif, Planning (congés/récup), Salaires
  *   SYSTÈME     — Paramètres
  *   (footer)    — bascule SAP, thème, compte
  *
@@ -126,12 +127,19 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
     ],
   },
   {
-    // Pilotage — chiffres et équipe (direction / compta).
+    // Pilotage — CHIFFRABLE : statistiques, résultats, finance (direction / compta).
     label: "Pilotage",
     items: [
       { href: "/dashboard", label: "Statistiques", icon: LayoutDashboard },
       { href: "/dashboard/magasins", label: "Palmarès magasins", icon: Trophy },
       { href: "/encours", label: "Encours clients", icon: Receipt },
+      { href: "/transport", label: "Coût de transport", icon: Truck },
+    ],
+  },
+  {
+    // Ressources humaines — L'HUMAIN : effectif, présence/congés, paie.
+    label: "Ressources humaines",
+    items: [
       { href: "/commerciaux", label: "Effectif", icon: Briefcase },
       // Planning congés & récup : calendriers par personne + équipe, compteurs
       // CP/récup, propositions boomerang (direction ⇄ salarié).
@@ -139,7 +147,6 @@ export const NAV_GROUPS: { label: string | null; items: NavItem[]; collapsible?:
       // Éléments des salaires : primes, 13e mois, avantages en nature, frais —
       // récap mensuel envoyé au cabinet comptable (remplace le PDF compta).
       { href: "/salaires", label: "Éléments de salaires", icon: Wallet },
-      { href: "/transport", label: "Coût de transport", icon: Truck },
     ],
   },
   {
