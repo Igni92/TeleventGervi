@@ -65,6 +65,7 @@ export async function GET(req: NextRequest) {
       docType: d.docType,
       docNum: d.docNum,
       docEntry: d.docEntry,
+      invoiceEntry: d.invoiceEntry,
       fileName: d.fileName,
       clientId: d.clientId,
       clientNom: d.client?.nom ?? null,

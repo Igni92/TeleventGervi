@@ -1,21 +1,30 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Search, Loader2, Workflow, ArrowDown, Folder, FolderOpen, ChevronLeft, Inbox, FileText, Truck, ReceiptText } from "lucide-react";
+import { Search, Loader2, Workflow, ArrowDown, Folder, FolderOpen, ChevronLeft, Inbox, Eye, CheckCircle2, ArrowDownAZ, CalendarClock } from "lucide-react";
 import { DocumentActions } from "@/components/documents/DocumentActions";
+import { PdfPreviewDialog } from "@/components/documents/PdfPreviewDialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { formatDate, formatRelative } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 
 interface FolderRow {
   clientId: string | null;
   clientNom: string | null;
   cardCode: string | null;
+  clientType: string | null;
   total: number;
   byType: Record<string, number>;
   lastReceivedAt: string | null;
 }
+
+const CLIENT_TYPES = [
+  { key: "", label: "Tous types" },
+  { key: "GMS", label: "GMS" },
+  { key: "EXPORT", label: "Export" },
+  { key: "CHR", label: "CHR" },
+] as const;
 interface Doc {
-  id: string; docType: string; docNum: string | null; docEntry: number | null;
+  id: string; docType: string; docNum: string | null; docEntry: number | null; invoiceEntry: number | null;
   fileName: string; clientNom: string | null; cardCode: string | null;
   docDate: string | null; receivedAt: string; lastSentAt: string | null; lastSentTo: string | null;
   matched: boolean; sizeBytes: number;
@@ -30,7 +39,6 @@ const TYPE_PILL: Record<string, string> = {
   AUTRE: "bg-secondary text-muted-foreground",
 };
 const TYPE_LABEL: Record<string, string> = { FACTURE: "Facture", BL: "BL", AVOIR: "Avoir", AUTRE: "Doc" };
-const TYPE_ICON: Record<string, typeof FileText> = { FACTURE: ReceiptText, BL: Truck, AVOIR: FileText, AUTRE: FileText };
 const TYPE_ORDER = ["BL", "FACTURE", "AVOIR", "AUTRE"];
 
 export function DocumentsExplorer() {
@@ -38,12 +46,14 @@ export function DocumentsExplorer() {
   const [open, setOpen] = useState<{ clientId: string | null; nom: string; code: string | null } | null>(null);
 
   const [q, setQ] = useState("");
+  const [clientType, setClientType] = useState("");
+  const [sort, setSort] = useState<"date" | "num">("date");
   const [folders, setFolders] = useState<FolderRow[] | null>(null);
   const [totalDocs, setTotalDocs] = useState(0);
 
   const [docs, setDocs] = useState<Doc[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
-  const [typeF, setTypeF] = useState("");
+  const [preview, setPreview] = useState<{ id: string; fileName: string } | null>(null);
 
   // Dossier lié (BL → Facture → Avoir)
   const [chainOpen, setChainOpen] = useState(false);
@@ -67,11 +77,12 @@ export function DocumentsExplorer() {
     try {
       const p = new URLSearchParams();
       if (q.trim()) p.set("q", q.trim());
+      if (clientType) p.set("clientType", clientType);
       const j = await fetch(`/api/archive/folders?${p}`, { cache: "no-store" }).then((r) => r.json());
       setFolders(j.folders ?? []);
       setTotalDocs(j.totalDocs ?? 0);
     } catch { setFolders([]); }
-  }, [q]);
+  }, [q, clientType]);
 
   // Charge les documents d'un dossier client.
   const loadDocs = useCallback(async (folder: { clientId: string | null }) => {
@@ -90,9 +101,68 @@ export function DocumentsExplorer() {
 
   // ── Vue documents d'un client ──
   if (open) {
-    const visible = typeF ? docs.filter((d) => d.docType === typeF) : docs;
-    const groups = TYPE_ORDER.map((t) => ({ type: t, items: visible.filter((d) => d.docType === t) })).filter((g) => g.items.length > 0);
-    const typesPresent = TYPE_ORDER.filter((t) => docs.some((d) => d.docType === t));
+    // Regroupe par DOSSIER (invoiceEntry = facture pivot) : chaque dossier montre
+    // BL | Facture | Avoir CÔTE À CÔTE. Les documents pas encore chaînés
+    // (invoiceEntry null) forment un dossier « solo » jusqu'à ce que le cron de
+    // chaînage les relie.
+    const dmap = new Map<string, { key: string; bl?: Doc; facture?: Doc; avoirs: Doc[]; sortKey: string }>();
+    for (const d of docs) {
+      const key = d.invoiceEntry != null ? `inv-${d.invoiceEntry}` : `solo-${d.id}`;
+      const g = dmap.get(key) ?? { key, avoirs: [], sortKey: "" };
+      if (d.docType === "FACTURE") g.facture = d;
+      else if (d.docType === "BL") g.bl = d;
+      else g.avoirs.push(d); // AVOIR (+ AUTRE éventuel)
+      const dt = d.docDate ?? d.receivedAt;
+      if (dt > g.sortKey) g.sortKey = dt;
+      dmap.set(key, g);
+    }
+    const dossierNum = (g: { facture?: Doc; bl?: Doc; avoirs: Doc[] }) => {
+      const n = g.facture?.docNum ?? g.bl?.docNum ?? g.avoirs[0]?.docNum ?? null;
+      return n != null ? (parseInt(String(n), 10) || 0) : -1;
+    };
+    const dossiers = [...dmap.values()].sort((a, b) =>
+      sort === "num" ? dossierNum(b) - dossierNum(a) : b.sortKey.localeCompare(a.sortKey),
+    );
+
+    // Cellule d'un maillon (BL/Facture/Avoir) — vide si absent.
+    const cell = (type: string, doc: Doc | undefined, extra?: number) => {
+      if (!doc) {
+        return (
+          <div className="rounded-xl border border-dashed border-border/50 p-2.5 flex flex-col items-center justify-center text-center min-h-[62px]">
+            <span className={`inline-flex px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wider opacity-40 ${TYPE_PILL[type]}`}>{TYPE_LABEL[type]}</span>
+            <span className="text-[11px] text-muted-foreground/40 mt-1">—</span>
+          </div>
+        );
+      }
+      return (
+        <div
+          onClick={() => setPreview({ id: doc.id, fileName: doc.fileName })}
+          className="group/cell rounded-xl border border-border bg-background/40 p-2.5 cursor-pointer hover:border-brand-400/50 hover:bg-secondary/30 transition-colors min-h-[62px]"
+          title="Aperçu du document"
+        >
+          <div className="flex items-center gap-1.5">
+            <span className={`inline-flex px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wider ${TYPE_PILL[type]}`}>{TYPE_LABEL[type]}</span>
+            <span className="font-mono text-[12px] font-semibold text-foreground truncate">{doc.docNum ?? "—"}</span>
+            {extra ? <span className="text-[10px] text-muted-foreground">+{extra}</span> : null}
+            <Eye className="ml-auto h-3.5 w-3.5 text-muted-foreground/40 group-hover/cell:text-brand-500 transition-colors shrink-0" />
+          </div>
+          <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+            <span className="tnum" title="Date du document">{doc.docDate ? formatDate(doc.docDate).slice(0, 10) : "—"}</span>
+            {/* Date d'ENVOI au client = date du mail archivé (la copie archivée EST
+                l'envoi au client), ou date de renvoi depuis l'app si re-envoyé. */}
+            <span
+              className="inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400"
+              title={`Envoyé au client le ${formatDate(doc.lastSentAt ?? doc.receivedAt)}${doc.lastSentAt ? " (renvoyé depuis l'app)" : " (copie archivée = envoi au client)"}`}
+            >
+              <CheckCircle2 className="h-2.5 w-2.5" /> env. {formatDate(doc.lastSentAt ?? doc.receivedAt).slice(0, 10)}
+            </span>
+            <span className="ml-auto" onClick={(e) => e.stopPropagation()}>
+              <DocumentActions compact hidePdf docType={type} docNum={doc.docNum} preloaded={{ id: doc.id, fileName: doc.fileName, lastSentAt: doc.lastSentAt }} />
+            </span>
+          </div>
+        </div>
+      );
+    };
     return (
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
@@ -106,55 +176,43 @@ export function DocumentsExplorer() {
               {open.code && <p className="font-mono text-[11px] text-muted-foreground">{open.code}</p>}
             </div>
           </div>
-          {typesPresent.length > 1 && (
-            <div className="ml-auto inline-flex rounded-lg border border-border bg-card p-0.5">
-              <button type="button" onClick={() => setTypeF("")} className={`px-3 h-8 rounded-md text-[12px] font-medium transition-colors ${typeF === "" ? "bg-brand-500 text-on-accent shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Tous</button>
-              {typesPresent.map((t) => (
-                <button key={t} type="button" onClick={() => setTypeF(t)} className={`px-3 h-8 rounded-md text-[12px] font-medium transition-colors ${typeF === t ? "bg-brand-500 text-on-accent shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-                  {TYPE_LABEL[t]}s
-                </button>
-              ))}
+          <div className="ml-auto flex items-center gap-2.5">
+            <div className="inline-flex rounded-lg border border-border bg-card p-0.5" title="Trier les dossiers">
+              <button type="button" onClick={() => setSort("date")} className={`inline-flex items-center gap-1 px-2.5 h-8 rounded-md text-[12px] font-medium transition-colors ${sort === "date" ? "bg-brand-500 text-on-accent shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                <CalendarClock className="h-3.5 w-3.5" /> Date
+              </button>
+              <button type="button" onClick={() => setSort("num")} className={`inline-flex items-center gap-1 px-2.5 h-8 rounded-md text-[12px] font-medium transition-colors ${sort === "num" ? "bg-brand-500 text-on-accent shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                <ArrowDownAZ className="h-3.5 w-3.5" /> N°
+              </button>
             </div>
-          )}
+            <span className="text-[12px] text-muted-foreground tnum whitespace-nowrap">{dossiers.length} dossier{dossiers.length > 1 ? "s" : ""}</span>
+          </div>
         </div>
+
+        {/* En-tête de colonnes du dossier */}
+        {dossiers.length > 0 && (
+          <div className="hidden sm:grid grid-cols-3 gap-2.5 px-2.5 text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground/70">
+            <span>Bon de livraison</span><span>Facture</span><span>Avoir</span>
+          </div>
+        )}
 
         {docsLoading ? (
           <div className="flex items-center justify-center py-16"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-        ) : groups.length === 0 ? (
+        ) : dossiers.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border bg-card/50 py-14 text-center text-[13px] text-muted-foreground">Aucun document.</div>
         ) : (
-          <div className="space-y-5">
-            {groups.map((g) => {
-              const Icon = TYPE_ICON[g.type] ?? FileText;
-              return (
-                <section key={g.type} className="rounded-2xl border border-border bg-card shadow-card overflow-hidden">
-                  <header className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-secondary/30">
-                    <span className={`h-6 w-6 rounded-md flex items-center justify-center ${TYPE_PILL[g.type]}`}><Icon className="h-3.5 w-3.5" /></span>
-                    <h3 className="text-[13px] font-semibold text-foreground">{TYPE_LABEL[g.type]}s</h3>
-                    <span className="text-[11.5px] text-muted-foreground tnum">{g.items.length}</span>
-                  </header>
-                  <ul className="divide-y divide-border/60">
-                    {g.items.map((d) => (
-                      <li key={d.id} className="flex items-center gap-3 px-4 py-2 hover:bg-secondary/25 transition-colors">
-                        <span className="font-mono text-[12.5px] font-semibold text-foreground shrink-0 w-24 truncate">{d.docNum ?? "—"}</span>
-                        <span className="text-[12px] text-muted-foreground tnum whitespace-nowrap shrink-0">{d.docDate ? formatDate(d.docDate).slice(0, 10) : formatRelative(d.receivedAt)}</span>
-                        {d.lastSentAt ? (
-                          <span className="text-[11px] text-emerald-700 dark:text-emerald-400 whitespace-nowrap shrink-0" title={`Envoyé à ${d.lastSentTo ?? "?"}`}>✓ envoyé</span>
-                        ) : <span className="w-0" />}
-                        <span className="flex-1" />
-                        <button type="button" onClick={() => openChain(d.id)} title="Dossier lié — BL → Facture → Avoir" className="inline-flex items-center justify-center h-7 w-7 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors shrink-0">
-                          <Workflow className="h-3.5 w-3.5" />
-                        </button>
-                        <DocumentActions docType={d.docType} docNum={d.docNum} preloaded={{ id: d.id, fileName: d.fileName, lastSentAt: d.lastSentAt }} className="shrink-0" />
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              );
-            })}
+          <div className="space-y-2.5">
+            {dossiers.map((g) => (
+              <div key={g.key} className="rounded-2xl border border-border bg-card shadow-card p-2.5 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {cell("BL", g.bl)}
+                {cell("FACTURE", g.facture)}
+                {cell("AVOIR", g.avoirs[0], g.avoirs.length > 1 ? g.avoirs.length - 1 : undefined)}
+              </div>
+            ))}
           </div>
         )}
         {chainDialog()}
+        <PdfPreviewDialog docId={preview?.id ?? null} fileName={preview?.fileName} open={!!preview} onOpenChange={(o) => { if (!o) setPreview(null); }} />
       </div>
     );
   }
@@ -168,11 +226,23 @@ export function DocumentsExplorer() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Rechercher un client (nom ou code)…"
+            placeholder="Rechercher un client (nom ou code) ou un n° de document…"
             className="h-10 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-brand-500/40"
           />
         </div>
-        {folders && <span className="text-[12px] text-muted-foreground tnum">{folders.length} dossier{folders.length > 1 ? "s" : ""} · {totalDocs} document{totalDocs > 1 ? "s" : ""}</span>}
+        <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
+          {CLIENT_TYPES.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setClientType(t.key)}
+              className={`px-2.5 h-8 rounded-md text-[12px] font-medium transition-colors ${clientType === t.key ? "bg-brand-500 text-on-accent shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {folders && <span className="text-[12px] text-muted-foreground tnum whitespace-nowrap">{folders.length} client{folders.length > 1 ? "s" : ""} · {totalDocs} doc{totalDocs > 1 ? "s" : ""}</span>}
       </div>
 
       {folders === null ? (
@@ -200,9 +270,14 @@ export function DocumentsExplorer() {
                       <FolderOpen className="h-5 w-5 hidden group-hover:block" />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className={`font-semibold text-[14px] truncate leading-tight ${isNone ? "text-muted-foreground italic" : "text-foreground group-hover:text-brand-600 dark:group-hover:text-brand-400"}`}>
-                        {f.clientNom ?? "Non rattachés"}
-                      </p>
+                      <div className="flex items-center gap-1.5">
+                        <p className={`font-semibold text-[14px] truncate leading-tight ${isNone ? "text-muted-foreground italic" : "text-foreground group-hover:text-brand-600 dark:group-hover:text-brand-400"}`}>
+                          {f.clientNom ?? "Non rattachés"}
+                        </p>
+                        {f.clientType && (
+                          <span className="shrink-0 inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-secondary text-muted-foreground">{f.clientType}</span>
+                        )}
+                      </div>
                       {f.cardCode && <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">{f.cardCode}</p>}
                     </div>
                     <span className="shrink-0 inline-flex items-center justify-center min-w-[26px] h-6 px-1.5 rounded-full bg-secondary text-[11.5px] font-bold text-foreground tnum">{f.total}</span>

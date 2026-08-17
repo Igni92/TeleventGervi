@@ -41,6 +41,14 @@ MAILTO=""
 #    activée (Paramètres) / Mail.Read non accordée. Toutes les 30 min. ──
 7,37 * * * *  televent  televent-cron-call /api/cron/archive-sync
 
+# ── Chaînage des documents (BL → Facture → Avoir) : pré-calcule les pivots de
+#    dossier pour un « dossier lié » local instantané. Toutes les 15 min. ──
+12,27,42,57 * * * *  televent  televent-cron-call /api/cron/archive-link
+
+# ── Rafraîchissement QUOTIDIEN de la base clients depuis SAP (upsert, jamais de
+#    vidage). Chaque matin à 4h05. ──
+5 4 * * *  televent  televent-cron-call /api/sap/clients/import
+
 # ── Sauvegarde PostgreSQL locale (inoffensif si la base n'est pas locale :
 #    le script sort immédiatement). ──
 15 2 * * *  televent  /srv/televent/app/deploy/scripts/backup-db.sh

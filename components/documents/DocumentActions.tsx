@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { FileText, Send, Loader2, ExternalLink, CheckCircle2, AlertTriangle } from "lucide-react";
+import { FileText, Send, Loader2, CheckCircle2, AlertTriangle, Eye } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
+import { PdfPreviewDialog } from "@/components/documents/PdfPreviewDialog";
 
 /**
  * DocumentActions — bloc réutilisable posé PARTOUT où l'on accède à un document
@@ -32,7 +33,7 @@ interface Prep {
 }
 
 export function DocumentActions({
-  docType, docNum, docEntry, preloaded, hideWhenMissing, compact, className,
+  docType, docNum, docEntry, preloaded, hideWhenMissing, compact, hidePdf, className,
 }: {
   docType: "BL" | "FACTURE" | "AVOIR" | string;
   docNum: string | number | null | undefined;
@@ -44,10 +45,13 @@ export function DocumentActions({
   hideWhenMissing?: boolean;
   /** true = boutons icône seule (compact, pour les lignes serrées). */
   compact?: boolean;
+  /** true = masque le bouton d'aperçu PDF (ex. l'aperçu se fait au clic sur la ligne). */
+  hidePdf?: boolean;
   className?: string;
 }) {
   const [doc, setDoc] = useState<FoundDoc | null | "none">(preloaded ?? null); // null = chargement
   const [emailOpen, setEmailOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [prep, setPrep] = useState<Prep | null>(null);
   const [prepLoading, setPrepLoading] = useState(false);
   const [subject, setSubject] = useState("");
@@ -131,15 +135,17 @@ export function DocumentActions({
   const btn = `inline-flex items-center gap-1 h-7 rounded-lg border border-border bg-card text-[11.5px] font-medium text-foreground hover:bg-secondary/60 transition-colors ${compact ? "px-1.5" : "px-2"}`;
   return (
     <span className={`inline-flex items-center gap-1.5 ${className ?? ""}`} onClick={(e) => e.stopPropagation()}>
-      <button
-        type="button"
-        onClick={() => window.open(`/api/archive/${doc.id}/pdf`, "_blank", "noopener")}
-        className={btn}
-        title="Visualiser le PDF"
-      >
-        <FileText className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" />
-        {!compact && <>PDF <ExternalLink className="h-3 w-3 text-muted-foreground/50" /></>}
-      </button>
+      {!hidePdf && (
+        <button
+          type="button"
+          onClick={() => setPreviewOpen(true)}
+          className={btn}
+          title="Aperçu du PDF"
+        >
+          <Eye className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" />
+          {!compact && "Aperçu"}
+        </button>
+      )}
       <button
         type="button"
         onClick={openEmail}
@@ -204,6 +210,8 @@ export function DocumentActions({
           )}
         </DialogContent>
       </Dialog>
+
+      <PdfPreviewDialog docId={doc.id} fileName={doc.fileName} open={previewOpen} onOpenChange={setPreviewOpen} onSend={() => { setPreviewOpen(false); openEmail(); }} />
     </span>
   );
 }

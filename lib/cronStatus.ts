@@ -25,6 +25,8 @@ export const KNOWN_CRONS: { route: string; label: string; cadence: string; stale
   { route: "/api/vendeur-reassign/revert", label: "Retour des bascules vendeur (congés)", cadence: "chaque matin (3h20)", staleAfterMs: 30 * 60 * 60 * 1000 },
   { route: "/api/cron/legal-rate", label: "Taux d'intérêt légal (Banque de France)", cadence: "1×/jour", staleAfterMs: 3 * 24 * 60 * 60 * 1000 },
   { route: "/api/cron/archive-sync", label: "Archive documents (boîte factures-archive@)", cadence: "toutes les 30 min", staleAfterMs: 3 * 60 * 60 * 1000 },
+  { route: "/api/cron/archive-link", label: "Chaînage documents (BL → Facture → Avoir)", cadence: "toutes les 15 min", staleAfterMs: 90 * 60 * 1000 },
+  { route: "/api/sap/clients/import", label: "Base clients SAP (rafraîchissement quotidien)", cadence: "1×/jour (4h05)", staleAfterMs: 30 * 60 * 60 * 1000 },
 ];
 
 export interface CronRun {

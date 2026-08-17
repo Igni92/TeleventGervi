@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
+import { isCronAuthorized } from "@/lib/cronAuth";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { formatPhoneDisplay } from "@/lib/phone";
@@ -190,15 +191,10 @@ async function foldDotVariant(dotCode: string, altName = "SCACHAP"): Promise<"fo
   return "folded";
 }
 
-export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  // Import global (peut VIDER la table Client en CASCADE) → admins uniquement.
-  if (!(await requireAdmin(session))) return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
-
-  const body = await req.json().catch(() => ({}));
-  const clear = body?.clear === true;
-
+/** Cœur de l'import clients (upsert des BP SAP → table Client). `clear` VIDE la
+ *  table d'abord (CASCADE, dangereux) — réservé à l'appel manuel admin, jamais
+ *  au cron quotidien. Jette en cas d'échec SAP. */
+async function runClientImport(clear: boolean): Promise<Record<string, unknown>> {
   let bps: SapBP[];
   let groupName: Map<number, string>;
   try {
@@ -220,7 +216,7 @@ export async function POST(req: NextRequest) {
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ ok: false, error: `Lecture SAP échouée : ${msg}` }, { status: 502 });
+    throw new Error(`Lecture SAP échouée : ${msg}`);
   }
 
   // Colonnes géo (cf. scripts/ddl-client-geo.mjs) — créées ici de façon
@@ -268,7 +264,7 @@ export async function POST(req: NextRequest) {
   }
 
   const importedClients = mainBps.length + orphanDots;
-  return NextResponse.json({
+  return {
     ok: true,
     cleared: clear,
     company: sap.getEnvironment().prodCompany, // import lu sur la base réelle
@@ -280,5 +276,28 @@ export async function POST(req: NextRequest) {
     shipTo: shipToCount, // clients géolocalisés sur leur adresse de livraison
     foldedDeliveryModes: foldedModes, // variantes « code. » repliées en modes Direct/SCACHAP
     orphanDotClients: orphanDots, // variantes « code. » sans parent → importées telles quelles
-  });
+  };
+}
+
+/** POST — import manuel (admin). `{ clear: true }` autorise le VIDAGE préalable. */
+export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  if (!(await requireAdmin(session))) return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+  const body = await req.json().catch(() => ({}));
+  try {
+    return NextResponse.json(await runClientImport(body?.clear === true));
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
+  }
+}
+
+/** GET — rafraîchissement QUOTIDIEN via cron (jamais de clear). */
+export async function GET(req: NextRequest) {
+  if (!isCronAuthorized(req)) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  try {
+    return NextResponse.json(await runClientImport(false));
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
+  }
 }

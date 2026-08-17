@@ -15,11 +15,14 @@ export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  const q = new URL(req.url).searchParams.get("q")?.trim() || "";
+  const sp = new URL(req.url).searchParams;
+  const q = sp.get("q")?.trim() || "";
+  const clientType = sp.get("clientType")?.trim().toUpperCase(); // GMS | EXPORT | CHR
   const ids = await clientIdsInScope(await getAccessScope(session));
 
   const where: Prisma.ArchivedDocumentWhereInput = {};
   if (ids) where.clientId = { in: ids };
+  if (clientType && ["GMS", "EXPORT", "CHR"].includes(clientType)) where.client = { type: clientType };
   if (q) {
     where.OR = [
       { client: { nom: { contains: q, mode: "insensitive" } } },
@@ -36,11 +39,11 @@ export async function GET(req: NextRequest) {
   });
 
   // Agrège par client (clientId null = « non rattachés »).
-  type Folder = { clientId: string | null; clientNom: string | null; cardCode: string | null; total: number; byType: Record<string, number>; lastReceivedAt: string | null };
+  type Folder = { clientId: string | null; clientNom: string | null; cardCode: string | null; clientType: string | null; total: number; byType: Record<string, number>; lastReceivedAt: string | null };
   const map = new Map<string, Folder>();
   for (const g of groups) {
     const key = g.clientId ?? "__none__";
-    const f = map.get(key) ?? { clientId: g.clientId, clientNom: null, cardCode: null, total: 0, byType: {}, lastReceivedAt: null };
+    const f = map.get(key) ?? { clientId: g.clientId, clientNom: null, cardCode: null, clientType: null, total: 0, byType: {}, lastReceivedAt: null };
     const c = g._count._all;
     f.total += c;
     f.byType[g.docType] = (f.byType[g.docType] ?? 0) + c;
@@ -52,10 +55,10 @@ export async function GET(req: NextRequest) {
   // Noms/codes clients.
   const clientIds = [...map.keys()].filter((k) => k !== "__none__");
   if (clientIds.length) {
-    const clients = await prisma.client.findMany({ where: { id: { in: clientIds } }, select: { id: true, nom: true, code: true } });
+    const clients = await prisma.client.findMany({ where: { id: { in: clientIds } }, select: { id: true, nom: true, code: true, type: true } });
     for (const c of clients) {
       const f = map.get(c.id);
-      if (f) { f.clientNom = c.nom; f.cardCode = c.code; }
+      if (f) { f.clientNom = c.nom; f.cardCode = c.code; f.clientType = c.type; }
     }
   }
 
