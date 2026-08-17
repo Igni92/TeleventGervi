@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Space_Grotesk } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { AppToaster } from "@/components/ui/toaster";
 import { ClickSparks } from "@/components/ClickSparks";
@@ -12,17 +12,21 @@ import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 // gros chiffres. Sa personnalité géométrique-industrielle colle à l'identité
 // anthracite + jaune, et sort l'app du « tout-Inter » générique. Il embarque
 // les chiffres tabulaires (tnum) → aucun saut de layout sur les KPI animés.
-const inter = Inter({
-  subsets: ["latin"],
+//
+// Polices AUTO-HÉBERGÉES (fichiers variables woff2 sous app/fonts) plutôt que
+// next/font/google : le build (Turbopack) ne dépend plus d'un accès réseau à
+// fonts.gstatic.com — c'est ce qui faisait échouer `next build` en prod.
+const inter = localFont({
+  src: "./fonts/inter-latin-var.woff2",
   variable: "--font-inter",
   display: "swap",
-  weight: ["300", "400", "500", "600", "700", "800"],
+  weight: "300 800",
 });
-const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
+const spaceGrotesk = localFont({
+  src: "./fonts/space-grotesk-latin-var.woff2",
   variable: "--font-display",
   display: "swap",
-  weight: ["400", "500", "600", "700"],
+  weight: "400 700",
 });
 
 export const metadata: Metadata = {
