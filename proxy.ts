@@ -61,12 +61,13 @@ export default auth((req) => {
   }
   // Habilité : l'écran de bienvenue n'a plus lieu d'être.
   if (req.auth && provisioned && pathname.startsWith("/bienvenue")) {
-    return NextResponse.redirect(new URL("/clients", origin));
+    // /accueil : même porte d'entrée que le login et la racine (une seule cible).
+    return NextResponse.redirect(new URL("/accueil", origin));
   }
 
   // Redirect authenticated users away from login page
   if (req.auth && pathname === "/login") {
-    return NextResponse.redirect(new URL("/clients", origin));
+    return NextResponse.redirect(new URL("/accueil", origin));
   }
 
   // ── RÔLES À ACCÈS RESTREINT (terrain) : préparateur, livreur, agréeur ──

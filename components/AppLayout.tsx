@@ -1,8 +1,9 @@
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
+import { isTerrainConfined } from "@/lib/preparateur";
 import { Sidebar } from "@/components/Sidebar";
 import { MobileTopBar } from "@/components/MobileTopBar";
-import { TopStrip } from "@/components/TopStrip";
+import { TabBar } from "@/components/TabBar";
 import { RolePreviewProvider } from "@/components/role-preview/RolePreviewProvider";
 import { RolePreviewBanner } from "@/components/role-preview/RolePreviewBanner";
 import { HoursValidationGate } from "@/components/effectifs/HoursValidationGate";
@@ -12,11 +13,14 @@ interface AppLayoutProps {
 }
 
 /**
- * Layout applicatif — sidebar gauche + zone de contenu. En tête du contenu :
- * la bannière ÉVÉNEMENTS (temps forts commerciaux de la semaine ±7 j) — elle
- * remplace l'ancien ruban promos en coin. Les promotions restent diffusées par
- * le bandeau principal (PromoBanner) sur l'accueil et l'écran de commande.
- * Le cockpit /dashboard n'utilise PAS ce layout (plein écran).
+ * Layout applicatif — sidebar gauche + zone de contenu. La bande ÉVÉNEMENTS +
+ * météo (TopStrip) n'est plus globale : elle vit sur l'ACCUEIL uniquement
+ * (app/accueil/page.tsx). Le cockpit /dashboard n'utilise PAS ce layout
+ * (plein écran).
+ *
+ * Coquille TACTILE : barre du haut (MobileTopBar) + barre d'onglets basse
+ * (TabBar). La TabBar est MASQUÉE pour les rôles terrain confinés (préparateur
+ * restreint, livreur, agréeur) — ils ont leur nav focalisée PreparateurNav.
  *
  * Enveloppé par RolePreviewProvider : admin/direction peuvent « voir comme » un
  * rôle (aperçu visuel de la navigation, sans changer données ni droits).
@@ -24,6 +28,7 @@ interface AppLayoutProps {
 export async function AppLayout({ children }: AppLayoutProps) {
   const session = await auth();
   const canPreview = await requireAdmin(session); // admin OU direction
+  const terrainConfined = isTerrainConfined(session);
 
   return (
     <RolePreviewProvider canPreview={canPreview}>
@@ -44,12 +49,11 @@ export async function AppLayout({ children }: AppLayoutProps) {
               tactile (téléphone/tablette) → barre du haut forcée, sidebar masquée. */}
           <MobileTopBar className="md:hidden touch:!block" />
           <RolePreviewBanner />
-          {/* Bande du haut : événements à gauche + météo à droite (accueil).
-              Desktop uniquement — sur mobile (app pro), pas de chrome décoratif
-              entre la barre du haut et le contenu (géré DANS TopStrip). */}
-          <TopStrip />
           <HoursValidationGate />
           {children}
+          {/* Barre d'onglets BASSE (coquille tactile) — rend aussi son propre
+              espaceur de flux pour que le bas du contenu ne soit jamais couvert. */}
+          {!terrainConfined && <TabBar />}
         </main>
       </div>
     </RolePreviewProvider>

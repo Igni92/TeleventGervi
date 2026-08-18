@@ -5,7 +5,6 @@ import { AppToaster } from "@/components/ui/toaster";
 import { ClickSparks } from "@/components/ClickSparks";
 import { SaleCelebration } from "@/components/SaleCelebration";
 import { Providers } from "./providers";
-import { AmbientBackground } from "@/components/AmbientBackground";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 
 // Pile SYSTÈME partout (refonte UI) : SF sur Apple, sinon Inter. Inter reste
@@ -52,10 +51,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="font-sans antialiased">
-        <AmbientBackground />
         <Providers>
-          {/* Wrapper de ZOOM d'interface (confort visuel Direction) : agrandit le
-              contenu applicatif sans toucher au fond d'ambiance fixe. */}
+          {/* Wrapper de ZOOM d'interface (confort visuel Direction) : agrandit
+              tout le contenu applicatif d'un facteur --app-zoom. */}
           <div className="app-zoom-root">{children}</div>
           <AppToaster />
           <ClickSparks />

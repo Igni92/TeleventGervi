@@ -48,7 +48,8 @@ export function PageHeader({
     >
       <div className="min-w-0 max-sm:hidden">
         {kicker && <p className="kicker mb-1.5">{kicker}</p>}
-        <h1 className="font-display text-[27px] sm:text-[34px] font-bold tracking-tight leading-none text-foreground flex items-center gap-2.5">
+        {/* Rampe tokenisée : title1 (28px) porte sa propre chasse/interligne. */}
+        <h1 className="font-display text-title1 font-bold text-foreground flex items-center gap-2.5">
           <span className="truncate">{title}</span>
           {help && (
             <InfoHint label={helpLabel} side="bottom" size={18} className="translate-y-[1px]">

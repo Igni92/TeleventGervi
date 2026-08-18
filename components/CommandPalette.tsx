@@ -3,36 +3,45 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Command } from "cmdk";
-import {
-  Home, Radio, ClipboardList, Users, Package, PackagePlus, PackageCheck, Factory, Truck,
-  LayoutDashboard, Receipt, Briefcase, Settings, Search, CornerDownLeft, Store, ShoppingCart,
-  ClipboardCheck, PackageX, Clock3, FileText, CalendarDays,
-} from "lucide-react";
+import { Users, Search, CornerDownLeft } from "lucide-react";
+import { flatNavItems, NAV_FOOTER, type NavItem } from "@/lib/navigation";
 
-interface NavItem { href: string; label: string; icon: typeof Home; keywords?: string }
-const NAV: NavItem[] = [
-  { href: "/accueil", label: "Accueil", icon: Home },
-  { href: "/console", label: "Console d'appels", icon: Radio, keywords: "commande bl vente télévente" },
-  { href: "/console2", label: "Console 2 · Commande", icon: ShoppingCart, keywords: "bl bon livraison mobile saisie commande" },
-  { href: "/clients", label: "Clients & plan d'appel", icon: Users, keywords: "base contacts plan appel televente vendeur commercial assignation incidents retard rappel annuaire" },
-  { href: "/ventes-du-jour", label: "Ventes du jour", icon: Store, keywords: "ventes préparation livraison magasin mise en prep" },
-  { href: "/livraisons", label: "Livraisons du jour", icon: Truck, keywords: "détail livraison préparation dispatch bons transporteur tournée ventes mise en préparation" },
-  { href: "/details-livraison", label: "Livraisons · par article", icon: PackageCheck, keywords: "détails livraison articles récap segments gms chr export tags produit conditionnement" },
-  { href: "/preparations", label: "Livraisons · à préparer", icon: ClipboardList, keywords: "préparations à faire charge dates livraison à préparer non préparé" },
-  { href: "/bons-commande", label: "Bons de commande", icon: FileText, keywords: "bon de commande précommande lot affecter em pending export lots à affecter" },
-  { href: "/manquants", label: "Livraisons · manquants", icon: PackageX, keywords: "rupture stock négatif achats à prévoir articles manquants déficit" },
-  { href: "/products", label: "Stock", icon: Package, keywords: "produits articles" },
-  { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, keywords: "comptage stock entrepôt" },
-  { href: "/commandes-fournisseurs", label: "Cde Fournisseur", icon: PackageCheck, keywords: "achat fournisseur cf réception commandes" },
-  { href: "/entrees", label: "Entrées marchandises", icon: PackagePlus, keywords: "réception marchandise em agréage réserve" },
-  { href: "/fabrication", label: "Fabrication", icon: Factory, keywords: "production deco kit" },
-  { href: "/dashboard", label: "Statistiques · Carte", icon: LayoutDashboard, keywords: "pilotage dashboard géo carte stats" },
-  { href: "/encours", label: "Encours clients", icon: Receipt, keywords: "factures impayés" },
-  { href: "/commerciaux", label: "Équipe commerciale", icon: Briefcase, keywords: "commerciaux objectifs slp équipe personnel préparateur rôles effectifs" },
-  { href: "/heures", label: "Mes heures", icon: Clock3, keywords: "heures temps de travail feuille pointage semaine paie" },
-  { href: "/planning", label: "Planning", icon: CalendarDays, keywords: "planning congés cp récup calendrier équipe vacances absences plafond" },
-  { href: "/parametres", label: "Paramètres", icon: Settings, keywords: "réglages sap import thème" },
-];
+/**
+ * Mots-clés de recherche PAR ROUTE — métadonnée propre à la palette. La
+ * structure de navigation (entrées, libellés, icônes) vient de lib/navigation :
+ * une route retirée de la nav disparaît d'ici sans autre maintenance (les clés
+ * orphelines de cette map sont simplement ignorées).
+ */
+const KEYWORDS: Record<string, string> = {
+  "/accueil": "home hub notifications tableau de bord",
+  // Console fusionnée : couvre aussi l'écran 2 (saisie de commande / BL).
+  "/console": "commande bl vente télévente appels écran 2 saisie bon livraison",
+  "/clients": "base contacts plan appel televente vendeur commercial assignation incidents retard rappel annuaire",
+  "/prospection": "prospects démarchage pipeline nouveaux clients relance",
+  "/ventes-du-jour": "ventes préparation livraison magasin mise en prep",
+  // Hub Livraisons : couvre les anciennes vues Par article · À préparer · Manquants.
+  "/livraisons": "détail livraison préparation dispatch bons transporteur tournée ventes mise en préparation par article récap segments gms chr export à préparer manquants rupture stock négatif déficit",
+  "/bons-commande": "bon de commande précommande lot affecter em pending export lots à affecter",
+  "/products": "produits stock entrepôt",
+  "/articles": "articles référentiel produits fiches",
+  "/inventaire": "comptage stock entrepôt",
+  "/fabrication": "production deco kit",
+  "/fournisseurs": "achats fournisseurs annuaire contacts",
+  "/commandes-fournisseurs": "achat fournisseur cf réception commandes",
+  "/entrees": "réception marchandise em agréage réserve",
+  "/dashboard": "pilotage dashboard géo carte stats statistiques",
+  "/dashboard/magasins": "palmarès magasins classement top gms",
+  "/encours": "factures impayés clients",
+  "/etat-documentaire": "documents archive factures bl état documentaire",
+  "/transport": "coût transport transporteur tarif livraison",
+  "/commerciaux": "commerciaux objectifs slp équipe personnel préparateur rôles effectifs",
+  "/planning": "planning congés cp récup calendrier équipe vacances absences plafond",
+  "/salaires": "salaires primes paie éléments cabinet comptable",
+  "/parametres": "réglages sap import thème",
+};
+
+/** Entrées « Aller à » — dérivées de la source de vérité nav (+ footer). */
+const NAV: NavItem[] = [...flatNavItems(), ...NAV_FOOTER];
 
 interface ClientHit { id: string; nom: string; code: string; type?: string | null }
 
@@ -81,7 +90,7 @@ export function CommandPalette() {
   if (!open) return null;
 
   const ql = q.toLowerCase();
-  const navShown = NAV.filter((n) => !ql || n.label.toLowerCase().includes(ql) || (n.keywords ?? "").includes(ql));
+  const navShown = NAV.filter((n) => !ql || n.label.toLowerCase().includes(ql) || (KEYWORDS[n.href] ?? "").includes(ql));
 
   return (
     <div
