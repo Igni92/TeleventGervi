@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Target, CalendarPlus, Check, X, Phone, MapPin, ChevronLeft, ChevronRight, ArrowLeft, Plus, Search, BarChart3 } from "lucide-react";
@@ -212,16 +211,16 @@ export function ProspectionBoard() {
         onDragEnd={draggable ? () => { setDragId(null); setOverStage(null); } : undefined}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY, kind: "card", id: r.id, view: "root" }); }}
         className={`rounded-xl bg-[#11161f] ring-1 transition-[box-shadow,opacity] duration-150 ${
-          selId === r.id ? "ring-brand-500" : "ring-white/[0.07] hover:ring-white/20"
+          selId === r.id ? "ring-brand-500" : "ring-border hover:ring-brand-400/50"
         } ${dragId === r.id ? "opacity-40" : ""}`}
       >
         <button onClick={() => setSelId(r.id)}
           className="w-full text-left px-3 pt-2.5 pb-2 transition-transform duration-100 active:scale-[0.98]">
           <div className="flex items-start gap-1.5">
-            <span className="text-[13px] font-semibold text-white/90 leading-snug flex-1">{r.nom}</span>
+            <span className="text-[13px] font-semibold text-foreground leading-snug flex-1">{r.nom}</span>
           </div>
           <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-            {r.city && <span className="text-[11px] text-white/45">{r.city}</span>}
+            {r.city && <span className="text-[11px] text-foreground/45">{r.city}</span>}
             {r.prospectEnseigne && r.prospectEnseigne !== "AUTRE" && (
               <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/30">{ENSEIGNE_LABELS[r.prospectEnseigne] ?? r.prospectEnseigne}</span>
             )}
@@ -236,7 +235,7 @@ export function ProspectionBoard() {
                 <Check className="h-3 w-3" /> labo confirmé
               </span>
             ) : r.qualifieLabo === false ? (
-              <span className="text-[9.5px] px-1.5 py-0.5 rounded ring-1 bg-white/[0.05] text-white/45 ring-white/10">sans labo</span>
+              <span className="text-[9.5px] px-1.5 py-0.5 rounded ring-1 bg-secondary/40 text-foreground/45 ring-border">sans labo</span>
             ) : r.probaLabo ? (
               <span className={`text-[9.5px] px-1.5 py-0.5 rounded ring-1 ${PROBA_COLOR[r.probaLabo] ?? PROBA_COLOR["À qualifier"]}`}>
                 labo {r.probaLabo.toLowerCase()}
@@ -250,14 +249,14 @@ export function ProspectionBoard() {
           </div>
         </button>
         {/* Flèches — déplacer d'une étape à l'autre */}
-        <div className="flex items-center gap-1 border-t border-white/[0.06] px-1.5 py-1">
+        <div className="flex items-center gap-1 border-t border-border px-1.5 py-1">
           <button disabled={sIdx <= 0} onClick={() => move(r.id, -1)} title="Étape précédente"
-            className="h-6 w-6 grid place-items-center rounded-md text-white/45 transition hover:bg-white/[0.06] hover:text-white active:scale-90 disabled:pointer-events-none disabled:opacity-25">
+            className="h-6 w-6 grid place-items-center rounded-md text-foreground/45 transition hover:bg-secondary/40 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25">
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <span className="flex-1 text-center text-[9.5px] tabular-nums text-white/25">{sIdx + 1}/{stageKeys.length}</span>
+          <span className="flex-1 text-center text-[9.5px] tabular-nums text-foreground/25">{sIdx + 1}/{stageKeys.length}</span>
           <button disabled={sIdx >= stageKeys.length - 1} onClick={() => move(r.id, 1)} title="Étape suivante"
-            className="h-6 w-6 grid place-items-center rounded-md text-white/45 transition hover:bg-white/[0.06] hover:text-white active:scale-90 disabled:pointer-events-none disabled:opacity-25">
+            className="h-6 w-6 grid place-items-center rounded-md text-foreground/45 transition hover:bg-secondary/40 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25">
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
@@ -266,24 +265,23 @@ export function ProspectionBoard() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 p-4 md:p-6">
+    // Page CLASSIQUE : plus de hauteur viewport figée ni de barre de navigation
+    // propre à l'écran — le titre vient de <PageHeader> et la navigation de la
+    // barre latérale, comme partout ailleurs.
+    <div className="flex min-h-0 flex-col gap-4">
       {/* Barre d'outils */}
       <div className="flex items-center gap-2.5 flex-wrap">
-        <Link href="/accueil" title="Retour à l'accueil"
-          className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 text-[13px] text-white/70 hover:bg-white/[0.08]">
-          <ArrowLeft className="h-4 w-4" /> Retour
-        </Link>
-        <div className="flex items-center gap-2 text-white/90">
-          <Target className="h-5 w-5 text-brand-400" />
-          <h1 className="text-[17px] font-bold">Prospection</h1>
-          <span className="text-white/40 text-[13px]">{rows.length} en pipeline</span>
+        <div className="flex items-center gap-2 text-foreground">
+          <Target className="h-5 w-5 text-brand-500" />
+          <span className="text-[15px] font-semibold">Pipeline</span>
+          <span className="text-muted-foreground text-[13px]">{rows.length} en cours</span>
         </div>
         <input
           value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrer la pipeline…"
-          className="ml-auto h-9 w-52 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-[13px] text-white placeholder:text-white/35 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          className="ml-auto h-9 w-52 rounded-lg border border-border bg-secondary/30 px-3 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
         <button onClick={() => setStatsOpen(true)}
-          className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 text-[13px] text-white/70 hover:bg-white/[0.08]">
+          className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-border bg-secondary/30 px-2.5 text-[13px] text-foreground/70 hover:bg-secondary/50">
           <BarChart3 className="h-4 w-4" /> Stats
         </button>
         <button onClick={() => setPoolOpen(true)}
@@ -291,11 +289,11 @@ export function ProspectionBoard() {
           <Plus className="h-4 w-4" /> Ajouter des prospects
         </button>
         <button onClick={doImportHypers} disabled={importingH} title="Ajouter tous les hypermarchés de France (province) au vivier — admin"
-          className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 text-[13px] text-white/70 hover:bg-white/[0.08] disabled:opacity-60">
+          className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-border bg-secondary/30 px-2.5 text-[13px] text-foreground/70 hover:bg-secondary/50 disabled:opacity-60">
           {importingH ? <Loader2 className="h-4 w-4 animate-spin" /> : "Importer hypers France"}
         </button>
         <button onClick={doImport} disabled={importing} title="Recharger le vivier depuis le fichier (admin)"
-          className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 text-[13px] text-white/70 hover:bg-white/[0.08] disabled:opacity-60">
+          className="h-9 inline-flex items-center gap-1.5 rounded-lg border border-border bg-secondary/30 px-2.5 text-[13px] text-foreground/70 hover:bg-secondary/50 disabled:opacity-60">
           {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : "Recharger le vivier"}
         </button>
       </div>
@@ -303,11 +301,11 @@ export function ProspectionBoard() {
       {err && <div className="rounded-lg bg-rose-500/10 text-rose-300 ring-1 ring-rose-500/30 px-3 py-2 text-[13px]">{err} — la migration prospection est-elle appliquée ?</div>}
 
       {loading ? (
-        <div className="flex-1 grid place-items-center text-white/50"><Loader2 className="h-6 w-6 animate-spin" /></div>
+        <div className="flex-1 grid place-items-center text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin" /></div>
       ) : (
       <>
         {/* ─────────── Desktop — Kanban ─────────── */}
-        <div className="hidden md:flex flex-1 min-h-0 gap-4 overflow-x-auto pb-1">
+        <div className="hidden md:flex min-h-0 gap-4 overflow-x-auto pb-1">
           {PIPELINE_STAGES.map((st, sIdx) => {
             const items = byStage(st.key);
             return (
@@ -316,7 +314,7 @@ export function ProspectionBoard() {
                 onDragLeave={(e) => { if (dragId && !e.currentTarget.contains(e.relatedTarget as Node)) setOverStage((s) => (s === st.key ? null : s)); }}
                 onDrop={() => { onDrop(st.key); setOverStage(null); }}
                 onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, kind: "col", stageKey: st.key, view: "root" }); }}
-                className="relative flex-1 min-w-[256px] flex flex-col rounded-2xl bg-white/[0.02] ring-1 ring-white/[0.06]"
+                className="relative flex-1 min-w-[256px] flex flex-col rounded-2xl bg-secondary/20 ring-1 ring-border"
               >
                 {/* Surbrillance de dépôt : la colonne survolée s'illumine en jaune. */}
                 {dragId && overStage === st.key && (
@@ -324,14 +322,14 @@ export function ProspectionBoard() {
                 )}
                 <div className="flex items-center gap-2 rounded-t-2xl px-3.5 py-2.5" style={{ background: st.color + "1a" }}>
                   <span className="h-2.5 w-2.5 rounded-full" style={{ background: st.color }} />
-                  <span className="text-[13px] font-semibold text-white/90">{st.label}</span>
-                  <span className="ml-auto text-[11px] font-medium tabular-nums text-white/50 rounded-full bg-white/[0.06] px-2 py-0.5">{items.length}</span>
+                  <span className="text-[13px] font-semibold text-foreground">{st.label}</span>
+                  <span className="ml-auto text-[11px] font-medium tabular-nums text-muted-foreground rounded-full bg-secondary/40 px-2 py-0.5">{items.length}</span>
                 </div>
                 <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5">
                   {items.map((r) => card(r, sIdx, true))}
                   {items.length === 0 && (
                     <button onClick={() => setPoolOpen(true)}
-                      className="w-full rounded-xl border border-dashed border-white/[0.12] py-8 text-center text-[12px] text-white/40 transition hover:border-brand-500/40 hover:bg-white/[0.02] hover:text-white/70 active:scale-[0.99]">
+                      className="w-full rounded-xl border border-dashed border-border py-8 text-center text-[12px] text-muted-foreground transition hover:border-brand-500/40 hover:bg-secondary/20 hover:text-foreground/70 active:scale-[0.99]">
                       <Plus className="mx-auto mb-1 h-4 w-4" />
                       Ajouter un prospect
                     </button>
@@ -339,7 +337,7 @@ export function ProspectionBoard() {
                   {/* Footer d'ajout permanent sur la 1re étape (point d'entrée) */}
                   {sIdx === 0 && items.length > 0 && (
                     <button onClick={() => setPoolOpen(true)}
-                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/[0.12] py-2 text-[12px] text-white/45 transition hover:border-brand-500/40 hover:text-white/75 active:scale-[0.99]">
+                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2 text-[12px] text-foreground/45 transition hover:border-brand-500/40 hover:text-foreground/75 active:scale-[0.99]">
                       <Plus className="h-3.5 w-3.5" /> Ajouter un prospect
                     </button>
                   )}
@@ -350,7 +348,7 @@ export function ProspectionBoard() {
         </div>
 
         {/* ─────────── Mobile — une étape à la fois ─────────── */}
-        <div className="md:hidden flex-1 min-h-0 flex flex-col">
+        <div className="md:hidden min-h-0 flex flex-col">
           {(() => {
             const st = PIPELINE_STAGES[Math.min(mobileIdx, PIPELINE_STAGES.length - 1)];
             const items = byStage(st.key);
@@ -361,18 +359,18 @@ export function ProspectionBoard() {
                   onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, kind: "col", stageKey: st.key, view: "root" }); }}>
 
                   <button disabled={mobileIdx <= 0} onClick={() => setMobileIdx((i) => Math.max(0, i - 1))}
-                    className="h-10 w-10 grid place-items-center rounded-xl bg-white/[0.06] text-white/80 transition active:scale-90 disabled:opacity-25">
+                    className="h-10 w-10 grid place-items-center rounded-xl bg-secondary/40 text-foreground/80 transition active:scale-90 disabled:opacity-25">
                     <ChevronLeft className="h-5 w-5" />
                   </button>
                   <div className="flex-1 text-center">
                     <div className="flex items-center justify-center gap-2">
                       <span className="h-2.5 w-2.5 rounded-full" style={{ background: st.color }} />
-                      <span className="text-[14px] font-bold text-white/90">{st.label}</span>
+                      <span className="text-[14px] font-bold text-foreground">{st.label}</span>
                     </div>
-                    <span className="text-[11px] text-white/50">{items.length} prospect{items.length > 1 ? "s" : ""}</span>
+                    <span className="text-[11px] text-muted-foreground">{items.length} prospect{items.length > 1 ? "s" : ""}</span>
                   </div>
                   <button disabled={mobileIdx >= PIPELINE_STAGES.length - 1} onClick={() => setMobileIdx((i) => Math.min(PIPELINE_STAGES.length - 1, i + 1))}
-                    className="h-10 w-10 grid place-items-center rounded-xl bg-white/[0.06] text-white/80 transition active:scale-90 disabled:opacity-25">
+                    className="h-10 w-10 grid place-items-center rounded-xl bg-secondary/40 text-foreground/80 transition active:scale-90 disabled:opacity-25">
                     <ChevronRight className="h-5 w-5" />
                   </button>
                 </div>
@@ -388,7 +386,7 @@ export function ProspectionBoard() {
                   {items.map((r) => card(r, mobileIdx, false))}
                   {items.length === 0 && (
                     <button onClick={() => setPoolOpen(true)}
-                      className="w-full rounded-xl border border-dashed border-white/[0.12] py-10 text-center text-[13px] text-white/40 transition active:scale-[0.99]">
+                      className="w-full rounded-xl border border-dashed border-border py-10 text-center text-[13px] text-muted-foreground transition active:scale-[0.99]">
                       <Plus className="mx-auto mb-1.5 h-5 w-5" />
                       Ajouter un prospect
                     </button>
@@ -396,7 +394,7 @@ export function ProspectionBoard() {
                   {/* Bouton d'ajout permanent sur la 1re étape */}
                   {mobileIdx === 0 && items.length > 0 && (
                     <button onClick={() => setPoolOpen(true)}
-                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/[0.12] py-2.5 text-[13px] text-white/45 transition active:scale-[0.99]">
+                      className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2.5 text-[13px] text-foreground/45 transition active:scale-[0.99]">
                       <Plus className="h-4 w-4" /> Ajouter un prospect
                     </button>
                   )}
@@ -418,30 +416,30 @@ export function ProspectionBoard() {
         const mrow = menu.kind === "card" ? rows.find((r) => r.id === menu.id) ?? null : null;
         const close = () => setMenu(null);
         const item =
-          "w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-white/85 hover:bg-white/[0.07] active:scale-[0.985] transition disabled:opacity-30 disabled:pointer-events-none";
+          "w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-foreground/80 hover:bg-secondary/40 active:scale-[0.985] transition disabled:opacity-30 disabled:pointer-events-none";
         const left = Math.min(menu.x, (typeof window !== "undefined" ? window.innerWidth : 9999) - 236);
         const top = Math.min(menu.y, (typeof window !== "undefined" ? window.innerHeight : 9999) - 320);
         return (
           <>
             <div className="fixed inset-0 z-[90]" onClick={close}
               onContextMenu={(e) => { e.preventDefault(); close(); }} />
-            <div className="fixed z-[91] w-[224px] rounded-xl bg-[#0f141c] p-1 text-white/85 shadow-2xl ring-1 ring-white/10"
+            <div className="fixed z-[91] w-[224px] rounded-xl bg-card p-1 text-foreground/85 shadow-2xl ring-1 ring-border"
               style={{ left, top }}>
               {menu.kind === "card" && mrow && (
                 <>
-                  <div className="truncate px-2.5 pb-1.5 pt-1 text-[12px] font-semibold text-white/50">{mrow.nom}</div>
+                  <div className="truncate px-2.5 pb-1.5 pt-1 text-[12px] font-semibold text-muted-foreground">{mrow.nom}</div>
                   {menu.view === "root" && (
                     <>
                       <button className={item} onClick={() => { setSelId(mrow.id); close(); }}>
                         <Target className="h-4 w-4 text-brand-300" /> Ouvrir la fiche
                       </button>
                       <button className={item} onClick={() => setMenu({ ...menu, view: "move" })}>
-                        <ChevronRight className="h-4 w-4 text-white/45" /> Déplacer vers…
+                        <ChevronRight className="h-4 w-4 text-foreground/45" /> Déplacer vers…
                       </button>
                       <button className={item} onClick={() => setMenu({ ...menu, view: "lost" })}>
                         <X className="h-4 w-4 text-rose-400" /> Marquer perdu…
                       </button>
-                      <div className="my-1 border-t border-white/[0.06]" />
+                      <div className="my-1 border-t border-border" />
                       <button className={item} onClick={() => { removeFromPipeline(mrow.id); close(); }}>
                         <ArrowLeft className="h-4 w-4 text-amber-300" /> Retirer du pipeline
                       </button>
@@ -449,7 +447,7 @@ export function ProspectionBoard() {
                   )}
                   {menu.view === "move" && (
                     <>
-                      <button className={`${item} text-white/50`} onClick={() => setMenu({ ...menu, view: "root" })}>
+                      <button className={`${item} text-muted-foreground`} onClick={() => setMenu({ ...menu, view: "root" })}>
                         <ChevronLeft className="h-4 w-4" /> Retour
                       </button>
                       {PIPELINE_STAGES.map((s) => (
@@ -462,7 +460,7 @@ export function ProspectionBoard() {
                   )}
                   {menu.view === "lost" && (
                     <>
-                      <button className={`${item} text-white/50`} onClick={() => setMenu({ ...menu, view: "root" })}>
+                      <button className={`${item} text-muted-foreground`} onClick={() => setMenu({ ...menu, view: "root" })}>
                         <ChevronLeft className="h-4 w-4" /> Retour
                       </button>
                       {LOST_REASONS.map((m) => (
@@ -477,7 +475,7 @@ export function ProspectionBoard() {
               )}
               {menu.kind === "col" && menu.stageKey && (
                 <>
-                  <div className="px-2.5 pb-1.5 pt-1 text-[12px] font-semibold text-white/50">
+                  <div className="px-2.5 pb-1.5 pt-1 text-[12px] font-semibold text-muted-foreground">
                     Catégorie « {stageLabel(menu.stageKey)} » · {byStage(menu.stageKey).length}
                   </div>
                   <button className={item} onClick={() => { clearStage(menu.stageKey!); close(); }}>
@@ -571,40 +569,40 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
 
   return (
     <div className="fixed inset-0 z-[80] flex justify-end bg-black/50" onClick={onClose}>
-      <aside onClick={(e) => e.stopPropagation()} className="w-[440px] max-w-[92vw] h-full overflow-y-auto bg-[#0f141c] ring-1 ring-white/10 p-4 space-y-3">
+      <aside onClick={(e) => e.stopPropagation()} className="w-[440px] max-w-[92vw] h-full overflow-y-auto bg-card ring-1 ring-border p-4 space-y-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-[15px] font-bold text-white/90 flex-1">Ajouter des prospects</h2>
-          <span className="text-[12px] text-white/45">{total} dans le vivier</span>
-          <button onClick={onClose} className="h-7 w-7 grid place-items-center rounded-lg text-white/40 hover:text-white hover:bg-white/[0.06]"><X className="h-4 w-4" /></button>
+          <h2 className="text-[15px] font-bold text-foreground flex-1">Ajouter des prospects</h2>
+          <span className="text-[12px] text-foreground/45">{total} dans le vivier</span>
+          <button onClick={onClose} className="h-7 w-7 grid place-items-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/40"><X className="h-4 w-4" /></button>
         </div>
         <div className="space-y-2">
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-white/35" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher (nom, ville, CP)…"
-              className="w-full h-9 rounded-lg border border-white/10 bg-white/[0.04] pl-8 pr-3 text-[13px] text-white placeholder:text-white/35 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+              className="w-full h-9 rounded-lg border border-border bg-secondary/30 pl-8 pr-3 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-brand-500" />
           </div>
           <div className="flex flex-wrap gap-2">
-            <select value={source} onChange={(e) => setSource(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Origine du prospect">
+            <select value={source} onChange={(e) => setSource(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-border text-[12px] text-foreground/80 px-2" title="Origine du prospect">
               <option value="">Tous types</option>
               <option value="gms">GMS (prospection)</option>
               <option value="ancien">Anciens clients</option>
               <option value="nonqual">Non qualifiés (revue)</option>
             </select>
-            <select value={format} onChange={(e) => setFormat(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Format du magasin (proxy taille / labo)">
+            <select value={format} onChange={(e) => setFormat(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-border text-[12px] text-foreground/80 px-2" title="Format du magasin (proxy taille / labo)">
               <option value="">Tous formats</option>
               <option value="Hyper">Hyper (labo probable)</option>
               <option value="Super">Super</option>
             </select>
             <button type="button" onClick={() => setZoneOpen((v) => !v)}
-              className={`h-8 flex-1 min-w-[110px] inline-flex items-center gap-1 rounded-lg bg-[#11161f] ring-1 text-[12px] px-2 justify-between ${zones.size ? "ring-brand-500/50 text-white" : "ring-white/10 text-white/80"}`}>
+              className={`h-8 flex-1 min-w-[110px] inline-flex items-center gap-1 rounded-lg bg-[#11161f] ring-1 text-[12px] px-2 justify-between ${zones.size ? "ring-brand-500/50 text-foreground" : "ring-border text-foreground/80"}`}>
               <span className="truncate">{zones.size ? `${zones.size} dépt${zones.size > 1 ? "s" : ""}` : "Toutes zones"}</span>
               <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${zoneOpen ? "rotate-90" : ""}`} />
             </button>
-            <select value={enseigne} onChange={(e) => setEnseigne(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Enseigne">
+            <select value={enseigne} onChange={(e) => setEnseigne(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-border text-[12px] text-foreground/80 px-2" title="Enseigne">
               <option value="">Toutes enseignes</option>
               {ENSEIGNE_CHOICES.map((c) => <option key={c} value={c}>{ENSEIGNE_LABELS[c] ?? c}</option>)}
             </select>
-            <select value={sort} onChange={(e) => setSort(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-white/10 text-[12px] text-white/80 px-2" title="Trier par">
+            <select value={sort} onChange={(e) => setSort(e.target.value)} className="h-8 flex-1 min-w-[110px] rounded-lg bg-[#11161f] ring-1 ring-border text-[12px] text-foreground/80 px-2" title="Trier par">
               <option value="proba">Tri : proba labo</option>
               <option value="zone">Tri : zone (CP)</option>
               <option value="enseigne">Tri : enseigne</option>
@@ -614,12 +612,12 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
           </div>
           {/* Sélecteur de départements (multi) — inline, pleine largeur (jamais rogné). */}
           {zoneOpen && (
-            <div className="rounded-xl bg-[#11161f] ring-1 ring-white/10 p-2">
+            <div className="rounded-xl bg-[#11161f] ring-1 ring-border p-2">
               <div className="flex items-center justify-between px-0.5 pb-1.5">
-                <span className="text-[10.5px] uppercase tracking-wide text-white/40">Départements ({zones.size})</span>
+                <span className="text-[10.5px] uppercase tracking-wide text-muted-foreground">Départements ({zones.size})</span>
                 <div className="flex items-center gap-2">
                   {zones.size > 0 && <button onClick={() => setZones(new Set())} className="text-[10.5px] text-brand-300 hover:underline">Effacer</button>}
-                  <button onClick={() => setZoneOpen(false)} className="text-[10.5px] text-white/50 hover:text-white">Fermer</button>
+                  <button onClick={() => setZoneOpen(false)} className="text-[10.5px] text-muted-foreground hover:text-foreground">Fermer</button>
                 </div>
               </div>
               <div className="max-h-[220px] overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-0.5">
@@ -627,9 +625,9 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
                   const on = zones.has(code);
                   return (
                     <button key={code} onClick={() => setZones((s) => { const n = new Set(s); n.has(code) ? n.delete(code) : n.add(code); return n; })}
-                      className={`flex items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[11px] transition ${on ? "bg-brand-500/15 text-white" : "text-white/70 hover:bg-white/[0.06]"}`}>
-                      <span className={`h-3 w-3 shrink-0 grid place-items-center rounded-[3px] ring-1 ${on ? "bg-brand-500 ring-brand-500" : "ring-white/25"}`}>{on && <Check className="h-2.5 w-2.5 text-white" />}</span>
-                      <span className="truncate"><b className="text-white/80">{code}</b> {name}</span>
+                      className={`flex items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[11px] transition ${on ? "bg-brand-500/15 text-foreground" : "text-foreground/70 hover:bg-secondary/40"}`}>
+                      <span className={`h-3 w-3 shrink-0 grid place-items-center rounded-[3px] ring-1 ${on ? "bg-brand-500 ring-brand-500" : "ring-border"}`}>{on && <Check className="h-2.5 w-2.5 text-foreground" />}</span>
+                      <span className="truncate"><b className="text-foreground/80">{code}</b> {name}</span>
                     </button>
                   );
                 })}
@@ -644,26 +642,26 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
             <Plus className="h-3.5 w-3.5" /> Ajouter la sélection ({sel.size})
           </button>
           <button disabled={adding || !total} onClick={() => add({ all: true, search, enseigne, source, format, zone: zoneCsv }, `${total} résultats`)}
-            className="inline-flex items-center gap-1 rounded-lg ring-1 ring-white/10 px-3 h-8 text-white/80 hover:bg-white/[0.06] disabled:opacity-40">
+            className="inline-flex items-center gap-1 rounded-lg ring-1 ring-border px-3 h-8 text-foreground/80 hover:bg-secondary/40 disabled:opacity-40">
             Tout ajouter ({total})
           </button>
         </div>
 
         {loading ? (
-          <div className="grid place-items-center py-10 text-white/40"><Loader2 className="h-5 w-5 animate-spin" /></div>
+          <div className="grid place-items-center py-10 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>
         ) : (
           <ul className="space-y-1.5">
             {rows.map((r) => (
               <li key={r.id} className="relative">
                 <button onClick={() => toggle(r.id)}
-                  className={`w-full text-left rounded-lg px-2.5 py-2 pr-9 ring-1 flex items-center gap-2 transition-colors ${sel.has(r.id) ? "ring-brand-500 bg-brand-500/10" : "ring-white/[0.07] bg-[#11161f] hover:ring-white/20"}`}>
-                  <span className={`h-4 w-4 shrink-0 rounded grid place-items-center ring-1 ${sel.has(r.id) ? "bg-brand-500 ring-brand-500" : "ring-white/20"}`}>
-                    {sel.has(r.id) && <Check className="h-3 w-3 text-white" />}
+                  className={`w-full text-left rounded-lg px-2.5 py-2 pr-9 ring-1 flex items-center gap-2 transition-colors ${sel.has(r.id) ? "ring-brand-500 bg-brand-500/10" : "ring-border bg-[#11161f] hover:ring-brand-400/50"}`}>
+                  <span className={`h-4 w-4 shrink-0 rounded grid place-items-center ring-1 ${sel.has(r.id) ? "bg-brand-500 ring-brand-500" : "ring-border"}`}>
+                    {sel.has(r.id) && <Check className="h-3 w-3 text-foreground" />}
                   </span>
                   <span className="flex-1 min-w-0">
-                    <span className="block text-[12.5px] text-white/90 truncate">{r.nom}</span>
+                    <span className="block text-[12.5px] text-foreground truncate">{r.nom}</span>
                     <span className="mt-0.5 flex items-center gap-1 flex-wrap">
-                      <span className="text-[10.5px] text-white/40">{[r.city, r.zipCode].filter(Boolean).join(" · ")}</span>
+                      <span className="text-[10.5px] text-muted-foreground">{[r.city, r.zipCode].filter(Boolean).join(" · ")}</span>
                       {r.prospectEnseigne && r.prospectEnseigne !== "AUTRE" && (
                         <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/30">{ENSEIGNE_LABELS[r.prospectEnseigne] ?? r.prospectEnseigne}</span>
                       )}
@@ -679,7 +677,7 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
                       )}
                     </span>
                   </span>
-                  {r.probaLabo && <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-white/[0.06] text-white/60 shrink-0">{r.probaLabo}</span>}
+                  {r.probaLabo && <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-secondary/40 text-muted-foreground shrink-0">{r.probaLabo}</span>}
                 </button>
                 {/* Croix « retirer du vivier » — motif rapide (pas qualifié / déjà
                     client ailleurs). Masquée dans la revue des non qualifiés
@@ -688,24 +686,24 @@ function AddProspectsPanel({ onClose, onAdded }: { onClose: () => void; onAdded:
                 {source !== "nonqual" && (
                   <button type="button" title="Retirer du vivier (non qualifié / déjà client)"
                     onClick={(e) => { e.stopPropagation(); setRemoveId((v) => (v === r.id ? null : r.id)); }}
-                    className={`absolute top-1.5 right-1.5 h-6 w-6 grid place-items-center rounded-md transition-colors ${removeId === r.id ? "text-rose-300 bg-rose-500/15" : "text-white/25 hover:text-rose-300 hover:bg-rose-500/10"}`}>
+                    className={`absolute top-1.5 right-1.5 h-6 w-6 grid place-items-center rounded-md transition-colors ${removeId === r.id ? "text-rose-300 bg-rose-500/15" : "text-muted-foreground hover:text-rose-300 hover:bg-rose-500/10"}`}>
                     <X className="h-3.5 w-3.5" />
                   </button>
                 )}
                 {removeId === r.id && (
                   <div onClick={(e) => e.stopPropagation()}
-                    className="absolute z-20 right-1.5 top-9 w-56 rounded-lg bg-[#151b26] ring-1 ring-white/10 p-1 shadow-xl">
-                    <p className="px-2 py-1 text-[10px] uppercase tracking-wide text-white/40">Retirer du vivier — motif</p>
+                    className="absolute z-20 right-1.5 top-9 w-56 rounded-lg bg-[#151b26] ring-1 ring-border p-1 shadow-xl">
+                    <p className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">Retirer du vivier — motif</p>
                     <button onClick={() => disqualify(r.id, "Pas qualifié")}
-                      className="w-full text-left px-2 py-1.5 rounded-md text-[12px] text-white/80 hover:bg-white/[0.06]">Pas qualifié</button>
+                      className="w-full text-left px-2 py-1.5 rounded-md text-[12px] text-foreground/80 hover:bg-secondary/40">Pas qualifié</button>
                     <button onClick={() => disqualify(r.id, "Déjà client (autre compte)")}
-                      className="w-full text-left px-2 py-1.5 rounded-md text-[12px] text-white/80 hover:bg-white/[0.06]">Déjà client (autre compte)</button>
+                      className="w-full text-left px-2 py-1.5 rounded-md text-[12px] text-foreground/80 hover:bg-secondary/40">Déjà client (autre compte)</button>
                   </div>
                 )}
               </li>
             ))}
-            {rows.length === 0 && <li className="text-[12px] text-white/35 italic py-6 text-center">Aucun prospect dans le vivier pour cette recherche.</li>}
-            {total > rows.length && <li className="text-[11px] text-white/35 text-center pt-1">{rows.length} affichés sur {total} — affinez la recherche ou « Tout ajouter ».</li>}
+            {rows.length === 0 && <li className="text-[12px] text-muted-foreground italic py-6 text-center">Aucun prospect dans le vivier pour cette recherche.</li>}
+            {total > rows.length && <li className="text-[11px] text-muted-foreground text-center pt-1">{rows.length} affichés sur {total} — affinez la recherche ou « Tout ajouter ».</li>}
           </ul>
         )}
       </aside>
@@ -731,11 +729,11 @@ function Bar({ label, n, max, color, sub }: { label: string; n: number; max: num
   const pct = max > 0 ? Math.max(3, Math.round((n / max) * 100)) : 0;
   return (
     <div className="flex items-center gap-2">
-      <span className="w-28 shrink-0 truncate text-[11.5px] text-white/70" title={label}>{label}</span>
-      <span className="relative h-4 flex-1 overflow-hidden rounded bg-white/[0.05]">
+      <span className="w-28 shrink-0 truncate text-[11.5px] text-foreground/70" title={label}>{label}</span>
+      <span className="relative h-4 flex-1 overflow-hidden rounded bg-secondary/40">
         <span className="absolute inset-y-0 left-0 rounded transition-[width] duration-500" style={{ width: `${pct}%`, background: color ?? "#6366f1" }} />
       </span>
-      <span className="w-14 shrink-0 text-right text-[11.5px] tabular-nums text-white/80">{n}{sub}</span>
+      <span className="w-14 shrink-0 text-right text-[11.5px] tabular-nums text-foreground/80">{n}{sub}</span>
     </div>
   );
 }
@@ -756,23 +754,23 @@ function StatsPanel({ onClose }: { onClose: () => void }) {
   }, []);
 
   const KPI = ({ label, value, tone }: { label: string; value: string | number; tone?: string }) => (
-    <div className="flex-1 min-w-[92px] rounded-xl bg-white/[0.03] ring-1 ring-white/[0.06] px-3 py-2.5">
-      <div className={`text-[19px] font-bold ${tone ?? "text-white/90"}`}>{value}</div>
-      <div className="text-[10.5px] uppercase tracking-wide text-white/45">{label}</div>
+    <div className="flex-1 min-w-[92px] rounded-xl bg-secondary/25 ring-1 ring-border px-3 py-2.5">
+      <div className={`text-[19px] font-bold ${tone ?? "text-foreground"}`}>{value}</div>
+      <div className="text-[10.5px] uppercase tracking-wide text-foreground/45">{label}</div>
     </div>
   );
 
   return (
     <div className="fixed inset-0 z-[80] flex justify-end bg-black/50" onClick={onClose}>
-      <aside onClick={(e) => e.stopPropagation()} className="w-[520px] max-w-[94vw] h-full overflow-y-auto bg-[#0f141c] ring-1 ring-white/10 p-4 space-y-4">
+      <aside onClick={(e) => e.stopPropagation()} className="w-[520px] max-w-[94vw] h-full overflow-y-auto bg-card ring-1 ring-border p-4 space-y-4">
         <div className="flex items-center gap-2">
           <BarChart3 className="h-5 w-5 text-brand-400" />
-          <h2 className="text-[15px] font-bold text-white/90 flex-1">Statistiques de prospection</h2>
-          <button onClick={onClose} className="h-7 w-7 grid place-items-center rounded-lg text-white/40 hover:text-white hover:bg-white/[0.06]"><X className="h-4 w-4" /></button>
+          <h2 className="text-[15px] font-bold text-foreground flex-1">Statistiques de prospection</h2>
+          <button onClick={onClose} className="h-7 w-7 grid place-items-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/40"><X className="h-4 w-4" /></button>
         </div>
 
         {err && <div className="rounded-lg bg-rose-500/10 text-rose-300 ring-1 ring-rose-500/30 px-3 py-2 text-[13px]">{err}</div>}
-        {!data && !err && <div className="grid place-items-center py-16 text-white/40"><Loader2 className="h-6 w-6 animate-spin" /></div>}
+        {!data && !err && <div className="grid place-items-center py-16 text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin" /></div>}
 
         {data && (() => {
           const funnelMax = Math.max(1, ...data.funnel.map((f) => f.n));
@@ -790,8 +788,8 @@ function StatsPanel({ onClose }: { onClose: () => void }) {
               </div>
 
               {/* Entonnoir */}
-              <section className="rounded-xl bg-white/[0.02] ring-1 ring-white/[0.06] p-3 space-y-2">
-                <p className="text-[10px] uppercase tracking-wider font-bold text-white/40">Entonnoir</p>
+              <section className="rounded-xl bg-secondary/20 ring-1 ring-border p-3 space-y-2">
+                <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Entonnoir</p>
                 {data.funnel.map((f) => (
                   <Bar key={f.k} label={stageLabel(f.k)} n={f.n} max={funnelMax} color={getStage(f.k)?.color} />
                 ))}
@@ -799,8 +797,8 @@ function StatsPanel({ onClose }: { onClose: () => void }) {
 
               {/* Perdus par motif */}
               {data.lostByReason.length > 0 && (
-                <section className="rounded-xl bg-white/[0.02] ring-1 ring-white/[0.06] p-3 space-y-2">
-                  <p className="text-[10px] uppercase tracking-wider font-bold text-white/40">Perdus — motifs</p>
+                <section className="rounded-xl bg-secondary/20 ring-1 ring-border p-3 space-y-2">
+                  <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Perdus — motifs</p>
                   {data.lostByReason.map((f, i) => (
                     <Bar key={i} label={f.k ?? "Non précisé"} n={f.n} max={lostMax} color="#ef4444" />
                   ))}
@@ -809,16 +807,16 @@ function StatsPanel({ onClose }: { onClose: () => void }) {
 
               {/* Par commercial */}
               {data.byOwner.length > 0 && (
-                <section className="rounded-xl bg-white/[0.02] ring-1 ring-white/[0.06] p-3">
-                  <p className="text-[10px] uppercase tracking-wider font-bold text-white/40 mb-2">Par commercial</p>
+                <section className="rounded-xl bg-secondary/20 ring-1 ring-border p-3">
+                  <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground mb-2">Par commercial</p>
                   <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 gap-y-1 text-[12px]">
-                    <span className="text-white/40 text-[10.5px]">Commercial</span>
+                    <span className="text-muted-foreground text-[10.5px]">Commercial</span>
                     <span className="text-emerald-300/70 text-[10.5px] text-right">Gagnés</span>
                     <span className="text-rose-300/70 text-[10.5px] text-right">Perdus</span>
                     <span className="text-brand-300/70 text-[10.5px] text-right">En cours</span>
                     {data.byOwner.map((o, i) => (
                       <div key={i} className="contents">
-                        <span className="text-white/80 truncate">{o.k ?? "Non attribué"}</span>
+                        <span className="text-foreground/80 truncate">{o.k ?? "Non attribué"}</span>
                         <span className="text-right tabular-nums text-emerald-300">{o.won}</span>
                         <span className="text-right tabular-nums text-rose-300">{o.lost}</span>
                         <span className="text-right tabular-nums text-brand-300">{o.active}</span>
@@ -829,8 +827,8 @@ function StatsPanel({ onClose }: { onClose: () => void }) {
               )}
 
               {/* Composition du vivier */}
-              <section className="rounded-xl bg-white/[0.02] ring-1 ring-white/[0.06] p-3 space-y-3">
-                <p className="text-[10px] uppercase tracking-wider font-bold text-white/40">Vivier — composition</p>
+              <section className="rounded-xl bg-secondary/20 ring-1 ring-border p-3 space-y-3">
+                <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">Vivier — composition</p>
                 <div className="space-y-1.5">
                   {data.vivierComposition.byEnseigne.map((f, i) => (
                     <Bar key={i} label={ENSEIGNE_LABELS[f.k ?? ""] ?? f.k ?? "—"} n={f.n} max={ensMax} color="#0ea5e9" />
@@ -838,16 +836,16 @@ function StatsPanel({ onClose }: { onClose: () => void }) {
                 </div>
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   {data.vivierComposition.byFormat.map((f, i) => (
-                    <span key={i} className="text-[11px] px-2 py-1 rounded-lg bg-white/[0.05] text-white/70">{f.k ?? "—"} : <b className="text-white/90">{f.n}</b></span>
+                    <span key={i} className="text-[11px] px-2 py-1 rounded-lg bg-secondary/40 text-foreground/70">{f.k ?? "—"} : <b className="text-foreground">{f.n}</b></span>
                   ))}
                   {data.vivierComposition.byProba.map((f, i) => (
-                    <span key={i} className={`text-[11px] px-2 py-1 rounded-lg ring-1 ${PROBA_COLOR[f.k ?? ""] ?? "bg-white/[0.05] ring-white/10 text-white/70"}`}>{f.k ?? "—"} : <b>{f.n}</b></span>
+                    <span key={i} className={`text-[11px] px-2 py-1 rounded-lg ring-1 ${PROBA_COLOR[f.k ?? ""] ?? "bg-secondary/40 ring-border text-foreground/70"}`}>{f.k ?? "—"} : <b>{f.n}</b></span>
                   ))}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {data.vivierComposition.bySource.map((f, i) => (
-                    <span key={i} className="text-[11px] px-2 py-1 rounded-lg bg-white/[0.05] text-white/70">
-                      {f.k === "ancien-client" ? "Anciens clients" : f.k === "import-gms-idf-patisserie" ? "GMS" : (f.k ?? "—")} : <b className="text-white/90">{f.n}</b>
+                    <span key={i} className="text-[11px] px-2 py-1 rounded-lg bg-secondary/40 text-foreground/70">
+                      {f.k === "ancien-client" ? "Anciens clients" : f.k === "import-gms-idf-patisserie" ? "GMS" : (f.k ?? "—")} : <b className="text-foreground">{f.n}</b>
                     </span>
                   ))}
                 </div>
@@ -885,39 +883,39 @@ function FichePanel({ row, onClose, onPatch, onReload }: {
   return (
     <div className="fixed inset-0 z-[70] flex justify-end bg-black/50" onClick={onClose}>
     <aside onClick={(e) => e.stopPropagation()}
-      className="w-full sm:w-[380px] h-full overflow-y-auto bg-[#0f141c] ring-1 ring-white/[0.08] p-4 space-y-4">
+      className="w-full sm:w-[380px] h-full overflow-y-auto bg-card ring-1 ring-border p-4 space-y-4">
       <div className="flex items-start gap-2">
         <div className="flex-1">
-          <h2 className="text-[15px] font-bold text-white/90 leading-tight">{row.nom}</h2>
-          <p className="text-[12px] text-white/45">{[row.city, row.zipCode].filter(Boolean).join(" · ")}</p>
+          <h2 className="text-[15px] font-bold text-foreground leading-tight">{row.nom}</h2>
+          <p className="text-[12px] text-foreground/45">{[row.city, row.zipCode].filter(Boolean).join(" · ")}</p>
         </div>
-        <button onClick={onClose} className="h-7 w-7 grid place-items-center rounded-lg text-white/40 hover:text-white hover:bg-white/[0.06]"><X className="h-4 w-4" /></button>
+        <button onClick={onClose} className="h-7 w-7 grid place-items-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/40"><X className="h-4 w-4" /></button>
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] px-2 py-1 rounded-lg ring-1 ring-white/10 text-white/80" style={{ background: (stage?.color ?? "#334") + "22" }}>
+        <span className="text-[11px] px-2 py-1 rounded-lg ring-1 ring-border text-foreground/80" style={{ background: (stage?.color ?? "#334") + "22" }}>
           {stage?.label ?? "—"}
         </span>
-        {row.tel1 && <a href={`tel:${row.tel1}`} className="text-[11px] inline-flex items-center gap-1 text-white/70 hover:text-white"><Phone className="h-3 w-3" />{row.tel1}</a>}
+        {row.tel1 && <a href={`tel:${row.tel1}`} className="text-[11px] inline-flex items-center gap-1 text-foreground/70 hover:text-foreground"><Phone className="h-3 w-3" />{row.tel1}</a>}
         <a target="_blank" rel="noreferrer" href={`https://www.google.com/search?q=${encodeURIComponent(`${row.nom} ${row.city ?? ""} téléphone`)}`}
           className="text-[11px] inline-flex items-center gap-1 text-brand-300 hover:underline"><MapPin className="h-3 w-3" />Trouver le tél</a>
       </div>
 
       {/* Script de l'étape */}
       {stage && (
-        <div className="rounded-lg bg-white/[0.03] ring-1 ring-white/[0.06] p-3">
-          <p className="text-[10px] uppercase tracking-wider font-bold text-white/40 mb-1.5">Script — {stage.label}</p>
-          <p className="text-[12.5px] text-white/80 whitespace-pre-line leading-relaxed">{stage.script}</p>
+        <div className="rounded-lg bg-secondary/25 ring-1 ring-border p-3">
+          <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground mb-1.5">Script — {stage.label}</p>
+          <p className="text-[12.5px] text-foreground/80 whitespace-pre-line leading-relaxed">{stage.script}</p>
         </div>
       )}
 
       {/* Qualif labo — « Non qualifié » sort le prospect de la liste (avec motif) */}
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[12px] text-white/60">Labo pâtisserie&nbsp;:</span>
+        <span className="text-[12px] text-muted-foreground">Labo pâtisserie&nbsp;:</span>
         <button onClick={() => onPatch(row.id, { qualifieLabo: true }, "Qualifié : labo OK")}
-          className={`text-[12px] px-2.5 py-1 rounded-lg ring-1 ${row.qualifieLabo === true ? "bg-emerald-500/20 text-emerald-300 ring-emerald-500/40" : "ring-white/10 text-white/60 hover:bg-white/[0.06]"}`}>Oui, qualifié</button>
+          className={`text-[12px] px-2.5 py-1 rounded-lg ring-1 ${row.qualifieLabo === true ? "bg-emerald-500/20 text-emerald-300 ring-emerald-500/40" : "ring-border text-muted-foreground hover:bg-secondary/40"}`}>Oui, qualifié</button>
         <select value="" onChange={(e) => { if (e.target.value) { onPatch(row.id, { qualifieLabo: false, lostReason: e.target.value, remove: true }, "Non qualifié — sorti de la liste"); onClose(); } }}
-          className={`text-[12px] px-2 py-1.5 rounded-lg ring-1 ${row.qualifieLabo === false ? "bg-rose-500/20 text-rose-300 ring-rose-500/40" : "bg-[#11161f] ring-white/10 text-white/70"}`}
+          className={`text-[12px] px-2 py-1.5 rounded-lg ring-1 ${row.qualifieLabo === false ? "bg-rose-500/20 text-rose-300 ring-rose-500/40" : "bg-[#11161f] ring-border text-foreground/70"}`}
           title="Non qualifié — choisir le motif">
           <option value="">Non qualifié…</option>
           {NON_QUAL_REASONS.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -941,11 +939,11 @@ function FichePanel({ row, onClose, onPatch, onReload }: {
           {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} Client à créer (1re cde)
         </button>
         <button onClick={() => setRdvOpen((v) => !v)}
-          className="inline-flex items-center gap-1 text-[12.5px] px-3 py-1.5 rounded-lg ring-1 ring-white/10 text-white/80 hover:bg-white/[0.06]">
+          className="inline-flex items-center gap-1 text-[12.5px] px-3 py-1.5 rounded-lg ring-1 ring-border text-foreground/80 hover:bg-secondary/40">
           <CalendarPlus className="h-3.5 w-3.5" /> Rendez-vous
         </button>
         <select onChange={(e) => { if (e.target.value) onPatch(row.id, { stage: "PERDU", lostReason: e.target.value }, "Marqué perdu"); }}
-          defaultValue="" className="text-[12px] px-2 py-1.5 rounded-lg bg-[#11161f] ring-1 ring-white/10 text-white/70">
+          defaultValue="" className="text-[12px] px-2 py-1.5 rounded-lg bg-[#11161f] ring-1 ring-border text-foreground/70">
           <option value="" disabled>Perdu…</option>
           {LOST_REASONS.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
@@ -956,9 +954,9 @@ function FichePanel({ row, onClose, onPatch, onReload }: {
       {/* Note rapide */}
       <div>
         <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Ajouter une note…"
-          className="w-full rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-2 text-[12.5px] text-white placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+          className="w-full rounded-lg border border-border bg-secondary/30 px-2.5 py-2 text-[12.5px] text-foreground placeholder:text-foreground/30 focus:outline-none focus:ring-1 focus:ring-brand-500" />
         <button disabled={!note.trim()} onClick={() => { onPatch(row.id, { note }, "Note ajoutée"); setNote(""); }}
-          className="mt-1.5 text-[12px] px-3 py-1 rounded-lg ring-1 ring-white/10 text-white/70 hover:bg-white/[0.06] disabled:opacity-40">Enregistrer la note</button>
+          className="mt-1.5 text-[12px] px-3 py-1 rounded-lg ring-1 ring-border text-foreground/70 hover:bg-secondary/40 disabled:opacity-40">Enregistrer la note</button>
       </div>
     </aside>
     </div>
@@ -989,19 +987,19 @@ function RdvForm({ clientId, defaultTitle, onDone }: { clientId: string; default
   }
 
   return (
-    <div className="rounded-lg bg-white/[0.03] ring-1 ring-white/[0.06] p-3 space-y-2">
+    <div className="rounded-lg bg-secondary/25 ring-1 ring-border p-3 space-y-2">
       <div className="grid grid-cols-2 gap-2">
-        <select value={type} onChange={(e) => setType(e.target.value)} className="text-[12px] px-2 py-1.5 rounded-lg bg-[#11161f] ring-1 ring-white/10 text-white/80">
+        <select value={type} onChange={(e) => setType(e.target.value)} className="text-[12px] px-2 py-1.5 rounded-lg bg-[#11161f] ring-1 ring-border text-foreground/80">
           {RDV_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
         </select>
-        <select value={notify} onChange={(e) => setNotify(Number(e.target.value))} className="text-[12px] px-2 py-1.5 rounded-lg bg-[#11161f] ring-1 ring-white/10 text-white/80" title="Notification avant le RDV">
+        <select value={notify} onChange={(e) => setNotify(Number(e.target.value))} className="text-[12px] px-2 py-1.5 rounded-lg bg-[#11161f] ring-1 ring-border text-foreground/80" title="Notification avant le RDV">
           {NOTIFY_MINUTES_CHOICES.map((m) => <option key={m} value={m}>Notif {notifyLabel(m)}</option>)}
         </select>
       </div>
       <input type="datetime-local" value={startAt} onChange={(e) => setStartAt(e.target.value)}
-        className="w-full text-[12px] px-2 py-1.5 rounded-lg bg-[#11161f] ring-1 ring-white/10 text-white/80" />
+        className="w-full text-[12px] px-2 py-1.5 rounded-lg bg-[#11161f] ring-1 ring-border text-foreground/80" />
       <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Lieu (adresse magasin)…"
-        className="w-full text-[12px] px-2 py-1.5 rounded-lg bg-white/[0.04] ring-1 ring-white/10 text-white/80 placeholder:text-white/30" />
+        className="w-full text-[12px] px-2 py-1.5 rounded-lg bg-secondary/30 ring-1 ring-border text-foreground/80 placeholder:text-foreground/30" />
       <button disabled={saving} onClick={save}
         className="w-full inline-flex items-center justify-center gap-1.5 text-[12.5px] px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-semibold disabled:opacity-50">
         {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarPlus className="h-3.5 w-3.5" />} Créer le rendez-vous

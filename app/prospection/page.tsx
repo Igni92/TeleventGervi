@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { PageHeader } from "@/components/ui/page-header";
 import { ProspectionBoard } from "@/components/prospection/ProspectionBoard";
 
 export const metadata = { title: "Prospection | Gervi" };
@@ -19,7 +20,12 @@ export default async function ProspectionPage() {
   if (!session) redirect("/login");
 
   return (
-    <div className="h-[calc(100vh-2rem)] animate-fade-up">
+    <div className="space-y-6 animate-fade-up pt-4 sm:pt-6 px-1 sm:px-2">
+      <PageHeader
+        kicker="Télévente"
+        title="Prospection"
+        help={<>Pipeline CRM des prospects : à contacter → qualification → présentation/RDV → après 1<sup>re</sup> commande → gagné.<br/>Chaque étape porte son script d&apos;appel ; un prospect gagné bascule en client.</>}
+      />
       <ProspectionBoard />
     </div>
   );
