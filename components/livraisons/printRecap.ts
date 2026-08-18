@@ -94,8 +94,8 @@ export function renderOrderRecapHtml(doc: PrintDoc, ctx: PrintContext, origin = 
         <td class="art">
           <span class="name">${esc(l.itemName)}</span>
           ${details(l).length ? `<span class="det">— ${details(l).map(esc).join(" · ")}</span>` : ""}
-          ${l.lot != null ? (/^EM\d+$/.test(l.lot) ? `<span class="lot">${esc(l.lot)}</span>` : `<span class="lot pending">lot à affecter</span>`) : ""}
         </td>
+        <td class="lotcell">${l.lot != null ? (/^EM\d+$/.test(l.lot) ? `<span class="lot">${esc(l.lot)}</span>` : `<span class="lot pending">lot à affecter</span>`) : ""}</td>
         <td class="warn">${isMissing ? "⚠" : ""}</td>
         <td class="num">${num(l.weightKg)} <span class="unit">kg</span></td>
       </tr>`;
@@ -138,7 +138,11 @@ export function renderOrderRecapHtml(doc: PrintDoc, ctx: PrintContext, origin = 
   header .bl .date { font-size: 19px; }
   header .bl .date b { font-weight: 900; }
 
-  .infos { display: grid; grid-template-columns: 1.5fr 0.7fr 1.15fr 0.85fr 1.15fr 1fr; gap: 0;
+  /* Géométrie PARTAGÉE avec le tableau : la case « Transporteur » commence à
+     30% + 18% = 48%, exactement où démarre la colonne « Lot (EM) » ci-dessous.
+     Les EM se lisent ainsi dans l'axe du transporteur, en une colonne franche
+     au lieu de flotter après des désignations de longueur variable. */
+  .infos { display: grid; grid-template-columns: 30% 18% 16% 12% 14% 10%; gap: 0;
            border: 1.5px solid #111; border-radius: 6px; overflow: hidden; margin-bottom: 14px; }
   .infos > div { padding: 7px 10px; border-left: 1px solid #bbb; }
   .infos > div:first-child { border-left: none; }
@@ -155,6 +159,22 @@ export function renderOrderRecapHtml(doc: PrintDoc, ctx: PrintContext, origin = 
              border-bottom: 2px solid #111; padding: 6px 8px; text-align: left; }
   thead th.num, td.num { text-align: right; white-space: nowrap; }
   thead th.warn, td.warn { text-align: center; width: 40px; }
+  /* Largeurs FIXES, posées APRÈS les règles ci-dessus pour l'emporter sur la
+     largeur fixe de td.warn (même spécificité → la dernière déclarée gagne).
+     Pas d'accent grave dans ce commentaire : tout ce bloc vit DANS un littéral
+     gabarit, un backtick y fermerait la chaîne.
+     table-layout: fixed rend les pourcentages effectifs : sans lui le
+     navigateur redistribue selon le contenu et l'alignement saute.
+     6 + 8 + 34 = 48 → la colonne « Lot (EM) » démarre exactement sous la case
+     « Transporteur » de la grille d'infos (30% + 18% = 48%). */
+  table { table-layout: fixed; }
+  thead th:nth-child(1), tbody td:nth-child(1), tfoot td:nth-child(1) { width: 6%; }
+  thead th:nth-child(2), tbody td:nth-child(2), tfoot td:nth-child(2) { width: 8%; }
+  thead th:nth-child(3), tbody td:nth-child(3), tfoot td:nth-child(3) { width: 34%; }
+  thead th:nth-child(4), tbody td:nth-child(4), tfoot td:nth-child(4) { width: 16%; }
+  thead th:nth-child(5), tbody td:nth-child(5), tfoot td:nth-child(5) { width: 4%; }
+  thead th:nth-child(6), tbody td:nth-child(6), tfoot td:nth-child(6) { width: 32%; }
+  td.lotcell { vertical-align: top; padding-top: 7px; }
   tbody td { border-bottom: 1px solid #ccc; padding: 7px 8px; vertical-align: middle; }
   td.colis { font-size: 19px; font-weight: 800; text-align: center; width: 62px;
              font-variant-numeric: tabular-nums; }
@@ -169,10 +189,10 @@ export function renderOrderRecapHtml(doc: PrintDoc, ctx: PrintContext, origin = 
   tr.missing td { border-top: 1.3px solid #111; border-bottom: 1.3px solid #111; background: #f6f6f6; }
   tr.missing td:first-child { border-left: 1.3px solid #111; }
   tr.missing td:last-child { border-right: 1.3px solid #111; }
-  td.art .lot { display: inline-block; margin-left: 8px; border: 1.5px solid #111;
+  td.lotcell .lot { display: inline-block; border: 1.5px solid #111;
                 border-radius: 3px; padding: 0 5px; font-size: 12px; font-weight: 800;
                 font-variant-numeric: tabular-nums; color: #111; }
-  td.art .lot.pending { border-style: dashed; font-weight: 700; color: #555; }
+  td.lotcell .lot.pending { border-style: dashed; font-weight: 700; color: #555; }
   .unit { font-size: 11px; font-weight: 600; color: #555; }
   tfoot td { border-top: 2px solid #111; padding: 8px; font-weight: 700; font-size: 14px; }
   tfoot .label { text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
@@ -234,6 +254,7 @@ export function renderOrderRecapHtml(doc: PrintDoc, ctx: PrintContext, origin = 
         <th style="text-align:center">Fait</th>
         <th style="text-align:center">Colis</th>
         <th>Article</th>
+        <th>Lot (EM)</th>
         <th class="warn"></th>
         <th class="num">Poids (kg)</th>
       </tr>
@@ -244,6 +265,7 @@ export function renderOrderRecapHtml(doc: PrintDoc, ctx: PrintContext, origin = 
         <td></td>
         <td style="text-align:center">${num(doc.colis)} <span class="unit">colis</span></td>
         <td class="label">Total — ${doc.lines.length} article${doc.lines.length > 1 ? "s" : ""}</td>
+        <td></td>
         <td class="warn"></td>
         <td class="num">${num(doc.weightKg)} <span class="unit">kg</span></td>
       </tr>
