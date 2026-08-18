@@ -953,140 +953,244 @@ html[data-reduce-anim="1"] .promo-marquee-track {
 .maplibregl-canvas:focus { outline: none; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SKIN « APPLE » — réécrit de zéro (data-skin="apple" sur <html>).
-   100 % réversible : tout est scopé sous [data-skin="apple"] ; le thème CLASSIQUE
-   au-dessus n'est jamais touché. Bascule dans Paramètres → Apparence.
+   SKIN « APPLE » — refonte graphique intégrale, écrite de zéro.
 
-   Philosophie : coder comme pour macOS / iPadOS / iOS. L'appli est pilotée par
-   des TOKENS (--background, --card, --popover, --border…) → il suffit de les
-   redéfinir « à la Apple » pour re-thémer l'essentiel. On ajoute ensuite quelques
-   règles ciblées : police système (SF), canvas plat, séparateurs hairline, ombres
-   neutres douces, et surtout des SURFACES FLOTTANTES OPAQUES (menus, popovers,
-   dialogs) — plus AUCUN verre/backdrop-filter, qui provoquait des artefacts de
-   transparence. Un seul accent : l'or de la marque. Placé HORS @layer → prime.
+   Tout est scopé sous html[data-skin="apple"] : le thème CLASSIQUE au-dessus
+   n'est jamais touché, la bascule (Paramètres → Apparence) reste réversible à
+   100 %. Placé hors @layer pour primer sur les utilitaires.
+
+   Le parti pris n'est pas « des coins un peu plus ronds » : c'est le langage
+   visuel d'Apple appliqué à la lettre.
+     • Une seule famille : SF, avec la RAMPE typographique d'Apple (chaque taille
+       a son interlettrage — plus le texte est gros, plus il se resserre).
+     • Des matériaux, pas des décorations : surfaces opaques, filets d'un demi-
+       pixel, élévation par l'ombre. Aucun dégradé, aucune lueur, aucun verre
+       dépoli — le flou d'arrière-plan coûte cher et bavait sur les popovers.
+     • La LISTE GROUPÉE INSÉRÉE d'iOS comme motif de base : les tableaux
+       deviennent des listes à séparateurs qui s'arrêtent avant le bord.
+     • Trois niveaux de bouton (plein / teinté / nu), comme UIKit.
+     • Barre latérale CLAIRE en thème clair. Elle est codée en dur en anthracite
+       dans le composant : on la reprend ici, sinon elle restait noire au milieu
+       d'une interface blanche.
+     • Le mouvement est court et sort en douceur (courbe d'Apple), jamais rebondi.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* ── Police système (vrai SF Pro sur Mac/iPad/iPhone, repli soigné ailleurs) ── */
+/* ─────────────────────────────────────────────────────────────────────────
+   1 · FONDATIONS — échelles partagées
+   ───────────────────────────────────────────────────────────────────────── */
+html[data-skin="apple"] {
+  /* Rayons : 4 crans seulement. Apple ne mélange pas 9 arrondis différents. */
+  --r-xs: 6px;
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --radius: 0.875rem;             /* 14px — valeur consommée par les composants */
+
+  /* Courbe de sortie standard d'Apple + durées courtes. */
+  --ease-apple: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-fast: 140ms;
+  --dur-base: 240ms;
+
+  /* Épaisseur des séparateurs : un demi-pixel, comme les hairlines système. */
+  --hairline: 0.5px;
+}
+
+/* ── Typographie : SF d'abord, repli soigné ailleurs ── */
 html[data-skin="apple"] body,
-html[data-skin="apple"] .font-display,
 html[data-skin="apple"] button,
 html[data-skin="apple"] input,
 html[data-skin="apple"] select,
-html[data-skin="apple"] textarea {
+html[data-skin="apple"] textarea,
+html[data-skin="apple"] .font-display {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
     "Inter", "Segoe UI", Roboto, system-ui, sans-serif;
+  font-synthesis-weight: none;
 }
-html[data-skin="apple"] body { letter-spacing: -0.006em; -webkit-font-smoothing: antialiased; }
-html[data-skin="apple"] .font-display { letter-spacing: -0.021em; }
+html[data-skin="apple"] body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
+  font-size: 15px;                /* corps iOS */
+  line-height: 1.47;
+}
 
-/* ── LIGHT — palette système iOS/macOS (gris froids), or conservé en accent ── */
+/* Rampe optique : plus c'est gros, plus c'est resserré. C'est ce qui fait
+   « lire Apple » avant même la couleur. */
+html[data-skin="apple"] .font-display { letter-spacing: -0.022em; font-weight: 700; }
+html[data-skin="apple"] h1 { letter-spacing: -0.026em; font-weight: 700; line-height: 1.08; }
+html[data-skin="apple"] h2 { letter-spacing: -0.022em; font-weight: 700; line-height: 1.14; }
+html[data-skin="apple"] h3 { letter-spacing: -0.018em; font-weight: 600; line-height: 1.2; }
+html[data-skin="apple"] .tnum,
+html[data-skin="apple"] [class*="tnum"] { font-variant-numeric: tabular-nums; letter-spacing: -0.015em; }
+
+/* Sur-titre : capitales espacées, gris secondaire — le « eyebrow » des Réglages. */
+html[data-skin="apple"] .kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   2 · COULEUR — palette système, clair
+   ───────────────────────────────────────────────────────────────────────── */
 html[data-skin="apple"] {
-  --background:        240 24% 96.5%;   /* systemGray6 ~#F2F2F7 */
-  --foreground:        240 6% 10%;      /* label ~#1c1c1e */
-  --card:              0 0% 100%;
-  --card-foreground:   240 6% 10%;
-  --popover:           0 0% 100%;
-  --popover-foreground:240 6% 10%;
-  --secondary:         240 18% 93%;
-  --secondary-foreground: 240 6% 10%;
-  --muted:             240 18% 93.5%;
-  --muted-foreground:  240 4% 44%;      /* secondary label */
-  --accent:            240 18% 93%;
-  --accent-foreground: 240 6% 10%;
-  --destructive:       3 100% 47%;      /* systemRed */
-  --destructive-foreground: 0 0% 100%;
-  --border:            240 10% 88%;     /* separator */
-  --input:             240 10% 85%;
-  --primary:           42 92% 45%;      /* or marque */
-  --primary-foreground: 240 8% 12%;
-  --ring:              42 92% 45%;
-  --radius:            0.75rem;         /* 12px */
+  --background:            240 20% 97%;      /* systemGroupedBackground */
+  --foreground:            240 6% 9%;        /* label */
+  --card:                  0 0% 100%;
+  --card-foreground:       240 6% 9%;
+  --popover:               0 0% 100%;
+  --popover-foreground:    240 6% 9%;
+  --secondary:             240 16% 94%;
+  --secondary-foreground:  240 6% 9%;
+  --muted:                 240 16% 94.5%;
+  --muted-foreground:      240 4% 46%;       /* secondaryLabel */
+  --accent:                240 16% 94%;
+  --accent-foreground:     240 6% 9%;
+  --destructive:           3 100% 47%;       /* systemRed */
+  --destructive-foreground:0 0% 100%;
+  --border:                240 10% 87%;      /* separator */
+  --input:                 240 10% 84%;
 
-  /* Ombres NEUTRES et douces (jamais sépia) — élévation discrète façon Apple. */
+  /* L'accent reste l'OR de la marque : c'est l'identité Gervifrais, pas une
+     décision d'interface. Tout le reste autour est neutre système. */
+  --primary:               42 92% 44%;
+  --primary-foreground:    240 8% 12%;
+  --ring:                  42 92% 44%;
+
+  /* Élévation : le contour d'un demi-pixel fait la découpe, l'ombre fait la
+     hauteur. Jamais de teinte chaude dans une ombre. */
   --shadow-card:
+    0 0 0 0.5px rgba(0,0,0,0.06),
+    0 1px 1px rgba(0,0,0,0.04),
+    0 8px 24px rgba(0,0,0,0.06);
+  --shadow-card-hover:
+    0 0 0 0.5px rgba(0,0,0,0.08),
+    0 8px 20px rgba(0,0,0,0.09),
+    0 20px 44px rgba(0,0,0,0.10);
+  --shadow-nav:
     0 0 0 0.5px rgba(0,0,0,0.05),
-    0 1px 2px rgba(0,0,0,0.05),
-    0 6px 16px rgba(0,0,0,0.05);
-  --shadow-card-hover:
-    0 0 0 0.5px rgba(0,0,0,0.07),
-    0 6px 16px rgba(0,0,0,0.08),
-    0 16px 34px rgba(0,0,0,0.10);
-  --shadow-nav:
-    0 0.5px 0 rgba(0,0,0,0.04),
-    0 1px 14px rgba(0,0,0,0.06);
+    0 1px 12px rgba(0,0,0,0.05);
   --shadow-modal:
-    0 0 0 0.5px rgba(0,0,0,0.07),
-    0 16px 50px rgba(0,0,0,0.18),
-    0 36px 70px rgba(0,0,0,0.14);
+    0 0 0 0.5px rgba(0,0,0,0.08),
+    0 24px 68px rgba(0,0,0,0.20),
+    0 48px 96px rgba(0,0,0,0.14);
 }
 
-/* ── DARK — near-black + surfaces surélevées (iOS/macOS sombre) ── */
+/* ── Couleur — sombre : noir profond, surfaces qui montent avec l'élévation ── */
 html[data-skin="apple"].dark {
-  --background:        240 6% 6.5%;     /* ~#0f0f11 */
-  --foreground:        0 0% 98%;
-  --card:              240 6% 11%;      /* elevated ~#1c1c1e */
-  --card-foreground:   0 0% 98%;
-  --popover:           240 6% 13.5%;    /* ~#212123 */
-  --popover-foreground:0 0% 98%;
-  --secondary:         240 5% 17%;
-  --secondary-foreground: 0 0% 98%;
-  --muted:             240 5% 17%;
-  --muted-foreground:  240 5% 64%;
-  --accent:            240 5% 17%;
-  --accent-foreground: 0 0% 98%;
-  --destructive:       3 100% 61%;      /* systemRed dark */
-  --destructive-foreground: 0 0% 100%;
-  --border:            240 5% 21%;
-  --input:             240 5% 23%;
-  --primary:           45 96% 56%;      /* or vif */
-  --primary-foreground: 240 8% 10%;
-  --ring:              45 96% 56%;
+  --background:            240 6% 5%;
+  --foreground:            0 0% 98%;
+  --card:                  240 6% 10.5%;
+  --card-foreground:       0 0% 98%;
+  --popover:               240 6% 14%;
+  --popover-foreground:    0 0% 98%;
+  --secondary:             240 5% 16%;
+  --secondary-foreground:  0 0% 98%;
+  --muted:                 240 5% 16%;
+  --muted-foreground:      240 5% 63%;
+  --accent:                240 5% 16%;
+  --accent-foreground:     0 0% 98%;
+  --destructive:           3 100% 62%;
+  --destructive-foreground:0 0% 100%;
+  --border:                240 5% 20%;
+  --input:                 240 5% 22%;
+  --primary:               45 96% 56%;
+  --primary-foreground:    240 8% 10%;
+  --ring:                  45 96% 56%;
 
   --shadow-card:
-    0 0 0 0.5px rgba(255,255,255,0.06),
-    0 1px 2px rgba(0,0,0,0.5),
-    0 6px 18px rgba(0,0,0,0.45);
+    0 0 0 0.5px rgba(255,255,255,0.07),
+    0 1px 2px rgba(0,0,0,0.6),
+    0 8px 24px rgba(0,0,0,0.5);
   --shadow-card-hover:
-    0 0 0 0.5px rgba(255,255,255,0.08),
-    0 8px 22px rgba(0,0,0,0.55),
-    0 20px 44px rgba(0,0,0,0.5);
+    0 0 0 0.5px rgba(255,255,255,0.10),
+    0 10px 28px rgba(0,0,0,0.62),
+    0 24px 52px rgba(0,0,0,0.55);
   --shadow-nav:
-    0 0.5px 0 rgba(255,255,255,0.05),
-    0 2px 18px rgba(0,0,0,0.6);
+    0 0 0 0.5px rgba(255,255,255,0.06),
+    0 2px 16px rgba(0,0,0,0.65);
   --shadow-modal:
-    0 0 0 0.5px rgba(255,255,255,0.08),
-    0 20px 64px rgba(0,0,0,0.72),
-    0 44px 88px rgba(0,0,0,0.6);
+    0 0 0 0.5px rgba(255,255,255,0.10),
+    0 28px 76px rgba(0,0,0,0.76),
+    0 56px 104px rgba(0,0,0,0.62);
 }
 
-/* ── Canvas PLAT — on coupe le voile d'ambiance du thème classique ── */
+/* ─────────────────────────────────────────────────────────────────────────
+   3 · CANVAS — à plat, sans décor
+   ───────────────────────────────────────────────────────────────────────── */
 html[data-skin="apple"] { background-color: hsl(var(--background)); }
 html[data-skin="apple"] body { background: transparent; }
+/* Le voile d'ambiance du thème classique n'a pas sa place ici. */
 html[data-skin="apple"] body::before,
 html[data-skin="apple"] body::after { display: none !important; content: none !important; }
+html[data-skin="apple"] ::selection { background: hsl(var(--primary) / 0.28); }
 
-html[data-skin="apple"] ::selection { background: hsl(var(--primary) / 0.26); }
+/* ─────────────────────────────────────────────────────────────────────────
+   4 · BARRE LATÉRALE — claire en thème clair
+   Le composant force un anthracite (#0b1018) et des bordures blanches : sans
+   cette reprise, elle restait un bloc noir planté dans une interface blanche.
+   ───────────────────────────────────────────────────────────────────────── */
+html[data-skin="apple"] .app-sidebar {
+  background: hsl(var(--card)) !important;
+  border-right: var(--hairline) solid hsl(var(--border)) !important;
+  box-shadow: none !important;
+}
+html[data-skin="apple"] .app-sidebar > .absolute { display: none !important; } /* filet dégradé décoratif */
 
-/* ── Surfaces : cartes/panneaux OPAQUES, filet hairline, ombre douce.
-      Mood minimaliste : on retire rails d'accent et glows décoratifs. ── */
+/* Texte et icônes de la barre : on annule les blancs codés en dur. */
+html[data-skin="apple"] .app-sidebar [class*="text-white"],
+html[data-skin="apple"] .app-sidebar a,
+html[data-skin="apple"] .app-sidebar button { color: hsl(var(--foreground)); }
+html[data-skin="apple"] .app-sidebar [class*="text-white/4"],
+html[data-skin="apple"] .app-sidebar [class*="text-white/5"],
+html[data-skin="apple"] .app-sidebar [class*="text-white/6"],
+html[data-skin="apple"] .app-sidebar [class*="text-white/7"] { color: hsl(var(--muted-foreground)); }
+html[data-skin="apple"] .app-sidebar [class*="bg-white/"] { background-color: hsl(var(--secondary)) !important; }
+html[data-skin="apple"] .app-sidebar [class*="border-white/"] { border-color: hsl(var(--border)) !important; }
+
+/* Élément de navigation : pastille arrondie pleine largeur, façon Réglages. */
+html[data-skin="apple"] .app-sidebar a {
+  border-radius: var(--r-sm);
+  transition: background-color var(--dur-fast) var(--ease-apple);
+}
+html[data-skin="apple"] .app-sidebar a:hover { background-color: hsl(var(--secondary)); }
+/* Sélection : teinte d'accent franche, texte renforcé — pas de barre latérale. */
+html[data-skin="apple"] .app-sidebar a[aria-current="page"],
+html[data-skin="apple"] .app-sidebar a[data-active="true"] {
+  background-color: hsl(var(--primary) / 0.16) !important;
+  color: hsl(var(--foreground)) !important;
+  font-weight: 600;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   5 · SURFACES — cartes opaques, filet, élévation
+   ───────────────────────────────────────────────────────────────────────── */
 html[data-skin="apple"] .surface,
 html[data-skin="apple"] .panel,
 html[data-skin="apple"] .surface-card {
   background: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
+  border: var(--hairline) solid hsl(var(--border));
+  border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+  background-image: none !important;
+  transition: box-shadow var(--dur-base) var(--ease-apple);
 }
+/* Décorations du thème classique : rail d'accent, points lumineux, pulsations. */
 html[data-skin="apple"] .sc-accent { border-inline-start-width: 0 !important; box-shadow: none !important; }
 html[data-skin="apple"] .dot-accent { box-shadow: none !important; }
 html[data-skin="apple"] .btn-nudge { animation: none !important; box-shadow: none !important; }
 html[data-skin="apple"] .btn-nudge:hover { filter: none !important; }
 html[data-skin="apple"] .hairline { background: hsl(var(--border)); }
 
-/* ── SURFACES FLOTTANTES = 100 % OPAQUES (le correctif clé) ──
-      Menus, popovers, sélecteurs, tooltips, dialogs, feuilles : fond plein,
-      aucun backdrop-filter (fini les artefacts « verre »), filet + ombre nette. */
+/* ─────────────────────────────────────────────────────────────────────────
+   6 · SURFACES FLOTTANTES — opaques, sans exception
+   Menus, popovers, listes, dialogues, infobulles. Le verre dépoli laissait
+   passer le contenu du dessous et rendait ces couches illisibles.
+   ───────────────────────────────────────────────────────────────────────── */
 html[data-skin="apple"] .bg-popover,
 html[data-skin="apple"] .app-sheet,
 html[data-skin="apple"] [role="menu"],
@@ -1097,23 +1201,103 @@ html[data-skin="apple"] [data-radix-popper-content-wrapper] > * {
   background-color: hsl(var(--popover)) !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  border: 1px solid hsl(var(--border));
+  border: var(--hairline) solid hsl(var(--border));
+  border-radius: var(--r-md);
   box-shadow: var(--shadow-modal);
-  border-radius: 14px;
 }
-/* Voile derrière un dialog/feuille : simple assombrissement, SANS flou. */
+/* Les dialogues respirent davantage : c'est une constante des feuilles Apple. */
+html[data-skin="apple"] [role="dialog"] { border-radius: var(--r-lg); }
+/* Voile : simple assombrissement, aucun flou. */
 html[data-skin="apple"] .app-scrim {
-  background: rgba(0,0,0,0.38) !important;
+  background: rgba(0,0,0,0.40) !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
+/* Entrées de menu : pleine largeur, surlignage teinté. */
+html[data-skin="apple"] [role="menuitem"],
+html[data-skin="apple"] [role="option"] {
+  border-radius: var(--r-xs);
+  transition: background-color var(--dur-fast) var(--ease-apple);
+}
+html[data-skin="apple"] [role="menuitem"]:hover,
+html[data-skin="apple"] [role="option"]:hover,
+html[data-skin="apple"] [role="option"][aria-selected="true"] {
+  background-color: hsl(var(--primary) / 0.14);
+}
 
-/* ── Champs : coins arrondis Apple + anneau de focus accent (3,5px) ── */
+/* ─────────────────────────────────────────────────────────────────────────
+   7 · TABLEAUX — la liste groupée insérée d'iOS
+   Plus de grille : des séparateurs qui s'arrêtent avant le bord, un en-tête
+   discret en capitales, des lignes hautes et confortables.
+   ───────────────────────────────────────────────────────────────────────── */
+html[data-skin="apple"] table { border-collapse: separate; border-spacing: 0; }
+html[data-skin="apple"] thead th {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: hsl(var(--muted-foreground));
+  border-bottom: var(--hairline) solid hsl(var(--border));
+  background: transparent;
+  padding-block: 8px;
+}
+html[data-skin="apple"] tbody td {
+  border-bottom: var(--hairline) solid hsl(var(--border) / 0.75);
+  padding-block: 10px;
+}
+/* Dernière ligne : pas de trait qui pende sous la liste. */
+html[data-skin="apple"] tbody tr:last-child td { border-bottom: none; }
+html[data-skin="apple"] tbody tr { transition: background-color var(--dur-fast) var(--ease-apple); }
+html[data-skin="apple"] tbody tr:hover { background-color: hsl(var(--secondary) / 0.6); }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   8 · CONTRÔLES — la hiérarchie UIKit : plein, teinté, nu
+   ───────────────────────────────────────────────────────────────────────── */
+html[data-skin="apple"] button {
+  border-radius: var(--r-sm);
+  font-weight: 590;                          /* le demi-gras de SF */
+  letter-spacing: -0.01em;
+  transition:
+    transform var(--dur-fast) var(--ease-apple),
+    background-color var(--dur-fast) var(--ease-apple),
+    box-shadow var(--dur-fast) var(--ease-apple),
+    border-color var(--dur-fast) var(--ease-apple),
+    opacity var(--dur-fast) var(--ease-apple);
+}
+/* Enfoncement bref au doigt/à la souris — la réponse tactile d'iOS. */
+html[data-skin="apple"] button:active:not(:disabled) { transform: scale(0.97); }
+html[data-skin="apple"] button:disabled { opacity: 0.38; }
+
+/* Bouton PLEIN (action principale) : aplat d'accent, aucune ombre portée. */
+html[data-skin="apple"] button[class*="bg-brand-"],
+html[data-skin="apple"] button[class*="bg-primary"] {
+  box-shadow: none !important;
+  background-image: none !important;
+}
+/* Groupes de boutons façon contrôle segmenté : lit dans un creux gris. */
+html[data-skin="apple"] [role="tablist"] {
+  background: hsl(var(--secondary));
+  border-radius: var(--r-sm);
+  padding: 2px;
+  gap: 2px;
+}
+html[data-skin="apple"] [role="tab"] {
+  border-radius: calc(var(--r-sm) - 2px);
+  font-weight: 590;
+}
+html[data-skin="apple"] [role="tab"][aria-selected="true"] {
+  background: hsl(var(--card));
+  box-shadow: 0 0 0 0.5px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.12);
+}
+
+/* Champs : coins doux, anneau d'accent large et net au focus. */
 html[data-skin="apple"] input,
 html[data-skin="apple"] textarea,
 html[data-skin="apple"] select,
 html[data-skin="apple"] [class~="border-input"] {
-  border-radius: 9px;
+  border-radius: var(--r-sm);
+  transition: border-color var(--dur-fast) var(--ease-apple),
+              box-shadow var(--dur-fast) var(--ease-apple);
 }
 html[data-skin="apple"] input:focus-visible,
 html[data-skin="apple"] textarea:focus-visible,
@@ -1121,37 +1305,61 @@ html[data-skin="apple"] select:focus-visible,
 html[data-skin="apple"] [class~="border-input"]:focus-visible,
 html[data-skin="apple"] [class~="border-input"]:focus-within {
   border-color: hsl(var(--ring)) !important;
-  box-shadow: 0 0 0 3.5px hsl(var(--ring) / 0.25) !important;
+  box-shadow: 0 0 0 4px hsl(var(--ring) / 0.22) !important;
   outline: none !important;
 }
-
-/* ── Badges pilule ── */
-html[data-skin="apple"] .app-badge { border-radius: 999px; letter-spacing: 0; padding-inline: 0.55rem; }
-
-/* ── Boutons : réponse tactile Apple (léger enfoncement, transition fluide) ── */
-html[data-skin="apple"] button {
-  transition: transform .18s cubic-bezier(.22,1,.36,1), background-color .18s, filter .18s, box-shadow .18s, border-color .18s;
+/* Accessibilité clavier : le même anneau partout, jamais le contour du système. */
+html[data-skin="apple"] :focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px hsl(var(--ring) / 0.22);
 }
-html[data-skin="apple"] button:active { transform: scale(0.98); }
 
-/* ── Barres de défilement fines façon Apple ── */
-html[data-skin="apple"] * { scrollbar-width: thin; scrollbar-color: rgba(140,140,146,.5) transparent; }
-html[data-skin="apple"] ::-webkit-scrollbar { width: 9px; height: 9px; }
-html[data-skin="apple"] ::-webkit-scrollbar-thumb {
-  background: rgba(140,140,146,.45);
+/* Badges : pilule pleine, jamais de capitales forcées. */
+html[data-skin="apple"] .app-badge {
   border-radius: 999px;
-  border: 2px solid transparent;
+  letter-spacing: 0;
+  padding-inline: 0.6rem;
+  font-weight: 590;
+  text-transform: none;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   9 · DÉFILEMENT — fine, discrète, apparaît au besoin
+   ───────────────────────────────────────────────────────────────────────── */
+html[data-skin="apple"] * { scrollbar-width: thin; scrollbar-color: rgba(140,140,146,.45) transparent; }
+html[data-skin="apple"] ::-webkit-scrollbar { width: 10px; height: 10px; }
+html[data-skin="apple"] ::-webkit-scrollbar-track { background: transparent; }
+html[data-skin="apple"] ::-webkit-scrollbar-thumb {
+  background: rgba(140,140,146,.42);
+  border-radius: 999px;
+  border: 3px solid transparent;
   background-clip: padding-box;
 }
-html[data-skin="apple"] ::-webkit-scrollbar-thumb:hover { background: rgba(140,140,146,.7); background-clip: padding-box; }
+html[data-skin="apple"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(140,140,146,.68);
+  background-clip: padding-box;
+}
 
-/* ── Tactile (iPhone/iPad) : cibles un peu plus généreuses, défilement inertiel ── */
+/* ─────────────────────────────────────────────────────────────────────────
+   10 · TACTILE + ACCESSIBILITÉ
+   ───────────────────────────────────────────────────────────────────────── */
 html[data-skin="apple"][data-ui="touch"] button,
 html[data-skin="apple"][data-ui="touch"] [role="button"] { -webkit-tap-highlight-color: transparent; }
 html[data-skin="apple"][data-ui="touch"] .overflow-y-auto,
 html[data-skin="apple"][data-ui="touch"] .overflow-auto { -webkit-overflow-scrolling: touch; }
 
-/* ── Respect de « réduire les animations » ── */
 @media (prefers-reduced-motion: reduce) {
   html[data-skin="apple"] button:active { transform: none; }
+  html[data-skin="apple"] *,
+  html[data-skin="apple"] *::before,
+  html[data-skin="apple"] *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Impression : le skin ne doit pas déteindre sur les documents (bons de
+   préparation et de transport ont leur propre feuille, en noir et blanc). */
+@media print {
+  html[data-skin="apple"] .app-sidebar { display: none !important; }
 }
