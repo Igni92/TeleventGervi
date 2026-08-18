@@ -6,13 +6,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
  * Sélection TRANSPORTEUR + TOURNÉE à la CRÉATION d'un bon (écran 2 & BLDialog).
  *
  * Règle métier : un BL ne part JAMAIS sans tournée. Le hook pré-sélectionne
- * automatiquement le défaut du client — l'utilisateur ne touche au sélecteur
- * que par exception :
- *   1. transporteur par défaut du client (/api/clients/[id]/carriers :
+ * automatiquement le défaut du CardCode actif — l'utilisateur ne touche au
+ * sélecteur que par exception :
+ *   1. transporteur par défaut du CardCode (/api/clients/[id]/carriers :
  *      ligne principale SERG_TRCL, sinon le plus utilisé 24 mois) ;
  *   2. tournée par défaut de CE transporteur, dans l'ordre de fiabilité :
  *      TRCL (heure puis nom U_DistBy) → mémoire app (lineId → nom → heure,
  *      même ordre que « Détail livraison ») → tournée unique du transporteur.
+ *
+ * `cardCode` (3ᵉ argument) = compte de livraison ACTIF, pas forcément le code
+ * client de base : un compte alternatif (ex. « LPOI. » / SCACHAP) est un magasin
+ * à part entière avec sa PROPRE affectation SERG_TRCL — changer de compte doit
+ * donc re-résoudre transporteur + tournée pour CE CardCode, jamais hériter de
+ * ceux du compte direct du même client.
  *
  * Le catalogue des tournées vient de SERGTRS (/api/transporteurs?code=X),
  * comme le sélecteur de « Détail livraison » — mêmes libellés, mêmes heures.
@@ -155,7 +161,7 @@ export function pickDefaultTournee(
   return "";
 }
 
-export function useTourneeSelection(clientId: string, enabled: boolean = true) {
+export function useTourneeSelection(clientId: string, enabled: boolean = true, cardCode?: string) {
   const [carriers, setCarriers] = useState<CarrierOption[]>([]);
   const [savedTournee, setSavedTournee] = useState<SavedTournee | null>(null);
   // Valeur du sélecteur transporteur = sapValue (code U_TrspCode), "" = aucun.
@@ -166,7 +172,11 @@ export function useTourneeSelection(clientId: string, enabled: boolean = true) {
   const [tourneeId, setTourneeId] = useState("");
 
   // ── Transporteurs du client (défaut pré-sélectionné) ──
-  // Liste filtrée par client (TRCL / historique), sinon liste complète Carrier.
+  // Liste filtrée par CardCode (TRCL / historique), sinon liste complète Carrier.
+  // `cardCode` = compte de livraison ACTIF (défaut du client, ou compte
+  // alternatif choisi — ex. « LPOI. » / SCACHAP) : un compte alternatif a sa
+  // PROPRE affectation, résolue comme n'importe quel autre magasin — jamais un
+  // repli sur le transporteur/tournée du compte direct du même client.
   useEffect(() => {
     if (!enabled || !clientId) return;
     let cancelled = false;
@@ -176,7 +186,8 @@ export function useTourneeSelection(clientId: string, enabled: boolean = true) {
       let defaultSap = "";
       let saved: SavedTournee | null = null;
       try {
-        const r = await fetch(`/api/clients/${clientId}/carriers`);
+        const qs = cardCode ? `?cardCode=${encodeURIComponent(cardCode)}` : "";
+        const r = await fetch(`/api/clients/${clientId}/carriers${qs}`);
         if (r.ok) {
           const d = await r.json();
           type ApiCarrier = {
@@ -216,7 +227,7 @@ export function useTourneeSelection(clientId: string, enabled: boolean = true) {
       setCarrierSap(defaultSap);
     })();
     return () => { cancelled = true; };
-  }, [clientId, enabled]);
+  }, [clientId, enabled, cardCode]);
 
   // ── Tournées du transporteur sélectionné + pré-sélection du défaut ──
   const carrierEntry = useMemo(
