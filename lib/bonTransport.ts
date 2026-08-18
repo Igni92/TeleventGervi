@@ -7,14 +7,21 @@
  *  - envoi par mail au transporteur (route /api/livraisons/bon-transport) →
  *    corps HTML (exemplaire unique).
  *
- * La colonne « Palettes » reprend le comptage saisi À LA PRÉPARATION (au clic
- * « fait »), par type — cf. lib/palettes.ts. Le nombre de palettes n'existe pas
- * dans SAP : il est constaté en entrepôt. Un BL non compté laisse sa case VIDE,
- * pour être rempli à la main au chargement comme avant — on ne fait jamais
- * passer une absence de saisie pour un zéro.
+ * Les PALETTES sont un total de CHARGEMENT, pas une donnée de ligne : on charge
+ * un camion, pas un bon de livraison. Une palette porte couramment plusieurs BL,
+ * et un BL peut finir à cheval sur deux palettes — l'attribuer à une ligne
+ * donnerait un chiffre faux, et leur somme ne voudrait rien dire. Le tableau des
+ * commandes n'a donc PAS de colonne palettes : le comptage figure une seule
+ * fois, en pied de document, par type.
+ *
+ * Le total vient des comptages saisis à la préparation (clic « fait »), cf.
+ * lib/palettes.ts — le nombre de palettes n'existe pas dans SAP, il se constate
+ * en entrepôt. Si rien n'a été compté, le bloc s'imprime avec des cases VIDES,
+ * à remplir à la main au chargement comme avant : on ne fait jamais passer une
+ * absence de saisie pour un zéro.
  */
 
-import { formatPalettes, isEmptyPalettes, sumPalettes, totalPalettes, EMPTY_PALETTES, PALETTE_TYPES, type PaletteCounts } from "./palettes";
+import { isEmptyPalettes, sumPalettes, EMPTY_PALETTES, PALETTE_TYPES, type PaletteCounts } from "./palettes";
 
 export interface BonTransportRow {
   tournee: string;      // libellé de tournée (IDF, NORD…) ou « Sans tournée »
@@ -48,9 +55,13 @@ function renderCopy(data: BonTransportData, tag: string): string {
     weightKg: data.rows.reduce((s, r) => s + r.weightKg, 0),
     // Cumul des seuls BL RÉELLEMENT comptés : un BL non saisi ne compte pas pour
     // zéro, sinon le total afficherait un chiffre faux au chauffeur.
+    // Somme des comptages saisis. Le total est GLOBAL : c'est le chargement qui
+    // est palettisé, pas chaque bon de livraison pris isolément.
     palettes: sumPalettes(data.rows.map((r) => r.palettes ?? EMPTY_PALETTES)),
-    counted: data.rows.filter((r) => r.palettes && !isEmptyPalettes(r.palettes)).length,
   };
+  // Nombre de BL réellement comptés : à zéro, le bloc s'imprime VIDE plutôt que
+  // d'afficher « 0 » partout, ce qui se lirait comme « aucune palette ».
+  const counted = data.rows.filter((r) => r.palettes && !isEmptyPalettes(r.palettes)).length;
 
   // Lignes groupées par tournée : sous-en-tête par tournée puis ses commandes.
   let currentTournee: string | null = null;
@@ -59,7 +70,7 @@ function renderCopy(data: BonTransportData, tag: string): string {
       let sub = "";
       if (r.tournee !== currentTournee) {
         currentTournee = r.tournee;
-        sub = `<tr class="tournee"><td colspan="5">Tournée — ${esc(r.tournee)}</td></tr>`;
+        sub = `<tr class="tournee"><td colspan="4">Tournée — ${esc(r.tournee)}</td></tr>`;
       }
       return `${sub}
       <tr>
@@ -67,7 +78,6 @@ function renderCopy(data: BonTransportData, tag: string): string {
         <td class="num">${r.docNum}</td>
         <td class="num">${num(r.colis)}</td>
         <td class="num">${num(r.weightKg)}</td>
-        <td class="pal">${r.palettes && !isEmptyPalettes(r.palettes) ? esc(formatPalettes(r.palettes)) : ""}</td>
       </tr>`;
     })
     .join("");
@@ -110,7 +120,6 @@ function renderCopy(data: BonTransportData, tag: string): string {
           <th class="num">BL n°</th>
           <th class="num">Colis</th>
           <th class="num">Poids (kg)</th>
-          <th class="num">Palettes</th>
         </tr>
       </thead>
       <tbody>${bodyRows}</tbody>
@@ -120,21 +129,22 @@ function renderCopy(data: BonTransportData, tag: string): string {
           <td></td>
           <td class="num">${num(totals.colis)}</td>
           <td class="num">${num(totals.weightKg)}</td>
-          <td class="pal">${totalPalettes(totals.palettes) > 0 ? esc(formatPalettes(totals.palettes)) : ""}</td>
         </tr>
       </tfoot>
     </table>
-${totalPalettes(totals.palettes) > 0 ? `
+
+    <!-- Comptage GLOBAL du chargement. Imprimé même vide : le chauffeur doit
+         pouvoir l'écrire à la main si personne ne l'a saisi. -->
     <table class="pal-recap">
       <thead>
         <tr><th colspan="${PALETTE_TYPES.length}">Nombre de palette(s)</th></tr>
       </thead>
       <tbody>
-        <tr>${PALETTE_TYPES.map((t) => `<td class="pal-n">${totals.palettes[t.key] || 0}</td>`).join("")}</tr>
+        <tr>${PALETTE_TYPES.map((t) => `<td class="pal-n">${counted > 0 ? (totals.palettes[t.key] || 0) : "&nbsp;"}</td>`).join("")}</tr>
         <tr>${PALETTE_TYPES.map((t) => `<td class="pal-s">${esc(t.size)}</td>`).join("")}</tr>
         <tr>${PALETTE_TYPES.map((t) => `<td class="pal-l">${esc(t.label)}</td>`).join("")}</tr>
       </tbody>
-    </table>` : ""}
+    </table>
 
     <div class="sign">
       <div>
@@ -200,9 +210,6 @@ export function renderBonTransport(
   td.num { font-variant-numeric: tabular-nums; }
   tr.tournee td { background: #eee; border-bottom: 1.5px solid #111; padding: 4px 7px;
                   font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; }
-  td.pal { width: 74px; }
-  tbody td.pal::after, tfoot td.pal::after { content: ""; display: block; height: 17px;
-                  border: 1.5px solid #111; border-radius: 3px; }
   tfoot td { border-top: 2px solid #111; padding: 7px; font-weight: 700; }
   tfoot .label { text-transform: uppercase; font-size: 10px; letter-spacing: 1px; }
 
