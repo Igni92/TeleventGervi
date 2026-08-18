@@ -20,7 +20,7 @@ export default async function ProspectionPage() {
   if (!session) redirect("/login");
 
   return (
-    <div className="space-y-6 animate-fade-up pt-4 sm:pt-6 px-1 sm:px-2">
+    <div className="space-y-6 animate-fade-up">
       <PageHeader
         kicker="Télévente"
         title="Prospection"

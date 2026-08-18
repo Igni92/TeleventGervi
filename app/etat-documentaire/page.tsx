@@ -10,7 +10,7 @@ export default async function EtatDocumentairePage() {
   const session = await auth();
   if (!session) redirect("/login");
   return (
-    <div className="space-y-6 animate-fade-up pt-4 sm:pt-6 px-1 sm:px-2">
+    <div className="space-y-6 animate-fade-up">
       <PageHeader
         kicker="Pilotage"
         title="État documentaire"
