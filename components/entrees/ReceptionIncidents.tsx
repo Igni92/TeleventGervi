@@ -131,7 +131,7 @@ export function InlineIncidentDeclare({
         }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? res.statusText);
-      toast.success(`Incident « ${type} » déclaré sur l'entrée #${receipt.docNum}`);
+      toast.success(`Incident « ${type} » déclaré sur l'entrée n°${receipt.docNum}`);
       setNote("");
       notifyReceptionIncidentsChanged();   // badge sidebar → apparaît tout de suite
       onCreated();
@@ -225,7 +225,7 @@ export function OpenReceptionIncidents({
                   <IncidentTypeIcon type={i.type} className="h-3.5 w-3.5 self-center" />
                   {i.type ?? "Incident"}
                 </span>
-                {i.docNum != null && <span className="font-mono text-muted-foreground">EM # {i.docNum}</span>}
+                {i.docNum != null && <span className="font-mono text-muted-foreground">EM n° {i.docNum}</span>}
                 {i.lot && <span className="font-mono text-muted-foreground">{i.lot}</span>}
                 {i.cardCode && <span className="font-mono text-foreground/80 truncate">{i.cardCode}</span>}
               </div>

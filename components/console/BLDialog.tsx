@@ -258,7 +258,7 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
       if (!json.found || !json.lines?.length) { toast("Aucune commande précédente pour ce client"); return; }
       setLines(json.lines.map((l: BLLine) => ({ ...l })));
       setLastDocNum(json.docNum ?? null);
-      toast.success(`Dernière commande #${json.docNum} rejouée — ajuste les quantités si besoin`);
+      toast.success(`Dernière commande n°${json.docNum} rejouée — ajuste les quantités si besoin`);
     } catch { toast.error("Erreur lors du rejeu"); }
     finally { setReplaying(false); }
   };
@@ -378,7 +378,7 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
       }
       const fmt = (n: number | null | undefined) => n != null ? n.toFixed(2) : "—";
       toast.success(
-        json.offre ? `Offre client #${json.docNum} créée` : `Commande #${json.docNum} créée`,
+        json.offre ? `Offre client n°${json.docNum} créée` : `Commande n°${json.docNum} créée`,
         {
           description: [
             `${clientName} — ${lines.length} ligne(s) · ${fmt(json.totalTTC)} € TTC`,
@@ -511,7 +511,7 @@ export function BLDialog({ open, onOpenChange, clientId, clientName, stockShareP
           >
             {replaying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
             Rejouer la dernière commande
-            {lastDocNum && <span className="text-[11px] font-normal opacity-70">(# {lastDocNum} chargée)</span>}
+            {lastDocNum && <span className="text-[11px] font-normal opacity-70">(n° {lastDocNum} chargée)</span>}
           </button>
 
           {/* N° de commande client (→ SAP NumAtCard) */}

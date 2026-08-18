@@ -606,7 +606,7 @@ export async function POST(req: NextRequest) {
             .map((l) => ({ LineNum: l.LineNum, U_NoLot: LOT_PENDING }));
           if (patchLines.length > 0) {
             await sap.patch(`Orders(${order.DocEntry})`, { DocumentLines: patchLines });
-            console.log(`[BonCommande] Conversion #${order.DocNum} : ${patchLines.length} ligne(s) à lot ÉPUISÉ remises en attente.`);
+            console.log(`[BonCommande] Conversion n°${order.DocNum} : ${patchLines.length} ligne(s) à lot ÉPUISÉ remises en attente.`);
           }
         }
 
@@ -654,12 +654,12 @@ export async function POST(req: NextRequest) {
     // Close puis, à défaut, Cancel — dans les deux cas l'offre quitte l'onglet.
     try {
       await sap.post(`Quotations(${docEntry})/Close`, null);
-      console.log(`[BonCommande] Offre #${quote.DocNum} clôturée après conversion.`);
+      console.log(`[BonCommande] Offre n°${quote.DocNum} clôturée après conversion.`);
     } catch (eClose) {
       console.warn(`[BonCommande] Clôture de l'offre ${docEntry} après conversion échouée, repli Cancel:`, (eClose as Error).message);
       try {
         await sap.post(`Quotations(${docEntry})/Cancel`, null);
-        console.log(`[BonCommande] Offre #${quote.DocNum} annulée après conversion.`);
+        console.log(`[BonCommande] Offre n°${quote.DocNum} annulée après conversion.`);
       } catch (eCancel) {
         // Ni Close ni Cancel : l'offre est probablement DÉJÀ clôturée par SAP à la
         // conversion (elle ne remontera plus). On ne bloque pas la réussite.
@@ -667,7 +667,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    console.log(`[BonCommande] Offre #${quote.DocNum} → Commande #${order.DocNum} (passée par ${by})`);
+    console.log(`[BonCommande] Offre n°${quote.DocNum} → Commande n°${order.DocNum} (passée par ${by})`);
     return NextResponse.json({ ok: true, offreDocNum: quote.DocNum, docNum: order.DocNum, docEntry: order.DocEntry });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

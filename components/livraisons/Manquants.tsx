@@ -266,7 +266,7 @@ export function Manquants() {
                                       {o.clientType}
                                     </span>
                                   )}
-                                  <span className="text-muted-foreground tnum">BL # {o.docNum}</span>
+                                  <span className="text-muted-foreground tnum">BL n° {o.docNum}</span>
                                   {o.carrierName && (
                                     <span className="inline-flex items-center gap-1 text-muted-foreground">
                                       <Truck className="h-3 w-3" /> {o.carrierName}

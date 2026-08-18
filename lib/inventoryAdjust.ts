@@ -440,7 +440,7 @@ export async function executeAdjustment(session: InventorySession, actor: string
             .filter((w) => w.lot).map((w) => ({ itemCode: m.itemCode, lot: w.lot as string, qty: w.qtyUnits }))));
       } catch (e) { console.warn("[inventoryAdjust] Crédit registre entrée échoué (non-bloquant):", (e as Error).message); }
     } catch (e) {
-      return { ...base, status: "error", error: `Entrée SAP échouée APRÈS sortie OK (exit#${base.sapExitDocNum ?? "—"}) : ${(e as Error).message}` };
+      return { ...base, status: "error", error: `Entrée SAP échouée APRÈS sortie OK (exit n°${base.sapExitDocNum ?? "—"}) : ${(e as Error).message}` };
     }
   }
 

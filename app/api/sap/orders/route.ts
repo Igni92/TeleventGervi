@@ -1217,7 +1217,7 @@ export async function POST(req: NextRequest) {
         .map((l) => `${l.ItemCode}→lot ${l.U_NoLot}`)
         .join(", ");
       const noteParts = [
-        `${isBonCommande ? "Offre client" : "Commande"} #${created.DocNum} créée dans SAP`,
+        `${isBonCommande ? "Offre client" : "Commande"} n°${created.DocNum} créée dans SAP`,
         cardCode !== client.code ? `(via ${cardCode})` : null,
         enriched ? `Total ${enriched.DocTotal.toFixed(2)} € TTC` : null,
         lotsList ? `Lots: ${lotsList}` : null,
@@ -1303,7 +1303,7 @@ export async function POST(req: NextRequest) {
           const def = expensesMasterPreloaded.get(code);
           return {
             code,
-            label: def?.Name ?? `Frais #${code}`,
+            label: def?.Name ?? `Frais n°${code}`,
             amount: Math.round(v.amount * 100) / 100,
             tax: Math.round(v.tax * 100) / 100,
             gross: Math.round((v.amount + v.tax) * 100) / 100,

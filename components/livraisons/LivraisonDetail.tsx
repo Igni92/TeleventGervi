@@ -1805,7 +1805,7 @@ const OrderRow = memo(function OrderRow({
         return;
       }
       setSavedRef(val);
-      toast.success(val ? `N° de commande enregistré (#${doc.docNum})` : `N° de commande retiré (#${doc.docNum})`);
+      toast.success(val ? `N° de commande enregistré (n°${doc.docNum})` : `N° de commande retiré (n°${doc.docNum})`);
     } catch {
       toast.error("SAP injoignable — n° de commande non enregistré");
       setRefDraft(savedRef);
@@ -2031,7 +2031,7 @@ const OrderRow = memo(function OrderRow({
         } else {
           setPreparer(j.preparer ?? null); setIncomplete(false); setReportedMissing([]);
           onPatchDoc(doc.docEntry, { preparer: j.preparer ?? null, incomplete: false, reportedMissing: [] });
-          if (!open) toast.success(`Commande #${doc.docNum} affectée — à vous`);
+          if (!open) toast.success(`Commande n°${doc.docNum} affectée — à vous`);
         }
       }
     } catch { /* affectation non bloquante */ }
@@ -2068,8 +2068,8 @@ const OrderRow = memo(function OrderRow({
       setBigOpen(false);
       onPatchDoc(doc.docEntry, { preparer: null, incomplete: true, prepared: false, preparedBy: null, preparedAt: null, departed: false, departedAt: null, reportedMissing: reported });
       toast.warning(reported.length
-        ? `Commande #${doc.docNum} remise sur la file — ${reported.length} manquant${reported.length > 1 ? "s" : ""} signalé${reported.length > 1 ? "s" : ""}`
-        : `Commande #${doc.docNum} non terminée — remise sur la file`);
+        ? `Commande n°${doc.docNum} remise sur la file — ${reported.length} manquant${reported.length > 1 ? "s" : ""} signalé${reported.length > 1 ? "s" : ""}`
+        : `Commande n°${doc.docNum} non terminée — remise sur la file`);
     } catch { toast.error("Échec"); }
     finally { setRequeuing(false); }
   }
@@ -2111,7 +2111,7 @@ const OrderRow = memo(function OrderRow({
         client: null,
         modif: { docEntry: doc.docEntry, docNum: doc.docNum },
       });
-      toast.success(`Modification du BL #${doc.docNum} chargée sur l'Écran 2`, {
+      toast.success(`Modification du BL n°${doc.docNum} chargée sur l'Écran 2`, {
         description: "La saisie s'ouvre sur l'Écran 2 (même fenêtre).",
         duration: 6000,
       });
@@ -2172,7 +2172,7 @@ const OrderRow = memo(function OrderRow({
       const j = await res.json().catch(() => null);
       if (!res.ok || !j?.ok) { toast.error(j?.error || "Échec du changement de client"); return; }
       if (j.warning) toast.warning(j.warning, { duration: 10000 });
-      else toast.success(`BL recréé pour ${preview.cardName} (#${j.newDocNum}) — ancien #${j.oldDocNum} annulé`, { duration: 7000 });
+      else toast.success(`BL recréé pour ${preview.cardName} (n°${j.newDocNum}) — ancien n°${j.oldDocNum} annulé`, { duration: 7000 });
       setRebindOpen(false); setNewCode(""); setPreview({ state: "idle" });
       onReload();
     } catch {
@@ -3006,7 +3006,7 @@ const OrderRow = memo(function OrderRow({
           <div className="flex items-start gap-2 rounded-xl border border-amber-300/60 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15 px-3.5 py-2.5">
             <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
             <p className="text-[11.5px] text-amber-800 dark:text-amber-300 leading-relaxed">
-              L&apos;ancien BL <b># {doc.docNum}</b> sera <b>annulé</b> et un <b>nouveau BL</b> recréé à l&apos;identique
+              L&apos;ancien BL <b>n° {doc.docNum}</b> sera <b>annulé</b> et un <b>nouveau BL</b> recréé à l&apos;identique
               (mêmes articles, prix, date, transporteur) pour le client cible. Action <b>irréversible</b> côté SAP.
             </p>
           </div>

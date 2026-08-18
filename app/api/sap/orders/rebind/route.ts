@@ -236,7 +236,7 @@ export async function POST(req: NextRequest) {
     action: "ORDER_REBIND",
     entity: "SapOrder",
     entityId: String(docEntry),
-    summary: `Re-codage BL #${order.DocNum} : ${order.CardCode} → ${bp.CardCode} (nouveau BL #${created.DocNum})`,
+    summary: `Re-codage BL n°${order.DocNum} : ${order.CardCode} → ${bp.CardCode} (nouveau BL n°${created.DocNum})`,
     details: {
       oldDocEntry: docEntry, oldDocNum: order.DocNum, oldCardCode: order.CardCode,
       newDocEntry: created.DocEntry, newDocNum: created.DocNum, newCardCode: bp.CardCode,
@@ -254,7 +254,7 @@ export async function POST(req: NextRequest) {
     newCardName: bp.CardName ?? bp.CardCode,
     cancelledOld,
     // Avertissement explicite si l'ancienne n'a pas pu être annulée (doublon à traiter).
-    warning: cancelledOld ? null : `Nouvelle commande #${created.DocNum} créée, mais l'ancienne #${order.DocNum} n'a pas pu être annulée automatiquement — annule-la manuellement dans SAP.`,
+    warning: cancelledOld ? null : `Nouvelle commande n°${created.DocNum} créée, mais l'ancienne n°${order.DocNum} n'a pas pu être annulée automatiquement — annule-la manuellement dans SAP.`,
     db: process.env.SAP_B1_COMPANY_DB,
   });
 }

@@ -61,7 +61,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
       });
       const json = await res.json();
       if (!res.ok || !json.ok) { toast.error(json.error || "Erreur SAP"); return; }
-      toast.success(`Commande fournisseur #${json.docNum} créée`, { description: `Livraison prévue le ${new Date(dueDate).toLocaleDateString("fr-FR")}` });
+      toast.success(`Commande fournisseur n°${json.docNum} créée`, { description: `Livraison prévue le ${new Date(dueDate).toLocaleDateString("fr-FR")}` });
       setLast(json.docNum); reset(); onCreated?.();
     } catch (e) {
       toast.error((e as Error).message);
@@ -78,7 +78,7 @@ export function PurchaseOrderForm({ onCreated }: { onCreated?: () => void }) {
       {last && (
         <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[13px] text-emerald-700 dark:text-emerald-300">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>Dernière commande créée : <b># {last}</b>.</span>
+          <span>Dernière commande créée : <b>n° {last}</b>.</span>
         </div>
       )}
 

@@ -165,7 +165,7 @@ function notifyOrderResult(
   if (!ok || !json?.ok) {
     toast.error(
       job.kind === "modif"
-        ? `Modification refusée — BL #${job.docNum}`
+        ? `Modification refusée — BL n°${job.docNum}`
         : json?.blocked
           ? `Client bloqué — ${job.clientName}`
           : `Commande non créée — ${job.clientName}`,
@@ -174,7 +174,7 @@ function notifyOrderResult(
     return;
   }
   if (job.kind === "modif") {
-    toast.success(`BL #${json.docNum ?? job.docNum} enregistré`, {
+    toast.success(`BL n°${json.docNum ?? job.docNum} enregistré`, {
       description: `${job.clientName} — ${json.totalLines ?? "?"} ligne(s) · ${fmt(json.totalTTC)} € TTC`,
       duration: 10000,
     });
@@ -185,12 +185,12 @@ function notifyOrderResult(
     });
   } else if (json.offre) {
     // Précommande → OFFRE CLIENT (devis SAP), à passer en commande au jour de départ.
-    toast.success(`Offre client #${json.docNum} créée — ${job.clientName}`, {
+    toast.success(`Offre client n°${json.docNum} créée — ${job.clientName}`, {
       description: `${fmt(json.totalTTC)} € TTC · à passer en commande au jour de départ.`,
       duration: 10000,
     });
   } else {
-    toast.success(`Commande #${json.docNum} créée — ${job.clientName}`, {
+    toast.success(`Commande n°${json.docNum} créée — ${job.clientName}`, {
       // Vente Sofruce : l'achat (EM) créé juste avant la vente est rappelé ici —
       // la preuve visible que la double saisie manuelle n'est plus nécessaire.
       description: `${fmt(json.totalTTC)} € TTC${json.sofruce ? ` · Achat Sofruce EM ${json.sofruce.docNum} créé` : ""}`,
@@ -214,7 +214,7 @@ function sendOrderInBackground(job: BackgroundOrder) {
   const offline = () =>
     toast.error(
       job.kind === "modif"
-        ? `BL #${job.docNum} non enregistré — ${job.clientName}`
+        ? `BL n°${job.docNum} non enregistré — ${job.clientName}`
         : `Commande non créée — ${job.clientName}`,
       { description: "SAP injoignable — réessaie.", duration: 15000 },
     );
@@ -1224,7 +1224,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
         return next;
       });
       if (added > 0) {
-        toast.success(`Dernière commande #${json.docNum} dupliquée — ${added} ligne(s) au panier`, {
+        toast.success(`Dernière commande n°${json.docNum} dupliquée — ${added} ligne(s) au panier`, {
           description: missing.length
             ? `${missing.length} article(s) hors catalogue chargé : ${missing.slice(0, 3).join(", ")}${missing.length > 3 ? "…" : ""} (active « + Rupture » si besoin).`
             : "Ajuste les quantités et les prix si besoin.",
@@ -1687,7 +1687,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
         kind: "modif", clientName, docEntry: modif.docEntry, docNum: modif.docNum,
         body: { lines, comments: comments.trim(), numAtCard: numAtCard.trim() },
       });
-      toast.info(`BL #${modif.docNum} (${clientName}) — enregistrement en arrière-plan…`);
+      toast.info(`BL n°${modif.docNum} (${clientName}) — enregistrement en arrière-plan…`);
       setCart([]); setNumAtCard(""); setComments("");
       onSubmitted?.();
       return;
@@ -1870,7 +1870,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
             className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-amber-800 dark:text-amber-200 shrink-0"
           >
             <Pencil className="h-3 w-3" strokeWidth={2.2} />
-            BL # {modif.docNum}
+            BL n° {modif.docNum}
             {modifMeta?.dueDate && (
               <span className="font-normal text-amber-700/80 dark:text-amber-300/80 hidden xl:inline">
                 · {new Date(modifMeta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}

@@ -607,7 +607,7 @@ function DetailTable({ stores, configured }: { stores: StoreRow[]; configured: b
         <table className="w-full text-[12px] tabular-nums">
           <thead>
             <tr className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/80 border-b border-border">
-              <th className="text-left font-semibold px-3 py-2 w-8">#</th>
+              <th className="text-left font-semibold px-3 py-2 w-8">n°</th>
               <th className="text-left font-semibold px-3 py-2">Magasin</th>
               <th className="text-left font-semibold px-2 py-2">Seg.</th>
               {cols.map((c) => (

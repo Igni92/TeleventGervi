@@ -109,7 +109,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
       "PurchaseReturns",
       { CardCode: pdn.CardCode, DocumentLines },
     );
-    console.log(`[Retour] PurchaseReturns #${created.DocNum} depuis EM #${pdn.DocNum} (${DocumentLines.length} ligne(s))`);
+    console.log(`[Retour] PurchaseReturns n°${created.DocNum} depuis EM n°${pdn.DocNum} (${DocumentLines.length} ligne(s))`);
     // Registre : le retour est une sortie du lot d'origine → débit (best-effort).
     if (returnDebits.length > 0) {
       try { await debitLots(returnDebits); }

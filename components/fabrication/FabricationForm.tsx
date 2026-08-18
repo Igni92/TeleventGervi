@@ -90,7 +90,7 @@ export function FabricationForm() {
         return;
       }
       toast.success(`${json.opCode} · Fabriqué ${packageQuantity} colis ${parent}`, {
-        description: `Exit #${json.sapExitDocNum} · Entry #${json.sapEntryDocNum} · Coût ${json.totalCost.toFixed(2)} €`,
+        description: `Exit n°${json.sapExitDocNum} · Entry n°${json.sapEntryDocNum} · Coût ${json.totalCost.toFixed(2)} €`,
         duration: 10000,
       });
       setLastResult({ exit: json.sapExitDocNum, entry: json.sapEntryDocNum, cost: json.totalCost });
@@ -107,7 +107,7 @@ export function FabricationForm() {
       {lastResult && (
         <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[13px] text-emerald-700 dark:text-emerald-300">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>Dernière fab : Exit # {lastResult.exit} · Entry # {lastResult.entry} · Coût {lastResult.cost.toFixed(2)} €</span>
+          <span>Dernière fab : Exit n° {lastResult.exit} · Entry n° {lastResult.entry} · Coût {lastResult.cost.toFixed(2)} €</span>
         </div>
       )}
 

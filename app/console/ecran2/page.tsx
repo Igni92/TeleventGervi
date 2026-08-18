@@ -648,7 +648,7 @@ function BLPickerDialog({ client, onClose, onPick }: {
                       {closed ? <PackageCheck className="h-3 w-3" /> : <PackageOpen className="h-3 w-3" />}
                     </span>
                     <span className="min-w-0 flex-1 flex items-baseline gap-1.5">
-                      <span className="text-[13px] font-semibold text-foreground shrink-0"># {o.docNum}</span>
+                      <span className="text-[13px] font-semibold text-foreground shrink-0">n° {o.docNum}</span>
                       <span className="text-[11px] text-muted-foreground tnum shrink-0">{fmtDate(o.docDate)}</span>
                       {closed && <span className="text-[10px] text-muted-foreground italic shrink-0">· clôturé</span>}
                       {o.invoiceNum ? (

@@ -334,7 +334,7 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
       if (!q) return true;
       const haystack = [
         d.cardCode, d.cardName, d.numAtCard, d.lot,
-        `#${d.docNum}`, String(d.docNum),
+        `n°${d.docNum}`, String(d.docNum),
         ...d.lines.flatMap((l) => [l.itemCode, l.itemName]),
       ];
       return haystack.some((h) => (h ?? "").toString().toLowerCase().includes(q));
@@ -497,7 +497,7 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
                     onClick={() => setLargeEntry(d.docEntry)}
                   >
                     <td className="px-3 py-2.5 font-mono font-semibold whitespace-nowrap">
-                      <span className={isVoided(d) ? "line-through text-muted-foreground" : ""}># {d.docNum}</span>
+                      <span className={isVoided(d) ? "line-through text-muted-foreground" : ""}>n° {d.docNum}</span>
                       <CancelBadge d={d} className="ml-1.5 align-middle" />
                     </td>
                     <td className="px-3 py-2.5">
@@ -565,7 +565,7 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
         subtitle={
           largeDoc ? (
             <span className="inline-flex items-center gap-2 flex-wrap">
-              <span className="font-mono">EM # {largeDoc.docNum}</span>
+              <span className="font-mono">EM n° {largeDoc.docNum}</span>
               <span className="tnum">· {fmtJourDate(largeDoc.docDate)}</span>
               {largeDoc.lot && <FreshnessBadge dlc={dlcMap[largeDoc.lot]} className="shrink-0" />}
               <CancelBadge d={largeDoc} />
@@ -644,7 +644,7 @@ function ReceiptDetail({
       });
       const j = await res.json();
       if (!res.ok || !j.ok) { toast.error(j.error || "Retour impossible"); return; }
-      toast.success(`Retour fournisseur #${j.docNum} créé depuis l'EM #${receipt.docNum}`);
+      toast.success(`Retour fournisseur n°${j.docNum} créé depuis l'EM n°${receipt.docNum}`);
       setReturnOpen(false);
       await onModified?.();
     } catch (e) { toast.error((e as Error).message); }
@@ -659,7 +659,7 @@ function ReceiptDetail({
       });
       const j = await res.json();
       if (!res.ok || !j.ok) { toast.error(j.error || "Annulation impossible"); return; }
-      toast.success(`Entrée marchandise #${receipt.docNum} annulée — stock sorti`);
+      toast.success(`Entrée marchandise n°${receipt.docNum} annulée — stock sorti`);
       setCancelConfirm(false);
       await onModified?.();
     } catch (e) { toast.error((e as Error).message); }
@@ -782,7 +782,7 @@ function ReceiptDetail({
       const j = await res.json();
       if (!res.ok || j.ok === false) throw new Error(j.error || "Échec");
       onNumAtCardChange(receipt.docEntry, next);
-      toast.success(`N° BL enregistré sur l'entrée #${receipt.docNum}`);
+      toast.success(`N° BL enregistré sur l'entrée n°${receipt.docNum}`);
     } catch (e) {
       toast.error(`Échec de l'enregistrement du N° BL : ${e instanceof Error ? e.message : ""}`);
     } finally {
@@ -829,7 +829,7 @@ function ReceiptDetail({
           <Ban className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
             <b>Document d&apos;annulation</b>
-            {receipt.cancelsDocNum ? <> de la réception <span className="font-mono"># {receipt.cancelsDocNum}</span></> : null} —
+            {receipt.cancelsDocNum ? <> de la réception <span className="font-mono">n° {receipt.cancelsDocNum}</span></> : null} —
             il inverse le stock entré. Ce n&apos;est pas une nouvelle entrée.
           </span>
         </div>
@@ -839,7 +839,7 @@ function ReceiptDetail({
           <Ban className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
             <b>Réception annulée</b>
-            {receipt.cancelledByDocNum ? <> par l&apos;annulation <span className="font-mono"># {receipt.cancelledByDocNum}</span></> : null} —
+            {receipt.cancelledByDocNum ? <> par l&apos;annulation <span className="font-mono">n° {receipt.cancelledByDocNum}</span></> : null} —
             le stock entré a été ressorti.
           </span>
         </div>
@@ -1075,7 +1075,7 @@ function ReceiptDetail({
               ) : (
                 <span className="inline-flex items-center gap-2">
                   <span className="text-[13.5px] text-foreground">
-                    Annuler l&apos;entrée # {receipt.docNum} ? Le stock entré sera sorti.
+                    Annuler l&apos;entrée n° {receipt.docNum} ? Le stock entré sera sorti.
                   </span>
                   <Button variant="destructive" size="sm" onClick={cancelReceipt} disabled={cancelling}>
                     {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Confirmer
@@ -1102,7 +1102,7 @@ function ReceiptDetail({
         <div className="rounded-xl border border-sky-400/50 bg-sky-50/60 dark:bg-sky-950/20 p-3 space-y-2.5">
           <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground">
             <Undo2 className="h-4 w-4 text-sky-600 dark:text-sky-400" />
-            Retour fournisseur — entrée # {receipt.docNum}
+            Retour fournisseur — entrée n° {receipt.docNum}
           </div>
           <p className="text-[11.5px] text-muted-foreground">
             Choisis le nombre de colis à retourner par ligne (0 = ne pas retourner). SAP crée un

@@ -313,7 +313,7 @@ function VenteRow({ d, alerts, onOpenBL }: { d: Doc; alerts?: SafeguardViolation
       const j = await r.json().catch(() => null);
       if (!r.ok || j?.ok === false) throw new Error(j?.error || "Échec");
       savedRef.current = v;
-      toast.success(`N° commande enregistré — BL #${d.docNum}`);
+      toast.success(`N° commande enregistré — BL n°${d.docNum}`);
     } catch (e) {
       toast.error(`N° commande non enregistré : ${e instanceof Error ? e.message : ""}`);
       setNum(savedRef.current);
@@ -335,7 +335,7 @@ function VenteRow({ d, alerts, onOpenBL }: { d: Doc; alerts?: SafeguardViolation
         tabIndex={0}
         onClick={() => setDetailOpen(true)}
         onKeyDown={(e) => { if (e.key === "Enter") setDetailOpen(true); }}
-        title={`Voir le détail du BL #${d.docNum}`}
+        title={`Voir le détail du BL n°${d.docNum}`}
       >
         <p className="flex items-center gap-2 min-w-0 text-[13.5px] font-semibold text-foreground">
           <button
@@ -369,7 +369,7 @@ function VenteRow({ d, alerts, onOpenBL }: { d: Doc; alerts?: SafeguardViolation
           )}
         </p>
         <p className="text-[11px] text-muted-foreground flex items-center gap-x-2 gap-y-0.5 flex-wrap">
-          <span>BL # {d.docNum}</span>
+          <span>BL n° {d.docNum}</span>
           {takenTime && <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" /> Prise {takenTime}</span>}
           <span className="inline-flex items-center gap-1"><CalendarDays className="h-3 w-3" /> Livr. {shortDate(d.dueDate)}</span>
           <span>{d.colis.toLocaleString("fr-FR")} colis</span>

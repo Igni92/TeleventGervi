@@ -116,7 +116,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
       );
       totals = { totalTTC: r.DocTotal ?? null, totalHT: (r.DocTotal ?? 0) - (r.VatSum ?? 0) };
     } catch { /* non bloquant */ }
-    await writeAudit({ session, action: "PO_MODIF", entity: "PurchaseOrder", entityId: String(docEntry), summary: `Modification commande fournisseur #${po.DocNum}`, details: { docNum: po.DocNum, totalLines: DocumentLines.length, ...totals } });
+    await writeAudit({ session, action: "PO_MODIF", entity: "PurchaseOrder", entityId: String(docEntry), summary: `Modification commande fournisseur n°${po.DocNum}`, details: { docNum: po.DocNum, totalLines: DocumentLines.length, ...totals } });
     return NextResponse.json({ ok: true, docEntry, docNum: po.DocNum, totalLines: DocumentLines.length, ...totals });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

@@ -474,7 +474,7 @@ export async function POST(req: NextRequest) {
         await sap.patch(`Orders(${ord.DocEntry})`, { DocumentLines: patchLines });
         retroPatchCount += patchLines.length;
         retroDebits.push(...orderDebits); // débit seulement après PATCH réussi
-        console.log(`[GoodsReceipt] Retro lot ${lotCode} → Order #${ord.DocNum} (${patchLines.length} ligne(s))`);
+        console.log(`[GoodsReceipt] Retro lot ${lotCode} → Order n°${ord.DocNum} (${patchLines.length} ligne(s))`);
       }
     }
     // Débit registre des ventes à découvert désormais servies par ce lot.
@@ -536,7 +536,7 @@ export async function POST(req: NextRequest) {
         await sap.patch(`InventoryGenExits(${exit.DocEntry})`, { DocumentLines: patchLines });
         retroFabricationCount += patchLines.length;
         retroFabDebits.push(...exitDebits); // débit après PATCH réussi
-        console.log(`[GoodsReceipt] Retro lot ${lotCode} → InventoryGenExit #${exit.DocNum} (${patchLines.length} ligne(s))`);
+        console.log(`[GoodsReceipt] Retro lot ${lotCode} → InventoryGenExit n°${exit.DocNum} (${patchLines.length} ligne(s))`);
       }
     }
     // Débit registre des composants fabriqués désormais servis par ce lot.
@@ -630,9 +630,9 @@ export async function POST(req: NextRequest) {
           // Réserve le disponible pour ne pas sur-promettre une autre offre.
           for (const [code, qty] of need) availByItem.set(code, (availByItem.get(code) ?? 0) - qty);
           autoConvertCount++;
-          console.log(`[GoodsReceipt] Bon de commande #${q.DocNum} couvert → Commande #${r.docNum} (validation auto)`);
+          console.log(`[GoodsReceipt] Bon de commande n°${q.DocNum} couvert → Commande n°${r.docNum} (validation auto)`);
         } catch (e) {
-          console.warn(`[GoodsReceipt] Conversion auto de l'offre #${q.DocNum} échouée (non-bloquant):`, (e as Error).message);
+          console.warn(`[GoodsReceipt] Conversion auto de l'offre n°${q.DocNum} échouée (non-bloquant):`, (e as Error).message);
         }
       }
     }

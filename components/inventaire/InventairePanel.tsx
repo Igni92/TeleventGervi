@@ -632,7 +632,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
         const a = json.adjustment as AdjustmentDTO;
         toast.success(
           `Stock régularisé — ${a.nbSorties} sortie(s) / ${a.nbEntrees} entrée(s)` +
-          `${a.sapExitDocNum ? ` · sortie #${a.sapExitDocNum}` : ""}${a.sapEntryDocNum ? ` · entrée #${a.sapEntryDocNum}` : ""}.`,
+          `${a.sapExitDocNum ? ` · sortie n°${a.sapExitDocNum}` : ""}${a.sapEntryDocNum ? ` · entrée n°${a.sapEntryDocNum}` : ""}.`,
           { duration: 9000 },
         );
         closeAdjust();

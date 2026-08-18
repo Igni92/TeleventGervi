@@ -516,7 +516,7 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
           duration: 10000,
         });
       } else {
-        toast.success(`Commande #${json.docNum} créée`, {
+        toast.success(`Commande n°${json.docNum} créée`, {
           description: json.totalTTC != null ? `${json.totalTTC.toFixed(2)} € TTC` : undefined,
           duration: 10000,
         });

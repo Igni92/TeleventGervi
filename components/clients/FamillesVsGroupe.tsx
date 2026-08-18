@@ -85,7 +85,7 @@ export function FamillesVsGroupe({ clientId }: { clientId: string }) {
           <Users className="h-3.5 w-3.5 opacity-70" />
           Groupe{" "}
           <span className="text-foreground font-medium">
-            {data.sapGroupName ?? `#${data.sapGroupCode ?? "—"}`}
+            {data.sapGroupName ?? `n°${data.sapGroupCode ?? "—"}`}
           </span>
           <span className="opacity-60">· {data.groupSize} pair{data.groupSize > 1 ? "s" : ""}</span>
         </span>

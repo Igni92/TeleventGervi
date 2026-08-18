@@ -124,7 +124,7 @@ export function BLViewDialog({
       });
       const j = await r.json().catch(() => null);
       if (!r.ok || j?.ok === false) throw new Error(j?.error || "Échec de l'enregistrement");
-      toast.success(`BL #${docNum} enregistré.`);
+      toast.success(`BL n°${docNum} enregistré.`);
       setEditing(false);
       onSaved?.();
       await load();

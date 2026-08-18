@@ -360,7 +360,7 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
   // ── 2. SAP InventoryGenEntries — entrée du parent dans SON magasin ──
   const entryPayload = {
     DocDate: today,
-    Comments: `${opCode} — Fabrication ${body.parentColis} colis ${parentCode} (entrée parent, exit#${exitDoc.DocNum})`,
+    Comments: `${opCode} — Fabrication ${body.parentColis} colis ${parentCode} (entrée parent, exit n°${exitDoc.DocNum})`,
     DocumentLines: [{
       ItemCode: parentCode,
       Quantity: parentPieceQty,
@@ -378,10 +378,10 @@ async function assemblyV2(body: V2Body, session: Session, admin: boolean) {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     console.error(`[Assembly v2] ❌ ${opCode} InventoryGenEntries FAIL après Exit OK:`, message);
-    await failRun(`Entrée parent échouée APRÈS sortie composants OK (exit#${exitDoc.DocNum}). Corrige dans SAP. ${message}`);
+    await failRun(`Entrée parent échouée APRÈS sortie composants OK (exit n°${exitDoc.DocNum}). Corrige dans SAP. ${message}`);
     return NextResponse.json({
       ok: false,
-      error: `Entrée parent échouée APRÈS sortie composants OK (exit#${exitDoc.DocNum}). Corrige manuellement dans SAP. Détail: ${message}`,
+      error: `Entrée parent échouée APRÈS sortie composants OK (exit n°${exitDoc.DocNum}). Corrige manuellement dans SAP. Détail: ${message}`,
     }, { status: 500 });
   }
 
@@ -555,7 +555,7 @@ async function assemblyLegacy(body: LegacyBody, session: Session, admin: boolean
   // ── SAP InventoryGenEntries : entrée parent ──
   const entryPayload = {
     DocDate: today,
-    Comments: `${opCode} — Fabrication ${body.packageQuantity} colis ${parentCode} (entrée parent, exit#${exitDoc.DocNum})`,
+    Comments: `${opCode} — Fabrication ${body.packageQuantity} colis ${parentCode} (entrée parent, exit n°${exitDoc.DocNum})`,
     DocumentLines: [{
       ItemCode: parentCode,
       Quantity: parentPieceQty,
@@ -571,7 +571,7 @@ async function assemblyLegacy(body: LegacyBody, session: Session, admin: boolean
     console.error("[Assembly] ❌ InventoryGenEntries FAIL après Exit OK:", message);
     return NextResponse.json({
       ok: false,
-      error: `Entrée parent échouée APRÈS sortie composants OK (exit#${exitDoc.DocNum}). Corrige manuellement dans SAP. Détail: ${message}`,
+      error: `Entrée parent échouée APRÈS sortie composants OK (exit n°${exitDoc.DocNum}). Corrige manuellement dans SAP. Détail: ${message}`,
     }, { status: 500 });
   }
 

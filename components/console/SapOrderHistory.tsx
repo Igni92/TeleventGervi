@@ -123,7 +123,7 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
       });
       const j = await res.json();
       if (!res.ok || j.ok === false) throw new Error(j.error || "Échec");
-      toast.success(`BL #${o.docNum} modifié`);
+      toast.success(`BL n°${o.docNum} modifié`);
       setOrders((cur) => cur.map((x) => x.docEntry === o.docEntry ? { ...x, total: j.total, totalHT: j.totalHT } : x));
       setLines((cur) => ({ ...cur, [o.docEntry]: ls.map((l) => { const d = lineDraft[`${o.docEntry}:${l.lineNum}`]; return d ? { ...l, quantity: d.quantity, price: d.price, lineTotal: d.quantity * d.price } : l; }) }));
     } catch (e) { toast.error(`Échec : ${e instanceof Error ? e.message : ""}`); }
@@ -137,7 +137,7 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
       const res = await fetch("/api/sap/orders/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ docEntry: o.docEntry }) });
       const j = await res.json(); if (!res.ok || j.ok === false) throw new Error(j.error);
       setOrders((cur) => cur.map((x) => x.docEntry === o.docEntry ? { ...x, status: "bost_Close" } : x));
-      toast.success(`BL #${o.docNum} annulé`);
+      toast.success(`BL n°${o.docNum} annulé`);
     } catch (e) { toast.error(`Échec : ${e instanceof Error ? e.message : ""}`); }
     finally { setBusy(null); }
   };
@@ -204,7 +204,7 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
             {closed ? <PackageCheck className="h-3 w-3" /> : <PackageOpen className="h-3 w-3" />}
           </span>
           <span className="min-w-0 flex-1 flex items-baseline gap-1.5">
-            <span className="text-[12.5px] font-semibold text-foreground shrink-0"># {o.docNum}</span>
+            <span className="text-[12.5px] font-semibold text-foreground shrink-0">n° {o.docNum}</span>
             <span className="text-[11px] text-muted-foreground tnum shrink-0">{fmtDate(o.docDate)}</span>
             {nbInc > 0 && (
               <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] px-1 py-px rounded bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300" title={`${nbInc} incident(s)`}>
@@ -376,7 +376,7 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
               {/* Facture liée (lecture) */}
               {showInvoice && detail.invoiceEntry && (
                 <div className="rounded-lg border border-blue-400/30 bg-blue-500/[0.04] p-3">
-                  <p className="text-[11px] uppercase tracking-wider text-blue-600 dark:text-blue-400 font-semibold mb-1.5">Facture # {detail.invoiceNum}</p>
+                  <p className="text-[11px] uppercase tracking-wider text-blue-600 dark:text-blue-400 font-semibold mb-1.5">Facture n° {detail.invoiceNum}</p>
                   {!invLines[detail.invoiceEntry] ? (
                     <p className="text-[12px] text-muted-foreground inline-flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" /> Chargement…</p>
                   ) : (
@@ -504,7 +504,7 @@ export function SapOrderHistory({ clientId }: { clientId: string }) {
             </DialogTitle>
           </DialogHeader>
           <DialogDescription className="text-[13px]">
-            Annuler définitivement le BL <b># {cancelTarget?.docNum}</b> dans SAP ? Cette action est irréversible.
+            Annuler définitivement le BL <b>n° {cancelTarget?.docNum}</b> dans SAP ? Cette action est irréversible.
           </DialogDescription>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" onClick={() => setCancelTarget(null)}>Retour</Button>

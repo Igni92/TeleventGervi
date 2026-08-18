@@ -119,7 +119,7 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
       if (dateFilter && d.docDate?.slice(0, 10) !== dateFilter) return false;
       if (!q) return true;
       const haystack = [
-        d.cardCode, d.cardName, d.numAtCard, `#${d.docNum}`, String(d.docNum),
+        d.cardCode, d.cardName, d.numAtCard, `n°${d.docNum}`, String(d.docNum),
         ...d.lines.flatMap((l) => [l.itemCode, l.itemName]),
       ];
       return haystack.some((h) => (h ?? "").toString().toLowerCase().includes(q));
@@ -146,11 +146,11 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
       if (agreage.status === "RESERVE") {
         notifyReceptionIncidentsChanged();   // badge sidebar → apparaît tout de suite
         toast.warning(
-          `Réception AVEC RÉSERVE (${agreage.type ?? "Qualité"}) — entrée marchandise #${j.docNum} créée (lot ${j.lot}), incident de réception ouvert`,
+          `Réception AVEC RÉSERVE (${agreage.type ?? "Qualité"}) — entrée marchandise n°${j.docNum} créée (lot ${j.lot}), incident de réception ouvert`,
           { duration: 10000 },
         );
       } else {
-        toast.success(`Réception agréée conforme — entrée marchandise #${j.docNum} créée (lot ${j.lot})`, { duration: 9000 });
+        toast.success(`Réception agréée conforme — entrée marchandise n°${j.docNum} créée (lot ${j.lot})`, { duration: 9000 });
       }
       setLargeEntry(null);
       await load();
@@ -291,7 +291,7 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
                     onClick={() => setLargeEntry(d.docEntry)}
                     className="border-t border-border/60 hover:bg-secondary/30 cursor-pointer transition-colors"
                   >
-                    <td className="px-3 py-2.5 font-mono font-semibold"># {d.docNum}</td>
+                    <td className="px-3 py-2.5 font-mono font-semibold">n° {d.docNum}</td>
                     <td className="px-3 py-2.5">
                       {/* Le NOM d'abord ; le technique (code SAP, date/heure de prise,
                           réf., nb lignes) derrière le « ? ». */}
@@ -327,7 +327,7 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
         subtitle={
           largeDoc ? (
             <span className="inline-flex items-center gap-2 flex-wrap">
-              <span className="font-mono">CF # {largeDoc.docNum}</span>
+              <span className="font-mono">CF n° {largeDoc.docNum}</span>
               <span className="tnum">· Livraison {fmtDate(largeDoc.dueDate)}</span>
               {isDue(largeDoc) ? <DueBadge /> : <StatusBadge open={largeDoc.open} cancelled={largeDoc.cancelled} />}
             </span>
@@ -400,7 +400,7 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
       });
       const j = await res.json();
       if (!res.ok || !j.ok) { toast.error(j.error || "Annulation impossible"); return; }
-      toast.success(`Commande fournisseur #${po.docNum} annulée`);
+      toast.success(`Commande fournisseur n°${po.docNum} annulée`);
       setCancelConfirm(false);
       await onModified();
     } catch (e) { toast.error((e as Error).message); }
@@ -462,7 +462,7 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
       });
       const j = await res.json();
       if (!res.ok || !j.ok) { toast.error(j.error || "Erreur SAP"); return; }
-      toast.success(`Commande #${po.docNum} modifiée`);
+      toast.success(`Commande n°${po.docNum} modifiée`);
       setEditing(false);
       await onModified();
     } catch (e) { toast.error((e as Error).message); }
@@ -629,7 +629,7 @@ function PoDetail({ po, onReceive, receiving, onModified, restricted = false }: 
             </Button>
           ) : (
             <div className="inline-flex items-center gap-2">
-              <span className="text-[12.5px] text-foreground">Annuler la commande # {po.docNum} ?</span>
+              <span className="text-[12.5px] text-foreground">Annuler la commande n° {po.docNum} ?</span>
               <Button variant="destructive" size="sm" onClick={cancelOrder} disabled={cancelling}>
                 {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />} Confirmer
               </Button>

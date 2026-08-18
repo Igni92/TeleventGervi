@@ -251,7 +251,7 @@ export async function POST(req: NextRequest) {
         await sap.patch(`Orders(${ord.DocEntry})`, { DocumentLines: patchLines });
         retroPatchCount += patchLines.length;
         retroDebits.push(...orderDebits);                          // débit registre APRÈS PATCH réussi
-        console.log(`[POReceive] Retro lot ${lotCode} → Order #${ord.DocNum} (${patchLines.length} ligne(s))`);
+        console.log(`[POReceive] Retro lot ${lotCode} → Order n°${ord.DocNum} (${patchLines.length} ligne(s))`);
       }
     }
     if (retroDebits.length > 0) {
@@ -299,7 +299,7 @@ export async function POST(req: NextRequest) {
         await sap.patch(`InventoryGenExits(${exit.DocEntry})`, { DocumentLines: patchLines });
         retroFabricationCount += patchLines.length;
         retroFabDebits.push(...exitDebits);
-        console.log(`[POReceive] Retro lot ${lotCode} → InventoryGenExit #${exit.DocNum} (${patchLines.length} ligne(s))`);
+        console.log(`[POReceive] Retro lot ${lotCode} → InventoryGenExit n°${exit.DocNum} (${patchLines.length} ligne(s))`);
       }
     }
     if (retroFabDebits.length > 0) {

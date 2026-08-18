@@ -190,7 +190,7 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
       const j = await res.json();
       if (!res.ok || !j.ok) { toast.error(j.error || "Erreur SAP"); return; }
       toast.success(`${j.opCode} · Fabriqué ${parentColis} colis ${recipe.parentItemCode}`, {
-        description: `Sortie #${j.sapExitDocNum} · Entrée #${j.sapEntryDocNum} → ${entryWhs} · Coût ${j.totalCost.toFixed(2)} €`,
+        description: `Sortie n°${j.sapExitDocNum} · Entrée n°${j.sapEntryDocNum} → ${entryWhs} · Coût ${j.totalCost.toFixed(2)} €`,
         duration: 10000,
       });
       setLastResult({ opCode: j.opCode, exit: j.sapExitDocNum, entry: j.sapEntryDocNum, cost: j.totalCost });
@@ -209,7 +209,7 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
       {lastResult && (
         <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[13px] text-emerald-700 dark:text-emerald-300 mb-4">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>{lastResult.opCode} · Sortie # {lastResult.exit} · Entrée # {lastResult.entry} · Coût {lastResult.cost.toFixed(2)} €</span>
+          <span>{lastResult.opCode} · Sortie n° {lastResult.exit} · Entrée n° {lastResult.entry} · Coût {lastResult.cost.toFixed(2)} €</span>
         </div>
       )}
 
