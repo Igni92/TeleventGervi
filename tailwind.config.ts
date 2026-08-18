@@ -7,6 +7,9 @@ const config: Config = {
     "./components/**/*.{ts,tsx}",
     "./app/**/*.{ts,tsx}",
     "./src/**/*.{ts,tsx}",
+    // lib/ héberge des classes utilitaires partagées (ex. SEGMENT_BADGE de
+    // lib/segments.ts) : sans ce glob, le JIT ne génère pas ces classes.
+    "./lib/**/*.{ts,tsx}",
   ],
   prefix: "",
   theme: {
@@ -23,10 +26,26 @@ const config: Config = {
       screens: {
         xs: "380px",
       },
+      // Pile SYSTÈME partout (SF sur Apple, sinon Inter auto-hébergée puis
+      // Segoe/Roboto). Space Grotesk est RETIRÉE : `display` = MÊME pile — la
+      // classe .font-display garde son sens (graisse 700 + interlettrage
+      // resserré, cf. globals.css), seule la famille change.
       fontFamily: {
-        sans:    ["var(--font-inter)", "Inter", "system-ui", "sans-serif"],
-        display: ["var(--font-display)", "var(--font-inter)", "system-ui", "sans-serif"],
+        sans:    ["-apple-system", "BlinkMacSystemFont", "SF Pro Text", "var(--font-inter)", "Segoe UI", "Roboto", "system-ui", "sans-serif"],
+        display: ["-apple-system", "BlinkMacSystemFont", "SF Pro Text", "var(--font-inter)", "Segoe UI", "Roboto", "system-ui", "sans-serif"],
         mono:    ["JetBrains Mono", "Fira Code", "ui-monospace", "monospace"],
+      },
+      // Rampe typographique nommée (la SEULE autorisée pour le nouveau code ;
+      // les tailles Tailwind par défaut restent dispo pour l'existant).
+      // Plus c'est gros, plus l'interlettrage se resserre — c'est la rampe iOS.
+      fontSize: {
+        caption2: ["11px", { lineHeight: "14px" }],
+        caption:  ["12px", { lineHeight: "16px" }],
+        body:     ["13px", { lineHeight: "19px", letterSpacing: "-0.01em" }],
+        callout:  ["15px", { lineHeight: "22px", letterSpacing: "-0.01em" }],
+        title3:   ["17px", { lineHeight: "23px", letterSpacing: "-0.018em" }],
+        title2:   ["22px", { lineHeight: "28px", letterSpacing: "-0.022em" }],
+        title1:   ["28px", { lineHeight: "32px", letterSpacing: "-0.026em" }],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -84,12 +103,25 @@ const config: Config = {
           950: "hsl(var(--brand-950) / <alpha-value>)",
         },
       },
+      // RAYONS : 4 crans seulement (6/10/14/20 px, cf. --r-xs..lg de
+      // globals.css). Les rounded-* existants du code se re-calent d'un coup
+      // sur cette grille ; `sm` est aligné sur le cran xs pour ne laisser
+      // aucun rayon hors échelle.
       borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
-        "2xl": "1rem",
-        "3xl": "1.25rem",
+        sm:    "6px",
+        md:    "6px",
+        lg:    "10px",
+        xl:    "14px",
+        "2xl": "20px",
+        "3xl": "20px",
+      },
+      // Ombres = tokens (contour 0.5px + ombre NEUTRE, jamais teintée) —
+      // définies dans globals.css, basculent seules clair/sombre.
+      boxShadow: {
+        card:         "var(--shadow-card)",
+        "card-hover": "var(--shadow-card-hover)",
+        nav:          "var(--shadow-nav)",
+        modal:        "var(--shadow-modal)",
       },
       keyframes: {
         "accordion-down": {

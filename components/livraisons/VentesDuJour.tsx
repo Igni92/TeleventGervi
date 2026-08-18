@@ -24,6 +24,8 @@ import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { broadcastActiveClient } from "@/lib/consoleSync";
 import { BLViewDialog } from "@/components/livraisons/BLViewDialog";
 import type { ApiResp, Doc } from "@/lib/livraisonView";
+// Couleurs de segment : source unique du design system (GMS teal · CHR amber · EXPORT violet).
+import { SEGMENT_BADGE } from "@/lib/segments";
 import type { SafeguardViolation } from "@/lib/safeguards";
 
 /** Date murale Europe/Paris (le poste peut être ailleurs) — « aujourd'hui » métier. */
@@ -57,12 +59,6 @@ function venteHeaderLabel(iso: string): string {
 const eur = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 const eur2 = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-/** Même palette de segments que le Détail livraison (SEG_UI de LivraisonDetail). */
-const SEGMENT_BADGE: Record<string, string> = {
-  CHR: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
-  EXPORT: "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300",
-  GMS: "bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300",
-};
 
 interface Group { key: string; name: string; docs: Doc[] }
 

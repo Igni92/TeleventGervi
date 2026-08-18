@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
  *
  * Remplace les 4 patterns concurrents de <h1> (26/28/32/34px, semibold/bold/
  * light, avec/sans font-display) par une seule voix : titre héros en
- * font-display (Space Grotesk), BLANC, grand. L'explication de la page
+ * font-display (pile système, graisse 700), grand. L'explication de la page
  * (ancien sous-titre gris `hidden md:block`) passe derrière un « ? » cerclé —
  * visible au survol sur desktop, supprimée sur mobile.
  *

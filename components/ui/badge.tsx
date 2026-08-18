@@ -1,31 +1,28 @@
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
+import { SEGMENT_BADGE } from "@/lib/segments";
 import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
-  "app-badge inline-flex items-center rounded-md px-2 py-0.5 text-[11.5px] font-semibold tracking-wide transition-colors",
+  // Pilule translucide : fond /12 + liseré /25, lisible clair/sombre.
+  "inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition-colors",
   {
     variants: {
-      // Teintes TRANSLUCIDES (fond /12 + texte 700/300) : lisibles sur papier
-      // chaud comme sur charcoal — l'ancien jeu `-50/-700` était illisible en
-      // mode sombre (aucune variante dark).
       variant: {
         default:
-          "bg-brand-500/12 text-brand-700 ring-1 ring-brand-500/25 dark:text-brand-300",
+          "bg-brand-500/12 text-brand-700 dark:text-brand-300 ring-1 ring-brand-500/25",
         secondary:
           "bg-secondary text-muted-foreground ring-1 ring-border",
         destructive:
-          "bg-rose-500/12 text-rose-700 ring-1 ring-rose-500/25 dark:text-rose-300",
+          "bg-destructive/12 text-destructive ring-1 ring-destructive/25",
         outline:
           "text-muted-foreground ring-1 ring-border",
-        // Types client
-        export:
-          "bg-sky-500/12 text-sky-700 ring-1 ring-sky-500/25 dark:text-sky-300",
-        gms:
-          "bg-orange-500/12 text-orange-700 ring-1 ring-orange-500/25 dark:text-orange-300",
-        chr:
-          "bg-emerald-500/12 text-emerald-700 ring-1 ring-emerald-500/25 dark:text-emerald-300",
-        // Statuts rappel — tokens sémantiques (basculent seuls clair/sombre)
+        // Types client — couleurs canoniques importées de lib/segments.ts
+        // (vérité unique) : GMS = teal · CHR = amber · EXPORT = violet.
+        export: SEGMENT_BADGE.EXPORT,
+        gms:    SEGMENT_BADGE.GMS,
+        chr:    SEGMENT_BADGE.CHR,
+        // Statuts rappel — tokens sémantiques (basculent seuls clair/sombre).
         planifie:
           "bg-warning/12 text-warning ring-1 ring-warning/25",
         fait:
@@ -41,12 +38,12 @@ const badgeVariants = cva(
 );
 
 export interface BadgeProps
-  extends React.HTMLAttributes<HTMLDivElement>,
+  extends React.HTMLAttributes<HTMLSpanElement>,
     VariantProps<typeof badgeVariants> {}
 
 function Badge({ className, variant, ...props }: BadgeProps) {
   return (
-    <div className={cn(badgeVariants({ variant }), className)} {...props} />
+    <span className={cn(badgeVariants({ variant }), className)} {...props} />
   );
 }
 

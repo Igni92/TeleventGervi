@@ -23,6 +23,7 @@ import {
 } from "@/lib/useConsoleShortcuts";
 import { HabitudesBanner } from "@/components/console/HabitudesBanner";
 import { broadcastActiveClient } from "@/lib/consoleSync";
+import { segmentBadgeClass } from "@/lib/segments";
 import { displayNameFromSlp, SALESPEOPLE } from "@/lib/salespeople";
 import { loadCallNote, saveCallNote, clearCallNote } from "@/lib/callNoteStorage";
 import { loadFavPhone, saveFavPhone, type PhoneKey } from "@/lib/favPhoneStorage";
@@ -812,11 +813,7 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
                               {c.nom}
                             </p>
                             {c.type && (
-                              <span className={`shrink-0 text-[9px] font-bold tracking-wider px-1.5 py-px rounded leading-tight ${
-                                c.type === "EXPORT" ? "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" :
-                                c.type === "GMS"    ? "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" :
-                                                      "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
-                              }`}>
+                              <span className={`shrink-0 text-[9px] font-bold tracking-wider px-1.5 py-px rounded leading-tight ${segmentBadgeClass(c.type)}`}>
                                 {c.type}
                               </span>
                             )}
@@ -1361,11 +1358,7 @@ const QueueRow = React.memo(function QueueRow({
             </span>
           ) : null}
           {client.type && (
-            <span className={`ml-auto shrink-0 text-[9px] font-bold tracking-wider px-1.5 py-px rounded leading-tight ${
-              client.type === "EXPORT" ? "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" :
-              client.type === "GMS"    ? "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" :
-                                         "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
-            }`}>
+            <span className={`ml-auto shrink-0 text-[9px] font-bold tracking-wider px-1.5 py-px rounded leading-tight ${segmentBadgeClass(client.type)}`}>
               {client.type}
             </span>
           )}
@@ -1610,11 +1603,7 @@ function ActiveClient({
             <ArrowUpRight className="h-4 w-4 shrink-0 self-center opacity-0 transition-opacity group-hover/name:opacity-70" aria-hidden />
           </Link>
           {client.type && (
-            <span className={`text-[10px] font-bold tracking-[0.14em] uppercase px-1.5 py-0.5 rounded ${
-              client.type === "EXPORT" ? "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" :
-              client.type === "GMS"    ? "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" :
-                                         "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
-            }`}>
+            <span className={`text-[10px] font-bold tracking-[0.14em] uppercase px-1.5 py-0.5 rounded ${segmentBadgeClass(client.type)}`}>
               {client.type}
             </span>
           )}

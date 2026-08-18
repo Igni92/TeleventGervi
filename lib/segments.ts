@@ -182,3 +182,25 @@ export function isComptoirClient(opts: {
   if (t === "GMS" || t === "CHR" || t === "EXPORT") return false;
   return true;
 }
+
+// ── Badges de segment — VÉRITÉ UNIQUE du design system ──────────────────
+// GMS = teal · CHR = amber · EXPORT = violet, style translucide (fond /12,
+// texte 700 en clair / 300 en sombre, liseré /25) : lisible sur les deux
+// modes sans variante dédiée. Clés en MAJUSCULES (valeurs `type` client).
+// Classes COMPLÈTES (pas de template string) : le JIT Tailwind ne génère
+// que ce qu'il lit littéralement dans les sources.
+export const SEGMENT_BADGE: Record<string, string> = {
+  GMS: "bg-teal-500/12 text-teal-700 dark:text-teal-300 ring-1 ring-teal-500/25",
+  CHR: "bg-amber-500/12 text-amber-700 dark:text-amber-300 ring-1 ring-amber-500/25",
+  EXPORT: "bg-violet-500/12 text-violet-700 dark:text-violet-300 ring-1 ring-violet-500/25",
+};
+
+/**
+ * Classes de badge d'un segment (insensible à la casse) — repli NEUTRE pour
+ * tout segment hors GMS/CHR/EXPORT (Rungis, comptoir, inconnu…).
+ */
+export function segmentBadgeClass(seg: string): string {
+  // `?? ""` : blindage runtime — des `type` client typés string arrivent
+  // parfois null depuis le miroir SAP.
+  return SEGMENT_BADGE[(seg ?? "").trim().toUpperCase()] ?? "bg-secondary text-muted-foreground";
+}

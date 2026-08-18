@@ -13,7 +13,7 @@ import {
 import { composePriceLabel, fmtPrix, storeTypeLabel } from "@/components/promos/promo-utils";
 import { designationProduit } from "@/lib/produit-designation";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
-import { useIsApple } from "@/lib/useSkin";
+import { SEGMENT_BADGE } from "@/lib/segments";
 
 /**
  * Gestion des promos articles (C2) — liste + création + désactivation/suppression.
@@ -80,7 +80,6 @@ function fmtDate(s: string | null | undefined): string | null {
 }
 
 export function PromosManager() {
-  const isApple = useIsApple();
   const [promos, setPromos] = useState<Promo[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
@@ -168,17 +167,16 @@ export function PromosManager() {
             });
             // Cible magasin : uniquement affichée si RESTREINTE (Export/GMS/CHR) —
             // « tous les magasins » (storeType vide) ne porte plus de badge.
-            const storeChip = p.storeType === "EXPORT" ? "bg-violet-500/20 text-violet-300 ring-violet-400/40"
-              : p.storeType === "GMS" ? "bg-blue-500/20 text-blue-300 ring-blue-400/40"
-              : p.storeType === "CHR" ? "bg-emerald-500/20 text-emerald-300 ring-emerald-400/40"
-              : null;
+            const storeChip = p.storeType ? SEGMENT_BADGE[p.storeType] ?? null : null;
             return (
               // Bloc fond NOIR PUR par promo — encre blanche pour rester lisible
               // quel que soit le thème clair/sombre de l'appli. `dark` forcé
               // (Tailwind darkMode:"class") pour que les composants partagés
               // (chips) prennent leur variante contrastée sur fond noir, même
               // si le thème global de l'appli est resté clair.
-              <li key={p.id} className={`rounded-xl p-3.5 ${isApple ? "border border-border bg-card" : "dark bg-black"} ${active ? "" : "opacity-55"}`}>
+              // (l'ancienne variante liée au skin "apple" posait bg-card sous
+              // cette encre blanche — retirée avec le système de skins)
+              <li key={p.id} className={`rounded-xl p-3.5 dark bg-black ${active ? "" : "opacity-55"}`}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     {/* Article — même décomposition que les autres écrans (Cde
@@ -198,7 +196,7 @@ export function PromosManager() {
                       {storeChip && (
                         <span
                           title={`S'applique aux magasins : ${storeTypeLabel(p.storeType)}`}
-                          className={`inline-flex items-center gap-1 h-[19px] px-1.5 rounded-[4px] text-[10.5px] font-bold uppercase tracking-wide ring-1 ring-inset ${storeChip}`}>
+                          className={`inline-flex items-center gap-1 h-[19px] px-1.5 rounded-[4px] text-[10.5px] font-bold uppercase tracking-wide ${storeChip}`}>
                           <Store className="h-2.5 w-2.5" />
                           {storeTypeLabel(p.storeType)}
                         </span>

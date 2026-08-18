@@ -21,6 +21,7 @@ import { BrandLogo } from "@/components/BrandLogo";
 import { useBrandLogos } from "@/lib/useBrandLogos";
 import { designationProduit } from "@/lib/produit-designation";
 import { displayPersonName } from "@/lib/userNames";
+import { segmentBadgeClass } from "@/lib/segments";
 import {
   buildFamilies, sapInfo, ecartOf, fmt, fmtDate, fruitEmoji, productTile, MAX_PHOTOS,
   type Product, type DraftPhoto,
@@ -85,13 +86,6 @@ type Mode = "home" | "count" | "recap";
 type Scope = { products: Product[]; label: string; startIndex: number };
 /** Ligne du récap (produit en stock, ligne orpheline d'une correction, ou article ajouté). */
 type RecapRow = { itemCode: string; itemName: string; sapQty: number; real: number; unit: string; ecart: number; emoji: string; orphan: boolean; extra: boolean };
-
-/** Pastille de segment client (GMS / CHR / EXPORT) — couleurs distinctes. */
-const SEG_BADGE: Record<string, string> = {
-  GMS: "bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300",
-  CHR: "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300",
-  EXPORT: "bg-teal-100 text-teal-700 dark:bg-teal-500/20 dark:text-teal-300",
-};
 
 const DRAFT_KEY = "tv-inv-draft-v2";
 const PHOTOS_KEY = "tv-inv-photos-v2";
@@ -1282,7 +1276,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                           <span className="min-w-0 flex-1">
                             <span className="flex items-center gap-1.5">
                               <span className="truncate text-[12.5px] font-medium text-foreground">{o.cardName}</span>
-                              <span className={`shrink-0 rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide ${SEG_BADGE[o.segment] ?? "bg-muted text-muted-foreground"}`}>
+                              <span className={`shrink-0 rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide ${segmentBadgeClass(o.segment)}`}>
                                 {o.segment}
                               </span>
                             </span>

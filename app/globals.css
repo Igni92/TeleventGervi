@@ -3,49 +3,55 @@
 @tailwind utilities;
 
 /* ═══════════════════════════════════════════════════════════
-   LIGHT MODE — Design tokens
+   TOKENS — mode jour
 ═══════════════════════════════════════════════════════════ */
 @layer base {
   :root {
-    /* MODE JOUR « papier chaud » — fini le blanc clinique : canvas ivoire-greige
-       teinté marque (Or), CARTES blanc cassé qui se détachent nettement, bordures
-       et gris textuels assombris (contraste ↑). Même ADN que le mode sombre :
-       le fond a une matière, les données vivent sur des surfaces claires. */
-    /* MODE JOUR — GRIS NEUTRE (plus lisible que l'ancien cream) : canvas gris doux
-       nettement distinct des CARTES blanches, textes assombris (contraste ↑,
-       « plus de noir »), bordures plus marquées. */
-    --background:        220 15% 89%;          /* gris doux — se détache du blanc */
-    --foreground:        222 47% 6%;           /* quasi-noir */
-    --card:              0 0% 100%;            /* cartes BLANCHES → contraste net */
-    --card-foreground:   222 47% 6%;
+    /* Palette système neutre : canvas gris groupé très clair, cartes
+       blanches, gris froids. L'accent reste l'OR de la marque — c'est
+       l'identité Gervifrais, pas une décision d'interface. */
+    --background:        240 20% 97%;          /* systemGroupedBackground */
+    --foreground:        240 6% 9%;            /* label */
+    --card:              0 0% 100%;
+    --card-foreground:   240 6% 9%;
     --popover:           0 0% 100%;
-    --popover-foreground:222 47% 6%;
-    --primary:           42 95% 44%;          /* or profond — lisible sur clair */
-    --primary-foreground: 222 45% 9%;          /* texte SOMBRE sur l'or clair (AA ≥ 4,5:1, cf. agrume/fraise) */
-    --secondary:         220 15% 92%;
-    --secondary-foreground: 222 47% 6%;
-    --muted:             220 15% 92%;
-    --muted-foreground:  220 14% 30%;          /* gris FONCÉ — texte secondaire lisible */
-    --accent:            220 15% 92%;
-    --accent-foreground: 222 47% 6%;
-    --destructive:       0 72% 46%;
+    --popover-foreground:240 6% 9%;
+    --primary:           42 92% 44%;           /* or Gervifrais — UNIQUE accent */
+    --primary-foreground: 240 8% 12%;          /* texte SOMBRE sur l'or (AA) */
+    --secondary:         240 16% 94%;
+    --secondary-foreground: 240 6% 9%;
+    --muted:             240 16% 94.5%;
+    --muted-foreground:  240 4% 46%;           /* secondaryLabel */
+    --accent:            240 16% 94%;
+    --accent-foreground: 240 6% 9%;
+    --destructive:       3 100% 47%;           /* systemRed */
     --destructive-foreground: 0 0% 100%;
-    --border:            220 14% 80%;          /* bordure plus marquée */
-    --input:             220 14% 78%;
-    --ring:              42 95% 44%;
-    --radius:            0.9rem;
+    --border:            240 10% 87%;          /* separator */
+    --input:             240 10% 84%;
+    --ring:              42 92% 44%;
+    --radius:            0.875rem;             /* 14px — cran md */
 
-    /* ── Tokens SÉMANTIQUES de statut (redesign 07/2026) ──
-       Une seule source de vérité pour « ça va / attention / info » —
-       mêmes valeurs que les accents de toasts (déjà éprouvées AA).
-       Le rouge d'erreur reste --destructive. Basculent avec .dark. */
+    /* Rayons : 4 crans seulement. */
+    --r-xs: 6px;
+    --r-sm: 10px;
+    --r-md: 14px;
+    --r-lg: 20px;
+
+    /* Mouvement : courbe de sortie douce + durées courtes. Pas de rebond. */
+    --ease-apple: cubic-bezier(0.32, 0.72, 0, 1);
+    --dur-fast: 140ms;
+    --dur-base: 240ms;
+
+    /* Filet : un demi-pixel, comme les hairlines système. */
+    --hairline: 0.5px;
+
+    /* Statuts sémantiques — une seule source de vérité, bascule avec .dark.
+       Le rouge d'erreur reste --destructive. */
     --success: 158 64% 34%;
     --warning: 32 95% 38%;
     --info:    217 85% 50%;
 
-    /* ── Échelle BRAND par défaut = OR / JAUNE (triplets HSL, pour <alpha-value>) ──
-       Surchargée par [data-theme="agrume"|"fraise"] plus bas pour changer la
-       colorimétrie à chaud. */
+    /* Échelle brand = OR (triplets HSL, pour <alpha-value>). */
     --brand-50:  55 92% 95%;
     --brand-100: 53 97% 88%;
     --brand-200: 54 97% 77%;
@@ -58,180 +64,65 @@
     --brand-900: 44 72% 14%;
     --brand-950: 43 70% 8%;
 
-    /* Shadows — neutres (gris froid) pour un mode jour gris, contraste net. */
-    --shadow-card:
-      0 0 0 1px rgba(20,24,33,0.06),
-      0 1px 3px rgba(20,24,33,0.07),
-      0 2px 10px rgba(20,24,33,0.07);
-    --shadow-card-hover:
-      0 0 0 1px rgba(20,24,33,0.09),
-      0 4px 14px rgba(20,24,33,0.12),
-      0 10px 28px rgba(20,24,33,0.10);
-    --shadow-nav:
-      0 1px 0 rgba(255,255,255,0.6),
-      0 4px 24px rgba(20,24,33,0.15);
-    --shadow-modal:
-      0 0 0 1px rgba(20,24,33,0.09),
-      0 8px 40px rgba(20,24,33,0.18),
-      0 20px 60px rgba(20,24,33,0.14);
+    /* Ombres : le contour demi-pixel fait la découpe, l'ombre fait la
+       hauteur. Toujours NEUTRES — jamais de teinte dans une ombre. */
+    --shadow-card:       0 0 0 0.5px rgba(0,0,0,0.06), 0 1px 1px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06);
+    --shadow-card-hover: 0 0 0 0.5px rgba(0,0,0,0.08), 0 8px 20px rgba(0,0,0,0.09), 0 20px 44px rgba(0,0,0,0.10);
+    --shadow-nav:        0 0 0 0.5px rgba(0,0,0,0.05), 0 1px 12px rgba(0,0,0,0.05);
+    --shadow-modal:      0 0 0 0.5px rgba(0,0,0,0.08), 0 24px 68px rgba(0,0,0,0.20), 0 48px 96px rgba(0,0,0,0.14);
   }
 
 /* ═══════════════════════════════════════════════════════════
-   DARK MODE — Premium night palette
+   TOKENS — mode nuit
 ═══════════════════════════════════════════════════════════ */
   .dark {
-    /* Charcoal anthracite (légère pointe de bleu) + jaune vif — style "Controllino" */
-    --background:        222 18% 8%;            /* ~#11141a charcoal */
-    --foreground:        210 22% 95%;           /* blanc froid */
-    --card:              220 15% 11%;           /* ~#181c23 cartes */
-    --card-foreground:   210 22% 95%;
-    --popover:           220 15% 13%;
-    --popover-foreground:210 22% 95%;
-    --primary:           47 97% 55%;            /* JAUNE VIF */
-    --primary-foreground:222 45% 9%;            /* texte sombre sur le jaune */
-    --secondary:         220 12% 16%;           /* ~#232730 */
-    --secondary-foreground: 210 22% 95%;
-    --muted:             220 12% 16%;
-    --muted-foreground:  217 11% 62%;
-    --accent:            220 12% 16%;
-    --accent-foreground: 210 22% 95%;
-    --destructive:       0 72% 56%;
+    /* Noir profond, surfaces qui montent avec l'élévation (carte < popover),
+       accent or éclairci pour rester lisible. */
+    --background:        240 6% 5%;
+    --foreground:        0 0% 98%;
+    --card:              240 6% 10.5%;
+    --card-foreground:   0 0% 98%;
+    --popover:           240 6% 14%;
+    --popover-foreground:0 0% 98%;
+    --primary:           45 96% 56%;
+    --primary-foreground:240 8% 10%;            /* texte sombre sur le jaune */
+    --secondary:         240 5% 16%;
+    --secondary-foreground: 0 0% 98%;
+    --muted:             240 5% 16%;
+    --muted-foreground:  240 5% 63%;
+    --accent:            240 5% 16%;
+    --accent-foreground: 0 0% 98%;
+    --destructive:       3 100% 62%;
     --destructive-foreground: 0 0% 100%;
-    --border:            220 11% 19%;           /* ~#2b303a */
-    --input:             220 11% 19%;
-    --ring:              47 97% 55%;
+    --border:            240 5% 20%;
+    --input:             240 5% 22%;
+    --ring:              45 96% 56%;
 
-    /* Statuts sémantiques — variantes NUIT (plus claires, lisibles sur charcoal) */
+    /* Statuts sémantiques — variantes nuit (plus claires, lisibles sur noir) */
     --success: 158 64% 52%;
     --warning: 43 96% 58%;
     --info:    213 92% 68%;
 
-    --shadow-card:
-      0 0 0 1px rgba(255,255,255,0.05),
-      0 1px 3px rgba(0,0,0,0.3),
-      0 2px 8px rgba(0,0,0,0.2);
-    --shadow-card-hover:
-      0 0 0 1px rgba(255,255,255,0.07),
-      0 4px 16px rgba(0,0,0,0.35),
-      0 8px 32px rgba(0,0,0,0.25);
-    --shadow-nav:
-      0 1px 0 rgba(255,255,255,0.04),
-      0 4px 24px rgba(0,0,0,0.5);
-    --shadow-modal:
-      0 0 0 1px rgba(255,255,255,0.06),
-      0 8px 40px rgba(0,0,0,0.5),
-      0 24px 64px rgba(0,0,0,0.4);
+    --shadow-card:       0 0 0 0.5px rgba(255,255,255,0.07), 0 1px 2px rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.5);
+    --shadow-card-hover: 0 0 0 0.5px rgba(255,255,255,0.10), 0 10px 28px rgba(0,0,0,0.62), 0 24px 52px rgba(0,0,0,0.55);
+    --shadow-nav:        0 0 0 0.5px rgba(255,255,255,0.06), 0 2px 16px rgba(0,0,0,0.65);
+    --shadow-modal:      0 0 0 0.5px rgba(255,255,255,0.10), 0 28px 76px rgba(0,0,0,0.76), 0 56px 104px rgba(0,0,0,0.62);
   }
 
-  /* ═══════════════════════════════════════════════════════════
-     ZOOM D'INTERFACE — confort visuel / accessibilité Direction.
-     `--app-zoom` (posée sur <html> par les réglages, cf. app-settings.ts)
-     agrandit TOUT le contenu applicatif, texte figé en px compris — comme un
-     zoom navigateur. Scopé à `.app-zoom-root` (wrapper du contenu dans
-     app/layout.tsx) pour NE PAS agrandir le fond d'ambiance fixe. Absent = 1.
-  ═══════════════════════════════════════════════════════════ */
+  /* ZOOM D'INTERFACE — `--app-zoom` (posée sur <html> par les réglages)
+     agrandit tout le contenu applicatif comme un zoom navigateur. Scopé à
+     .app-zoom-root (wrapper dans app/layout.tsx). Absent = 1. */
   .app-zoom-root { zoom: var(--app-zoom, 1); }
 
-  /* ═══════════════════════════════════════════════════════════
-     COLORIMÉTRIES alternatives — DÉPRÉCIÉES (marque = Or unique).
-     Le sélecteur de colorimétrie a été retiré ; plus rien ne pose `data-theme`,
-     donc ces règles n'activent jamais. Conservées inertes pour réactivation
-     éventuelle. On ne change QUE l'accent ; le fond et les couleurs sémantiques
-     restent. Placé après .dark pour l'ordre de cascade (même spécificité).
-  ═══════════════════════════════════════════════════════════ */
-
-  /* AGRUME — orange vif, énergique et appétissant (recommandé council) */
-  [data-theme="agrume"] {
-    --brand-50:  34 100% 96%;
-    --brand-100: 34 100% 92%;
-    --brand-200: 32 98% 83%;
-    --brand-300: 31 97% 72%;
-    --brand-400: 27 96% 61%;
-    --brand-500: 25 95% 53%;
-    --brand-600: 21 90% 48%;
-    --brand-700: 17 88% 40%;
-    --brand-800: 15 79% 34%;
-    --brand-900: 15 75% 28%;
-    --brand-950: 13 81% 15%;
-    --primary:            25 95% 53%;
-    --primary-foreground: 222 45% 9%;   /* texte sombre sur l'orange vif (AA) */
-    --ring:               25 95% 53%;
-  }
-
-  /* FRAISE / FRAMBOISE — rose-rouge vif, peps maximal, lié au produit phare */
-  [data-theme="fraise"] {
-    --brand-50:  356 100% 97%;
-    --brand-100: 356 100% 95%;
-    --brand-200: 353 96% 90%;
-    --brand-300: 353 96% 82%;
-    --brand-400: 351 95% 71%;
-    --brand-500: 350 89% 60%;
-    --brand-600: 347 77% 50%;
-    --brand-700: 345 83% 41%;
-    --brand-800: 343 80% 35%;
-    --brand-900: 342 75% 30%;
-    --brand-950: 343 88% 16%;
-    --primary:            350 89% 60%;
-    --primary-foreground: 222 45% 9%;   /* texte sombre sur le rose vif (council) */
-    --ring:               350 89% 60%;
-  }
-
-  /* ── SURFACES teintées par thème (dark) — pour que chaque colorimétrie soit
-        une VRAIE patte graphique différente, pas seulement un accent. On scope
-        en .dark[data-theme=…] pour ne pas casser le mode clair. ────────────── */
-
-  /* AGRUME — anthracite CHAUD (ambre / brun) */
-  .dark[data-theme="agrume"] {
-    --background:        28 26% 7%;     /* charcoal chaud */
-    --foreground:        38 30% 95%;
-    --card:              26 22% 10%;
-    --card-foreground:   38 30% 95%;
-    --popover:           26 22% 12%;
-    --secondary:         26 18% 15%;
-    --secondary-foreground: 38 25% 95%;
-    --muted:             26 18% 15%;
-    --muted-foreground:  30 14% 64%;
-    --accent:            26 18% 15%;
-    --accent-foreground: 38 25% 95%;
-    --border:            26 18% 19%;
-    --input:             26 18% 19%;
-  }
-
-  /* FRAISE — anthracite ROSÉ / bordeaux profond */
-  .dark[data-theme="fraise"] {
-    --background:        344 28% 7%;    /* charcoal bordeaux */
-    --foreground:        350 25% 96%;
-    --card:              344 22% 10%;
-    --card-foreground:   350 25% 96%;
-    --popover:           344 22% 12%;
-    --secondary:         344 18% 15%;
-    --secondary-foreground: 350 22% 96%;
-    --muted:             344 18% 15%;
-    --muted-foreground:  344 12% 66%;
-    --accent:            344 18% 15%;
-    --accent-foreground: 350 22% 96%;
-    --border:            344 20% 20%;
-    --input:             344 20% 20%;
-  }
-
-  /* Touche en mode CLAIR aussi (fond légèrement teinté) */
-  :root[data-theme="agrume"]:not(.dark) { --background: 36 60% 97%; --secondary: 34 50% 94%; --muted: 34 50% 94%; --accent: 34 50% 94%; }
-  :root[data-theme="fraise"]:not(.dark) { --background: 350 60% 98%; --secondary: 350 50% 95%; --muted: 350 50% 95%; --accent: 350 50% 95%; }
-
-  /* ═══════════════════════════════════════════════════════════
-     DENSITÉ GLOBALE — Compact / Normal / Aéré (réglée sur /parametres).
-     Pilote la taille rem RACINE : toutes les gouttières/espacements Tailwind
-     (p-, gap-, space-, m-, h-/w- en rem) de TOUTE l'app se resserrent ou
-     s'aèrent d'un coup. « normal » = défaut navigateur (16px) → AUCUN
-     changement pour l'existant. Le texte (tailles en px) reste lisible ;
-     on ne joue que sur l'air autour des éléments.
-  ═══════════════════════════════════════════════════════════ */
+  /* DENSITÉ GLOBALE — compact / normal / aéré (réglée sur /parametres).
+     Pilote le rem racine : tous les espacements Tailwind se resserrent ou
+     s'aèrent d'un coup. « normal » = défaut navigateur (16px). */
   html[data-density="compact"] { font-size: 14px; }
   html[data-density="aere"]    { font-size: 18px; }
 }
 
 /* ═══════════════════════════════════════════════════════════
-   BASE STYLES
+   BASE
 ═══════════════════════════════════════════════════════════ */
 @layer base {
   *,*::before,*::after { @apply border-border; box-sizing: border-box; }
@@ -240,60 +131,34 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
-    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    font-feature-settings: "rlig" 1, "calt" 1;
     scroll-behavior: smooth;
   }
 
   body {
     @apply bg-background text-foreground;
-    /* Mobile-first : plancher lisible 15px ; on densifie à 14px sur ≥ md (desktop). */
     font-size: 15px;
     line-height: 1.6;
+    letter-spacing: -0.01em;
     font-variant-numeric: tabular-nums;
   }
-  @media (min-width: 768px) {
-    body { font-size: 14px; }
-  }
 
-  /* ═══════════════════════════════════════════════════════════
-     MOBILE = UNE SEULE SURFACE (app pro, « on ne voit jamais le fond »).
-     Sous 640 px le fond de page PREND LA COULEUR DES PANNEAUX : plus
-     aucune distinction fond/carte — tout est plat, les sections ne sont
-     séparées que par des filets 1 px. Fonctionne en clair et en sombre
-     (var(--card) se résout selon le thème de l'élément).
-  ═══════════════════════════════════════════════════════════ */
+  /* Rampe de titres : plus c'est gros, plus l'interlettrage se resserre. */
+  h1 { letter-spacing: -0.026em; }
+  h2 { letter-spacing: -0.022em; }
+  h3 { letter-spacing: -0.018em; }
+
+  /* MOBILE = UNE SEULE SURFACE. Sous 640 px le fond de page prend la couleur
+     des panneaux : plus aucune distinction fond/carte — tout est plat, les
+     sections ne sont séparées que par des filets. */
   @media (max-width: 639.98px) {
     :root, .dark { --background: var(--card); }
   }
 
-  /* ── Subtle film-grain overlay (editorial premium feel) ── */
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 9999;
-    /* Pas de mix-blend-mode : il forçait une recomposition plein écran à chaque
-       frame de scroll (jank universel). Grain en simple overlay très léger. */
-    opacity: 0.03;
-    background-image:
-      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-  }
-  .dark body::before { opacity: 0.045; }
-  /* Mobile app pro : pas de texture décorative — surface parfaitement plate. */
-  @media (max-width: 639.98px) {
-    body::before { display: none; }
-  }
-
-  /* Sélection alignée sur l'identité jaune/or (plus d'indigo) */
-  ::selection {
-    background-color: rgba(212,160,4,0.24);
-  }
-  .dark ::selection {
-    background-color: rgba(250,204,21,0.26);
-  }
+  /* Sélection : teinte marque translucide (bascule seule clair/sombre). */
+  ::selection { background-color: hsl(var(--primary) / 0.28); }
   /* Dans les CHAMPS de saisie : surlignage BLEU (clic = sélection-remplacement,
-     repère visuel net pour la saisie rapide de commande). */
+     repère net pour la saisie rapide de commande). */
   input::selection, textarea::selection {
     background-color: rgba(37,99,235,0.40);
   }
@@ -301,102 +166,60 @@
     background-color: rgba(59,130,246,0.50);
   }
 
-  /* ── Ultra-thin scrollbar ─────────────────────────── */
+  /* Scrollbars fines — gris neutre sur tokens (bascule seule clair/sombre). */
   ::-webkit-scrollbar { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: #c8c1b0; /* gris chaud — assorti au papier du mode jour */
+    background: hsl(var(--muted-foreground) / 0.35);
     border-radius: 99px;
   }
-  .dark ::-webkit-scrollbar-thumb { background: #374151; }
-  ::-webkit-scrollbar-thumb:hover { background: #a89f89; }
-  * { scrollbar-width: thin; scrollbar-color: #c8c1b0 transparent; }
-  .dark * { scrollbar-color: #374151 transparent; }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.55); }
+  * { scrollbar-width: thin; scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent; }
 }
 
 /* ═══════════════════════════════════════════════════════════
-   DESIGN SYSTEM — Utility classes
+   CLASSES MAISON
 ═══════════════════════════════════════════════════════════ */
 @layer utilities {
 
-  /* ── Shadows via CSS vars (auto dark/light) ───────── */
-  .shadow-card       { box-shadow: var(--shadow-card); }
-  .shadow-card-hover { box-shadow: var(--shadow-card-hover); }
-  .shadow-nav        { box-shadow: var(--shadow-nav); }
-  .shadow-modal      { box-shadow: var(--shadow-modal); }
+  /* Les utilitaires shadow-card / -card-hover / -nav / -modal sont générés
+     par Tailwind (boxShadow du config) sur les mêmes tokens. */
 
-  /* ── Surface card — auto dark mode ───────────────── */
-  .surface {
+  /* Surfaces : une carte = fond carte, filet demi-pixel, rayon md, ombre
+     token. Pas de rail d'accent, pas de lueur interne. */
+  .surface,
+  .panel,
+  .surface-card {
     background-color: hsl(var(--card));
-    border-radius: 1rem;
-    border: 1px solid hsl(var(--border));
+    border: var(--hairline) solid hsl(var(--border));
+    border-radius: var(--r-md);
     box-shadow: var(--shadow-card);
   }
 
-  /* ── Glass effect ─────────────────────────────────── */
-  .glass {
-    background: rgba(255,255,255,0.03);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-  }
-  .dark .glass {
-    background: rgba(0,0,0,0.3);
-  }
-
-  /* ── Gradient text — signature or/jaune (remplace l'ancien indigo) ── */
-  .text-gradient-brand {
-    @apply bg-clip-text text-transparent;
-    background-image: linear-gradient(135deg, #facc15 0%, #a87d03 100%);
-  }
-  .dark .text-gradient-brand {
-    background-image: linear-gradient(135deg, #fde047 0%, #facc15 100%);
-  }
-
-  /* ── Shimmer skeleton ─────────────────────────────── */
+  /* Squelette : balayage shimmer (keyframes émises par le config via @apply). */
   .skeleton {
-    @apply rounded-lg overflow-hidden;
+    @apply rounded-lg overflow-hidden animate-shimmer;
     background: linear-gradient(90deg,
       hsl(var(--muted)) 0%,
       hsl(var(--border)) 50%,
       hsl(var(--muted)) 100%);
     background-size: 200% 100%;
-    animation: shimmer 1.5s ease-in-out infinite;
   }
 
-  /* ── Stagger delays ───────────────────────────────── */
-  .delay-75  { animation-delay: 75ms; }
-  .delay-100 { animation-delay: 100ms; }
-  .delay-150 { animation-delay: 150ms; }
-  .delay-200 { animation-delay: 200ms; }
-  .delay-300 { animation-delay: 300ms; }
-  .delay-400 { animation-delay: 400ms; }
-  .delay-500 { animation-delay: 500ms; }
-
-  /* ── Divider ──────────────────────────────────────── */
-  .divider { @apply h-px bg-border w-full; }
-
-  /* ── Table dark mode helpers ──────────────────────── */
-  .dark .table-row-hover:hover {
-    background-color: rgba(255,255,255,0.025);
-  }
-
-  /* ═══════════════════════════════════════════════════════════
-     EDITORIAL — display typography & decoratives
-     used to break out of the "AI dashboard template" look
-  ═══════════════════════════════════════════════════════════ */
-
-  /* Display = Space Grotesk : titres & gros chiffres. Personnalité
-     géométrique-industrielle (assortie à l'identité anthracite + jaune),
-     chiffres tabulaires conservés (KPI animés sans saut de layout). */
+  /* Display : même pile système que le corps — la classe garde son sens par
+     la graisse 700 et l'interlettrage resserré. Chiffres tabulaires (KPI
+     animés sans saut de layout), retours à la ligne équilibrés. */
   .font-display {
-    font-family: var(--font-display), var(--font-inter), system-ui, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-inter), "Segoe UI", Roboto, system-ui, sans-serif;
     font-feature-settings: "calt", "kern", "tnum";
-    letter-spacing: -0.02em;
+    font-weight: 700;
+    letter-spacing: -0.022em;
     line-height: 1;
     font-variant-numeric: tabular-nums;
+    text-wrap: balance;
   }
 
-  /* Eyebrow / kicker label */
+  /* Libellé eyebrow / kicker */
   .kicker {
     font-size: 10.5px;
     font-weight: 600;
@@ -410,7 +233,7 @@
     .kicker { display: block; }
   }
 
-  /* Hairline rule — 1px dotted-then-solid feel */
+  /* Filet horizontal fondu */
   .hairline {
     height: 1px;
     background: linear-gradient(to right,
@@ -419,119 +242,33 @@
       transparent 100%);
   }
 
-  /* Tabular numerics opt-in (already on body, but explicit on data cells) */
+  /* Chiffres tabulaires explicites (cellules de données) */
   .tnum { font-variant-numeric: tabular-nums; }
 
-  /* Texte sur un fond ACCENT clair (jaune/or brand, ambre vif). Le jaune est une
-     couleur claire : le texte doit être SOMBRE, jamais blanc — et ce, dans les
-     deux modes (le fond accent ne s'inverse pas). Méthode normalisée sur tout le
-     site : remplacer `text-white` par `text-on-accent` sur ces fonds. */
+  /* Texte sur fond ACCENT clair (or) : toujours SOMBRE, dans les deux modes. */
   .text-on-accent { color: hsl(var(--primary-foreground)); }
 
-  /* Soft-glow accent dot (used in stat lists) */
-  .dot-accent {
-    box-shadow: 0 0 0 3px hsl(var(--background)),
-                0 0 12px currentColor;
-  }
-
-  /* Asymmetric bento panel — subtle inner glow */
-  .panel {
-    background-color: hsl(var(--card));
-    border: 1px solid hsl(var(--border));
-    border-radius: 1.25rem;
-    position: relative;
-    isolation: isolate;
-  }
-  .panel::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    padding: 1px;
-    background: linear-gradient(
-      135deg,
-      rgba(255,255,255,0.04) 0%,
-      transparent 45%
-    );
-    -webkit-mask:
-      linear-gradient(#fff 0 0) content-box,
-      linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-            mask-composite: exclude;
-    pointer-events: none;
-    z-index: -1;
-  }
+  /* ── Classes NEUTRALISÉES — conservées pour l'existant, sans effet ── */
+  /* Rail d'accent des cartes : retiré. .sc-accent et l'attribut
+     data-accent-pos (Paramètres → Apparence) restent reconnus mais inertes :
+     contour uniforme quelle que soit la position réglée. */
+  html[data-accent-pos] .sc-accent,
+  .sc-accent { border-color: hsl(var(--border)); }
+  /* Point d'accent : plus de halo lumineux. */
+  .dot-accent { box-shadow: none; }
+  /* Va-et-vient de survol des boutons : supprimé (retour = active:scale). */
+  .btn-nudge { animation: none; }
 }
 
 /* ═══════════════════════════════════════════════════════════
-   KEYFRAMES
-═══════════════════════════════════════════════════════════ */
-@keyframes fade-up {
-  from { opacity: 0; transform: translateY(10px); }
-  /* `none` : pas de transform résiduel (fill-mode both) → pas de contexte
-     d'empilement permanent qui ferait passer les dropdowns sous les cartes
-     suivantes du DOM. */
-  to   { opacity: 1; transform: none; }
-}
-@keyframes fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-@keyframes scale-in {
-  from { opacity: 0; transform: scale(0.95); }
-  to   { opacity: 1; transform: none; }
-}
-@keyframes slide-right {
-  from { opacity: 0; transform: translateX(-12px); }
-  to   { opacity: 1; transform: none; }
-}
-@keyframes shimmer {
-  from { background-position: -200% 0; }
-  to   { background-position:  200% 0; }
-}
-@keyframes dot-pulse {
-  0%,100% { opacity:1; transform:scale(1); }
-  50%     { opacity:.5; transform:scale(.85); }
-}
-@keyframes spin-slow {
-  to { transform: rotate(360deg); }
-}
-
-/* ═══════════════════════════════════════════════════════════
-   BARRE D'ACCENT DES CARTES (SurfaceCard)
-   Position réglable via [data-accent-pos] sur <html> (Paramètres →
-   Apparence) : gauche par défaut (attribut absent) · haut · bas · aucune.
-   La couleur vient de --sc-accent (posée en inline par SurfaceCard) ; on
-   ne fait que déplacer le côté épaissi + coloré (mêmes 4px qu'avant).
-═══════════════════════════════════════════════════════════ */
-html:not([data-accent-pos]) .sc-accent,
-html[data-accent-pos="left"] .sc-accent {
-  border-left-width: 4px;
-  border-left-color: var(--sc-accent);
-}
-html[data-accent-pos="top"] .sc-accent {
-  border-top-width: 4px;
-  border-top-color: var(--sc-accent);
-}
-html[data-accent-pos="bottom"] .sc-accent {
-  border-bottom-width: 4px;
-  border-bottom-color: var(--sc-accent);
-}
-/* [data-accent-pos="off"] : aucune barre — la carte garde son bord 1px uniforme. */
-
-/* ── PLEIN ÉCRAN MOBILE — PARTOUT (demande client : « c'est une app ») ──
-   Sous 640 px, tout panneau (.surface-card = SurfaceCard & SectionCard)
-   devient L'ÉCRAN lui-même : il s'étale sur la gouttière px-4 de la
-   coquille (marges négatives) et perd cadre, coins, ombre et barre
-   d'accent (!important face aux règles [data-accent-pos]). Seuls des
+   PLEIN ÉCRAN MOBILE — sous 640 px, tout panneau (.surface-card)
+   devient l'écran lui-même : il s'étale sur la gouttière px-4 de la
+   coquille (marges négatives) et perd cadre, coins et ombre. Seuls des
    filets 1 px haut/bas séparent les sections empilées.
-
-   Exceptions :
-   - `.keep-bricks *` — l'ACCUEIL garde ses briques (demande client) ;
-   - `[class~="grid-cols-N"] *` — les tuiles posées côte à côte dès le
-     mobile (grilles multi-colonnes à la base) restent des tuiles ;
-     `~=` = mot exact, donc `sm:grid-cols-2` (1 colonne sur mobile)
-     n'est PAS exclu et ses cartes s'étalent bien. */
+   Exceptions : `.keep-bricks *` (l'accueil garde ses briques) et les
+   grilles multi-colonnes dès le mobile (`~=` = mot exact, donc
+   `sm:grid-cols-2` n'est pas exclu et ses cartes s'étalent bien).
+═══════════════════════════════════════════════════════════ */
 @media (max-width: 639.98px) {
   html .surface-card:not(.keep-bricks *):not([class~="grid-cols-2"] *):not([class~="grid-cols-3"] *):not([class~="grid-cols-4"] *) {
     margin-left: -1rem;
@@ -545,186 +282,12 @@ html[data-accent-pos="bottom"] .sc-accent {
     border-radius: 0;
     box-shadow: none;
   }
-}
 
-/* ═══════════════════════════════════════════════════════════
-   AMBIANCE DE FOND — version APAISÉE (redesign 07/2026)
-   UNE nappe de teinte marque, très discrète. L'ancienne « salle
-   de signal » (auroras multicolores + grille + anneaux radar)
-   faisait template IA — supprimée.
-═══════════════════════════════════════════════════════════ */
-.ambient-aurora {
-  position: absolute;
-  inset: -30%;
-  filter: blur(48px) saturate(115%);
-  background:
-    radial-gradient(34% 38% at 14% 10%, hsl(var(--brand-500) / 0.16), transparent 70%),
-    radial-gradient(38% 42% at 92% 94%, hsl(var(--brand-400) / 0.12), transparent 72%);
-  /* Animation = opt-in (réglage /parametres « animations: on ») — statique par
-     défaut pour un scroll fluide. Voir html[data-anim="force"] plus bas. */
-}
-.dark .ambient-aurora {
-  background:
-    radial-gradient(36% 40% at 14% 10%, hsl(var(--brand-500) / 0.14), transparent 70%),
-    radial-gradient(42% 46% at 92% 94%, hsl(var(--brand-400) / 0.10), transparent 72%);
-}
-
-/* Errance organique de la nappe (opt-in via data-anim=force). */
-@keyframes ambient-drift-a {
-  0%   { transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
-  30%  { transform: translate3d(-7%, -5%, 0) scale(1.1)  rotate(-2.4deg); }
-  60%  { transform: translate3d(5%, 4%, 0)   scale(1.06) rotate(1.8deg); }
-  100% { transform: translate3d(-3%, -8%, 0) scale(1.16) rotate(-3deg); }
-}
-
-/* Loader « signal » — animé en CSS PUR (transform/opacity = thread compositeur)
-   pour rester fluide même quand le thread principal rend la page. */
-@keyframes signal-bar {
-  0%, 100% { transform: scaleY(0.35); opacity: 0.45; }
-  50%      { transform: scaleY(1);    opacity: 1; }
-}
-.signal-bar { transform-origin: bottom; animation: signal-bar 0.9s ease-in-out infinite; }
-
-@media (prefers-reduced-motion: reduce) {
-  .ambient-aurora { animation: none; }
-  /* Squelettes : pas de balayage, fond muté statique. */
-  .skeleton { animation: none; background: hsl(var(--muted)); }
-  /* Boucles décoratives de la fiche (status-light, barres signal) : figées. */
-  .signal-bar, .animate-soft-pulse { animation: none !important; }
-  /* Balai général : neutralise toutes les classes d'animation génériques
-     (entrées fade/scale/slide…) pour qui demande moins de mouvement. Le
-     skeleton garde son fond muté ci-dessus (override par sélecteur propre). */
-  .animate-fade-up, .animate-fade-in, .animate-scale-in, .animate-slide-right,
-  .animate-client-swap, .animate-success-burst,
-  [class*="animate-"] { animation: none !important; }
-}
-
-/* Réglage televente:animations (page /parametres), posé sur <html> par
-   AmbientMotionGate. "off" coupe le fond d'ambiance ; "on" (data-anim=force)
-   le rallume même si le système demande prefers-reduced-motion. */
-html[data-reduce-anim="1"] .ambient-aurora,
-html[data-reduce-anim="1"] .signal-bar,
-html[data-reduce-anim="1"] .animate-soft-pulse,
-html[data-reduce-anim="1"] .animate-badge-wobble { animation: none !important; }
-
-/* "on" (data-anim=force) → rallume le fond animé pour qui le souhaite,
-   y compris si le système demande prefers-reduced-motion. */
-html[data-anim="force"] .ambient-aurora { animation: ambient-drift-a 17s ease-in-out infinite alternate; will-change: transform; }
-
-/* ═══════════════════════════════════════════════════════════
-   CONTRASTE DE SURVOL (réglage « Contraste » — page /parametres,
-   propre à chaque utilisateur/session). Pilote l'intensité de la
-   surbrillance quand le curseur passe d'une ligne à l'autre sur
-   TOUTE l'app : la quasi-totalité des lignes interactives utilise
-   `hover:bg-secondary|muted|accent` — on harmonise leur opacité de
-   survol via la variable `--hover-contrast` (0 → invisible,
-   1 → plein). Activé seulement si l'attribut `data-hover-contrast`
-   est posé sur <html> (HoverContrastGate) : sans réglage explicite,
-   l'app garde exactement son rendu d'origine.
-
-   Spécificité (html[attr] + [class*] + :hover) > classe Tailwind
-   `.hover\:bg-secondary\/60:hover` → override sans !important. */
-:root { --hover-contrast: 0.6; }
-/* Surbrillance au survol — TEINTÉE MARQUE (or) au lieu du gris `--secondary`
-   quasi invisible en mode sombre (même à 100 %). C'était la cause racine : on
-   ne jouait que sur l'OPACITÉ d'une couleur trop proche du fond. L'alpha suit
-   --hover-contrast (0 → 2) via un facteur 0.32 : ~19 % de teinte à 60 %, ~32 %
-   à 100 %, jusqu'à ~64 % à 200 % — nettement lisible pour un utilisateur à
-   faible acuité (Direction). */
-html[data-hover-contrast] [class*="hover:bg-secondary"]:hover,
-html[data-hover-contrast] [class*="hover:bg-muted"]:hover,
-html[data-hover-contrast] [class*="hover:bg-accent"]:hover {
-  background-color: hsl(var(--brand-500) / calc(var(--hover-contrast) * 0.32));
-}
-/* MODE SOMBRE : sur la surbrillance teintée or, le texte blanc perd en
-   lisibilité (demande). On force le texte de la ligne survolée en NOIR — seul
-   le texte HÉRITÉ bascule : les éléments à couleur propre (prix violet, tags…)
-   gardent la leur (leur classe `text-*` prime sur l'héritage). */
-html.dark[data-hover-contrast] [class*="hover:bg-secondary"]:hover,
-html.dark[data-hover-contrast] [class*="hover:bg-muted"]:hover,
-html.dark[data-hover-contrast] [class*="hover:bg-accent"]:hover {
-  color: hsl(222 47% 9%);
-}
-
-/* ═══════════════════════════════════════════════════════════
-   VA-ET-VIENT DE SURVOL DES BOUTONS (demande client 07/2026,
-   remplace l'onde jugée trop marquée). Au passage de la souris,
-   le bouton avance légèrement vers l'utilisateur puis revient
-   (échelle 1 → 1.03 → 1 en 380 ms, une seule fois) — affordance
-   « c'est cliquable », discrète.
-
-   On anime la propriété `scale` SEULE (pas `transform`) : elle se
-   compose avec les utilitaires translate/scale existants (boutons
-   centrés en absolu, active:scale-…) sans jamais les écraser. Pas
-   de fill → aucun style résiduel après l'animation.
-
-   Périmètre : les BOUTONS uniquement — <button> et .btn-nudge
-   (posée par buttonVariants pour couvrir les liens rendus via
-   asChild). Exclusions : désactivés, boutons porteurs d'une classe
-   d'animation propre, opt-out explicite `.no-nudge`. Souris
-   uniquement (pas de hover fantôme au tap sur tactile) et respect
-   de prefers-reduced-motion.
-═══════════════════════════════════════════════════════════ */
-@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
-  :is(button, .btn-nudge):not(:disabled):not(.no-nudge):not([class*="animate-"]):hover {
-    animation: btn-hover-nudge 380ms ease-in-out;
-  }
-}
-@keyframes btn-hover-nudge {
-  0%   { scale: 1; }
-  50%  { scale: 1.03; }
-  100% { scale: 1; }
-}
-/* Réglage televente:animations « off » : va-et-vient coupé aussi. */
-html[data-reduce-anim="1"] :is(button, .btn-nudge):not([class*="animate-"]):hover {
-  animation: none;
-}
-
-/* ═══════════════════════════════════════════════════════════
-   ICÔNES — toutes les icônes (lucide) 30% plus grandes partout
-   (demande). `zoom` agrandit ET reflue la mise en page (la boîte
-   grandit), contrairement à transform:scale qui déborderait. Ne
-   touche QUE les icônes lucide (pas les graphiques / sparklines).
-═══════════════════════════════════════════════════════════ */
-svg.lucide { zoom: 1.3; }
-
-/* ═══════════════════════════════════════════════════════════
-   CONFORT MOBILE / ÉCRAN ZOOMÉ — s'applique PARTOUT, sur tout
-   appareil dont le viewport est étroit (téléphone, et surtout
-   iPhone en « Affichage zoomé » / gros texte : le viewport effectif
-   tombe vers 320-375 px). Objectif : la mise en page RESPIRE au lieu
-   de se tasser ; le texte reste à la taille lisible voulue.
-═══════════════════════════════════════════════════════════ */
-@media (max-width: 640px) {
-  /* Le téléphone gère DÉJÀ l'agrandissement au niveau de l'OS. Le zoom
-     d'interface applicatif (confort Direction, pensé pour le bureau) se
-     cumulerait et casserait la grille → neutralisé sur mobile. */
-  .app-zoom-root { zoom: 1 !important; }
-
-  /* Icônes : +30 % (confort bureau) ramené à +12 % sur téléphone. Sur un
-     écran étroit/zoomé, des icônes surdimensionnées mangent la largeur des
-     lignes et alourdissent tout. On garde des icônes plus grandes que
-     nominal (lisibilité), mais les lignes retrouvent de l'air. */
-  svg.lucide { zoom: 1.12; }
-}
-
-/* ═══════════════════════════════════════════════════════════
-   CHAMPS RENSEIGNABLES EN EXERGUE — MOBILE (demande client 07/2026)
-   Sous 640 px le fond de page prend la couleur des cartes (« une seule
-   surface », cf. plus haut) : les champs en `bg-background` deviennent
-   invisibles — seul un filet 1 px les distingue. On force donc TOUS les
-   champs de saisie (inputs texte, textareas, selects natifs et triggers
-   Radix [role="combobox"]) sur un FOND GRIS (--secondary, bascule
-   clair/sombre automatique) + une bordure renforcée : on repère d'un
-   coup d'œil tout ce qui se remplit. `!important` face aux utilitaires
-   Tailwind posés en classe (bg-background, bg-card…), même logique que
-   la règle mobile .surface-card ci-dessus.
-
-   Exclusions : les types non textuels (cases, radios, curseurs…) et les
-   champs volontairement transparents (`bg-transparent` : éditeurs inline
-   dont l'habillage visuel est porté par leur conteneur — palette de
-   commande, cellules éditables…). */
-@media (max-width: 639.98px) {
+  /* CHAMPS RENSEIGNABLES EN EXERGUE : le fond de page ayant pris la couleur
+     des cartes, les champs en bg-background deviennent invisibles. On force
+     tous les champs de saisie sur un fond gris + bordure renforcée.
+     Exclusions : types non textuels et champs volontairement transparents
+     (habillage porté par leur conteneur). */
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="hidden"]):not([class*="bg-transparent"]),
   textarea:not([class*="bg-transparent"]),
   select:not([class*="bg-transparent"]),
@@ -734,38 +297,43 @@ svg.lucide { zoom: 1.3; }
   }
 }
 
-/* Titres display : équilibre les retours à la ligne (pas de mot orphelin seul
-   sur la dernière ligne) → titres nettement plus propres quand ils passent sur
-   2-3 lignes sur écran étroit. Sans effet sur une seule ligne. */
-.font-display { text-wrap: balance; }
+/* CONFORT MOBILE : le téléphone gère déjà l'agrandissement au niveau de
+   l'OS — le zoom d'interface applicatif (pensé bureau) se cumulerait et
+   casserait la grille → neutralisé sur viewport étroit. */
+@media (max-width: 640px) {
+  .app-zoom-root { zoom: 1 !important; }
+}
 
-/* Console-specific — soft swap between active clients */
+/* ═══════════════════════════════════════════════════════════
+   KEYFRAMES MAISON (celles partagées avec tailwind.config.ts —
+   fade-up, fade-in, scale-in, slide-right, shimmer — vivent
+   UNIQUEMENT dans le config)
+═══════════════════════════════════════════════════════════ */
+
+/* Loader « signal » — CSS pur (transform/opacity = thread compositeur). */
+@keyframes signal-bar {
+  0%, 100% { transform: scaleY(0.35); opacity: 0.45; }
+  50%      { transform: scaleY(1);    opacity: 1; }
+}
+.signal-bar { transform-origin: bottom; animation: signal-bar 0.9s ease-in-out infinite; }
+
+/* Console : fondu doux entre clients actifs. `backwards` : pas de fill final
+   (transform/filter résiduels = contexte d'empilement permanent). */
 @keyframes client-swap {
   from { opacity: 0; transform: translateY(6px); filter: blur(4px); }
   to   { opacity: 1; transform: none;   filter: blur(0); }
 }
-/* `backwards` : pas de fill final (transform/filter résiduels = contexte d'empilement permanent). */
-.animate-client-swap { animation: client-swap 0.32s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+.animate-client-swap { animation: client-swap 0.32s var(--ease-apple) backwards; }
 
-/* Success burst — subtle scale+fade for action confirmations */
-@keyframes success-burst {
-  0%   { transform: scale(0.92); opacity: 0; }
-  60%  { transform: scale(1.04); opacity: 1; }
-  100% { transform: scale(1);    opacity: 1; }
-}
-.animate-success-burst { animation: success-burst 0.4s cubic-bezier(0.22, 1.4, 0.4, 1) backwards; }
-
-/* Soft pulse for the live indicator on the logo */
+/* Pulsation douce de l'indicateur « live » du logo. */
 @keyframes soft-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50%      { opacity: 0.55; transform: scale(0.92); }
 }
 .animate-soft-pulse { animation: soft-pulse 2.4s ease-in-out infinite; }
 
-/* Vacillement LÉGER des pastilles de notification (sidebar) : la pastille
-   oscille brièvement puis se repose (~3 s de cycle, mouvement < 10°) — attire
-   l'œil sans agiter l'écran. Coupé par prefers-reduced-motion (balai
-   [class*="animate-"]) et par le réglage televente:animations ci-dessus. */
+/* Vacillement léger des pastilles de notification (sidebar) : oscille
+   brièvement puis se repose (~3 s de cycle, mouvement < 10°). */
 @keyframes badge-wobble {
   0%, 68%, 92%, 100% { transform: rotate(0deg) scale(1); }
   72% { transform: rotate(9deg) scale(1.08); }
@@ -775,20 +343,72 @@ svg.lucide { zoom: 1.3; }
 }
 .animate-badge-wobble { animation: badge-wobble 3.2s ease-in-out infinite; transform-origin: 50% 50%; }
 
-/* ═══════════════════════════════════════════════════════════
-   COMPONENT OVERRIDES
-═══════════════════════════════════════════════════════════ */
-/* ── Sonner toast — refonte « carte verre » ──────────────────────────
-   Design : carte translucide (blur) sur les tokens popover, pastille
-   d'icône teintée par type (la couleur ne déborde plus sur toute la
-   carte), titre net + description discrète, et surtout GRILLE 2 lignes :
-   icône | contenu en haut, boutons (Abandonner / Créer quand même…) sur
-   leur propre ligne en bas — le texte ne se fait plus écraser.
-   Le composant React vit dans components/ui/toaster.tsx. */
+/* Ticker promos : la piste contient 2 copies de la séquence ; -50 % =
+   exactement une copie → boucle sans couture. */
+@keyframes promo-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
 
-/* Accent par type — branché sur les tokens sémantiques (une seule source
-   de vérité, bascule clair/sombre automatique). L'erreur garde sa nuance
-   dédiée (plus claire que --destructive en nuit pour rester lisible). */
+/* ═══════════════════════════════════════════════════════════
+   CONTRASTE DE SURVOL (réglage « Contraste », /parametres). Harmonise
+   l'intensité de la surbrillance des lignes interactives
+   (hover:bg-secondary|muted|accent) via --hover-contrast (0 → invisible,
+   2 → très marqué). Teinte NEUTRE sur --foreground : visible dans les
+   deux modes sans forcer la couleur du texte. Activé seulement si
+   data-hover-contrast est posé sur <html> (HoverContrastGate).
+═══════════════════════════════════════════════════════════ */
+:root { --hover-contrast: 0.6; }
+html[data-hover-contrast] [class*="hover:bg-secondary"]:hover,
+html[data-hover-contrast] [class*="hover:bg-muted"]:hover,
+html[data-hover-contrast] [class*="hover:bg-accent"]:hover {
+  background-color: hsl(var(--foreground) / calc(var(--hover-contrast) * 0.12));
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MOINS DE MOUVEMENT — préférence système et réglage applicatif
+   televente:animations (html[data-reduce-anim], AmbientMotionGate).
+═══════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  /* Squelettes : pas de balayage, fond muté statique. */
+  .skeleton { animation: none; background: hsl(var(--muted)); }
+  /* Boucles décoratives + balai général des classes d'animation. */
+  .signal-bar, .promo-marquee-track,
+  [class*="animate-"] { animation: none !important; }
+  .promo-marquee-track { transform: none !important; }
+}
+html[data-reduce-anim="1"] .signal-bar,
+html[data-reduce-anim="1"] .animate-soft-pulse,
+html[data-reduce-anim="1"] .animate-badge-wobble { animation: none !important; }
+html[data-reduce-anim="1"] .promo-marquee-track {
+  animation: none !important;
+  transform: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SURFACES FLOTTANTES — toujours OPAQUES : fond popover, aucun
+   verre dépoli (le flou laissait passer le contenu du dessous).
+═══════════════════════════════════════════════════════════ */
+[role="menu"],
+[role="listbox"],
+[role="dialog"],
+[role="tooltip"],
+[data-radix-popper-content-wrapper] > * {
+  background-color: hsl(var(--popover));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SONNER — refonte « carte verre »
+   Carte translucide (blur) sur les tokens popover, pastille d'icône
+   teintée par type, grille 2 lignes : icône | contenu en haut, boutons
+   sur leur propre ligne en bas. Composant React : components/ui/toaster.tsx.
+═══════════════════════════════════════════════════════════ */
+
+/* Accent par type — branché sur les tokens sémantiques. L'erreur garde sa
+   nuance dédiée (plus claire que --destructive en nuit pour rester lisible). */
 [data-sonner-toast] { --toast-accent: var(--muted-foreground); }
 [data-sonner-toast][data-type="success"] { --toast-accent: var(--success); }
 [data-sonner-toast][data-type="error"]   { --toast-accent: 0 72% 46%; }
@@ -903,36 +523,17 @@ svg.lucide { zoom: 1.3; }
 [data-sonner-toast] [data-close-button]:hover { color: hsl(var(--popover-foreground)) !important; }
 html[data-ui="touch"] [data-sonner-toast] [data-close-button] { opacity: 1; }
 
-/* Radix Select — dark */
-.dark [data-radix-select-viewport] {
-  background: hsl(var(--popover));
-  border-color: hsl(var(--border));
-}
-
-/* ── Input focus ring — brand color ───────────────── */
+/* ── Focus des champs : l'anneau est porté par les classes ring-* ── */
 input:focus-visible,
 textarea:focus-visible,
 [data-state="open"] {
   outline: none;
 }
 
-/* ── Ticker promos (crawl façon BFM) ──────────────────
-   La piste contient 2 copies de la séquence ; -50 % = exactement une copie
-   → boucle sans couture. Gelée si l'utilisateur coupe les animations
-   (réglage global televente:animations → html[data-reduce-anim]). */
-@keyframes promo-marquee {
-  from { transform: translateX(0); }
-  to   { transform: translateX(-50%); }
-}
-html[data-reduce-anim="1"] .promo-marquee-track {
-  animation: none !important;
-  transform: none !important;
-}
-
-/* ── MapLibre GL — thème sombre (carte « Où je livre le plus ») ──────── */
-/* Le popup suit le curseur (tooltip de survol) : il NE doit jamais capter le
-   clic, sinon cliquer sur un département atterrit sur la bulle au lieu du
-   canvas → drill impossible (surtout en 2D, pitch 0). */
+/* ── MapLibre GL — carte « Où je livre le plus » ─────────────────────
+   Le popup suit le curseur (tooltip de survol) : il ne doit jamais capter
+   le clic, sinon cliquer sur un département atterrit sur la bulle au lieu
+   du canvas → drill impossible. */
 .geo-popup { pointer-events: none; }
 .geo-popup .maplibregl-popup-content {
   background: hsl(var(--popover));
@@ -952,414 +553,11 @@ html[data-reduce-anim="1"] .promo-marquee-track {
 .maplibregl-ctrl-group button .maplibregl-ctrl-icon { filter: invert(0.75); }
 .maplibregl-canvas:focus { outline: none; }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   SKIN « APPLE » — refonte graphique intégrale, écrite de zéro.
-
-   Tout est scopé sous html[data-skin="apple"] : le thème CLASSIQUE au-dessus
-   n'est jamais touché, la bascule (Paramètres → Apparence) reste réversible à
-   100 %. Placé hors @layer pour primer sur les utilitaires.
-
-   Le parti pris n'est pas « des coins un peu plus ronds » : c'est le langage
-   visuel d'Apple appliqué à la lettre.
-     • Une seule famille : SF, avec la RAMPE typographique d'Apple (chaque taille
-       a son interlettrage — plus le texte est gros, plus il se resserre).
-     • Des matériaux, pas des décorations : surfaces opaques, filets d'un demi-
-       pixel, élévation par l'ombre. Aucun dégradé, aucune lueur, aucun verre
-       dépoli — le flou d'arrière-plan coûte cher et bavait sur les popovers.
-     • La LISTE GROUPÉE INSÉRÉE d'iOS comme motif de base : les tableaux
-       deviennent des listes à séparateurs qui s'arrêtent avant le bord.
-     • Trois niveaux de bouton (plein / teinté / nu), comme UIKit.
-     • Barre latérale CLAIRE en thème clair. Elle est codée en dur en anthracite
-       dans le composant : on la reprend ici, sinon elle restait noire au milieu
-       d'une interface blanche.
-     • Le mouvement est court et sort en douceur (courbe d'Apple), jamais rebondi.
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-/* ─────────────────────────────────────────────────────────────────────────
-   1 · FONDATIONS — échelles partagées
-   ───────────────────────────────────────────────────────────────────────── */
-html[data-skin="apple"] {
-  /* Rayons : 4 crans seulement. Apple ne mélange pas 9 arrondis différents. */
-  --r-xs: 6px;
-  --r-sm: 10px;
-  --r-md: 14px;
-  --r-lg: 20px;
-  --radius: 0.875rem;             /* 14px — valeur consommée par les composants */
-
-  /* Courbe de sortie standard d'Apple + durées courtes. */
-  --ease-apple: cubic-bezier(0.32, 0.72, 0, 1);
-  --dur-fast: 140ms;
-  --dur-base: 240ms;
-
-  /* Épaisseur des séparateurs : un demi-pixel, comme les hairlines système. */
-  --hairline: 0.5px;
-}
-
-/* ── Typographie : SF d'abord, repli soigné ailleurs ── */
-html[data-skin="apple"] body,
-html[data-skin="apple"] button,
-html[data-skin="apple"] input,
-html[data-skin="apple"] select,
-html[data-skin="apple"] textarea,
-html[data-skin="apple"] .font-display {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
-    "Inter", "Segoe UI", Roboto, system-ui, sans-serif;
-  font-synthesis-weight: none;
-}
-html[data-skin="apple"] body {
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  letter-spacing: -0.01em;
-  font-size: 15px;                /* corps iOS */
-  line-height: 1.47;
-}
-
-/* Rampe optique : plus c'est gros, plus c'est resserré. C'est ce qui fait
-   « lire Apple » avant même la couleur. */
-html[data-skin="apple"] .font-display { letter-spacing: -0.022em; font-weight: 700; }
-html[data-skin="apple"] h1 { letter-spacing: -0.026em; font-weight: 700; line-height: 1.08; }
-html[data-skin="apple"] h2 { letter-spacing: -0.022em; font-weight: 700; line-height: 1.14; }
-html[data-skin="apple"] h3 { letter-spacing: -0.018em; font-weight: 600; line-height: 1.2; }
-html[data-skin="apple"] .tnum,
-html[data-skin="apple"] [class*="tnum"] { font-variant-numeric: tabular-nums; letter-spacing: -0.015em; }
-
-/* Sur-titre : capitales espacées, gris secondaire — le « eyebrow » des Réglages. */
-html[data-skin="apple"] .kicker {
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 600;
-  font-size: 11px;
-  color: hsl(var(--muted-foreground));
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
-   2 · COULEUR — palette système, clair
-   ───────────────────────────────────────────────────────────────────────── */
-html[data-skin="apple"] {
-  --background:            240 20% 97%;      /* systemGroupedBackground */
-  --foreground:            240 6% 9%;        /* label */
-  --card:                  0 0% 100%;
-  --card-foreground:       240 6% 9%;
-  --popover:               0 0% 100%;
-  --popover-foreground:    240 6% 9%;
-  --secondary:             240 16% 94%;
-  --secondary-foreground:  240 6% 9%;
-  --muted:                 240 16% 94.5%;
-  --muted-foreground:      240 4% 46%;       /* secondaryLabel */
-  --accent:                240 16% 94%;
-  --accent-foreground:     240 6% 9%;
-  --destructive:           3 100% 47%;       /* systemRed */
-  --destructive-foreground:0 0% 100%;
-  --border:                240 10% 87%;      /* separator */
-  --input:                 240 10% 84%;
-
-  /* L'accent reste l'OR de la marque : c'est l'identité Gervifrais, pas une
-     décision d'interface. Tout le reste autour est neutre système. */
-  --primary:               42 92% 44%;
-  --primary-foreground:    240 8% 12%;
-  --ring:                  42 92% 44%;
-
-  /* Élévation : le contour d'un demi-pixel fait la découpe, l'ombre fait la
-     hauteur. Jamais de teinte chaude dans une ombre. */
-  --shadow-card:
-    0 0 0 0.5px rgba(0,0,0,0.06),
-    0 1px 1px rgba(0,0,0,0.04),
-    0 8px 24px rgba(0,0,0,0.06);
-  --shadow-card-hover:
-    0 0 0 0.5px rgba(0,0,0,0.08),
-    0 8px 20px rgba(0,0,0,0.09),
-    0 20px 44px rgba(0,0,0,0.10);
-  --shadow-nav:
-    0 0 0 0.5px rgba(0,0,0,0.05),
-    0 1px 12px rgba(0,0,0,0.05);
-  --shadow-modal:
-    0 0 0 0.5px rgba(0,0,0,0.08),
-    0 24px 68px rgba(0,0,0,0.20),
-    0 48px 96px rgba(0,0,0,0.14);
-}
-
-/* ── Couleur — sombre : noir profond, surfaces qui montent avec l'élévation ── */
-html[data-skin="apple"].dark {
-  --background:            240 6% 5%;
-  --foreground:            0 0% 98%;
-  --card:                  240 6% 10.5%;
-  --card-foreground:       0 0% 98%;
-  --popover:               240 6% 14%;
-  --popover-foreground:    0 0% 98%;
-  --secondary:             240 5% 16%;
-  --secondary-foreground:  0 0% 98%;
-  --muted:                 240 5% 16%;
-  --muted-foreground:      240 5% 63%;
-  --accent:                240 5% 16%;
-  --accent-foreground:     0 0% 98%;
-  --destructive:           3 100% 62%;
-  --destructive-foreground:0 0% 100%;
-  --border:                240 5% 20%;
-  --input:                 240 5% 22%;
-  --primary:               45 96% 56%;
-  --primary-foreground:    240 8% 10%;
-  --ring:                  45 96% 56%;
-
-  --shadow-card:
-    0 0 0 0.5px rgba(255,255,255,0.07),
-    0 1px 2px rgba(0,0,0,0.6),
-    0 8px 24px rgba(0,0,0,0.5);
-  --shadow-card-hover:
-    0 0 0 0.5px rgba(255,255,255,0.10),
-    0 10px 28px rgba(0,0,0,0.62),
-    0 24px 52px rgba(0,0,0,0.55);
-  --shadow-nav:
-    0 0 0 0.5px rgba(255,255,255,0.06),
-    0 2px 16px rgba(0,0,0,0.65);
-  --shadow-modal:
-    0 0 0 0.5px rgba(255,255,255,0.10),
-    0 28px 76px rgba(0,0,0,0.76),
-    0 56px 104px rgba(0,0,0,0.62);
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
-   3 · CANVAS — à plat, sans décor
-   ───────────────────────────────────────────────────────────────────────── */
-html[data-skin="apple"] { background-color: hsl(var(--background)); }
-html[data-skin="apple"] body { background: transparent; }
-/* Le voile d'ambiance du thème classique n'a pas sa place ici. */
-html[data-skin="apple"] body::before,
-html[data-skin="apple"] body::after { display: none !important; content: none !important; }
-html[data-skin="apple"] ::selection { background: hsl(var(--primary) / 0.28); }
-
-/* ─────────────────────────────────────────────────────────────────────────
-   4 · BARRE LATÉRALE — claire en thème clair
-   Le composant force un anthracite (#0b1018) et des bordures blanches : sans
-   cette reprise, elle restait un bloc noir planté dans une interface blanche.
-   ───────────────────────────────────────────────────────────────────────── */
-html[data-skin="apple"] .app-sidebar {
-  background: hsl(var(--card)) !important;
-  border-right: var(--hairline) solid hsl(var(--border)) !important;
-  box-shadow: none !important;
-}
-html[data-skin="apple"] .app-sidebar > .absolute { display: none !important; } /* filet dégradé décoratif */
-
-/* Texte et icônes de la barre : on annule les blancs codés en dur. */
-html[data-skin="apple"] .app-sidebar [class*="text-white"],
-html[data-skin="apple"] .app-sidebar a,
-html[data-skin="apple"] .app-sidebar button { color: hsl(var(--foreground)); }
-html[data-skin="apple"] .app-sidebar [class*="text-white/4"],
-html[data-skin="apple"] .app-sidebar [class*="text-white/5"],
-html[data-skin="apple"] .app-sidebar [class*="text-white/6"],
-html[data-skin="apple"] .app-sidebar [class*="text-white/7"] { color: hsl(var(--muted-foreground)); }
-html[data-skin="apple"] .app-sidebar [class*="bg-white/"] { background-color: hsl(var(--secondary)) !important; }
-html[data-skin="apple"] .app-sidebar [class*="border-white/"] { border-color: hsl(var(--border)) !important; }
-
-/* Élément de navigation : pastille arrondie pleine largeur, façon Réglages. */
-html[data-skin="apple"] .app-sidebar a {
-  border-radius: var(--r-sm);
-  transition: background-color var(--dur-fast) var(--ease-apple);
-}
-html[data-skin="apple"] .app-sidebar a:hover { background-color: hsl(var(--secondary)); }
-/* Sélection : teinte d'accent franche, texte renforcé — pas de barre latérale. */
-html[data-skin="apple"] .app-sidebar a[aria-current="page"],
-html[data-skin="apple"] .app-sidebar a[data-active="true"] {
-  background-color: hsl(var(--primary) / 0.16) !important;
-  color: hsl(var(--foreground)) !important;
-  font-weight: 600;
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
-   5 · SURFACES — cartes opaques, filet, élévation
-   ───────────────────────────────────────────────────────────────────────── */
-html[data-skin="apple"] .surface,
-html[data-skin="apple"] .panel,
-html[data-skin="apple"] .surface-card {
-  background: hsl(var(--card));
-  border: var(--hairline) solid hsl(var(--border));
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-card);
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  background-image: none !important;
-  transition: box-shadow var(--dur-base) var(--ease-apple);
-}
-/* Décorations du thème classique : rail d'accent, points lumineux, pulsations. */
-html[data-skin="apple"] .sc-accent { border-inline-start-width: 0 !important; box-shadow: none !important; }
-html[data-skin="apple"] .dot-accent { box-shadow: none !important; }
-html[data-skin="apple"] .btn-nudge { animation: none !important; box-shadow: none !important; }
-html[data-skin="apple"] .btn-nudge:hover { filter: none !important; }
-html[data-skin="apple"] .hairline { background: hsl(var(--border)); }
-
-/* ─────────────────────────────────────────────────────────────────────────
-   6 · SURFACES FLOTTANTES — opaques, sans exception
-   Menus, popovers, listes, dialogues, infobulles. Le verre dépoli laissait
-   passer le contenu du dessous et rendait ces couches illisibles.
-   ───────────────────────────────────────────────────────────────────────── */
-html[data-skin="apple"] .bg-popover,
-html[data-skin="apple"] .app-sheet,
-html[data-skin="apple"] [role="menu"],
-html[data-skin="apple"] [role="listbox"],
-html[data-skin="apple"] [role="dialog"],
-html[data-skin="apple"] [role="tooltip"],
-html[data-skin="apple"] [data-radix-popper-content-wrapper] > * {
-  background-color: hsl(var(--popover)) !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  border: var(--hairline) solid hsl(var(--border));
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-modal);
-}
-/* Les dialogues respirent davantage : c'est une constante des feuilles Apple. */
-html[data-skin="apple"] [role="dialog"] { border-radius: var(--r-lg); }
-/* Voile : simple assombrissement, aucun flou. */
-html[data-skin="apple"] .app-scrim {
-  background: rgba(0,0,0,0.40) !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-/* Entrées de menu : pleine largeur, surlignage teinté. */
-html[data-skin="apple"] [role="menuitem"],
-html[data-skin="apple"] [role="option"] {
-  border-radius: var(--r-xs);
-  transition: background-color var(--dur-fast) var(--ease-apple);
-}
-html[data-skin="apple"] [role="menuitem"]:hover,
-html[data-skin="apple"] [role="option"]:hover,
-html[data-skin="apple"] [role="option"][aria-selected="true"] {
-  background-color: hsl(var(--primary) / 0.14);
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
-   7 · TABLEAUX — la liste groupée insérée d'iOS
-   Plus de grille : des séparateurs qui s'arrêtent avant le bord, un en-tête
-   discret en capitales, des lignes hautes et confortables.
-   ───────────────────────────────────────────────────────────────────────── */
-html[data-skin="apple"] table { border-collapse: separate; border-spacing: 0; }
-html[data-skin="apple"] thead th {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: hsl(var(--muted-foreground));
-  border-bottom: var(--hairline) solid hsl(var(--border));
-  background: transparent;
-  padding-block: 8px;
-}
-html[data-skin="apple"] tbody td {
-  border-bottom: var(--hairline) solid hsl(var(--border) / 0.75);
-  padding-block: 10px;
-}
-/* Dernière ligne : pas de trait qui pende sous la liste. */
-html[data-skin="apple"] tbody tr:last-child td { border-bottom: none; }
-html[data-skin="apple"] tbody tr { transition: background-color var(--dur-fast) var(--ease-apple); }
-html[data-skin="apple"] tbody tr:hover { background-color: hsl(var(--secondary) / 0.6); }
-
-/* ─────────────────────────────────────────────────────────────────────────
-   8 · CONTRÔLES — la hiérarchie UIKit : plein, teinté, nu
-   ───────────────────────────────────────────────────────────────────────── */
-html[data-skin="apple"] button {
-  border-radius: var(--r-sm);
-  font-weight: 590;                          /* le demi-gras de SF */
-  letter-spacing: -0.01em;
-  transition:
-    transform var(--dur-fast) var(--ease-apple),
-    background-color var(--dur-fast) var(--ease-apple),
-    box-shadow var(--dur-fast) var(--ease-apple),
-    border-color var(--dur-fast) var(--ease-apple),
-    opacity var(--dur-fast) var(--ease-apple);
-}
-/* Enfoncement bref au doigt/à la souris — la réponse tactile d'iOS. */
-html[data-skin="apple"] button:active:not(:disabled) { transform: scale(0.97); }
-html[data-skin="apple"] button:disabled { opacity: 0.38; }
-
-/* Bouton PLEIN (action principale) : aplat d'accent, aucune ombre portée. */
-html[data-skin="apple"] button[class*="bg-brand-"],
-html[data-skin="apple"] button[class*="bg-primary"] {
-  box-shadow: none !important;
-  background-image: none !important;
-}
-/* Groupes de boutons façon contrôle segmenté : lit dans un creux gris. */
-html[data-skin="apple"] [role="tablist"] {
-  background: hsl(var(--secondary));
-  border-radius: var(--r-sm);
-  padding: 2px;
-  gap: 2px;
-}
-html[data-skin="apple"] [role="tab"] {
-  border-radius: calc(var(--r-sm) - 2px);
-  font-weight: 590;
-}
-html[data-skin="apple"] [role="tab"][aria-selected="true"] {
-  background: hsl(var(--card));
-  box-shadow: 0 0 0 0.5px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.12);
-}
-
-/* Champs : coins doux, anneau d'accent large et net au focus. */
-html[data-skin="apple"] input,
-html[data-skin="apple"] textarea,
-html[data-skin="apple"] select,
-html[data-skin="apple"] [class~="border-input"] {
-  border-radius: var(--r-sm);
-  transition: border-color var(--dur-fast) var(--ease-apple),
-              box-shadow var(--dur-fast) var(--ease-apple);
-}
-html[data-skin="apple"] input:focus-visible,
-html[data-skin="apple"] textarea:focus-visible,
-html[data-skin="apple"] select:focus-visible,
-html[data-skin="apple"] [class~="border-input"]:focus-visible,
-html[data-skin="apple"] [class~="border-input"]:focus-within {
-  border-color: hsl(var(--ring)) !important;
-  box-shadow: 0 0 0 4px hsl(var(--ring) / 0.22) !important;
-  outline: none !important;
-}
-/* Accessibilité clavier : le même anneau partout, jamais le contour du système. */
-html[data-skin="apple"] :focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 4px hsl(var(--ring) / 0.22);
-}
-
-/* Badges : pilule pleine, jamais de capitales forcées. */
-html[data-skin="apple"] .app-badge {
-  border-radius: 999px;
-  letter-spacing: 0;
-  padding-inline: 0.6rem;
-  font-weight: 590;
-  text-transform: none;
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
-   9 · DÉFILEMENT — fine, discrète, apparaît au besoin
-   ───────────────────────────────────────────────────────────────────────── */
-html[data-skin="apple"] * { scrollbar-width: thin; scrollbar-color: rgba(140,140,146,.45) transparent; }
-html[data-skin="apple"] ::-webkit-scrollbar { width: 10px; height: 10px; }
-html[data-skin="apple"] ::-webkit-scrollbar-track { background: transparent; }
-html[data-skin="apple"] ::-webkit-scrollbar-thumb {
-  background: rgba(140,140,146,.42);
-  border-radius: 999px;
-  border: 3px solid transparent;
-  background-clip: padding-box;
-}
-html[data-skin="apple"] ::-webkit-scrollbar-thumb:hover {
-  background: rgba(140,140,146,.68);
-  background-clip: padding-box;
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
-   10 · TACTILE + ACCESSIBILITÉ
-   ───────────────────────────────────────────────────────────────────────── */
-html[data-skin="apple"][data-ui="touch"] button,
-html[data-skin="apple"][data-ui="touch"] [role="button"] { -webkit-tap-highlight-color: transparent; }
-html[data-skin="apple"][data-ui="touch"] .overflow-y-auto,
-html[data-skin="apple"][data-ui="touch"] .overflow-auto { -webkit-overflow-scrolling: touch; }
-
-@media (prefers-reduced-motion: reduce) {
-  html[data-skin="apple"] button:active { transform: none; }
-  html[data-skin="apple"] *,
-  html[data-skin="apple"] *::before,
-  html[data-skin="apple"] *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-
-/* Impression : le skin ne doit pas déteindre sur les documents (bons de
-   préparation et de transport ont leur propre feuille, en noir et blanc). */
+/* ═══════════════════════════════════════════════════════════
+   IMPRESSION — papier blanc, pas d'ombres, pas d'éléments flottants.
+═══════════════════════════════════════════════════════════ */
 @media print {
-  html[data-skin="apple"] .app-sidebar { display: none !important; }
+  body { background: #fff; color: #000; }
+  .surface, .panel, .surface-card { box-shadow: none; }
+  [data-sonner-toaster] { display: none !important; }
 }

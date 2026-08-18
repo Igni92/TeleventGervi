@@ -27,6 +27,8 @@ import {
   nextDeliveryDate, frenchHolidayLabel, nextWorkingDeliveryDay,
   formatDeliveryDate, addDaysISO,
 } from "@/lib/livraison";
+// Couleurs de segment : source unique du design system (GMS teal · CHR amber · EXPORT violet).
+import { SEGMENT_BADGE } from "@/lib/segments";
 // Types (miroir de /api/livraisons) + logique de vue pure (testée à part).
 import {
   docStatus, computeStatusCounts, computeView, docTourneeKeyLabel, STATUS_LABEL,
@@ -77,11 +79,12 @@ const fmtClock = (iso: string | null | undefined): string | null => {
 type ViewTab = "VENTES" | StatusTab;
 
 /** Badge de ligne par segment client (CHR / EXPORT / GMS) — repère visuel du
- *  segment, en cohérence avec le filtre Tout / CHR / Export / GMS. */
+ *  segment, en cohérence avec le filtre Tout / CHR / Export / GMS. Les
+ *  couleurs viennent de la source unique du design system (lib/segments). */
 const SEG_UI: Record<"CHR" | "EXPORT" | "GMS", { label: string; badge: string }> = {
-  CHR:    { label: "CHR",    badge: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" },
-  EXPORT: { label: "Export", badge: "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" },
-  GMS:    { label: "GMS",    badge: "bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300" },
+  CHR:    { label: "CHR",    badge: SEGMENT_BADGE.CHR },
+  EXPORT: { label: "Export", badge: SEGMENT_BADGE.EXPORT },
+  GMS:    { label: "GMS",    badge: SEGMENT_BADGE.GMS },
 };
 
 /* ═════════════════════════════════════════════════════════════

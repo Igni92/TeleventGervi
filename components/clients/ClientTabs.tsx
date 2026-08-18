@@ -48,7 +48,7 @@ export function ClientTabs({ commercial, compta, logistique, defaultTab = "comme
       <div
         role="tablist"
         aria-label="Sections fiche client"
-        className="sticky top-16 z-30 mb-5 inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-xl border border-border glass p-1 shadow-sm md:top-2"
+        className="sticky top-16 z-30 mb-5 inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-xl bg-card ring-1 ring-border p-1 shadow-sm md:top-2"
       >
         {!logisticsOnly && (
           <>

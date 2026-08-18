@@ -16,6 +16,8 @@ import { useRouter } from "next/navigation";
 import { CheckCircle2, ChevronRight, ClipboardList, Loader2, RefreshCw, Search, Store, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { addDaysISO, formatDeliveryDate } from "@/lib/livraison";
+// Couleurs de segment : source unique du design system (GMS teal · CHR amber · EXPORT violet).
+import { SEGMENT_BADGE } from "@/lib/segments";
 import { hasMissing, type ApiResp, type Doc } from "@/lib/livraisonView";
 
 /** Date murale Europe/Paris — « aujourd'hui » métier. */
@@ -27,11 +29,6 @@ const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : 
 /** Fenêtre analysée : aujourd'hui → +N jours de livraison. */
 const WINDOW_DAYS = 14;
 
-const SEGMENT_BADGE: Record<string, string> = {
-  CHR: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
-  EXPORT: "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300",
-  GMS: "bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300",
-};
 
 interface DayGroup { date: string; docs: Doc[] }
 

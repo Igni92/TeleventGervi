@@ -5,12 +5,10 @@ import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
   [
-    // `btn-nudge` : va-et-vient de survol global (globals.css) — les <button>
-    // natifs sont déjà couverts par le sélecteur `button:hover` ; la classe
-    // étend l'effet aux liens rendus via asChild (<a> par Slot).
-    "btn-nudge inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-[13.5px] font-medium",
-    // Propriétés explicites (pas `all`) : couleurs + ombre + transform.
-    "transition-[background-color,border-color,color,box-shadow,transform,filter] duration-150 ease-out",
+    // Hiérarchie UIKit : aplat / teinté / plain / outline — rayon UNIQUE 10px,
+    // aucune ombre portée, seul retour tactile : active:scale.
+    "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-body font-semibold",
+    "transition-[background-color,border-color,color,transform] duration-[var(--dur-fast)] ease-[var(--ease-apple)]",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     "disabled:pointer-events-none disabled:opacity-50",
     "active:scale-[0.97]",
@@ -18,42 +16,44 @@ const buttonVariants = cva(
   ].join(" "),
   {
     variants: {
-      // Variantes 100 % TOKENS (clair/sombre automatiques) — plus de slate-*
-      // codé en dur qui jurait avec le papier chaud / charcoal.
+      // 100 % TOKENS (clair/sombre et skins automatiques).
       variant: {
+        // filled : aplat or Gervifrais — le survol ASSOMBRIT légèrement
+        // (color-mix vers le noir), jamais de brightness ni d'ombre.
         default:
-          "bg-primary text-primary-foreground font-semibold " +
-          "shadow-[0_2px_10px_hsl(var(--primary)/0.25)] " +
-          "hover:brightness-105 hover:shadow-[0_4px_18px_hsl(var(--primary)/0.4)]",
+          "bg-primary text-primary-foreground " +
+          "hover:bg-[color-mix(in_srgb,hsl(var(--primary))_92%,black)]",
+        // tinted : accent translucide, l'étage sous filled.
+        tinted:
+          "bg-primary/12 text-foreground hover:bg-primary/20",
         destructive:
-          "bg-destructive text-destructive-foreground shadow-[0_1px_3px_hsl(var(--destructive)/0.3)] " +
-          "hover:brightness-110",
+          "bg-destructive text-destructive-foreground " +
+          "hover:bg-[color-mix(in_srgb,hsl(var(--destructive))_92%,black)]",
+        // outline : carte + filet demi-pixel.
         outline:
-          "border border-border bg-card text-foreground shadow-xs " +
-          "hover:bg-secondary hover:border-input",
+          "border-[length:var(--hairline)] border-border bg-card text-foreground " +
+          "hover:bg-secondary",
         secondary:
-          "bg-secondary text-secondary-foreground " +
-          "hover:bg-secondary/75 hover:text-foreground",
+          "bg-secondary text-secondary-foreground hover:bg-secondary/75 hover:text-foreground",
         ghost:
           "text-muted-foreground hover:bg-secondary hover:text-foreground",
         link:
           "text-brand-600 dark:text-brand-400 underline-offset-4 hover:underline",
+        // Statuts sémantiques — mêmes tokens que les badges (--success/--warning).
         success:
-          "bg-emerald-600 text-white shadow-[0_1px_3px_rgba(5,150,105,0.3)] " +
-          "hover:bg-emerald-700",
+          "bg-success text-white " +
+          "hover:bg-[color-mix(in_srgb,hsl(var(--success))_92%,black)]",
         warning:
-          "border border-amber-300 bg-amber-50 text-amber-800 " +
-          "hover:bg-amber-100 hover:border-amber-400 " +
-          "dark:border-amber-500/50 dark:bg-amber-900/20 dark:text-amber-400 " +
-          "dark:hover:bg-amber-900/30 dark:hover:border-amber-500",
+          "bg-warning/15 text-foreground hover:bg-warning/25",
       },
+      // Rayon hérité de la base (10px partout) — plus d'override par taille.
       size: {
-        default: "h-9 px-4 py-2",
-        sm:      "h-8 rounded-lg px-3 text-[12.5px]",
-        lg:      "h-10 px-5 text-[14px]",
-        xl:      "h-11 px-6 text-[14px]",
+        default: "h-9 px-4",
+        sm:      "h-8 px-3 text-caption",
+        lg:      "h-10 px-5 text-callout",
+        xl:      "h-11 px-6 text-callout",
         icon:    "h-9 w-9",
-        "icon-sm": "h-8 w-8 rounded-lg",
+        "icon-sm": "h-8 w-8",
       },
     },
     defaultVariants: {

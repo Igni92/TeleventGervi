@@ -25,6 +25,7 @@ import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { eur } from "@/lib/format";
 import { FRUIT_FAMILIES } from "@/lib/familles";
 import { familyLotSentinel, familyOfLot } from "@/lib/gervifrais-calc";
+import { SEGMENT_BADGE } from "@/lib/segments";
 import { Button } from "@/components/ui/button";
 import { FullscreenPanel } from "@/components/ui/fullscreen-panel";
 import { InfoHint } from "@/components/ui/info-hint";
@@ -67,11 +68,6 @@ interface OffreDoc {
 
 const AFFECT_LABEL: Record<string, string> = { TOUS: "Tous", EXPORT: "Export", GMS: "GMS", CHR: "CHR" };
 const PENDING = "EM_PENDING";
-const SEG_BADGE: Record<string, string> = {
-  CHR: "bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
-  GMS: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
-  EXPORT: "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300",
-};
 
 export function BonsCommandePanel() {
   const router = useRouter();
@@ -405,8 +401,8 @@ export function BonsCommandePanel() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[15px] font-semibold text-foreground truncate">{o.cardName}</span>
-                        {o.clientType && SEG_BADGE[o.clientType] && (
-                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEG_BADGE[o.clientType]}`}>
+                        {o.clientType && SEGMENT_BADGE[o.clientType] && (
+                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEGMENT_BADGE[o.clientType]}`}>
                             {o.clientType}
                           </span>
                         )}
@@ -486,8 +482,8 @@ export function BonsCommandePanel() {
             >
               <div className="flex items-center gap-2 min-w-0 flex-wrap">
                 <span className="text-[15px] font-semibold text-foreground truncate">{doc.cardName}</span>
-                {doc.clientType && SEG_BADGE[doc.clientType] && (
-                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEG_BADGE[doc.clientType]}`}>
+                {doc.clientType && SEGMENT_BADGE[doc.clientType] && (
+                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEGMENT_BADGE[doc.clientType]}`}>
                     {doc.clientType}
                   </span>
                 )}

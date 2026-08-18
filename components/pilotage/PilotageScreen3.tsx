@@ -19,7 +19,9 @@ const GeoMapGL = dynamic(() => import("@/components/charts/GeoMapGL").then((m) =
   loading: () => <div className="h-full w-full grid place-items-center text-[12px] text-muted-foreground">Chargement de la carte…</div>,
 });
 
-const SEGMENT_COLORS: Record<string, string> = { GMS: "#38bdf8", CHR: "#10b981", EXPORT: "#a78bfa" };
+// Couleurs alignées sur la vérité segment de lib/segments : GMS teal-500 ·
+// CHR amber-500 · EXPORT violet-500 (hex requis par le donut SVG).
+const SEGMENT_COLORS: Record<string, string> = { GMS: "#14b8a6", CHR: "#f59e0b", EXPORT: "#8b5cf6" };
 const SEGMENT_LABELS: Record<string, string> = { GMS: "GMS", CHR: "CHR", EXPORT: "Export" };
 
 /**

@@ -20,6 +20,7 @@ import {
   type ActiveClientState, type ActiveClientInfo,
 } from "@/lib/consoleSync";
 import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
+import { segmentBadgeClass } from "@/lib/segments";
 
 type ModifTarget = { docEntry: number; docNum: number; clientId: string | null; clientName: string | null };
 /** Compte chargé MANUELLEMENT via la recherche (hors file de télévente). */
@@ -326,11 +327,7 @@ function ClientBanner({
             </h1>
           )}
           {info?.type && (
-            <span className={`shrink-0 text-[9.5px] font-bold tracking-[0.14em] uppercase px-1.5 py-0.5 rounded ${
-              info.type === "EXPORT" ? "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" :
-              info.type === "GMS"    ? "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" :
-                                       "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
-            }`}>
+            <span className={`shrink-0 text-[9.5px] font-bold tracking-[0.14em] uppercase px-1.5 py-0.5 rounded ${segmentBadgeClass(info.type)}`}>
               {info.type}
             </span>
           )}
@@ -516,11 +513,7 @@ function ClientSearch({ mode, onPick }: {
                       <span className="block text-[10.5px] font-mono tnum text-muted-foreground">{c.code}</span>
                     </span>
                     {c.type && (
-                      <span className={`shrink-0 text-[9px] font-bold tracking-wider px-1.5 py-px rounded ${
-                        c.type === "EXPORT" ? "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300" :
-                        c.type === "GMS"    ? "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" :
-                                              "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
-                      }`}>
+                      <span className={`shrink-0 text-[9px] font-bold tracking-wider px-1.5 py-px rounded ${segmentBadgeClass(c.type)}`}>
                         {c.type}
                       </span>
                     )}

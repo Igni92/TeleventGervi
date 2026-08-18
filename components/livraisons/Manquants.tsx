@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { addDaysISO, formatDeliveryDate, frenchHolidayLabel, nextDeliveryDate } from "@/lib/livraison";
 import type { ApiResp } from "@/lib/livraisonView";
 import { buildShortages, reorderPriority, type ItemShortage } from "@/lib/manquants";
+import { SEGMENT_BADGE } from "@/lib/segments";
 
 const NF_NUM = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
 const fmtNum = (v: number) => NF_NUM.format(v);
@@ -31,12 +32,6 @@ const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : 
 
 /** Ordre de priorité par article — mémorisé PAR JOUR (poste partagé, localStorage). */
 const PRIO_KEY = (date: string) => `televent-manquants-prio:${date}`;
-
-const SEG_BADGE: Record<string, string> = {
-  CHR: "bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
-  GMS: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
-  EXPORT: "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300",
-};
 
 export function Manquants() {
   const auto = useMemo(() => nextDeliveryDate(), []);
@@ -261,8 +256,8 @@ export function Manquants() {
                                 <span className="w-5 shrink-0 text-right tnum text-[11px] font-semibold text-muted-foreground">{idx + 1}.</span>
                                 <span className="min-w-0 flex-1 flex items-center gap-1.5 flex-wrap">
                                   <span className="font-medium text-foreground truncate">{o.cardName}</span>
-                                  {o.clientType && SEG_BADGE[o.clientType] && (
-                                    <span className={`shrink-0 inline-flex items-center px-1 py-px rounded text-[8.5px] font-bold uppercase tracking-wide ${SEG_BADGE[o.clientType]}`}>
+                                  {o.clientType && SEGMENT_BADGE[o.clientType] && (
+                                    <span className={`shrink-0 inline-flex items-center px-1 py-px rounded text-[8.5px] font-bold uppercase tracking-wide ${SEGMENT_BADGE[o.clientType]}`}>
                                       {o.clientType}
                                     </span>
                                   )}

@@ -54,13 +54,14 @@ const fmtPct = (v: number) => `${v.toFixed(1)} %`;
 const fmtWeight = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)} t` : `${formatNum(v)} kg`);
 const fmtPerKg = (v: number) => `${v.toLocaleString("fr-FR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} €/kg`;
 
-/* Couleur de segment — cohérente avec les accents bento (sky/emerald/violet/amber). */
+/* Couleur de segment — alignée sur la vérité de lib/segments (GMS teal ·
+   CHR amber · EXPORT violet) ; hors segments livrés : neutre. */
 const SEG_TONE: Record<ClientSegment, { dot: string; text: string }> = {
-  GMS:       { dot: "bg-sky-400",     text: "text-sky-300" },
-  CHR:       { dot: "bg-emerald-400", text: "text-emerald-300" },
+  GMS:       { dot: "bg-teal-400",    text: "text-teal-300" },
+  CHR:       { dot: "bg-amber-400",   text: "text-amber-300" },
   EXPORT:    { dot: "bg-violet-400",  text: "text-violet-300" },
-  RUNGIS:    { dot: "bg-amber-400",   text: "text-amber-300" },
-  MIN_RUNGIS:{ dot: "bg-amber-400",   text: "text-amber-300" },
+  RUNGIS:    { dot: "bg-slate-400",   text: "text-slate-300" },
+  MIN_RUNGIS:{ dot: "bg-slate-400",   text: "text-slate-300" },
 };
 function segLabel(s: ClientSegment | null): string {
   return s ? (SEGMENTS.find((x) => x.id === s)?.label ?? s) : "—";
@@ -486,9 +487,10 @@ function Scatter({ stores, avgNetPct }: { stores: StoreRow[]; avgNetPct: number 
   const dotColor = (s: StoreRow) =>
     s.marginNet < 0 ? "rgb(251 113 133)"
     : s.segment && SEG_TONE[s.segment] ? undefined : "rgb(148 163 184)";
+  // Remplissages alignés sur SEG_TONE (teal/amber/violet-400, neutre sinon).
   const segFill: Record<ClientSegment, string> = {
-    GMS: "rgb(56 189 248)", CHR: "rgb(52 211 153)", EXPORT: "rgb(167 139 250)",
-    RUNGIS: "rgb(251 191 36)", MIN_RUNGIS: "rgb(251 191 36)",
+    GMS: "rgb(45 212 191)", CHR: "rgb(251 191 36)", EXPORT: "rgb(167 139 250)",
+    RUNGIS: "rgb(148 163 184)", MIN_RUNGIS: "rgb(148 163 184)",
   };
 
   return (

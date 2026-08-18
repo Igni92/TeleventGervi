@@ -63,7 +63,7 @@ export function FullscreenPanel({
             "fixed inset-0 z-50 bg-background",
             "data-[state=open]:animate-in data-[state=open]:fade-in-0",
             "data-[state=closed]:animate-out data-[state=closed]:fade-out-0",
-            "duration-200",
+            "duration-[var(--dur-base)] ease-[var(--ease-apple)]",
           )}
         />
         <DialogPrimitive.Content
@@ -72,7 +72,7 @@ export function FullscreenPanel({
             "fixed inset-0 z-50 flex flex-col bg-background outline-none",
             "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-[0.99]",
             "data-[state=closed]:animate-out data-[state=closed]:fade-out-0",
-            "duration-200 ease-out",
+            "duration-[var(--dur-base)] ease-[var(--ease-apple)]",
             className,
           )}
           // Cf. components/ui/dialog.tsx : les menus/comboboxes maison sont
@@ -100,7 +100,8 @@ export function FullscreenPanel({
           }}
         >
           {/* ── En-tête : retour + titre héros + actions ─────────────── */}
-          <header className="shrink-0 border-b border-border bg-card/60 backdrop-blur-sm">
+          {/* OPAQUE : jamais de verre dépoli, le contenu ne transparaît pas. */}
+          <header className="shrink-0 border-b border-border bg-card">
             <div
               className={cn(
                 "mx-auto flex w-full items-center gap-3 px-3 py-3 sm:px-6 sm:py-4",
@@ -113,7 +114,7 @@ export function FullscreenPanel({
                   "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
                   "border border-border bg-card text-foreground",
                   "hover:bg-secondary active:scale-[0.97]",
-                  "transition-[background-color,transform] duration-150 ease-out",
+                  "transition-[background-color,transform] duration-[var(--dur-fast)] ease-[var(--ease-apple)]",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 )}
               >
@@ -148,7 +149,7 @@ export function FullscreenPanel({
                 className={cn(
                   "hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:inline-flex",
                   "text-muted-foreground hover:bg-secondary hover:text-foreground",
-                  "active:scale-[0.97] transition-[background-color,color,transform] duration-150 ease-out",
+                  "active:scale-[0.97] transition-[background-color,color,transform] duration-[var(--dur-fast)] ease-[var(--ease-apple)]",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 )}
               >

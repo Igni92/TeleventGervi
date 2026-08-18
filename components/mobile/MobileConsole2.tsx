@@ -26,6 +26,7 @@ import {
 import { splitByWarehouse, totalAvailable, saleableAvailable, unitInfo } from "@/lib/gervifrais-calc";
 import { nextDeliveryDate, nextWorkingDeliveryDay, isPrecommande } from "@/lib/livraison";
 import { familyOf } from "@/lib/familles";
+import { segmentBadgeClass } from "@/lib/segments";
 import { priceForArticle, type TarifFruitRow } from "@/lib/tarifFruits";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
@@ -57,12 +58,6 @@ type ApiLine = {
 };
 
 const eur = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2 });
-
-const TYPE_BADGE: Record<string, string> = {
-  EXPORT: "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300",
-  GMS: "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300",
-  CHR: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
-};
 
 /** Groupes ÉPINGLÉS en tête de liste (mêmes principes que l'Écran 2) :
  *  ⭐ favoris du commercial et tarifs fixes (cotations) du client. */
@@ -171,7 +166,7 @@ function ClientPicker({ client, onPick, onClear }: {
           <p className="text-[10.5px] font-mono tnum text-muted-foreground">{client.code}</p>
         </div>
         {client.type && (
-          <span className={`shrink-0 text-[9.5px] font-bold tracking-[0.14em] uppercase px-1.5 py-0.5 rounded ${TYPE_BADGE[client.type] ?? TYPE_BADGE.CHR}`}>
+          <span className={`shrink-0 text-[9.5px] font-bold tracking-[0.14em] uppercase px-1.5 py-0.5 rounded ${segmentBadgeClass(client.type)}`}>
             {client.type}
           </span>
         )}
@@ -216,7 +211,7 @@ function ClientPicker({ client, onPick, onClear }: {
                       <span className="block text-[10.5px] font-mono tnum text-muted-foreground">{c.code}</span>
                     </span>
                     {c.type && (
-                      <span className={`shrink-0 text-[9px] font-bold tracking-wider px-1.5 py-px rounded ${TYPE_BADGE[c.type] ?? TYPE_BADGE.CHR}`}>
+                      <span className={`shrink-0 text-[9px] font-bold tracking-wider px-1.5 py-px rounded ${segmentBadgeClass(c.type)}`}>
                         {c.type}
                       </span>
                     )}

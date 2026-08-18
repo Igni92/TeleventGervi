@@ -33,9 +33,11 @@ const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("fr-FR", { day
 const monthLabelFr = (m: string) =>
   new Date(`${m}-01T12:00:00Z`).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
 
+// Teintes alignées sur la vérité segment de lib/segments (GMS teal · CHR amber ·
+// EXPORT violet) — hors segments livrés : neutre.
 const SEG_TONE: Record<ClientSegment, string> = {
-  GMS: "text-sky-300", CHR: "text-emerald-300", EXPORT: "text-violet-300",
-  RUNGIS: "text-amber-300", MIN_RUNGIS: "text-amber-300",
+  GMS: "text-teal-300", CHR: "text-amber-300", EXPORT: "text-violet-300",
+  RUNGIS: "text-slate-300", MIN_RUNGIS: "text-slate-300",
 };
 
 /* ───────────────────────── Shell commun ───────────────────────── */

@@ -8,25 +8,16 @@ import { Providers } from "./providers";
 import { AmbientBackground } from "@/components/AmbientBackground";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 
-// Inter = texte courant (lisibilité max). Space Grotesk = DISPLAY : titres et
-// gros chiffres. Sa personnalité géométrique-industrielle colle à l'identité
-// anthracite + jaune, et sort l'app du « tout-Inter » générique. Il embarque
-// les chiffres tabulaires (tnum) → aucun saut de layout sur les KPI animés.
-//
-// Polices AUTO-HÉBERGÉES (fichiers variables woff2 sous app/fonts) plutôt que
-// next/font/google : le build (Turbopack) ne dépend plus d'un accès réseau à
-// fonts.gstatic.com — c'est ce qui faisait échouer `next build` en prod.
+// Pile SYSTÈME partout (refonte UI) : SF sur Apple, sinon Inter. Inter reste
+// AUTO-HÉBERGÉE (woff2 variable sous app/fonts) plutôt que next/font/google :
+// le build ne dépend pas d'un accès réseau à fonts.gstatic.com. Elle n'est
+// qu'un REPLI dans la pile (cf. tailwind.config fontFamily) — Space Grotesk
+// est retirée, le « display » = même famille, graisse 700 resserrée.
 const inter = localFont({
   src: "./fonts/inter-latin-var.woff2",
   variable: "--font-inter",
   display: "swap",
   weight: "300 800",
-});
-const spaceGrotesk = localFont({
-  src: "./fonts/space-grotesk-latin-var.woff2",
-  variable: "--font-display",
-  display: "swap",
-  weight: "400 700",
 });
 
 export const metadata: Metadata = {
@@ -45,7 +36,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="fr" className={`${inter.variable} ${spaceGrotesk.variable}`}>
+    <html lang="fr" className={inter.variable}>
       <head>
         {/* Anti-FOUC : applique densité + zoom d'interface avant le 1er paint.
             Colorimétrie retirée (marque = Or unique) → on purge un ancien choix.
