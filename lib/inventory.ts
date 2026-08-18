@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { normalizePalettes, isEmptyPalettes, EMPTY_PALETTES, type PaletteCounts } from "@/lib/palettes";
 
 /**
  * Inventaire (comptage du préparateur) — stocké dans la table clé/valeur
@@ -258,6 +259,9 @@ export async function getDeliveryStatuses(): Promise<{
   misEnPrepBy: Map<number, string>;
   misEnPrepAt: Map<number, string>;
   bonCommande: Map<number, boolean>;
+  /** Palettes comptées à la préparation. Absent = jamais saisi (case à remplir
+   *  à la main sur le bon de transport) — à distinguer d'un comptage à zéro. */
+  palettes: Map<number, PaletteCounts>;
 }> {
   const out = {
     prepared: new Map<number, boolean>(),
@@ -274,8 +278,9 @@ export async function getDeliveryStatuses(): Promise<{
     misEnPrepBy: new Map<number, string>(),
     misEnPrepAt: new Map<number, string>(),
     bonCommande: new Map<number, boolean>(),
+    palettes: new Map<number, PaletteCounts>(),
   };
-  const prefixes = [LIV_FAITE_PREFIX, LIV_DEPART_PREFIX, LIV_PREP_PREFIX, LIV_INCOMPLETE_PREFIX, LIV_AVOIR_PREFIX, LIV_MISEPREP_PREFIX, LIV_COMMANDE_PREFIX];
+  const prefixes = [LIV_FAITE_PREFIX, LIV_DEPART_PREFIX, LIV_PREP_PREFIX, LIV_INCOMPLETE_PREFIX, LIV_AVOIR_PREFIX, LIV_MISEPREP_PREFIX, LIV_COMMANDE_PREFIX, LIV_PALETTES_PREFIX];
   try {
     const rows = await prisma.appSetting.findMany({
       where: { OR: prefixes.map((p) => ({ key: { startsWith: p } })) },
@@ -285,7 +290,7 @@ export async function getDeliveryStatuses(): Promise<{
       if (!prefix) continue;
       const docEntry = Number(r.key.slice(prefix.length));
       if (!Number.isFinite(docEntry)) continue;
-      let v: { prepared?: boolean; departed?: boolean; incomplete?: boolean; missing?: string[]; excluded?: boolean; misEnPrep?: boolean; bonCommande?: boolean; by?: string; at?: string };
+      let v: { prepared?: boolean; departed?: boolean; incomplete?: boolean; missing?: string[]; excluded?: boolean; misEnPrep?: boolean; bonCommande?: boolean; palettes?: unknown; by?: string; at?: string };
       try { v = JSON.parse(r.value); } catch { continue; }
       switch (prefix) {
         case LIV_FAITE_PREFIX:
@@ -322,6 +327,12 @@ export async function getDeliveryStatuses(): Promise<{
           break;
         case LIV_COMMANDE_PREFIX:
           if (v.bonCommande) out.bonCommande.set(docEntry, true);
+          break;
+        case LIV_PALETTES_PREFIX:
+          // On mémorise même un comptage à zéro : « compté, et il n'y en a pas »
+          // n'est pas « pas encore compté ». Seul le second laisse la case vide
+          // à remplir à la main sur le bon de transport.
+          out.palettes.set(docEntry, normalizePalettes(v.palettes));
           break;
       }
     }
@@ -527,4 +538,57 @@ export async function listBonCommandeDocEntries(): Promise<{ docEntry: number; a
     }
     return out;
   } catch { return []; }
+}
+
+
+// ── Palettes par BL ───────────────────────────────────────────
+const LIV_PALETTES_PREFIX = "livpalettes:";
+
+/**
+ * Enregistre le comptage de palettes d'un BL (saisi au passage en « fait »).
+ *
+ * Un comptage entièrement à zéro EFFACE la clé : on revient à « pas encore
+ * compté », ce qui laisse la case vide sur le bon de transport. C'est la seule
+ * façon de corriger une saisie faite par erreur.
+ */
+export async function setDeliveryPalettes(docEntry: number, palettes: unknown, by: string): Promise<PaletteCounts> {
+  const key = LIV_PALETTES_PREFIX + docEntry;
+  const counts = normalizePalettes(palettes);
+  if (isEmptyPalettes(counts)) {
+    try { await prisma.appSetting.delete({ where: { key } }); } catch { /* déjà absent */ }
+    return EMPTY_PALETTES;
+  }
+  const value = JSON.stringify({ palettes: counts, at: new Date().toISOString(), by });
+  await prisma.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+  return counts;
+}
+
+/** Comptage d'UN BL, ou null s'il n'a jamais été saisi. */
+export async function getDeliveryPalettes(docEntry: number): Promise<PaletteCounts | null> {
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key: LIV_PALETTES_PREFIX + docEntry } });
+    if (!row) return null;
+    const v = JSON.parse(row.value) as { palettes?: unknown };
+    return normalizePalettes(v.palettes);
+  } catch { return null; }
+}
+
+/** Comptages de PLUSIEURS BL (bon de transport : total par transporteur). */
+export async function getDeliveryPalettesMany(docEntries: number[]): Promise<Map<number, PaletteCounts>> {
+  const out = new Map<number, PaletteCounts>();
+  if (docEntries.length === 0) return out;
+  try {
+    const rows = await prisma.appSetting.findMany({
+      where: { key: { in: docEntries.map((d) => LIV_PALETTES_PREFIX + d) } },
+    });
+    for (const r of rows) {
+      const docEntry = Number(r.key.slice(LIV_PALETTES_PREFIX.length));
+      if (!Number.isFinite(docEntry)) continue;
+      try {
+        const v = JSON.parse(r.value) as { palettes?: unknown };
+        out.set(docEntry, normalizePalettes(v.palettes));
+      } catch { /* ligne illisible → BL considéré non compté */ }
+    }
+  } catch { /* table absente → aucun comptage */ }
+  return out;
 }

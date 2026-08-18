@@ -9,6 +9,7 @@ import { getCarrierInfo } from "@/lib/carrierInfo";
 import { getTransporteurDetail } from "@/lib/transporteurs";
 import { sendMailAsShared } from "@/lib/graph";
 import { renderBonTransport, type BonTransportRow } from "@/lib/bonTransport";
+import { getDeliveryPalettesMany } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -110,6 +111,10 @@ export async function POST(req: NextRequest) {
       return "Sans tournée";
     };
 
+    // Palettes comptées à la préparation — le mail au transporteur doit porter
+    // les MÊMES chiffres que le bon imprimé (une seule lecture groupée).
+    const palettesByDoc = await getDeliveryPalettesMany(orders.map((o) => o.DocEntry));
+
     const rows: BonTransportRow[] = orders.map((o) => {
       let colis = 0, weightKg = 0;
       for (const l of o.DocumentLines ?? []) {
@@ -124,6 +129,7 @@ export async function POST(req: NextRequest) {
         docNum: o.DocNum,
         colis: Math.round(colis * 10) / 10,
         weightKg: Math.round(weightKg * 10) / 10,
+        palettes: palettesByDoc.get(o.DocEntry) ?? null,
       };
     }).sort((a, b) => a.tournee.localeCompare(b.tournee, "fr") || a.client.localeCompare(b.client, "fr"));
 

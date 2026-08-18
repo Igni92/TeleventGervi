@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { setDeliveryPrepared, setDeliveryPreparedBy, setDeliveryIncomplete } from "@/lib/inventory";
+import { setDeliveryPrepared, setDeliveryPreparedBy, setDeliveryIncomplete, setDeliveryPalettes } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -13,12 +13,18 @@ export const dynamic = "force-dynamic";
  *
  * Variante RÉ-ATTRIBUTION : { docEntry, by } SANS `prepared` → change uniquement
  * la PERSONNE qui a fait la commande (l'heure du clic d'origine est conservée).
+ *
+ * `palettes` (facultatif) : comptage constaté au moment du « fait »
+ * ({ demi, medium, europe, xl }). Il est totalisé par transporteur sur le bon de
+ * transport. Un comptage tout à zéro efface la saisie — la case redevient vide,
+ * à remplir à la main. Omettre le champ ne touche PAS à un comptage existant :
+ * ré-attribuer l'auteur ou re-cliquer « fait » ne doit rien effacer par surprise.
  */
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
-  let body: { docEntry?: number; prepared?: boolean; by?: string };
+  let body: { docEntry?: number; prepared?: boolean; by?: string; palettes?: unknown };
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "JSON invalide" }, { status: 400 }); }
 
@@ -46,7 +52,11 @@ export async function POST(req: NextRequest) {
     const at = await setDeliveryPrepared(docEntry, prepared, me);
     // Marquer « faite » lève tout signalement « incomplète — à reprendre ».
     if (prepared) await setDeliveryIncomplete(docEntry, false);
-    return NextResponse.json({ ok: true, docEntry, prepared, by: prepared ? me : null, at: prepared ? at : null });
+    // Comptage de palettes : uniquement s'il est fourni (cf. en-tête).
+    const palettes = body.palettes !== undefined
+      ? await setDeliveryPalettes(docEntry, body.palettes, me)
+      : undefined;
+    return NextResponse.json({ ok: true, docEntry, prepared, by: prepared ? me : null, at: prepared ? at : null, palettes });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }

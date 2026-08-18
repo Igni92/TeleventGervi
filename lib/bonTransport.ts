@@ -7,9 +7,14 @@
  *  - envoi par mail au transporteur (route /api/livraisons/bon-transport) →
  *    corps HTML (exemplaire unique).
  *
- * La colonne « Palettes » est volontairement laissée VIDE : elle se remplit à
- * la main au chargement (le nombre de palettes n'existe pas dans SAP).
+ * La colonne « Palettes » reprend le comptage saisi À LA PRÉPARATION (au clic
+ * « fait »), par type — cf. lib/palettes.ts. Le nombre de palettes n'existe pas
+ * dans SAP : il est constaté en entrepôt. Un BL non compté laisse sa case VIDE,
+ * pour être rempli à la main au chargement comme avant — on ne fait jamais
+ * passer une absence de saisie pour un zéro.
  */
+
+import { formatPalettes, isEmptyPalettes, sumPalettes, totalPalettes, EMPTY_PALETTES, PALETTE_TYPES, type PaletteCounts } from "./palettes";
 
 export interface BonTransportRow {
   tournee: string;      // libellé de tournée (IDF, NORD…) ou « Sans tournée »
@@ -17,6 +22,9 @@ export interface BonTransportRow {
   docNum: number;       // n° de BL
   colis: number;
   weightKg: number;
+  /** Comptage saisi à la préparation. `null`/absent = jamais compté → case vide
+   *  à remplir à la main (comportement d'origine de ce document). */
+  palettes?: PaletteCounts | null;
 }
 
 export interface BonTransportData {
@@ -38,6 +46,10 @@ function renderCopy(data: BonTransportData, tag: string): string {
     orders: data.rows.length,
     colis: data.rows.reduce((s, r) => s + r.colis, 0),
     weightKg: data.rows.reduce((s, r) => s + r.weightKg, 0),
+    // Cumul des seuls BL RÉELLEMENT comptés : un BL non saisi ne compte pas pour
+    // zéro, sinon le total afficherait un chiffre faux au chauffeur.
+    palettes: sumPalettes(data.rows.map((r) => r.palettes ?? EMPTY_PALETTES)),
+    counted: data.rows.filter((r) => r.palettes && !isEmptyPalettes(r.palettes)).length,
   };
 
   // Lignes groupées par tournée : sous-en-tête par tournée puis ses commandes.
@@ -55,7 +67,7 @@ function renderCopy(data: BonTransportData, tag: string): string {
         <td class="num">${r.docNum}</td>
         <td class="num">${num(r.colis)}</td>
         <td class="num">${num(r.weightKg)}</td>
-        <td class="pal"></td>
+        <td class="pal">${r.palettes && !isEmptyPalettes(r.palettes) ? esc(formatPalettes(r.palettes)) : ""}</td>
       </tr>`;
     })
     .join("");
@@ -108,10 +120,21 @@ function renderCopy(data: BonTransportData, tag: string): string {
           <td></td>
           <td class="num">${num(totals.colis)}</td>
           <td class="num">${num(totals.weightKg)}</td>
-          <td class="pal"></td>
+          <td class="pal">${totalPalettes(totals.palettes) > 0 ? esc(formatPalettes(totals.palettes)) : ""}</td>
         </tr>
       </tfoot>
     </table>
+${totalPalettes(totals.palettes) > 0 ? `
+    <table class="pal-recap">
+      <thead>
+        <tr><th colspan="${PALETTE_TYPES.length}">Nombre de palette(s)</th></tr>
+      </thead>
+      <tbody>
+        <tr>${PALETTE_TYPES.map((t) => `<td class="pal-n">${totals.palettes[t.key] || 0}</td>`).join("")}</tr>
+        <tr>${PALETTE_TYPES.map((t) => `<td class="pal-s">${esc(t.size)}</td>`).join("")}</tr>
+        <tr>${PALETTE_TYPES.map((t) => `<td class="pal-l">${esc(t.label)}</td>`).join("")}</tr>
+      </tbody>
+    </table>` : ""}
 
     <div class="sign">
       <div>
@@ -182,6 +205,21 @@ export function renderBonTransport(
                   border: 1.5px solid #111; border-radius: 3px; }
   tfoot td { border-top: 2px solid #111; padding: 7px; font-weight: 700; }
   tfoot .label { text-transform: uppercase; font-size: 10px; letter-spacing: 1px; }
+
+  /* Récapitulatif des palettes — tuiles nombre / format / type, à la suite du
+     tableau. Imprimé seulement si un comptage existe (sinon la colonne reste
+     vide, à remplir à la main au chargement). */
+  .pal-recap { width: auto; margin: 10px 0 14px; border: 1.5px solid #111;
+               border-radius: 6px; border-collapse: collapse; overflow: hidden; }
+  .pal-recap th { font-size: 9.5px; text-transform: uppercase; letter-spacing: 1px;
+                  color: #555; font-weight: 700; text-align: center; padding: 5px 10px;
+                  border-bottom: 1px solid #bbb; }
+  .pal-recap td { text-align: center; padding: 2px 16px; border-left: 1px solid #ddd; }
+  .pal-recap td:first-child { border-left: none; }
+  .pal-recap td.pal-n { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums;
+                        padding-top: 6px; }
+  .pal-recap td.pal-s { font-size: 10px; color: #555; }
+  .pal-recap td.pal-l { font-size: 11px; font-weight: 700; padding-bottom: 6px; }
 
   .sign { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px; }
   .sign > div { border: 1.5px solid #111; border-radius: 6px; height: 92px; padding: 7px 10px; }

@@ -370,6 +370,7 @@ export async function GET(req: NextRequest) {
       excluded: avoirByDoc, preparer: prepByDoc, incomplete: incompleteByDoc,
       incompleteMissing: incompleteMissingByDoc,
       misEnPrep: misEnPrepByDocEntry, misEnPrepBy: misEnPrepByDoc, misEnPrepAt: misEnPrepAtDoc,
+      palettes: palettesByDoc,
     } = statuses;
 
     const weightOfItem = (code: string) => pMap.get(code)?.salesUnitWeight ?? 0;
@@ -500,6 +501,8 @@ export async function GET(req: NextRequest) {
         missingItems: outLines.filter((l) => negativeStocks[l.itemCode] !== undefined).map((l) => l.itemCode),
         // « avoir/exclu » : surcharge manuelle si présente, sinon détecté auto (ci-dessous).
         excluded: avoirByDoc.has(d.DocEntry) ? !!avoirByDoc.get(d.DocEntry) : false,
+        // null = jamais compté (case à remplir à la main sur le bon de transport).
+        palettes: palettesByDoc.get(d.DocEntry) ?? null,
         lineCount: outLines.length,
         lines: outLines,
       };

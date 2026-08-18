@@ -7,6 +7,10 @@
  * signalés MANQUANTS sont barrés et rappelés dans un encart dédié.
  */
 
+// Import RELATIF (et non alias @/) : ce module est couvert par vitest, dont la
+// résolution ne connaît pas les alias TS — cf. les autres modules purs testés.
+import { PALETTE_TYPES, type PaletteCounts } from "../../lib/palettes";
+
 export interface PrintLine {
   itemCode: string;
   itemName: string;
@@ -25,6 +29,9 @@ export interface PrintLine {
 }
 
 export interface PrintDoc {
+  /** Palettes comptées à la préparation (cf. lib/palettes.ts). Absent = pas
+   *  encore compté : le bloc s'imprime alors VIDE, à remplir à la main. */
+  palettes?: PaletteCounts | null;
   docNum: number;
   cardCode: string;
   cardName: string;
@@ -174,7 +181,23 @@ export function renderOrderRecapHtml(doc: PrintDoc, ctx: PrintContext, origin = 
   .manquants h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 4px; }
   .manquants li { margin-left: 16px; font-size: 14px; }
 
-  .noprint { margin-bottom: 14px; }
+  /* Cartouche d'impression aligné à DROITE : il ne masque plus le début du
+     document et tombe sous la main, du côté des actions. */
+  /* Palettes — tuiles nombre / format / type. Les cases restent VIDES quand
+     rien n'a été compté : on écrit alors le chiffre à la main au chargement. */
+  .pal-recap { width: auto; margin: 12px 0 4px; border: 1.5px solid #111;
+               border-radius: 6px; border-collapse: collapse; }
+  .pal-recap th { font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px;
+                  color: #555; font-weight: 700; text-align: center; padding: 5px 10px;
+                  border-bottom: 1px solid #bbb; }
+  .pal-recap td { text-align: center; padding: 2px 18px; border-left: 1px solid #ddd; }
+  .pal-recap td:first-child { border-left: none; }
+  .pal-recap td.pal-n { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums;
+                        padding-top: 6px; min-width: 34px; }
+  .pal-recap td.pal-s { font-size: 10px; color: #555; }
+  .pal-recap td.pal-l { font-size: 11.5px; font-weight: 700; padding-bottom: 6px; }
+
+  .noprint { margin-bottom: 14px; display: flex; justify-content: flex-end; }
   .noprint button { font: 600 13px "Times New Roman", Times, serif; padding: 8px 18px;
                     border: 1.5px solid #111; border-radius: 6px; background: #111;
                     color: #fff; cursor: pointer; }
@@ -225,6 +248,19 @@ export function renderOrderRecapHtml(doc: PrintDoc, ctx: PrintContext, origin = 
         <td class="num">${num(doc.weightKg)} <span class="unit">kg</span></td>
       </tr>
     </tfoot>
+  </table>
+
+  <!-- Palettes : rempli si le comptage a été saisi au passage en « fait »,
+       sinon cases VIDES à remplir à la main au chargement. -->
+  <table class="pal-recap">
+    <thead>
+      <tr><th colspan="${PALETTE_TYPES.length}">Nombre de palette(s)</th></tr>
+    </thead>
+    <tbody>
+      <tr>${PALETTE_TYPES.map((t) => `<td class="pal-n">${doc.palettes ? (doc.palettes[t.key] || 0) : "&nbsp;"}</td>`).join("")}</tr>
+      <tr>${PALETTE_TYPES.map((t) => `<td class="pal-s">${esc(t.size)}</td>`).join("")}</tr>
+      <tr>${PALETTE_TYPES.map((t) => `<td class="pal-l">${esc(t.label)}</td>`).join("")}</tr>
+    </tbody>
   </table>
 
   ${missingLines.length ? `

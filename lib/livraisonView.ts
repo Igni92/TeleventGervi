@@ -38,7 +38,12 @@ export interface Line {
   lot?: string | null;
 }
 
+import type { PaletteCounts } from "./palettes";
+
 export interface Doc {
+  /** Palettes comptées à la préparation. Absent = jamais compté (à distinguer
+   *  d'un comptage à zéro) — cf. lib/palettes.ts. */
+  palettes?: PaletteCounts | null;
   docEntry: number;
   docNum: number;
   docDate: string;

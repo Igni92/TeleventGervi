@@ -11,6 +11,7 @@ import {
   Send, Phone, Plus, Trash2, Search, X, Store, BadgeEuro, Check,
 } from "lucide-react";
 import { toast } from "sonner";
+import { PALETTE_TYPES, EMPTY_PALETTES, totalPalettes, type PaletteCounts, type PaletteKind } from "@/lib/palettes";
 import { Button } from "@/components/ui/button";
 import { StarRating } from "@/components/ui/star-rating";
 import { PageHeader } from "@/components/ui/page-header";
@@ -1124,6 +1125,8 @@ function BonTransportActions({
           docNum: d.docNum,
           colis: d.colis,
           weightKg: d.weightKg,
+          // Comptage saisi à la préparation ; null = non compté → case vide.
+          palettes: d.palettes ?? null,
         }))
         .sort((a, b) => a.tournee.localeCompare(b.tournee, "fr") || a.client.localeCompare(b.client, "fr")),
     [docs, tournees],
@@ -1844,6 +1847,12 @@ const OrderRow = memo(function OrderRow({
   const [requeuePicks, setRequeuePicks] = useState<Set<string>>(new Set());
   // Vérification avant de marquer « faite » (évite les validations par erreur).
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Palettes constatées à la préparation — saisies DANS la confirmation « fait »,
+  // puis totalisées par transporteur sur le bon de transport. Repartir de la
+  // saisie existante permet de corriger un comptage sans le ressaisir.
+  const [palettes, setPalettes] = useState<PaletteCounts>(doc.palettes ?? EMPTY_PALETTES);
+  const setPalette = (k: PaletteKind, v: number) =>
+    setPalettes((cur) => ({ ...cur, [k]: Number.isFinite(v) && v > 0 ? Math.floor(v) : 0 }));
 
   // ── Modifier la PERSONNE qui a fait la commande (« Fait par … ») ──
   //    Dialog partagé (PreparedByDialog) — badge cliquable et menu clic droit.
@@ -1898,7 +1907,9 @@ const OrderRow = memo(function OrderRow({
     try {
       const res = await fetch("/api/livraisons/prepared", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docEntry: doc.docEntry, prepared: next }),
+        // Le comptage n'accompagne QUE le passage en « fait » : annuler un
+        // « fait » ne doit pas effacer les palettes déjà constatées.
+        body: JSON.stringify({ docEntry: doc.docEntry, prepared: next, ...(next ? { palettes } : {}) }),
       });
       const j = await res.json().catch(() => null);
       if (!res.ok || j?.ok === false) {
@@ -1911,7 +1922,7 @@ const OrderRow = memo(function OrderRow({
       const at = next ? (j?.at ?? new Date().toISOString()) : null;
       setPreparedBy(by);
       setPreparedAt(at);
-      onPatchDoc(doc.docEntry, { preparedBy: by, preparedAt: at });
+      onPatchDoc(doc.docEntry, { preparedBy: by, preparedAt: at, ...(next ? { palettes } : {}) });
     } catch {
       rollback();
       toast.error("Échec de l'enregistrement");
@@ -2227,6 +2238,8 @@ const OrderRow = memo(function OrderRow({
         clientType: doc.clientType,
         colis: doc.colis,
         weightKg: doc.weightKg,
+        // Reprend le comptage saisi au « fait » ; absent → cases vides à remplir.
+        palettes: doc.palettes ?? null,
         // Mêmes lignes consolidées qu'à l'écran (colis complets, sans ligne à 0).
         lines: displayLines,
       },
@@ -2877,6 +2890,38 @@ const OrderRow = memo(function OrderRow({
             <span className="text-[11px] uppercase tracking-wide text-muted-foreground">colis</span>
             <span className="ml-auto text-[12.5px] font-semibold tnum text-muted-foreground">{fmtNum(doc.weightKg)} kg · {doc.lineCount} article(s)</span>
           </div>
+          {/* Palettes constatées — le total remonte sur le bon de transport du
+              transporteur. Laisser tout à 0 = « pas compté » : la case reste
+              vide sur le bon, à remplir à la main au chargement. */}
+          <div className="rounded-xl border border-border bg-secondary/20 px-3 py-2.5">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">
+              Nombre de palette(s)
+            </p>
+            <div className="grid grid-cols-4 gap-2">
+              {PALETTE_TYPES.map((t) => (
+                <div key={t.key} className="flex flex-col items-center gap-1">
+                  <input
+                    type="number"
+                    min={0}
+                    inputMode="numeric"
+                    value={palettes[t.key] || 0}
+                    onChange={(e) => setPalette(t.key, Number(e.target.value))}
+                    onFocus={(e) => e.currentTarget.select()}
+                    aria-label={`${t.label} (${t.size})`}
+                    className="h-11 w-full rounded-lg border border-border bg-card text-center text-[19px] font-bold tnum text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+                  />
+                  <span className="text-[9.5px] text-muted-foreground leading-tight text-center">{t.size}</span>
+                  <span className="text-[10.5px] font-semibold text-foreground leading-tight text-center">{t.label}</span>
+                </div>
+              ))}
+            </div>
+            {totalPalettes(palettes) === 0 && (
+              <p className="mt-2 text-[10.5px] text-muted-foreground">
+                Rien de compté — la case restera vide sur le bon de transport.
+              </p>
+            )}
+          </div>
+
           <div className="flex items-center gap-2 pt-1">
             <Button
               type="button"
