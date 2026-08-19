@@ -33,6 +33,7 @@ import { printOrderRecap } from "../printRecap";
 import { fmtNum, fmtEur, fmtClock, capitalize, SEG_UI, type CarrierOption } from "./shared";
 import { PreparedByDialog } from "./dialogs";
 import { useContextMenu, ContextMenu, MenuItem, LineToolMenu, normalizeLotInput, applyLotChange } from "./menus";
+import { ArticleDesignation } from "@/components/livraisons/ArticleDesignation";
 
 /* ─────────────────────────────────────────────────────────────
    Pilules d'état de la ligne — tokens sémantiques uniquement (couleur = état).
@@ -45,22 +46,6 @@ const PILL_TONE = {
   success:     "bg-success/12 text-success ring-1 ring-success/25",
   info:        "bg-info/12 text-info ring-1 ring-info/25",
 } as const;
-
-/** Désignation en texte muted « Marque · 8×500g · cal. 20 · Espagne » —
- *  remplace le mur de chips colorées (seule l'alerte reste colorée). */
-const okPart = (v?: string | null) => !!v && v.trim() !== "" && v.trim() !== "—" && v.trim() !== "-";
-function designationText(l: {
-  marque?: string | null; condt?: string | null; calibre?: string | null;
-  variete?: string | null; pays?: string | null;
-}): string {
-  const parts: string[] = [];
-  if (okPart(l.marque)) parts.push(l.marque!.trim());
-  if (okPart(l.condt)) parts.push(l.condt!.trim());
-  if (okPart(l.calibre)) parts.push(/^cal\.?\s/i.test(l.calibre!.trim()) ? l.calibre!.trim() : `cal. ${l.calibre!.trim()}`);
-  if (okPart(l.variete)) parts.push(l.variete!.trim());
-  if (okPart(l.pays)) parts.push(l.pays!.trim());
-  return parts.join(" · ");
-}
 
 /* ═════════════════════════════════════════════════════════════
    Ligne commande — repliable vers le détail des lignes.
@@ -1061,7 +1046,6 @@ export const OrderRow = memo(function OrderRow({
               {displayLines.map((l, i) => {
                 const isMissing = isLineMissing(l.mergedCodes);
                 const isReported = l.mergedCodes.some((c) => reportedMissingSet.has(c));
-                const designation = designationText(l);
                 return (
                 <tr
                   key={`${l.itemCode}-${i}`}
@@ -1084,9 +1068,8 @@ export const OrderRow = memo(function OrderRow({
                             plus grand et plus contrasté pour rester lisible. */}
                         <div className="flex items-baseline gap-x-2 gap-y-0 min-w-0 max-sm:flex-wrap">
                           <span className={`text-callout font-semibold truncate min-w-0 ${isMissing ? "text-muted-foreground line-through decoration-destructive/60" : "text-foreground"}`}>{l.itemName}</span>
-                          {designation && (
-                            <span className="text-caption text-foreground/60 truncate min-w-0 max-sm:basis-full max-sm:text-body">{designation}</span>
-                          )}
+                          {/* Marque + calibre en blanc (repères préparateur), reste muted. */}
+                          <ArticleDesignation l={l} className="text-caption max-sm:basis-full max-sm:text-body" />
                           <span className="font-mono text-caption2 text-muted-foreground/60 hidden lg:inline shrink-0">{l.itemCode}</span>
                         </div>
                         {(isMissing || isReported) && (
@@ -1210,7 +1193,6 @@ export const OrderRow = memo(function OrderRow({
             {displayLines.map((l, i) => {
               const isMissing = isLineMissing(l.mergedCodes);
               const isReported = l.mergedCodes.some((c) => reportedMissingSet.has(c));
-              const designation = designationText(l);
               return (
               <li
                 key={`big-${l.itemCode}-${i}`}
@@ -1233,10 +1215,8 @@ export const OrderRow = memo(function OrderRow({
                       <span className={`ml-2 ${PILL} ${PILL_TONE.warning} align-middle`}>Signalé manquant</span>
                     )}
                   </p>
-                  {/* Désignation en texte muted — plus de mur de chips. */}
-                  {designation && (
-                    <p className="mt-0.5 text-caption text-muted-foreground">{designation}</p>
-                  )}
+                  {/* Marque + calibre en blanc (repères préparateur), reste muted. */}
+                  <ArticleDesignation l={l} className="mt-0.5 block text-caption" />
                 </div>
                 <BrandLogo marque={l.marque} logos={brandLogos} size="lg" className="self-center" zoomable />
               </li>

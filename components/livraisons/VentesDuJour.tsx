@@ -23,7 +23,7 @@ import { StatLine } from "@/components/ui/stat-line";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { DesignationChips } from "@/components/entrees/DesignationChips";
+import { ArticleDesignation } from "@/components/livraisons/ArticleDesignation";
 import { broadcastActiveClient } from "@/lib/consoleSync";
 import { BLViewDialog } from "@/components/livraisons/BLViewDialog";
 import type { ApiResp, Doc } from "@/lib/livraisonView";
@@ -484,7 +484,8 @@ function BLDetailDialog({ doc: d, open, onOpenChange }: { doc: Doc; open: boolea
                 <span className="shrink-0 tnum">{l.price != null ? eur2.format(l.price) : "—"}</span>
                 <span className="shrink-0 font-bold tnum">{l.lineTotal != null ? eur2.format(l.lineTotal) : "—"}</span>
               </div>
-              <DesignationChips marque={l.marque} condt={l.condt} calibre={l.calibre} variete={l.variete} pays={l.pays} className="ml-9 mt-1" />
+              {/* Marque + calibre en blanc (repères préparateur), reste muted. */}
+              <ArticleDesignation l={l} className="ml-9 mt-1 block text-caption" />
             </li>
           ))}
         </ul>

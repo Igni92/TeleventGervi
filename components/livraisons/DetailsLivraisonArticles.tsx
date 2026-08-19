@@ -13,6 +13,7 @@
  * bouton « ⋯ » visible — les tablettes d'entrepôt n'ont pas de clic droit).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { ArticleDesignation, type DesignationFields } from "@/components/livraisons/ArticleDesignation";
 import { createPortal } from "react-dom";
 import { floatingPortalTarget } from "@/lib/floatingPortal";
 import { Loader2, MoreHorizontal, Package, Printer, RefreshCw, Search, ArrowRight, Replace, AlertTriangle } from "lucide-react";
@@ -35,6 +36,7 @@ interface Row {
   itemCode: string;
   itemName: string;
   tags: string[];
+  desig: DesignationFields;
   seg: Record<Segment, SegQty>;
   /** BL OUVERTS du jour contenant cet article — cibles de l'échange en masse. */
   openDocs: number[];
@@ -106,6 +108,7 @@ export function DetailsLivraisonArticles() {
             const tags = [cleanTag(l.marque), cleanTag(l.condt), cleanTag(l.calibre), cleanTag(l.variete), cleanTag(l.pays)]
               .filter((t) => t && t.toUpperCase() !== l.itemName.toUpperCase());
             a = { itemCode: l.itemCode, itemName: l.itemName, tags: [...new Set(tags)],
+              desig: { marque: l.marque, condt: l.condt, calibre: l.calibre, variete: l.variete, pays: l.pays },
               seg: { GMS: { colis: 0, kg: 0 }, CHR: { colis: 0, kg: 0 }, EXPORT: { colis: 0, kg: 0 } }, openDocs: [] };
             map.set(l.itemCode, a);
           }
@@ -243,11 +246,8 @@ export function DetailsLivraisonArticles() {
                     >
                       <td className="py-2 pl-4 pr-3">
                         <p className="font-medium leading-tight text-foreground">{a.itemName}</p>
-                        {/* Tags produit en texte muted (plus de chips) : la ligne
-                            reste dense et rien ne concurrence les alertes. */}
-                        {a.tags.length > 0 && (
-                          <p className="mt-0.5 text-caption text-muted-foreground">{a.tags.join(" · ")}</p>
-                        )}
+                        {/* Marque + calibre en blanc (repères préparateur), reste muted. */}
+                        <ArticleDesignation l={a.desig} className="mt-0.5 block text-caption" />
                       </td>
                       {SEGMENTS.map((g) => (
                         <td key={g} className="px-3 py-2 text-right text-foreground/90">{fmt(val(a.seg[g]))}</td>
