@@ -3,22 +3,25 @@
 /**
  * VENTES DU JOUR — les ventes SAISIES aujourd'hui (jour où la commande est
  * RENTRÉE dans le système, = DocDate), quelle que soit leur date de livraison.
- * Consultation seule, groupée par TRANSPORTEUR.
+ * Consultation seule, groupée par TRANSPORTEUR — 5e onglet de la famille
+ * « Livraisons du jour » (LivraisonsSectionTabs).
  *
- * Pour chaque BL, on montre l'avancement de la préparation par deux COCHES :
- *   • « Préparé » (verte cochée quand la commande est faite) ;
- *   • « Départ »  (bleue cochée quand la commande est partie en livraison).
- * + la date de livraison prévue (souvent J+1, mais variable).
+ * Pour chaque BL, l'avancement est porté par UNE pilule de progression à
+ * trois crans (saisi → préparé → parti), cohérente avec les états de
+ * /livraisons (Fait = vert succès, Départ = bleu info).
  *
  * Les BL « avoir / exclu » ne sont pas des ventes → masqués de cet état.
  * (La mise en préparation / le suivi de picking vivent dans le Détail livraison.)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarDays, Check, Clock, Hash, Inbox, Loader2, Pencil, RefreshCw, Search, ShieldAlert, Store, Truck } from "lucide-react";
+import { CalendarDays, Clock, Hash, Inbox, Loader2, Pencil, RefreshCw, Search, ShieldAlert, Store, Truck } from "lucide-react";
 import { toast } from "sonner";
-import { StatBlock } from "@/components/ui/stat-block";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { StatLine } from "@/components/ui/stat-line";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { broadcastActiveClient } from "@/lib/consoleSync";
@@ -48,12 +51,12 @@ function blDateLabel(iso: string): string {
   const p2 = (n: number) => String(n).padStart(2, "0");
   return `${DOW_ABBR[dt.getUTCDay()]} ${p2(d)}.${p2(m)}.${String(y).slice(-2)}`;
 }
-/** « Vente(s) du MER 29.07.26 à 5h17 » — en-tête de la carte, heure courante
+/** « Ventes du MER 29.07.26 à 5h17 » — en-tête de la liste, heure courante
  *  (rendu au moment du chargement/rafraîchissement). */
 function venteHeaderLabel(iso: string): string {
   const now = new Date();
   const p2 = (n: number) => String(n).padStart(2, "0");
-  return `Vente(s) du ${blDateLabel(iso)} à ${now.getHours()}h${p2(now.getMinutes())}`;
+  return `Ventes du ${blDateLabel(iso)} à ${now.getHours()}h${p2(now.getMinutes())}`;
 }
 
 const eur = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
@@ -114,7 +117,7 @@ export function VentesDuJour() {
 
   const needle = q.trim().toLowerCase();
   // Total NON filtré (ignore la recherche) — distingue « aucune vente saisie
-  // aujourd'hui » (état B) de « la recherche ne matche rien » (texte discret).
+  // aujourd'hui » (EmptyState) de « la recherche ne matche rien » (texte discret).
   const allDocsCount = useMemo(
     () => toGroups(data).reduce((s, g) => s + g.docs.length, 0),
     [data],
@@ -138,7 +141,7 @@ export function VentesDuJour() {
 
   return (
     <div className="space-y-4">
-      {/* Bandeau : synthèse + recherche + rafraîchissement */}
+      {/* Bandeau : recherche + rafraîchissement */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
@@ -147,72 +150,93 @@ export function VentesDuJour() {
             onChange={(e) => setQ(e.target.value)}
             placeholder="Filtrer par magasin ou n° de BL…"
             aria-label="Filtrer les ventes"
-            className="h-11 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring/40"
+            className="h-11 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-body focus:outline-none focus:ring-2 focus:ring-ring/40"
           />
         </div>
         <button
           type="button"
           onClick={load}
           disabled={loading}
-          className="inline-flex items-center gap-1.5 h-11 px-3 rounded-xl border border-border bg-card text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60 shrink-0"
+          className="inline-flex items-center gap-1.5 h-11 px-3 rounded-xl border border-border bg-card text-caption font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:bg-secondary transition-colors disabled:opacity-60 shrink-0"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           <span className="hidden sm:inline">Actualiser</span>
         </button>
       </div>
 
-      {/* Synthèse du jour — masquée pendant la mise à jour et quand il n'y a
-          aucune vente saisie (états A/B : le gros message prend toute la place).
-          Basé sur le total NON filtré : une recherche sans résultat ne doit pas
-          faire disparaître les compteurs (juste les repasser à 0). */}
-      {!loading && allDocsCount > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-          <Stat label="Ventes saisies" value={docs.length.toString()} />
-          <Stat label="CA HT" value={eur.format(ca)} />
-          <Stat label="Préparées" value={`${prepared}/${docs.length}`} tone="emerald" />
-          <Stat label="Parties" value={`${departed}/${docs.length}`} tone="sky" />
-          {/* Garde-fous (Paramètres) : ventes du jour présentant ≥ 1 anomalie. */}
-          <Stat label="Alertes garde-fous" value={alerted.toString()} tone={alerted > 0 ? "amber" : undefined} />
-        </div>
-      )}
-
       <section className="rounded-2xl border border-border bg-card overflow-hidden">
-        <div className="flex items-center gap-2.5 px-4 sm:px-5 py-3 border-b border-border bg-secondary/30">
-          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-500/15 text-brand-600 dark:text-brand-400">
-            <Store className="h-4 w-4" strokeWidth={2} />
-          </span>
-          <div className="min-w-0">
-            <p className="text-[13.5px] font-semibold text-foreground leading-tight">
+        {/* En-tête de la liste : titre + badge d'alertes (ambre, seulement si > 0)
+            et synthèse StatLine (« 41 ventes · 12 480 € HT · 30/41 préparées ·
+            8 parties »). Basée sur les docs FILTRÉS : la recherche met les
+            compteurs à jour sans les faire disparaître. */}
+        <div className="px-4 sm:px-5 py-3 border-b border-border bg-secondary/30">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Store className="h-4 w-4 text-muted-foreground shrink-0" strokeWidth={2} />
+            <p className="text-body font-semibold text-foreground leading-tight">
               {venteHeaderLabel(data?.date ?? today)}
             </p>
-            {!loading && allDocsCount > 0 && (
-              <p className="text-[11px] text-muted-foreground">
-                {`${docs.length} vente${docs.length > 1 ? "s" : ""} · ${eur.format(ca)} HT · groupées par transporteur`}
-              </p>
+            <span className="text-caption text-muted-foreground">groupées par transporteur</span>
+            {/* GARDE-FOUS — badge ambre seulement quand il y a des anomalies. */}
+            {!loading && alerted > 0 && (
+              <Badge variant="planifie" className="ml-auto inline-flex items-center gap-1">
+                <ShieldAlert className="h-3 w-3" />
+                {alerted} alerte{alerted > 1 ? "s" : ""} garde-fous
+              </Badge>
             )}
           </div>
+          {!loading && allDocsCount > 0 && (
+            <StatLine
+              className="mt-3"
+              items={[
+                { value: docs.length.toLocaleString("fr-FR"), label: `vente${docs.length > 1 ? "s" : ""}` },
+                { value: eur.format(ca), label: "CA HT" },
+                { value: `${prepared}/${docs.length}`, label: "préparées" },
+                { value: departed.toLocaleString("fr-FR"), label: `partie${departed > 1 ? "s" : ""}` },
+              ]}
+            />
+          )}
         </div>
 
         {loading ? (
-          // A — mise à jour en cours : pas de compteurs, message plein cadre.
-          <BigStateMessage icon={Loader2} spin text="Mise à jour en cours" />
+          // A — mise à jour en cours : squelette de liste (le texte accessible
+          // est porté par le role="status", les blocs Skeleton sont décoratifs).
+          <div role="status" aria-label="Chargement des ventes du jour">
+            <div className="px-4 sm:px-5 py-2 border-b border-border/60 bg-secondary/20">
+              <Skeleton className="h-3 w-32 rounded" />
+            </div>
+            <ul className="divide-y divide-border/60">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <li key={i} className="flex items-center gap-3 px-4 sm:px-5 py-3">
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <Skeleton className="h-4 w-48 max-w-full rounded" />
+                    <Skeleton className="h-3 w-64 max-w-full rounded" />
+                  </div>
+                  <Skeleton className="h-7 w-28 rounded-full shrink-0" />
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : allDocsCount === 0 ? (
-          // B — aucune vente saisie aujourd'hui : pas de compteurs, message plein cadre.
-          <BigStateMessage icon={Inbox} text="Aucune vente pour le moment" />
+          // B — aucune vente saisie aujourd'hui : état vide standard.
+          <EmptyState
+            icon={Inbox}
+            title="Aucune vente pour le moment"
+            description="Les commandes saisies aujourd'hui apparaîtront ici au fil de la journée."
+          />
         ) : groups.length === 0 ? (
-          // Recherche active sans résultat (des ventes existent, filtrées à 0) — cas
-          // distinct de « B » : garde le texte discret existant.
-          <p className="px-5 py-6 text-[13px] text-muted-foreground text-center">
+          // Recherche active sans résultat (des ventes existent, filtrées à 0) —
+          // cas distinct de « B » : texte discret, les compteurs restent visibles.
+          <p className="px-5 py-6 text-body text-muted-foreground text-center">
             Aucune vente saisie aujourd&apos;hui pour cette recherche.
           </p>
         ) : (
-          // C — des ventes : tout s'affiche normalement.
+          // C — des ventes : liste groupée par transporteur.
           groups.map((g) => (
             <div key={g.key}>
               <div className="flex items-center gap-2 px-4 sm:px-5 py-1.5 bg-secondary/20 border-y border-border/60">
                 <Truck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground truncate">{g.name}</span>
-                <span className="text-[11px] tnum text-muted-foreground/70">{g.docs.length}</span>
+                <span className="text-caption2 font-bold uppercase tracking-wide text-muted-foreground truncate">{g.name}</span>
+                <span className="text-caption2 tnum text-muted-foreground/70">{g.docs.length}</span>
               </div>
               <ul className="divide-y divide-border/60">
                 {g.docs.map((d) => <VenteRow key={d.docEntry} d={d} alerts={alerts[d.docEntry]} onOpenBL={openBL} />)}
@@ -222,7 +246,7 @@ export function VentesDuJour() {
         )}
       </section>
 
-      {/* Visuel / édition d'un BL (clic sur la ligne, clic droit ou stylo). */}
+      {/* Édition d'un BL (clic droit sur la ligne ou stylo). */}
       <BLViewDialog
         docEntry={blOpen?.docEntry ?? null}
         docNum={blOpen?.docNum ?? null}
@@ -236,55 +260,39 @@ export function VentesDuJour() {
   );
 }
 
-/** Gros message plein cadre (états A « mise à jour » / B « aucune vente ») —
- *  compteurs masqués, texte blanc pur en surgras + liseré blanc, lisible sur
- *  fond sombre dédié (indépendant du thème clair/sombre de l'appli). */
-function BigStateMessage({ icon: Icon, text, spin }: { icon: typeof Loader2; text: string; spin?: boolean }) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-3 px-5 py-16 bg-gradient-to-br from-slate-900 to-slate-800">
-      <Icon className={`h-7 w-7 text-white/80 ${spin ? "animate-spin" : ""}`} />
-      <p
-        className="text-[20px] sm:text-[22px] font-extrabold text-white text-center tracking-tight"
-        style={{ WebkitTextStroke: "0.6px #fff" }}
-      >
-        {text}
-      </p>
-    </div>
-  );
-}
-
-/** Tuile stat locale — délègue la typo au StatBlock partagé (dédoublonnage). */
-function Stat({ label, value, tone }: { label: string; value: string; tone?: "emerald" | "sky" | "amber" }) {
-  return (
-    <div className="rounded-xl border border-border bg-card px-3 py-2">
-      <StatBlock label={label} value={value} size="md" tone={tone ?? "default"} />
-    </div>
-  );
-}
-
-/** Coche d'avancement — verte/bleue cochée quand l'étape est atteinte, grise sinon. */
-function Coche({ done, label, tone }: { done: boolean; label: string; tone: "emerald" | "sky" }) {
-  const on = tone === "emerald"
-    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/40"
-    : "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/40";
+/** Avancement à TROIS CRANS — saisi → préparé → parti. Pilule NEUTRE (fond
+ *  secondaire, filet border) : seuls les crans atteints et le libellé prennent
+ *  la couleur de l'état courant, cohérente avec les onglets de /livraisons
+ *  (Fait = vert succès, Départ = bleu info ; « saisi » reste muted). */
+function ProgressPill({ prepared, departed }: { prepared: boolean; departed: boolean }) {
+  const step = departed ? 3 : prepared ? 2 : 1;
+  const label = departed ? "Parti" : prepared ? "Préparé" : "Saisi";
+  const fill = departed ? "bg-info" : prepared ? "bg-success" : "bg-muted-foreground/50";
+  const text = departed ? "text-info" : prepared ? "text-success" : "text-muted-foreground";
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-lg border px-2 h-7 text-[11px] font-semibold ${
-        done ? on : "border-border text-muted-foreground/60"
-      }`}
-      title={done ? `${label} ✓` : `${label} — pas encore`}
+      className="inline-flex h-7 items-center gap-2 rounded-full border border-border bg-secondary/40 px-2.5 shrink-0"
+      title={`Avancement ${step}/3 : saisi → préparé → parti`}
+      aria-label={`Avancement : ${label} (étape ${step} sur 3)`}
     >
-      <span className={`inline-flex h-4 w-4 items-center justify-center rounded ${
-        done ? (tone === "emerald" ? "bg-emerald-500 text-white" : "bg-sky-500 text-white") : "border border-border"
-      }`}>
-        {done && <Check className="h-3 w-3" strokeWidth={3} />}
+      <span className="flex items-center gap-1" aria-hidden>
+        {[1, 2, 3].map((i) => (
+          <span
+            key={i}
+            className={`h-1.5 w-3.5 rounded-full transition-colors duration-[var(--dur-fast)] ease-[var(--ease-apple)] ${
+              i <= step ? fill : "bg-border"
+            }`}
+          />
+        ))}
       </span>
-      {label}
+      <span className={`text-caption font-semibold ${text}`}>{label}</span>
     </span>
   );
 }
 
-/** Ligne de vente — un BL (magasin), consultation ; coches préparé + départ.
+/** Ligne de vente — un BL (magasin). UNE affordance de clic : la zone
+ *  principale ouvre le DÉTAIL du BL ; la modification passe par le stylo
+ *  visible (le clic droit reste un raccourci vers la même édition).
  *  `alerts` = anomalies garde-fous détectées a posteriori (badge + détail dépliable). */
 function VenteRow({ d, alerts, onOpenBL }: { d: Doc; alerts?: SafeguardViolation[]; onOpenBL: (d: Doc, edit: boolean) => void }) {
   const takenTime = d.takenAt ? d.takenAt.slice(11, 16) : null;
@@ -311,6 +319,7 @@ function VenteRow({ d, alerts, onOpenBL }: { d: Doc; alerts?: SafeguardViolation
       savedRef.current = v;
       toast.success(`N° commande enregistré — BL n°${d.docNum}`);
     } catch (e) {
+      // Rollback : on repart de la dernière valeur enregistrée côté SAP.
       toast.error(`N° commande non enregistré : ${e instanceof Error ? e.message : ""}`);
       setNum(savedRef.current);
     } finally { setSaving(false); }
@@ -322,29 +331,23 @@ function VenteRow({ d, alerts, onOpenBL }: { d: Doc; alerts?: SafeguardViolation
     <li
       className="flex flex-col gap-1.5 px-4 sm:px-5 py-2.5"
       onContextMenu={(e) => { e.preventDefault(); onOpenBL(d, true); }}
-      title="Clic : voir le BL · Clic droit : modifier"
+      title="Clic : détail du BL · Clic droit : modifier"
     >
     <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+      {/* Zone cliquable UNIQUE de la ligne → détail du BL. */}
       <div
-        className="min-w-0 flex-1 cursor-pointer"
+        className="min-w-0 flex-1 cursor-pointer rounded-lg -mx-1.5 px-1.5 py-0.5 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-apple)] hover:bg-secondary/50 active:bg-secondary focus-visible:bg-secondary/50 focus-visible:outline-none"
         role="button"
         tabIndex={0}
         onClick={() => setDetailOpen(true)}
-        onKeyDown={(e) => { if (e.key === "Enter") setDetailOpen(true); }}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailOpen(true); } }}
         title={`Voir le détail du BL n°${d.docNum}`}
       >
-        <p className="flex items-center gap-2 min-w-0 text-[13.5px] font-semibold text-foreground">
-          <button
-            type="button"
-            onClick={() => onOpenBL(d, false)}
-            className="flex items-center gap-2 min-w-0 text-left hover:text-brand-600 transition-colors"
-            title="Voir le détail du BL"
-          >
-            <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate">{d.cardFullName ?? d.cardName}</span>
-          </button>
+        <p className="flex items-center gap-2 min-w-0 text-body font-semibold text-foreground">
+          <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate">{d.cardFullName ?? d.cardName}</span>
           {d.clientType && SEGMENT_BADGE[d.clientType] && (
-            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide shrink-0 ${SEGMENT_BADGE[d.clientType]}`}>
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-caption2 font-bold uppercase tracking-wide shrink-0 ${SEGMENT_BADGE[d.clientType]}`}>
               {d.clientType}
             </span>
           )}
@@ -354,17 +357,17 @@ function VenteRow({ d, alerts, onOpenBL }: { d: Doc; alerts?: SafeguardViolation
               type="button"
               onClick={(e) => { e.stopPropagation(); setShowAlerts((v) => !v); }}
               title="Anomalies garde-fous — cliquer pour le détail"
-              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide shrink-0 ${
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-caption2 font-bold uppercase tracking-wide shrink-0 ${
                 hasBlock
-                  ? "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
-                  : "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
+                  ? "bg-destructive/12 text-destructive ring-1 ring-destructive/25"
+                  : "bg-warning/12 text-warning ring-1 ring-warning/25"
               }`}
             >
               <ShieldAlert className="h-3 w-3" /> {alerts!.length}
             </button>
           )}
         </p>
-        <p className="text-[11px] text-muted-foreground flex items-center gap-x-2 gap-y-0.5 flex-wrap">
+        <p className="text-caption text-muted-foreground flex items-center gap-x-2 gap-y-0.5 flex-wrap">
           <span>BL n° {d.docNum}</span>
           {takenTime && <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" /> Prise {takenTime}</span>}
           <span className="inline-flex items-center gap-1"><CalendarDays className="h-3 w-3" /> Livr. {shortDate(d.dueDate)}</span>
@@ -383,22 +386,20 @@ function VenteRow({ d, alerts, onOpenBL }: { d: Doc; alerts?: SafeguardViolation
           disabled={saving || !d.open}
           placeholder="N° cmd"
           aria-label={`N° de commande du BL ${d.docNum}`}
-          className="h-8 w-[110px] rounded-md border border-border bg-card px-2 text-[12px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
+          className="h-8 w-[110px] rounded-md border border-border bg-card px-2 text-caption text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand-500/40 disabled:opacity-60"
         />
         {saving && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" />}
       </label>
-      {/* Avancement : coches Préparé (fait) puis Départ (parti). */}
+      {/* Avancement (pilule 3 crans) + stylo d'édition (BL ouvert uniquement). */}
       <div className="flex items-center gap-1.5 shrink-0">
-        <Coche done={d.prepared || !!d.departed} label="Préparé" tone="emerald" />
-        <Coche done={!!d.departed} label="Départ" tone="sky" />
-        {/* Stylo : modifier la commande (BL ouvert uniquement). */}
+        <ProgressPill prepared={d.prepared} departed={!!d.departed} />
         {d.open && (
           <button
             type="button"
             onClick={() => onOpenBL(d, true)}
             title="Modifier la commande"
             aria-label={`Modifier le BL ${d.docNum}`}
-            className="inline-flex items-center justify-center h-7 w-7 rounded-lg border border-border text-muted-foreground hover:text-brand-600 hover:border-brand-500/40 transition-colors"
+            className="inline-flex items-center justify-center h-8 w-8 rounded-lg border border-border text-muted-foreground hover:text-brand-600 hover:border-brand-500/40 active:scale-[0.97] transition-[color,border-color,transform] duration-[var(--dur-fast)] ease-[var(--ease-apple)]"
           >
             <Pencil className="h-3.5 w-3.5" />
           </button>
@@ -407,12 +408,10 @@ function VenteRow({ d, alerts, onOpenBL }: { d: Doc; alerts?: SafeguardViolation
     </div>
     {/* Détail des anomalies garde-fous (déplié au clic sur le badge). */}
     {showAlerts && (alerts?.length ?? 0) > 0 && (
-      <ul className="rounded-lg border border-amber-300/60 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-950/20 px-3 py-2 space-y-0.5">
+      <ul className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 space-y-0.5">
         {alerts!.map((a, i) => (
-          <li key={i} className={`text-[11.5px] leading-snug ${
-            a.severity === "block"
-              ? "text-rose-700 dark:text-rose-300 font-semibold"
-              : "text-amber-800/90 dark:text-amber-200/90"
+          <li key={i} className={`text-caption2 leading-snug ${
+            a.severity === "block" ? "text-destructive font-semibold" : "text-warning"
           }`}>
             • {a.message}
           </li>
@@ -463,14 +462,14 @@ function BLDetailDialog({ doc: d, open, onOpenChange }: { doc: Doc; open: boolea
         className="fixed inset-0 top-0 left-0 h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 flex flex-col gap-3 overflow-y-auto rounded-none p-4 sm:inset-auto sm:left-[50%] sm:top-[50%] sm:h-auto sm:max-h-[90vh] sm:w-[calc(100%-1.5rem)] sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:p-6"
       >
         <DialogHeader className="text-left shrink-0">
-          <DialogTitle className="flex items-center justify-between gap-2 pr-6 text-[15px]">
+          <DialogTitle className="flex items-center justify-between gap-2 pr-6 text-callout">
             <span className="truncate">{d.cardName}</span>
-            <span className={`inline-flex items-center gap-1.5 text-[11.5px] font-semibold shrink-0 ${d.open ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
-              <span className={`h-2 w-2 rounded-full shrink-0 ${d.open ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
+            <span className={`inline-flex items-center gap-1.5 text-caption font-semibold shrink-0 ${d.open ? "text-success" : "text-muted-foreground"}`}>
+              <span className={`h-2 w-2 rounded-full shrink-0 ${d.open ? "bg-success" : "bg-muted-foreground/40"}`} />
               {d.open ? "BL modifiable" : "BL clôturé"}
             </span>
           </DialogTitle>
-          <DialogDescription className="text-[12.5px] text-muted-foreground">
+          <DialogDescription className="text-caption text-muted-foreground">
             BL {d.docNum} du {blDateLabel(d.dueDate)}
           </DialogDescription>
         </DialogHeader>
@@ -478,7 +477,7 @@ function BLDetailDialog({ doc: d, open, onOpenChange }: { doc: Doc; open: boolea
         <ul className="flex-1 divide-y divide-border/60 min-h-0">
           {d.lines.map((l) => (
             <li key={l.itemCode} className="py-2.5">
-              <div className="flex items-baseline gap-2 text-[13px]">
+              <div className="flex items-baseline gap-2 text-body">
                 <span className="w-7 shrink-0 text-right font-bold tnum">{l.colis.toLocaleString("fr-FR")}</span>
                 <span className="min-w-0 flex-1 truncate font-semibold text-foreground">{l.itemName}</span>
                 <span className="shrink-0 text-muted-foreground">{l.itemCode}</span>
@@ -491,7 +490,7 @@ function BLDetailDialog({ doc: d, open, onOpenChange }: { doc: Doc; open: boolea
         </ul>
 
         <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border/60 pt-3">
-          <span className="text-[13px] font-semibold">
+          <span className="text-body font-semibold">
             Total HT <b className="tnum">{eur2.format(d.totalHT)}</b>
           </span>
           {d.open && (

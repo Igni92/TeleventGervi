@@ -13,7 +13,7 @@
 |---|---|---|
 | 0 | Fondations : design system tokenisé, primitives | ✅ committée `fb12624` |
 | 1 | Coquille : navigation, sidebar, badges, login, tab bar | ✅ committée `233fc44` |
-| 2 | Livraisons (frustration n°1 mesurée) | 🔴 À REFAIRE (panne de crédit, 0 fichier écrit) |
+| 2 | Livraisons (frustration n°1 mesurée) | ✅ committée (voir git log) |
 | 3 | Console + Écran 2 (1 779 clics morts mesurés) | ⬜ à faire |
 | 4 | Commerce : clients, fiche, prospection, encours, effectifs | ⬜ à faire |
 | 5 | Marchandise : entrées, CF, bons de commande, inventaire, fabrication, stock/articles | ⬜ à faire |
@@ -76,15 +76,22 @@
 
 ---
 
-## 🔴 Vague 2 — Livraisons (À REFAIRE INTÉGRALEMENT)
+## ✅ Vague 2 — Livraisons (FAITE le 19/08)
 
-La tentative du 18/08 a été tuée par la panne de crédit : **aucun fichier écrit**.
-Script réutilisable : `workflows/scripts/refonte-vague-2-wf_43e63722-5a1.js` (session data).
+Découpe : `LivraisonDetail.tsx` 3 551 → 646 lignes, 7 modules sous `components/livraisons/detail/`
+(OrderRow, CarrierGroup, panels, menus, dialogs, DatePanel, shared). Refonte : en-tête fusionné
+(titre = date), barre d'outils unique, StatLine, transporteurs en listes groupées, menu « ⋯ »
+par ligne (clic droit = raccourci), badges 2 max + « +n », auto-refresh 45 s silencieux
+(quadruple garde anti-écrasement de saisie), Ventes du jour = 5ᵉ onglet de section,
+satellites en GroupedList avec totaux de charge. 717 tests, tsc, build : OK du premier coup.
 
-### Étape A — découpe (séquentielle, AVANT la refonte)
-`components/livraisons/LivraisonDetail.tsx` (3 551 lignes) → modules sous `components/livraisons/detail/` :
-`DatePanel` · `CarrierGroup` · `OrderRow` · `dialogs` · `menus`. Zéro changement de comportement,
-orchestrateur < 900 lignes, tests au vert avant de continuer.
+### Dettes résiduelles notées par l'intégration (à traiter en vague 3 ou 6)
+- OrderRow fige `prepared`/`departed` au montage : un poll silencieux ne met pas à jour le
+  bouton d'état d'une ligne déjà montée si une AUTRE tablette a changé le statut (divergence
+  possible compteur/bouton jusqu'au prochain gen++). Prix assumé de la préservation des saisies.
+- `BonsPreparationPanel.tsx` et `BLViewDialog.tsx` : text-[NNpx] et un bg-violet-600 pré-existants
+  (hors périmètre vague 2) — à tokeniser.
+
 
 ### Étape B — refonte (4 chantiers parallèles)
 1. **Page** : 7 bandeaux → 2 étages (titre = « Livraison du mardi 19 août » + DateStepper ;

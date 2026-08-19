@@ -18,9 +18,9 @@ const KEYWORDS: Record<string, string> = {
   "/console": "commande bl vente télévente appels écran 2 saisie bon livraison",
   "/clients": "base contacts plan appel televente vendeur commercial assignation incidents retard rappel annuaire",
   "/prospection": "prospects démarchage pipeline nouveaux clients relance",
-  "/ventes-du-jour": "ventes préparation livraison magasin mise en prep",
-  // Hub Livraisons : couvre les anciennes vues Par article · À préparer · Manquants.
-  "/livraisons": "détail livraison préparation dispatch bons transporteur tournée ventes mise en préparation par article récap segments gms chr export à préparer manquants rupture stock négatif déficit",
+  // Hub Livraisons : couvre les anciennes vues Par article · À préparer ·
+  // Manquants, et désormais Ventes du jour (onglet /ventes-du-jour).
+  "/livraisons": "détail livraison préparation dispatch bons transporteur tournée ventes du jour saisies magasin mise en préparation par article récap segments gms chr export à préparer manquants rupture stock négatif déficit",
   "/bons-commande": "bon de commande précommande lot affecter em pending export lots à affecter",
   "/products": "produits stock entrepôt",
   "/articles": "articles référentiel produits fiches",

@@ -8,27 +8,27 @@
  *
  * ≠ Ventes du jour (qui liste les ventes SAISIES aujourd'hui, DocDate). Ici on
  * raisonne sur la date de LIVRAISON — ce qui quitte l'entrepôt ce jour-là.
- * Source : /api/livraisons?date=J (mode « due »). Consultation seule.
+ * Source : /api/livraisons?date=J (mode « due »). Consultation seule, à une
+ * exception près : l'ÉCHANGE D'ARTICLE EN MASSE (clic droit sur une ligne OU
+ * bouton « ⋯ » visible — les tablettes d'entrepôt n'ont pas de clic droit).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { floatingPortalTarget } from "@/lib/floatingPortal";
-import { Loader2, RefreshCw, Search, Package, Boxes, Truck, Printer, ArrowRight, Replace, AlertTriangle } from "lucide-react";
+import { Loader2, MoreHorizontal, Package, Printer, RefreshCw, Search, ArrowRight, Replace, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { formatDeliveryDate, nextDeliveryDate } from "@/lib/livraison";
 import { DateStepper } from "@/components/ui/date-stepper";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { printArticlesRecap } from "@/components/livraisons/printRecap";
 import type { ApiResp } from "@/lib/livraisonView";
 
 const SEGMENTS = ["GMS", "CHR", "EXPORT"] as const;
 type Segment = (typeof SEGMENTS)[number];
 type Metric = "colis" | "kg";
-
-const SEG_HEAD: Record<Segment, string> = {
-  GMS: "text-teal-700 dark:text-teal-300",
-  CHR: "text-amber-700 dark:text-amber-300",
-  EXPORT: "text-violet-700 dark:text-violet-300",
-};
 
 interface SegQty { colis: number; kg: number }
 interface Row {
@@ -50,8 +50,9 @@ export function DetailsLivraisonArticles() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [metric, setMetric] = useState<Metric>("colis");
-  // Échange d'article EN MASSE (clic droit sur une ligne article) : remplace le
-  // code sur TOUS les BL ouverts du jour qui le portent (modif SAP par bon).
+  // Échange d'article EN MASSE : remplace le code sur TOUS les BL ouverts du
+  // jour qui le portent (modif SAP par bon). Deux entrées équivalentes : le
+  // clic droit sur la ligne, et le bouton « ⋯ » toujours visible (tablettes).
   const [bulk, setBulk] = useState<{ x: number; y: number; oldCode: string; oldName: string; docEntries: number[] } | null>(null);
   const openBulk = useCallback((e: ReactMouseEvent, a: Row) => {
     if (a.openDocs.length === 0) return;                 // aucun BL ouvert → rien à échanger
@@ -59,6 +60,17 @@ export function DetailsLivraisonArticles() {
     setBulk({
       x: Math.min(e.clientX, window.innerWidth - 312),
       y: Math.min(e.clientY, window.innerHeight - 360),
+      oldCode: a.itemCode, oldName: a.itemName, docEntries: a.openDocs,
+    });
+  }, []);
+  // Même panneau, ancré sous le bouton « ⋯ » de la ligne.
+  const openBulkFromButton = useCallback((e: ReactMouseEvent<HTMLButtonElement>, a: Row) => {
+    if (a.openDocs.length === 0) return;
+    e.stopPropagation();
+    const r = e.currentTarget.getBoundingClientRect();
+    setBulk({
+      x: Math.max(8, Math.min(r.right - 300, window.innerWidth - 312)),
+      y: Math.min(r.bottom + 4, window.innerHeight - 360),
       oldCode: a.itemCode, oldName: a.itemName, docEntries: a.openDocs,
     });
   }, []);
@@ -127,29 +139,28 @@ export function DetailsLivraisonArticles() {
   const unit = metric === "kg" ? "kg" : "colis";
 
   return (
-    <div className="space-y-4">
-      {/* Contrôles : date + recherche + rafraîchir */}
+    <div className="space-y-5">
+      {/* Contrôles : date + recherche + rafraîchir + imprimer */}
       <div className="flex flex-wrap items-center gap-2">
         <DateStepper value={date} onChange={setDate} className="shrink-0" />
-        <div className="relative flex-1 min-w-[180px] max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+        <div className="relative min-w-[180px] max-w-sm flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Filtrer par article, marque, origine…"
             aria-label="Filtrer les articles"
-            className="h-11 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring/40"
+            className="h-10 w-full rounded-lg border border-border bg-card pl-9 pr-3 text-body focus:outline-none focus:ring-2 focus:ring-ring/40"
           />
         </div>
-        <button
-          type="button" onClick={() => load(date)} disabled={loading}
-          className="inline-flex items-center gap-1.5 h-11 px-3 rounded-xl border border-border bg-card text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60 shrink-0"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        <Button variant="outline" size="lg" onClick={() => load(date)} disabled={loading} className="shrink-0">
+          <RefreshCw className={loading ? "animate-spin" : ""} />
           <span className="hidden sm:inline">Actualiser</span>
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="outline"
+          size="lg"
+          className="shrink-0"
           onClick={() => {
             if (rows.length === 0) { toast.info("Rien à imprimer pour ce jour."); return; }
             const ok = printArticlesRecap({
@@ -161,94 +172,117 @@ export function DetailsLivraisonArticles() {
             if (!ok) toast.error("Impression bloquée — autorise les fenêtres pop-up.");
           }}
           disabled={loading || rows.length === 0}
-          className="inline-flex items-center gap-1.5 h-11 px-3 rounded-xl border border-border bg-card text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60 shrink-0"
           title="Imprimer le récap par article (unité affichée)"
         >
-          <Printer className="h-4 w-4" />
+          <Printer />
           <span className="hidden sm:inline">Imprimer</span>
-        </button>
+        </Button>
       </div>
 
-      <section className="rounded-2xl border border-border bg-card overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-3 border-b border-border bg-secondary/30">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-500/15 text-brand-600 dark:text-brand-400">
-              <Package className="h-4 w-4" strokeWidth={2} />
-            </span>
-            <div className="min-w-0">
-              <p className="text-[13.5px] font-semibold text-foreground leading-tight">
-                Livraison par article{data?.date ? ` — ${formatDeliveryDate(data.date)}` : ""}
-              </p>
-              <p className="text-[11px] text-muted-foreground inline-flex items-center gap-1">
-                <Truck className="h-3 w-3" />
-                {loading && !data ? "Chargement…" : `${rows.length} article${rows.length > 1 ? "s" : ""} · ${docCount} livraison${docCount > 1 ? "s" : ""} · GMS / CHR / Export`}
-              </p>
-            </div>
+      <section aria-label="Livraison par article">
+        {/* En-tête AU-DESSUS de la surface (motif GroupedList) : titre + compteurs
+            à gauche, bascule d'unité à droite. */}
+        <div className="mb-1.5 flex flex-wrap items-end justify-between gap-2 px-4">
+          <div className="min-w-0">
+            <h2 className="truncate text-body font-semibold text-foreground">
+              Livraison par article{data?.date ? ` — ${formatDeliveryDate(data.date)}` : ""}
+            </h2>
+            <p className="tnum text-caption text-muted-foreground">
+              {loading && !data ? "Chargement…" : `${rows.length} article${rows.length > 1 ? "s" : ""} · ${docCount} livraison${docCount > 1 ? "s" : ""} · GMS / CHR / Export`}
+            </p>
           </div>
-          <div className="inline-flex items-center gap-1 rounded-lg border border-border bg-card p-0.5 shrink-0">
-            <MetricTab active={metric === "colis"} onClick={() => setMetric("colis")} icon={<Boxes className="h-3.5 w-3.5" />}>Colis</MetricTab>
-            <MetricTab active={metric === "kg"} onClick={() => setMetric("kg")}>Kg</MetricTab>
-          </div>
+          <SegmentedControl<Metric>
+            value={metric}
+            onChange={setMetric}
+            options={[{ value: "colis", label: "Colis" }, { value: "kg", label: "Kg" }]}
+            size="sm"
+            aria-label="Unité affichée"
+            className="shrink-0"
+          />
         </div>
 
-        {loading && !data ? (
-          <div className="flex items-center gap-2 px-5 py-4 text-[13px] text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Chargement des livraisons…
-          </div>
-        ) : rows.length === 0 ? (
-          <p className="px-5 py-6 text-[13px] text-muted-foreground text-center">
-            Aucune livraison GMS / CHR / Export ce jour{needle ? " pour cette recherche" : ""}.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-[12.5px]">
-              <thead>
-                <tr className="border-b border-border/70 text-muted-foreground">
-                  <th className="text-left font-semibold py-2 pl-4 sm:pl-5 pr-3">Article</th>
-                  {SEGMENTS.map((g) => (
-                    <th key={g} className={`text-right font-bold py-2 px-3 uppercase tracking-wide ${SEG_HEAD[g]}`}>{g === "EXPORT" ? "Export" : g}</th>
-                  ))}
-                  <th className="text-right font-semibold py-2 pl-3 pr-4 sm:pr-5">Total</th>
-                </tr>
-              </thead>
-              <tbody className="tnum">
-                {rows.map((a) => (
-                  <tr
-                    key={a.itemCode}
-                    onContextMenu={(e) => openBulk(e, a)}
-                    title={a.openDocs.length > 0 ? `Clic droit : échanger cet article sur ${a.openDocs.length} bon(s) du jour` : undefined}
-                    className={`border-b border-border/40 last:border-0 hover:bg-secondary/30 align-top ${a.openDocs.length > 0 ? "cursor-context-menu" : ""}`}
-                  >
-                    <td className="py-2 pl-4 sm:pl-5 pr-3">
-                      <p className="text-foreground font-medium leading-tight">{a.itemName}</p>
-                      {a.tags.length > 0 && (
-                        <div className="mt-0.5 flex flex-wrap gap-1">
-                          {a.tags.map((t, i) => (
-                            <span key={i} className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-secondary/70 text-muted-foreground">{t}</span>
-                          ))}
-                        </div>
-                      )}
-                    </td>
+        <div className="overflow-hidden rounded-xl bg-card ring-1 ring-border">
+          {loading && !data ? (
+            <div role="status" aria-label="Chargement des livraisons" className="divide-y divide-border">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} className="flex items-center gap-3 px-4 py-3">
+                  <Skeleton className="h-3.5 w-2/5" />
+                  <Skeleton className="ml-auto h-3.5 w-1/4" />
+                </div>
+              ))}
+            </div>
+          ) : rows.length === 0 ? (
+            <EmptyState
+              icon={Package}
+              title="Aucune livraison"
+              description={<>Aucune livraison GMS / CHR / Export ce jour{needle ? " pour cette recherche" : ""}.</>}
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-body">
+                {/* Colonnes de segment SANS couleur : la couleur est réservée aux
+                    états (le segment est une identité, pas une alerte). */}
+                <thead>
+                  <tr className="border-b border-border/70 text-caption2 uppercase tracking-wider text-muted-foreground">
+                    <th className="py-2 pl-4 pr-3 text-left font-semibold">Article</th>
                     {SEGMENTS.map((g) => (
-                      <td key={g} className="py-2 px-3 text-right text-foreground/90">{fmt(val(a.seg[g]))}</td>
+                      <th key={g} className="px-3 py-2 text-right font-semibold">{g === "EXPORT" ? "Export" : g}</th>
                     ))}
-                    <td className="py-2 pl-3 pr-4 sm:pr-5 text-right font-bold text-foreground">{fmt(rowTotal(a))}</td>
+                    <th className="py-2 pl-3 pr-3 text-right font-semibold">Total</th>
+                    {/* Colonne du menu « ⋯ » (échange en masse). */}
+                    <th className="w-10 py-2 pr-2"><span className="sr-only">Actions</span></th>
                   </tr>
-                ))}
-                <tr className="border-t border-border/70 font-bold text-foreground bg-secondary/20">
-                  <td className="py-2 pl-4 sm:pl-5 pr-3">Total ({unit})</td>
-                  {SEGMENTS.map((g) => (
-                    <td key={g} className="py-2 px-3 text-right">{fmt(colTotals[g])}</td>
+                </thead>
+                <tbody className="tnum">
+                  {rows.map((a) => (
+                    <tr
+                      key={a.itemCode}
+                      onContextMenu={(e) => openBulk(e, a)}
+                      title={a.openDocs.length > 0 ? `Clic droit ou « ⋯ » : échanger cet article sur ${a.openDocs.length} bon(s) du jour` : undefined}
+                      className={`border-b border-border/40 align-top transition-colors last:border-0 hover:bg-secondary/40 ${a.openDocs.length > 0 ? "cursor-context-menu" : ""}`}
+                    >
+                      <td className="py-2 pl-4 pr-3">
+                        <p className="font-medium leading-tight text-foreground">{a.itemName}</p>
+                        {/* Tags produit en texte muted (plus de chips) : la ligne
+                            reste dense et rien ne concurrence les alertes. */}
+                        {a.tags.length > 0 && (
+                          <p className="mt-0.5 text-caption text-muted-foreground">{a.tags.join(" · ")}</p>
+                        )}
+                      </td>
+                      {SEGMENTS.map((g) => (
+                        <td key={g} className="px-3 py-2 text-right text-foreground/90">{fmt(val(a.seg[g]))}</td>
+                      ))}
+                      <td className="py-2 pl-3 pr-3 text-right font-bold text-foreground">{fmt(rowTotal(a))}</td>
+                      <td className="py-1.5 pr-2 text-right">
+                        {a.openDocs.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={(e) => openBulkFromButton(e, a)}
+                            aria-label={`Actions sur « ${a.itemName} » — échanger l'article sur ${a.openDocs.length} bon(s) du jour`}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors duration-[var(--dur-fast)] ease-[var(--ease-apple)] hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          >
+                            <MoreHorizontal size={16} aria-hidden />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
                   ))}
-                  <td className="py-2 pl-3 pr-4 sm:pr-5 text-right">{fmt(colTotals.all)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        )}
+                  <tr className="border-t border-border/70 bg-secondary/20 font-bold text-foreground">
+                    <td className="py-2 pl-4 pr-3">Total ({unit})</td>
+                    {SEGMENTS.map((g) => (
+                      <td key={g} className="px-3 py-2 text-right">{fmt(colTotals[g])}</td>
+                    ))}
+                    <td className="py-2 pl-3 pr-3 text-right">{fmt(colTotals.all)}</td>
+                    <td className="py-2 pr-2" />
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </section>
 
-      {/* Échange d'article en masse (clic droit sur une ligne article). */}
+      {/* Échange d'article en masse (clic droit sur une ligne OU bouton « ⋯ »). */}
       {bulk && (
         <BulkSwapMenu
           pos={bulk}
@@ -371,27 +405,29 @@ function BulkSwapMenu({ pos, onClose, onDone }: {
       className="pointer-events-auto z-[130] rounded-xl border border-border bg-card shadow-modal overflow-hidden flex flex-col max-h-[360px] animate-fade-up"
     >
       <div className="shrink-0 px-3 py-2 border-b border-border bg-secondary/30">
-        <p className="text-[11px] font-semibold text-foreground inline-flex items-center gap-1.5">
+        <p className="text-caption2 font-semibold text-foreground inline-flex items-center gap-1.5">
           <Replace className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" /> Échanger en masse
         </p>
-        <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+        <p className="text-caption2 text-muted-foreground truncate mt-0.5">
           <span className="font-semibold text-foreground">{pos.oldName}</span> · {pos.docEntries.length} bon(s) du jour
         </p>
       </div>
 
       {pending ? (
         <div className="p-3 space-y-2.5">
-          <p className="text-[12.5px] text-foreground inline-flex items-start gap-1.5">
-            <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-            Remplacer <b>{pos.oldName}</b> par <b>{pending.itemName}</b> sur <b>{pos.docEntries.length} bon(s)</b> ? Quantité et prix conservés. Action irréversible.
+          <p className="text-body text-foreground inline-flex items-start gap-1.5">
+            <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+            <span>
+              Remplacer <b>{pos.oldName}</b> par <b>{pending.itemName}</b> sur <b>{pos.docEntries.length} bon(s)</b> ? Quantité et prix conservés. Action irréversible.
+            </span>
           </p>
           <div className="flex items-center gap-2">
             <button type="button" disabled={running} onClick={() => run(pending)}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-[12.5px] font-semibold disabled:opacity-60 transition-colors">
+              className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-body font-semibold disabled:opacity-60 transition-colors">
               {running ? <><Loader2 className="h-4 w-4 animate-spin" /> Échange…</> : <>Confirmer</>}
             </button>
             <button type="button" disabled={running} onClick={() => setPending(null)}
-              className="inline-flex items-center justify-center h-9 px-3 rounded-lg border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-60 transition-colors">
+              className="inline-flex items-center justify-center h-9 px-3 rounded-lg border border-border text-body font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-60 transition-colors">
               Retour
             </button>
           </div>
@@ -406,15 +442,15 @@ function BulkSwapMenu({ pos, onClose, onDone }: {
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Nouveau produit (nom ou code)…"
               aria-label="Rechercher l'article de remplacement"
-              className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-8 text-[12.5px] focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              className="h-9 w-full rounded-lg border border-border bg-background pl-8 pr-8 text-body focus:outline-none focus:ring-2 focus:ring-brand-500/40"
             />
             {loading && <Loader2 className="absolute right-4 top-[calc(50%+4px)] -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
           </div>
           <div className="overflow-y-auto py-1 min-h-0">
             {query.trim().length < 2 ? (
-              <p className="px-3 py-2 text-[11.5px] italic text-muted-foreground">Tape au moins 2 caractères…</p>
+              <p className="px-3 py-2 text-caption italic text-muted-foreground">Tape au moins 2 caractères…</p>
             ) : results.length === 0 && !loading ? (
-              <p className="px-3 py-2 text-[11.5px] italic text-muted-foreground">Aucun produit trouvé.</p>
+              <p className="px-3 py-2 text-caption italic text-muted-foreground">Aucun produit trouvé.</p>
             ) : results.map((p) => (
               <button
                 key={p.itemCode}
@@ -423,8 +459,8 @@ function BulkSwapMenu({ pos, onClose, onDone }: {
                 className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-secondary/60 transition-colors"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block text-[12.5px] font-medium text-foreground truncate">{p.itemName}</span>
-                  <span className="block text-[10px] font-mono text-muted-foreground">{p.itemCode}</span>
+                  <span className="block text-body font-medium text-foreground truncate">{p.itemName}</span>
+                  <span className="block text-caption2 font-mono text-muted-foreground">{p.itemCode}</span>
                 </span>
                 <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
               </button>
@@ -436,19 +472,5 @@ function BulkSwapMenu({ pos, onClose, onDone }: {
     // Porté DANS le Dialog : sinon son piège à focus rapatrie le focus et ce
     // champ de recherche (autoFocus) est inutilisable — cf. lib/floatingPortal.ts.
     floatingPortalTarget(boxRef.current),
-  );
-}
-
-function MetricTab({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <button
-      type="button" onClick={onClick} aria-pressed={active}
-      className={`inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[11.5px] font-semibold transition-colors ${
-        active ? "bg-brand-500/15 text-brand-700 dark:text-brand-300" : "text-muted-foreground hover:text-foreground"
-      }`}
-    >
-      {icon}
-      {children}
-    </button>
   );
 }

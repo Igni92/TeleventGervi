@@ -2,9 +2,10 @@
 
 /**
  * PRÉPARATIONS À FAIRE — les BL PAS ENCORE PRÉPARÉS des livraisons à venir,
- * groupés par DATE DE LIVRAISON (le plus proche en premier). Vue de charge
+ * groupés par DATE DE LIVRAISON (le plus proche en premier). Vue de CHARGE
  * pour anticiper le travail de préparation sur plusieurs jours (au-delà du
- * seul jour du Détail livraison).
+ * seul jour du Détail livraison) : chaque jour affiche ses totaux
+ * (n BL · colis · kg).
  *
  * « Pas encore préparé » = ni fait (prepared) ni parti (departed), hors avoir.
  * Adossé à GET /api/livraisons?from=…&to=… (plage de dates de livraison). Pour
@@ -13,12 +14,16 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, ChevronRight, ClipboardList, Loader2, RefreshCw, Search, Store, Truck } from "lucide-react";
+import { PackageCheck, RefreshCw, Search, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { addDaysISO, formatDeliveryDate } from "@/lib/livraison";
 // Couleurs de segment : source unique du design system (GMS teal · CHR amber · EXPORT violet).
-import { SEGMENT_BADGE } from "@/lib/segments";
+import { segmentBadgeClass } from "@/lib/segments";
 import { hasMissing, type ApiResp, type Doc } from "@/lib/livraisonView";
+import { GroupedList, GroupedRow } from "@/components/ui/grouped-list";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 
 /** Date murale Europe/Paris — « aujourd'hui » métier. */
 function parisTodayISO(): string {
@@ -29,6 +34,7 @@ const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : 
 /** Fenêtre analysée : aujourd'hui → +N jours de livraison. */
 const WINDOW_DAYS = 14;
 
+const NF = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
 
 interface DayGroup { date: string; docs: Doc[] }
 
@@ -99,111 +105,106 @@ export function PreparationsAFaire() {
   const total = useMemo(() => groups.reduce((s, g) => s + g.docs.length, 0), [groups]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+        <div className="relative min-w-[200px] max-w-sm flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Filtrer par magasin, transporteur, n° BL…"
             aria-label="Filtrer les préparations"
-            className="h-11 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-ring/40"
+            className="h-10 w-full rounded-lg border border-border bg-card pl-9 pr-3 text-body focus:outline-none focus:ring-2 focus:ring-ring/40"
           />
         </div>
-        <span className="text-[12px] text-muted-foreground tnum">
+        <span className="tnum text-caption text-muted-foreground">
           {loading && !data ? "" : `${total} à préparer`}
         </span>
-        <button
-          type="button"
-          onClick={load}
-          disabled={loading}
-          className="ml-auto inline-flex items-center gap-1.5 h-11 px-3 rounded-xl border border-border bg-card text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60 shrink-0"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        <Button variant="outline" size="lg" onClick={load} disabled={loading} className="ml-auto shrink-0">
+          <RefreshCw className={loading ? "animate-spin" : ""} />
           <span className="hidden sm:inline">Actualiser</span>
-        </button>
+        </Button>
       </div>
 
       {loading && !data ? (
-        <div className="flex items-center gap-2 px-1 py-4 text-[13px] text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Chargement des préparations…
-        </div>
-      ) : groups.length === 0 ? (
-        <div className="flex flex-col items-center justify-center text-center rounded-2xl border border-dashed border-border bg-card py-12 px-6">
-          <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 mb-3">
-            <CheckCircle2 className="h-6 w-6" strokeWidth={1.8} />
-          </span>
-          <p className="text-[14px] font-semibold text-foreground">Tout est préparé</p>
-          <p className="text-[12.5px] text-muted-foreground mt-1 max-w-sm">
-            Aucune préparation en attente sur les {WINDOW_DAYS} prochains jours{needle ? " pour cette recherche" : ""}.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {groups.map((g) => (
-            <section key={g.date} className="rounded-2xl border border-border bg-card overflow-hidden">
-              <div className="flex items-center gap-2.5 px-4 sm:px-5 py-2.5 border-b border-border bg-secondary/30">
-                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                  <ClipboardList className="h-4 w-4" strokeWidth={2} />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-[13.5px] font-semibold text-foreground leading-tight">
-                    Livraison du {g.date ? capitalize(formatDeliveryDate(g.date)) : "—"}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {g.docs.length} préparation{g.docs.length > 1 ? "s" : ""} à faire
-                  </p>
+        // Squelette standard : un groupe-jour factice (en-tête + 4 rangées).
+        <div role="status" aria-label="Chargement des préparations">
+          <Skeleton className="mb-2 ml-4 h-3.5 w-48" />
+          <div className="divide-y divide-border overflow-hidden rounded-xl bg-card ring-1 ring-border">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center gap-3 px-4 py-3">
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <Skeleton className="h-3.5 w-2/5" />
+                  <Skeleton className="h-3 w-3/5" />
                 </div>
               </div>
-              <ul className="divide-y divide-border/60">
-                {g.docs.map((d) => (
-                  <li key={d.docEntry}>
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => openDoc(g.date, d)}
-                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDoc(g.date, d); } }}
-                      title={`Ouvrir « ${d.cardFullName ?? d.cardName} » (BL n°${d.docNum}) — modifier les lots`}
-                      className="flex items-center gap-2 px-4 sm:px-5 py-3 cursor-pointer select-none hover:bg-secondary/40 active:bg-secondary/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 transition-colors"
-                    >
-                    <div className="min-w-0 flex-1">
-                      <p className="flex items-center gap-2 min-w-0 text-[13.5px] font-semibold text-foreground">
-                        <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        <span className="truncate">{d.cardFullName ?? d.cardName}</span>
-                        {d.clientType && SEGMENT_BADGE[d.clientType] && (
-                          <span className={`hidden xs:inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide shrink-0 ${SEGMENT_BADGE[d.clientType]}`}>
-                            {d.clientType}
+            ))}
+          </div>
+        </div>
+      ) : groups.length === 0 ? (
+        <EmptyState
+          icon={PackageCheck}
+          title="Tout est préparé"
+          description={<>Aucune préparation en attente sur les {WINDOW_DAYS} prochains jours{needle ? " pour cette recherche" : ""}.</>}
+          className="rounded-xl bg-card ring-1 ring-border"
+        />
+      ) : (
+        <div className="space-y-6">
+          {groups.map((g) => {
+            // Totaux du jour — c'est une vue de charge : n BL · colis · kg.
+            const colis = g.docs.reduce((s, d) => s + (d.colis || 0), 0);
+            const kg = g.docs.reduce((s, d) => s + (d.weightKg || 0), 0);
+            return (
+              <section key={g.date} aria-label={`Livraison du ${formatDeliveryDate(g.date)}`}>
+                {/* En-tête de section AU-DESSUS de la surface (motif GroupedList),
+                    toujours visible (pas .kicker : masqué sur mobile). */}
+                <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-4">
+                  <h2 className="text-body font-semibold text-foreground">
+                    {g.date ? capitalize(formatDeliveryDate(g.date)) : "—"}
+                  </h2>
+                  <p className="tnum text-caption text-muted-foreground">
+                    {g.docs.length} BL · {NF.format(colis)} colis · {NF.format(kg)} kg
+                  </p>
+                </div>
+                <GroupedList>
+                  {g.docs.map((d) => {
+                    const missing = hasMissing(d) ? (d.missingItems?.length ?? 0) : 0;
+                    return (
+                      <GroupedRow key={d.docEntry} onClick={() => openDoc(g.date, d)} className="py-2.5">
+                        <span className="min-w-0 flex-1">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="truncate text-body font-medium text-foreground">
+                              {d.cardFullName ?? d.cardName}
+                            </span>
+                            {d.clientType && (
+                              <span className={`hidden shrink-0 items-center rounded px-1.5 py-px text-caption2 font-semibold uppercase tracking-wide xs:inline-flex ${segmentBadgeClass(d.clientType)}`}>
+                                {d.clientType}
+                              </span>
+                            )}
                           </span>
-                        )}
-                      </p>
-                      {/* Ligne méta : sur le plus étroit (iPhone zoomé) on garde
-                          l'essentiel — n° BL, transporteur, alerte manquants. Le
-                          nombre de colis ne réapparaît qu'à partir de `xs`. */}
-                      <p className="text-[11px] text-muted-foreground flex items-center gap-x-2 gap-y-0.5 flex-wrap mt-0.5">
-                        <span>BL n° {d.docNum}</span>
-                        <span className="inline-flex items-center gap-1 min-w-0"><Truck className="h-3 w-3 shrink-0" /> <span className="truncate">{d.carrierName ?? "Non affecté"}</span></span>
-                        <span className="hidden xs:inline">{d.colis.toLocaleString("fr-FR")} colis</span>
-                        {hasMissing(d) && (
-                          <span className="inline-flex items-center gap-1 font-semibold text-rose-600 dark:text-rose-400">
-                            {(d.missingItems?.length ?? 0)} manquant{(d.missingItems?.length ?? 0) > 1 ? "s" : ""}
+                          {/* Méta : n° BL, transporteur, colis (masqué sur le plus
+                              étroit) — rouge UNIQUEMENT s'il y a des manquants. */}
+                          <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-caption text-muted-foreground">
+                            <span className="tnum">BL n° {d.docNum}</span>
+                            <span className="inline-flex min-w-0 items-center gap-1">
+                              <Truck size={12} aria-hidden className="shrink-0" />
+                              <span className="truncate">{d.carrierName ?? "Non affecté"}</span>
+                            </span>
+                            <span className="tnum hidden xs:inline">{NF.format(d.colis)} colis</span>
+                            {missing > 0 && (
+                              <span className="font-semibold text-destructive">
+                                {missing} manquant{missing > 1 ? "s" : ""}
+                              </span>
+                            )}
                           </span>
-                        )}
-                      </p>
-                    </div>
-                    {/* Pastille de statut : redondante sur mobile (toute la section
-                        est « à préparer » + thème ambre) → réservée à ≥ sm pour
-                        laisser respirer le nom du magasin sur téléphone. */}
-                    <span className="hidden sm:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-700 dark:text-amber-300 shrink-0">
-                      À préparer
-                    </span>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" aria-hidden />
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
+                        </span>
+                      </GroupedRow>
+                    );
+                  })}
+                </GroupedList>
+              </section>
+            );
+          })}
         </div>
       )}
     </div>

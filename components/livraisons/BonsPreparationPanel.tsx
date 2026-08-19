@@ -14,6 +14,8 @@ import {
   Sparkles, FileText, CalendarDays,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { displayPersonName } from "@/lib/userNames";
 import { formatDeliveryDate } from "@/lib/livraison";
 
@@ -67,6 +69,13 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
   const [busy, setBusy] = useState<string | null>(null);   // id du bon en cours (BL / suppression)
   const [manualKey, setManualKey] = useState<string | null>(null);   // `${bon.id}:${idx}` en saisie manuelle
   const [manualDraft, setManualDraft] = useState("");
+  // Le panneau vit SOUS les commandes, replié par défaut : une ligne discrète
+  // « n bons export à affecter » qui se déplie à la demande.
+  const [open, setOpen] = useState(false);
+  // Confirmations (window.confirm interdit) : suppression d'un bon, et
+  // dépassement d'encours (409 needsConfirm) avant de forcer la création du BL.
+  const [toDelete, setToDelete] = useState<Bon | null>(null);
+  const [encoursAsk, setEncoursAsk] = useState<{ bon: Bon; message: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -128,28 +137,25 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
   };
 
   // « Créer le BL » — repost de /api/sap/orders avec bonPrepId + lot par ligne.
-  // Encours dépassé (409 needsConfirm) → confirmation puis retry forcé.
-  async function createBL(bon: Bon) {
+  // Encours dépassé (409 needsConfirm) → ConfirmDialog puis retry forcé.
+  async function createBL(bon: Bon, confirmEncours = false) {
     if (bon.lots.some((l) => !l)) { toast.error("Affecte un lot à chaque ligne d'abord."); return; }
     setBusy(bon.id);
     try {
-      const post = (confirmEncours: boolean) =>
-        fetch("/api/sap/orders", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...bon.orderBody,
-            bonPrepId: bon.id,
-            confirmEncours,
-            lines: bon.orderBody.lines.map((l, i) => ({ ...l, lot: bon.lots[i] })),
-          }),
-        });
-      let res = await post(false);
-      let json = await res.json().catch(() => null);
-      if (res.status === 409 && json?.needsConfirm === "encours") {
-        const ok = window.confirm(`${json.error}\n\nCréer le BL quand même ?`);
-        if (!ok) return;
-        res = await post(true);
-        json = await res.json().catch(() => null);
+      const res = await fetch("/api/sap/orders", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...bon.orderBody,
+          bonPrepId: bon.id,
+          confirmEncours,
+          lines: bon.orderBody.lines.map((l, i) => ({ ...l, lot: bon.lots[i] })),
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (res.status === 409 && json?.needsConfirm === "encours" && !confirmEncours) {
+        // La confirmation ouvre un dialog ; la création reprend au « Confirmer ».
+        setEncoursAsk({ bon, message: String(json.error ?? "Encours dépassé.") });
+        return;
       }
       if (!res.ok || !json?.ok) {
         toast.error(json?.blocked ? "Client bloqué" : "Échec de la création du BL", { description: json?.error, duration: 10000 });
@@ -165,8 +171,9 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
     }
   }
 
+  // Suppression effective — la confirmation passe par le ConfirmDialog
+  // (`toDelete`), plus jamais par window.confirm.
   async function remove(bon: Bon) {
-    if (!window.confirm(`Supprimer le bon de préparation de ${bon.clientName} (${bon.orderBody.lines.length} ligne(s)) ?`)) return;
     setBusy(bon.id);
     try {
       const r = await fetch(`/api/bons-preparation?id=${encodeURIComponent(bon.id)}`, { method: "DELETE" });
@@ -182,38 +189,49 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
   }
 
   const count = bons?.length ?? 0;
-  // Rien à afficher : le panneau disparaît complètement (écran inchangé).
-  const empty = useMemo(() => bons !== null && count === 0, [bons, count]);
+  // Rien à afficher (ou premier chargement en cours) : le panneau disparaît
+  // complètement — pas de ligne fantôme sous les commandes.
+  const empty = useMemo(() => bons === null || count === 0, [bons, count]);
   if (empty) return null;
 
   return (
-    <section className="rounded-2xl border border-violet-600/60 dark:border-violet-600/45 bg-card overflow-hidden">
-      <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-violet-600/40 dark:border-violet-600/30 bg-violet-600/10 dark:bg-violet-600/15">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-600/15 text-violet-600 dark:text-violet-400">
-            <ClipboardList className="h-4 w-4" strokeWidth={2} />
-          </span>
-          <div className="min-w-0">
-            <p className="text-[13.5px] font-semibold text-foreground leading-tight">
-              Bons de préparation export — lots à affecter
-            </p>
-            <p className="text-[11px] text-muted-foreground">
-              {bons === null ? "Chargement…" : `${count} bon${count > 1 ? "s" : ""} en attente : affecte un lot à chaque ligne puis crée le BL.`}
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={load}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-border bg-card text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60 shrink-0"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-          <span className="hidden sm:inline">Actualiser</span>
-        </button>
-      </div>
+    <section className="overflow-hidden rounded-xl border border-border bg-card">
+      {/* LIGNE REPLIÉE discrète — se déplie à la demande. */}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2.5 px-4 py-3 text-left transition-colors hover:bg-secondary/40"
+      >
+        <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "" : "-rotate-90"}`} />
+        <ClipboardList className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+        <span className="min-w-0 truncate text-body font-medium text-foreground">
+          {count} bon{count > 1 ? "s" : ""} export à affecter
+        </span>
+        <Badge variant="export">Export</Badge>
+        <span className="ml-auto hidden text-caption text-muted-foreground sm:inline">
+          {open ? "Replier" : "Déplier"}
+        </span>
+      </button>
 
-      {(bons ?? []).map((bon) => {
+      {open && (
+        <div className="border-t border-border">
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 sm:px-5">
+            <p className="text-caption text-muted-foreground">
+              Affecte un lot à chaque ligne puis crée le BL.
+            </p>
+            <button
+              type="button"
+              onClick={load}
+              disabled={loading}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-caption font-medium text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-60"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              <span className="hidden sm:inline">Actualiser</span>
+            </button>
+          </div>
+
+          {(bons ?? []).map((bon) => {
         const isCollapsed = collapsed.has(bon.id);
         const missing = bon.lots.filter((l) => !l).length;
         const ready = missing === 0;
@@ -382,7 +400,7 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
                   </button>
                   <button
                     type="button"
-                    onClick={() => remove(bon)}
+                    onClick={() => setToDelete(bon)}
                     disabled={isBusy}
                     title="Supprimer ce bon de préparation (aucun BL ne sera créé)"
                     className="ml-auto inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors disabled:opacity-50"
@@ -394,12 +412,37 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
             )}
           </div>
         );
-      })}
-      {bons === null && (
-        <div className="flex items-center gap-2 px-5 py-4 text-[13px] text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Chargement des bons de préparation…
+          })}
         </div>
       )}
+
+      {/* Confirmation de suppression d'un bon (window.confirm interdit). */}
+      <ConfirmDialog
+        open={toDelete !== null}
+        onOpenChange={(o) => { if (!o) setToDelete(null); }}
+        title="Supprimer le bon de préparation ?"
+        description={
+          toDelete
+            ? `${toDelete.clientName} — ${toDelete.orderBody.lines.length} ligne${toDelete.orderBody.lines.length > 1 ? "s" : ""}. Aucun BL ne sera créé.`
+            : undefined
+        }
+        confirmLabel="Supprimer"
+        tone="destructive"
+        onConfirm={async () => { if (toDelete) await remove(toDelete); }}
+      />
+
+      {/* Garde-fou encours dépassé : confirmation avant de forcer le BL. */}
+      <ConfirmDialog
+        open={encoursAsk !== null}
+        onOpenChange={(o) => { if (!o) setEncoursAsk(null); }}
+        title="Encours dépassé"
+        description={encoursAsk ? `${encoursAsk.message}` : undefined}
+        confirmLabel="Créer le BL quand même"
+        onConfirm={async () => {
+          const ask = encoursAsk;
+          if (ask) await createBL(ask.bon, true);
+        }}
+      />
     </section>
   );
 }
