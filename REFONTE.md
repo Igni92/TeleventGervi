@@ -85,6 +85,19 @@ par ligne (clic droit = raccourci), badges 2 max + « +n », auto-refresh 45 s s
 (quadruple garde anti-écrasement de saisie), Ventes du jour = 5ᵉ onglet de section,
 satellites en GroupedList avec totaux de charge. 717 tests, tsc, build : OK du premier coup.
 
+### Retours utilisateur vague 2 — corrigés le 19/08 (mobile/tablette préparateur)
+- Filtre segment (Tout/CHR/Export/GMS) MASQUÉ sur mobile (`hidden sm:flex`) — encombrait le préparateur.
+- Filtre d'état : icônes masquées sur mobile + `whitespace-nowrap` → « À préparer » ne déborde plus.
+- Articles : nom en callout semibold, désignation plus contrastée (foreground/60) ; TABLETTE = une seule
+  ligne (troncature), petit téléphone = désignation renvoyée dessous en corps plus grand ; colis par
+  ligne agrandi (title3) — repère visuel du préparateur. Le détail focalisé reste « Ouvrir en grand ».
+- Lot : LECTURE SEULE sur tactile (`touch:`) — un préparateur ne modifie plus les lots (geste de dispatch
+  réservé au desktop). L'input reste éditable sur desktop.
+
+### À décider (suivi retour vague 2)
+- Le menu « ⋯ » par ligne d'article (LineToolMenu) permet encore de changer le lot au tactile (geste
+  délibéré en 2 taps). Si le lot doit être TOTALEMENT verrouillé sur tablette, gater aussi ce menu.
+
 ### Dettes résiduelles notées par l'intégration (à traiter en vague 3 ou 6)
 - OrderRow fige `prepared`/`departed` au montage : un poll silencieux ne met pas à jour le
   bouton d'état d'une ligne déjà montée si une AUTRE tablette a changé le statut (divergence

@@ -777,7 +777,7 @@ export const OrderRow = memo(function OrderRow({
             onClick={releaseToPrep}
             disabled={savingRelease}
             title="Mettre ce magasin en préparation — il devient visible pour l'entrepôt (À préparer)"
-            className="inline-flex shrink-0 flex-1 sm:flex-none items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-body font-semibold transition-[background-color,transform] duration-[var(--dur-fast)] ease-[var(--ease-apple)] disabled:opacity-60 active:scale-[0.97] bg-warning text-white hover:bg-[color-mix(in_srgb,hsl(var(--warning))_92%,black)]"
+            className="inline-flex shrink-0 flex-1 sm:flex-none items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-body font-semibold whitespace-nowrap transition-[background-color,transform] duration-[var(--dur-fast)] ease-[var(--ease-apple)] disabled:opacity-60 active:scale-[0.97] bg-warning text-white hover:bg-[color-mix(in_srgb,hsl(var(--warning))_92%,black)]"
           >
             {savingRelease ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             {/* Libellé complet partout : sur mobile le bouton occupe sa propre
@@ -793,7 +793,7 @@ export const OrderRow = memo(function OrderRow({
             ? "Commande partie en livraison — cliquer pour la ramener à « fait »"
             : prepared ? "Commande préparée (faite) — cliquer pour annuler" : "Marquer la commande comme préparée (faite)"}
           aria-pressed={prepared || departed}
-          className={`inline-flex shrink-0 flex-1 sm:flex-none items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-body font-semibold transition-[background-color,transform] duration-[var(--dur-fast)] ease-[var(--ease-apple)] disabled:opacity-60 active:scale-[0.97] ${
+          className={`inline-flex shrink-0 flex-1 sm:flex-none items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg text-body font-semibold whitespace-nowrap transition-[background-color,transform] duration-[var(--dur-fast)] ease-[var(--ease-apple)] disabled:opacity-60 active:scale-[0.97] ${
             departed
               ? "bg-info text-white hover:bg-[color-mix(in_srgb,hsl(var(--info))_92%,black)]"
               : prepared
@@ -1070,27 +1070,30 @@ export const OrderRow = memo(function OrderRow({
                   className={`${isMissing ? "bg-destructive/5" : isReported ? "bg-warning/5" : ""} ${doc.open ? "cursor-context-menu" : ""}`}
                 >
 
-                  {/* Colisage en premier (gauche) — repère principal de préparation */}
-                  <td className="px-2 py-2 text-center align-middle">
-                    <span className="text-callout font-bold tnum text-foreground">{fmtNum(l.colis)}</span>
+                  {/* Colisage en premier (gauche) — repère principal du préparateur,
+                      chiffre volontairement gros pour se lire d'un coup d'œil. */}
+                  <td className="px-2 py-2.5 text-center align-middle">
+                    <span className="text-title3 font-bold tnum text-foreground">{fmtNum(l.colis)}</span>
                   </td>
-                  <td className="px-3 py-2 min-w-0 align-middle">
+                  <td className="px-3 py-2.5 min-w-0 align-middle">
                     <div className="flex items-center gap-2.5">
                       <BrandLogo marque={l.marque} logos={brandLogos} size="md" zoomable />
-                      <div className="min-w-0">
-                        <div className="flex items-baseline gap-1.5 flex-wrap">
-                          <span className={`text-callout sm:text-body font-medium ${isMissing ? "text-muted-foreground line-through decoration-destructive/60" : "text-foreground"}`}>{l.itemName}</span>
-                          <span className="font-mono text-caption2 text-muted-foreground/70 hidden sm:inline">{l.itemCode}</span>
-                          {isMissing && (
-                            <span className={`${PILL} ${PILL_TONE.destructive}`}>Manquant</span>
+                      <div className="min-w-0 flex-1">
+                        {/* Nom + désignation : sur TABLETTE une seule ligne (troncature) ;
+                            sur petit téléphone la désignation passe dessous, en corps
+                            plus grand et plus contrasté pour rester lisible. */}
+                        <div className="flex items-baseline gap-x-2 gap-y-0 min-w-0 max-sm:flex-wrap">
+                          <span className={`text-callout font-semibold truncate min-w-0 ${isMissing ? "text-muted-foreground line-through decoration-destructive/60" : "text-foreground"}`}>{l.itemName}</span>
+                          {designation && (
+                            <span className="text-caption text-foreground/60 truncate min-w-0 max-sm:basis-full max-sm:text-body">{designation}</span>
                           )}
-                          {isReported && !isMissing && (
-                            <span className={`${PILL} ${PILL_TONE.warning}`}>Signalé manquant</span>
-                          )}
+                          <span className="font-mono text-caption2 text-muted-foreground/60 hidden lg:inline shrink-0">{l.itemCode}</span>
                         </div>
-                        {/* Désignation en texte muted — plus de mur de chips. */}
-                        {designation && (
-                          <p className="mt-0.5 text-caption text-muted-foreground">{designation}</p>
+                        {(isMissing || isReported) && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {isMissing && <span className={`${PILL} ${PILL_TONE.destructive}`}>Manquant</span>}
+                            {isReported && !isMissing && <span className={`${PILL} ${PILL_TONE.warning}`}>Signalé manquant</span>}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1617,8 +1620,10 @@ function LotCellInput({ docEntry, docNum, itemCode, itemName, lot, disabled, onD
     }
   };
 
+  const shownLot = (value ?? "").trim();
   return (
     <span className="inline-flex items-center gap-1">
+      {/* DESKTOP : saisie directe du n° d'entrée (EM) — geste de dispatch. */}
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
@@ -1635,8 +1640,17 @@ function LotCellInput({ docEntry, docNum, itemCode, itemName, lot, disabled, onD
         placeholder="n° EM"
         aria-label={`Lot de ${itemName}`}
         title={disabled ? "Bon clôturé — lot non modifiable" : "Saisir le n° d'entrée (EM) puis Entrée"}
-        className="h-7 w-[104px] rounded-md border border-border bg-card px-1.5 text-caption font-mono tnum text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+        className="touch:hidden h-7 w-[104px] rounded-md border border-border bg-card px-1.5 text-caption font-mono tnum text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
       />
+      {/* TACTILE (tablette / téléphone d'entrepôt) : le lot est en LECTURE SEULE.
+          Un préparateur ne modifie pas les lots — c'est un geste de dispatch,
+          réservé au poste desktop. */}
+      <span
+        aria-label={`Lot de ${itemName}`}
+        className="hidden touch:inline-flex h-7 min-w-[64px] items-center rounded-md bg-secondary px-2 text-caption font-mono tnum text-foreground"
+      >
+        {shownLot ? shownLot : <span className="text-muted-foreground/50">—</span>}
+      </span>
       {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />}
     </span>
   );

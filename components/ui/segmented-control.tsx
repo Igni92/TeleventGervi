@@ -82,7 +82,7 @@ function SegmentedControl<T extends string = string>({
             tabIndex={i === tabbableIdx ? 0 : -1}
             onClick={() => onChange(opt.value)}
             className={cn(
-              "flex flex-1 items-center justify-center gap-1.5 rounded-md text-caption font-semibold",
+              "flex min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-caption font-semibold",
               "transition-[background-color,color,box-shadow] duration-[var(--dur-fast)] ease-[var(--ease-apple)]",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               "[&_svg]:size-3.5 [&_svg]:shrink-0",

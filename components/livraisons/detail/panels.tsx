@@ -73,7 +73,9 @@ export function Toolbar({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {/* Filtre d'ÉTAT — segmented neutre, compteurs colorés discrètement. */}
+      {/* Filtre d'ÉTAT — segmented neutre, compteurs colorés discrètement.
+          Sur mobile les icônes sont masquées : les libellés (« À préparer »)
+          tiennent alors dans leur segment sans déborder. */}
       <SegmentedControl<ViewTab>
         aria-label="État des commandes"
         value={tab}
@@ -83,35 +85,37 @@ export function Toolbar({
           ...(showVentes
             ? [{
                 value: "VENTES" as ViewTab,
-                icon: <Store aria-hidden />,
+                icon: <span className="hidden sm:inline-flex"><Store aria-hidden /></span>,
                 label: <>Ventes <Count n={counts.ventes} /></>,
               }]
             : []),
           {
             value: "A_PREPARER" as ViewTab,
-            icon: <Clock aria-hidden />,
+            icon: <span className="hidden sm:inline-flex"><Clock aria-hidden /></span>,
             label: <>À préparer <Count n={counts.aPreparer} tone="text-warning" /></>,
           },
           {
             value: "FAIT" as ViewTab,
-            icon: <CheckCircle2 aria-hidden />,
+            icon: <span className="hidden sm:inline-flex"><CheckCircle2 aria-hidden /></span>,
             label: <>Fait <Count n={counts.fait} tone="text-success" /></>,
           },
           {
             value: "DEPART" as ViewTab,
-            icon: <Truck aria-hidden />,
+            icon: <span className="hidden sm:inline-flex"><Truck aria-hidden /></span>,
             label: <>Départ <Count n={counts.depart} tone="text-info" /></>,
           },
         ]}
       />
 
-      {/* Filtre SEGMENT client — second segmented compact, entièrement neutre. */}
+      {/* Filtre SEGMENT client (Tout / CHR / Export / GMS) — MASQUÉ sur mobile :
+          hors de propos pour un préparateur sur tablette, il encombrait la barre.
+          Réservé au poste desktop (dispatch commercial). */}
       <SegmentedControl<SegmentTab>
         aria-label="Segment client"
         size="sm"
         value={segment}
         onChange={onSegment}
-        className="max-sm:w-full"
+        className="hidden sm:flex"
         options={(["TOUT", "CHR", "EXPORT", "GMS"] as SegmentTab[]).map((s) => ({
           value: s,
           label: <>{SEGMENT_LABEL[s]} <Count n={segCounts[s]} /></>,
