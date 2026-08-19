@@ -1033,9 +1033,9 @@ export const OrderRow = memo(function OrderRow({
               <tr>
                 <th className="text-center font-medium px-2 py-1.5 w-14 whitespace-nowrap">Colis</th>
                 <th className="text-left font-medium px-3 py-1.5">Article</th>
-                {/* Lot saisissable en direct : le n° d'entrée (EM) se corrige ici,
-                    sans passer par le menu de ligne. */}
-                <th className="text-left font-medium px-3 py-1.5 w-[120px] whitespace-nowrap">Lot</th>
+                {/* Lot volontairement ABSENT de la ligne : il n'apparaît que dans
+                    la vue « en grand » (ouvrir la commande), pour ne pas encombrer
+                    la liste de préparation. */}
                 <th className="text-right font-medium px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">Qté</th>
                 <th className="text-right font-medium px-3 py-1.5 whitespace-nowrap hidden sm:table-cell">kg</th>
                 {/* Colonne « ⋯ » : outil de ligne (lot / échange) sans clic droit. */}
@@ -1082,17 +1082,6 @@ export const OrderRow = memo(function OrderRow({
                         )}
                       </div>
                     </div>
-                  </td>
-                  <td className="px-3 py-2 align-middle">
-                    <LotCellInput
-                      docEntry={doc.docEntry}
-                      docNum={doc.docNum}
-                      itemCode={l.itemCode}
-                      itemName={l.itemName}
-                      lot={l.lot}
-                      disabled={!doc.open}
-                      onDone={onReload}
-                    />
                   </td>
                   <td className="px-3 py-2 text-right text-caption tnum text-muted-foreground hidden sm:table-cell align-middle">{fmtNum(l.quantity)}</td>
                   <td className="px-3 py-2 text-right text-caption tnum text-muted-foreground hidden sm:table-cell align-middle">{fmtNum(l.weightKg)}</td>
@@ -1220,6 +1209,20 @@ export const OrderRow = memo(function OrderRow({
                   </p>
                   {/* Ligne 2 : conditionnement · variété · pays (muted). */}
                   <DesignationMuted l={l} className="mt-0.5 text-caption" />
+                </div>
+                {/* Lot (n° d'entrée) — visible UNIQUEMENT ici, dans la vue en grand.
+                    Éditable au poste desktop, en lecture seule sur tablette. Le
+                    stopPropagation évite d'ouvrir l'outil d'échange en le touchant. */}
+                <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                  <LotCellInput
+                    docEntry={doc.docEntry}
+                    docNum={doc.docNum}
+                    itemCode={l.itemCode}
+                    itemName={l.itemName}
+                    lot={l.lot}
+                    disabled={!doc.open}
+                    onDone={onReload}
+                  />
                 </div>
                 <BrandLogo marque={l.marque} logos={brandLogos} size="lg" className="self-center" zoomable />
               </li>
