@@ -253,7 +253,11 @@ Extraction d'abord : `CallConsole.tsx` (2 799 l.) et `Ecran2Order.tsx` (3 251 l.
 
 - Clone : `/home/ubuntu/refonte` (propriétaire ubuntu, `.env` copié de la prod — MÊME base de données
   et MÊME SAP que la prod : les écritures depuis l'aperçu sont réelles, prudence).
-- Serveur d'aperçu : `next start` port **3002** (`npm run build && npx next start -p 3002`).
+- Serveur d'aperçu : `next start` port **3002** — démarrage :
+  `NODE_OPTIONS="--max-http-header-size=65536" nohup npx next start -p 3002 > /tmp/refonte-preview.log 2>&1 &`
+  (limite d'en-têtes élargie : le domaine est partagé avec la prod, les cookies cumulés
+  dépassent les 16 Ko par défaut de Node ; côté nginx, `large_client_header_buffers 8 32k`
+  dans `refonte-preview.conf`). Après un nouveau build : tuer le PID écoutant sur 3002 puis relancer.
 - Accès : `https://televent.gervifrais.com:8443` via nginx (`refonte-preview.conf`) — port 8443
   ouvert dans ufw. Certificat Let's Encrypt partagé avec la prod.
 - La prod reste sur le port 3000 / https standard, intouchée.
