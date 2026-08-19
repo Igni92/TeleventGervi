@@ -33,7 +33,7 @@ import { printOrderRecap } from "../printRecap";
 import { fmtNum, fmtEur, fmtClock, capitalize, SEG_UI, type CarrierOption } from "./shared";
 import { PreparedByDialog } from "./dialogs";
 import { useContextMenu, ContextMenu, MenuItem, LineToolMenu, normalizeLotInput, applyLotChange } from "./menus";
-import { ArticleDesignation } from "@/components/livraisons/ArticleDesignation";
+import { DesignationStrong, DesignationMuted } from "@/components/livraisons/ArticleDesignation";
 
 /* ─────────────────────────────────────────────────────────────
    Pilules d'état de la ligne — tokens sémantiques uniquement (couleur = état).
@@ -1066,12 +1066,14 @@ export const OrderRow = memo(function OrderRow({
                         {/* Nom + désignation : sur TABLETTE une seule ligne (troncature) ;
                             sur petit téléphone la désignation passe dessous, en corps
                             plus grand et plus contrasté pour rester lisible. */}
-                        <div className="flex items-baseline gap-x-2 gap-y-0 min-w-0 max-sm:flex-wrap">
+                        {/* Ligne 1 : fruit + MARQUE + CALIBRE (blanc). */}
+                        <div className="flex items-baseline gap-x-2 min-w-0">
                           <span className={`text-callout font-semibold truncate min-w-0 ${isMissing ? "text-muted-foreground line-through decoration-destructive/60" : "text-foreground"}`}>{l.itemName}</span>
-                          {/* Marque + calibre en blanc (repères préparateur), reste muted. */}
-                          <ArticleDesignation l={l} className="text-caption max-sm:basis-full max-sm:text-body" />
+                          <DesignationStrong l={l} className="text-callout truncate min-w-0" />
                           <span className="font-mono text-caption2 text-muted-foreground/60 hidden lg:inline shrink-0">{l.itemCode}</span>
                         </div>
+                        {/* Ligne 2 : conditionnement · variété · pays (muted). */}
+                        <DesignationMuted l={l} className="mt-0.5 text-caption" />
                         {(isMissing || isReported) && (
                           <div className="mt-1 flex flex-wrap gap-1">
                             {isMissing && <span className={`${PILL} ${PILL_TONE.destructive}`}>Manquant</span>}
@@ -1207,7 +1209,8 @@ export const OrderRow = memo(function OrderRow({
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className={`text-body font-semibold ${isMissing ? "text-muted-foreground line-through decoration-destructive/60" : "text-foreground"}`}>
-                    {l.itemName}
+                    {l.itemName}{" "}
+                    <DesignationStrong l={l} />
                     {isMissing && (
                       <span className={`ml-2 ${PILL} ${PILL_TONE.destructive} no-underline align-middle`}>Manquant</span>
                     )}
@@ -1215,8 +1218,8 @@ export const OrderRow = memo(function OrderRow({
                       <span className={`ml-2 ${PILL} ${PILL_TONE.warning} align-middle`}>Signalé manquant</span>
                     )}
                   </p>
-                  {/* Marque + calibre en blanc (repères préparateur), reste muted. */}
-                  <ArticleDesignation l={l} className="mt-0.5 block text-caption" />
+                  {/* Ligne 2 : conditionnement · variété · pays (muted). */}
+                  <DesignationMuted l={l} className="mt-0.5 text-caption" />
                 </div>
                 <BrandLogo marque={l.marque} logos={brandLogos} size="lg" className="self-center" zoomable />
               </li>

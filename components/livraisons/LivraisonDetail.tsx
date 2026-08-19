@@ -552,7 +552,7 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
       />
 
       {/* ── Synthèse inline (reflète le segment + l'onglet actif) ── */}
-      {view?.totals && <SummaryStats totals={view.totals} showRevenue={canDispatch} />}
+      {view?.totals && <SummaryStats totals={view.totals} />}
 
       {/* ── Étage 2 : BARRE D'OUTILS UNIQUE — état · segment · recherche ·
              repliage. ── */}

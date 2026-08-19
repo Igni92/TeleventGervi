@@ -1,10 +1,14 @@
 import { cn } from "@/lib/utils";
 
 // Désignation article partagée par TOUS les onglets livraisons (Préparation,
-// Par article, Ventes du jour). Règle métier voulue par les préparateurs :
-// MARQUE et CALIBRE sont les repères principaux — ils s'affichent en blanc
-// (foreground), à côté du fruit ; le conditionnement / la variété / le pays
-// restent secondaires (muted).
+// Par article, Ventes du jour). Disposition voulue par les préparateurs :
+//   Ligne 1 : Fruit + MARQUE + CALIBRE  (repères principaux, en blanc)
+//   Ligne 2 : conditionnement · variété · pays  (secondaire, muted)
+//
+// Le nom du fruit est rendu par l'appelant (styles variables : troncature,
+// barré si manquant…). On expose donc deux morceaux à placer :
+//   <DesignationStrong/> — inline, à coller après le nom sur la ligne 1
+//   <DesignationMuted/>  — bloc, à poser dessous sur la ligne 2
 
 export interface DesignationFields {
   marque?: string | null;
@@ -20,47 +24,42 @@ const okPart = (v?: string | null) =>
 const calibreLabel = (c: string) =>
   /^cal\.?\s/i.test(c.trim()) ? c.trim() : `cal. ${c.trim()}`;
 
-/** Sépare la désignation : `strong` = marque + calibre (mis en avant),
- *  `muted` = conditionnement + variété + pays (secondaire). */
-export function designationParts(l: DesignationFields): { strong: string[]; muted: string[] } {
-  const strong: string[] = [];
-  if (okPart(l.marque)) strong.push(l.marque!.trim());
-  if (okPart(l.calibre)) strong.push(calibreLabel(l.calibre!));
-  const muted: string[] = [];
-  if (okPart(l.condt)) muted.push(l.condt!.trim());
-  if (okPart(l.variete)) muted.push(l.variete!.trim());
-  if (okPart(l.pays)) muted.push(l.pays!.trim());
-  return { strong, muted };
+/** Parties fortes (ligne 1, blanc) : marque + calibre. */
+export function strongParts(l: DesignationFields): string[] {
+  const out: string[] = [];
+  if (okPart(l.marque)) out.push(l.marque!.trim());
+  if (okPart(l.calibre)) out.push(calibreLabel(l.calibre!));
+  return out;
+}
+
+/** Parties secondaires (ligne 2, muted) : conditionnement + variété + pays. */
+export function mutedParts(l: DesignationFields): string[] {
+  const out: string[] = [];
+  if (okPart(l.condt)) out.push(l.condt!.trim());
+  if (okPart(l.variete)) out.push(l.variete!.trim());
+  if (okPart(l.pays)) out.push(l.pays!.trim());
+  return out;
 }
 
 /** Chaîne plate de toutes les parties (recherche / repli). */
 export function designationSearch(l: DesignationFields): string {
-  const { strong, muted } = designationParts(l);
-  return [...strong, ...muted].join(" · ");
+  return [...strongParts(l), ...mutedParts(l)].join(" · ");
 }
 
-/**
- * Rendu inline : « Belorta · cal. 20 » (blanc) suivi de « 8×500g · Espagne »
- * (muted). Tronque proprement dans une cellule étroite.
- */
-export function ArticleDesignation({
-  l,
-  className,
-}: {
-  l: DesignationFields;
-  className?: string;
-}) {
-  const { strong, muted } = designationParts(l);
-  if (strong.length === 0 && muted.length === 0) return null;
+/** Marque + calibre en BLANC, inline — se place juste après le nom du fruit. */
+export function DesignationStrong({ l, className }: { l: DesignationFields; className?: string }) {
+  const strong = strongParts(l);
+  if (strong.length === 0) return null;
   return (
-    <span className={cn("min-w-0 truncate", className)}>
-      {strong.length > 0 && (
-        <span className="font-semibold text-foreground">{strong.join(" · ")}</span>
-      )}
-      {strong.length > 0 && muted.length > 0 && (
-        <span className="text-muted-foreground"> · </span>
-      )}
-      {muted.length > 0 && <span className="text-muted-foreground">{muted.join(" · ")}</span>}
-    </span>
+    <span className={cn("font-semibold text-foreground", className)}>{strong.join(" · ")}</span>
+  );
+}
+
+/** Conditionnement · variété · pays, muted — se place sur la ligne du dessous. */
+export function DesignationMuted({ l, className }: { l: DesignationFields; className?: string }) {
+  const muted = mutedParts(l);
+  if (muted.length === 0) return null;
+  return (
+    <span className={cn("block truncate text-muted-foreground", className)}>{muted.join(" · ")}</span>
   );
 }

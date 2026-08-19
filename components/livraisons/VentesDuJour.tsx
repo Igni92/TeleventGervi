@@ -23,7 +23,7 @@ import { StatLine } from "@/components/ui/stat-line";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { ArticleDesignation } from "@/components/livraisons/ArticleDesignation";
+import { DesignationStrong, DesignationMuted } from "@/components/livraisons/ArticleDesignation";
 import { broadcastActiveClient } from "@/lib/consoleSync";
 import { BLViewDialog } from "@/components/livraisons/BLViewDialog";
 import type { ApiResp, Doc } from "@/lib/livraisonView";
@@ -479,13 +479,17 @@ function BLDetailDialog({ doc: d, open, onOpenChange }: { doc: Doc; open: boolea
             <li key={l.itemCode} className="py-2.5">
               <div className="flex items-baseline gap-2 text-body">
                 <span className="w-7 shrink-0 text-right font-bold tnum">{l.colis.toLocaleString("fr-FR")}</span>
-                <span className="min-w-0 flex-1 truncate font-semibold text-foreground">{l.itemName}</span>
-                <span className="shrink-0 text-muted-foreground">{l.itemCode}</span>
+                {/* Ligne 1 : fruit + marque + calibre (blanc). */}
+                <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                  <span className="min-w-0 truncate font-semibold text-foreground">{l.itemName}</span>
+                  <DesignationStrong l={l} className="min-w-0 truncate" />
+                </span>
+                <span className="shrink-0 text-muted-foreground hidden sm:inline">{l.itemCode}</span>
                 <span className="shrink-0 tnum">{l.price != null ? eur2.format(l.price) : "—"}</span>
                 <span className="shrink-0 font-bold tnum">{l.lineTotal != null ? eur2.format(l.lineTotal) : "—"}</span>
               </div>
-              {/* Marque + calibre en blanc (repères préparateur), reste muted. */}
-              <ArticleDesignation l={l} className="ml-9 mt-1 block text-caption" />
+              {/* Ligne 2 : conditionnement · variété · pays (muted). */}
+              <DesignationMuted l={l} className="ml-9 mt-1 text-caption" />
             </li>
           ))}
         </ul>

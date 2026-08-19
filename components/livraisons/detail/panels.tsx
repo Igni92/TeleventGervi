@@ -18,21 +18,21 @@ import { StatLine } from "@/components/ui/stat-line";
 import { formatDeliveryDate } from "@/lib/livraison";
 import { SEGMENT_LABEL, type SegmentTab } from "@/lib/livraisonView";
 import type { Totals } from "@/lib/livraisonView";
-import { fmtInt, fmtNum, fmtKg, fmtEur, type ViewTab } from "./shared";
+import { fmtInt, fmtNum, fmtKg, type ViewTab } from "./shared";
 
 /* ═════════════════════════════════════════════════════════════
    Synthèse — chiffres clés de la tournée, inline sans cartes
 ═════════════════════════════════════════════════════════════ */
-export function SummaryStats({ totals, showRevenue }: { totals: Totals; showRevenue: boolean }) {
+export function SummaryStats({ totals }: { totals: Totals }) {
+  // Volontairement trois chiffres seulement (Commandes · Colis · Poids) : ils
+  // tiennent sur une seule ligne en mobile. Nombre de clients et Total HT
+  // retirés (bruit pour le préparateur ; le CA reste sur les fiches).
   return (
     <StatLine
       items={[
         { label: "Commandes", value: fmtInt(totals.orders) },
-        { label: "Clients", value: fmtInt(totals.clients) },
         { label: "Colis", value: fmtNum(totals.colis) },
         { label: "Poids net", value: fmtKg(totals.weightKg) },
-        // Total HT — chiffre commercial : masqué pour préparateur / livreur.
-        ...(showRevenue ? [{ label: "Total HT", value: fmtEur(totals.totalHT) }] : []),
       ]}
     />
   );

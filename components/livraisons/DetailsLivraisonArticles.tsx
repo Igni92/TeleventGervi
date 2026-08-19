@@ -13,7 +13,7 @@
  * bouton « ⋯ » visible — les tablettes d'entrepôt n'ont pas de clic droit).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { ArticleDesignation, type DesignationFields } from "@/components/livraisons/ArticleDesignation";
+import { DesignationStrong, DesignationMuted, type DesignationFields } from "@/components/livraisons/ArticleDesignation";
 import { createPortal } from "react-dom";
 import { floatingPortalTarget } from "@/lib/floatingPortal";
 import { Loader2, MoreHorizontal, Package, Printer, RefreshCw, Search, ArrowRight, Replace, AlertTriangle } from "lucide-react";
@@ -245,9 +245,12 @@ export function DetailsLivraisonArticles() {
                       className={`border-b border-border/40 align-top transition-colors last:border-0 hover:bg-secondary/40 ${a.openDocs.length > 0 ? "cursor-context-menu" : ""}`}
                     >
                       <td className="py-2 pl-4 pr-3">
-                        <p className="font-medium leading-tight text-foreground">{a.itemName}</p>
-                        {/* Marque + calibre en blanc (repères préparateur), reste muted. */}
-                        <ArticleDesignation l={a.desig} className="mt-0.5 block text-caption" />
+                        {/* Ligne 1 : fruit + marque + calibre (blanc). */}
+                        <p className="font-medium leading-tight text-foreground">
+                          {a.itemName} <DesignationStrong l={a.desig} />
+                        </p>
+                        {/* Ligne 2 : conditionnement · variété · pays (muted). */}
+                        <DesignationMuted l={a.desig} className="mt-0.5 text-caption" />
                       </td>
                       {SEGMENTS.map((g) => (
                         <td key={g} className="px-3 py-2 text-right text-foreground/90">{fmt(val(a.seg[g]))}</td>

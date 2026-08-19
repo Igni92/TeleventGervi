@@ -45,7 +45,7 @@ function StatLine({ items, className }: StatLineProps) {
         {items.map((item, i) => {
           const content = (
             <>
-              <div className={cn("text-title2 tnum", TONE[item.tone ?? "default"])}>
+              <div className={cn("text-title3 sm:text-title2 tnum", TONE[item.tone ?? "default"])}>
                 {item.value}
               </div>
               <div className="text-caption text-muted-foreground">{item.label}</div>
