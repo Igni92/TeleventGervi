@@ -168,7 +168,7 @@ export function Sidebar() {
     <motion.aside
       animate={{ width: rail ? W_RAIL : W_FULL }}
       transition={SPRING.soft}
-      className="app-sidebar sticky top-0 h-screen shrink-0 z-50 hidden md:flex touch:!hidden flex-col bg-card border-r-[length:var(--hairline)] border-border overflow-hidden"
+      className="app-sidebar sticky top-0 h-screen shrink-0 z-50 hidden md:flex touch:!hidden flex-col bg-secondary/50 border-r-[length:var(--hairline)] border-border overflow-hidden"
     >
       {/* ── Logo + collapse ─────────────────────────────── */}
       <div className={`flex items-center h-[60px] shrink-0 ${rail ? "justify-center px-0" : "justify-between pl-5 pr-3"}`}>
@@ -286,11 +286,11 @@ export function Sidebar() {
                             <motion.span
                               layoutId="sidebar-active"
                               transition={SPRING.snappy}
-                              className="absolute inset-0 rounded-lg bg-primary/20 ring-1 ring-primary/25"
+                              className="absolute inset-0 rounded-lg bg-card ring-1 ring-border shadow-[0_1px_2px_rgba(0,0,0,0.06)]"
                             />
                           )}
                           <span className="relative shrink-0">
-                            <Icon className="h-[18px] w-[18px]" strokeWidth={active ? 2 : 1.8} />
+                            <Icon className={`h-[18px] w-[18px] ${active ? "text-primary" : ""}`} strokeWidth={active ? 2.2 : 1.8} />
                             {/* Compteur en mode rail : petite pilule sur l'icône. */}
                             {rail && badge && count > 0 && (
                               <span

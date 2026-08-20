@@ -57,7 +57,10 @@ export function SurfaceCard({
   // s'étale bord à bord et perd son cadre — cf. globals.css ; l'accueil
   // [.keep-bricks] et les grilles de tuiles sont épargnés).
   const base = cn(
-    "surface-card bg-card border border-border rounded-xl p-4",
+    "surface-card border rounded-xl p-4",
+    // Carte teintée = son propre fond + contour coloré (posés en inline) ;
+    // carte neutre = fond/bord tokens.
+    tinted && accent ? "" : "bg-card border-border",
     accent && "sc-accent",
     animate && "animate-fade-up motion-reduce:animate-none",
     className,
@@ -66,10 +69,14 @@ export function SurfaceCard({
   const style: React.CSSProperties = {
     ...(animate && delay ? { animationDelay: `${delay}ms` } : {}),
     ...(accent ? ({ "--sc-accent": ACCENT_COLOR[accent] } as React.CSSProperties) : {}),
-    // Fond teinté : la couleur de l'accent mélangée à ~7 % dans la carte — assez
-    // pour distinguer chaque case d'info, assez discret pour rester lisible.
+    // Case d'INFO franchement colorée : fond soutenu (16 % de l'accent) + contour
+    // de la même couleur. Chaque case a son identité, tout en gardant le texte
+    // foncé lisible (on ne passe pas au fond saturé plein).
     ...(tinted && accent
-      ? { backgroundColor: `color-mix(in srgb, ${ACCENT_COLOR[accent]} 7%, hsl(var(--card)))` }
+      ? {
+          backgroundColor: `color-mix(in srgb, ${ACCENT_COLOR[accent]} 16%, hsl(var(--card)))`,
+          borderColor: `color-mix(in srgb, ${ACCENT_COLOR[accent]} 38%, hsl(var(--card)))`,
+        }
       : {}),
   };
 
