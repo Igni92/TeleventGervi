@@ -14,7 +14,7 @@
 | 0 | Fondations : design system tokenisé, primitives | ✅ committée `fb12624` |
 | 1 | Coquille : navigation, sidebar, badges, login, tab bar | ✅ committée `233fc44` |
 | 2 | Livraisons (frustration n°1 mesurée) | ✅ committée (voir git log) |
-| 3 | Console + Écran 2 (1 779 clics morts mesurés) | ⬜ à faire |
+| 3 | Console + Écran 2 (1 779 clics morts mesurés) | ✅ committée (voir git log) |
 | 4 | Commerce : clients, fiche, prospection, encours, effectifs | ⬜ à faire |
 | 5 | Marchandise : entrées, CF, bons de commande, inventaire, fabrication, stock/articles | ⬜ à faire |
 | 6 | Pilotage + RH + réglages + nettoyages finaux | ⬜ à faire |
@@ -133,6 +133,31 @@ dispatch inline (canDispatch) · saisie lot inline + LineToolMenu + échange d'a
 avoir/exclu · impressions (bon de prépa, bon de transport ORIGINAL+COPIE, mail) · PreparateurNav.
 
 ---
+
+## ✅ Vague 3 — Console + Écran 2 (FAITE le 20/08)
+
+Découpe : CallConsole 2 877 → 840 l. (11 modules sous call/), Ecran2Order 3 251 → 2 298 l.
+(7 modules sous ecran2/). Refonte :
+- Console file : 5 tuiles hover-lift → StatLine calme ; 3 bandeaux d'alerte → une pile Banner ;
+  file en liste groupée sticky (Rappels dus / À appeler / Autres comptes / Faits) ;
+  1 point d'état + 1 badge max par ligne ; téléphone retiré de la ligne ; EmptyState (fin du néon+emoji).
+- Console centre : InsightsBlock fondu (titre+hairline, 4 métriques + « Plus ») ; ActionPanel
+  (motifs non-vente en SegmentedControl, « À demain »/« Rappel » gris sobres, InfoTip retirés) ;
+  NotesCluster calme ; tuiles « Familles régulières » CLIQUABLES.
+- Écran 2 stock/panier : chips → ArticleDesignation (marque+calibre blanc) sur stock ET panier ;
+  tuile panier = clic simple utile + bouton « ⋯ » visible ; récap au clic simple (fin du double-clic).
+- Écran 2 cadre : bandeau client compacté, champs réf/texte BL déplacés au pied commande,
+  marge en 1 ligne + popover, en-tête panier avec libellés, palette 4 rôles.
+Flux préservés (vérifiés byte-identiques) : verdict optimiste + auto-advance (logAppel), création
+BL SAP (endpoint/payload inchangés), consoleSync console↔écran 2, raccourcis clavier + neutralisation
+modale. 717 tests, tsc, build OK.
+
+### Retours / dettes vague 3 (à traiter)
+- CallConsole.tsx:189 : un window.confirm PRÉ-EXISTANT (passage compte inactif, menu admin) subsiste
+  → migrer vers ConfirmDialog (doctrine).
+- text-[NNpx] pré-existants déplacés tels quels dans les modules extraits (steppers, badges,
+  ClientBanner text-[9px] type client) — à tokeniser lors d'un passage de nettoyage.
+- Un text-[10px] neuf isolé (badge « Facture liée », Ecran2Order) sous l'échelle fermée.
 
 ## ⬜ Vague 3 — Console + Écran 2
 

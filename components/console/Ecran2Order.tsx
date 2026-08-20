@@ -4,313 +4,45 @@ import { useEffect, useState, useCallback, useMemo, useRef, Fragment, type React
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
-  Loader2, RefreshCw, ChevronDown, ChevronRight, ChevronUp, Search, Plus, Trash2,
-  ShoppingCart, Check, AlertTriangle, Star, Gift, Megaphone, Pencil, Lock, X,
-  History, BadgeEuro, ArrowRightLeft, CopyPlus, Boxes, ListPlus, Truck, ShieldAlert,
-  Eye, EyeOff,
+  Loader2, RefreshCw, ChevronDown, ChevronRight, Search, Plus,
+  ShoppingCart, AlertTriangle, Star, Megaphone, Pencil, X,
+  History, BadgeEuro, ArrowRightLeft, CopyPlus, Boxes, ListPlus, ShieldAlert, Maximize2,
 } from "lucide-react";
 import {
   evaluateLineSafeguards, evaluateOrderSafeguards, normalizeSafeguardsConfig, splitViolations,
   type SafeguardsConfig, type SafeguardViolation,
 } from "@/lib/safeguards";
-import { splitByWarehouse, totalAvailable, saleableAvailable, personalStock, unitInfo } from "@/lib/gervifrais-calc";
+import { splitByWarehouse, totalAvailable, saleableAvailable, unitInfo } from "@/lib/gervifrais-calc";
 import { formatDateInput } from "@/lib/utils";
-// Depuis `lib/freshness` (pur) et NON `lib/lotDlc` (qui importe Prisma et
-// embarquerait le client Prisma dans le bundle navigateur).
-import { freshnessLabel, isDdmSoon } from "@/lib/freshness";
 import { nextDeliveryDate, nextWorkingDeliveryDay, isPrecommande } from "@/lib/livraison";
 import { familyOf } from "@/lib/familles";
 import { priceForArticle, type TarifFruitRow } from "@/lib/tarifFruits";
-import { TarifFruitsEditor } from "@/components/clients/TarifFruitsEditor";
 import { Button } from "@/components/ui/button";
 import { InfoHint } from "@/components/ui/info-hint";
-import { NumberInput } from "@/components/ui/number-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { BrandLogo } from "@/components/BrandLogo";
-import { StarRating } from "@/components/ui/star-rating";
 import { LotDetailsDialog } from "./LotDetailsDialog";
 import { SofruceStatementButton } from "./SofruceStatementDialog";
-import { ConsoleLotPicker, type ConsoleLotCandidate } from "./ConsoleLotPicker";
+import { type ConsoleLotCandidate } from "./ConsoleLotPicker";
 import { useContextMenu, ContextMenu, ContextMenuItem, ContextMenuLabel } from "@/components/ui/context-menu";
 import { useBrandLogos } from "@/lib/useBrandLogos";
 import { useTourneeSelection } from "@/lib/useTourneeSelection";
-import { transportPerKgForCarrier, isDirectCarrier, normCarrier, type TransportCostModel, type ClientCarrierPricing } from "@/lib/transportCost";
+import { transportPerKgForCarrier, isDirectCarrier, type TransportCostModel, type ClientCarrierPricing } from "@/lib/transportCost";
 import { computePositionCost, resolveCarrierTariff, type CarrierTariffMap } from "@/lib/carrierTariff";
-import { celebrateSale } from "@/components/settings/app-settings";
-
-interface StockEntry { available: number }
-interface Product {
-  id: string; itemCode: string; itemName: string; groupName: string | null;
-  salesUnit: string | null; salesQtyPerPackUnit: number | null;
-  // B4 — poids colis (kg) : salesUnitWeight × salesQtyPerPackUnit × (salesItemsPerUnit ?? 1)
-  salesUnitWeight?: number | null; salesItemsPerUnit?: number | null;
-  // Détails métier (Gervifrais U_*) — sortis du grisé pour décision rapide en appel
-  uMarque: string | null; uPays: string | null; uCondi: string | null; uUvc: string | null;
-  frgnName?: string | null;                 // variété (SAP FrgnName)
-  /** DDM la plus proche encore à venir sur cet article (ISO) — null si aucune. */
-  dlc?: string | null;
-  stockByWarehouse: Record<string, StockEntry>;
-}
-interface Hint {
-  prixConseille: number | null; coef: number; isDefault: boolean; prixAchat: number | null;
-  marque: string | null; calibre: string | null; pays: string | null;
-}
-/** C2 — Promo active sur un article (cf. /api/promos?active=1). */
-interface Promo {
-  id: string; itemCode: string; kind: "PERCENT" | "X_PLUS_Y" | "FREE" | "PRICE";
-  value: number; buyQty: number; freeQty: number; label: string | null;
-  /** Type de magasin ciblé (EXPORT | GMS | CHR) — null = tous. */
-  storeType?: string | null;
-  startsAt?: string | null; endsAt?: string | null;
-}
-interface CartLine {
-  itemCode: string; itemName: string; unit: string; priceUnit: string; packDivisor: number;
-  availByWarehouse: Record<string, number>;
-  quantity: number; price: number | null;
-  // Tags produit (affichés sur la ligne panier) — capturés à l'ajout.
-  marque: string | null; condi: string | null; pays: string | null; variete: string | null;
-  // Incrément « un colis » dans l'unité d'affichage : kg/colis (ex. 4 pour un
-  // colis de 4 kg vendu au kg ; 1 pour un article déjà compté en colis).
-  stepColis: number;
-  // Poids d'UN colis en kg (pour le coût transport estimé) — null si inconnu.
-  colisWeightKg?: number | null;
-  // Lot choisi À LA MAIN dans la console pour un BON DE COMMANDE (avant SAP).
-  // null/absent = « à affecter » (EM_PENDING) — choix reporté à l'onglet Bons de
-  // commande. Ignoré pour un BL normal (auto-lot serveur).
-  lot?: string | null;
-  // C2 — promo appliquée à la ligne (remise SAP envoyée à la création du bon)
-  promo: Promo | null; discountPercent: number; freeUnits: number;
-  // freeUnits saisi À LA MAIN (sélecteur « offert ») → ne pas recalculer depuis la
-  // promo quand la quantité change. true dès que l'utilisateur touche le sélecteur.
-  freeManual?: boolean;
-  // Mode MODIFICATION : ligne déjà présente sur le BL. null/absent = nouvelle
-  // ligne. Le BL est ré-enregistré en remplacement complet → une ligne retirée
-  // du panier est supprimée du BL, l'ordre du panier = l'ordre des lignes.
-  // `qty`/`price` = valeurs d'origine (détection de changement) ; `pieces` = la
-  // quantité SAP brute d'origine (renvoyée telle quelle si la qté n'a pas bougé,
-  // pour ne pas réintroduire d'arrondi colis↔pièces) ; `lot` = lot préservé ;
-  // `closed` = ligne déjà livrée (verrouillée : ni édition ni suppression).
-  originalLine?: {
-    lineNum: number; warehouse: string | null; qty: number; price: number | null;
-    pieces: number; lot: string | null; closed: boolean;
-  } | null;
-}
-/** Cotation SPÉCIFIQUE client par code article (onglet « Tarif ») — le prix
- *  négocié est PRIORITAIRE sur le prix conseillé à l'ajout au panier. */
-interface TarifItem { itemCode: string; price: number; note?: string | null }
-
-/* ── C2 — Helpers promo (purs) ─────────────────────────────── */
-
-/** Recalcule les COLIS OFFERTS d'une ligne promo (X_PLUS_Y ou FREE).
- *  X_PLUS_Y (« 5 achetés + 1 offert ») : l'offert s'AJOUTE à la quantité saisie
- *    (ligne à 0 € À CÔTÉ de la ligne payante) — pour chaque buyQty commandés →
- *    freeQty offerts en plus → freeUnits = freeQty × floor(qty / buyQty). (Ex. 5 → +1, 10 → +2.)
- *  FREE (« colis offert », sans seuil) : PAS d'ajout — le(s) colis déjà saisi(s)
- *    DEVIENNENT offerts (jusqu'à freeQty). 1 PETALE saisi + promo activée → cette
- *    unique ligne passe à 100 % de remise, un colis reste un colis sur le bon.
- *  No-op pour les autres lignes — appelé à chaque changement de quantité. */
-function applyPromoFree(line: CartLine): CartLine {
-  if (line.freeManual) return line;   // « offert » saisi à la main → on n'écrase pas
-  const pr = line.promo;
-  const qty = line.quantity;
-  if (pr?.kind === "X_PLUS_Y" && pr.buyQty > 0 && pr.freeQty > 0) {
-    // « buyQty achetés + freeQty offert » : offert(s) EN PLUS, par tranche de buyQty.
-    const freeUnits = qty > 0 ? pr.freeQty * Math.floor(qty / pr.buyQty) : 0;
-    return { ...line, freeUnits, discountPercent: 0 };
-  }
-  if (pr?.kind === "FREE" && pr.freeQty > 0) {
-    // Carvé DANS la quantité saisie — jamais plus que ce qui est réellement au panier.
-    const freeUnits = qty > 0 ? Math.min(qty, pr.freeQty) : 0;
-    return { ...line, freeUnits, discountPercent: 0 };
-  }
-  return line;
-}
-
-/** true si les colis offerts de la ligne s'AJOUTENT à la quantité saisie
- *  (X_PLUS_Y) plutôt que d'être pris SUR elle (FREE, cf. applyPromoFree). */
-function freeIsAdditive(l: Pick<CartLine, "promo">): boolean {
-  return l.promo?.kind === "X_PLUS_Y";
-}
-
-/** Libellé court du badge promo : « −10 % », « 2,80 € », « 5+1 » ou « +1 offert ». */
-function promoBadge(pr: Promo): string {
-  if (pr.kind === "PERCENT") return `−${String(Math.round(pr.value * 100) / 100)} %`;
-  if (pr.kind === "PRICE") return `${pr.value.toFixed(2).replace(".", ",")} €`;
-  if (pr.kind === "FREE") return `+${pr.freeQty} offert${pr.freeQty > 1 ? "s" : ""}`;
-  return `${pr.buyQty}+${pr.freeQty}`;
-}
-
-/* ── Envoi du BL en ARRIÈRE-PLAN ────────────────────────────────────────────
-   La création/modification ne bloque plus l'écran : dès le clic, le client
-   quitte la vue (le poste enchaîne sur le suivant) et la réponse SAP arrive
-   en toast — PORTANT LE NOM DU CLIENT, puisque l'écran est passé à autre
-   chose. Vit au niveau MODULE : la requête survit au démontage de l'écran.
-   Garde-fou encours (création) : le 409 needsConfirm revient en toast avec
-   l'action « Créer quand même » (re-post confirmEncours) — la commande n'est
-   PAS créée tant que l'action n'est pas cliquée. */
-type BackgroundOrder =
-  | { kind: "create"; clientName: string; body: Record<string, unknown>; margeNette?: number }
-  | { kind: "modif"; clientName: string; docEntry: number; docNum: number; body: Record<string, unknown> };
-
-function notifyOrderResult(
-  job: BackgroundOrder,
-  ok: boolean,
-  json: {
-    ok?: boolean; blocked?: boolean; error?: string; docNum?: number;
-    totalTTC?: number | null; totalLines?: number; bonPrep?: boolean; offre?: boolean;
-    sofruce?: { docNum: number; lot: string } | null;
-  } | null,
-) {
-  const fmt = (n: number | null | undefined) => (n != null ? n.toFixed(2) : "—");
-  if (!ok || !json?.ok) {
-    toast.error(
-      job.kind === "modif"
-        ? `Modification refusée — BL n°${job.docNum}`
-        : json?.blocked
-          ? `Client bloqué — ${job.clientName}`
-          : `Commande non créée — ${job.clientName}`,
-      { description: json?.error, duration: 15000 },
-    );
-    return;
-  }
-  if (job.kind === "modif") {
-    toast.success(`BL n°${json.docNum ?? job.docNum} enregistré`, {
-      description: `${job.clientName} — ${json.totalLines ?? "?"} ligne(s) · ${fmt(json.totalTTC)} € TTC`,
-      duration: 10000,
-    });
-  } else if (json.bonPrep) {
-    toast.success(`Bon de préparation créé — ${job.clientName}`, {
-      description: "Affecte les lots dans « Détail livraison » puis crée le BL.",
-      duration: 10000,
-    });
-  } else if (json.offre) {
-    // Précommande → OFFRE CLIENT (devis SAP), à passer en commande au jour de départ.
-    toast.success(`Offre client n°${json.docNum} créée — ${job.clientName}`, {
-      description: `${fmt(json.totalTTC)} € TTC · à passer en commande au jour de départ.`,
-      duration: 10000,
-    });
-  } else {
-    toast.success(`Commande n°${json.docNum} créée — ${job.clientName}`, {
-      // Vente Sofruce : l'achat (EM) créé juste avant la vente est rappelé ici —
-      // la preuve visible que la double saisie manuelle n'est plus nécessaire.
-      description: `${fmt(json.totalTTC)} € TTC${json.sofruce ? ` · Achat Sofruce EM ${json.sofruce.docNum} créé` : ""}`,
-      duration: 10000,
-    });
-    // Célébration « grosse marge » — no-op si désactivée ou marge < seuil.
-    if (job.kind === "create" && typeof job.margeNette === "number") {
-      celebrateSale(job.margeNette);
-    }
-  }
-}
-
-function sendOrderInBackground(job: BackgroundOrder) {
-  const url = job.kind === "modif" ? `/api/sap/orders/${job.docEntry}/modif` : "/api/sap/orders";
-  const post = (extra: { confirmEncours?: boolean; confirmSafeguards?: boolean }) =>
-    fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...job.body, ...extra }),
-    });
-  const offline = () =>
-    toast.error(
-      job.kind === "modif"
-        ? `BL n°${job.docNum} non enregistré — ${job.clientName}`
-        : `Commande non créée — ${job.clientName}`,
-      { description: "SAP injoignable — réessaie.", duration: 15000 },
-    );
-  // Boucle de confirmation : le serveur peut demander DEUX confirmations
-  // successives (encours PUIS garde-fous) — chaque « Créer quand même »
-  // re-poste avec le flag correspondant en PLUS des précédents.
-  const attempt = (extra: { confirmEncours?: boolean; confirmSafeguards?: boolean }) => {
-    post(extra)
-      .then(async (res) => {
-        const json = await res.json().catch(() => null);
-        if (job.kind === "create" && !res.ok && json?.needsConfirm === "encours") {
-          // Confirmation en ligne : titre court, chiffres seuls — les boutons disent le reste.
-          const enc = json?.encours as { balance?: number; creditLimit?: number } | undefined;
-          const eur = (n: number) => `${n.toFixed(2)} €`;
-          toast.warning(`Encours dépassé — ${job.clientName}`, {
-            description:
-              enc?.balance != null && enc?.creditLimit != null
-                ? `Solde ${eur(enc.balance)} · limite ${eur(enc.creditLimit)}.`
-                : (json?.error ?? "Limite de crédit atteinte."),
-            duration: 30000,
-            action: { label: "Créer quand même", onClick: () => attempt({ ...extra, confirmEncours: true }) },
-            cancel: { label: "Abandonner", onClick: () => toast.info(`Commande abandonnée — ${job.clientName}`) },
-          });
-          return;
-        }
-        // Garde-fous serveur (Paramètres) en mode « Avertir » : confirmables.
-        // (Les BLOQUANTS arrivent en erreur ferme via notifyOrderResult.)
-        if (job.kind === "create" && !res.ok && json?.needsConfirm === "safeguards") {
-          toast.warning(`Garde-fous — ${job.clientName}`, {
-            description: json?.error ?? "Garde-fous déclenchés — la commande n'est pas créée.",
-            duration: 30000,
-            action: { label: "Créer quand même", onClick: () => attempt({ ...extra, confirmSafeguards: true }) },
-            cancel: { label: "Abandonner", onClick: () => toast.info(`Commande abandonnée — ${job.clientName}`) },
-          });
-          return;
-        }
-        notifyOrderResult(job, res.ok, json);
-      })
-      .catch(offline);
-  };
-  attempt({});
-}
-
-/* ── B4 — Poids d'un colis (kg), null-safe ─────────────────── */
-function colisKg(p: Product): number | null {
-  const w = p.salesUnitWeight, perPack = p.salesQtyPerPackUnit;
-  if (w == null || !(w > 0) || perPack == null || !(perPack > 0)) return null;
-  const items = p.salesItemsPerUnit != null && p.salesItemsPerUnit > 0 ? p.salesItemsPerUnit : 1;
-  const kg = w * perPack * items;
-  if (!Number.isFinite(kg) || kg <= 0) return null;
-  return Math.round(kg * 100) / 100;
-}
-function fmtKg(kg: number): string {
-  return kg % 1 === 0 ? kg.toFixed(0) : String(kg);
-}
-
-/** Valeur de tag « propre » : ignore les placeholders vides ou « - » (tiret(s)
- *  seul(s)) → on ne fait PAS apparaître le tag dans ce cas. */
-function cleanTag(v: string | null | undefined): string | null {
-  if (v == null) return null;
-  const t = v.trim();
-  if (!t || /^-+$/.test(t)) return null;
-  return t;
-}
-
-/* ── C4 — Densité d'affichage de la liste stock ────────────── */
-type Density = "compact" | "normal" | "aere";
-const DENSITY_KEY = "televente:ecran2Density";
-/** Tailles par niveau — « normal » = la référence actuelle (ne rien réduire par défaut). */
-const DENSITY_UI: Record<Density, {
-  rowPad: string; dispo: string; dispoUnit: string; dec: string;
-  name: string; chip: string; code: string; price: string; priceUnit: string;
-}> = {
-  compact: {
-    rowPad: "py-1.5", dispo: "text-[18px]", dispoUnit: "text-[9.5px]", dec: "text-[13px]",
-    name: "text-[14px]", chip: "h-[20px] text-[11px]", code: "text-[10px]",
-    price: "text-[16px]", priceUnit: "text-[10.5px]",
-  },
-  normal: {
-    rowPad: "py-2.5", dispo: "text-[22px]", dispoUnit: "text-[10px]", dec: "text-[15px]",
-    name: "text-[16px]", chip: "h-[22px] text-[12px]", code: "text-[10.5px]",
-    price: "text-[18px]", priceUnit: "text-[11px]",
-  },
-  aere: {
-    rowPad: "py-3.5", dispo: "text-[24px]", dispoUnit: "text-[10.5px]", dec: "text-[16px]",
-    name: "text-[17px]", chip: "h-[24px] text-[13px]", code: "text-[11px]",
-    price: "text-[19px]", priceUnit: "text-[11.5px]",
-  },
-};
-/* ── C1 — Groupe Favoris épinglé en tête de liste ──────────── */
-const FAV_GROUP = "⭐ Favoris";
-
-/** Entrée de la liste stock : un groupe famille (éventuellement épinglé).
- *  `key` distinct de `name` pour les copies épinglées (clé React unique +
- *  état ouvert/fermé indépendant de l'original resté à sa place). */
-interface GroupEntry { key: string; name: string; prods: Product[]; pinned?: boolean }
+import {
+  applyPromoFree, freeIsAdditive, fmtKg, cleanTag,
+  lineHT, lineWeightKg, sendOrderInBackground,
+  readDraft, clearDraft, pruneDrafts, draftKey,
+  DENSITY_KEY, DENSITY_UI, FAV_GROUP, SHORTCUTS_KEY,
+  SOFRUCE_MARGE_KEY, SOFRUCE_MARGE_DEFAULT,
+  type Product, type Hint, type Promo, type CartLine, type TarifItem,
+  type ApiLine, type Density, type GroupEntry, type OrderDraft,
+  type RowMenuTarget, type LotDetailTarget,
+} from "./ecran2/shared";
+import { StockRow } from "./ecran2/StockRow";
+import { CartLineTile, CartDropGap } from "./ecran2/CartLine";
+import { MarginPanel } from "./ecran2/MarginPanel";
+import { TarifTab } from "./ecran2/TarifTab";
+import { FooterBar } from "./ecran2/footerBar";
 
 /**
  * Écran 2 — Constructeur de commande piloté par le stock.
@@ -332,64 +64,6 @@ interface GroupEntry { key: string; name: string; prods: Product[]; pinned?: boo
  *        est conservée (localStorage) — au retour sur le client, le panier
  *        revient tel quel. Effacé à l'envoi du bon ou après expiration.
  */
-const SHORTCUTS_KEY = "televente:cmd-raccourcis";
-
-/** Marge Sofruce PAR DÉFAUT (%) — sans prix d'achat saisi, l'EM part au prix
- *  de vente − cette marge (vente 1,00 €/kg → achat 0,80 € à 20 %). Modifiable
- *  dans la pastille à côté du bouton « Vente Sofruce » ; mémorisée par poste. */
-const SOFRUCE_MARGE_KEY = "tv:sofruce-marge";
-const SOFRUCE_MARGE_DEFAULT = 20;
-
-/* ── C5 — Brouillon de commande NON VALIDÉE, conservé PAR CLIENT ────────────
-   Sauvegardé en continu pendant la saisie (par poste, localStorage) ; restauré
-   au montage quand on REVIENT sur le client. Supprimé : à l'envoi du bon, quand
-   le panier est vidé à la main, ou passé le TTL (stock/prix trop périmés — le
-   dispo des lignes restaurées est de toute façon rafraîchi sur le stock du
-   jour dès que le catalogue est chargé). JAMAIS en mode MODIFICATION : l'état
-   d'une modif vit sur le BL SAP, pas en brouillon. */
-const DRAFT_PREFIX = "televente:brouillon:";
-const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;   // 24 h — au-delà, prix/promos périmés
-const draftKey = (clientId: string) => `${DRAFT_PREFIX}${clientId}`;
-
-interface OrderDraft {
-  v: 1; savedAt: number;
-  cart: CartLine[]; numAtCard: string; comments: string; deliveryDate: string;
-  bonCommandeManual: boolean; venteSofruce: boolean; sofrucePA: Record<string, string>;
-}
-
-function readDraft(clientId: string): OrderDraft | null {
-  try {
-    const raw = localStorage.getItem(draftKey(clientId));
-    if (!raw) return null;
-    const d = JSON.parse(raw) as OrderDraft;
-    if (d?.v !== 1 || typeof d.savedAt !== "number" || Date.now() - d.savedAt > DRAFT_TTL_MS) return null;
-    if (!Array.isArray(d.cart)) return null;
-    d.cart = d.cart.filter((l) => l && typeof l.itemCode === "string" && typeof l.quantity === "number");
-    return d.cart.length > 0 ? d : null;
-  } catch { return null; }
-}
-
-function clearDraft(clientId: string) {
-  try { localStorage.removeItem(draftKey(clientId)); } catch { /* ignore */ }
-}
-
-/** Purge les brouillons expirés ou illisibles (une fois au montage de l'écran). */
-function pruneDrafts() {
-  try {
-    const now = Date.now();
-    const stale: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (!k || !k.startsWith(DRAFT_PREFIX)) continue;
-      try {
-        const d = JSON.parse(localStorage.getItem(k) ?? "");
-        if (typeof d?.savedAt !== "number" || now - d.savedAt > DRAFT_TTL_MS) stale.push(k);
-      } catch { stale.push(k); }
-    }
-    stale.forEach((k) => localStorage.removeItem(k));
-  } catch { /* ignore */ }
-}
-
 /**
  * Raccourcis produits personnalisables (remplacent l'ancien compteur « Promotions »).
  * Liste de codes mémorisée en localStorage (par poste) ; un clic ajoute le produit
@@ -455,32 +129,6 @@ function OrderShortcuts({ onPick }: { onPick: (code: string) => void }) {
         </button>
       ) : null}
     </div>
-  );
-}
-
-/**
- * Interstice de dépôt entre deux lignes du BL (glisser-déposer) — rectangle en
- * pointillé qui apparaît pendant un glisser et « s'allume » au survol. Déposer
- * ICI = INSÉRER la ligne à cette position (déposer SUR une ligne = échange).
- */
-function CartDropGap({
-  show, highlighted, onOver, onDrop,
-}: {
-  show: boolean;
-  highlighted: boolean;
-  onOver: () => void;
-  onDrop: () => void;
-}) {
-  if (!show) return null;
-  return (
-    <div
-      aria-hidden
-      onDragOver={(e) => { e.preventDefault(); onOver(); }}
-      onDrop={(e) => { e.preventDefault(); onDrop(); }}
-      className={`rounded-lg border border-dashed transition-all duration-150 ${
-        highlighted ? "h-11 border-brand-500 bg-brand-500/10" : "h-1.5 border-border"
-      }`}
-    />
   );
 }
 
@@ -614,6 +262,9 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   // fournisseur Sofruce (mêmes articles/quantités), puis la vente sur son lot EM.
   // Une seule saisie au lieu de deux — supprime les doublons d'EM manuels.
   const [venteSofruce, setVenteSofruce] = useState(false);
+  // Section repliable « Options » du pied (Vente Sofruce + marge + relevé) —
+  // repliée par défaut pour ne pas encombrer la saisie courante.
+  const [optionsOpen, setOptionsOpen] = useState(false);
   // Prix d'ACHAT unitaire par article (saisie libre, unité de stock = celle du
   // prix de vente). Vide → dérivé du prix de vente − la marge Sofruce (ci-dessous).
   const [sofrucePA, setSofrucePA] = useState<Record<string, string>>({});
@@ -1202,9 +853,9 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   // articles introuvables au catalogue chargé sont signalés.
   const [replaying, setReplaying] = useState(false);
   // Clic droit sur une ligne produit → menu (Détails lots · Tout mettre).
-  const [lotDetail, setLotDetail] = useState<{ id: string; code: string; name: string; dispo: number; unit: string; packDivisor: number } | null>(null);
+  const [lotDetail, setLotDetail] = useState<LotDetailTarget | null>(null);
   const { menu: rowMenu, openAt: openRowMenu, close: closeRowMenu } = useContextMenu();
-  const [menuTarget, setMenuTarget] = useState<{ p: Product; fullQty: number; dispo: number; unit: string; packDivisor: number } | null>(null);
+  const [menuTarget, setMenuTarget] = useState<RowMenuTarget | null>(null);
   const replayLast = async () => {
     if (replaying || prefilling || modif) return;
     setReplaying(true);
@@ -1339,23 +990,8 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
     setCart((c) => c.filter((l) => l.itemCode !== itemCode));
 
 
-  // Prix à la pièce × (colis × pièces/colis) = total ligne.
-  // Les colis offerts (X_PLUS_Y / FREE) sont une LIGNE séparée à 0 € → ils ne
-  // réduisent pas ce total. PERCENT : le prix affiché est DÉJÀ net → rien à déduire.
-  const lineHT = (l: CartLine) => {
-    if (!l.price) return 0;
-    return l.price * l.quantity * l.packDivisor;
-  };
+  // lineHT / lineWeightKg : helpers purs déplacés dans ecran2/shared (importés).
   const totalHT = useMemo(() => cart.reduce((s, l) => s + lineHT(l), 0), [cart]);
-
-  // Coût transport ESTIMÉ de la commande (temps réel) — selon le TRANSPORTEUR
-  // sélectionné : livraison directe → prix position × kg ; sinon valeur manuelle.
-  // Poids d'une ligne : quantité déjà en kg pour les articles au kg, sinon
-  // quantité (colis) × poids d'un colis.
-  const lineWeightKg = (l: CartLine): number => {
-    const w = l.unit === "kg" ? l.quantity : l.quantity * (l.colisWeightKg ?? 0);
-    return Number.isFinite(w) && w > 0 ? w : 0;
-  };
   const totalKg = useMemo(() => cart.reduce((s, l) => s + lineWeightKg(l), 0), [cart]);
   const carrierIsDirect = isDirectCarrier(transportModel, carrierSap) || (transportModel?.directCarriers.length ?? 0) === 0;
   // Transporteur EXTERNE avec une GRILLE : coût de CETTE livraison = prix de la
@@ -1459,20 +1095,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   // reste intact tant que le commercial n'a pas tranché.
   const [sgConfirmOpen, setSgConfirmOpen] = useState(false);
 
-  // ── Création BL ──
-  type ApiLine = {
-    itemCode: string; quantity: number; displayQuantity: number;
-    displayUnit: string; warehouseCode: string; price?: number;
-    /** C2 — remise SAP par ligne (0–100), portée sur le bon. */
-    discountPercent?: number;
-    /** Ligne à découvert (sur-vente) : part sans lot EM — affectée à la réception. */
-    decouvert?: boolean;
-    /** Lot choisi à la main (bon de commande) — honoré côté serveur (U_NoLot). */
-    lot?: string | null;
-    /** Vente Sofruce : prix d'ACHAT unitaire (même unité que le prix de vente)
-     *  porté sur l'entrée marchandise créée avant la vente. */
-    purchasePrice?: number;
-  };
+  // ── Création BL ── (type ApiLine déplacé dans ecran2/shared, importé)
 
   /** Vente Sofruce — prix d'ACHAT unitaire d'une ligne : saisi à la main
    *  (virgule acceptée), sinon DÉRIVÉ du prix de vente − la marge Sofruce
@@ -1757,6 +1380,9 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
   // ── MENU CONTEXTUEL d'une ligne du BL (clic droit) : ajouter une 2ᵉ ligne
   //    du MÊME article (valorisation différente) ou remplacer l'article. ──
   const [lineMenu, setLineMenu] = useState<{ x: number; y: number; index: number } | null>(null);
+  // Ligne du panier SÉLECTIONNÉE au clic simple (mise en avant pour l'édition).
+  // Repérée par index, comme le reste du panier (menus, déplacements, clé de map).
+  const [selectedLine, setSelectedLine] = useState<number | null>(null);
   useEffect(() => {
     if (!lineMenu) return;
     const close = () => setLineMenu(null);
@@ -1864,51 +1490,10 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
 
   return (
     <div className="flex flex-col h-full min-h-0 gap-1.5">
-      {/* (Bandeau promotions déplacé tout en haut de l'écran — cf. page Écran 2.) */}
-      {/* ── Bandeau MODIFICATION ultra-compact (une ligne) : contexte du BL en
-             cours d'édition + Quitter. La réf. client et le texte du BL vivent
-             dans la colonne COMMANDE (côte à côte, comme transporteur/tournée). ── */}
-      {modif && (
-        <div className="shrink-0 flex items-center gap-x-2 rounded-md border px-2 py-1 border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15">
-          <span
-            className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-amber-800 dark:text-amber-200 shrink-0"
-          >
-            <Pencil className="h-3 w-3" strokeWidth={2.2} />
-            BL n° {modif.docNum}
-            {modifMeta?.dueDate && (
-              <span className="font-normal text-amber-700/80 dark:text-amber-300/80 hidden xl:inline">
-                · {new Date(modifMeta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}
-              </span>
-            )}
-            {prefilling && <Loader2 className="h-3 w-3 animate-spin" />}
-          </span>
-          <InfoHint label="Mode modification" size={14}>
-            {`Modification du BL # ${modif.docNum} — modifie, supprime ou ajoute des lignes, enregistré sur ce même BL${
-              modifMeta?.dueDate ? ` · livraison ${new Date(modifMeta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}` : ""}`}
-          </InfoHint>
-          {modifMeta?.editable === false && (
-            <>
-              <span className="text-[10.5px] font-medium text-rose-600 dark:text-rose-400 shrink-0">
-                ⚠️ clôturée
-              </span>
-              <InfoHint label="Commande clôturée" size={14}>
-                Commande clôturée — la modification sera refusée par SAP.
-              </InfoHint>
-            </>
-          )}
-          <span className="flex-1" />
-          {onExitModif && (
-            <button
-              type="button"
-              onClick={onExitModif}
-              title="Quitter la modification et revenir à la saisie normale (synchro écran 1)"
-              className="inline-flex shrink-0 items-center gap-1 h-[26px] px-2 rounded bg-amber-500 hover:bg-amber-600 text-on-accent text-[11px] font-semibold active:scale-[0.98] transition-colors"
-            >
-              <X className="h-3 w-3" /> Quitter
-            </button>
-          )}
-        </div>
-      )}
+      {/* (Bandeau promotions déplacé tout en haut de l'écran — cf. page Écran 2.)
+          Le contexte de MODIFICATION (BL n° · date · Quitter) est FUSIONNÉ dans
+          l'en-tête de la colonne « Commande » — plus de bandeau séparé, plus de
+          double affichage du n° de BL. */}
 
       {/* Deux colonnes UNIQUEMENT sur vrai desktop (≥ xl) : sur tablette, la
           colonne commande fixe (640px) écrasait le stock → on EMPILE (stock en
@@ -1923,32 +1508,9 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
         {/* Bandeau client REGROUPÉ ici : nom + méta + recherche « créer / modifier
             un bon », en tête de la colonne stock (un seul bloc à gauche). */}
         {clientHeader}
-        {/* Réf. client + note du BL — CALÉES ici (dans le bloc gauche) plutôt qu'au
-            pied de la commande, pour laisser plus de place aux lignes produit. */}
-        <div className="shrink-0 mb-2 space-y-1">
-          {modif && cart.some((l) => l.promo) && (
-            <div className="flex justify-end">
-              <button type="button"
-                onClick={() => setComments((c) => {
-                  const t = buildPromoComment();
-                  if (!t) return c;
-                  return c.trim() ? `${c.trim()} · ${t}` : t;
-                })}
-                className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline">
-                <Megaphone className="h-3 w-3" /> Insérer le texte promo
-              </button>
-            </div>
-          )}
-          <div className="flex gap-1.5">
-            <input id="bl-numatcard" value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)}
-              placeholder="N° de commande (réf. client)" aria-label="N° de commande (réf. client)"
-              className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13.5px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
-            <input id="bl-note" value={comments} onChange={(e) => setComments(e.target.value)} maxLength={254}
-              placeholder={modif ? "Texte sur le BL (note/promo)" : "Texte sur le BL (note)"}
-              aria-label="Texte sur le BL"
-              className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
-          </div>
-        </div>
+        {/* Réf. client (N° de commande) + texte du BL : DÉPLACÉS au pied de la
+            colonne « Commande » (avec transporteur/date). La colonne stock
+            commence donc directement au filtre + liste. */}
         <div className="flex items-center gap-2 mb-2 shrink-0">
           {/* Onglets : Stock (catalogue) / Tarif (cotations spécifiques du client) */}
           <div className="inline-flex items-center gap-0.5 rounded-md border border-border p-0.5 shrink-0">
@@ -2065,174 +1627,27 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                 {isOpen && (
                   <ul className="divide-y divide-border/40">
                     {visible.map((p) => {
-                      const { packDivisor, displayUnit: unit, priceUnit, isKg } = unitInfo(p.salesUnit, p.salesQtyPerPackUnit);
-                      const total = ["R1", "01", "000"].reduce((s, w) => s + (p.stockByWarehouse[w]?.available ?? 0), 0) / packDivisor;
-                      const perso = personalStock(total, stockSharePct);
-                      const h = hints[p.itemCode];
                       const inCart = cart.some((l) => l.itemCode === p.itemCode);
-                      const noStock = total <= 0;
-                      const dispo = stockSharePct < 100 ? perso : total;
-                      // Méta-chips visibles : marque · conditionnement · calibre · origine.
-                      // Calibre = U_GER_CALIBRE (via Hint, chargé après) — distinct du condi.
-                      const marque  = cleanTag(p.uMarque ?? h?.marque);
-                      const condi   = cleanTag(p.uCondi ?? p.uUvc);          // ex. 8×500g
-                      const calibreRaw = cleanTag(h?.calibre);
-                      const calibre = calibreRaw ? `cal. ${calibreRaw}` : null;
-                      const variete = cleanTag(p.frgnName);                  // variété (FrgnName)
-                      const pays    = cleanTag(p.uPays ?? h?.pays);
-                      // Alerte fraîcheur : DDM la plus proche encore à venir sur cet
-                      // article (API produits). Affichée UNIQUEMENT si elle est proche
-                      // (≤ 3 j) — sinon ce serait du bruit sur tout le catalogue.
-                      const dlcWarn = isDdmSoon(p.dlc) ? freshnessLabel(p.dlc ? new Date(p.dlc) : null) : null;
-                      const isFav   = favorites.has(p.itemCode);          // C1
-                      // C2 — plus de badge promo sur la liste stock : la remise
-                      // auto au panier reste (cf. addToCart), le récap vit dans
-                      // le Dialog « Promotions » et sur la ligne panier.
-                      const kgC     = !isKg ? colisKg(p) : null;          // B4
-                      // Chips dimensionnés par la densité (C4)
-                      const chipCls = `inline-flex items-center px-2 rounded-[5px] font-semibold ${ui.chip}`;
                       // Seule une ligne déjà LIVRÉE (clôturée) ne peut pas être retirée.
                       const hasClosedLine = !!modif && cart.some((l) => l.itemCode === p.itemCode && l.originalLine?.closed);
-                      const toggleCart = () => {
-                        if (inCart) { if (hasClosedLine) return; removeFromCartByCode(p.itemCode); }
-                        else addToCart(p);
-                      };
                       return (
-                        <li key={p.id}>
-                          {/* Ligne = div role=button (et non <button>) : l'étoile favoris
-                              est un vrai bouton imbriqué — interdit dans un <button>. */}
-                          <div
-                            role="button"
-                            tabIndex={0}
-                            onClick={toggleCart}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleCart(); }
-                            }}
-                            onContextMenu={(e) => {
-                              const fullQty = dispo > 0 ? (packDivisor > 1 ? Math.floor(dispo) : Math.round(dispo * 10) / 10) : 0;
-                              setMenuTarget({ p, fullQty, dispo: Math.round(dispo * 10) / 10, unit, packDivisor });
-                              openRowMenu(e);
-                            }}
-                            title={inCart ? "Retirer du panier"
-                                          : noStock ? "À découvert — sera créé en EM_PENDING, lot affecté à réception"
-                                          : "Ajouter au panier"}
-                            className={`w-full grid items-center gap-3 px-2.5 ${ui.rowPad} text-left cursor-pointer select-none transition-colors ${
-                              inCart ? "bg-emerald-50 dark:bg-emerald-950/30 hover:bg-rose-50 dark:hover:bg-rose-950/30"
-                                : noStock ? "bg-rose-50/40 dark:bg-rose-950/15 hover:bg-rose-100/60 dark:hover:bg-rose-950/30"
-                                : "hover:bg-secondary/40"}`}
-                            style={{ gridTemplateColumns: "28px 96px minmax(0,1fr) 118px 30px" }}
-                          >
-                            {/* Col 1 — Add/Done */}
-                            <span className={`h-7 w-7 inline-flex items-center justify-center rounded-md shrink-0 ${inCart ? "bg-emerald-500 text-white" : "bg-brand-500/10 text-brand-600 dark:text-brand-400"}`}>
-                              {inCart ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                            </span>
-                            {/* Col 2 — Dispo (quantité à gauche, bien lisible) */}
-                            <span className="flex flex-col leading-none">
-                              {noStock ? (
-                                <>
-                                  <span className={`${ui.dec} font-bold text-rose-600 dark:text-rose-400`}>À déc.</span>
-                                  <span className="text-[10px] font-medium uppercase tracking-wide text-rose-500/80 mt-1">à récept.</span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className={`${ui.dispo} font-bold tnum tracking-tight text-foreground`}>
-                                    {packDivisor > 1 ? Math.floor(dispo) : dispo.toFixed(0)}
-                                  </span>
-                                  <span className={`${ui.dispoUnit} font-medium uppercase tracking-wide text-muted-foreground/70 mt-1`}>
-                                    {unit}
-                                  </span>
-                                </>
-                              )}
-                            </span>
-                            {/* Col 3 — Produit COMPACT (2 lignes) : nom, puis chips + code +
-                                colis/kg sur UNE seule ligne (tronquée) — plus de produits
-                                visibles sans scroller. */}
-                            <span className="min-w-0 flex items-center gap-2">
-                              <BrandLogo marque={marque} logos={brandLogos} size="xl" />
-                              <span className="min-w-0 flex-1">
-                              <span className="flex items-center gap-1.5 min-w-0">
-                                <span className={`${ui.name} font-semibold text-foreground truncate leading-tight`}>
-                                  {p.itemName}
-                                </span>
-                                {/* Note qualité (étoiles) saisie à la réception. */}
-                                {notes[p.itemCode] ? <StarRating value={notes[p.itemCode]} size="sm" className="shrink-0" /> : null}
-                              </span>
-                              {/* Tags espacés (gap-1.5) ; le CODE ARTICLE n'apparaît plus
-                                  sur la ligne (clic droit « Détails » pour le lot/DDM). */}
-                              <span className="mt-0.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap min-w-0">
-                                {/* DDM PROCHE — en TÊTE des chips : c'est l'info qui doit
-                                    arrêter l'œil du vendeur avant qu'il n'engage la vente. */}
-                                {dlcWarn && (
-                                  <span
-                                    title={`Marchandise en stock dont la date limite est proche (${dlcWarn.label})`}
-                                    className={`${chipCls} shrink-0 inline-flex items-center gap-1 ${
-                                      dlcWarn.tone === "red"
-                                        ? "bg-rose-100 text-rose-800 ring-1 ring-inset ring-rose-400/60 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/50"
-                                        : "bg-amber-100 text-amber-900 ring-1 ring-inset ring-amber-400/60 dark:bg-amber-500/30 dark:text-amber-50 dark:ring-amber-400/50"
-                                    }`}
-                                  >
-                                    <AlertTriangle className="h-3 w-3 shrink-0" />
-                                    {dlcWarn.label}
-                                  </span>
-                                )}
-                                {marque && <span className={`${chipCls} shrink-0 bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100 dark:ring-1 dark:ring-inset dark:ring-violet-400/50`}>{marque}</span>}
-                                {condi && <span className={`${chipCls} shrink-0 bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100 dark:ring-1 dark:ring-inset dark:ring-sky-400/50`}>{condi}</span>}
-                                {calibre && <span className={`${chipCls} shrink-0 bg-teal-100 text-teal-800 dark:bg-teal-500/30 dark:text-teal-100 dark:ring-1 dark:ring-inset dark:ring-teal-400/50`}>{calibre}</span>}
-                                {variete && <span className={`${chipCls} shrink-0 bg-rose-100 text-rose-800 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-1 dark:ring-inset dark:ring-rose-400/50`}>{variete}</span>}
-                                {pays && <span className={`${chipCls} shrink-0 bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100 dark:ring-1 dark:ring-inset dark:ring-amber-400/50`}>{pays}</span>}
-                                {/* B4 — poids du colis quand calculable (≈ poids unité × pièces/colis) */}
-                                {kgC != null && (
-                                  <span className={`${ui.code} text-muted-foreground/80 font-medium shrink-0`}>
-                                    {fmtKg(kgC)} kg/colis
-                                  </span>
-                                )}
-                              </span>
-                              </span>
-                            </span>
-                            {/* Col 4 — Prix : cotation TARIF client prioritaire, sinon conseillé */}
-                            <span className="text-right tnum">
-                              {(() => {
-                                const tarifP = tarifByCode.get(p.itemCode);
-                                if (tarifP != null) {
-                                  return (
-                                    <>
-                                      <span className={`block ${ui.price} font-bold leading-tight text-violet-600 dark:text-violet-400`}>
-                                        {tarifP.toFixed(2)} €
-                                      </span>
-                                      <span className={`block ${ui.priceUnit} font-semibold text-violet-500/80 leading-tight`}>
-                                        tarif /{priceUnit}
-                                      </span>
-                                    </>
-                                  );
-                                }
-                                return h?.prixConseille != null ? (
-                                  <>
-                                    <span className={`block ${ui.price} font-bold leading-tight ${h.isDefault ? "text-foreground/70" : "text-brand-600 dark:text-brand-400"}`}>
-                                      {h.prixConseille.toFixed(2)} €
-                                    </span>
-                                    <span className={`block ${ui.priceUnit} font-normal text-muted-foreground leading-tight`}>
-                                      /{priceUnit}
-                                    </span>
-                                  </>
-                                ) : <span className="block text-[13px] text-muted-foreground/40">—</span>;
-                              })()}
-                            </span>
-                            {/* Col 5 — C1 : étoile favoris (zone cliquable séparée, stopPropagation) */}
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); toggleFavorite(p.itemCode); }}
-                              onKeyDown={(e) => e.stopPropagation()}
-                              aria-pressed={isFav}
-                              title={isFav ? "Retirer des favoris" : "Ajouter aux favoris"}
-                              className={`h-7 w-7 inline-flex items-center justify-center rounded-md transition-colors ${
-                                isFav ? "text-amber-400 hover:text-amber-300"
-                                      : "text-muted-foreground/40 hover:text-amber-400 hover:bg-secondary/60"
-                              }`}
-                            >
-                              <Star className="h-4 w-4" fill={isFav ? "currentColor" : "none"} />
-                            </button>
-                          </div>
-                        </li>
+                        <StockRow
+                          key={p.id}
+                          p={p}
+                          hint={hints[p.itemCode]}
+                          ui={ui}
+                          stockSharePct={stockSharePct}
+                          brandLogos={brandLogos}
+                          note={notes[p.itemCode]}
+                          isFav={favorites.has(p.itemCode)}
+                          tarifPrice={tarifByCode.get(p.itemCode)}
+                          inCart={inCart}
+                          hasClosedLine={hasClosedLine}
+                          onToggleCart={() => { if (inCart) removeFromCartByCode(p.itemCode); else addToCart(p); }}
+                          onToggleFavorite={() => toggleFavorite(p.itemCode)}
+                          setMenuTarget={setMenuTarget}
+                          openRowMenu={openRowMenu}
+                        />
                       );
                     })}
                   </ul>
@@ -2242,99 +1657,19 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
           })}
         </div>
         </>) : (
-        /* ── Onglet TARIF — par fruits (désignation) + par article (cotation SKU) ── */
-        <div className="flex-1 min-h-0 flex flex-col">
-          {/* Tarif PAR FRUITS (famille · origine · calibre · variété) — édité ici ET
-              dans la fiche client ; appliqué en priorité sur le prix conseillé. */}
-          <div className="shrink-0 mb-3 pb-3 border-b border-border max-h-[46%] overflow-y-auto pr-1">
-            <p className="mb-2 text-[12px] font-semibold text-foreground">Tarif par fruits</p>
-            <TarifFruitsEditor clientId={clientId} compact />
-          </div>
-          <p className="shrink-0 mb-2 text-[12px] font-semibold text-foreground">Tarif par article (SKU)</p>
-          <div className="shrink-0 mb-2 flex items-center gap-1.5">
-            <input
-              value={tarifQuery}
-              onChange={(e) => setTarifQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTarif(); } }}
-              placeholder="Ajouter un article au tarif (code ou nom)…"
-              className="flex-1 h-9 rounded-md border border-border bg-background text-[13.5px] px-2.5 focus:outline-none focus:ring-1 focus:ring-violet-500"
-            />
-            <button
-              type="button" onClick={addTarif} disabled={tarifAdding || !tarifQuery.trim()}
-              className="inline-flex items-center gap-1 h-9 px-3 rounded-md bg-violet-600 hover:bg-violet-700 text-white text-[12.5px] font-semibold disabled:opacity-50"
-            >
-              {tarifAdding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} Ajouter
-            </button>
-          </div>
-          <p className="shrink-0 mb-2 text-[11px] text-muted-foreground">
-            Cotations spécifiques de ce client : le prix négocié est <b>prioritaire</b> sur le prix
-            conseillé à l&apos;ajout au panier (sauvegarde automatique).
-          </p>
-          <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-            {tarifs === null ? (
-              <p className="py-4 text-[13px] text-muted-foreground inline-flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" /> Chargement du tarif…
-              </p>
-            ) : tarifs.length === 0 ? (
-              <p className="py-4 text-[13px] text-muted-foreground italic text-center">
-                Aucune cotation pour ce client — ajoute un article ci-dessus.
-              </p>
-            ) : (
-              <ul className="divide-y divide-border/40 border border-border rounded-lg overflow-hidden">
-                {tarifs
-                  .filter((t) => {
-                    if (!q) return true;
-                    const p = productByCode.get(t.itemCode);
-                    return (t.itemCode + (p?.itemName ?? "")).toLowerCase().includes(q);
-                  })
-                  .map((t) => {
-                    const p = productByCode.get(t.itemCode);
-                    const inCart = cart.some((l) => l.itemCode === t.itemCode);
-                    const { priceUnit } = unitInfo(p?.salesUnit ?? null, p?.salesQtyPerPackUnit ?? null);
-                    return (
-                      <li key={t.itemCode} className="flex items-center gap-2 px-2.5 py-1.5">
-                        {/* Ajout direct au panier AU PRIX DU TARIF */}
-                        <button
-                          type="button"
-                          disabled={!p || inCart}
-                          onClick={() => { if (p) { addToCart(p, { price: t.price, noPromo: true }); toast.success(`${p.itemName} ajouté au panier — tarif ${t.price.toFixed(2)} €`); } }}
-                          title={!p ? "Article hors catalogue chargé (active « + Rupture » sur l'onglet Stock)"
-                            : inCart ? "Déjà au panier" : "Ajouter au panier au prix du tarif"}
-                          className={`h-7 w-7 inline-flex items-center justify-center rounded-md shrink-0 disabled:opacity-40 ${
-                            inCart ? "bg-emerald-500 text-white" : "bg-violet-500/10 text-violet-600 dark:text-violet-400 hover:bg-violet-500/20"
-                          }`}
-                        >
-                          {inCart ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                        </button>
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-[13.5px] font-semibold text-foreground truncate leading-tight">
-                            {p?.itemName ?? t.itemCode}
-                          </span>
-                          <span className="block font-mono text-[10.5px] text-muted-foreground/60 truncate">{t.itemCode}</span>
-                        </span>
-                        <NumberInput
-                          value={t.price}
-                          onValueChange={(n) => mutateTarifs((cur) => cur.map((x) => x.itemCode === t.itemCode ? { ...x, price: n ?? 0 } : x))}
-                          min={0} step={0.1} decimals={2}
-                          aria-label={`Prix tarif ${p?.itemName ?? t.itemCode}`}
-                          className="h-9 w-[88px] text-right text-[14.5px] font-semibold tnum rounded-md border border-violet-300/70 dark:border-violet-500/40 bg-background px-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-violet-500"
-                        />
-                        <span className="text-[11px] text-muted-foreground w-8 shrink-0">€/{priceUnit}</span>
-                        <button
-                          type="button"
-                          onClick={() => mutateTarifs((cur) => cur.filter((x) => x.itemCode !== t.itemCode))}
-                          title="Retirer cet article du tarif"
-                          className="shrink-0 text-muted-foreground/50 hover:text-rose-500"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </li>
-                    );
-                  })}
-              </ul>
-            )}
-          </div>
-        </div>
+          <TarifTab
+            clientId={clientId}
+            tarifQuery={tarifQuery}
+            setTarifQuery={setTarifQuery}
+            addTarif={addTarif}
+            tarifAdding={tarifAdding}
+            filterQ={q}
+            tarifs={tarifs}
+            productByCode={productByCode}
+            cart={cart}
+            mutateTarifs={mutateTarifs}
+            onAddToCart={addToCart}
+          />
         )}
       </div>
 
@@ -2342,86 +1677,77 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
              cœur). Empilée sous le stock en dessous de xl (tablette) : pleine
              largeur, plafonnée à ~55 % de la hauteur, liste scrollable. ── */}
       <div className="w-full xl:w-[640px] shrink-0 min-h-0 max-h-[55%] xl:max-h-none flex flex-col panel p-3">
-        <div
-          onDoubleClick={(e) => {
-            // Double-clic sur l'EN-TÊTE (pas les boutons) → ouvre le RÉCAP en grand
-            // (popup par-dessus tout). Fermeture : fond, croix ou Échap.
-            if ((e.target as HTMLElement).closest("button, input, select, a")) return;
-            if (cart.length > 0) setOrderFullscreen(true);
-          }}
-          title="Double-cliquez pour afficher le récapitulatif de la commande en grand"
-          className="flex items-center justify-between gap-2 mb-2 shrink-0 cursor-pointer select-none"
-        >
-          <p className="kicker inline-flex items-center gap-1.5 min-w-0">
-            {/* En modification : nom du client + n° de BL + date de livraison,
-                à gauche du caddie — le BL s'identifie d'un coup d'œil. En saisie
-                neuve (pas de BL encore), on garde « Commande ». */}
-            <ShoppingCart className="h-3 w-3 shrink-0" />
-            {modif ? (
-              <span className="inline-flex items-center gap-1.5 min-w-0">
-                <span className="truncate max-w-[220px] text-foreground">{clientName}</span>
-                <span className="text-muted-foreground/50" aria-hidden>·</span>
-                <span className="shrink-0">BL&nbsp;#&nbsp;{modif.docNum}</span>
-                {modifMeta?.dueDate && (
-                  <span className="shrink-0 font-normal text-muted-foreground">
-                    · {new Date(modifMeta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}
-                  </span>
-                )}
-              </span>
-            ) : "Commande"}
-          </p>
+        <div className="flex items-center justify-between gap-2 mb-2 shrink-0 select-none">
+          <div className="flex items-center gap-2 min-w-0">
+            {/* CLIC SIMPLE sur l'en-tête → RÉCAP en grand (popup par-dessus tout).
+                En MODIFICATION, l'en-tête PORTE le contexte du BL (n° · date) —
+                bandeau ambre séparé supprimé, plus de double affichage. */}
+            <button
+              type="button"
+              onClick={() => { if (cart.length > 0) setOrderFullscreen(true); }}
+              disabled={cart.length === 0}
+              title="Afficher le récapitulatif de la commande en grand"
+              className={`group inline-flex items-center gap-1.5 min-w-0 -mx-1 px-1.5 py-0.5 rounded-md text-left transition-colors hover:bg-secondary/60 disabled:cursor-default disabled:hover:bg-transparent ${
+                modif ? "text-callout font-semibold text-warning" : "kicker"}`}
+            >
+              {modif ? <Pencil className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} /> : <ShoppingCart className="h-3 w-3 shrink-0" />}
+              {modif ? (
+                <span className="inline-flex items-baseline gap-1.5 min-w-0">
+                  <span className="shrink-0">Modification BL n° {modif.docNum}</span>
+                  {modifMeta?.dueDate && (
+                    <span className="shrink-0 font-normal text-muted-foreground text-body">
+                      · {new Date(modifMeta.dueDate).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className="inline-flex items-baseline gap-1.5 min-w-0">
+                  <span>Commande</span>
+                  {cart.length > 0 && (
+                    <span className="font-bold tnum text-foreground text-body">· {totalHT.toFixed(2)} € HT</span>
+                  )}
+                </span>
+              )}
+              {cart.length > 0 && (
+                <Maximize2 className="h-3 w-3 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-foreground" />
+              )}
+            </button>
+            {/* Prefilling (chargement du BL) + état clôturé — repris du bandeau ambre. */}
+            {modif && prefilling && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-warning" />}
+            {modif && modifMeta?.editable === false && (
+              <>
+                <span className="shrink-0 text-caption2 font-semibold px-1.5 py-0.5 rounded bg-destructive/12 text-destructive">
+                  Clôturée
+                </span>
+                <InfoHint label="Commande clôturée" size={14}>
+                  Commande clôturée — la modification sera refusée par SAP.
+                </InfoHint>
+              </>
+            )}
+            {/* Quitter la modification (fusionné dans l'en-tête). */}
+            {modif && onExitModif && (
+              <button
+                type="button"
+                onClick={onExitModif}
+                title="Quitter la modification et revenir à la saisie normale (synchro écran 1)"
+                className="inline-flex shrink-0 items-center gap-1 h-7 px-2 rounded-md border border-warning/50 bg-warning/10 text-warning text-caption2 font-semibold hover:bg-warning/20 active:scale-[0.98] transition-colors"
+              >
+                <X className="h-3 w-3" /> Quitter
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* VENTE SOFRUCE (marché) — en haut à droite : un seul geste crée
-                l'ACHAT Sofruce (EM) puis la VENTE sur son lot. Décochée/grisée en
-                bon de commande, précommande ou modification. */}
-            {!modif && (
-              <label
-                title={isBonCommande
-                  ? "Vente Sofruce : uniquement en BL direct (pas de bon de commande ni de précommande)"
-                  : `Vente Sofruce : à la validation, crée d'abord l'entrée marchandise fournisseur Sofruce (mêmes articles/quantités), puis la vente sur ce lot. Prix d'achat par défaut = prix de vente − ${sofruceMargePct} % de marge (réglable à côté) ; ajustable article par article dans le bandeau.`}
-                className={`inline-flex items-center gap-1.5 rounded-md border px-2 h-8 text-[11.5px] select-none ${isBonCommande ? "cursor-not-allowed opacity-50" : "cursor-pointer"} ${
-                  venteSofruce ? "border-violet-400/60 bg-violet-500/10 text-violet-700 dark:text-violet-300" : "border-border text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <input type="checkbox" checked={venteSofruce} disabled={isBonCommande}
-                  onChange={(e) => setVenteSofruce(e.target.checked)}
-                  className="h-3.5 w-3.5 accent-violet-600" />
-                <span className="font-semibold whitespace-nowrap">Vente Sofruce</span>
-              </label>
-            )}
-            {/* Marge Sofruce PAR DÉFAUT (%) — appliquée quand aucun prix d'achat
-                n'est saisi : achat = vente − marge (1,00 € → 0,80 € à 20 %).
-                Hors du <label> pour ne pas basculer la case en cliquant dedans. */}
-            {!modif && venteSofruce && (
-              <span
-                title={`Marge Sofruce par défaut : sans prix d'achat saisi, l'achat part au prix de vente − ${sofruceMargePct} % (ex. vente 1,00 € → achat ${(1 - sofruceMargePct / 100).toFixed(2).replace(".", ",")} €). Mémorisée sur ce poste.`}
-                className="inline-flex items-center gap-1 h-8 px-2 rounded-md border border-violet-400/60 bg-violet-500/10 text-[11.5px] font-semibold text-violet-700 dark:text-violet-300 select-none"
-              >
-                marge
-                <input
-                  type="text" inputMode="decimal"
-                  value={sofruceMargeStr}
-                  onChange={(e) => setSofruceMarge(e.target.value)}
-                  aria-label="Marge Sofruce par défaut (%)"
-                  className="h-6 w-9 rounded border border-violet-400/50 bg-background px-1 text-right tnum text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500"
-                />
-                %
-              </span>
-            )}
-            {/* État de compte Sofruce (PDF) — relevé des achats de la période,
-                à remettre à Sofruce (ce qu'ils doivent nous facturer). */}
-            {!modif && <SofruceStatementButton />}
             {/* Raccourcis produits personnalisables (ajout direct au panier) */}
             <OrderShortcuts onPick={addByShortcut} />
-            {/* Dupliquer la DERNIÈRE commande — ICÔNE SEULE, à droite des raccourcis. */}
+            {/* Dupliquer la DERNIÈRE commande — AVEC libellé (découvrable). */}
             {!modif && (
               <button
                 type="button" onClick={replayLast} disabled={replaying || prefilling}
-                aria-label="Dupliquer la dernière commande"
                 title="Dupliquer la dernière commande du client dans le panier (quantités + prix)"
-                className="inline-flex items-center justify-center h-8 w-8 shrink-0 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 h-8 px-2.5 shrink-0 rounded-md border border-border text-caption2 font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
               >
                 {replaying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <History className="h-3.5 w-3.5" />}
+                Dupliquer la dernière
               </button>
             )}
           </div>
@@ -2430,13 +1756,13 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
             vente). Vide = prix de vente − la marge Sofruce par défaut. L'EM
             Sofruce est créée à la validation, juste avant la vente. */}
         {venteSofruce && !modif && cart.length > 0 && (
-          <div className="mb-2 shrink-0 rounded-lg border border-violet-400/50 bg-violet-500/5 px-2.5 py-2">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
+          <div className="mb-2 shrink-0 rounded-lg border border-brand-400/50 bg-brand-500/5 px-2.5 py-2">
+            <p className="text-caption2 font-semibold uppercase tracking-wide text-brand-700 dark:text-brand-300">
               Achat Sofruce — prix d&apos;achat unitaire
             </p>
             <div className="mt-1.5 space-y-1">
               {cart.map((l) => (
-                <div key={l.itemCode} className="flex items-center justify-between gap-2 text-[12px]">
+                <div key={l.itemCode} className="flex items-center justify-between gap-2 text-caption">
                   <span className="min-w-0 truncate text-foreground">{l.itemName}</span>
                   <span className="inline-flex items-center gap-1 shrink-0">
                     <input
@@ -2457,7 +1783,7 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                 </div>
               ))}
             </div>
-            <p className="mt-1 text-[10.5px] text-muted-foreground">
+            <p className="mt-1 text-caption2 text-muted-foreground">
               Vide = prix de vente − {sofruceMargePct} % de marge (ex. vente 1,00 € → achat {(1 - sofruceMargePct / 100).toFixed(2).replace(".", ",")} €).
               À la validation : EM Sofruce puis vente sur son lot.
             </p>
@@ -2472,268 +1798,41 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
                         : "Clique un produit à gauche pour l'ajouter."}
             </p>
           )}
-          {cart.map((l, i) => {
-            const max = totalAvailable(l.availByWarehouse);
-            const over = l.quantity > max;
-            const sellShort = max <= 0;             // entièrement à découvert
-            const partialShort = over && !sellShort;
-            const locked = !!l.originalLine?.closed; // ligne déjà livrée → verrouillée
-            // Saisie AU COLIS : le panier stocke `quantity` (en unité de base via
-            // packDivisor — kg/pie) ; on SAISIT en colis et on AFFICHE la conversion
-            // en unité de base. `baseUnitsPerColis` = stepColis × packDivisor (ex.
-            // 4 kg, 12 pie). Article sans colis réel (=1) → saisie en unité de base.
-            const baseUnitsPerColis = Math.round(l.stepColis * l.packDivisor * 1000) / 1000;
-            const hasColis = baseUnitsPerColis > 1;
-            const baseQty = Math.round(l.quantity * l.packDivisor * 100) / 100;
-            const colisCount = hasColis ? Math.round((l.quantity / l.stepColis) * 100) / 100 : baseQty;
-            const freeColis = hasColis
-              ? Math.round((l.freeUnits / l.stepColis) * 100) / 100
-              : Math.round(l.freeUnits * l.packDivisor * 100) / 100;
-            // #12 — Plafond SOUPLE anti-saisie aberrante, exprimé dans l'unité
-            // AFFICHÉE du champ (colis si hasColis, sinon unité de base). On
-            // confirme au-delà de 200 colis OU de 50× le stock dispo connu (>0).
-            // `max` est en unité de base / packDivisor ; on le convertit dans
-            // l'unité du champ pour comparer des grandeurs homogènes.
-            const SOFT_CAP_COLIS = 200;
-            const availInField = hasColis
-              ? (max * l.packDivisor) / l.stepColis   // base/packDiv → colis
-              : max * l.packDivisor;                  // base/packDiv → unité de base
-            const absoluteCap = hasColis ? SOFT_CAP_COLIS : SOFT_CAP_COLIS * baseUnitsPerColis;
-            const relativeCap = availInField > 0 ? availInField * 50 : Infinity;
-            const lineSoftMax = Math.min(absoluteCap, relativeCap);
-            const fieldUnitLabel = hasColis ? "colis" : l.priceUnit;
-            // Garde anti-aberration : confirme une grosse saisie (sans bloquer).
-            const guardBigQty = (typed: number) => {
-              if (confirmedBigQty.has(l.itemCode)) return;   // déjà confirmé pour cette ligne
-              const rounded = Math.round(typed * 100) / 100;
-              const cap = Math.round(lineSoftMax * 100) / 100;
-              toast.warning(`Confirmer ${rounded} ${fieldUnitLabel} pour ${l.itemName} ?`, {
-                description: "Quantité inhabituellement élevée — vérifie qu'il n'y a pas d'erreur de saisie.",
-                duration: 12000,
-                action: {
-                  label: "Oui, c'est correct",
-                  onClick: () => { confirmedBigQty.add(l.itemCode); },
-                },
-                cancel: {
-                  label: "Corriger",
-                  onClick: () => {
-                    // Revient au plafond souple (dans l'unité de base stockée).
-                    const backBase = hasColis ? cap * l.stepColis : cap / l.packDivisor;
-                    updateLine(i, { quantity: Math.round(backBase * 1000) / 1000 });
-                  },
-                },
-              });
-            };
-            return (
-              <Fragment key={i}>
-                {/* Interstice AVANT cette ligne — déposer ici = insérer à cette place. */}
-                <CartDropGap
-                  show={dragLine !== null && dragLine !== i}
-                  highlighted={overLine === `gap:${i}`}
-                  onOver={() => setOverLine(`gap:${i}`)}
-                  onDrop={() => { if (dragLine !== null) moveLineBefore(dragLine, i); endLineDrag(); }}
-                />
-                <div
-                  draggable={!locked}
-                  onDragStart={(e) => {
-                    // Toute la tuile est saisissable — SAUF les champs/boutons, qui
-                    // gardent leur comportement natif (focus, sélection, clic).
-                    const el = e.target as HTMLElement;
-                    if (locked || el.closest("input, select, textarea, button, a")) {
-                      e.preventDefault();
-                      return;
-                    }
-                    e.dataTransfer.effectAllowed = "move";
-                    setDragLine(i);
-                  }}
-                  onDragEnd={endLineDrag}
-                  onContextMenu={(e) => {
-                    // Clic droit = MENU de ligne : 2ᵉ ligne du même article / remplacer.
-                    const el = e.target as HTMLElement;
-                    if (el.closest("input, select, textarea")) return;   // menu natif dans les champs
-                    e.preventDefault();
-                    if (locked) return;
-                    setLineMenu({ x: e.clientX, y: e.clientY, index: i });
-                  }}
-                  onDragOver={(e) => { if (dragLine !== null && dragLine !== i) { e.preventDefault(); setOverLine(`row:${i}`); } }}
-                  onDrop={(e) => { if (dragLine !== null && dragLine !== i) { e.preventDefault(); swapLine(dragLine, i); } endLineDrag(); }}
-                  title="Glisser la tuile pour réordonner · clic droit : ajouter une ligne du même article, ou remplacer l'article"
-                  className={`rounded-lg border p-2 transition-all duration-150 ${!locked ? "cursor-grab active:cursor-grabbing" : ""} ${
-                    dragLine === i ? "opacity-40" : ""
-                  } ${
-                    overLine === `row:${i}` ? "ring-2 ring-brand-500 ring-offset-1 ring-offset-background" : ""
-                  } ${sellShort ? "border-rose-400/60 bg-rose-50/40 dark:bg-rose-950/15" : "border-border"}`}
-                >
-                <div className="flex items-start justify-between gap-1.5">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-x-1.5 gap-y-1 flex-wrap">
-                      <p className="text-[14px] font-medium text-foreground shrink-0">{l.itemName}</p>
-                      {sellShort && (
-                        <span className="inline-flex h-5 items-center px-1.5 rounded text-[11px] font-bold bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300">
-                          À DÉCOUVERT
-                        </span>
-                      )}
-                      {/* C2 — promo PAR LIGNE, jamais imposée : appliquer/retirer en 1 clic
-                          (badge actif = clic pour retirer ; sinon chip discret si une promo
-                          existe pour l'article). Marche aussi sur les lignes déjà au BL. */}
-                      {l.promo ? (
-                        <button type="button" onClick={() => togglePromo(i)} title="Retirer la promotion"
-                          className="inline-flex h-5 items-center gap-1 px-1.5 rounded text-[11px] font-bold bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-400/60 dark:bg-rose-500/30 dark:text-rose-100 dark:ring-rose-400/50 hover:bg-rose-200 dark:hover:bg-rose-500/40">
-                          {promoBadge(l.promo)} <X className="h-2.5 w-2.5" />
-                        </button>
-                      ) : (promos[l.itemCode] && !locked) ? (
-                        <button type="button" onClick={() => togglePromo(i)} title="Appliquer la promotion"
-                          className="inline-flex h-5 items-center gap-1 px-1.5 rounded text-[11px] font-semibold border border-dashed border-rose-300 text-rose-600 hover:bg-rose-50 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-950/30">
-                          <Megaphone className="h-2.5 w-2.5" /> {promoBadge(promos[l.itemCode])}
-                        </button>
-                      ) : null}
-                      {/* Modification : ligne déjà LIVRÉE → verrouillée (ni édition ni retrait) */}
-                      {locked && (
-                        <>
-                          <span
-                            className="inline-flex h-5 items-center gap-1 px-1.5 rounded text-[11px] font-bold bg-muted text-muted-foreground">
-                            <Lock className="h-3 w-3" /> livré
-                          </span>
-                          <InfoHint label="Ligne livrée" size={14}>
-                            Ligne déjà livrée — verrouillée
-                          </InfoHint>
-                        </>
-                      )}
-                      {/* Tags désignation — inline à droite du libellé (lignes compactes, code masqué) */}
-                      {(() => {
-                        const calibreRaw = cleanTag(hints[l.itemCode]?.calibre);
-                        const calibre = calibreRaw ? `cal. ${calibreRaw}` : null;
-                        const marque = cleanTag(l.marque);
-                        const condi = cleanTag(l.condi);
-                        const variete = cleanTag(l.variete);
-                        const pays = cleanTag(l.pays);
-                        const chips = [
-                          marque && ["bg-violet-100 text-violet-800 dark:bg-violet-500/30 dark:text-violet-100", marque],
-                          condi && ["bg-sky-100 text-sky-800 dark:bg-sky-500/30 dark:text-sky-100", condi],
-                          calibre && ["bg-teal-100 text-teal-800 dark:bg-teal-500/30 dark:text-teal-100", calibre],
-                          variete && ["bg-rose-100 text-rose-800 dark:bg-rose-500/30 dark:text-rose-100", variete],
-                          pays && ["bg-amber-100 text-amber-800 dark:bg-amber-500/30 dark:text-amber-100", pays],
-                        ].filter(Boolean) as [string, string][];
-                        return chips.map(([cls, txt], ci) => (
-                          <span key={ci} className={`inline-flex items-center px-1.5 py-px rounded-[5px] text-[10.5px] font-semibold ${cls}`}>{txt}</span>
-                        ));
-                      })()}
-                    </div>
-                  </div>
-                  {/* Actions de ligne : réordonner (flèches ; la tuile entière est
-                      glissable) + supprimer (sauf ligne livrée). L'ordre du panier =
-                      l'ordre des lignes du BL, à la création comme en modification. */}
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    <div className="flex flex-col -my-0.5">
-                      <button type="button" tabIndex={-1} onClick={() => moveLine(i, -1)} disabled={i === 0}
-                        aria-label="Monter la ligne" title="Monter"
-                        className="text-muted-foreground/40 hover:text-foreground disabled:opacity-20 leading-none">
-                        <ChevronUp className="h-3.5 w-3.5" />
-                      </button>
-                      <button type="button" tabIndex={-1} onClick={() => moveLine(i, 1)} disabled={i === cart.length - 1}
-                        aria-label="Descendre la ligne" title="Descendre"
-                        className="text-muted-foreground/40 hover:text-foreground disabled:opacity-20 leading-none">
-                        <ChevronDown className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                    {!locked && (
-                      <button type="button" onClick={() => removeLine(i)} className="text-muted-foreground/50 hover:text-rose-500">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div className={`flex items-center gap-1.5 mt-1.5 ${locked ? "opacity-60" : ""}`}>
-                  {/* On SAISIT au colis (−/+ avancent d'un colis) et on AFFICHE la
-                      conversion en unité de base : « 9 colis (36 kg) × 7.20 ».
-                      Article sans colis réel → saisie directe en unité de base. */}
-                  <div className="inline-flex items-center rounded-lg border border-border overflow-hidden shrink-0">
-                    <button
-                      type="button" tabIndex={-1} disabled={locked}
-                      onClick={() => updateLine(i, { quantity: Math.max(0, Math.round((l.quantity - l.stepColis) * 1000) / 1000) })}
-                      aria-label="Retirer un colis"
-                      className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-muted-foreground hover:bg-secondary/60 active:scale-95 disabled:opacity-40 disabled:hover:bg-transparent"
-                    >−</button>
-                    <NumberInput value={hasColis ? colisCount : baseQty}
-                      onValueChange={(n) => updateLine(i, { quantity: hasColis ? Math.round((n ?? 0) * l.stepColis * 1000) / 1000 : (n ?? 0) / l.packDivisor })}
-                      min={0} step={hasColis ? 1 : baseUnitsPerColis} disabled={locked}
-                      softMax={lineSoftMax} onSoftMaxExceeded={guardBigQty}
-                      aria-label={`Quantité ${l.itemName} (en ${hasColis ? "colis" : l.priceUnit})`}
-                      className={`h-11 w-[64px] text-center text-[17px] font-semibold tnum border-x border-border bg-background px-1 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 ${over ? "text-amber-600 dark:text-amber-400" : ""}`} />
-                    <button
-                      type="button" tabIndex={-1} disabled={locked}
-                      onClick={() => updateLine(i, { quantity: Math.round((l.quantity + l.stepColis) * 1000) / 1000 })}
-                      aria-label="Ajouter un colis"
-                      className="h-11 w-9 inline-flex items-center justify-center text-[18px] font-bold text-brand-600 dark:text-brand-400 hover:bg-secondary/60 active:scale-95 disabled:opacity-40 disabled:hover:bg-transparent"
-                    >+</button>
-                  </div>
-                  {hasColis ? (
-                    <span className="text-[12px] text-muted-foreground whitespace-nowrap">
-                      colis <span className="text-[13.5px] font-semibold text-foreground tnum">({baseQty}&nbsp;{l.priceUnit})</span>
-                    </span>
-                  ) : (
-                    <span className="text-[12px] text-muted-foreground w-9">{l.priceUnit}</span>
-                  )}
-                  <span className="text-muted-foreground">×</span>
-                  <NumberInput value={l.price} onValueChange={(n) => updateLine(i, { price: n })}
-                    min={0} step={0.1} decimals={2} allowEmpty placeholder="prix" disabled={locked}
-                    aria-label={`Prix ${l.itemName}`}
-                    className="h-11 w-[84px] text-right text-[17px] font-semibold tnum rounded-lg border border-border bg-background px-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500" />
-                  <span className="text-[12px] text-muted-foreground">€/{l.priceUnit}</span>
-                  <span className="ml-auto text-[15px] font-bold tnum">{l.price ? lineHT(l).toFixed(2) : "—"}</span>
-                </div>
-                {/* Colis OFFERTS — lecture seule : non modifiable directement (piloté par
-                    les promotions ; X+Y les ajoute EN PLUS, FREE les prend SUR la qté saisie). */}
-                {l.freeUnits > 0 && (
-                  <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-rose-600 dark:text-rose-400">
-                    <Gift className="h-3.5 w-3.5 shrink-0" />
-                    <span className="font-medium">
-                      {freeColis} {hasColis ? "colis" : l.priceUnit} offert{freeColis > 1 ? "s" : ""}
-                    </span>
-                    {hasColis && (
-                      <span className="text-foreground/50 tnum">({Math.round(l.freeUnits * l.packDivisor * 100) / 100} {l.priceUnit})</span>
-                    )}
-                    <span className="text-muted-foreground">· promo</span>
-                  </div>
-                )}
-                {sellShort ? (
-                  <p className="text-[11px] text-rose-600 dark:text-rose-400 mt-1">
-                    ⚠️ Stock = 0. Lot affecté à la prochaine entrée marchandise.
-                  </p>
-                ) : partialShort ? (
-                  <p className="text-[11px] text-amber-600 mt-1">⚠️ {max} dispo seulement (le surplus sera à découvert)</p>
-                ) : null}
-                {/* GARDE-FOUS — anomalies de CETTE ligne (prix / volume), en direct.
-                    Ambre = « Avertir » (confirmable) · rouge = BLOQUANT. */}
-                {(safeguards.byLine.get(i) ?? []).map((v, vi) => (
-                  <p key={`sg-${vi}`} className={`flex items-start gap-1 text-[11px] mt-1 ${
-                    v.severity === "block"
-                      ? "text-rose-600 dark:text-rose-400 font-semibold"
-                      : "text-amber-600 dark:text-amber-400"
-                  }`}>
-                    <ShieldAlert className="h-3 w-3 shrink-0 mt-0.5" />
-                    <span>{v.message}{v.severity === "block" ? " — bloquant" : ""}</span>
-                  </p>
-                ))}
-                {/* Bon de commande : CHOIX DU LOT avant l'envoi (« valider propre »).
-                    Seuls les lots avec du stock physique TeleVent sont proposés ;
-                    « à affecter » = EM_PENDING, réglé plus tard dans l'onglet dédié. */}
-                {isBonCommande && !locked && (
-                  <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-dashed border-border/60">
-                    <span className="text-[11px] text-muted-foreground shrink-0">Lot :</span>
-                    <ConsoleLotPicker
-                      itemName={l.itemName}
-                      current={l.lot ?? null}
-                      candidates={lotCands[l.itemCode]?.candidates ?? []}
-                      suggested={lotCands[l.itemCode]?.suggested ?? null}
-                      onPick={(lot) => updateLine(i, { lot })}
-                    />
-                  </div>
-                )}
-                </div>
-              </Fragment>
-            );
-          })}
+          {cart.map((l, i) => (
+            <Fragment key={i}>
+              {/* Interstice AVANT cette ligne — déposer ici = insérer à cette place. */}
+              <CartDropGap
+                show={dragLine !== null && dragLine !== i}
+                highlighted={overLine === `gap:${i}`}
+                onOver={() => setOverLine(`gap:${i}`)}
+                onDrop={() => { if (dragLine !== null) moveLineBefore(dragLine, i); endLineDrag(); }}
+              />
+              <CartLineTile
+                l={l}
+                i={i}
+                cartLength={cart.length}
+                hint={hints[l.itemCode]}
+                activePromo={promos[l.itemCode]}
+                lineSafeguards={safeguards.byLine.get(i) ?? []}
+                isBonCommande={isBonCommande}
+                lotCand={lotCands[l.itemCode]}
+                confirmedBigQty={confirmedBigQty}
+                dragLine={dragLine}
+                overLine={overLine}
+                selected={selectedLine === i}
+                updateLine={updateLine}
+                moveLine={moveLine}
+                removeLine={removeLine}
+                togglePromo={togglePromo}
+                onSelect={(idx) => setSelectedLine((prev) => (prev === idx ? null : idx))}
+                setDragLine={setDragLine}
+                endLineDrag={endLineDrag}
+                setLineMenu={setLineMenu}
+                setOverLine={setOverLine}
+                swapLine={swapLine}
+              />
+            </Fragment>
+          ))}
           {/* Interstice de FIN — déposer ici = placer la ligne en dernier. */}
           {dragLine !== null && (
             <CartDropGap
@@ -2745,203 +1844,146 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
           )}
         </div>
 
-        {/* Pied : date, mode, n° cmd, total, créer */}
+        {/* Pied de la colonne « Commande » : transporteur/date, réf. client +
+            note, options, marge, garde-fous, validation. */}
         <div className="shrink-0 pt-2 mt-2 border-t border-border space-y-2">
-          {/* En modification, le BL existe déjà : mode/transporteur/date/réf sont figés. */}
+          {/* En modification, le BL existe déjà : mode/transporteur/date sont figés. */}
           {!modif && (
-            <>
-              {/* SÉLECTION UNIQUE : transporteur OU compte de livraison (LPOI,
-                  SCACHAP…) dans le MÊME sélecteur — choisir un compte fait
-                  partir le bon sur ce compte SAP ; choisir un transporteur
-                  ramène le bon sur le compte par défaut du client. */}
-              {(() => {
-                const needsTournee = !!carrierSap && tournees !== undefined && tournees.some((t) => t.heure);
-                const missingCarrier = !carrierSap;
-                const missingTournee = needsTournee && !tourneeId;
-                const warnCls = "border-amber-400/70 bg-amber-50/50 dark:bg-amber-950/20";
-                const defaultMode = deliveryModes.find((m) => m.isDefault) ?? deliveryModes[0];
-                const accountModes = deliveryModes.filter((m) => !m.isDefault);
-                const activeAccount = accountModes.find((m) => m.id === deliveryModeId) ?? null;
-                // Valeur combinée : compte non-défaut sélectionné → « m:<id> »,
-                // sinon le transporteur courant → « c:<code> ».
-                const combined = activeAccount ? `m:${activeAccount.id}` : (carrierSap ? `c:${carrierSap}` : "");
-                const onCombined = (v: string) => {
-                  if (v.startsWith("m:")) {
-                    onDeliveryModeChange?.(v.slice(2));
-                  } else if (v.startsWith("c:")) {
-                    if (defaultMode) onDeliveryModeChange?.(defaultMode.id);
-                    setCarrierSap(v.slice(2));
-                  }
-                };
-                return (
-                  <div className="flex gap-1.5">
-                    <select value={combined} onChange={(e) => onCombined(e.target.value)}
-                      aria-label="Transporteur ou compte de livraison"
-                      title="Transporteur du bon (défaut du client pré-sélectionné) — ou compte sur lequel le bon doit partir (LPOI, SCACHAP…)"
-                      className={`min-w-0 flex-1 h-9 rounded-md border bg-background text-[13.5px] px-2 ${
-                        missingCarrier && !activeAccount ? warnCls : "border-border"}`}>
-                      <option value="" disabled>🚚 Transporteur…</option>
-                      {/* B3 — count présent quand la liste est filtrée par client (habitudes) */}
-                      {carriers.map((c) => (
-                        <option key={c.id} value={`c:${c.sapValue}`}>
-                          🚚 {c.name}{c.count ? ` · ${c.count} cde${c.count > 1 ? "s" : ""}` : ""}
-                        </option>
-                      ))}
-                      {accountModes.length > 0 && (
-                        <optgroup label="Livré sur un autre compte">
-                          {accountModes.map((m) => (
-                            <option key={m.id} value={`m:${m.id}`}>
-                              🏬 Compte {m.name} ({m.sapCardCode})
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                    </select>
-                    <select value={tourneeId} onChange={(e) => setTourneeId(e.target.value)}
-                      disabled={!carrierSap || tournees === undefined || (tournees !== undefined && !needsTournee)}
-                      aria-label="Tournée"
-                      title={!carrierSap ? "Choisis d'abord le transporteur"
-                        : tournees === undefined ? "Chargement des tournées…"
-                        : needsTournee ? "Tournée du bon (fixe l'heure, mémorisée pour le client)"
-                        : "Aucune tournée définie pour ce transporteur"}
-                      className={`min-w-0 flex-1 h-9 rounded-md border bg-background text-[13.5px] px-2 disabled:opacity-60 ${
-                        missingTournee ? warnCls : "border-border"}`}>
-                      <option value="" disabled>
-                        {!carrierSap ? "Tournée…"
-                          : tournees === undefined ? "Chargement…"
-                          : needsTournee ? "Tournée…" : "Aucune tournée définie"}
-                      </option>
-                      {(tournees ?? []).filter((t) => t.heure).map((t) => (
-                        <option key={t.lineId} value={String(t.lineId)}>
-                          {t.nom}{t.des ? ` (${t.des})` : ""} — {(t.heure as string).slice(0, 5)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                );
-              })()}
-              {/* Date de livraison SANS heure (l'heure est portée par la TOURNÉE)
-                  + bascule « Bon de commande » COMPACTE sur la même rangée. */}
-              <div className="flex gap-1.5">
-                <input type="date" value={deliveryDate.slice(0, 10)} onChange={(e) => setDeliveryDate(e.target.value)}
-                  aria-label="Date de livraison"
-                  className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-[13px] px-2" />
-                {/* Bon de commande (aucun auto-lot, lots affectés plus tard) — compact.
-                    Forcé (coché + verrouillé) si précommande OU article à découvert. */}
-                <label
-                  title={hasDecouvert
-                    ? "Article à découvert (stock insuffisant) → forcé en bon de commande : il ne réserve pas de stock et se validera automatiquement en commande à la réception"
-                    : precommande
-                    ? "Livraison au-delà du prochain jour livrable → précommande : créée en bon de commande (lots affectés plus tard)"
-                    : "Créer en bon de commande : aucun lot automatique, tu affectes les lots ensuite dans l'onglet Bons de commande"}
-                  className={`shrink-0 inline-flex items-center gap-1.5 rounded-md border px-2 h-9 text-[11.5px] select-none ${precommande || hasDecouvert ? "cursor-default" : "cursor-pointer"} ${
-                    isBonCommande ? "border-amber-400/60 bg-amber-500/10 text-amber-700 dark:text-amber-300" : "border-border text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <input type="checkbox" checked={isBonCommande} disabled={precommande || hasDecouvert}
-                    onChange={(e) => setBonCommandeManual(e.target.checked)}
-                    className="h-3.5 w-3.5 accent-amber-600" />
-                  <span className="font-semibold whitespace-nowrap">Bon de commande</span>
-                </label>
-              </div>
-            </>
+            <FooterBar
+              carriers={carriers}
+              carrierSap={carrierSap}
+              setCarrierSap={setCarrierSap}
+              tournees={tournees}
+              tourneeId={tourneeId}
+              setTourneeId={setTourneeId}
+              deliveryModes={deliveryModes}
+              deliveryModeId={deliveryModeId}
+              onDeliveryModeChange={onDeliveryModeChange}
+              deliveryDate={deliveryDate}
+              setDeliveryDate={setDeliveryDate}
+              hasDecouvert={hasDecouvert}
+              precommande={precommande}
+              isBonCommande={isBonCommande}
+              setBonCommandeManual={setBonCommandeManual}
+            />
           )}
-          {/* Réf. client + note du BL : déplacées en tête du bloc gauche
-              (cf. colonne stock) — plus au pied de la commande. */}
-          {/* Total HT : porté sur le bouton d'action (plus de ligne dédiée). */}
-          {/* Indicateur de marge — prix transport /kg en haut à droite + bascule
-              /livraison ↔ /kg. MARGE NETTE en gros en bas (feu tricolore : rouge
-              = à perte, orange < 10 % net, vert ≥ 10 %). */}
-          {cart.length > 0 && (transportPerKg > 0 || hasCostData) && (() => {
-            const TONE = {
-              rose: "text-rose-600 dark:text-rose-400",
-              amber: "text-amber-600 dark:text-amber-400",
-              emerald: "text-emerald-600 dark:text-emerald-400",
-            } as const;
-            const RING = {
-              rose: "border-rose-300/60 bg-rose-50/60 dark:border-rose-500/40 dark:bg-rose-950/20",
-              amber: "border-amber-300/60 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-950/20",
-              emerald: "border-emerald-300/60 bg-emerald-50/60 dark:border-emerald-500/40 dark:bg-emerald-950/20",
-            } as const;
-            const isPos = marginUnit === "position";
-            const fmtE = (v: number) => `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(v)} €`;
-            const fmtK = (v: number) => `${v.toFixed(3)} €/kg`;
-            // Vue /kg : « n.c. » si aucune ligne n'a de poids connu (sinon 0,000 €/kg trompeur).
-            const kgTxt = (v: number) => (hasKgData ? fmtK(v) : "n.c.");
-            // Marge MASQUÉE (épaule) : les montants de marge deviennent « ••• ».
-            // Le feu tricolore reste (filet anti-vente à perte, sans chiffre).
-            const m = (txt: string) => (hideMargin ? "•••" : txt);
-            const transpTxt = transportPerKgClient > 0 || carrierIsDirect
-              ? (isPos ? fmtE(coutTransportTotal) : fmtK(transportPerKgClient))
-              : "externe n.c.";
-            return (
-            <div className={`mt-1 rounded-lg border px-2.5 py-2 ${hasCostData ? RING[netTone] : "border-border/60 bg-secondary/20"}`}>
-              {/* Haut : libellé + bascule /livraison ↔ /kg + prix transport /kg à droite */}
-              <div className="flex items-center justify-between gap-2 text-[11px]">
-                <span className="inline-flex items-center gap-1">
-                  <span className="uppercase tracking-wide font-semibold text-muted-foreground">Marge nette transport</span>
-                  <InfoHint label="Feu tricolore" size={14}>
-                    {"Feu : rouge = à perte, orange < 10 % de marge nette, vert ≥ 10 %."}
-                  </InfoHint>
-                </span>
-                <div className="flex items-center gap-2">
-                  {/* Masquer la marge (regard par-dessus l'épaule) — persistant par poste. */}
-                  <button
-                    type="button" onClick={toggleHideMargin}
-                    aria-label={hideMargin ? "Afficher la marge" : "Masquer la marge"}
-                    title={hideMargin ? "Afficher la marge" : "Masquer la marge (regard par-dessus l'épaule) — le feu tricolore reste"}
-                    className="inline-flex items-center justify-center h-5 w-5 rounded border border-border/60 text-muted-foreground hover:text-foreground"
-                  >
-                    {hideMargin ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                  </button>
-                  <div className="inline-flex rounded-md border border-border/60 overflow-hidden text-[10.5px] font-semibold">
-                    <button type="button" onClick={() => setMarginUnit("position")} className={`px-1.5 h-5 ${isPos ? "bg-brand-500/20 text-brand-700 dark:text-brand-300" : "text-muted-foreground hover:text-foreground"}`}>/livr.</button>
-                    <button type="button" onClick={() => setMarginUnit("kg")} className={`px-1.5 h-5 ${!isPos ? "bg-brand-500/20 text-brand-700 dark:text-brand-300" : "text-muted-foreground hover:text-foreground"}`}>/kg</button>
-                  </div>
-                  <span className="inline-flex items-center gap-1 text-muted-foreground whitespace-nowrap">
-                    <Truck className="h-3 w-3" />
-                    <b className="tnum text-foreground">
-                      {positionCost
-                        ? `${positionCost.total.toFixed(2)} €/pos. (${positionCost.bracket.minKg}–${positionCost.bracket.maxKg ?? "∞"} kg)`
-                        : transportPerKgClient > 0 ? `${transportPerKgClient.toFixed(3)} €/kg` : (carrierIsDirect ? "0 €/kg" : "n.c.")}
-                    </b>
+          {/* Réf. client (N° de commande) + texte du BL — DÉPLACÉS ici, avec
+              transporteur/date (là où ils appartiennent). En modif, le bouton
+              « Insérer le texte promo » reste à portée. */}
+          {modif && cart.some((l) => l.promo) && (
+            <div className="flex justify-end">
+              <button type="button"
+                onClick={() => setComments((c) => {
+                  const t = buildPromoComment();
+                  if (!t) return c;
+                  return c.trim() ? `${c.trim()} · ${t}` : t;
+                })}
+                className="inline-flex items-center gap-1 text-caption2 font-semibold text-rose-600 dark:text-rose-400 hover:underline">
+                <Megaphone className="h-3 w-3" /> Insérer le texte promo
+              </button>
+            </div>
+          )}
+          <div className="flex gap-1.5">
+            <input id="bl-numatcard" value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)}
+              placeholder="N° de commande (réf. client)" aria-label="N° de commande (réf. client)"
+              className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-body px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+            <input id="bl-note" value={comments} onChange={(e) => setComments(e.target.value)} maxLength={254}
+              placeholder={modif ? "Texte sur le BL (note/promo)" : "Texte sur le BL (note)"}
+              aria-label="Texte sur le BL"
+              className="min-w-0 flex-1 h-9 rounded-md border border-border bg-background text-body px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+          </div>
+          {/* ── Section « Options » repliable (création uniquement) : Vente Sofruce
+              (checkbox + marge par défaut) + relevé Sofruce. ── */}
+          {!modif && (
+            <div className="rounded-md border border-border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setOptionsOpen((v) => !v)}
+                aria-expanded={optionsOpen}
+                className="w-full flex items-center gap-1.5 px-2.5 h-9 select-none text-caption font-semibold text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {optionsOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                Options
+                {venteSofruce && (
+                  <span className="ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-caption2 font-semibold bg-brand-500/15 text-brand-700 dark:text-brand-300">
+                    Vente Sofruce
                   </span>
+                )}
+              </button>
+              {optionsOpen && (
+                <div className="px-2.5 pb-2.5 pt-1 border-t border-border space-y-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* VENTE SOFRUCE (marché) — un seul geste crée l'ACHAT Sofruce
+                        (EM) puis la VENTE sur son lot. Grisée en bon de commande /
+                        précommande (le serveur refuse la combinaison). */}
+                    <label
+                      title={isBonCommande
+                        ? "Vente Sofruce : uniquement en BL direct (pas de bon de commande ni de précommande)"
+                        : `Vente Sofruce : à la validation, crée d'abord l'entrée marchandise fournisseur Sofruce (mêmes articles/quantités), puis la vente sur ce lot. Prix d'achat par défaut = prix de vente − ${sofruceMargePct} % de marge (réglable à côté).`}
+                      className={`inline-flex items-center gap-1.5 rounded-md border px-2 h-8 text-caption2 select-none ${isBonCommande ? "cursor-not-allowed opacity-50" : "cursor-pointer"} ${
+                        venteSofruce ? "border-brand-400/60 bg-brand-500/10 text-brand-700 dark:text-brand-300" : "border-border text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <input type="checkbox" checked={venteSofruce} disabled={isBonCommande}
+                        onChange={(e) => setVenteSofruce(e.target.checked)}
+                        className="h-3.5 w-3.5 accent-[hsl(var(--brand-600))]" />
+                      <span className="font-semibold whitespace-nowrap">Vente Sofruce</span>
+                    </label>
+                    {venteSofruce && (
+                      <span
+                        title={`Marge Sofruce par défaut : sans prix d'achat saisi, l'achat part au prix de vente − ${sofruceMargePct} % (ex. vente 1,00 € → achat ${(1 - sofruceMargePct / 100).toFixed(2).replace(".", ",")} €). Mémorisée sur ce poste.`}
+                        className="inline-flex items-center gap-1 h-8 px-2 rounded-md border border-brand-400/60 bg-brand-500/10 text-caption2 font-semibold text-brand-700 dark:text-brand-300 select-none"
+                      >
+                        marge
+                        <input
+                          type="text" inputMode="decimal"
+                          value={sofruceMargeStr}
+                          onChange={(e) => setSofruceMarge(e.target.value)}
+                          aria-label="Marge Sofruce par défaut (%)"
+                          className="h-6 w-9 rounded border border-brand-400/50 bg-background px-1 text-right tnum text-foreground focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        />
+                        %
+                      </span>
+                    )}
+                    {/* État de compte Sofruce (PDF) — relevé des achats de la période. */}
+                    <SofruceStatementButton />
+                  </div>
                 </div>
-              </div>
-              {hasCostData ? (
-                <>
-                  {/* Détail : coût transport + marge brute (unité choisie) */}
-                  <div className="mt-1.5 flex items-center justify-between gap-2 text-[11.5px] text-muted-foreground">
-                    <span>Transport <b className="tnum text-foreground">{transpTxt}</b></span>
-                    <span>Marge brute <b className="tnum text-foreground">{m(isPos ? fmtE(margeBruteTotal) : kgTxt(margeBruteKg))}</b></span>
-                  </div>
-                  {/* Bas : marge nette en GROS, colorée */}
-                  <div className="mt-1 flex items-baseline justify-between gap-2 border-t border-border/40 pt-1">
-                    <span className="text-[11px] font-medium text-foreground">{isPos ? "Marge nette livraison" : "Marge nette /kg"}</span>
-                    <span className="inline-flex items-baseline gap-1.5">
-                      <span className={`tnum font-extrabold text-[21px] leading-none ${TONE[netTone]}`}>{m(isPos ? fmtE(margeNetteTotal) : kgTxt(margeNetteKg))}</span>
-                      {(isPos || hasKgData) && !hideMargin && <span className={`tnum font-bold text-[13px] ${TONE[netTone]}`}>{margeNettePct.toFixed(1)} %</span>}
-                    </span>
-                  </div>
-                </>
-              ) : (
-                <p className="text-[10.5px] text-muted-foreground/70 mt-1">
-                  {isPos ? `Transport ${transpTxt}` : `Transport ${transpTxt}`} · marge indisponible (prix d&apos;achat manquant).
-                </p>
               )}
             </div>
-            );
-          })()}
+          )}
+          {/* Indicateur de marge — réduit à UNE ligne (feu tricolore + marge nette
+              + œil) ; détail transport/brute au clic (popover). */}
+          {cart.length > 0 && (transportPerKg > 0 || hasCostData) && (
+            <MarginPanel
+              netTone={netTone}
+              hasCostData={hasCostData}
+              hasKgData={hasKgData}
+              marginUnit={marginUnit}
+              setMarginUnit={setMarginUnit}
+              hideMargin={hideMargin}
+              toggleHideMargin={toggleHideMargin}
+              transportPerKgClient={transportPerKgClient}
+              carrierIsDirect={carrierIsDirect}
+              coutTransportTotal={coutTransportTotal}
+              positionCost={positionCost}
+              margeBruteTotal={margeBruteTotal}
+              margeBruteKg={margeBruteKg}
+              margeNetteTotal={margeNetteTotal}
+              margeNetteKg={margeNetteKg}
+              margeNettePct={margeNettePct}
+            />
+          )}
           {/* GARDE-FOUS — récap des anomalies (lignes + commande) avant validation.
               Ambre = « Avertir » (confirmable) · rouge = BLOQUANT (envoi refusé). */}
           {safeguards.all.length > 0 && (
             <div className={`mt-1 rounded-lg border px-2.5 py-2 ${
               sgSplit.blocks.length > 0
-                ? "border-rose-300/60 bg-rose-50/60 dark:border-rose-500/40 dark:bg-rose-950/20"
-                : "border-amber-300/60 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-950/20"
+                ? "border-destructive/40 bg-destructive/[0.06]"
+                : "border-warning/40 bg-warning/[0.06]"
             }`}>
-              <p className={`flex items-center gap-1.5 text-[11px] uppercase tracking-wide font-semibold ${
-                sgSplit.blocks.length > 0 ? "text-rose-700 dark:text-rose-300" : "text-amber-700 dark:text-amber-300"
+              <p className={`flex items-center gap-1.5 text-caption2 uppercase tracking-wide font-semibold ${
+                sgSplit.blocks.length > 0 ? "text-destructive" : "text-warning"
               }`}>
                 <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
                 Garde-fous · {safeguards.all.length} alerte{safeguards.all.length > 1 ? "s" : ""}
@@ -2949,10 +1991,10 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
               </p>
               <ul className="mt-1 space-y-0.5">
                 {safeguards.all.map((v, vi) => (
-                  <li key={vi} className={`text-[11.5px] leading-snug ${
+                  <li key={vi} className={`text-caption leading-snug ${
                     v.severity === "block"
-                      ? "text-rose-700 dark:text-rose-300 font-semibold"
-                      : "text-amber-800/90 dark:text-amber-200/90"
+                      ? "text-destructive font-semibold"
+                      : "text-warning/90"
                   }`}>
                     • {v.message}
                   </li>
@@ -2960,29 +2002,34 @@ export function Ecran2Order({ clientId, clientName, clientType = null, stockShar
               </ul>
             </div>
           )}
-          {/* Envoi en ARRIÈRE-PLAN : le clic libère la vue (client suivant),
-              le résultat SAP arrive en toast au nom du client. */}
-          <button type="button" onClick={() => submit()}
-            disabled={prefilling || cart.length === 0 || (!!modif && modifMeta?.editable === false)}
-            title={modif ? "Enregistrer en arrière-plan — l'écran passe au client suivant" : "Créer en arrière-plan — l'écran passe au client suivant"}
-            className={`w-full h-11 rounded-xl disabled:opacity-50 text-white text-[15px] font-semibold inline-flex items-center justify-center gap-2 px-3 ${
-              modif ? "bg-amber-600 hover:bg-amber-700" : "bg-emerald-600 hover:bg-emerald-700"
-            }`}>
-            <ShoppingCart className="h-4 w-4 shrink-0" />
-            <span className="truncate">
-              {modif
-                ? `Enregistrer le BL # ${modif.docNum}`
-                : isBonCommande
-                ? `Créer le bon de commande (${cart.length})`
-                : `Créer la commande (${cart.length})`}
-            </span>
-            {/* Total HT estimé porté sur le bouton (remplace la ligne dédiée). */}
-            {cart.length > 0 && (
-              <span className="ml-auto pl-2 tnum font-bold whitespace-nowrap border-l border-white/25">
-                {totalHT.toFixed(2)} € HT
+          {/* Envoi en ARRIÈRE-PLAN : le clic libère la vue (client suivant), le
+              résultat SAP arrive en toast. Sur TABLETTE (touch), le bloc de
+              validation devient une barre STICKY en bas (total + Créer toujours
+              accessibles pendant que la liste défile). Vert = création (validé),
+              ambre = enregistrement d'une modification. */}
+          <div className="touch:sticky touch:bottom-0 touch:z-10 touch:-mx-3 touch:px-3 touch:pt-2 touch:pb-1 touch:bg-card touch:border-t touch:border-border">
+            <button type="button" onClick={() => submit()}
+              disabled={prefilling || cart.length === 0 || (!!modif && modifMeta?.editable === false)}
+              title={modif ? "Enregistrer en arrière-plan — l'écran passe au client suivant" : "Créer en arrière-plan — l'écran passe au client suivant"}
+              className={`w-full h-11 rounded-xl disabled:opacity-50 text-white text-callout font-semibold inline-flex items-center justify-center gap-2 px-3 active:scale-[0.99] transition-transform ${
+                modif ? "bg-amber-600 hover:bg-amber-700" : "bg-emerald-600 hover:bg-emerald-700"
+              }`}>
+              <ShoppingCart className="h-4 w-4 shrink-0" />
+              <span className="truncate">
+                {modif
+                  ? `Enregistrer le BL # ${modif.docNum}`
+                  : isBonCommande
+                  ? `Créer le bon de commande (${cart.length})`
+                  : `Créer la commande (${cart.length})`}
               </span>
-            )}
-          </button>
+              {/* Total HT estimé porté sur le bouton. */}
+              {cart.length > 0 && (
+                <span className="ml-auto pl-2 tnum font-bold whitespace-nowrap border-l border-white/25">
+                  {totalHT.toFixed(2)} € HT
+                </span>
+              )}
+            </button>
+          </div>
         </div>
       </div>
       </div>{/* /flex deux colonnes */}

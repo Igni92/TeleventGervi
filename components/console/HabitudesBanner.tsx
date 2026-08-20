@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Truck, Package } from "lucide-react";
+import Link from "next/link";
+import { Truck, Package, ArrowUpRight } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelative } from "@/lib/utils";
 
 interface HabitsData {
@@ -18,24 +20,15 @@ interface Props {
   ordersCount?: number;
 }
 
-/** Tons des 3 pastilles — hiérarchie forte, rang 1 = accent principal (or).
- *  Le fond est teinté (visuel) mais le TEXTE reste en foreground (noir sur
- *  clair, blanc sur sombre) pour un contraste correct — pas de texte coloré. */
-const TONES = [
-  "border-brand-500/40 bg-brand-500/12",
-  "border-emerald-500/40 bg-emerald-500/12",
-  "border-sky-500/40 bg-sky-500/12",
-] as const;
-
 const fmtKg = (kg: number) => (kg < 10 ? kg.toFixed(1).replace(".", ",") : String(Math.round(kg)));
 
 /**
  * Bandeau "Habitudes" en haut de la fiche client (Console 1).
  * 2 tuiles :
  *   - **Dernière livraison** : date du dernier BL SAP (fallback CRM si SAP KO).
- *   - **Familles régulières** : 3 pastilles très visuelles des familles de fruit
- *     classées par **poids médian par commande** (côté API). C'est le « quand
- *     ils en prennent, ils en prennent combien » — plus parlant que le cumul.
+ *   - **Familles régulières** : pastilles des familles de fruit classées par
+ *     poids médian par commande. Chaque pastille est CLIQUABLE : elle ouvre
+ *     l'historique du client (nouvel onglet) sans quitter la console.
  */
 export function HabitudesBanner({ clientId, lastCallOrder, ordersCount }: Props) {
   const [data, setData] = useState<HabitsData | null>(null);
@@ -63,75 +56,78 @@ export function HabitudesBanner({ clientId, lastCallOrder, ordersCount }: Props)
       <div className="rounded-xl border border-border bg-card px-3.5 py-3 min-w-0 flex flex-col justify-center">
         <div className="flex items-center gap-1.5 mb-1.5">
           <Truck className="h-3 w-3 text-muted-foreground" />
-          <p className="text-[10px] uppercase tracking-[0.14em] font-semibold text-foreground/80">
+          <p className="text-caption2 uppercase tracking-[0.14em] font-semibold text-foreground/80">
             Dernière livraison
           </p>
         </div>
         {lastSrc ? (
           <div className="flex items-baseline justify-between gap-2">
-            <p className="text-[17px] font-bold text-foreground tnum leading-tight">
+            <p className="text-title3 font-bold text-foreground tnum leading-tight">
               {formatRelative(lastSrc)}
             </p>
             {ordersCount && ordersCount > 1 ? (
-              <p className="text-[10.5px] text-muted-foreground tnum shrink-0">
+              <p className="text-caption2 text-muted-foreground tnum shrink-0">
                 {ordersCount} cdes / 180 j
               </p>
             ) : null}
           </div>
         ) : (
-          <p className="text-[13px] italic text-muted-foreground/60 leading-tight">aucune récente</p>
+          <p className="text-body italic text-muted-foreground/60 leading-tight">aucune récente</p>
         )}
       </div>
 
-      {/* Familles régulières — 3 pastilles très visuelles */}
+      {/* Familles régulières — pastilles cliquables (→ historique client) */}
       <div className="rounded-xl border border-border bg-card px-3.5 py-3 min-w-0">
         <div className="flex items-center gap-1.5 mb-2">
           <Package className="h-3 w-3 text-muted-foreground" />
-          <p className="text-[10px] uppercase tracking-[0.14em] font-semibold text-foreground/80">
+          <p className="text-caption2 uppercase tracking-[0.14em] font-semibold text-foreground/80">
             Familles régulières
           </p>
-          <span className="text-[9.5px] text-muted-foreground/60 normal-case tracking-normal font-normal">
+          <span className="text-caption2 text-muted-foreground/60 normal-case tracking-normal font-normal">
             poids médian / commande
           </span>
         </div>
         {loading ? (
           <div className="grid grid-cols-3 gap-2">
             {[0, 1, 2].map((i) => (
-              <div key={i} className="h-[62px] rounded-xl border border-border/60 bg-secondary/30 animate-pulse" />
+              <Skeleton key={i} className="h-[62px] rounded-xl" />
             ))}
           </div>
         ) : data && data.topProducts.length > 0 ? (
           <div className="grid grid-cols-3 gap-2">
-            {data.topProducts.map((p, i) => {
-              const tone = TONES[i] ?? TONES[TONES.length - 1];
+            {data.topProducts.map((p) => {
               const kg = p.weightKg ?? 0;
               const showWeight = kg > 0;
               const nb = `${p.orderCount} cde${p.orderCount > 1 ? "s" : ""}`;
               return (
-                <div
+                <Link
                   key={p.itemCode}
-                  className={`rounded-xl border ${tone} px-2 py-2 text-center min-w-0`}
-                  title={`${p.itemName} — ${showWeight ? `${fmtKg(kg)} kg médian / commande` : nb} (médiane saisonnière sur ${nb})`}
+                  href={`/clients/${clientId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`Voir l'historique — ${p.itemName} · ${showWeight ? `${fmtKg(kg)} kg médian / commande` : nb} (médiane saisonnière sur ${nb})`}
+                  className="group relative rounded-xl border border-border bg-secondary/40 px-2 py-2 text-center min-w-0 transition-all hover:border-primary/50 hover:bg-secondary active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <p className="text-[11px] font-semibold truncate text-foreground">{p.itemName}</p>
+                  <ArrowUpRight className="absolute right-1.5 top-1.5 h-3 w-3 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/70" aria-hidden />
+                  <p className="text-caption2 font-semibold truncate text-foreground">{p.itemName}</p>
                   {showWeight ? (
                     <>
-                      <p className="text-[19px] font-bold text-foreground tnum leading-none mt-0.5">
-                        {fmtKg(kg)}<span className="text-[11px] font-semibold ml-0.5">kg</span>
+                      <p className="text-title3 font-bold text-foreground tnum leading-none mt-0.5">
+                        {fmtKg(kg)}<span className="text-caption2 font-semibold ml-0.5">kg</span>
                       </p>
-                      <p className="text-[8.5px] uppercase tracking-[0.1em] text-foreground/55 mt-0.5">/ cde</p>
+                      <p className="text-caption2 uppercase tracking-[0.1em] text-foreground/55 mt-0.5">/ cde</p>
                     </>
                   ) : (
-                    <p className="text-[15px] font-bold text-foreground tnum leading-tight mt-1">
+                    <p className="text-callout font-bold text-foreground tnum leading-tight mt-1">
                       ×{p.orderCount}
                     </p>
                   )}
-                </div>
+                </Link>
               );
             })}
           </div>
         ) : (
-          <p className="text-[13px] italic text-muted-foreground/60 leading-tight">aucun historique</p>
+          <p className="text-body italic text-muted-foreground/60 leading-tight">aucun historique</p>
         )}
       </div>
     </section>
