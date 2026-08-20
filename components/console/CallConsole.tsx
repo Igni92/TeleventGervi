@@ -14,6 +14,8 @@ import { displayNameFromSlp } from "@/lib/salespeople";
 import { loadCallNote, saveCallNote, clearCallNote } from "@/lib/callNoteStorage";
 import { BLDialog } from "@/components/console/BLDialog";
 import { NotificationsBell } from "@/components/console/NotificationsBell";
+import { ConsoleSectionTabs } from "@/components/console/ConsoleSectionTabs";
+
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -560,12 +562,16 @@ export function CallConsole({ isAdmin = false, meInitials = null }: { isAdmin?: 
 
   return (
     <div className="h-full flex flex-col gap-5 animate-fade-up min-h-0">
+      {/* Onglets de section Télévente (Appels / Commande) — l'entrée de nav est
+          fusionnée, cette barre bascule vers l'Écran 2 (prise de commande). */}
+      <div className="shrink-0 flex items-center justify-between gap-3">
+        <ConsoleSectionTabs />
+        <NotificationsBell />
+      </div>
+
       {/* ── Top stat strip ─────────────────────────────────── */}
-      <div className="shrink-0 flex items-start justify-between gap-4">
+      <div className="shrink-0">
         <ConsoleHeader stats={stats} />
-        <div className="shrink-0 flex items-center gap-2">
-          <NotificationsBell />
-        </div>
       </div>
 
       {/* ── Pile de bandeaux — même design, une seule colonne en tête ──────

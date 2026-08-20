@@ -5,6 +5,7 @@ import {
   Loader2, FileText, PackageOpen, PackageCheck, ChevronRight,
 } from "lucide-react";
 import { Ecran2Order } from "@/components/console/Ecran2Order";
+import { ConsoleSectionTabs } from "@/components/console/ConsoleSectionTabs";
 import { PromoBanner } from "@/components/promos/PromoBanner";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -162,6 +163,10 @@ export default function Ecran2Page() {
 
   return (
     <div className="h-full flex flex-col gap-3 animate-fade-up min-h-0">
+      {/* Onglets de section Télévente (Appels / Commande) — l'entrée de nav est
+          fusionnée, cette barre bascule entre les deux écrans. */}
+      <ConsoleSectionTabs />
+
       {/* ── Bandeau PROMOTIONS — barre-ticker tout en haut de l'écran ── */}
       <PromoBanner context="commande" />
 
