@@ -111,23 +111,12 @@ export function ActiveClient({
           }}
           {...collapseProps("jours")}
         >
-          <div className="flex gap-1.5 flex-wrap">
-            {[1,2,3,4,5,6,0].map((d) => {
-              const active = days.includes(d);
-              return (
-                <span
-                  key={d}
-                  className={`h-7 w-10 rounded-md text-[11px] font-semibold flex items-center justify-center transition-colors ${
-                    active
-                      ? "bg-brand-600 text-white"
-                      : "bg-secondary text-muted-foreground/60"
-                  }`}
-                >
-                  {JOURS_FR[d]}
-                </span>
-              );
-            })}
-          </div>
+          {/* Info PASSIVE (pas des toggles) : juste les jours programmés en
+              texte, séparés par des points. Ne peut pas déborder d'une colonne
+              étroite, contrairement aux 7 pastilles fixes précédentes. */}
+          <p className="text-body font-semibold text-foreground">
+            {[1,2,3,4,5,6,0].filter((d) => days.includes(d)).map((d) => JOURS_FR[d]).join(" · ")}
+          </p>
         </Block>
       ) : null,
 
