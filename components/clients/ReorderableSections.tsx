@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { GripVertical, Eye, EyeOff, SlidersHorizontal, RotateCcw, Check, Maximize2, Minimize2, Pencil, ArrowDownToLine } from "lucide-react";
+import { GripVertical, Eye, EyeOff, SlidersHorizontal, RotateCcw, Check, Maximize2, Minimize2, Pencil, ArrowDownToLine, MoreHorizontal } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 
 /**
  * Fiche RÉORGANISABLE & pleine largeur.
@@ -141,31 +144,45 @@ export function ReorderableSections({ storageKey, sections }: { storageKey: stri
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between gap-2">
-        <p className="hidden text-[12px] text-muted-foreground sm:block">
-          {editing ? "Glissez les blocs pour réordonner · renommez · masquez (œil) · pleine largeur (⤢)" : ""}
-        </p>
-        <div className="ml-auto flex items-center gap-1.5">
-          {editing && (
+      {/* Hors édition : simple menu « … » discret (au niveau des onglets).
+          En édition : chrome d'édition VISIBLE (aide + réinitialiser + terminer). */}
+      {editing ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-secondary/60 px-3 py-2">
+          <p className="text-caption text-muted-foreground">
+            Glissez les blocs pour réordonner · renommez · masquez (œil) · pleine largeur (⤢)
+          </p>
+          <div className="ml-auto flex items-center gap-1.5">
             <button
               type="button" onClick={reset}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-caption font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             >
               <RotateCcw className="h-3.5 w-3.5" /> Réinitialiser
             </button>
-          )}
-          <button
-            type="button" onClick={() => setEditing((e) => !e)}
-            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] font-semibold transition-colors ${
-              editing
-                ? "bg-brand-600 text-white shadow-[0_2px_10px_-2px_hsl(var(--brand-600))] hover:bg-brand-700"
-                : "border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-            }`}
-          >
-            {editing ? <><Check className="h-3.5 w-3.5" /> Terminer</> : <><SlidersHorizontal className="h-3.5 w-3.5" /> Personnaliser</>}
-          </button>
+            <button
+              type="button" onClick={() => setEditing(false)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-caption font-semibold text-primary-foreground transition-colors hover:bg-[color-mix(in_srgb,hsl(var(--primary))_92%,black)]"
+            >
+              <Check className="h-3.5 w-3.5" /> Terminer
+            </button>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="mb-4 flex justify-end">
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="Options de disposition"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setEditing(true)} className="gap-2">
+                <SlidersHorizontal className="h-4 w-4" /> Personnaliser la disposition
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
 
       {/* Grille : 1 colonne (mobile) → 2 (lg) → 3 (xl+). Ordre de lecture
           gauche→droite (prévisible). Le passage à 3 colonnes dès `xl` (≈1280px)
@@ -232,10 +249,10 @@ export function ReorderableSections({ storageKey, sections }: { storageKey: stri
                     onBlur={() => setEditId(null)}
                     onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") setEditId(null); }}
                     aria-label={`Renommer ${section.label}`}
-                    className="flex-1 min-w-0 h-8 px-2 rounded-md border border-border bg-background text-[13px] font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className="flex-1 min-w-0 h-8 px-2 rounded-md border border-border bg-background text-body font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-brand-500"
                   />
                 ) : (
-                  <span className="flex-1 min-w-0 truncate py-1.5 text-[13px] font-semibold text-foreground">{labelOf(id)}</span>
+                  <span className="flex-1 min-w-0 truncate py-1.5 text-body font-semibold text-foreground">{labelOf(id)}</span>
                 )}
                 <button
                   type="button" draggable={false} onMouseDown={(e) => e.preventDefault()}
@@ -271,7 +288,7 @@ export function ReorderableSections({ storageKey, sections }: { storageKey: stri
           <div
             onDragOver={(e) => { e.preventDefault(); setOverId("bottom"); }}
             onDrop={(e) => { e.preventDefault(); moveBefore(dragId, null); endDrag(); }}
-            className={`col-span-full flex items-center justify-center gap-2 h-16 rounded-xl border-2 border-dashed text-[13px] font-semibold transition-all duration-150 ${
+            className={`col-span-full flex items-center justify-center gap-2 h-16 rounded-xl border-2 border-dashed text-body font-semibold transition-all duration-150 ${
               overId === "bottom"
                 ? "border-brand-500 bg-brand-500/10 text-brand-600 dark:text-brand-400 scale-[1.005]"
                 : "border-border text-muted-foreground"

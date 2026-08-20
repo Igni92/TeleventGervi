@@ -30,6 +30,12 @@ interface ImportResult {
 
 interface ImportModalProps {
   onImported?: () => void;
+  /** Ouverture contrôlée (facultative) : permet de piloter l'import depuis un
+   *  menu « … » sans afficher le bouton d'ouverture propre au modal. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Masque le déclencheur interne (le parent ouvre le modal lui-même). */
+  hideTrigger?: boolean;
 }
 
 interface ParseOutcome {
@@ -189,8 +195,14 @@ function parseCSV(text: string): ParseOutcome {
   return { rows: Array.from(byCode.values()), duplicates };
 }
 
-export function ImportModal({ onImported }: ImportModalProps) {
-  const [open, setOpen] = useState(false);
+export function ImportModal({ onImported, open: openProp, onOpenChange, hideTrigger }: ImportModalProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = openProp !== undefined;
+  const open = isControlled ? openProp : internalOpen;
+  const setOpen = (v: boolean) => {
+    if (isControlled) onOpenChange?.(v);
+    else setInternalOpen(v);
+  };
   const [rows, setRows] = useState<ParsedRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -255,12 +267,14 @@ export function ImportModal({ onImported }: ImportModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
-      <DialogTrigger asChild>
-        <Button variant="outline" className="gap-2">
-          <Upload className="h-4 w-4" />
-          Importer CSV
-        </Button>
-      </DialogTrigger>
+      {!hideTrigger && (
+        <DialogTrigger asChild>
+          <Button variant="outline" className="gap-2">
+            <Upload className="h-4 w-4" />
+            Importer CSV
+          </Button>
+        </DialogTrigger>
+      )}
 
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>

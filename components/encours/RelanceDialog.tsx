@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { Loader2, X, Send, Mail, AlertTriangle, ShieldCheck, History } from "lucide-react";
+import { Loader2, X, Send, Mail, AlertTriangle, ShieldCheck, History, ArrowLeft, Check } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { StatBlock } from "@/components/ui/stat-block";
 import { InfoHint } from "@/components/ui/info-hint";
 import { RELANCE_LEVELS, suggestLevel, type RelanceCode } from "@/lib/relance/levels";
@@ -72,12 +74,15 @@ export function RelanceDialog({
   cardName,
   maxOverdueDays,
   onClose,
+  onBack,
   onSent,
 }: {
   cardCode: string;
   cardName: string;
   maxOverdueDays: number;
   onClose: () => void;
+  /** Feuille 2 étapes : retour au détail du client (si ouvert depuis le détail). */
+  onBack?: () => void;
   onSent?: () => void;
 }) {
   const [level, setLevel] = useState<RelanceCode>(suggestLevel(maxOverdueDays) ?? "R0");
@@ -142,8 +147,6 @@ export function RelanceDialog({
       if (!r.ok || !j.ok) { toast.error(j.error || "Envoi impossible"); return; }
       setSentLevel(level); // verrouille le bouton pour ce niveau (anti-doublon UI)
       if (j.warning) {
-        // Mail parti mais journalisation KO : l'anti-doublon n'est pas enregistré.
-        // Avertissement persistant pour éviter un renvoi (doublon) par l'opérateur.
         toast.warning(j.warning, { duration: Infinity });
       } else {
         toast.success(
@@ -164,53 +167,69 @@ export function RelanceDialog({
   if (typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 sm:p-6" onClick={onClose}>
       <div
-        className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col"
+        className="bg-card border border-border rounded-xl shadow-modal w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-border">
-          <div className="min-w-0">
-            <p className="kicker mb-0.5">Relance / recouvrement · NT-2026-RC-01</p>
-            <h2 className="text-[18px] font-semibold tracking-tight text-foreground truncate">{cardName}</h2>
-            <p className="text-[11.5px] font-mono text-muted-foreground">{cardCode}</p>
+        <header className="shrink-0 flex items-center justify-between gap-3 px-5 py-3 border-b border-border">
+          <div className="min-w-0 flex items-center gap-3">
+            {onBack && (
+              <button onClick={onBack} title="Retour au détail du client"
+                className="shrink-0 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary">
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+            )}
+            <div className="min-w-0">
+              <p className="kicker mb-0.5">Relance / recouvrement · NT-2026-RC-01</p>
+              <h2 className="text-title3 font-semibold tracking-tight text-foreground truncate">{cardName}</h2>
+              <p className="text-caption font-mono text-muted-foreground">{cardCode}</p>
+            </div>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-secondary rounded-md text-muted-foreground"><X className="h-4 w-4" /></button>
         </header>
 
-        {/* Sélecteur de niveau R0→R5 */}
+        {/* Sélecteur de niveau — liste radio libellée (chaque palier explicite). */}
         <div className="shrink-0 px-5 pt-3">
-          <div className="grid grid-cols-6 gap-1.5">
-            {RELANCE_LEVELS.map((l) => (
-              <button
-                key={l.code}
-                type="button"
-                onClick={() => setLevel(l.code)}
-                aria-pressed={level === l.code}
-                title={`${l.libelle} · ${l.declenchement} · ${l.canal}`}
-                className={`h-9 rounded-md border text-[12.5px] font-bold transition-colors ${
-                  level === l.code
-                    ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-950/40 dark:text-brand-300"
-                    : "border-border text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {l.code}
-              </button>
-            ))}
+          <div role="radiogroup" aria-label="Niveau de relance" className="rounded-lg border border-border divide-y divide-border overflow-hidden">
+            {RELANCE_LEVELS.map((l) => {
+              const on = level === l.code;
+              return (
+                <button
+                  key={l.code}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  onClick={() => setLevel(l.code)}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-2 text-left transition-colors",
+                    on ? "bg-brand-500/10" : "hover:bg-secondary/60",
+                  )}
+                >
+                  <span className={cn("grid h-4 w-4 shrink-0 place-items-center rounded-full ring-1", on ? "bg-brand-500 ring-brand-500" : "ring-border")}>
+                    {on && <Check className="h-3 w-3 text-brand-950" />}
+                  </span>
+                  <span className="w-9 shrink-0 text-body font-bold tnum text-foreground">{l.code}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-body font-medium text-foreground">
+                      {l.libelle}
+                      {suggested === l.code && <span className="ml-1.5 text-caption font-semibold text-brand-600 dark:text-brand-400">(suggéré)</span>}
+                    </span>
+                    <span className="block truncate text-caption text-muted-foreground">{l.declenchement} · {l.canal} · {l.tonalite}</span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
-          <p className="text-[12px] text-muted-foreground mt-1.5">
-            <b className="text-foreground">{meta.libelle}</b> · {meta.declenchement} · {meta.canal} · <i>{meta.tonalite}</i>
-            {suggested === meta.code && <span className="ml-1 text-brand-600 dark:text-brand-400">(suggéré)</span>}
-          </p>
         </div>
 
         {/* Bandeau destinataire / mode test */}
         <div className="shrink-0 px-5 pt-3">
           {preview && (
             preview.recipient.testMode ? (
-              <div className="flex items-start gap-2 rounded-lg border border-amber-400/60 bg-amber-50 dark:bg-amber-950/25 px-3 py-2">
-                <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-                <p className="text-[12px] text-amber-800 dark:text-amber-200">
+              <div className="flex items-start gap-2 rounded-lg border border-warning/50 bg-warning/10 px-3 py-2">
+                <AlertTriangle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
+                <p className="text-caption text-foreground">
                   <b>Mode test</b> — depuis <b className="font-mono">{preview.from}</b>, l&apos;email partira vers <b className="font-mono">{preview.recipient.to}</b>
                   {preview.recipient.intendedTo
                     ? <> et non vers le client (<span className="font-mono">{preview.recipient.intendedTo}</span>).</>
@@ -218,9 +237,9 @@ export function RelanceDialog({
                 </p>
               </div>
             ) : (
-              <div className="flex items-start gap-2 rounded-lg border border-emerald-400/60 bg-emerald-50 dark:bg-emerald-950/25 px-3 py-2">
-                <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
-                <p className="text-[12px] text-emerald-800 dark:text-emerald-200">
+              <div className="flex items-start gap-2 rounded-lg border border-success/50 bg-success/10 px-3 py-2">
+                <ShieldCheck className="h-4 w-4 text-success mt-0.5 shrink-0" />
+                <p className="text-caption text-foreground">
                   <b>Envoi réel</b> — depuis <b className="font-mono">{preview.from}</b> vers <b className="font-mono">{preview.recipient.to}</b>.
                 </p>
               </div>
@@ -235,19 +254,22 @@ export function RelanceDialog({
           ) : preview ? (
             <>
               <div className="rounded-lg border border-border overflow-hidden">
-                <div className="flex items-center gap-2 px-3 py-2 bg-secondary/40 border-b border-border">
+                <div className="flex items-center gap-2 px-3 py-2 bg-secondary/60 border-b border-border">
                   <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span className="text-[12.5px] font-semibold text-foreground truncate">{preview.subject}</span>
+                  <span className="text-caption font-semibold text-foreground truncate">{preview.subject}</span>
                 </div>
+                {/* Papier de l'email : document reçu par le client, volontairement
+                    blanc dans les deux thèmes (l'email ne suit pas le thème app). */}
                 <iframe
                   title="Aperçu de la relance"
                   srcDoc={preview.html}
                   sandbox=""
-                  className="w-full h-[300px] bg-white"
+                  className="w-full h-[300px]"
+                  style={{ background: "hsl(0 0% 100%)" }}
                 />
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 text-[12px]">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                 <Stat label={`Principal net (${preview.totals.nbFactures} fact.)`} value={eur(preview.totals.principal)} />
                 {preview.rate && (
                   <Stat
@@ -267,14 +289,14 @@ export function RelanceDialog({
                 <Stat label="Total dû" value={eur(preview.totals.total)} strong />
               </div>
               {preview.totals.encaissementsNonAffectes > 0 && (
-                <p className="text-[11.5px] text-muted-foreground">
+                <p className="text-caption text-muted-foreground">
                   Factures échues <b className="text-foreground">{eur(preview.totals.openTotal)}</b> − encaissements/avoirs reçus non affectés{" "}
                   <b className="text-emerald-600 dark:text-emerald-400">−{eur(preview.totals.encaissementsNonAffectes)}</b> = principal net{" "}
                   <b className="text-foreground">{eur(preview.totals.principal)}</b> (solde compte tiers).
                 </p>
               )}
               {preview.avoirs && (preview.avoirs.imputesTotal > 0.005 || preview.avoirs.enFaveurTotal > 0.005) && (
-                <div className="flex items-start gap-2 rounded-lg border border-violet-400/40 bg-violet-50 dark:bg-violet-950/25 px-3 py-2 text-[12px] text-violet-800 dark:text-violet-200">
+                <div className="flex items-start gap-2 rounded-lg border border-violet-400/40 bg-violet-500/10 px-3 py-2 text-caption text-violet-800 dark:text-violet-200">
                   <span className="font-semibold">Avoirs</span>
                   <span>
                     {preview.avoirs.imputesTotal > 0.005 && <>Imputé sur les factures : <b>{eur(preview.avoirs.imputesTotal)}</b>. </>}
@@ -287,7 +309,7 @@ export function RelanceDialog({
                 </div>
               )}
               {meta.serviceOnly && (
-                <div className="flex items-start gap-2 rounded-lg border border-violet-400/50 bg-violet-50 dark:bg-violet-950/25 px-3 py-2 text-[12px] text-violet-800 dark:text-violet-200">
+                <div className="flex items-start gap-2 rounded-lg border border-violet-400/50 bg-violet-500/10 px-3 py-2 text-caption text-violet-800 dark:text-violet-200">
                   <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                   <span>
                     <b>Relance de factures de service</b> (location / prestation / palettes / destruction) —{" "}
@@ -298,21 +320,21 @@ export function RelanceDialog({
               )}
             </>
           ) : (
-            <div className="h-48 flex items-center justify-center text-[13px] text-muted-foreground">Aucun aperçu.</div>
+            <div className="h-48 flex items-center justify-center text-body text-muted-foreground">Aucun aperçu.</div>
           )}
 
           {logs.length > 0 && (
             <div className="rounded-lg border border-border">
-              <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border text-[11px] uppercase tracking-wide font-semibold text-muted-foreground">
+              <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border kicker">
                 <History className="h-3.5 w-3.5" /> Historique des relances ({logs.length})
               </div>
-              <ul className="divide-y divide-border/50">
+              <ul className="divide-y divide-border/60">
                 {logs.map((log) => (
-                  <li key={log.id} className="flex items-center justify-between gap-3 px-3 py-1.5 text-[12px]">
+                  <li key={log.id} className="flex items-center justify-between gap-3 px-3 py-1.5 text-caption">
                     <span className="flex items-center gap-2">
                       <span className="font-bold text-foreground">{log.level}</span>
                       <span className="text-muted-foreground">{new Date(log.sentAt).toLocaleString("fr-FR")}</span>
-                      {log.testMode && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 font-semibold">TEST</span>}
+                      {log.testMode && <span className="text-caption2 px-1.5 py-0.5 rounded bg-warning/12 text-warning ring-1 ring-warning/25 font-semibold">TEST</span>}
                     </span>
                     <span className="flex items-center gap-2 shrink-0">
                       <span className="font-mono text-muted-foreground truncate max-w-[160px]">{log.recipient}</span>
@@ -327,22 +349,21 @@ export function RelanceDialog({
 
         {/* Pied : envoi */}
         <footer className="shrink-0 flex items-center justify-between gap-3 px-5 py-3 border-t border-border">
-          <p className="text-[11px] text-muted-foreground max-w-md">
+          <p className="text-caption2 text-muted-foreground max-w-md">
             L&apos;email part depuis la boîte partagée{preview?.from ? <> <b className="font-mono">{preview.from}</b></> : ""}.{" "}
             {preview?.attachInvoices && <>Les PDF des factures sont joints. </>}
             {meta.canal.includes("LRAR") && <b className="text-amber-600 dark:text-amber-400">Niveau LRAR : l&apos;email de test ne remplace pas le recommandé postal. </b>}
             Chaque envoi est journalisé (piste d&apos;audit).
           </p>
-          <button
-            type="button"
+          <Button
             onClick={send}
             disabled={sending || loading || !preview || sentLevel === level || preview?.relanceActive === false}
             title={preview?.relanceActive === false ? "Relances désactivées pour ce client" : undefined}
-            className="inline-flex items-center gap-2 h-9 px-4 rounded-md bg-brand-600 text-white text-[13px] font-semibold hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+            className="shrink-0"
           >
-            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            {sentLevel === level ? "Envoyé ✓" : preview?.relanceActive === false ? "Relances désactivées" : meta.serviceOnly ? "Envoyer à la compta" : preview?.recipient.testMode ? "Envoyer (test)" : "Envoyer"}
-          </button>
+            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : sentLevel === level ? <Check className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+            {sentLevel === level ? "Envoyé" : preview?.relanceActive === false ? "Relances désactivées" : meta.serviceOnly ? "Envoyer à la compta" : preview?.recipient.testMode ? "Envoyer (test)" : "Envoyer"}
+          </Button>
         </footer>
       </div>
     </div>,

@@ -169,6 +169,18 @@
     background-color: rgba(59,130,246,0.50);
   }
 
+  /* Zébrage des tableaux (lisibilité façon tableur) — une rangée sur deux prend
+     une teinte légèrement plus soutenue. Sur tokens : bascule seule clair/sombre.
+     - Une classe de fond posée sur la ligne (bg-destructive/5 « manquant », etc.)
+       l'emporte (spécificité classe > sélecteur pseudo) : les lignes d'état
+       gardent leur couleur.
+     - Le survol (hover:bg-…) l'emporte aussi : la ligne survolée reste distincte.
+     Les tableaux qui ne veulent PAS de zébrage portent la classe .no-zebra. */
+  table:not(.no-zebra) > tbody > tr:nth-child(even),
+  table:not(.no-zebra) > tr:nth-child(even) {
+    background-color: hsl(var(--muted) / 0.55);
+  }
+
   /* Scrollbars fines — gris neutre sur tokens (bascule seule clair/sombre). */
   ::-webkit-scrollbar { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -563,4 +575,7 @@ textarea:focus-visible,
   body { background: #fff; color: #000; }
   .surface, .panel, .surface-card { box-shadow: none; }
   [data-sonner-toaster] { display: none !important; }
+  /* Pas de zébrage à l'impression : les documents restent en noir sur blanc. */
+  table > tbody > tr:nth-child(even),
+  table > tr:nth-child(even) { background-color: transparent !important; }
 }

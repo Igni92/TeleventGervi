@@ -22,30 +22,32 @@ import type { ValueTier } from "@/lib/clientValue";
  * optionnel et s'affiche en chip mono discret accolé.
  */
 
+// Couleur SÉMANTIQUE par état, en pilule translucide /12 (lisible clair ET
+// sombre — aligné sur le primitif <Badge>). La couleur ne code que l'état.
 const STATE_STYLE: Record<LifecycleState, { icon: LucideIcon; className: string }> = {
   ACTIF: {
     icon: CheckCircle2,
-    className: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/60",
+    className: "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20",
   },
   EN_RETARD: {
     icon: Clock,
-    className: "bg-amber-50 text-amber-700 ring-1 ring-amber-200/60",
+    className: "bg-amber-500/12 text-amber-600 dark:text-amber-400 ring-1 ring-amber-500/20",
   },
   A_RISQUE: {
     icon: TriangleAlert,
-    className: "bg-orange-50 text-orange-700 ring-1 ring-orange-200/60",
+    className: "bg-orange-500/12 text-orange-600 dark:text-orange-400 ring-1 ring-orange-500/20",
   },
   ENDORMI: {
     icon: Moon,
-    className: "bg-slate-100 text-slate-600 ring-1 ring-slate-200/80",
+    className: "bg-slate-500/12 text-slate-600 dark:text-slate-300 ring-1 ring-slate-500/20",
   },
   PERDU: {
     icon: Ban,
-    className: "bg-rose-50 text-rose-700 ring-1 ring-rose-200/60",
+    className: "bg-rose-500/12 text-rose-600 dark:text-rose-400 ring-1 ring-rose-500/20",
   },
   NOUVEAU: {
     icon: Sparkles,
-    className: "bg-sky-50 text-sky-700 ring-1 ring-sky-200/60",
+    className: "bg-sky-500/12 text-sky-600 dark:text-sky-400 ring-1 ring-sky-500/20",
   },
 };
 
@@ -72,7 +74,7 @@ export function LifecycleBadge({ lifecycle, tier, className }: LifecycleBadgePro
       </Badge>
       {tier && (
         <span
-          className="inline-flex items-center rounded-md bg-secondary/70 px-1.5 py-0.5 font-mono text-[10.5px] font-semibold text-foreground/70 ring-1 ring-border"
+          className="inline-flex items-center rounded-md bg-secondary/70 px-1.5 py-0.5 font-mono text-caption2 font-semibold text-foreground/70 ring-1 ring-border"
           title={`Valeur client : ${tier.label}`}
         >
           {tier.tier}

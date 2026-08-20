@@ -28,11 +28,11 @@ export default async function NewClientPage() {
 
       <PageHeader
         kicker="Création"
-        title={<>Nouveau <span className="italic text-foreground/50">client</span></>}
+        title="Nouveau client"
         help={<>Remplissez les champs pour l&apos;ajouter à la base.</>}
       />
 
-      <div className="bg-white dark:bg-card rounded-xl border border-border shadow-card p-6">
+      <div className="surface-card rounded-xl border border-border bg-card shadow-card p-6">
         <ClientForm mode="create" />
       </div>
     </div>

@@ -18,16 +18,21 @@ export interface GroupedListProps
   title?: React.ReactNode;
   /** Légende caption sous la surface (mentions, aide contextuelle). */
   footer?: React.ReactNode;
+  /** Zébrage une rangée sur deux (lisibilité façon tableur). Défaut true. */
+  zebra?: boolean;
 }
 
 const GroupedList = React.forwardRef<HTMLDivElement, GroupedListProps>(
-  ({ title, footer, className, children, ...props }, ref) => (
+  ({ title, footer, zebra = true, className, children, ...props }, ref) => (
     <div ref={ref} className={className} {...props}>
       {/* px-4 : aligne kicker et footer sur le padding interne des rangées. */}
       {title != null && <div className="kicker mb-2 px-4">{title}</div>}
       {/* divide-y : le séparateur n'existe qu'ENTRE les rangées, pas après la
           dernière — un border-b par rangée laisserait un filet orphelin. */}
-      <div className="divide-y divide-border overflow-hidden rounded-xl bg-card ring-1 ring-border shadow-card">
+      <div className={cn(
+        "divide-y divide-border overflow-hidden rounded-xl bg-card ring-1 ring-border shadow-card",
+        zebra && "[&>*:nth-child(even)]:bg-muted/40",
+      )}>
         {children}
       </div>
       {footer != null && (

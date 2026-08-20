@@ -1,44 +1,57 @@
 "use client";
 
 /**
- * « Clients & plan d'appel » — ANNUAIRE EN CARTES (même grammaire visuelle que la
- * fiche Fournisseurs : grille de cartes propres, lift au survol, pastilles). Il
- * REMPLACE le cockpit tableau historique tout en conservant les leviers de
- * télévente essentiels, portés sur chaque carte :
+ * « Clients & plan d'appel » — ANNUAIRE (liste de travail sobre). Fusion de
+ * l'ancien annuaire clients et du cockpit /plan-appel : une seule population,
+ * une seule liste. La page suit les DEUX régimes visuels de la refonte :
  *
- *   • assignation VENDEUR / COMMERCIAL (menu par carte) ;
- *   • ACTIVATION télévente (activer / désactiver) ;
- *   • JOURS D'APPEL (badges), DERNIÈRE COMMANDE, INCIDENTS ouverts ;
- *   • programmer un RAPPEL ;
- *   • déduire les vendeurs depuis SAP, importer les clients SAP.
+ *   1. ZONE DE PRISE D'INFO — 4 KPI-FILTRES teintés (SurfaceCard tinted+accent)
+ *      qui donnent l'état du portefeuille d'un coup d'oeil ET filtrent la liste
+ *      au clic (Clients · Programmés aujourd'hui · Sans commande ≥ 30 j · Incidents).
+ *   2. ZONE DE TRAVAIL — la liste elle-même : surfaces neutres (GroupedList),
+ *      en-tête gris marqué, séparateurs nets, aucune couleur de fond. La couleur
+ *      n'y code QUE l'état (retard de commande, incident, inactif).
+ *
+ * Une barre unique : recherche large + UN bouton « Filtres » (popover portant
+ * les 6 critères) ; les filtres actifs se relisent en puces amovibles.
+ *
+ * Chaque ligne a UNE cible de clic — la fiche client. Les actions de télévente
+ * (console, rappel, activation, assignation) vivent dans le menu « … » de fin de
+ * ligne. Les tâches d'admin (déduire vendeurs, import SAP, mode sélection) sont
+ * regroupées dans un second menu « … ».
  *
  * Source unique : `/api/plan-appel` (dernière commande SAP réelle, incidents,
- * dernier appel) — on charge tout et on filtre/trie/compte EN MÉMOIRE. La vraie
- * file d'appel priorisée reste la Console (`/console`).
+ * dernier appel), scopée serveur au portefeuille de l'utilisateur (`restricted`).
+ * On charge tout et on filtre/trie/compte EN MÉMOIRE. La file d'appel priorisée
+ * reste la Console (`/console`).
  *
  * `canManage` (faux pour le livreur) masque les leviers d'assignation/admin ; les
  * écritures restent gardées côté API.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  Search, Loader2, Users, Phone, ChevronRight, AlertTriangle, PackageX,
-  CalendarClock, UserCheck, Bell, Power, MoreHorizontal, UserPlus, Plus, Radio, Target,
-  BadgeCheck, History, UserX, CheckSquare,
+  Search, Loader2, Users, AlertTriangle, PackageX, CalendarClock,
+  UserCheck, Bell, Power, MoreHorizontal, Plus, Radio, SlidersHorizontal, X,
+  Check, UserPlus, Upload, CheckSquare,
 } from "lucide-react";
 import { classifyByDays } from "@/lib/prospection";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { SurfaceCard, type Accent } from "@/components/ui/surface-card";
+import { GroupedList } from "@/components/ui/grouped-list";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ViewToggle, useViewMode } from "@/components/ui/view-toggle";
 import { SALESPEOPLE, displayNameFromSlp, normalizeSlp } from "@/lib/salespeople";
-import { formatPhoneDisplay, standardizePhone } from "@/lib/phone";
+import { formatPhoneDisplay } from "@/lib/phone";
 import { parisDayOfWeek } from "@/lib/paris-time";
 import { ReminderModal } from "@/components/ReminderModal";
 import { ImportModal } from "@/components/ImportModal";
@@ -71,6 +84,7 @@ const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/\p{Diacrit
 const typeVariant = (t: string | null) =>
   t === "GMS" ? "gms" : t === "EXPORT" ? "export" : t === "CHR" ? "chr" : "outline";
 
+/** Pastilles des jours d'appel — jour actif en accent, jour courant cerclé. */
 function JoursBadges({ joursAppel, today }: { joursAppel: string | null; today: number }) {
   const days = joursAppel ? joursAppel.split(",").map(Number) : [];
   return (
@@ -79,52 +93,60 @@ function JoursBadges({ joursAppel, today }: { joursAppel: string | null; today: 
         const on = days.includes(d);
         const isToday = d === today;
         return (
-          <span key={d} className={`inline-flex items-center justify-center h-[16px] w-[17px] text-[9px] font-semibold rounded ${
-            on ? "bg-brand-600 text-white" : "bg-secondary text-muted-foreground/40"
-          } ${isToday ? "ring-1 ring-offset-1 ring-brand-500 dark:ring-offset-card" : ""}`}>{JOURS[i]}</span>
+          <span key={d} className={cn(
+            "inline-flex h-4 w-[17px] items-center justify-center rounded text-caption2 font-semibold",
+            on ? "bg-brand-600 text-white" : "bg-secondary text-muted-foreground/50",
+            isToday && "ring-1 ring-offset-1 ring-brand-500 dark:ring-offset-card",
+          )}>{JOURS[i]}</span>
         );
       })}
     </div>
   );
 }
 
+/** Dernière commande — la couleur code l'urgence (vert / ambre / rouge). */
 function LastOrder({ days }: { days: number | null }) {
-  if (days == null) return <span className="text-[12px] font-semibold text-rose-600 dark:text-rose-400">jamais</span>;
-  const color = days >= 30 ? "text-rose-600 dark:text-rose-400" : days >= 14 ? "text-amber-600 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400";
-  return <span className={`text-[12px] font-semibold ${color} tnum`}>{days === 0 ? "auj." : `${days} j`}</span>;
+  if (days == null) return <span className="text-caption font-semibold text-destructive">jamais</span>;
+  const color = days >= 30 ? "text-destructive" : days >= 14 ? "text-warning" : "text-success";
+  return <span className={cn("text-caption font-semibold tnum", color)}>{days === 0 ? "auj." : `${days} j`}</span>;
 }
+
+// ── État des filtres (hors recherche, qui a son propre champ) ────────────────
+interface Filters {
+  vendeur: string;
+  commercial: string;
+  type: string;
+  active: string;
+  stale: string;
+  statut: string; // clients | prospects | "" (les deux)
+  todayOnly: boolean;
+  incidents: boolean;
+}
+const DEFAULT_FILTERS: Filters = {
+  vendeur: "", commercial: "", type: "", active: "", stale: "",
+  statut: "clients", todayOnly: false, incidents: false,
+};
 
 export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) {
   const [clients, setClients] = useState<PlanClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [restricted, setRestricted] = useState(false);
   const [search, setSearch] = useState("");
-  const [vendeur, setVendeur] = useState("");
-  const [commercial, setCommercial] = useState("");
-  const [type, setType] = useState("");
-  const [active, setActive] = useState("");
-  const [stale, setStale] = useState("");
-  const [statut, setStatut] = useState("clients"); // clients | prospects | "" (les deux)
-  // Comptes prospection (vivier + pipeline) — hors cockpit, chargés à part.
-  const [prosp, setProsp] = useState<{ prospects: number; qualifies: number; anciens: number; nonqual: number } | null>(null);
-  const [todayOnly, setTodayOnly] = useState(false);
-  const [incidents, setIncidents] = useState(false);
+  const [f, setF] = useState<Filters>(DEFAULT_FILTERS);
+  const setFilter = useCallback(<K extends keyof Filters>(k: K, v: Filters[K]) => {
+    setF((cur) => ({ ...cur, [k]: v }));
+  }, []);
+
   const [syncingVendeurs, setSyncingVendeurs] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [reminderClient, setReminderClient] = useState<PlanClient | null>(null);
-  // Sélection EN SÉRIE (vue liste) : réaffecter un portefeuille ou disqualifier
-  // un paquet de magasins se fait par dizaines de lignes, pas une par une.
+
+  // Mode SÉLECTION EN SÉRIE (canManage) : réaffecter un portefeuille ou
+  // disqualifier un paquet de magasins d'un coup. Désactivé par défaut pour
+  // garder une seule cible de clic par ligne (la fiche).
+  const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
-  const router = useRouter();
-
-  // Tuiles prospection (Prospect / Qualifié / Ancien client) — comptage dédié.
-  useEffect(() => {
-    fetch("/api/prospection/stats", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (j?.tiles) setProsp(j.tiles); })
-      .catch(() => {});
-  }, []);
-  const [view, setView] = useViewMode("televent-clients-view");
 
   const today = parisDayOfWeek();
 
@@ -194,42 +216,40 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
 
   // Statistiques sur le PORTEFEUILLE complet (ne bougent pas avec les filtres).
   const stats = useMemo(() => {
-    let total = 0, todayCount = 0, stale30 = 0, withIncidents = 0, noVendeur = 0, clientsN = 0, prospectsN = 0;
+    let today_ = 0, stale30 = 0, withIncidents = 0, clientsN = 0;
     for (const c of clients) {
-      total++;
-      if (classifyByDays(c.lastOrderDays, c.prospectStage, c.type) === "PROSPECT") prospectsN++; else clientsN++;
+      if (classifyByDays(c.lastOrderDays, c.prospectStage, c.type) !== "PROSPECT") clientsN++;
       const days = c.joursAppel ? c.joursAppel.split(",").map(Number) : [];
-      if (c.activeTelevente && days.includes(today)) todayCount++;
+      if (c.activeTelevente && days.includes(today)) today_++;
       if (c.activeTelevente && (c.lastOrderDays == null || c.lastOrderDays >= 30)) stale30++;
       if (c.openIncidents > 0) withIncidents++;
-      if (c.activeTelevente && !c.vendeur) noVendeur++;
     }
-    return { total, today: todayCount, stale30, withIncidents, noVendeur, clientsN, prospectsN };
+    return { today: today_, stale30, withIncidents, clientsN };
   }, [clients, today]);
 
   const filtered = useMemo(() => {
     const q = norm(search.trim());
-    const staleN = stale ? parseInt(stale) : 0;
+    const staleN = f.stale ? parseInt(f.stale) : 0;
     return clients.filter((c) => {
       if (q) {
         const hay = norm(`${c.nom} ${c.code} ${c.commercial ?? ""} ${c.vendeur ?? ""}`);
         if (!hay.includes(q)) return false;
       }
-      if (vendeur && normalizeSlp(c.vendeur ?? "") !== vendeur) return false;
-      if (commercial === "__none__") { if (c.commercial) return false; }
-      else if (commercial && normalizeSlp(c.commercial ?? "") !== commercial) return false;
-      if (type && c.type !== type) return false;
-      if (active === "actifs" && !c.activeTelevente) return false;
-      if (active === "inactifs" && c.activeTelevente) return false;
+      if (f.vendeur && normalizeSlp(c.vendeur ?? "") !== f.vendeur) return false;
+      if (f.commercial === "__none__") { if (c.commercial) return false; }
+      else if (f.commercial && normalizeSlp(c.commercial ?? "") !== f.commercial) return false;
+      if (f.type && c.type !== f.type) return false;
+      if (f.active === "actifs" && !c.activeTelevente) return false;
+      if (f.active === "inactifs" && c.activeTelevente) return false;
       if (staleN && !(c.lastOrderDays == null || c.lastOrderDays >= staleN)) return false;
-      if (todayOnly) {
+      if (f.todayOnly) {
         const days = c.joursAppel ? c.joursAppel.split(",").map(Number) : [];
         if (!days.includes(today)) return false;
       }
-      if (incidents && c.openIncidents === 0) return false;
+      if (f.incidents && c.openIncidents === 0) return false;
       const kind = classifyByDays(c.lastOrderDays, c.prospectStage, c.type);
-      if (statut === "clients" && kind !== "CLIENT") return false;
-      if (statut === "prospects" && kind !== "PROSPECT") return false;
+      if (f.statut === "clients" && kind !== "CLIENT") return false;
+      if (f.statut === "prospects" && kind !== "PROSPECT") return false;
       return true;
     }).sort((a, b) => {
       // Actifs d'abord, puis les plus « en retard » (jamais commandé = urgent) en tête.
@@ -239,7 +259,7 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
       if (da !== db) return db - da;
       return a.nom.localeCompare(b.nom);
     });
-  }, [clients, search, vendeur, commercial, type, active, stale, statut, todayOnly, incidents, today]);
+  }, [clients, search, f, today]);
 
   // La sélection ne survit PAS à un changement de filtre : agir sur des lignes
   // devenues invisibles serait la meilleure façon de réassigner un portefeuille
@@ -253,117 +273,118 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
     });
   }, [filtered]);
 
+  // Quitter le mode sélection vide toujours la sélection courante.
+  const exitSelectMode = useCallback(() => { setSelectMode(false); setSelected(new Set()); }, []);
+
+  const activeChips = useMemo(() => buildChips(f, setFilter), [f, setFilter]);
+
   return (
     <div className="space-y-4">
-      {/* Cartes synthèse — cliquables = filtres rapides. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-3">
-        <StatCard icon={Users} label="Clients" value={stats.clientsN} tone="brand"
-          onClick={() => setStatut(statut === "clients" ? "" : "clients")} active={statut === "clients"} />
-        {/* Prospection : comptage dédié (tout l'import), clic → pipeline. */}
-        <StatCard icon={Target} label="Prospects" value={prosp?.prospects ?? "…"} tone="violet"
-          onClick={() => router.push("/prospection")} />
-        <StatCard icon={BadgeCheck} label="Prospects qualifiés" value={prosp?.qualifies ?? "…"} tone="sky"
-          onClick={() => router.push("/prospection")} />
-        <StatCard icon={History} label="Anciens clients" value={prosp?.anciens ?? "…"} tone="amber"
-          onClick={() => router.push("/prospection")} />
-        <StatCard icon={UserX} label="Non qualifiés" value={prosp?.nonqual ?? "…"} tone="rose"
-          onClick={() => router.push("/prospection")} />
-        <StatCard icon={CalendarClock} label="Programmés auj." value={stats.today} tone="sky"
-          onClick={() => setTodayOnly((v) => !v)} active={todayOnly} />
-        <StatCard icon={PackageX} label="Sans cde ≥ 30 j" value={stats.stale30} tone="rose"
-          onClick={() => setStale(stale === "30" ? "" : "30")} active={stale === "30"} />
-        <StatCard icon={AlertTriangle} label="Avec incident" value={stats.withIncidents} tone="amber"
-          onClick={() => setIncidents((v) => !v)} active={incidents} />
-        {canManage && <StatCard icon={UserCheck} label="Sans vendeur" value={stats.noVendeur} tone="violet" />}
+      {/* ── ZONE DE PRISE D'INFO : 4 KPI-filtres teintés ────────────────── */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiFilterTile
+          icon={<Users className="h-3.5 w-3.5" />} label="Clients" accent="brand"
+          value={loading ? null : stats.clientsN}
+          active={f.statut === "clients"}
+          onClick={() => setFilter("statut", f.statut === "clients" ? "" : "clients")}
+        />
+        <KpiFilterTile
+          icon={<CalendarClock className="h-3.5 w-3.5" />} label="Programmés aujourd'hui" accent="sky"
+          value={loading ? null : stats.today}
+          active={f.todayOnly}
+          onClick={() => setFilter("todayOnly", !f.todayOnly)}
+        />
+        <KpiFilterTile
+          icon={<PackageX className="h-3.5 w-3.5" />} label="Sans commande ≥ 30 j" accent="rose"
+          value={loading ? null : stats.stale30}
+          active={f.stale === "30"}
+          onClick={() => setFilter("stale", f.stale === "30" ? "" : "30")}
+        />
+        <KpiFilterTile
+          icon={<AlertTriangle className="h-3.5 w-3.5" />} label="Incidents ouverts" accent="amber"
+          value={loading ? null : stats.withIncidents}
+          active={f.incidents}
+          onClick={() => setFilter("incidents", !f.incidents)}
+        />
       </div>
 
-      {/* Filtres + actions */}
+      {/* ── Barre : recherche large + Filtres + actions ─────────────────── */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher (nom, code, commercial…)" className="pl-9" />
+        <div className="relative min-w-[220px] flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un client (nom, code, commercial…)" className="pl-9" />
         </div>
-        {canManage && <FilterSelect value={vendeur} onChange={setVendeur} placeholder="Vendeur" options={[["", "Tous vendeurs"], ...VENDEURS.map((v) => [v, displayNameFromSlp(v) ?? v] as [string, string])]} />}
-        <FilterSelect value={commercial} onChange={setCommercial} placeholder="Commercial"
-          options={[["", "Tous commerciaux"], ["__none__", "Non assigné"], ...VENDEURS.map((v) => [v, displayNameFromSlp(v) ?? v] as [string, string])]} />
-        <FilterSelect value={type} onChange={setType} placeholder="Type" options={[["", "Tous types"], ["GMS", "GMS"], ["EXPORT", "EXPORT"], ["CHR", "CHR"]]} />
-        <FilterSelect value={active} onChange={setActive} placeholder="Activation" options={[["", "Actif + inactif"], ["actifs", "Actifs"], ["inactifs", "À activer"]]} />
-        <FilterSelect value={stale} onChange={setStale} placeholder="Sans cde depuis" options={[["", "Toute ancienneté"], ["14", "Sans cde ≥ 14 j"], ["30", "Sans cde ≥ 30 j"], ["60", "Sans cde ≥ 60 j"]]} />
-        <FilterSelect value={statut} onChange={setStatut} placeholder="Statut" options={[["clients", "Clients"], ["prospects", "Prospects"], ["", "Clients + prospects"]]} />
-        {statut === "prospects" && (
-          <Button asChild variant="outline" size="sm" className="gap-1.5">
-            <Link href="/prospection"><Target className="h-4 w-4 text-brand-500" /> Pipeline</Link>
-          </Button>
-        )}
+
+        <FiltersPopover f={f} setFilter={setFilter} canManage={canManage} onReset={() => setF(DEFAULT_FILTERS)} />
 
         <div className="ml-auto flex items-center gap-2">
-          <ViewToggle value={view} onChange={setView} />
           {canManage && (
-            <Button asChild variant="outline" size="sm" className="gap-1.5">
-              <Link href="/console"><Radio className="h-4 w-4 text-brand-500" /> Console d&apos;appels</Link>
-            </Button>
+            <AdminMenu
+              onSyncVendeurs={syncVendeurs}
+              syncing={syncingVendeurs}
+              onImport={() => setImportOpen(true)}
+              selectMode={selectMode}
+              onToggleSelect={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+            />
           )}
-          {canManage && (
-            <>
-              <Button variant="outline" size="sm" onClick={syncVendeurs} disabled={syncingVendeurs} className="hidden lg:inline-flex gap-1">
-                {syncingVendeurs ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-                Déduire vendeurs
-              </Button>
-              <span className="hidden lg:block"><ImportModal onImported={fetchData} /></span>
-            </>
-          )}
-          <Button asChild size="sm" className="gap-1">
+          <Button asChild variant="outline" size="sm" className="gap-1.5">
+            <Link href="/console"><Radio className="h-4 w-4 text-brand-500" /> Console d&apos;appels</Link>
+          </Button>
+          <Button asChild size="sm" className="gap-1.5">
             <Link href="/clients/new"><Plus className="h-4 w-4" /> Nouveau client</Link>
           </Button>
         </div>
       </div>
 
-      {/* Grille de cartes */}
-      {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-        </div>
-      ) : restricted ? (
-        <div className="rounded-2xl border border-dashed border-border bg-card/50 py-16 text-center">
-          <Users className="mx-auto h-8 w-8 text-muted-foreground/40" />
-          <p className="mt-3 text-[14px] font-medium text-foreground">Aucun client rattaché à votre compte</p>
-          <p className="mt-1 text-[12.5px] text-muted-foreground">Demandez à un administrateur de vous assigner un portefeuille.</p>
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-border bg-card/50 py-16 text-center">
-          <Users className="mx-auto h-8 w-8 text-muted-foreground/40" />
-          <p className="mt-3 text-[14px] font-medium text-foreground">Aucun client pour ces filtres</p>
-          <p className="mt-1 text-[12.5px] text-muted-foreground">Ajustez la recherche ou les filtres ci-dessus.</p>
-        </div>
-      ) : view === "cards" ? (
-        <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((c) => (
-            <ClientCard
-              key={c.id}
-              c={c}
-              today={today}
-              canManage={canManage}
-              onAssign={assign}
-              onReminder={setReminderClient}
-            />
+      {/* Puces des filtres actifs — relecture + retrait au clic. */}
+      {activeChips.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {activeChips.map((chip) => (
+            <button key={chip.key} type="button" onClick={chip.clear}
+              className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-caption font-medium text-foreground ring-1 ring-border transition-colors hover:bg-secondary/70">
+              {chip.label}
+              <X className="h-3 w-3 text-muted-foreground" />
+            </button>
           ))}
-        </ul>
-      ) : (
-        <>
-          {canManage && selected.size > 0 && (
-            <BulkBar
-              count={selected.size}
-              busy={bulkBusy}
-              onClear={() => setSelected(new Set())}
-              onBulk={bulk}
-            />
-          )}
-          <ClientListView
-            clients={filtered} today={today} canManage={canManage}
-            onAssign={assign} onReminder={setReminderClient}
-            selected={selected} onSelectedChange={setSelected}
+          <button type="button" onClick={() => setF(DEFAULT_FILTERS)}
+            className="px-1 text-caption font-medium text-muted-foreground hover:text-foreground">
+            Tout effacer
+          </button>
+        </div>
+      )}
+
+      {/* ── ZONE DE TRAVAIL : la liste ──────────────────────────────────── */}
+      {canManage && selectMode && selected.size > 0 && (
+        <BulkBar count={selected.size} busy={bulkBusy} onClear={() => setSelected(new Set())} onBulk={bulk} />
+      )}
+
+      {loading ? (
+        <ListSkeleton />
+      ) : restricted ? (
+        <GroupedList>
+          <EmptyState
+            icon={Users}
+            title="Aucun client rattaché à votre compte"
+            description="Demandez à un administrateur de vous assigner un portefeuille."
           />
-        </>
+        </GroupedList>
+      ) : filtered.length === 0 ? (
+        <GroupedList>
+          <EmptyState
+            icon={Search}
+            title="Aucun client pour ces filtres"
+            description="Ajustez la recherche ou les filtres ci-dessus."
+            action={(search || activeChips.length > 0)
+              ? <Button variant="tinted" size="sm" onClick={() => { setSearch(""); setF(DEFAULT_FILTERS); }}>Réinitialiser</Button>
+              : undefined}
+          />
+        </GroupedList>
+      ) : (
+        <ClientList
+          clients={filtered} today={today} canManage={canManage}
+          selectMode={selectMode} selected={selected} onSelectedChange={setSelected}
+          onAssign={assign} onReminder={setReminderClient}
+        />
       )}
 
       {reminderClient && (
@@ -374,158 +395,196 @@ export function ClientsDirectory({ canManage = true }: { canManage?: boolean }) 
           onReminderCreated={() => setReminderClient(null)}
         />
       )}
+
+      {/* Import SAP piloté depuis le menu admin « … » (déclencheur masqué). */}
+      {canManage && (
+        <ImportModal onImported={fetchData} open={importOpen} onOpenChange={setImportOpen} hideTrigger />
+      )}
     </div>
   );
 }
 
-function ClientCard({
-  c, today, canManage, onAssign, onReminder,
+/* ─────────────────────────── KPI-filtre teinté ─────────────────────────── */
+
+function KpiFilterTile({
+  icon, label, value, accent, active, onClick,
 }: {
-  c: PlanClient; today: number; canManage: boolean;
-  onAssign: (id: string, patch: Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTelevente">>) => void;
-  onReminder: (c: PlanClient) => void;
+  icon: React.ReactNode; label: string; value: number | null;
+  accent: Accent; active: boolean; onClick: () => void;
 }) {
-  const tel = firstTel(c);
-  const telHref = tel ? standardizePhone(tel) || null : null;
-  const vNorm = c.vendeur ? normalizeSlp(c.vendeur) : null;
-  const cNorm = c.commercial ? normalizeSlp(c.commercial) : null;
-
   return (
-    <li className={`group relative flex h-full flex-col rounded-2xl border border-border bg-card p-4 shadow-card transition-all duration-200 hover:-translate-y-px hover:shadow-card-hover hover:border-brand-400/50 ${!c.activeTelevente ? "opacity-70" : ""}`}>
-      {/* En-tête cliquable → fiche */}
-      <div className="flex items-start justify-between gap-2">
-        <Link href={`/console?open=${encodeURIComponent(c.code)}`} title="Ouvrir dans la console d'appels" className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <p className="truncate text-[14.5px] font-semibold text-foreground group-hover:text-brand-600">{c.nom}</p>
-            {!c.activeTelevente && <span className="text-[9px] font-bold uppercase text-amber-600 dark:text-amber-400">inactif</span>}
-          </div>
-          <p className="mt-0.5 font-mono text-[11.5px] text-muted-foreground">{c.code}</p>
-        </Link>
-        <div className="flex items-center gap-1 shrink-0">
-          {canManage && <ClientActionsMenu c={c} onAssign={onAssign} onReminder={onReminder} />}
-          <Link href={`/clients/${c.id}`} className="h-7 w-7 inline-flex items-center justify-center" aria-label="Ouvrir la fiche">
-            <ChevronRight className="h-4 w-4 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-500" />
-          </Link>
-        </div>
+    <SurfaceCard
+      accent={accent}
+      tinted
+      animate={false}
+      className={cn("relative py-3.5", active && "ring-2 ring-inset ring-[color:var(--sc-accent)]")}
+    >
+      {/* Cible de clic pleine surface : le tuile ENTIER filtre la liste. */}
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={active}
+        aria-label={`Filtrer : ${label}`}
+        className="absolute inset-0 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      />
+      <div className="flex items-center gap-1.5 text-muted-foreground">
+        <span className="shrink-0 text-muted-foreground/70">{icon}</span>
+        <span className="min-w-0 truncate text-caption font-semibold uppercase tracking-[0.08em] leading-none">{label}</span>
+        {active && <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-[color:var(--sc-accent)]" />}
       </div>
-
-      {/* Badges type / assignation */}
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-        {c.type && <Badge variant={typeVariant(c.type)} className="text-[10px]">{c.type}</Badge>}
-        {vNorm && (
-          <span className="inline-flex items-center gap-1 rounded-md bg-brand-500/10 px-1.5 py-0.5 text-[10.5px] font-semibold text-brand-700 ring-1 ring-brand-500/20 dark:text-brand-300" title="Vendeur">
-            <UserCheck className="h-3 w-3" /> {displayNameFromSlp(vNorm) ?? vNorm}
-          </span>
-        )}
-        {cNorm && (
-          <span className="inline-flex items-center gap-1 rounded-md bg-violet-500/10 px-1.5 py-0.5 text-[10.5px] font-semibold text-violet-700 ring-1 ring-violet-500/20 dark:text-violet-300" title="Commercial">
-            <Users className="h-3 w-3" /> {displayNameFromSlp(cNorm) ?? cNorm}
-          </span>
-        )}
-        {canManage && c.activeTelevente && !vNorm && (
-          <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10.5px] font-semibold text-amber-700 ring-1 ring-amber-500/25 dark:text-amber-300">
-            sans vendeur
-          </span>
-        )}
-      </div>
-
-      {/* Contact + jours d'appel */}
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-        {tel ? (
-          <a href={telHref ? `tel:${telHref}` : undefined} className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-brand-600">
-            <Phone className="h-3 w-3" /> <span className="font-mono">{formatPhoneDisplay(tel)}</span>
-          </a>
-        ) : <span className="text-[12px] text-muted-foreground/50">Pas de téléphone</span>}
-        <JoursBadges joursAppel={c.joursAppel} today={today} />
-      </div>
-
-      {/* Pied : dernière commande + incidents */}
-      <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/60 pt-2.5">
-        <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <PackageX className="h-3 w-3" /> Dernière cde <LastOrder days={c.lastOrderDays} />
-        </span>
-        <div className="flex items-center gap-2">
-          {c.openIncidents > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-md bg-rose-500/10 px-1.5 py-0.5 text-[10.5px] font-semibold text-rose-700 ring-1 ring-rose-500/25 dark:text-rose-300" title="Incidents ouverts">
-              <AlertTriangle className="h-3 w-3" /> {c.openIncidents}
-            </span>
-          )}
-          {canManage && (
-            <button type="button" onClick={() => onReminder(c)} title="Programmer un rappel"
-              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/60 hover:text-brand-600 hover:bg-secondary/60">
-              <Bell className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
-    </li>
+      {value == null ? (
+        <Skeleton className="mt-3 h-7 w-16 rounded-md" />
+      ) : (
+        <div className="mt-2.5 text-title1 font-bold leading-none tnum text-foreground">{value}</div>
+      )}
+    </SurfaceCard>
   );
 }
 
-/** Menu d'actions plan d'appel (rappel · activation · assignation), partagé
- *  entre la carte et la ligne de liste. */
-function ClientActionsMenu({
-  c, onAssign, onReminder, align = "end",
+/* ─────────────────────────── Popover Filtres ──────────────────────────── */
+
+function FiltersPopover({
+  f, setFilter, canManage, onReset,
 }: {
-  c: PlanClient;
-  onAssign: (id: string, patch: Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTelevente">>) => void;
-  onReminder: (c: PlanClient) => void;
-  align?: "end" | "start";
+  f: Filters; setFilter: <K extends keyof Filters>(k: K, v: Filters[K]) => void;
+  canManage: boolean; onReset: () => void;
 }) {
-  const vNorm = c.vendeur ? normalizeSlp(c.vendeur) : null;
-  const cNorm = c.commercial ? normalizeSlp(c.commercial) : null;
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Fermeture au clic extérieur / Échap (popover maison : on garde le panneau
+  // ouvert pendant qu'on empile plusieurs critères).
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const activeCount = countActive(f);
+
+  return (
+    <div ref={ref} className="relative">
+      <Button variant="outline" size="sm" onClick={() => setOpen((v) => !v)} className="gap-1.5" aria-expanded={open}>
+        <SlidersHorizontal className="h-4 w-4" />
+        Filtres
+        {activeCount > 0 && (
+          <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-caption2 font-bold text-primary-foreground tnum">
+            {activeCount}
+          </span>
+        )}
+      </Button>
+
+      {open && (
+        <div className="absolute right-0 z-40 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-popover p-3 shadow-lg animate-fade-up motion-reduce:animate-none">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-caption font-semibold uppercase tracking-[0.1em] text-muted-foreground">Filtres</span>
+            <button type="button" onClick={onReset} className="text-caption font-medium text-muted-foreground hover:text-foreground">
+              Réinitialiser
+            </button>
+          </div>
+          <div className="space-y-3">
+            <FilterGroup label="Statut" value={f.statut} onChange={(v) => setFilter("statut", v)}
+              options={[["clients", "Clients"], ["prospects", "Prospects"], ["", "Les deux"]]} />
+            {canManage && (
+              <FilterGroup label="Vendeur" value={f.vendeur} onChange={(v) => setFilter("vendeur", v)}
+                options={[["", "Tous"], ...VENDEURS.map((v) => [v, displayNameFromSlp(v) ?? v] as [string, string])]} />
+            )}
+            <FilterGroup label="Commercial" value={f.commercial} onChange={(v) => setFilter("commercial", v)}
+              options={[["", "Tous"], ["__none__", "Non assigné"], ...VENDEURS.map((v) => [v, displayNameFromSlp(v) ?? v] as [string, string])]} />
+            <FilterGroup label="Type" value={f.type} onChange={(v) => setFilter("type", v)}
+              options={[["", "Tous"], ["GMS", "GMS"], ["CHR", "CHR"], ["EXPORT", "EXPORT"]]} />
+            <FilterGroup label="Activation" value={f.active} onChange={(v) => setFilter("active", v)}
+              options={[["", "Tous"], ["actifs", "Actifs"], ["inactifs", "À activer"]]} />
+            <FilterGroup label="Sans commande depuis" value={f.stale} onChange={(v) => setFilter("stale", v)}
+              options={[["", "—"], ["14", "≥ 14 j"], ["30", "≥ 30 j"], ["60", "≥ 60 j"]]} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Un critère = une rangée de pastilles (sélection unique). */
+function FilterGroup({
+  label, value, onChange, options,
+}: { label: string; value: string; onChange: (v: string) => void; options: [string, string][] }) {
+  return (
+    <div>
+      <div className="mb-1 text-caption font-medium text-muted-foreground">{label}</div>
+      <div className="flex flex-wrap gap-1">
+        {options.map(([v, l]) => {
+          const on = value === v;
+          return (
+            <button key={v} type="button" onClick={() => onChange(v)}
+              className={cn(
+                "rounded-md px-2 py-1 text-caption font-medium transition-colors",
+                on ? "bg-primary/15 text-foreground ring-1 ring-primary/30" : "bg-secondary text-muted-foreground hover:text-foreground",
+              )}>
+              {l}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────── Menu admin « … » ─────────────────────────── */
+
+function AdminMenu({
+  onSyncVendeurs, syncing, onImport, selectMode, onToggleSelect,
+}: {
+  onSyncVendeurs: () => void; syncing: boolean; onImport: () => void;
+  selectMode: boolean; onToggleSelect: () => void;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-secondary/60" title="Actions">
+        <Button variant="outline" size="icon-sm" aria-label="Administration du portefeuille">
           <MoreHorizontal className="h-4 w-4" />
-        </button>
+        </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={align} className="w-56">
-        <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Plan d&apos;appel</DropdownMenuLabel>
-        <DropdownMenuItem onClick={() => onReminder(c)} className="cursor-pointer text-[13px] gap-2">
-          <Bell className="h-3.5 w-3.5" /> Programmer un rappel
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onAssign(c.id, { activeTelevente: !c.activeTelevente })} className="cursor-pointer text-[13px] gap-2">
-          <Power className="h-3.5 w-3.5" /> {c.activeTelevente ? "Désactiver en télévente" : "Activer en télévente"}
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuLabel className="text-caption2 uppercase tracking-wider text-muted-foreground">Portefeuille</DropdownMenuLabel>
+        <DropdownMenuItem onClick={onToggleSelect} className="cursor-pointer gap-2 text-body">
+          {selectMode ? <CheckSquare className="h-3.5 w-3.5 text-brand-500" /> : <CheckSquare className="h-3.5 w-3.5" />}
+          {selectMode ? "Quitter la sélection" : "Sélection en série"}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Assigner un vendeur</DropdownMenuLabel>
-        {VENDEURS.map((v) => (
-          <DropdownMenuItem key={`v-${v}`} onClick={() => onAssign(c.id, { vendeur: v })} className="cursor-pointer text-[13px] gap-2">
-            <span className={`h-1.5 w-1.5 rounded-full ${vNorm === v ? "bg-brand-500" : "bg-muted-foreground/30"}`} /> {displayNameFromSlp(v) ?? v}
-          </DropdownMenuItem>
-        ))}
-        <DropdownMenuItem onClick={() => onAssign(c.id, { vendeur: null })} className="cursor-pointer text-[13px] gap-2 text-muted-foreground">
-          Retirer le vendeur
+        <DropdownMenuLabel className="text-caption2 uppercase tracking-wider text-muted-foreground">Données SAP</DropdownMenuLabel>
+        <DropdownMenuItem onSelect={(e) => { e.preventDefault(); onSyncVendeurs(); }} disabled={syncing} className="cursor-pointer gap-2 text-body">
+          {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+          Déduire les vendeurs
         </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Assigner un commercial</DropdownMenuLabel>
-        {VENDEURS.map((v) => (
-          <DropdownMenuItem key={`c-${v}`} onClick={() => onAssign(c.id, { commercial: v })} className="cursor-pointer text-[13px] gap-2">
-            <span className={`h-1.5 w-1.5 rounded-full ${cNorm === v ? "bg-brand-500" : "bg-muted-foreground/30"}`} /> {displayNameFromSlp(v) ?? v}
-          </DropdownMenuItem>
-        ))}
+        <DropdownMenuItem onSelect={(e) => { e.preventDefault(); onImport(); }} className="cursor-pointer gap-2 text-body">
+          <Upload className="h-3.5 w-3.5" />
+          Importer des clients (CSV)
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-/** Vue LISTE classique (tableau compact) du portefeuille clients. */
-function ClientListView({
-  clients, today, canManage, onAssign, onReminder, selected, onSelectedChange,
+/* ─────────────────────────── La liste ─────────────────────────────────── */
+
+function ClientList({
+  clients, today, canManage, selectMode, selected, onSelectedChange, onAssign, onReminder,
 }: {
   clients: PlanClient[]; today: number; canManage: boolean;
+  selectMode: boolean; selected: Set<string>; onSelectedChange: (next: Set<string>) => void;
   onAssign: (id: string, patch: Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTelevente">>) => void;
   onReminder: (c: PlanClient) => void;
-  selected: Set<string>;
-  onSelectedChange: (next: Set<string>) => void;
 }) {
-  const dash = <span className="text-muted-foreground/40">—</span>;
-  // Ancre de la dernière case cochée — support du Maj+clic (sélection de PLAGE),
-  // le geste qui rend « en série » praticable sur 200 lignes.
+  // Ancre pour le Maj+clic (sélection de PLAGE) — praticable sur 200 lignes.
   const [anchor, setAnchor] = useState<string | null>(null);
-
   const allVisible = clients.length > 0 && clients.every((c) => selected.has(c.id));
   const someVisible = clients.some((c) => selected.has(c.id));
 
@@ -533,21 +592,15 @@ function ClientListView({
     onSelectedChange(allVisible ? new Set() : new Set(clients.map((c) => c.id)));
     setAnchor(null);
   };
-
   const toggleOne = (id: string, shift: boolean) => {
     const next = new Set(selected);
     if (shift && anchor) {
-      // Plage anchor → id : on ALIGNE toute la plage sur l'état visé, plutôt
-      // que d'inverser ligne à ligne (sinon un Maj+clic décoche des lignes
-      // déjà cochées au milieu de la plage).
       const from = clients.findIndex((c) => c.id === anchor);
       const to = clients.findIndex((c) => c.id === id);
       if (from !== -1 && to !== -1) {
         const [a, b] = from < to ? [from, to] : [to, from];
         const turnOn = !selected.has(id);
-        for (let i = a; i <= b; i++) {
-          if (turnOn) next.add(clients[i].id); else next.delete(clients[i].id);
-        }
+        for (let i = a; i <= b; i++) { if (turnOn) next.add(clients[i].id); else next.delete(clients[i].id); }
         onSelectedChange(next);
         setAnchor(id);
         return;
@@ -559,99 +612,189 @@ function ClientListView({
   };
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
-      <div className="overflow-x-auto">
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
-              {canManage && (
-                <th className="pl-3 pr-1 py-2.5 w-9">
-                  <input
-                    type="checkbox"
-                    checked={allVisible}
-                    ref={(el) => { if (el) el.indeterminate = someVisible && !allVisible; }}
-                    onChange={toggleAll}
-                    aria-label={allVisible ? "Tout désélectionner" : "Tout sélectionner"}
-                    title={allVisible ? "Tout désélectionner" : `Sélectionner les ${clients.length} lignes affichées`}
-                    className="h-3.5 w-3.5 cursor-pointer accent-brand-500 align-middle"
-                  />
-                </th>
-              )}
-              <th className="px-3 py-2.5 text-left font-semibold">Client</th>
-              <th className="px-3 py-2.5 text-left font-semibold">Type</th>
-              {canManage && <th className="px-3 py-2.5 text-left font-semibold">Vendeur</th>}
-              <th className="px-3 py-2.5 text-left font-semibold">Commercial</th>
-              <th className="px-3 py-2.5 text-left font-semibold">Téléphone</th>
-              <th className="px-3 py-2.5 text-left font-semibold">Jours d&apos;appel</th>
-              <th className="px-3 py-2.5 text-right font-semibold">Dernière cde</th>
-              <th className="px-3 py-2.5 text-center font-semibold">Inc.</th>
-              {canManage && <th className="px-3 py-2.5" />}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {clients.map((c) => {
-              const tel = firstTel(c);
-              const vNorm = c.vendeur ? normalizeSlp(c.vendeur) : null;
-              const cNorm = c.commercial ? normalizeSlp(c.commercial) : null;
-              const isSel = selected.has(c.id);
-              return (
-                <tr key={c.id} className={`transition-colors ${isSel ? "bg-brand-500/10" : "hover:bg-secondary/30"} ${!c.activeTelevente ? "opacity-60" : ""}`}>
-                  {canManage && (
-                    <td className="pl-3 pr-1 py-2">
-                      <input
-                        type="checkbox"
-                        checked={isSel}
-                        onChange={() => { /* piloté par onClick pour capter la touche Maj */ }}
-                        onClick={(e) => toggleOne(c.id, e.shiftKey)}
-                        aria-label={`Sélectionner ${c.nom}`}
-                        className="h-3.5 w-3.5 cursor-pointer accent-brand-500 align-middle"
-                      />
-                    </td>
-                  )}
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-1.5">
-                      <Link href={`/console?open=${encodeURIComponent(c.code)}`} title="Ouvrir dans la console d'appels" className="font-semibold text-foreground hover:text-brand-600 hover:underline underline-offset-2">{c.nom}</Link>
-                      {!c.activeTelevente && <span className="text-[9px] font-bold uppercase text-amber-600 dark:text-amber-400">inactif</span>}
-                      {c.qualifieLabo === false && (
-                        <span className="text-[9px] font-bold uppercase text-rose-600 dark:text-rose-400" title="Marqué non qualifié (pas de labo pâtisserie)">non qualifié</span>
-                      )}
-                    </div>
-                    <span className="font-mono text-[10.5px] text-muted-foreground">{c.code}</span>
-                  </td>
-                  <td className="px-3 py-2">{c.type ? <Badge variant={typeVariant(c.type)} className="text-[9.5px]">{c.type}</Badge> : dash}</td>
-                  {canManage && <td className="px-3 py-2">{vNorm ? (displayNameFromSlp(vNorm) ?? vNorm) : dash}</td>}
-                  <td className="px-3 py-2">{cNorm ? (displayNameFromSlp(cNorm) ?? cNorm) : dash}</td>
-                  <td className="px-3 py-2 font-mono text-[12px] text-muted-foreground">{tel ? formatPhoneDisplay(tel) : dash}</td>
-                  <td className="px-3 py-2"><JoursBadges joursAppel={c.joursAppel} today={today} /></td>
-                  <td className="px-3 py-2 text-right"><LastOrder days={c.lastOrderDays} /></td>
-                  <td className="px-3 py-2 text-center">
-                    {c.openIncidents > 0
-                      ? <span className="inline-flex items-center gap-1 rounded-md bg-rose-500/10 px-1.5 py-0.5 text-[10.5px] font-semibold text-rose-700 ring-1 ring-rose-500/25 dark:text-rose-300"><AlertTriangle className="h-3 w-3" /> {c.openIncidents}</span>
-                      : dash}
-                  </td>
-                  {canManage && (
-                    <td className="px-3 py-2 text-right">
-                      <ClientActionsMenu c={c} onAssign={onAssign} onReminder={onReminder} />
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+    <GroupedList title={`Portefeuille · ${clients.length} client${clients.length > 1 ? "s" : ""}`}>
+      {/* En-tête GRIS marqué (zone de travail sobre) — oriente la lecture. */}
+      <div className="flex items-center gap-3 bg-secondary/60 px-4 py-2 text-caption2 font-semibold uppercase tracking-wide text-muted-foreground">
+        {canManage && selectMode && (
+          <input
+            type="checkbox"
+            checked={allVisible}
+            ref={(el) => { if (el) el.indeterminate = someVisible && !allVisible; }}
+            onChange={toggleAll}
+            aria-label={allVisible ? "Tout désélectionner" : "Tout sélectionner"}
+            className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-brand-500"
+          />
+        )}
+        <span className="min-w-0 flex-1">Client</span>
+        <span className="hidden w-[128px] shrink-0 text-left sm:block">Jours d&apos;appel</span>
+        <span className="w-16 shrink-0 text-right">Dern. cde</span>
+        {canManage && !selectMode && <span className="w-8 shrink-0" aria-hidden />}
       </div>
+
+      {clients.map((c) => (
+        <ClientRow
+          key={c.id} c={c} today={today} canManage={canManage}
+          selectMode={selectMode} selected={selected.has(c.id)}
+          onToggle={toggleOne} onAssign={onAssign} onReminder={onReminder}
+        />
+      ))}
+    </GroupedList>
+  );
+}
+
+function ClientRow({
+  c, today, canManage, selectMode, selected, onToggle, onAssign, onReminder,
+}: {
+  c: PlanClient; today: number; canManage: boolean;
+  selectMode: boolean; selected: boolean;
+  onToggle: (id: string, shift: boolean) => void;
+  onAssign: (id: string, patch: Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTelevente">>) => void;
+  onReminder: (c: PlanClient) => void;
+}) {
+  const tel = firstTel(c);
+  const vNorm = c.vendeur ? normalizeSlp(c.vendeur) : null;
+  const cNorm = c.commercial ? normalizeSlp(c.commercial) : null;
+  const assignLabel = vNorm ? (displayNameFromSlp(vNorm) ?? vNorm) : cNorm ? (displayNameFromSlp(cNorm) ?? cNorm) : null;
+
+  // Méta ligne 2 : code · vendeur/commercial · téléphone (sobre, muted).
+  const meta = (
+    <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-caption text-muted-foreground">
+      <span className="font-mono tnum">{c.code}</span>
+      {assignLabel && (
+        <span className="inline-flex items-center gap-1"><UserCheck className="h-3 w-3" />{assignLabel}</span>
+      )}
+      {tel && <span className="hidden font-mono xs:inline">{formatPhoneDisplay(tel)}</span>}
+    </span>
+  );
+
+  const nameBlock = (
+    <span className="min-w-0 flex-1">
+      <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+        <span className="truncate text-body font-medium text-foreground">{c.nom}</span>
+        {c.type && <Badge variant={typeVariant(c.type)} className="px-1.5 py-0 text-caption2">{c.type}</Badge>}
+        {/* Inactif : PAS d'opacité (illisible) — un badge discret suffit. */}
+        {!c.activeTelevente && (
+          <span className="inline-flex items-center rounded bg-secondary px-1.5 py-px text-caption2 font-semibold uppercase tracking-wide text-muted-foreground ring-1 ring-border">inactif</span>
+        )}
+        {c.qualifieLabo === false && (
+          <span className="inline-flex items-center rounded bg-destructive/12 px-1.5 py-px text-caption2 font-semibold uppercase tracking-wide text-destructive ring-1 ring-destructive/25">non qualifié</span>
+        )}
+      </span>
+      {meta}
+    </span>
+  );
+
+  // Bloc droit d'info (lecture seule) : jours d'appel · dernière commande · incidents.
+  const info = (
+    <>
+      <span className="hidden w-[128px] shrink-0 sm:block"><JoursBadges joursAppel={c.joursAppel} today={today} /></span>
+      <span className="flex w-16 shrink-0 items-center justify-end gap-1">
+        <LastOrder days={c.lastOrderDays} />
+      </span>
+      {c.openIncidents > 0 && (
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-destructive/12 px-1.5 py-0.5 text-caption2 font-semibold text-destructive ring-1 ring-destructive/25" title="Incidents ouverts">
+          <AlertTriangle className="h-3 w-3" />{c.openIncidents}
+        </span>
+      )}
+    </>
+  );
+
+  // MODE SÉLECTION : la ligne devient une cible de coche (pas de navigation).
+  if (canManage && selectMode) {
+    return (
+      <div className={cn("flex items-center gap-3 px-4 py-2.5", selected && "bg-brand-500/10")}>
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => { /* piloté par onClick pour capter Maj */ }}
+          onClick={(e) => onToggle(c.id, (e as React.MouseEvent).shiftKey)}
+          aria-label={`Sélectionner ${c.nom}`}
+          className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-brand-500"
+        />
+        {nameBlock}
+        {info}
+      </div>
+    );
+  }
+
+  // MODE NORMAL : UNE seule cible de clic (la fiche) + menu « … » d'actions.
+  return (
+    <div className="group flex items-center">
+      <Link
+        href={`/clients/${c.id}`}
+        className="flex min-w-0 flex-1 items-center gap-3 px-4 py-2.5 transition-colors duration-[var(--dur-fast)] ease-[var(--ease-apple)] hover:bg-secondary/60 focus-visible:bg-secondary/60 focus-visible:outline-none"
+      >
+        {nameBlock}
+        {info}
+      </Link>
+      {canManage ? (
+        <div className="shrink-0 pr-2">
+          <ClientActionsMenu c={c} onAssign={onAssign} onReminder={onReminder} />
+        </div>
+      ) : (
+        <span className="w-2 shrink-0" aria-hidden />
+      )}
     </div>
   );
 }
 
-/** Barre d'actions EN SÉRIE — n'apparaît qu'avec une sélection. Les actions
- *  reprennent exactement celles du menu par ligne, appliquées au lot. */
+/** Menu d'actions plan d'appel (console · rappel · activation · assignation). */
+function ClientActionsMenu({
+  c, onAssign, onReminder,
+}: {
+  c: PlanClient;
+  onAssign: (id: string, patch: Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTelevente">>) => void;
+  onReminder: (c: PlanClient) => void;
+}) {
+  const vNorm = c.vendeur ? normalizeSlp(c.vendeur) : null;
+  const cNorm = c.commercial ? normalizeSlp(c.commercial) : null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-secondary hover:text-foreground" title="Actions" aria-label={`Actions pour ${c.nom}`}>
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuItem asChild className="cursor-pointer gap-2 text-body">
+          <Link href={`/console?open=${encodeURIComponent(c.code)}`}>
+            <Radio className="h-3.5 w-3.5" /> Ouvrir dans la console
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onReminder(c)} className="cursor-pointer gap-2 text-body">
+          <Bell className="h-3.5 w-3.5" /> Programmer un rappel
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onAssign(c.id, { activeTelevente: !c.activeTelevente })} className="cursor-pointer gap-2 text-body">
+          <Power className="h-3.5 w-3.5" /> {c.activeTelevente ? "Désactiver en télévente" : "Activer en télévente"}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-caption2 uppercase tracking-wider text-muted-foreground">Assigner un vendeur</DropdownMenuLabel>
+        {VENDEURS.map((v) => (
+          <DropdownMenuItem key={`v-${v}`} onClick={() => onAssign(c.id, { vendeur: v })} className="cursor-pointer gap-2 text-body">
+            <span className={cn("h-1.5 w-1.5 rounded-full", vNorm === v ? "bg-brand-500" : "bg-muted-foreground/30")} /> {displayNameFromSlp(v) ?? v}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuItem onClick={() => onAssign(c.id, { vendeur: null })} className="cursor-pointer gap-2 text-body text-muted-foreground">
+          Retirer le vendeur
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-caption2 uppercase tracking-wider text-muted-foreground">Assigner un commercial</DropdownMenuLabel>
+        {VENDEURS.map((v) => (
+          <DropdownMenuItem key={`c-${v}`} onClick={() => onAssign(c.id, { commercial: v })} className="cursor-pointer gap-2 text-body">
+            <span className={cn("h-1.5 w-1.5 rounded-full", cNorm === v ? "bg-brand-500" : "bg-muted-foreground/30")} /> {displayNameFromSlp(v) ?? v}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/* ─────────────────────── Barre d'action en série ──────────────────────── */
+
 function BulkBar({
   count, busy, onClear, onBulk,
 }: {
-  count: number;
-  busy: boolean;
-  onClear: () => void;
+  count: number; busy: boolean; onClear: () => void;
   onBulk: (
     patch: Partial<Pick<PlanClient, "vendeur" | "commercial" | "activeTelevente" | "qualifieLabo">>,
     label: string,
@@ -659,73 +802,62 @@ function BulkBar({
 }) {
   return (
     <div className="sticky top-2 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-brand-500/40 bg-card/95 px-3 py-2 shadow-card backdrop-blur">
-      <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-foreground">
+      <span className="inline-flex items-center gap-1.5 text-caption font-semibold text-foreground">
         {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-500" /> : <CheckSquare className="h-3.5 w-3.5 text-brand-500" />}
         {count} sélectionné{count > 1 ? "s" : ""}
       </span>
-
       <span className="mx-1 h-4 w-px bg-border" />
-
       <BulkMenu label="Vendeur" icon={<UserCheck className="h-3.5 w-3.5" />} disabled={busy}
         onPick={(v) => onBulk({ vendeur: v }, v ? `Vendeur ${displayNameFromSlp(v) ?? v}` : "Vendeur retiré")} />
       <BulkMenu label="Commercial" icon={<Users className="h-3.5 w-3.5" />} disabled={busy}
         onPick={(v) => onBulk({ commercial: v }, v ? `Commercial ${displayNameFromSlp(v) ?? v}` : "Commercial retiré")} />
-
       <span className="mx-1 h-4 w-px bg-border" />
-
-      <Button variant="outline" size="sm" disabled={busy} className="gap-1.5 h-8"
+      <Button variant="outline" size="sm" disabled={busy} className="h-8 gap-1.5"
         onClick={() => onBulk({ activeTelevente: true }, "Activés en télévente")}>
         <Power className="h-3.5 w-3.5" /> Activer
       </Button>
-      <Button variant="outline" size="sm" disabled={busy} className="gap-1.5 h-8"
+      <Button variant="outline" size="sm" disabled={busy} className="h-8 gap-1.5"
         onClick={() => onBulk({ activeTelevente: false }, "Désactivés en télévente")}>
         <Power className="h-3.5 w-3.5" /> Désactiver
       </Button>
-
       <span className="mx-1 h-4 w-px bg-border" />
-
-      {/* Qualification en série : écarter d'office les magasins sans labo. */}
       <Button variant="outline" size="sm" disabled={busy}
-        className="gap-1.5 h-8 border-rose-500/40 text-rose-600 hover:bg-rose-500/10 dark:text-rose-300"
+        className="h-8 gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10"
         onClick={() => onBulk({ qualifieLabo: false }, "Marqués non qualifiés")}>
-        <UserX className="h-3.5 w-3.5" /> Non qualifié
+        <UserCheck className="h-3.5 w-3.5" /> Non qualifié
       </Button>
       <Button variant="outline" size="sm" disabled={busy}
-        className="gap-1.5 h-8 border-emerald-500/40 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300"
+        className="h-8 gap-1.5 border-success/40 text-success hover:bg-success/10"
         onClick={() => onBulk({ qualifieLabo: true }, "Marqués qualifiés")}>
-        <BadgeCheck className="h-3.5 w-3.5" /> Qualifié
+        <Check className="h-3.5 w-3.5" /> Qualifié
       </Button>
-
       <button type="button" onClick={onClear} disabled={busy}
-        className="ml-auto text-[12px] font-medium text-muted-foreground hover:text-foreground">
+        className="ml-auto text-caption font-medium text-muted-foreground hover:text-foreground">
         Annuler la sélection
       </button>
     </div>
   );
 }
 
-/** Petit menu « choisir un trigramme » (vendeur ou commercial) pour le lot. */
 function BulkMenu({
   label, icon, disabled, onPick,
 }: { label: string; icon: React.ReactNode; disabled: boolean; onPick: (v: string | null) => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" disabled={disabled} className="gap-1.5 h-8">
+        <Button variant="outline" size="sm" disabled={disabled} className="h-8 gap-1.5">
           {icon} {label}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-52">
-        <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground">
-          Affecter · {label}
-        </DropdownMenuLabel>
+        <DropdownMenuLabel className="text-caption2 uppercase tracking-wider text-muted-foreground">Affecter · {label}</DropdownMenuLabel>
         {VENDEURS.map((v) => (
-          <DropdownMenuItem key={v} onClick={() => onPick(v)} className="cursor-pointer text-[13px]">
+          <DropdownMenuItem key={v} onClick={() => onPick(v)} className="cursor-pointer text-body">
             {displayNameFromSlp(v) ?? v}
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => onPick(null)} className="cursor-pointer text-[13px] text-muted-foreground">
+        <DropdownMenuItem onClick={() => onPick(null)} className="cursor-pointer text-body text-muted-foreground">
           Retirer
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -733,48 +865,59 @@ function BulkMenu({
   );
 }
 
-function StatCard({
-  icon: Icon, label, value, tone, onClick, active,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string; value: number | string; tone: "brand" | "rose" | "amber" | "violet" | "sky";
-  onClick?: () => void; active?: boolean;
-}) {
-  const toneCls = {
-    brand: "text-brand-600 dark:text-brand-400",
-    rose: "text-rose-600 dark:text-rose-400",
-    amber: "text-amber-600 dark:text-amber-400",
-    violet: "text-violet-600 dark:text-violet-400",
-    sky: "text-sky-600 dark:text-sky-400",
-  }[tone];
+/* ─────────────────────────── Squelette de liste ───────────────────────── */
+
+function ListSkeleton() {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!onClick}
-      className={`text-left rounded-xl border bg-card px-4 py-3 transition-colors ${
-        active ? "border-brand-500 ring-1 ring-brand-500/40" : "border-border"
-      } ${onClick ? "hover:bg-secondary/40 cursor-pointer" : "cursor-default"}`}
-    >
-      <div className="flex items-center gap-1.5 text-[10.5px] uppercase tracking-wide text-muted-foreground font-semibold">
-        <Icon className={`h-3.5 w-3.5 ${toneCls}`} /> {label}
+    <div role="status" aria-label="Chargement des clients" className="overflow-hidden rounded-xl bg-card ring-1 ring-border shadow-card">
+      <div className="bg-secondary/60 px-4 py-2"><Skeleton className="h-3 w-24 rounded" /></div>
+      <div className="divide-y divide-border">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3 px-4 py-3">
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <Skeleton className="h-3.5 w-40 rounded" />
+              <Skeleton className="h-3 w-28 rounded" />
+            </div>
+            <Skeleton className="hidden h-4 w-28 rounded sm:block" />
+            <Skeleton className="h-3.5 w-10 rounded" />
+          </div>
+        ))}
       </div>
-      <div className="text-[24px] font-bold tnum text-foreground mt-0.5">{value}</div>
-    </button>
+    </div>
   );
 }
 
-function FilterSelect({
-  value, onChange, placeholder, options,
-}: { value: string; onChange: (v: string) => void; placeholder: string; options: [string, string][] }) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      aria-label={placeholder}
-      className="h-9 rounded-md border border-border bg-background text-[12.5px] px-2 focus:outline-none focus:ring-1 focus:ring-brand-500"
-    >
-      {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-    </select>
-  );
+/* ─────────────────────────── Puces & compteurs ────────────────────────── */
+
+function countActive(f: Filters): number {
+  let n = 0;
+  if (f.vendeur) n++;
+  if (f.commercial) n++;
+  if (f.type) n++;
+  if (f.active) n++;
+  if (f.stale) n++;
+  if (f.statut !== "clients") n++;
+  if (f.todayOnly) n++;
+  if (f.incidents) n++;
+  return n;
+}
+
+/** Construit la liste des puces de filtres actifs (label + retrait). */
+function buildChips(
+  f: Filters,
+  setFilter: <K extends keyof Filters>(k: K, v: Filters[K]) => void,
+): { key: string; label: string; clear: () => void }[] {
+  const chips: { key: string; label: string; clear: () => void }[] = [];
+  const staleLabel: Record<string, string> = { "14": "Sans commande ≥ 14 j", "30": "Sans commande ≥ 30 j", "60": "Sans commande ≥ 60 j" };
+  const statutLabel: Record<string, string> = { prospects: "Prospects", "": "Clients + prospects" };
+
+  if (f.statut !== "clients") chips.push({ key: "statut", label: statutLabel[f.statut] ?? f.statut, clear: () => setFilter("statut", "clients") });
+  if (f.vendeur) chips.push({ key: "vendeur", label: `Vendeur ${displayNameFromSlp(f.vendeur) ?? f.vendeur}`, clear: () => setFilter("vendeur", "") });
+  if (f.commercial) chips.push({ key: "commercial", label: f.commercial === "__none__" ? "Sans commercial" : `Commercial ${displayNameFromSlp(f.commercial) ?? f.commercial}`, clear: () => setFilter("commercial", "") });
+  if (f.type) chips.push({ key: "type", label: f.type, clear: () => setFilter("type", "") });
+  if (f.active) chips.push({ key: "active", label: f.active === "actifs" ? "Actifs" : "À activer", clear: () => setFilter("active", "") });
+  if (f.stale) chips.push({ key: "stale", label: staleLabel[f.stale] ?? f.stale, clear: () => setFilter("stale", "") });
+  if (f.todayOnly) chips.push({ key: "todayOnly", label: "Programmés aujourd'hui", clear: () => setFilter("todayOnly", false) });
+  if (f.incidents) chips.push({ key: "incidents", label: "Avec incident", clear: () => setFilter("incidents", false) });
+  return chips;
 }

@@ -22,6 +22,7 @@ import {
 import {
   ContextMenu, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, useContextMenu,
 } from "@/components/ui/context-menu";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 interface Counts { ALL: number; CHR: number; GMS: number; EXPORT: number; OTHER: number; }
 
@@ -82,6 +83,7 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
   const [agreeur, setAgreeur] = useState(isAgreeur);
   const [savingAgr, setSavingAgr] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   // Clic droit sur la carte → mêmes actions que le menu « ... ».
   const { menu, openAt, close } = useContextMenu(240, 200);
   // Nom affiché sans le suffixe société (« … - Gervifrais ») qui tronque sur mobile.
@@ -153,18 +155,11 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
     finally { setSavingAgr(false); }
   }
 
-  /** Suppression du compte — irréversible : on demande une confirmation
-   *  EXPLICITE, nom à l'appui, plutôt qu'un « Êtes-vous sûr ? » anonyme qu'on
-   *  valide sans lire. Les garde-fous réels (admin strict, pas soi-même, pas un
-   *  admin bootstrap) sont côté API : le menu ne fait que les refléter. */
+  /** Suppression du compte — irréversible : confirmation EXPLICITE via
+   *  ConfirmDialog (nom à l'appui), jamais un window.confirm. Les garde-fous
+   *  réels (admin strict, pas soi-même, pas un admin bootstrap) sont côté API :
+   *  le menu ne fait que les refléter. */
   async function removeMember() {
-    const ok = window.confirm(
-      `Supprimer le compte de ${displayName} ?\n\n`
-      + `Ses accès sont retirés immédiatement et sa session est fermée. `
-      + `S'il se reconnecte, il repartira d'un compte vierge, sans aucun rôle.\n\n`
-      + `Son historique (heures, salaires, commissions) est CONSERVÉ.`,
-    );
-    if (!ok) return;
     setDeleting(true);
     try {
       const res = await fetch("/api/commerciaux", {
@@ -182,6 +177,7 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Échec de la suppression");
       setDeleting(false);
+      throw e; // laisse le ConfirmDialog ouvert pour retenter
     }
   }
 
@@ -248,14 +244,14 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
             Voir comme {firstName}
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem icon={Trash2} accent="danger" onClick={() => { close(); removeMember(); }}>
+          <ContextMenuItem icon={Trash2} accent="danger" onClick={() => { close(); setConfirmDelete(true); }}>
             Supprimer ce membre
           </ContextMenuItem>
         </ContextMenu>
       )}
       <div className="flex items-start gap-3 min-w-0 flex-1">
-        {/* Avatar */}
-        <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gradient-to-br from-brand-500 to-brand-600 flex items-center justify-center text-white font-bold text-[13px] shadow-[0_0_0_2px_hsl(var(--brand-500)_/_0.18)]">
+        {/* Avatar — monogramme neutre (plus de dégradé de marque) */}
+        <div className="flex-shrink-0 grid h-10 w-10 place-items-center rounded-full bg-secondary text-foreground font-semibold text-body">
           {name.charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
@@ -456,7 +452,7 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
         {canDelete && (
           <button
             type="button"
-            onClick={removeMember}
+            onClick={() => setConfirmDelete(true)}
             disabled={deleting}
             title={`Supprimer le compte de ${displayName}`}
             className="hidden md:inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[11.5px] font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 transition-colors disabled:opacity-60"
@@ -475,6 +471,24 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
           aName={displayName}
           bTrig={myTrigramme}
           bName={myName || "Moi"}
+        />
+      )}
+
+      {canDelete && (
+        <ConfirmDialog
+          open={confirmDelete}
+          onOpenChange={setConfirmDelete}
+          tone="destructive"
+          title={`Supprimer le compte de ${displayName} ?`}
+          description={
+            <>
+              Ses accès sont retirés immédiatement et sa session est fermée. S&apos;il se
+              reconnecte, il repartira d&apos;un compte vierge, sans aucun rôle. Son historique
+              (heures, salaires, commissions) est conservé.
+            </>
+          }
+          confirmLabel="Supprimer"
+          onConfirm={removeMember}
         />
       )}
     </div>

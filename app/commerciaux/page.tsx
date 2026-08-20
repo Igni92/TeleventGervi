@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getAccessScope, getOwnSlpName, requireStrictAdmin, ADMIN_EMAILS } from "@/lib/permissions";
 import { CommercialCard } from "@/components/commerciaux/CommercialCard";
@@ -9,6 +10,12 @@ import { CommerciauxSapList } from "./CommerciauxSapList";
 import { HeuresPanel } from "@/components/effectifs/HeuresPanel";
 import { CommissionsPanel } from "@/components/effectifs/CommissionsPanel";
 import { PageHeader } from "@/components/ui/page-header";
+import { Banner } from "@/components/ui/banner";
+import { Button } from "@/components/ui/button";
+import { SurfaceCard } from "@/components/ui/surface-card";
+import { StatBlock } from "@/components/ui/stat-block";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Users } from "lucide-react";
 
 export const metadata = { title: "Effectifs | Gervi" };
 export const dynamic = "force-dynamic";
@@ -30,6 +37,9 @@ export default async function CommerciauxPage() {
 
   // ── Section équipe (admin/direction) : comptes connectés + présence + rôles ──
   let teamSection: React.ReactNode = null;
+  // KPI d'équipe (bandeau de cases d'INFO teintées) + alerte remontée EN TÊTE.
+  let teamKpis: React.ReactNode = null;
+  let unassignedClients = 0;
   if (isManager) {
     const users = await prisma.user.findMany({
       select: { id: true, name: true, email: true, stockSharePct: true },
@@ -83,17 +93,38 @@ export default async function CommerciauxPage() {
     const unassigned = await prisma.client.count({
       where: { OR: [{ commercial: null }, { commercial: "" }] },
     });
+    unassignedClients = unassigned;
+
+    // Effectif présent / force de vente (commercial coché, défaut vrai).
+    const presentCount = users.filter((u) => presMap.get(u.id) ?? true).length;
+    const commCount = users.filter((u) => commByUser.get(u.id) ?? true).length;
+
+    // KPI d'équipe — cases de PRISE D'INFO : SurfaceCard teintée (identité couleur),
+    // valeur héros via le StatBlock partagé. Texte foncé lisible (pas de tone coloré).
+    teamKpis = (
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <SurfaceCard tinted accent="brand">
+          <StatBlock label="Effectif" value={users.length} size="lg" />
+        </SurfaceCard>
+        <SurfaceCard tinted accent="emerald">
+          <StatBlock label="Présents aujourd'hui" value={`${presentCount}/${users.length}`} size="lg" />
+        </SurfaceCard>
+        <SurfaceCard tinted accent="sky">
+          <StatBlock label="Commerciaux" value={commCount} size="lg" />
+        </SurfaceCard>
+        <SurfaceCard tinted accent="amber">
+          <StatBlock label="Sans commercial" value={unassigned} size="lg" />
+        </SurfaceCard>
+      </div>
+    );
 
     teamSection = (
-      <section className="space-y-4">
-        <div>
-          <p className="kicker mb-1">Équipe Gervi</p>
-          <p className="hidden md:block text-[12.5px] text-muted-foreground max-w-2xl">
-            Comptes connectés : présence du jour, % de stock attribué et menu{" "}
-            <span className="font-medium text-foreground">Récupérer ▾</span> pour reprendre
-            temporairement les clients d&apos;un collègue absent.
-          </p>
-        </div>
+      <div className="space-y-4">
+        <p className="hidden md:block text-callout text-muted-foreground max-w-2xl">
+          Comptes connectés : présence du jour, % de stock attribué et menu{" "}
+          <span className="font-medium text-foreground">Récupérer ▾</span> pour reprendre
+          temporairement les clients d&apos;un collègue absent.
+        </p>
         {/* « Voir comme » (admin/direction) — remplace le sélecteur global du menu */}
         <EffectifsPreviewBar />
         <div className="grid gap-3 sm:grid-cols-2">
@@ -137,32 +168,16 @@ export default async function CommerciauxPage() {
             );
           })}
           {users.length === 0 && (
-            <div className="col-span-2 text-center py-10 text-muted-foreground border border-border rounded-xl bg-card">
-              <p className="text-[14px]">Aucun compte enregistré.</p>
-              <p className="text-[12px] mt-1">Les comptes apparaissent après leur première connexion Microsoft.</p>
+            <div className="col-span-2 rounded-xl border border-border bg-card">
+              <EmptyState
+                icon={Users}
+                title="Aucun compte enregistré"
+                description="Les comptes apparaissent après leur première connexion Microsoft."
+              />
             </div>
           )}
         </div>
-        {unassigned > 0 && (
-          <div className="rounded-xl border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/15 p-4 flex items-center justify-between">
-            <div>
-              <p className="text-[13px] font-medium text-amber-800 dark:text-amber-300">
-                {unassigned} client{unassigned > 1 ? "s" : ""} sans commercial assigné
-              </p>
-              <p className="text-[11.5px] text-amber-700/80 dark:text-amber-400/80 mt-0.5">
-                Ces clients n&apos;apparaissent dans la liste d&apos;aucun commercial.
-              </p>
-            </div>
-            {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- navigation full-reload volontaire (comportement preexistant inchange) */}
-            <a
-              href="/clients?commercial=none"
-              className="text-[12px] font-medium text-amber-800 dark:text-amber-300 hover:underline"
-            >
-              Voir →
-            </a>
-          </div>
-        )}
-      </section>
+      </div>
     );
   }
 
@@ -180,18 +195,38 @@ export default async function CommerciauxPage() {
         }
       />
 
-      <CommerciauxSapList />
+      {/* Alerte actionnable EN TÊTE : clients orphelins (invisibles dans toute liste). */}
+      {isManager && unassignedClients > 0 && (
+        <Banner
+          tone="warning"
+          title={`${unassignedClients} client${unassignedClients > 1 ? "s" : ""} sans commercial assigné`}
+          action={
+            <Button asChild size="sm" variant="warning">
+              <Link href="/clients?commercial=none">Voir</Link>
+            </Button>
+          }
+        >
+          Ces clients n&apos;apparaissent dans la liste d&apos;aucun commercial.
+        </Banner>
+      )}
 
-      {/* ── État des commissions mois par mois, avec le trait de la dernière
-             échéance réglée (l'API borne au périmètre : un commercial ne voit
-             que la sienne). ── */}
-      <CommissionsPanel isManager={isManager} />
+      {/* ── PERFORMANCE : activité SAP (liste comparative) + état des commissions.
+             L'API borne au périmètre : un commercial ne voit que la sienne. ── */}
+      <section className="space-y-4">
+        <p className="kicker">Performance</p>
+        <CommerciauxSapList />
+        <CommissionsPanel isManager={isManager} />
+      </section>
 
-      {/* ── Gestion horaire hebdomadaire : chaque employé saisit ses heures ;
-             les managers voient l'équipe et sortent les feuilles PDF (compta). ── */}
-      <HeuresPanel isManager={isManager} />
-
-      {teamSection}
+      {/* ── ÉQUIPE : KPI d'effectif, rôles/présence, puis gestion horaire. Chaque
+             employé saisit ses heures ; les managers voient l'équipe et sortent
+             les feuilles PDF (compta). ── */}
+      <section className="space-y-4">
+        <p className="kicker">Équipe</p>
+        {teamKpis}
+        {teamSection}
+        <HeuresPanel isManager={isManager} />
+      </section>
     </div>
   );
 }
