@@ -4,6 +4,7 @@ import {
   categoryFromGroupName, resolveCoef, computeSuggestedPrice, personalStock, unitInfo,
   chooseLot, LOT_PENDING,
   LOT_FAMILY_PREFIX, familyLotSentinel, familyOfLot, isLotPending, isRealLot,
+  stockPackDivisor,
 } from "./gervifrais-calc";
 
 describe("isRealLot — vrais lots EM (réception) ET OP (fabrication)", () => {
@@ -241,4 +242,21 @@ describe("Stock perso commercial", () => {
   it("30% de 100 dispo = 30", () => expect(personalStock(100, 30)).toBe(30));
   it("100% = tout le stock", () => expect(personalStock(84, 100)).toBe(84));
   it("dispo négatif → 0", () => expect(personalStock(-5, 50)).toBe(0));
+});
+
+
+describe("stockPackDivisor — regroupement en colis (aligné sur colisInfo)", () => {
+  it("regroupe dès salesQtyPerPackUnit > 1, SANS exiger le libellé salesPackagingUnit", () => {
+    // Régression FRAMB12B : article à 12 barquettes/colis mais SalesPackagingUnit
+    // vide (les autres FRAMB12* portent « CAT I »). Exiger ce libellé faisait
+    // retomber le diviseur à 1 → stock affiché 720 au lieu de 60.
+    expect(stockPackDivisor({ salesUnit: "pie", salesQtyPerPackUnit: 12, salesPackagingUnit: null })).toBe(12);
+    expect(stockPackDivisor({ salesUnit: "pie", salesQtyPerPackUnit: 12, salesPackagingUnit: "" })).toBe(12);
+    // Même résultat avec le libellé présent (comportement inchangé).
+    expect(stockPackDivisor({ salesUnit: "pie", salesQtyPerPackUnit: 12, salesPackagingUnit: "CAT I" })).toBe(12);
+  });
+  it("pas de regroupement quand qty <= 1", () => {
+    expect(stockPackDivisor({ salesUnit: "pie", salesQtyPerPackUnit: 1, salesPackagingUnit: "CAT I" })).toBe(1);
+    expect(stockPackDivisor({ salesUnit: "kg", salesQtyPerPackUnit: null })).toBe(1);
+  });
 });

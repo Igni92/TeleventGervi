@@ -373,12 +373,15 @@ export interface StockUnitProduct {
 }
 
 /**
- * Diviseur unités de base → colis. Cohérent avec ProductsTable.getPackDivisor :
- * un colis n'existe que si l'article porte une unité de conditionnement
- * (SalesPackagingUnit) ET un nombre d'unités > 1 (SalesQtyPerPackUnit).
+ * Diviseur unités de base → colis. Aligné sur lib/colis.ts (colisInfo, la
+ * console) qui est la RÉFÉRENCE : un colis regroupe SalesQtyPerPackUnit unités
+ * dès que ce nombre est > 1 — SalesPackagingUnit (le libellé « CAT I » etc.)
+ * n'est PAS requis. Exiger ce libellé était un bug : les articles qui ont un
+ * regroupement (qty 12) mais un SalesPackagingUnit vide (ex. FRAMB12B) voyaient
+ * leur diviseur retomber à 1 et leur stock affiché ×12 (720 au lieu de 60).
  */
 export function stockPackDivisor(p: StockUnitProduct): number {
-  if (p.salesPackagingUnit && p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) {
+  if (p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) {
     return p.salesQtyPerPackUnit;
   }
   return 1;
