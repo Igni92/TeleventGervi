@@ -27,7 +27,7 @@ const GroupedList = React.forwardRef<HTMLDivElement, GroupedListProps>(
       {title != null && <div className="kicker mb-2 px-4">{title}</div>}
       {/* divide-y : le séparateur n'existe qu'ENTRE les rangées, pas après la
           dernière — un border-b par rangée laisserait un filet orphelin. */}
-      <div className="divide-y divide-border overflow-hidden rounded-xl bg-card ring-1 ring-border">
+      <div className="divide-y divide-border overflow-hidden rounded-xl bg-card ring-1 ring-border shadow-card">
         {children}
       </div>
       {footer != null && (

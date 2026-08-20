@@ -10,7 +10,7 @@
     /* Palette système neutre : canvas gris groupé très clair, cartes
        blanches, gris froids. L'accent reste l'OR de la marque — c'est
        l'identité Gervifrais, pas une décision d'interface. */
-    --background:        240 18% 93.5%;        /* fond gris franc : les cartes blanches ressortent */
+    --background:        240 20% 91%;           /* gris franc : les cartes blanches se detachent nettement */
     --foreground:        240 6% 9%;            /* label */
     --card:              0 0% 100%;
     --card-foreground:   240 6% 9%;
@@ -18,16 +18,16 @@
     --popover-foreground:240 6% 9%;
     --primary:           42 92% 44%;           /* or Gervifrais — UNIQUE accent */
     --primary-foreground: 240 8% 12%;          /* texte SOMBRE sur l'or (AA) */
-    --secondary:         240 14% 89.5%;
+    --secondary:         240 16% 87.5%;
     --secondary-foreground: 240 6% 9%;
-    --muted:             240 14% 90%;
+    --muted:             240 16% 88%;
     --muted-foreground:  240 5% 40%;           /* secondaryLabel — assombri pour rester lisible */
-    --accent:            240 14% 89.5%;
+    --accent:            240 16% 87.5%;
     --accent-foreground: 240 6% 9%;
     --destructive:       3 100% 47%;           /* systemRed */
     --destructive-foreground: 0 0% 100%;
-    --border:            240 12% 82%;          /* separator — assez foncé pour être visible sur blanc */
-    --input:             240 12% 78%;
+    --border:            240 13% 79%;           /* separator net sur blanc ET sur le fond gris */
+    --input:             240 13% 74%;
     --ring:              42 92% 44%;
     --radius:            0.875rem;             /* 14px — cran md */
 
@@ -66,7 +66,7 @@
 
     /* Ombres : le contour demi-pixel fait la découpe, l'ombre fait la
        hauteur. Toujours NEUTRES — jamais de teinte dans une ombre. */
-    --shadow-card:       0 0 0 0.5px rgba(0,0,0,0.06), 0 1px 1px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06);
+    --shadow-card:       0 0 0 0.5px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06), 0 6px 16px rgba(0,0,0,0.09);
     --shadow-card-hover: 0 0 0 0.5px rgba(0,0,0,0.08), 0 8px 20px rgba(0,0,0,0.09), 0 20px 44px rgba(0,0,0,0.10);
     --shadow-nav:        0 0 0 0.5px rgba(0,0,0,0.05), 0 1px 12px rgba(0,0,0,0.05);
     --shadow-modal:      0 0 0 0.5px rgba(0,0,0,0.08), 0 24px 68px rgba(0,0,0,0.20), 0 48px 96px rgba(0,0,0,0.14);
