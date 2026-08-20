@@ -59,10 +59,10 @@ export function DesignationStrong({ l, className }: { l: DesignationFields; clas
 export function DesignationMuted({ l, className }: { l: DesignationFields; className?: string }) {
   const muted = mutedParts(l);
   if (muted.length === 0) return null;
-  // Volontairement plus effacé que le muted standard : la ligne 2 (conditionnement
-  // / variété / pays) est une info secondaire, elle ne doit pas concurrencer le
-  // fruit + marque + calibre de la ligne 1.
+  // Info secondaire (ne concurrence pas le fruit + marque + calibre de la ligne
+  // 1), mais lisible : muted-foreground plein — pas d'opacité qui la ferait
+  // disparaître sur fond clair.
   return (
-    <span className={cn("block truncate text-muted-foreground/60", className)}>{muted.join(" · ")}</span>
+    <span className={cn("block truncate text-muted-foreground", className)}>{muted.join(" · ")}</span>
   );
 }

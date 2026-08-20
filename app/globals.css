@@ -10,7 +10,7 @@
     /* Palette système neutre : canvas gris groupé très clair, cartes
        blanches, gris froids. L'accent reste l'OR de la marque — c'est
        l'identité Gervifrais, pas une décision d'interface. */
-    --background:        240 20% 97%;          /* systemGroupedBackground */
+    --background:        240 18% 93.5%;        /* fond gris franc : les cartes blanches ressortent */
     --foreground:        240 6% 9%;            /* label */
     --card:              0 0% 100%;
     --card-foreground:   240 6% 9%;
@@ -18,16 +18,16 @@
     --popover-foreground:240 6% 9%;
     --primary:           42 92% 44%;           /* or Gervifrais — UNIQUE accent */
     --primary-foreground: 240 8% 12%;          /* texte SOMBRE sur l'or (AA) */
-    --secondary:         240 16% 94%;
+    --secondary:         240 14% 89.5%;
     --secondary-foreground: 240 6% 9%;
-    --muted:             240 16% 94.5%;
-    --muted-foreground:  240 4% 46%;           /* secondaryLabel */
-    --accent:            240 16% 94%;
+    --muted:             240 14% 90%;
+    --muted-foreground:  240 5% 40%;           /* secondaryLabel — assombri pour rester lisible */
+    --accent:            240 14% 89.5%;
     --accent-foreground: 240 6% 9%;
     --destructive:       3 100% 47%;           /* systemRed */
     --destructive-foreground: 0 0% 100%;
-    --border:            240 10% 87%;          /* separator */
-    --input:             240 10% 84%;
+    --border:            240 12% 82%;          /* separator — assez foncé pour être visible sur blanc */
+    --input:             240 12% 78%;
     --ring:              42 92% 44%;
     --radius:            0.875rem;             /* 14px — cran md */
 
@@ -152,7 +152,10 @@
      des panneaux : plus aucune distinction fond/carte — tout est plat, les
      sections ne sont séparées que par des filets. */
   @media (max-width: 639.98px) {
-    :root, .dark { --background: var(--card); }
+    /* Seul le thème SOMBRE effondre fond/carte (le contraste vient de l'ombre).
+       En CLAIR on garde un fond gris distinct : sinon carte blanche sur fond
+       blanc = illisible (filets à peine visibles). */
+    .dark { --background: var(--card); }
   }
 
   /* Sélection : teinte marque translucide (bascule seule clair/sombre). */
