@@ -111,7 +111,7 @@ export function KpiStrip() {
         const hasBubble = !!t.bubbleKind && !!vent
           && (t.bubbleKind === "orders" ? vent.orders.length > 0 : vent.families.length > 0);
         return (
-          <SurfaceCard key={t.label} accent={t.accent} delay={i * 50}
+          <SurfaceCard key={t.label} accent={t.accent} tinted delay={i * 50}
             className={`py-3.5${t.bubbleKind ? " group relative !overflow-visible" : ""}`}>
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <span className="shrink-0 text-muted-foreground/70">{t.icon}</span>
@@ -236,7 +236,7 @@ function MargeTile({ curr, reliability, state, delay }: { curr: ActivityBucket; 
   const hasKg = typeof margeKg === "number" && (mk?.overall?.weightKg ?? 0) > 0;
 
   return (
-    <SurfaceCard accent="violet" delay={delay} className="py-3.5 group relative !overflow-visible">
+    <SurfaceCard accent="violet" tinted delay={delay} className="py-3.5 group relative !overflow-visible">
       <div className="flex items-center gap-1.5 text-muted-foreground">
         <span className="shrink-0 text-muted-foreground/70"><Percent className="h-3.5 w-3.5" /></span>
         <span className="text-[11.5px] font-semibold uppercase tracking-[0.08em] leading-none">Marge du jour</span>

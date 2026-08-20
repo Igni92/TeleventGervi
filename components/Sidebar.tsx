@@ -279,14 +279,14 @@ export function Sidebar() {
                           title={rail ? label : undefined}
                           className={`relative flex items-center h-9 rounded-lg transition-colors duration-150 ${
                             rail ? "justify-center px-0" : "gap-3 px-3"
-                          } ${active ? "text-foreground font-semibold" : "text-muted-foreground hover:text-foreground hover:bg-secondary"}`}
+                          } ${active ? "text-foreground font-semibold" : "text-foreground/75 hover:text-foreground hover:bg-secondary"}`}
                         >
                           {/* Pastille active partagée — glisse d'un item à l'autre. */}
                           {active && (
                             <motion.span
                               layoutId="sidebar-active"
                               transition={SPRING.snappy}
-                              className="absolute inset-0 rounded-lg bg-primary/14"
+                              className="absolute inset-0 rounded-lg bg-primary/20 ring-1 ring-primary/25"
                             />
                           )}
                           <span className="relative shrink-0">

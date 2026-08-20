@@ -43,11 +43,15 @@ interface SurfaceCardProps {
   animate?: boolean;
   /** délai d'entrée (ms) pour une cascade entre cartes */
   delay?: number;
+  /** Fond légèrement teinté de l'accent (zones de PRISE D'INFO : accueil,
+   *  dashboard). Chaque case devient distincte et agréable. À ne PAS utiliser
+   *  dans les zones de saisie (qui restent sobres, fond carte neutre). */
+  tinted?: boolean;
   className?: string;
 }
 
 export function SurfaceCard({
-  children, accent, title, action, icon, animate = true, delay = 0, className,
+  children, accent, title, action, icon, animate = true, delay = 0, tinted = false, className,
 }: SurfaceCardProps) {
   // `surface-card` : marqueur du PLEIN ÉCRAN MOBILE global (< 640 px la carte
   // s'étale bord à bord et perd son cadre — cf. globals.css ; l'accueil
@@ -62,6 +66,11 @@ export function SurfaceCard({
   const style: React.CSSProperties = {
     ...(animate && delay ? { animationDelay: `${delay}ms` } : {}),
     ...(accent ? ({ "--sc-accent": ACCENT_COLOR[accent] } as React.CSSProperties) : {}),
+    // Fond teinté : la couleur de l'accent mélangée à ~7 % dans la carte — assez
+    // pour distinguer chaque case d'info, assez discret pour rester lisible.
+    ...(tinted && accent
+      ? { backgroundColor: `color-mix(in srgb, ${ACCENT_COLOR[accent]} 7%, hsl(var(--card)))` }
+      : {}),
   };
 
   const header = (title || action) && (

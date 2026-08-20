@@ -182,7 +182,7 @@ export function CarrierGroup({
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(carrierKey); } }}
         aria-expanded={!collapsed}
         title={collapsed ? "Déplier ce transporteur (clic droit : changer l'état du groupe)" : "Replier ce transporteur (clic droit : changer l'état du groupe)"}
-        className="flex items-center justify-between gap-3 px-3 sm:px-4 py-2.5 border-b border-border hover:bg-secondary/40 cursor-pointer select-none transition-colors duration-[var(--dur-fast)] ease-[var(--ease-apple)]"
+        className="flex items-center justify-between gap-3 px-3 sm:px-4 py-2.5 border-b border-border bg-secondary/70 hover:bg-secondary cursor-pointer select-none transition-colors duration-[var(--dur-fast)] ease-[var(--ease-apple)]"
       >
         <div className="flex items-center gap-2 min-w-0">
           <ChevronDown className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform duration-[var(--dur-base)] ease-[var(--ease-apple)] ${collapsed ? "-rotate-90" : ""}`} />
