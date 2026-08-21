@@ -548,19 +548,26 @@ export function ProductsTable() {
                   <InfoTip label="Commande fournisseur" content="Quantité en commande fournisseur (en attente). Dès la réception (entrée marchandise), elle passe en stock." side="bottom" iconSize={10} />
                 </div>
               </th>
-              <SortTh sortKey="fruit" sort={sort} onSort={toggleSort}>Article</SortTh>
+              {/* Désignation éclatée COLONNE PAR COLONNE (lisibilité max) :
+                  Fruit · Marque · Calibre · Conditionnement · Variété · Origine. */}
+              <SortTh sortKey="fruit" sort={sort} onSort={toggleSort}>Fruit</SortTh>
+              <ColTh>Marque</ColTh>
+              <ColTh>Calibre</ColTh>
+              <ColTh>Cond.</ColTh>
+              <ColTh>Variété</ColTh>
+              <ColTh>Origine</ColTh>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={4} className="h-32 text-center">
+                <td colSpan={9} className="h-32 text-center">
                   <Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
                 </td>
               </tr>
             ) : !data?.products.length ? (
               <tr>
-                <td colSpan={4} className="h-32 text-center text-muted-foreground">
+                <td colSpan={9} className="h-32 text-center text-muted-foreground">
                   {last?.totalProducts === 0
                     ? <>Aucun produit en base — clique sur <b>Rafraîchir maintenant</b> pour lancer le premier sync.</>
                     : "Aucun produit ne correspond aux filtres."}
@@ -572,8 +579,6 @@ export function ProductsTable() {
                 // Surcharge d'unité d'affichage choisie pour le groupe (sinon auto).
                 const unit = (p.itemGroup != null ? groupUnits[String(p.itemGroup)] : undefined) ?? null;
                 const dz = designationProduit({ itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque, uCondi: p.uCondi, frgnName: p.frgnName });
-                // Désignation forte (marque/calibre) + muted (condt/variété/pays).
-                const desig = { marque: dz.marque, condt: dz.condt, calibre: p.uCalibre, variete: dz.variete, pays: dz.pays };
                 // Quantités cumulées sur les 3 entrepôts synchronisés.
                 const totalAvailable = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.available ?? 0), 0);
                 const totalOrdered = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.ordered ?? 0), 0);
@@ -624,25 +629,25 @@ export function ProductsTable() {
                         <span className="text-muted-foreground/30">—</span>
                       )}
                     </td>
-                    {/* Ligne unique « Article » : nom + désignation (marque/calibre en
-                        avant, reste muted) + code en sous-ligne. */}
-                    <td className="px-4 py-2.5">
+                    {/* Désignation COLONNE PAR COLONNE : Fruit(+code) · Marque ·
+                        Calibre · Cond. · Variété · Origine — lisibilité max. */}
+                    <td className="px-4 py-2.5 align-top">
                       <div className="min-w-0">
-                        <div className="truncate text-body">
-                          <span className="font-semibold text-foreground">{dz.fruit}</span>
-                          {" "}
-                          <DesignationStrong l={desig} />
-                        </div>
-                        <DesignationMuted l={desig} className="text-caption" />
+                        <span className="block truncate text-body font-semibold text-foreground">{dz.fruit}</span>
                         <span className="block font-mono text-caption2 text-muted-foreground/60">{p.itemCode}</span>
                       </div>
                     </td>
+                    <DesignCell value={dz.marque} strong />
+                    <DesignCell value={p.uCalibre} />
+                    <DesignCell value={dz.condt} />
+                    <DesignCell value={dz.variete} />
+                    <DesignCell value={dz.pays} />
                   </tr>,
                 ];
                 if (isExpanded) {
                   rows.push(
                     <tr key={`${p.id}-batches`}>
-                      <td colSpan={4} className="bg-secondary/30 px-6 py-4 border-b border-border/40">
+                      <td colSpan={9} className="bg-secondary/30 px-6 py-4 border-b border-border/40">
                         <BatchList batches={batches[p.id]} product={p} />
                       </td>
                     </tr>,
@@ -1059,5 +1064,26 @@ export function SortTh({
         <SortArrow active={active} dir={sort.dir} />
       </button>
     </th>
+  );
+}
+
+/** En-tête de colonne simple (non triable) — même style que SortTh. */
+export function ColTh({ children }: { children: React.ReactNode }) {
+  return (
+    <th className="px-3 py-3 text-left text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground bg-secondary whitespace-nowrap">
+      {children}
+    </th>
+  );
+}
+
+/** Cellule de désignation : valeur ou tiret atténué si vide. `strong` = mise en
+ *  avant (marque). Utilisée pour l'affichage colonne par colonne du Stock. */
+function DesignCell({ value, strong = false }: { value?: string | null; strong?: boolean }) {
+  const v = value?.trim();
+  const ok = v && v !== "—" && v !== "-";
+  return (
+    <td className={`px-3 py-2.5 align-top whitespace-nowrap ${strong ? "text-body font-medium text-foreground" : "text-caption text-muted-foreground"}`}>
+      {ok ? v : <span className="text-muted-foreground/30">—</span>}
+    </td>
   );
 }

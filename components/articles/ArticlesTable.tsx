@@ -20,11 +20,26 @@ interface ArticleRow {
   uCondi: string | null;
   uCalibre: string | null;
   frgnName: string | null;
+  // Unités (mêmes champs que /products) — pour exprimer la dispo en COLIS.
+  salesUnit: string | null;
+  inventoryUnit: string | null;
+  salesQtyPerPackUnit: number | null;
   totalStock: number;
   stockByWarehouse: Record<string, { available: number }>;
 }
 
 const PAGE = 60;
+
+/**
+ * Dispo exprimée dans le CONDITIONNEMENT de vente : « 510 colis » quand
+ * l'article a un colisage (salesQtyPerPackUnit > 1), sinon dans son unité brute
+ * (kg / pièce…). Même règle que l'écran Stock (getPackDivisor).
+ */
+function dispoDisplay(a: ArticleRow, avail: number): { qty: number; label: string } {
+  const div = a.salesQtyPerPackUnit && a.salesQtyPerPackUnit > 1 ? a.salesQtyPerPackUnit : 1;
+  if (div > 1) return { qty: Math.round(avail / div), label: "colis" };
+  return { qty: Math.round(avail), label: (a.salesUnit || a.inventoryUnit || "").trim() };
+}
 
 export function ArticlesTable() {
   const [articles, setArticles] = useState<ArticleRow[]>([]);
@@ -201,6 +216,7 @@ function GroupSection({
       </tr>
       {rows.map((a, i) => {
         const avail = availOf(a);
+        const d = dispoDisplay(a, avail);
         return (
           <tr key={a.id} className={`border-b border-border/40 transition-colors hover:bg-secondary/40 ${i % 2 === 1 ? "bg-muted/40" : ""}`}>
             <td className="px-4 py-2.5 align-top">
@@ -216,7 +232,14 @@ function GroupSection({
               <DesignationMuted l={{ condt: a.uCondi, variete: a.frgnName, pays: a.uPays }} className="mt-0.5 text-caption" />
             </td>
             <td className={`px-3 py-2.5 text-right align-top tnum font-semibold ${avail > 0 ? "text-success" : "text-muted-foreground/60"}`}>
-              {Math.round(avail)}
+              {avail > 0 ? (
+                <>
+                  {d.qty}
+                  {d.label && <span className="ml-1 text-[10px] font-normal text-muted-foreground/70">{d.label}</span>}
+                </>
+              ) : (
+                0
+              )}
             </td>
           </tr>
         );
