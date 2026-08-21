@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { getLotMaps, resolveLotForSegment, LOT_PENDING } from "@/lib/lotResolver";
+import { mirrorCreatedOrder, type CreatedOrderForMirror } from "@/lib/sapMirror";
 import { getEmAffects } from "@/lib/emAffect";
 import { getItemStock } from "@/lib/lotStock";
 import { buildLotCandidates, type LotCandidate } from "@/lib/lotCandidates";
@@ -95,29 +96,41 @@ type OffreDoc = {
   lines: PrepLine[];
 };
 
+/** Ligne d'un document miroir (SapQuotationLine / SapOrderLine). */
+type MirrorLine = {
+  lineNum: number; itemCode: string | null; itemDescription: string | null;
+  quantity: number; warehouseCode: string | null; uNoLot: string | null; lineTotal: number;
+};
+/** En-tête d'un document miroir (offre ou commande) + ses lignes. */
+type MirrorDoc = {
+  docEntry: number; docNum: number | null; docDate: Date; docDueDate: Date | null;
+  cardCode: string; cardName: string | null; numAtCard?: string | null; cancelled: boolean;
+  lines: MirrorLine[];
+};
+
 /**
- * Lecture BRUTE des OFFRES CLIENT (Quotations SAP ouvertes, non annulées) = « bons
- * de commande » TeleVent en attente. Best-effort : échec SAP → [] (l'onglet reste
- * utilisable pour l'affectation des lots des commandes). Les lignes (avec lots +
- * candidats) sont construites dans le GET, en réutilisant le stock/les cartes de
- * lots communs aux offres ET aux commandes.
+ * Adapte un document du MIROIR (offre/commande + lignes) au format SapOrderDoc
+ * attendu par buildPrepLines — plus AUCUN appel SAP en lecture (chantier C).
+ * Le lot par ligne (uNoLot) et la date de départ (docDueDate) sont désormais
+ * miroités et tenus frais par le cron + le write-through des écritures.
  */
-async function loadOffresRaw(): Promise<SapOrderDoc[]> {
-  try {
-    const res = await sap.get<{ value: SapOrderDoc[] }>(
-      `Quotations?$orderby=DocDueDate asc&$top=100`
-      + `&$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,NumAtCard,DocumentStatus,Cancelled,DocumentLines`
-      + `&$filter=${encodeURIComponent("DocumentStatus eq 'bost_Open' and Cancelled eq 'tNO'")}`,
-      // ⚠️ Header Prefer obligatoire : sans lui ce Service Layer plafonne la page à
-      // 20 documents, quel que soit le $top. Les offres au-delà de la 20ᵉ étaient
-      // donc simplement INVISIBLES dans l'onglet (et dans la pastille de comptage).
-      { headers: { Prefer: "odata.maxpagesize=100" } },
-    );
-    return res.value ?? [];
-  } catch (e) {
-    console.warn("[BonCommande] Lecture des offres (Quotations) échouée:", (e as Error).message);
-    return [];
-  }
+function mirrorToDoc(d: MirrorDoc, status: "bost_Open" | "bost_Close"): SapOrderDoc {
+  return {
+    DocEntry: d.docEntry, DocNum: d.docNum ?? 0,
+    DocDate: d.docDate.toISOString(),
+    DocDueDate: d.docDueDate ? d.docDueDate.toISOString() : undefined,
+    CardCode: d.cardCode, CardName: d.cardName ?? undefined,
+    NumAtCard: d.numAtCard ?? undefined,
+    DocumentStatus: status, Cancelled: d.cancelled ? "tYES" : "tNO",
+    DocumentLines: d.lines
+      .slice()
+      .sort((a, b) => a.lineNum - b.lineNum)
+      .map((l) => ({
+        LineNum: l.lineNum, ItemCode: l.itemCode ?? "", ItemDescription: l.itemDescription ?? undefined,
+        Quantity: l.quantity, WarehouseCode: l.warehouseCode ?? undefined,
+        U_NoLot: l.uNoLot ?? undefined, LineTotal: l.lineTotal,
+      })),
+  };
 }
 
 type ProductInfo = {
@@ -131,82 +144,67 @@ export async function GET() {
   if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
   try {
-    // ── PHASE 1 — marques « bon de commande » (DB) + offres client (SAP) ──
-    // Strictement indépendants : chargés EN PARALLÈLE (avant, deux attentes
-    // enchaînées ouvraient le chemin critique de cet écran).
-    const [marks, offresRaw] = await Promise.all([listBonCommandeDocEntries(), loadOffresRaw()]);
+    // ── Offres (SapQuotation) + commandes marquées (SapOrder) : TOUT depuis le
+    //    MIROIR local — plus AUCUN appel SAP en lecture (chantier C). Le lot par
+    //    ligne (uNoLot) et la date de départ (docDueDate) sont miroités (cron) et
+    //    tenus frais IMMÉDIATEMENT par le write-through des écritures (PATCH/POST).
+    const [marks, offresMirror] = await Promise.all([
+      listBonCommandeDocEntries(),
+      prisma.sapQuotation.findMany({
+        where: { documentStatus: "O", cancelled: false },
+        orderBy: { docDueDate: "asc" },
+        include: { lines: true },
+      }),
+    ]);
     const markInfo = new Map(marks.map((m) => [m.docEntry, m]));
     const docEntries = marks.map((m) => m.docEntry);
 
-    // ── PHASE 2 — commandes marquées, par paquets de 20 DocEntry EN PARALLÈLE ──
-    // Les paquets ne dépendent pas les uns des autres : les enchaîner ajoutait un
-    // aller-retour SAP complet par paquet. Un paquet en échec ne condamne plus la
-    // réponse entière (les autres commandes restent affichées).
-    const CHUNK = 20;
-    const orderChunks: number[][] = [];
-    for (let i = 0; i < docEntries.length; i += CHUNK) orderChunks.push(docEntries.slice(i, i + CHUNK));
-    const orderPages = await Promise.all(orderChunks.map((slice) => {
-      const filter = slice.map((n) => `DocEntry eq ${n}`).join(" or ");
-      return sap.get<{ value: SapOrderDoc[] }>(
-        `Orders?$filter=${encodeURIComponent(filter)}`
-        + `&$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocumentStatus,Cancelled,DocumentLines`,
-      )
-        .then((r) => r.value ?? [])
-        .catch((e) => {
-          console.warn("[BonCommande] Paquet de commandes en échec:", (e as Error).message);
-          return [] as SapOrderDoc[];
-        });
-    }));
-    // On ne garde que les commandes vivantes (non annulées).
-    const live = orderPages.flat().filter((d) => d.Cancelled !== "tYES");
+    const ordersMirror = docEntries.length
+      ? await prisma.sapOrder.findMany({
+          where: { docEntry: { in: docEntries }, cancelled: false },
+          include: { lines: true },
+        })
+      : [];
 
-    // Union des articles (offres + commandes) → produits, calibre, stock, lots.
+    const offresRaw: SapOrderDoc[] = offresMirror.map((q) => mirrorToDoc(q, "bost_Open"));
+    // Une commande marquée reste dans la file tant qu'elle a des lignes en attente
+    // (filtré plus bas sur pendingCount) → statut « open » par défaut.
+    const live: SapOrderDoc[] = ordersMirror.map((o) => mirrorToDoc(o, "bost_Open"));
+
+    // Union des articles (offres + commandes) → produits (dont calibre), stock, lots.
     const allDocs = [...offresRaw, ...live];
-    const itemCodes = Array.from(new Set(allDocs.flatMap((d) => (d.DocumentLines ?? []).map((l) => l.ItemCode))));
+    const itemCodes = Array.from(
+      new Set(allDocs.flatMap((d) => (d.DocumentLines ?? []).map((l) => l.ItemCode)).filter(Boolean)),
+    );
     // Segment client par CardCode (union offres + commandes).
     const cardCodes = Array.from(new Set(allDocs.map((d) => d.CardCode)));
 
-    // ── PHASE 3 — tous les référentiels EN PARALLÈLE ──
-    // Produits (DB), segments client (DB), calibre (SAP, par paquets parallèles),
-    // cartes de lots, affectations EM et stock physique ne dépendent QUE de
-    // itemCodes/cardCodes : plus aucune raison de les enchaîner. Avant, la
-    // pire configuration alignait ~15-25 allers-retours SAP en série — de quoi
-    // dépasser la limite de durée de la fonction, d'où l'écran qui « charge à
-    // l'infini » sans jamais afficher d'erreur.
-    const calChunks: string[][] = [];
-    for (let i = 0; i < itemCodes.length; i += 20) calChunks.push(itemCodes.slice(i, i + 20));
-    const [prods, clients, calPages, maps, affects, stock] = await Promise.all([
+    // ── Référentiels LOCAUX EN PARALLÈLE ──
+    // Produits (DB, calibre = uCalibre miroité → fini l'appel SAP Items), segments
+    // client (DB), cartes de lots (miroir), affectations EM et stock physique.
+    const [prods, clients, maps, affects, stock] = await Promise.all([
       itemCodes.length
         ? prisma.product.findMany({
             where: { itemCode: { in: itemCodes } },
             select: { itemCode: true, itemName: true, salesUnit: true, salesUnitWeight: true,
-                      salesQtyPerPackUnit: true, uMarque: true, uCondi: true, uPays: true, uUvc: true, frgnName: true },
+                      salesQtyPerPackUnit: true, uMarque: true, uCondi: true, uPays: true, uUvc: true,
+                      frgnName: true, uCalibre: true },
           })
         : Promise.resolve([]),
       cardCodes.length
         ? prisma.client.findMany({ where: { code: { in: cardCodes } }, select: { code: true, type: true } })
         : Promise.resolve([]),
-      // Calibre (U_GER_CALIBRE) — champ SAP LIVE (hors miroir Product), pour le
-      // libellé détaillé au survol. Paquet en échec = calibre absent, jamais bloquant.
-      Promise.all(calChunks.map((slice) => {
-        const filter = "(" + slice.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ") + ")";
-        return sap.get<{ value: { ItemCode: string; U_GER_CALIBRE?: string | null }[] }>(
-          `Items?$select=ItemCode,U_GER_CALIBRE&$filter=${encodeURIComponent(filter)}&$top=50`,
-        )
-          .then((r) => r.value ?? [])
-          .catch(() => [] as { ItemCode: string; U_GER_CALIBRE?: string | null }[]);
-      })),
       getLotMaps(), getEmAffects(), getItemStock(itemCodes),
     ]);
 
     const pMap = new Map<string, ProductInfo>();
-    for (const p of prods) pMap.set(p.itemCode, p);
+    const calibreByItem = new Map<string, string>();
+    for (const p of prods) {
+      pMap.set(p.itemCode, p);
+      if (p.uCalibre) calibreByItem.set(p.itemCode, p.uCalibre.trim());
+    }
     const typeByCard = new Map<string, string | null>();
     for (const c of clients) typeByCard.set(c.code, c.type);
-    const calibreByItem = new Map<string, string>();
-    for (const page of calPages) {
-      for (const it of page) if (it.U_GER_CALIBRE) calibreByItem.set(it.ItemCode, it.U_GER_CALIBRE);
-    }
     const unitsPerColis = (code: string) => {
       const p = pMap.get(code);
       return p ? colisInfo(p).unitsPerColis || 1 : 1;
@@ -424,6 +422,19 @@ export async function PATCH(req: NextRequest) {
 
     await sap.patch(`${entity}(${docEntry})`, { DocumentLines: patchLines });
 
+    // ── WRITE-THROUGH miroir : refléter le lot posé sur les lignes de cet article
+    // IMMÉDIATEMENT (le GET lit le miroir). Sans ça, la ligne resterait « en
+    // attente » à l'écran jusqu'à la prochaine synchro (≤10 min). Best-effort.
+    try {
+      const lineTable = isOffre ? "SapQuotationLine" : "SapOrderLine";
+      await prisma.$executeRawUnsafe(
+        `UPDATE "${lineTable}" SET "uNoLot" = $1 WHERE "docEntry" = $2 AND "itemCode" = $3`,
+        lot, docEntry, itemCode,
+      );
+    } catch (e) {
+      console.warn("[BonCommande] write-through lot miroir échoué (rattrapé à la synchro):", (e as Error).message);
+    }
+
     if (!isOffre && wasAllPending && isRealLot(lot) && soldQty > 0) {
       try {
         await debitLots([{ itemCode, lot, qty: soldQty }]);
@@ -498,14 +509,21 @@ export async function POST(req: NextRequest) {
   if (body.action === "delete") {
     // Les actions SL (Cancel/Close) sont des POST sans corps sur Quotations(id)/Action.
     const runAction = (action: "Cancel" | "Close") => sap.post(`Quotations(${docEntry})/${action}`, null);
+    // Write-through miroir : l'offre quitte la liste tout de suite (le GET filtre
+    // documentStatus='O' et cancelled=false). Best-effort.
+    const markQuoteGone = (data: { cancelled?: boolean; documentStatus?: string }) =>
+      prisma.sapQuotation.updateMany({ where: { docEntry }, data: { ...data, syncedAt: new Date() } })
+        .catch((e) => console.warn("[BonCommande] write-through suppression offre échoué:", (e as Error).message));
     try {
       await runAction("Cancel");
+      await markQuoteGone({ cancelled: true });
       console.log(`[BonCommande] Offre docEntry ${docEntry} annulée (Cancel).`);
       return NextResponse.json({ ok: true, deleted: true, method: "cancel", docEntry });
     } catch (eCancel) {
       console.warn(`[BonCommande] Cancel offre ${docEntry} échoué, repli Close:`, (eCancel as Error).message);
       try {
         await runAction("Close");
+        await markQuoteGone({ documentStatus: "C" });
         console.log(`[BonCommande] Offre docEntry ${docEntry} clôturée (Close).`);
         return NextResponse.json({ ok: true, deleted: true, method: "close", docEntry });
       } catch (eClose) {
@@ -531,6 +549,19 @@ export async function POST(req: NextRequest) {
     if (Object.keys(patch).length === 0) return NextResponse.json({ error: "Rien à modifier (dueDate ou numAtCard requis)." }, { status: 400 });
     try {
       await sap.patch(`Quotations(${docEntry})`, patch);
+      // Write-through miroir : date de départ / n° de commande à jour tout de suite.
+      try {
+        await prisma.sapQuotation.updateMany({
+          where: { docEntry },
+          data: {
+            ...(patch.DocDueDate !== undefined ? { docDueDate: new Date(String(patch.DocDueDate)) } : {}),
+            ...(patch.NumAtCard !== undefined ? { numAtCard: String(patch.NumAtCard).trim() || null } : {}),
+            syncedAt: new Date(),
+          },
+        });
+      } catch (e) {
+        console.warn("[BonCommande] write-through update offre échoué (rattrapé à la synchro):", (e as Error).message);
+      }
       console.log(`[BonCommande] Offre docEntry ${docEntry} mise à jour:`, Object.keys(patch).join(", "));
       return NextResponse.json({ ok: true, docEntry, ...patch });
     } catch (e) {
@@ -665,6 +696,20 @@ export async function POST(req: NextRequest) {
         // conversion (elle ne remontera plus). On ne bloque pas la réussite.
         console.warn(`[BonCommande] Offre ${docEntry} non clôturée (probablement déjà fermée par SAP):`, (eCancel as Error).message);
       }
+    }
+
+    // ── WRITE-THROUGH miroir : la commande créée doit apparaître IMMÉDIATEMENT
+    // dans la file (le GET lit SapOrder) et l'offre en disparaître — sans attendre
+    // la synchro. On relit la commande finale (états de lot post-revalidation) puis
+    // on l'écrit au miroir, et on marque l'offre clôturée. Best-effort.
+    try {
+      const full = await sap.get<CreatedOrderForMirror>(
+        `Orders(${order.DocEntry})?$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,VatSum,UpdateDate,DocumentLines`,
+      );
+      await mirrorCreatedOrder(full);
+      await prisma.sapQuotation.updateMany({ where: { docEntry }, data: { documentStatus: "C", syncedAt: new Date() } });
+    } catch (e) {
+      console.warn("[BonCommande] write-through conversion miroir échoué (rattrapé à la synchro):", (e as Error).message);
     }
 
     console.log(`[BonCommande] Offre n°${quote.DocNum} → Commande n°${order.DocNum} (passée par ${by})`);

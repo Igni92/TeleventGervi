@@ -1066,6 +1066,7 @@ model SapQuotation {
   docNum         Int?
   docDate        DateTime
   docDueDate     DateTime? // date de départ/échéance (badge « offres dues »)
+  numAtCard      String? // n° de commande client (NumAtCard) — affiché sur l'offre
   cardCode       String
   cardName       String?
   slpName        String? // commercial snapshot

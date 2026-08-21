@@ -726,6 +726,7 @@ interface SapOpenDoc {
   DocNum?: number;
   DocDate: string;
   DocDueDate?: string;
+  NumAtCard?: string;
   CardCode: string;
   CardName?: string;
   SalesPersonCode?: number;
@@ -738,7 +739,7 @@ interface SapOpenDoc {
 }
 
 const QUOTATION_HEADER_COLS = [
-  "docEntry", "docNum", "docDate", "docDueDate", "cardCode", "cardName",
+  "docEntry", "docNum", "docDate", "docDueDate", "numAtCard", "cardCode", "cardName",
   "slpName", "docTotal", "vatSum", "documentStatus", "cancelled", "updateDate",
 ] as const;
 const PO_HEADER_COLS = [
@@ -774,7 +775,7 @@ async function pullOpenDocs(
   const filter = `&$filter=${filters.join(" and ")}`;
 
   const headerFields = isQuote
-    ? "DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,SalesPersonCode,DocTotal,VatSum,DocumentStatus,Cancelled,UpdateDate"
+    ? "DocEntry,DocNum,DocDate,DocDueDate,NumAtCard,CardCode,CardName,SalesPersonCode,DocTotal,VatSum,DocumentStatus,Cancelled,UpdateDate"
     : "DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,DocumentStatus,Cancelled,UpdateDate";
   const path = `${kind}?$select=${headerFields},DocumentLines${filter}&$orderby=DocEntry desc`;
 
@@ -813,7 +814,8 @@ async function pullOpenDocs(
     const header: unknown[] = isQuote
       ? [
           d.DocEntry, d.DocNum ?? null, new Date(d.DocDate),
-          d.DocDueDate ? new Date(d.DocDueDate) : null, d.CardCode, d.CardName ?? null,
+          d.DocDueDate ? new Date(d.DocDueDate) : null,
+          (d.NumAtCard ?? "").trim() || null, d.CardCode, d.CardName ?? null,
           d.SalesPersonCode != null && d.SalesPersonCode >= 0
             ? slpNameByCode.get(d.SalesPersonCode) ?? null : null,
           docTotal - vatSum, vatSum, docStatusChar(d.DocumentStatus),
