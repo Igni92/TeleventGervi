@@ -19,7 +19,6 @@ import { AnimatedNumber } from "@/components/ui/animated-number";
 import { formatRelative } from "@/lib/utils";
 import { convertStockDisplay, type StockDisplayUnit } from "@/lib/gervifrais-calc";
 import { designationProduit } from "@/lib/produit-designation";
-import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { DesignationStrong, DesignationMuted } from "@/components/livraisons/ArticleDesignation";
 
 interface StockEntry { inStock: number; committed: number; ordered: number; available: number; }
@@ -494,11 +493,15 @@ export function ProductsTable() {
                                     </>
                                   )}
                                 </span>
-                                {/* Désignation + chips colorés à DROITE */}
+                                {/* Désignation à DROITE — même langage que le reste :
+                                    fruit + marque + calibre en avant, reste muted
+                                    (fin des chips colorés qui faisaient doublon). */}
                                 <span className="min-w-0 border-l border-border/60 pl-3">
-                                  <span className="block text-[15px] font-semibold text-foreground truncate leading-tight">{dz.fruit}</span>
-                                  <DesignationChips marque={dz.marque} condt={dz.condt} calibre={p.uCalibre} variete={dz.variete} pays={dz.pays} size="md" className="mt-1.5" />
-                                  <span className="flex items-baseline gap-2 text-[11px] mt-1 min-w-0">
+                                  <span className="block text-callout font-semibold text-foreground truncate leading-tight">
+                                    {dz.fruit} <DesignationStrong l={{ marque: dz.marque, calibre: p.uCalibre }} />
+                                  </span>
+                                  <DesignationMuted l={{ condt: dz.condt, variete: dz.variete, pays: dz.pays }} className="mt-0.5 text-caption" />
+                                  <span className="flex items-baseline gap-2 text-caption2 mt-1 min-w-0">
                                     <span className="font-mono text-muted-foreground/60 truncate">{p.itemCode}</span>
                                     {attendu && (
                                       <PoDuesMenu dues={poDuesByItem[p.itemCode]} align="start">

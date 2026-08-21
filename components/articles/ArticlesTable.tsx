@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SortArrow, nextSort, type SortDir } from "@/components/ui/sort";
 import { SortTh } from "@/components/products/ProductsTable";
-import { DesignationChips } from "@/components/entrees/DesignationChips";
+import { DesignationStrong, DesignationMuted } from "@/components/livraisons/ArticleDesignation";
 
 interface ArticleRow {
   id: string;
@@ -210,13 +210,10 @@ function GroupSection({
               </Link>
             </td>
             <td className="px-3 py-2.5 align-top">
-              <DesignationChips
-                marque={a.uMarque}
-                condt={a.uCondi}
-                calibre={a.uCalibre}
-                variete={a.frgnName}
-                pays={a.uPays}
-              />
+              {/* Désignation texte (marque + calibre en avant, reste muted) —
+                  même langage que Stock et les livraisons, fin des chips colorés. */}
+              <DesignationStrong l={{ marque: a.uMarque, calibre: a.uCalibre }} className="text-body" />
+              <DesignationMuted l={{ condt: a.uCondi, variete: a.frgnName, pays: a.uPays }} className="mt-0.5 text-caption" />
             </td>
             <td className={`px-3 py-2.5 text-right align-top tnum font-semibold ${avail > 0 ? "text-success" : "text-muted-foreground/60"}`}>
               {Math.round(avail)}
