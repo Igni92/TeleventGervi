@@ -133,7 +133,7 @@ export function DocumentsExplorer() {
       if (!doc) {
         return (
           <div className="rounded-xl border border-dashed border-border/50 p-2.5 flex flex-col items-center justify-center text-center min-h-[76px]">
-            <span className={`inline-flex px-1.5 py-0.5 rounded text-caption2 font-bold uppercase tracking-wider opacity-40 ${DOC_TYPE_PILL[type]}`}>{DOC_TYPE_LABEL[type]}</span>
+            <span className={`inline-flex w-14 justify-center px-1.5 py-0.5 rounded text-caption2 font-bold uppercase tracking-wider opacity-40 ${DOC_TYPE_PILL[type]}`}>{DOC_TYPE_LABEL[type]}</span>
             <span className="text-caption text-muted-foreground/40 mt-1">—</span>
           </div>
         );
@@ -148,7 +148,7 @@ export function DocumentsExplorer() {
             className="group/cell flex-1 text-left px-2.5 pt-2.5 pb-1.5 hover:bg-secondary/40 transition-colors"
           >
             <div className="flex items-center gap-1.5">
-              <span className={`inline-flex px-1.5 py-0.5 rounded text-caption2 font-bold uppercase tracking-wider ${DOC_TYPE_PILL[type]}`}>{DOC_TYPE_LABEL[type]}</span>
+              <span className={`inline-flex w-14 justify-center px-1.5 py-0.5 rounded text-caption2 font-bold uppercase tracking-wider ${DOC_TYPE_PILL[type]}`}>{DOC_TYPE_LABEL[type]}</span>
               <span className="font-mono text-caption font-semibold text-foreground truncate">{doc.docNum ?? "—"}</span>
               {extra ? <span className="text-caption2 text-muted-foreground">+{extra}</span> : null}
               <Eye className="ml-auto h-3.5 w-3.5 text-muted-foreground/40 group-hover/cell:text-brand-500 transition-colors shrink-0" />
@@ -315,19 +315,28 @@ export function DocumentsExplorer() {
                 label={<span className={isNone ? "italic text-muted-foreground" : undefined}>{nom}</span>}
                 sublabel={f.cardCode ? <span className="font-mono">{f.cardCode}</span> : undefined}
               >
-                {/* Chips compteurs à droite : un compteur par type présent, puis total. */}
+                {/* Compteurs à droite ALIGNÉS EN COLONNES : type client (largeur
+                    fixe), puis BL / Facture / Avoir TOUJOURS aux mêmes positions
+                    (placeholder atténué si absent), puis le total. Les
+                    dénominations s'alignent ainsi d'une ligne à l'autre. */}
                 <div className="ml-auto flex items-center gap-1.5 shrink-0">
-                  {f.clientType && (
-                    <span className="hidden sm:inline-flex px-1.5 py-0.5 rounded text-caption2 font-bold uppercase tracking-wider bg-secondary text-muted-foreground">
-                      {clientTypeLabel(f.clientType)}
-                    </span>
-                  )}
-                  {DOC_TYPE_ORDER.filter((t) => (f.byType[t] ?? 0) > 0).map((t) => (
-                    <span key={t} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-caption2 font-semibold ${DOC_TYPE_PILL[t]}`}>
-                      {DOC_TYPE_LABEL[t]} <span className="tnum">{f.byType[t]}</span>
-                    </span>
-                  ))}
-                  <span className="inline-flex items-center justify-center min-w-[26px] h-6 px-1.5 rounded-full bg-secondary text-caption font-bold text-foreground tnum">{f.total}</span>
+                  <span className="hidden sm:inline-flex items-center justify-center w-14 px-1.5 py-0.5 rounded text-caption2 font-bold uppercase tracking-wider bg-secondary text-muted-foreground">
+                    {f.clientType ? clientTypeLabel(f.clientType) : ""}
+                  </span>
+                  {["BL", "FACTURE", "AVOIR"].map((t) => {
+                    const n = f.byType[t] ?? 0;
+                    return n > 0 ? (
+                      <span key={t} className={`inline-flex w-[4.5rem] items-center justify-between px-2 py-0.5 rounded text-caption2 font-semibold ${DOC_TYPE_PILL[t]}`}>
+                        <span className="uppercase tracking-wide">{DOC_TYPE_LABEL[t]}</span>
+                        <span className="tnum">{n}</span>
+                      </span>
+                    ) : (
+                      <span key={t} className="hidden sm:inline-flex w-[4.5rem] items-center justify-start px-2 py-0.5 rounded text-caption2 font-medium uppercase tracking-wide text-muted-foreground/30">
+                        {DOC_TYPE_LABEL[t]}
+                      </span>
+                    );
+                  })}
+                  <span className="inline-flex items-center justify-center min-w-[28px] h-6 px-1.5 rounded-full bg-secondary text-caption font-bold text-foreground tnum">{f.total}</span>
                 </div>
               </GroupedRow>
             );
