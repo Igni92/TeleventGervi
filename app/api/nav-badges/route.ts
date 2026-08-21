@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import type { Session } from "next-auth";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { sap } from "@/lib/sapb1";
 import { isDepartureReached } from "@/lib/livraison";
 import { cached, invalidate } from "@/lib/ttlCache";
 import { requireAdmin } from "@/lib/permissions";
@@ -67,35 +66,34 @@ async function safeCount(compute: () => Promise<number>): Promise<number> {
 }
 
 /**
- * Offres client (Quotations) au jour de départ — MÊME clé/TTL que
- * /api/bons-commande/due-count : les deux routes partagent le cache, l'appel
- * SAP n'est payé qu'une fois quel que soit le chemin qui le déclenche.
+ * Offres client (Quotations) au jour de départ — LU DEPUIS LE MIROIR
+ * (SapQuotation), plus aucun appel SAP par page. Le cron `mirror` maintient le
+ * statut O/C et la date d'échéance (cf. PERF.md chantier A). L'ensemble des
+ * offres ouvertes est petit → on ramène les docDueDate et on applique la même
+ * règle `isDepartureReached` que l'écran Bons de commande.
  */
-function offresDueCount(): Promise<number> {
-  return cached("sidebar:offres-due", 120_000, async () => {
-    const filter = "DocumentStatus eq 'bost_Open' and Cancelled eq 'tNO'";
-    const res = await sap.get<{ value: { DocDueDate?: string }[] }>(
-      `Quotations?$select=DocDueDate&$top=200&$filter=${encodeURIComponent(filter)}`,
-      // ⚠️ Sans le header Prefer, ce Service Layer plafonne la page à 20 documents.
-      { headers: { Prefer: "odata.maxpagesize=200" } },
-    );
-    return (res.value ?? []).filter((q) => q.DocDueDate && isDepartureReached(q.DocDueDate)).length;
+async function offresDueCount(): Promise<number> {
+  const rows = await prisma.sapQuotation.findMany({
+    where: { documentStatus: "O", cancelled: false, docDueDate: { not: null } },
+    select: { docDueDate: true },
   });
+  return rows.filter((q) => q.docDueDate && isDepartureReached(q.docDueDate.toISOString())).length;
 }
 
 /**
- * Commandes fournisseurs ouvertes arrivées à échéance — MÊME clé (datée : le
- * passage à minuit n'hérite pas du compte de la veille) et même TTL que
- * /api/sap/purchase-orders/due-count.
+ * Commandes fournisseurs ouvertes arrivées à échéance — LU DEPUIS LE MIROIR
+ * (SapPurchaseOrder). `DocDueDate <= aujourd'hui` (bornée à la fin de journée
+ * pour inclure les PO dues le jour même).
  */
 function poDueCount(): Promise<number> {
-  const today = new Date().toISOString().slice(0, 10);
-  return cached(`sidebar:po-due:${today}`, 120_000, async () => {
-    const filter = `DocumentStatus eq 'bost_Open' and DocDueDate le '${today}'`;
-    const res = await sap.get<{ value: { DocEntry: number }[] }>(
-      `PurchaseOrders?$select=DocEntry&$top=100&$filter=${encodeURIComponent(filter)}`,
-    );
-    return res.value?.length ?? 0;
+  const endOfToday = new Date();
+  endOfToday.setHours(23, 59, 59, 999);
+  return prisma.sapPurchaseOrder.count({
+    where: {
+      documentStatus: "O",
+      cancelled: false,
+      docDueDate: { not: null, lte: endOfToday },
+    },
   });
 }
 

@@ -9,6 +9,8 @@ import {
   pullPdns,
   pullCreditNotes,
   pullPurchaseReturns,
+  pullQuotations,
+  pullPurchaseOrders,
   pullAllSalesSliced,
   syncClientGroupsFromMirror,
 } from "@/lib/sapMirror";
@@ -46,6 +48,8 @@ async function bootstrapMirror() {
     const bps = await pullBusinessPartners({});
     const groups = await syncClientGroupsFromMirror();
     const docs = await pullAllSalesSliced(annualWindowStart(), new Date());
+    // Docs ouverts (offres + PO) : seed de tous les ouverts, sans borne de date.
+    const [quo, po] = await Promise.all([pullQuotations({}), pullPurchaseOrders({})]);
 
     await prisma.sapMirrorCursor.update({
       where: { id: 1 },
@@ -55,6 +59,8 @@ async function bootstrapMirror() {
         lastPdnUpdate: docs.maxUpdate.pdn ?? undefined,
         lastCreditNoteUpdate: docs.maxUpdate.creditNote ?? undefined,
         lastPurchaseReturnUpdate: docs.maxUpdate.purchaseReturn ?? undefined,
+        lastQuotationUpdate: quo.maxUpdate ?? undefined,
+        lastPurchaseOrderUpdate: po.maxUpdate ?? undefined,
         lastBpUpdate: new Date(),
         lastTickAt: new Date(),
       },
@@ -72,6 +78,8 @@ async function bootstrapMirror() {
       pdns: docs.pdns,
       creditNotes: docs.creditNotes,
       purchaseReturns: docs.purchaseReturns,
+      quotations: quo.pulled,
+      purchaseOrders: po.pulled,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -115,12 +123,15 @@ async function runMirrorSync() {
     });
     // Propage le groupe SAP vers Client.sapGroup* (pré-requis flèche familles).
     const groups = await syncClientGroupsFromMirror();
-    const [inv, ord, pdn, cn, pret] = await Promise.all([
+    const [inv, ord, pdn, cn, pret, quo, po] = await Promise.all([
       pullInvoices({ updatedSince: cursor.lastInvoiceUpdate ?? undefined }),
       pullOrders({ updatedSince: cursor.lastOrderUpdate ?? undefined }),
       pullPdns({ updatedSince: cursor.lastPdnUpdate ?? undefined }),
       pullCreditNotes({ updatedSince: cursor.lastCreditNoteUpdate ?? undefined }),
       pullPurchaseReturns({ updatedSince: cursor.lastPurchaseReturnUpdate ?? undefined }),
+      // Offres/PO : curseur neuf ⇒ seed de tous les ouverts (cf. pullOpenDocs).
+      pullQuotations({ updatedSince: cursor.lastQuotationUpdate ?? undefined }),
+      pullPurchaseOrders({ updatedSince: cursor.lastPurchaseOrderUpdate ?? undefined }),
     ]);
 
     await prisma.sapMirrorCursor.update({
@@ -131,6 +142,8 @@ async function runMirrorSync() {
         lastPdnUpdate: pdn.maxUpdate ?? cursor.lastPdnUpdate,
         lastCreditNoteUpdate: cn.maxUpdate ?? cursor.lastCreditNoteUpdate,
         lastPurchaseReturnUpdate: pret.maxUpdate ?? cursor.lastPurchaseReturnUpdate,
+        lastQuotationUpdate: quo.maxUpdate ?? cursor.lastQuotationUpdate,
+        lastPurchaseOrderUpdate: po.maxUpdate ?? cursor.lastPurchaseOrderUpdate,
         lastBpUpdate: new Date(),
         lastTickAt: new Date(),
       },
@@ -167,6 +180,8 @@ async function runMirrorSync() {
       pdns: pdn.pulled,
       creditNotes: cn.pulled,
       purchaseReturns: pret.pulled,
+      quotations: quo.pulled,
+      purchaseOrders: po.pulled,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

@@ -814,6 +814,8 @@ model SapBusinessPartner {
   pdns     SapPurchaseDeliveryNote[]
   creditNotes SapCreditNote[]
   purchaseReturns SapPurchaseReturn[]
+  quotations     SapQuotation[]
+  purchaseOrders SapPurchaseOrder[]
 
   @@index([cardType])
   @@index([slpName])
@@ -1044,6 +1046,96 @@ model SapPurchaseReturnLine {
   @@index([itemCode])
 }
 
+// ── Documents OUVERTS (offres client + commandes fournisseur) ──────────────
+// Différent des ventes : on garde le STATUT (open/closed) et la DATE D'ÉCHÉANCE
+// (DocDueDate), pour servir depuis Postgres les badges de nav (offres/PO dues)
+// et l'écran Bons de commande — sans appel SAP live. Le pull (lib/sapMirror)
+// seede tous les docs OUVERTS puis suit UpdateDate : une offre qui se ferme est
+// re-pull avec documentStatus='C'. Voir PERF.md, chantier A.
+
+// Offre client (Quotation SAP) — « bons à affecter » de l'écran Bons de commande.
+model SapQuotation {
+  docEntry       Int       @id
+  docNum         Int?
+  docDate        DateTime
+  docDueDate     DateTime? // date de départ/échéance (badge « offres dues »)
+  cardCode       String
+  cardName       String?
+  slpName        String? // commercial snapshot
+  docTotal       Float     @default(0) // total HT (DocTotal - VatSum)
+  vatSum         Float     @default(0)
+  documentStatus String    @default("O") // 'O' = bost_Open, 'C' = bost_Close
+  cancelled      Boolean   @default(false)
+  updateDate     DateTime?
+  syncedAt       DateTime  @default(now())
+
+  bp    SapBusinessPartner @relation(fields: [cardCode], references: [cardCode], onDelete: Cascade)
+  lines SapQuotationLine[]
+
+  @@index([docDueDate])
+  @@index([documentStatus])
+  @@index([cardCode])
+  @@index([updateDate])
+}
+
+model SapQuotationLine {
+  id              Int     @id @default(autoincrement())
+  docEntry        Int
+  lineNum         Int
+  itemCode        String? // nullable — lignes de service (cf. SapOrderLine)
+  itemDescription String?
+  quantity        Float   @default(0)
+  lineTotal       Float   @default(0) // total HT ligne
+  warehouseCode   String?
+  isService       Boolean @default(false)
+
+  quotation SapQuotation @relation(fields: [docEntry], references: [docEntry], onDelete: Cascade)
+
+  @@unique([docEntry, lineNum])
+  @@index([itemCode])
+}
+
+// Commande fournisseur (PurchaseOrder SAP) — badge « commandes fournisseur dues »
+// et écrans achats servis depuis le miroir.
+model SapPurchaseOrder {
+  docEntry       Int       @id
+  docNum         Int?
+  docDate        DateTime
+  docDueDate     DateTime? // échéance (badge « PO dues »)
+  cardCode       String // CardCode fournisseur
+  cardName       String?
+  docTotal       Float     @default(0)
+  documentStatus String    @default("O") // 'O' = bost_Open, 'C' = bost_Close
+  cancelled      Boolean   @default(false)
+  updateDate     DateTime?
+  syncedAt       DateTime  @default(now())
+
+  bp    SapBusinessPartner @relation(fields: [cardCode], references: [cardCode], onDelete: Cascade)
+  lines SapPurchaseOrderLine[]
+
+  @@index([docDueDate])
+  @@index([documentStatus])
+  @@index([cardCode])
+  @@index([updateDate])
+}
+
+model SapPurchaseOrderLine {
+  id              Int     @id @default(autoincrement())
+  docEntry        Int
+  lineNum         Int
+  itemCode        String?
+  itemDescription String?
+  quantity        Float   @default(0)
+  lineTotal       Float   @default(0)
+  warehouseCode   String?
+  isService       Boolean @default(false)
+
+  purchaseOrder SapPurchaseOrder @relation(fields: [docEntry], references: [docEntry], onDelete: Cascade)
+
+  @@unique([docEntry, lineNum])
+  @@index([itemCode])
+}
+
 // Curseur singleton pour la sync incrémentale du mirror SAP.
 // On stocke un UpdateDate ISO par entité — chaque pull "UpdateDate gt cursor".
 // id=1, pattern identique à StockSyncCursor.
@@ -1055,6 +1147,8 @@ model SapMirrorCursor {
   lastBpUpdate      DateTime?
   lastCreditNoteUpdate     DateTime?
   lastPurchaseReturnUpdate DateTime?
+  lastQuotationUpdate      DateTime? // SAP UpdateDate max vu sur Quotations
+  lastPurchaseOrderUpdate  DateTime? // SAP UpdateDate max vu sur PurchaseOrders
   lastTickAt        DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 }

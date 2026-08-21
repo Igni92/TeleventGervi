@@ -694,6 +694,142 @@ async function pullPurchaseDocs(
 export const pullPdns = (opts: MirrorPullOpts) =>
   pullPurchaseDocs("PurchaseDeliveryNotes", { header: "SapPurchaseDeliveryNote", line: "SapPdnLine" }, opts);
 
+// ─────────────────────────────────────────────────────────────────
+// Documents OUVERTS — Quotations (offres client) & PurchaseOrders
+// (commandes fournisseur). Servent les badges de nav + l'écran Bons de
+// commande DEPUIS LE MIROIR (plus aucun `sap.get` par page). Voir PERF.md A.
+//
+// Spécificité vs ventes : on garde `documentStatus` (O/C) et `docDueDate`.
+//   • curseur NEUF → seed de TOUS les docs ouverts (`DocumentStatus eq
+//     'bost_Open'`, sans borne de date : une offre ouverte depuis 6 mois doit
+//     entrer même si son UpdateDate est ancien).
+//   • curseur posé → incrémental `UpdateDate ge cursor` : capte les nouveaux
+//     ouverts ET les transitions vers fermé (upsert → documentStatus='C').
+// ─────────────────────────────────────────────────────────────────
+
+interface SapOpenDoc {
+  DocEntry: number;
+  DocNum?: number;
+  DocDate: string;
+  DocDueDate?: string;
+  CardCode: string;
+  CardName?: string;
+  SalesPersonCode?: number;
+  DocTotal?: number;
+  VatSum?: number;
+  DocumentStatus?: "bost_Open" | "bost_Close" | string;
+  Cancelled?: "tYES" | "tNO";
+  UpdateDate?: string;
+  DocumentLines?: SapDocLine[];
+}
+
+const QUOTATION_HEADER_COLS = [
+  "docEntry", "docNum", "docDate", "docDueDate", "cardCode", "cardName",
+  "slpName", "docTotal", "vatSum", "documentStatus", "cancelled", "updateDate",
+] as const;
+const PO_HEADER_COLS = [
+  "docEntry", "docNum", "docDate", "docDueDate", "cardCode", "cardName",
+  "docTotal", "documentStatus", "cancelled", "updateDate",
+] as const;
+// Lignes identiques pour les deux (pas de coût/marge : docs non facturés).
+const OPEN_LINE_COLS = [
+  "docEntry", "lineNum", "itemCode", "itemDescription",
+  "quantity", "lineTotal", "warehouseCode", "isService",
+] as const;
+
+function docStatusChar(s?: string): "O" | "C" {
+  return s === "bost_Close" ? "C" : "O";
+}
+
+async function pullOpenDocs(
+  kind: "Quotations" | "PurchaseOrders",
+  opts: MirrorPullOpts,
+): Promise<{ pulled: number; maxUpdate: Date | null }> {
+  const isQuote = kind === "Quotations";
+  const tables = isQuote
+    ? { header: "SapQuotation", line: "SapQuotationLine" }
+    : { header: "SapPurchaseOrder", line: "SapPurchaseOrderLine" };
+
+  // Filtre : seed (curseur neuf) = tous les ouverts ; sinon incrémental UpdateDate.
+  const filters: string[] = [];
+  if (opts.updatedSince) {
+    filters.push(`UpdateDate ge ${odataDate(opts.updatedSince)}`);
+  } else {
+    filters.push("DocumentStatus eq 'bost_Open'");
+  }
+  const filter = `&$filter=${filters.join(" and ")}`;
+
+  const headerFields = isQuote
+    ? "DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,SalesPersonCode,DocTotal,VatSum,DocumentStatus,Cancelled,UpdateDate"
+    : "DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,DocumentStatus,Cancelled,UpdateDate";
+  const path = `${kind}?$select=${headerFields},DocumentLines${filter}&$orderby=DocEntry desc`;
+
+  const docs = dedupeByDocEntry(
+    await sap.getAll<SapOpenDoc>(path, { pageSize: 100, maxPages: 100, env: "prod" }),
+  );
+  if (docs.length === 0) return { pulled: 0, maxUpdate: null };
+
+  // FK BusinessPartner : client (C) pour les offres, fournisseur (V) pour les PO.
+  await ensureBusinessPartners(docs, isQuote ? "C" : "V");
+
+  // Commercial (offres uniquement) — cache local SalesPersons.
+  const slpNameByCode = new Map<number, string>();
+  if (isQuote) {
+    const slps = await sap.getAll<SapSalesPerson>(
+      "SalesPersons?$select=SalesEmployeeCode,SalesEmployeeName",
+      { env: "prod" },
+    );
+    for (const s of slps) slpNameByCode.set(s.SalesEmployeeCode, s.SalesEmployeeName);
+  }
+
+  let maxUpdate: Date | null = null;
+  const mapped: MappedDoc[] = docs.map((d) => {
+    const upd = d.UpdateDate ? new Date(d.UpdateDate) : null;
+    if (upd && (!maxUpdate || upd > maxUpdate)) maxUpdate = upd;
+    const docTotal = d.DocTotal ?? 0;
+    const vatSum = d.VatSum ?? 0;
+
+    // Ordre = OPEN_LINE_COLS.
+    const lines: unknown[][] = (d.DocumentLines ?? []).map((l) => [
+      d.DocEntry, l.LineNum, l.ItemCode ?? null, l.ItemDescription ?? null,
+      l.Quantity ?? 0, l.LineTotal ?? 0, l.WarehouseCode ?? null, l.ItemCode == null,
+    ]);
+
+    const header: unknown[] = isQuote
+      ? [
+          d.DocEntry, d.DocNum ?? null, new Date(d.DocDate),
+          d.DocDueDate ? new Date(d.DocDueDate) : null, d.CardCode, d.CardName ?? null,
+          d.SalesPersonCode != null && d.SalesPersonCode >= 0
+            ? slpNameByCode.get(d.SalesPersonCode) ?? null : null,
+          docTotal - vatSum, vatSum, docStatusChar(d.DocumentStatus),
+          d.Cancelled === "tYES", upd,
+        ]
+      : [
+          d.DocEntry, d.DocNum ?? null, new Date(d.DocDate),
+          d.DocDueDate ? new Date(d.DocDueDate) : null, d.CardCode, d.CardName ?? null,
+          docTotal, docStatusChar(d.DocumentStatus),
+          d.Cancelled === "tYES", upd,
+        ];
+    return { docEntry: d.DocEntry, header, lines };
+  });
+
+  await bulkUpsertDocs({
+    headerTable: tables.header,
+    lineTable: tables.line,
+    headerCols: isQuote ? QUOTATION_HEADER_COLS : PO_HEADER_COLS,
+    lineCols: OPEN_LINE_COLS,
+    docs: mapped,
+  });
+
+  return { pulled: docs.length, maxUpdate };
+}
+
+/** Offres client (Quotations) → SapQuotation. Curseur : lastQuotationUpdate. */
+export const pullQuotations = (opts: MirrorPullOpts) => pullOpenDocs("Quotations", opts);
+
+/** Commandes fournisseur (PurchaseOrders) → SapPurchaseOrder. Curseur : lastPurchaseOrderUpdate. */
+export const pullPurchaseOrders = (opts: MirrorPullOpts) => pullOpenDocs("PurchaseOrders", opts);
+
 /** Avoirs fournisseurs (PurchaseReturns) → SapPurchaseReturn.
  *  Nécessaire aux Achats NET (= Σ PDN − Σ retours) — curseur : lastPurchaseReturnUpdate. */
 export const pullPurchaseReturns = (opts: MirrorPullOpts) =>
