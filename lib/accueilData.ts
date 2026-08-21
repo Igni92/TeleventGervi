@@ -175,8 +175,8 @@ export async function getMargeKgFamilles(): Promise<MargeKgDay> {
     // Alias imposés par lib/cogs : l = SapOrderLine, i = SapOrder, cogs/fab = LATERAL.
     const rows = await prisma.$queryRaw<{ name: string | null; grp: string | null; w: number; marge: number }[]>(Prisma.sql`
       SELECT p."itemName" AS name, p."groupName" AS grp,
-             COALESCE(SUM((l."quantity" * COALESCE(p."salesUnitWeight", 0))
-                          FILTER (WHERE ${COGS_COSTED_HYBRID})), 0)::float AS w,
+             COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0))
+                          FILTER (WHERE ${COGS_COSTED_HYBRID}), 0)::float AS w,
              COALESCE(SUM(${COGS_MARGIN_HYBRID}), 0)::float AS marge
       FROM ${freshCogsOrderFromSql(COGS_FRESH_RECEPTION_DAYS)} ${FAB_COST_LATERAL}
       LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
