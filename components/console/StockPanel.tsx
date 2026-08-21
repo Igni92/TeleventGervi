@@ -41,14 +41,11 @@ export function StockPanel({ sharePct = 100 }: { sharePct?: number }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
-  // Sync delta SAP toutes les 30 s puis refetch — la route est throttled côté
-  // serveur (≤ 1 pull SAP / 20 s peu importe le nombre de clients).
+  // Rafraîchissement périodique depuis le MIROIR local (chantier F) : on ne
+  // déclenche PLUS de synchro SAP au chargement — le cron s'en charge (delta
+  // 10 min + refresh-stock 15 min). On relit juste la base locale.
   useEffect(() => {
-    const tick = async () => {
-      try { await fetch("/api/sap/sync/delta", { method: "POST" }); } catch { /* silent */ }
-      load();
-    };
-    const t = setInterval(tick, 90 * 1000);
+    const t = setInterval(() => load(), 90 * 1000);
     return () => clearInterval(t);
   }, [load]);
 
