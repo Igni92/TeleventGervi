@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import { SurfaceCard } from "@/components/ui/surface-card";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { colis } from "./ui";
 import { uniteBase, libelleUnite, type ModeQuantite } from "@/lib/fabrication-optim";
 
@@ -83,8 +85,8 @@ function ProductPicker({ placeholder, onPick }: { placeholder: string; onPick: (
               <button type="button"
                 onClick={() => { onPick(p); setQuery(""); setOpen(false); }}
                 className="w-full text-left px-3 py-2 hover:bg-secondary/60 transition-colors">
-                <div className="text-[13px] font-medium truncate">{p.itemName}</div>
-                <div className="text-[11px] text-muted-foreground font-mono">{p.itemCode}</div>
+                <div className="text-body font-medium truncate">{p.itemName}</div>
+                <div className="text-caption2 text-muted-foreground font-mono">{p.itemCode}</div>
               </button>
             </li>
           ))}
@@ -106,6 +108,8 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
   const [costs, setCosts] = useState<CostLine[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Confirmation de suppression (remplace window.confirm).
+  const [confirmDel, setConfirmDel] = useState<{ code: string; name: string } | null>(null);
 
   const loadList = useCallback(async () => {
     try {
@@ -182,7 +186,6 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
   };
 
   const remove = async (code: string) => {
-    if (!confirm(`Supprimer la recette de ${code} ?`)) return;
     try {
       const r = await fetch(`/api/fabrication/recipes?parentItemCode=${encodeURIComponent(code)}`, { method: "DELETE" });
       const j = await r.json();
@@ -214,10 +217,10 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
                 parent?.itemCode === r.parentItemCode ? "border-violet-400/60 bg-violet-500/10" : "border-border bg-card/50"
               }`}>
               <div className="min-w-0">
-                <p className="text-[14px] font-semibold truncate">
-                  {r.itemName} <span className="font-mono text-[11px] text-muted-foreground">({r.parentItemCode})</span>
+                <p className="text-body font-semibold truncate">
+                  {r.itemName} <span className="font-mono text-caption2 text-muted-foreground">({r.parentItemCode})</span>
                 </p>
-                <p className="text-[12.5px] text-muted-foreground truncate">
+                <p className="text-caption text-muted-foreground truncate">
                   {colis(r.parentQty)} colis = {r.components.map((c) => `${colis(c.qty)} ${uniteLigne(c, c.qty)} ${c.familyLabel}`).join(" + ") || "—"}
                 </p>
               </div>
@@ -227,7 +230,7 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
                 <Button variant="ghost" size="icon-sm" aria-label={`Supprimer ${r.parentItemCode}`}
-                  onClick={() => remove(r.parentItemCode)}>
+                  onClick={() => setConfirmDel({ code: r.parentItemCode, name: r.itemName })}>
                   <Trash2 className="h-3.5 w-3.5 text-rose-500" />
                 </Button>
               </div>
@@ -239,22 +242,22 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
       {/* ── Nouveau / édition ── */}
       {!parent ? (
         <div className="space-y-1.5">
-          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">
+          <label className="text-caption2 uppercase tracking-wide text-muted-foreground font-semibold">
             Nouvelle recette — produit fini fabriqué
           </label>
           <ProductPicker placeholder="ex. DECO, plateau, mélange…" onPick={(p) => openRecipe(p.itemCode, p.itemName)} />
         </div>
       ) : loading ? (
-        <p className="text-[13px] italic text-muted-foreground">Chargement de la recette…</p>
+        <p className="text-body italic text-muted-foreground">Chargement de la recette…</p>
       ) : (
         <div className="space-y-5 rounded-lg border border-border bg-card/40 p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-[15px] font-semibold">
-                {parent.itemName} <span className="font-mono text-[12px] text-muted-foreground">({parent.itemCode})</span>
+              <p className="text-callout font-semibold">
+                {parent.itemName} <span className="font-mono text-caption text-muted-foreground">({parent.itemCode})</span>
               </p>
               {sentence && (
-                <p className="text-[13px] text-violet-600 dark:text-violet-300 font-medium mt-1">{sentence}</p>
+                <p className="text-body text-violet-600 dark:text-violet-300 font-medium mt-1">{sentence}</p>
               )}
             </div>
             <Button variant="ghost" size="icon-sm" onClick={closeEditor} aria-label="Fermer">
@@ -264,17 +267,17 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
 
           {/* Ratio tour */}
           <div className="flex items-center gap-3">
-            <label className="text-[12px] font-semibold text-foreground whitespace-nowrap">
+            <label className="text-caption font-semibold text-foreground whitespace-nowrap">
               1 tour de recette produit
             </label>
             <NumberInput value={parentQty} onValueChange={(n) => setParentQty(n ?? 1)} min={1} step={1}
-              className="w-24 text-right text-[15px] font-semibold" />
-            <span className="text-[12px] text-muted-foreground">colis de {parent.itemCode}</span>
+              className="w-24 text-right text-callout font-semibold" />
+            <span className="text-caption text-muted-foreground">colis de {parent.itemCode}</span>
           </div>
 
           {/* Familles — chips cliquables */}
           <div className="space-y-2">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">
+            <p className="text-caption2 uppercase tracking-wide text-muted-foreground font-semibold">
               Composants — clique une famille pour l&apos;ajouter
             </p>
             <div className="flex flex-wrap gap-1.5">
@@ -283,7 +286,7 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
                 return (
                   <button key={f.familyKey} type="button" onClick={() => addFamily(f)}
                     disabled={inRecipe}
-                    className={`h-8 px-3 rounded-full border text-[13px] font-medium transition-colors ${
+                    className={`h-8 px-3 rounded-full border text-body font-medium transition-colors ${
                       inRecipe
                         ? "border-violet-400/60 bg-violet-500/15 text-violet-600 dark:text-violet-300 cursor-default"
                         : "border-border bg-card hover:bg-secondary/60"
@@ -294,18 +297,18 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
               })}
               {otherFamilies.length > 0 && (
                 <button type="button" onClick={() => setShowAllFamilies((v) => !v)}
-                  className="h-8 px-3 rounded-full border border-dashed border-border text-[12px] text-muted-foreground hover:bg-secondary/60 transition-colors">
+                  className="h-8 px-3 rounded-full border border-dashed border-border text-caption text-muted-foreground hover:bg-secondary/60 transition-colors">
                   {showAllFamilies ? "Réduire" : `Toutes les familles (${otherFamilies.length})`}
                 </button>
               )}
             </div>
 
             {components.length === 0 ? (
-              <p className="text-[12.5px] italic text-muted-foreground py-1">Ajoute au moins une famille.</p>
+              <p className="text-caption italic text-muted-foreground py-1">Ajoute au moins une famille.</p>
             ) : (
               <div className="rounded-lg border border-border overflow-x-auto">
-                <table className="w-full text-[13.5px]">
-                  <thead className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+                <table className="w-full text-body">
+                  <thead className="bg-secondary/40 text-caption2 uppercase tracking-wide text-muted-foreground">
                     <tr>
                       <th className="text-left px-3 py-2 font-semibold">Famille</th>
                       <th className="text-right px-3 py-2 font-semibold w-32">Quantité par tour</th>
@@ -325,14 +328,15 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
                             className="text-right h-9" />
                         </td>
                         <td className="px-3 py-2">
-                          <select
+                          <SegmentedControl<ModeQuantite>
                             value={l.mode}
-                            onChange={(e) => setComponents((c) => c.map((x, k) => k === i ? { ...x, mode: e.target.value as ModeQuantite } : x))}
+                            onChange={(mode) => setComponents((c) => c.map((x, k) => k === i ? { ...x, mode } : x))}
                             aria-label={`Unité pour ${l.familyLabel}`}
-                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-[13px]">
-                            <option value="unite">{libelleUnite(uniteBase({ familyKey: l.familyKey }), 2)} (unité)</option>
-                            <option value="colis">colis</option>
-                          </select>
+                            options={[
+                              { value: "unite", label: libelleUnite(uniteBase({ familyKey: l.familyKey }), 2) },
+                              { value: "colis", label: "colis" },
+                            ]}
+                          />
                         </td>
                         <td className="px-2 py-2 text-right">
                           <Button variant="ghost" size="icon-sm" aria-label="Supprimer"
@@ -351,7 +355,7 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
           {/* Lignes de coût (marge) */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-[12px] font-semibold text-foreground">
+              <div className="flex items-center gap-2 text-caption font-semibold text-foreground">
                 <Euro className="h-3.5 w-3.5 text-muted-foreground" /> Coûts par colis fini (marge — hors stock)
               </div>
               <Button variant="ghost" size="sm" onClick={() => setCosts((c) => [...c, { label: "", costPerColis: 0 }])}>
@@ -359,12 +363,12 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
               </Button>
             </div>
             {costs.length === 0 ? (
-              <p className="text-[12.5px] italic text-muted-foreground py-1">
+              <p className="text-caption italic text-muted-foreground py-1">
                 Aucun coût. Ajoute main d&apos;œuvre, emballage, carton… (€ par colis fini).
               </p>
             ) : (
               <div className="rounded-lg border border-border overflow-x-auto">
-                <table className="w-full text-[13.5px]">
+                <table className="w-full text-body">
                   <tbody>
                     {costs.map((c, i) => (
                       <tr key={i} className={i > 0 ? "border-t border-border" : ""}>
@@ -403,6 +407,18 @@ export function RecettesPanel({ onRecipesChanged }: { onRecipesChanged: () => vo
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmDel != null}
+        onOpenChange={(o) => { if (!o) setConfirmDel(null); }}
+        title="Supprimer la recette ?"
+        description={confirmDel
+          ? `La recette de « ${confirmDel.name} » (${confirmDel.code}) sera définitivement supprimée.`
+          : undefined}
+        confirmLabel="Supprimer"
+        tone="destructive"
+        onConfirm={async () => { if (confirmDel) await remove(confirmDel.code); }}
+      />
     </SurfaceCard>
   );
 }

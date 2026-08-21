@@ -19,7 +19,8 @@ import { AnimatedNumber } from "@/components/ui/animated-number";
 import { formatRelative } from "@/lib/utils";
 import { convertStockDisplay, type StockDisplayUnit } from "@/lib/gervifrais-calc";
 import { designationProduit } from "@/lib/produit-designation";
-import { DesignationChips, Chip } from "@/components/entrees/DesignationChips";
+import { DesignationChips } from "@/components/entrees/DesignationChips";
+import { DesignationStrong, DesignationMuted } from "@/components/livraisons/ArticleDesignation";
 
 interface StockEntry { inStock: number; committed: number; ordered: number; available: number; }
 interface Product {
@@ -104,9 +105,10 @@ export function ProductsTable() {
   const [batches, setBatches] = useState<Record<string, Batch[] | "loading">>({});
   // Groupes repliés sur la liste mobile (style Écran 2 — sections par famille).
   const [closedGroups, setClosedGroups] = useState<Set<string>>(new Set());
-  // Jours de livraison des commandes fournisseurs ouvertes, par article (survol
-  // de la colonne « Commande fournisseur »). itemCode → "24.06 (480) · 26.06 (120)".
-  const [poDuesByItem, setPoDuesByItem] = useState<Record<string, string>>({});
+  // Jours de livraison des commandes fournisseurs ouvertes, par article. Déplié
+  // au TAP sur la quantité « Commande fournisseur » (mini-liste). itemCode →
+  // [{ due: "24.06", qty: 480 }, …].
+  const [poDuesByItem, setPoDuesByItem] = useState<Record<string, { due: string; qty: number }[]>>({});
 
   const toggleExpand = useCallback(async (productId: string) => {
     if (expandedId === productId) { setExpandedId(null); return; }
@@ -177,15 +179,14 @@ export function ProductsTable() {
           (byItem[l.itemCode] ??= []).push({ due, qty });
         }
       }
-      const out: Record<string, string> = {};
+      const out: Record<string, { due: string; qty: number }[]> = {};
       for (const [code, arr] of Object.entries(byItem)) {
         // 1 ligne par jour de livraison (agrégé), trié par date.
         const perDay = new Map<string, number>();
         for (const { due, qty } of arr) perDay.set(due, (perDay.get(due) ?? 0) + qty);
         out[code] = Array.from(perDay.entries())
           .sort((a, b) => a[0].localeCompare(b[0]))
-          .map(([due, qty]) => `${due} (${Math.round(qty * 10) / 10})`)
-          .join(" · ");
+          .map(([due, qty]) => ({ due, qty: Math.round(qty * 10) / 10 }));
       }
       setPoDuesByItem(out);
     } catch { /* infobulle optionnelle */ }
@@ -267,57 +268,6 @@ export function ProductsTable() {
 
   return (
     <div className="space-y-4">
-      {/* ── Sync status bar (masquée sur mobile : bruit technique) ── */}
-      <div className="hidden md:flex bg-card border border-border border-l-4 border-l-brand-500 rounded-xl p-4 flex-wrap items-center gap-4">
-        <div className="flex items-center gap-2 text-[12px]">
-          <Package className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-foreground/80">
-            <span className="font-semibold text-foreground tnum">
-              {last?.totalProducts != null ? <AnimatedNumber value={last.totalProducts} /> : "—"}
-            </span> produits en base
-            {last?.productsWithStock != null && (
-              <> · <span className="font-semibold text-emerald-600 dark:text-emerald-400 tnum">
-                <AnimatedNumber value={last.productsWithStock} />
-              </span> avec stock</>
-            )}
-          </span>
-        </div>
-        <span className="opacity-30">·</span>
-        <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
-          <RefreshCw className="h-3 w-3" />
-          {last?.last ? (
-            <span>
-              Dernière synchro :{" "}
-              <span className="text-foreground font-medium">{formatRelative(last.last.finishedAt ?? last.last.startedAt)}</span>
-              {last.last.durationMs && <> en {(last.last.durationMs / 1000).toFixed(1)}s</>}
-              {last.last.status === "error" && (
-                <span className="ml-2 inline-flex items-center gap-1 text-rose-600">
-                  <AlertTriangle className="h-3 w-3" /> erreur
-                </span>
-              )}
-              {last.last.status === "success" && (
-                <span className="ml-2 inline-flex items-center gap-1 text-emerald-600">
-                  <Check className="h-3 w-3" /> ok
-                </span>
-              )}
-            </span>
-          ) : (
-            <span>Jamais synchronisé</span>
-          )}
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-[10.5px] text-muted-foreground italic">
-            auto toutes les 30 s
-          </span>
-          <Button onClick={sync} disabled={syncing} size="sm" className="gap-1.5">
-            {syncing
-              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              : <RefreshCw className="h-3.5 w-3.5" />}
-            {syncing ? "Synchro…" : "Rafraîchir maintenant"}
-          </Button>
-        </div>
-      </div>
-
       {/* ── Toolbar ── */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative w-full sm:flex-1 sm:max-w-md">
@@ -339,7 +289,7 @@ export function ProductsTable() {
           <span className={`h-4 w-4 rounded border flex items-center justify-center transition-all ${
             inStockOnly
               ? "bg-brand-600 border-brand-600"
-              : "bg-card border-slate-300 dark:border-slate-600"
+              : "bg-card border-border"
           }`}>
             {inStockOnly && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
           </span>
@@ -550,7 +500,11 @@ export function ProductsTable() {
                                   <DesignationChips marque={dz.marque} condt={dz.condt} calibre={p.uCalibre} variete={dz.variete} pays={dz.pays} size="md" className="mt-1.5" />
                                   <span className="flex items-baseline gap-2 text-[11px] mt-1 min-w-0">
                                     <span className="font-mono text-muted-foreground/60 truncate">{p.itemCode}</span>
-                                    {attendu && <span className="text-sky-600 dark:text-sky-400 shrink-0 font-medium">{attendu}</span>}
+                                    {attendu && (
+                                      <PoDuesMenu dues={poDuesByItem[p.itemCode]} align="start">
+                                        <span className="text-sky-600 dark:text-sky-400 shrink-0 font-medium">{attendu}</span>
+                                      </PoDuesMenu>
+                                    )}
                                   </span>
                                 </span>
                                 {p.manageBatch && (
@@ -579,36 +533,31 @@ export function ProductsTable() {
         <div className="max-h-[68vh] overflow-y-auto">
         <table className="w-full text-[12.5px]">
           <thead className="sticky top-0 z-10">
-            <tr className="bg-slate-50 dark:bg-slate-800 border-b border-border">
-              <th className="w-8 px-2 py-3 bg-slate-50 dark:bg-slate-800"></th>
+            <tr className="border-b border-border">
+              <th className="w-8 px-2 py-3 bg-secondary"></th>
               {/* Quantités à GAUCHE : stock dispo + en achat (EM) */}
               <SortTh sortKey="qty" sort={sort} onSort={toggleSort} align="right">
                 Qté stock
                 <InfoTip label="Quantité en stock" content="Somme des dispos sur 000 + 01 + R1 (dispo = stock − réservé)." side="bottom" iconSize={10} />
               </SortTh>
-              <th className="text-right px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground bg-slate-50 dark:bg-slate-800">
+              <th className="text-right px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground bg-secondary">
                 <div className="inline-flex items-center gap-1 justify-end">Commande fournisseur
                   <InfoTip label="Commande fournisseur" content="Quantité en commande fournisseur (en attente). Dès la réception (entrée marchandise), elle passe en stock." side="bottom" iconSize={10} />
                 </div>
               </th>
-              <SortTh sortKey="code" sort={sort} onSort={toggleSort}>Code Article</SortTh>
-              <SortTh sortKey="fruit" sort={sort} onSort={toggleSort}>Fruit</SortTh>
-              <SortTh sortKey="marque" sort={sort} onSort={toggleSort}>Marque</SortTh>
-              <SortTh sortKey="condt" sort={sort} onSort={toggleSort}>Condt</SortTh>
-              <SortTh sortKey="variete" sort={sort} onSort={toggleSort}>Variété</SortTh>
-              <SortTh sortKey="pays" sort={sort} onSort={toggleSort}>Pays</SortTh>
+              <SortTh sortKey="fruit" sort={sort} onSort={toggleSort}>Article</SortTh>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={9} className="h-32 text-center">
+                <td colSpan={4} className="h-32 text-center">
                   <Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
                 </td>
               </tr>
             ) : !data?.products.length ? (
               <tr>
-                <td colSpan={9} className="h-32 text-center text-muted-foreground">
+                <td colSpan={4} className="h-32 text-center text-muted-foreground">
                   {last?.totalProducts === 0
                     ? <>Aucun produit en base — clique sur <b>Rafraîchir maintenant</b> pour lancer le premier sync.</>
                     : "Aucun produit ne correspond aux filtres."}
@@ -620,6 +569,8 @@ export function ProductsTable() {
                 // Surcharge d'unité d'affichage choisie pour le groupe (sinon auto).
                 const unit = (p.itemGroup != null ? groupUnits[String(p.itemGroup)] : undefined) ?? null;
                 const dz = designationProduit({ itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque, uCondi: p.uCondi, frgnName: p.frgnName });
+                // Désignation forte (marque/calibre) + muted (condt/variété/pays).
+                const desig = { marque: dz.marque, condt: dz.condt, calibre: p.uCalibre, variete: dz.variete, pays: dz.pays };
                 // Quantités cumulées sur les 3 entrepôts synchronisés.
                 const totalAvailable = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.available ?? 0), 0);
                 const totalOrdered = ["000", "01", "R1"].reduce((s, w) => s + (p.stockByWarehouse[w]?.ordered ?? 0), 0);
@@ -657,32 +608,38 @@ export function ProductsTable() {
                         <span className="text-muted-foreground/40">0</span>
                       )}
                     </td>
-                    {/* Commande fournisseur attendue — survol = jour(s) de livraison */}
-                    <td
-                      className={`px-3 py-2.5 text-right tnum text-sky-600 dark:text-sky-400 ${poDuesByItem[p.itemCode] ? "cursor-help" : ""}`}
-                      title={poDuesByItem[p.itemCode] ? `Livraison(s) : ${poDuesByItem[p.itemCode]}` : undefined}
-                    >
+                    {/* Commande fournisseur attendue — tap = jour(s) de livraison */}
+                    <td className="px-3 py-2.5 text-right tnum text-sky-600 dark:text-sky-400">
                       {orderD.qty > 0 ? (
-                        <span className={poDuesByItem[p.itemCode] ? "underline decoration-dotted decoration-sky-400/60 underline-offset-2" : ""}>
-                          {fmtQty(orderD.qty, orderD.whole)}
-                          <span className="ml-1 text-[10px] text-muted-foreground/70 font-normal">{orderD.label}</span>
-                        </span>
+                        <PoDuesMenu dues={poDuesByItem[p.itemCode]} align="end">
+                          <span>
+                            {fmtQty(orderD.qty, orderD.whole)}
+                            <span className="ml-1 text-[10px] text-muted-foreground/70 font-normal">{orderD.label}</span>
+                          </span>
+                        </PoDuesMenu>
                       ) : (
                         <span className="text-muted-foreground/30">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-[11.5px] font-semibold text-foreground">{p.itemCode}</td>
-                    <td className="px-3 py-2.5 text-foreground/90">{dz.fruit}</td>
-                    <td className="px-3 py-2.5"><Chip kind="marque">{dz.marque}</Chip></td>
-                    <td className="px-3 py-2.5"><Chip kind="condt">{dz.condt}</Chip></td>
-                    <td className="px-3 py-2.5"><Chip kind="variete">{dz.variete}</Chip></td>
-                    <td className="px-3 py-2.5"><Chip kind="pays">{dz.pays}</Chip></td>
+                    {/* Ligne unique « Article » : nom + désignation (marque/calibre en
+                        avant, reste muted) + code en sous-ligne. */}
+                    <td className="px-4 py-2.5">
+                      <div className="min-w-0">
+                        <div className="truncate text-body">
+                          <span className="font-semibold text-foreground">{dz.fruit}</span>
+                          {" "}
+                          <DesignationStrong l={desig} />
+                        </div>
+                        <DesignationMuted l={desig} className="text-caption" />
+                        <span className="block font-mono text-caption2 text-muted-foreground/60">{p.itemCode}</span>
+                      </div>
+                    </td>
                   </tr>,
                 ];
                 if (isExpanded) {
                   rows.push(
                     <tr key={`${p.id}-batches`}>
-                      <td colSpan={9} className="bg-secondary/30 px-6 py-4 border-b border-border/40">
+                      <td colSpan={4} className="bg-secondary/30 px-6 py-4 border-b border-border/40">
                         <BatchList batches={batches[p.id]} product={p} />
                       </td>
                     </tr>,
@@ -710,6 +667,35 @@ export function ProductsTable() {
           </div>
         </div>
       )}
+
+      {/* ── Ligne de synchro (discrète, sous le tableau) ── */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border pt-3 text-caption text-muted-foreground">
+        <Package className="h-3.5 w-3.5 shrink-0" />
+        <span className="tnum">
+          <span className="font-medium text-foreground">
+            {last?.totalProducts != null ? <AnimatedNumber value={last.totalProducts} /> : "—"}
+          </span> produits
+          {last?.productsWithStock != null && (
+            <> · <span className="font-medium text-success"><AnimatedNumber value={last.productsWithStock} /></span> avec stock</>
+          )}
+        </span>
+        {last?.last && (
+          <span className="inline-flex items-center gap-1">
+            <span className="text-border">·</span>
+            synchro <span className="text-foreground/80">{formatRelative(last.last.finishedAt ?? last.last.startedAt)}</span>
+            {last.last.durationMs != null && <> en {(last.last.durationMs / 1000).toFixed(1)}s</>}
+            {last.last.status === "error" && (
+              <span className="inline-flex items-center gap-1 text-destructive"><AlertTriangle className="h-3 w-3" /> erreur</span>
+            )}
+          </span>
+        )}
+        <span className="text-border">·</span>
+        <span>auto 30 s</span>
+        <Button onClick={sync} disabled={syncing} size="sm" variant="outline" className="ml-auto gap-1.5">
+          {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          {syncing ? "Synchro…" : "Rafraîchir"}
+        </Button>
+      </div>
 
       {unitModalOpen && (
         <StockUnitModal
@@ -830,7 +816,7 @@ function BatchList({
       </table>
       {batches.some((b) => b.purchasePrice == null) && (
         <p className="text-[10.5px] italic text-muted-foreground mt-2">
-          ℹ️ Les prix d&apos;achat sont enrichis depuis les bons de réception SAP (BR) — peut être absent si la jonction n&apos;est pas trouvée.
+          Les prix d&apos;achat sont enrichis depuis les bons de réception SAP (BR) — peut être absent si la jonction n&apos;est pas trouvée.
         </p>
       )}
     </div>
@@ -1004,9 +990,49 @@ function StockUnitModal({
   return createPortal(modal, document.body);
 }
 
+/** Mini-liste des jours de livraison des commandes fournisseurs OUVERTES,
+ *  dépliée au TAP (tablette) sur la quantité « en achat ». Sans données, rend
+ *  simplement les enfants. Le déclencheur est un <span> (imbriquable dans une
+ *  rangée cliquable) qui stoppe la propagation pour ne pas déclencher la rangée. */
+function PoDuesMenu({
+  dues, align = "end", children,
+}: {
+  dues?: { due: string; qty: number }[];
+  align?: "start" | "end";
+  children: React.ReactNode;
+}) {
+  if (!dues || dues.length === 0) return <>{children}</>;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(e) => e.stopPropagation()}
+          className="cursor-pointer underline decoration-dotted decoration-sky-400/60 underline-offset-2"
+        >
+          {children}
+        </span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align={align} onClick={(e) => e.stopPropagation()} className="min-w-[190px]">
+        <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground">
+          Livraisons prévues
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {dues.map((d, i) => (
+          <div key={i} className="flex items-center justify-between gap-6 px-2 py-1 text-[12.5px]">
+            <span className="tnum text-foreground">{d.due}</span>
+            <span className="tnum text-sky-600 dark:text-sky-400">+{d.qty}</span>
+          </div>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 /** En-tête de colonne TRIABLE (Stock). Clic → asc / desc / défaut. En-tête figé
  *  (sticky) : on répète le fond pour qu'il masque les lignes au défilement. */
-function SortTh({
+export function SortTh({
   sortKey, sort, onSort, align = "left", children,
 }: {
   sortKey: string;
@@ -1017,7 +1043,7 @@ function SortTh({
 }) {
   const active = sort.key === sortKey;
   return (
-    <th className={`px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground bg-slate-50 dark:bg-slate-800 ${align === "right" ? "text-right" : "text-left"}`}>
+    <th className={`px-3 py-3 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground bg-secondary ${align === "right" ? "text-right" : "text-left"}`}>
       <button
         type="button"
         onClick={() => onSort(sortKey)}

@@ -14,6 +14,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { EcartBadge } from "@/components/ui/ecart-badge";
 import { GuidedCounter } from "./GuidedCounter";
 import { PhotoStep } from "./PhotoStep";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
@@ -729,8 +731,20 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
       {/* Aperçu + confirmation de régularisation SAP */}
       <AnimatePresence>{adjustFor && renderAdjustModal()}</AnimatePresence>
 
-      {/* Confirmation « Marquer revu » / « Rouvrir » */}
-      <AnimatePresence>{confirmPatch && renderConfirmPatchModal()}</AnimatePresence>
+      {/* Confirmation « Marquer revu » / « Rouvrir » (ConfirmDialog partagé) */}
+      <ConfirmDialog
+        open={confirmPatch != null}
+        onOpenChange={(o) => { if (!o && !confirmingPatch) setConfirmPatch(null); }}
+        loading={confirmingPatch}
+        title={confirmPatch?.action === "review" ? "Marquer l'inventaire comme revu ?" : "Rouvrir l'inventaire ?"}
+        description={confirmPatch
+          ? (confirmPatch.action === "review"
+              ? `L'inventaire du ${fmtDate(confirmPatch.session.createdAt)} sera validé par la direction. Tu pourras encore le rouvrir ensuite si besoin.`
+              : `L'inventaire du ${fmtDate(confirmPatch.session.createdAt)} repassera en « à revoir » et pourra être recorrigé.`)
+          : undefined}
+        confirmLabel={confirmPatch?.action === "review" ? "Oui, marquer revu" : "Oui, rouvrir"}
+        onConfirm={runConfirmPatch}
+      />
     </div>
   );
 
@@ -837,59 +851,6 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
             >
               {adjusting ? <Loader2 className="!size-4 animate-spin" /> : <Boxes className="!size-4" />}
               Confirmer l&apos;ajustement SAP
-            </Button>
-          </div>
-        </motion.div>
-      </motion.div>
-    );
-  }
-
-  /* ---------------- Modale : confirmation « revu » / « rouvrir » ---------------- */
-  function renderConfirmPatchModal() {
-    if (!confirmPatch) return null;
-    const isReview = confirmPatch.action === "review";
-    return (
-      <motion.div
-        className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4"
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        onClick={() => !confirmingPatch && setConfirmPatch(null)}
-      >
-        <motion.div
-          className="w-full max-w-sm overflow-hidden rounded-t-2xl bg-card shadow-xl sm:rounded-2xl"
-          initial={{ y: 24, opacity: 0.6 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 24, opacity: 0 }}
-          transition={{ duration: 0.18 }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-start gap-3 p-5">
-            <div
-              className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[20px] ${isReview ? "bg-emerald-500/15" : "bg-amber-500/15"}`}
-              aria-hidden
-            >
-              {isReview ? "✅" : "🔄"}
-            </div>
-            <div className="min-w-0 flex-1">
-              <h3 className="text-[15px] font-bold text-foreground">
-                {isReview ? "Marquer l’inventaire comme revu ?" : "Rouvrir l’inventaire ?"}
-              </h3>
-              <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">
-                {isReview
-                  ? `L’inventaire du ${fmtDate(confirmPatch.session.createdAt)} sera validé par la direction. Tu pourras encore le rouvrir ensuite si besoin.`
-                  : `L’inventaire du ${fmtDate(confirmPatch.session.createdAt)} repassera en « à revoir » et pourra être recorrigé.`}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 border-t border-border p-3">
-            <Button variant="ghost" className="flex-1" onClick={() => setConfirmPatch(null)} disabled={confirmingPatch}>
-              Annuler
-            </Button>
-            <Button
-              variant={isReview ? "success" : "default"}
-              className="flex-1"
-              onClick={runConfirmPatch}
-              disabled={confirmingPatch}
-            >
-              {confirmingPatch ? <Loader2 className="!size-4 animate-spin" /> : <span aria-hidden>{isReview ? "✅" : "🔄"}</span>}
-              {isReview ? "Oui, marquer revu" : "Oui, rouvrir"}
             </Button>
           </div>
         </motion.div>
@@ -1459,8 +1420,9 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                       <div className="text-[11px] text-sky-600/90 dark:text-sky-400/90">Dernière correction par {displayPersonName(s.updatedBy)}</div>
                     )}
                     {s.adjustment && (sessionLocked(s) || s.adjustment.status === "error") && (
-                      <div className={`text-[11px] ${s.adjustment.status === "error" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600/90 dark:text-emerald-400/90"}`}>
-                        {s.adjustment.status === "error" ? (sessionLocked(s) ? "⚠ Régularisation partielle en erreur" : "⚠ Régularisation échouée (rien posté — à reprendre)") : "Stock régularisé"} par {displayPersonName(s.adjustment.by)}
+                      <div className={`flex items-center gap-1 text-[11px] ${s.adjustment.status === "error" ? "text-rose-600 dark:text-rose-400" : "text-emerald-600/90 dark:text-emerald-400/90"}`}>
+                        {s.adjustment.status === "error" && <AlertTriangle className="h-3 w-3 shrink-0" />}
+                        {s.adjustment.status === "error" ? (sessionLocked(s) ? "Régularisation partielle en erreur" : "Régularisation échouée (rien posté — à reprendre)") : "Stock régularisé"} par {displayPersonName(s.adjustment.by)}
                         {s.adjustment.sapExitDocNum ? ` · sortie # ${s.adjustment.sapExitDocNum}` : ""}
                         {s.adjustment.sapEntryDocNum ? ` · entrée # ${s.adjustment.sapEntryDocNum}` : ""}
                         {` · ${s.adjustment.nbSorties}↓/${s.adjustment.nbEntrees}↑`}
@@ -1487,21 +1449,21 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
                         {s.nbEcarts > 0 && (
                           <Button size="sm" className="w-full sm:w-auto" onClick={() => openAdjust(s)}>
-                            📦 Valider &amp; ajuster le stock
+                            <Boxes className="!size-3.5" /> Valider &amp; ajuster le stock
                           </Button>
                         )}
                         <div className="flex gap-2">
                           {s.status === "submitted" ? (
                             <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => askPatch(s, "review")}>
-                              ✅ Marquer revu
+                              <CheckCircle2 className="!size-3.5" /> Marquer revu
                             </Button>
                           ) : (
                             <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => askPatch(s, "reopen")}>
-                              🔄 Rouvrir
+                              <RotateCcw className="!size-3.5" /> Rouvrir
                             </Button>
                           )}
                           <Button size="sm" variant="ghost" className="flex-1 sm:flex-none" disabled={loadingEdit === s.id} onClick={() => startEdit(s.id)}>
-                            {loadingEdit === s.id ? <Loader2 className="!size-3.5 animate-spin" /> : "✏️"} Corriger
+                            {loadingEdit === s.id ? <Loader2 className="!size-3.5 animate-spin" /> : <Pencil className="!size-3.5" />} Corriger
                           </Button>
                         </div>
                       </div>

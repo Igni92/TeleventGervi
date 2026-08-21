@@ -57,7 +57,7 @@ export function RunsHistory({ version }: { version: number }) {
       }
       className="p-5">
       {runs.length === 0 ? (
-        <p className="text-[13px] italic text-muted-foreground">
+        <p className="text-body italic text-muted-foreground">
           {loading ? "Chargement…" : "Aucune fabrication enregistrée pour l'instant."}
         </p>
       ) : (
@@ -66,34 +66,34 @@ export function RunsHistory({ version }: { version: number }) {
             <div key={r.id} className="rounded-lg border border-border bg-card/50 px-3 py-2.5">
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`inline-flex h-5 items-center px-1.5 rounded text-[11px] font-semibold ${STATUS_STYLE[r.status] ?? STATUS_STYLE.pending}`}>
+                  <span className={`inline-flex h-5 items-center px-1.5 rounded text-caption2 font-semibold ${STATUS_STYLE[r.status] ?? STATUS_STYLE.pending}`}>
                     {STATUS_LABEL[r.status] ?? r.status}
                   </span>
-                  <span className="font-mono text-[12px] text-muted-foreground">{r.opCode ?? "—"}</span>
-                  <span className="text-[14px] font-semibold">
+                  <span className="font-mono text-caption text-muted-foreground">{r.opCode ?? "—"}</span>
+                  <span className="text-body font-semibold">
                     {colis(r.parentColis)} colis {r.parentItemName ?? r.parentItemCode}
                   </span>
-                  <span className="font-mono text-[11px] text-muted-foreground">({r.parentItemCode} · entrée {r.warehouseCode})</span>
+                  <span className="font-mono text-caption2 text-muted-foreground">({r.parentItemCode} · entrée {r.warehouseCode})</span>
                 </div>
-                <div className="text-right text-[12.5px] text-muted-foreground">
+                <div className="text-right text-caption text-muted-foreground">
                   {new Date(r.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
                   {r.createdBy ? ` · ${r.createdBy}` : ""}
                 </div>
               </div>
-              <div className="mt-1.5 flex items-center gap-x-3 gap-y-1 flex-wrap text-[12.5px]">
+              <div className="mt-1.5 flex items-center gap-x-3 gap-y-1 flex-wrap text-caption">
                 {r.lines.map((l, i) => (
                   <span key={i} className="inline-flex items-center gap-1.5">
                     <span className="text-muted-foreground">{l.familyLabel ?? l.family}</span>
-                    <span className="font-mono text-[11px]">{l.itemCode}</span>
+                    <span className="font-mono text-caption2">{l.itemCode}</span>
                     <span className="font-semibold tnum">{colis(l.colisQty)} colis</span>
                     {l.warehouseCode && l.warehouseCode !== r.warehouseCode && (
-                      <span className="font-mono text-[11px] text-muted-foreground">de {l.warehouseCode}</span>
+                      <span className="font-mono text-caption2 text-muted-foreground">de {l.warehouseCode}</span>
                     )}
                     <LotBadge batchNumber={l.batchNumber} pending={l.batchNumber === "EM_PENDING"} />
                   </span>
                 ))}
               </div>
-              <div className="mt-1.5 flex items-center gap-3 flex-wrap text-[12.5px] text-muted-foreground">
+              <div className="mt-1.5 flex items-center gap-3 flex-wrap text-caption text-muted-foreground">
                 {r.totalCost != null && <span>Coût <b className="text-foreground">{eur(r.totalCost)}</b></span>}
                 {r.parentValue != null && r.totalCost != null && (
                   <span>Marge estimée{" "}

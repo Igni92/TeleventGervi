@@ -11,11 +11,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { FullscreenPanel } from "@/components/ui/fullscreen-panel";
+import { GroupedList, GroupedRow } from "@/components/ui/grouped-list";
+import { EmptyState } from "@/components/ui/empty-state";
 import { InfoHint } from "@/components/ui/info-hint";
 import { StatBlock } from "@/components/ui/stat-block";
 import { AnimatedNumber } from "@/components/ui/animated-number";
+import { cn } from "@/lib/utils";
 import { designationProduit } from "@/lib/produit-designation";
-import { fmtJourDate } from "@/lib/date-fr";
+import { fmtJourDate, jourCourtFR } from "@/lib/date-fr";
 import { heureFromDocRef, creatorFromDocRef } from "@/lib/docLabel";
 import { eur, eur0, fmtColis } from "@/lib/format";
 import { DesignationChips, Chip } from "./DesignationChips";
@@ -279,7 +282,7 @@ function useDlcMap(
  *  `restricted` = agréeur « pur » : aucun prix visible ni éditable, pas de retour
  *  fournisseur ni d'annulation — consultation seule (l'agréage se fait à la
  *  réception d'une commande fournisseur). */
-export function GoodsReceiptHistory({ restricted = false }: { restricted?: boolean }) {
+export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { restricted?: boolean; reloadSignal?: number }) {
   const [docs, setDocs] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
@@ -321,6 +324,8 @@ export function GoodsReceiptHistory({ restricted = false }: { restricted?: boole
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  // Rafraîchissement piloté par le parent (après création depuis la feuille).
+  useEffect(() => { if (reloadSignal) load(); }, [reloadSignal, load]);
 
   // DDM (fraîcheur) : un seul fetch groupé pour TOUS les lots chargés.
   const allBatches = useMemo(() => docs.map((d) => d.lot).filter(Boolean), [docs]);

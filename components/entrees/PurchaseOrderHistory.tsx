@@ -90,7 +90,7 @@ function DueBadge() {
  *  `restricted` = agréeur « pur » : ne voit AUCUN prix, ne peut ni modifier ni
  *  annuler la commande — seulement la consulter et la passer en entrée
  *  marchandise (« Réceptionner → EM »). */
-export function PurchaseOrderHistory({ restricted = false }: { restricted?: boolean }) {
+export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { restricted?: boolean; reloadSignal?: number }) {
   const [docs, setDocs] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
@@ -112,6 +112,8 @@ export function PurchaseOrderHistory({ restricted = false }: { restricted?: bool
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  // Rafraîchissement piloté par le parent (après création depuis la feuille).
+  useEffect(() => { if (reloadSignal) load(); }, [reloadSignal, load]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

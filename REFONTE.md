@@ -16,7 +16,7 @@
 | 2 | Livraisons (frustration n°1 mesurée) | ✅ committée (voir git log) |
 | 3 | Console + Écran 2 (1 779 clics morts mesurés) | ✅ committée (voir git log) |
 | 4 | Commerce : clients, fiche, prospection, encours, effectifs | ✅ committée (voir git log) |
-| 5 | Marchandise : entrées, CF, bons de commande, inventaire, fabrication, stock/articles | ⬜ à faire |
+| 5 | Marchandise : entrées, CF, bons de commande, inventaire, fabrication, stock/articles | ✅ committée (voir git log) |
 | 6 | Pilotage + RH + réglages + nettoyages finaux | ⬜ à faire |
 | — | Bascule en prod | ⬜ après validation utilisateur |
 

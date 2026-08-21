@@ -6,8 +6,11 @@ import { Loader2, Factory, CheckCircle2, TriangleAlert, ArrowRight } from "lucid
 import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import { SurfaceCard } from "@/components/ui/surface-card";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { libelleUnite, quantitesComposant, uniteBase, type ModeQuantite } from "@/lib/fabrication-optim";
-import { ChipMarque, ChipCondi, ChipPays, LotBadge, WAREHOUSES, type WarehouseCode, eur, colis, qtePhys } from "./ui";
+import { LotBadge, WAREHOUSES, type WarehouseCode, eur, colis, qtePhys } from "./ui";
 
 /**
  * Fabriquer — run de production v3 :
@@ -207,7 +210,7 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
   return (
     <SurfaceCard accent="brand" title="Fabriquer" icon={<Factory className="h-3.5 w-3.5" />} className="p-5">
       {lastResult && (
-        <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[13px] text-emerald-700 dark:text-emerald-300 mb-4">
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-body text-emerald-700 dark:text-emerald-300 mb-4">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           <span>{lastResult.opCode} · Sortie n° {lastResult.exit} · Entrée n° {lastResult.entry} · Coût {lastResult.cost.toFixed(2)} €</span>
         </div>
@@ -216,21 +219,21 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
       {/* ── 1. Recette + quantité + magasin d'entrée du produit fini ── */}
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="space-y-1.5">
-          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Produit à fabriquer</label>
-          <select
-            value={parentCode}
-            onChange={(e) => setParentCode(e.target.value)}
-            className="h-11 w-full rounded-md border border-input bg-background px-3 text-[14px]"
-          >
-            <option value="">— Choisir une recette —</option>
-            {recipes.map((r) => (
-              <option key={r.parentItemCode} value={r.parentItemCode}>
-                {r.itemName} ({r.parentItemCode})
-              </option>
-            ))}
-          </select>
+          <label className="text-caption2 uppercase tracking-wide text-muted-foreground font-semibold">Produit à fabriquer</label>
+          <Select value={parentCode} onValueChange={setParentCode}>
+            <SelectTrigger className="h-11 text-callout" aria-label="Produit à fabriquer">
+              <SelectValue placeholder="— Choisir une recette —" />
+            </SelectTrigger>
+            <SelectContent>
+              {recipes.map((r) => (
+                <SelectItem key={r.parentItemCode} value={r.parentItemCode}>
+                  {r.itemName} ({r.parentItemCode})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {recipe && (
-            <p className="text-[12px] text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               1 tour = <b>{colis(recipe.parentQty)} colis</b> ·{" "}
               {recipe.components.map((c) =>
                 `${colis(c.qty)} ${c.mode === "colis" ? "colis" : libelleUnite(uniteBase({ familyKey: c.familyKey }), c.qty)} ${c.familyLabel}`,
@@ -239,32 +242,32 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
           )}
         </div>
         <div className="space-y-1.5">
-          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Quantité à produire (colis)</label>
+          <label className="text-caption2 uppercase tracking-wide text-muted-foreground font-semibold">Quantité à produire (colis)</label>
           <NumberInput
             value={parentColis}
             onValueChange={(n) => setParentColis(n ?? 0)}
             min={parentQty} step={parentQty}
-            className="h-11 text-[16px] font-semibold text-right"
+            className="h-11 text-callout font-semibold text-right"
           />
           {recipe && !isMultiple && (
-            <p className="text-[12px] text-rose-500 font-medium">
+            <p className="text-caption text-rose-500 font-medium">
               Doit être un multiple de {colis(parentQty)} colis.
             </p>
           )}
           {recipe && isMultiple && tours > 0 && (
-            <p className="text-[12px] text-muted-foreground">= {colis(tours)} tour{tours > 1 ? "s" : ""} de recette</p>
+            <p className="text-caption text-muted-foreground">= {colis(tours)} tour{tours > 1 ? "s" : ""} de recette</p>
           )}
         </div>
         <div className="space-y-1.5">
-          <label className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Magasin d&apos;entrée (produit fini)</label>
-          <select
+          <label className="text-caption2 uppercase tracking-wide text-muted-foreground font-semibold">Magasin d&apos;entrée (produit fini)</label>
+          <SegmentedControl<WarehouseCode>
             value={entryWhs}
-            onChange={(e) => setEntryWhs(e.target.value as WarehouseCode)}
-            className="h-11 w-full rounded-md border border-input bg-background px-3 text-[14px]"
-          >
-            {WAREHOUSES.map((w) => <option key={w.code} value={w.code}>{w.label}</option>)}
-          </select>
-          <p className="text-[12px] text-muted-foreground">
+            onChange={setEntryWhs}
+            aria-label="Magasin d'entrée du produit fini"
+            className="h-11"
+            options={WAREHOUSES.map((w) => ({ value: w.code, label: w.label }))}
+          />
+          <p className="text-caption text-muted-foreground">
             Chaque composant sort de son propre magasin, choisi famille par famille.
           </p>
         </div>
@@ -272,13 +275,13 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
 
       {/* ── 2. Choix de l'article + magasin source par famille ── */}
       {parentCode && loadingOptions && (
-        <p className="text-[13px] italic text-muted-foreground mt-4 flex items-center gap-2">
+        <p className="text-body italic text-muted-foreground mt-4 flex items-center gap-2">
           <Loader2 className="h-4 w-4 animate-spin" /> Chargement des articles et des lots…
         </p>
       )}
       {options && !loadingOptions && (
         <div className="mt-5 space-y-4">
-          <label className="flex items-center gap-2 text-[12px] text-muted-foreground cursor-pointer select-none">
+          <label className="flex items-center gap-2 text-caption text-muted-foreground cursor-pointer select-none">
             <input
               type="checkbox"
               checked={showDecouvert}
@@ -304,39 +307,36 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
             return (
               <div key={f.familyKey} className="rounded-lg border border-border overflow-hidden">
                 <div className="px-3 py-2 bg-secondary/40 flex items-center justify-between gap-3 flex-wrap">
-                  <p className="text-[12px] uppercase tracking-wide font-semibold text-foreground">
+                  <p className="text-caption uppercase tracking-wide font-semibold text-foreground">
                     {f.familyLabel}
                     {needQty != null && (
-                      <span className="ml-2 normal-case tracking-normal font-bold text-[13px] text-brand-600 dark:text-brand-300">
+                      <span className="ml-2 normal-case tracking-normal font-bold text-body text-brand-600 dark:text-brand-300">
                         {qtePhys(needQty)} {uniteFamille(f, picked, needQty)}
                       </span>
                     )}
                     {needColis != null && f.mode === "unite" && (
-                      <span className="ml-1.5 normal-case tracking-normal text-[12px] text-muted-foreground">
+                      <span className="ml-1.5 normal-case tracking-normal text-caption text-muted-foreground">
                         = {colis(needColis)} colis
                       </span>
                     )}
                   </p>
                   <div className="flex items-center gap-2">
-                    <label className="text-[11px] text-muted-foreground whitespace-nowrap">Sortie du magasin</label>
-                    <select
+                    <label className="text-caption2 text-muted-foreground whitespace-nowrap">Sortie du magasin</label>
+                    <SegmentedControl<WarehouseCode>
                       value={famWhs}
-                      onChange={(e) => {
-                        const whs = e.target.value as WarehouseCode;
-                        setPicks((p) => pick ? { ...p, [f.familyKey]: { ...pick, whs } } : p);
-                      }}
+                      onChange={(whs) => setPicks((p) => pick ? { ...p, [f.familyKey]: { ...pick, whs } } : p)}
+                      size="sm"
                       aria-label={`Magasin source pour ${f.familyLabel}`}
-                      className="h-8 rounded-md border border-input bg-background px-2 text-[12.5px]"
-                    >
-                      {WAREHOUSES.map((w) => <option key={w.code} value={w.code}>{w.label}</option>)}
-                    </select>
-                    <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                      className="w-[220px]"
+                      options={WAREHOUSES.map((w) => ({ value: w.code, label: w.label }))}
+                    />
+                    <span className="text-caption2 text-muted-foreground whitespace-nowrap">
                       {visibleItems.length} article(s){hiddenCount > 0 ? ` · ${hiddenCount} à découvert` : ""}
                     </span>
                   </div>
                 </div>
                 {visibleItems.length === 0 ? (
-                  <p className="text-[13px] italic text-rose-500 px-3 py-3">
+                  <p className="text-body italic text-rose-500 px-3 py-3">
                     {f.items.length === 0
                       ? "Aucun article dans cette famille — impossible de fabriquer."
                       : "Aucun article en stock dans ce magasin — change de magasin ou coche « à découvert »."}
@@ -360,13 +360,11 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
                               }`} />
                             <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-1.5 flex-wrap">
-                                <span className="text-[14px] font-semibold truncate">{it.itemName}</span>
-                                <span className="font-mono text-[11px] text-muted-foreground">{it.itemCode}</span>
-                                {it.uMarque && <ChipMarque value={it.uMarque} />}
-                                {it.uCondi && <ChipCondi value={it.uCondi} />}
-                                {it.uPays && <ChipPays value={it.uPays} />}
+                                <span className="text-body font-semibold truncate">{it.itemName}</span>
+                                <span className="font-mono text-caption2 text-muted-foreground">{it.itemCode}</span>
+                                <DesignationChips marque={it.uMarque} condt={it.uCondi} pays={it.uPays} />
                               </span>
-                              <span className="mt-1 flex items-center gap-2 flex-wrap text-[12px]">
+                              <span className="mt-1 flex items-center gap-2 flex-wrap text-caption">
                                 <LotBadge batchNumber={lot.batchNumber} pending={lot.pending} />
                                 {lot.priceColis != null && (
                                   <span className="text-muted-foreground">
@@ -377,12 +375,12 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
                               </span>
                             </span>
                             <span className="shrink-0 text-right">
-                              <span className={`block text-[16px] font-bold tnum ${
+                              <span className={`block text-title3 font-bold tnum ${
                                 availHere > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500"
                               }`}>
                                 {colis(availHere)}
                               </span>
-                              <span className="block text-[10.5px] text-muted-foreground">
+                              <span className="block text-caption2 text-muted-foreground">
                                 colis dispo · {famWhs}
                               </span>
                             </span>
@@ -400,15 +398,15 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
           {recap && (
             <div className="rounded-lg border border-border overflow-x-auto">
               <div className="px-3 py-2 bg-secondary/40">
-                <p className="text-[12px] uppercase tracking-wide font-semibold text-foreground">
+                <p className="text-caption uppercase tracking-wide font-semibold text-foreground">
                   Récapitulatif — {colis(parentColis)} colis {options.parent.itemCode}
                   <span className="ml-1.5 normal-case tracking-normal text-muted-foreground font-medium">
                     (entrée magasin {entryWhs})
                   </span>
                 </p>
               </div>
-              <table className="w-full text-[13.5px]">
-                <thead className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              <table className="w-full text-body">
+                <thead className="text-caption2 uppercase tracking-wide text-muted-foreground">
                   <tr className="border-t border-border">
                     <th className="text-left px-3 py-2 font-semibold">Famille → article</th>
                     <th className="text-left px-3 py-2 font-semibold w-20">Magasin</th>
@@ -424,15 +422,15 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
                       <td className="px-3 py-2">
                         <span className="font-medium">{l.familyLabel}</span>
                         <span className="text-muted-foreground"> → </span>
-                        <span className="font-mono text-[12px]">{l.item.itemCode}</span>
+                        <span className="font-mono text-caption">{l.item.itemCode}</span>
                         {l.insufficient && (
-                          <span className="ml-2 inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                          <span className="ml-2 inline-flex items-center gap-1 text-caption2 text-amber-600 dark:text-amber-400 font-medium">
                             <TriangleAlert className="h-3 w-3" /> {colis(l.availColisHere)} colis dispo seulement
                           </span>
                         )}
                       </td>
                       <td className="px-3 py-2">
-                        <span className="inline-flex items-center gap-1 font-mono text-[12px]">
+                        <span className="inline-flex items-center gap-1 font-mono text-caption">
                           {l.whs} <ArrowRight className="h-3 w-3 text-muted-foreground" /> {entryWhs}
                         </span>
                       </td>
@@ -443,7 +441,7 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
                         {l.mode === "unite" ? (
                           <>
                             {qtePhys(l.pieceQty)} {uniteFamille(l, l.item, l.pieceQty)}
-                            <span className="block text-[11px] font-normal text-muted-foreground">= {colis(l.colisQty)} colis</span>
+                            <span className="block text-caption2 font-normal text-muted-foreground">= {colis(l.colisQty)} colis</span>
                           </>
                         ) : (
                           <>{colis(l.colisQty)} colis</>
@@ -459,14 +457,14 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
                   ))}
                   {options.recipe.costs.map((c) => (
                     <tr key={c.label} className="border-t border-border text-muted-foreground">
-                      <td className="px-3 py-2" colSpan={4}>{c.label} <span className="text-[11px]">({eur(c.costPerColis)}/colis fini)</span></td>
+                      <td className="px-3 py-2" colSpan={4}>{c.label} <span className="text-caption2">({eur(c.costPerColis)}/colis fini)</span></td>
                       <td className="px-3 py-2 text-right tnum">{eur(c.costPerColis)}</td>
                       <td className="px-3 py-2 text-right tnum">{eur(Math.round(c.costPerColis * parentColis * 100) / 100)}</td>
                     </tr>
                   ))}
                   <tr className="border-t-2 border-border bg-secondary/30">
                     <td colSpan={5} className="px-3 py-2 text-right font-semibold">Coût total</td>
-                    <td className="px-3 py-2 text-right tnum font-bold text-[15px]">{eur(recap.totalCost)}</td>
+                    <td className="px-3 py-2 text-right tnum font-bold text-callout">{eur(recap.totalCost)}</td>
                   </tr>
                   {recap.parentValue != null && (
                     <>
@@ -478,7 +476,7 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
                       </tr>
                       <tr className="border-t border-border">
                         <td colSpan={5} className="px-3 py-2 text-right font-semibold">Marge estimée</td>
-                        <td className={`px-3 py-2 text-right tnum font-bold text-[15px] ${
+                        <td className={`px-3 py-2 text-right tnum font-bold text-callout ${
                           (recap.margin ?? 0) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500"
                         }`}>
                           {eur(recap.margin!)}
@@ -491,7 +489,25 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-2 pt-1">
+          {/* Marge estimée en GROS chiffre, juste à gauche du bouton Lancer :
+              le repère de décision doit sauter aux yeux avant de valider. */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            {recap && recap.margin != null ? (
+              <div className="min-w-0">
+                <div className="text-caption2 uppercase tracking-wide text-muted-foreground font-semibold">Marge estimée</div>
+                <div className={`text-title1 font-bold leading-none tnum ${
+                  recap.margin >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500"
+                }`}>
+                  {eur(recap.margin)}
+                </div>
+                <div className="mt-1 text-caption text-muted-foreground tnum">
+                  Coût {eur(recap.totalCost)}
+                  {recap.parentValue != null ? ` · valeur ${eur(recap.parentValue)}` : ""}
+                </div>
+              </div>
+            ) : (
+              <span />
+            )}
             <Button onClick={submit} size="lg"
               disabled={submitting || !recap || !isMultiple || recap.lines.length === 0}>
               {submitting ? <Loader2 className="animate-spin" /> : <Factory />}

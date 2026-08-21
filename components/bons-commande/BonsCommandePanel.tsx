@@ -7,26 +7,40 @@
  * export) partent SANS lot auto : chaque ligne est en EM_PENDING. Ici on choisit,
  * par article, le lot (arrivage EM) réellement en stock → PATCH U_NoLot sur la
  * commande SAP. Quand toutes les lignes ont un lot, la commande sort de l'onglet.
+ *
+ * Offres client (devis, à passer en commande) et bons de commande (lots à
+ * affecter) vivent dans UNE seule liste, distingués par un champ « étape » :
+ * mêmes cartes, un seul panneau plein écran de détail.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { floatingPortalTarget } from "@/lib/floatingPortal";
 import { useRouter } from "next/navigation";
 import {
-  PackageCheck, ChevronDown, RefreshCw, Loader2, CheckCircle2, Sparkles,
-  CalendarDays, AlertTriangle, Grape, FileText, ArrowRightCircle, Clock, Trash2, Hash, Pencil, Star, Truck, Printer,
+  ChevronDown, ChevronRight, RefreshCw, Loader2, CheckCircle2, Sparkles,
+  CalendarDays, AlertTriangle, Grape, FileText, PackageCheck, ArrowRightCircle,
+  Clock, Trash2, Hash, Pencil, Star, Truck, Printer,
 } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { formatDeliveryDate } from "@/lib/livraison";
 import { printOrderRecap, type PrintLine, type PrintDoc } from "@/components/livraisons/printRecap";
 import { displayPersonName } from "@/lib/userNames";
 import { broadcastActiveClient } from "@/lib/consoleSync";
-import { DesignationChips } from "@/components/entrees/DesignationChips";
+import {
+  DesignationStrong, DesignationMuted,
+} from "@/components/livraisons/ArticleDesignation";
 import { eur } from "@/lib/format";
 import { FRUIT_FAMILIES } from "@/lib/familles";
 import { familyLotSentinel, familyOfLot } from "@/lib/gervifrais-calc";
-import { SEGMENT_BADGE } from "@/lib/segments";
+import { segmentBadgeClass } from "@/lib/segments";
 import { Button } from "@/components/ui/button";
+import { SurfaceCard } from "@/components/ui/surface-card";
+import { StatBlock } from "@/components/ui/stat-block";
+import { Banner } from "@/components/ui/banner";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FullscreenPanel } from "@/components/ui/fullscreen-panel";
 import { InfoHint } from "@/components/ui/info-hint";
 
@@ -69,6 +83,21 @@ interface OffreDoc {
 const AFFECT_LABEL: Record<string, string> = { TOUS: "Tous", EXPORT: "Export", GMS: "GMS", CHR: "CHR" };
 const PENDING = "EM_PENDING";
 
+/** Filtre de la liste, piloté par les deux KPI du pipeline. */
+type Filter = "all" | "offres" | "bons";
+
+/** Élément unifié de la liste : offre (à passer) ou bon (lots à affecter). */
+type Entry = { kind: "offre"; o: OffreDoc } | { kind: "bon"; d: BonDoc };
+
+/** Action de confirmation en attente (remplace window.confirm). */
+interface PendingConfirm {
+  title: React.ReactNode;
+  description?: React.ReactNode;
+  confirmLabel: React.ReactNode;
+  tone?: "default" | "destructive";
+  onConfirm: () => void | Promise<void>;
+}
+
 export function BonsCommandePanel() {
   const router = useRouter();
   const [docs, setDocs] = useState<BonDoc[] | null>(null);
@@ -77,15 +106,17 @@ export function BonsCommandePanel() {
   // Message d'échec du chargement (timeout SAP, erreur serveur) — affiché avec un
   // bouton de reprise, plutôt qu'un spinner qui tourne sans fin.
   const [loadError, setLoadError] = useState<string | null>(null);
-  // Détail = PLEIN ÉCRAN (plus d'accordéon inline) : un seul bon / une seule
-  // offre ouverte à la fois, dérivés de l'état (si le doc sort de la liste,
-  // le panneau se ferme tout seul).
-  const [openBonId, setOpenBonId] = useState<number | null>(null);
-  const [openOffreId, setOpenOffreId] = useState<number | null>(null);
+  // Filtre du pipeline : la case KPI cliquée restreint la liste.
+  const [filter, setFilter] = useState<Filter>("all");
+  // Détail = PLEIN ÉCRAN : une seule offre / un seul bon ouvert à la fois. L'état
+  // porte l'étape + l'identifiant ; si le doc quitte la liste, le panneau se ferme
+  // tout seul (le find renvoie null → open prop false).
+  const [open, setOpen] = useState<{ kind: "offre" | "bon"; docEntry: number } | null>(null);
   const [busyLine, setBusyLine] = useState<string | null>(null); // `${docEntry}:${itemCode}` ou `offre:${docEntry}:${itemCode}`
   const [convertingId, setConvertingId] = useState<number | null>(null); // offre en cours de passage
-  const [deletingId, setDeletingId] = useState<number | null>(null); // offre en cours de suppression
+  const [deletingId, setDeletingId] = useState<number | null>(null); // offre / bon en cours de suppression
   const [modifBusy, setModifBusy] = useState<number | null>(null); // docEntry en cours d'ouverture
+  const [confirmState, setConfirmState] = useState<PendingConfirm | null>(null);
 
   // « Modifier la commande » : ouvre le bon dans la console (Écran 2), pilotée par
   // le STOCK — on peut y changer les articles/quantités pour garantir des lots
@@ -265,7 +296,7 @@ export function BonsCommandePanel() {
       if (!r.ok || !j?.ok) { toast.error(j?.error || "Échec du passage en commande"); return; }
       setOffres((prev) => prev?.filter((o) => o.docEntry !== offre.docEntry) ?? prev);
       toast.success(`Offre n°${offre.docNum} passée en commande n°${j.docNum}`, { description: "Lots à affecter." });
-      load();  // la nouvelle commande apparaît dans la file des lots ci-dessous
+      load();  // la nouvelle commande apparaît dans la file des lots
     } catch {
       toast.error("SAP injoignable — offre non convertie");
     } finally {
@@ -291,9 +322,8 @@ export function BonsCommandePanel() {
     }
   }, [load]);
 
-  // Supprime une offre (Quotation) dans SAP.
-  const deleteOffre = useCallback(async (offre: OffreDoc) => {
-    if (!window.confirm(`Supprimer l'offre n°${offre.docNum} de ${offre.cardName} ? Cette action est définitive.`)) return;
+  // Supprime une offre (Quotation) dans SAP — le fetch pur (confirmation en amont).
+  const doDeleteOffre = useCallback(async (offre: OffreDoc) => {
     setDeletingId(offre.docEntry);
     try {
       const r = await fetch("/api/bons-commande", {
@@ -311,16 +341,21 @@ export function BonsCommandePanel() {
     }
   }, []);
 
+  const deleteOffre = useCallback((offre: OffreDoc) => {
+    setConfirmState({
+      title: `Supprimer l'offre n°${offre.docNum} ?`,
+      description: `Offre de ${offre.cardName}. Cette action est définitive.`,
+      confirmLabel: "Supprimer l'offre",
+      tone: "destructive",
+      onConfirm: () => doDeleteOffre(offre),
+    });
+  }, [doDeleteOffre]);
+
   // Retire une COMMANDE de la liste (lève le marqueur « bon de commande ») SANS
   // toucher SAP — pour les commandes déjà FACTURÉES / clôturées, qu'on ne peut
   // plus solder par l'affectation de lots (SAP refuse le PATCH) et qui restaient
   // donc épinglées à vie dans l'onglet.
-  const unmarkBon = useCallback(async (doc: BonDoc) => {
-    if (!window.confirm(
-      `Retirer le bon de commande n°${doc.docNum} (${doc.cardName}) de la liste ?\n\n`
-      + "La commande et sa facture dans SAP ne sont PAS supprimées — on enlève seulement "
-      + "ce bon de la liste des lots à affecter (utile quand la commande est déjà facturée)."
-    )) return;
+  const doUnmarkBon = useCallback(async (doc: BonDoc) => {
     setDeletingId(doc.docEntry);
     try {
       const r = await fetch("/api/bons-commande", {
@@ -330,7 +365,7 @@ export function BonsCommandePanel() {
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) { toast.error(j?.error || "Échec du retrait du bon de commande"); return; }
       setDocs((prev) => prev?.filter((d) => d.docEntry !== doc.docEntry) ?? prev);
-      setOpenBonId(null);
+      setOpen(null);
       toast.success(`Bon de commande n°${doc.docNum} retiré de la liste`);
     } catch {
       toast.error("Réseau injoignable — bon non retiré");
@@ -339,191 +374,121 @@ export function BonsCommandePanel() {
     }
   }, []);
 
-  const count = docs?.length ?? 0;
+  const unmarkBon = useCallback((doc: BonDoc) => {
+    setConfirmState({
+      title: `Retirer le bon de commande n°${doc.docNum} ?`,
+      description:
+        `${doc.cardName} — la commande et sa facture dans SAP ne sont PAS supprimées. `
+        + "On enlève seulement ce bon de la liste des lots à affecter (utile quand la commande est déjà facturée).",
+      confirmLabel: "Retirer de la liste",
+      tone: "destructive",
+      onConfirm: () => doUnmarkBon(doc),
+    });
+  }, [doUnmarkBon]);
+
+  // ── Dérivés ────────────────────────────────────────────────────────────
+  const initialLoading = docs === null || offres === null;
+  const offresCount = offres?.length ?? 0;
   const dueCount = (offres ?? []).filter((o) => o.due).length;
-  const openBon = openBonId != null ? (docs ?? []).find((d) => d.docEntry === openBonId) ?? null : null;
-  const openOffre = openOffreId != null ? (offres ?? []).find((o) => o.docEntry === openOffreId) ?? null : null;
+  const bonsCount = docs?.length ?? 0;
+  const pendingLots = (docs ?? []).reduce((s, d) => s + d.pendingCount, 0);
+  const totalItems = offresCount + bonsCount;
+
+  const openOffre = open?.kind === "offre" ? (offres ?? []).find((o) => o.docEntry === open.docEntry) ?? null : null;
+  const openBon = open?.kind === "bon" ? (docs ?? []).find((d) => d.docEntry === open.docEntry) ?? null : null;
+  const panelOpen = !!openOffre || !!openBon;
+
+  // Liste unifiée : offres (à passer) puis bons (lots à affecter), filtrée par KPI.
+  const entries: Entry[] = [
+    ...(filter === "bons" ? [] : (offres ?? []).map((o): Entry => ({ kind: "offre", o }))),
+    ...(filter === "offres" ? [] : (docs ?? []).map((d): Entry => ({ kind: "bon", d }))),
+  ];
+
+  const toggleFilter = (f: Exclude<Filter, "all">) => setFilter((prev) => (prev === f ? "all" : f));
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-[12.5px] text-muted-foreground">
-          {loadError ? <span className="text-amber-600 dark:text-amber-400 font-medium">{loadError}</span>
-            : docs === null ? "Chargement…"
-            : count === 0 ? "Aucune commande en attente de lot."
-            : `${count} commande${count > 1 ? "s" : ""} à traiter : choisis, par article, le lot réellement en stock.`}
-        </p>
+      {loadError && (
+        <Banner
+          tone="warning"
+          action={
+            <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+              <RefreshCw className={loading ? "animate-spin" : ""} /> Réessayer
+            </Button>
+          }
+        >
+          {loadError}
+        </Banner>
+      )}
+
+      {/* ── PIPELINE : 2 KPI cliquables (cases d'INFO teintées) qui filtrent ── */}
+      <div className="flex items-start gap-3">
+        <div className="grid flex-1 grid-cols-2 gap-3 sm:max-w-xl">
+          <KpiCard
+            accent="violet"
+            active={filter === "offres"}
+            label="Offres à passer"
+            value={initialLoading ? "—" : offresCount}
+            tone="violet"
+            hint={dueCount > 0 ? `${dueCount} au jour de départ` : "aucune au départ"}
+            onClick={() => toggleFilter("offres")}
+          />
+          <KpiCard
+            accent="amber"
+            active={filter === "bons"}
+            label="Lots à affecter"
+            value={initialLoading ? "—" : pendingLots}
+            tone="amber"
+            hint={`${bonsCount} commande${bonsCount > 1 ? "s" : ""}`}
+            onClick={() => toggleFilter("bons")}
+          />
+        </div>
         <Button variant="outline" size="sm" onClick={load} disabled={loading} className="shrink-0">
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-          Actualiser
+          <RefreshCw className={loading ? "animate-spin" : ""} />
+          <span className="max-sm:hidden">Actualiser</span>
         </Button>
       </div>
 
-      {/* ── OFFRES CLIENT (précommandes) à passer en commande ────────── */}
-      {offres !== null && offres.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <FileText className="h-4 w-4 text-brand-500 shrink-0" />
-            <h2 className="text-[13px] font-semibold text-foreground">Offres client — à passer en commande</h2>
-            {dueCount > 0 && (
-              <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-amber-500/15 text-amber-700 dark:text-amber-300">
-                {dueCount} à passer
-              </span>
-            )}
-          </div>
-          <p className="text-[11.5px] text-muted-foreground max-sm:hidden">
-            Une précommande crée une <b>offre client</b> (devis SAP), pas une commande engagée. Tu peux
-            <b> affecter les lots ici</b> (déplie l&apos;offre) <b>avant</b> de la passer en commande — la commande
-            créée héritera des lots. Au <b>jour de départ</b>, passe-la en commande.
-          </p>
-          <ul className="space-y-2">
-            {offres.map((o) => {
-              const converting = convertingId === o.docEntry;
-              const deleting = deletingId === o.docEntry;
-              const busy = converting || deleting;
-              const missing = o.pendingCount;
-              const ready = missing === 0;
-              return (
-                <li
-                  key={o.docEntry}
-                  className={`rounded-xl border overflow-hidden max-sm:-mx-4 max-sm:rounded-none max-sm:border-x-0 ${
-                    o.due ? "border-amber-400/60 bg-amber-50/40 dark:bg-amber-950/15" : "border-border bg-card"
-                  }`}
-                >
-                  {/* Ligne-résumé : l'IMPORTANT en clair (client, livraison, statut
-                      des lots) — le détail s'ouvre en PLEIN ÉCRAN. */}
-                  <div
-                    role="button" tabIndex={0}
-                    onClick={() => setOpenOffreId(o.docEntry)}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenOffreId(o.docEntry); } }}
-                    className="px-3 sm:px-4 py-3 flex items-center gap-3 cursor-pointer select-none hover:bg-secondary/30 transition-colors"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[15px] font-semibold text-foreground truncate">{o.cardName}</span>
-                        {o.clientType && SEGMENT_BADGE[o.clientType] && (
-                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEGMENT_BADGE[o.clientType]}`}>
-                            {o.clientType}
-                          </span>
-                        )}
-                        <InfoHint label="Détails de l'offre">
-                          <span className="block space-y-0.5">
-                            <span className="block">Offre n°{o.docNum}</span>
-                            <span className="block">{o.lineCount} ligne{o.lineCount > 1 ? "s" : ""} · {o.colis} colis</span>
-                            {o.numAtCard && <span className="block">N° commande client : {o.numAtCard}</span>}
-                          </span>
-                        </InfoHint>
-                      </div>
-                      <div className="mt-1 flex items-center gap-x-3 gap-y-1 flex-wrap text-[12px] text-muted-foreground">
-                        {o.dueDate && (
-                          <span className="inline-flex items-center gap-1 tnum">
-                            <CalendarDays className="h-3.5 w-3.5" /> Livraison {formatDeliveryDate(o.dueDate)}
-                          </span>
-                        )}
-                        {o.due
-                          ? <span className="inline-flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-300"><Clock className="h-3.5 w-3.5" /> jour de départ</span>
-                          : <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> en attente</span>}
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                          ready ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                        }`}>
-                          {ready ? <><CheckCircle2 className="h-3 w-3" /> Lots complets</> : `${missing} lot${missing > 1 ? "s" : ""} à affecter`}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="shrink-0 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                      <Button
-                        variant={o.due ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => convertOffre(o)}
-                        disabled={busy}
-                        title={ready
-                          ? "Créer la commande client SAP — les lots affectés sur l'offre sont conservés"
-                          : "Créer la commande client SAP — les articles sans lot resteront à affecter dans la file ci-dessous"}
-                        className="hidden sm:inline-flex"
-                      >
-                        {converting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightCircle className="h-4 w-4" />}
-                        Passer en commande
-                      </Button>
-                      <ChevronDown className="h-4 w-4 -rotate-90 text-muted-foreground/50" />
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+      {/* ── LISTE UNIFIÉE ───────────────────────────────────────────────── */}
+      {initialLoading ? (
+        <div className="space-y-2" role="status" aria-label="Chargement des bons de commande">
+          {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[68px] rounded-xl max-sm:rounded-none" />)}
         </div>
+      ) : entries.length === 0 ? (
+        filter !== "all" && totalItems > 0 ? (
+          <EmptyState
+            icon={filter === "offres" ? FileText : PackageCheck}
+            title={filter === "offres" ? "Aucune offre à passer" : "Aucun lot à affecter"}
+            description="Rien dans ce filtre pour l'instant."
+            action={<Button variant="tinted" size="sm" onClick={() => setFilter("all")}>Voir tout</Button>}
+          />
+        ) : (
+          <EmptyState
+            icon={CheckCircle2}
+            title="Tous les lots sont affectés"
+            description="Les offres client (précommandes) et les bons de commande apparaissent ici tant qu'il reste une étape à traiter. Rien en attente pour l'instant."
+          />
+        )
+      ) : (
+        <ul className="space-y-2">
+          {entries.map((e) => (
+            <EntryCard
+              key={`${e.kind}:${e.kind === "offre" ? e.o.docEntry : e.d.docEntry}`}
+              entry={e}
+              onOpen={() => setOpen({
+                kind: e.kind,
+                docEntry: e.kind === "offre" ? e.o.docEntry : e.d.docEntry,
+              })}
+            />
+          ))}
+        </ul>
       )}
 
-      {docs !== null && count === 0 && (offres?.length ?? 0) === 0 && (
-        <div className="flex flex-col items-center justify-center text-center rounded-2xl border border-dashed border-border bg-card py-14 px-6 max-sm:-mx-4 max-sm:rounded-none max-sm:border-x-0">
-          <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 mb-3">
-            <CheckCircle2 className="h-6 w-6" strokeWidth={1.8} />
-          </span>
-          <p className="text-[14px] font-semibold text-foreground">Tous les lots sont affectés</p>
-          <p className="text-[12.5px] text-muted-foreground mt-1 max-w-sm">
-            Les bons de commande (précommandes, export, choix manuel) apparaissent ici tant qu&apos;il reste
-            un lot à affecter. Rien en attente pour l&apos;instant.
-          </p>
-        </div>
-      )}
-
-      {(docs ?? []).map((doc) => {
-        const missing = doc.pendingCount;
-        const ready = missing === 0;
-        return (
-          <section key={doc.docEntry} className="rounded-2xl border border-border bg-card overflow-hidden max-sm:-mx-4 max-sm:rounded-none max-sm:border-x-0">
-            {/* Ligne-résumé : client, livraison, statut des lots — le détail
-                (affectation des lots) s'ouvre en PLEIN ÉCRAN. */}
-            <div
-              role="button" tabIndex={0}
-              onClick={() => setOpenBonId(doc.docEntry)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenBonId(doc.docEntry); } }}
-              className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3.5 hover:bg-secondary/30 cursor-pointer select-none transition-colors"
-            >
-              <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                <span className="text-[15px] font-semibold text-foreground truncate">{doc.cardName}</span>
-                {doc.clientType && SEGMENT_BADGE[doc.clientType] && (
-                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide ${SEGMENT_BADGE[doc.clientType]}`}>
-                    {doc.clientType}
-                  </span>
-                )}
-                <InfoHint label="Détails du bon">
-                  <span className="block space-y-0.5">
-                    <span className="block">BL n°{doc.docNum}</span>
-                    <span className="block">{doc.lines.length} ligne{doc.lines.length > 1 ? "s" : ""}</span>
-                    {doc.markedBy && <span className="block">Créé par {displayPersonName(doc.markedBy)}</span>}
-                  </span>
-                </InfoHint>
-                {doc.dueDate && (
-                  <span className="inline-flex items-center gap-1 text-[12px] text-muted-foreground tnum">
-                    <CalendarDays className="h-3.5 w-3.5" /> {formatDeliveryDate(doc.dueDate)}
-                  </span>
-                )}
-              </div>
-              <div className="shrink-0 flex items-center gap-2">
-                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                  ready ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                }`}>
-                  {ready ? <><CheckCircle2 className="h-3 w-3" /> Lots complets</> : `${missing} lot${missing > 1 ? "s" : ""} à affecter`}
-                </span>
-                <ChevronDown className="h-4 w-4 -rotate-90 text-muted-foreground/50" />
-              </div>
-            </div>
-          </section>
-        );
-      })}
-
-      {docs === null && (
-        <div className="flex items-center gap-2 px-5 py-4 max-sm:px-0 text-[13px] text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Chargement des bons de commande…
-        </div>
-      )}
-
-      {/* ══ PLEIN ÉCRAN — affectation des lots d'une OFFRE (avant passage) ══ */}
+      {/* ══ PLEIN ÉCRAN — un seul panneau pour offre ET bon ══ */}
       <FullscreenPanel
-        open={!!openOffre}
-        onOpenChange={(v) => { if (!v) setOpenOffreId(null); }}
-        title={openOffre?.cardName ?? ""}
+        open={panelOpen}
+        onOpenChange={(v) => { if (!v) setOpen(null); }}
+        title={openOffre?.cardName ?? openBon?.cardName ?? ""}
         subtitle={
           openOffre ? (
             <span className="inline-flex items-center gap-2 flex-wrap">
@@ -531,15 +496,21 @@ export function BonsCommandePanel() {
               <span className="tnum">· {openOffre.lineCount} ligne{openOffre.lineCount > 1 ? "s" : ""} · {openOffre.colis} colis</span>
               {openOffre.due && <span className="inline-flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-300"><Clock className="h-3.5 w-3.5" /> jour de départ</span>}
             </span>
+          ) : openBon ? (
+            <span className="inline-flex items-center gap-2 flex-wrap">
+              <span>BL n°{openBon.docNum}</span>
+              {openBon.dueDate && <span className="tnum">· Livraison {formatDeliveryDate(openBon.dueDate)}</span>}
+              {openBon.markedBy && <span>· Créé par {displayPersonName(openBon.markedBy)}</span>}
+            </span>
           ) : undefined
         }
-        highlight={
-          openOffre
-            ? (openOffre.pendingCount === 0
-                ? <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 text-[15px] sm:text-[17px]"><CheckCircle2 className="h-5 w-5" /> Lots complets</span>
-                : <span className="text-amber-600 dark:text-amber-400 text-[15px] sm:text-[17px]">{openOffre.pendingCount} lot{openOffre.pendingCount > 1 ? "s" : ""} à affecter</span>)
-            : undefined
-        }
+        highlight={(() => {
+          const pending = openOffre?.pendingCount ?? openBon?.pendingCount ?? 0;
+          if (!panelOpen) return undefined;
+          return pending === 0
+            ? <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 text-[15px] sm:text-[17px]"><CheckCircle2 className="h-5 w-5" /> Lots complets</span>
+            : <span className="text-amber-600 dark:text-amber-400 text-[15px] sm:text-[17px]">{pending} lot{pending > 1 ? "s" : ""} à affecter</span>;
+        })()}
         actions={
           openOffre ? (
             <>
@@ -549,7 +520,7 @@ export function BonsCommandePanel() {
                 onClick={() => convertOffre(openOffre)}
                 disabled={convertingId === openOffre.docEntry || deletingId === openOffre.docEntry}
               >
-                {convertingId === openOffre.docEntry ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightCircle className="h-4 w-4" />}
+                {convertingId === openOffre.docEntry ? <Loader2 className="animate-spin" /> : <ArrowRightCircle />}
                 Passer en commande
               </Button>
               <Button
@@ -559,7 +530,31 @@ export function BonsCommandePanel() {
                 title="Supprimer l'offre" aria-label={`Supprimer l'offre n°${openOffre.docNum}`}
                 className="text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400"
               >
-                {deletingId === openOffre.docEntry ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                {deletingId === openOffre.docEntry ? <Loader2 className="animate-spin" /> : <Trash2 />}
+              </Button>
+            </>
+          ) : openBon ? (
+            <>
+              <Button
+                variant="outline" size="sm"
+                onClick={() => startModif(openBon)}
+                disabled={modifBusy === openBon.docEntry}
+                title="Modifier la commande dans la console (stock en direct) : changer les articles/quantités pour garantir les lots disponibles"
+              >
+                {modifBusy === openBon.docEntry ? <Loader2 className="animate-spin" /> : <Pencil />} Modifier
+              </Button>
+              <Button variant="outline" size="icon" onClick={() => printPrep(openBon)}
+                title="Imprimer le bon de commande pour la préparation (articles, colis, lots)" aria-label="Imprimer">
+                <Printer />
+              </Button>
+              <Button
+                variant="outline" size="sm"
+                onClick={() => unmarkBon(openBon)}
+                disabled={deletingId === openBon.docEntry}
+                className="text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300"
+                title="Retirer ce bon de la liste (commande déjà facturée / clôturée) — n'affecte PAS la commande ni la facture dans SAP"
+              >
+                {deletingId === openBon.docEntry ? <Loader2 className="animate-spin" /> : <Trash2 />} Retirer de la liste
               </Button>
             </>
           ) : undefined
@@ -574,8 +569,8 @@ export function BonsCommandePanel() {
                 <input
                   type="date"
                   defaultValue={openOffre.dueDate ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
+                  onChange={(ev) => {
+                    const v = ev.target.value;
                     if (/^\d{4}-\d{2}-\d{2}$/.test(v) && v !== openOffre.dueDate) saveOffre(openOffre, { dueDate: v });
                   }}
                   aria-label={`Date de livraison de l'offre n°${openOffre.docNum}`}
@@ -588,11 +583,11 @@ export function BonsCommandePanel() {
                   type="text"
                   defaultValue={openOffre.numAtCard ?? ""}
                   placeholder="N° commande"
-                  onBlur={(e) => {
-                    const v = e.target.value.trim();
+                  onBlur={(ev) => {
+                    const v = ev.target.value.trim();
                     if (v !== (openOffre.numAtCard ?? "")) saveOffre(openOffre, { numAtCard: v });
                   }}
-                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                  onKeyDown={(ev) => { if (ev.key === "Enter") (ev.target as HTMLInputElement).blur(); }}
                   aria-label={`N° de commande de l'offre n°${openOffre.docNum}`}
                   className="h-9 w-[150px] rounded-lg border border-border bg-card px-2 text-[13px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-brand-500/40"
                 />
@@ -610,61 +605,11 @@ export function BonsCommandePanel() {
               disabled={openOffre.pendingCount === 0 || busyLine !== null || !openOffre.lines.some((l) => l.pending && !l.familyTarget && l.suggested)}
               title="Valider le lot suggéré (arrivage en stock) sur les lignes qui en ont un ; les articles sans lot dispo restent en attente"
             >
-              <Sparkles className="h-4 w-4" /> Valider les lots en stock
+              <Sparkles /> Valider les lots en stock
             </Button>
           </div>
         )}
-      </FullscreenPanel>
 
-      {/* ══ PLEIN ÉCRAN — affectation des lots d'un BON DE COMMANDE ══ */}
-      <FullscreenPanel
-        open={!!openBon}
-        onOpenChange={(v) => { if (!v) setOpenBonId(null); }}
-        title={openBon?.cardName ?? ""}
-        subtitle={
-          openBon ? (
-            <span className="inline-flex items-center gap-2 flex-wrap">
-              <span>BL n°{openBon.docNum}</span>
-              {openBon.dueDate && <span className="tnum">· Livraison {formatDeliveryDate(openBon.dueDate)}</span>}
-              {openBon.markedBy && <span>· Créé par {displayPersonName(openBon.markedBy)}</span>}
-            </span>
-          ) : undefined
-        }
-        highlight={
-          openBon
-            ? (openBon.pendingCount === 0
-                ? <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 text-[15px] sm:text-[17px]"><CheckCircle2 className="h-5 w-5" /> Lots complets</span>
-                : <span className="text-amber-600 dark:text-amber-400 text-[15px] sm:text-[17px]">{openBon.pendingCount} lot{openBon.pendingCount > 1 ? "s" : ""} à affecter</span>)
-            : undefined
-        }
-        actions={
-          openBon ? (
-            <>
-              <Button
-                variant="outline" size="sm"
-                onClick={() => startModif(openBon)}
-                disabled={modifBusy === openBon.docEntry}
-                title="Modifier la commande dans la console (stock en direct) : changer les articles/quantités pour garantir les lots disponibles"
-              >
-                {modifBusy === openBon.docEntry ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />} Modifier
-              </Button>
-              <Button variant="outline" size="icon" onClick={() => printPrep(openBon)}
-                title="Imprimer le bon de commande pour la préparation (articles, colis, lots)" aria-label="Imprimer">
-                <Printer className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline" size="sm"
-                onClick={() => unmarkBon(openBon)}
-                disabled={deletingId === openBon.docEntry}
-                className="text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300"
-                title="Retirer ce bon de la liste (commande déjà facturée / clôturée) — n'affecte PAS la commande ni la facture dans SAP"
-              >
-                {deletingId === openBon.docEntry ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Retirer de la liste
-              </Button>
-            </>
-          ) : undefined
-        }
-      >
         {openBon && (
           <div className="space-y-4">
             <LotAssignList
@@ -679,17 +624,160 @@ export function BonsCommandePanel() {
               disabled={openBon.pendingCount === 0 || busyLine !== null || !openBon.lines.some((l) => l.pending && !l.familyTarget && l.suggested)}
               title="Valider le lot suggéré (arrivage en stock du segment) sur les lignes qui en ont un ; les articles sans lot dispo restent en attente"
             >
-              <Sparkles className="h-4 w-4" /> Valider les lots en stock
+              <Sparkles /> Valider les lots en stock
             </Button>
           </div>
         )}
       </FullscreenPanel>
+
+      <ConfirmDialog
+        open={confirmState !== null}
+        onOpenChange={(o) => { if (!o) setConfirmState(null); }}
+        title={confirmState?.title ?? ""}
+        description={confirmState?.description}
+        confirmLabel={confirmState?.confirmLabel ?? "Confirmer"}
+        tone={confirmState?.tone}
+        onConfirm={async () => { await confirmState?.onConfirm(); }}
+      />
     </div>
   );
 }
 
-/* ── Liste d'affectation des lots (partagée offre / bon) — chaque ligne :
-      article en clair + LotCell. Utilisée dans les panneaux PLEIN ÉCRAN. ── */
+/* ── KPI du pipeline : case d'INFO teintée, cliquable (filtre la liste). ── */
+function KpiCard({
+  accent, active, label, value, tone, hint, onClick,
+}: {
+  accent: "violet" | "amber";
+  active: boolean;
+  label: string;
+  value: React.ReactNode;
+  tone: "violet" | "amber";
+  hint: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-pressed={active}
+      onClick={onClick}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
+      className="cursor-pointer rounded-xl transition-transform duration-[var(--dur-fast)] ease-[var(--ease-apple)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    >
+      <SurfaceCard
+        tinted
+        accent={accent}
+        animate={false}
+        className={cn("h-full p-3.5", active && (accent === "violet" ? "ring-2 ring-violet-500/50" : "ring-2 ring-amber-500/50"))}
+      >
+        <StatBlock label={label} value={value} tone={tone} size="lg" />
+        <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p>
+      </SurfaceCard>
+    </div>
+  );
+}
+
+/* ── Carte unifiée (offre OU bon) : même gabarit, un champ « étape » distingue. ── */
+function EntryCard({ entry, onOpen }: { entry: Entry; onOpen: () => void }) {
+  const isOffre = entry.kind === "offre";
+  const cardName = isOffre ? entry.o.cardName : entry.d.cardName;
+  const clientType = isOffre ? entry.o.clientType : entry.d.clientType;
+  const dueDate = isOffre ? entry.o.dueDate : entry.d.dueDate;
+  const pending = isOffre ? entry.o.pendingCount : entry.d.pendingCount;
+  const due = isOffre ? entry.o.due : false;
+
+  return (
+    <li
+      className={cn(
+        "rounded-xl border bg-card overflow-hidden max-sm:-mx-4 max-sm:rounded-none max-sm:border-x-0",
+        due ? "border-amber-400/60" : "border-border",
+      )}
+    >
+      <div
+        role="button" tabIndex={0}
+        onClick={onOpen}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
+        className="flex items-center gap-3 px-3 sm:px-4 py-3 cursor-pointer select-none hover:bg-secondary/40 transition-colors"
+      >
+        <div className="min-w-0 flex-1">
+          {/* Ligne 1 : étape + client + segment + détail */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <EtapeBadge kind={entry.kind} />
+            <span className="text-[15px] font-semibold text-foreground truncate">{cardName}</span>
+            {clientType && (
+              <span className={cn(
+                "inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide",
+                segmentBadgeClass(clientType),
+              )}>
+                {clientType}
+              </span>
+            )}
+            <InfoHint label={isOffre ? "Détails de l'offre" : "Détails du bon"}>
+              <span className="block space-y-0.5">
+                {isOffre ? (
+                  <>
+                    <span className="block">Offre n°{entry.o.docNum}</span>
+                    <span className="block">{entry.o.lineCount} ligne{entry.o.lineCount > 1 ? "s" : ""} · {entry.o.colis} colis</span>
+                    {entry.o.numAtCard && <span className="block">N° commande client : {entry.o.numAtCard}</span>}
+                  </>
+                ) : (
+                  <>
+                    <span className="block">BL n°{entry.d.docNum}</span>
+                    <span className="block">{entry.d.lines.length} ligne{entry.d.lines.length > 1 ? "s" : ""}</span>
+                    {entry.d.markedBy && <span className="block">Créé par {displayPersonName(entry.d.markedBy)}</span>}
+                  </>
+                )}
+              </span>
+            </InfoHint>
+          </div>
+          {/* Ligne 2 : livraison + départ + statut des lots */}
+          <div className="mt-1 flex items-center gap-x-3 gap-y-1 flex-wrap text-[12px] text-muted-foreground">
+            {dueDate && (
+              <span className="inline-flex items-center gap-1 tnum">
+                <CalendarDays className="h-3.5 w-3.5" /> Livraison {formatDeliveryDate(dueDate)}
+              </span>
+            )}
+            {isOffre && (due
+              ? <span className="inline-flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-300"><Clock className="h-3.5 w-3.5" /> jour de départ</span>
+              : <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> en attente</span>)}
+            <LotsStatus pending={pending} />
+          </div>
+        </div>
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/50" />
+      </div>
+    </li>
+  );
+}
+
+/* ── Champ « étape » : Offre — à passer / Commande — lots à affecter. ── */
+function EtapeBadge({ kind }: { kind: "offre" | "bon" }) {
+  return kind === "offre" ? (
+    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-violet-500/12 text-violet-700 dark:text-violet-300 ring-1 ring-violet-500/25">
+      <FileText className="h-3 w-3" /> Offre — à passer
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-sky-500/12 text-sky-700 dark:text-sky-300 ring-1 ring-sky-500/25">
+      <PackageCheck className="h-3 w-3" /> Commande — lots à affecter
+    </span>
+  );
+}
+
+/* ── Pastille d'état des lots (partagée carte / en-tête). ── */
+function LotsStatus({ pending }: { pending: number }) {
+  return pending === 0 ? (
+    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/25">
+      <CheckCircle2 className="h-3 w-3" /> Lots complets
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-amber-500/12 text-amber-700 dark:text-amber-300 ring-1 ring-amber-500/25">
+      {pending} lot{pending > 1 ? "s" : ""} à affecter
+    </span>
+  );
+}
+
+/* ── Liste d'affectation des lots (partagée offre / bon) — ZONE DE SAISIE :
+      fond neutre, en-tête gris marqué, séparateurs nets, zébrage. Chaque ligne :
+      quantité en gros + article (désignation), puis le sélecteur de lot seul. ── */
 function LotAssignList({ lines, keyPrefix, busyLine, onPick }: {
   lines: BonLine[];
   keyPrefix: string;
@@ -697,47 +785,62 @@ function LotAssignList({ lines, keyPrefix, busyLine, onPick }: {
   onPick: (itemCode: string, v: string) => void;
 }) {
   return (
-    <ul className="divide-y divide-border/50 rounded-xl border border-border overflow-hidden bg-card">
-      {lines.map((l) => {
-        const isBusy = busyLine === `${keyPrefix}${l.itemCode}`;
-        // Valeur sélectionnée : tag famille (EM_FAM:…) prioritaire, sinon
-        // vrai lot, sinon vide (à découvert générique).
-        const current = l.familyTarget
-          ? familyLotSentinel(l.familyTarget.key)
-          : l.pending ? "" : l.lot;
-        return (
-          <li key={l.itemCode} className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-3">
-            <div className="min-w-0 flex-1">
-              {/* Colis + article + magasin + PU + total HT — sur UNE SEULE ligne */}
-              <div className="flex items-baseline gap-2">
-                <span className="text-[15px] font-bold tnum text-foreground shrink-0">{l.colis}</span>
-                <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground">{l.itemName}</span>
-                {l.warehouse && <span className="shrink-0 text-[12px] text-muted-foreground tnum">mag {l.warehouse}</span>}
-                <span className="shrink-0 tnum text-muted-foreground">{l.price != null ? eur(l.price) : "—"}</span>
-                <span className="shrink-0 text-[15px] font-bold tnum text-foreground">{l.lineTotal != null ? eur(l.lineTotal) : "—"}</span>
+    <div className="overflow-hidden rounded-xl border border-border bg-card">
+      {/* En-tête gris marqué (repère de colonnes de la zone de travail). */}
+      <div className="flex items-center gap-3 border-b border-border bg-secondary/60 px-3 py-2 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <span className="flex-1">Article · quantité</span>
+        <span className="sm:w-[320px]">Lot à affecter</span>
+      </div>
+      <ul className="divide-y divide-border [&>li:nth-child(even)]:bg-muted/40">
+        {lines.map((l) => {
+          const isBusy = busyLine === `${keyPrefix}${l.itemCode}`;
+          // Valeur sélectionnée : tag famille (EM_FAM:…) prioritaire, sinon
+          // vrai lot, sinon vide (à découvert générique).
+          const current = l.familyTarget
+            ? familyLotSentinel(l.familyTarget.key)
+            : l.pending ? "" : l.lot;
+          return (
+            <li key={l.itemCode} className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-center">
+              {/* GAUCHE — deux niveaux : quantité en gros + nom/désignation ; le
+                  code article et le PU/total sont relégués sur une ligne discrète. */}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-2.5">
+                  <span className="shrink-0 text-[22px] font-bold leading-none tnum text-foreground">{l.colis}</span>
+                  <div className="min-w-0">
+                    <div className="flex items-baseline gap-1.5 flex-wrap">
+                      <span className="text-[15px] font-semibold text-foreground">{l.itemName}</span>
+                      <DesignationStrong l={l} className="text-[13px]" />
+                    </div>
+                    <DesignationMuted l={l} className="text-[12px] mt-0.5" />
+                  </div>
+                </div>
+                <div className="mt-1 flex items-center gap-x-3 gap-y-0.5 flex-wrap text-[11px] text-muted-foreground">
+                  <span className="font-mono">{l.itemCode}</span>
+                  {l.warehouse && <span className="tnum">mag {l.warehouse}</span>}
+                  <span className="tnum">PU {l.price != null ? eur(l.price) : "—"}</span>
+                  <span className="tnum">Total {l.lineTotal != null ? eur(l.lineTotal) : "—"}</span>
+                </div>
+                {l.familyTarget && (
+                  <span className="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300">
+                    <Grape className="h-3 w-3" /> {l.familyTarget.label} — à préciser
+                  </span>
+                )}
               </div>
-              <div className="text-[12px] font-mono text-muted-foreground mt-0.5">{l.itemCode}</div>
-              {l.familyTarget && (
-                <span className="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300">
-                  <Grape className="h-3 w-3" /> {l.familyTarget.label} — à préciser
-                </span>
-              )}
-              <DesignationChips marque={l.marque} condt={l.condt} variete={l.variete} calibre={l.calibre} pays={l.pays} size="md" className="mt-1" />
-            </div>
-            <LotCell line={l} current={current} isBusy={isBusy} onPick={(v) => onPick(l.itemCode, v)} />
-          </li>
-        );
-      })}
-    </ul>
+              {/* DROITE — le sélecteur de lot, seul. */}
+              <LotCell line={l} current={current} isBusy={isBusy} onPick={(v) => onPick(l.itemCode, v)} />
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
 /* ── Cellule d'affectation d'un lot ──────────────────────────────────────────
-   Menu déroulant PERSONNALISÉ (porté en portail → jamais rogné par la carte). En
-   SURVOLANT une EM dans la liste, le PIED du menu affiche le CODE ARTICLE + tout
-   le détail (marque · conditionnement · calibre · variété · origine) et la
-   réception de cette EM (date · fournisseur · magasin · affectation). Cliquer une
-   entrée l'affecte. ──────────────────────────────────────────────────────── */
+   Menu déroulant PERSONNALISÉ (porté en portail → jamais rogné par la carte),
+   scindé en GROUPES titrés : Lots en stock · Attendre un fruit · Autre. La saisie
+   manuelle d'un n° d'EM a sa propre zone. En SURVOLANT une EM, le PIED du menu
+   affiche le CODE ARTICLE + tout le détail et la réception de cette EM. ── */
 function LotCell({ line, current, isBusy, onPick }: {
   line: BonLine; current: string; isBusy: boolean; onPick: (v: string) => void;
 }) {
@@ -805,7 +908,7 @@ function LotCell({ line, current, isBusy, onPick }: {
   ].filter(Boolean)) as [string, string][];
 
   const curCand = opts.find((c) => c.lot === current);
-  const triggerLabel = line.familyTarget ? `🍓 ${line.familyTarget.label} — à préciser`
+  const triggerLabel = line.familyTarget ? `${line.familyTarget.label} — à préciser`
     : current === PENDING ? "À découvert — arrivage à venir"
     : curCand ? `${curCand.lot} · ${AFFECT_LABEL[curCand.affect] ?? curCand.affect}`
     : showRawCurrent ? current
@@ -861,46 +964,59 @@ function LotCell({ line, current, isBusy, onPick }: {
               className={`w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-secondary/60 ${current === "" ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
               Choisir le lot…
             </button>
-            {emRows.map(({ c, sug }) => (
-              <button key={c.lot} type="button" onMouseEnter={() => setHovered(c)} onClick={() => pick(c.lot)}
-                className={`w-full text-left px-3 py-1.5 flex items-center gap-1.5 text-[12.5px] hover:bg-secondary/60 ${current === c.lot ? "bg-brand-500/10 font-semibold" : "text-foreground"}`}>
-                {sug && <Star className="h-3 w-3 text-amber-500 fill-amber-400 shrink-0" />}
-                <span className="font-semibold text-foreground">{c.lot}</span>
-                {sug && <span className="text-[10px] text-amber-600 dark:text-amber-400">suggéré</span>}
-                <span className="text-[10px] px-1 py-px rounded bg-secondary text-muted-foreground">{AFFECT_LABEL[c.affect] ?? c.affect}</span>
-                {c.qty != null && c.qty > 0 && (
-                  <span className="text-[10px] px-1 py-px rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 tnum">{Math.round(c.qty)} en stock</span>
-                )}
-                {c.warehouse && <span className="text-[10.5px] text-muted-foreground ml-auto">mag. {c.warehouse}</span>}
-              </button>
-            ))}
-            {showRawCurrent && (
-              <button type="button" onMouseEnter={() => setHovered(null)} onClick={() => pick(current)}
-                className="w-full text-left px-3 py-1.5 text-[12.5px] bg-brand-500/10 font-semibold text-foreground">
-                {current}
-              </button>
+
+            {/* GROUPE 1 — Lots en stock (arrivages EM, avec suggestion en tête) */}
+            {emRows.length > 0 && (
+              <>
+                <MenuGroupLabel>Lots en stock</MenuGroupLabel>
+                {emRows.map(({ c, sug }) => (
+                  <button key={c.lot} type="button" onMouseEnter={() => setHovered(c)} onClick={() => pick(c.lot)}
+                    className={`w-full text-left px-3 py-2 flex items-center gap-1.5 text-[12.5px] hover:bg-secondary/60 ${current === c.lot ? "bg-brand-500/10 font-semibold" : "text-foreground"}`}>
+                    {sug && <Star className="h-3 w-3 text-amber-500 fill-amber-400 shrink-0" />}
+                    <span className="font-semibold text-foreground">{c.lot}</span>
+                    {sug && <span className="text-[10px] text-amber-600 dark:text-amber-400">suggéré</span>}
+                    <span className="text-[10px] px-1 py-px rounded bg-secondary text-muted-foreground">{AFFECT_LABEL[c.affect] ?? c.affect}</span>
+                    {c.qty != null && c.qty > 0 && (
+                      <span className="text-[10px] px-1 py-px rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 tnum">{Math.round(c.qty)} en stock</span>
+                    )}
+                    {c.warehouse && <span className="text-[10.5px] text-muted-foreground ml-auto">mag. {c.warehouse}</span>}
+                  </button>
+                ))}
+              </>
             )}
-            <div className="my-1 border-t border-border/60" />
-            <p className="px-3 pb-0.5 text-[9.5px] uppercase tracking-wider text-muted-foreground font-semibold">Attendre un fruit</p>
+            {showRawCurrent && (
+              <>
+                {emRows.length === 0 && <MenuGroupLabel>Lot en stock</MenuGroupLabel>}
+                <button type="button" onMouseEnter={() => setHovered(null)} onClick={() => pick(current)}
+                  className="w-full text-left px-3 py-2 text-[12.5px] bg-brand-500/10 font-semibold text-foreground">
+                  {current}
+                </button>
+              </>
+            )}
+
+            {/* GROUPE 2 — Attendre un fruit (rappel, jamais auto-affecté) */}
+            <MenuGroupLabel>Attendre un fruit</MenuGroupLabel>
             {FRUIT_FAMILIES.map((f) => {
               const v = familyLotSentinel(f.key);
               return (
                 <button key={f.key} type="button" onMouseEnter={() => setHovered(null)} onClick={() => pick(v)}
-                  className={`w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-secondary/60 ${current === v ? "bg-violet-500/10 font-semibold text-violet-700 dark:text-violet-300" : "text-foreground"}`}>
-                  🍓 {f.label} — à préciser
+                  className={`w-full text-left px-3 py-2 flex items-center gap-1.5 text-[12.5px] hover:bg-secondary/60 ${current === v ? "bg-violet-500/10 font-semibold text-violet-700 dark:text-violet-300" : "text-foreground"}`}>
+                  <Grape className="h-3.5 w-3.5 text-violet-500 shrink-0" /> {f.label} — à préciser
                 </button>
               );
             })}
-            <div className="my-1 border-t border-border/60" />
+
+            {/* GROUPE 3 — Autre */}
+            <MenuGroupLabel>Autre</MenuGroupLabel>
             <button type="button" onMouseEnter={() => setHovered(null)} onClick={() => pick(PENDING)}
-              className={`w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-secondary/60 ${current === PENDING ? "bg-amber-500/10 font-semibold text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}>
-              À découvert — arrivage à venir
+              className={`w-full text-left px-3 py-2 flex items-center gap-1.5 text-[12.5px] hover:bg-secondary/60 ${current === PENDING ? "bg-amber-500/10 font-semibold text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}>
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" /> À découvert — arrivage à venir
             </button>
           </div>
 
-          {/* Saisie manuelle d'un n° d'entrée — pour un article SANS lot proposé
-              (déco / fabrication maison, pas d'EM en base) : je tape les chiffres,
-              ça affecte « EM<chiffres> » directement. */}
+          {/* Saisie manuelle d'un n° d'entrée — sa propre zone. Pour un article
+              SANS lot proposé (déco / fabrication maison, pas d'EM en base) : je
+              tape les chiffres, ça affecte « EM<chiffres> » directement. */}
           <div className="shrink-0 border-t border-border/60 bg-secondary/30 px-3 py-2">
             <label className="block text-[9.5px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">
               Ou saisir le n° d&apos;entrée
@@ -959,5 +1075,14 @@ function LotCell({ line, current, isBusy, onPick }: {
         floatingPortalTarget(triggerRef.current),
       )}
     </div>
+  );
+}
+
+/* ── Titre de groupe du menu de lot (plus d'air entre les sections). ── */
+function MenuGroupLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="px-3 pt-2.5 pb-1 text-[9.5px] uppercase tracking-wider text-muted-foreground font-semibold">
+      {children}
+    </p>
   );
 }
