@@ -79,7 +79,14 @@ export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
       const email = user?.email ?? (typeof token.email === "string" ? token.email : null);
       const rolesStale =
         typeof token.rolesAt !== "number" || Date.now() - token.rolesAt > ROLES_TTL_MS;
-      if (email && (user?.email || rolesStale)) {
+      // Un token qui PORTE ENCORE un flag terrain est re-validé À CHAQUE requête
+      // (pas seulement au TTL) : un admin promu APRÈS l'émission de son jeton, ou
+      // dont le jeton précède la neutralisation des privilégiés, était confiné
+      // jusqu'à ~5 min OU une reconnexion (cas Lyse GUNSLAY, admin+livreur+agréeur,
+      // bloquée hors /inventaire sur mobile). Coût borné : seuls les jetons
+      // « terrain » re-requêtent, et ils sont rares (téléphones d'entrepôt).
+      const looksConfined = token.isLivreur === true || token.isAgreeur === true;
+      if (email && (user?.email || rolesStale || looksConfined)) {
         try {
           const rows = await prisma.$queryRawUnsafe<{
             isLivreur: boolean | null; isAgreeur: boolean | null; isAdmin: boolean | null;
@@ -95,6 +102,11 @@ export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
           const r = rows[0];
           const bootstrap = ADMIN_EMAILS.some((a) => a.toLowerCase() === email.toLowerCase());
           const privileged = !!r?.isAdmin || !!r?.isDirection || bootstrap;
+          // Porté sur le jeton → le middleware ET la nav mobile exemptent
+          // explicitement les privilégiés du confinement terrain (défense en
+          // profondeur : même si un flag terrain traînait, un admin n'est jamais
+          // enfermé).
+          token.privileged = privileged;
           token.isLivreur = !privileged && !!r?.isLivreur;
           token.isAgreeur = !privileged && !!r?.isAgreeur;
 
@@ -139,6 +151,9 @@ export const { handlers, auth: _auth, signIn, signOut } = NextAuth({
         if (token.sub) session.user.id = token.sub;
         session.user.isLivreur = token.isLivreur === true;
         session.user.isAgreeur = token.isAgreeur === true;
+        // Privilégié (admin/direction) → jamais confiné : lu par le middleware et
+        // isTerrainConfined pour exempter explicitement, quoi qu'il arrive.
+        session.user.privileged = token.privileged === true;
         // `!== false` : un jeton émis AVANT ce champ (session déjà ouverte, PWA
         // gardée des semaines) n'a pas la clé — on ne l'enferme pas d'office,
         // le TTL des rôles la posera à la prochaine résolution.
@@ -190,6 +205,8 @@ declare module "next-auth/jwt" {
     expiresAt?: number;
     isLivreur?: boolean;
     isAgreeur?: boolean;
+    /** Admin/direction → jamais confiné par un rôle terrain (cf. proxy.ts). */
+    privileged?: boolean;
     /** Compte HABILITÉ : au moins un rôle posé ou un rattachement commercial.
      *  Faux = accès au seul écran de bienvenue (cf. proxy.ts). */
     provisioned?: boolean;
@@ -204,6 +221,8 @@ declare module "next-auth" {
     user: {
       isLivreur?: boolean;
       isAgreeur?: boolean;
+      /** Admin/direction → exempté du confinement terrain. */
+      privileged?: boolean;
       /** Faux = compte connecté mais sans aucun rôle attribué. */
       provisioned?: boolean;
     } & DefaultSession["user"];

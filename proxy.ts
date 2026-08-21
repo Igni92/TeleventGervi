@@ -80,9 +80,14 @@ export default auth((req) => {
   //   • livreur (flag jeton) → /livraisons (marque « départ »), /clients (créneaux/GPS)
   //   • agréeur (flag jeton) → /commandes-fournisseurs, /entrees (réception CF → EM)
   // Les routes /api et /login restent toujours ouvertes (pages fonctionnelles).
-  const isPrep = isRestrictedPreparateur(req.auth?.user?.email);
-  const isLivreur = req.auth?.user?.isLivreur === true;
-  const isAgreeur = req.auth?.user?.isAgreeur === true;
+  // Un ADMIN / DIRECTION (privileged) n'est JAMAIS confiné, même s'il porte aussi
+  // un flag terrain (cf. lib/auth : token.privileged). Sans cette exemption, une
+  // admin cochée livreur/agréeur (ex. Lyse GUNSLAY) se retrouvait bloquée hors
+  // /inventaire sur mobile — le flag terrain de son jeton prenant le pas.
+  const isPrivileged = req.auth?.user?.privileged === true;
+  const isPrep = !isPrivileged && isRestrictedPreparateur(req.auth?.user?.email);
+  const isLivreur = !isPrivileged && req.auth?.user?.isLivreur === true;
+  const isAgreeur = !isPrivileged && req.auth?.user?.isAgreeur === true;
   if (isPrep || isLivreur || isAgreeur) {
     // /heures : saisie PERSONNELLE des heures — ouverte à tout rôle confiné
     // (chacun enregistre SA semaine). /planning : congés & récup (demandes +

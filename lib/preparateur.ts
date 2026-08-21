@@ -32,8 +32,11 @@ export function isRestrictedPreparateur(email: string | null | undefined): boole
  * sans accès base — utilisable en Edge comme en server component.
  */
 export function isTerrainConfined(session: {
-  user?: { email?: string | null; isLivreur?: boolean; isAgreeur?: boolean } | null;
+  user?: { email?: string | null; isLivreur?: boolean; isAgreeur?: boolean; privileged?: boolean } | null;
 } | null | undefined): boolean {
   const u = session?.user;
+  // Un admin/direction (privileged) n'est jamais confiné, même avec un flag
+  // terrain (cf. lib/auth, proxy.ts) : il garde la nav complète sur mobile.
+  if (u?.privileged === true) return false;
   return isRestrictedPreparateur(u?.email) || u?.isLivreur === true || u?.isAgreeur === true;
 }
