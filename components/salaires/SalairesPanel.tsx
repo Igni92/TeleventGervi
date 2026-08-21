@@ -14,14 +14,18 @@
  * L'app RAPPELLE les éléments manquants avant transmission ; le récapitulatif
  * part par email au cabinet comptable en un clic.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft, ChevronRight, ChevronDown, RotateCcw, Loader2, Save, Send, Plus, Trash2,
   Wallet, AlertTriangle, Car, Gift, ReceiptText, CheckCircle2, FileSpreadsheet, Pencil,
-  Coins, CalendarCheck, Scale, ListChecks, FileDown,
+  Coins, CalendarCheck, Scale, ListChecks, FileDown, MoreHorizontal, Clock3,
 } from "lucide-react";
 import { toast } from "sonner";
 import { SurfaceCard } from "@/components/ui/surface-card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { fmtHM, monthIdOf, shiftMonth, monthLabel } from "@/lib/heuresCalc";
 import type { SuppWeekRecap } from "@/lib/heuresRecap";
 import {
@@ -211,6 +215,18 @@ export function SalairesPanel({ canEdit }: { canEdit: boolean }) {
   const [data, setData] = useState<ApiData | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  // Confirmation d'envoi malgré des éléments manquants (remplace window.confirm).
+  const [confirmSend, setConfirmSend] = useState(false);
+  // Cartes employé OUVERTES (état remonté au parent) : la checklist des manquants
+  // ouvre la bonne carte et fait défiler jusqu'à elle.
+  const [openSet, setOpenSet] = useState<Set<string>>(() => new Set());
+  const toggleOpen = (email: string) =>
+    setOpenSet((s) => { const n = new Set(s); if (n.has(email)) n.delete(email); else n.add(email); return n; });
+  const focusEmployee = (email: string) => {
+    setOpenSet((s) => { const n = new Set(s); n.add(email); return n; });
+    requestAnimationFrame(() =>
+      document.getElementById(`emp-${email}`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -233,9 +249,8 @@ export function SalairesPanel({ canEdit }: { canEdit: boolean }) {
   );
   const missingTotal = rows.reduce((s, r) => s + r.missing.length, 0);
 
-  const sendRecap = async () => {
-    if (missingTotal > 0 && !window.confirm(
-      `${missingTotal} élément(s) manquant(s) — envoyer quand même le récap au comptable ?`)) return;
+  // Envoi effectif au cabinet (endpoint inchangé).
+  const doSend = async () => {
     setSending(true);
     try {
       const r = await fetch("/api/salaires", {
@@ -249,6 +264,8 @@ export function SalairesPanel({ canEdit }: { canEdit: boolean }) {
     } catch { toast.error("Envoi impossible — réseau ?"); }
     finally { setSending(false); }
   };
+  // Des manquants ? On demande confirmation (ConfirmDialog) ; sinon envoi direct.
+  const requestSend = () => { if (missingTotal > 0) setConfirmSend(true); else void doSend(); };
 
   const monthNav = (
     <div className="flex items-center gap-1.5">
@@ -272,41 +289,30 @@ export function SalairesPanel({ canEdit }: { canEdit: boolean }) {
   return (
     <div className="space-y-3">
       <SurfaceCard accent="amber" title={`Paie — ${monthLabel(month)}`} icon={<Wallet className="h-3.5 w-3.5" />} action={monthNav}>
-        {/* RAPPEL avant transmission : ce qui manque encore, employé par employé. */}
+        {/* RAPPEL avant transmission : CHECKLIST actionnable — chaque ligne ouvre
+            la carte de l'employé et fait défiler jusqu'à ses champs à compléter. */}
         {missingTotal > 0 && (
-          <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
-            <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-amber-700 dark:text-amber-300">
+          <div className="mb-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2.5">
+            <p className="flex items-center gap-1.5 text-body font-semibold text-warning">
               <AlertTriangle className="h-4 w-4 shrink-0" /> À compléter avant transmission au cabinet comptable
             </p>
-            <ul className="mt-1 space-y-0.5 text-[12px] text-amber-800 dark:text-amber-200">
+            <ul className="mt-1.5 space-y-0.5">
               {rows.filter((r) => r.missing.length > 0).map((r) => (
-                <li key={r.email}><b>{r.name}</b> — {r.missing.join(" · ")}</li>
+                <li key={r.email}>
+                  <button type="button" onClick={() => focusEmployee(r.email)}
+                    className="group flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-warning/10">
+                    <span className="shrink-0 text-body font-semibold text-foreground">{r.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">{r.missing.join(" · ")}</span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                  </button>
+                </li>
               ))}
             </ul>
           </div>
         )}
 
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-          {data?.sent ? (
-            <p className="inline-flex items-center gap-1.5 text-[12.5px] text-emerald-700 dark:text-emerald-300">
-              <CheckCircle2 className="h-4 w-4 shrink-0" />
-              Récap envoyé le {new Date(data.sent.sentAt).toLocaleDateString("fr-FR")}
-            </p>
-          ) : (
-            <p className="text-[12.5px] text-muted-foreground">
-              Récapitulatif de {monthLabel(month)} pas encore transmis.
-            </p>
-          )}
-          {canEdit && (
-            <button type="button" onClick={sendRecap} disabled={sending || loading || rows.length === 0}
-              className="w-full sm:w-auto sm:ml-auto inline-flex items-center justify-center gap-1.5 h-10 px-4 rounded-lg bg-amber-600 hover:bg-amber-700 text-on-accent text-[13px] font-semibold disabled:opacity-50">
-              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              {data?.sent ? "Renvoyer au comptable" : "Envoyer au comptable"}
-            </button>
-          )}
-        </div>
         {loading && (
-          <p className="mt-2 text-[11.5px] text-muted-foreground inline-flex items-center gap-1.5">
+          <p className="text-caption text-muted-foreground inline-flex items-center gap-1.5">
             <Loader2 className="h-3.5 w-3.5 animate-spin" /> Chargement…
           </p>
         )}
@@ -317,11 +323,50 @@ export function SalairesPanel({ canEdit }: { canEdit: boolean }) {
       </SurfaceCard>
 
       {rows.map((r) => (
-        <EmployeeCard key={`${r.email}:${month}`} row={r} month={month} canEdit={canEdit} onSaved={load} />
+        <EmployeeCard key={`${r.email}:${month}`} row={r} month={month} canEdit={canEdit}
+          open={openSet.has(r.email)} onToggleOpen={() => toggleOpen(r.email)} onSaved={load} />
       ))}
       {!loading && rows.length === 0 && (
-        <p className="px-1 py-3 text-[12.5px] italic text-muted-foreground">Aucune donnée ce mois-ci.</p>
+        <p className="px-1 py-3 text-body italic text-muted-foreground">Aucune donnée ce mois-ci.</p>
       )}
+
+      {/* ── BARRE STICKY DE BAS DE PAGE — « Envoyer au comptable » ── */}
+      {canEdit && rows.length > 0 && (
+        <div className="sticky bottom-3 z-10">
+          <div className="flex flex-col gap-2 rounded-xl border border-border bg-card/95 px-4 py-3 shadow-modal backdrop-blur sm:flex-row sm:items-center">
+            {data?.sent ? (
+              <p className="inline-flex items-center gap-1.5 text-caption text-success">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                Récap envoyé le {new Date(data.sent.sentAt).toLocaleDateString("fr-FR")}
+              </p>
+            ) : (
+              <p className="text-caption text-muted-foreground">
+                Récapitulatif de {monthLabel(month)} pas encore transmis.
+              </p>
+            )}
+            {missingTotal > 0 && (
+              <span className="inline-flex items-center gap-1 text-caption font-semibold text-warning">
+                <AlertTriangle className="h-3.5 w-3.5" /> {missingTotal} manquant{missingTotal > 1 ? "s" : ""}
+              </span>
+            )}
+            <button type="button" onClick={requestSend} disabled={sending || loading}
+              className="w-full sm:w-auto sm:ml-auto inline-flex items-center justify-center gap-1.5 h-10 px-4 rounded-lg bg-amber-600 hover:bg-amber-700 text-on-accent text-body font-semibold disabled:opacity-50">
+              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {data?.sent ? "Renvoyer au comptable" : "Envoyer au comptable"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirmSend}
+        onOpenChange={setConfirmSend}
+        title="Éléments manquants"
+        description={`${missingTotal} élément(s) encore manquant(s). Envoyer quand même le récapitulatif au cabinet comptable ?`}
+        confirmLabel="Envoyer quand même"
+        onConfirm={doSend}
+        loading={sending}
+      />
     </div>
   );
 }
@@ -371,72 +416,94 @@ function CommissionsSummary({ data }: { data: ApiData }) {
   };
 
   return (
-    <div className="mt-3 rounded-lg border border-brand-500/25 bg-brand-500/[0.05] px-3 py-2.5">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-foreground">
-          <Coins className="h-4 w-4 text-brand-500" /> Commissions — du / paye / ecart
-        </span>
-        <span className="ml-auto inline-flex items-baseline gap-2 tnum text-[12px]">
-          <span className="text-muted-foreground">Du {eur(totDue)}</span>
-          <span className="text-muted-foreground">Paye {eur(totPaid)}</span>
-          <span className={`font-bold ${totEcart < 0 ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>
-            Ecart {eur(totEcart)}
-          </span>
-        </span>
+    <div className="mt-3">
+      <p className="mb-2 flex items-center gap-1.5 text-caption uppercase tracking-[0.12em] font-semibold text-muted-foreground">
+        <Coins className="h-3.5 w-3.5" /> Commissions — dû / payé / écart
+      </p>
+      {/* Zone de TRAVAIL : tableau sobre (en-têtes gris, zébrage, séparateurs
+          nets), actions par ligne reléguées dans un menu « … ». */}
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full border-collapse text-body">
+          <thead>
+            <tr className="bg-secondary/60 text-caption uppercase tracking-wide text-muted-foreground">
+              <th className="text-left font-semibold px-3 py-2">Commercial</th>
+              <th className="text-right font-semibold px-2 py-2">Dû</th>
+              <th className="text-right font-semibold px-2 py-2">Payé</th>
+              <th className="text-right font-semibold px-3 py-2">Écart</th>
+              <th className="w-10 px-2 py-2"><span className="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/60 [&>tr:nth-child(even)]:bg-muted/40">
+            {detail.map((d) => {
+              const over = d.ecart < 0;
+              return (
+                <Fragment key={d.email}>
+                  <tr>
+                    <td className="px-3 py-2 font-semibold text-foreground whitespace-nowrap">{d.email.split("@")[0]}</td>
+                    <td className="px-2 py-2 text-right tnum text-muted-foreground">{eur(d.due)}</td>
+                    <td className="px-2 py-2 text-right tnum text-muted-foreground">{eur(d.paid)}</td>
+                    <td className={`px-3 py-2 text-right tnum font-bold ${over ? "text-success" : "text-foreground"}`}>
+                      {over ? "Trop-payé " : ""}{eur(Math.abs(d.ecart))}
+                    </td>
+                    <td className="px-2 py-2 text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button type="button" aria-label={`Actions — ${d.email.split("@")[0]}`} disabled={busy != null}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 disabled:opacity-50">
+                            {busy?.endsWith(d.slp) ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreHorizontal className="h-4 w-4" />}
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {d.months.length > 0 && (
+                            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setOpenDetail((v) => (v === d.email ? null : d.email)); }}>
+                              <ChevronDown className={`h-4 w-4 transition-transform ${openDetail === d.email ? "rotate-180" : ""}`} /> Détail par mois
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem disabled={busy != null} onSelect={(e) => { e.preventDefault(); printMois(d.slp); }}>
+                            <FileDown className="h-4 w-4" /> PDF mois
+                          </DropdownMenuItem>
+                          <DropdownMenuItem disabled={busy != null} onSelect={(e) => { e.preventDefault(); printFactures(d.slp); }}>
+                            <FileDown className="h-4 w-4" /> PDF factures
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  </tr>
+                  {openDetail === d.email && d.months.length > 0 && (
+                    <tr>
+                      <td colSpan={5} className="bg-muted/30 px-3 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          {d.months.map((m) => (
+                            <span key={m.month}
+                              title={`${monthFrLong(m.month)} — base ${m.base.toFixed(2)} € · ${m.invoices} fact.`}
+                              className="inline-flex items-baseline gap-1 rounded-md border border-border bg-card px-1.5 py-0.5 text-caption2 tnum">
+                              <span className="text-muted-foreground">{monthFr(m.month)}</span>
+                              <b className="text-foreground">{eur(m.prime)}</b>
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="border-t-2 border-border font-bold">
+              <td className="px-3 py-2 text-foreground">Total</td>
+              <td className="px-2 py-2 text-right tnum text-foreground">{eur(totDue)}</td>
+              <td className="px-2 py-2 text-right tnum text-foreground">{eur(totPaid)}</td>
+              <td className={`px-3 py-2 text-right tnum ${totEcart < 0 ? "text-success" : "text-foreground"}`}>{eur(totEcart)}</td>
+              <td />
+            </tr>
+          </tfoot>
+        </table>
       </div>
 
-      <div className="mt-2 space-y-1.5 border-t border-brand-500/20 pt-2">
-        {detail.map((d) => {
-          const over = d.ecart < 0;
-          return (
-            <div key={d.email}>
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-[12px] font-semibold text-foreground">{d.email.split("@")[0]}</span>
-                <span className={`tnum text-[12.5px] font-bold ${over ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>
-                  {over ? "Trop-paye " : "Reste du "}{eur(Math.abs(d.ecart))}
-                </span>
-              </div>
-              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground tnum">
-                <span>Du {eur(d.due)}</span>
-                <span aria-hidden>&middot;</span>
-                <span>Paye {eur(d.paid)}</span>
-                {d.months.length > 0 && (
-                  <button type="button" onClick={() => setOpenDetail((v) => (v === d.email ? null : d.email))}
-                    className="inline-flex items-center gap-1 font-semibold text-brand-600 dark:text-brand-300 hover:underline">
-                    <ChevronDown className={`h-3.5 w-3.5 transition-transform ${openDetail === d.email ? "rotate-180" : ""}`} />
-                    detail par mois
-                  </button>
-                )}
-                <span aria-hidden>&middot;</span>
-                <button type="button" onClick={() => printMois(d.slp)} disabled={busy != null}
-                  className="inline-flex items-center gap-1 font-semibold text-brand-600 dark:text-brand-300 hover:underline disabled:opacity-50">
-                  {busy === `mois:${d.slp}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileDown className="h-3 w-3" />} PDF mois
-                </button>
-                <button type="button" onClick={() => printFactures(d.slp)} disabled={busy != null}
-                  className="inline-flex items-center gap-1 font-semibold text-brand-600 dark:text-brand-300 hover:underline disabled:opacity-50">
-                  {busy === `fact:${d.slp}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileDown className="h-3 w-3" />} PDF factures
-                </button>
-              </div>
-              {openDetail === d.email && d.months.length > 0 && (
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {d.months.map((m) => (
-                    <span key={m.month}
-                      title={`${monthFrLong(m.month)} base ${m.base.toFixed(2)} EUR - ${m.invoices} fact.`}
-                      className="inline-flex items-baseline gap-1 rounded border border-border bg-background/60 px-1.5 py-0.5 text-[10.5px] tnum">
-                      <span className="text-muted-foreground">{monthFr(m.month)}</span>
-                      <b className="text-foreground">{eur(m.prime)}</b>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      <p className="mt-1.5 text-[10px] text-muted-foreground">
-        Du = commissions calculees depuis le 1er nov. 2025. Paye = versements saisis dans Pilotage &rsaquo; Commerciaux.
-        Ecart &plusmn; = reste a regler. La ligne du bulletin porte l&apos;ecart (jamais negatif).
+      <p className="mt-1.5 text-caption2 text-muted-foreground">
+        Dû = commissions calculées depuis le 1er nov. 2025. Payé = versements saisis dans Pilotage &rsaquo; Commerciaux.
+        Écart &plusmn; = reste à régler. La ligne du bulletin porte l&apos;écart (jamais négatif).
       </p>
     </div>
   );
@@ -673,11 +740,22 @@ function RecupCetPanel({ row, month, canEdit, onSaved }: { row: Row; month: stri
 
 /* ───────────── Carte d'un salarié — REPLIABLE (l'en-tête résume) ──────────── */
 
-function EmployeeCard({ row, month, canEdit, onSaved }: {
-  row: Row; month: string; canEdit: boolean; onSaved: () => Promise<void>;
+/** Titre de zone (les 3 zones de la carte employé : Heures & supp / Éléments
+ *  variables / Fiche) — kicker sobre commun. */
+function ZoneTitle({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <h4 className="flex items-center gap-1.5 text-caption uppercase tracking-[0.12em] font-semibold text-foreground">
+      <span className="text-muted-foreground">{icon}</span>
+      {children}
+    </h4>
+  );
+}
+
+function EmployeeCard({ row, month, canEdit, open, onToggleOpen, onSaved }: {
+  row: Row; month: string; canEdit: boolean;
+  open: boolean; onToggleOpen: () => void; onSaved: () => Promise<void>;
 }) {
   const h = row.heures;
-  const [open, setOpen] = useState(false);
   const [primes, setPrimes] = useState<SalaryPrime[]>(row.salary?.primes ?? []);
   const [frais, setFrais] = useState<SalaryFrais[]>(row.salary?.frais ?? []);
   const [note, setNote] = useState(row.salary?.note ?? "");
@@ -718,22 +796,22 @@ function EmployeeCard({ row, month, canEdit, onSaved }: {
   const inputCls = "h-10 rounded-md border border-border bg-background px-2 text-[13px] focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-60";
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
+    <div id={`emp-${row.email}`} className="scroll-mt-4 rounded-xl border border-border bg-card overflow-hidden">
       {/* EN-TÊTE repliable : le résumé suffit tant qu'on n'édite pas. */}
-      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+      <button type="button" onClick={onToggleOpen} aria-expanded={open}
         className="w-full flex items-center gap-2.5 px-4 py-3 text-left hover:bg-secondary/30 transition-colors">
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[14px] font-bold text-foreground">{row.name}</span>
-          <span className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11.5px] tnum text-muted-foreground">
+          <span className="block truncate text-callout font-bold text-foreground">{row.name}</span>
+          <span className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-caption tnum text-muted-foreground">
             <span>Heures <b className="text-foreground">{fmtHM(h.totalMin)}</b></span>
-            {h.suppPayEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Supp payées <b>{fmtHM(h.suppPayEquivMin)}</b></span>}
-            {h.suppRecupEquivMin > 0 && <span className="text-sky-700 dark:text-sky-300">Supp → récup <b>{fmtHM(h.suppRecupEquivMin)}</b></span>}
+            {h.suppPayEquivMin > 0 && <span className="text-success">Supp payées <b>{fmtHM(h.suppPayEquivMin)}</b></span>}
+            {h.suppRecupEquivMin > 0 && <span className="text-info">Supp → récup <b>{fmtHM(h.suppRecupEquivMin)}</b></span>}
             {primesTotal > 0 && <span className="hidden sm:inline">Primes <b className="text-foreground">{eur(primesTotal)}</b></span>}
             {row.anMensuel > 0 && <span className="hidden sm:inline">AN <b className="text-foreground">{eur(row.anMensuel)}</b></span>}
           </span>
         </span>
         {row.missing.length > 0 && (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-warning/15 px-1.5 py-0.5 text-caption2 font-semibold text-warning">
             <AlertTriangle className="h-3.5 w-3.5" /> {row.missing.length}
           </span>
         )}
@@ -741,18 +819,21 @@ function EmployeeCard({ row, month, canEdit, onSaved }: {
       </button>
 
       {open && (
-        <div className="border-t border-border px-4 py-3.5 space-y-4">
-          {/* Heures du mois (reprises de la saisie) — détail complet. */}
-          <div className="flex flex-wrap gap-x-4 gap-y-1 rounded-lg border border-border bg-secondary/20 px-3 py-2 text-[12px] tnum">
-            <span className="text-muted-foreground">Heures <b className="text-foreground">{fmtHM(h.totalMin)}</b> <span className="opacity-70">({h.weeksWithData}/{h.weeksTotal} sem.)</span></span>
-            {h.suppPayEquivMin > 0 && <span className="text-emerald-700 dark:text-emerald-300">Supp payées <b>{fmtHM(h.suppPayEquivMin)}</b></span>}
-            {h.suppRecupEquivMin > 0 && <span className="text-sky-700 dark:text-sky-300">Supp → récup <b>{fmtHM(h.suppRecupEquivMin)}</b></span>}
-            {h.ferieMin > 0 && <span className="text-orange-700 dark:text-orange-300">Férié <b>{fmtHM(h.ferieMin)}</b></span>}
-            {h.cpJours > 0 && <span className="text-violet-700 dark:text-violet-300">CP <b>{h.cpJours} j</b></span>}
-            {h.recupJours > 0 && <span className="text-sky-700 dark:text-sky-300">Récup prise <b>{h.recupJours} j</b></span>}
-            {h.maladieJours > 0 && <span className="text-amber-700 dark:text-amber-300">Maladie <b>{h.maladieJours} j</b></span>}
-            {h.absentJours > 0 && <span className="text-rose-700 dark:text-rose-300">Absence <b>{h.absentJours} j</b></span>}
-          </div>
+        <div className="border-t border-border px-4 py-3.5 space-y-5">
+          {/* ── ZONE 1 — HEURES & SUPP ──────────────────────────────────────── */}
+          <section className="space-y-3">
+            <ZoneTitle icon={<Clock3 className="h-3.5 w-3.5" />}>Heures &amp; supp</ZoneTitle>
+            {/* Heures du mois (reprises de la saisie) — ligne de détail sobre. */}
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-caption tnum">
+              <span className="text-muted-foreground">Heures <b className="text-foreground">{fmtHM(h.totalMin)}</b> <span className="opacity-70">({h.weeksWithData}/{h.weeksTotal} sem.)</span></span>
+              {h.suppPayEquivMin > 0 && <span className="text-success">Supp payées <b>{fmtHM(h.suppPayEquivMin)}</b></span>}
+              {h.suppRecupEquivMin > 0 && <span className="text-info">Supp → récup <b>{fmtHM(h.suppRecupEquivMin)}</b></span>}
+              {h.ferieMin > 0 && <span className="text-orange-700 dark:text-orange-300">Férié <b>{fmtHM(h.ferieMin)}</b></span>}
+              {h.cpJours > 0 && <span className="text-violet-700 dark:text-violet-300">CP <b>{h.cpJours} j</b></span>}
+              {h.recupJours > 0 && <span className="text-info">Récup prise <b>{h.recupJours} j</b></span>}
+              {h.maladieJours > 0 && <span className="text-amber-700 dark:text-amber-300">Maladie <b>{h.maladieJours} j</b></span>}
+              {h.absentJours > 0 && <span className="text-destructive">Absence <b>{h.absentJours} j</b></span>}
+            </div>
 
           {/* DÉCISION HEURES SUPP — c'est ICI qu'on tranche : payé ou récup. */}
           {canEdit && h.suppTotalMin > 0 && (
@@ -781,10 +862,15 @@ function EmployeeCard({ row, month, canEdit, onSaved }: {
           {(row.suppRecap?.length ?? 0) > 0 && (
             <SuppRecapView row={row} />
           )}
+          </section>
+
+          {/* ── ZONE 2 — ÉLÉMENTS VARIABLES ─────────────────────────────────── */}
+          <section className="space-y-3 border-t border-border pt-4">
+            <ZoneTitle icon={<Gift className="h-3.5 w-3.5" />}>Éléments variables</ZoneTitle>
 
           {/* PRIMES */}
           <div>
-            <p className="mb-1.5 flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
+            <p className="mb-1.5 flex items-center gap-1.5 text-caption uppercase tracking-wide font-semibold text-muted-foreground">
               <Gift className="h-3.5 w-3.5" /> Primes
             </p>
             {show13eHint && (
@@ -844,7 +930,7 @@ function EmployeeCard({ row, month, canEdit, onSaved }: {
 
           {/* FRAIS à rembourser */}
           <div>
-            <p className="mb-1.5 flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
+            <p className="mb-1.5 flex items-center gap-1.5 text-caption uppercase tracking-wide font-semibold text-muted-foreground">
               <ReceiptText className="h-3.5 w-3.5" /> Remboursements de frais
             </p>
             <div className="space-y-1.5">
@@ -883,14 +969,19 @@ function EmployeeCard({ row, month, canEdit, onSaved }: {
               className={`${inputCls} flex-1 min-w-0`} aria-label="Note pour le comptable" />
             {canEdit && (
               <button type="button" onClick={save} disabled={saving || !dirty}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[13px] font-semibold disabled:opacity-50">
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-body font-semibold disabled:opacity-50">
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Enregistrer
               </button>
             )}
           </div>
+          </section>
 
-          {/* FICHE PAIE derrière son propre pli (rarement modifiée). */}
-          <FichePaie row={row} canEdit={canEdit} onSaved={onSaved} />
+          {/* ── ZONE 3 — FICHE ──────────────────────────────────────────────── */}
+          <section className="space-y-3 border-t border-border pt-4">
+            <ZoneTitle icon={<Car className="h-3.5 w-3.5" />}>Fiche</ZoneTitle>
+            {/* FICHE PAIE derrière son propre pli (rarement modifiée). */}
+            <FichePaie row={row} canEdit={canEdit} onSaved={onSaved} />
+          </section>
         </div>
       )}
     </div>

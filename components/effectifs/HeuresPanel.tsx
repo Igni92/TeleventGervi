@@ -14,10 +14,11 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Clock3, ChevronLeft, ChevronRight, Loader2, Save, Printer, Wand2,
+  Clock3, ChevronLeft, ChevronRight, ChevronDown, Loader2, Save, Printer, Wand2,
   CalendarDays, RotateCcw, Plus, Minus,
-  Users, Scale,
+  Users, Scale, SlidersHorizontal,
 } from "lucide-react";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { toast } from "sonner";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { displayPersonName, stripOrgSuffix } from "@/lib/userNames";
@@ -145,6 +146,10 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
   const [wantAfternoon, setWantAfternoon] = useState(false);
   const showAfternoon = wantAfternoon || daysHaveAfternoon || profileHasAfternoon;
 
+  // Le profil horaire (contrat + journée type + réglages employeur) est REPLIÉ
+  // par défaut : on ne l'ouvre qu'à la configuration, pas à chaque saisie.
+  const [showProfile, setShowProfile] = useState(false);
+
   const saveWeek = async () => {
     setSaving(true);
     try {
@@ -190,6 +195,8 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
         le mois n'est que la totalisation. Semaine à cheval → mois de son
         dimanche (les supp partent dans le mois suivant — paie au 10). ── */
   const [month, setMonth] = useState(() => monthIdOf(new Date()));
+  // État mensuel : deux segments « Mon mois » / « Équipe » (managers seulement).
+  const [monthView, setMonthView] = useState<"moi" | "equipe">("moi");
   const [myMonth, setMyMonth] = useState<MonthRow | null>(null);
   const [teamMonth, setTeamMonth] = useState<MonthRow[] | null>(null);
   const [monthLoading, setMonthLoading] = useState(false);
@@ -288,9 +295,21 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           </div>
         )}
 
-        {/* Profil : contrat hebdo + journée type (responsive : les blocs passent
-            à la ligne sur mobile, le bouton « journée type » prend la largeur). */}
-        <div className="mb-3 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-secondary/20 px-3 py-2.5">
+        {/* PROFIL HORAIRE — replié par défaut derrière un disclosure : contrat
+            hebdo + journée type + réglages employeur. On ne l'ouvre qu'à la
+            configuration, pas à chaque saisie de la semaine. */}
+        <div className="mb-3 overflow-hidden rounded-lg border border-border">
+          <button type="button" onClick={() => setShowProfile((v) => !v)} aria-expanded={showProfile}
+            className="flex w-full items-center gap-2 bg-secondary/60 px-3 py-2 text-left transition-colors hover:bg-secondary">
+            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="text-caption uppercase tracking-[0.12em] font-semibold text-muted-foreground">Mon profil horaire</span>
+            <span className="ml-auto flex items-center gap-2 text-caption tnum text-muted-foreground">
+              <span className="hidden sm:inline">Contrat {profile.weeklyHours} h/sem.</span>
+              <ChevronDown className={`h-4 w-4 transition-transform ${showProfile ? "rotate-180" : ""}`} />
+            </span>
+          </button>
+          {showProfile && (
+        <div className="flex flex-wrap items-end gap-3 border-t border-border bg-secondary/20 px-3 py-2.5">
           <div>
             <label className="block text-[10px] uppercase tracking-wide font-semibold text-muted-foreground mb-1">Contrat hebdo (h)</label>
             <input
@@ -325,11 +344,16 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           </button>
           {savingProfile && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mb-2.5" />}
         </div>
-
-        {/* Réglages EMPLOYEUR (fiche salarié) — heures payées d'office (contrat
-            « 42 h ») + cumul CP permanent. Réservé aux managers (le patron y entre
-            depuis le sélecteur « Salarié » ci-dessus). */}
-        {isManager && <EmployerSettings profile={profile} saving={savingProfile} onSave={saveProfil} />}
+          )}
+          {/* Réglages EMPLOYEUR (fiche salarié) — heures payées d'office (contrat
+              « 42 h ») + cumul CP permanent. Réservé aux managers (le patron y entre
+              depuis le sélecteur « Salarié » ci-dessus). */}
+          {showProfile && isManager && (
+            <div className="border-t border-border">
+              <EmployerSettings profile={profile} saving={savingProfile} onSave={saveProfil} />
+            </div>
+          )}
+        </div>
 
         {/* Barre : bascule « après-midi » (masquée par défaut). Désactivée quand une
             saisie après-midi existe déjà (on ne peut pas cacher des données réelles). */}
@@ -482,26 +506,33 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
           </p>
         )}
 
-        {/* Totaux + actions */}
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Badge label="Total" value={fmtHM(calc.totalMin)} tone="foreground" />
-          <Badge label="Contrat" value={fmtHM(calc.contractMin)} tone="muted" />
-          {calc.sup25Min > 0 && <Badge label="Supp +25 %" value={fmtHM(calc.sup25Min)} tone="amber" />}
-          {calc.sup50Min > 0 && <Badge label="Supp +50 %" value={fmtHM(calc.sup50Min)} tone="rose" />}
-          {/* Contrat « 42 h » : part des supp payée d'office (jamais arbitrable). */}
-          {(() => {
-            const st = splitStructuralSupp(calc.sup25Min, calc.sup50Min, structuralSuppMin(profile));
-            return st.structEquivMin > 0
-              ? <Badge label="Payées d'office" value={fmtHM(st.structEquivMin)} tone="emerald" />
-              : null;
-          })()}
-          {calc.majEquivMin > 0 && <Badge label="Équiv. payé" value={fmtHM(calc.majEquivMin)} tone="emerald" />}
-          {calc.recupMin > 0 && <Badge label="Récup" value={fmtHM(calc.recupMin)} tone="sky" />}
-          {calc.congesMin > 0 && <Badge label="Congés crédités" value={fmtHM(calc.congesMin)} tone="violet" />}
-          {calc.ferieMin > 0 && <Badge label="Férié crédité" value={fmtHM(calc.ferieMin)} tone="orange" />}
+        {/* SYNTHÈSE de la semaine : le TOTAL en héros, le détail (contrat, supp,
+            récup, crédits) en ligne secondaire discrète — plus la rangée de badges
+            colorés qui aplatissait la hiérarchie. */}
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="min-w-0">
+            <p className="text-caption uppercase tracking-[0.12em] font-semibold text-muted-foreground">Total de la semaine</p>
+            <p className="font-display text-title2 font-bold tnum leading-tight text-foreground">{fmtHM(calc.totalMin)}</p>
+          </div>
+          {/* Détail hiérarchisé (« dont … ») — secondaire, gris, chiffres en gras. */}
+          <p className="min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption tnum text-muted-foreground">
+            <span>Contrat <b className="text-foreground">{fmtHM(calc.contractMin)}</b></span>
+            {(() => {
+              const st = splitStructuralSupp(calc.sup25Min, calc.sup50Min, structuralSuppMin(profile));
+              return st.structEquivMin > 0
+                ? <span className="text-success">dont payées d&apos;office <b>{fmtHM(st.structEquivMin)}</b></span>
+                : null;
+            })()}
+            {calc.sup25Min > 0 && <span>dont supp +25 % <b className="text-foreground">{fmtHM(calc.sup25Min)}</b></span>}
+            {calc.sup50Min > 0 && <span>dont supp +50 % <b className="text-foreground">{fmtHM(calc.sup50Min)}</b></span>}
+            {calc.majEquivMin > 0 && <span className="text-success">équiv. payé <b>{fmtHM(calc.majEquivMin)}</b></span>}
+            {calc.recupMin > 0 && <span className="text-info">récup <b>{fmtHM(calc.recupMin)}</b></span>}
+            {calc.congesMin > 0 && <span className="text-violet-700 dark:text-violet-300">congés crédités <b>{fmtHM(calc.congesMin)}</b></span>}
+            {calc.ferieMin > 0 && <span className="text-orange-700 dark:text-orange-300">férié crédité <b>{fmtHM(calc.ferieMin)}</b></span>}
+          </p>
           {/* Bouton pleine largeur sur mobile (grande cible), aligné à droite ≥ sm. */}
           <button type="button" onClick={saveWeek} disabled={saving || loading || !dirty}
-            className="w-full sm:w-auto sm:ml-auto inline-flex items-center justify-center gap-1.5 h-11 sm:h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[13px] font-semibold disabled:opacity-50">
+            className="w-full sm:w-auto sm:ml-auto inline-flex items-center justify-center gap-1.5 h-11 sm:h-10 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-body font-semibold disabled:opacity-50">
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Enregistrer mes heures
           </button>
@@ -526,17 +557,25 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                 <RotateCcw className="h-3.5 w-3.5" />
               </button>
             )}
-            {isManager && (
-              <button type="button" onClick={printMonthAll} disabled={monthLoading}
-                title="État mensuel de toute l'équipe (synthèse + un état signable par employé) — le document à envoyer à la compta pour la paie"
-                className="ml-1 inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-on-accent text-[12.5px] font-semibold disabled:opacity-50 shrink-0">
-                <Printer className="h-4 w-4 shrink-0" /> PDF <span className="hidden sm:inline">compta (tous)</span>
-              </button>
-            )}
           </div>
         }>
+        {/* Segments « Mon mois » / « Équipe » — un seul bloc affiché à la fois
+            (managers). Un salarié ne voit que son mois : pas de segments. */}
+        {isManager && (
+          <SegmentedControl<"moi" | "equipe">
+            className="mb-3 max-w-xs"
+            aria-label="État mensuel"
+            value={monthView}
+            onChange={setMonthView}
+            options={[
+              { value: "moi", label: "Mon mois", icon: <CalendarDays /> },
+              { value: "equipe", label: "Équipe", icon: <Users /> },
+            ]}
+          />
+        )}
+
         {/* Mon mois : une ligne par semaine rattachée au mois */}
-        {monthLoading && !myMonth ? (
+        {(!isManager || monthView === "moi") && (monthLoading && !myMonth ? (
           <p className="py-3 text-[13px] text-muted-foreground inline-flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin" /> Chargement du mois…
           </p>
@@ -630,17 +669,16 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                 Une semaine à cheval sur deux mois est rattachée au mois où elle se termine (dimanche).
               </p>
               <button type="button" onClick={printMyMonth}
-                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border text-[12.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border text-caption font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60">
                 <Printer className="h-4 w-4" /> Mon état mensuel (PDF)
               </button>
             </div>
           </>
-        )}
+        ))}
 
-        {/* Équipe (managers) : totaux mensuels par employé */}
-        {isManager && (
-          <div className="mt-4">
-            <p className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">Équipe — totaux du mois</p>
+        {/* Équipe (managers) : totaux mensuels par employé — segment « Équipe ». */}
+        {isManager && monthView === "equipe" && (
+          <div>
             {monthLoading && !teamMonth ? (
               <p className="py-2 text-[13px] text-muted-foreground inline-flex items-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin" /> Chargement…
@@ -731,6 +769,19 @@ export function HeuresPanel({ isManager }: { isManager: boolean }) {
                       )}
                     </tbody>
                   </table>
+                </div>
+
+                {/* PDF COMPTA (tous) — l'action lourde reléguée EN BAS de la
+                    section équipe : synthèse + un état signable par employé,
+                    le document à transmettre à la compta pour la paie. */}
+                <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-caption text-muted-foreground">
+                    Un document unique pour toute l&apos;équipe : synthèse + un état signable par employé.
+                  </p>
+                  <button type="button" onClick={printMonthAll} disabled={monthLoading}
+                    className="inline-flex w-full items-center justify-center gap-1.5 h-10 px-4 rounded-lg bg-amber-600 hover:bg-amber-700 text-on-accent text-body font-semibold disabled:opacity-50 sm:w-auto">
+                    <Printer className="h-4 w-4 shrink-0" /> PDF compta (tous)
+                  </button>
                 </div>
               </>
             )}
@@ -851,29 +902,6 @@ function TagChip({ tag, active, disabled, onClick }: { tag: DayTag; active: bool
       }`}>
       {DAY_TAG_LABEL[tag]}
     </button>
-  );
-}
-
-
-function Badge({ label, value, tone }: { label: string; value: string; tone: "foreground" | "muted" | "amber" | "rose" | "emerald" | "sky" | "violet" | "orange" }) {
-  // Recette CANONIQUE du design system (bg /12 + ring /25 + variante sombre).
-  // Les tons à sens métier passent par les tokens sémantiques (success/warning/
-  // info) ; les tons purement catégoriels gardent leur teinte littérale.
-  const cls: Record<string, string> = {
-    foreground: "bg-foreground/10 text-foreground ring-1 ring-foreground/15",
-    muted: "bg-secondary text-muted-foreground ring-1 ring-border",
-    amber: "bg-warning/12 text-warning ring-1 ring-warning/25",
-    rose: "bg-destructive/12 text-destructive ring-1 ring-destructive/25",
-    emerald: "bg-success/12 text-success ring-1 ring-success/25",
-    sky: "bg-info/12 text-info ring-1 ring-info/25",
-    violet: "bg-violet-500/12 text-violet-700 dark:text-violet-300 ring-1 ring-violet-500/25",
-    orange: "bg-orange-500/12 text-orange-700 dark:text-orange-300 ring-1 ring-orange-500/25",
-  };
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 ${cls[tone]}`}>
-      <span className="text-[9.5px] uppercase tracking-[0.12em] font-semibold opacity-80">{label}</span>
-      <span className="text-[14px] font-bold tnum">{value}</span>
-    </span>
   );
 }
 

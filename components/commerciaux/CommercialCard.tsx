@@ -23,6 +23,7 @@ import {
   ContextMenu, ContextMenuItem, ContextMenuLabel, ContextMenuSeparator, useContextMenu,
 } from "@/components/ui/context-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Badge } from "@/components/ui/badge";
 
 interface Counts { ALL: number; CHR: number; GMS: number; EXPORT: number; OTHER: number; }
 
@@ -256,22 +257,18 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="font-semibold text-foreground truncate text-[14px]">{displayName}</p>
-            {isMe && (
-              <span className="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-brand-600 text-white">
-                vous
-              </span>
-            )}
+            <p className="font-semibold text-foreground truncate text-callout">{displayName}</p>
+            {isMe && <Badge>vous</Badge>}
           </div>
           {email && (
-            <p className="text-[11.5px] text-muted-foreground flex items-center gap-1 mt-0.5 truncate">
+            <p className="text-caption text-muted-foreground flex items-center gap-1 mt-0.5 truncate">
               <Mail className="h-3 w-3 flex-shrink-0" />
               {email}
             </p>
           )}
 
           {/* Type breakdown */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[11px] text-muted-foreground tnum">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-caption text-muted-foreground tnum">
             <span className="font-semibold text-foreground">{counts.ALL}</span>
             <span>clients</span>
             <span className="opacity-30">·</span>
@@ -287,7 +284,7 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
                 type="button"
                 onClick={togglePresence}
                 disabled={savingPresence}
-                className={`inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-60 ${
+                className={`inline-flex items-center gap-1 h-6 px-2 rounded-md text-caption font-semibold transition-colors disabled:opacity-60 ${
                   isPresent
                     ? "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
                     : "bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300"
@@ -298,7 +295,7 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
               </button>
               {/* % stock attribué — n'a de sens que pour un commercial (force de vente) */}
               {comm && (
-                <label className="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-secondary/60 text-[11px] text-muted-foreground" title="% du stock total attribué à ce commercial">
+                <label className="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-secondary/60 text-caption text-muted-foreground" title="% du stock total attribué à ce commercial">
                   <Percent className="h-3 w-3" />
                   <input
                     type="number" min={0} max={100} step={5}
@@ -314,7 +311,7 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
 
             {/* RÔLES — cases à cocher indépendantes : un compte peut en cumuler plusieurs */}
             <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
-              <span className="mr-0.5 select-none text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Rôles</span>
+              <span className="mr-0.5 select-none text-caption2 font-medium uppercase tracking-wide text-muted-foreground">Rôles</span>
               <RoleCheck label="Commercial" active={comm} saving={savingComm} onToggle={toggleCommercial}
                 title={comm ? "Retirer le rôle commercial" : "Désigner commercial (force de vente)"} />
               <RoleCheck label="Préparateur" active={prep} saving={savingPrep} onToggle={togglePrep}
@@ -344,7 +341,7 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
                 type="button"
                 onClick={viewAsMember}
                 title={`Voir l'application comme ${displayName} — vue globale de tous ses rôles`}
-                className="mt-2 inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border text-[12px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
+                className="mt-2 inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border text-caption font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors"
               >
                 <Eye className="h-3.5 w-3.5" /> Voir comme {firstName}
               </button>
@@ -357,7 +354,7 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
       <div className="flex flex-col items-end gap-1.5 shrink-0">
         <Link
           href={`/clients?commercial=${encodeURIComponent(name)}`}
-          className="text-[11.5px] text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1 border-b border-border hover:border-foreground pb-0.5"
+          className="text-caption text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1 border-b border-border hover:border-foreground pb-0.5"
         >
           Voir clients
           <ArrowRight className="h-3 w-3" />
@@ -368,7 +365,7 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
             type="button"
             onClick={() => setTransferOpen(true)}
             title={`Transférer des clients (vendeur télévente) entre ${displayName} et vous`}
-            className="hidden md:inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[11.5px] font-medium border border-border text-muted-foreground hover:text-foreground hover:border-foreground/40 transition-colors"
+            className="hidden md:inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-caption font-medium border border-border text-muted-foreground hover:text-foreground hover:border-foreground/40 transition-colors"
           >
             <ArrowLeftRight className="h-3 w-3" />
             Transférer
@@ -381,7 +378,7 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
             <DropdownMenuTrigger asChild>
               <button
                 disabled={!!claiming}
-                className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[11.5px] font-medium bg-brand-600 hover:bg-brand-700 text-white transition-colors active:scale-[0.97] disabled:opacity-60"
+                className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-caption font-medium bg-primary hover:bg-primary/90 text-primary-foreground transition-colors active:scale-[0.97] disabled:opacity-60"
               >
                 {claiming ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
@@ -394,51 +391,51 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-60">
-              <DropdownMenuLabel className="text-[10.5px] uppercase tracking-wider text-muted-foreground font-semibold">
+              <DropdownMenuLabel className="text-caption2 uppercase tracking-wider text-muted-foreground font-semibold">
                 Récupérer pour aujourd&apos;hui
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => claim("ALL")}
-                className="cursor-pointer flex items-center gap-2 text-[13px]"
+                className="cursor-pointer flex items-center gap-2 text-body"
               >
                 <Users className="h-3.5 w-3.5 text-muted-foreground" />
                 Tous les clients
-                <span className="ml-auto tnum text-muted-foreground text-[11.5px]">{counts.ALL}</span>
+                <span className="ml-auto tnum text-muted-foreground text-caption">{counts.ALL}</span>
               </DropdownMenuItem>
 
               {counts.CHR > 0 && (
                 <DropdownMenuItem
                   onClick={() => claim("CHR")}
-                  className="cursor-pointer flex items-center gap-2 text-[13px]"
+                  className="cursor-pointer flex items-center gap-2 text-body"
                 >
                   <Store className="h-3.5 w-3.5 text-muted-foreground" />
                   Uniquement CHR
-                  <span className="ml-auto tnum text-muted-foreground text-[11.5px]">{counts.CHR}</span>
+                  <span className="ml-auto tnum text-muted-foreground text-caption">{counts.CHR}</span>
                 </DropdownMenuItem>
               )}
               {counts.GMS > 0 && (
                 <DropdownMenuItem
                   onClick={() => claim("GMS")}
-                  className="cursor-pointer flex items-center gap-2 text-[13px]"
+                  className="cursor-pointer flex items-center gap-2 text-body"
                 >
                   <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
                   Uniquement GMS
-                  <span className="ml-auto tnum text-muted-foreground text-[11.5px]">{counts.GMS}</span>
+                  <span className="ml-auto tnum text-muted-foreground text-caption">{counts.GMS}</span>
                 </DropdownMenuItem>
               )}
               {counts.EXPORT > 0 && (
                 <DropdownMenuItem
                   onClick={() => claim("EXPORT")}
-                  className="cursor-pointer flex items-center gap-2 text-[13px]"
+                  className="cursor-pointer flex items-center gap-2 text-body"
                 >
                   <Globe className="h-3.5 w-3.5 text-muted-foreground" />
                   Uniquement EXPORT
-                  <span className="ml-auto tnum text-muted-foreground text-[11.5px]">{counts.EXPORT}</span>
+                  <span className="ml-auto tnum text-muted-foreground text-caption">{counts.EXPORT}</span>
                 </DropdownMenuItem>
               )}
               <DropdownMenuSeparator />
-              <div className="px-2 py-1.5 text-[10.5px] text-muted-foreground leading-tight">
+              <div className="px-2 py-1.5 text-caption2 text-muted-foreground leading-tight">
                 Les clients récupérés apparaîtront dans votre console jusqu&apos;à minuit.
               </div>
             </DropdownMenuContent>
@@ -455,7 +452,7 @@ export function CommercialCard({ userId, name, commercialKey, email, counts, isM
             onClick={() => setConfirmDelete(true)}
             disabled={deleting}
             title={`Supprimer le compte de ${displayName}`}
-            className="hidden md:inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[11.5px] font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 transition-colors disabled:opacity-60"
+            className="hidden md:inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-caption font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 transition-colors disabled:opacity-60"
           >
             {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <UserMinus className="h-3 w-3" />}
             Supprimer
@@ -525,14 +522,14 @@ function RoleCheck({
       onClick={interactive ? onToggle : undefined}
       disabled={saving || disabled}
       title={title}
-      className={`inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-[12.5px] transition-colors focus-visible:ring-2 focus-visible:ring-brand-500 focus:outline-none ${
+      className={`inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-caption transition-colors focus-visible:ring-2 focus-visible:ring-ring focus:outline-none ${
         disabled ? "cursor-not-allowed" : locked ? "cursor-default" : "hover:bg-secondary/60"
       }`}
     >
       <span
         className={`grid h-[16px] w-[16px] shrink-0 place-items-center rounded-[4px] border transition-colors ${
           active
-            ? "border-brand-600 bg-brand-600 text-white"
+            ? "border-primary bg-primary text-primary-foreground"
             : disabled
               ? "border-dashed border-border bg-muted"
               : "border-border bg-background"
@@ -547,7 +544,7 @@ function RoleCheck({
         ) : null}
       </span>
       <span className={`font-medium ${disabled ? "text-muted-foreground/60" : "text-foreground"}`}>{label}</span>
-      {note && <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{note}</span>}
+      {note && <span className="text-caption2 font-medium uppercase tracking-wide text-muted-foreground">{note}</span>}
     </button>
   );
 }

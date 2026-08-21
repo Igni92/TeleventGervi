@@ -7,6 +7,9 @@ import {
   TrendingDown, ChevronDown, ChevronRight, RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { InfoHint } from "@/components/ui/info-hint";
 import { PhotoStep } from "@/components/inventaire/PhotoStep";
 import type { DraftPhoto } from "@/components/inventaire/inv-utils";
 import { TransportBreakdown } from "@/components/transport/TransportBreakdown";
@@ -62,6 +65,9 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
 
   const [expenses, setExpenses] = useState<TransportExpense[]>([]);
   const [carriers, setCarriers] = useState<CarrierOpt[]>([]);
+  // Deux audiences : la direction saisit la structure de coûts & les tarifs ;
+  // le transporteur déclare ses dépenses. Un onglet par audience.
+  const [tab, setTab] = useState<"couts" | "depenses">("couts");
 
   const loadModel = useCallback(() => {
     return fetch("/api/transport/model", { cache: "no-store" })
@@ -199,10 +205,24 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
   }
 
   return (
-    <div className="space-y-8">
-      {/* ── États / prix position (résultat) ─────────────────────────────── */}
+    <div className="space-y-6 pb-24">
+      {/* ── Prix position (résultat, héros) — visible quelle que soit l'audience ── */}
       <MetricsBoard metrics={metrics} />
 
+      {/* ── Onglets par audience ─────────────────────────────────────────── */}
+      <SegmentedControl<"couts" | "depenses">
+        value={tab}
+        onChange={setTab}
+        aria-label="Choisir la vue transport"
+        className="max-w-md"
+        options={[
+          { value: "couts", label: "Coûts & tarifs" },
+          { value: "depenses", label: "Dépenses" },
+        ]}
+      />
+
+      {tab === "couts" && (
+      <div className="space-y-6">
       {/* ── États détaillés (par poste / transporteur / client) ──────────── */}
       <TransportBreakdown metrics={metrics} isManager={isManager} />
 
@@ -210,12 +230,15 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
       <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
-            <p className="text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1.5">
+            <p className="text-caption2 uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1.5">
               <Calculator className="h-3.5 w-3.5" /> Structure de coûts · direction
             </p>
-            <p className="text-[12px] text-muted-foreground mt-1 max-w-xl">
-              Tous les coûts rapportables à la livraison directe. L&apos;amortissement s&apos;étale
-              sur X années ; les autres coûts sont saisis par période (hebdo / mensuel / annuel).
+            <p className="text-caption text-muted-foreground mt-1 inline-flex items-center gap-1.5">
+              Coûts de la livraison directe
+              <InfoHint label="Comment saisir">
+                Tous les coûts rapportables à la livraison directe. L&apos;amortissement s&apos;étale
+                sur X années ; les autres coûts sont saisis par période (hebdo / mensuel / annuel).
+              </InfoHint>
             </p>
           </div>
           {isManager && (
@@ -226,7 +249,7 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
         </div>
 
         {model.costs.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border py-8 text-center text-[13px] text-muted-foreground">
+          <div className="rounded-xl border border-dashed border-border py-8 text-center text-body text-muted-foreground">
             Aucune ligne de coût. {isManager ? "Ajoute une première ligne (amortissement, salaire livreur…)." : "En attente de saisie par la direction."}
           </div>
         ) : (
@@ -246,7 +269,7 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
 
         {/* Volumes de référence — récupérables depuis les BL SAP */}
         <div className="mt-4 flex items-center justify-between gap-2 border-t border-border/60 pt-4">
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption2 text-muted-foreground">
             Volumes de référence <span className="text-muted-foreground/70">(livraisons en direct)</span>
           </p>
           {isManager && (
@@ -275,23 +298,15 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
             onChange={(v) => patchModel({ kgPerYear: v })}
           />
           <div className="rounded-xl bg-secondary/40 px-3 py-2.5 flex flex-col justify-center">
-            <p className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">Coût annuel total</p>
-            <p className="text-[19px] font-bold tnum text-foreground leading-tight">{fmtEur(metrics.annualCost)}</p>
+            <p className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground">Coût annuel total</p>
+            <p className="text-title3 font-bold tnum text-foreground leading-tight">{fmtEur(metrics.annualCost)}</p>
           </div>
         </div>
 
-        {isManager && (
-          <div className="mt-4 flex items-center justify-end gap-2">
-            {model.updatedAt && !dirty && (
-              <span className="text-[11px] text-muted-foreground mr-auto">
-                Enregistré le {fmtDate(model.updatedAt)}
-              </span>
-            )}
-            <Button onClick={saveModel} disabled={saving || !dirty} variant={dirty ? "default" : "secondary"}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Enregistrer
-            </Button>
-          </div>
+        {isManager && model.updatedAt && !dirty && (
+          <p className="mt-4 text-caption2 text-muted-foreground text-right">
+            Enregistré le {fmtDate(model.updatedAt)}
+          </p>
         )}
       </section>
 
@@ -303,8 +318,11 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
         isManager={isManager}
         onSetDirect={setDirect}
       />
+      </div>
+      )}
 
-      {/* ── Dépenses transporteur (photo à l'appui) ──────────────────────── */}
+      {tab === "depenses" && (
+      /* ── Dépenses transporteur (photo à l'appui) ──────────────────────── */
       <ExpensesSection
         expenses={expenses}
         isManager={isManager}
@@ -312,6 +330,20 @@ export function TransportCostPanel({ isManager }: { isManager: boolean }) {
         onAdded={(e) => setExpenses((cur) => [e, ...cur])}
         onDeleted={(id) => setExpenses((cur) => cur.filter((x) => x.id !== id))}
       />
+      )}
+
+      {/* ── Barre d'enregistrement STICKY — n'apparaît qu'en cas de modifications ── */}
+      {isManager && tab === "couts" && dirty && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/90 backdrop-blur-md">
+          <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3">
+            <p className="text-caption font-medium text-foreground">Modifications non enregistrées</p>
+            <Button onClick={saveModel} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Enregistrer la structure de coûts
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -323,37 +355,37 @@ function MetricsBoard({ metrics }: { metrics: ReturnType<typeof computeTransport
     <section className="rounded-2xl border border-border bg-card overflow-hidden">
       <div className="px-4 sm:px-5 py-3 border-b border-border/60 flex items-center gap-2">
         <Truck className="h-4 w-4 text-brand-500" />
-        <p className="text-[13px] font-semibold text-foreground">Gestion de marge nette transport</p>
+        <p className="text-body font-semibold text-foreground">Gestion de marge nette transport</p>
       </div>
 
       {/* Prix position — la valeur qui fait foi (annuelle) */}
       <div className="grid gap-px bg-border/60 sm:grid-cols-3">
         <div className="bg-card p-4 sm:col-span-1 flex flex-col justify-center">
-          <p className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground inline-flex items-center gap-1">
+          <p className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground inline-flex items-center gap-1">
             <TrendingDown className="h-3 w-3" /> Prix position (€/kg)
           </p>
-          <p className="mt-1 text-[30px] font-bold tnum leading-none text-brand-600 dark:text-brand-400">
+          <p className="mt-1 text-title1 font-bold tnum leading-none text-brand-600 dark:text-brand-400">
             {hasKg ? fmtPerKg(metrics.prixPositionPerKg) : "—"}
           </p>
-          <p className="text-[10.5px] text-muted-foreground mt-1.5">
+          <p className="text-caption2 text-muted-foreground mt-1.5">
             Coût transport au kilo · valeur ANNUELLE (reportée en fiche client)
           </p>
         </div>
         <div className="bg-card p-4 flex flex-col justify-center">
-          <p className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">Coût / livraison</p>
-          <p className="mt-1 text-[22px] font-bold tnum leading-tight text-foreground">
+          <p className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground">Coût / livraison</p>
+          <p className="mt-1 text-title2 font-bold tnum leading-tight text-foreground">
             {metrics.deliveriesPerYear > 0 ? fmtEur2(metrics.costPerDelivery) : "—"}
           </p>
-          <p className="text-[10.5px] text-muted-foreground mt-1.5">
+          <p className="text-caption2 text-muted-foreground mt-1.5">
             {fmtInt(metrics.deliveriesPerYear)} livraisons/an · {fmtKg(metrics.kgPerYear)}
           </p>
         </div>
         <div className="bg-card p-4 flex flex-col justify-center">
-          <p className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">Règle transporteur</p>
-          <p className="mt-1 text-[13px] font-medium text-foreground leading-snug">
+          <p className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground">Règle transporteur</p>
+          <p className="mt-1 text-body font-medium text-foreground leading-snug">
             Direct → <span className="tnum font-bold">prix position</span>
           </p>
-          <p className="text-[10.5px] text-muted-foreground mt-1">
+          <p className="text-caption2 text-muted-foreground mt-1">
             Seules les livraisons EN DIRECT sont valorisées au prix position ; les autres
             transporteurs portent une valeur €/kg saisie à la main (voir ci-dessous).
           </p>
@@ -362,9 +394,9 @@ function MetricsBoard({ metrics }: { metrics: ReturnType<typeof computeTransport
 
       {/* États : annuel (12 mois glissants, référence) + mensuel (indicatif) */}
       <div className="px-4 sm:px-5 py-3 border-t border-border/60">
-        <p className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2">États du coût</p>
+        <p className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2">États du coût</p>
         <div className="overflow-x-auto">
-          <table className="w-full text-[12.5px]">
+          <table className="w-full text-caption">
             <thead>
               <tr className="text-muted-foreground border-b border-border/60">
                 <th className="text-left font-medium py-1.5 pr-3">Période</th>
@@ -388,10 +420,10 @@ function PeriodRow({ label, value, note, indicatif, strong }: { label: string; v
     <tr className={`border-b border-border/40 last:border-0 ${strong ? "font-semibold text-foreground" : "text-foreground/90"}`}>
       <td className="py-1.5 pr-3">
         {label}
-        {indicatif && <span className="ml-1.5 text-[10px] font-normal text-amber-600 dark:text-amber-400 uppercase tracking-wide">indicatif</span>}
+        {indicatif && <span className="ml-1.5 text-caption2 font-normal text-amber-600 dark:text-amber-400 uppercase tracking-wide">indicatif</span>}
       </td>
       <td className="py-1.5 px-3 text-right">{value}</td>
-      <td className="py-1.5 pl-3 text-right text-[11px] text-muted-foreground font-normal">{note}</td>
+      <td className="py-1.5 pl-3 text-right text-caption2 text-muted-foreground font-normal">{note}</td>
     </tr>
   );
 }
@@ -407,8 +439,8 @@ function CostLineRow({
   onRemove: () => void;
 }) {
   const isAmort = line.kind === "amortissement";
-  const selectCls = "h-9 rounded-md border border-input bg-background px-2 text-[13px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60";
-  const inputCls = "h-9 rounded-md border border-input bg-background px-2 text-[13px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60";
+  const selectCls = "h-9 rounded-md border border-input bg-background px-2 text-body text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60";
+  const inputCls = "h-9 rounded-md border border-input bg-background px-2 text-body text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60";
   return (
     <div className="grid grid-cols-2 lg:grid-cols-12 gap-2 items-center rounded-xl bg-secondary/30 p-2">
       <input
@@ -440,7 +472,7 @@ function CostLineRow({
           onChange={(e) => onPatch({ amount: parseFloat(e.target.value) || 0 })}
           aria-label={isAmort ? "Investissement total (€)" : "Montant (€)"}
         />
-        <span className="text-[12px] text-muted-foreground">€</span>
+        <span className="text-caption text-muted-foreground">€</span>
       </div>
       {isAmort ? (
         <div className="col-span-1 lg:col-span-2 flex items-center gap-1">
@@ -452,7 +484,7 @@ function CostLineRow({
             onChange={(e) => onPatch({ amortYears: parseFloat(e.target.value) || 0 })}
             aria-label="Nombre d'années d'amortissement"
           />
-          <span className="text-[12px] text-muted-foreground whitespace-nowrap">ans</span>
+          <span className="text-caption text-muted-foreground whitespace-nowrap">ans</span>
         </div>
       ) : (
         <select
@@ -467,8 +499,8 @@ function CostLineRow({
         </select>
       )}
       <div className="col-span-1 lg:col-span-2 flex items-center justify-end gap-2">
-        <span className="text-[12px] tnum text-muted-foreground whitespace-nowrap" title="Montant annualisé">
-          {fmtEur(annual)}<span className="text-[10px]">/an</span>
+        <span className="text-caption tnum text-muted-foreground whitespace-nowrap" title="Montant annualisé">
+          {fmtEur(annual)}<span className="text-caption2">/an</span>
         </span>
         {editable && (
           <button
@@ -493,18 +525,18 @@ function VolumeField({
 }) {
   return (
     <label className="rounded-xl bg-secondary/40 px-3 py-2.5 block">
-      <span className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">{label}</span>
+      <span className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground">{label}</span>
       <div className="mt-1 flex items-center gap-1">
         <input
           type="number" min={0} step={step}
-          className="h-8 w-full rounded-md bg-background/70 border border-input px-2 text-[16px] font-bold tnum text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70 disabled:border-transparent disabled:bg-transparent"
+          className="h-8 w-full rounded-md bg-background/70 border border-input px-2 text-callout font-bold tnum text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70 disabled:border-transparent disabled:bg-transparent"
           value={value || ""}
           disabled={!editable}
           onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
         />
-        {suffix && <span className="text-[12px] text-muted-foreground">{suffix}</span>}
+        {suffix && <span className="text-caption text-muted-foreground">{suffix}</span>}
       </div>
-      <span className="text-[10px] text-muted-foreground">{hint}</span>
+      <span className="text-caption2 text-muted-foreground">{hint}</span>
     </label>
   );
 }
@@ -533,14 +565,14 @@ function CarriersSection({
     <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
       <div className="mb-4">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1.5">
+          <p className="text-caption2 uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1.5">
             <Truck className="h-3.5 w-3.5" /> Transporteurs · livraison en direct
           </p>
           {/* Import du fichier tarif fournisseur (xlsx Delanchy / Antoine) :
               la grille par position s'applique à TOUS les clients. */}
           {isManager && <CarrierTariffImport />}
         </div>
-        <p className="text-[12px] text-muted-foreground mt-1 max-w-xl">
+        <p className="text-caption text-muted-foreground mt-1 max-w-xl">
           Marque « direct » les transporteurs de la flotte propre (ex. <span className="font-medium text-foreground">DIRECT IDF</span>, <span className="font-medium text-foreground">GERVIFRAIS IDF</span>) — valorisés au prix position
           {prixPositionPerKg > 0 ? <> · <span className="tnum font-medium text-foreground">{fmtPerKg(prixPositionPerKg)}</span></> : null}.
           Les transporteurs externes portent une <span className="font-medium text-foreground">grille au coût par position</span> (tranches de poids × départements livrés + majorations gazole / frais fixes), saisie depuis la fiche client › Logistique — grille partagée entre tous les clients du transporteur.
@@ -549,7 +581,7 @@ function CarriersSection({
       </div>
 
       {rows.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border py-8 text-center text-[13px] text-muted-foreground">
+        <div className="rounded-xl border border-dashed border-border py-8 text-center text-body text-muted-foreground">
           Catalogue transporteurs indisponible (SAP injoignable). La règle de repli « tout direct » s&apos;applique.
         </div>
       ) : (
@@ -560,15 +592,15 @@ function CarriersSection({
             return (
               <li key={k} className="py-2.5 flex items-center gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-[13.5px] font-medium text-foreground truncate">{c.name}</p>
-                  <p className="text-[11px] text-muted-foreground truncate">Code {c.code}</p>
+                  <p className="text-body font-medium text-foreground truncate">{c.name}</p>
+                  <p className="text-caption2 text-muted-foreground truncate">Code {c.code}</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => isManager && onSetDirect(c.code, !direct)}
                   disabled={!isManager}
                   aria-pressed={direct}
-                  className={`shrink-0 inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-[12px] font-semibold transition-colors disabled:opacity-60 ${
+                  className={`shrink-0 inline-flex items-center gap-1 h-8 px-2.5 rounded-lg text-caption font-semibold transition-colors disabled:opacity-60 ${
                     direct
                       ? "bg-brand-100 dark:bg-brand-950/40 text-brand-700 dark:text-brand-300 ring-1 ring-brand-500/40"
                       : "bg-secondary/60 text-muted-foreground hover:text-foreground"
@@ -603,12 +635,15 @@ function ExpensesSection({
     <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
       <div className="flex items-start justify-between gap-3 mb-4">
         <div>
-          <p className="text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1.5">
+          <p className="text-caption2 uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1.5">
             <Receipt className="h-3.5 w-3.5" /> Dépenses transporteur · justificatifs
           </p>
-          <p className="text-[12px] text-muted-foreground mt-1 max-w-xl">
-            Le transporteur notifie ici toutes ses dépenses, photo à l&apos;appui. Elles
-            documentent la structure de coûts ci-dessus. Total déclaré : <span className="font-semibold text-foreground tnum">{fmtEur2(total)}</span>.
+          <p className="text-caption text-muted-foreground mt-1 inline-flex items-center gap-1.5">
+            Total déclaré <span className="font-semibold text-foreground tnum">{fmtEur2(total)}</span>
+            <InfoHint label="À quoi ça sert">
+              Le transporteur notifie ici toutes ses dépenses, photo à l&apos;appui. Elles
+              documentent la structure de coûts ci-dessus.
+            </InfoHint>
           </p>
         </div>
         <Button size="sm" onClick={() => setShowForm((v) => !v)} className="shrink-0">
@@ -625,7 +660,7 @@ function ExpensesSection({
       )}
 
       {expenses.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border py-8 text-center text-[13px] text-muted-foreground">
+        <div className="rounded-xl border border-dashed border-border py-8 text-center text-body text-muted-foreground">
           Aucune dépense déclarée pour l&apos;instant.
         </div>
       ) : (
@@ -643,7 +678,7 @@ function ExpenseRow({ expense, isManager, onDeleted }: { expense: TransportExpen
   const [open, setOpen] = useState(false);
   const [full, setFull] = useState<TransportExpense | null>(null);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const nbPhotos = full?.photos.length ?? expense.nbPhotos ?? 0;
 
   async function toggle() {
@@ -660,18 +695,16 @@ function ExpenseRow({ expense, isManager, onDeleted }: { expense: TransportExpen
     }
   }
 
+  // Suppression confirmée via ConfirmDialog (window.confirm proscrit). Lève en
+  // cas d'échec pour laisser le dialog ouvert et permettre un nouvel essai.
   async function remove() {
-    if (!confirm("Supprimer cette dépense ?")) return;
-    setDeleting(true);
-    try {
-      const r = await fetch(`/api/transport/expenses?id=${encodeURIComponent(expense.id)}`, { method: "DELETE" });
-      if (!r.ok) throw new Error();
-      onDeleted(expense.id);
-      toast.success("Dépense supprimée");
-    } catch {
+    const r = await fetch(`/api/transport/expenses?id=${encodeURIComponent(expense.id)}`, { method: "DELETE" });
+    if (!r.ok) {
       toast.error("Suppression impossible");
-      setDeleting(false);
+      throw new Error("delete failed");
     }
+    onDeleted(expense.id);
+    toast.success("Dépense supprimée");
   }
 
   return (
@@ -689,33 +722,41 @@ function ExpenseRow({ expense, isManager, onDeleted }: { expense: TransportExpen
             <span className="h-4 w-4 shrink-0" />
           )}
           <div className="min-w-0 flex-1">
-            <p className="text-[13.5px] font-medium text-foreground truncate">
+            <p className="text-body font-medium text-foreground truncate">
               {expense.label || COST_KIND_LABELS[expense.category]}
             </p>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-caption2 text-muted-foreground">
               {COST_KIND_LABELS[expense.category]} · {fmtDate(expense.date)}
               {nbPhotos > 0 && <span className="inline-flex items-center gap-0.5 ml-1.5"><Camera className="h-3 w-3" />{nbPhotos}</span>}
             </p>
           </div>
         </button>
-        <span className="text-[14px] font-bold tnum text-foreground shrink-0">{fmtEur2(expense.amount)}</span>
+        <span className="text-callout font-bold tnum text-foreground shrink-0">{fmtEur2(expense.amount)}</span>
         {isManager && (
           <button
             type="button"
-            onClick={remove}
-            disabled={deleting}
-            className="h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors disabled:opacity-50"
+            onClick={() => setConfirmOpen(true)}
+            className="h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
             aria-label="Supprimer la dépense"
           >
-            {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            <Trash2 className="h-3.5 w-3.5" />
           </button>
         )}
+        <ConfirmDialog
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          title="Supprimer cette dépense ?"
+          description={`${expense.label || COST_KIND_LABELS[expense.category]} · ${fmtEur2(expense.amount)}`}
+          confirmLabel="Supprimer"
+          tone="destructive"
+          onConfirm={remove}
+        />
       </div>
       {open && (
         <div className="mt-2 ml-7">
-          {expense.note && <p className="text-[12px] text-muted-foreground mb-2 whitespace-pre-wrap">{expense.note}</p>}
+          {expense.note && <p className="text-caption text-muted-foreground mb-2 whitespace-pre-wrap">{expense.note}</p>}
           {loadingPhotos ? (
-            <div className="flex items-center gap-2 text-[12px] text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Chargement des photos…</div>
+            <div className="flex items-center gap-2 text-caption text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Chargement des photos…</div>
           ) : full && full.photos.length > 0 ? (
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
               {full.photos.map((p) => (
@@ -726,7 +767,7 @@ function ExpenseRow({ expense, isManager, onDeleted }: { expense: TransportExpen
               ))}
             </div>
           ) : (
-            <p className="text-[12px] text-muted-foreground">Aucune photo jointe.</p>
+            <p className="text-caption text-muted-foreground">Aucune photo jointe.</p>
           )}
         </div>
       )}
@@ -743,8 +784,8 @@ function ExpenseForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: (e:
   const [photos, setPhotos] = useState<DraftPhoto[]>([]);
   const [saving, setSaving] = useState(false);
 
-  const selectCls = "h-10 rounded-md border border-input bg-background px-2 text-[13px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-  const inputCls = "h-10 w-full rounded-md border border-input bg-background px-3 text-[13px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  const selectCls = "h-10 rounded-md border border-input bg-background px-2 text-body text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  const inputCls = "h-10 w-full rounded-md border border-input bg-background px-3 text-body text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   async function submit() {
     if (!label.trim() && amount <= 0 && photos.length === 0) {
@@ -778,7 +819,7 @@ function ExpenseForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: (e:
         <input className={`${inputCls} sm:col-span-2`} placeholder="Libellé (ex. Plein gasoil, pneu…)" value={label} onChange={(e) => setLabel(e.target.value)} />
         <div className="flex items-center gap-1">
           <input type="number" min={0} step={1} className={`${inputCls} text-right`} placeholder="Montant" value={amount || ""} onChange={(e) => setAmount(parseFloat(e.target.value) || 0)} />
-          <span className="text-[12px] text-muted-foreground">€</span>
+          <span className="text-caption text-muted-foreground">€</span>
         </div>
         <select className={selectCls} value={category} onChange={(e) => setCategory(e.target.value as TransportCostKind)}>
           {TRANSPORT_COST_KINDS.map((k) => <option key={k} value={k}>{COST_KIND_LABELS[k]}</option>)}
@@ -786,17 +827,17 @@ function ExpenseForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: (e:
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="block">
-          <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Date</span>
+          <span className="text-caption2 uppercase tracking-wider font-semibold text-muted-foreground">Date</span>
           <input type="date" className={`${inputCls} mt-1`} value={date} onChange={(e) => setDate(e.target.value)} />
         </label>
         <label className="block">
-          <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">Note (optionnel)</span>
+          <span className="text-caption2 uppercase tracking-wider font-semibold text-muted-foreground">Note (optionnel)</span>
           <input className={`${inputCls} mt-1`} placeholder="Précision…" value={note} onChange={(e) => setNote(e.target.value)} />
         </label>
       </div>
 
       <div>
-        <p className="text-[11px] font-semibold text-muted-foreground mb-2 inline-flex items-center gap-1.5">
+        <p className="text-caption2 font-semibold text-muted-foreground mb-2 inline-flex items-center gap-1.5">
           <Camera className="h-3.5 w-3.5" /> Photos justificatives
         </p>
         <PhotoStep photos={photos} onChange={setPhotos} />

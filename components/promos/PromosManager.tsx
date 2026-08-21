@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
-  BadgePercent, Gift, Loader2, PackagePlus, Plus, Power, RefreshCw, Search, Store, Tag, Trash2,
+  BadgePercent, Gift, Loader2, PackagePlus, Plus, RefreshCw, Search, Store, Tag, Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
@@ -14,6 +17,7 @@ import { composePriceLabel, fmtPrix, storeTypeLabel } from "@/components/promos/
 import { designationProduit } from "@/lib/produit-designation";
 import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { SEGMENT_BADGE } from "@/lib/segments";
+import { cn } from "@/lib/utils";
 
 /**
  * Gestion des promos articles (C2) — liste + création + désactivation/suppression.
@@ -79,12 +83,21 @@ function fmtDate(s: string | null | undefined): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString("fr-FR");
 }
 
+/** Jours entiers restants avant une date de fin (null si absente/passée-invalide). */
+function joursRestants(s: string | null | undefined): number | null {
+  if (!s) return null;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  const finJour = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).getTime();
+  return Math.ceil((finJour - Date.now()) / 86_400_000);
+}
+
 export function PromosManager() {
   const [promos, setPromos] = useState<Promo[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
-  // Suppression en 2 temps (pas de window.confirm) : 1er clic arme, 2e confirme.
-  const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
+  // Suppression confirmée par ConfirmDialog (jamais window.confirm).
+  const [deleteTarget, setDeleteTarget] = useState<Promo | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -98,15 +111,9 @@ export function PromosManager() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Désarme la suppression après 3 s sans confirmation
-  useEffect(() => {
-    if (!armedDeleteId) return;
-    const t = setTimeout(() => setArmedDeleteId(null), 3000);
-    return () => clearTimeout(t);
-  }, [armedDeleteId]);
-
-  const toggleActive = async (p: Promo) => {
-    const next = !(p.active ?? true);
+  /** Bascule Actif/Inactif (mise à jour optimiste, rollback au besoin). */
+  const setActive = async (p: Promo, next: boolean) => {
+    setPromos((cur) => cur.map((x) => (x.id === p.id ? { ...x, active: next } : x)));
     try {
       const res = await fetch(`/api/promos/${p.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -114,19 +121,107 @@ export function PromosManager() {
       });
       if (!res.ok) throw new Error();
       toast.success(next ? "Promo réactivée" : "Promo désactivée");
-      load();
-    } catch { toast.error("Échec de la mise à jour"); }
+    } catch {
+      setPromos((cur) => cur.map((x) => (x.id === p.id ? { ...x, active: !next } : x)));
+      toast.error("Échec de la mise à jour");
+    }
   };
 
-  const remove = async (p: Promo) => {
-    if (armedDeleteId !== p.id) { setArmedDeleteId(p.id); return; }
-    setArmedDeleteId(null);
-    try {
-      const res = await fetch(`/api/promos/${p.id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error();
-      toast.success("Promo supprimée");
-      setPromos((cur) => cur.filter((x) => x.id !== p.id));
-    } catch { toast.error("Échec de la suppression"); }
+  const confirmRemove = async () => {
+    const p = deleteTarget;
+    if (!p) return;
+    const res = await fetch(`/api/promos/${p.id}`, { method: "DELETE" });
+    if (!res.ok) { toast.error("Échec de la suppression"); throw new Error("delete"); }
+    toast.success("Promo supprimée");
+    setPromos((cur) => cur.filter((x) => x.id !== p.id));
+  };
+
+  const actives = promos.filter((p) => p.active ?? true);
+  const inactives = promos.filter((p) => !(p.active ?? true));
+
+  /** Carte d'une promo — badge héros à gauche, statut + suppression à droite. */
+  const renderCard = (p: Promo) => {
+    const active = p.active ?? true;
+    const debut = fmtDate(p.startsAt);
+    const fin = fmtDate(p.endsAt);
+    const restants = joursRestants(p.endsAt);
+    // Échéance PROCHE : accent d'alerte quand il reste 3 jours ou moins.
+    const proche = restants != null && restants >= 0 && restants <= 3;
+    const dz = designationProduit({
+      itemName: p.itemName, uPays: p.pays, uMarque: p.marque, uCondi: p.condi, uVariete: p.variete,
+    });
+    // Cible magasin : affichée uniquement si RESTREINTE (Export/GMS/CHR).
+    const storeChip = p.storeType ? SEGMENT_BADGE[p.storeType] ?? null : null;
+    return (
+      <li
+        key={p.id}
+        className={cn(
+          "rounded-xl border border-border bg-card p-3.5 flex flex-wrap items-start gap-3.5 shadow-card",
+          !active && "opacity-60",
+        )}
+      >
+        {/* Badge promo en HÉROS à gauche — grande pastille. */}
+        <div className="shrink-0 flex w-[84px] flex-col items-center justify-center gap-1 rounded-xl bg-rose-500/12 px-2 py-3 text-rose-700 ring-1 ring-inset ring-rose-500/25 dark:text-rose-300">
+          {(p.kind === "X_PLUS_Y" || p.kind === "FREE") && <Gift className="h-4 w-4" />}
+          {p.kind === "PRICE" && <Tag className="h-4 w-4" />}
+          <span className="text-title3 font-bold leading-none tnum text-center">{promoBadge(p)}</span>
+        </div>
+
+        {/* Corps — article, tags, métadonnées. */}
+        <div className="min-w-0 flex-1">
+          <p className="text-callout font-semibold text-foreground truncate leading-tight">
+            {p.label?.trim() || dz.fruit}
+          </p>
+          <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1" />
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-caption2 text-muted-foreground">
+            <span className="font-mono">{p.itemCode}</span>
+            <span className="text-muted-foreground/40" aria-hidden>•</span>
+            {(debut || fin) ? (
+              <span>{debut ?? "…"} → {fin ?? "…"}</span>
+            ) : (
+              <span className="font-medium text-emerald-600 dark:text-emerald-400">permanent</span>
+            )}
+            {storeChip && (
+              <span
+                title={`S'applique aux magasins : ${storeTypeLabel(p.storeType)}`}
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-bold uppercase tracking-wide ${storeChip}`}
+              >
+                <Store className="h-2.5 w-2.5" />
+                {storeTypeLabel(p.storeType)}
+              </span>
+            )}
+            {proche && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded font-semibold bg-warning/12 text-warning ring-1 ring-inset ring-warning/25">
+                {restants === 0 ? "se termine aujourd'hui" : `se termine dans ${restants} j`}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Actions — vrai interrupteur libellé + suppression. */}
+        <div className="shrink-0 flex items-center gap-2">
+          <SegmentedControl
+            size="sm"
+            aria-label={`Statut de la promo ${p.itemCode}`}
+            value={active ? "actif" : "inactif"}
+            onChange={(v) => { const next = v === "actif"; if (next !== active) setActive(p, next); }}
+            options={[
+              { value: "actif", label: "Actif" },
+              { value: "inactif", label: "Inactif" },
+            ]}
+          />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setDeleteTarget(p)}
+            title="Supprimer la promo"
+            className="text-muted-foreground hover:text-destructive"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </li>
+    );
   };
 
   return (
@@ -137,11 +232,16 @@ export function PromosManager() {
           {!loading && <span className="text-muted-foreground/60 font-normal normal-case tracking-normal">({promos.length})</span>}
         </p>
         <div className="flex items-center gap-1.5">
-          <button type="button" onClick={load} disabled={loading}
+          {/* Rafraîchir — icône ghost discrète. */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={load}
+            disabled={loading}
             title="Recharger la liste"
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-border text-[12.5px] font-semibold text-muted-foreground hover:text-foreground disabled:opacity-60">
+          >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          </button>
+          </Button>
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" /> Nouvelle promo
           </Button>
@@ -149,103 +249,50 @@ export function PromosManager() {
       </div>
 
       {loading ? (
-        <p className="text-[13px] text-muted-foreground inline-flex items-center gap-2 py-6">
+        <p className="text-body text-muted-foreground inline-flex items-center gap-2 py-6">
           <Loader2 className="h-4 w-4 animate-spin" /> Chargement…
         </p>
       ) : promos.length === 0 ? (
-        <p className="text-[14px] text-muted-foreground italic py-6 text-center">
-          Aucune promo. Crée la première — elle apparaîtra en badge sur la liste stock de l&apos;Écran 2.
-        </p>
+        <EmptyState
+          icon={BadgePercent}
+          title="Aucune promo"
+          description="Créez la première — elle apparaîtra en badge sur la liste stock de l'Écran 2."
+          action={<Button variant="tinted" onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> Nouvelle promo</Button>}
+        />
       ) : (
-        <ul className="space-y-2">
-          {promos.map((p) => {
-            const active = p.active ?? true;
-            const debut = fmtDate(p.startsAt);
-            const fin = fmtDate(p.endsAt);
-            const dz = designationProduit({
-              itemName: p.itemName, uPays: p.pays, uMarque: p.marque, uCondi: p.condi, uVariete: p.variete,
-            });
-            // Cible magasin : uniquement affichée si RESTREINTE (Export/GMS/CHR) —
-            // « tous les magasins » (storeType vide) ne porte plus de badge.
-            const storeChip = p.storeType ? SEGMENT_BADGE[p.storeType] ?? null : null;
-            return (
-              // Bloc fond NOIR PUR par promo — encre blanche pour rester lisible
-              // quel que soit le thème clair/sombre de l'appli. `dark` forcé
-              // (Tailwind darkMode:"class") pour que les composants partagés
-              // (chips) prennent leur variante contrastée sur fond noir, même
-              // si le thème global de l'appli est resté clair.
-              // (l'ancienne variante liée au skin "apple" posait bg-card sous
-              // cette encre blanche — retirée avec le système de skins)
-              <li key={p.id} className={`rounded-xl p-3.5 dark bg-black ${active ? "" : "opacity-55"}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    {/* Article — même décomposition que les autres écrans (Cde
-                        Fournisseur, Entrée marchandise) : fruit + tags + code. */}
-                    <p className="text-[14.5px] font-semibold text-white truncate leading-tight">
-                      {p.label?.trim() || dz.fruit}
-                    </p>
-                    <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1" />
-                    <p className="flex items-center gap-1.5 text-[11px] font-mono text-white/60 mt-1">
-                      {p.itemCode}
-                      <span className="text-white/30">●</span>
-                      {(debut || fin) ? (
-                        <span className="font-sans text-white/70">{debut ?? "…"} → {fin ?? "…"}</span>
-                      ) : (
-                        <span className="font-sans text-emerald-400">permanent</span>
-                      )}
-                      {storeChip && (
-                        <span
-                          title={`S'applique aux magasins : ${storeTypeLabel(p.storeType)}`}
-                          className={`inline-flex items-center gap-1 h-[19px] px-1.5 rounded-[4px] text-[10.5px] font-bold uppercase tracking-wide ${storeChip}`}>
-                          <Store className="h-2.5 w-2.5" />
-                          {storeTypeLabel(p.storeType)}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {!active && (
-                      <span className="text-[10px] uppercase tracking-wide font-bold text-white/50">
-                        Inactive
-                      </span>
-                    )}
-                    <button type="button" onClick={() => toggleActive(p)}
-                      title={active ? "Désactiver (disparaît de l'Écran 2)" : "Réactiver"}
-                      className={`h-8 w-8 inline-flex items-center justify-center rounded-md border transition-colors shrink-0 ${
-                        active
-                          ? "border-emerald-400/50 text-emerald-400 hover:bg-emerald-950/40"
-                          : "border-white/20 text-white/50 hover:text-white"
-                      }`}>
-                      <Power className="h-4 w-4" />
-                    </button>
-                    <button type="button" onClick={() => remove(p)}
-                      title={armedDeleteId === p.id ? "Clique à nouveau pour confirmer" : "Supprimer"}
-                      className={`h-8 inline-flex items-center gap-1 px-2 rounded-md border transition-colors shrink-0 text-[11.5px] font-semibold ${
-                        armedDeleteId === p.id
-                          ? "border-rose-500 bg-rose-950/40 text-rose-300"
-                          : "border-white/20 text-white/50 hover:text-rose-400 hover:border-rose-400/60"
-                      }`}>
-                      <Trash2 className="h-4 w-4" />
-                      {armedDeleteId === p.id && "Confirmer ?"}
-                    </button>
-                  </div>
-                </div>
-                {/* Détail de la promo — déplacé de gauche vers BAS */}
-                <span className="mt-2.5 inline-flex h-[24px] min-w-[64px] justify-center items-center px-2 rounded-[5px] text-[13px] font-bold bg-rose-500/20 text-rose-300 ring-1 ring-inset ring-rose-400/40">
-                  {(p.kind === "X_PLUS_Y" || p.kind === "FREE") && <Gift className="h-3 w-3 mr-1" />}
-                  {p.kind === "PRICE" && <Tag className="h-3 w-3 mr-1" />}
-                  {promoBadge(p)}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="space-y-6">
+          <section>
+            <p className="kicker mb-2">Actives <span className="font-normal normal-case tracking-normal text-muted-foreground/60">({actives.length})</span></p>
+            {actives.length === 0 ? (
+              <p className="text-caption text-muted-foreground italic py-2">Aucune promo active.</p>
+            ) : (
+              <ul className="space-y-2">{actives.map(renderCard)}</ul>
+            )}
+          </section>
+
+          {inactives.length > 0 && (
+            <section>
+              <p className="kicker mb-2">Inactives <span className="font-normal normal-case tracking-normal text-muted-foreground/60">({inactives.length})</span></p>
+              <ul className="space-y-2">{inactives.map(renderCard)}</ul>
+            </section>
+          )}
+        </div>
       )}
 
       <CreatePromoDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
         onCreated={() => { setCreateOpen(false); load(); }}
+      />
+
+      <ConfirmDialog
+        open={deleteTarget != null}
+        onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}
+        title="Supprimer la promo ?"
+        description={deleteTarget ? `« ${deleteTarget.label?.trim() || deleteTarget.itemCode} » sera définitivement retirée. Cette action est irréversible.` : undefined}
+        confirmLabel="Supprimer"
+        tone="destructive"
+        onConfirm={confirmRemove}
       />
     </div>
   );
@@ -382,7 +429,7 @@ function CreatePromoDialog({
           <DialogTitle className="flex items-center gap-2">
             <BadgePercent className="h-4 w-4 text-rose-500" /> Nouvelle promo
           </DialogTitle>
-          <DialogDescription className="text-[12.5px]">
+          <DialogDescription className="text-caption">
             Badge sur la liste stock, remise préremplie au panier, mention sur le bon SAP.
           </DialogDescription>
         </DialogHeader>
@@ -390,7 +437,7 @@ function CreatePromoDialog({
         <div className="space-y-3">
           {/* Article — autocomplétion */}
           <div className="relative">
-            <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+            <label className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
               Article
             </label>
             <div className="relative">
@@ -399,7 +446,7 @@ function CreatePromoDialog({
                 value={query}
                 onChange={(e) => { setQuery(e.target.value); setPicked(null); }}
                 placeholder="Nom ou code article (min. 2 caractères)…"
-                className="w-full h-10 pl-9 pr-2 rounded-md border border-border bg-background text-[14px] focus:outline-none focus:ring-1 focus:ring-brand-500"
+                className="w-full h-10 pl-9 pr-2 rounded-md border border-border bg-background text-callout focus:outline-none focus:ring-1 focus:ring-brand-500"
               />
               {searching && <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />}
             </div>
@@ -409,8 +456,8 @@ function CreatePromoDialog({
                   <li key={h.itemCode}>
                     <button type="button" onClick={() => pick(h)}
                       className="w-full px-3 py-2 text-left hover:bg-secondary/50">
-                      <span className="block text-[13.5px] font-medium text-foreground truncate">{h.itemName}</span>
-                      <span className="block text-[10.5px] font-mono text-muted-foreground/70">
+                      <span className="block text-body font-medium text-foreground truncate">{h.itemName}</span>
+                      <span className="block text-caption2 font-mono text-muted-foreground/70">
                         {h.itemCode}{h.groupName ? ` · ${h.groupName}` : ""}
                       </span>
                     </button>
@@ -422,30 +469,30 @@ function CreatePromoDialog({
 
           {/* Type */}
           <div>
-            <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+            <label className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
               Type de promo
             </label>
             <div className="grid grid-cols-2 gap-1.5">
               <button type="button" aria-pressed={kind === "PERCENT"} onClick={() => setKind("PERCENT")}
-                className={`h-10 rounded-md border text-[12.5px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
+                className={`h-10 rounded-md border text-caption font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
                   kind === "PERCENT" ? "border-rose-400/70 bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" : "border-border text-muted-foreground hover:text-foreground"
                 }`}>
                 <BadgePercent className="h-4 w-4" /> Remise %
               </button>
               <button type="button" aria-pressed={kind === "PRICE"} onClick={() => setKind("PRICE")}
-                className={`h-10 rounded-md border text-[12.5px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
+                className={`h-10 rounded-md border text-caption font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
                   kind === "PRICE" ? "border-rose-400/70 bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" : "border-border text-muted-foreground hover:text-foreground"
                 }`}>
                 <Tag className="h-4 w-4" /> Tarif imposé
               </button>
               <button type="button" aria-pressed={kind === "X_PLUS_Y"} onClick={() => setKind("X_PLUS_Y")}
-                className={`h-10 rounded-md border text-[12.5px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
+                className={`h-10 rounded-md border text-caption font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
                   kind === "X_PLUS_Y" ? "border-rose-400/70 bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" : "border-border text-muted-foreground hover:text-foreground"
                 }`}>
                 <Gift className="h-4 w-4" /> X + Y
               </button>
               <button type="button" aria-pressed={kind === "FREE"} onClick={() => setKind("FREE")}
-                className={`h-10 rounded-md border text-[12.5px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
+                className={`h-10 rounded-md border text-caption font-semibold inline-flex items-center justify-center gap-1.5 transition-colors ${
                   kind === "FREE" ? "border-rose-400/70 bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300" : "border-border text-muted-foreground hover:text-foreground"
                 }`}>
                 <PackagePlus className="h-4 w-4" /> Colis offert
@@ -456,60 +503,60 @@ function CreatePromoDialog({
           {/* Valeur selon le type */}
           {kind === "PERCENT" ? (
             <div>
-              <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+              <label className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
                 Remise (%)
               </label>
               <div className="flex items-center gap-2">
                 <NumberInput value={value} onValueChange={setValue} min={0} max={99} step={1}
                   aria-label="Remise en pourcentage"
-                  className="h-10 w-24 text-right text-[15px] tnum rounded-md border border-border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
-                <span className="text-[14px] text-muted-foreground">% sur le prix conseillé</span>
+                  className="h-10 w-24 text-right text-callout tnum rounded-md border border-border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                <span className="text-callout text-muted-foreground">% sur le prix conseillé</span>
               </div>
             </div>
           ) : kind === "PRICE" ? (
             <div>
-              <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+              <label className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
                 Prix unitaire imposé
               </label>
               <div className="flex items-center gap-2">
                 <NumberInput value={price} onValueChange={setPrice} min={0} step={0.01}
                   aria-label="Prix unitaire imposé (€)"
-                  className="h-10 w-28 text-right text-[15px] tnum rounded-md border border-border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
-                <span className="text-[14px] text-muted-foreground">€ / unité — remplace le prix conseillé</span>
+                  className="h-10 w-28 text-right text-callout tnum rounded-md border border-border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                <span className="text-callout text-muted-foreground">€ / unité — remplace le prix conseillé</span>
               </div>
             </div>
           ) : kind === "FREE" ? (
             <div>
-              <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+              <label className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
                 Colis offerts
               </label>
               <div className="flex items-center gap-2">
                 <NumberInput value={freeQty} onValueChange={setFreeQty} min={1} step={1}
                   aria-label="Colis offerts"
-                  className="h-10 w-20 text-right text-[15px] tnum rounded-md border border-border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
-                <span className="text-[13.5px] text-muted-foreground">colis offert(s) — sans condition d&apos;achat, ligne à 0 € sur le bon</span>
+                  className="h-10 w-20 text-right text-callout tnum rounded-md border border-border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                <span className="text-body text-muted-foreground">colis offert(s) — sans condition d&apos;achat, ligne à 0 € sur le bon</span>
               </div>
             </div>
           ) : (
             <div className="flex flex-wrap items-end gap-3">
               <div>
-                <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+                <label className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
                   Colis achetés
                 </label>
                 <NumberInput value={buyQty} onValueChange={setBuyQty} min={1} step={1}
                   aria-label="Colis achetés"
-                  className="h-10 w-20 text-right text-[15px] tnum rounded-md border border-border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                  className="h-10 w-20 text-right text-callout tnum rounded-md border border-border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
               </div>
-              <span className="text-[16px] font-bold text-muted-foreground pb-2">+</span>
+              <span className="text-callout font-bold text-muted-foreground pb-2">+</span>
               <div>
-                <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+                <label className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
                   Colis offerts
                 </label>
                 <NumberInput value={freeQty} onValueChange={setFreeQty} min={1} step={1}
                   aria-label="Colis offerts"
-                  className="h-10 w-20 text-right text-[15px] tnum rounded-md border border-border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+                  className="h-10 w-20 text-right text-callout tnum rounded-md border border-border bg-background px-2 focus:outline-none focus:ring-1 focus:ring-brand-500" />
               </div>
-              <p className="text-[11.5px] text-muted-foreground pb-2">
+              <p className="text-caption2 text-muted-foreground pb-2">
                 ex. 5+1 : le 6ᵉ colis est offert
               </p>
             </div>
@@ -517,21 +564,21 @@ function CreatePromoDialog({
 
           {/* Type de magasin ciblé — applique la promo à TOUS les magasins de ce type */}
           <div>
-            <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+            <label className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
               <span className="inline-flex items-center gap-1"><Store className="h-3 w-3" /> Magasins concernés</span>
             </label>
             <div className="grid grid-cols-4 gap-1.5">
               {STORE_OPTIONS.map((o) => (
                 <button key={o.value || "all"} type="button" aria-pressed={storeType === o.value}
                   onClick={() => setStoreType(o.value)}
-                  className={`h-9 rounded-md border text-[12.5px] font-semibold transition-colors ${
+                  className={`h-9 rounded-md border text-caption font-semibold transition-colors ${
                     storeType === o.value ? "border-brand-400/70 bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-300" : "border-border text-muted-foreground hover:text-foreground"
                   }`}>
                   {o.label}
                 </button>
               ))}
             </div>
-            <p className="text-[11.5px] text-muted-foreground mt-1">
+            <p className="text-caption2 text-muted-foreground mt-1">
               {storeType
                 ? `S'applique à tous les magasins de type ${storeTypeLabel(storeType)}.`
                 : "S'applique à tous les magasins, quel que soit leur type."}
@@ -540,15 +587,15 @@ function CreatePromoDialog({
 
           {/* Libellé */}
           <div>
-            <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+            <label className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
               Libellé (mention sur le bon)
             </label>
             <input value={label}
               onChange={(e) => { setLabel(e.target.value); setLabelTouched(true); }}
               placeholder="ex. Groseille Mixte  12x125g  Belgique  Belorta   Prix Unitaire  2.80 EUR"
-              className="w-full h-10 rounded-md border border-border bg-background text-[14px] px-2.5 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+              className="w-full h-10 rounded-md border border-border bg-background text-callout px-2.5 focus:outline-none focus:ring-1 focus:ring-brand-500" />
             {kind === "PRICE" && !labelTouched && picked && (
-              <p className="text-[11.5px] text-muted-foreground mt-1">
+              <p className="text-caption2 text-muted-foreground mt-1">
                 Libellé composé automatiquement depuis les tags de l&apos;article — modifiable.
               </p>
             )}
@@ -556,10 +603,10 @@ function CreatePromoDialog({
 
           {/* Durée : permanente (sans dates) ou période fixée */}
           <div>
-            <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+            <label className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
               Durée
             </label>
-            <label className="inline-flex items-center gap-2 text-[13.5px] text-foreground cursor-pointer select-none">
+            <label className="inline-flex items-center gap-2 text-body text-foreground cursor-pointer select-none">
               <input type="checkbox" checked={permanent} onChange={(e) => setPermanent(e.target.checked)}
                 className="h-4 w-4 accent-rose-500" />
               Promo permanente <span className="text-muted-foreground">(sans date de fin)</span>
@@ -567,18 +614,18 @@ function CreatePromoDialog({
             {!permanent && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
                 <div>
-                  <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+                  <label className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
                     Début (optionnel)
                   </label>
                   <input type="date" value={startsAt} onChange={(e) => setStartsAt(e.target.value)}
-                    className="w-full h-10 rounded-md border border-border bg-background text-[13px] px-2" />
+                    className="w-full h-10 rounded-md border border-border bg-background text-body px-2" />
                 </div>
                 <div>
-                  <label className="text-[11px] uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
+                  <label className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground block mb-1">
                     Fin (optionnel)
                   </label>
                   <input type="date" value={endsAt} onChange={(e) => setEndsAt(e.target.value)}
-                    className="w-full h-10 rounded-md border border-border bg-background text-[13px] px-2" />
+                    className="w-full h-10 rounded-md border border-border bg-background text-body px-2" />
                 </div>
               </div>
             )}

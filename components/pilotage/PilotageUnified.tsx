@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import {
   ArrowLeft, Trophy, Maximize2, X, Home, AlertCircle,
-  Users, Briefcase, Building2, Map as MapIcon, CalendarRange,
+  Users, Briefcase, Building2, Map as MapIcon, CalendarRange, MonitorSmartphone,
 } from "lucide-react";
 import { Tile, BigKpi, MiniKpi, RefreshButton, formatEuro, formatNum, formatPct } from "./bento";
 import { GranularitySwitch } from "./GranularitySwitch";
@@ -130,13 +130,14 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
           </Link>
           <div className="min-w-0">
             <p className="kicker">Pilotage</p>
-            <h1 className="text-[20px] font-semibold leading-none text-foreground">Chiffres clés du jour</h1>
+            <h1 className="text-title2 font-semibold leading-none text-foreground">Chiffres clés du jour</h1>
           </div>
         </div>
         <KpiStrip />
-        <div className="rounded-2xl border border-border bg-card p-4 text-[14px] leading-relaxed text-muted-foreground">
-          📊 La vue complète — cockpit unifié, rapport annuel, commissions et carte —
-          est optimisée pour <b className="text-foreground">grand écran</b>.
+        <div className="rounded-2xl border border-border bg-card p-4 flex items-start gap-3 text-callout leading-relaxed text-muted-foreground">
+          <MonitorSmartphone className="h-5 w-5 shrink-0 mt-0.5 text-muted-foreground" />
+          <span>La vue complète — cockpit unifié, rapport annuel, commissions et carte —
+          est optimisée pour <b className="text-foreground">grand écran</b>.</span>
         </div>
       </div>
 
@@ -149,15 +150,15 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
               href="/console"
               aria-label="Retour au site"
               title="Retour au site"
-              className="inline-flex items-center gap-1.5 h-8 pl-2 pr-3 rounded-full bg-card border border-border text-[11px] font-semibold text-foreground/80 hover:text-foreground transition-colors shrink-0"
+              className="inline-flex items-center gap-1.5 h-8 pl-2 pr-3 rounded-full bg-card border border-border text-caption2 font-semibold text-foreground/80 hover:text-foreground transition-colors shrink-0"
             >
               <ArrowLeft className="h-3.5 w-3.5" /> Retour
             </Link>
             <div className="flex items-baseline gap-3 min-w-0">
-              <p className="text-[10.5px] uppercase tracking-[0.18em] font-bold text-muted-foreground shrink-0">
+              <p className="text-caption2 uppercase tracking-[0.18em] font-bold text-muted-foreground shrink-0">
                 Pilotage · Vue d&apos;ensemble
               </p>
-              <h1 className="text-[15px] font-semibold tracking-tight text-foreground truncate">{periodLabel}</h1>
+              <h1 className="text-callout font-semibold tracking-tight text-foreground truncate">{periodLabel}</h1>
             </div>
           </div>
           <div className="flex items-center gap-2.5 shrink-0">
@@ -167,7 +168,7 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
             <Link
               href="/dashboard/magasins"
               title="Palmarès des magasins — rentabilité par client"
-              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-secondary/60 text-[11.5px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-secondary/60 text-caption font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
             >
               <Trophy className="h-3.5 w-3.5 text-brand-500" /> Palmarès
             </Link>
@@ -178,11 +179,11 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
         {err && (
           <div className="flex-1 grid place-items-center">
             <div className="flex flex-col items-center gap-3 text-center">
-              <p className="text-[13px] text-rose-400">Erreur de chargement : {err}</p>
+              <p className="text-body text-destructive">Erreur de chargement : {err}</p>
               <button
                 type="button"
                 onClick={() => setNonce((n) => n + 1)}
-                className="px-3 h-8 text-[12px] font-semibold rounded-md bg-secondary/60 text-foreground hover:bg-secondary transition-colors"
+                className="px-3 h-8 text-caption font-semibold rounded-md bg-secondary/60 text-foreground hover:bg-secondary transition-colors"
               >
                 Réessayer
               </button>
@@ -195,8 +196,8 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
           className="flex-1 grid gap-2 min-h-0"
           style={{ gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gridTemplateRows: "repeat(8, minmax(0, 1fr))" }}
         >
-          {/* ── Rang 1 : KPI (survol = détail N-1) ── */}
-          <Tile colSpan={3} rowSpan={2} accent="brand" className="!overflow-visible">
+          {/* ── Rang 1 : bande de KPI — cases de PRISE D'INFO (teintées or, tap = détail N-1) ── */}
+          <Tile colSpan={3} rowSpan={2} tinted className="!overflow-visible">
             <Pop
               content={data && (
                 <>
@@ -218,7 +219,7 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
             </Pop>
           </Tile>
 
-          <Tile colSpan={3} rowSpan={2} accent="emerald" className="!overflow-visible">
+          <Tile colSpan={3} rowSpan={2} tinted className="!overflow-visible">
             <Pop
               content={data && (
                 <>
@@ -239,7 +240,7 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
                   animateOnMount
                 />
                 {data && data.curr.marginCoverage < 95 && (
-                  <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 inline-flex items-center gap-1">
+                  <p className="text-caption2 text-amber-600 dark:text-amber-400 mt-1 inline-flex items-center gap-1">
                     <AlertCircle className="h-3 w-3 shrink-0" />
                     {formatPct(data.curr.marginCoverage)} des lignes costées
                   </p>
@@ -248,7 +249,7 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
             </Pop>
           </Tile>
 
-          <Tile colSpan={3} rowSpan={2}>
+          <Tile colSpan={3} rowSpan={2} tinted>
             <div className="h-full grid grid-rows-2 gap-1.5">
               <MiniKpi label="Cdes BL" value={data ? formatNum(data.curr.ordersCount) : ph}
                 curr={data?.curr.ordersCount ?? 0} prev={data?.prev.ordersCount ?? 0}
@@ -260,7 +261,7 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
             </div>
           </Tile>
 
-          <Tile colSpan={3} rowSpan={2}>
+          <Tile colSpan={3} rowSpan={2} tinted>
             <div className="h-full grid grid-rows-2 gap-1.5">
               <MiniKpi label="Appels CRM" value={data ? formatNum(data.crm.appels) : ph}
                 curr={data?.crm.appels ?? 0} prev={data?.crmPrev.appels ?? 0}
@@ -272,17 +273,17 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
           </Tile>
 
           {/* ── Rang 2 : évolution + matrice annuelle compacte ── */}
-          <Tile colSpan={7} rowSpan={3} title={`Évolution ${isWeight ? "volume kg" : "CA HT"} BL · hebdo (N vs N-1)`} accent="brand">
+          <Tile colSpan={7} rowSpan={3} title={`Évolution ${isWeight ? "volume kg" : "CA HT"} BL · hebdo (N vs N-1)`}>
             {trend.length > 1 ? (
               <TrendArea data={trend} tone="brand" height="100%" className="h-full" format={fmtVal}
                 currentLabel="N" compareLabel="N-1"
                 aria-label="Évolution BL hebdomadaire, année courante vs précédente" />
             ) : (
-              <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">Série indisponible.</div>
+              <div className="h-full flex items-center justify-center text-caption text-muted-foreground">Série indisponible.</div>
             )}
           </Tile>
 
-          <ClickTile colSpan={5} rowSpan={3} icon={CalendarRange} accent="violet"
+          <ClickTile colSpan={5} rowSpan={3} icon={CalendarRange}
             title="Rapport annuel · CA facturé"
             hintOpen="matrice, évolutions, drill-in mois"
             onOpen={() => setOverlay("annual")}
@@ -291,7 +292,7 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
           </ClickTile>
 
           {/* ── Rang 3 : les mondes — clic = plein écran ── */}
-          <ClickTile colSpan={4} rowSpan={3} icon={Users} accent="brand"
+          <ClickTile colSpan={4} rowSpan={3} icon={Users}
             title={`Top clients · ${isWeight ? "Volume" : "CA HT"} × appels`}
             hintOpen="tous les magasins, marges & transport"
             onOpen={() => setOverlay("clients")}
@@ -310,7 +311,7 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
                       <PopRow k="Poids" v={formatWeight(c.weightKg)} />
                       <PopRow k="Commandes BL" v={formatNum(c.orders)} />
                       <PopRow k="Appels télévente" v={formatNum(c.crmCalls)} />
-                      <p className="mt-1 text-[10px] text-brand-400">Clic : détail de tous les magasins →</p>
+                      <p className="mt-1 text-caption2 text-muted-foreground">Clic : détail de tous les magasins →</p>
                     </>
                   }
                   sub={`${formatNum(c.orders)} BL · ${formatNum(c.crmCalls)} app.`}
@@ -321,7 +322,7 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
             </ol>
           </ClickTile>
 
-          <ClickTile colSpan={3} rowSpan={3} icon={Briefcase} accent="violet"
+          <ClickTile colSpan={3} rowSpan={3} icon={Briefcase}
             title="Commerciaux"
             hintOpen="équipe, primes & factures"
             onOpen={() => setOverlay("commerciaux")}
@@ -333,14 +334,14 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
                   name={s.slpName}
                   value={fmtVal(isWeight ? s.weightKg : s.volume)}
                   bar={(isWeight ? s.weightKg : s.volume) / Math.max(...(data?.salespersons ?? []).map((x) => (isWeight ? x.weightKg : x.volume)), 1)}
-                  tone="bg-violet-500/15"
+                  tone="bg-brand-500/15"
                   pop={
                     <>
                       <PopRow k="CA période" v={formatEuro(s.volume, true)} />
                       <PopRow k="Poids" v={formatWeight(s.weightKg)} />
                       <PopRow k="Clients actifs" v={formatNum(s.activeClients)} />
                       <PopRow k="Commandes BL" v={formatNum(s.orders)} />
-                      <p className="mt-1 text-[10px] text-violet-300">Clic : primes & détail des factures →</p>
+                      <p className="mt-1 text-caption2 text-muted-foreground">Clic : primes & détail des factures →</p>
                     </>
                   }
                   sub={`${s.activeClients} cl. · ${s.orders} BL`}
@@ -353,7 +354,7 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
             </ol>
           </ClickTile>
 
-          <ClickTile colSpan={3} rowSpan={3} icon={Building2} accent="amber"
+          <ClickTile colSpan={3} rowSpan={3} icon={Building2}
             title={`Top fournisseurs · ${annual?.currentYear ?? "N"}`}
             hintOpen="achats nets 12 mois"
             onOpen={() => setOverlay("fournisseurs")}
@@ -365,13 +366,13 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
                   name={s.cardName ?? s.cardCode}
                   value={formatEuro(s.totalIn, true)}
                   bar={s.totalIn / Math.max(...(annual?.suppliers ?? []).map((x) => x.totalIn), 1)}
-                  tone="bg-amber-500/15"
+                  tone="bg-brand-500/15"
                   pop={
                     <>
                       <PopRow k="Achats nets HT" v={formatEuro(s.totalIn, true)} />
                       <PopRow k="Entrées marchandises" v={formatNum(s.pdnCount)} />
                       <PopRow k="Poids" v={formatWeight(s.weightKg)} />
-                      <p className="mt-1 text-[10px] text-amber-300">Clic : détail des achats →</p>
+                      <p className="mt-1 text-caption2 text-muted-foreground">Clic : détail des achats →</p>
                     </>
                   }
                   sub={`${s.pdnCount} EM`}
@@ -384,7 +385,7 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
             </ol>
           </ClickTile>
 
-          <ClickTile colSpan={2} rowSpan={3} icon={MapIcon} accent="sky"
+          <ClickTile colSpan={2} rowSpan={3} icon={MapIcon}
             title="Zones · 12 mois"
             hintOpen="carte plein écran"
             onOpen={() => setOverlay("geo")}
@@ -396,7 +397,7 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
                   name={z.name}
                   value={formatEuro(z.ca, true)}
                   bar={z.ca / Math.max(...topZones.map((x) => x.ca), 1)}
-                  tone="bg-sky-500/15"
+                  tone="bg-brand-500/15"
                   compact
                   pop={
                     <>
@@ -404,7 +405,7 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
                       <PopRow k="Marge" v={formatEuro(z.margin, true)} />
                       <PopRow k="Poids" v={formatWeight(z.weightKg)} />
                       <PopRow k="BL · clients" v={`${formatNum(z.docs)} · ${formatNum(z.clients)}`} />
-                      <p className="mt-1 text-[10px] text-sky-300">Clic : carte plein écran →</p>
+                      <p className="mt-1 text-caption2 text-muted-foreground">Clic : carte plein écran →</p>
                     </>
                   }
                 />
@@ -419,9 +420,9 @@ export function PilotageUnified({ viewAs = null }: { viewAs?: string | null } = 
 
       {/* Bannière « voir comme » */}
       {viewAs && (
-        <div className="absolute top-2.5 left-1/2 -translate-x-1/2 z-40 inline-flex items-center gap-2 h-8 pl-3 pr-1.5 rounded-full bg-violet-600/95 backdrop-blur-md shadow-modal text-[11.5px] font-semibold text-white">
+        <div className="absolute top-2.5 left-1/2 -translate-x-1/2 z-40 inline-flex items-center gap-2 h-8 pl-3 pr-1.5 rounded-full bg-violet-600/95 backdrop-blur-md shadow-modal text-caption font-semibold text-white">
           Vue de&nbsp;<span className="font-bold">{viewAs}</span>&nbsp;· lecture seule
-          <Link href="/dashboard" className="ml-1 inline-flex items-center gap-1 h-6 px-2 rounded-full bg-white/15 hover:bg-white/25 transition-colors">
+          <Link href="/dashboard" className="ml-1 inline-flex items-center gap-1 h-6 px-2 rounded-full bg-violet-800/40 hover:bg-violet-800/60 transition-colors">
             <X className="h-3 w-3" /> Quitter
           </Link>
         </div>
@@ -457,7 +458,7 @@ function Clock() {
     const id = setInterval(tick, 30_000);
     return () => clearInterval(id);
   }, []);
-  return <span className="text-[11px] text-muted-foreground tnum">{now}</span>;
+  return <span className="text-caption2 text-muted-foreground tnum">{now}</span>;
 }
 
 function MetricToggle({ value, onChange }: { value: "ca" | "weight"; onChange: (m: "ca" | "weight") => void }) {
@@ -465,8 +466,8 @@ function MetricToggle({ value, onChange }: { value: "ca" | "weight"; onChange: (
     <div className="inline-flex items-center gap-0.5 bg-secondary/60 p-0.5 rounded-md">
       {(["ca", "weight"] as const).map((m) => (
         <button key={m} type="button" onClick={() => onChange(m)} aria-pressed={value === m}
-          className={`px-2.5 h-7 text-[11.5px] font-semibold tracking-tight rounded transition-colors ${
-            value === m ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
+          className={`px-2.5 h-7 text-caption font-semibold tracking-tight rounded transition-colors ${
+            value === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
           }`}
         >
           {m === "ca" ? "CA HT" : "Volume"}
@@ -479,23 +480,21 @@ function MetricToggle({ value, onChange }: { value: "ca" | "weight"; onChange: (
 /** Tuile CLIQUABLE — en-tête avec icône + affordance « plein écran », tout le
  *  corps est un bouton. Le survol des lignes internes garde ses popovers. */
 function ClickTile({
-  colSpan, rowSpan, icon: Icon, accent, title, hintOpen, onOpen, children,
+  colSpan, rowSpan, icon: Icon, title, hintOpen, onOpen, children,
 }: {
   colSpan: number; rowSpan: number;
   icon: typeof Users;
-  accent: "brand" | "emerald" | "rose" | "violet" | "amber" | "sky";
   title: string;
   hintOpen: string;
   onOpen: () => void;
   children: React.ReactNode;
 }) {
-  const accentBorder = {
-    brand: "border-l-brand-500", emerald: "border-l-emerald-500", rose: "border-l-rose-500",
-    violet: "border-l-violet-500", amber: "border-l-amber-500", sky: "border-l-sky-500",
-  }[accent];
+  // Tuile de TRAVAIL : fond neutre, aucun filet coloré. Les mondes se
+  // distinguent par leur en-tête (icône + intitulé) et leur contenu, pas par
+  // la couleur. Seul l'or sert d'accent au survol/focus (affordance d'ouverture).
   return (
     <section
-      className={`relative bg-card border border-border border-l-4 ${accentBorder} rounded-xl overflow-visible flex flex-col p-4 group/tile cursor-pointer hover:border-brand-500/40 transition-colors`}
+      className="relative bg-card border border-border rounded-xl overflow-visible flex flex-col p-4 group/tile cursor-pointer hover:border-brand-500/40 focus-visible:outline-none focus-visible:border-brand-500/60 transition-colors"
       style={{ gridColumn: `span ${colSpan} / span ${colSpan}`, gridRow: `span ${rowSpan} / span ${rowSpan}` }}
       onClick={onOpen}
       role="button"
@@ -504,10 +503,10 @@ function ClickTile({
       aria-label={`${title} — ouvrir en plein écran (${hintOpen})`}
     >
       <div className="flex items-center justify-between gap-2 mb-2 shrink-0">
-        <h3 className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1.5 min-w-0">
+        <h3 className="text-caption2 uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1.5 min-w-0">
           <Icon className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{title}</span>
         </h3>
-        <span className="inline-flex items-center gap-1 text-[9.5px] font-semibold text-muted-foreground/60 group-hover/tile:text-brand-400 transition-colors whitespace-nowrap">
+        <span className="inline-flex items-center gap-1 text-caption2 font-semibold text-muted-foreground/60 group-hover/tile:text-brand-500 transition-colors whitespace-nowrap">
           <Maximize2 className="h-3 w-3" />
           <span className="hidden xl:inline">{hintOpen}</span>
         </span>
@@ -517,13 +516,32 @@ function ClickTile({
   );
 }
 
-/** Popover de survol — CSS pur (invisible → visible), zéro listener. */
-function Pop({ children, content, up }: { children: React.ReactNode; content: React.ReactNode; up?: boolean }) {
+/** Popover de détail — ouvert au TAP/clic (compatible tablette : le survol
+ *  n'existe pas au doigt). Un clic hors de la case referme. */
+function Pop({ children, content }: { children: React.ReactNode; content: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+  if (!content) return <div className="relative h-full">{children}</div>;
   return (
-    <div className="relative h-full group/pop">
-      {children}
-      {content && (
-        <div className={`pointer-events-none invisible opacity-0 group-hover/pop:visible group-hover/pop:opacity-100 transition-opacity duration-150 absolute ${up ? "bottom-full mb-1.5" : "top-full mt-1.5"} left-0 z-40 w-56 rounded-lg border border-border bg-popover shadow-modal p-2.5`}>
+    <div className="relative h-full" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="h-full w-full text-left focus-visible:outline-none"
+      >
+        {children}
+      </button>
+      {open && (
+        <div className="absolute top-full mt-1.5 left-0 z-40 w-56 rounded-lg border border-border bg-popover shadow-modal p-2.5">
           {content}
         </div>
       )}
@@ -533,18 +551,19 @@ function Pop({ children, content, up }: { children: React.ReactNode; content: Re
 
 function PopRow({ k, v }: { k: string; v: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 text-[11px] leading-relaxed">
+    <div className="flex items-baseline justify-between gap-3 text-caption2 leading-relaxed">
       <span className="text-muted-foreground">{k}</span>
       <span className="font-semibold text-foreground tnum tabular-nums whitespace-nowrap">{v}</span>
     </div>
   );
 }
 
-/** Ligne de top-list avec barre + popover au survol.
+/** Ligne de top-list avec barre + popover de détail.
  *
- *  Le popover est rendu en `position: fixed` (coordonnées mesurées au survol) :
- *  il ÉCHAPPE à l'overflow-hidden des listes/tuiles — au-dessus de la ligne,
- *  rabattu vers la gauche s'il déborde du viewport. */
+ *  Ouverture au TAP/clic (compatible tablette). `stopPropagation` empêche le
+ *  clic d'ouvrir aussi le plein écran de la tuile parente ; un clic hors de la
+ *  ligne referme. Le popover est rendu en `position: fixed` (coordonnées
+ *  mesurées à l'ouverture) : il ÉCHAPPE à l'overflow des listes/tuiles. */
 function PopLi({
   rank, name, value, sub, bar, tone, pop, compact,
 }: {
@@ -552,39 +571,50 @@ function PopLi({
   bar: number; tone: string; pop: React.ReactNode; compact?: boolean;
 }) {
   const [at, setAt] = useState<{ left: number; bottom: number } | null>(null);
+  const liRef = useRef<HTMLLIElement>(null);
   const POP_W = 224; // w-56
+  useEffect(() => {
+    if (!at) return;
+    const onDown = (e: MouseEvent) => {
+      if (liRef.current && !liRef.current.contains(e.target as Node)) setAt(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [at]);
   return (
     <li
-      className={`relative grid ${compact ? "grid-cols-[14px_1fr]" : "grid-cols-[18px_1fr_auto]"} items-center gap-1.5 text-[12px] min-h-0`}
-      onMouseEnter={(e) => {
+      ref={liRef}
+      className={`relative grid ${compact ? "grid-cols-[14px_1fr]" : "grid-cols-[18px_1fr_auto]"} items-center gap-1.5 text-caption min-h-0 cursor-pointer`}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (at) { setAt(null); return; }
         const r = e.currentTarget.getBoundingClientRect();
         setAt({
           left: Math.max(8, Math.min(r.left + 24, window.innerWidth - POP_W - 8)),
           bottom: window.innerHeight - r.top + 6,
         });
       }}
-      onMouseLeave={() => setAt(null)}
     >
-      <span className="text-muted-foreground/70 tnum text-right text-[10.5px]">{rank}</span>
+      <span className="text-muted-foreground/70 tnum text-right text-caption2">{rank}</span>
       <div className="min-w-0 relative">
         <div className={`absolute inset-y-0 left-0 rounded-sm ${tone}`} style={{ width: `${Math.min(100, bar * 100)}%` }} />
         <div className="relative px-1.5 py-0.5 min-w-0 flex items-baseline justify-between gap-2">
           <span className="min-w-0">
             <span className="font-medium text-foreground truncate block leading-tight">{name}</span>
-            {sub && !compact && <span className="text-[9.5px] text-muted-foreground truncate block leading-tight">{sub}</span>}
+            {sub && !compact && <span className="text-caption2 text-muted-foreground truncate block leading-tight">{sub}</span>}
           </span>
-          {compact && <span className="font-semibold tnum tabular-nums text-[11px] whitespace-nowrap">{value}</span>}
+          {compact && <span className="font-semibold tnum tabular-nums text-caption2 whitespace-nowrap">{value}</span>}
         </div>
       </div>
       {!compact && (
-        <span className="font-semibold tnum text-foreground tabular-nums whitespace-nowrap text-[11.5px]">{value}</span>
+        <span className="font-semibold tnum text-foreground tabular-nums whitespace-nowrap text-caption">{value}</span>
       )}
       {at && (
         <div
           className="pointer-events-none fixed z-[55] w-56 rounded-lg border border-border bg-popover shadow-modal p-2.5"
           style={{ left: at.left, bottom: at.bottom }}
         >
-          <p className="text-[11.5px] font-bold text-foreground truncate mb-1">{name}</p>
+          <p className="text-caption font-bold text-foreground truncate mb-1">{name}</p>
           {pop}
         </div>
       )}
@@ -593,13 +623,13 @@ function PopLi({
 }
 
 function EmptyHint({ text }: { text: string }) {
-  return <li className="text-[11.5px] text-muted-foreground py-2 list-none">{text}</li>;
+  return <li className="text-caption text-muted-foreground py-2 list-none">{text}</li>;
 }
 
 const MOIS_LONG = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 /** Styles des 3 années du comparatif (du plus ancien au plus récent). */
 const YEAR_BAR = [
-  { bar: "bg-slate-500/45", dot: "bg-slate-400", text: "text-slate-300" },      // N-2
+  { bar: "bg-muted-foreground/40", dot: "bg-muted-foreground/60", text: "text-muted-foreground" }, // N-2 (neutre)
   { bar: "bg-brand-500/45", dot: "bg-brand-500/60", text: "text-brand-300" },   // N-1
   { bar: "bg-brand-500", dot: "bg-brand-500", text: "text-brand-400" },         // N
 ];
@@ -610,20 +640,29 @@ const YEAR_BAR = [
 function CompactMatrix({ matrix }: { matrix: { year: number; months: { ca: number }[]; totalCa: number }[] }) {
   const years = useMemo(() => [...matrix].sort((a, b) => a.year - b.year).slice(-3), [matrix]);
   const [tip, setTip] = useState<{ m: number; left: number; bottom: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const max = Math.max(1, ...years.flatMap((y) => y.months.map((m) => m.ca)));
+  useEffect(() => {
+    if (!tip) return;
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setTip(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [tip]);
   if (years.length === 0) {
-    return <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">Chargement du rapport annuel…</div>;
+    return <div className="h-full flex items-center justify-center text-caption text-muted-foreground">Chargement du rapport annuel…</div>;
   }
   const styleOf = (i: number) => YEAR_BAR[YEAR_BAR.length - years.length + i] ?? YEAR_BAR[0];
   return (
-    <div className="h-full flex flex-col min-h-0">
+    <div className="h-full flex flex-col min-h-0" ref={rootRef}>
       {/* Légende : année + total annuel (gros chiffres, couleur = barre) */}
       <div className="shrink-0 flex flex-wrap items-baseline gap-x-4 gap-y-0.5 mb-1.5">
         {years.map((y, i) => (
           <span key={y.year} className="inline-flex items-baseline gap-1.5">
             <span className={`h-2 w-2 rounded-[3px] self-center ${styleOf(i).dot}`} />
-            <span className="text-[10px] font-semibold text-muted-foreground tnum">{y.year}</span>
-            <span className={`text-[13px] font-bold tnum ${styleOf(i).text}`}>{formatEuro(y.totalCa, true)}</span>
+            <span className="text-caption2 font-semibold text-muted-foreground tnum">{y.year}</span>
+            <span className={`text-body font-bold tnum ${styleOf(i).text}`}>{formatEuro(y.totalCa, true)}</span>
           </span>
         ))}
       </div>
@@ -632,8 +671,10 @@ function CompactMatrix({ matrix }: { matrix: { year: number; months: { ca: numbe
         {MOIS_1L.map((_, m) => (
           <div
             key={m}
-            className="flex-1 h-full flex items-end justify-center gap-[2px] rounded-sm hover:bg-secondary/40 transition-colors px-[1px]"
-            onMouseEnter={(e) => {
+            className="flex-1 h-full flex items-end justify-center gap-[2px] rounded-sm hover:bg-secondary/40 transition-colors px-[1px] cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (tip && tip.m === m) { setTip(null); return; }
               const r = e.currentTarget.getBoundingClientRect();
               setTip({
                 m,
@@ -641,7 +682,6 @@ function CompactMatrix({ matrix }: { matrix: { year: number; months: { ca: numbe
                 bottom: window.innerHeight - r.top + 6,
               });
             }}
-            onMouseLeave={() => setTip(null)}
           >
             {years.map((y, i) => {
               const v = y.months[m]?.ca ?? 0;
@@ -660,7 +700,7 @@ function CompactMatrix({ matrix }: { matrix: { year: number; months: { ca: numbe
       {/* Libellés mois */}
       <div className="shrink-0 flex gap-[3px] mt-1">
         {MOIS_1L.map((lbl, m) => (
-          <div key={m} className="flex-1 text-center text-[8.5px] text-muted-foreground">{lbl}</div>
+          <div key={m} className="flex-1 text-center text-caption2 text-muted-foreground">{lbl}</div>
         ))}
       </div>
       {/* Tooltip du mois survolé — N, N-1, N-2 + évolution */}
@@ -673,12 +713,12 @@ function CompactMatrix({ matrix }: { matrix: { year: number; months: { ca: numbe
             className="pointer-events-none fixed z-[55] w-44 rounded-lg border border-border bg-popover shadow-modal p-2.5"
             style={{ left: tip.left, bottom: tip.bottom }}
           >
-            <p className="text-[11.5px] font-bold text-foreground mb-1">{MOIS_LONG[tip.m]}</p>
+            <p className="text-caption font-bold text-foreground mb-1">{MOIS_LONG[tip.m]}</p>
             {[...years].reverse().map((y, ri) => {
               const i = years.length - 1 - ri;
               const v = y.months[tip.m]?.ca ?? 0;
               return (
-                <div key={y.year} className="flex items-baseline justify-between gap-3 text-[11px] leading-relaxed">
+                <div key={y.year} className="flex items-baseline justify-between gap-3 text-caption2 leading-relaxed">
                   <span className="inline-flex items-center gap-1.5 text-muted-foreground">
                     <span className={`h-1.5 w-1.5 rounded-full ${styleOf(i).dot}`} />{y.year}
                   </span>
@@ -687,7 +727,7 @@ function CompactMatrix({ matrix }: { matrix: { year: number; months: { ca: numbe
               );
             })}
             {delta != null && (
-              <p className={`mt-1 text-[10px] font-semibold ${delta >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+              <p className={`mt-1 text-caption2 font-semibold ${delta >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
                 {delta >= 0 ? "▲" : "▼"} {Math.abs(delta).toFixed(0)} % vs N-1
               </p>
             )}
@@ -709,7 +749,7 @@ function ScreenOverlay({ onClose, children }: { onClose: () => void; children: R
         onClick={onClose}
         aria-label="Retour au pilotage"
         title="Retour au pilotage"
-        className="absolute left-3 top-2.5 z-[60] inline-flex items-center gap-1.5 h-8 pl-2 pr-3 rounded-full bg-background/85 backdrop-blur-md border border-border shadow-modal text-[11px] font-semibold text-foreground/80 hover:text-foreground hover:bg-background transition-colors"
+        className="absolute left-3 top-2.5 z-[60] inline-flex items-center gap-1.5 h-8 pl-2 pr-3 rounded-full bg-background/85 backdrop-blur-md border border-border shadow-modal text-caption2 font-semibold text-foreground/80 hover:text-foreground hover:bg-background transition-colors"
       >
         <ArrowLeft className="h-3.5 w-3.5" /> Pilotage
       </button>

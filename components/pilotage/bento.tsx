@@ -40,34 +40,36 @@ export function formatPct(v: number): string {
    Tile — conteneur générique avec grid placement.
    ───────────────────────────────────────────────────────────────── */
 export function Tile({
-  children, colSpan = 3, rowSpan = 2, title, accent, className = "",
+  children, colSpan = 3, rowSpan = 2, title, tinted = false, className = "",
 }: {
   children: ReactNode;
   colSpan?: number;
   rowSpan?: number;
   title?: string;
+  /** Case de PRISE D'INFO : fond légèrement teinté de l'or (16 %) + contour
+   *  assorti — accent UNIQUE (or). Les cases se distinguent par la typo et
+   *  l'espace, jamais par des filets multicolores. */
+  tinted?: boolean;
+  /** Déprécié : la palette est réduite à l'or. Toléré pour compatibilité des
+   *  ex-écrans (ignoré — plus aucun filet coloré). */
   accent?: "brand" | "emerald" | "rose" | "violet" | "amber" | "sky";
   className?: string;
 }) {
-  const accentBorder =
-    accent === "emerald" ? "border-l-emerald-500" :
-    accent === "rose"    ? "border-l-rose-500" :
-    accent === "violet"  ? "border-l-violet-500" :
-    accent === "amber"   ? "border-l-amber-500" :
-    accent === "sky"     ? "border-l-sky-500" :
-    accent === "brand"   ? "border-l-brand-500" : "";
-  // Spotlight curseur retiré (redesign 07/2026) : effet « template IA »,
-  // coût mousemove permanent pour zéro information.
+  // Palette réduite à l'or : les cases d'info sont teintées, les tuiles de
+  // travail restent neutres (bg-card). Plus de border-l-4 multicolore.
+  const surface = tinted
+    ? "border-brand-500/35 bg-brand-500/[0.10]"
+    : "bg-card border-border";
   return (
     <section
-      className={`relative bg-card border border-border rounded-xl overflow-hidden flex flex-col p-4 ${accent ? `border-l-4 ${accentBorder}` : ""} ${className}`}
+      className={`relative border rounded-xl overflow-hidden flex flex-col p-4 ${surface} ${className}`}
       style={{
         gridColumn: `span ${colSpan} / span ${colSpan}`,
         gridRow: `span ${rowSpan} / span ${rowSpan}`,
       }}
     >
       {title && (
-        <h3 className="relative text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2 shrink-0">
+        <h3 className="relative text-caption2 uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2 shrink-0">
           {title}
         </h3>
       )}
@@ -125,7 +127,7 @@ export function BigKpi({
 }) {
   return (
     <div className="relative h-full flex flex-col">
-      <p className="text-[11px] uppercase tracking-[0.14em] font-semibold text-muted-foreground">
+      <p className="text-caption2 uppercase tracking-[0.14em] font-semibold text-muted-foreground">
         {label}
       </p>
       <p className="text-[clamp(28px,4.5vw,56px)] font-semibold text-foreground tracking-tight leading-none tnum mt-1.5">
@@ -133,7 +135,7 @@ export function BigKpi({
       </p>
       <div className="flex items-center gap-3 mt-2">
         <YoYPill curr={curr} prev={prev} />
-        {hint && <span className="text-[11px] text-muted-foreground">{hint}</span>}
+        {hint && <span className="text-caption2 text-muted-foreground">{hint}</span>}
       </div>
       {spark && spark.length > 0 && (
         <div className="mt-auto pt-3">
@@ -152,7 +154,7 @@ export function MiniKpi({
 }: { label: string; value: string; curr: number; prev: number; format?: (n: number) => string; animateOnMount?: boolean }) {
   return (
     <div className="flex flex-col justify-between h-full">
-      <p className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground">
+      <p className="text-caption2 uppercase tracking-[0.14em] font-semibold text-muted-foreground">
         {label}
       </p>
       <div>
@@ -200,13 +202,13 @@ export function TopList<T extends { name: string; value: number; prev?: number; 
       {items.map((it, i) => {
         const bar = (it.value / max) * 100;
         return (
-          <li key={i} className="grid grid-cols-[20px_1fr_auto_50px] items-center gap-2 text-[12px]">
+          <li key={i} className="grid grid-cols-[20px_1fr_auto_50px] items-center gap-2 text-caption">
             <span className="text-muted-foreground/70 tnum text-right">{i + 1}</span>
             <div className="min-w-0 relative">
               <div className="absolute inset-y-0 left-0 bg-brand-500/15 rounded-sm" style={{ width: `${bar}%` }} />
               <div className="relative px-1.5 py-1 truncate">
                 <span className="font-medium text-foreground truncate block">{it.name}</span>
-                {it.sub && <span className="text-[10px] text-muted-foreground">{it.sub}</span>}
+                {it.sub && <span className="text-caption2 text-muted-foreground">{it.sub}</span>}
               </div>
             </div>
             <span className="font-semibold tnum text-foreground tabular-nums whitespace-nowrap">
@@ -219,7 +221,7 @@ export function TopList<T extends { name: string; value: number; prev?: number; 
         );
       })}
       {items.length === 0 && (
-        <li className="text-[12px] text-muted-foreground py-2">Aucune donnée sur la période.</li>
+        <li className="text-caption text-muted-foreground py-2">Aucune donnée sur la période.</li>
       )}
     </ol>
   );
@@ -251,7 +253,7 @@ export function MixedTopList<T extends {
   const max = Math.max(...items.map((i) => i.value), 1);
   return (
     <div className="h-full flex flex-col gap-1 overflow-hidden">
-      <div className="grid grid-cols-[20px_1fr_60px_50px_44px] items-center gap-2 text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground/80 shrink-0">
+      <div className="grid grid-cols-[20px_1fr_60px_50px_44px] items-center gap-2 text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground/80 shrink-0">
         <span />
         <span>Client</span>
         <span className="text-right">{primaryLabel}</span>
@@ -264,7 +266,7 @@ export function MixedTopList<T extends {
           // Détection sous-monétisé : peu d'appels & CA fort = client "facile"
           // Sur-monétisé / fragile : beaucoup d'appels & CA faible
           return (
-            <li key={i} className="grid grid-cols-[20px_1fr_60px_50px_44px] items-center gap-2 text-[12px]">
+            <li key={i} className="grid grid-cols-[20px_1fr_60px_50px_44px] items-center gap-2 text-caption">
               <span className="text-muted-foreground/70 tnum text-right">{i + 1}</span>
               <div className="min-w-0 relative">
                 <div className="absolute inset-y-0 left-0 bg-brand-500/15 rounded-sm" style={{ width: `${bar}%` }} />
@@ -275,7 +277,7 @@ export function MixedTopList<T extends {
               <span className="text-right font-semibold tnum text-foreground tabular-nums whitespace-nowrap">
                 {fmtPrimary(it.value)}
               </span>
-              <span className={`text-right tnum tabular-nums whitespace-nowrap text-[11px] ${
+              <span className={`text-right tnum tabular-nums whitespace-nowrap text-caption2 ${
                 it.secondary === 0 ? "text-rose-500/80" : "text-foreground/70"
               }`}>
                 {fmtSecondary(it.secondary)}
@@ -287,7 +289,7 @@ export function MixedTopList<T extends {
           );
         })}
         {items.length === 0 && (
-          <li className="text-[12px] text-muted-foreground py-2">Aucune donnée sur la période.</li>
+          <li className="text-caption text-muted-foreground py-2">Aucune donnée sur la période.</li>
         )}
       </ol>
     </div>
@@ -303,7 +305,7 @@ export function Heatmap7x12({ matrix }: { matrix: number[][] }) {
   const max = Math.max(1, ...matrix.flat());
   return (
     <div className="h-full flex flex-col gap-0.5">
-      <div className="grid gap-0.5 text-[9px] text-muted-foreground tnum"
+      <div className="grid gap-0.5 text-caption2 text-muted-foreground tnum"
         style={{ gridTemplateColumns: "28px repeat(12, 1fr)" }}
       >
         <div />
@@ -313,17 +315,17 @@ export function Heatmap7x12({ matrix }: { matrix: number[][] }) {
         <div key={di} className="grid gap-0.5 flex-1"
           style={{ gridTemplateColumns: "28px repeat(12, 1fr)" }}
         >
-          <div className="text-[10px] text-foreground/70 font-medium self-center">{days[di]}</div>
+          <div className="text-caption2 text-foreground/70 font-medium self-center">{days[di]}</div>
           {row.map((v, hi) => {
             const intensity = v / max;
             return (
               <div
                 key={hi}
-                className="rounded-sm flex items-center justify-center text-[9px]"
+                className="rounded-sm flex items-center justify-center text-caption2"
                 style={{
                   backgroundColor: v === 0 ? "hsl(var(--border) / 0.4)"
-                    : `rgba(250, 204, 21, ${0.18 + intensity * 0.72})`,
-                  color: intensity > 0.5 ? "rgb(20, 20, 20)" : "hsl(var(--muted-foreground))",
+                    : `hsl(var(--brand-500) / ${0.18 + intensity * 0.72})`,
+                  color: intensity > 0.5 ? "hsl(var(--primary-foreground))" : "hsl(var(--muted-foreground))",
                 }}
                 title={`${days[di]} ${hi+8}h — ${v}`}
               >

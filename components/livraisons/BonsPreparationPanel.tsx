@@ -251,18 +251,18 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
             >
               <div className="flex items-center gap-2 min-w-0 flex-wrap">
                 <ChevronDown className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
-                <span className="text-[13.5px] font-semibold text-foreground truncate">{bon.clientName}</span>
-                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300">
+                <span className="text-body font-semibold text-foreground truncate">{bon.clientName}</span>
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-caption2 font-bold uppercase tracking-wide bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300">
                   Export
                 </span>
-                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                <span className="inline-flex items-center gap-1 text-caption text-muted-foreground">
                   <CalendarDays className="h-3 w-3" /> {formatDeliveryDate(bon.orderBody.deliveryDate)}
                 </span>
                 {bon.createdBy && (
-                  <span className="text-[11px] text-muted-foreground">· par {displayPersonName(bon.createdBy)}</span>
+                  <span className="text-caption text-muted-foreground">· par {displayPersonName(bon.createdBy)}</span>
                 )}
               </div>
-              <span className={`shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+              <span className={`shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-caption2 font-bold uppercase tracking-wide ${
                 ready
                   ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
                   : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
@@ -284,11 +284,11 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
                     return (
                       <li key={`${bon.id}-${i}`} className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-2">
                         <div className="min-w-0 flex-1">
-                          <p className="text-[13px] font-medium text-foreground truncate">
+                          <p className="text-body font-medium text-foreground truncate">
                             {l.itemName ?? l.itemCode}
-                            <span className="ml-2 font-mono text-[10px] text-muted-foreground/70 hidden sm:inline">{l.itemCode}</span>
+                            <span className="ml-2 font-mono text-caption2 text-muted-foreground/70 hidden sm:inline">{l.itemCode}</span>
                           </p>
-                          <p className="text-[11px] text-muted-foreground">
+                          <p className="text-caption text-muted-foreground">
                             {l.displayQuantity != null
                               ? `${l.displayQuantity} ${l.displayUnit ?? "colis"} (${l.quantity} pie)`
                               : `${l.quantity} pie`}
@@ -311,7 +311,7 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
                               setLot(bon, i, v);
                             }}
                             aria-label={`Lot de ${l.itemName ?? l.itemCode}`}
-                            className={`h-9 w-full rounded-lg border bg-card px-2.5 text-[12.5px] font-medium focus:outline-none focus:ring-2 focus:ring-violet-500/40 disabled:opacity-60 cursor-pointer ${
+                            className={`h-9 w-full rounded-lg border bg-card px-2.5 text-caption font-medium focus:outline-none focus:ring-2 focus:ring-violet-500/40 disabled:opacity-60 cursor-pointer ${
                               current ? "border-border text-foreground" : "border-amber-400/60 text-amber-700 dark:text-amber-300"
                             }`}
                           >
@@ -348,13 +348,13 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
                                 }}
                                 placeholder="EM23568, OP00042…"
                                 aria-label={`Saisir le lot de ${l.itemName ?? l.itemCode}`}
-                                className="h-8 flex-1 min-w-0 rounded-md border border-border bg-card px-2 text-[12.5px] font-medium tnum focus:outline-none focus:ring-2 focus:ring-violet-500/40 disabled:opacity-60"
+                                className="h-8 flex-1 min-w-0 rounded-md border border-border bg-card px-2 text-caption font-medium tnum focus:outline-none focus:ring-2 focus:ring-violet-500/40 disabled:opacity-60"
                               />
                               <button
                                 type="button"
                                 disabled={isBusy || !manualDraft.trim()}
                                 onClick={() => { setLot(bon, i, manualDraft.trim()); setManualKey(null); }}
-                                className="h-8 shrink-0 rounded-md bg-violet-600 px-2.5 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="h-8 shrink-0 rounded-md bg-violet-600 px-2.5 text-caption font-semibold text-white hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed"
                               >
                                 OK
                               </button>
@@ -374,7 +374,7 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
                   })}
                 </ul>
                 {bon.orderBody.comments && (
-                  <p className="text-[11.5px] italic text-muted-foreground">« {bon.orderBody.comments} »</p>
+                  <p className="text-caption italic text-muted-foreground">« {bon.orderBody.comments} »</p>
                 )}
 
                 {/* Actions du bon */}
@@ -384,7 +384,7 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
                     onClick={() => createBL(bon)}
                     disabled={!ready || isBusy}
                     title={ready ? "Créer la commande SAP avec les lots affectés" : "Affecte un lot à chaque ligne d'abord"}
-                    className="inline-flex items-center gap-1.5 h-10 px-4 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[13px] font-semibold disabled:opacity-50 active:scale-95 transition-all"
+                    className="inline-flex items-center gap-1.5 h-10 px-4 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-body font-semibold disabled:opacity-50 active:scale-95 transition-all"
                   >
                     {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
                     Créer le BL
@@ -394,7 +394,7 @@ export function BonsPreparationPanel({ refreshKey, onOrderCreated }: {
                     onClick={() => applySuggestions(bon)}
                     disabled={isBusy || ready}
                     title="Remplir les lignes sans lot avec la suggestion (arrivage Export, sinon à découvert)"
-                    className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-border text-[12.5px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-border text-caption font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-50"
                   >
                     <Sparkles className="h-4 w-4" /> Suggérer les lots
                   </button>

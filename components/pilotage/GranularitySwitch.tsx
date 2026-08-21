@@ -36,9 +36,9 @@ export function GranularitySwitch({
               onChange(o.v);
               if (broadcastOnChange) broadcastPilotage({ g: o.v });
             }}
-            className={`px-2.5 h-7 text-[11.5px] font-semibold tracking-tight rounded transition-colors ${
+            className={`px-2.5 h-7 text-caption font-semibold tracking-tight rounded transition-colors ${
               active
-                ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]"
+                ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >

@@ -48,7 +48,7 @@ export const SETTING_KEYS = {
    *   "on"   → animées
    *   "off"  → figées (fond statique)
    *   "auto" → suit prefers-reduced-motion du système (défaut)
-   * Honoré par AmbientBackground (attribut `data-reduce-anim` sur <html>).
+   * Honoré via l'attribut `data-reduce-anim` sur <html> (cf. globals.css).
    */
   animations: "televente:animations",
   /**
@@ -79,13 +79,6 @@ export const SETTING_KEYS = {
    * Pilote l'attribut `data-accent-pos` sur <html> (cf. globals.css + applyAccentPos).
    */
   accentPos: "televente:accentPos",
-  /**
-   * SKIN d'interface : "classic" (défaut, thème actuel) | "apple" (refonte
-   * minimaliste — surfaces froides, police système/SF, verre, ombres neutres).
-   * Pilote l'attribut `data-skin` sur <html> (cf. globals.css : tout est scopé
-   * sous [data-skin="apple"], le classique n'est jamais touché → 100 % réversible).
-   */
-  skin: "televente:skin",
   /**
    * Célébration « grosse marge » : ON/OFF maître (défaut "on"). Quand une commande
    * est validée avec une marge nette ≥ seuil (cf. celebrationMargin), une pluie de
@@ -225,23 +218,6 @@ export function applyAccentPos(pos: string | null): void {
     : ACCENT_POS_DEFAULT;
   if (v === "left") r.removeAttribute("data-accent-pos");
   else r.setAttribute("data-accent-pos", v);
-}
-
-/** Skins d'interface disponibles. */
-export const SKINS = ["classic", "apple"] as const;
-export type Skin = (typeof SKINS)[number];
-export const SKIN_DEFAULT: Skin = "classic";
-
-/**
- * Applique le skin d'interface : pose (ou retire) l'attribut `data-skin` sur
- * <html>. "classic" = défaut → attribut retiré (le CSS ne cible que
- * [data-skin="apple"]). Robuste côté serveur (no-op si `document` absent).
- */
-export function applySkin(skin: string | null): void {
-  if (typeof document === "undefined") return;
-  const r = document.documentElement;
-  if (skin === "apple") r.setAttribute("data-skin", "apple");
-  else r.removeAttribute("data-skin");
 }
 
 /** Seuil de marge nette (en €) par défaut déclenchant la célébration. */

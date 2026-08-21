@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  ArrowLeft, Trophy, Truck, Gem, Flame, TriangleAlert,
-  Coins, RefreshCw, Info, ArrowUpDown, ChevronDown,
+  ArrowLeft, Trophy, Truck, Gem, TriangleAlert,
+  Coins, RefreshCw, ArrowUpDown, ChevronDown,
 } from "lucide-react";
 import { formatEuro, formatNum } from "./bento";
 import { SEGMENTS, type Segment, type ClientSegment } from "@/lib/segments";
 import { SignalLoader } from "@/components/ui/page-loader";
+import { Banner } from "@/components/ui/banner";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 
 /* ───────────────────────── Types (miroir de /api/pilotage/stores) ───────── */
 
@@ -56,12 +58,14 @@ const fmtPerKg = (v: number) => `${v.toLocaleString("fr-FR", { minimumFractionDi
 
 /* Couleur de segment — alignée sur la vérité de lib/segments (GMS teal ·
    CHR amber · EXPORT violet) ; hors segments livrés : neutre. */
+// Couleur = IDENTITÉ de segment (donnée catégorielle), lisible en clair ET en
+// sombre (valeur foncée en light, atténuée en dark).
 const SEG_TONE: Record<ClientSegment, { dot: string; text: string }> = {
-  GMS:       { dot: "bg-teal-400",    text: "text-teal-300" },
-  CHR:       { dot: "bg-amber-400",   text: "text-amber-300" },
-  EXPORT:    { dot: "bg-violet-400",  text: "text-violet-300" },
-  RUNGIS:    { dot: "bg-slate-400",   text: "text-slate-300" },
-  MIN_RUNGIS:{ dot: "bg-slate-400",   text: "text-slate-300" },
+  GMS:       { dot: "bg-teal-500",    text: "text-teal-700 dark:text-teal-300" },
+  CHR:       { dot: "bg-amber-500",   text: "text-amber-700 dark:text-amber-300" },
+  EXPORT:    { dot: "bg-violet-500",  text: "text-violet-700 dark:text-violet-300" },
+  RUNGIS:    { dot: "bg-muted-foreground",   text: "text-muted-foreground" },
+  MIN_RUNGIS:{ dot: "bg-muted-foreground",   text: "text-muted-foreground" },
 };
 function segLabel(s: ClientSegment | null): string {
   return s ? (SEGMENTS.find((x) => x.id === s)?.label ?? s) : "—";
@@ -98,17 +102,17 @@ export function StoresReport() {
           <div className="min-w-0">
             <Link
               href="/dashboard"
-              className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors mb-2"
+              className="inline-flex items-center gap-1.5 text-caption2 font-semibold text-muted-foreground hover:text-foreground transition-colors mb-2"
             >
               <ArrowLeft className="h-3.5 w-3.5" /> Retour aux statistiques
             </Link>
-            <p className="text-[11px] uppercase tracking-[0.16em] font-bold text-brand-500">
+            <p className="text-caption2 uppercase tracking-[0.16em] font-bold text-brand-500">
               Pilotage · Rentabilité par magasin
             </p>
             <h1 className="font-display text-[clamp(24px,3.4vw,36px)] font-bold leading-[1.1] tracking-tight text-foreground mt-0.5">
               Palmarès des magasins
             </h1>
-            <p className="text-[13px] text-muted-foreground mt-1 max-w-[62ch]">
+            <p className="text-body text-muted-foreground mt-1 max-w-[62ch]">
               Où va vraiment la marge — <span className="text-foreground font-medium">marge nette</span> par client
               (marge brute <span className="text-foreground font-medium">moins le coût de livraison</span>), sur les
               12&nbsp;derniers mois. Le détail complet est en bas de page.
@@ -135,9 +139,9 @@ export function StoresReport() {
                 type="button"
                 onClick={() => setSegment(s.id)}
                 aria-pressed={active}
-                className={`h-8 px-3 rounded-full text-[12px] font-semibold tracking-wide transition-colors ${
+                className={`h-8 px-3 rounded-full text-caption font-semibold tracking-wide transition-colors ${
                   active
-                    ? "bg-brand-500 text-[#0b1018] shadow-[0_0_12px_rgba(250,204,21,0.35)]"
+                    ? "bg-brand-500 text-primary-foreground"
                     : "bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary"
                 }`}
               >
@@ -151,14 +155,14 @@ export function StoresReport() {
           <div className="flex items-center justify-center py-24"><SignalLoader /></div>
         )}
         {err && !loading && (
-          <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-[13px] text-rose-200">
+          <Banner tone="danger" title="Palmarès indisponible">
             Impossible de charger le palmarès : {err}
-          </div>
+          </Banner>
         )}
 
         {data && !loading && (
           data.nbStores === 0 ? (
-            <div className="rounded-xl border border-border bg-card px-4 py-10 text-center text-[13px] text-muted-foreground">
+            <div className="rounded-xl border border-border bg-card px-4 py-10 text-center text-body text-muted-foreground">
               Aucun magasin facturé sur la période pour ce segment.
             </div>
           ) : (
@@ -194,11 +198,6 @@ function Report({ data }: { data: StoresPayload }) {
     () => stores.filter((s) => s.transportCost > 0).sort((a, b) => b.transportCost - a.transportCost),
     [stores],
   );
-  const byTransportShare = useMemo(
-    () => stores.filter((s) => s.transportPctMargin != null && s.transportCost > 0)
-      .sort((a, b) => (b.transportPctMargin ?? 0) - (a.transportPctMargin ?? 0)),
-    [stores],
-  );
   const worst = useMemo(
     () => [...stores].sort((a, b) => a.marginNet - b.marginNet).filter((s) => s.marginNet < totals.marginNet / Math.max(1, stores.length)),
     [stores, totals],
@@ -206,6 +205,60 @@ function Report({ data }: { data: StoresPayload }) {
 
   const podium = byNet.slice(0, 3);
   const nbNeg = stores.filter((s) => s.marginNet < 0).length;
+
+  // Magasin survolé — relie le nuage de points et la table de détail (survol
+  // d'un point → surligne sa ligne, et réciproquement).
+  const [hovered, setHovered] = useState<string | null>(null);
+
+  // UN SEUL classement héros (marge nette = podium) puis une LISTE à
+  // SegmentedControl : chaque « lentille » remplace les ex-6 boards.
+  type Lens = "net" | "ca" | "pct" | "transport" | "risk";
+  const [lens, setLens] = useState<Lens>("net");
+  const LENS: Record<Lens, {
+    icon: typeof Trophy; title: string; hint: string; rows: StoreRow[];
+    value: (s: StoreRow) => number; fmt: (v: number) => string;
+    sub: (s: StoreRow) => string; negative?: boolean;
+  }> = {
+    net: {
+      icon: Trophy, title: "Plus grosses marges nettes",
+      hint: "ce que chaque magasin rapporte, transport déduit",
+      rows: byNet.slice(0, 10), value: (s) => s.marginNet, fmt: fmtEurC,
+      sub: (s) => `CA ${fmtEurC(s.ca)} · ${s.marginNetPct.toFixed(1)} %`,
+    },
+    ca: {
+      icon: Coins, title: "Plus gros chiffre d'affaires",
+      hint: "le volume d'affaires brut",
+      rows: byCa.slice(0, 10), value: (s) => s.ca, fmt: fmtEurC,
+      sub: (s) => `marge nette ${fmtEurC(s.marginNet)}`,
+    },
+    pct: {
+      icon: Gem, title: "Meilleure rentabilité nette",
+      hint: rentables ? `magasins ≥ ${fmtEurC(rentables)} de CA` : "en % du CA produit",
+      rows: byNetPct.slice(0, 10), value: (s) => s.marginNetPct, fmt: fmtPct,
+      sub: (s) => `${fmtEurC(s.marginNet)} de marge nette`,
+    },
+    transport: {
+      icon: Truck, title: "Coûtent le plus cher à livrer",
+      hint: "coût de transport le plus élevé",
+      rows: byTransport.slice(0, 10), value: (s) => s.transportCost, fmt: fmtEurC,
+      sub: (s) => `${fmtWeight(s.weightKg)} · ${s.transportPctMargin != null ? s.transportPctMargin.toFixed(0) + " % de la marge" : "—"}`,
+    },
+    risk: {
+      icon: TriangleAlert, title: nbNeg > 0 ? "Marge nette négative" : "Marges nettes les plus faibles",
+      hint: nbNeg > 0 ? `${nbNeg} magasin${nbNeg > 1 ? "s" : ""} en perte nette` : "à surveiller",
+      rows: worst.slice(0, 10), value: (s) => s.marginNet, fmt: fmtEurC,
+      sub: (s) => `CA ${fmtEurC(s.ca)} · transport ${fmtEurC(s.transportCost)}`, negative: true,
+    },
+  };
+  const lensOptions: { value: Lens; label: string }[] = [
+    { value: "net", label: "Marge nette" },
+    { value: "ca", label: "CA" },
+    { value: "pct", label: "Rentabilité" },
+    ...(data.transportConfigured ? [{ value: "transport" as Lens, label: "Transport" }] : []),
+    { value: "risk", label: "À risque" },
+  ];
+  const safeLens: Lens = lensOptions.some((o) => o.value === lens) ? lens : "net";
+  const cfg = LENS[safeLens];
 
   return (
     <>
@@ -228,97 +281,72 @@ function Report({ data }: { data: StoresPayload }) {
 
       {/* Bandeau : positions livrées sans tarif applicable (coût transport sous-estimé) */}
       {data.transportConfigured && totals.transportUnpriced > 0 && (
-        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-[12.5px] text-amber-100">
-          <TriangleAlert className="h-4 w-4 mt-0.5 shrink-0 text-amber-300" />
-          <span>
-            <b>{formatNum(totals.transportUnpriced)} position(s) sans tarif</b> — coût transport non calculé
-            (comptées 0 €). La marge nette est <b>sur-estimée</b> pour ces magasins.{" "}
-            <Link href="/transport" className="underline underline-offset-2 font-semibold hover:text-white">
-              Compléter les tarifs transporteurs →
+        <Banner
+          tone="warning"
+          className="mt-4"
+          title={`${formatNum(totals.transportUnpriced)} position(s) sans tarif`}
+          action={
+            <Link href="/transport" className="text-body font-semibold text-foreground underline underline-offset-2 whitespace-nowrap">
+              Compléter les tarifs →
             </Link>
-          </span>
-        </div>
+          }
+        >
+          Coût transport non calculé (comptées 0 €). La marge nette est sur-estimée pour ces magasins.
+        </Banner>
       )}
 
       {/* Bandeau : transport non configuré */}
       {!data.transportConfigured && (
-        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-[12.5px] text-amber-100">
-          <Info className="h-4 w-4 mt-0.5 shrink-0 text-amber-300" />
-          <span>
-            Le <b>coût de transport</b> n’est pas encore paramétré : la marge nette affichée est
-            provisoirement égale à la marge brute.{" "}
-            <Link href="/transport" className="underline underline-offset-2 font-semibold hover:text-white">
-              Renseigner la structure de coûts →
+        <Banner
+          tone="warning"
+          className="mt-4"
+          title="Coût de transport non paramétré"
+          action={
+            <Link href="/transport" className="text-body font-semibold text-foreground underline underline-offset-2 whitespace-nowrap">
+              Renseigner les coûts →
             </Link>
-          </span>
-        </div>
+          }
+        >
+          La marge nette affichée est provisoirement égale à la marge brute.
+        </Banner>
       )}
 
-      {/* Classements */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 mt-6">
-        <Board
-          icon={Trophy} accent="brand"
-          title="Plus grosses marges nettes"
-          hint="ce que chaque magasin rapporte, transport déduit"
-          rows={byNet.slice(0, 10)}
-          value={(s) => s.marginNet} fmt={fmtEurC}
-          sub={(s) => `CA ${fmtEurC(s.ca)} · ${s.marginNetPct.toFixed(1)} %`}
-        />
-        <Board
-          icon={Coins} accent="sky"
-          title="Plus gros chiffre d'affaires"
-          hint="le volume d'affaires brut"
-          rows={byCa.slice(0, 10)}
-          value={(s) => s.ca} fmt={fmtEurC}
-          sub={(s) => `marge nette ${fmtEurC(s.marginNet)}`}
-        />
-        <Board
-          icon={Gem} accent="emerald"
-          title="Meilleure rentabilité nette"
-          hint={rentables ? `magasins ≥ ${fmtEurC(rentables)} de CA` : "en % du CA produit"}
-          rows={byNetPct.slice(0, 10)}
-          value={(s) => s.marginNetPct} fmt={fmtPct}
-          sub={(s) => `${fmtEurC(s.marginNet)} de marge nette`}
-        />
-
-        {data.transportConfigured && (
-          <Board
-            icon={Truck} accent="amber"
-            title="Coûtent le plus cher à livrer"
-            hint="coût de transport le plus élevé (€)"
-            rows={byTransport.slice(0, 10)}
-            value={(s) => s.transportCost} fmt={fmtEurC}
-            sub={(s) => `${fmtWeight(s.weightKg)} · ${s.transportPctMargin != null ? s.transportPctMargin.toFixed(0) + " % de la marge" : "—"}`}
+      {/* Classement — une seule liste, la lentille se choisit au SegmentedControl */}
+      <section className="rounded-xl border border-border bg-card p-4 mt-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <cfg.icon className="h-4 w-4 text-brand-500 shrink-0" />
+            <div className="min-w-0">
+              <h3 className="text-callout font-bold text-foreground tracking-tight truncate">{cfg.title}</h3>
+              <p className="text-caption2 text-muted-foreground truncate">{cfg.hint}</p>
+            </div>
+          </div>
+          <SegmentedControl<Lens>
+            value={safeLens}
+            onChange={setLens}
+            options={lensOptions}
+            aria-label="Choisir le classement"
+            className="shrink-0"
           />
-        )}
-        {data.transportConfigured && (
-          <Board
-            icon={Flame} accent="rose"
-            title="Le transport ronge la marge"
-            hint="part de la marge brute absorbée par la livraison"
-            rows={byTransportShare.slice(0, 10)}
-            value={(s) => s.transportPctMargin ?? 0} fmt={(v) => `${v.toFixed(0)} %`}
-            sub={(s) => `transport ${fmtEurC(s.transportCost)} · marge nette ${fmtEurC(s.marginNet)}`}
-          />
-        )}
+        </div>
         <Board
-          icon={TriangleAlert} accent="rose"
-          title={nbNeg > 0 ? "Marge nette négative" : "Marges nettes les plus faibles"}
-          hint={nbNeg > 0 ? `${nbNeg} magasin${nbNeg > 1 ? "s" : ""} en perte nette` : "à surveiller"}
-          rows={worst.slice(0, 10)}
-          value={(s) => s.marginNet} fmt={fmtEurC}
-          sub={(s) => `CA ${fmtEurC(s.ca)} · transport ${fmtEurC(s.transportCost)}`}
-          negative
+          rows={cfg.rows}
+          value={cfg.value}
+          fmt={cfg.fmt}
+          sub={cfg.sub}
+          negative={cfg.negative}
+          hovered={hovered}
+          onHover={setHovered}
         />
-      </div>
+      </section>
 
       {/* Carte de positionnement — CA vs rentabilité nette, bulle = poids */}
-      <Scatter stores={stores} avgNetPct={totals.marginNetPct} />
+      <Scatter stores={stores} avgNetPct={totals.marginNetPct} hovered={hovered} onHover={setHovered} />
 
       {/* Détail complet */}
-      <DetailTable stores={stores} configured={data.transportConfigured} />
+      <DetailTable stores={stores} configured={data.transportConfigured} hovered={hovered} onHover={setHovered} />
 
-      <p className="text-[11px] leading-relaxed text-muted-foreground/80 mt-6 max-w-[92ch]">
+      <p className="text-caption2 leading-relaxed text-muted-foreground/80 mt-6 max-w-[92ch]">
         Source : factures SAP (le facturé fait foi), 12&nbsp;mois glissants. La <b>marge brute</b> est calculée
         ligne à ligne au coût d’entrée marchandise réel. Le <b>coût de livraison</b> est compté <b>par position,
         facture par facture</b>, selon le transporteur réel du document (repli : tournée habituelle du client) —
@@ -334,10 +362,12 @@ function Report({ data }: { data: StoresPayload }) {
 
 /* ───────────────────────── Podium (top 3 marge nette) ────────────────────── */
 
+// N°1 en case de PRISE D'INFO teintée or (le héros du palmarès) ; N°2/N°3
+// sobres. Plus de glow jaune en dur — le rang se lit à la pastille et au fond.
 const PODIUM_STYLE = [
-  { ring: "ring-brand-500/60",   badge: "bg-brand-500 text-[#0b1018]",   glow: "shadow-[0_0_28px_rgba(250,204,21,0.18)]", label: "N°1" },
-  { ring: "ring-slate-300/40",   badge: "bg-slate-300 text-[#0b1018]",   glow: "", label: "N°2" },
-  { ring: "ring-amber-700/50",   badge: "bg-amber-700 text-white",       glow: "", label: "N°3" },
+  { card: "border-brand-500/35 bg-brand-500/[0.10]", badge: "bg-brand-500 text-primary-foreground", label: "N°1" },
+  { card: "border-border bg-card",                   badge: "bg-secondary text-foreground",         label: "N°2" },
+  { card: "border-border bg-card",                   badge: "bg-secondary text-foreground",         label: "N°3" },
 ];
 
 function Podium({ rows }: { rows: StoreRow[] }) {
@@ -349,26 +379,26 @@ function Podium({ rows }: { rows: StoreRow[] }) {
         return (
           <div
             key={s.cardCode}
-            className={`relative rounded-2xl border border-border bg-card p-4 ring-1 ${st.ring} ${st.glow} ${i === 0 ? "sm:-mt-1" : ""}`}
+            className={`relative rounded-2xl border p-4 ${st.card} ${i === 0 ? "sm:-mt-1" : ""}`}
           >
             <div className="flex items-center justify-between mb-2">
-              <span className={`inline-flex items-center h-6 px-2 rounded-full text-[11px] font-bold tracking-wide ${st.badge}`}>
+              <span className={`inline-flex items-center h-6 px-2 rounded-full text-caption2 font-bold tracking-wide ${st.badge}`}>
                 {st.label}
               </span>
               {s.segment && (
-                <span className={`inline-flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.1em] ${SEG_TONE[s.segment].text}`}>
+                <span className={`inline-flex items-center gap-1.5 text-caption2 font-semibold uppercase tracking-[0.1em] ${SEG_TONE[s.segment].text}`}>
                   <span className={`h-1.5 w-1.5 rounded-full ${SEG_TONE[s.segment].dot}`} />
                   {segLabel(s.segment)}
                 </span>
               )}
             </div>
-            <p className="text-[14px] font-semibold text-foreground truncate" title={shortName(s.cardName, s.cardCode)}>
+            <p className="text-callout font-semibold text-foreground truncate" title={shortName(s.cardName, s.cardCode)}>
               {shortName(s.cardName, s.cardCode)}
             </p>
             <p className="font-display text-[clamp(26px,3.2vw,38px)] font-bold text-foreground tracking-tight tabular-nums leading-none mt-1.5">
               {fmtEur(s.marginNet)}
             </p>
-            <p className="text-[11.5px] text-muted-foreground mt-1.5">
+            <p className="text-caption text-muted-foreground mt-1.5">
               marge nette · <span className="text-foreground/80 font-medium">{s.marginNetPct.toFixed(1)} %</span> du CA
               produit · CA {fmtEurC(s.ca)}
             </p>
@@ -382,85 +412,80 @@ function Podium({ rows }: { rows: StoreRow[] }) {
 /* ───────────────────────── KPI compact ──────────────────────────────────── */
 
 function Kpi({ label, value, hint, accent }: { label: string; value: string; hint?: string; accent?: "brand" }) {
+  // Case d'INFO : l'unique KPI accentué (marge nette totale) est teinté or,
+  // sans filet coloré. Les autres restent neutres.
+  const tinted = accent === "brand";
   return (
-    <div className={`rounded-xl border border-border bg-card p-3.5 ${accent === "brand" ? "border-l-4 border-l-brand-500" : ""}`}>
-      <p className="text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground">{label}</p>
-      <p className={`font-display text-[clamp(21px,2.6vw,30px)] font-bold tracking-tight tabular-nums leading-none mt-1.5 ${accent === "brand" ? "text-brand-400" : "text-foreground"}`}>
+    <div className={`rounded-xl border p-3.5 ${tinted ? "border-brand-500/35 bg-brand-500/[0.10]" : "border-border bg-card"}`}>
+      <p className="text-caption2 uppercase tracking-[0.14em] font-semibold text-muted-foreground">{label}</p>
+      <p className="font-display text-[clamp(21px,2.6vw,30px)] font-bold tracking-tight tabular-nums leading-none mt-1.5 text-foreground">
         {value}
       </p>
-      {hint && <p className="text-[11px] text-muted-foreground mt-1.5">{hint}</p>}
+      {hint && <p className="text-caption2 text-muted-foreground mt-1.5">{hint}</p>}
     </div>
   );
 }
 
 /* ───────────────────────── Board — classement générique ─────────────────── */
 
-const BOARD_ACCENT: Record<string, { bar: string; icon: string; border: string }> = {
-  brand:   { bar: "bg-brand-500/20",   icon: "text-brand-400",   border: "border-l-brand-500" },
-  sky:     { bar: "bg-sky-500/20",     icon: "text-sky-300",     border: "border-l-sky-500" },
-  emerald: { bar: "bg-emerald-500/20", icon: "text-emerald-300", border: "border-l-emerald-500" },
-  amber:   { bar: "bg-amber-500/20",   icon: "text-amber-300",   border: "border-l-amber-500" },
-  rose:    { bar: "bg-rose-500/20",    icon: "text-rose-300",    border: "border-l-rose-500" },
-};
-
 function Board({
-  icon: Icon, title, hint, accent, rows, value, fmt, sub, negative,
+  rows, value, fmt, sub, negative, hovered, onHover,
 }: {
-  icon: typeof Trophy;
-  title: string;
-  hint?: string;
-  accent: keyof typeof BOARD_ACCENT;
   rows: StoreRow[];
   value: (s: StoreRow) => number;
   fmt: (v: number) => string;
   sub?: (s: StoreRow) => string;
   negative?: boolean;
+  hovered?: string | null;
+  onHover?: (code: string | null) => void;
 }) {
-  const tone = BOARD_ACCENT[accent];
   // Base de la barre : max des valeurs absolues (les marges négatives se lisent).
+  // Barre de magnitude en accent UNIQUE (or), jamais multicolore.
   const max = Math.max(...rows.map((r) => Math.abs(value(r))), 1);
   return (
-    <section className={`rounded-xl border border-border bg-card p-4 border-l-4 ${tone.border}`}>
-      <div className="flex items-center gap-2 mb-0.5">
-        <Icon className={`h-4 w-4 ${tone.icon}`} />
-        <h3 className="text-[12.5px] font-bold text-foreground tracking-tight">{title}</h3>
-      </div>
-      {hint && <p className="text-[10.5px] text-muted-foreground mb-2.5 ml-6">{hint}</p>}
-      <ol className="flex flex-col gap-1">
-        {rows.map((s, i) => {
-          const v = value(s);
-          const bar = (Math.abs(v) / max) * 100;
-          return (
-            <li key={s.cardCode} className="grid grid-cols-[18px_1fr_auto] items-center gap-2 text-[12px]">
-              <span className="text-muted-foreground/60 tabular-nums text-right text-[11px]">{i + 1}</span>
-              <div className="min-w-0 relative">
-                <div className={`absolute inset-y-0 left-0 rounded-sm ${tone.bar}`} style={{ width: `${bar}%` }} />
-                <div className="relative px-1.5 py-1 min-w-0">
-                  <span className="font-medium text-foreground truncate block" title={shortName(s.cardName, s.cardCode)}>
-                    {shortName(s.cardName, s.cardCode)}
-                  </span>
-                  {sub && <span className="text-[10px] text-muted-foreground truncate block">{sub(s)}</span>}
-                </div>
+    <ol className="flex flex-col gap-0.5">
+      {rows.map((s, i) => {
+        const v = value(s);
+        const bar = (Math.abs(v) / max) * 100;
+        const on = hovered === s.cardCode;
+        return (
+          <li
+            key={s.cardCode}
+            className={`grid grid-cols-[18px_1fr_auto] items-center gap-2 text-caption rounded-md transition-colors ${on ? "bg-secondary/60" : ""}`}
+            onMouseEnter={() => onHover?.(s.cardCode)}
+            onMouseLeave={() => onHover?.(null)}
+          >
+            <span className="text-muted-foreground/60 tabular-nums text-right text-caption2">{i + 1}</span>
+            <div className="min-w-0 relative">
+              <div className="absolute inset-y-0 left-0 rounded-sm bg-brand-500/20" style={{ width: `${bar}%` }} />
+              <div className="relative px-1.5 py-1 min-w-0">
+                <span className="font-medium text-foreground truncate block" title={shortName(s.cardName, s.cardCode)}>
+                  {shortName(s.cardName, s.cardCode)}
+                </span>
+                {sub && <span className="text-caption2 text-muted-foreground truncate block">{sub(s)}</span>}
               </div>
-              <span className={`font-bold tabular-nums whitespace-nowrap text-[12.5px] ${
-                negative && v < 0 ? "text-rose-300" : "text-foreground"
-              }`}>
-                {fmt(v)}
-              </span>
-            </li>
-          );
-        })}
-        {rows.length === 0 && (
-          <li className="text-[11.5px] text-muted-foreground py-2">Aucune donnée.</li>
-        )}
-      </ol>
-    </section>
+            </div>
+            <span className={`font-bold tabular-nums whitespace-nowrap text-caption pr-1.5 ${
+              negative && v < 0 ? "text-destructive" : "text-foreground"
+            }`}>
+              {fmt(v)}
+            </span>
+          </li>
+        );
+      })}
+      {rows.length === 0 && (
+        <li className="text-caption text-muted-foreground py-2">Aucune donnée.</li>
+      )}
+    </ol>
   );
 }
 
 /* ───────────────────────── Nuage de positionnement (SVG) ─────────────────── */
 
-function Scatter({ stores, avgNetPct }: { stores: StoreRow[]; avgNetPct: number }) {
+function Scatter({ stores, avgNetPct, hovered, onHover }: {
+  stores: StoreRow[]; avgNetPct: number;
+  hovered?: string | null; onHover?: (code: string | null) => void;
+}) {
   const [hover, setHover] = useState<{ s: StoreRow; x: number; y: number } | null>(null);
   const pts = useMemo(() => stores.filter((s) => s.ca > 0), [stores]);
 
@@ -496,8 +521,8 @@ function Scatter({ stores, avgNetPct }: { stores: StoreRow[]; avgNetPct: number 
   return (
     <section className="rounded-xl border border-border bg-card p-4 mt-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
-        <h3 className="text-[12.5px] font-bold text-foreground tracking-tight">Positionnement des magasins</h3>
-        <p className="text-[10.5px] text-muted-foreground">
+        <h3 className="text-caption font-bold text-foreground tracking-tight">Positionnement des magasins</h3>
+        <p className="text-caption2 text-muted-foreground">
           CA (horizontal) × rentabilité nette (vertical) · taille = poids livré
         </p>
       </div>
@@ -511,30 +536,37 @@ function Scatter({ stores, avgNetPct }: { stores: StoreRow[]; avgNetPct: number 
               <text x={m.l - 7} y={Y(t) + 3.5} textAnchor="end" fontSize="10" fill="hsl(var(--muted-foreground))">{t} %</text>
             </g>
           ))}
-          {/* ligne moyenne */}
-          <line x1={m.l} y1={Y(avgNetPct)} x2={W - m.r} y2={Y(avgNetPct)} stroke="rgb(250 204 21)" strokeWidth={1} strokeDasharray="5 4" opacity={0.6} />
-          <text x={W - m.r} y={Y(avgNetPct) - 4} textAnchor="end" fontSize="9.5" fill="rgb(250 204 21)">moyenne {avgNetPct.toFixed(1)} %</text>
+          {/* ligne moyenne (accent or) */}
+          <line x1={m.l} y1={Y(avgNetPct)} x2={W - m.r} y2={Y(avgNetPct)} stroke="hsl(var(--brand-500))" strokeWidth={1} strokeDasharray="5 4" opacity={0.6} />
+          <text x={W - m.r} y={Y(avgNetPct) - 4} textAnchor="end" fontSize="9.5" fill="hsl(var(--brand-500))">moyenne {avgNetPct.toFixed(1)} %</text>
           {/* X ticks */}
           {xTicks.map((t, i) => (
             <text key={i} x={X(t)} y={H - 12} textAnchor="middle" fontSize="10" fill="hsl(var(--muted-foreground))">{fmtEurC(t)}</text>
           ))}
           <text x={W - m.r} y={H - 12} textAnchor="end" fontSize="9.5" fill="hsl(var(--muted-foreground))" opacity={0.7}>CA →</text>
-          {/* points */}
-          {pts.map((s) => (
-            <circle
-              key={s.cardCode}
-              cx={X(s.ca)} cy={Y(s.marginNetPct)} r={R(s.weightKg)}
-              fill={dotColor(s) ?? segFill[s.segment as ClientSegment]}
-              fillOpacity={0.55} stroke={dotColor(s) ?? segFill[s.segment as ClientSegment]} strokeOpacity={0.9} strokeWidth={1}
-              className="cursor-pointer transition-[fill-opacity]"
-              onMouseEnter={() => setHover({ s, x: X(s.ca), y: Y(s.marginNetPct) })}
-              onMouseLeave={() => setHover(null)}
-            />
-          ))}
+          {/* points — le magasin survolé (ici ou dans la table) est mis en avant */}
+          {pts.map((s) => {
+            const on = hovered === s.cardCode;
+            const c = dotColor(s) ?? segFill[s.segment as ClientSegment];
+            return (
+              <circle
+                key={s.cardCode}
+                cx={X(s.ca)} cy={Y(s.marginNetPct)} r={on ? R(s.weightKg) + 2 : R(s.weightKg)}
+                fill={c}
+                fillOpacity={on ? 0.85 : 0.55}
+                stroke={on ? "hsl(var(--foreground))" : c}
+                strokeOpacity={on ? 1 : 0.9}
+                strokeWidth={on ? 1.5 : 1}
+                className="cursor-pointer transition-[fill-opacity,r]"
+                onMouseEnter={() => { setHover({ s, x: X(s.ca), y: Y(s.marginNetPct) }); onHover?.(s.cardCode); }}
+                onMouseLeave={() => { setHover(null); onHover?.(null); }}
+              />
+            );
+          })}
         </svg>
         {hover && (
           <div
-            className="pointer-events-none absolute z-10 rounded-lg border border-border bg-popover px-2.5 py-1.5 shadow-modal text-[11px]"
+            className="pointer-events-none absolute z-10 rounded-lg border border-border bg-popover px-2.5 py-1.5 shadow-modal text-caption2"
             style={{
               left: `min(${(hover.x / W) * 100}%, calc(100% - 180px))`,
               top: `calc(${(hover.y / H) * 100}% + 10px)`,
@@ -551,11 +583,11 @@ function Scatter({ stores, avgNetPct }: { stores: StoreRow[]; avgNetPct: number 
       {/* légende segments */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 ml-1">
         {(["GMS", "CHR", "EXPORT", "RUNGIS"] as ClientSegment[]).map((s) => (
-          <span key={s} className="inline-flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
+          <span key={s} className="inline-flex items-center gap-1.5 text-caption2 text-muted-foreground">
             <span className="h-2 w-2 rounded-full" style={{ background: segFill[s] }} /> {segLabel(s)}
           </span>
         ))}
-        <span className="inline-flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5 text-caption2 text-muted-foreground">
           <span className="h-2 w-2 rounded-full" style={{ background: "rgb(251 113 133)" }} /> marge nette négative
         </span>
       </div>
@@ -577,7 +609,10 @@ const COLS: { key: SortKey; label: string; fmt: (s: StoreRow) => string }[] = [
   { key: "marginNetPct",   label: "Nette %",       fmt: (s) => fmtPct(s.marginNetPct) },
 ];
 
-function DetailTable({ stores, configured }: { stores: StoreRow[]; configured: boolean }) {
+function DetailTable({ stores, configured, hovered, onHover }: {
+  stores: StoreRow[]; configured: boolean;
+  hovered?: string | null; onHover?: (code: string | null) => void;
+}) {
   const [sort, setSort] = useState<SortKey>("marginNet");
   const [asc, setAsc] = useState(false);
   const [open, setOpen] = useState(false);
@@ -601,14 +636,14 @@ function DetailTable({ stores, configured }: { stores: StoreRow[]; configured: b
       <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2">
           <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
-          <h3 className="text-[12.5px] font-bold text-foreground tracking-tight">Détail par magasin</h3>
-          <span className="text-[11px] text-muted-foreground">{stores.length} magasins · clic sur une colonne pour trier</span>
+          <h3 className="text-caption font-bold text-foreground tracking-tight">Détail par magasin</h3>
+          <span className="text-caption2 text-muted-foreground">{stores.length} magasins · clic sur une colonne pour trier</span>
         </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-[12px] tabular-nums">
+        <table className="w-full text-caption tabular-nums">
           <thead>
-            <tr className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/80 border-b border-border">
+            <tr className="text-caption2 uppercase tracking-[0.08em] text-muted-foreground/80 border-b border-border">
               <th className="text-left font-semibold px-3 py-2 w-8">n°</th>
               <th className="text-left font-semibold px-3 py-2">Magasin</th>
               <th className="text-left font-semibold px-2 py-2">Seg.</th>
@@ -630,8 +665,13 @@ function DetailTable({ stores, configured }: { stores: StoreRow[]; configured: b
           </thead>
           <tbody>
             {rows.map((s, i) => (
-              <tr key={s.cardCode} className="border-b border-border/50 hover:bg-secondary/30">
-                <td className="px-3 py-1.5 text-muted-foreground/60 text-right text-[11px]">{i + 1}</td>
+              <tr
+                key={s.cardCode}
+                className={`border-b border-border/50 transition-colors ${hovered === s.cardCode ? "bg-secondary/60" : "hover:bg-secondary/30"}`}
+                onMouseEnter={() => onHover?.(s.cardCode)}
+                onMouseLeave={() => onHover?.(null)}
+              >
+                <td className="px-3 py-1.5 text-muted-foreground/60 text-right text-caption2">{i + 1}</td>
                 <td className="px-3 py-1.5 max-w-[220px]">
                   <span className="font-medium text-foreground truncate block" title={shortName(s.cardName, s.cardCode)}>
                     {shortName(s.cardName, s.cardCode)}
@@ -639,7 +679,7 @@ function DetailTable({ stores, configured }: { stores: StoreRow[]; configured: b
                 </td>
                 <td className="px-2 py-1.5">
                   {s.segment ? (
-                    <span className={`inline-flex items-center gap-1 text-[10px] font-semibold ${SEG_TONE[s.segment].text}`}>
+                    <span className={`inline-flex items-center gap-1 text-caption2 font-semibold ${SEG_TONE[s.segment].text}`}>
                       <span className={`h-1.5 w-1.5 rounded-full ${SEG_TONE[s.segment].dot}`} />{segLabel(s.segment)}
                     </span>
                   ) : <span className="text-muted-foreground/50">—</span>}
@@ -649,7 +689,7 @@ function DetailTable({ stores, configured }: { stores: StoreRow[]; configured: b
                   return (
                     <td key={c.key} className={`px-3 py-1.5 text-right whitespace-nowrap ${
                       c.key === "marginNet" ? "font-semibold" : ""
-                    } ${neg ? "text-rose-300" : c.key === "marginNet" ? "text-foreground" : "text-foreground/80"}`}>
+                    } ${neg ? "text-destructive" : c.key === "marginNet" ? "text-foreground" : "text-foreground/80"}`}>
                       {c.fmt(s)}
                     </td>
                   );
@@ -663,7 +703,7 @@ function DetailTable({ stores, configured }: { stores: StoreRow[]; configured: b
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="w-full py-2.5 text-[12px] font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/30 transition-colors border-t border-border"
+          className="w-full py-2.5 text-caption font-semibold text-muted-foreground hover:text-foreground hover:bg-secondary/30 transition-colors border-t border-border"
         >
           {open ? "Réduire" : `Voir les ${sorted.length} magasins`}
         </button>

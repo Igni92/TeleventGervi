@@ -4,8 +4,8 @@ import { useEffect } from "react";
 import { SETTING_KEYS, onSettingChange, readSetting } from "@/components/settings/app-settings";
 
 /**
- * Pont entre le réglage `televente:animations` (page /parametres) et le fond
- * d'ambiance (AmbientBackground / globals.css).
+ * Pont entre le réglage `televente:animations` (page /parametres) et les
+ * couches d'ambiance animées (globals.css).
  *
  * Pose `data-reduce-anim="1"` sur <html> quand les animations doivent être
  * coupées, sinon retire l'attribut. globals.css traduit cet attribut en

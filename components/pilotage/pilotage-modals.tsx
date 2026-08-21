@@ -16,7 +16,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { X, ChevronDown, ArrowLeft, Trophy, Wallet, Loader2 } from "lucide-react";
+import { X, ChevronDown, ArrowLeft, Trophy, Wallet, Loader2, AlertTriangle, Gift } from "lucide-react";
 import { formatEuro, formatNum } from "./bento";
 import { SEGMENTS, type Segment, type ClientSegment } from "@/lib/segments";
 
@@ -65,9 +65,9 @@ export function FullscreenModal({
       >
         <header className="shrink-0 flex items-center justify-between gap-3 px-5 py-3 border-b border-border">
           <div className="flex items-baseline gap-3 min-w-0">
-            <p className="text-[10px] uppercase tracking-[0.18em] font-bold text-muted-foreground shrink-0">{kicker}</p>
-            <h2 className="text-[18px] font-semibold tracking-tight text-foreground truncate">{title}</h2>
-            {sub && <span className="text-[12px] text-muted-foreground tnum truncate hidden md:inline">{sub}</span>}
+            <p className="text-caption2 uppercase tracking-[0.18em] font-bold text-muted-foreground shrink-0">{kicker}</p>
+            <h2 className="text-title3 font-semibold tracking-tight text-foreground truncate">{title}</h2>
+            {sub && <span className="text-caption text-muted-foreground tnum truncate hidden md:inline">{sub}</span>}
           </div>
           <button onClick={onClose} aria-label="Fermer" className="p-1.5 hover:bg-secondary rounded-md text-muted-foreground shrink-0">
             <X className="h-4 w-4" />
@@ -81,7 +81,7 @@ export function FullscreenModal({
 
 function ModalLoading({ label }: { label: string }) {
   return (
-    <div className="h-48 grid place-items-center text-[13px] text-muted-foreground">
+    <div className="h-48 grid place-items-center text-body text-muted-foreground">
       <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> {label}</span>
     </div>
   );
@@ -147,25 +147,25 @@ export function ClientsModal({ onClose }: { onClose: () => void }) {
               type="button"
               onClick={() => setSegment(s.id)}
               aria-pressed={segment === s.id}
-              className={`h-7 px-2.5 rounded-full text-[11px] font-semibold transition-colors ${
-                segment === s.id ? "bg-brand-500 text-[#0b1018]" : "bg-secondary/50 text-muted-foreground hover:text-foreground"
+              className={`h-7 px-2.5 rounded-full text-caption2 font-semibold transition-colors ${
+                segment === s.id ? "bg-brand-500 text-primary-foreground" : "bg-secondary/50 text-muted-foreground hover:text-foreground"
               }`}
             >
               {s.label}
             </button>
           ))}
         </div>
-        <Link href="/dashboard/magasins" className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-brand-400 hover:text-brand-300">
+        <Link href="/dashboard/magasins" className="inline-flex items-center gap-1.5 text-caption font-semibold text-brand-400 hover:text-brand-300">
           <Trophy className="h-3.5 w-3.5" /> Ouvrir le palmarès complet →
         </Link>
       </div>
 
-      {err && <p className="px-5 py-6 text-[13px] text-rose-400">Erreur : {err}</p>}
+      {err && <p className="px-5 py-6 text-body text-rose-400">Erreur : {err}</p>}
       {!err && !data && <ModalLoading label="Agrégation des magasins…" />}
       {data && (
-        <table className="w-full text-[12px] tnum tabular-nums">
+        <table className="w-full text-caption tnum tabular-nums">
           <thead className="sticky top-0 bg-card z-10">
-            <tr className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/80 border-b border-border">
+            <tr className="text-caption2 uppercase tracking-[0.08em] text-muted-foreground/80 border-b border-border">
               <th className="text-left font-semibold px-4 py-2 w-8">n°</th>
               <th className="text-left font-semibold px-2 py-2">Magasin</th>
               <th className="text-left font-semibold px-2 py-2">Seg.</th>
@@ -186,13 +186,13 @@ export function ClientsModal({ onClose }: { onClose: () => void }) {
           <tbody>
             {sorted.map((s, i) => (
               <tr key={s.cardCode} className="border-b border-border/40 hover:bg-secondary/30">
-                <td className="px-4 py-1.5 text-muted-foreground/60 text-right text-[11px]">{i + 1}</td>
+                <td className="px-4 py-1.5 text-muted-foreground/60 text-right text-caption2">{i + 1}</td>
                 <td className="px-2 py-1.5 max-w-[220px]">
                   <span className="font-medium text-foreground truncate block" title={s.cardName ?? s.cardCode}>
                     {s.cardName ?? s.cardCode}
                   </span>
                 </td>
-                <td className={`px-2 py-1.5 text-[10px] font-semibold ${s.segment ? SEG_TONE[s.segment] : "text-muted-foreground/50"}`}>
+                <td className={`px-2 py-1.5 text-caption2 font-semibold ${s.segment ? SEG_TONE[s.segment] : "text-muted-foreground/50"}`}>
                   {s.segment ? (SEGMENTS.find((x) => x.id === s.segment)?.label ?? s.segment) : "—"}
                 </td>
                 {STORE_COLS.map((c) => {
@@ -244,15 +244,15 @@ export function SuppliersModal({ onClose }: { onClose: () => void }) {
       sub={data && !data.restricted ? `${data.suppliers.length} fournisseurs · ${fmtEurC(total)} d'achats nets` : undefined}
       onClose={onClose}
     >
-      {err && <p className="px-5 py-6 text-[13px] text-rose-400">Erreur : {err}</p>}
+      {err && <p className="px-5 py-6 text-body text-rose-400">Erreur : {err}</p>}
       {!err && !data && <ModalLoading label="Chargement des achats…" />}
       {data?.restricted && (
-        <p className="px-5 py-8 text-center text-[13px] text-muted-foreground">Détail des achats réservé à la direction.</p>
+        <p className="px-5 py-8 text-center text-body text-muted-foreground">Détail des achats réservé à la direction.</p>
       )}
       {data && !data.restricted && (
-        <table className="w-full text-[12px] tnum tabular-nums">
+        <table className="w-full text-caption tnum tabular-nums">
           <thead className="sticky top-0 bg-card z-10">
-            <tr className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/80 border-b border-border">
+            <tr className="text-caption2 uppercase tracking-[0.08em] text-muted-foreground/80 border-b border-border">
               <th className="text-left font-semibold px-4 py-2 w-8">n°</th>
               <th className="text-left font-semibold px-2 py-2">Fournisseur</th>
               <th className="text-right font-semibold px-3 py-2">Achats nets HT</th>
@@ -264,7 +264,7 @@ export function SuppliersModal({ onClose }: { onClose: () => void }) {
           <tbody>
             {data.suppliers.map((s, i) => (
               <tr key={s.cardCode} className="border-b border-border/40 hover:bg-secondary/30">
-                <td className="px-4 py-1.5 text-muted-foreground/60 text-right text-[11px]">{i + 1}</td>
+                <td className="px-4 py-1.5 text-muted-foreground/60 text-right text-caption2">{i + 1}</td>
                 <td className="px-2 py-1.5 max-w-[280px] relative">
                   <div className="absolute inset-y-1 left-0 bg-amber-500/12 rounded-sm" style={{ width: `${(s.totalIn / max) * 100}%` }} />
                   <span className="relative font-medium text-foreground truncate block px-1" title={s.cardName ?? s.cardCode}>
@@ -341,8 +341,8 @@ function carrierLabel(f: { carrier: string | null; mode: CommissionDetail["invoi
       + (f.mode === "aucun" ? " — aucun tarif paramétré pour ce transporteur" : "")
     }>
       {f.carrier}
-      {!f.fromDoc && <span className="text-[8.5px] text-muted-foreground/70">(hab.)</span>}
-      {f.mode === "aucun" && <span className="text-[8.5px]">⚠ sans tarif</span>}
+      {!f.fromDoc && <span className="text-caption2 text-muted-foreground/70">(hab.)</span>}
+      {f.mode === "aucun" && <span className="text-caption2 inline-flex items-center gap-1"><AlertTriangle className="h-3 w-3 shrink-0" /> sans tarif</span>}
     </span>
   );
 }
@@ -383,7 +383,7 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
         : "clic sur un commercial = le détail des factures derrière sa prime"}
       onClose={onClose}
     >
-      {err && <p className="px-5 py-6 text-[13px] text-rose-400">Erreur : {err}</p>}
+      {err && <p className="px-5 py-6 text-body text-rose-400">Erreur : {err}</p>}
       {!err && !list && <ModalLoading label="Chargement de l'équipe…" />}
 
       {/* ── Vue 1 : l'équipe ── */}
@@ -397,34 +397,34 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
               className="text-left rounded-xl border border-border bg-secondary/20 hover:bg-secondary/40 hover:border-brand-500/50 transition-colors p-4 group"
             >
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[15px] font-bold text-foreground">{c.slpName}</span>
-                <span className="text-[10.5px] text-muted-foreground">{c.clientsActifs} clients · {formatNum(c.nbFacturesYtd)} fact. YTD</span>
+                <span className="text-callout font-bold text-foreground">{c.slpName}</span>
+                <span className="text-caption2 text-muted-foreground">{c.clientsActifs} clients · {formatNum(c.nbFacturesYtd)} fact. YTD</span>
               </div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[12px]">
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-caption">
                 <div>
-                  <p className="text-[9.5px] uppercase tracking-[0.1em] font-semibold text-muted-foreground">CA net YTD</p>
+                  <p className="text-caption2 uppercase tracking-[0.1em] font-semibold text-muted-foreground">CA net YTD</p>
                   <p className="font-semibold text-foreground tnum">{fmtEurC(c.caNetYtd)}</p>
                 </div>
                 <div>
-                  <p className="text-[9.5px] uppercase tracking-[0.1em] font-semibold text-muted-foreground">Marge brute YTD</p>
+                  <p className="text-caption2 uppercase tracking-[0.1em] font-semibold text-muted-foreground">Marge brute YTD</p>
                   <p className="font-semibold text-foreground tnum">{fmtEurC(c.margeBruteYtd)}</p>
                 </div>
                 <div>
-                  <p className="text-[9.5px] uppercase tracking-[0.1em] font-semibold text-muted-foreground">Marge nette (base prime)</p>
+                  <p className="text-caption2 uppercase tracking-[0.1em] font-semibold text-muted-foreground">Marge nette (base prime)</p>
                   <p className="font-semibold text-foreground tnum">{fmtEurC(c.primeMargeNette)}</p>
                 </div>
                 <div>
-                  <p className="text-[9.5px] uppercase tracking-[0.1em] font-semibold text-muted-foreground">Prime ({(c.primeRate * 100).toFixed(0)} %)</p>
+                  <p className="text-caption2 uppercase tracking-[0.1em] font-semibold text-muted-foreground">Prime ({(c.primeRate * 100).toFixed(0)} %)</p>
                   <p className="font-bold text-brand-400 tnum inline-flex items-center gap-1"><Wallet className="h-3.5 w-3.5" />{fmtEur2(c.prime)}</p>
                 </div>
               </div>
-              <p className="mt-2.5 text-[10.5px] text-muted-foreground group-hover:text-brand-400 transition-colors">
+              <p className="mt-2.5 text-caption2 text-muted-foreground group-hover:text-brand-400 transition-colors">
                 Voir le détail des factures →
               </p>
             </button>
           ))}
           {list.length === 0 && (
-            <p className="col-span-full py-8 text-center text-[13px] text-muted-foreground">Aucun commercial actif sur 12 mois.</p>
+            <p className="col-span-full py-8 text-center text-body text-muted-foreground">Aucun commercial actif sur 12 mois.</p>
           )}
         </div>
       )}
@@ -436,7 +436,7 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
             <button
               type="button"
               onClick={() => setSelected(null)}
-              className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-muted-foreground hover:text-foreground"
+              className="inline-flex items-center gap-1.5 text-caption font-semibold text-muted-foreground hover:text-foreground"
             >
               <ArrowLeft className="h-3.5 w-3.5" /> Équipe
             </button>
@@ -450,7 +450,7 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
                 {detail.totals.avoirs > 0 && <Stat label="Avoirs repris" v={`− ${fmtEurC(detail.totals.avoirs)}`} />}
                 <Stat label="Base retenue" v={fmtEurC(detail.totals.margeNette)} />
                 <Stat label={`Prime (${(detail.rate * 100).toFixed(0)} %)`} v={fmtEur2(detail.totals.prime)} brand />
-                <span className="text-[10.5px] text-muted-foreground">
+                <span className="text-caption2 text-muted-foreground">
                   {formatNum(detail.totals.invoices)} factures · {formatNum(detail.totals.creditNotes)} avoirs
                   {detail.totals.planchers > 0 && ` · ${detail.totals.planchers} au plancher`}
                 </span>
@@ -458,7 +458,7 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
             )}
           </div>
 
-          {detailErr && <p className="px-5 py-6 text-[13px] text-rose-400">Erreur : {detailErr}</p>}
+          {detailErr && <p className="px-5 py-6 text-body text-rose-400">Erreur : {detailErr}</p>}
           {!detailErr && !detail && <ModalLoading label="Calcul facture par facture…" />}
           {detail && (
             <div className="overflow-auto">
@@ -466,15 +466,15 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
                    bulletin (ligne automatique des éléments de salaires). ── */}
               {detail.byMonth.length > 0 && (
                 <div className="px-5 pt-3">
-                  <p className="text-[10px] uppercase tracking-[0.12em] font-bold text-muted-foreground mb-1.5">
+                  <p className="text-caption2 uppercase tracking-[0.12em] font-bold text-muted-foreground mb-1.5">
                     Prime par mois — versée sur le bulletin (Éléments de salaires)
                   </p>
                   <div className="flex gap-2 overflow-x-auto pb-2">
                     {detail.byMonth.map((m) => (
                       <div key={m.month} className="shrink-0 rounded-lg border border-border bg-secondary/25 px-3 py-2 min-w-[128px]">
-                        <p className="text-[10.5px] font-semibold text-muted-foreground capitalize">{monthLabelFr(m.month)}</p>
-                        <p className="text-[15px] font-bold text-brand-400 tnum tabular-nums leading-tight">{fmtEur2(m.prime)}</p>
-                        <p className="text-[9.5px] text-muted-foreground tnum">
+                        <p className="text-caption2 font-semibold text-muted-foreground capitalize">{monthLabelFr(m.month)}</p>
+                        <p className="text-callout font-bold text-brand-400 tnum tabular-nums leading-tight">{fmtEur2(m.prime)}</p>
+                        <p className="text-caption2 text-muted-foreground tnum">
                           base {fmtEurC(m.base)} · {formatNum(m.invoices)} fact.{m.avoirs > 0 ? ` · avoirs −${fmtEurC(m.avoirs)}` : ""}
                         </p>
                       </div>
@@ -482,9 +482,9 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
                   </div>
                 </div>
               )}
-              <table className="w-full text-[11.5px] tnum tabular-nums">
+              <table className="w-full text-caption tnum tabular-nums">
                 <thead className="sticky top-0 bg-card z-10">
-                  <tr className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground/80 border-b border-border">
+                  <tr className="text-caption2 uppercase tracking-[0.08em] text-muted-foreground/80 border-b border-border">
                     <th className="text-left font-semibold px-4 py-2">Date</th>
                     <th className="text-left font-semibold px-2 py-2">N°</th>
                     <th className="text-left font-semibold px-2 py-2">Client</th>
@@ -505,23 +505,23 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
                       <td className="px-2 py-1 max-w-[200px]">
                         <span className="truncate block font-medium text-foreground" title={f.cardName ?? f.cardCode}>{f.cardName ?? f.cardCode}</span>
                         {f.cadeaux > 0 && (
-                          <span className="text-[9px] text-emerald-300/90 block">🎁 cadeau neutralisé {fmtEur(f.cadeaux)}</span>
+                          <span className="text-caption2 text-emerald-700 dark:text-emerald-300 inline-flex items-center gap-1"><Gift className="h-3 w-3 shrink-0" /> cadeau neutralisé {fmtEur(f.cadeaux)}</span>
                         )}
                       </td>
                       <td className="px-3 py-1 text-right whitespace-nowrap text-foreground/80">{fmtEur(f.caHt)}</td>
                       <td className="px-3 py-1 text-right whitespace-nowrap text-foreground/80">{fmtEur(f.margeBrute)}</td>
                       <td className="px-3 py-1 text-right whitespace-nowrap text-foreground/60">{fmtKg(f.kg)}</td>
-                      <td className="px-2 py-1 whitespace-nowrap text-[10.5px]">{carrierLabel(f)}</td>
+                      <td className="px-2 py-1 whitespace-nowrap text-caption2">{carrierLabel(f)}</td>
                       <td className="px-3 py-1 text-right whitespace-nowrap text-foreground/60">{f.transport > 0 ? `− ${fmtEur(f.transport)}` : "—"}</td>
                       <td className={`px-3 py-1 text-right whitespace-nowrap font-semibold ${f.margeNette < 0 ? "text-rose-300" : "text-foreground"}`}>
                         {fmtEur(f.margeNette)}
-                        {f.plancher && <span className="text-[8.5px] text-muted-foreground block leading-none">plancher → 0</span>}
+                        {f.plancher && <span className="text-caption2 text-muted-foreground block leading-none">plancher → 0</span>}
                       </td>
                       <td className={`px-3 py-1 text-right whitespace-nowrap font-semibold ${f.prime < 0 ? "text-rose-300" : "text-brand-400"}`}>{fmtEur2(f.prime)}</td>
                     </tr>
                   ))}
                   {detail.creditNotes.length > 0 && (
-                    <tr><td colSpan={10} className="px-4 pt-3 pb-1 text-[10px] uppercase tracking-[0.12em] font-bold text-rose-300/80">Avoirs (marge reprise — la base totale ne descend jamais sous 0)</td></tr>
+                    <tr><td colSpan={10} className="px-4 pt-3 pb-1 text-caption2 uppercase tracking-[0.12em] font-bold text-rose-300/80">Avoirs (marge reprise — la base totale ne descend jamais sous 0)</td></tr>
                   )}
                   {detail.creditNotes.map((f) => (
                     <tr key={`cn-${f.docEntry}`} className="border-b border-border/40 hover:bg-secondary/30">
@@ -540,16 +540,16 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
                 </tbody>
               </table>
               {detail.truncated && (
-                <p className="px-5 py-2.5 text-[11px] text-muted-foreground">
+                <p className="px-5 py-2.5 text-caption2 text-muted-foreground">
                   Liste plafonnée aux 400 documents les plus récents — les totaux du bandeau couvrent bien TOUTE la période.
                 </p>
               )}
-              <p className="px-5 pb-4 pt-1 text-[10.5px] text-muted-foreground/80 max-w-[110ch]">
+              <p className="px-5 pb-4 pt-1 text-caption2 text-muted-foreground/80 max-w-[110ch]">
                 Règles : <b className="text-foreground/80">cadeaux neutralisés</b> (lignes offertes 0 € / remise 100 %),{" "}
                 <b className="text-foreground/80">plancher 0 par facture</b> (une marge nette négative ne ronge pas la prime),{" "}
                 <b className="text-foreground/80">avoirs repris</b> sans jamais passer la base sous 0. Transport <b className="text-foreground/80">par
                 position</b> : transporteur réel du document (repli tournée habituelle) — direct = coût/position de la flotte,
-                externe = grille département × tranche ; « ⚠ sans tarif » = transporteur connu mais aucune grille/€-kg paramétré
+                externe = grille département × tranche ; « sans tarif » = transporteur connu mais aucune grille/€-kg paramétré
                 (à compléter dans Coût de transport). Identique au calcul de la page Effectif.
               </p>
             </div>
@@ -563,8 +563,8 @@ export function CommerciauxModal({ onClose }: { onClose: () => void }) {
 function Stat({ label, v, brand }: { label: string; v: string; brand?: boolean }) {
   return (
     <span className="inline-flex items-baseline gap-1.5">
-      <span className="text-[9.5px] uppercase tracking-[0.1em] font-semibold text-muted-foreground">{label}</span>
-      <span className={`text-[13px] font-bold tnum ${brand ? "text-brand-400" : "text-foreground"}`}>{v}</span>
+      <span className="text-caption2 uppercase tracking-[0.1em] font-semibold text-muted-foreground">{label}</span>
+      <span className={`text-body font-bold tnum ${brand ? "text-brand-400" : "text-foreground"}`}>{v}</span>
     </span>
   );
 }

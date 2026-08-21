@@ -61,10 +61,10 @@ export function TransportBreakdown({ metrics, isManager }: { metrics: TransportC
     <section className="rounded-2xl border border-border bg-card p-4 sm:p-5 space-y-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-[10px] uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1.5">
+          <p className="text-caption2 uppercase tracking-[0.14em] font-semibold text-muted-foreground inline-flex items-center gap-1.5">
             <BarChart3 className="h-3.5 w-3.5" /> États détaillés · coûts de livraison
           </p>
-          <p className="text-[12px] text-muted-foreground mt-1 max-w-xl">
+          <p className="text-caption text-muted-foreground mt-1 max-w-xl">
             Ventilation du coût par poste, et — à la demande — analyse des BL des 12 derniers mois
             par transporteur et par client (coût transport appliqué : direct = prix position,
             externe = tarif du client).
@@ -80,14 +80,14 @@ export function TransportBreakdown({ metrics, isManager }: { metrics: TransportC
 
       {/* ── Ventilation par POSTE (modèle) ── */}
       <div>
-        <p className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2 inline-flex items-center gap-1">
+        <p className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2 inline-flex items-center gap-1">
           <PieChart className="h-3 w-3" /> Par poste de coût (annuel)
         </p>
         {posteRows.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">Aucun coût saisi.</p>
+          <p className="text-caption text-muted-foreground">Aucun coût saisi.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-[12.5px] tnum">
+            <table className="w-full text-caption tnum">
               <thead>
                 <tr className="text-muted-foreground border-b border-border/60">
                   <th className="text-left font-medium py-1.5 pr-3">Poste</th>
@@ -127,23 +127,23 @@ export function TransportBreakdown({ metrics, isManager }: { metrics: TransportC
             <MiniStat label="Coût transport imputé" value={fmtEur(data.totals.cost)} tone="amber" />
           </div>
           {data.totals.unpriced > 0 && (
-            <p className="text-[11px] text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
+            <p className="text-caption2 text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
               <AlertTriangle className="h-3 w-3" /> {fmtInt(data.totals.unpriced)} position(s) sans tarif — coût transport non calculé (comptées 0 €).
             </p>
           )}
           {data.truncated && (
-            <p className="text-[11px] text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
+            <p className="text-caption2 text-amber-600 dark:text-amber-400 inline-flex items-center gap-1">
               <AlertTriangle className="h-3 w-3" /> Résultat plafonné (beaucoup de BL) — chiffres partiels.
             </p>
           )}
 
           {/* Par transporteur */}
           <div>
-            <p className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2 inline-flex items-center gap-1">
+            <p className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2 inline-flex items-center gap-1">
               <Truck className="h-3 w-3" /> Par transporteur
             </p>
             <div className="overflow-x-auto">
-              <table className="w-full text-[12.5px] tnum">
+              <table className="w-full text-caption tnum">
                 <thead>
                   <tr className="text-muted-foreground border-b border-border/60">
                     <th className="text-left font-medium py-1.5 pr-3">Transporteur</th>
@@ -159,7 +159,7 @@ export function TransportBreakdown({ metrics, isManager }: { metrics: TransportC
                       <td className="py-1.5 pr-3">
                         <span className="inline-flex items-center gap-1.5">
                           {c.code}
-                          {c.direct && <span className="text-[9px] uppercase tracking-wide font-bold text-brand-600 dark:text-brand-400">direct</span>}
+                          {c.direct && <span className="text-caption2 uppercase tracking-wide font-bold text-brand-600 dark:text-brand-400">direct</span>}
                         </span>
                       </td>
                       <td className="py-1.5 px-3 text-right">{fmtInt(c.deliveries)}</td>
@@ -175,11 +175,11 @@ export function TransportBreakdown({ metrics, isManager }: { metrics: TransportC
 
           {/* Par client (top 100) */}
           <div>
-            <p className="text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2 inline-flex items-center gap-1">
+            <p className="text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground mb-2 inline-flex items-center gap-1">
               <Users className="h-3 w-3" /> Par client · top {data.clients.length} (coût décroissant)
             </p>
             <div className="overflow-x-auto max-h-[420px] overflow-y-auto rounded-lg border border-border/50">
-              <table className="w-full text-[12.5px] tnum">
+              <table className="w-full text-caption tnum">
                 <thead className="sticky top-0 bg-card">
                   <tr className="text-muted-foreground border-b border-border/60">
                     <th className="text-left font-medium py-1.5 px-3">Client</th>
@@ -215,8 +215,8 @@ export function TransportBreakdown({ metrics, isManager }: { metrics: TransportC
 function MiniStat({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "amber" }) {
   return (
     <div className={`rounded-xl px-3 py-2.5 ${tone === "amber" ? "bg-amber-50 dark:bg-amber-950/30 ring-1 ring-inset ring-amber-300/40 dark:ring-amber-500/30" : "bg-secondary/40"}`}>
-      <p className={`text-[18px] font-bold tnum leading-tight ${tone === "amber" ? "text-amber-700 dark:text-amber-300" : "text-foreground"}`}>{value}</p>
-      <p className="mt-0.5 text-[10px] text-muted-foreground">{label}</p>
+      <p className={`text-title3 font-bold tnum leading-tight ${tone === "amber" ? "text-amber-700 dark:text-amber-300" : "text-foreground"}`}>{value}</p>
+      <p className="mt-0.5 text-caption2 text-muted-foreground">{label}</p>
     </div>
   );
 }

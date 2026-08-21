@@ -19,6 +19,7 @@ import { Wallet, Loader2, Printer, Plus, Trash2, Check, ChevronDown, Sliders, Tr
 import { toast } from "sonner";
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { printEtatCommissions, printDetailCommissions, type CommissionPdfCommercial, type CommissionDetail } from "@/lib/commissionsPdf";
 import {
   CommissionRulesEditor, ClientProgress, describeRule,
@@ -142,6 +143,8 @@ function CommercialLedger({ c, canEdit, onChanged }: { c: Commercial; canEdit: b
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Versement à supprimer (confirmation via ConfirmDialog, plus de window.confirm).
+  const [toDelete, setToDelete] = useState<Payout | null>(null);
   const [panel, setPanel] = useState<null | "progress" | "rules" | "detail">(null);
   const [detFrom, setDetFrom] = useState(c.since.slice(0, 10));
   const [detTo, setDetTo] = useState(todayISO());
@@ -179,7 +182,6 @@ function CommercialLedger({ c, canEdit, onChanged }: { c: Commercial; canEdit: b
   };
 
   const remove = async (p: Payout) => {
-    if (!window.confirm(`Supprimer le versement de ${eur2(p.amount)} du ${dateFrShort(p.date)} ?`)) return;
     setDeletingId(p.id);
     try {
       const r = await fetch("/api/effectif/commissions", {
@@ -263,7 +265,7 @@ function CommercialLedger({ c, canEdit, onChanged }: { c: Commercial; canEdit: b
               <span className="min-w-0 flex-1 truncate text-muted-foreground" title={p.note}>{p.note || "—"}</span>
               {canEdit && (
                 <button
-                  type="button" onClick={() => remove(p)} disabled={deletingId === p.id}
+                  type="button" onClick={() => setToDelete(p)} disabled={deletingId === p.id}
                   title="Supprimer ce versement"
                   className="shrink-0 text-muted-foreground hover:text-rose-500 disabled:opacity-50"
                 >
@@ -307,6 +309,17 @@ function CommercialLedger({ c, canEdit, onChanged }: { c: Commercial; canEdit: b
           </button>
         </div>
       )}
+
+      <ConfirmDialog
+        open={toDelete != null}
+        onOpenChange={(o) => { if (!o) setToDelete(null); }}
+        title="Supprimer ce versement ?"
+        description={toDelete ? `Versement de ${eur2(toDelete.amount)} du ${dateFrShort(toDelete.date)}.` : undefined}
+        confirmLabel="Supprimer"
+        tone="destructive"
+        onConfirm={async () => { if (toDelete) await remove(toDelete); }}
+        loading={deletingId != null}
+      />
     </div>
   );
 }

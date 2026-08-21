@@ -2,9 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Truck, ReceiptText, FileMinus, AlertTriangle, Eye } from "lucide-react";
+import { Loader2, Truck, ReceiptText, FileMinus, Eye } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Banner } from "@/components/ui/banner";
 import { PdfPreviewDialog } from "@/components/documents/PdfPreviewDialog";
+import { DOC_TYPE_PILL } from "@/components/documents/doc-types";
 import { formatDate } from "@/lib/utils";
 
 interface Doc {
@@ -14,15 +17,10 @@ interface Doc {
 interface InvoiceLine { lineNum: number; itemCode: string; itemName?: string; quantity: number; price: number; }
 
 const COLS = [
-  { type: "BL", label: "Bons de livraison", icon: Truck, hint: "Glisser vers Factures pour facturer" },
-  { type: "FACTURE", label: "Factures", icon: ReceiptText, hint: "Glisser vers Avoirs pour créer un avoir" },
-  { type: "AVOIR", label: "Avoirs", icon: FileMinus, hint: "" },
+  { type: "BL", label: "Bons de livraison", icon: Truck },
+  { type: "FACTURE", label: "Factures", icon: ReceiptText },
+  { type: "AVOIR", label: "Avoirs", icon: FileMinus },
 ] as const;
-const PILL: Record<string, string> = {
-  BL: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
-  FACTURE: "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300",
-  AVOIR: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
-};
 
 export function DocumentsKanban({ docs, onChanged }: { docs: Doc[]; onChanged: () => void }) {
   const [drag, setDrag] = useState<Doc | null>(null);
@@ -100,13 +98,10 @@ export function DocumentsKanban({ docs, onChanged }: { docs: Doc[]; onChanged: (
 
   return (
     <div className="space-y-3">
-      <div className="flex items-start gap-2 rounded-lg border border-amber-400/50 bg-amber-50 dark:bg-amber-950/25 px-3 py-2 text-[11.5px] text-amber-800 dark:text-amber-200">
-        <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-        <span>
-          Glissez un <b>BL → Factures</b> pour créer la facture, ou une <b>Facture → Avoirs</b> pour créer un avoir.
-          Ces actions créent de <b>vrais documents SAP</b> {env ? <>sur l&apos;environnement <b>{env.toUpperCase()}</b></> : null} (réservé à la direction). Un BL déjà facturé est refusé.
-        </span>
-      </div>
+      <p className="text-caption text-muted-foreground">
+        Un bouton <b>Facturer</b> sur chaque BL et <b>Créer un avoir</b> sur chaque facture crée un
+        vrai document SAP (réservé à la direction). Le glisser-déposer entre colonnes reste possible sur ordinateur.
+      </p>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {COLS.map((col) => {
@@ -122,11 +117,10 @@ export function DocumentsKanban({ docs, onChanged }: { docs: Doc[]; onChanged: (
               className={`rounded-2xl border bg-card p-2.5 min-h-[160px] transition-colors ${over === col.type && isTarget ? "border-brand-400 bg-brand-500/10 ring-2 ring-brand-400/40" : "border-border"}`}
             >
               <header className="flex items-center gap-2 px-1 pb-2 mb-1 border-b border-border">
-                <span className={`h-6 w-6 rounded-md flex items-center justify-center ${PILL[col.type]}`}><Icon className="h-3.5 w-3.5" /></span>
-                <h3 className="text-[13px] font-semibold text-foreground">{col.label}</h3>
-                <span className="text-[11px] text-muted-foreground tnum ml-auto">{list.length}</span>
+                <span className={`h-6 w-6 rounded-md flex items-center justify-center ${DOC_TYPE_PILL[col.type]}`}><Icon className="h-3.5 w-3.5" /></span>
+                <h3 className="text-body font-semibold text-foreground">{col.label}</h3>
+                <span className="text-caption text-muted-foreground tnum ml-auto">{list.length}</span>
               </header>
-              {col.hint && <p className="px-1 pb-1.5 text-[10.5px] text-muted-foreground/70">{col.hint}</p>}
               <ul className="space-y-1.5">
                 {list.map((d) => (
                   <li
@@ -137,13 +131,24 @@ export function DocumentsKanban({ docs, onChanged }: { docs: Doc[]; onChanged: (
                     className={`rounded-lg border border-border bg-background/50 px-2.5 py-2 ${col.type !== "AVOIR" ? "cursor-grab active:cursor-grabbing" : ""} ${drag?.id === d.id ? "opacity-40" : "hover:border-brand-400/50"}`}
                   >
                     <div className="flex items-center gap-1.5">
-                      <span className="font-mono text-[12px] font-semibold text-foreground truncate">{d.docNum ?? "—"}</span>
+                      <span className="font-mono text-caption font-semibold text-foreground truncate">{d.docNum ?? "—"}</span>
+                      <span className="text-caption2 text-muted-foreground tnum">{d.docDate ? formatDate(d.docDate).slice(0, 10) : ""}</span>
                       <button type="button" onClick={() => setPreview({ id: d.id, fileName: d.fileName })} title="Aperçu" className="ml-auto text-muted-foreground/50 hover:text-brand-500 shrink-0"><Eye className="h-3.5 w-3.5" /></button>
                     </div>
-                    <p className="text-[10.5px] text-muted-foreground tnum mt-0.5">{d.docDate ? formatDate(d.docDate).slice(0, 10) : ""}</p>
+                    {/* Action EXPLICITE — le drag-drop ne marche pas au tactile. */}
+                    {col.type === "BL" && (
+                      <Button variant="tinted" size="sm" className="mt-2 w-full" onClick={() => setFacturer(d)}>
+                        <ReceiptText className="h-3.5 w-3.5" /> Facturer
+                      </Button>
+                    )}
+                    {col.type === "FACTURE" && (
+                      <Button variant="outline" size="sm" className="mt-2 w-full" onClick={() => openAvoir(d)}>
+                        <FileMinus className="h-3.5 w-3.5" /> Créer un avoir
+                      </Button>
+                    )}
                   </li>
                 ))}
-                {list.length === 0 && <li className="px-1 py-4 text-center text-[11px] text-muted-foreground/40">—</li>}
+                {list.length === 0 && <li className="px-1 py-4 text-center text-caption text-muted-foreground/40">—</li>}
               </ul>
             </div>
           );
@@ -155,15 +160,21 @@ export function DocumentsKanban({ docs, onChanged }: { docs: Doc[]; onChanged: (
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><ReceiptText className="h-5 w-5 text-brand-600 dark:text-brand-400" /> Facturer le BL</DialogTitle>
-            <DialogDescription className="text-[13px]">
-              Créer la <b>facture SAP</b> à partir du BL <b>N° {facturer?.docNum}</b> ? SAP recopie articles, quantités, prix, lots, TPF et TVA. {env ? <>Environnement : <b>{env.toUpperCase()}</b>.</> : null}
+            <DialogDescription className="text-body">
+              Créer la <b>facture SAP</b> à partir du BL <b>N° {facturer?.docNum}</b> ? SAP recopie articles, quantités, prix, lots, TPF et TVA.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex justify-end gap-2 pt-1">
-            <button type="button" onClick={() => setFacturer(null)} className="h-9 px-3 rounded-lg text-[13px] text-muted-foreground hover:text-foreground">Annuler</button>
-            <button type="button" onClick={doFacturer} disabled={working} className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-brand-600 text-white text-[13px] font-semibold hover:bg-brand-700 disabled:opacity-60">
+          {/* Environnement SAP rappelé au MOMENT de l'action. */}
+          {env && (
+            <Banner tone="warning">
+              Action réelle sur l&apos;environnement SAP <b>{env.toUpperCase()}</b>.
+            </Banner>
+          )}
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <Button variant="outline" onClick={() => setFacturer(null)}>Annuler</Button>
+            <Button onClick={doFacturer} disabled={working}>
               {working ? <Loader2 className="h-4 w-4 animate-spin" /> : <ReceiptText className="h-4 w-4" />} Créer la facture
-            </button>
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -173,12 +184,17 @@ export function DocumentsKanban({ docs, onChanged }: { docs: Doc[]; onChanged: (
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><FileMinus className="h-5 w-5 text-amber-600 dark:text-amber-400" /> Avoir sur la facture N° {avoirFor?.docNum}</DialogTitle>
-            <DialogDescription className="text-[12.5px]">Choisissez les lignes et les quantités à créditer.{env ? <> Environnement SAP : <b>{env.toUpperCase()}</b>.</> : null}</DialogDescription>
+            <DialogDescription className="text-caption">Choisissez les lignes et les quantités à créditer.</DialogDescription>
           </DialogHeader>
+          {env && (
+            <Banner tone="warning">
+              Action réelle sur l&apos;environnement SAP <b>{env.toUpperCase()}</b>.
+            </Banner>
+          )}
           {invLines === null ? (
-            <div className="flex items-center gap-2 py-6 text-[13px] text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Chargement des lignes…</div>
+            <div className="flex items-center gap-2 py-6 text-body text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Chargement des lignes…</div>
           ) : invLines.length === 0 ? (
-            <p className="py-4 text-[13px] text-muted-foreground">Aucune ligne sur cette facture.</p>
+            <p className="py-4 text-body text-muted-foreground">Aucune ligne sur cette facture.</p>
           ) : (
             <div className="space-y-1.5 max-h-[50vh] overflow-y-auto">
               {invLines.map((l) => {
@@ -192,25 +208,25 @@ export function DocumentsKanban({ docs, onChanged }: { docs: Doc[]; onChanged: (
                       className="h-4 w-4 accent-brand-600"
                     />
                     <div className="min-w-0 flex-1">
-                      <p className="text-[12.5px] text-foreground truncate">{l.itemName || l.itemCode}</p>
-                      <p className="text-[11px] text-muted-foreground">facturé : {l.quantity} · {l.price?.toFixed(2)} €</p>
+                      <p className="text-caption text-foreground truncate">{l.itemName || l.itemCode}</p>
+                      <p className="text-caption2 text-muted-foreground">facturé : {l.quantity} · {l.price?.toFixed(2)} €</p>
                     </div>
                     <input
                       type="number" min={0} max={l.quantity} step="0.001"
                       value={qty}
                       onChange={(e) => setSel((s) => ({ ...s, [l.lineNum]: Math.max(0, Math.min(l.quantity, parseFloat(e.target.value) || 0)) }))}
-                      className="h-8 w-20 text-right tnum rounded-lg border border-border bg-background px-2 text-[12.5px]"
+                      className="h-8 w-20 text-right tnum rounded-lg border border-border bg-background px-2 text-caption"
                     />
                   </div>
                 );
               })}
             </div>
           )}
-          <div className="flex justify-end gap-2 pt-1">
-            <button type="button" onClick={() => setAvoirFor(null)} className="h-9 px-3 rounded-lg text-[13px] text-muted-foreground hover:text-foreground">Annuler</button>
-            <button type="button" onClick={doAvoir} disabled={working || !invLines?.length} className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-amber-600 text-white text-[13px] font-semibold hover:bg-amber-700 disabled:opacity-60">
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <Button variant="outline" onClick={() => setAvoirFor(null)}>Annuler</Button>
+            <Button variant="warning" onClick={doAvoir} disabled={working || !invLines?.length}>
               {working ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileMinus className="h-4 w-4" />} Créer l&apos;avoir
-            </button>
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

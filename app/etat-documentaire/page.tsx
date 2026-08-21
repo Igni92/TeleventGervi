@@ -14,7 +14,7 @@ export default async function EtatDocumentairePage() {
       <PageHeader
         kicker="Pilotage"
         title="État documentaire"
-        help={<>Tous les documents archivés (BL, factures, avoirs) rangés par client, en dossiers BL → Facture → Avoir.<br/>Cliquez une case pour l&apos;aperçu ; passez en vue Kanban pour facturer / créer un avoir par glisser-déposer.</>}
+        help={<>Tous les documents archivés (BL, factures, avoirs) rangés par client, en dossiers BL → Facture → Avoir.<br/>Cliquez une case pour l&apos;aperçu ; passez en vue Kanban pour facturer ou créer un avoir (boutons explicites).</>}
       />
       <DocumentsExplorer />
     </div>

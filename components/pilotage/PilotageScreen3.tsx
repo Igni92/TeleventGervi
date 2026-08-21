@@ -16,7 +16,7 @@ import {
 // Carte MapLibre (WebGL) — client uniquement, chargée à la volée.
 const GeoMapGL = dynamic(() => import("@/components/charts/GeoMapGL").then((m) => m.GeoMapGL), {
   ssr: false,
-  loading: () => <div className="h-full w-full grid place-items-center text-[12px] text-muted-foreground">Chargement de la carte…</div>,
+  loading: () => <div className="h-full w-full grid place-items-center text-caption text-muted-foreground">Chargement de la carte…</div>,
 });
 
 // Couleurs alignées sur la vérité segment de lib/segments : GMS teal-500 ·
@@ -89,7 +89,7 @@ export function PilotageScreen3({ viewAs = null }: { viewAs?: string | null } = 
       <Header period={periodLabel} metric={metric} onMetric={setMetric} onRefresh={() => setRefreshNonce((n) => n + 1)} />
 
       {err && (
-        <div className="flex-1 grid place-items-center text-[13px] text-rose-400">
+        <div className="flex-1 grid place-items-center text-body text-rose-400">
           Erreur de chargement : {err}
         </div>
       )}
@@ -119,7 +119,7 @@ export function PilotageScreen3({ viewAs = null }: { viewAs?: string | null } = 
                   aria-label="Répartition EXPORT / GMS / CHR"
                 />
               ) : (
-                <p className="text-[12px] italic text-muted-foreground">Aucune donnée.</p>
+                <p className="text-caption italic text-muted-foreground">Aucune donnée.</p>
               )}
             </div>
           </Tile>
@@ -151,7 +151,7 @@ export function PilotageScreen3({ viewAs = null }: { viewAs?: string | null } = 
    ───────────────────────────────────────────────────────────────── */
 function TotalsPanel({ data }: { data: ReturnType<typeof useGeoData>["data"] }) {
   if (!data) {
-    return <div className="h-full grid place-items-center text-[12px] text-muted-foreground">Chargement…</div>;
+    return <div className="h-full grid place-items-center text-caption text-muted-foreground">Chargement…</div>;
   }
   const t = data.totals;
   const eur = (n: number) => formatEuro(n, true);
@@ -169,15 +169,15 @@ function TotalsPanel({ data }: { data: ReturnType<typeof useGeoData>["data"] }) 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {stats.map((s) => (
           <div key={s.label} className="rounded-lg bg-secondary/40 px-2.5 py-2">
-            <p className="text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground">{s.label}</p>
-            <p className="text-[15px] font-semibold text-foreground tnum leading-tight mt-0.5">
+            <p className="text-caption2 uppercase tracking-[0.12em] text-muted-foreground">{s.label}</p>
+            <p className="text-callout font-semibold text-foreground tnum leading-tight mt-0.5">
               <AnimatedNumber value={s.value} format={s.format} animateOnMount />
             </p>
           </div>
         ))}
       </div>
       {data.unlocated.clients > 0 && (
-        <p className="text-[10.5px] text-muted-foreground mt-2">
+        <p className="text-caption2 text-muted-foreground mt-2">
           {formatNum(data.unlocated.clients)} client(s) non localisé(s)
           {unlocatedPct >= 0.5 ? ` · ${unlocatedPct.toFixed(0)} % du CA` : ""} — adresse SAP manquante.
         </p>
@@ -202,13 +202,13 @@ function Header({
   return (
     <header className="shrink-0 flex items-center justify-between gap-4 pl-36 pr-2">
       <div className="flex items-baseline gap-3 min-w-0">
-        <p className="text-[10.5px] uppercase tracking-[0.18em] font-bold text-muted-foreground shrink-0">
+        <p className="text-caption2 uppercase tracking-[0.18em] font-bold text-muted-foreground shrink-0">
           Carte · Où je livre le plus
         </p>
-        <h1 className="text-[15px] font-semibold tracking-tight text-foreground truncate">{period}</h1>
+        <h1 className="text-callout font-semibold tracking-tight text-foreground truncate">{period}</h1>
       </div>
       <div className="flex items-center gap-3">
-        <span className="text-[11px] text-muted-foreground tnum">{now}</span>
+        <span className="text-caption2 text-muted-foreground tnum">{now}</span>
         <MetricToggle value={metric} onChange={onMetric} />
         <RefreshButton onClick={onRefresh} title="Actualiser la géoloc et les données" />
       </div>
@@ -225,8 +225,8 @@ function MetricToggle({ value, onChange }: { value: GeoMetric; onChange: (m: Geo
           type="button"
           onClick={() => onChange(m.id)}
           aria-pressed={value === m.id}
-          className={`px-2.5 h-7 text-[11.5px] font-semibold tracking-tight rounded transition-colors ${
-            value === m.id ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
+          className={`px-2.5 h-7 text-caption font-semibold tracking-tight rounded transition-colors ${
+            value === m.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
           }`}
         >
           {m.short}

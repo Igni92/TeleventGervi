@@ -52,7 +52,7 @@ export function CarrierTariffImport({ onImported }: { onImported?: () => void })
       <Button
         size="sm"
         variant="outline"
-        className="h-7 text-[11px]"
+        className="h-7 text-caption2"
         disabled={busy}
         onClick={() => inputRef.current?.click()}
         title="Déposer le fichier tarif du transporteur (xlsx Delanchy ou Antoine) — la grille de tous les clients est mise à jour"

@@ -139,12 +139,12 @@ export function BLViewDialog({
     <Dialog open={open} onOpenChange={(v) => { if (!saving) onOpenChange(v); }}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-[15px]">
+          <DialogTitle className="flex items-center gap-2 text-callout">
             <PackageOpen className="h-4 w-4 text-brand-600" />
             BL #{docNum ?? "—"}
             <span className="truncate text-muted-foreground font-normal">· {cardName}</span>
           </DialogTitle>
-          <DialogDescription className="flex items-center gap-2 text-[12px]">
+          <DialogDescription className="flex items-center gap-2 text-caption">
             {closed ? (
               <span className="inline-flex items-center gap-1 text-amber-600"><Lock className="h-3 w-3" /> BL clôturé — consultation seule</span>
             ) : detail ? (
@@ -155,15 +155,15 @@ export function BLViewDialog({
         </DialogHeader>
 
         {loading ? (
-          <div className="flex items-center gap-2 py-10 justify-center text-[13px] text-muted-foreground">
+          <div className="flex items-center gap-2 py-10 justify-center text-body text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Chargement du BL…
           </div>
         ) : !detail ? null : (
           <>
             <div className="flex-1 overflow-y-auto -mx-1 px-1">
-              <table className="w-full text-[12.5px]">
+              <table className="w-full text-caption">
                 <thead className="sticky top-0 bg-card">
-                  <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground border-b border-border">
+                  <tr className="text-left text-caption uppercase tracking-wide text-muted-foreground border-b border-border">
                     <th className="py-1.5 pr-2 font-semibold">Article</th>
                     <th className="py-1.5 px-2 font-semibold text-right w-[110px]">Qté</th>
                     <th className="py-1.5 px-2 font-semibold text-right w-[120px]">Prix HT</th>
@@ -178,7 +178,7 @@ export function BLViewDialog({
                       <tr key={l.lineNum} className="border-b border-border/50 align-top">
                         <td className="py-1.5 pr-2">
                           <span className="text-foreground">{l.itemName || l.itemCode}</span>
-                          <span className="block text-[10.5px] text-muted-foreground">{l.itemCode}{l.unit ? ` · ${l.unit}` : ""}</span>
+                          <span className="block text-caption2 text-muted-foreground">{l.itemCode}{l.unit ? ` · ${l.unit}` : ""}</span>
                         </td>
                         <td className="py-1.5 px-2 text-right tnum">
                           {editing ? (
@@ -202,11 +202,11 @@ export function BLViewDialog({
               {/* N° commande + commentaire (édition) */}
               {editing && (
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <label className="text-[12px]">
+                  <label className="text-caption">
                     <span className="block mb-1 text-muted-foreground">N° de commande client</span>
                     <Input value={numAtCard} onChange={(e) => setNumAtCard(e.target.value)} placeholder="Réf. client" className="h-9" />
                   </label>
-                  <label className="text-[12px]">
+                  <label className="text-caption">
                     <span className="block mb-1 text-muted-foreground">Commentaire (ajouté au BL)</span>
                     <Textarea value={comments} onChange={(e) => setComments(e.target.value)} rows={1} placeholder="Optionnel" className="min-h-9" />
                   </label>
@@ -216,7 +216,7 @@ export function BLViewDialog({
 
             {/* Pied : total + actions */}
             <div className="mt-1 flex items-center justify-between gap-2 border-t border-border pt-3">
-              <div className="text-[13px]">
+              <div className="text-body">
                 <span className="text-muted-foreground">Total HT&nbsp;</span>
                 <span className="font-semibold text-foreground tnum">{eur.format(totalHT)}</span>
               </div>
@@ -235,7 +235,7 @@ export function BLViewDialog({
                     <Pencil className="h-3.5 w-3.5" /> Modifier
                   </Button>
                 ) : (
-                  <span className="inline-flex items-center gap-1 text-[12px] text-muted-foreground"><Eye className="h-3.5 w-3.5" /> Consultation</span>
+                  <span className="inline-flex items-center gap-1 text-caption text-muted-foreground"><Eye className="h-3.5 w-3.5" /> Consultation</span>
                 )}
               </div>
             </div>

@@ -143,11 +143,11 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
       {err && (
         <div className="flex-1 grid place-items-center">
           <div className="flex flex-col items-center gap-3 text-center">
-            <p className="text-[13px] text-rose-400">Erreur de chargement : {err}</p>
+            <p className="text-body text-rose-400">Erreur de chargement : {err}</p>
             <button
               type="button"
               onClick={() => setRefreshNonce((n) => n + 1)}
-              className="px-3 h-8 text-[12px] font-semibold tracking-tight rounded-md bg-secondary/60 text-foreground hover:bg-secondary transition-colors"
+              className="px-3 h-8 text-caption font-semibold tracking-tight rounded-md bg-secondary/60 text-foreground hover:bg-secondary transition-colors"
             >
               Réessayer
             </button>
@@ -187,7 +187,7 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
             animateOnMount
             />
             {data && data.curr.marginCoverage < 95 && (
-              <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 inline-flex items-center gap-1">
+              <p className="text-caption2 text-amber-600 dark:text-amber-400 mt-1 inline-flex items-center gap-1">
                 <AlertCircle className="h-3 w-3 shrink-0" />
                 {formatPct(data.curr.marginCoverage)} des lignes ont un coût d’entrée connu
               </p>
@@ -277,7 +277,7 @@ export function PilotageScreen1({ viewAs = null }: { viewAs?: string | null } = 
               aria-label="Évolution BL hebdomadaire, année courante vs précédente, par numéro de semaine ISO"
             />
           ) : (
-            <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">
+            <div className="h-full flex items-center justify-center text-caption text-muted-foreground">
               Série indisponible.
             </div>
           )}
@@ -314,16 +314,16 @@ function Header({
   return (
     <header className="shrink-0 flex items-center justify-between gap-4 pl-36 pr-2">
       <div className="flex items-baseline gap-3 min-w-0">
-        <p className="text-[10.5px] uppercase tracking-[0.18em] font-bold text-muted-foreground shrink-0">
+        <p className="text-caption2 uppercase tracking-[0.18em] font-bold text-muted-foreground shrink-0">
           {screen}
         </p>
-        <h1 className="text-[15px] font-semibold tracking-tight text-foreground truncate">
+        <h1 className="text-callout font-semibold tracking-tight text-foreground truncate">
           {period}
         </h1>
       </div>
       <div className="flex items-center gap-3">
         <MetricToggle value={metric} onChange={onMetric} />
-        <span className="text-[11px] text-muted-foreground tnum">{now}</span>
+        <span className="text-caption2 text-muted-foreground tnum">{now}</span>
         <GranularitySwitch value={g} onChange={onG} allowed={allowed} />
         <RefreshButton onClick={onRefresh} />
       </div>
@@ -339,8 +339,8 @@ function MetricToggle({ value, onChange }: { value: "ca" | "weight"; onChange: (
         type="button"
         onClick={() => onChange("ca")}
         aria-pressed={value === "ca"}
-        className={`px-2.5 h-7 text-[11.5px] font-semibold tracking-tight rounded transition-colors ${
-          value === "ca" ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
+        className={`px-2.5 h-7 text-caption font-semibold tracking-tight rounded transition-colors ${
+          value === "ca" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
         }`}
       >
         CA HT
@@ -349,8 +349,8 @@ function MetricToggle({ value, onChange }: { value: "ca" | "weight"; onChange: (
         type="button"
         onClick={() => onChange("weight")}
         aria-pressed={value === "weight"}
-        className={`px-2.5 h-7 text-[11.5px] font-semibold tracking-tight rounded transition-colors ${
-          value === "weight" ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
+        className={`px-2.5 h-7 text-caption font-semibold tracking-tight rounded transition-colors ${
+          value === "weight" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
         }`}
       >
         Volume

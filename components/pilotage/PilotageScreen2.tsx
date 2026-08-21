@@ -114,11 +114,11 @@ export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = 
       {view === "matrix" && err && (
         <div className="flex-1 grid place-items-center">
           <div className="flex flex-col items-center gap-3 text-center">
-            <p className="text-[13px] text-rose-400">Erreur de chargement : {err}</p>
+            <p className="text-body text-rose-400">Erreur de chargement : {err}</p>
             <button
               type="button"
               onClick={() => setRefreshNonce((n) => n + 1)}
-              className="px-3 h-8 text-[12px] font-semibold tracking-tight rounded-md bg-secondary/60 text-foreground hover:bg-secondary transition-colors"
+              className="px-3 h-8 text-caption font-semibold tracking-tight rounded-md bg-secondary/60 text-foreground hover:bg-secondary transition-colors"
             >
               Réessayer
             </button>
@@ -127,7 +127,7 @@ export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = 
       )}
 
       {view === "matrix" && !err && annualLoading && (
-        <div className="flex-1 grid place-items-center text-[13px] text-muted-foreground">
+        <div className="flex-1 grid place-items-center text-body text-muted-foreground">
           Chargement du rapport annuel…
         </div>
       )}
@@ -169,7 +169,7 @@ export function PilotageScreen2({ viewAs = null }: { viewAs?: string | null } = 
                     aria-label="Évolution mensuelle, année courante comparée à l'an dernier"
                   />
                 ) : (
-                  <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">
+                  <div className="h-full flex items-center justify-center text-caption text-muted-foreground">
                     Données indisponibles.
                   </div>
                 )}
@@ -281,7 +281,7 @@ function CompareToggle({
   checked, onChange, prevYear,
 }: { checked: boolean; onChange: (v: boolean) => void; prevYear: number }) {
   return (
-    <label className="inline-flex items-center gap-1.5 text-[10.5px] font-medium text-muted-foreground hover:text-foreground cursor-pointer select-none">
+    <label className="inline-flex items-center gap-1.5 text-caption2 font-medium text-muted-foreground hover:text-foreground cursor-pointer select-none">
       <input
         type="checkbox"
         checked={checked}
@@ -341,7 +341,7 @@ function EvolutionView({ weekly }: { weekly: WeeklyPayload | null }) {
 
   if (!series) {
     return (
-      <main className="flex-1 flex items-center justify-center text-[13px] text-muted-foreground">
+      <main className="flex-1 flex items-center justify-center text-body text-muted-foreground">
         Chargement de la série hebdomadaire…
       </main>
     );
@@ -429,7 +429,7 @@ function EventsView({ weekly }: { weekly: WeeklyPayload | null }) {
 
   if (!weekly) {
     return (
-      <main className="flex-1 flex items-center justify-center text-[13px] text-muted-foreground">
+      <main className="flex-1 flex items-center justify-center text-body text-muted-foreground">
         Chargement des semaines à événement…
       </main>
     );
@@ -440,9 +440,9 @@ function EventsView({ weekly }: { weekly: WeeklyPayload | null }) {
       style={{ gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gridTemplateRows: "repeat(6, minmax(0, 1fr))" }}>
       <Tile colSpan={8} rowSpan={6} title={`Semaines à événement · CA ${yearN} vs ${yearN - 1}`} accent="brand">
         <div className="h-full overflow-auto">
-          <table className="w-full text-[12px] tabular-nums">
+          <table className="w-full text-caption tabular-nums">
             <thead className="sticky top-0 bg-card z-10">
-              <tr className="border-b border-border text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
+              <tr className="border-b border-border text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground">
                 <th className="text-left px-2 py-1.5">Événement</th>
                 <th className="text-center px-2 py-1.5">Sem.</th>
                 <th className="text-right px-2 py-1.5">{yearN - 1}</th>
@@ -461,7 +461,7 @@ function EventsView({ weekly }: { weekly: WeeklyPayload | null }) {
                     {r.caPrev != null && r.caPrev !== 0 ? formatEuro(r.caPrev, true) : "—"}
                   </td>
                   <td className="px-2 py-1.5 text-right font-semibold text-foreground">
-                    {r.future ? <span className="text-[10.5px] uppercase tracking-wide text-sky-500/80">à venir</span>
+                    {r.future ? <span className="text-caption2 uppercase tracking-wide text-sky-500/80">à venir</span>
                       : r.caN != null && r.caN !== 0 ? formatEuro(r.caN, true) : "—"}
                   </td>
                   <td className="px-2 py-1.5 text-right">
@@ -532,7 +532,7 @@ function AnnualMatrixTable({
 }) {
   if (data.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">
+      <div className="h-full flex items-center justify-center text-caption text-muted-foreground">
         Aucune donnée annuelle disponible — lancer un backfill SAP.
       </div>
     );
@@ -553,7 +553,7 @@ function AnnualMatrixTable({
   return (
     <div className="h-full flex flex-col min-h-0">
       {mode === "marginPct" && (
-        <div className="shrink-0 px-2 pb-1.5 flex items-baseline gap-x-2 gap-y-0.5 flex-wrap text-[11.5px]">
+        <div className="shrink-0 px-2 pb-1.5 flex items-baseline gap-x-2 gap-y-0.5 flex-wrap text-caption">
           <span className="text-muted-foreground">Marge {currentYear.year}</span>
           <span className="font-semibold text-foreground tnum">
             {marginPctOf(currentYear.totalMargin, currentYear.totalCaProductNet).toFixed(1)} %
@@ -565,19 +565,19 @@ function AnnualMatrixTable({
         </div>
       )}
       <div className="flex-1 overflow-auto">
-      <table className="w-full text-[11px] tabular-nums">
+      <table className="w-full text-caption2 tabular-nums">
         <thead className="sticky top-0 bg-card z-10">
           <tr className="border-b border-border">
-            <th className="text-left px-2 py-1.5 text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">Mois</th>
+            <th className="text-left px-2 py-1.5 text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground">Mois</th>
             {years.map((y) => (
-              <th key={y.year} className={`text-right px-2 py-1.5 text-[9.5px] uppercase tracking-[0.12em] font-semibold ${y.year === currentYear.year ? "text-foreground" : "text-muted-foreground"}`}>
+              <th key={y.year} className={`text-right px-2 py-1.5 text-caption2 uppercase tracking-[0.12em] font-semibold ${y.year === currentYear.year ? "text-foreground" : "text-muted-foreground"}`}>
                 {y.year}
               </th>
             ))}
-            <th className="text-center px-2 py-1.5 text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
+            <th className="text-center px-2 py-1.5 text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground">
               {years.length >= 3 ? "N-2·N-1·N" : "N-1·N"}
             </th>
-            <th className="text-right px-2 py-1.5 text-[9.5px] uppercase tracking-[0.12em] font-semibold text-muted-foreground">
+            <th className="text-right px-2 py-1.5 text-caption2 uppercase tracking-[0.12em] font-semibold text-muted-foreground">
               {prevYear ? `Δ ${currentYear.year}/${prevYear.year}` : "—"}
             </th>
           </tr>
@@ -604,7 +604,7 @@ function AnnualMatrixTable({
                       <div className={`font-semibold ${isCurr ? "text-foreground" : ""}`}>
                         {v === 0 ? "—" : formatValue(v, mode)}
                       </div>
-                      <div className="text-[9.5px] text-muted-foreground/80">
+                      <div className="text-caption2 text-muted-foreground/80">
                         {mode === "marginPct"
                           ? (mg !== 0 ? formatPerKg(mg, wkg) : "")
                           : mode === "ca" && mg !== 0 ? `${formatEuro(mg, true)} mg` : ""}
@@ -628,7 +628,7 @@ function AnnualMatrixTable({
           })}
           {/* Ligne total */}
           <tr className="border-t-2 border-border bg-secondary/30">
-            <td className="px-2 py-2 font-bold text-foreground uppercase text-[10px] tracking-[0.12em]">Total</td>
+            <td className="px-2 py-2 font-bold text-foreground uppercase text-caption2 tracking-[0.12em]">Total</td>
             {years.map((y) => {
               const isCurr = y.year === currentYear.year;
               return (
@@ -636,7 +636,7 @@ function AnnualMatrixTable({
                   <div className={`font-bold ${isCurr ? "text-foreground" : ""}`}>
                     {formatValue(totalOf(y), mode)}
                   </div>
-                  <div className="text-[9.5px] text-muted-foreground/80">
+                  <div className="text-caption2 text-muted-foreground/80">
                     {mode === "marginPct" ? formatPerKg(y.totalMargin, y.totalWeightKg)
                       : mode === "ca" ? `${formatEuro(y.totalMargin, true)} mg` : ""}
                   </div>
@@ -696,7 +696,7 @@ function MiniYearBars({
 
 function DeltaCell({ curr, prev }: { curr: number; prev: number }) {
   if (prev === 0 && curr === 0) return <span className="text-muted-foreground">—</span>;
-  if (prev === 0) return <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-[10.5px]">nouveau</span>;
+  if (prev === 0) return <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-caption2">nouveau</span>;
   const pct = Math.round((curr - prev) / Math.abs(prev) * 100);
   // Direction calée sur le % ARRONDI (dead-band) : un +0,4 % qui s'arrondit à 0
   // affiche un état neutre, pas une flèche verte trompeuse.
@@ -764,12 +764,12 @@ function MonthDrilldownDrawer({
       >
         <header className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-border">
           <div className="flex items-baseline gap-3">
-            <p className="text-[10px] uppercase tracking-[0.18em] font-bold text-muted-foreground">Drill-in mois</p>
-            <h2 className="text-[20px] font-semibold tracking-tight text-foreground">
+            <p className="text-caption2 uppercase tracking-[0.18em] font-bold text-muted-foreground">Drill-in mois</p>
+            <h2 className="text-title2 font-semibold tracking-tight text-foreground">
               {MOIS_FR[month]} {year}
             </h2>
             {data && (
-              <span className="text-[12px] text-muted-foreground tnum">
+              <span className="text-caption text-muted-foreground tnum">
                 · {formatEuro(data.totalCa, true)} CA · {formatWeight(data.totalWeightKg)} · {data.invoicesCount} factures
               </span>
             )}
@@ -780,12 +780,12 @@ function MonthDrilldownDrawer({
         </header>
 
         <div className="flex-1 overflow-auto p-5 grid grid-cols-1 lg:grid-cols-12 gap-4">
-          {loading && <p className="col-span-1 lg:col-span-12 text-center text-muted-foreground text-[13px]">Chargement…</p>}
+          {loading && <p className="col-span-1 lg:col-span-12 text-center text-muted-foreground text-body">Chargement…</p>}
           {!loading && data && (
             <>
               {/* Distribution jour par jour, labels = initiale du jour (L M M J V S D) */}
               <section className="col-span-1 lg:col-span-12 bg-secondary/30 rounded-lg p-3">
-                <h3 className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">
+                <h3 className="text-caption2 uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">
                   Distribution {mode === "ca" ? "CA" : "Poids"} par jour
                 </h3>
                 <div className="flex items-stretch gap-[3px]">
@@ -806,7 +806,7 @@ function MonthDrilldownDrawer({
                             style={{ height: `${Math.max(h, v > 0 ? 4 : 1)}%`, opacity: v > 0 ? 1 : 0.18 }}
                           />
                         </div>
-                        <span className={`text-[8.5px] mt-1 leading-none ${weekend ? "text-muted-foreground/50" : "text-muted-foreground/80"} ${isPeak ? "text-foreground font-bold" : ""}`}>
+                        <span className={`text-caption2 mt-1 leading-none ${weekend ? "text-muted-foreground/50" : "text-muted-foreground/80"} ${isPeak ? "text-foreground font-bold" : ""}`}>
                           {WEEKDAY_INITIAL[dow]}
                         </span>
                       </div>
@@ -817,10 +817,10 @@ function MonthDrilldownDrawer({
 
               {/* Top clients */}
               <section className="col-span-1 lg:col-span-7 bg-secondary/30 rounded-lg p-3">
-                <h3 className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">
+                <h3 className="text-caption2 uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">
                   Top 5 clients
                 </h3>
-                <ol className="space-y-1 text-[12px]">
+                <ol className="space-y-1 text-caption">
                   {data.topClients.map((c, i) => (
                     <li key={c.cardCode} className="grid grid-cols-[18px_1fr_auto_auto] items-baseline gap-2">
                       <span className="text-muted-foreground/70 tnum text-right">{i + 1}</span>
@@ -828,7 +828,7 @@ function MonthDrilldownDrawer({
                       <span className="font-semibold tnum text-foreground tabular-nums whitespace-nowrap">
                         {formatValue(mode === "ca" ? c.ca : c.weightKg, mode)}
                       </span>
-                      <span className="text-[10px] text-muted-foreground whitespace-nowrap">{c.invoices} fact.</span>
+                      <span className="text-caption2 text-muted-foreground whitespace-nowrap">{c.invoices} fact.</span>
                     </li>
                   ))}
                   {data.topClients.length === 0 && (
@@ -839,7 +839,7 @@ function MonthDrilldownDrawer({
 
               {/* Top familles (regroupées) + donut de répartition */}
               <section className="col-span-1 lg:col-span-5 bg-secondary/30 rounded-lg p-3">
-                <h3 className="text-[10.5px] uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">
+                <h3 className="text-caption2 uppercase tracking-[0.14em] font-semibold text-muted-foreground mb-2">
                   Top familles {mode === "ca" ? "· CA" : "· Poids"}
                 </h3>
                 {data.topFamilies.length > 0 ? (
@@ -857,7 +857,7 @@ function MonthDrilldownDrawer({
                     aria-label="Répartition du CA par famille d'article ce mois"
                   />
                 ) : (
-                  <p className="text-muted-foreground italic text-[12px]">Aucune famille ce mois.</p>
+                  <p className="text-muted-foreground italic text-caption">Aucune famille ce mois.</p>
                 )}
               </section>
             </>
@@ -897,16 +897,16 @@ function Header({
   return (
     <header className="shrink-0 flex items-center justify-between gap-4 pl-36 pr-2">
       <div className="flex items-baseline gap-3 min-w-0">
-        <p className="text-[10.5px] uppercase tracking-[0.18em] font-bold text-muted-foreground shrink-0">
+        <p className="text-caption2 uppercase tracking-[0.18em] font-bold text-muted-foreground shrink-0">
           {screen}
         </p>
-        <h1 className="text-[15px] font-semibold tracking-tight text-foreground truncate">
+        <h1 className="text-callout font-semibold tracking-tight text-foreground truncate">
           {period}
         </h1>
       </div>
       <div className="flex items-center gap-3">
         <ViewSwitch value={view} onChange={onView} />
-        <span className="text-[11px] text-muted-foreground tnum">{now}</span>
+        <span className="text-caption2 text-muted-foreground tnum">{now}</span>
         <SegmentToggle value={segment} onChange={onSegment} />
         {showModeToggle && <ModeToggle value={mode} onChange={onMode} />}
         <RefreshButton onClick={onRefresh} />
@@ -929,8 +929,8 @@ function ViewSwitch({ value, onChange }: { value: Screen2View; onChange: (v: Scr
           type="button"
           onClick={() => onChange(t.id)}
           aria-pressed={value === t.id}
-          className={`px-2.5 h-7 text-[11.5px] font-semibold tracking-tight rounded transition-colors ${
-            value === t.id ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
+          className={`px-2.5 h-7 text-caption font-semibold tracking-tight rounded transition-colors ${
+            value === t.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
           }`}
         >
           {t.label}
@@ -950,8 +950,8 @@ function SegmentToggle({ value, onChange }: { value: Segment; onChange: (s: Segm
           type="button"
           onClick={() => onChange(s.id)}
           aria-pressed={value === s.id}
-          className={`px-2.5 h-7 text-[11.5px] font-semibold tracking-tight rounded transition-colors ${
-            value === s.id ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
+          className={`px-2.5 h-7 text-caption font-semibold tracking-tight rounded transition-colors ${
+            value === s.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
           }`}
         >
           {s.label}
@@ -975,8 +975,8 @@ function ModeToggle({ value, onChange }: { value: Metric; onChange: (m: Metric) 
           type="button"
           onClick={() => onChange(o.id)}
           aria-pressed={value === o.id}
-          className={`px-2.5 h-7 text-[11.5px] font-semibold tracking-tight rounded transition-colors ${
-            value === o.id ? "bg-primary text-primary-foreground shadow-[0_0_10px_rgba(250,204,21,0.45)]" : "text-muted-foreground hover:text-foreground"
+          className={`px-2.5 h-7 text-caption font-semibold tracking-tight rounded transition-colors ${
+            value === o.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
           }`}
         >
           {o.label}

@@ -82,22 +82,44 @@ const TYPE_TONE: Record<CongeType, { solid: string; soft: string; text: string }
   sans_solde: { solid: "bg-zinc-400", soft: "bg-zinc-400/15", text: "text-zinc-600 dark:text-zinc-300" },
   autre:      { solid: "bg-zinc-400", soft: "bg-zinc-400/15", text: "text-zinc-600 dark:text-zinc-300" },
 };
-/* Teintes des pastilles ALLONGÉES du calendrier (une couleur par catégorie).
-   `solid` = barre pleine (calendrier d'équipe) ; `soft`+`text`+`border` = la
-   pastille lisible avec libellé (calendrier d'une personne). Le férié a sa
-   propre couleur (orange), distincte de la maladie (ambre). */
-const CAT_TONE: Record<DayCategory, { solid: string; soft: string; text: string; border: string }> = {
-  present:    { solid: "bg-emerald-500", soft: "bg-emerald-500/15", text: "text-emerald-700 dark:text-emerald-300", border: "border-emerald-500/45" },
-  ferie:      { solid: "bg-orange-500",  soft: "bg-orange-500/15",  text: "text-orange-700 dark:text-orange-300",   border: "border-orange-500/45" },
-  cp:         { solid: "bg-violet-500",  soft: "bg-violet-500/15",  text: "text-violet-700 dark:text-violet-300",   border: "border-violet-500/45" },
-  conges:     { solid: "bg-violet-500",  soft: "bg-violet-500/15",  text: "text-violet-700 dark:text-violet-300",   border: "border-violet-500/45" },
-  rtt:        { solid: "bg-fuchsia-500", soft: "bg-fuchsia-500/15", text: "text-fuchsia-700 dark:text-fuchsia-300", border: "border-fuchsia-500/45" },
-  recup:      { solid: "bg-sky-500",     soft: "bg-sky-500/15",     text: "text-sky-700 dark:text-sky-300",         border: "border-sky-500/45" },
-  maladie:    { solid: "bg-amber-500",   soft: "bg-amber-500/15",   text: "text-amber-700 dark:text-amber-300",     border: "border-amber-500/45" },
-  absent:     { solid: "bg-rose-500",    soft: "bg-rose-500/15",    text: "text-rose-700 dark:text-rose-300",       border: "border-rose-500/45" },
-  sans_solde: { solid: "bg-zinc-400",    soft: "bg-zinc-400/15",    text: "text-zinc-600 dark:text-zinc-300",       border: "border-zinc-400/45" },
-  autre:      { solid: "bg-zinc-400",    soft: "bg-zinc-400/15",    text: "text-zinc-600 dark:text-zinc-300",       border: "border-zinc-400/45" },
+/* PALETTE À 4 FAMILLES — les 10 catégories du calendrier sont regroupées en
+   4 familles VISUELLES (une couleur chacune). Le LIBELLÉ de la pastille reste
+   spécifique (CP, Récup, Férié…) ; seule la couleur se simplifie, pour un
+   calendrier lisible d'un coup d'oeil plutôt qu'un arc-en-ciel de 10 teintes. */
+type DayFamily = "present" | "repos" | "absence" | "exception";
+const CAT_FAMILY: Record<DayCategory, DayFamily> = {
+  present: "present",
+  cp: "repos", conges: "repos", rtt: "repos", recup: "repos",
+  absent: "absence", sans_solde: "absence",
+  ferie: "exception", maladie: "exception", autre: "exception",
 };
+const CONGE_FAMILY: Record<CongeType, DayFamily> = {
+  cp: "repos", rtt: "repos", recup: "repos",
+  maladie: "exception", autre: "exception",
+  sans_solde: "absence", absence: "absence",
+};
+const FAMILY_TONE: Record<DayFamily, { solid: string; soft: string; text: string; border: string; label: string }> = {
+  present:   { solid: "bg-emerald-500", soft: "bg-emerald-500/15", text: "text-emerald-700 dark:text-emerald-300", border: "border-emerald-500/45", label: "Présent" },
+  repos:     { solid: "bg-violet-500",  soft: "bg-violet-500/15",  text: "text-violet-700 dark:text-violet-300",   border: "border-violet-500/45", label: "Repos payé" },
+  absence:   { solid: "bg-rose-500",    soft: "bg-rose-500/15",    text: "text-rose-700 dark:text-rose-300",       border: "border-rose-500/45",   label: "Absence" },
+  exception: { solid: "bg-amber-500",   soft: "bg-amber-500/15",   text: "text-amber-700 dark:text-amber-300",     border: "border-amber-500/45",  label: "Exception" },
+};
+
+/** Légende compacte permanente des 4 familles — posée sous les compteurs. */
+function CategoryLegend() {
+  const families: DayFamily[] = ["present", "repos", "absence", "exception"];
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      {families.map((f) => (
+        <span key={f} className="inline-flex items-center gap-1.5 text-caption2 font-semibold text-muted-foreground">
+          <span aria-hidden className={`h-2.5 w-2.5 rounded-[3px] ${FAMILY_TONE[f].solid}`} />
+          {FAMILY_TONE[f].label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 const STATUS_TONE: Record<CongeStatus, string> = {
   pending: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
   approved: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
@@ -231,6 +253,15 @@ export function PlanningPanel({ isManager, isDirection }: { isManager: boolean; 
 
   return (
     <div className="space-y-4">
+      {/* ── SÉLECTEUR DE MOIS GLOBAL — un seul pour toute la page (calendrier
+            perso ET calendrier d'équipe) ; fini les navigations dupliquées. */}
+      <div className="sticky top-2 z-20 flex items-center justify-between gap-2 rounded-xl border border-border bg-card/95 px-3 py-2 shadow-card backdrop-blur">
+        <span className="flex items-center gap-1.5 text-caption uppercase tracking-[0.12em] font-semibold text-muted-foreground">
+          <CalendarDays className="h-3.5 w-3.5" /> Mois
+        </span>
+        {monthNav}
+      </div>
+
       {/* ── BOOMERANG : ce qui attend une réponse ── */}
       {(proposalsForMe.length > 0 || toValidate.length > 0 || awaitingAnswer.length > 0) && (
         <SurfaceCard accent="violet" title="À traiter" icon={<Send className="h-3.5 w-3.5" />}>
@@ -300,7 +331,7 @@ export function PlanningPanel({ isManager, isDirection }: { isManager: boolean; 
         title={isSelf
           ? "Mon calendrier"
           : <span className="truncate max-w-[130px] sm:max-w-none">Calendrier — {fullName(person.name)}</span>}
-        icon={<CalendarDays className="h-3.5 w-3.5" />} action={monthNav}>
+        icon={<CalendarDays className="h-3.5 w-3.5" />}>
         {isManager && team.length > 0 && (
           <div className="mb-3 flex items-center gap-2 rounded-lg border border-border bg-secondary/20 px-3 py-2">
             <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -317,6 +348,11 @@ export function PlanningPanel({ isManager, isDirection }: { isManager: boolean; 
 
         {/* COMPTEURS au-dessus du calendrier : CP + récup (l'exigence clé). */}
         <CounterBar person={person} />
+
+        {/* LÉGENDE compacte permanente — les 10 catégories regroupées en
+            4 familles visuelles (présent / repos payé / absence / exception). */}
+        <CategoryLegend />
+
 
         <PersonCalendar
           person={person} month={month} todayISO={data.todayISO}
@@ -348,30 +384,12 @@ export function PlanningPanel({ isManager, isDirection }: { isManager: boolean; 
         )}
       </SurfaceCard>
 
-      {/* ── CALENDRIER D'ÉQUIPE (managers) — l'en-tête EST le mois (« JUILLET 26 »),
-            encadré par les chevrons de navigation. */}
+      {/* ── CALENDRIER D'ÉQUIPE (managers) — le mois vient du sélecteur global
+            en tête ; l'en-tête ne porte plus de navigation dupliquée. */}
       {isManager && team.length > 0 && (
         <SurfaceCard accent="violet"
-          title={<span className="uppercase tracking-wide tnum">{monthTitleShort(month)}</span>}
-          icon={<Users className="h-3.5 w-3.5" />}
-          action={
-            <div className="flex items-center gap-1.5">
-              <button type="button" onClick={() => setMonth((m) => shiftMonth(m, -1))} aria-label="Mois précédent"
-                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <button type="button" onClick={() => setMonth((m) => shiftMonth(m, 1))} aria-label="Mois suivant"
-                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
-                <ChevronRight className="h-4 w-4" />
-              </button>
-              {month !== monthIdOf(new Date()) && (
-                <button type="button" onClick={() => setMonth(monthIdOf(new Date()))} title="Revenir au mois en cours"
-                  className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60">
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-          }>
+          title={<span className="uppercase tracking-wide tnum">Équipe — {monthTitleShort(month)}</span>}
+          icon={<Users className="h-3.5 w-3.5" />}>
           <TeamCalendar team={team} month={month} todayISO={data.todayISO} onPick={(email) => setWho(email === data.me.email ? "" : email)} />
         </SurfaceCard>
       )}
@@ -798,9 +816,15 @@ function PersonCalendar({ person, month, todayISO, isSelf, isDirection, busy, on
         </div>
       )}
 
-      {/* Demande / proposition sur la sélection */}
+      {/* Demande / proposition sur la sélection — BARRE CONTEXTUELLE : dès qu'une
+          plage est sélectionnée, le bloc devient une barre STICKY en bas d'écran
+          (contour accent + ombre), pour valider la demande sans remonter. */}
       {canAct && (
-        <div className="mt-3 rounded-lg border border-border bg-secondary/20 p-3">
+        <div className={`mt-3 rounded-lg border p-3 transition-shadow ${
+          sel.start
+            ? "sticky bottom-3 z-10 border-brand-500/45 bg-card shadow-modal"
+            : "border-border bg-secondary/20"
+        }`}>
           <p className="mb-2 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
             {isSelf ? "Demander (validé par la direction)"
               : maladieDeclare ? "Déclarer un arrêt maladie (enregistré directement)"
@@ -996,9 +1020,56 @@ function TeamCalendar({ team, month, todayISO, onPick }: {
   }, [days]);
   const eventMap = useMemo(() => eventsByDate(days.map((g) => g.date)), [days]);
 
+  // Bornes du mois affiché (pour la LISTE PAR PERSONNE mobile).
+  const monthStart = `${month}-01`;
+  const monthEnd = monthEndISO(month);
+
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
-      <table className="border-collapse text-[12px] w-full">
+    <>
+      {/* MOBILE (< md) : LISTE PAR PERSONNE — un téléphone n'affiche pas une
+          table de 31 colonnes. Chaque salarié : compteurs + ses congés du mois
+          en pastilles (familles de couleurs), tap = ouvre son calendrier. */}
+      <div className="md:hidden space-y-2">
+        {rows.map((p) => {
+          const cp = p.counters.cp.balanceDays == null ? `${p.counters.cp.takenDays} j pris` : `${p.counters.cp.balanceDays} j`;
+          const mConges = p.conges
+            .filter((c) => (c.status === "approved" || c.status === "pending") && rangesOverlap(c.start, c.end, monthStart, monthEnd))
+            .sort((x, y) => (x.start < y.start ? -1 : x.start > y.start ? 1 : 0));
+          return (
+            <button key={p.email} type="button" onClick={() => onPick(p.email)}
+              className="flex w-full flex-col gap-1.5 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-secondary/40">
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate text-body font-semibold text-foreground">{fullName(p.name)}</span>
+                <span className="shrink-0 text-caption2 tnum text-muted-foreground">
+                  <span className="font-semibold text-info">{fmtHM(p.counters.recup.availableMin)}</span> récup
+                  {" · "}
+                  <span className="font-semibold text-violet-600 dark:text-violet-400">{cp}</span> CP
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {mConges.length === 0 ? (
+                  <span className="text-caption2 italic text-muted-foreground">Présent tout le mois</span>
+                ) : mConges.map((c) => {
+                  const fam = FAMILY_TONE[CONGE_FAMILY[c.type]];
+                  const pending = c.status === "pending";
+                  return (
+                    <span key={c.id}
+                      className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-caption2 font-semibold ${
+                        pending ? `border border-dashed bg-transparent ${fam.text} ${fam.border}` : `${fam.soft} ${fam.text}`
+                      }`}>
+                      {CONGE_TYPE_LABEL[c.type]} · {rangeLabel(c)}
+                    </span>
+                  );
+                })}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* DESKTOP (≥ md) : déroulé mensuel en table. */}
+      <div className="hidden md:block overflow-x-auto rounded-lg border border-border">
+        <table className="border-collapse text-[12px] w-full">
         <thead>
           <tr className="bg-secondary/40 text-[9.5px] uppercase tracking-wide text-muted-foreground">
             {/* Mobile : colonne étroite (initiales seules) pour que le déroulé
@@ -1087,9 +1158,9 @@ function TeamCalendar({ team, month, todayISO, onPick }: {
                         // (noir en sombre / blanc en clair) — repère net, discret.
                         <span className="mx-auto block h-4 w-4 rounded-[5px] border-2 border-emerald-500 bg-background" />
                       ) : cat === "ferie" ? (
-                        <span className="mx-auto block h-1.5 w-full min-w-[18px] rounded-full bg-orange-500/50" />
+                        <span className="mx-auto block h-1.5 w-full min-w-[18px] rounded-full bg-amber-500/50" />
                       ) : cat ? (
-                        <span className={`mx-auto block h-5 w-full min-w-[18px] rounded ${resolved.pending || resolved.planned ? `border border-dashed ${CAT_TONE[cat].soft} border-current ${CAT_TONE[cat].text}` : CAT_TONE[cat].solid}`} />
+                        <span className={`mx-auto block h-5 w-full min-w-[18px] rounded ${resolved.pending || resolved.planned ? `border border-dashed ${FAMILY_TONE[CAT_FAMILY[cat]].soft} border-current ${FAMILY_TONE[CAT_FAMILY[cat]].text}` : FAMILY_TONE[CAT_FAMILY[cat]].solid}`} />
                       ) : null}
                     </td>
                   );
@@ -1099,7 +1170,8 @@ function TeamCalendar({ team, month, todayISO, onPick }: {
           })}
         </tbody>
       </table>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -1132,9 +1204,11 @@ function DayPill({ category, pending, planned, absenceJustified }: { category: D
   // Absence JUSTIFIÉE (déclarée par la direction) → teinte NEUTRE (zinc, « excusée »)
   // au lieu du rose « absent » (réservé aux absences NON justifiées / non couvertes).
   const justAbs = category === "absent" && absenceJustified === true;
+  // Couleur = FAMILLE (présent / repos payé / absence / exception) ; le libellé
+  // reste spécifique. Absence JUSTIFIÉE → teinte neutre (« excusée »).
   const tone = justAbs
     ? { solid: "bg-zinc-400", soft: "bg-zinc-400/15", text: "text-zinc-600 dark:text-zinc-300", border: "border-zinc-400/45" }
-    : CAT_TONE[category];
+    : FAMILY_TONE[CAT_FAMILY[category]];
   const fullLabel = justAbs ? "Absence justifiée" : DAY_CATEGORY_LABEL[category];
   const shortLabel = justAbs ? "Abs. ✓" : CAT_SHORT[category];
   const dashed = pending || planned;

@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Eye, Send, CalendarDays, Mail, CheckCircle2, Save, FileText } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { monthIdOf, shiftMonth } from "@/lib/heuresCalc";
 import {
   salaireMonthLabel,
@@ -119,12 +120,25 @@ export function ComptaStatement() {
     } finally { setBusy(null); }
   };
 
-  const send = async (m: string, kind: "normal" | "rectif") => {
+  // Confirmation d'envoi (manquants ou rectificatif) — remplace window.confirm.
+  const [confirmSend, setConfirmSend] = useState<{ m: string; kind: "normal" | "rectif"; message: string } | null>(null);
+
+  // Décide s'il faut confirmer avant d'envoyer ; sinon envoi direct.
+  const send = (m: string, kind: "normal" | "rectif") => {
+    if (kind === "rectif") {
+      setConfirmSend({ m, kind, message: `Envoyer un RECTIFICATIF pour ${salaireMonthLabel(m)} au cabinet ?` });
+      return;
+    }
+    if (m === month && missingTotal > 0) {
+      setConfirmSend({ m, kind, message: `${missingTotal} élément(s) manquant(s) — envoyer quand même au cabinet ?` });
+      return;
+    }
+    void performSend(m, kind);
+  };
+
+  const performSend = async (m: string, kind: "normal" | "rectif") => {
     const emp = await employesOf(m).catch(() => []);
     if (emp.length === 0) { toast.error(`Aucune donnée à envoyer pour ${salaireMonthLabel(m)}.`); return; }
-    if (kind === "normal" && m === month && missingTotal > 0
-      && !window.confirm(`${missingTotal} élément(s) manquant(s) — envoyer quand même au cabinet ?`)) return;
-    if (kind === "rectif" && !window.confirm(`Envoyer un RECTIFICATIF pour ${salaireMonthLabel(m)} au cabinet ?`)) return;
     setBusy(`send:${m}:${kind}`);
     try {
       const doc = await buildSalairesPdf(m, emp);
@@ -273,6 +287,16 @@ export function ComptaStatement() {
           </ul>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmSend != null}
+        onOpenChange={(o) => { if (!o) setConfirmSend(null); }}
+        title={confirmSend?.kind === "rectif" ? "Envoyer un rectificatif" : "Éléments manquants"}
+        description={confirmSend?.message}
+        confirmLabel={confirmSend?.kind === "rectif" ? "Envoyer le rectificatif" : "Envoyer quand même"}
+        onConfirm={async () => { if (confirmSend) await performSend(confirmSend.m, confirmSend.kind); }}
+        loading={busy?.startsWith("send") ?? false}
+      />
     </div>
   );
 }
