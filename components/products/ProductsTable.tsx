@@ -719,9 +719,12 @@ export function ProductsTable() {
   );
 }
 
-/** Returns the pack divisor (qty per pack) if this product is sold per pack. */
+/** Diviseur unités → colis. Aligné sur colisInfo (lib/colis.ts, la console,
+ *  référence) : regroupement dès salesQtyPerPackUnit > 1, sans exiger le libellé
+ *  salesPackagingUnit — sinon un article à qty 12 mais SalesPackagingUnit vide
+ *  (ex. FRAMB12B) retombait à 1 et affichait ×12 (720 au lieu de 60 colis). */
 function getPackDivisor(p: Product): number {
-  if (p.salesPackagingUnit && p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) {
+  if (p.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1) {
     return p.salesQtyPerPackUnit;
   }
   return 1;
