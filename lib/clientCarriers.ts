@@ -232,6 +232,21 @@ let builtCache: { at: number; byCard: Map<string, ClientCarrierStat[] | null> } 
  * journée), puis met en cache la mise en forme par client. null si la vue est
  * illisible ou le client absent.
  */
+/**
+ * PRÉCHAUFFAGE — charge la vue SERG_TRCL COMPLÈTE en cache (getV2ViewAll, jusqu'à
+ * 40 pages SAP). Appelé par le cron miroir à chaque tick : sans lui, le PREMIER
+ * chargement de /api/livraisons après un redémarrage (déploiement) ou l'expiration
+ * du TTL (30 min) payait ce chargement à froid — plusieurs dizaines de secondes,
+ * jusqu'au timeout (60 s) → l'écran « chargeait en boucle » (499 + retries). Le
+ * cron paie désormais ce coût, jamais l'utilisateur. Best-effort. */
+export async function warmClientCarriers(): Promise<void> {
+  try {
+    await getAllTrclRowsByCard();
+  } catch (e) {
+    console.warn("[clientCarriers] préchauffage vue TRCL échoué:", (e as Error).message);
+  }
+}
+
 export async function getClientTrclCarriers(cardCode: string): Promise<ClientCarrierStat[] | null> {
   const byCard = await getAllTrclRowsByCard();
   if (!byCard) return null;

@@ -18,6 +18,7 @@ import { annualWindowStart } from "@/lib/pilotage-time";
 import { invalidate } from "@/lib/ttlCache";
 import { warmAccueil } from "@/lib/accueilData";
 import { warmLotMaps } from "@/lib/lotResolver";
+import { warmClientCarriers } from "@/lib/clientCarriers";
 import { isCronAuthorized } from "@/lib/cronAuth";
 
 // Pull de 5 entités + BP (pagination SAP) → peut dépasser le défaut serverless.
@@ -170,6 +171,10 @@ async function runMirrorSync() {
     // expiration repayait le scan des 1500 réceptions (7 à 15 s). Coût SAP
     // inchangé (même fréquence qu'avant), mais payé ici et non par un humain.
     await warmLotMaps();
+    // Vue transporteurs SERG_TRCL (écran Livraisons) : préchauffée à chaque tick
+    // pour qu'aucun humain ne paie son chargement à froid (40 pages SAP) — c'était
+    // la cause du « livraisons charge en boucle » après un déploiement/TTL.
+    await warmClientCarriers();
 
     return NextResponse.json({
       ok: true,

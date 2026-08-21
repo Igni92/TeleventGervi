@@ -253,14 +253,13 @@ export function ProductsTable() {
     return () => clearTimeout(t);
   }, [search]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync delta SAP toutes les 30 s puis refetch — la route /sync/delta est
-  // throttled côté serveur (≤ 1 pull SAP / 20 s tous clients confondus).
+  // Rafraîchissement PÉRIODIQUE depuis le MIROIR local (chantier F) : on ne
+  // déclenche PLUS de synchro SAP au chargement/à intervalle — le cron s'en
+  // charge (delta 10 min + refresh-stock 15 min). Ici on relit seulement la base
+  // locale pour refléter ces mises à jour. Fini le martèlement SAP à l'ouverture
+  // de l'écran Stock ; le bouton « Rafraîchir » reste pour un pull SAP à la demande.
   useEffect(() => {
-    const tick = async () => {
-      try { await fetch("/api/sap/sync/delta", { method: "POST" }); } catch { /* silent */ }
-      fetchProducts();
-      fetchLastSync();
-    };
+    const tick = () => { fetchProducts(); fetchLastSync(); };
     const t = setInterval(tick, REFRESH_INTERVAL);
     return () => clearInterval(t);
   }, [fetchProducts, fetchLastSync]);
