@@ -304,55 +304,31 @@ export async function GET(req: NextRequest) {
         }));
         return m;
       })(),
-      // ── Articles MANQUANTS = stock DISPONIBLE négatif (tous entrepôts) ──
-      // Interrogé EN DIRECT dans SAP sur les seuls articles des commandes du jour.
-      // ⚠️ On crée des COMMANDES CLIENT (Sales Orders) : elles n'ENTAMENT PAS le
-      // stock physique (QuantityOnStock reste ≥ 0), elles n'augmentent que le
-      // COMMITTED (QuantityOrderedByCustomers). Se baser sur QuantityOnStock < 0
-      // ratait donc les articles VENDUS AU-DELÀ du stock (necta, abricot…). On
-      // calcule le DISPONIBLE = en stock − engagé clients ; < 0 = vendu plus
-      // qu'on ne détient → achat à faire. Filtre côté app (champs calculés).
+      // ── Articles MANQUANTS + stock + calibre — LU DEPUIS LE MIROIR (chantier C) ──
+      // Avant : lecture EN DIRECT sur SAP Items par paquets — le plus gros du coût
+      // SAP de cet écran. Désormais depuis Product/ProductStock, miroités par les
+      // crons (delta 10 min + refresh-stock 15 min, quasi temps réel) :
+      //   • onHand   = Σ inStock  (stock physique détenu, entrepôts synchronisés) ;
+      //   • disponible = Σ available (stock − engagé clients) ; < 0 = à acheter ;
+      //   • calibre  = Product.uCalibre.
+      // Plus de « lot en échec » possible (lecture locale atomique) → failedChunks 0.
       (async () => {
         const neg: Record<string, number> = {};
         const onHand: Record<string, number> = {};
-        // Calibre (U_GER_CALIBRE) — LU EN DIRECT sur SAP Items (pas synchronisé en
-        // local) pour l'afficher en tag de PRÉPARATION. Best-effort par lot.
         const cal: Record<string, string> = {};
-        // Audit 2026-08-13 (#14) : nb de lots de stock tombés en échec. Avant, un
-        // lot KO était avalé en silence (catch vide) → ces articles restaient SANS
-        // stock (ni « manquant » ni « en stock ») et la réponse renvoyait ok:true
-        // sans le signaler. On compte les lots échoués pour propager un état partiel.
-        let failedChunks = 0;
-        const chunks: string[][] = [];
-        for (let i = 0; i < allItemCodes.length; i += 20) chunks.push(allItemCodes.slice(i, i + 20));
-        await Promise.all(chunks.map(async (chunk) => {
-          try {
-            const or = chunk.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
-            const items = await sap.getAll<{ ItemCode: string; QuantityOnStock?: number; QuantityOrderedByCustomers?: number; U_GER_CALIBRE?: string | null }>(
-              `Items?$select=ItemCode,QuantityOnStock,QuantityOrderedByCustomers,U_GER_CALIBRE&$filter=${encodeURIComponent(`(${or})`)}`,
-              { pageSize: 50, maxPages: 2 },
-            );
-            for (const it of items) {
-              // Stock PHYSIQUE détenu (tous entrepôts) — base « faire d'abord avec
-              // ce qu'on a » de l'écran Manquants (allocation par commande).
-              onHand[it.ItemCode] = it.QuantityOnStock ?? 0;
-              // Disponible SAP global (stock − TOUS les engagements clients) < 0 :
-              // conservé pour compat (badges de préparation), mais NE pilote plus
-              // l'écran Manquants — il sur-compte car il inclut les engagements des
-              // AUTRES jours / reliquats.
-              const available = (it.QuantityOnStock ?? 0) - (it.QuantityOrderedByCustomers ?? 0);
-              if (available < 0) neg[it.ItemCode] = available;
-              const c = (it.U_GER_CALIBRE ?? "").trim();
-              if (c) cal[it.ItemCode] = c;
-            }
-          } catch (e) {
-            // Audit 2026-08-13 (#14) : lot en échec → pas de stock pour ces
-            // articles, mais on le COMPTE (plus de catch muet) pour le remonter.
-            failedChunks++;
-            console.error("[livraisons] lecture d'un lot de stock échouée (articles sans stock):", e);
-          }
-        }));
-        return { neg, onHand, cal, failedChunks };
+        if (allItemCodes.length === 0) return { neg, onHand, cal, failedChunks: 0 };
+        const rows = await prisma.product.findMany({
+          where: { itemCode: { in: allItemCodes } },
+          select: { itemCode: true, uCalibre: true, stocks: { select: { inStock: true, available: true } } },
+        });
+        for (const p of rows) {
+          onHand[p.itemCode] = p.stocks.reduce((s, w) => s + w.inStock, 0);
+          const available = p.stocks.reduce((s, w) => s + w.available, 0);
+          if (available < 0) neg[p.itemCode] = available;
+          const c = (p.uCalibre ?? "").trim();
+          if (c) cal[p.itemCode] = c;
+        }
+        return { neg, onHand, cal, failedChunks: 0 };
       })(),
     ]);
     const negativeStocks = stockInfo.neg;
@@ -520,21 +496,18 @@ export async function GET(req: NextRequest) {
       const cc = Array.from(new Set(docs.map((d) => d.cardCode).filter(Boolean)));
       if (cc.length) {
         const since = new Date(Date.parse(date) - 45 * 86_400_000).toISOString().slice(0, 10);
-        // Filtre OR chunké (25 clients/requête) : une seule URL avec tous les
-        // clients du jour pouvait dépasser plusieurs Ko et se faire rejeter par
-        // le Service Layer. Les lots partent en parallèle et sont fusionnés.
-        const CHUNK = 25;
-        const chunks: string[][] = [];
-        for (let i = 0; i < cc.length; i += CHUNK) chunks.push(cc.slice(i, i + CHUNK));
-        const notesByChunk = await Promise.all(chunks.map((group) => {
-          const orCard = group.map((c) => `CardCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
-          const cnFilter = encodeURIComponent(`(${orCard}) and DocDate ge '${since}' and Cancelled eq 'tNO'`);
-          return sap.getAll<{ CardCode: string; DocTotal?: number; DocDate?: string }>(
-            `CreditNotes?$select=CardCode,DocTotal,DocDate&$filter=${cnFilter}&$orderby=DocEntry asc`,
-            { pageSize: 100, maxPages: 5 },
-          );
+        // Avoirs (CreditNotes) des 45 derniers jours — LU DEPUIS LE MIROIR
+        // (SapCreditNote), fini l'appel SAP chunké. TTC reconstitué = docTotal
+        // (stocké HT au miroir) + vatSum, pour matcher le totalTTC des BL.
+        const notes = (await prisma.sapCreditNote.findMany({
+          where: { cardCode: { in: cc }, cancelled: false, docDate: { gte: new Date(since) } },
+          select: { cardCode: true, docTotal: true, vatSum: true, docDate: true },
+          orderBy: { docEntry: "asc" },
+        })).map((n) => ({
+          cardCode: n.cardCode,
+          ttc: Math.abs((n.docTotal ?? 0) + (n.vatSum ?? 0)),
+          day: n.docDate.toISOString().slice(0, 10),
         }));
-        const notes = notesByChunk.flat();
         // BL par client, plus ANCIEN (DocEntry) d'abord — l'original avoiré précède
         // le BL recréé.
         const byClient = new Map<string, typeof docs>();
@@ -545,10 +518,10 @@ export async function GET(req: NextRequest) {
         }
         const matched = new Set<number>();
         for (const n of notes) {
-          const amt = Math.abs(n.DocTotal ?? 0);
+          const amt = n.ttc;
           if (amt <= 0.01) continue;
-          const noteDay = (n.DocDate ?? "").slice(0, 10);
-          const cand = (byClient.get(n.CardCode) ?? []).find(
+          const noteDay = n.day;
+          const cand = (byClient.get(n.cardCode) ?? []).find(
             (d) =>
               !matched.has(d.docEntry) &&
               Math.abs((d.totalTTC ?? 0) - amt) <= 0.05 &&        // total avoiré = total du BL
