@@ -827,6 +827,7 @@ model SapInvoice {
   docEntry    Int       @id // SAP DocEntry
   docNum      Int?
   docDate     DateTime // SAP DocDate (jour de facturation)
+  docDueDate  DateTime? // SAP DocDueDate (échéance de paiement) — sert à l'encours
   cardCode    String
   cardName    String? // snapshot (utile si BP supprimé)
   slpName     String? // commercial snapshot
@@ -863,6 +864,7 @@ model SapInvoiceLine {
   lineCost        Float? // prix de revient SAP (unitaire)
   grossProfit     Float? // marge SAP ligne
   warehouseCode   String?
+  uNoLot          String? // U_NoLot — lot affecté à la ligne (EM<DocNum> / EM_PENDING)
   // Flag pour distinguer une ligne "vraie vente produit" d'une ligne de
   // refacturation (service/location/déchet). Permet de filtrer les rapports
   // marge sur le pur négoce. true = ligne sans itemCode (= pas un produit SAP).
@@ -880,6 +882,7 @@ model SapOrder {
   docEntry    Int       @id
   docNum      Int?
   docDate     DateTime
+  docDueDate  DateTime? // SAP DocDueDate (date de livraison prévue) — écran Livraisons
   cardCode    String
   cardName    String?
   slpName     String?
@@ -895,6 +898,7 @@ model SapOrder {
   lines SapOrderLine[]
 
   @@index([docDate])
+  @@index([docDueDate])
   @@index([cardCode])
   @@index([slpName])
   @@index([updateDate])
@@ -911,6 +915,7 @@ model SapOrderLine {
   lineCost        Float?
   grossProfit     Float?
   warehouseCode   String?
+  uNoLot          String? // U_NoLot — lot affecté à la ligne (EM<DocNum> / EM_PENDING)
   isService       Boolean @default(false)
 
   order SapOrder @relation(fields: [docEntry], references: [docEntry], onDelete: Cascade)
@@ -965,6 +970,7 @@ model SapCreditNote {
   docEntry    Int       @id
   docNum      Int?
   docDate     DateTime
+  docDueDate  DateTime? // échéance (colonne partagée du pull ventes)
   cardCode    String
   cardName    String?
   slpName     String?
@@ -999,6 +1005,7 @@ model SapCreditNoteLine {
   lineCost        Float?
   grossProfit     Float?
   warehouseCode   String?
+  uNoLot          String?
   isService       Boolean @default(false)
 
   creditNote SapCreditNote @relation(fields: [docEntry], references: [docEntry], onDelete: Cascade)
@@ -1087,6 +1094,7 @@ model SapQuotationLine {
   quantity        Float   @default(0)
   lineTotal       Float   @default(0) // total HT ligne
   warehouseCode   String?
+  uNoLot          String?
   isService       Boolean @default(false)
 
   quotation SapQuotation @relation(fields: [docEntry], references: [docEntry], onDelete: Cascade)
@@ -1128,6 +1136,7 @@ model SapPurchaseOrderLine {
   quantity        Float   @default(0)
   lineTotal       Float   @default(0)
   warehouseCode   String?
+  uNoLot          String?
   isService       Boolean @default(false)
 
   purchaseOrder SapPurchaseOrder @relation(fields: [docEntry], references: [docEntry], onDelete: Cascade)

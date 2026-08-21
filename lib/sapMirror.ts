@@ -34,12 +34,14 @@ interface SapDocLine {
   StockPrice?: number;       // prix de revient unitaire (SAP) — utilisé pour la marge
   GrossProfit?: number;
   WarehouseCode?: string;
+  U_NoLot?: string;          // lot affecté à la ligne (EM<DocNum> / EM_PENDING)
 }
 
 interface SapInvoiceDoc {
   DocEntry: number;
   DocNum?: number;
   DocDate: string;           // ISO
+  DocDueDate?: string;       // échéance (paiement pour Invoice, livraison pour Order)
   CardCode: string;
   CardName?: string;
   SalesPersonCode?: number;  // SlpCode — résolu via SalesPersons
@@ -84,7 +86,7 @@ interface SapSalesPerson { SalesEmployeeCode: number; SalesEmployeeName: string 
 //     qu'au niveau LIGNE. La marge du document est donc recalculée au mapping
 //     = Σ (ligne.GrossProfit).  ⇒ aucun `GrossProfit` dans les selects ci-dessous.
 const COMMON_SELECT_DOC =
-  "DocEntry,DocNum,DocDate,CardCode,CardName,SalesPersonCode,DocTotal,VatSum,Cancelled,UpdateDate";
+  "DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,SalesPersonCode,DocTotal,VatSum,Cancelled,UpdateDate";
 const SELECT_DOC_LINES = `$select=${COMMON_SELECT_DOC},DocumentLines`;
 
 // ── U_TrspCode (transporteur réel du document) ────────────────────
@@ -144,10 +146,11 @@ const MAX_SQL_PARAMS = 60_000;  // marge sous la limite Postgres (~65 535 param�
 const SALES_HEADER_COLS = [
   "docEntry", "docNum", "docDate", "cardCode", "cardName", "slpName",
   "docTotal", "vatSum", "grossProfit", "cancelled", "updateDate", "trspCode",
+  "docDueDate",
 ] as const;
 const SALES_LINE_COLS = [
   "docEntry", "lineNum", "itemCode", "itemDescription", "quantity",
-  "lineTotal", "lineCost", "grossProfit", "warehouseCode", "isService",
+  "lineTotal", "lineCost", "grossProfit", "warehouseCode", "isService", "uNoLot",
 ] as const;
 
 // Colonnes PDN (pas de slpName / vatSum / grossProfit / lineCost).
@@ -475,6 +478,7 @@ async function pullSalesDocs(
       return [
         d.DocEntry, l.LineNum, l.ItemCode ?? null, l.ItemDescription ?? null,
         qty, lineTotal, lineCost, gp, l.WarehouseCode ?? null, l.ItemCode == null,
+        (l.U_NoLot ?? "").trim() || null,
       ];
     });
 
@@ -487,6 +491,8 @@ async function pullSalesDocs(
       d.Cancelled === "tYES", upd,
       // Transporteur réel du doc (normalisé MAJUSCULES) — null si UDF absent/vide.
       (d.U_TrspCode ?? "").trim().toUpperCase() || null,
+      // Échéance (livraison pour Order, paiement pour Invoice) — sert Livraisons/encours.
+      d.DocDueDate ? new Date(d.DocDueDate) : null,
     ];
     return { docEntry: d.DocEntry, header, lines };
   });
@@ -533,11 +539,13 @@ export interface CreatedOrderForMirror {
   DocEntry: number;
   DocNum?: number;
   DocDate: string;            // ISO (SAP DocDate)
+  DocDueDate?: string;        // ISO (date de livraison prévue)
   CardCode: string;
   CardName?: string;
   DocTotal?: number;          // TTC (sera stocké HT = DocTotal − VatSum)
   VatSum?: number;
   UpdateDate?: string;
+  U_TrspCode?: string | null;
   DocumentLines?: {
     LineNum?: number;
     ItemCode?: string | null;
@@ -547,6 +555,7 @@ export interface CreatedOrderForMirror {
     GrossProfit?: number;
     StockPrice?: number;
     WarehouseCode?: string;
+    U_NoLot?: string | null;
   }[];
 }
 
@@ -577,14 +586,19 @@ export async function mirrorCreatedOrder(order: CreatedOrderForMirror): Promise<
     return [
       order.DocEntry, l.LineNum ?? 0, l.ItemCode ?? null, l.ItemDescription ?? null,
       qty, lineTotal, lineCost, gp, l.WarehouseCode ?? null, l.ItemCode == null,
+      (l.U_NoLot ?? "").trim() || null,
     ];
   });
 
   // Ordre = SALES_HEADER_COLS. docTotal stocké HT (= DocTotal − VatSum), comme la synchro.
+  // trspCode + docDueDate ajoutés pour matcher SALES_HEADER_COLS (l'ancien tableau à
+  // 11 valeurs faisait échouer l'INSERT optimiste — colonnes ≠ valeurs).
   const header: unknown[] = [
     order.DocEntry, order.DocNum ?? null, new Date(order.DocDate), order.CardCode, order.CardName ?? null,
     slpName, docTotal - vatSum, vatSum, docGrossProfit,
     false, upd,
+    (order.U_TrspCode ?? "").trim().toUpperCase() || null,
+    order.DocDueDate ? new Date(order.DocDueDate) : null,
   ];
 
   await bulkUpsertDocs({
@@ -734,7 +748,7 @@ const PO_HEADER_COLS = [
 // Lignes identiques pour les deux (pas de coût/marge : docs non facturés).
 const OPEN_LINE_COLS = [
   "docEntry", "lineNum", "itemCode", "itemDescription",
-  "quantity", "lineTotal", "warehouseCode", "isService",
+  "quantity", "lineTotal", "warehouseCode", "isService", "uNoLot",
 ] as const;
 
 function docStatusChar(s?: string): "O" | "C" {
@@ -793,6 +807,7 @@ async function pullOpenDocs(
     const lines: unknown[][] = (d.DocumentLines ?? []).map((l) => [
       d.DocEntry, l.LineNum, l.ItemCode ?? null, l.ItemDescription ?? null,
       l.Quantity ?? 0, l.LineTotal ?? 0, l.WarehouseCode ?? null, l.ItemCode == null,
+      (l.U_NoLot ?? "").trim() || null,
     ]);
 
     const header: unknown[] = isQuote
