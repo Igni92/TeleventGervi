@@ -1398,3 +1398,101 @@ model UsageEvent {
   @@index([sessionId])
   @@index([createdAt])
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MODULE TRANSPORTEUR — planification des tournées + suivi des expéditions.
+// AUTONOME : aucune dépendance SAP B1 / Orderlion. Tables préfixées Transport*.
+// Le jalon `statut = EXPEDIE` + `refSuivi` sont la brique du futur suivi client
+// (e-boutique). Voir MODULE-TRANSPORTEUR.md.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Chauffeur : interne (ex. Hugo) ou extérieur (rattaché à une société, ex. STM).
+model TransportChauffeur {
+  id        String   @id @default(cuid())
+  nom       String
+  type      String   @default("INTERNE") // INTERNE | EXTERIEUR
+  societe   String? // transporteur pour un extérieur (ex. STM)
+  tel       String?
+  email     String?
+  actif     Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tournees    TransportTournee[]
+  expeditions TransportExpedition[]
+
+  @@index([actif])
+}
+
+// Tournée journalière d'un chauffeur. `token` = accès feuille de route sans compte
+// (chauffeur extérieur : lien tokenisé).
+model TransportTournee {
+  id          String   @id @default(cuid())
+  date        DateTime // jour de la tournée (00:00)
+  libelle     String?
+  chauffeurId String?
+  notes       String?
+  token       String   @unique @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  chauffeur   TransportChauffeur?   @relation(fields: [chauffeurId], references: [id], onDelete: SetNull)
+  expeditions TransportExpedition[]
+
+  @@index([date])
+  @@index([token])
+}
+
+// Expédition = une commande à livrer. Cœur du module.
+model TransportExpedition {
+  id             String    @id @default(cuid())
+  date           DateTime // jour d'expédition
+  numCommande    String? // réf interne (n° BL / commande)
+  refSuivi       String    @unique // ex. EX-1041 — pré-mapping e-boutique
+  clientNom      String
+  clientAdresse  String?
+  creneau        String? // créneau de réception / quai GMS
+  canal          String    @default("GMS") // GMS | EXPORT | DIRECT
+  chauffeurId    String?
+  tourneeId      String?
+  ordre          Int       @default(0) // ordre de passage
+  statut         String    @default("A_PREPARER") // A_PREPARER | PREPAREE | EXPEDIE | LIVREE | INCIDENT
+  tempChargement Float? // relevé T°C au chargement (chaîne du froid)
+  immatriculation String?
+  observations   String?
+  colis          Int?
+  poidsKg        Float?
+  // BL TeleVent source si pré-rempli depuis le miroir local (docEntry SAP), sinon
+  // null (saisie manuelle). Sert à éviter les doublons de pré-remplissage.
+  sourceDocEntry Int?
+  prepareeAt     DateTime?
+  expedieAt      DateTime?
+  livreeAt       DateTime?
+  arriveeAt      DateTime?
+  departAt       DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  chauffeur TransportChauffeur? @relation(fields: [chauffeurId], references: [id], onDelete: SetNull)
+  tournee   TransportTournee?   @relation(fields: [tourneeId], references: [id], onDelete: SetNull)
+  logs      TransportStatutLog[]
+
+  @@index([date])
+  @@index([canal])
+  @@index([statut])
+  @@index([tourneeId])
+  @@index([sourceDocEntry])
+}
+
+// Journal des transitions de statut (traçabilité + lecture e-boutique du jalon EXPEDIE).
+model TransportStatutLog {
+  id           String   @id @default(cuid())
+  expeditionId String
+  statut       String
+  at           DateTime @default(now())
+  by           String?
+
+  expedition TransportExpedition @relation(fields: [expeditionId], references: [id], onDelete: Cascade)
+
+  @@index([expeditionId])
+}

@@ -3,7 +3,7 @@ import {
   Home, Radio, Users, Target, Truck, FileText, Package, Boxes,
   ClipboardCheck, Factory, Building2, PackageCheck, PackagePlus,
   LayoutDashboard, Trophy, Receipt, Archive, Briefcase, CalendarDays,
-  Wallet, Settings,
+  Wallet, Settings, Send,
 } from "lucide-react";
 
 /**
@@ -75,6 +75,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/articles", label: "Articles", icon: Boxes },
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventaire" },
       { href: "/fabrication", label: "Fabrication", icon: Factory },
+      { href: "/expeditions", label: "Expéditions", icon: Send },
     ],
   },
   {
