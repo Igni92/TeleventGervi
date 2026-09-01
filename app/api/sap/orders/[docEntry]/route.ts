@@ -33,16 +33,35 @@ export async function GET(_req: NextRequest, props: { params: Promise<{ docEntry
   }
   try {
     const o = await sap.get<Order>(`Orders(${params.docEntry})`);
+    // Enrichissement local (miroir Product) : désignation décomposée (tags) +
+    // colisage (colis = quantité / ratio) — pour un rendu « document » riche
+    // (accueil : dernières livraisons). 0 appel SAP supplémentaire.
+    const codes = Array.from(new Set((o.DocumentLines || []).map((l) => l.ItemCode).filter(Boolean)));
+    const products = codes.length
+      ? await prisma.product.findMany({
+          where: { itemCode: { in: codes } },
+          select: { itemCode: true, salesQtyPerPackUnit: true, uMarque: true, uCondi: true, uPays: true, uCalibre: true, frgnName: true },
+        })
+      : [];
+    const pMap = new Map(products.map((p) => [p.itemCode, p]));
     return NextResponse.json({
       docEntry: o.DocEntry, docNum: o.DocNum, status: o.DocumentStatus,
       editable: o.DocumentStatus === "bost_Open",
       total: o.DocTotal ?? 0, totalHT: (o.DocTotal ?? 0) - (o.VatSum ?? 0),
       numAtCard: o.NumAtCard ?? "", dueDate: o.DocDueDate,
-      lines: (o.DocumentLines || []).map((l) => ({
-        lineNum: l.LineNum, itemCode: l.ItemCode, itemName: l.ItemDescription,
-        quantity: l.Quantity, price: l.Price ?? 0, lineTotal: l.LineTotal ?? 0,
-        unit: l.MeasureUnit, warehouse: l.WarehouseCode, lot: l.U_NoLot ?? null,
-      })),
+      lines: (o.DocumentLines || []).map((l) => {
+        const p = pMap.get(l.ItemCode);
+        const ratio = p?.salesQtyPerPackUnit && p.salesQtyPerPackUnit > 1 ? p.salesQtyPerPackUnit : 1;
+        return {
+          lineNum: l.LineNum, itemCode: l.ItemCode, itemName: l.ItemDescription,
+          quantity: l.Quantity, price: l.Price ?? 0, lineTotal: l.LineTotal ?? 0,
+          unit: l.MeasureUnit, warehouse: l.WarehouseCode, lot: l.U_NoLot ?? null,
+          // Colis (quantité ÷ colisage) + désignation décomposée pour les tags.
+          packageQuantity: ratio > 1 ? Math.round((l.Quantity / ratio) * 100) / 100 : l.Quantity,
+          uMarque: p?.uMarque ?? null, uCondi: p?.uCondi ?? null, uPays: p?.uPays ?? null,
+          uCalibre: p?.uCalibre ?? null, frgnName: p?.frgnName ?? null,
+        };
+      }),
     });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });

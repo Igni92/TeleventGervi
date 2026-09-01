@@ -131,6 +131,7 @@ export function SupplierPicker({ value, onChange }: {
   const [results, setResults] = useState<Supplier[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [active, setActive] = useState(0);              // index surligné (navigation clavier)
   const debounced = useDebounced(query, 220);
   const boxRef = useClickOutside<HTMLDivElement>(() => setOpen(false));
 
@@ -141,7 +142,7 @@ export function SupplierPicker({ value, onChange }: {
       try {
         const res = await fetch(`/api/sap/suppliers?q=${encodeURIComponent(debounced)}`);
         const json = await res.json();
-        if (!cancel) setResults(json.suppliers ?? []);
+        if (!cancel) { setResults(json.suppliers ?? []); setActive(0); }
       } catch {
         if (!cancel) setResults([]);
       } finally {
@@ -150,6 +151,15 @@ export function SupplierPicker({ value, onChange }: {
     })();
     return () => { cancel = true; };
   }, [debounced]);
+
+  // Navigation clavier : ↓/↑ déplacent la sélection, Entrée valide, Échap ferme.
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!open || results.length === 0) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, results.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
+    else if (e.key === "Enter") { e.preventDefault(); const s = results[active]; if (s) { onChange(s); setQuery(""); setOpen(false); } }
+    else if (e.key === "Escape") { setOpen(false); }
+  };
 
   if (value) {
     return (
@@ -170,18 +180,20 @@ export function SupplierPicker({ value, onChange }: {
         value={query}
         onFocus={() => setOpen(true)}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onKeyDown={onKeyDown}
         placeholder="Fournisseur (code ou nom)…"
         className="pl-9"
       />
       {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
       {open && results.length > 0 && (
         <ul className="absolute z-10 mt-1 w-full rounded-lg border border-border bg-popover shadow-modal max-h-72 overflow-auto">
-          {results.map((s) => (
+          {results.map((s, idx) => (
             <li key={s.cardCode}>
               <button
                 type="button"
+                onMouseEnter={() => setActive(idx)}
                 onClick={() => { onChange(s); setQuery(""); setOpen(false); }}
-                className="w-full text-left px-3 py-2 hover:bg-secondary/60 transition-colors"
+                className={`w-full text-left px-3 py-2 transition-colors ${idx === active ? "bg-secondary/70" : "hover:bg-secondary/60"}`}
               >
                 <div className="text-body font-medium">{s.cardName}</div>
                 <div className="text-caption text-muted-foreground font-mono">{s.cardCode}</div>
@@ -200,6 +212,7 @@ export function ProductPicker({ onPick }: { onPick: (p: ProductHit) => void }) {
   const [results, setResults] = useState<ProductHit[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [active, setActive] = useState(0);              // index surligné (navigation clavier)
   const debounced = useDebounced(query, 220);
   const inputRef = useRef<HTMLInputElement>(null);
   const boxRef = useClickOutside<HTMLDivElement>(() => setOpen(false));
@@ -213,7 +226,7 @@ export function ProductPicker({ onPick }: { onPick: (p: ProductHit) => void }) {
         const params = new URLSearchParams({ search: debounced.trim(), limit: "8" });
         const res = await fetch(`/api/products?${params}`);
         const json = await res.json();
-        if (!cancel) setResults(json.products ?? []);
+        if (!cancel) { setResults(json.products ?? []); setActive(0); }
       } catch {
         if (!cancel) setResults([]);
       } finally {
@@ -223,6 +236,16 @@ export function ProductPicker({ onPick }: { onPick: (p: ProductHit) => void }) {
     return () => { cancel = true; };
   }, [debounced]);
 
+  const pick = (p: ProductHit) => { onPick(p); setQuery(""); setOpen(false); inputRef.current?.focus(); };
+  // Navigation clavier : ↓/↑ sélection, Entrée valide (reste focalisé pour enchaîner), Échap ferme.
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!open || results.length === 0) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, results.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
+    else if (e.key === "Enter") { e.preventDefault(); const p = results[active]; if (p) pick(p); }
+    else if (e.key === "Escape") { setOpen(false); }
+  };
+
   return (
     <div className="relative" ref={boxRef}>
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -231,18 +254,20 @@ export function ProductPicker({ onPick }: { onPick: (p: ProductHit) => void }) {
         value={query}
         onFocus={() => setOpen(true)}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onKeyDown={onKeyDown}
         placeholder="Code ou nom article…"
         className="pl-9"
       />
       {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
       {open && results.length > 0 && (
         <ul className="absolute z-10 mt-1 w-full rounded-lg border border-border bg-popover shadow-modal max-h-72 overflow-auto">
-          {results.map((p) => (
+          {results.map((p, idx) => (
             <li key={p.id}>
               <button
                 type="button"
-                onClick={() => { onPick(p); setQuery(""); setOpen(false); inputRef.current?.focus(); }}
-                className="w-full text-left px-3 py-2 hover:bg-secondary/60 transition-colors"
+                onMouseEnter={() => setActive(idx)}
+                onClick={() => pick(p)}
+                className={`w-full text-left px-3 py-2 transition-colors ${idx === active ? "bg-secondary/70" : "hover:bg-secondary/60"}`}
               >
                 <div className="text-body font-medium truncate">
                   {[p.itemName, p.uMarque, p.uCondi, p.uPays].filter((x) => x && x.trim() && x.trim() !== "-").join(" · ")}

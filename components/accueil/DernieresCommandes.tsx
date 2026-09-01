@@ -5,6 +5,9 @@ import { Boxes, Scale, History, FileText, Loader2, ChevronRight, Search, X } fro
 import { SurfaceCard } from "@/components/ui/surface-card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ClientLink } from "@/components/ClientLink";
+import { fmtJourDate } from "@/lib/date-fr";
+import { designationProduit } from "@/lib/produit-designation";
+import { DesignationChips } from "@/components/entrees/DesignationChips";
 import { useJson } from "./use-json";
 
 /**
@@ -35,20 +38,21 @@ interface OrdersResponse { docs?: OrderDoc[] }
 interface OrderLine {
   lineNum: number; itemCode: string; itemName?: string; quantity: number;
   price: number; lineTotal: number; unit?: string; warehouse?: string; lot?: string | null;
+  packageQuantity?: number;
+  uMarque?: string | null; uCondi?: string | null; uPays?: string | null; uCalibre?: string | null; frgnName?: string | null;
 }
 
-/** SAP DocDate est une date SANS heure → on l'affiche en jj/mm (pas d'heure
- *  fantôme « 02:00 » due au décalage UTC→Paris de minuit). */
+/** Date de LIVRAISON prévue (DocDueDate) au format « LUN 31.08.26 » ; repli sur
+ *  la date de saisie. */
 function dateOf(d: OrderDoc): string {
-  if (!d.docDate) return "—";
-  const [, m, day] = d.docDate.slice(0, 10).split("-");
-  return day && m ? `${day}/${m}` : "—";
+  return fmtJourDate((d.dueDate || d.docDate || "").slice(0, 10));
 }
+/** Colis d'une ligne (packageQuantity enrichi ; repli quantité brute). */
+const colisOf = (l: OrderLine): number => l.packageQuantity ?? l.quantity;
 
 const fmtNum = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 const fmt2 = (n: number) => n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDateLong = (d?: string) => (d ? new Date(d.slice(0, 10) + "T12:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—");
-const TAG = "inline-flex items-center justify-center whitespace-nowrap rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 px-2 h-5 min-w-[2.25rem] text-[11px] font-semibold tnum";
 
 export function DernieresCommandes() {
   // Recherche par CODE client (CardCode SAP) : vide = les 8 dernières globales ;
@@ -79,7 +83,7 @@ export function DernieresCommandes() {
   }, []);
 
   return (
-    <SurfaceCard title="Dernières commandes" icon={<History className="h-3.5 w-3.5" />} accent="sky" delay={140}>
+    <SurfaceCard title="Dernières livraisons" icon={<History className="h-3.5 w-3.5" />} accent="sky" delay={140}>
       {/* Recherche par CODE client (CardCode SAP) — vide = 8 dernières globales. */}
       <form onSubmit={submit} className="mb-3 flex items-center gap-2">
         <div className="relative flex-1 min-w-0">
@@ -127,12 +131,14 @@ export function DernieresCommandes() {
 
       {state === "ok" && docs.length > 0 && (
         <>
-          {/* En-tête de colonnes : icônes une seule fois */}
-          <div className="flex items-center gap-3 pb-1.5 mb-0.5 border-b border-border/60 text-muted-foreground">
-            <span className="w-[44px] shrink-0" />
+          {/* En-tête de colonnes : libellés + icônes une seule fois. Colis & poids
+              alignés à DROITE. */}
+          <div className="flex items-center gap-3 pb-1.5 mb-0.5 border-b border-border/60 text-[10px] uppercase tracking-wide text-muted-foreground">
+            <span className="w-24 shrink-0">Livraison</span>
             <span className="flex-1 min-w-0" />
-            <span className="w-12 shrink-0 flex justify-center" title="Nombre de colis"><Boxes className="h-4 w-4" /></span>
-            <span className="w-16 shrink-0 flex justify-center" title="Poids (kg)"><Scale className="h-4 w-4" /></span>
+            <span className="w-28 shrink-0 text-right">N° cde</span>
+            <span className="w-12 shrink-0 flex justify-end" title="Nombre de colis"><Boxes className="h-4 w-4" /></span>
+            <span className="w-16 shrink-0 flex justify-end" title="Poids (kg)"><Scale className="h-4 w-4" /></span>
             <span className="w-4 shrink-0" />
           </div>
           <div className="-mx-1 px-1 max-h-[44vh] overflow-y-auto overscroll-contain">
@@ -142,18 +148,22 @@ export function DernieresCommandes() {
                 <button
                   type="button"
                   onClick={() => openBL(d)}
-                  title={`Ouvrir le bon de livraison${d.docNum ? ` # ${d.docNum}` : ""}`}
+                  title={`Ouvrir le bon de livraison${d.docNum ? ` n° ${d.docNum}` : ""}`}
                   className="w-full flex items-center gap-3 py-1.5 -mx-1 px-1 rounded-md hover:bg-secondary/50 transition-colors text-left group"
                 >
-                  <span className="tnum shrink-0 w-[44px] text-[11px] font-medium text-muted-foreground">{dateOf(d)}</span>
+                  <span className="tnum shrink-0 w-24 text-[11px] font-semibold uppercase text-muted-foreground">{dateOf(d)}</span>
                   <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-foreground">
                     {d.cardName || d.cardCode || "—"}
                   </span>
-                  <span className="w-12 shrink-0 flex justify-center">
-                    {d.colis != null && d.colis > 0 ? <span className={TAG}>{fmtNum(d.colis)}</span> : <span className="text-muted-foreground/40 text-[11px]">—</span>}
+                  {/* N° de commande client (à saisir en régul.) — repère logistique. */}
+                  <span className="w-28 shrink-0 truncate text-right text-[11px] tnum text-muted-foreground">
+                    {d.numAtCard ? <>CDE <span className="font-semibold text-foreground">{d.numAtCard}</span></> : <span className="text-muted-foreground/30">—</span>}
                   </span>
-                  <span className="w-16 shrink-0 flex justify-center">
-                    {d.weightKg != null && d.weightKg > 0 ? <span className={TAG}>{fmtNum(d.weightKg)} kg</span> : <span className="text-muted-foreground/40 text-[11px]">—</span>}
+                  <span className="w-12 shrink-0 text-right tnum text-[12.5px] font-bold text-foreground">
+                    {d.colis != null && d.colis > 0 ? fmtNum(d.colis) : <span className="text-muted-foreground/40 font-normal">—</span>}
+                  </span>
+                  <span className="w-16 shrink-0 text-right tnum text-[12.5px] font-semibold text-foreground">
+                    {d.weightKg != null && d.weightKg > 0 ? <>{fmtNum(d.weightKg)}<span className="text-[10px] font-normal text-muted-foreground">kg</span></> : <span className="text-muted-foreground/40 font-normal">—</span>}
                   </span>
                   <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40 group-hover:text-foreground transition-colors" />
                 </button>
@@ -168,9 +178,12 @@ export function DernieresCommandes() {
       <Dialog open={!!open} onOpenChange={(o) => { if (!o) setOpen(null); }}>
         <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+            <DialogTitle className="flex items-center gap-2 flex-wrap">
               <FileText className="h-5 w-5 text-brand-600 dark:text-brand-400" />
-              Bon de livraison{open?.docNum ? ` N° ${open.docNum}` : ""}
+              Bon de livraison{open?.docNum ? ` n° ${open.docNum}` : ""}
+              {(open?.cardName || open?.cardCode) && (
+                <span className="text-[15px] font-medium text-muted-foreground">· {open?.cardName || open?.cardCode}</span>
+              )}
               {open?.status === "bost_Close" && <span className="text-[13px] font-normal text-muted-foreground">· clôturé</span>}
             </DialogTitle>
             <DialogDescription className="sr-only">Détail des lignes du bon de livraison SAP sélectionné.</DialogDescription>
@@ -189,6 +202,12 @@ export function DernieresCommandes() {
                 {open.colis != null && open.colis > 0 && <span className="text-muted-foreground tnum">{fmtNum(open.colis)} colis</span>}
                 {open.weightKg != null && open.weightKg > 0 && <span className="text-muted-foreground tnum">{fmtNum(open.weightKg)} kg</span>}
                 {open.invoiceNum && <span className="text-muted-foreground">Facture <span className="text-foreground font-medium tnum">{open.invoiceNum}</span></span>}
+                {/* Libellé BL : « BL <n°> pour livraison LUN 31.08.26 ». */}
+                {open.dueDate && (
+                  <span className="inline-flex items-center gap-1.5 rounded-md bg-sky-500/10 px-2 py-0.5 text-sky-700 dark:text-sky-300 font-semibold">
+                    BL {open.docNum} pour livraison {fmtJourDate((open.dueDate || "").slice(0, 10))}
+                  </span>
+                )}
               </div>
 
               {linesErr ? (
@@ -200,41 +219,55 @@ export function DernieresCommandes() {
                   <table className="w-full text-[14px]">
                     <thead className="bg-secondary/40 text-[11.5px] uppercase tracking-wide text-muted-foreground">
                       <tr>
-                        <th className="text-left px-3 py-2.5 font-semibold">Désignation</th>
-                        <th className="text-left px-3 py-2.5 font-semibold w-32">Entrepôt / Lot</th>
-                        <th className="text-right px-3 py-2.5 font-semibold w-20">Qté</th>
+                        <th className="text-right px-3 py-2.5 font-semibold w-16">Colis</th>
+                        <th className="text-left px-3 py-2.5 font-semibold">Article</th>
+                        <th className="text-left px-3 py-2.5 font-semibold w-20">Magasin</th>
+                        <th className="text-left px-3 py-2.5 font-semibold w-24">Lot</th>
                         <th className="text-right px-3 py-2.5 font-semibold w-24">PU HT</th>
                         <th className="text-right px-3 py-2.5 font-semibold w-24">Total HT</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {lines.map((l, k) => (
-                        <tr key={k} className="border-t border-border/50">
-                          <td className="px-3 py-2">
-                            <span className="text-foreground">{l.itemName || l.itemCode}</span>
-                            <span className="ml-2 text-[11px] font-mono text-muted-foreground">{l.itemCode}</span>
-                          </td>
-                          <td className="px-3 py-2 text-muted-foreground text-[12.5px]">{l.warehouse}{l.lot ? ` · ${l.lot}` : ""}</td>
-                          <td className="px-3 py-2 text-right tnum">{l.quantity}{l.unit ? ` ${l.unit}` : ""}</td>
-                          <td className="px-3 py-2 text-right tnum">{fmt2(l.price)} €</td>
-                          <td className="px-3 py-2 text-right tnum font-medium">{fmt2(l.lineTotal)} €</td>
-                        </tr>
-                      ))}
+                      {lines.map((l, k) => {
+                        const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi, frgnName: l.frgnName });
+                        const lotLabel = l.lot ? (/^EM(\d+)$/i.test(l.lot) ? `EM ${l.lot.replace(/^EM/i, "")}` : l.lot) : null;
+                        return (
+                          <tr key={k} className="border-t border-border/50 align-top">
+                            {/* Colis — SURGRAS NOIR */}
+                            <td className="px-3 py-2 text-right tnum font-bold text-foreground whitespace-nowrap">{fmtNum(colisOf(l))}</td>
+                            {/* Article — fruit + tags couleur + code SURGRAS GRIS */}
+                            <td className="px-3 py-2">
+                              <div className="font-semibold text-foreground">{dz.fruit}</div>
+                              <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} calibre={l.uCalibre} className="mt-0.5" />
+                              <div className="mt-0.5 font-mono text-[11px] font-bold text-muted-foreground">{l.itemCode}</div>
+                            </td>
+                            <td className="px-3 py-2 tnum text-muted-foreground">{l.warehouse || "—"}</td>
+                            {/* Lot EM */}
+                            <td className="px-3 py-2">
+                              {lotLabel
+                                ? <span className="inline-flex items-center rounded-md border border-emerald-400/50 bg-emerald-500/10 px-1.5 h-5 font-mono text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">{lotLabel}</span>
+                                : <span className="text-muted-foreground/40">—</span>}
+                            </td>
+                            <td className="px-3 py-2 text-right tnum">{fmt2(l.price)} €</td>
+                            <td className="px-3 py-2 text-right tnum font-bold text-foreground">{fmt2(l.lineTotal)} €</td>
+                          </tr>
+                        );
+                      })}
                       {lines.length === 0 && (
-                        <tr><td colSpan={5} className="px-3 py-3 text-center text-muted-foreground text-[13px]">Aucune ligne.</td></tr>
+                        <tr><td colSpan={6} className="px-3 py-3 text-center text-muted-foreground text-[13px]">Aucune ligne.</td></tr>
                       )}
                     </tbody>
                     {(open.total != null || open.totalHT != null) && (
                       <tfoot>
                         {open.totalHT != null && (
                           <tr className="border-t border-border bg-secondary/30">
-                            <td colSpan={4} className="px-3 py-2 text-right text-[12px] uppercase tracking-wide font-semibold text-muted-foreground">Total HT</td>
+                            <td colSpan={5} className="px-3 py-2 text-right text-[12px] uppercase tracking-wide font-semibold text-muted-foreground">Total HT</td>
                             <td className="px-3 py-2 text-right tnum font-semibold text-[15px] text-foreground">{fmt2(open.totalHT)} €</td>
                           </tr>
                         )}
                         {open.total != null && (
                           <tr className="bg-secondary/30 border-t border-border">
-                            <td colSpan={4} className="px-3 py-2 text-right text-[12px] uppercase tracking-wide font-semibold text-muted-foreground">Total TTC</td>
+                            <td colSpan={5} className="px-3 py-2 text-right text-[12px] uppercase tracking-wide font-semibold text-muted-foreground">Total TTC</td>
                             <td className="px-3 py-2 text-right tnum font-bold text-[15px] text-foreground">{fmt2(open.total)} €</td>
                           </tr>
                         )}
