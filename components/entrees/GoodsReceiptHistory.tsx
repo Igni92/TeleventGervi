@@ -609,7 +609,10 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
           largeDoc ? (
             <span className="inline-flex items-center gap-2 flex-wrap">
               <span className="font-mono">EM n° {largeDoc.docNum}</span>
-              <span className="tnum">· {fmtJourDate(largeDoc.docDate)}</span>
+              {/* Commande d'achat liée (CF <n°>) — cliquable pour l'ouvrir. */}
+              {largeDoc.po && <CfLink po={largeDoc.po} onOpen={openCf} />}
+              <span className="tnum">· {fmtJourDate(largeDoc.docDate)}{heureFromDocRef(largeDoc.comments) ? ` à ${heureFromDocRef(largeDoc.comments)}` : ""}</span>
+              {creatorFromDocRef(largeDoc.comments) && <span className="text-muted-foreground">· {creatorFromDocRef(largeDoc.comments)}</span>}
               {largeDoc.lot && <FreshnessBadge dlc={dlcMap[largeDoc.lot]} className="shrink-0" />}
               <CancelBadge d={largeDoc} />
             </span>
@@ -959,6 +962,7 @@ function ReceiptDetail({
               <th className={`text-left font-semibold ${th}`}>Condt</th>
               <th className={`text-left font-semibold ${th}`}>Variété</th>
               <th className={`text-left font-semibold ${th}`}>Pays</th>
+              <th className={`text-left font-semibold ${th}`}>Calibre</th>
               <th className={`text-left font-semibold w-40 ${th}`}>DDM</th>
               {!restricted && <th className={`text-right font-semibold w-24 ${th}`}>PU HT</th>}
               {!restricted && <th className={`text-right font-semibold w-24 ${th}`}>Total HT</th>}
@@ -980,6 +984,7 @@ function ReceiptDetail({
                   <td className={td}><Chip kind="condt">{dz.condt}</Chip></td>
                   <td className={td}><Chip kind="variete">{dz.variete}</Chip></td>
                   <td className={td}><Chip kind="pays">{dz.pays}</Chip></td>
+                  <td className={td}>{l.calibre ? <Chip kind="calibre">{l.calibre}</Chip> : null}</td>
                   <td className={td}>
                     {/* DDM (fraîcheur) du lot — sur la ligne, éditable */}
                     <div className="flex items-center gap-1.5">
@@ -1019,15 +1024,15 @@ function ReceiptDetail({
           {!restricted && (
             <tfoot>
               <tr className="border-t border-border bg-secondary/30">
-                <td colSpan={8} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total HT</td>
+                <td colSpan={9} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total HT</td>
                 <td colSpan={2} className={`text-right tnum font-semibold text-foreground ${td} ${totVal}`}>{eur(totHT)}</td>
               </tr>
               <tr className="bg-secondary/20">
-                <td colSpan={8} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>TVA</td>
+                <td colSpan={9} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>TVA</td>
                 <td colSpan={2} className={`text-right tnum text-muted-foreground ${td}`}>{eur(totTVA)}</td>
               </tr>
               <tr className="bg-secondary/30 border-t border-border">
-                <td colSpan={8} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total TTC</td>
+                <td colSpan={9} className={`text-right uppercase tracking-wide font-semibold text-muted-foreground ${td} ${totLbl}`}>Total TTC</td>
                 <td colSpan={2} className={`text-right tnum font-bold text-foreground ${td} ${totVal}`}>{eur(totTTC)}</td>
               </tr>
             </tfoot>
