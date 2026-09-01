@@ -35,7 +35,9 @@ export default auth((req) => {
   const origin = `${proto}://${host}`;
 
   // Public routes that don't require authentication
-  const publicRoutes = ["/login", "/api/auth"];
+  // /feuille-route/<token> + son API : feuille de route CHAUFFEUR accessible SANS
+  // compte (chauffeur extérieur), protégée par le token unique de la tournée.
+  const publicRoutes = ["/login", "/api/auth", "/feuille-route", "/api/transport/feuille"];
   const isPublicRoute = publicRoutes.some((route) => pathname.startsWith(route));
 
   if (!req.auth && !isPublicRoute) {

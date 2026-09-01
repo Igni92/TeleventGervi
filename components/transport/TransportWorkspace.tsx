@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Plus, Truck, RefreshCw, Trash2, AlertTriangle, Thermometer, PackageCheck } from "lucide-react";
+import { Loader2, Plus, Truck, RefreshCw, Trash2, AlertTriangle, Thermometer, PackageCheck, ArrowUp, ArrowDown } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,7 @@ import {
   CANAUX, CANAL_LABEL, STATUT_LABEL, NEXT_CLICK_STATUT,
 } from "@/lib/transport";
 
-type Chauffeur = { id: string; nom: string; type: string; societe?: string | null };
+type Chauffeur = { id: string; nom: string; type: string; societe?: string | null; email?: string | null; actif?: boolean };
 type Expedition = {
   id: string; date: string; numCommande: string | null; refSuivi: string;
   clientNom: string; clientAdresse: string | null; creneau: string | null; canal: string;
@@ -114,6 +114,75 @@ export function TransportWorkspace() {
     catch { load(); }
   };
 
+  // ── Chauffeurs & feuilles de route ──
+  const [showChauff, setShowChauff] = useState(false);
+  const [newChaufNom, setNewChaufNom] = useState("");
+  const [newChaufType, setNewChaufType] = useState("EXTERIEUR");
+  const [newChaufSociete, setNewChaufSociete] = useState("");
+  const [newChaufEmail, setNewChaufEmail] = useState("");
+
+  const addChauffeur = async () => {
+    const nom = newChaufNom.trim();
+    if (!nom) return;
+    try {
+      const r = await fetch("/api/transport/chauffeurs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nom, type: newChaufType, societe: newChaufSociete.trim() || undefined, email: newChaufEmail.trim() || undefined }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || "Échec");
+      setNewChaufNom(""); setNewChaufSociete(""); setNewChaufEmail("");
+      setChauffeurs((cur) => [...cur, j.chauffeur].sort((a, b) => a.nom.localeCompare(b.nom)));
+    } catch (e) { toast.error(`Chauffeur : ${e instanceof Error ? e.message : ""}`); }
+  };
+
+  /** Récupère (ou crée) le lien tokenisé de la feuille de route d'un chauffeur ce jour. */
+  const tourneeLink = useCallback(async (chauffeurId: string): Promise<string | null> => {
+    try {
+      const r = await fetch("/api/transport/tournees", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, chauffeurId }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || "Échec");
+      return j.tournee.token as string;
+    } catch (e) { toast.error(`Feuille : ${e instanceof Error ? e.message : ""}`); return null; }
+  }, [date]);
+
+  const openFeuille = async (chauffeurId: string) => {
+    const token = await tourneeLink(chauffeurId);
+    if (token) window.open(`/feuille-route/${token}`, "_blank", "noopener");
+  };
+  const emailFeuille = async (chauffeurId: string, annonce: boolean) => {
+    const token = await tourneeLink(chauffeurId);
+    if (!token) return;
+    try {
+      const r = await fetch(`/api/transport/tournees/${token}/email`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annonce }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || "Échec");
+      toast.success(`${annonce ? "Annonce d'enlèvement" : "Feuille de route"} envoyée à ${j.to}`);
+    } catch (e) { toast.error(`Email : ${e instanceof Error ? e.message : ""}`); }
+  };
+
+  /** Réordonne une expédition dans son canal (échange l'ordre avec le voisin). */
+  const reorder = async (exp: Expedition, dir: -1 | 1) => {
+    const sameCanal = exps.filter((x) => x.canal === exp.canal).sort((a, b) => a.ordre - b.ordre);
+    const i = sameCanal.findIndex((x) => x.id === exp.id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= sameCanal.length) return;
+    const a = sameCanal[i], b = sameCanal[j];
+    // Ordres distincts garantis : on repose des index séquentiels sur le canal.
+    const reindexed = sameCanal.map((x, k) => ({ id: x.id, ordre: k }));
+    const oa = reindexed.find((r) => r.id === a.id)!, ob = reindexed.find((r) => r.id === b.id)!;
+    [oa.ordre, ob.ordre] = [ob.ordre, oa.ordre];
+    setExps((cur) => cur.map((x) => { const r = reindexed.find((z) => z.id === x.id); return r ? { ...x, ordre: r.ordre } : x; }));
+    await Promise.all([
+      fetch(`/api/transport/expeditions/${a.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ordre: oa.ordre }) }),
+      fetch(`/api/transport/expeditions/${b.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ordre: ob.ordre }) }),
+    ]).catch(() => load());
+  };
+
   const byCanal = useMemo(() => {
     const m: Record<string, Expedition[]> = { EXPORT: [], GMS: [], DIRECT: [] };
     for (const x of exps) (m[x.canal] ?? (m[x.canal] = [])).push(x);
@@ -140,6 +209,9 @@ export function TransportWorkspace() {
         help={<>Planifie les tournées et suis les expéditions. <b>Un clic sur une carte</b> fait avancer son statut (À préparer → Préparée → Expédié). L&apos;export part <b>avant 6h30</b>.</>}
         actions={
           <div className="flex items-center gap-2 flex-wrap">
+            <Button variant="outline" size="sm" onClick={() => setShowChauff((s) => !s)}>
+              <Truck className="h-4 w-4" /> Chauffeurs & feuilles
+            </Button>
             <Button variant="outline" size="sm" onClick={prefill} disabled={busy}>
               {busy ? <Loader2 className="animate-spin" /> : <RefreshCw />} Pré-remplir (BL du jour)
             </Button>
@@ -163,6 +235,47 @@ export function TransportWorkspace() {
           </select>
           <Button size="sm" onClick={addManual} disabled={busy || !newClient.trim()}>Ajouter</Button>
           <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>Annuler</Button>
+        </div>
+      )}
+
+      {/* Chauffeurs & feuilles de route */}
+      {showChauff && (
+        <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-[14px] font-semibold">Chauffeurs & feuilles de route</h3>
+            <button type="button" onClick={() => setShowChauff(false)} className="text-[12px] text-muted-foreground hover:text-foreground">Fermer</button>
+          </div>
+          {/* Ajouter un chauffeur */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Input value={newChaufNom} onChange={(e) => setNewChaufNom(e.target.value)} placeholder="Nom" className="w-36" />
+            <select value={newChaufType} onChange={(e) => setNewChaufType(e.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-body">
+              <option value="INTERNE">Interne</option>
+              <option value="EXTERIEUR">Extérieur</option>
+            </select>
+            <Input value={newChaufSociete} onChange={(e) => setNewChaufSociete(e.target.value)} placeholder="Société (ext.)" className="w-36" />
+            <Input value={newChaufEmail} onChange={(e) => setNewChaufEmail(e.target.value)} placeholder="Email (feuille de route)" className="w-52" />
+            <Button size="sm" onClick={addChauffeur} disabled={!newChaufNom.trim()}><Plus className="h-4 w-4" /> Ajouter</Button>
+          </div>
+          {/* Liste + actions feuille de route */}
+          <ul className="divide-y divide-border/60">
+            {chauffeurs.map((c) => {
+              const n = exps.filter((x) => x.chauffeurId === c.id).length;
+              return (
+                <li key={c.id} className="py-2 flex items-center gap-2 flex-wrap">
+                  <span className="font-medium text-foreground">{c.nom}</span>
+                  <span className="text-[11px] text-muted-foreground">{c.type === "INTERNE" ? "interne" : (c.societe || "extérieur")}</span>
+                  {c.actif === false && <span className="text-[10px] rounded bg-secondary px-1.5 py-0.5 text-muted-foreground">inactif</span>}
+                  <span className="text-[12px] tnum text-muted-foreground">· {n} expédition{n > 1 ? "s" : ""}</span>
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <Button size="sm" variant="outline" disabled={n === 0} onClick={() => openFeuille(c.id)}>Ouvrir feuille</Button>
+                    <Button size="sm" variant="outline" disabled={n === 0 || !c.email} title={c.email ? "Envoyer la feuille de route" : "Renseigne l'email du chauffeur"} onClick={() => emailFeuille(c.id, false)}>Envoyer</Button>
+                    <Button size="sm" variant="ghost" disabled={n === 0 || !c.email} title="Annonce d'enlèvement" onClick={() => emailFeuille(c.id, true)}>Annonce</Button>
+                  </div>
+                </li>
+              );
+            })}
+            {chauffeurs.length === 0 && <li className="py-2 text-[12.5px] italic text-muted-foreground">Aucun chauffeur — ajoute-en un ci-dessus.</li>}
+          </ul>
         </div>
       )}
 
@@ -200,7 +313,8 @@ export function TransportWorkspace() {
                   <ExpeditionCard key={x.id} x={x} chauffeurs={chauffeurs}
                     onAdvance={() => advance(x)}
                     onPatch={(b) => patch(x.id, b)}
-                    onRemove={() => removeExp(x.id)} />
+                    onRemove={() => removeExp(x.id)}
+                    onReorder={(dir) => reorder(x, dir)} />
                 ))}
               </div>
             </section>
@@ -213,9 +327,10 @@ export function TransportWorkspace() {
 
 /** Cartouche d'expédition — le corps est un bouton (clic = étape suivante). Les
  *  contrôles secondaires (T°C, chauffeur, incident, suppr.) stoppent la propagation. */
-function ExpeditionCard({ x, chauffeurs, onAdvance, onPatch, onRemove }: {
+function ExpeditionCard({ x, chauffeurs, onAdvance, onPatch, onRemove, onReorder }: {
   x: Expedition; chauffeurs: Chauffeur[];
   onAdvance: () => void; onPatch: (b: Record<string, unknown>) => void; onRemove: () => void;
+  onReorder: (dir: -1 | 1) => void;
 }) {
   const ui = STATUT_UI[x.statut] ?? STATUT_UI.A_PREPARER;
   const [temp, setTemp] = useState<number | null>(x.tempChargement);
@@ -262,6 +377,15 @@ function ExpeditionCard({ x, chauffeurs, onAdvance, onPatch, onRemove }: {
             step={0.1} decimals={1} allowEmpty placeholder="°C"
             className="h-8 w-16 text-right bg-white/10 border-white/30 text-white placeholder:text-white/60" />
         </span>
+        {/* Ordre de passage */}
+        <button type="button" title="Monter dans l'ordre de passage" onClick={() => onReorder(-1)}
+          className="inline-flex h-8 w-7 items-center justify-center rounded-md border border-white/30 bg-white/10 hover:bg-white/20">
+          <ArrowUp className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" title="Descendre dans l'ordre de passage" onClick={() => onReorder(1)}
+          className="inline-flex h-8 w-7 items-center justify-center rounded-md border border-white/30 bg-white/10 hover:bg-white/20">
+          <ArrowDown className="h-3.5 w-3.5" />
+        </button>
         {/* Incident */}
         <button type="button" title="Signaler un incident"
           onClick={() => { if (x.statut !== "INCIDENT") { const note = window.prompt("Motif de l'incident :", x.observations ?? ""); if (note != null) onPatch({ statut: "INCIDENT", observations: note }); } else { onPatch({ statut: "A_PREPARER" }); } }}
