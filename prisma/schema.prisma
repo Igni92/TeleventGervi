@@ -103,31 +103,31 @@ model VerificationToken {
 // = slpName), pas sur le slpName des factures SAP — cf. /api/commerciaux/sap.
 // Accédé en raw SQL (cf. scripts/ddl-commercial-objectif.mjs).
 model CommercialObjectif {
-  slpName   String   @id
-  objectifCa Float   @default(0)
-  updatedAt DateTime @default(now()) @updatedAt
+  slpName    String   @id
+  objectifCa Float    @default(0)
+  updatedAt  DateTime @default(now()) @updatedAt
 }
 
 model Client {
-  id              String               @id @default(cuid())
-  code            String               @unique
-  nom             String
-  type            String? // EXPORT | GMS | CHR (optionnel)
-  commercial      String? // Nom du commercial en charge
-  tel1            String?
-  tel2            String?
-  tel3            String?
+  id                 String                @id @default(cuid())
+  code               String                @unique
+  nom                String
+  type               String? // EXPORT | GMS | CHR (optionnel)
+  commercial         String? // Nom du commercial en charge
+  tel1               String?
+  tel2               String?
+  tel3               String?
   // Email principal — **déprécié** (B7) : l'email vit maintenant sur Contact
   // (une fiche par interlocuteur). Conservé pour compat (script de migration
   // legacy a migré ici depuis les notes ; le retrait définitif du champ
   // attend une migration de données vers Contact.email + cleanup des lectures).
-  email           String?
+  email              String?
   // Email de la comptabilité (onglet Compta de la fiche client). Distinct de
   // l'email commercial — sert aux factures/relances, pas à la télévente.
-  emailCompta     String?
+  emailCompta        String?
   // Email du quai/réception marchandise — pour confirmations de livraison et
   // litiges réception. Souvent distinct de la compta (ex. "reception.X@…").
-  emailReception  String?
+  emailReception     String?
   // Adresse de facturation (onglet Compta) — libre, multi-ligne accepté.
   // Distincte de l'adresse de livraison (côté SAP/ClientDeliveryMode).
   adresseFacturation String?
@@ -143,27 +143,27 @@ model Client {
   // Cache local du BusinessPartner.GroupCode SAP (lecture seule côté app).
   // Pilote le coefficient de prix conseillé (cf. lib/gerviPricing.ts) —
   // modification réservée à SAP B1 pour éviter de casser la marge.
-  sapGroupCode    Int?
-  sapGroupName    String? // libellé résolu, idem cache
+  sapGroupCode       Int?
+  sapGroupName       String? // libellé résolu, idem cache
   // Note libre — résiduel après split email/groupe/historique. Pour le bruit
   // (anecdotes, contexte non catégorisable).
-  notes           String?
-  joursAppel      String?
-  joursLivraison  String? // jours de livraison (CSV 0..6) — défaut lun→sam à l'affichage
+  notes              String?
+  joursAppel         String?
+  joursLivraison     String? // jours de livraison (CSV 0..6) — défaut lun→sam à l'affichage
   // Activation TeleVente : un client n'apparaît dans la liste d'un commercial
   // que s'il est activé. Auto-activé à l'import SAP si U_Actif='O' ; sinon
   // activation manuelle (et tout nouveau client arrive inactif).
-  activeTelevente Boolean              @default(false)
+  activeTelevente    Boolean               @default(false)
   // Activation des RELANCES : décoché → ce client ne reçoit aucune relance
   // (case à cocher dans la liste Encours). Défaut true. Colonne ajoutée en raw
   // SQL (cf. scripts/ddl-client-relance-active.mjs) — lue/écrite en $queryRaw
   // tant que le client Prisma n'est pas régénéré (même convention qu'activeTelevente).
-  relanceActive   Boolean              @default(true)
+  relanceActive      Boolean               @default(true)
   // VENDEUR (≠ commercial assigné) : celui qui réalise concrètement les ventes,
   // déduit du dernier BL/commande SAP. Non commissionné — sert au routage du
   // travail. Réassignable à la main. Le `commercial` (account manager) reste la
   // source du futur calcul de commission.
-  vendeur         String?
+  vendeur            String?
   // ── PROSPECTION (module CRM) — cf. prisma/migrations/manual/20260721_prospection_pipeline.sql.
   //    prospectStage NULL = hors pipeline. Un prospect prospecté reste rattaché à
   //    son commercial (prospectOwner) et bascule client à l'étape GAGNE. Colonnes
@@ -175,17 +175,17 @@ model Client {
   prospectLostReason String? // motif si PERDU
   probaLabo          String? // Élevée | Moyenne-haute | Moyenne | À qualifier
   qualifieLabo       Boolean? // labo pâtisserie confirmé ?
-  rappels         Rappel[]
-  appels          AppelLog[]
-  tempAssignments TempAssignment[]
-  deliveryModes   ClientDeliveryMode[]
-  contacts        Contact[]
-  incidents       Incident[]
-  rendezVous      RendezVous[]
-  prospActivities ProspectionActivity[]
-  archivedDocuments ArchivedDocument[]
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
+  rappels            Rappel[]
+  appels             AppelLog[]
+  tempAssignments    TempAssignment[]
+  deliveryModes      ClientDeliveryMode[]
+  contacts           Contact[]
+  incidents          Incident[]
+  rendezVous         RendezVous[]
+  prospActivities    ProspectionActivity[]
+  archivedDocuments  ArchivedDocument[]
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
 }
 
 // Rendez-vous de prospection (agenda) — R1 physique, appels programmés.
@@ -375,7 +375,7 @@ model Carrier {
   // Famille du mapping SAP :
   //   - "cardcode" → utiliser ClientDeliveryMode (transporteur = CardCode)
   //   - "field"    → SET un champ SAP sur le BL (sapField + sapValue)
-  kind      String   // "cardcode" | "field"
+  kind      String // "cardcode" | "field"
   // Pour kind="field" : nom du champ SAP côté Service Layer (ex. "TransportationCode")
   sapField  String?
   // Valeur à pousser dans ce champ (ex. "1" pour Rungis enlèvement)
@@ -430,8 +430,8 @@ model TempAssignment {
 // Produits synchronisés depuis SAP B1 (table /Items).
 // Toutes les unités/groupes/quantités globales en cache pour éviter de hammer SAP.
 model Product {
-  id                  String         @id @default(cuid())
-  itemCode            String         @unique // SAP ItemCode (ex. "MVM12L")
+  id                  String            @id @default(cuid())
+  itemCode            String            @unique // SAP ItemCode (ex. "MVM12L")
   itemName            String // SAP ItemName
   itemGroup           Int? // SAP ItemsGroupCode
   groupName           String? // Nom du groupe résolu
@@ -450,20 +450,20 @@ model Product {
   uUvc                String? // SAP Items.U_GER_UVC (ex. "125g")
   frgnName            String? // SAP Items.FrgnName (nom étranger) = VARIÉTÉ
   uNbBarqColis        Float? // SAP Items.U_GER_NB_BARQ_COLIS
-  manageBatch         Boolean        @default(false) // tYES/tNO de SAP
-  isPackaging         Boolean        @default(false) // True si groupe 100-130/114
+  manageBatch         Boolean           @default(false) // tYES/tNO de SAP
+  isPackaging         Boolean           @default(false) // True si groupe 100-130/114
   // === Kit / Fabrication (DECO = mélange de fruits) ===
   // Si true → ce produit est fabriqué à partir d'autres (cf. ProductBom).
   // L'assemblage local appelle InventoryGenEntries (+parent) + InventoryGenExits
   // (-composants) côté SAP. Marge calculée sur Σ(qtyPerParent × purchasePrice
   // du composant). Voir [[kit-deco-fabrication]] memory.
-  isKit               Boolean        @default(false)
-  totalStock          Float          @default(0) // SAP QuantityOnStock (somme tous entrepôts)
-  syncedAt            DateTime       @default(now())
+  isKit               Boolean           @default(false)
+  totalStock          Float             @default(0) // SAP QuantityOnStock (somme tous entrepôts)
+  syncedAt            DateTime          @default(now())
   stocks              ProductStock[]
   batches             ProductBatch[]
-  bomAsParent         ProductBom[]   @relation("BomParent")
-  bomAsComponent      ProductBom[]   @relation("BomComponent")
+  bomAsParent         ProductBom[]      @relation("BomParent")
+  bomAsComponent      ProductBom[]      @relation("BomComponent")
   recipe              ProductionRecipe? @relation("RecipeParent")
 
   @@index([itemGroup])
@@ -610,28 +610,28 @@ model AppSetting {
 // Rattachement au client via le n° de document lu dans le nom/objet, résolu
 // sur le miroir SAP (SapInvoice/SapOrder/SapCreditNote → cardCode).
 model ArchivedDocument {
-  id                String    @id @default(cuid())
+  id           String    @id @default(cuid())
   // "BL" | "FACTURE" | "AVOIR" | "AUTRE"
-  docType           String
+  docType      String
   // N° de document SAP (chaîne — tolérant aux préfixes), null si illisible.
-  docNum            String?
+  docNum       String?
   // Résolution SAP (si le n° a matché le miroir).
-  docEntry          Int?
+  docEntry     Int?
   // Pivot du DOSSIER (BL → Facture → Avoir) : DocEntry de la FACTURE centrale.
   // Précalculé (liens SAP BaseType 17/13) → le « dossier lié » est un simple
   // lookup local (WHERE invoiceEntry = …), instantané, sans requête SAP.
-  invoiceEntry      Int?
-  cardCode          String? // SAP CardCode du client
-  clientId          String? // FK Client résolue
-  client            Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  docDate           DateTime? // date du document (miroir SAP si résolu)
+  invoiceEntry Int?
+  cardCode     String? // SAP CardCode du client
+  clientId     String? // FK Client résolue
+  client       Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  docDate      DateTime? // date du document (miroir SAP si résolu)
   // true = rattaché à un client (clientId non nul). false = à revoir.
-  matched           Boolean   @default(false)
+  matched      Boolean   @default(false)
 
   // Fichier sur disque.
-  fileName          String // nom d'origine de la pièce jointe
-  filePath          String // chemin RELATIF sous la racine d'archive
-  sizeBytes         Int      @default(0)
+  fileName  String // nom d'origine de la pièce jointe
+  filePath  String // chemin RELATIF sous la racine d'archive
+  sizeBytes Int    @default(0)
 
   // Traçabilité / déduplication de la source Graph.
   graphMessageId    String
@@ -640,10 +640,10 @@ model ArchivedDocument {
   receivedAt        DateTime // date de réception du mail
 
   // Envoi au client.
-  lastSentAt        DateTime?
-  lastSentTo        String?
+  lastSentAt DateTime?
+  lastSentTo String?
 
-  createdAt         DateTime  @default(now())
+  createdAt DateTime @default(now())
 
   @@unique([graphMessageId, graphAttachmentId])
   @@index([clientId, docType])
@@ -792,30 +792,30 @@ model AppelLog {
 
 // BusinessPartner SAP — clients (C) et fournisseurs (V).
 model SapBusinessPartner {
-  cardCode   String    @id // SAP CardCode
-  cardName   String
-  cardType   String // "C" (customer) | "V" (vendor)
-  groupCode  Int?
-  groupName  String?
-  slpName    String? // commercial SAP (résolu via SalesPersonCode)
-  email      String?
-  phone      String?
-  active     Boolean   @default(true)
+  cardCode              String    @id // SAP CardCode
+  cardName              String
+  cardType              String // "C" (customer) | "V" (vendor)
+  groupCode             Int?
+  groupName             String?
+  slpName               String? // commercial SAP (résolu via SalesPersonCode)
+  email                 String?
+  phone                 String?
+  active                Boolean   @default(true)
   // Encours / risque crédit — miroir des champs SAP BusinessPartners (lecture
   // seule côté app, peuplés par lib/sapMirror ; modification réservée à SAP B1).
   creditLimit           Float?
   currentAccountBalance Float?
   frozen                Boolean   @default(false)
-  updateDate DateTime? // SAP UpdateDate (ISO)
-  syncedAt   DateTime  @default(now())
+  updateDate            DateTime? // SAP UpdateDate (ISO)
+  syncedAt              DateTime  @default(now())
 
-  invoices SapInvoice[]
-  orders   SapOrder[]
-  pdns     SapPurchaseDeliveryNote[]
-  creditNotes SapCreditNote[]
+  invoices        SapInvoice[]
+  orders          SapOrder[]
+  pdns            SapPurchaseDeliveryNote[]
+  creditNotes     SapCreditNote[]
   purchaseReturns SapPurchaseReturn[]
-  quotations     SapQuotation[]
-  purchaseOrders SapPurchaseOrder[]
+  quotations      SapQuotation[]
+  purchaseOrders  SapPurchaseOrder[]
 
   @@index([cardType])
   @@index([slpName])
@@ -972,25 +972,25 @@ model SapPdnLine {
 // docTotal stocké en POSITIF (= montant de l'avoir). Pour calculer le
 // CA NET, l'agrégateur fait : Σ SapInvoice.docTotal − Σ SapCreditNote.docTotal.
 model SapCreditNote {
-  docEntry    Int       @id
-  docNum      Int?
-  docDate     DateTime
-  docDueDate  DateTime? // échéance (colonne partagée du pull ventes)
-  cardCode    String
-  cardName    String?
-  slpName     String?
-  docTotal    Float     @default(0) // total HT de l'avoir (positif)
-  vatSum      Float     @default(0)
-  grossProfit Float? // perte de marge associée (positif aussi)
+  docEntry         Int       @id
+  docNum           Int?
+  docDate          DateTime
+  docDueDate       DateTime? // échéance (colonne partagée du pull ventes)
+  cardCode         String
+  cardName         String?
+  slpName          String?
+  docTotal         Float     @default(0) // total HT de l'avoir (positif)
+  vatSum           Float     @default(0)
+  grossProfit      Float? // perte de marge associée (positif aussi)
   // DocEntry de l'Invoice source si traçable (SAP BaseEntry sur la 1ère ligne).
   // Permet d'imputer l'avoir à la facture d'origine côté analytique.
   baseInvoiceEntry Int?
-  trspCode    String? // transporteur réel (UDF U_TrspCode, MAJUSCULES)
-  cancelled   Boolean   @default(false)
-  updateDate  DateTime?
-  syncedAt    DateTime  @default(now())
+  trspCode         String? // transporteur réel (UDF U_TrspCode, MAJUSCULES)
+  cancelled        Boolean   @default(false)
+  updateDate       DateTime?
+  syncedAt         DateTime  @default(now())
 
-  bp    SapBusinessPartner @relation(fields: [cardCode], references: [cardCode], onDelete: Cascade)
+  bp    SapBusinessPartner  @relation(fields: [cardCode], references: [cardCode], onDelete: Cascade)
   lines SapCreditNoteLine[]
 
   @@index([docDate])
@@ -1022,18 +1022,18 @@ model SapCreditNoteLine {
 // Retour fournisseur (PurchaseReturn SAP) — annulation/retour d'une PDN.
 // docTotal stocké en POSITIF. Achats NET = Σ PDN − Σ Returns.
 model SapPurchaseReturn {
-  docEntry   Int       @id
-  docNum     Int?
-  docDate    DateTime
-  cardCode   String
-  cardName   String?
-  docTotal   Float     @default(0)
+  docEntry     Int       @id
+  docNum       Int?
+  docDate      DateTime
+  cardCode     String
+  cardName     String?
+  docTotal     Float     @default(0)
   basePdnEntry Int? // DocEntry du PDN source si traçable
-  cancelled  Boolean   @default(false)
-  updateDate DateTime?
-  syncedAt   DateTime  @default(now())
+  cancelled    Boolean   @default(false)
+  updateDate   DateTime?
+  syncedAt     DateTime  @default(now())
 
-  bp    SapBusinessPartner @relation(fields: [cardCode], references: [cardCode], onDelete: Cascade)
+  bp    SapBusinessPartner      @relation(fields: [cardCode], references: [cardCode], onDelete: Cascade)
   lines SapPurchaseReturnLine[]
 
   @@index([docDate])
@@ -1126,7 +1126,7 @@ model SapPurchaseOrder {
   updateDate     DateTime?
   syncedAt       DateTime  @default(now())
 
-  bp    SapBusinessPartner @relation(fields: [cardCode], references: [cardCode], onDelete: Cascade)
+  bp    SapBusinessPartner     @relation(fields: [cardCode], references: [cardCode], onDelete: Cascade)
   lines SapPurchaseOrderLine[]
 
   @@index([docDueDate])
@@ -1157,17 +1157,17 @@ model SapPurchaseOrderLine {
 // On stocke un UpdateDate ISO par entité — chaque pull "UpdateDate gt cursor".
 // id=1, pattern identique à StockSyncCursor.
 model SapMirrorCursor {
-  id                Int       @id @default(1)
-  lastInvoiceUpdate DateTime? // SAP UpdateDate max vu sur Invoices
-  lastOrderUpdate   DateTime?
-  lastPdnUpdate     DateTime?
-  lastBpUpdate      DateTime?
+  id                       Int       @id @default(1)
+  lastInvoiceUpdate        DateTime? // SAP UpdateDate max vu sur Invoices
+  lastOrderUpdate          DateTime?
+  lastPdnUpdate            DateTime?
+  lastBpUpdate             DateTime?
   lastCreditNoteUpdate     DateTime?
   lastPurchaseReturnUpdate DateTime?
   lastQuotationUpdate      DateTime? // SAP UpdateDate max vu sur Quotations
   lastPurchaseOrderUpdate  DateTime? // SAP UpdateDate max vu sur PurchaseOrders
-  lastTickAt        DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  lastTickAt               DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 }
 
 // ── Favoris articles par utilisateur (Console 2 — accès rapide) ──
@@ -1397,102 +1397,4 @@ model UsageEvent {
   @@index([userEmail])
   @@index([sessionId])
   @@index([createdAt])
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// MODULE TRANSPORTEUR — planification des tournées + suivi des expéditions.
-// AUTONOME : aucune dépendance SAP B1 / Orderlion. Tables préfixées Transport*.
-// Le jalon `statut = EXPEDIE` + `refSuivi` sont la brique du futur suivi client
-// (e-boutique). Voir MODULE-TRANSPORTEUR.md.
-// ═══════════════════════════════════════════════════════════════════════════
-
-// Chauffeur : interne (ex. Hugo) ou extérieur (rattaché à une société, ex. STM).
-model TransportChauffeur {
-  id        String   @id @default(cuid())
-  nom       String
-  type      String   @default("INTERNE") // INTERNE | EXTERIEUR
-  societe   String? // transporteur pour un extérieur (ex. STM)
-  tel       String?
-  email     String?
-  actif     Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  tournees    TransportTournee[]
-  expeditions TransportExpedition[]
-
-  @@index([actif])
-}
-
-// Tournée journalière d'un chauffeur. `token` = accès feuille de route sans compte
-// (chauffeur extérieur : lien tokenisé).
-model TransportTournee {
-  id          String   @id @default(cuid())
-  date        DateTime // jour de la tournée (00:00)
-  libelle     String?
-  chauffeurId String?
-  notes       String?
-  token       String   @unique @default(cuid())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  chauffeur   TransportChauffeur?   @relation(fields: [chauffeurId], references: [id], onDelete: SetNull)
-  expeditions TransportExpedition[]
-
-  @@index([date])
-  @@index([token])
-}
-
-// Expédition = une commande à livrer. Cœur du module.
-model TransportExpedition {
-  id             String    @id @default(cuid())
-  date           DateTime // jour d'expédition
-  numCommande    String? // réf interne (n° BL / commande)
-  refSuivi       String    @unique // ex. EX-1041 — pré-mapping e-boutique
-  clientNom      String
-  clientAdresse  String?
-  creneau        String? // créneau de réception / quai GMS
-  canal          String    @default("GMS") // GMS | EXPORT | DIRECT
-  chauffeurId    String?
-  tourneeId      String?
-  ordre          Int       @default(0) // ordre de passage
-  statut         String    @default("A_PREPARER") // A_PREPARER | PREPAREE | EXPEDIE | LIVREE | INCIDENT
-  tempChargement Float? // relevé T°C au chargement (chaîne du froid)
-  immatriculation String?
-  observations   String?
-  colis          Int?
-  poidsKg        Float?
-  // BL TeleVent source si pré-rempli depuis le miroir local (docEntry SAP), sinon
-  // null (saisie manuelle). Sert à éviter les doublons de pré-remplissage.
-  sourceDocEntry Int?
-  prepareeAt     DateTime?
-  expedieAt      DateTime?
-  livreeAt       DateTime?
-  arriveeAt      DateTime?
-  departAt       DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-
-  chauffeur TransportChauffeur? @relation(fields: [chauffeurId], references: [id], onDelete: SetNull)
-  tournee   TransportTournee?   @relation(fields: [tourneeId], references: [id], onDelete: SetNull)
-  logs      TransportStatutLog[]
-
-  @@index([date])
-  @@index([canal])
-  @@index([statut])
-  @@index([tourneeId])
-  @@index([sourceDocEntry])
-}
-
-// Journal des transitions de statut (traçabilité + lecture e-boutique du jalon EXPEDIE).
-model TransportStatutLog {
-  id           String   @id @default(cuid())
-  expeditionId String
-  statut       String
-  at           DateTime @default(now())
-  by           String?
-
-  expedition TransportExpedition @relation(fields: [expeditionId], references: [id], onDelete: Cascade)
-
-  @@index([expeditionId])
 }

@@ -10,7 +10,7 @@ import type { StatusTab } from "@/lib/livraisonView";
 export interface CarrierOption { name: string; sapValue: string }
 
 /** Fiche transporteur (coordonnées) — miroir de /api/transporteurs/fiche. */
-export interface CarrierFiche { email: string | null; phones: { label: string; value: string }[] }
+export interface CarrierFiche { emails: string[]; phones: { label: string; value: string }[] }
 
 /* ─────────────────────────────────────────────────────────────
    Formatters — instances Intl créées UNE fois (module) : réinstancier un

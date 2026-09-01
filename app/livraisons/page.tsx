@@ -6,7 +6,7 @@ import { PreparateurNav } from "@/components/PreparateurNav";
 import { isTerrainConfined } from "@/lib/preparateur";
 import { isLivraisonRestricted } from "@/lib/permissions";
 
-export const metadata = { title: "Livraisons du jour" };
+export const metadata = { title: "Expéditions" };
 export const dynamic = "force-dynamic";
 
 export default async function LivraisonsPage() {

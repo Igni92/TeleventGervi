@@ -51,7 +51,7 @@ export function LivraisonsSectionTabs() {
       {/* Même langage que <SegmentedControl /> : creux bg-secondary, l'onglet
           actif est une pastille carte qui porte la seule ombre — plus de
           conteneur carte bordé. */}
-      <div role="tablist" aria-label="Livraisons du jour"
+      <div role="tablist" aria-label="Expéditions"
         className="inline-flex w-max items-stretch rounded-lg bg-secondary p-0.5">
         {TABS.map(({ href, label, icon: Icon }) => {
           const active = href === activeHref;

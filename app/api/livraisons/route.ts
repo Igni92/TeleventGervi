@@ -11,6 +11,7 @@ import { getClientTournees, type ClientTournee } from "@/lib/clientTournee";
 import { getClientTrclCarriers } from "@/lib/clientCarriers";
 import { isLivraisonRestricted } from "@/lib/permissions";
 import { isDelanchyCarrierCode } from "@/lib/carrierTariff";
+import { getFeuilleSentMany } from "@/lib/carrierInfo";
 
 export const dynamic = "force-dynamic";
 
@@ -581,6 +582,17 @@ export async function GET(req: NextRequest) {
         return b.colis - a.colis;
       });
 
+    // Feuille de route déjà envoyée ce jour → pastille « envoyé » par transporteur.
+    // Clé = date de la requête (identique à celle utilisée à l'envoi côté client).
+    const sentMap = await getFeuilleSentMany(
+      date,
+      carriers.map((c) => c.code).filter((c): c is string => !!c),
+    );
+    const carriersOut = carriers.map((c) => {
+      const s = c.code ? sentMap.get(c.code.toUpperCase()) : undefined;
+      return { ...c, sentAt: s?.at ?? null, sentTo: s?.to ?? [] };
+    });
+
     const counted = visibleDocs.filter((d) => !d.excluded);
     const totals = {
       orders: counted.length,
@@ -602,7 +614,7 @@ export async function GET(req: NextRequest) {
       holiday: mode === "due" ? frenchHolidayLabel(date) : null,
       count: visibleDocs.length,
       totals,
-      carriers,
+      carriers: carriersOut,
       // Disponible SAP global (négatif) par article — conservé pour compat (badges).
       negativeStocks,
       // Stock PHYSIQUE détenu (QuantityOnStock, tous entrepôts) par article du jour

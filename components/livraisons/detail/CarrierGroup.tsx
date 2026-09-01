@@ -216,7 +216,7 @@ export function CarrierGroup({
           {/* Bon de transport + état groupé — menu « ⋯ » (imprimer / envoyer / fiche) */}
           <BonTransportActions
             carrier={carrier} date={date} canDispatch={canDispatch} docs={fullDocs}
-            tournees={carrierTournees} menuExtras={bulkMenuItems}
+            tournees={carrierTournees} menuExtras={bulkMenuItems} onReload={onReload}
           />
         </div>
       </div>
@@ -313,7 +313,7 @@ export function CarrierGroup({
    fiche transporteur) + items d'état groupé injectés par le parent.
 ═════════════════════════════════════════════════════════════ */
 function BonTransportActions({
-  carrier, date, canDispatch, docs, tournees, menuExtras,
+  carrier, date, canDispatch, docs, tournees, menuExtras, onReload,
 }: {
   carrier: Carrier;
   date: string;
@@ -323,7 +323,14 @@ function BonTransportActions({
   tournees: Tournee[] | undefined;
   /** Items supplémentaires du menu « ⋯ » (état groupé, ré-attribution). */
   menuExtras?: ReactNode;
+  /** Rechargement de la liste (pastille « envoyé » après envoi). */
+  onReload: () => void;
 }) {
+  // « Finalisé » = toutes les commandes (hors avoirés/exclus) sont faites ou
+  // parties → le bouton « Feuille de route » ne s'active qu'à ce moment-là.
+  const nonExcluded = docs.filter((d) => !d.excluded);
+  const allFait = nonExcluded.length > 0 && nonExcluded.every((d) => d.prepared || d.departed);
+  const sentAt = carrier.sentAt ?? null;
   // Lignes du bon (hors BL avoirés/exclus), groupées par tournée nommée.
   const rows = useMemo(
     () =>
@@ -345,7 +352,7 @@ function BonTransportActions({
   const [ficheOpen, setFicheOpen] = useState(false);
   const [ficheLoading, setFicheLoading] = useState(false);
   const [ficheSaving, setFicheSaving] = useState(false);
-  const [email, setEmail] = useState("");
+  const [emails, setEmails] = useState<string[]>([]);
   const [phones, setPhones] = useState<{ label: string; value: string }[]>([]);
 
   const loadFiche = useCallback(async (): Promise<CarrierFiche | null> => {
@@ -362,7 +369,7 @@ function BonTransportActions({
     setFicheOpen(true);
     setFicheLoading(true);
     const f = await loadFiche();
-    if (f) { setEmail(f.email ?? ""); setPhones(f.phones ?? []); }
+    if (f) { setEmails(f.emails ?? []); setPhones(f.phones ?? []); }
     setFicheLoading(false);
   }
 
@@ -372,7 +379,7 @@ function BonTransportActions({
     try {
       const res = await fetch("/api/transporteurs/fiche", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: carrier.code, email, phones }),
+        body: JSON.stringify({ code: carrier.code, emails: emails.map((e) => e.trim()).filter(Boolean), phones }),
       });
       const j = await res.json().catch(() => null);
       if (!res.ok || !j?.ok) { toast.error(j?.error || "Échec de l'enregistrement de la fiche"); return; }
@@ -397,7 +404,7 @@ function BonTransportActions({
         {
           carrierName: carrier.name,
           dateLabel: formatDeliveryDate(date),
-          email: fiche?.email ?? null,
+          emails: fiche?.emails ?? [],
           phones: fiche?.phones ?? [],
           rows,
         },
@@ -431,11 +438,12 @@ function BonTransportActions({
         body: JSON.stringify({ date, trspCode: carrier.code }),
       });
       const j = await res.json().catch(() => null);
-      if (!res.ok || !j?.ok) { toast.error(j?.error || "Échec de l'envoi du bon de transport"); return; }
-      toast.success(`Bon de transport envoyé à ${j.to}`, { description: `Depuis ${j.from} — ${j.orders} commande(s).`, duration: 7000 });
+      if (!res.ok || !j?.ok) { toast.error(j?.error || "Échec de l'envoi de la feuille de route"); return; }
+      toast.success(`Feuille de route envoyée à ${j.to}`, { description: `Depuis ${j.from} — ${j.orders} commande(s).`, duration: 7000 });
       setMailOpen(false);
+      onReload(); // rafraîchit la pastille « envoyé »
     } catch {
-      toast.error("Échec de l'envoi du bon de transport");
+      toast.error("Échec de l'envoi de la feuille de route");
     } finally {
       setSending(false);
     }
@@ -446,8 +454,41 @@ function BonTransportActions({
   const hasOwnItems = orderCount > 0 || (canDispatch && !!carrier.code);
   if (!hasOwnItems && !menuExtras) return null;
 
+  const sentTime = sentAt ? new Date(sentAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : null;
+  const canSend = canDispatch && !!carrier.code && orderCount > 0;
+
   return (
-    <div className="flex items-center" onClick={(e) => e.stopPropagation()}>
+    <div className="flex items-center gap-1.5 sm:gap-2" onClick={(e) => e.stopPropagation()}>
+      {/* Pastille « feuille de route envoyée » — sinon bouton d'envoi (actif
+          uniquement quand TOUTES les commandes du transporteur sont faites). */}
+      {sentAt ? (
+        <span
+          title={`Feuille de route envoyée à ${sentTime}${carrier.sentTo?.length ? ` — ${carrier.sentTo.join(", ")}` : ""}`}
+          className="inline-flex shrink-0 items-center gap-1.5 h-8 sm:h-9 px-2 sm:px-2.5 rounded-lg bg-success/12 text-success ring-1 ring-success/25 text-caption font-semibold"
+        >
+          <CheckCircle2 className="h-4 w-4" />
+          <span className="hidden sm:inline">Envoyé</span>
+          <span className="hidden sm:inline tnum font-normal text-success/80">{sentTime}</span>
+        </span>
+      ) : canSend ? (
+        <button
+          type="button"
+          onClick={openMail}
+          disabled={!allFait}
+          title={allFait
+            ? `Envoyer la feuille de route de ${carrier.name} au transporteur`
+            : "Disponible quand toutes les commandes du transporteur sont faites"}
+          className={`inline-flex shrink-0 items-center gap-1.5 h-11 sm:h-9 px-2.5 sm:px-3 rounded-lg text-caption font-semibold transition-[background-color,transform] duration-[var(--dur-fast)] ease-[var(--ease-apple)] active:scale-[0.97] ${
+            allFait
+              ? "bg-brand-600 text-white hover:bg-brand-500"
+              : "bg-secondary text-muted-foreground cursor-not-allowed opacity-70"
+          }`}
+        >
+          <Send className="h-4 w-4" />
+          <span className="hidden sm:inline">Feuille de route</span>
+        </button>
+      ) : null}
+
       {/* Menu « ⋯ » — regroupe imprimer / envoyer / fiche + l'état groupé. */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -469,16 +510,9 @@ function BonTransportActions({
             </DropdownMenuItem>
           )}
           {canDispatch && carrier.code && (
-            <>
-              {orderCount > 0 && (
-                <DropdownMenuItem onSelect={openMail}>
-                  <Send className="mr-2 h-4 w-4 text-muted-foreground" /> Envoyer par mail…
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onSelect={openFiche}>
-                <Phone className="mr-2 h-4 w-4 text-muted-foreground" /> Fiche transporteur…
-              </DropdownMenuItem>
-            </>
+            <DropdownMenuItem onSelect={openFiche}>
+              <Phone className="mr-2 h-4 w-4 text-muted-foreground" /> Fiche transporteur (emails, tél.)…
+            </DropdownMenuItem>
           )}
           {menuExtras}
         </DropdownMenuContent>
@@ -503,15 +537,38 @@ function BonTransportActions({
           ) : (
             <>
               <div>
-                <label className="text-caption font-medium text-foreground">Email</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="contact@transporteur.fr"
-                  disabled={ficheSaving}
-                  className="mt-1 h-10 w-full rounded-lg border border-border bg-background px-3 text-body font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
-                />
+                <label className="text-caption font-medium text-foreground">Emails <span className="text-muted-foreground font-normal">(un ou plusieurs)</span></label>
+                <div className="mt-1 space-y-2">
+                  {emails.map((v, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        type="email"
+                        value={v}
+                        onChange={(e) => setEmails((prev) => prev.map((x, j) => (j === i ? e.target.value : x)))}
+                        placeholder="contact@transporteur.fr"
+                        disabled={ficheSaving}
+                        className="h-10 flex-1 min-w-0 rounded-lg border border-border bg-background px-3 text-body font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEmails((prev) => prev.filter((_, j) => j !== i))}
+                        disabled={ficheSaving}
+                        title="Retirer cet email"
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-60"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setEmails((prev) => [...prev, ""])}
+                    disabled={ficheSaving || emails.length >= 10}
+                    className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-dashed border-border text-caption font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors disabled:opacity-60"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Ajouter un email
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="text-caption font-medium text-foreground">Téléphones</label>
@@ -584,7 +641,7 @@ function BonTransportActions({
           <DialogHeader className="text-left">
             <DialogTitle className="flex items-center gap-2 pr-8">
               <Send className="h-5 w-5 text-muted-foreground shrink-0" />
-              Envoyer le bon de transport
+              Envoyer la feuille de route
             </DialogTitle>
           </DialogHeader>
           <p className="text-body text-muted-foreground">
@@ -597,10 +654,14 @@ function BonTransportActions({
             <div className="flex items-center gap-2 text-body text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" /> Lecture de la fiche transporteur…
             </div>
-          ) : mailFiche?.email ? (
-            <div className="flex items-center gap-2 rounded-lg ring-1 ring-border bg-secondary/30 px-3.5 py-2.5 text-body">
-              <span className="text-caption2 text-muted-foreground shrink-0">Destinataire</span>
-              <span className="font-semibold text-foreground truncate">{mailFiche.email}</span>
+          ) : mailFiche && mailFiche.emails.length > 0 ? (
+            <div className="rounded-lg ring-1 ring-border bg-secondary/30 px-3.5 py-2.5 text-body">
+              <span className="text-caption2 text-muted-foreground">Destinataire{mailFiche.emails.length > 1 ? "s" : ""}</span>
+              <ul className="mt-1 space-y-0.5">
+                {mailFiche.emails.map((e) => (
+                  <li key={e} className="font-semibold text-foreground truncate">{e}</li>
+                ))}
+              </ul>
             </div>
           ) : (
             <div className="flex items-start gap-2 rounded-lg ring-1 ring-warning/25 bg-warning/10 px-3.5 py-2.5">
@@ -631,7 +692,7 @@ function BonTransportActions({
               type="button"
               size="xl"
               onClick={sendMail}
-              disabled={sending || mailLoading || !mailFiche?.email}
+              disabled={sending || mailLoading || !mailFiche || mailFiche.emails.length === 0}
             >
               {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Envoyer

@@ -90,6 +90,9 @@ export interface Carrier {
   weightKg: number;
   totalHT: number;
   docs: Doc[];
+  /** Feuille de route envoyée ce jour (marqueur AppSetting) — pastille « envoyé ». */
+  sentAt?: string | null;
+  sentTo?: string[];
 }
 
 export interface Totals {

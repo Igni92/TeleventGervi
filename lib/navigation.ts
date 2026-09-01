@@ -3,7 +3,7 @@ import {
   Home, Radio, Users, Target, Truck, FileText, Package, Boxes,
   ClipboardCheck, Factory, Building2, PackageCheck, PackagePlus,
   LayoutDashboard, Trophy, Receipt, Archive, Briefcase, CalendarDays,
-  Wallet, Settings, Send,
+  Wallet, Settings,
 } from "lucide-react";
 
 /**
@@ -69,13 +69,12 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       // « Livraisons du jour » — HUB à onglets in-page (Préparation · Par article ·
       // À préparer · Manquants · Ventes) : routes secondaires en `also`.
-      { href: "/livraisons", label: "Livraisons du jour", icon: Truck, also: ["/details-livraison", "/preparations", "/manquants", "/ventes-du-jour"] },
+      { href: "/livraisons", label: "Expéditions", icon: Truck, also: ["/details-livraison", "/preparations", "/manquants", "/ventes-du-jour"] },
       { href: "/bons-commande", label: "Bons de commande", icon: FileText, badge: "offresDue" },
       { href: "/products", label: "Stock", icon: Package },
       { href: "/articles", label: "Articles", icon: Boxes },
       { href: "/inventaire", label: "Inventaire", icon: ClipboardCheck, badge: "inventaire" },
       { href: "/fabrication", label: "Fabrication", icon: Factory },
-      { href: "/expeditions", label: "Expéditions", icon: Send },
     ],
   },
   {

@@ -5,7 +5,7 @@ import { sap } from "@/lib/sapb1";
 import { colisInfo } from "@/lib/colis";
 import { formatDeliveryDate } from "@/lib/livraison";
 import { isLivraisonRestricted } from "@/lib/permissions";
-import { getCarrierInfo } from "@/lib/carrierInfo";
+import { getCarrierInfo, setFeuilleSent } from "@/lib/carrierInfo";
 import { getTransporteurDetail } from "@/lib/transporteurs";
 import { sendMailAsShared } from "@/lib/graph";
 import { renderBonTransport, type BonTransportRow } from "@/lib/bonTransport";
@@ -44,9 +44,9 @@ export async function POST(req: NextRequest) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return NextResponse.json({ error: "date requise (YYYY-MM-DD)" }, { status: 400 });
   if (!trspCode) return NextResponse.json({ error: "trspCode requis" }, { status: 400 });
 
-  // Destinataire = email de la fiche transporteur (obligatoire).
+  // Destinataires = emails de la fiche transporteur (au moins un obligatoire).
   const fiche = await getCarrierInfo(trspCode);
-  if (!fiche.email) {
+  if (fiche.emails.length === 0) {
     return NextResponse.json(
       { ok: false, error: "Aucun email dans la fiche transporteur — renseignez-la d'abord (bouton fiche sur le groupe transporteur)." },
       { status: 400 },
@@ -135,17 +135,20 @@ export async function POST(req: NextRequest) {
 
     const dateLabel = formatDeliveryDate(date);
     const html = renderBonTransport(
-      { carrierName, dateLabel, email: fiche.email, phones: fiche.phones, rows },
+      { carrierName, dateLabel, emails: fiche.emails, phones: fiche.phones, rows },
       { copies: ["ORIGINAL"] },
     );
 
     await sendMailAsShared(FROM_MAILBOX, {
-      to: fiche.email,
-      subject: `Bon de transport Gervifrais — ${carrierName} — livraison du ${dateLabel}`,
+      to: fiche.emails,
+      subject: `Feuille de route Gervifrais — ${carrierName} — livraison du ${dateLabel}`,
       html,
     });
 
-    return NextResponse.json({ ok: true, to: fiche.email, from: FROM_MAILBOX, orders: rows.length });
+    // Marqueur d'envoi (pastille « envoyé » côté livraisons) — best-effort.
+    try { await setFeuilleSent(date, trspCode, { at: new Date().toISOString(), to: fiche.emails, orders: rows.length }); } catch { /* non bloquant */ }
+
+    return NextResponse.json({ ok: true, to: fiche.emails.join(", "), from: FROM_MAILBOX, orders: rows.length });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }

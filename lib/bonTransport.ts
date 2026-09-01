@@ -37,7 +37,7 @@ export interface BonTransportRow {
 export interface BonTransportData {
   carrierName: string;
   dateLabel: string;    // date de livraison formatée (ex. « jeudi 2 juillet 2026 »)
-  email?: string | null;
+  emails?: string[];
   phones?: { label: string; value: string }[];
   rows: BonTransportRow[];  // déjà triées par tournée
 }
@@ -83,7 +83,7 @@ function renderCopy(data: BonTransportData, tag: string): string {
     .join("");
 
   const contact = [
-    data.email?.trim() ? `Email : ${esc(data.email.trim())}` : null,
+    ...(data.emails ?? []).filter((e) => e?.trim()).map((e) => `Email : ${esc(e.trim())}`),
     ...(data.phones ?? []).map((p) => `${p.label ? esc(p.label) + " : " : "Tél : "}${esc(p.value)}`),
   ].filter(Boolean);
 
