@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Plus, Truck, RefreshCw, Trash2, AlertTriangle, Thermometer, PackageCheck, ArrowUp, ArrowDown } from "lucide-react";
+import { Loader2, Plus, Truck, RefreshCw, Trash2, AlertTriangle, Thermometer, PackageCheck, ArrowUp, ArrowDown, Download } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -214,6 +214,10 @@ export function TransportWorkspace() {
             </Button>
             <Button variant="outline" size="sm" onClick={prefill} disabled={busy}>
               {busy ? <Loader2 className="animate-spin" /> : <RefreshCw />} Pré-remplir (BL du jour)
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => window.open(`/api/transport/expeditions/export?from=${date}&to=${date}`, "_blank")}
+              title="Exporter les expéditions du jour (CSV)">
+              <Download className="h-4 w-4" /> CSV
             </Button>
             <Button size="sm" onClick={() => setAdding((a) => !a)}><Plus /> Expédition</Button>
           </div>
