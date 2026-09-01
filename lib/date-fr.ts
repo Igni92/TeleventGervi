@@ -43,3 +43,21 @@ export function fmtJourDateHeure(input: DateLike): string {
   const heure = `${d.getHours()}h${String(d.getMinutes()).padStart(2, "0")}`;
   return `${fmtJourDate(d)} · ${heure}`;
 }
+
+/** Jour + date + heure, tournure « à » : `VEN 10.07.26 à 6h45`. Vide → « — ».
+ *  Utilisé pour le libellé « BL <n°> du … à … » du détail livraison. */
+export function fmtJourDateHeureA(input: DateLike): string {
+  const d = toDate(input);
+  if (!d) return "—";
+  const heure = `${d.getHours()}h${String(d.getMinutes()).padStart(2, "0")}`;
+  return `${fmtJourDate(d)} à ${heure}`;
+}
+
+/** Jour + date à ANNÉE PLEINE : `LUN 31.08.2026`. Vide → « — ».
+ *  Pour les modules où l'année complète est voulue (sélecteur de date livraison). */
+export function fmtJourDatePleine(input: DateLike): string {
+  const d = toDate(input);
+  if (!d) return "—";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${jourCourtFR(d)} ${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()}`;
+}

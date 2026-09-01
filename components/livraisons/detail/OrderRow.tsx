@@ -27,6 +27,7 @@ import { useBrandLogos } from "@/lib/useBrandLogos";
 import { displayPersonName } from "@/lib/userNames";
 import { broadcastActiveClient } from "@/lib/consoleSync";
 import { formatDeliveryDate } from "@/lib/livraison";
+import { fmtJourDateHeureA, fmtJourDatePleine } from "@/lib/date-fr";
 import { docTourneeKeyLabel, type StatusTab, type Tournee, type Doc } from "@/lib/livraisonView";
 import { consolidateDeliveryLines } from "@/lib/livraisonLines";
 import { printOrderRecap } from "../printRecap";
@@ -820,11 +821,12 @@ export const OrderRow = memo(function OrderRow({
           </div>
           <div className="flex items-center gap-2 mt-0.5 text-caption2 text-muted-foreground flex-wrap">
             <span className="font-mono text-foreground/60 hidden sm:inline">{doc.cardCode}</span>
-            <span><span className="hidden sm:inline">· </span>BL n°{doc.docNum}</span>
-            {/* Heure de PRISE de la commande dans le système (création SAP). */}
-            {fmtClock(doc.takenAt) && (
-              <span title={`Commande prise dans le système à ${fmtClock(doc.takenAt)}`}>· Prise {fmtClock(doc.takenAt)}</span>
-            )}
+            {/* Libellé BL complet : n° + jour/date/heure de PRISE (création SAP) —
+                « BL 24012636 du SAM 29.08.26 à 5h32 ». Sans date de prise → n° seul. */}
+            <span title="Bon de livraison (n° · prise dans le système)">
+              <span className="hidden sm:inline">· </span>BL {doc.docNum}
+              {doc.takenAt ? <span className="text-muted-foreground/80"> du {fmtJourDateHeureA(doc.takenAt)}</span> : null}
+            </span>
             {/* Total HT — chiffre commercial : masqué pour préparateur / livreur. */}
             {canDispatch && <span className="hidden sm:inline">· {fmtEur(doc.totalHT)} HT</span>}
           </div>
@@ -897,17 +899,22 @@ export const OrderRow = memo(function OrderRow({
               />
               {savingRef && <Loader2 className="pointer-events-none absolute right-1.5 h-3 w-3 animate-spin text-muted-foreground" />}
             </div>
-            {/* Date de livraison — modifiable directement ici */}
-            <div className="relative inline-flex items-center">
+            {/* Date de livraison — modifiable directement ici. La case affiche le
+                format lisible « LUN 31.08.2026 » (jour + date pleine) par-dessus un
+                <input type="date"> natif transparent (calendrier au clic). */}
+            <div
+              title={doc.open ? "Changer la date de livraison du BL" : "Commande livrée — date figée"}
+              className={`relative inline-flex h-7 items-center rounded-md border border-border bg-card pl-7 pr-2 text-caption font-medium uppercase tracking-wide tnum text-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-ring ${(savingDate || !doc.open) ? "opacity-60" : ""}`}
+            >
               <CalendarDays className="pointer-events-none absolute left-2 h-3 w-3 text-muted-foreground" />
+              <span className="whitespace-nowrap">{dueISO ? fmtJourDatePleine(dueISO) : "—"}</span>
               <input
                 type="date"
                 value={dueISO}
                 disabled={savingDate || !doc.open}
                 onChange={(e) => e.target.value && handleDate(e.target.value)}
-                title={doc.open ? "Changer la date de livraison du BL" : "Commande livrée — date figée"}
                 aria-label={`Date de livraison de la commande ${doc.docNum}`}
-                className="h-7 rounded-md border border-border bg-card pl-7 pr-2 text-caption font-medium text-foreground tnum focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60 disabled:cursor-not-allowed"
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
               />
               {savingDate && <Loader2 className="pointer-events-none absolute right-1.5 h-3 w-3 animate-spin text-muted-foreground" />}
             </div>
