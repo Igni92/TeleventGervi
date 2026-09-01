@@ -5,7 +5,7 @@ import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { FullscreenPanel } from "@/components/ui/fullscreen-panel";
-import { PurchaseOrderForm } from "./PurchaseOrderForm";
+import { PurchaseOrderEditor } from "./PurchaseOrderEditor";
 import { PurchaseOrderHistory } from "./PurchaseOrderHistory";
 
 /**
@@ -49,7 +49,7 @@ export function CommandesFournisseursWorkspace({ agreeurOnly }: { agreeurOnly: b
           subtitle="Engagement d'achat — création côté SAP"
         >
           <div className="mx-auto max-w-5xl">
-            <PurchaseOrderForm onCreated={() => { setOpen(false); setReload((n) => n + 1); }} />
+            <PurchaseOrderEditor po={null} onDone={() => { setOpen(false); setReload((n) => n + 1); }} />
           </div>
         </FullscreenPanel>
       )}
