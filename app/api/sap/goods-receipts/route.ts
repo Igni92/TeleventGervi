@@ -791,6 +791,27 @@ export async function GET(req: NextRequest) {
       : [];
     const pMap = new Map(products.map((p) => [p.itemCode, p]));
 
+    // ── Lien COMMANDE D'ACHAT : une EM créée depuis une CF porte BaseType 22 +
+    // BaseEntry (DocEntry de la commande) sur ses lignes. On résout le n° (docNum)
+    // via le miroir SapPurchaseOrder ; repli : « CF <n> » du commentaire de l'EM.
+    const poEntryOf = (d: SapPdnListed): number | null => {
+      for (const l of d.DocumentLines || []) {
+        if (Number(l.BaseType) === 22 && l.BaseEntry != null) return l.BaseEntry;
+      }
+      return null;
+    };
+    const poEntries = Array.from(
+      new Set(listed.map(poEntryOf).filter((x): x is number => x != null)),
+    );
+    const poNumByEntry = new Map<number, number>();
+    if (poEntries.length) {
+      const pos = await prisma.sapPurchaseOrder.findMany({
+        where: { docEntry: { in: poEntries } },
+        select: { docEntry: true, docNum: true },
+      });
+      for (const p of pos) if (p.docNum != null) poNumByEntry.set(p.docEntry, p.docNum);
+    }
+
     // Calibre (U_GER_CALIBRE) — pas synchronisé en local, lu EN DIRECT sur SAP
     // Items par lot (même repli que /api/livraisons : best-effort, jamais bloquant).
     const calibreByCode: Record<string, string> = {};
@@ -826,10 +847,18 @@ export async function GET(req: NextRequest) {
         const cancellationDoc = cancellationByBaseEntry.get(d.DocEntry);
         const cancelled = !isCancellation && (d.Cancelled === "tYES" || cancellationDoc != null);
         const cancelledByDocNum = cancellationDoc?.DocNum ?? null;
+        // Commande d'achat liée (null si EM manuelle). docNum via miroir, repli comment.
+        const poEntry = poEntryOf(d);
+        let po: { docEntry: number; docNum: number | null } | null = null;
+        if (poEntry != null) {
+          const m = (d.Comments ?? "").match(/CF\s*(\d+)/i);
+          po = { docEntry: poEntry, docNum: poNumByEntry.get(poEntry) ?? (m ? Number(m[1]) : null) };
+        }
         return {
           docEntry: d.DocEntry,
           docNum: d.DocNum,
           lot: `EM${d.DocNum}`,
+          po,
           docDate: d.DocDate,
           cardCode: d.CardCode,
           cardName: d.CardName,

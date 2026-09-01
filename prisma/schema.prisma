@@ -955,12 +955,17 @@ model SapPdnLine {
   lineTotal       Float   @default(0)
   warehouseCode   String?
   isService       Boolean @default(false)
+  // Document de base SAP (BaseType 22 = PurchaseOrder) → lie l'EM à sa commande
+  // d'achat. baseEntry = DocEntry de la commande. Sert au lien PO↔EM des écrans.
+  baseType        Int?
+  baseEntry       Int?
 
   pdn SapPurchaseDeliveryNote @relation(fields: [docEntry], references: [docEntry], onDelete: Cascade)
 
   @@unique([docEntry, lineNum])
   @@index([itemCode])
   @@index([isService])
+  @@index([baseType, baseEntry])
 }
 
 // Avoir client (CreditNote SAP) — annulation/correction d'une Invoice.
@@ -1046,6 +1051,8 @@ model SapPurchaseReturnLine {
   lineTotal       Float   @default(0) // positif = montant rendu au fournisseur
   warehouseCode   String?
   isService       Boolean @default(false)
+  baseType        Int? // colonne partagée du pull achats (PDN_LINE_COLS)
+  baseEntry       Int?
 
   purchaseReturn SapPurchaseReturn @relation(fields: [docEntry], references: [docEntry], onDelete: Cascade)
 

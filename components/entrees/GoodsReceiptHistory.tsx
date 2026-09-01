@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, ClipboardList, Search, ChevronRight,
@@ -41,6 +42,8 @@ type ReceiptLine = {
 };
 type Receipt = {
   docEntry: number; docNum: number; lot: string; docDate: string;
+  /** Commande d'achat liée (BaseType 22) — null si EM manuelle. */
+  po?: { docEntry: number; docNum: number | null } | null;
   cardCode: string; cardName?: string; numAtCard: string;
   editable?: boolean;
   // Annulations (SAP) : ce doc EST une annulation, ou la réception A ÉTÉ annulée.
@@ -282,6 +285,23 @@ function useDlcMap(
  *  `restricted` = agréeur « pur » : aucun prix visible ni éditable, pas de retour
  *  fournisseur ni d'annulation — consultation seule (l'agréage se fait à la
  *  réception d'une commande fournisseur). */
+/** Pastille « CF <n°> » de la commande d'achat liée — clic = ouvre la commande
+ *  (navigation vers Commandes fournisseurs). `stopPropagation` : ne pas ouvrir
+ *  aussi l'EM sous-jacente. Tiret atténué si EM manuelle (sans commande). */
+function CfLink({ po, onOpen }: { po?: { docEntry: number; docNum: number | null } | null; onOpen: (docEntry: number) => void }) {
+  if (!po) return <span className="text-muted-foreground/40 text-[12px]">—</span>;
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onOpen(po.docEntry); }}
+      title="Ouvrir la commande d'achat"
+      className="inline-flex items-center gap-1 rounded-md border border-violet-400/50 bg-violet-500/10 px-2 h-6 font-mono text-[11px] font-semibold text-violet-700 dark:text-violet-300 hover:bg-violet-500/20 transition-colors"
+    >
+      CF{po.docNum != null ? ` ${po.docNum}` : ""}
+    </button>
+  );
+}
+
 export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { restricted?: boolean; reloadSignal?: number }) {
   const [docs, setDocs] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(false);
@@ -324,6 +344,21 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Deep-link `?em=<docEntry>` : ouvre l'EM ciblée (venant d'un lien « EM … »
+  // cliqué depuis Commandes fournisseurs). N'ouvre que si elle est dans la fenêtre
+  // chargée (dernières 50). Ouvrir la CF liée : navigation vers son écran.
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const em = searchParams.get("em");
+    if (!em) return;
+    const entry = Number(em);
+    if (Number.isInteger(entry) && docs.some((d) => d.docEntry === entry)) setLargeEntry(entry);
+  }, [searchParams, docs]);
+  const openCf = useCallback((docEntry: number) => {
+    router.push(`/commandes-fournisseurs?cf=${docEntry}`);
+  }, [router]);
   // Rafraîchissement piloté par le parent (après création depuis la feuille).
   useEffect(() => { if (reloadSignal) load(); }, [reloadSignal, load]);
 
@@ -456,6 +491,7 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
                     <span className="inline-flex items-center gap-1.5 flex-wrap mt-1">
                       <CancelBadge d={d} />
                       {!isVoided(d) && <AgreageBadge a={agreages[d.docEntry]} />}
+                      {d.po && <CfLink po={d.po} onOpen={openCf} />}
                     </span>
                   </div>
                   <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
@@ -487,6 +523,7 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
                   <th className="text-left px-3 py-2 font-semibold w-24">N° EM</th>
                   <th className="text-left px-3 py-2 font-semibold">Fournisseur</th>
                   <th className="text-left px-3 py-2 font-semibold w-28">Date</th>
+                  <th className="text-left px-3 py-2 font-semibold w-32">Commande d&apos;achat</th>
                   {!restricted && <th className="text-right px-3 py-2 font-semibold w-32">Total HT</th>}
                   <th className="text-center px-3 py-2 font-semibold w-28">Agréage</th>
                   <th className="text-center px-3 py-2 font-semibold w-20">Incident</th>
@@ -523,6 +560,7 @@ export function GoodsReceiptHistory({ restricted = false, reloadSignal }: { rest
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-muted-foreground tnum">{fmtJourDate(d.docDate)}</td>
+                    <td className="px-3 py-2.5"><CfLink po={d.po} onOpen={openCf} /></td>
                     {!restricted && (
                       <td className="px-3 py-2.5 text-right tnum font-display font-bold text-[15px]">{eur(d.totalHT ?? 0)}</td>
                     )}

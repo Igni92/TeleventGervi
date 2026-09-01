@@ -179,6 +179,27 @@ export async function GET(req: NextRequest) {
       : [];
     const pMap = new Map(products.map((p) => [p.itemCode, p]));
 
+    // ── Lien ENTRÉE MARCHANDISE : les EM (PurchaseDeliveryNote) créées depuis ces
+    // commandes portent BaseType 22 + BaseEntry = DocEntry de la commande sur leurs
+    // lignes. Résolu DEPUIS LE MIROIR (SapPdnLine.baseEntry) — 0 appel SAP. Une
+    // commande peut avoir plusieurs EM (réceptions partielles) → tableau.
+    const poEntries = docs.map((d) => d.DocEntry);
+    const emByPo = new Map<number, { docEntry: number; docNum: number }[]>();
+    if (poEntries.length) {
+      const emLines = await prisma.sapPdnLine.findMany({
+        where: { baseType: 22, baseEntry: { in: poEntries } },
+        select: { baseEntry: true, pdn: { select: { docEntry: true, docNum: true, cancelled: true } } },
+      });
+      for (const el of emLines) {
+        if (el.baseEntry == null || !el.pdn || el.pdn.cancelled || el.pdn.docNum == null) continue;
+        const arr = emByPo.get(el.baseEntry) ?? [];
+        if (!arr.some((e) => e.docEntry === el.pdn!.docEntry)) {
+          arr.push({ docEntry: el.pdn.docEntry, docNum: el.pdn.docNum });
+        }
+        emByPo.set(el.baseEntry, arr);
+      }
+    }
+
     return NextResponse.json({
       db: process.env.SAP_B1_COMPANY_DB,
       count: docs.length,

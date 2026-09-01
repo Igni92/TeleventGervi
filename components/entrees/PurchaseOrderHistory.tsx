@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, PackageCheck, Search, ChevronRight, X, Truck, AlertTriangle,
@@ -38,6 +39,8 @@ type PurchaseOrder = {
   cancelled: boolean;
   total: number; totalTTC: number; totalHT: number; totalTVA: number;
   comments: string; lineCount: number; lines: PoLine[];
+  /** Entrées marchandise (PDN) créées depuis cette commande (réceptions). */
+  ems?: { docEntry: number; docNum: number }[];
 };
 
 /** Agréage porté par la réception (cf. lib/agreage) : conforme, ou avec réserve.
@@ -86,6 +89,28 @@ function DueBadge() {
   );
 }
 
+/** Pastille(s) « EM <n°> » de l'entrée marchandise liée — clic = ouvre l'EM
+ *  (navigation vers l'écran Entrées). `stopPropagation` : ne pas ouvrir aussi la
+ *  commande sous-jacente (la ligne est cliquable). Tiret atténué si aucune EM. */
+function EmLinks({ ems, onOpen }: { ems?: { docEntry: number; docNum: number }[]; onOpen: (docEntry: number) => void }) {
+  if (!ems || ems.length === 0) return <span className="text-muted-foreground/40 text-[12px]">—</span>;
+  return (
+    <span className="inline-flex flex-wrap gap-1">
+      {ems.map((em) => (
+        <button
+          key={em.docEntry}
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onOpen(em.docEntry); }}
+          title="Ouvrir l'entrée marchandise"
+          className="inline-flex items-center gap-1 rounded-md border border-emerald-400/50 bg-emerald-500/10 px-2 h-6 font-mono text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+        >
+          EM {em.docNum}
+        </button>
+      ))}
+    </span>
+  );
+}
+
 /** Liste des COMMANDES FOURNISSEURS (SAP PurchaseOrders) — lecture seule.
  *  `restricted` = agréeur « pur » : ne voit AUCUN prix, ne peut ni modifier ni
  *  annuler la commande — seulement la consulter et la passer en entrée
@@ -114,6 +139,22 @@ export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { res
   useEffect(() => { load(); }, [load]);
   // Rafraîchissement piloté par le parent (après création depuis la feuille).
   useEffect(() => { if (reloadSignal) load(); }, [reloadSignal, load]);
+
+  // Deep-link `?cf=<docEntry>` : ouvre directement la commande (venant d'un lien
+  // « CF … » cliqué depuis l'écran Entrées marchandises). Best-effort : n'ouvre
+  // que si la commande est dans la fenêtre chargée (dernières 40).
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const cf = searchParams.get("cf");
+    if (!cf) return;
+    const entry = Number(cf);
+    if (Number.isInteger(entry) && docs.some((d) => d.docEntry === entry)) setLargeEntry(entry);
+  }, [searchParams, docs]);
+
+  const openEm = useCallback((docEntry: number) => {
+    router.push(`/entrees?em=${docEntry}`);
+  }, [router]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -253,8 +294,9 @@ export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { res
                   <div className="text-[13px] text-foreground mt-0.5 tnum">
                     {fmtDate(d.dueDate)}{heure ? `  ${heure}` : ""}{creator ? ` par ${creator}` : ""}
                   </div>
-                  <div className="mt-1">
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
                     {isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}
+                    <EmLinks ems={d.ems} onOpen={openEm} />
                   </div>
                 </div>
                 <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
@@ -282,6 +324,7 @@ export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { res
                   <th className="text-left px-3 py-2 font-semibold">Fournisseur</th>
                   <th className="text-left px-3 py-2 font-semibold w-28">Livraison</th>
                   <th className="text-left px-3 py-2 font-semibold w-36">Statut</th>
+                  <th className="text-left px-3 py-2 font-semibold w-40">Entrée Marchandise</th>
                   {!restricted && <th className="text-right px-3 py-2 font-semibold w-32">Total HT</th>}
                   <th className="w-10" />
                 </tr>
@@ -311,6 +354,7 @@ export function PurchaseOrderHistory({ restricted = false, reloadSignal }: { res
                     </td>
                     <td className="px-3 py-2.5 tnum text-muted-foreground">{fmtDate(d.dueDate)}</td>
                     <td className="px-3 py-2.5">{isDue(d) ? <DueBadge /> : <StatusBadge open={d.open} cancelled={d.cancelled} />}</td>
+                    <td className="px-3 py-2.5"><EmLinks ems={d.ems} onOpen={openEm} /></td>
                     {!restricted && <td className="px-3 py-2.5 text-right tnum font-display font-bold text-[15px]">{eur(d.totalHT ?? 0)}</td>}
                     <td className="px-2 py-2.5 text-right"><ChevronRight className="h-4 w-4 text-muted-foreground/50 inline" /></td>
                   </tr>

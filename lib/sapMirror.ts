@@ -35,6 +35,8 @@ interface SapDocLine {
   GrossProfit?: number;
   WarehouseCode?: string;
   U_NoLot?: string;          // lot affecté à la ligne (EM<DocNum> / EM_PENDING)
+  BaseType?: number;         // type du doc de base (22 = PurchaseOrder pour un PDN)
+  BaseEntry?: number;        // DocEntry du doc de base (commande d'achat liée)
 }
 
 interface SapInvoiceDoc {
@@ -160,7 +162,7 @@ const PDN_HEADER_COLS = [
 ] as const;
 const PDN_LINE_COLS = [
   "docEntry", "lineNum", "itemCode", "itemDescription", "quantity",
-  "lineTotal", "warehouseCode",
+  "lineTotal", "warehouseCode", "baseType", "baseEntry",
 ] as const;
 
 interface MappedDoc {
@@ -680,10 +682,12 @@ async function pullPurchaseDocs(
     const upd = d.UpdateDate ? new Date(d.UpdateDate) : null;
     if (upd && (!maxUpdate || upd > maxUpdate)) maxUpdate = upd;
 
-    // Ordre = PDN_LINE_COLS
+    // Ordre = PDN_LINE_COLS. baseType/baseEntry : lien vers la commande d'achat
+    // (BaseType 22 = PurchaseOrder) — null si EM manuelle sans commande.
     const lines: unknown[][] = (d.DocumentLines ?? []).map((l) => [
       d.DocEntry, l.LineNum, l.ItemCode ?? null, l.ItemDescription ?? null,
       l.Quantity ?? 0, l.LineTotal ?? 0, l.WarehouseCode ?? null,
+      l.BaseType ?? null, l.BaseEntry ?? null,
     ]);
 
     // Ordre = PDN_HEADER_COLS
