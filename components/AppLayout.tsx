@@ -7,6 +7,7 @@ import { TabBar } from "@/components/TabBar";
 import { RolePreviewProvider } from "@/components/role-preview/RolePreviewProvider";
 import { RolePreviewBanner } from "@/components/role-preview/RolePreviewBanner";
 import { HoursValidationGate } from "@/components/effectifs/HoursValidationGate";
+import { ScrollProgress } from "@/components/core/scroll-progress";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -33,6 +34,8 @@ export async function AppLayout({ children }: AppLayoutProps) {
   return (
     <RolePreviewProvider canPreview={canPreview}>
       <div className="min-h-screen flex transition-colors duration-300">
+        {/* Progression de défilement — barre fine fixée en haut du viewport. */}
+        <ScrollProgress className="fixed left-0 right-0 top-0 z-[60] h-0.5 bg-brand-500" />
         <Sidebar />
         {/* overflow-x-clip : garde-fou anti-débordement horizontal (notamment en
             densité « Aéré » où l'échelle rem racine augmente). Les tableaux larges

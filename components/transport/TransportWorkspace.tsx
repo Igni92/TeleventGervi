@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Plus, Truck, RefreshCw, Trash2, AlertTriangle, Thermometer, PackageCheck, ArrowUp, ArrowDown, Download } from "lucide-react";
+import { Loader2, Plus, Truck, RefreshCw, Trash2, AlertTriangle, Thermometer, PackageCheck, ArrowUp, ArrowDown, Download, Check, ChevronDown } from "lucide-react";
+import { MorphingPopover, MorphingPopoverTrigger, MorphingPopoverContent } from "@/components/core/morphing-popover";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,14 +23,17 @@ type Expedition = {
   chauffeur?: Chauffeur | null;
 };
 
-/** Couleur pleine + libellé par statut (§Annexe A : cartouche colorée, texte blanc). */
-const STATUT_UI: Record<string, { bg: string; ring: string }> = {
-  A_PREPARER: { bg: "bg-rose-600 hover:bg-rose-500", ring: "ring-rose-300/40" },
-  PREPAREE: { bg: "bg-orange-500 hover:bg-orange-400", ring: "ring-orange-300/40" },
-  EXPEDIE: { bg: "bg-emerald-600 hover:bg-emerald-500", ring: "ring-emerald-300/40" },
-  LIVREE: { bg: "bg-sky-700 hover:bg-sky-600", ring: "ring-sky-300/40" },
-  INCIDENT: { bg: "bg-zinc-600 hover:bg-zinc-500", ring: "ring-zinc-300/40" },
+/** Tons DOUX par statut : accent latéral (barre) + pastille teintée (plus de
+ *  cartouche pleine agressive). Lisibles en clair comme en sombre. */
+const STATUT_TONE: Record<string, { accent: string; pill: string; dot: string }> = {
+  A_PREPARER: { accent: "bg-rose-500", pill: "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300", dot: "bg-rose-500" },
+  PREPAREE: { accent: "bg-orange-500", pill: "bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300", dot: "bg-orange-500" },
+  EXPEDIE: { accent: "bg-emerald-500", pill: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300", dot: "bg-emerald-500" },
+  LIVREE: { accent: "bg-sky-500", pill: "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300", dot: "bg-sky-500" },
+  INCIDENT: { accent: "bg-zinc-500", pill: "bg-zinc-200 text-zinc-700 dark:bg-zinc-500/20 dark:text-zinc-300", dot: "bg-zinc-500" },
 };
+/** Ordre d'affichage des statuts dans le sélecteur (popover). */
+const STATUT_ORDER = ["A_PREPARER", "PREPAREE", "EXPEDIE", "LIVREE", "INCIDENT"] as const;
 
 export function TransportWorkspace() {
   const [date, setDate] = useState(todayISO());
@@ -166,25 +170,33 @@ export function TransportWorkspace() {
 
   /** Réordonne une expédition dans son canal (échange l'ordre avec le voisin). */
   const reorder = async (exp: Expedition, dir: -1 | 1) => {
-    const sameCanal = exps.filter((x) => x.canal === exp.canal).sort((a, b) => a.ordre - b.ordre);
-    const i = sameCanal.findIndex((x) => x.id === exp.id);
+    // Ordre de passage courant du canal (index séquentiels 0..n, tri stable).
+    const seq = exps.filter((x) => x.canal === exp.canal)
+      .sort((a, b) => a.ordre - b.ordre || a.refSuivi.localeCompare(b.refSuivi));
+    const i = seq.findIndex((x) => x.id === exp.id);
     const j = i + dir;
-    if (i < 0 || j < 0 || j >= sameCanal.length) return;
-    const a = sameCanal[i], b = sameCanal[j];
-    // Ordres distincts garantis : on repose des index séquentiels sur le canal.
-    const reindexed = sameCanal.map((x, k) => ({ id: x.id, ordre: k }));
-    const oa = reindexed.find((r) => r.id === a.id)!, ob = reindexed.find((r) => r.id === b.id)!;
-    [oa.ordre, ob.ordre] = [ob.ordre, oa.ordre];
-    setExps((cur) => cur.map((x) => { const r = reindexed.find((z) => z.id === x.id); return r ? { ...x, ordre: r.ordre } : x; }));
-    await Promise.all([
-      fetch(`/api/transport/expeditions/${a.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ordre: oa.ordre }) }),
-      fetch(`/api/transport/expeditions/${b.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ordre: ob.ordre }) }),
-    ]).catch(() => load());
+    if (i < 0 || j < 0 || j >= seq.length) return;
+    [seq[i], seq[j]] = [seq[j], seq[i]];
+    // On repose des ordres canoniques 0..n → arrows toujours fiables, ordres distincts.
+    const next = new Map(seq.map((x, k) => [x.id, k]));
+    setExps((cur) => cur.map((x) => (next.has(x.id) ? { ...x, ordre: next.get(x.id)! } : x)));
+    // Persiste uniquement les cartes dont l'ordre change réellement.
+    await Promise.all(
+      seq.filter((x) => x.ordre !== next.get(x.id)).map((x) =>
+        fetch(`/api/transport/expeditions/${x.id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ordre: next.get(x.id) }),
+        }),
+      ),
+    ).catch(() => load());
   };
 
   const byCanal = useMemo(() => {
     const m: Record<string, Expedition[]> = { EXPORT: [], GMS: [], DIRECT: [] };
     for (const x of exps) (m[x.canal] ?? (m[x.canal] = [])).push(x);
+    // Tri par ordre de passage (sinon les flèches ↑/↓ modifient `ordre` sans
+    // déplacer la carte, qui suivait l'ordre d'insertion du tableau).
+    for (const k of Object.keys(m)) m[k].sort((a, b) => a.ordre - b.ordre || a.refSuivi.localeCompare(b.refSuivi));
     return m;
   }, [exps]);
 
@@ -327,79 +339,127 @@ export function TransportWorkspace() {
   );
 }
 
-/** Cartouche d'expédition — le corps est un bouton (clic = étape suivante). Les
- *  contrôles secondaires (T°C, chauffeur, incident, suppr.) stoppent la propagation. */
+/** Carte d'expédition — surface DOUCE (plus de cartouche pleine agressive) :
+ *  accent latéral coloré, pastille de statut teintée. Un clic sur le corps fait
+ *  avancer le statut ; la pastille ouvre un MorphingPopover pour choisir n'importe
+ *  quel statut. Les contrôles secondaires stoppent la propagation. */
 function ExpeditionCard({ x, chauffeurs, onAdvance, onPatch, onRemove, onReorder }: {
   x: Expedition; chauffeurs: Chauffeur[];
   onAdvance: () => void; onPatch: (b: Record<string, unknown>) => void; onRemove: () => void;
   onReorder: (dir: -1 | 1) => void;
 }) {
-  const ui = STATUT_UI[x.statut] ?? STATUT_UI.A_PREPARER;
+  const tone = STATUT_TONE[x.statut] ?? STATUT_TONE.A_PREPARER;
   const [temp, setTemp] = useState<number | null>(x.tempChargement);
+  const [statutOpen, setStatutOpen] = useState(false);
   useEffect(() => { setTemp(x.tempChargement); }, [x.tempChargement]);
   const stop = (e: React.MouseEvent) => e.stopPropagation();
 
+  const pickStatut = (s: string) => {
+    setStatutOpen(false);
+    if (s === x.statut) return;
+    if (s === "INCIDENT") {
+      const note = window.prompt("Motif de l'incident :", x.observations ?? "");
+      if (note == null) return;
+      onPatch({ statut: "INCIDENT", observations: note });
+    } else {
+      onPatch({ statut: s });
+    }
+  };
+
   return (
-    <div className={`rounded-2xl text-white shadow-card transition-colors ${ui.bg}`}>
-      {/* Corps cliquable — avance le statut */}
-      <button type="button" onClick={onAdvance} className="w-full text-left p-3.5 rounded-t-2xl focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white/50">
+    <div className="relative overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
+      <span className={`absolute left-0 inset-y-0 w-1 ${tone.accent}`} aria-hidden />
+
+      {/* Corps — clic = étape suivante du cycle */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onAdvance}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onAdvance(); } }}
+        title="Cliquer pour faire avancer le statut"
+        className="cursor-pointer pl-4 pr-3 pt-3.5 pb-3 rounded-t-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40"
+      >
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="text-[16px] font-bold leading-tight truncate">{x.clientNom}</div>
-            <div className="text-[12px] text-white/85 mt-0.5 tnum">
+            <div className="text-[16px] font-bold leading-tight truncate text-foreground">{x.clientNom}</div>
+            <div className="text-[12px] text-muted-foreground mt-0.5 tnum">
               {x.numCommande ? <>BL {x.numCommande}</> : "—"}
               {x.colis != null && x.colis > 0 ? ` · ${x.colis} colis` : ""}
               {x.poidsKg != null && x.poidsKg > 0 ? ` · ${Math.round(x.poidsKg)} kg` : ""}
             </div>
-            {x.creneau && <div className="text-[11px] text-white/80 mt-0.5">Créneau {x.creneau}</div>}
+            {x.creneau && <div className="text-[11px] text-muted-foreground mt-0.5">Créneau {x.creneau}</div>}
           </div>
-          <div className="text-right shrink-0">
-            <div className="text-[12px] font-bold uppercase whitespace-nowrap">{STATUT_LABEL[x.statut]}</div>
-            <div className="text-[10px] text-white/70 font-mono mt-0.5 whitespace-nowrap">{x.refSuivi}</div>
+          {/* Sélecteur de statut — MorphingPopover (contrôlé pour fermer à la sélection) */}
+          <div className="shrink-0 text-right" onClick={stop}>
+            <MorphingPopover open={statutOpen} onOpenChange={setStatutOpen}>
+              <MorphingPopoverTrigger
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold transition-colors ${tone.pill}`}
+                title="Changer le statut"
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
+                <span className="uppercase tracking-wide">{STATUT_LABEL[x.statut]}</span>
+                <ChevronDown className="h-3 w-3 opacity-70" />
+              </MorphingPopoverTrigger>
+              <MorphingPopoverContent className="right-0 w-56 p-1.5">
+                <p className="px-2 pt-1 pb-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Statut de l&apos;expédition</p>
+                <div className="space-y-0.5">
+                  {STATUT_ORDER.map((s) => {
+                    const t = STATUT_TONE[s];
+                    const active = s === x.statut;
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => pickStatut(s)}
+                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] text-left transition-colors hover:bg-secondary ${active ? "bg-secondary/70 font-semibold" : ""}`}
+                      >
+                        <span className={`h-2 w-2 rounded-full ${t.dot}`} />
+                        <span className="flex-1 text-foreground">{STATUT_LABEL[s]}</span>
+                        {active && <Check className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </MorphingPopoverContent>
+            </MorphingPopover>
+            <div className="text-[10px] text-muted-foreground font-mono mt-1 whitespace-nowrap">{x.refSuivi}</div>
           </div>
         </div>
-      </button>
+      </div>
 
-      {/* Barre de contrôles — 2 rangées, grandes cibles tactiles (tablette/quai).
-          Rangée 1 : chauffeur (pleine largeur). Rangée 2 : T°C + ordre + incident +
-          suppression. stopPropagation pour ne pas avancer le statut. */}
-      <div className="rounded-b-2xl bg-black/15 px-2.5 py-2 space-y-2" onClick={stop}>
-        {/* Chauffeur */}
+      {/* Contrôles — chauffeur (pleine largeur) puis T°C + ordre + incident + suppr. */}
+      <div className="border-t border-border/70 px-3 py-2 space-y-2" onClick={stop}>
         <select
           value={x.chauffeurId ?? ""}
           onChange={(e) => onPatch({ chauffeurId: e.target.value || null })}
-          className="h-10 w-full rounded-md border border-white/30 bg-white/10 px-2 text-[13px] text-white [&>option]:text-foreground"
+          className="h-10 w-full rounded-md border border-input bg-background px-2 text-[13px] text-foreground"
           title="Chauffeur affecté"
         >
           <option value="">Chauffeur…</option>
           {chauffeurs.map((c) => <option key={c.id} value={c.id}>{c.nom}{c.societe ? ` (${c.societe})` : ""}</option>)}
         </select>
         <div className="flex items-center gap-2">
-          {/* Température au chargement */}
           <span className="inline-flex items-center gap-1.5 flex-1 min-w-0" title="Température au chargement (°C)">
-            <Thermometer className="h-4 w-4 shrink-0 text-white/80" />
+            <Thermometer className="h-4 w-4 shrink-0 text-muted-foreground" />
             <NumberInput value={temp} onValueChange={setTemp} onBlur={() => { if (temp !== x.tempChargement) onPatch({ tempChargement: temp }); }}
               step={0.1} decimals={1} allowEmpty placeholder="°C"
-              className="h-10 w-full min-w-0 text-right bg-white/10 border-white/30 text-white placeholder:text-white/60" />
+              className="h-10 w-full min-w-0 text-right" />
           </span>
-          {/* Ordre de passage */}
           <button type="button" title="Monter dans l'ordre de passage" onClick={() => onReorder(-1)}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-white/30 bg-white/10 hover:bg-white/20 active:scale-95">
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-secondary hover:text-foreground active:scale-95">
             <ArrowUp className="h-4 w-4" />
           </button>
           <button type="button" title="Descendre dans l'ordre de passage" onClick={() => onReorder(1)}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-white/30 bg-white/10 hover:bg-white/20 active:scale-95">
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-secondary hover:text-foreground active:scale-95">
             <ArrowDown className="h-4 w-4" />
           </button>
-          {/* Incident */}
           <button type="button" title="Signaler un incident"
             onClick={() => { if (x.statut !== "INCIDENT") { const note = window.prompt("Motif de l'incident :", x.observations ?? ""); if (note != null) onPatch({ statut: "INCIDENT", observations: note }); } else { onPatch({ statut: "A_PREPARER" }); } }}
-            className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-white/30 active:scale-95 ${x.statut === "INCIDENT" ? "bg-white/25" : "bg-white/10 hover:bg-white/20"}`}>
+            className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border active:scale-95 ${x.statut === "INCIDENT" ? "border-amber-300 bg-amber-100 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300" : "border-border bg-background text-muted-foreground hover:bg-secondary hover:text-foreground"}`}>
             <AlertTriangle className="h-4 w-4" />
           </button>
-          {/* Supprimer */}
           <button type="button" title="Supprimer" onClick={onRemove}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-white/30 bg-white/10 hover:bg-white/20 active:scale-95">
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 dark:hover:bg-rose-500/10 dark:hover:text-rose-300 active:scale-95">
             <Trash2 className="h-4 w-4" />
           </button>
         </div>

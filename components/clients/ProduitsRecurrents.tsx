@@ -71,7 +71,8 @@ export function ProduitsRecurrents({ clientId }: { clientId: string }) {
             Articles les plus souvent commandés — classés par fréquence puis volume
             (historique facturé).
           </p>
-          <table className="w-full text-[12px]">
+          <div className="overflow-x-auto -mx-1 px-1">
+          <table className="w-full text-[12px] min-w-[340px]">
             <thead>
               <tr className="text-[10.5px] uppercase tracking-[0.08em] text-muted-foreground border-b border-border">
                 <th className="text-left font-medium pb-1.5">Article</th>
@@ -97,6 +98,7 @@ export function ProduitsRecurrents({ clientId }: { clientId: string }) {
               ))}
             </tbody>
           </table>
+          </div>
         </>
       )}
     </SectionCard>
