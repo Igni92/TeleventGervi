@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Search, Trash2 } from "lucide-react";
+import { Loader2, Search, Trash2, CornerDownLeft } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
@@ -134,6 +134,12 @@ export function SupplierPicker({ value, onChange }: {
   const [active, setActive] = useState(0);              // index surligné (navigation clavier)
   const debounced = useDebounced(query, 220);
   const boxRef = useClickOutside<HTMLDivElement>(() => setOpen(false));
+  const listRef = useRef<HTMLUListElement>(null);
+  // Fait défiler l'élément sélectionné au clavier dans la vue (sinon la sélection
+  // sous le pli n'était pas visible).
+  useEffect(() => {
+    if (open) listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [active, open]);
 
   useEffect(() => {
     let cancel = false;
@@ -186,17 +192,29 @@ export function SupplierPicker({ value, onChange }: {
       />
       {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
       {open && results.length > 0 && (
-        <ul className="absolute z-10 mt-1 w-full rounded-lg border border-border bg-popover shadow-modal max-h-72 overflow-auto">
+        <ul ref={listRef} className="absolute z-10 mt-1 w-full rounded-lg border border-border bg-popover shadow-modal max-h-72 overflow-auto">
           {results.map((s, idx) => (
             <li key={s.cardCode}>
               <button
                 type="button"
                 onMouseEnter={() => setActive(idx)}
                 onClick={() => { onChange(s); setQuery(""); setOpen(false); }}
-                className={`w-full text-left px-3 py-2 transition-colors ${idx === active ? "bg-secondary/70" : "hover:bg-secondary/60"}`}
+                aria-selected={idx === active}
+                className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 border-l-[3px] transition-colors ${
+                  idx === active
+                    ? "border-brand-500 bg-brand-500/12 ring-1 ring-inset ring-brand-500/40"
+                    : "border-transparent hover:bg-secondary/50"
+                }`}
               >
-                <div className="text-body font-medium">{s.cardName}</div>
-                <div className="text-caption text-muted-foreground font-mono">{s.cardCode}</div>
+                <span className="min-w-0">
+                  <span className={`block text-body ${idx === active ? "font-semibold text-foreground" : "font-medium"}`}>{s.cardName}</span>
+                  <span className="block text-caption text-muted-foreground font-mono">{s.cardCode}</span>
+                </span>
+                {idx === active && (
+                  <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold text-brand-600 dark:text-brand-400">
+                    <CornerDownLeft className="h-3.5 w-3.5" /> Entrée
+                  </span>
+                )}
               </button>
             </li>
           ))}
@@ -216,6 +234,10 @@ export function ProductPicker({ onPick }: { onPick: (p: ProductHit) => void }) {
   const debounced = useDebounced(query, 220);
   const inputRef = useRef<HTMLInputElement>(null);
   const boxRef = useClickOutside<HTMLDivElement>(() => setOpen(false));
+  const listRef = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    if (open) listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [active, open]);
 
   useEffect(() => {
     let cancel = false;
@@ -260,19 +282,31 @@ export function ProductPicker({ onPick }: { onPick: (p: ProductHit) => void }) {
       />
       {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />}
       {open && results.length > 0 && (
-        <ul className="absolute z-10 mt-1 w-full rounded-lg border border-border bg-popover shadow-modal max-h-72 overflow-auto">
+        <ul ref={listRef} className="absolute z-10 mt-1 w-full rounded-lg border border-border bg-popover shadow-modal max-h-72 overflow-auto">
           {results.map((p, idx) => (
             <li key={p.id}>
               <button
                 type="button"
                 onMouseEnter={() => setActive(idx)}
                 onClick={() => pick(p)}
-                className={`w-full text-left px-3 py-2 transition-colors ${idx === active ? "bg-secondary/70" : "hover:bg-secondary/60"}`}
+                aria-selected={idx === active}
+                className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 border-l-[3px] transition-colors ${
+                  idx === active
+                    ? "border-brand-500 bg-brand-500/12 ring-1 ring-inset ring-brand-500/40"
+                    : "border-transparent hover:bg-secondary/50"
+                }`}
               >
-                <div className="text-body font-medium truncate">
-                  {[p.itemName, p.uMarque, p.uCondi, p.uPays].filter((x) => x && x.trim() && x.trim() !== "-").join(" · ")}
-                </div>
-                <div className="text-caption text-muted-foreground font-mono">{p.itemCode}</div>
+                <span className="min-w-0">
+                  <span className={`block text-body truncate ${idx === active ? "font-semibold text-foreground" : "font-medium"}`}>
+                    {[p.itemName, p.uMarque, p.uCondi, p.uPays].filter((x) => x && x.trim() && x.trim() !== "-").join(" · ")}
+                  </span>
+                  <span className="block text-caption text-muted-foreground font-mono">{p.itemCode}</span>
+                </span>
+                {idx === active && (
+                  <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-semibold text-brand-600 dark:text-brand-400">
+                    <CornerDownLeft className="h-3.5 w-3.5" /> Entrée
+                  </span>
+                )}
               </button>
             </li>
           ))}
