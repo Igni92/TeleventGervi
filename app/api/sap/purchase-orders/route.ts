@@ -4,6 +4,7 @@ import { docRef } from "@/lib/docLabel";
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { isAgreeur, requirePreparateurOrAdmin } from "@/lib/permissions";
+import { swr, bustCache } from "@/lib/swrCache";
 
 // Route interrogeant SAP / agrégeant beaucoup de données : sans plafond explicite,
 // un backend lent dépassait la durée par défaut de la fonction, qui mourait SANS
@@ -103,6 +104,7 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       console.warn("[PurchaseOrder] PATCH référence CF échoué (non-bloquant):", e instanceof Error ? e.message : String(e));
     }
+    bustCache("po:"); // la nouvelle CF doit apparaître au prochain chargement de la liste
     return NextResponse.json({ ok: true, docNum: created.DocNum, docEntry: created.DocEntry });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
@@ -158,6 +160,11 @@ export async function GET(req: NextRequest) {
     // quel que soit $top, donc l'historique des commandes fournisseurs n'affichait
     // au plus que 20 CF et le `count` renvoyé était faux. getAll pose Prefer (page
     // 500) : $top=`last` (≤50) redevient la vraie limite.
+    // Cache stale-while-revalidate : après le 1er chargement, les suivants sont
+    // instantanés (les commandes fournisseur sont de la consultation ; la création
+    // vide le cache via bustCache). Clé = env + `last` + droits prix (agréeur).
+    const cacheKey = `po:${process.env.SAP_B1_COMPANY_DB}:${last}:${priceBlind ? 1 : 0}`;
+    const payload = await swr(cacheKey, 45_000, async () => {
     const docs = await sap.getAll<SapPoListed>(
       `PurchaseOrders?$top=${last}&$orderby=DocEntry desc`
       + `&$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,NumAtCard,DocTotal,VatSum,Comments,DocumentStatus,Cancelled,DocumentLines`,
@@ -200,7 +207,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({
+    return {
       db: process.env.SAP_B1_COMPANY_DB,
       count: docs.length,
       docs: docs.map((d) => {
@@ -253,7 +260,9 @@ export async function GET(req: NextRequest) {
           }),
         };
       }),
+    };
     });
+    return NextResponse.json(payload);
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }

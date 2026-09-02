@@ -10,6 +10,7 @@ import { buildWhsBudget, remainingForItem, pickReceiptWarehouse, consumeBudget }
 import { normalizeEmAffect, setEmAffect } from "@/lib/emAffect";
 import { creditLots, debitLots } from "@/lib/lotLedger";
 import { setMarchandiseNote, sanitizeRating } from "@/lib/marchandiseNote";
+import { swr, bustCache } from "@/lib/swrCache";
 import { convertQuotationToOrder } from "@/lib/quotationConvert";
 import { isDepartureReached } from "@/lib/livraison";
 
@@ -654,6 +655,7 @@ export async function POST(req: NextRequest) {
     console.warn("[GoodsReceipt] incrementLocalStock échoué (non-bloquant):", (e as Error).message);
   }
 
+  bustCache("em:"); // nouvelle EM → visible immédiatement dans l'historique
   return NextResponse.json({
     ok: true,
     docNum: created.DocNum,
@@ -717,6 +719,11 @@ export async function GET(req: NextRequest) {
     // quel que soit $top, donc l'historique n'affichait au plus que 20 EM et le
     // `count` renvoyé était faux (20 = plafond, pas le vrai nombre demandé). getAll
     // pose Prefer (page 500) : $top=`last` (≤50) redevient la vraie limite.
+    // Cache stale-while-revalidate : l'historique EM agrège plusieurs appels SAP
+    // (PDN + retours) → après le 1er chargement les suivants sont instantanés,
+    // revalidation en fond. La création/annulation vide le cache (bustCache).
+    const cacheKey = `em:${process.env.SAP_B1_COMPANY_DB}:${last}:${priceBlind ? 1 : 0}`;
+    const payload = await swr(cacheKey, 45_000, async () => {
     const docs = await sap.getAll<SapPdnListed>(
       `PurchaseDeliveryNotes?$top=${last}&$orderby=DocEntry desc`
       + `&$select=DocEntry,DocNum,DocDate,CardCode,CardName,NumAtCard,DocTotal,VatSum,Comments,DocumentStatus,Cancelled,DocumentLines`,
@@ -822,7 +829,7 @@ export async function GET(req: NextRequest) {
       if (c) calibreByCode[p.itemCode] = c;
     }
 
-    return NextResponse.json({
+    return {
       db: process.env.SAP_B1_COMPANY_DB,
       count: listed.length,
       docs: listed.map((d) => {
@@ -896,7 +903,9 @@ export async function GET(req: NextRequest) {
           }),
         };
       }),
+    };
     });
+    return NextResponse.json(payload);
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
@@ -927,6 +936,7 @@ export async function PATCH(req: NextRequest) {
 
   try {
     await sap.patch(`PurchaseDeliveryNotes(${docEntry})`, { NumAtCard: numAtCard });
+    bustCache("em:"); // n° BL modifié → rafraîchir l'historique
     return NextResponse.json({ ok: true, numAtCard });
   } catch (e) {
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 });
