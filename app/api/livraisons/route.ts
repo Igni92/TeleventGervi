@@ -12,6 +12,8 @@ import { getClientTrclCarriers } from "@/lib/clientCarriers";
 import { isLivraisonRestricted } from "@/lib/permissions";
 import { isDelanchyCarrierCode } from "@/lib/carrierTariff";
 import { getFeuilleSentMany } from "@/lib/carrierInfo";
+import { swr } from "@/lib/swrCache";
+import { isCronAuthorized } from "@/lib/cronAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -75,12 +77,15 @@ function sapCreationISO(date?: string, time?: string | number | null): string | 
  *   affecté » en dernier).
  */
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  // Réchauffage machine (cron) : self-fetch de la date par défaut pour peupler le
+  // cache des commandes du jour (SAP live) — le cron paie, jamais l'humain.
+  const cron = isCronAuthorized(req);
+  const session = cron ? null : await auth();
+  if (!cron && !session) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   // Rôles à accès restreint (préparateur verrouillé, livreur) : le CA (totalHT /
   // totalTTC) est un chiffre commercial — masqué CÔTÉ SERVEUR, pas seulement
   // dans l'UI (canDispatch), sinon il reste lisible en appelant l'API.
-  const restricted = await isLivraisonRestricted(session);
+  const restricted = cron ? false : await isLivraisonRestricted(session);
 
   const { searchParams } = new URL(req.url);
   const isISO = (s: string | null) => /^\d{4}-\d{2}-\d{2}$/.test(s ?? "");
@@ -177,8 +182,19 @@ export async function GET(req: NextRequest) {
 
     // Commandes du jour ciblé (DocDueDate) + statuts manuels (misEnPrep, faite,
     // départ, avoir…) — indépendants l'un de l'autre → chargés EN PARALLÈLE.
+    //
+    // Le fetch SAP LIVE des commandes du jour est le SEUL coût lourd de l'écran
+    // (le reste est miroir/prisma). On l'enveloppe dans un cache
+    // stale-while-revalidate (clé = env + filtre du jour) : 1er accès froid mis à
+    // part (couvert par le warm cron), les ouvertures suivantes sont instantanées
+    // — un jeu de commandes périmé est rendu tout de suite puis rafraîchi en fond.
+    // IMPORTANT : SEULES les commandes brutes sont cachées ; les STATUTS
+    // (fait/départ/mis en prépa), le STOCK, les AVOIRS et le CA sont recalculés
+    // FRAIS à chaque requête (plus bas) → un clic « fait » ou une rupture de stock
+    // n'est jamais périmé. Le CA restreint est masqué en aval, donc cacher les
+    // totaux bruts ne fuite rien.
     const [dayOrders, statuses] = await Promise.all([
-      fetchOrders(filterExpr),
+      swr(`livraisons:orders:${process.env.SAP_B1_COMPANY_DB}:${filterExpr}`, 60_000, () => fetchOrders(filterExpr)),
       getDeliveryStatuses(),
     ]);
     const orders: SapOrderListed[] = dayOrders;

@@ -205,6 +205,10 @@ async function runMirrorSync() {
       "/api/pilotage/stores",
       "/api/pilotage/geo",
       "/api/pilotage/activity/weekly",
+      // Écran « Expéditions » (livraisons du jour) : le fetch SAP live des commandes
+      // du jour par défaut (nextDeliveryDate) est réchauffé ici → 1er clic instantané.
+      // Le cache est stale-while-revalidate : ce warm suffit à le tenir chaud.
+      "/api/livraisons?carryover=1",
     ]);
     // ENCOURS : SAP LIVE (~15 s à froid), fraîcheur liée aux PAIEMENTS (qui ne
     // créent pas de doc) → on force le recalcul CHAQUE tick (?refresh=1). Le TTL

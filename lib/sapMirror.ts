@@ -19,6 +19,7 @@
 import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { invalidate } from "@/lib/ttlCache";
+import { bustCache } from "@/lib/swrCache";
 import { monthlySlicesDesc } from "@/lib/sync-slices";
 
 // ─────────────────────────────────────────────────────────────────
@@ -613,6 +614,9 @@ export async function mirrorCreatedOrder(order: CreatedOrderForMirror): Promise<
 
   // Rafraîchit les agrégats pilotage (KPI du jour) sans attendre le TTL 5 min.
   invalidate("pilotage:");
+  // …et le cache des commandes du jour (écran Expéditions) → la nouvelle commande
+  // apparaît immédiatement, sans attendre le TTL stale-while-revalidate.
+  bustCache("livraisons:orders:");
 }
 
 /**
@@ -628,6 +632,7 @@ export async function mirrorCancelOrder(docEntry: number): Promise<void> {
     data: { cancelled: true, syncedAt: new Date() },
   });
   invalidate("pilotage:");
+  bustCache("livraisons:orders:"); // la commande annulée disparaît tout de suite de l'écran Expéditions
 }
 
 // ─────────────────────────────────────────────────────────────────
