@@ -14,6 +14,7 @@ import { isDelanchyCarrierCode } from "@/lib/carrierTariff";
 import { getFeuilleSentMany } from "@/lib/carrierInfo";
 import { swr } from "@/lib/swrCache";
 import { isCronAuthorized } from "@/lib/cronAuth";
+import { sapCreationISO } from "@/lib/sapTime";
 
 export const dynamic = "force-dynamic";
 
@@ -40,26 +41,6 @@ export const maxDuration = 60;
  * selon la version du Service Layer. Sans heure exploitable → null (une date
  * seule n'apporte rien à l'affichage « Prise · HH:MM »).
  */
-function sapCreationISO(date?: string, time?: string | number | null): string | null {
-  const day = (date ?? "").slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
-  let hh: number, mm: number;
-  const t = time ?? "";
-  if (typeof t === "string" && /^\d{1,2}:\d{2}/.test(t)) {
-    const [h, m] = t.split(":");
-    hh = Number(h); mm = Number(m);
-  } else if (String(t).trim() !== "" && Number.isFinite(Number(t))) {
-    const n = Number(t);
-    hh = Math.floor(n / 100); mm = n % 100;
-  } else {
-    return null;
-  }
-  if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh > 23 || mm > 59) return null;
-  const p = (x: number) => String(x).padStart(2, "0");
-  // ISO SANS fuseau : l'heure SAP est locale (entrepôt) — new Date() la lit telle quelle.
-  return `${day}T${p(hh)}:${p(mm)}:00`;
-}
-
 /**
  * GET /api/livraisons?date=YYYY-MM-DD
  *
@@ -143,6 +124,8 @@ export async function GET(req: NextRequest) {
     CreationDate?: string;
     CreationTime?: string | number;
     DocTime?: string | number;
+    /** Précalculé côté miroir (source "mirror") — sinon dérivé de CreationDate/Time. */
+    takenAt?: string | null;
     DocumentLines?: ListedLine[];
   };
 
@@ -193,8 +176,79 @@ export async function GET(req: NextRequest) {
     // FRAIS à chaque requête (plus bas) → un clic « fait » ou une rupture de stock
     // n'est jamais périmé. Le CA restreint est masqué en aval, donc cacher les
     // totaux bruts ne fuite rien.
+    // Source des commandes : "mirror" (Postgres, instantané) ou "live" (SAP).
+    // Feature-flag LIVRAISONS_ORDERS_SOURCE (défaut "live") — bascule sûre, rollback
+    // = désactiver le flag (aucune donnée touchée). Le miroir reconstruit
+    // EXACTEMENT la forme SapOrderListed que le reste de la route consomme.
+    const ORDERS_SOURCE = process.env.LIVRAISONS_ORDERS_SOURCE ?? "live";
+
+    const dayOf = (d: Date | string) => (typeof d === "string" ? d : d.toISOString()).slice(0, 10);
+    const utcDay = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+    const nextUtcDay = (iso: string) => { const d = utcDay(iso); d.setUTCDate(d.getUTCDate() + 1); return d; };
+    const MIRROR_SELECT = {
+      docEntry: true, docNum: true, docDate: true, docDueDate: true, cardCode: true,
+      cardName: true, docTotal: true, vatSum: true, documentStatus: true, cancelled: true,
+      comments: true, numAtCard: true, trspCode: true, trspHeure: true, takenAt: true,
+      lines: {
+        select: { itemCode: true, itemDescription: true, quantity: true, warehouseCode: true, lineTotal: true, uNoLot: true, lineNum: true },
+        orderBy: { lineNum: "asc" as const },
+      },
+    } as const;
+    const mapMirrorRow = (r: {
+      docEntry: number; docNum: number | null; docDate: Date; docDueDate: Date | null;
+      cardCode: string; cardName: string | null; docTotal: number; vatSum: number;
+      documentStatus: string | null; cancelled: boolean; comments: string | null;
+      numAtCard: string | null; trspCode: string | null; trspHeure: string | null; takenAt: string | null;
+      lines: { itemCode: string | null; itemDescription: string | null; quantity: number;
+               warehouseCode: string | null; lineTotal: number; uNoLot: string | null; lineNum: number }[];
+    }): SapOrderListed => ({
+      DocEntry: r.docEntry,
+      DocNum: r.docNum ?? 0,
+      DocDate: dayOf(r.docDate),
+      DocDueDate: r.docDueDate ? dayOf(r.docDueDate) : "",
+      CardCode: r.cardCode,
+      CardName: r.cardName ?? undefined,
+      DocTotal: r.docTotal + r.vatSum, // miroir stocke HT → reconstruit TTC (math route inchangée)
+      VatSum: r.vatSum,
+      DocumentStatus: r.documentStatus ?? undefined, // null → open=true
+      Cancelled: r.cancelled ? "tYES" : "tNO",
+      Comments: r.comments ?? undefined,
+      NumAtCard: r.numAtCard ?? undefined,
+      U_TrspCode: r.trspCode ?? undefined,
+      U_TrspHeur: r.trspHeure ?? undefined,
+      takenAt: r.takenAt, // précalculé (byte-identique à sapCreationISO live)
+      DocumentLines: r.lines.map((l) => ({
+        ItemCode: l.itemCode ?? "",
+        ItemDescription: l.itemDescription ?? undefined,
+        Quantity: l.quantity,
+        WarehouseCode: l.warehouseCode ?? undefined,
+        LineTotal: l.lineTotal,
+        U_NoLot: l.uNoLot ?? undefined,
+      })),
+    });
+    const mirrorWhere =
+      mode === "entered" ? { docDate: { gte: utcDay(enteredParam as string), lt: nextUtcDay(enteredParam as string) } }
+      : mode === "range" ? { docDueDate: { gte: utcDay(fromParam as string), lt: nextUtcDay(toParam as string) } }
+      : { docDueDate: { gte: utcDay(date), lt: nextUtcDay(date) } };
+
+    // Miroir (défaut si flag) avec repli SAP live si le miroir est VIDE pour ce
+    // jour (sécurité R1 — jamais d'écran vide par erreur de population).
+    const loadDayOrders = async (): Promise<SapOrderListed[]> => {
+      if (ORDERS_SOURCE !== "mirror") return fetchOrders(filterExpr);
+      const rows = await prisma.sapOrder.findMany({
+        where: { ...mirrorWhere, cancelled: false },
+        orderBy: { cardName: "asc" },
+        select: MIRROR_SELECT,
+      });
+      if (rows.length === 0) return fetchOrders(filterExpr);
+      return rows.map(mapMirrorRow);
+    };
+
+    // Commandes du jour ciblé + statuts manuels — indépendants → EN PARALLÈLE.
+    // Cache stale-while-revalidate (clé inclut la SOURCE pour ne jamais mélanger
+    // un payload live et miroir). Statuts/stock/avoirs/CA recalculés FRAIS en aval.
     const [dayOrders, statuses] = await Promise.all([
-      swr(`livraisons:orders:${process.env.SAP_B1_COMPANY_DB}:${filterExpr}`, 60_000, () => fetchOrders(filterExpr)),
+      swr(`livraisons:orders:${process.env.SAP_B1_COMPANY_DB}:${ORDERS_SOURCE}:${filterExpr}`, 60_000, loadDayOrders),
       getDeliveryStatuses(),
     ]);
     const orders: SapOrderListed[] = dayOrders;
@@ -202,25 +256,32 @@ export async function GET(req: NextRequest) {
     // ── REPORT DE LA FILE DE PRÉPARATION (Détail livraison, mode « due ») ──
     // Une commande MISE EN PRÉPARATION par le commercial reste dans la file du
     // préparateur TANT QU'ELLE N'EST PAS FAITE : on la reporte dans la vue du jour
-    // même quand sa date de livraison (DocDueDate) n'y tombe pas — en RETARD (due
-    // un jour déjà passé, pas encore faite → reportée au lendemain) comme en
-    // AVANCE (mise en prépa le 10 pour une livraison le 15 → visible chaque jour
-    // d'ici là). Les commandes DÉJÀ dans la vue du jour sont ignorées (dédup).
+    // même quand sa date de livraison (DocDueDate) n'y tombe pas — en RETARD comme
+    // en AVANCE. Les commandes DÉJÀ dans la vue du jour sont ignorées (dédup).
     if (wantCarryover) {
       const present = new Set(orders.map((o) => o.DocEntry));
       const pending = selectCarryoverEntries(statuses, date, present);
       if (pending.length) {
-        // Garde-fou : la file en cours est petite, mais on plafonne le nombre de
-        // reports pour ne jamais inonder le Service Layer d'un filtre géant.
-        const list = pending.slice(0, 300);
-        const chunks: number[][] = [];
-        for (let i = 0; i < list.length; i += 20) chunks.push(list.slice(i, i + 20));
-        const extra = await Promise.all(
-          chunks.map((g) =>
-            fetchOrders(g.map((de) => `DocEntry eq ${de}`).join(" or ")).catch(() => [] as SapOrderListed[]),
-          ),
-        );
-        for (const o of extra.flat()) {
+        let extra: SapOrderListed[];
+        if (ORDERS_SOURCE === "mirror") {
+          // Le report existe TOUJOURS dans le miroir (récent, dans la fenêtre de pull).
+          const rows = await prisma.sapOrder.findMany({
+            where: { docEntry: { in: pending }, cancelled: false },
+            select: MIRROR_SELECT,
+          });
+          extra = rows.map(mapMirrorRow);
+        } else {
+          // Garde-fou live : plafond + chunks de 20 (filtre SL borné).
+          const list = pending.slice(0, 300);
+          const chunks: number[][] = [];
+          for (let i = 0; i < list.length; i += 20) chunks.push(list.slice(i, i + 20));
+          extra = (await Promise.all(
+            chunks.map((g) =>
+              fetchOrders(g.map((de) => `DocEntry eq ${de}`).join(" or ")).catch(() => [] as SapOrderListed[]),
+            ),
+          )).flat();
+        }
+        for (const o of extra) {
           if (!present.has(o.DocEntry)) { orders.push(o); present.add(o.DocEntry); }
         }
       }
@@ -442,8 +503,9 @@ export async function GET(req: NextRequest) {
         docNum: d.DocNum,
         docDate: d.DocDate,
         dueDate: d.DocDueDate,
-        // Heure de PRISE de la commande dans le système (création SAP).
-        takenAt: sapCreationISO(d.CreationDate, d.CreationTime ?? d.DocTime),
+        // Heure de PRISE de la commande. Source miroir → `takenAt` précalculé ;
+        // source live → dérivé de CreationDate/Time (repli identique).
+        takenAt: d.takenAt ?? sapCreationISO(d.CreationDate, d.CreationTime ?? d.DocTime),
         cardCode: d.CardCode,
         cardName: d.CardName ?? d.CardCode,
         // Nom complet (fiche client) pour les documents imprimés.

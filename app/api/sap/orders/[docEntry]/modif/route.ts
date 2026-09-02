@@ -346,7 +346,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ docEntry
     let refetched: Refetched | null = null;
     try {
       refetched = await sap.get<Refetched>(
-        `Orders(${docEntry})?$select=DocEntry,DocNum,DocDate,CardCode,CardName,DocTotal,VatSum,DocumentLines`,
+        `Orders(${docEntry})?$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,VatSum,U_TrspCode,DocumentStatus,Comments,NumAtCard,U_TrspHeur,CreationDate,CreationTime,DocumentLines`,
       );
     } catch { /* non bloquant */ }
 

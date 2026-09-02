@@ -704,7 +704,7 @@ export async function POST(req: NextRequest) {
     // on l'écrit au miroir, et on marque l'offre clôturée. Best-effort.
     try {
       const full = await sap.get<CreatedOrderForMirror>(
-        `Orders(${order.DocEntry})?$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,VatSum,UpdateDate,DocumentLines`,
+        `Orders(${order.DocEntry})?$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,VatSum,UpdateDate,U_TrspCode,DocumentStatus,Comments,NumAtCard,U_TrspHeur,CreationDate,CreationTime,DocumentLines`,
       );
       await mirrorCreatedOrder(full);
       await prisma.sapQuotation.updateMany({ where: { docEntry }, data: { documentStatus: "C", syncedAt: new Date() } });

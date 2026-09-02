@@ -879,20 +879,28 @@ model SapInvoiceLine {
 
 // Commande client (Orders) — vue commerciale (pas encore facturé).
 model SapOrder {
-  docEntry    Int       @id
-  docNum      Int?
-  docDate     DateTime
-  docDueDate  DateTime? // SAP DocDueDate (date de livraison prévue) — écran Livraisons
-  cardCode    String
-  cardName    String?
-  slpName     String?
-  docTotal    Float     @default(0)
-  vatSum      Float     @default(0)
-  grossProfit Float?
-  trspCode    String? // transporteur réel du BL (UDF U_TrspCode, MAJUSCULES)
-  cancelled   Boolean   @default(false)
-  updateDate  DateTime?
-  syncedAt    DateTime  @default(now())
+  docEntry       Int       @id
+  docNum         Int?
+  docDate        DateTime
+  docDueDate     DateTime? // SAP DocDueDate (date de livraison prévue) — écran Livraisons
+  cardCode       String
+  cardName       String?
+  slpName        String?
+  docTotal       Float     @default(0)
+  vatSum         Float     @default(0)
+  grossProfit    Float?
+  trspCode       String? // transporteur réel du BL (UDF U_TrspCode, MAJUSCULES)
+  // Champs ajoutés pour servir l'écran Expéditions/livraisons DEPUIS LE MIROIR
+  // (avant : lecture SAP live). Orders uniquement (SapInvoice/CreditNote ne les
+  // portent pas — cf. ORDER_HEADER_COLS forké dans lib/sapMirror).
+  documentStatus String? // SAP DocumentStatus (bost_Open / bost_Close) — null = ouvert
+  comments       String? // SAP Comments (affiché BL/récap)
+  numAtCard      String? // SAP NumAtCard (réf. client)
+  trspHeure      String? // UDF U_TrspHeur (heure de tournée) — parallèle à trspCode
+  takenAt        String? // ISO local SANS fuseau "YYYY-MM-DDTHH:MM:00" (Prise HH:MM), précalculé
+  cancelled      Boolean   @default(false)
+  updateDate     DateTime?
+  syncedAt       DateTime  @default(now())
 
   bp    SapBusinessPartner @relation(fields: [cardCode], references: [cardCode], onDelete: Cascade)
   lines SapOrderLine[]

@@ -214,7 +214,7 @@ export async function POST(req: NextRequest) {
   let enriched: CreatedOrderForMirror | null = null;
   try {
     enriched = await sap.get<CreatedOrderForMirror>(
-      `Orders(${created.DocEntry})?$select=DocEntry,DocNum,DocDate,CardCode,CardName,DocTotal,VatSum,DocumentLines`,
+      `Orders(${created.DocEntry})?$select=DocEntry,DocNum,DocDate,DocDueDate,CardCode,CardName,DocTotal,VatSum,U_TrspCode,DocumentStatus,Comments,NumAtCard,U_TrspHeur,CreationDate,CreationTime,DocumentLines`,
     );
     if (enriched?.DocEntry != null && enriched.DocDate && enriched.CardCode) await mirrorCreatedOrder(enriched);
   } catch (e) {

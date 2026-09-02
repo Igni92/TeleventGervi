@@ -20,6 +20,7 @@ import { prisma } from "@/lib/prisma";
 import { sap } from "@/lib/sapb1";
 import { invalidate } from "@/lib/ttlCache";
 import { bustCache } from "@/lib/swrCache";
+import { sapCreationISO } from "@/lib/sapTime";
 import { monthlySlicesDesc } from "@/lib/sync-slices";
 
 // ─────────────────────────────────────────────────────────────────
@@ -55,6 +56,14 @@ interface SapInvoiceDoc {
   UpdateDate?: string;
   /** Transporteur RÉEL du document (UDF livraison) — « par quoi ça a été livré ». */
   U_TrspCode?: string | null;
+  // ── Orders uniquement (écran Expéditions/livraisons depuis le miroir) ──
+  DocumentStatus?: string;         // bost_Open | bost_Close
+  Comments?: string;
+  NumAtCard?: string;
+  U_TrspHeur?: string | null;      // UDF heure tournée
+  CreationDate?: string;           // ISO date
+  CreationTime?: string | number;  // HHMM (absent selon version SL → sondé)
+  DocTime?: string | number;       // repli de CreationTime
   DocumentLines?: SapDocLine[];
 }
 
@@ -115,6 +124,29 @@ async function endpointHasTrspCode(endpoint: string): Promise<boolean> {
   return ok;
 }
 
+// Sonde générique d'un champ optionnel (mémorisée par endpoint:field). Sert aux
+// champs Orders version-dépendants (U_TrspHeur UDF, CreationTime/DocTime) — même
+// logique que le graduate-select de l'API livraisons : un champ absent dégrade en
+// NULL, ne casse jamais le sync.
+const fieldOk = new Map<string, boolean>();
+async function endpointHasField(endpoint: string, field: string): Promise<boolean> {
+  const key = `${endpoint}:${field}`;
+  const cached = fieldOk.get(key);
+  if (cached !== undefined) return cached;
+  let ok = false;
+  try {
+    await sap.getAll<{ DocEntry: number }>(
+      `${endpoint}?$select=DocEntry,${field}&$top=1`,
+      { pageSize: 1, maxPages: 1, env: "prod" },
+    );
+    ok = true;
+  } catch {
+    ok = false;
+  }
+  fieldOk.set(key, ok);
+  return ok;
+}
+
 // PDN n'a pas SalesPersonCode utile → select trimmed
 const SELECT_PDN_LINES =
   "$select=DocEntry,DocNum,DocDate,CardCode,CardName,DocTotal,Cancelled,UpdateDate,DocumentLines";
@@ -150,6 +182,13 @@ const SALES_HEADER_COLS = [
   "docEntry", "docNum", "docDate", "cardCode", "cardName", "slpName",
   "docTotal", "vatSum", "grossProfit", "cancelled", "updateDate", "trspCode",
   "docDueDate",
+] as const;
+// Orders porte 5 champs de plus (écran Expéditions/livraisons servi depuis le
+// miroir). Fork per-endpoint : NE PAS toucher SALES_HEADER_COLS, partagé avec
+// SapInvoice/SapCreditNote (qui n'ont pas ces colonnes).
+const ORDER_HEADER_COLS = [
+  ...SALES_HEADER_COLS,
+  "documentStatus", "comments", "numAtCard", "trspHeure", "takenAt",
 ] as const;
 const SALES_LINE_COLS = [
   "docEntry", "lineNum", "itemCode", "itemDescription", "quantity",
@@ -429,9 +468,20 @@ async function pullSalesDocs(
   // Transporteur réel : ajouté au $select seulement si l'entité le porte
   // (sonde mémorisée — cf. endpointHasTrspCode). Sinon, colonne à NULL.
   const hasTrsp = await endpointHasTrspCode(endpoint);
-  const select = hasTrsp
-    ? `$select=${COMMON_SELECT_DOC},U_TrspCode,DocumentLines`
-    : SELECT_DOC_LINES;
+  // Champs Orders-only pour l'écran Expéditions/livraisons. DocumentStatus/
+  // Comments/NumAtCard/CreationDate = standard SAP (sûrs). U_TrspHeur (UDF) +
+  // CreationTime/DocTime = version-dépendants → sondés. Fork isOrders : Invoices/
+  // CreditNotes gardent leur select inchangé (R3 : pas de 400 sur ces entités).
+  const isOrders = endpoint === "Orders";
+  const hasTrspHeur = isOrders && (await endpointHasField(endpoint, "U_TrspHeur"));
+  const hasCreaTime = isOrders && (await endpointHasField(endpoint, "CreationTime"));
+  const hasDocTime = isOrders && !hasCreaTime && (await endpointHasField(endpoint, "DocTime"));
+  const orderExtras = isOrders
+    ? ",DocumentStatus,Comments,NumAtCard,CreationDate"
+      + `${hasCreaTime ? ",CreationTime" : hasDocTime ? ",DocTime" : ""}`
+      + `${hasTrspHeur ? ",U_TrspHeur" : ""}`
+    : "";
+  const select = `$select=${COMMON_SELECT_DOC}${hasTrsp ? ",U_TrspCode" : ""}${orderExtras},DocumentLines`;
   const path = `${endpoint}?${select}${filter}&$orderby=DocEntry desc`;
 
   const docs = dedupeByDocEntry(
@@ -497,13 +547,23 @@ async function pullSalesDocs(
       // Échéance (livraison pour Order, paiement pour Invoice) — sert Livraisons/encours.
       d.DocDueDate ? new Date(d.DocDueDate) : null,
     ];
+    // ── Order-only (ordre = ORDER_HEADER_COLS) — écran Expéditions ──
+    if (isOrders) {
+      header.push(
+        d.DocumentStatus ?? null,
+        d.Comments ?? null,
+        d.NumAtCard ?? null,
+        (d.U_TrspHeur ?? "").trim() || null,
+        sapCreationISO(d.CreationDate, d.CreationTime ?? d.DocTime), // "YYYY-MM-DDTHH:MM:00" | null
+      );
+    }
     return { docEntry: d.DocEntry, header, lines };
   });
 
   await bulkUpsertDocs({
     headerTable: SALES_TABLES[endpoint].header,
     lineTable: SALES_TABLES[endpoint].line,
-    headerCols: SALES_HEADER_COLS,
+    headerCols: isOrders ? ORDER_HEADER_COLS : SALES_HEADER_COLS,
     lineCols: SALES_LINE_COLS,
     docs: mapped,
   });
@@ -549,6 +609,14 @@ export interface CreatedOrderForMirror {
   VatSum?: number;
   UpdateDate?: string;
   U_TrspCode?: string | null;
+  // ── Order-only (écran Expéditions) — le refetch de la route les fournit ──
+  DocumentStatus?: string;
+  Comments?: string;
+  NumAtCard?: string;
+  U_TrspHeur?: string | null;
+  CreationDate?: string;
+  CreationTime?: string | number;
+  DocTime?: string | number;
   DocumentLines?: {
     LineNum?: number;
     ItemCode?: string | null;
@@ -602,12 +670,18 @@ export async function mirrorCreatedOrder(order: CreatedOrderForMirror): Promise<
     false, upd,
     (order.U_TrspCode ?? "").trim().toUpperCase() || null,
     order.DocDueDate ? new Date(order.DocDueDate) : null,
+    // ── Order-only (ordre = ORDER_HEADER_COLS, IDENTIQUE au tail de pullSalesDocs) ──
+    order.DocumentStatus ?? "bost_Open", // commande fraîche = toujours ouverte
+    order.Comments ?? null,
+    order.NumAtCard ?? null,
+    (order.U_TrspHeur ?? "").trim() || null,
+    sapCreationISO(order.CreationDate, order.CreationTime ?? order.DocTime),
   ];
 
   await bulkUpsertDocs({
     headerTable: SALES_TABLES.Orders.header,
     lineTable: SALES_TABLES.Orders.line,
-    headerCols: SALES_HEADER_COLS,
+    headerCols: ORDER_HEADER_COLS,
     lineCols: SALES_LINE_COLS,
     docs: [{ docEntry: order.DocEntry, header, lines }],
   });

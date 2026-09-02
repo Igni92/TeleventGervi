@@ -1102,6 +1102,12 @@ export async function POST(req: NextRequest) {
       DocEntry: number; DocNum: number; DocDate: string; DocDueDate: string;
       DocTotal: number; VatSum: number; DocTotalSys?: number;
       CardCode: string; CardName: string;
+      // Champs Order-only pour le miroir Expéditions (le refetch sans $select les
+      // renvoie déjà) → mirrorCreatedOrder les propage (une commande fraîche montre
+      // sa Prise/comment/réf/heure sans attendre le prochain tick).
+      DocumentStatus?: string; Comments?: string; NumAtCard?: string;
+      U_TrspCode?: string | null; U_TrspHeur?: string | null;
+      CreationDate?: string; CreationTime?: string | number; DocTime?: string | number;
       DocumentLines: EnrichedLine[];
       DocumentAdditionalExpenses?: EnrichedExpense[];
     };
