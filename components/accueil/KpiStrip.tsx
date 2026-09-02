@@ -246,18 +246,21 @@ function MargeTile({ curr, reliability, state, delay }: { curr: ActivityBucket; 
       {state === "loading" ? (
         <div className="mt-3 h-[30px] w-20 rounded-md bg-secondary/70 animate-pulse" />
       ) : (
-        <div className="mt-2.5 flex items-baseline gap-2 font-display leading-none tnum">
-          <span className="text-[28px] sm:text-[32px] font-bold text-foreground">
+        // flex-wrap + valeurs insécables : sur mobile étroit (grille 2 col.) le
+        // « €/kg » passe proprement sous le %, sans jamais se couper en plein
+        // milieu (« 2,51 » / « €/kg »).
+        <div className="mt-2.5 flex flex-wrap items-baseline gap-x-2 gap-y-1 font-display leading-none tnum">
+          <span className="text-[26px] sm:text-[32px] font-bold text-foreground whitespace-nowrap">
             {state === "error" || !hasData ? (
               <span className="text-muted-foreground">—</span>
             ) : (
-              <>{pct.toFixed(1)}<span className="text-[18px] font-semibold text-muted-foreground"> %</span></>
+              <>{pct.toFixed(1)}<span className="text-[17px] sm:text-[18px] font-semibold text-muted-foreground"> %</span></>
             )}
           </span>
           {hasKg && (
             <>
-              <span className="text-[20px] font-normal text-border">|</span>
-              <span className="text-[20px] sm:text-[22px] font-bold text-emerald-600 dark:text-emerald-400">{eurKg(margeKg!)}</span>
+              <span className="hidden sm:inline text-[20px] font-normal text-border">|</span>
+              <span className="text-[18px] sm:text-[22px] font-bold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">{eurKg(margeKg!)}</span>
             </>
           )}
         </div>

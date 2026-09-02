@@ -151,7 +151,16 @@ export function CommerciauxSapList() {
 
   return (
     <>
-      <div className="overflow-hidden rounded-xl bg-card ring-1 ring-border shadow-card">
+      {/* Repli MOBILE (< md) : une carte par commercial (le tableau 8 colonnes
+          est illisible sur téléphone). */}
+      <div className="md:hidden space-y-2.5">
+        {data.map((c) => (
+          <CommercialCard key={c.slpName} c={c} isAdmin={isAdmin} onObjectifs={() => setObjOpen(c)} />
+        ))}
+      </div>
+
+      {/* Tableau comparatif DESKTOP (≥ md). */}
+      <div className="hidden md:block overflow-hidden rounded-xl bg-card ring-1 ring-border shadow-card">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] border-collapse text-left">
             <thead>
@@ -191,6 +200,52 @@ export function CommerciauxSapList() {
         />
       )}
     </>
+  );
+}
+
+/* ── Carte MOBILE (une par commercial) ─────────────────────── */
+function CommercialCard({ c, isAdmin, onObjectifs }: { c: CommercialSap; isAdmin: boolean; onObjectifs: () => void }) {
+  const pctCa = c.objectifCa > 0 ? Math.round((c.caNetYtd / c.objectifCa) * 100) : null;
+  const primePct = Math.round(c.primeRate * 1000) / 10;
+  const name = displayNameFromSlp(c.email) ?? localPart(c.email);
+  const Metric = ({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) => (
+    <div className="min-w-0">
+      <div className="text-caption2 uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={`text-body font-semibold tnum whitespace-nowrap ${tone ?? "text-foreground"}`}>{value}</div>
+      {sub && <div className="text-caption2 text-muted-foreground">{sub}</div>}
+    </div>
+  );
+  return (
+    <div className="rounded-xl bg-card ring-1 ring-border shadow-card p-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <Link href={`/commerciaux/${encodeURIComponent(c.slpName)}`} className="flex items-center gap-3 min-w-0">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-secondary text-caption font-semibold text-foreground">{avatarOf(c.email)}</span>
+          <span className="min-w-0">
+            <span className="block truncate text-body font-semibold text-foreground">{name}</span>
+            <span className="block truncate text-caption2 text-muted-foreground">{c.email}</span>
+          </span>
+        </Link>
+        <Sparkline data={c.spark} width={72} height={26} tone="brand" aria-label={`CA hebdo de ${name}`} />
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2.5">
+        <Metric label="CA net" value={fmtEur(c.caNetYtd)} />
+        <Metric label="Marge brute" value={fmtEur(c.margeBruteYtd)} />
+        <Metric label="Volume" value={fmtKg(c.volumeKgYtd)} tone="text-muted-foreground" />
+        <Metric label="Portefeuille" value={fmtEur(c.caPortefeuilleYtd)} sub={`${c.clientsActifs} actifs`} />
+        <Metric label="Prime" value={fmtEur2(c.prime)} sub={`${primePct} %`} tone="text-success" />
+        <Metric label="Objectif" value={pctCa !== null ? `${pctCa} %` : "—"} tone={pctCa !== null && pctCa >= 100 ? "text-success" : "text-foreground"} />
+      </div>
+      <div className="mt-3 flex items-center justify-end gap-1.5">
+        {isAdmin && (
+          <Button asChild variant="ghost" size="sm">
+            <Link href={`/dashboard?as=${encodeURIComponent(c.slpName)}`}><Eye className="h-3.5 w-3.5" /> Voir comme</Link>
+          </Button>
+        )}
+        <Button variant="tinted" size="sm" onClick={onObjectifs}>
+          <Target className="h-3.5 w-3.5" /> {isAdmin ? "Objectifs" : "Voir"}
+        </Button>
+      </div>
+    </div>
   );
 }
 

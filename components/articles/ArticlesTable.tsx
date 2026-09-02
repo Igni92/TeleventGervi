@@ -164,7 +164,47 @@ export function ArticlesTable() {
         </div>
       ) : (
         <>
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
+          {/* Repli MOBILE (< md) : cartes empilées — la dispo (info clé) reste
+              visible sans scroll horizontal, contrairement au tableau étroit. */}
+          <div className="md:hidden space-y-3">
+            {groups.map(([groupName, rows]) => (
+              <div key={groupName} className="bg-card border border-border rounded-xl overflow-hidden">
+                <div className="bg-secondary/60 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border">
+                  {groupName} <span className="tnum text-muted-foreground/70">({rows.length})</span>
+                </div>
+                <ul className="divide-y divide-border/50">
+                  {rows.map((a) => {
+                    const avail = availOf(a);
+                    const d = dispoDisplay(a, avail);
+                    return (
+                      <li key={a.id}>
+                        <Link href={`/articles/${a.id}`} className="block px-3 py-2.5 hover:bg-secondary/40">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <span className="block truncate text-body font-semibold text-foreground">{a.itemName}</span>
+                              <span className="block font-mono text-caption2 text-muted-foreground/60">{a.itemCode}</span>
+                            </div>
+                            <span className={`shrink-0 text-right tnum font-semibold ${avail > 0 ? "text-success" : "text-muted-foreground/60"}`}>
+                              {avail > 0 ? (
+                                <>{d.qty}{d.label && <span className="ml-1 text-[10px] font-normal text-muted-foreground/70">{d.label}</span>}</>
+                              ) : 0}
+                            </span>
+                          </div>
+                          <div className="mt-1">
+                            <DesignationStrong l={{ marque: a.uMarque, calibre: a.uCalibre }} className="text-caption" />
+                            <DesignationMuted l={{ condt: a.uCondi, variete: a.frgnName, pays: a.uPays }} className="text-caption2" />
+                          </div>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
+
+          {/* Tableau DESKTOP (≥ md) — colonnes alignées, tri par colonne. */}
+          <div className="hidden md:block bg-card border border-border rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-[13px]">
                 <thead>

@@ -38,7 +38,7 @@ import { cn } from "@/lib/utils";
 const TABS: { label: string; href: string; navHref: string }[] = [
   { label: "Accueil", href: "/accueil", navHref: "/accueil" },
   { label: "Console", href: "/console2", navHref: "/console" },
-  { label: "Livraisons", href: "/livraisons", navHref: "/livraisons" },
+  { label: "Expéditions", href: "/livraisons", navHref: "/livraisons" },
   { label: "Clients", href: "/clients", navHref: "/clients" },
 ];
 

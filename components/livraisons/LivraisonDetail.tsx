@@ -169,7 +169,11 @@ export function LivraisonDetail({ canDispatch }: { canDispatch: boolean }) {
             // Échec silencieux : on ignore (le cycle suivant réessaiera) — pas
             // d'erreur plein écran pendant que l'entrepôt travaille.
             if (!silent) {
-              setError(j.error || "Erreur de chargement.");
+              // Le détail technique (ex. requête OData SAP + code HTTP) ne doit
+              // JAMAIS s'afficher tel quel à l'utilisateur — on le garde en
+              // console pour le débogage et on montre un message clair.
+              if (j.error) console.warn("[expeditions] échec de chargement SAP :", j.error);
+              setError("Impossible de charger les expéditions depuis SAP. Réessayez dans un instant.");
               setData(null);
             }
             return;
