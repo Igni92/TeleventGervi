@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/permissions";
+import { isCronAuthorized } from "@/lib/cronAuth";
 import { prisma } from "@/lib/prisma";
 import {
   pullBusinessPartners,
@@ -35,10 +36,15 @@ export const maxDuration = 300;
  *      par entité quand le pull est terminé.
  */
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  if (!(await requireAdmin(session))) {
-    return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+  // Déclenchement machine (cron/ops) : `x-cron-secret` → sans session admin. Sert
+  // le backfill headless (ex. re-population de colonnes après migration additive).
+  const cron = isCronAuthorized(req);
+  const session = cron ? null : await auth();
+  if (!cron) {
+    if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+    if (!(await requireAdmin(session))) {
+      return NextResponse.json({ error: "Réservé aux administrateurs" }, { status: 403 });
+    }
   }
 
   const url = new URL(req.url);
@@ -63,7 +69,7 @@ export async function POST(req: Request) {
       type: "mirror-backfill",
       status: "running",
       startedAt,
-      triggeredBy: session.user.id ?? null,
+      triggeredBy: session?.user?.id ?? (cron ? "cron" : null),
     },
   });
 
