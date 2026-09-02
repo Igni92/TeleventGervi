@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
-import { getAccessScope, resolvePilotageView, scopePayload } from "@/lib/permissions";
+import { getAccessScope, resolvePilotageView, scopePayload, type AccessScope } from "@/lib/permissions";
+import { isCronAuthorized } from "@/lib/cronAuth";
 import { topClients, invoiceWeightByCard } from "@/lib/pilotage";
 import { prisma } from "@/lib/prisma";
 import { grossMarginPct } from "@/lib/margin";
@@ -67,11 +68,12 @@ interface StoreRow {
 }
 
 export async function GET(req: Request) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  const cron = isCronAuthorized(req);
+  const session = cron ? null : await auth();
+  if (!cron && !session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
   const url = new URL(req.url);
-  const scope = await getAccessScope(session);
+  const scope: AccessScope = cron ? { all: true, email: "cron@warm" } : await getAccessScope(session);
   const { slp } = resolvePilotageView(scope, url.searchParams.get("as"));
   const segment = parseSegment(url.searchParams.get("segment"));
 

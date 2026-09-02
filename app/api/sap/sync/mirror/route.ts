@@ -92,6 +92,26 @@ async function bootstrapMirror() {
 }
 
 /** Cœur de la synchro miroir, partagé entre le déclenchement manuel (POST) et le cron (GET). */
+/**
+ * Réchauffe des routes d'agrégat via un self-fetch LOCAL portant le
+ * `x-cron-secret` (les routes acceptent ce secret en périmètre admin ALL). Même
+ * process Next → même cache mémoire que les lectures humaines. Best-effort :
+ * n'échoue jamais la synchro (un warm raté = un humain paiera peut-être le froid,
+ * pas un cron cassé). Pas de secret configuré → on ne tente rien.
+ */
+async function warmViaHttp(paths: string[]): Promise<void> {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return;
+  const base = `http://127.0.0.1:${process.env.PORT || 3000}`;
+  await Promise.allSettled(
+    paths.map((p) =>
+      fetch(`${base}${p}`, { headers: { "x-cron-secret": secret }, cache: "no-store" })
+        .then((r) => { if (!r.ok) console.warn(`[warm] ${p} → HTTP ${r.status}`); })
+        .catch((e) => console.warn(`[warm] ${p} échec:`, e instanceof Error ? e.message : String(e))),
+    ),
+  );
+}
+
 async function runMirrorSync() {
   const cursor = await prisma.sapMirrorCursor.upsert({
     where: { id: 1 },
@@ -175,6 +195,21 @@ async function runMirrorSync() {
     // pour qu'aucun humain ne paie son chargement à froid (40 pages SAP) — c'était
     // la cause du « livraisons charge en boucle » après un déploiement/TTL.
     await warmClientCarriers();
+
+    // Dashboards PILOTAGE (annual/stores/geo/activity-weekly) : self-fetch sans
+    // `refresh` → le compute (SQL miroir lourd, 3-9 s) ne tourne QUE si le cache
+    // est froid (après un tick à nouveaux docs qui a purgé "pilotage:", ou après
+    // un redémarrage). Cache chaud = simple hit. Aucun humain ne paie le froid.
+    await warmViaHttp([
+      "/api/pilotage/annual",
+      "/api/pilotage/stores",
+      "/api/pilotage/geo",
+      "/api/pilotage/activity/weekly",
+    ]);
+    // ENCOURS : SAP LIVE (~15 s à froid), fraîcheur liée aux PAIEMENTS (qui ne
+    // créent pas de doc) → on force le recalcul CHAQUE tick (?refresh=1). Le TTL
+    // (12 min > 10 min de cron) garde la vue ALL chaude entre deux ticks.
+    await warmViaHttp(["/api/encours?refresh=1"]);
 
     return NextResponse.json({
       ok: true,

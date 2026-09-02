@@ -97,41 +97,44 @@ export async function geoAggregate(start: Date, end: Date, slpName?: string | nu
   const range = Prisma.sql`i."cancelled" = false AND i."docDate" >= ${start} AND i."docDate" < ${end}`;
 
   // En-tête : CA + nb BL par client (avec son adresse + groupe SAP).
-  const headerRows = await prisma.$queryRaw<{
-    card: string; nom: string | null; zip: string | null; city: string | null; country: string | null;
-    gcode: number | null; gname: string | null; docs: number; ca: number;
-  }[]>(Prisma.sql`
-    SELECT c."code" AS card, c."nom" AS nom, c."zipCode" AS zip, c."city" AS city, c."country" AS country,
-           c."sapGroupCode" AS gcode, c."sapGroupName" AS gname,
-           COUNT(i."docEntry")::int AS docs,
-           COALESCE(SUM(i."docTotal"), 0)::float AS ca
-    FROM "SapInvoice" i
-    JOIN "Client" c ON c."code" = i."cardCode"
-    WHERE ${range} AND ${inCodes} ${slp}
-    GROUP BY c."code", c."nom", c."zipCode", c."city", c."country", c."sapGroupCode", c."sapGroupName"`);
-
-  // Marge réelle (coût EM) par client — agrégat ligne (lib/cogs).
-  const marginRows = await prisma.$queryRaw<{ card: string; m: number }[]>(Prisma.sql`
-    SELECT i."cardCode" AS card, COALESCE(SUM(${COGS_MARGIN}), 0)::float AS m
-    FROM ${cogsFromSql("invoice")}
-    JOIN "Client" c ON c."code" = i."cardCode"
-    WHERE ${range} AND ${inCodes} ${slp}
-    GROUP BY 1`);
-
-  // Poids (kg) par client — quantité × poids unitaire produit.
-  const weightRows = await prisma.$queryRaw<{ card: string; w: number }[]>(Prisma.sql`
-    SELECT i."cardCode" AS card,
-           COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS w
-    FROM "SapInvoiceLine" l
-    JOIN "SapInvoice" i ON i."docEntry" = l."docEntry"
-    JOIN "Client" c ON c."code" = i."cardCode"
-    LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
-    WHERE ${range} AND ${inCodes} ${slp}
-    GROUP BY 1`);
-
-  // Avoirs clients (CreditNotes) à DÉDUIRE par client — sinon une facture
-  // annulée par un avoir laisse une position fantôme sur la carte (ex. Égypte).
-  const [cnHeaderRows, cnMarginRows, cnWeightRows] = await Promise.all([
+  // Les 6 agrégations (3 factures + 3 avoirs) sont indépendantes → une seule
+  // vague parallèle (avant : le trio factures était séquentiel). Réduit le coût
+  // à froid (payé par le cron de réchauffage) de Σ à max.
+  const [
+    headerRows, marginRows, weightRows,
+    cnHeaderRows, cnMarginRows, cnWeightRows,
+  ] = await Promise.all([
+    prisma.$queryRaw<{
+      card: string; nom: string | null; zip: string | null; city: string | null; country: string | null;
+      gcode: number | null; gname: string | null; docs: number; ca: number;
+    }[]>(Prisma.sql`
+      SELECT c."code" AS card, c."nom" AS nom, c."zipCode" AS zip, c."city" AS city, c."country" AS country,
+             c."sapGroupCode" AS gcode, c."sapGroupName" AS gname,
+             COUNT(i."docEntry")::int AS docs,
+             COALESCE(SUM(i."docTotal"), 0)::float AS ca
+      FROM "SapInvoice" i
+      JOIN "Client" c ON c."code" = i."cardCode"
+      WHERE ${range} AND ${inCodes} ${slp}
+      GROUP BY c."code", c."nom", c."zipCode", c."city", c."country", c."sapGroupCode", c."sapGroupName"`),
+    // Marge réelle (coût EM) par client — agrégat ligne (lib/cogs).
+    prisma.$queryRaw<{ card: string; m: number }[]>(Prisma.sql`
+      SELECT i."cardCode" AS card, COALESCE(SUM(${COGS_MARGIN}), 0)::float AS m
+      FROM ${cogsFromSql("invoice")}
+      JOIN "Client" c ON c."code" = i."cardCode"
+      WHERE ${range} AND ${inCodes} ${slp}
+      GROUP BY 1`),
+    // Poids (kg) par client — quantité × poids unitaire produit.
+    prisma.$queryRaw<{ card: string; w: number }[]>(Prisma.sql`
+      SELECT i."cardCode" AS card,
+             COALESCE(SUM(l."quantity" * COALESCE(p."salesUnitWeight", 0)), 0)::float AS w
+      FROM "SapInvoiceLine" l
+      JOIN "SapInvoice" i ON i."docEntry" = l."docEntry"
+      JOIN "Client" c ON c."code" = i."cardCode"
+      LEFT JOIN "Product" p ON p."itemCode" = l."itemCode"
+      WHERE ${range} AND ${inCodes} ${slp}
+      GROUP BY 1`),
+    // Avoirs clients (CreditNotes) à DÉDUIRE par client — sinon une facture
+    // annulée par un avoir laisse une position fantôme sur la carte (ex. Égypte).
     prisma.$queryRaw<{ card: string; ca: number }[]>(Prisma.sql`
       SELECT i."cardCode" AS card, COALESCE(SUM(i."docTotal"), 0)::float AS ca
       FROM "SapCreditNote" i

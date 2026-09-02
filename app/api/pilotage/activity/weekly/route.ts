@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getAccessScope, resolvePilotageView } from "@/lib/permissions";
+import { getAccessScope, resolvePilotageView, type AccessScope } from "@/lib/permissions";
+import { isCronAuthorized } from "@/lib/cronAuth";
 import { weeklyOrderSeries } from "@/lib/pilotage";
 import { isoWeek } from "@/lib/iso-week";
 import { cached, invalidate } from "@/lib/ttlCache";
@@ -9,7 +10,10 @@ import { cached, invalidate } from "@/lib/ttlCache";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const PILOTAGE_TTL_MS = 5 * 60_000; // filet de sécurité (le tick mirror purge "pilotage:")
+// TTL > intervalle du cron (10 min) pour survivre entre deux ticks : le tick
+// miroir purge "pilotage:" puis re-réchauffe la vue ALL — sans TTL suffisant,
+// la série se re-vidait toute seule (5 min) et repartait froide.
+const PILOTAGE_TTL_MS = 12 * 60_000;
 
 /**
  * GET /api/pilotage/activity/weekly
@@ -19,11 +23,12 @@ const PILOTAGE_TTL_MS = 5 * 60_000; // filet de sécurité (le tick mirror purge
  * commercial (≠ /api/pilotage/weekly qui est le CA facturé comptable).
  */
 export async function GET(req: Request) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  const cron = isCronAuthorized(req);
+  const session = cron ? null : await auth();
+  if (!cron && !session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
   // Droits : série volume BL scopée au slpName (non-admin ou « voir comme »).
-  const scope = await getAccessScope(session);
+  const scope: AccessScope = cron ? { all: true, email: "cron@warm" } : await getAccessScope(session);
   const { slp } = resolvePilotageView(scope, new URL(req.url).searchParams.get("as"));
 
   const cacheKey = `pilotage:activity-weekly:${slp ?? "ALL"}`;

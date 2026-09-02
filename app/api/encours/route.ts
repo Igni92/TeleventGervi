@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getAccessScope } from "@/lib/permissions";
+import { getAccessScope, type AccessScope } from "@/lib/permissions";
+import { isCronAuthorized } from "@/lib/cronAuth";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { sap } from "@/lib/sapb1";
@@ -34,7 +35,10 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const GRACE_DAYS = 0; // en retard dès le dépassement de l'échéance (DocDueDate)
-const ENCOURS_TTL_MS = 60_000; // cache court par périmètre (reloads quasi instantanés ; ?refresh=1 force)
+// TTL > intervalle du cron (10 min) : le cron réchauffe la vue ALL à chaque tick
+// (?refresh=1, il paie le gros scan SAP live ~15 s), l'humain lit toujours un
+// cache chaud (≤ ~10 min de fraîcheur ; ?refresh=1 force un rafraîchissement).
+const ENCOURS_TTL_MS = 12 * 60_000;
 
 interface OpenInvoice {
   DocEntry: number;
@@ -232,13 +236,16 @@ async function fetchCreditNotes(cardCodes: string[]): Promise<{ byClient: Map<st
 }
 
 export async function GET(req: Request) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  // Réchauffage machine (cron) : périmètre admin ALL, sans session — le tick
+  // maintient `encours:ALL` chaud pour qu'aucun humain ne paie le scan à froid.
+  const cron = isCronAuthorized(req);
+  const session = cron ? null : await auth();
+  if (!cron && !session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
   // Droits : un non-admin ne voit que les encours de SES clients (commercial OU
   // vendeur = son slpName). `allowed = null` → admin (aucun filtre) ; non mappé
   // → ensemble vide → encours à zéro (jamais la vue globale).
-  const scope = await getAccessScope(session);
+  const scope: AccessScope = cron ? { all: true, email: "cron@warm" } : await getAccessScope(session);
   let allowed: Set<string> | null = null;
   if (!scope.all) {
     if (scope.slpName) {

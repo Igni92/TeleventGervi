@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getAccessScope, resolvePilotageView, scopePayload } from "@/lib/permissions";
+import { getAccessScope, resolvePilotageView, scopePayload, type AccessScope } from "@/lib/permissions";
+import { isCronAuthorized } from "@/lib/cronAuth";
 import { geoAggregate } from "@/lib/pilotageGeo";
 import { cached, invalidate } from "@/lib/ttlCache";
 
@@ -25,11 +26,12 @@ export const maxDuration = 60;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 export async function GET(req: Request) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  const cron = isCronAuthorized(req);
+  const session = cron ? null : await auth();
+  if (!cron && !session?.user) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
 
   const url = new URL(req.url);
-  const scope = await getAccessScope(session);
+  const scope: AccessScope = cron ? { all: true, email: "cron@warm" } : await getAccessScope(session);
   const { slp } = resolvePilotageView(scope, url.searchParams.get("as"));
 
   const cacheKey = `pilotage:geo:${slp ?? "ALL"}`;
