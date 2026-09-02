@@ -213,6 +213,10 @@ export async function GET(req: NextRequest) {
         return {
           docEntry: d.DocEntry,
           docNum: d.DocNum,
+          // Entrée(s) marchandise liée(s) — reverse-lookup miroir (BaseType 22).
+          // Était calculé (emByPo) mais jamais renvoyé → le tag « EM … » restait
+          // vide côté commande fournisseur (le sens inverse EM→CF, lui, marchait).
+          ems: emByPo.get(d.DocEntry) ?? [],
           docDate: d.DocDate,
           dueDate: d.DocDueDate ?? null,
           cardCode: d.CardCode,

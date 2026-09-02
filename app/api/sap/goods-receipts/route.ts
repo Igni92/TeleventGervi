@@ -785,7 +785,7 @@ export async function GET(req: NextRequest) {
           where: { itemCode: { in: itemCodes } },
           select: {
             itemCode: true, itemName: true, salesQtyPerPackUnit: true, salesPackagingUnit: true,
-            uPays: true, uMarque: true, uCondi: true, frgnName: true,
+            uPays: true, uMarque: true, uCondi: true, frgnName: true, uCalibre: true,
           },
         })
       : [];
@@ -812,24 +812,15 @@ export async function GET(req: NextRequest) {
       for (const p of pos) if (p.docNum != null) poNumByEntry.set(p.docEntry, p.docNum);
     }
 
-    // Calibre (U_GER_CALIBRE) — pas synchronisé en local, lu EN DIRECT sur SAP
-    // Items par lot (même repli que /api/livraisons : best-effort, jamais bloquant).
+    // Calibre (U_GER_CALIBRE) — lu depuis le CATALOGUE LOCAL (Product.uCalibre,
+    // déjà synchronisé et récupéré ci-dessus dans `products`). Perf : supprime le
+    // fan-out SAP live « Items » par lot de 20 codes qui rendait l'historique EM
+    // « super lent » (plusieurs allers-retours Service Layer à chaque chargement).
     const calibreByCode: Record<string, string> = {};
-    const calChunks: string[][] = [];
-    for (let i = 0; i < itemCodes.length; i += 20) calChunks.push(itemCodes.slice(i, i + 20));
-    await Promise.all(calChunks.map(async (chunk) => {
-      try {
-        const or = chunk.map((c) => `ItemCode eq '${c.replace(/'/g, "''")}'`).join(" or ");
-        const items = await sap.getAll<{ ItemCode: string; U_GER_CALIBRE?: string | null }>(
-          `Items?$select=ItemCode,U_GER_CALIBRE&$filter=${encodeURIComponent(`(${or})`)}`,
-          { pageSize: 50, maxPages: 2 },
-        );
-        for (const it of items) {
-          const c = (it.U_GER_CALIBRE ?? "").trim();
-          if (c) calibreByCode[it.ItemCode] = c;
-        }
-      } catch { /* lot en échec → pas de calibre pour ces articles */ }
-    }));
+    for (const p of products) {
+      const c = (p.uCalibre ?? "").trim();
+      if (c) calibreByCode[p.itemCode] = c;
+    }
 
     return NextResponse.json({
       db: process.env.SAP_B1_COMPANY_DB,
