@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, LogIn, LogOut, Clock, CalendarDays, Timer, MapPin } from "lucide-react";
+import { MovingBorderButton } from "@/components/ui/moving-border-button";
 
 type MeState = {
   employee: { name: string | null; email: string };
@@ -70,23 +71,28 @@ export function EmployeeHome() {
         <h1 className="text-[22px] font-bold text-foreground leading-tight">{me.employee.name ?? me.employee.email}</h1>
       </header>
 
-      {/* Bouton BADGEUSE — géant, une seule action selon l'état. */}
-      <button
+      {/* Bouton BADGEUSE — géant, bordure animée (halo vert « J'arrive » / rouge
+          « Je pars »). Une seule action selon l'état. */}
+      <MovingBorderButton
         type="button"
         onClick={() => punch(inside ? "out" : "in")}
         disabled={punching}
-        className={`w-full rounded-3xl p-6 text-white shadow-lg transition-transform active:scale-[0.98] disabled:opacity-70 ${
-          inside ? "bg-rose-600 hover:bg-rose-500" : "bg-emerald-600 hover:bg-emerald-500"
-        }`}
+        borderRadius="1.75rem"
+        duration={inside ? 2600 : 3400}
+        containerClassName="w-full block shadow-lg transition-transform active:scale-[0.98] disabled:opacity-70"
+        borderChildClassName={inside
+          ? "bg-[radial-gradient(#fb7185_40%,transparent_60%)]"
+          : "bg-[radial-gradient(#34d399_40%,transparent_60%)]"}
+        className={`flex-col gap-2 p-6 text-white ${inside ? "bg-rose-600" : "bg-emerald-600"}`}
       >
         <span className="flex items-center justify-center gap-3 text-[22px] font-bold">
           {punching ? <Loader2 className="h-7 w-7 animate-spin" /> : inside ? <LogOut className="h-7 w-7" /> : <LogIn className="h-7 w-7" />}
           {inside ? "Je pars" : "J'arrive"}
         </span>
-        <span className="mt-2 flex items-center justify-center gap-1.5 text-[13px] text-white/85">
+        <span className="flex items-center justify-center gap-1.5 text-[13px] text-white/85">
           <MapPin className="h-3.5 w-3.5" /> Pointage géolocalisé
         </span>
-      </button>
+      </MovingBorderButton>
 
       {/* Heures du jour */}
       <div className="rounded-2xl border border-border bg-card p-4">
