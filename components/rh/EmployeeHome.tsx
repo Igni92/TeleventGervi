@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, LogIn, LogOut, Clock, CalendarDays, Timer, MapPin } from "lucide-react";
+import { Loader2, LogIn, LogOut, Clock, CalendarDays, Timer, MapPin, Lock, FileText, Download } from "lucide-react";
 import { MovingBorderButton } from "@/components/ui/moving-border-button";
 
 type MeState = {
@@ -10,6 +10,7 @@ type MeState = {
   today: { inside: boolean; workedMin: number; punches: { kind: string; at: string }[] };
   contract: { type: string; heuresHebdo: number; heuresAnnuelles: number } | null;
   soldes: { cpSolde: number; recupSoldeMin: number; recupCapMin: number };
+  documents?: { id: string; type: string; nom: string; createdAt: string }[];
 };
 
 const fmtHM = (min: number) => `${Math.floor(Math.max(0, min) / 60)}h${String(Math.round(Math.max(0, min) % 60)).padStart(2, "0")}`;
@@ -124,6 +125,28 @@ export function EmployeeHome() {
         <p className="text-center text-[12px] text-muted-foreground">
           Contrat {me.contract.type} · {me.contract.heuresHebdo} h/sem · {me.contract.heuresAnnuelles} h/an
         </p>
+      )}
+
+      {/* Mes documents (coffre-fort — lecture) */}
+      {me.documents && me.documents.length > 0 && (
+        <div className="rounded-2xl border border-border bg-card p-4">
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground mb-2"><Lock className="h-4 w-4" /> Mes documents</span>
+          <ul className="space-y-1.5">
+            {me.documents.map((d) => (
+              <li key={d.id}>
+                <button type="button" onClick={async () => {
+                  const r = await fetch(`/api/rh/documents/${d.id}`); const j = await r.json();
+                  if (r.ok && j.ok) { const a = document.createElement("a"); a.href = j.contenu; a.download = j.nom; a.click(); }
+                  else toast.error("Téléchargement impossible");
+                }} className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-secondary/50 text-[13px]">
+                  <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="min-w-0 flex-1 truncate text-foreground">{d.nom}</span>
+                  <Download className="h-3.5 w-3.5 text-muted-foreground" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
