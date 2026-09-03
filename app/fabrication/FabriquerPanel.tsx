@@ -40,7 +40,7 @@ type LotView = {
 };
 type ItemOption = {
   itemCode: string; itemName: string;
-  uMarque: string | null; uCondi: string | null; uPays: string | null;
+  uMarque: string | null; uCondi: string | null; uPays: string | null; uCalibre: string | null;
   ratio: number; unite: Unite; uniteBase: string;
   availColis: Record<string, number>; availUnits: Record<string, number>; availTotal: number;
   /** lot proposé PAR MAGASIN (000/01/R1) */
@@ -362,7 +362,7 @@ export function FabriquerPanel({ recipesVersion, onRunDone }: { recipesVersion: 
                               <span className="flex items-center gap-1.5 flex-wrap">
                                 <span className="text-body font-semibold truncate">{it.itemName}</span>
                                 <span className="font-mono text-caption2 text-muted-foreground">{it.itemCode}</span>
-                                <DesignationChips marque={it.uMarque} condt={it.uCondi} pays={it.uPays} />
+                                <DesignationChips marque={it.uMarque} calibre={it.uCalibre} condt={it.uCondi} pays={it.uPays} />
                               </span>
                               <span className="mt-1 flex items-center gap-2 flex-wrap text-caption">
                                 <LotBadge batchNumber={lot.batchNumber} pending={lot.pending} />

@@ -195,6 +195,7 @@ export type FamilyItemOption = {
   uMarque: string | null;
   uCondi: string | null;
   uPays: string | null;
+  uCalibre: string | null;
   manageBatch: boolean;
   /** ratio colis→pie */
   ratio: number;
@@ -216,14 +217,14 @@ export async function getFamilyItems(familyKeys: string[]): Promise<Map<string, 
   // $queryRawUnsafe). DOIT rester synchrone avec lib/familles.ts.
   type Row = {
     familyKey: string; itemCode: string; itemName: string;
-    uMarque: string | null; uCondi: string | null; uPays: string | null;
+    uMarque: string | null; uCondi: string | null; uPays: string | null; uCalibre: string | null;
     manageBatch: boolean; salesUnit: string | null; salesQtyPerPackUnit: number | null;
     salesItemsPerUnit: number | null; salesUnitWeight: number | null; inventoryUnit: string | null;
     warehouse: string | null; available: number | null;
   };
   const rows = await prisma.$queryRawUnsafe<Row[]>(
     `WITH fam AS (
-       SELECT p."itemCode", p."itemName", p."uMarque", p."uCondi", p."uPays",
+       SELECT p."itemCode", p."itemName", p."uMarque", p."uCondi", p."uPays", p."uCalibre",
               p."manageBatch", p."salesUnit", p."salesQtyPerPackUnit", p."id",
               p."salesItemsPerUnit", p."salesUnitWeight", p."inventoryUnit",
               CASE
@@ -239,7 +240,7 @@ export async function getFamilyItems(familyKeys: string[]): Promise<Map<string, 
          FROM "Product" p
         WHERE p."isPackaging" = false AND p."isKit" = false
      )
-     SELECT f."familyKey", f."itemCode", f."itemName", f."uMarque", f."uCondi", f."uPays",
+     SELECT f."familyKey", f."itemCode", f."itemName", f."uMarque", f."uCondi", f."uPays", f."uCalibre",
             f."manageBatch", f."salesUnit", f."salesQtyPerPackUnit",
             f."salesItemsPerUnit", f."salesUnitWeight", f."inventoryUnit",
             s."warehouse", s."available"
@@ -261,6 +262,7 @@ export async function getFamilyItems(familyKeys: string[]): Promise<Map<string, 
         uMarque: r.uMarque,
         uCondi: r.uCondi,
         uPays: r.uPays,
+        uCalibre: r.uCalibre,
         manageBatch: r.manageBatch,
         ratio: packRatio(r.salesUnit, r.salesQtyPerPackUnit != null ? Number(r.salesQtyPerPackUnit) : null),
         unite: uniteGestion({

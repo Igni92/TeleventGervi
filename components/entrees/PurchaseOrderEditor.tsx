@@ -35,7 +35,7 @@ type EditLine = {
   itemCode: string; itemName: string; ratio: number;
   packageQuantity: number; price: string;      // PU /pie HT, "" si non saisi
   warehouseCode: WarehouseCode;
-  pays: string | null; marque: string | null; condt: string | null; variete: string | null;
+  pays: string | null; marque: string | null; condt: string | null; variete: string | null; calibre: string | null;
   open: boolean;                               // ligne encore réceptionnable
 };
 
@@ -56,7 +56,7 @@ function lineFromHit(p: ProductHit): EditLine {
   return {
     itemCode: p.itemCode, itemName: p.itemName, ratio,
     packageQuantity: 1, price: "", warehouseCode: "01",
-    pays: p.uPays, marque: p.uMarque, condt: p.uCondi, variete: p.frgnName, open: true,
+    pays: p.uPays, marque: p.uMarque, condt: p.uCondi, variete: p.frgnName, calibre: p.uCalibre, open: true,
   };
 }
 function lineFromPo(l: PoLine): EditLine {
@@ -70,7 +70,7 @@ function lineFromPo(l: PoLine): EditLine {
   return {
     itemCode: l.itemCode, itemName: l.itemName ?? l.itemCode, ratio,
     packageQuantity: pkg, price: pu != null ? String(pu) : "", warehouseCode: whs,
-    pays: l.uPays, marque: l.uMarque, condt: l.uCondi, variete: l.frgnName ?? null, open: l.open,
+    pays: l.uPays, marque: l.uMarque, condt: l.uCondi, variete: l.frgnName ?? null, calibre: l.uCalibre ?? null, open: l.open,
   };
 }
 /** Charge utile ligne pour create/modif (PU /pie). */
@@ -340,7 +340,7 @@ export function PurchaseOrderEditor({
           <div className="space-y-2">
             {openLineIdx.map(({ l, i }) => {
               const la = getLA(i);
-              const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, frgnName: l.variete });
+              const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, uCalibre: l.calibre, frgnName: l.variete });
               return (
                 <div key={`agr-${l.itemCode}-${i}`} className={`rounded-lg border p-2.5 ${la.refused ? "border-rose-400/60 bg-rose-50/50 dark:bg-rose-950/20" : "border-border bg-card/40"}`}>
                   <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -470,7 +470,7 @@ function PoLinesTable({
         <tbody className="[&>tr:nth-child(even)]:bg-muted/40">
           {lines.map((l, i) => {
             const pieceQty = l.packageQuantity * l.ratio;
-            const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, frgnName: l.variete });
+            const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, uCalibre: l.calibre, frgnName: l.variete });
             return (
               <tr key={`${l.itemCode}-${i}`} className="border-t border-border align-top">
                 {/* Qté colis — SURGRAS */}
@@ -486,7 +486,7 @@ function PoLinesTable({
                 <td className="px-3 py-2.5 align-top">
                   <div className="font-semibold text-foreground">{dz.fruit}</div>
                   <div className="font-mono text-caption text-muted-foreground">{l.itemCode}</div>
-                  <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1" />
+                  <DesignationChips marque={dz.marque} calibre={dz.calibre} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1" />
                 </td>
                 {/* Magasin */}
                 <td className="px-3 py-2.5 align-top">

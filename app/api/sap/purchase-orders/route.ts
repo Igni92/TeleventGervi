@@ -180,7 +180,7 @@ export async function GET(req: NextRequest) {
           where: { itemCode: { in: itemCodes } },
           select: {
             itemCode: true, itemName: true, salesQtyPerPackUnit: true, salesPackagingUnit: true,
-            uPays: true, uMarque: true, uCondi: true, frgnName: true,
+            uPays: true, uMarque: true, uCondi: true, uCalibre: true, frgnName: true,
           },
         })
       : [];
@@ -255,6 +255,7 @@ export async function GET(req: NextRequest) {
               uPays: p?.uPays ?? null,
               uMarque: p?.uMarque ?? null,
               uCondi: p?.uCondi ?? null,
+              uCalibre: p?.uCalibre ?? null,
               frgnName: p?.frgnName ?? null,
             };
           }),

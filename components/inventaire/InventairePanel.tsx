@@ -36,7 +36,7 @@ type MoveDTO = {
   itemCode: string; itemName: string; sens: "entree" | "sortie";
   ecartColis: number; unitsPerColis: number; qtyUnits: number;
   lot: string | null; unitPrice: number; value: number;
-  uPays?: string | null; uMarque?: string | null; uCondi?: string | null; frgnName?: string | null;
+  uPays?: string | null; uMarque?: string | null; uCondi?: string | null; uCalibre?: string | null; frgnName?: string | null;
   warehouses?: { warehouse: string; qtyUnits: number; lot: string | null }[];
 };
 type AdjustmentDTO = {
@@ -348,9 +348,9 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
     if (!p) return null;
     const dz = designationProduit({
       itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque,
-      uCondi: p.uCondi ?? p.uUvc, frgnName: p.frgnName,
+      uCondi: p.uCondi ?? p.uUvc, uCalibre: p.uCalibre, frgnName: p.frgnName,
     });
-    return <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className={className} />;
+    return <DesignationChips marque={dz.marque} calibre={dz.calibre} condt={dz.condt} variete={dz.variete} pays={dz.pays} className={className} />;
   };
 
   /** Logo de marque d'un article (null si la marque n'a pas de logo). */
@@ -802,7 +802,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                     </div>
                     <div className="divide-y divide-border/60 rounded-lg border border-border">
                       {plan.moves.map((m) => {
-                        const dz = designationProduit({ itemName: m.itemName, uPays: m.uPays, uMarque: m.uMarque, uCondi: m.uCondi, frgnName: m.frgnName });
+                        const dz = designationProduit({ itemName: m.itemName, uPays: m.uPays, uMarque: m.uMarque, uCondi: m.uCondi, uCalibre: m.uCalibre, frgnName: m.frgnName });
                         // Répartition entrepôts en COLIS (on ne parle qu'au colis).
                         const whTxt = (m.warehouses ?? [])
                           .filter((w) => w.qtyUnits > 0)
@@ -824,7 +824,7 @@ export function InventairePanel({ isAdmin, isPreparateur = false }: { isAdmin: b
                                 {" · "}{m.sens === "sortie" ? "Sortir" : "Entrer"} {fmt(Math.abs(m.ecartColis))} colis
                                 {whTxt ? ` · ${whTxt}` : ""}
                               </div>
-                              <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1" />
+                              <DesignationChips marque={dz.marque} calibre={dz.calibre} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1" />
                             </div>
                             <div className="shrink-0 text-right">
                               <div className={`text-[12px] font-bold tnum ${m.sens === "sortie" ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>

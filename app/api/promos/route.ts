@@ -51,6 +51,7 @@ type PromoRow = {
   pays?: string | null;
   condi?: string | null;
   variete?: string | null;
+  calibre?: string | null;
 };
 
 /** Types de magasin ciblables (Client.type). */
@@ -104,7 +105,8 @@ export async function GET(req: NextRequest) {
             p."label", p."pitch", p."storeType", p."startsAt", p."endsAt", p."active",
             pr."itemName" AS "itemName",
             pr."uMarque" AS "marque", pr."uPays" AS "pays",
-            COALESCE(pr."uCondi", pr."uUvc") AS "condi", pr."frgnName" AS "variete"
+            COALESCE(pr."uCondi", pr."uUvc") AS "condi", pr."frgnName" AS "variete",
+            pr."uCalibre" AS "calibre"
      FROM "Promo" p
      LEFT JOIN "Product" pr ON pr."itemCode" = p."itemCode"
      ${where}

@@ -8,7 +8,7 @@ export type PoLine = {
   warehouse?: string;
   price: number | null; lineTotal: number | null; taxPercent: number | null;
   open: boolean;
-  uPays: string | null; uMarque: string | null; uCondi: string | null; frgnName?: string | null;
+  uPays: string | null; uMarque: string | null; uCondi: string | null; uCalibre?: string | null; frgnName?: string | null;
 };
 
 export type PurchaseOrder = {

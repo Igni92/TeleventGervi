@@ -591,7 +591,7 @@ function OrderBuilder({ client, returnTo }: { client: SearchClient; returnTo?: s
                   <div className="min-w-0 flex-1">
                     <p className="text-[13.5px] font-medium text-foreground leading-tight">{l.itemName}</p>
                     {/* Tags produit — conservés sur la version allégée. */}
-                    <DesignationChips marque={l.marque} condt={l.condi} variete={l.variete} pays={l.pays} className="mt-1" />
+                    <DesignationChips marque={l.marque} calibre={hints[l.itemCode]?.calibre} condt={l.condi} variete={l.variete} pays={l.pays} className="mt-1" />
                   </div>
                   {/* Réordonner (flèches, tactile) — l'ordre du panier = l'ordre du BL. */}
                   {cart.length > 1 && (

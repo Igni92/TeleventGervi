@@ -19,6 +19,8 @@ export interface PrintLine {
   colis: number;
   weightKg: number;
   marque?: string | null;
+  calibre?: string | null;
+  variete?: string | null;
   condt?: string | null;
   pays?: string | null;
   /** Lot à préparer (bon de commande) — « EM<n> » affiché, sinon « lot à affecter ». */
@@ -78,7 +80,8 @@ export function renderOrderRecapHtml(doc: PrintDoc, ctx: PrintContext, origin = 
   // Détails de désignation en TEXTE BRUT (marque · conditionnement · origine) —
   // plus lisible à l'impression que les tags encadrés de l'app.
   const details = (l: PrintLine) =>
-    [l.marque, l.condt, l.pays].map((t) => (t ?? "").trim()).filter((t) => t && t !== "—" && t !== "-");
+    [l.marque, l.calibre ? `cal. ${l.calibre}` : null, l.condt, l.variete, l.pays]
+      .map((t) => (t ?? "").trim()).filter((t) => t && t !== "—" && t !== "-");
 
   // Case « Fait » à GAUCHE (première colonne cochée par le préparateur). L'icône
   // MANQUANT (⚠) est dans une COLONNE dédiée à position FIXE (avant le poids), et

@@ -32,6 +32,7 @@ export type ProductHit = {
   uPays: string | null;                        // pays d'origine
   uMarque: string | null;                      // marque
   uCondi: string | null;                       // conditionnement (ex. "12x125g")
+  uCalibre: string | null;                     // calibre (U_GER_CALIBRE, ex. "2AEE")
   frgnName: string | null;                     // variété (SAP FrgnName)
 };
 
@@ -53,7 +54,7 @@ export type DocLine = {
   // vrai, le PU est DÉRIVÉ (total / pièces). Saisir un PU re-bascule en mode PU.
   lineTotal: string;
   forceTotal: boolean;
-  pays: string | null; marque: string | null; condt: string | null; variete: string | null;
+  pays: string | null; marque: string | null; condt: string | null; variete: string | null; calibre: string | null;
   dlc: string;                                 // DDM optionnelle (YYYY-MM-DD), "" si absente
   note: number | null;                         // note qualité 1..5 (étoiles), null si non notée
 };
@@ -84,15 +85,15 @@ export function makeLine(p: ProductHit, defaultDlc = ""): DocLine {
   return {
     itemCode: p.itemCode, itemName: p.itemName, ratio,
     packageQuantity: 1, warehouseCode: "01", price: "", lineTotal: "", forceTotal: false,
-    pays: p.uPays, marque: p.uMarque, condt: p.uCondi, variete: p.frgnName,
+    pays: p.uPays, marque: p.uMarque, condt: p.uCondi, variete: p.frgnName, calibre: p.uCalibre,
     dlc: defaultDlc, note: null,
   };
 }
 
 /** Champs de désignation d'une ligne (fruit rendu à part). */
 function dzFieldsOf(l: DocLine): { fruit: string; fields: DesignationFields } {
-  const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, frgnName: l.variete });
-  return { fruit: dz.fruit, fields: { marque: dz.marque, condt: dz.condt, variete: dz.variete, pays: dz.pays } };
+  const dz = designationProduit({ itemName: l.itemName, uPays: l.pays, uMarque: l.marque, uCondi: l.condt, uCalibre: l.calibre, frgnName: l.variete });
+  return { fruit: dz.fruit, fields: { marque: dz.marque, calibre: dz.calibre, condt: dz.condt, variete: dz.variete, pays: dz.pays } };
 }
 
 function useDebounced<T>(value: T, ms: number): T {

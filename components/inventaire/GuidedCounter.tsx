@@ -105,9 +105,9 @@ export function GuidedCounter({
                   {(() => {
                     const dz = designationProduit({
                       itemName: p.itemName, uPays: p.uPays, uMarque: p.uMarque,
-                      uCondi: p.uCondi ?? p.uUvc, frgnName: p.frgnName,
+                      uCondi: p.uCondi ?? p.uUvc, uCalibre: p.uCalibre, frgnName: p.frgnName,
                     });
-                    return <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1.5" />;
+                    return <DesignationChips marque={dz.marque} calibre={dz.calibre} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1.5" />;
                   })()}
                   <div className="mt-1.5 font-mono text-[11px] text-muted-foreground">{p.itemCode}</div>
                 </div>

@@ -16,6 +16,7 @@
 export interface ProduitDesignation {
   fruit: string;
   marque: string;
+  calibre: string;
   condt: string;
   variete: string;
   pays: string;
@@ -26,6 +27,8 @@ export interface ProduitAttributs {
   uPays?: string | null;
   uMarque?: string | null;
   uCondi?: string | null;
+  /** Calibre du fruit (SAP U_GER_CALIBRE / Product.uCalibre — ex. « 2AEE »). */
+  uCalibre?: string | null;
   /** Réservé : si un champ « variété » dédié est ajouté côté SAP un jour. */
   uVariete?: string | null;
   /** Variété — portée par SAP Items.FrgnName (nom étranger). */
@@ -52,16 +55,18 @@ export function designationProduit(p: ProduitAttributs): ProduitDesignation {
   return {
     fruit: clean(p.itemName) || VIDE,
     marque: clean(p.uMarque) || VIDE,
+    calibre: clean(p.uCalibre) || VIDE,
     condt: clean(p.uCondi) || VIDE,
     variete: clean(p.uVariete) || clean(p.frgnName) || VIDE,
     pays: clean(p.uPays) || VIDE,
   };
 }
 
-/** Désignation complète sur une ligne — « Framboise · Driscoll's · 12x125g · Portugal ». */
+/** Désignation complète sur une ligne — « Framboise · Driscoll's · cal. 2AEE · 12x125g · Portugal ». */
 export function designationCourte(p: ProduitAttributs): string {
   const d = designationProduit(p);
-  return [d.fruit, d.marque, d.condt, d.variete, d.pays]
+  const calibre = d.calibre && d.calibre !== VIDE ? `cal. ${d.calibre}` : "";
+  return [d.fruit, d.marque, calibre, d.condt, d.variete, d.pays]
     .filter((x) => x && x !== VIDE)
     .join(" · ");
 }

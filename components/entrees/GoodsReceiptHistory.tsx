@@ -1199,12 +1199,12 @@ function ReceiptDetail({
               const maxQ = l.packageQuantity ?? l.pieceQuantity ?? 0;
               const unit = l.packageQuantity != null ? "colis" : "pièces";
               // Désignation décomposée (fruit + tags) — même lecture que le détail.
-              const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi, frgnName: l.frgnName });
+              const dz = designationProduit({ itemName: l.itemName, uPays: l.uPays, uMarque: l.uMarque, uCondi: l.uCondi, uCalibre: l.calibre, frgnName: l.frgnName });
               return (
                 <li key={l.lineNum} className="flex items-start justify-between gap-2.5">
                   <div className="min-w-0 flex-1">
                     <div className="text-[14px] font-semibold text-foreground leading-tight">{dz.fruit}</div>
-                    <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1" />
+                    <DesignationChips marque={dz.marque} calibre={dz.calibre} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1" />
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <NumberInput

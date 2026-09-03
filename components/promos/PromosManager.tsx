@@ -54,11 +54,12 @@ interface Promo {
   pays?: string | null;
   condi?: string | null;
   variete?: string | null;
+  calibre?: string | null;
 }
 
 interface ProductHit {
   itemCode: string; itemName: string; groupName: string | null;
-  marque: string | null; pays: string | null; condi: string | null; variete: string | null;
+  marque: string | null; pays: string | null; condi: string | null; variete: string | null; calibre: string | null;
 }
 
 /** Types de magasin ciblables + « Tous ». */
@@ -148,7 +149,7 @@ export function PromosManager() {
     // Échéance PROCHE : accent d'alerte quand il reste 3 jours ou moins.
     const proche = restants != null && restants >= 0 && restants <= 3;
     const dz = designationProduit({
-      itemName: p.itemName, uPays: p.pays, uMarque: p.marque, uCondi: p.condi, uVariete: p.variete,
+      itemName: p.itemName, uPays: p.pays, uMarque: p.marque, uCondi: p.condi, uVariete: p.variete, uCalibre: p.calibre,
     });
     // Cible magasin : affichée uniquement si RESTREINTE (Export/GMS/CHR).
     const storeChip = p.storeType ? SEGMENT_BADGE[p.storeType] ?? null : null;
@@ -172,7 +173,7 @@ export function PromosManager() {
           <p className="text-callout font-semibold text-foreground truncate leading-tight">
             {p.label?.trim() || dz.fruit}
           </p>
-          <DesignationChips marque={dz.marque} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1" />
+          <DesignationChips marque={dz.marque} calibre={dz.calibre} condt={dz.condt} variete={dz.variete} pays={dz.pays} className="mt-1" />
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-caption2 text-muted-foreground">
             <span className="font-mono">{p.itemCode}</span>
             <span className="text-muted-foreground/40" aria-hidden>•</span>
@@ -349,12 +350,12 @@ function CreatePromoDialog({
         type ApiProduct = {
           itemCode: string; itemName: string; groupName?: string | null;
           uMarque?: string | null; uPays?: string | null;
-          uCondi?: string | null; uUvc?: string | null; frgnName?: string | null;
+          uCondi?: string | null; uUvc?: string | null; uCalibre?: string | null; frgnName?: string | null;
         };
         setHits(((json?.products ?? []) as ApiProduct[]).map((p) => ({
           itemCode: p.itemCode, itemName: p.itemName, groupName: p.groupName ?? null,
           marque: p.uMarque ?? null, pays: p.uPays ?? null,
-          condi: p.uCondi ?? p.uUvc ?? null, variete: p.frgnName ?? null,
+          condi: p.uCondi ?? p.uUvc ?? null, variete: p.frgnName ?? null, calibre: p.uCalibre ?? null,
         })));
       } catch { setHits([]); }
       finally { setSearching(false); }
