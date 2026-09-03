@@ -105,6 +105,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "RH",
     items: [
       { href: "/rh", label: "Mon espace (badgeuse)", icon: Fingerprint },
+      { href: "/rh/direction", label: "Cockpit RH", icon: LayoutDashboard },
       { href: "/commerciaux", label: "Effectif", icon: Briefcase },
       { href: "/planning", label: "Planning", icon: CalendarDays },
       { href: "/salaires", label: "Éléments de salaires", icon: Wallet },
