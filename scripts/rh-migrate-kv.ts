@@ -188,6 +188,24 @@ async function main() {
     bump("payrollSends");
   }
 
+  // 8) JOURNAL : backfill d'évènements (embauche + contrats + congés) pour que la
+  //    fiche salarié affiche l'historique. Idempotent (id déterministe).
+  const allEmps = await prisma.employee.findMany({ select: { id: true, hireDate: true, contracts: { select: { id: true, type: true, dateDebut: true } }, leaves: { select: { id: true, type: true, startDate: true, jours: true } } } });
+  for (const e of allEmps) {
+    if (!DRY && e.hireDate) {
+      await prisma.rhEvent.upsert({ where: { id: `kvevt_hire_${e.id}`.slice(0, 190) }, create: { id: `kvevt_hire_${e.id}`.slice(0, 190), employeeId: e.id, type: "embauche", date: e.hireDate }, update: {} });
+      bump("events");
+    }
+    for (const c of e.contracts) {
+      if (!DRY) await prisma.rhEvent.upsert({ where: { id: `kvevt_ct_${c.id}`.slice(0, 190) }, create: { id: `kvevt_ct_${c.id}`.slice(0, 190), employeeId: e.id, type: "contrat", date: c.dateDebut, meta: JSON.stringify({ contractType: c.type }) }, update: {} });
+      bump("events");
+    }
+    for (const l of e.leaves) {
+      if (!DRY) await prisma.rhEvent.upsert({ where: { id: `kvevt_lv_${l.id}`.slice(0, 190) }, create: { id: `kvevt_lv_${l.id}`.slice(0, 190), employeeId: e.id, type: "absence", date: l.startDate, meta: JSON.stringify({ leaveType: l.type, jours: l.jours }) }, update: {} });
+      bump("events");
+    }
+  }
+
   log("terminé.", stats);
   await prisma.$disconnect();
 }

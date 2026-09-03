@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import Link from "next/link";
 import { Loader2, Plus, UserPlus, FileSignature, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,7 +63,7 @@ export function ContractsPanel() {
                 return (
                   <tr key={e.id} className="border-t border-border/60 hover:bg-secondary/30">
                     <td className="px-3 py-2.5">
-                      <span className="font-semibold text-foreground">{e.displayName ?? e.email}</span>
+                      <Link href={`/rh/salarie/${e.id}`} className="font-semibold text-foreground hover:text-primary hover:underline underline-offset-2">{e.displayName ?? e.email}</Link>
                       {e.sapSlpName && <span className="ml-1.5 text-[10px] font-mono text-muted-foreground">{e.sapSlpName}</span>}
                       <div className="text-[11px] text-muted-foreground">{[e.poste, e.service].filter(Boolean).join(" · ") || e.email}</div>
                     </td>
