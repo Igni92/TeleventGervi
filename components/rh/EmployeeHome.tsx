@@ -78,12 +78,14 @@ export function EmployeeHome() {
         onClick={() => punch(inside ? "out" : "in")}
         disabled={punching}
         borderRadius="1.75rem"
-        duration={inside ? 2600 : 3400}
+        duration={2800}
         containerClassName="w-full block shadow-lg transition-transform active:scale-[0.98] disabled:opacity-70"
-        borderChildClassName={inside
-          ? "bg-[radial-gradient(#fb7185_40%,transparent_60%)]"
-          : "bg-[radial-gradient(#34d399_40%,transparent_60%)]"}
-        className={`flex-col gap-2 p-6 text-white ${inside ? "bg-rose-600" : "bg-emerald-600"}`}
+        borderChildClassName={`h-28 w-28 ${inside
+          ? "bg-[radial-gradient(#fda4af_45%,transparent_60%)]"
+          : "bg-[radial-gradient(#6ee7b7_45%,transparent_60%)]"}`}
+        className={`flex-col gap-2 p-6 text-white bg-gradient-to-br ${inside
+          ? "from-rose-900 via-rose-950 to-neutral-950"
+          : "from-emerald-900 via-emerald-950 to-neutral-950"}`}
       >
         <span className="flex items-center justify-center gap-3 text-[22px] font-bold">
           {punching ? <Loader2 className="h-7 w-7 animate-spin" /> : inside ? <LogOut className="h-7 w-7" /> : <LogIn className="h-7 w-7" />}
